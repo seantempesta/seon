@@ -67,11 +67,6 @@
 
 ;; ---- one definition of each entity (docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together) ----------
 
-(defn identity-attr?
-  "Is attribute a an upsert key ([:and {:seon.db/identity true} ...])? See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [a] (boolean (:seon.db/identity (contract/properties a))))
-
 (defn- form-props
   "The properties of named schema k's form in forms ([:type {props} ...]), or nil. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat :map :any] [:maybe :map]]}

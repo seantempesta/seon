@@ -6,14 +6,14 @@
  ;; definition (var, multimethod method, protocol extension, namespace) points to the form
  ;; that last made it; what a form defines, declares and references comes from Jolt's
  ;; analyzer (jolt.analyzer/*unit-tap*, or analysis-only for a file), never from text.
- :form/id [:and {:seon.db/identity true :seon.db/content-id true :description "The form's identity: a content id, the unit of reproduction that a definition points to."} :string]
+ :form/id [:and {:seon.db/identity true :seon.db/content-id true :description "The form's identity: its namespace and a content hash of its exact text, as ns/<uuid> (#k added for a repeated text in one namespace). The unit of reproduction that a definition points to."} :string]
  ;; the exact text as written, and the whitespace and comments before it in its file
- :form/src [:string {:description "The exact text of the form as written, with the whitespace and comments before it in its file."}]
+ :form/src [:string {:description "The form's exact text, from where the reader starts it to where it stops after it. The whitespace and comments before it are its :form/lead."}]
  ;; the digest of the form's namespace and its code: the form as the reader read it, printed, so with no
  ;; comment or layout (seon.program/form-ids), what a test's reach digest takes of the form;
  ;; written with the form, and a form without one (an older store's) is taken by its id
- :form/code [:string {:description "The digest of the form's namespace and its code as the reader read it, with no comment or layout."}]
- :form/lead [:string {:description "The whitespace and comments before the form in its file."}]
+ :form/code [:string {:description "A digest, ns/<uuid>, of the form as the reader read it, printed: no comment or layout, no docstring of a definition, gensym numbers renumbered. What a test's reach digest takes of the form."}]
+ :form/lead [:string {:description "The text between the previous form and this one in its file, whitespace and comments. For a form recorded at a REPL, only its ; comment; absent when there is none."}]
  ;; the form is the text of a source tree a generation was built from (seon.source's import):
  ;; the binary holds it compiled, so a process evaluates it again only where a changed macro
  ;; expanded or a changed schema reaches its contract (seon.program/load-changes!); a form an agent or a merge
@@ -23,15 +23,15 @@
  :form/ns [:and {:seon.db/to [:seon.db/ns-fact] :seon.db/index true :description "The namespace that the form belongs to."} :seon.db/ref]
  ;; its place among its namespace's forms: a sort key, not an index (seon.program/stable-places), so an inserted form moves no other; a new form after all others
  :form/order [:int {:description "The form's place among its namespace's forms, a sort key and not an index."}]
- :form/defines [:set {:seon.db/to [:seon.db/var-fact] :description "The vars that the form defines."} :seon.db/ref]
+ :form/defines [:set {:seon.db/to [:seon.db/var-fact] :description "The definitions the form makes, each a ref: its vars, its multimethod methods (:method/key), its protocol extensions (:impl/key) and, for an ns form, its namespace."} :seon.db/ref]
  :form/declares [:set {:seon.db/to [:seon.db/var-fact] :description "The vars that the form declares."} :seon.db/ref]
  ;; the vars it references, resolved by the compiler (program, library and clojure.core alike): callers are
  ;; one AVET seek
- :form/refs [:set {:seon.db/index true :description "The vars that the form references, resolved by the compiler."} :qualified-symbol]
+ :form/refs [:set {:seon.db/index true :description "The qualified symbols the form reaches, resolved by the compiler: the vars it uses, the macros it calls, the classes it constructs, host statics as Class/member, and vars named to resolve. A macro form also holds the names its template quotes. Indexed: callers are one seek."} :qualified-symbol]
  ;; the qualified names its quoted data holds (seon.program/quoted-names): names, not references,
  ;; so the reach never follows them; a caller listing reads them (seon.doc/callers: who names a
  ;; render, a proc, a form sent to an agent)
- :form/quoted [:set {:seon.db/index true :description "The qualified names that the form's quoted data holds: names, not references."} :qualified-symbol]
+ :form/quoted [:set {:seon.db/index true :description "The qualified names in the form's quoted data and in its string constants read as code (names, not references)."} :qualified-symbol]
  ;; the ops of the requests it builds ({:op :done ...}: a map's constant keyword under :op), recorded
  ;; by the analyzer (seon.program/unit-account): a test that starts a root reaches the server's
  ;; answer of each op it sends, seon.server/op-answer's method, and no other (seon.program/reach-step)
@@ -48,12 +48,12 @@
  :form/inline-defs [:set {:description "The definitions inside the form's function bodies, which are judged at merge."} :qualified-symbol]
  ;; its catch clauses as EDN {:class name ("*" for a catch-all)
  ;; :answers :constant|:rethrows|:expr}: the facts the guard detectors query
- :form/catches [:set {:description "The form's catch clauses as EDN, the facts that the guard detectors query."} :string]
+ :form/catches [:set {:description "The form's catch clauses, each a string of printed EDN {:class \"Class\" (\"*\" for a catch-all) :answers :constant|:rethrows|:expr}; the fact the guard law queries."} :string]
  :ns/name [:and {:seon.db/identity true :seon.db/content-id true :description "The namespace's name."} :symbol]
  :ns/doc [:string {:description "The namespace's docstring."}]
  :ns/form [:and {:seon.db/to [:seon.db/form-fact] :description "The form that last made this namespace."} :seon.db/ref]
  ;; the file it was imported from, relative to the source tree's root (seon.source)
- :ns/file [:string {:seon.db/index true :description "The file the namespace was imported from, relative to the source tree's root."}]
+ :ns/file [:string {:seon.db/index true :description "The path of the namespace's file, relative to the source tree's root: where it was imported from, or where a REPL-recorded namespace's file belongs."}]
  ;; the text after its file's last form
  :ns/tail [:string {:description "The text after the last form of the namespace's file."}]
  :var/name [:and {:seon.db/identity true :seon.db/content-id true :description "The var's qualified name."} :symbol]
@@ -63,8 +63,8 @@
  ;; the var's own Clojure metadata keys (location keys and :doc left out: the doc is :var/doc), recorded
  ;; by the analyzer (seon.program/def-meta): a test is a var whose meta holds :test, a macro :macro, a
  ;; function a defn made :arglists (docs/source.md#a-program-file). And its declared contract, as text
- :var/meta [:set {:seon.db/index true :description "The var's own Clojure metadata keys, with location keys and :doc left out. See docs/source.md#a-program-file."} :keyword]
- :var/contract [:string {:description "The var's declared contract, as text."}]
+ :var/meta [:set {:seon.db/index true :description "The keys of the var's own metadata (:test, :macro, :arglists, :private, :malli/schema, ...), without their values and without location keys, :doc or contract-instrumentation keys. See docs/source.md#a-program-file."} :keyword]
+ :var/contract [:string {:description "The var's declared :malli/schema as seon.edn text; read it back with seon.edn/decode."}]
  ;; A TEST'S LAST RESULT, on its var entity on the branch whose agent ran it (seon.proofs/result-tx,
  ;; written by seon.agent/run-tests-forked when a run ends; task seon.proofs/test-results-are-a-few-facts,
  ;; R2a): overwritten in place, no history. The digest it was judged at; green, red, or flaky (green and red at
@@ -92,9 +92,9 @@
  :schema/key [:and {:seon.db/identity true :seon.db/content-id true :description "The key of a schema entry of a schema resource."} :qualified-keyword]
  :schema/form [:string {:description "The schema entry's form, as EDN text."}]
  :schema/file [:and {:seon.db/index true :description "The resource that the schema entry is written back to."} :string]
- :file/path [:and {:seon.db/identity true :seon.db/content-id true :description "A file of the program, by its path in the checkout (a script under bin/, the shipped config). It is changed on your branch as a definition is, (seon.repl/edit! path old new), and reaches disk after your merge. A file you write with the shell or spit is not on your branch and does not merge."} :string]
- :file/text [:string {:description "The text of the file as imported."}]
- :file/mode [:string {:description "The file's mode."}]
+ :file/path [:and {:seon.db/identity true :seon.db/content-id true :description "A non-namespace file of the program, by its path in the checkout: a script under bin/, a schema resource, the config file or a test fixture, as :seon.config.source/things allows. The file text of a schema or config file also splits into entries. It is changed on your branch as a definition is, by (seon.repl/edit! path old new), and reaches disk after your merge. A file you write with the shell or spit is not on your branch and does not merge."} :string]
+ :file/text [:string {:description "The file's text as imported; for a schema or config file, the base that write-back edits with the entries' forms."}]
+ :file/mode [:string {:description "The file's git mode as a string, \"100755\" or \"100644\", which write-back commits with."}]
  ;; An ENTRY of the config file (docs/source.md#a-program-file): its key, its value's exact text with its tags unread, and its file. The config a process reads is built from these (seon.config/of-entries).
  :config/key [:and {:seon.db/identity true :seon.db/content-id true} :qualified-keyword]
  :config/form :string
@@ -165,7 +165,7 @@
  ;; what is stored of an eval's answer (:seon.repl/answer) beside its result: its handle, cost, namespace and warnings, each as the
  ;; answer has them (seon.repl/record-details, seon.db/with-response); its value, error and output are its result's, and
  ;; seon.db/response-of answers the whole (docs/users.md#what-each-thing-is)
- :seon.eval/response [:and {:description "What is stored of the eval's answer beside its result: its handle, cost, namespace and warnings. See docs/users.md#what-each-thing-is."} :seon.repl/answer :seon.db/plain]
+ :seon.eval/response [:and {:description "What is stored of the eval's answer beside its result: its handle, its cost (ms, ticks, bytes), its namespace, and what it says it did (:recorded, :edited, :warnings). See docs/users.md#what-each-thing-is."} :seon.repl/answer :seon.db/plain]
  ;; the eval's result, one entity per answer: evaluating one value twice points both evals at it. Evaluating again moves the ref
  ;; and the old result stays. Never pull its reverse: every eval with no value points at the same nil
  :seon.eval/result [:and {:seon.db/to [:seon.result/result-fact] :description "The eval's result, one entity per answer; evaluating one value twice points both evals at it."} :seon.db/ref]
@@ -196,7 +196,7 @@
  :seon.eval/call-id [:string {:description "The provider's call id for the model call this eval came from."}]
  ;; the model call of the turn in force when it was written (seon.task/call-ref; absent on root's, on an agent's own turn loop and on a context read)
  :seon.eval/call [:and {:seon.db/to [:seon.model-call/fact] :description "The model call of the turn in force when this eval was written; absent on root's evals, on an agent's own turn loop and on a context read."} :seon.db/ref]
- :seon.eval/fns [:vector {:description "The ten costliest contracted functions of the eval, each with its var, calls and ms."} :map]
+ :seon.eval/fns [:vector {:description "The ten costliest contracted functions of the eval, each with its var, its calls, and the ticks and bytes it took, its own and with what it called."} :map]
  :seon.eval/schema [:qualified-keyword {:description "The render schema that the eval's value names, kept in place of a copy."}]
  :seon.eval/basis [:map {:description "The basis (branch and t) that the eval's value is rendered from, when the value names one."} [:t :int] [:branch :seon.db/branch]]
  ;; an agent: one entity per agent, named by its key (seon.lib/unique-id: the digest of a fresh UUID),
@@ -327,9 +327,9 @@
  :seon.user/focus [:and {:seon.db/to [:seon.db/agent-fact :seon.task/task-fact]} :seon.db/ref]
  ;; what an agent's entry reads where a user's pull joins the agents it started (seon.render.ui/agent's nested form): its identity, its
  ;; process's status, its branch and turns, when it started, its name when it is a user, its task; the agents it started again, to
- ;; :seon.config.render/agent-tree-depth levels (a depth join), and below the last only their ids (its :below option), so an entry says how
+ ;; :seon.config.render/agent-tree-depth levels (a depth join), and below the last only their ids (its :seon.ctx/below option), so an entry says how
  ;; many are below it (docs/ctx.md#the-pattern)
- :seon.agent/entry [:map {:description "What an agent's entry reads where a user's pull joins the agents it started, to the configured depth (a depth join), and below the last level their ids alone (its :below option). See docs/users.md#whats-on-screen." :seon.ctx/pattern [:seon.agent/key :seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/turn :seon.agent/outcome :seon.agent/ended-turn :seon.agent/started-ms {:seon.agent/task [:seon.task/id :seon.task/plan :seon.task/outcome :seon.task/reason {:seon.task/started-by [:seon.user/name]}]} {[:seon.agent/agents :below [:db/id]] :seon.config.render/agent-tree-depth}]}]
+ :seon.agent/entry [:map {:description "What an agent's entry reads where a user's pull joins the agents it started, to the configured depth (a depth join), and below the last level their ids alone (its :seon.ctx/below option). See docs/users.md#whats-on-screen." :seon.ctx/pattern [:seon.agent/key :seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/turn :seon.agent/outcome :seon.agent/ended-turn :seon.agent/started-ms {:seon.agent/task [:seon.task/id :seon.task/plan :seon.task/outcome :seon.task/reason {:seon.task/started-by [:seon.user/name]}]} {[:seon.agent/agents :seon.ctx/below [:db/id]] :seon.config.render/agent-tree-depth}]}]
  :seon.db/user-fact [:and {:seon.db/attributes true :seon.ctx/required {:seon.agent/agents "the sessions you started"} :seon.render/hiccup seon.render.ui/agent :seon.ctx/pattern [:seon.agent/key :seon.user/name :seon.render/hiccup {:seon.agent/agents :seon.agent/entry}]} :seon.db/agent-fact [:map [:seon.user/name :seon.user/name] [:seon.user/focus {:optional true} :seon.user/focus]]]
  ;; ---- a citation: what an entity cites, an entity of its own (docs/references.md#an-entity-cites) ----
  ;; its content id, "<of> <target>": the citing entity's identity value (a task's :seon.task/id, an agent's
@@ -359,11 +359,11 @@
                            [:seon.search/k {:optional true} :seon.search/k]]
  ;; what the cite's render (seon.render.ui/cite) reads of its owner from the db, by the owner's identity the cite holds: a function in
  ;; the task's namespace, or among its proofs' forms' refs, is one it will change (docs/references.md#an-entity-cites)
- :seon.cite/of-read [:map {:seon.ctx/pattern [:seon.task/id :seon.task/ns {[:seon.task/proofs :by :var/name :as :proved] [:var/name {:var/form [:form/refs]}]}]}]
+ :seon.cite/of-read [:map {:description "What a cite's render reads of the task that cites, from the db, by the identity the cite holds: its namespace and the vars its proofs name, so a cited function the task will change is said so. No entity holds this; it is a pattern with a name. See docs/references.md#an-entity-cites." :seon.ctx/pattern [:seon.task/id :seon.task/ns {[:seon.task/proofs :by :var/name :as :proved] [:var/name {:var/form [:form/refs]}]}]}]
  ;; what the cite's render reads of its target from the db, by the target's identity the cite holds: the union of what each kind
  ;; of target shows (a section with its sections below; a var with its form and newest callers, each caller with the vars it
  ;; defines; a task; a schema key's entry; a namespace), so ctx holds what is cited and the page what it says (docs/references.md#an-entity-cites)
- :seon.cite/target-read [:map {:seon.ctx/pattern [:seon.doc/address :seon.doc/heading :seon.doc/lead :seon.doc/text :seon.doc/references
+ :seon.cite/target-read [:map {:description "What a cite's render reads of what is cited, from the db, by the identity the cite holds: a section's text and the sections below it, a var's form and newest callers, a task, a schema entry, a namespace. No entity holds this; it is a pattern with a name, so an agent's context holds what is cited and its page what it says. See docs/references.md#an-entity-cites." :seon.ctx/pattern [:seon.doc/address :seon.doc/heading :seon.doc/lead :seon.doc/text :seon.doc/references
                                                   {:seon.doc/_parent [:seon.doc/address :seon.doc/heading]}
                                                   :var/name :var/ns :var/doc :var/meta :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes
                                                   {:var/form [:form/id :form/src :form/defines :form/refs :form/quoted :form/keywords]}
@@ -589,7 +589,7 @@
  ;; ---- on every transaction Seon makes, in its tx-meta (seon.db/tx-meta) ----
  ;; the runtime that made it, as its compiled units are keyed (jolt.host/runtime-fingerprint:
  ;; Jolt's version, its runtime fingerprint, its trace tag; docs/storage.md#history)
- :seon.tx/runtime [:string {:description "The runtime that made the transaction, as its compiled units are keyed. See docs/storage.md#history."}]
+ :seon.tx/runtime [:string {:description "The Jolt runtime that made the transaction, a string <version>-<fingerprint> with -tr when tracing, the same key its compiled units use. See docs/storage.md#history."}]
  ;; the branch the transaction was written on: it travels with a merged datom, so the union
  ;; of every branch's history names who wrote what (seon.union). Not indexed by value: it is read off the
  ;; transaction entity (seon.ctx/made-by), never sought by value, and the index cost 5 nodes a write
@@ -613,7 +613,7 @@
  :seon.message/from [:and {:seon.db/to [:seon.db/agent-fact :seon.system/root-fact] :seon.db/index true :description "Who sent the message: an agent, a user or the system."} :seon.db/ref]
  :seon.message/to [:set {:seon.db/to [:seon.db/agent-fact] :seon.db/index true :description "The agents that receive the message, a ref each."} :seon.db/ref]
  ;; when root's writer recorded it (ms): it orders and decides nothing (docs/clocks.md)
- :seon.message/sent-ms [:int {:description "When root's writer recorded the message, in ms; it orders and decides nothing. See docs/clocks.md."}]
+ :seon.message/sent-ms [:int {:description "When the system's writer recorded the message, in ms; it orders and decides nothing. See docs/clocks.md."}]
  :seon.message/body :seon.db/text
  :seon.message/fact [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/message :seon.render/openai-compat seon.ctx.wire/message-msgs} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
                      [:seon.message/to {:optional true} :seon.message/to] [:seon.message/sent-ms {:optional true} :seon.message/sent-ms]
