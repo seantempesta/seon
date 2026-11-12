@@ -33,7 +33,7 @@ A hang's evidence is gone once it is killed, and `timeout` signals the whole gro
 
 ### Reading a red
 
-When a red has no cause, read the data it left (the store, the logs of every failed call) before forming a theory; a guessed cause is said as "not bisected" ([merging](merging.md#the-managing-session-lands-a-batch)).
+When a red has no cause, read the data it left (the store, the logs of every failed call) before forming a theory. A test's error keeps where it was thrown, its first frames under `:at` in the stored verdict ([`seon.proofs/error-at`](../src/seon/proofs.clj)), and its `:fns` say which functions it called and how often; a guessed cause is said as "not bisected" ([merging](merging.md#the-managing-session-lands-a-batch)).
 
 ## The target: a 16 GB MacBook M1
 

@@ -113,6 +113,7 @@
   [:seon.config.proofs/prove-main-on-commit {:optional true} :seon.config.proofs/prove-main-on-commit]
   [:seon.config.proofs/stall-factor {:optional true} :seon.config.proofs/stall-factor]
   [:seon.config.proofs/slow-test-ms {:optional true} :seon.config.proofs/slow-test-ms]
+  [:seon.config.proofs/error-frames {:optional true} :seon.config.proofs/error-frames]
   [:seon.config.build/jolt-compiler-options {:optional true} :seon.config.build/jolt-compiler-options]
   [:seon.config.build/jolt-cache-mb {:optional true} :seon.config.build/jolt-cache-mb]
   [:seon.config.proofs/results-dir {:optional true} :seon.config.proofs/results-dir]

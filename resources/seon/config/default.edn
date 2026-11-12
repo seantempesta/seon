@@ -687,6 +687,9 @@
  ;; Provenance: owner, 2026-11-06. Over the verdict cache that day, 5 s left out 70 of 1,466 tests and
  ;; kept about 96 s of work on 4 shards; 2 s left out 123 for 55 s, 15 s left out 31 for 189 s.
  :seon.config.proofs/slow-test-ms 5000
+ ;; Unit: frames. How many frames of where a test's error was thrown its report keeps (seon.proofs/error-at).
+ ;; Provenance: tests, 2026-11-12: the posix_spawn ENOENT's caller was three frames in; 8 is ~0.5 KB a red.
+ :seon.config.proofs/error-frames 8
  ;; Unit: path. The plan's store of kept program dbs (test-runner/program-db): one LMDB store
  ;; per checkout, a branch per git tree id holding that tree's program as facts. A tree never
  ;; seen is branched from the kept tree with the fewest changed files and brought current by

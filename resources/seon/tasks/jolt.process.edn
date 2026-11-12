@@ -1,1 +1,4 @@
-[]
+[{:seon.task/name "a-failed-spawn-names-what-it-spawned"
+  :seon.task/plan "Owner: deps. Found 2026-11-12 (tests): a spawn that posix_spawn refuses throws java.io.IOException \"posix_spawn failed (errno 2)\" (reference-code/jolt/host/chez/java/process.ss, the rc check after proc-c-spawn), naming neither the program path nor the directory of its chdir action, the two things ENOENT can mean. Finding which spawn failed in seon.program-test/a-kept-program-store-another-schema-refuses-is-made-again took a trace of every call (the cause: bin/env's ln -sf unlinked target/git-bin/git under a running git spawn). The JDK's message is \"Cannot run program \\\"git\\\" (in directory \\\"/x\\\"): error=2, No such file or directory\". Plan: the thrown message names the resolved path, the argv's first element and the directory as given, and the errno's strerror, as the JDK's does; nothing else changes. Proof, red first (in Jolt's test/chez/process-test.clj): a spawn of an absolute path that is not there, and one whose :dir is not there, each throw a message naming that path."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}]

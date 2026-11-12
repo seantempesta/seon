@@ -4,7 +4,7 @@
   reaches it (through macros, schemas and the inputs with no program facts), a bin/check step
   is keyed like a test by what its functions reach, and the run is shards whose greens are
   stored."
-  (:require [seon.lib] [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d] [clojure.java.shell]
+  (:require [seon.lib] [seon.agent] [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d] [clojure.java.shell]
             [seon.test-store :as ts] [seon.db :as pdb] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
             [seon.program-test :refer [record]] [seon.source :as source] [seon.fx :as fx] [seon.config] [seon.contract :as contract] [seon.profile :as profile] [test-runner :as runner] [konserve.jolt.lmdb :as klmdb]))
 
@@ -751,3 +751,14 @@
         "a verdict with no record of its reads is never reused by them")
     (is (= "static" (get (seon.proofs/read-digests static rd {'a.b-test/t [{:digest "old" :reads {'a/f "f1" [:file "x.md"] nil}}]}) 'a.b-test/t))
         "a read of a kind the index does not hold whole (files, in an agent's plan) is never taken for a miss")))
+
+(defn- spawn-of-nothing [] (clojure.java.shell/sh "/nonexistent/prog"))
+
+(deftest an-errors-verdict-names-where-it-was-thrown
+  ;; docs/machine.md#reading-a-red. Found 2026-11-12 (tests): a test's verdict kept "posix_spawn failed (errno 2)" and no
+  ;; place, since an #error prints its type and message only; finding the spawn took a trace of every call. Cost: one spawn.
+  (let [e (try (spawn-of-nothing) nil (catch Throwable e e))
+        rep (seon.agent/test-report {:type :error :message "Uncaught exception, not in assertion." :expected nil :actual e} "#'demo-test/t")
+        [f] (get (proofs/failures {:reports [rep]}) 'demo-test/t)]
+    (is (some #(str/includes? % "spawn_of_nothing") (:at f)) (str "the stored failure names the function that threw: " (pr-str (:at f))))
+    (is (<= 1 (count (:at f)) (seon.config/value :seon.config.proofs/error-frames)) "its first frames, at most the config's")))

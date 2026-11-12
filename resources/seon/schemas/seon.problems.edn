@@ -225,12 +225,14 @@
  ;; failing assertions per red test (at most 8 each, printed by seon.print under :part)
  :seon.problems/assertion [:map [:type [:enum :fail :error]] [:message {:optional true} [:maybe :string]] [:flaky {:optional true} :boolean]
                            [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]
-                           [:got {:optional true} [:maybe :string]] [:seon.error/type {:optional true} :qualified-keyword]]
+                           [:got {:optional true} [:maybe :string]] [:at {:optional true} [:vector :string]] [:seon.error/type {:optional true} :qualified-keyword]]
  ;; one clojure.test report as the test child keeps it (seon.agent/test-report)
  :seon.test/report [:map [:type :keyword] [:var {:optional true} [:maybe :string]] [:message {:optional true} [:maybe :string]]
                     [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]
                     ;; a failed (is (pred ...)): what (pred ...) evaluated to, without clojure.test's (not ...)
                     [:got {:optional true} :string]
+                    ;; an error's place: where it was thrown (seon.proofs/error-at)
+                    [:at {:optional true} [:vector :string]]
                     ;; a run stopped by its tick budget: the typed error, on the test that was running
                     [:seon.error/type {:optional true} :qualified-keyword] [:ticks {:optional true} :int] [:budget {:optional true} :int]
                     [:cost {:optional true} :seon.cost/report]]

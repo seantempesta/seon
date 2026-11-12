@@ -728,6 +728,9 @@
       (and (= :fail (:type m)) (seq? (:actual m)) (= 'not (first (:actual m))))
       (assoc :got (print/text (second (:actual m)) (:part print/budgets)))
       (contract/valid? :seon.cost/report cost) (assoc :cost cost)
+      ;; an error's place: the first frames of where it was thrown, which #error's print leaves out (a spawn's ENOENT named
+      ;; no caller, 2026-11-12)
+      (instance? Throwable (:actual m)) (assoc :at (proofs/error-at (:actual m)))
       ;; a test past its tick budget (seon.proofs/run-tests!): the typed error and its counts
       (:seon.error/type m) (merge (select-keys m [:seon.error/type :ticks :budget])))))
 

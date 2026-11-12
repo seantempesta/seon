@@ -405,14 +405,9 @@
                                  (fn [x] (cond (:seon.test/started x) (println "started" (:seon.test/started x))
                                                (:seon.test/output x) (print (:seon.test/output x))
                                                (:seon.test/report x) (let [m (:seon.test/report x)]
-                                                                        ;; a failing assertion, as the results keep it (seon.proofs/failures): by the one printer
+                                                                        ;; a failing assertion, as the results keep it (seon.proofs/failures): the agent's one reading of a report
                                                                         (when (#{:fail :error} (:type m))
-                                                                          (vswap! reports conj (cond-> {:type (:type m) :var (str "#'" (:test x))}
-                                                                                                 (:message m) (assoc :message (str (:message m)))
-                                                                                                 (contains? m :expected) (assoc :expected (print/text (:expected m) (:part print/budgets)))
-                                                                                                 (contains? m :actual) (assoc :actual (print/text (:actual m) (:part print/budgets)))
-                                                                                                 ;; a cost proof's verdict, as data, so its reused red reports it (seon.proofs/costs)
-                                                                                                 (and (map? (:actual m)) (:verdict (:actual m))) (assoc :cost (select-keys (:actual m) [:rows :verdict]))))))
+                                                                          (vswap! reports conj (seon.agent/test-report m (str "#'" (:test x))))))
                                                ;; a test's end, so bin/stalls never names one that finished
                                                ;; and its cost, the work it did (a green test's is read nowhere else)
                                                (:reused x) (do (println "reused" (:test x) "(green at its digest since the plan: another run stored it)")

@@ -65,6 +65,16 @@
              :when (and (= :error type) (nil? (test-symbol var)))]
          (or message "an error with no message"))))
 
+(defn error-at
+  "Where Throwable t was thrown: the first :seon.config.proofs/error-frames frames of its trace (Throwable->map's), each
+  as \"class.method(file:line)\", innermost first; a test's :error report keeps them (seon.agent/test-report), since an
+  #error prints its type and message only. See docs/machine.md#reading-a-red."
+  {:malli/schema [:=> [:cat :seon.host/throwable] [:vector :string]]}
+  [t]
+  (into [] (comp (take (cfg/value :seon.config.proofs/error-frames))
+                 (map (fn [[c m f l]] (str c "." m "(" f ":" l ")"))))
+        (:trace (Throwable->map t))))
+
 (defn failures
   "The failing assertions of the test run, per test: {test [{:type :message :expected :actual}]}, with the
   value the test got (:got) and a typed error's :seon.error/type, so a red reused at its digest reads as its run did;
@@ -74,7 +84,7 @@
   (reduce (fn [acc {:keys [type var] :as r}]
             (let [t (test-symbol var)]
               (if (and t (#{:fail :error} type))
-                (update acc t (fnil conj []) (select-keys r [:type :message :expected :actual :got :flaky :seon.error/type]))
+                (update acc t (fnil conj []) (select-keys r [:type :message :expected :actual :got :at :flaky :seon.error/type]))
                 acc)))
           {} (:reports test-run)))
 
