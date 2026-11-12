@@ -450,7 +450,9 @@
      ;; measured 2026-10-23 (n 1,000 -> 10,000): 13.3 KB and 1.4k ticks a step, 7 contracted calls; 17.9 KB
      ;; and 2.4k ticks before
      :per-n {:ticks 1400.0 :bytes 13300.0}
-     :fixed {:ticks 20000.0 :bytes 60000.0 :calls 7.0}
+     ;; and once a definition, its metadata read against the entity index for the facts a test's type is (def-facts:
+     ;; var-attributes, seon.db/owners, extends?): 4 more contracted calls, each instrumented at ~25k ticks (tests, 2026-11-12)
+     :fixed {:ticks 125000.0 :bytes 60000.0 :calls 11.0}
      :sizes [100 300 1000 10000]}))
 
 (defn literals-of

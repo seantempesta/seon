@@ -416,19 +416,19 @@
         mk (fn [rel text] (let [f (java.io.File. d rel)] (.mkdirs (.getParentFile f)) (spit f text)))
         link (fn [rel to] (java.nio.file.Files/createSymbolicLink (.toPath (java.io.File. d rel)) (.toPath (java.io.File. to)) (into-array java.nio.file.attribute.FileAttribute [])))]
     (try
-      (mk "a/one.edn" "1") (mk "b/c/two.edn" "22") (mk "three.txt" "333")
+      (mk "a/one.pass.edn" "1") (mk "b/c/two.red.edn" "22") (mk "three.txt" "333")
       (link "a/loop" d)              ;; a link back to the root
       (link "b/up" (str d "/b"))     ;; a link to its own parent
       (link "b/c/out" "/tmp")        ;; a link out of the tree
       (link "a/file-link.edn" (str d "/three.txt"))
       (let [names (mapv #(.getName ^java.io.File %) (fx/files-under d))]
-        (is (= ["file-link.edn" "one.edn" "three.txt" "two.edn"] (sort names)) "each file once, a link to a file as a file"))
+        (is (= ["file-link.edn" "one.pass.edn" "three.txt" "two.red.edn"] (sort names)) "each file once, a link to a file as a file"))
       (testing "the cache count sees each verdict once"
         (let [r (fx/write-verdicts! d {:id "run" :tree "t"} {'a/t {:test 'a/t :digest "d1" :pass 1 :fail 0 :error 0}} {} 1)]
           (is (= {:recorded 1} r))
-          ;; a bound of 1 byte evicts every verdict not just written: the walk ended and removed the three old .edn files
-          (is (not (.exists (java.io.File. d "a/one.edn"))))
-          (is (not (.exists (java.io.File. d "b/c/two.edn"))))))
+          ;; a bound of 1 byte evicts every verdict not just written (verdict-listing counts .pass.edn and .red.edn): the walk ended and removed the old ones
+          (is (not (.exists (java.io.File. d "a/one.pass.edn"))))
+          (is (not (.exists (java.io.File. d "b/c/two.red.edn"))))))
       (finally (seon.lib/remove-tree! d)))))
 
 ;; docs/merging.md#a-merge-runs-what-the-change-reaches: 17 gates in a row built one candidate to the one refusal, about 40 s each, holding the worker

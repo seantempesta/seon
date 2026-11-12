@@ -612,8 +612,10 @@
                                                               1    ; seon.problems/stale-plans' own contract
                                                               1    ; and its seon.db/eid of the var the world's ready task cites
                                                               1    ; seon.problems/unsynced-tasks' own contract (Optimization, 2026-11-10: a seek a declared task, no call)
-                                                              6)}  ; caused-split's content-class readers on base and head, for the move's candidates only
+                                                              6    ; caused-split's content-class readers on base and head, for the move's candidates only
                                                                    ; (Data model, 2026-11-12: nothing switched off; measured 58 -> 64)
+                                                              4)}  ; the test law's two classes (unestimated-tests, undeclared-tests), one reader each on
+                                                                   ; base and head (tests, 2026-11-12: measured 64 -> 68)
                :sizes [10 30 100]}))
 
 (deftest problems-cost-nothing-for-a-clean-program
@@ -978,7 +980,9 @@
                ;; 68 calls at 10: :long-form (seon.problems/long-forms) is a class the changed vars are asked, with its bound read once (seon.config/value) each form's chars set against the bound's (seon.print.emit/chars-per-token), a long one's tokens estimated;
                ;; the 7 more contracted calls, each instrumented (its output checked), are the ticks and bytes the fixed part grew by (measured: the
                ;; seek and text of a var cost ~8k ticks of it)
-               :fixed {:ticks 460000 :bytes 1800000 :calls 69}
+               ;; and 4: the test law's two classes (unestimated-tests, undeclared-tests), one reader each on base and head (tests,
+               ;; 2026-11-12: measured 69 -> 73)
+               :fixed {:ticks 460000 :bytes 1800000 :calls 73}
                :sizes [10 30 100]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
