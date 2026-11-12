@@ -156,19 +156,19 @@
     (is (= [[{:type :probe :tag "one" :got 1}] [{:type :probe :tag "one" :got 2}]]
            (map #(mapv (fn [e] (dissoc e :at-ms)) (:events %)) [o1 o2])))))
 
-(deftest ^{:seon.test/estimate {:ticks 50000000}} every-test-root-starts-through-start-root!
+(deftest ^{:seon.test/estimate {:ticks 5000000}} every-test-root-starts-through-start-root!
   ;; read from the program of test/ (the
   ;; compiler's references, not a text search over files), no test var but the helper's one
   ;; launcher runs bin/system or `./seon root` through binary-sh, so every test root names its
   ;; store and main and waits on its listening line
-  ;; only the files that name the primitive are analyzed (a launcher's source holds its name, in a call or a
-  ;; refer): the analysis of the whole of test/ was most of this test's time
-  (let [files (into {} (for [^java.io.File f (file-seq (java.io.File. (seon.config/checkout) "test")) :when (.endsWith (.getName f) ".clj")
-                             :let [text (slurp f)] :when (clojure.string/includes? text "binary-sh")]
-                         [(.getPath f) text]))
-        db (d/db-with (ts/test-db) (seon.source/import-tx (ts/test-db) files))
-        launchers (set (for [[v src] (d/q '[:find ?v ?s :where [?e :var/name ?v] [?e :var/form ?f]
-                                             [?f :form/refs seon.test-store/binary-sh] [?f :form/src ?s]] db)
+  ;; read from the program the run already holds (runner/program: src and test as facts, each form's :form/refs), never by
+  ;; importing the files again: re-importing every file naming binary-sh was 387M ticks of the test's own work
+  (let [db (test-runner/program)
+        files (d/q '[:find [?file ...] :where [?f :form/refs seon.test-store/binary-sh] [?f :form/ns ?ns] [?ns :ns/file ?file]] db)
+        ;; the selective clause first (the forms that name binary-sh, an index seek), then their vars: begun at every var, the
+        ;; join was most of the test's work
+        launchers (set (for [[v src] (d/q '[:find ?v ?s :where [?f :form/refs seon.test-store/binary-sh] [?e :var/form ?f]
+                                             [?e :var/name ?v] [?f :form/src ?s]] db)
                              ;; binary-sh is the primitive the one launcher calls; this test names both in its query
                              :when (not (#{'seon.test-store/binary-sh 'seon.check-test/every-test-root-starts-through-start-root!} v))
                              ;; the launch is a literal argument ("bin/system", or "./seon" "root"), never text that
