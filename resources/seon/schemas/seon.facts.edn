@@ -165,7 +165,7 @@
  ;; what is stored of an eval's answer (:seon.repl/answer) beside its result: its handle, cost, namespace and warnings, each as the
  ;; answer has them (seon.repl/record-details, seon.db/with-response); its value, error and output are its result's, and
  ;; seon.db/response-of answers the whole (docs/users.md#what-each-thing-is)
- :seon.eval/response [:and {:description "What is stored of the eval's answer beside its result: its handle, cost, namespace and warnings. See docs/users.md#what-each-thing-is."} :seon.repl/answer :seon.db/plain]
+ :seon.eval/response [:and {:description "What is stored of the eval's answer beside its result: its handle, its cost (ms, ticks, bytes), its namespace, and what it says it did (:recorded, :edited, :warnings). See docs/users.md#what-each-thing-is."} :seon.repl/answer :seon.db/plain]
  ;; the eval's result, one entity per answer: evaluating one value twice points both evals at it. Evaluating again moves the ref
  ;; and the old result stays. Never pull its reverse: every eval with no value points at the same nil
  :seon.eval/result [:and {:seon.db/to [:seon.result/result-fact] :description "The eval's result, one entity per answer; evaluating one value twice points both evals at it."} :seon.db/ref]
@@ -196,7 +196,7 @@
  :seon.eval/call-id [:string {:description "The provider's call id for the model call this eval came from."}]
  ;; the model call of the turn in force when it was written (seon.task/call-ref; absent on root's, on an agent's own turn loop and on a context read)
  :seon.eval/call [:and {:seon.db/to [:seon.model-call/fact] :description "The model call of the turn in force when this eval was written; absent on root's evals, on an agent's own turn loop and on a context read."} :seon.db/ref]
- :seon.eval/fns [:vector {:description "The ten costliest contracted functions of the eval, each with its var, calls and ms."} :map]
+ :seon.eval/fns [:vector {:description "The ten costliest contracted functions of the eval, each with its var, its calls, and the ticks and bytes it took, its own and with what it called."} :map]
  :seon.eval/schema [:qualified-keyword {:description "The render schema that the eval's value names, kept in place of a copy."}]
  :seon.eval/basis [:map {:description "The basis (branch and t) that the eval's value is rendered from, when the value names one."} [:t :int] [:branch :seon.db/branch]]
  ;; an agent: one entity per agent, named by its key (seon.lib/unique-id: the digest of a fresh UUID),
@@ -613,7 +613,7 @@
  :seon.message/from [:and {:seon.db/to [:seon.db/agent-fact :seon.system/root-fact] :seon.db/index true :description "Who sent the message: an agent, a user or the system."} :seon.db/ref]
  :seon.message/to [:set {:seon.db/to [:seon.db/agent-fact] :seon.db/index true :description "The agents that receive the message, a ref each."} :seon.db/ref]
  ;; when root's writer recorded it (ms): it orders and decides nothing (docs/clocks.md)
- :seon.message/sent-ms [:int {:description "When root's writer recorded the message, in ms; it orders and decides nothing. See docs/clocks.md."}]
+ :seon.message/sent-ms [:int {:description "When the system's writer recorded the message, in ms; it orders and decides nothing. See docs/clocks.md."}]
  :seon.message/body :seon.db/text
  :seon.message/fact [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/message :seon.render/openai-compat seon.ctx.wire/message-msgs} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
                      [:seon.message/to {:optional true} :seon.message/to] [:seon.message/sent-ms {:optional true} :seon.message/sent-ms]
