@@ -1396,6 +1396,17 @@
     (let [ts (vec (sort-by str (keys items)))]
       (assoc held :judge ts :selected ts :run ts :deferred [] :reused {} :reused-reports []))))
 
+(defn- grant-selection
+  "What a run selects: items given (the test service's grant, {test digest}) are what it runs, as held planned them
+  (item-selection), or, held gone or of another program, as planned again (plan: run-plan of their names); given and empty,
+  nothing (a grant of no items ran every test, 1,765 of them, 2026-11-12); items not given (nil), a plan of its own. See
+  docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat [:maybe :map] [:maybe [:map-of :qualified-symbol :string]] :seon.host/fn] :map]}
+  [held items plan]
+  (cond (nil? items) (plan)
+        (empty? items) {:plan (:plan held) :judge [] :selected [] :run [] :deferred [] :reused {} :reused-reports [] :digests {}}
+        :else (or (item-selection held items) (plan))))
+
 (defn run-tests-forked
   "Fork this agent; the child runs what test-plan runs for proofs (the selected tests with no
   green held at their digest), each test within ticks engine ticks of work of its own, writing
@@ -1443,7 +1454,7 @@
     (contract/error :seon.agent/program-differs #'seon.agent/run-tests-forked
                     (str "this agent runs another program than its branch: " (str/join ", " (map :var differs)))
                     {:differs differs})
-  (let [{:keys [unread] :as sel} (cond-> (or (item-selection (:held-plan @state) items) (run-plan proofs mode names))
+  (let [{:keys [unread] :as sel} (cond-> (grant-selection (:held-plan @state) items #(run-plan proofs mode names))
                                     checkout (assoc-in [:plan :checkout] checkout))]
   (if unread
     unread

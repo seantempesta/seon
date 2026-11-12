@@ -755,3 +755,10 @@
     (with-redefs [prove/item-ended (fn [st _ r] (reset! ended r) [st []]) prove/grant (fn [st] [st []])]
       (#'prove/batch-ended {:batches {7 [[t "d1"]]} :items {[t "d1"] {:kind :test}}} 7 ans))
     (is (= 1 (:pass @ended)) (str "the item's pass is its verdict, never no-verdict: " (pr-str @ended)))))
+
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-grant-of-no-items-runs-nothing
+  ;; docs/merging.md#the-test-service. Found 2026-11-12: an agent given a grant with empty :items ran every test it planned, 1,765
+  ;; of them: empty read as not given. Given and empty selects nothing; not given (nil) plans
+  (let [sel (fn [items] (#'seon.agent/grant-selection nil items (fn [] {:run [:everything]})))]
+    (is (= [] (:run (sel {}))) "empty items: nothing runs")
+    (is (= [:everything] (:run (sel nil))) "no items given: the run plans its own")))
