@@ -45,8 +45,8 @@
   "The three-way of base, o and t; every case also proves delta-three-way, read only where
   the dbs differ, answers the same."
   [o t]
-  (let [b (base) full (pm/three-way (pm/program b) (pm/program o) (pm/program t))]
-    (is (= full (pm/delta-three-way b o t)) "delta-three-way answers what three-way does")
+  (let [b (base) full (pm/three-way (pm/program b #{}) (pm/program o #{}) (pm/program t #{}))]
+    (is (= full (pm/delta-three-way b o t #{})) "delta-three-way answers what three-way does")
     full))
 (defn- vk [nm] [:var (symbol "app" nm)])
 (defn- defs-of "The definition keys among ks (a form's own key follows its definition)." [ks] (filterv #(not= :form (first %)) ks))
@@ -111,11 +111,15 @@
                    (load {"demo/p.md" (page "two") "demo/new.md" "# New\n\nIt is new.\n" "demo/both.md" "# Both\n\nMain's.\n"})
                    (#(d/db-with % (for [x (d/datoms % :avet :seon.doc/address "demo/gone.md#gone")] [:db/retractEntity (:e x)]))))
         ours (-> b (with (var-tx "n" "1")) (load {"demo/both.md" "# Both\n\nThe branch's.\n"}))
-        r (pm/delta-three-way b ours theirs)
+        r (pm/delta-three-way b ours theirs #{})
+        merged (d/db-with ours (pm/merge-tx ours b theirs (:apply r) #{}))
         addrs #(set (map :v (d/datoms % :avet :seon.doc/address)))]
-    (is (= #{[:section "demo/p.md#p"] [:section "demo/new.md#new"] [:section "demo/gone.md#gone"]} (set (filter #(= :section (first %)) (:apply r)))) "main's edit, its new page and its removed one apply")
+    (is (= "It says two." (:seon.doc/text (d/entity merged [:seon.doc/address "demo/p.md#p"]))) "main's edit overwrites the branch's copy")
+    (is (= (addrs theirs) (addrs merged)) "main's new page reaches the branch, and its removed one leaves it")
     (is (= [[:section "demo/both.md#both"]] (mapv :key (:conflicts r))) "a section both changed is a conflict, as a var is")
-    (is (empty? (:apply (pm/delta-three-way theirs theirs theirs))) "a branch holding main's wiki takes nothing")))
+    (is (= "The branch's." (:seon.doc/text (d/entity merged [:seon.doc/address "demo/both.md#both"]))) "and the branch keeps its own until it resolves it")
+    (is (some? (d/entity merged [:var/name 'app/n])) "the branch's own work stays")
+    (is (empty? (:apply (pm/delta-three-way theirs theirs theirs #{}))) "a branch holding main's wiki takes nothing")))
 
 ;; docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program: a branch's own doc edit merges as code does, and its
 ;; page is written back with the merge (seon.source/changed-files names it, seon.doc/files draws it), so the next load of
@@ -124,8 +128,8 @@
   (let [load (fn [db pages] (d/db-with db (seon.doc/load-tx db "demo" pages)))
         b (load (base) {"demo/p.md" "# P\n\nOne.\n" "demo/q.md" "# Q\n\nUntouched.\n"})
         edited (load b {"demo/p.md" "# P\n\nTwo.\n"})
-        r (pm/delta-three-way b edited b)
-        merged edited
+        r (pm/delta-three-way b edited b #{})
+        merged (d/db-with b (pm/merge-tx b b edited (keys (:ours r)) #{}))
         paths (seon.source/changed-files merged (:ours r))]
     (is (nil? (#'seon.writer/merge-refused b edited r)) "the writer takes it")
     (is (= ["demo/p.md"] paths) "the merge writes the page its doc changed, and only it")
@@ -138,13 +142,13 @@
         main (let [db (empty-db)] (d/db-with db (seon.source/import-tx db {p "{:x/a 1\n :x/b 2}\n"})))
         set-k (fn [db k v] (d/db-with db [{:config/key k :config/form v :config/file p}]))
         ours (set-k main :x/a "5")
-        r (pm/delta-three-way main ours (set-k main :x/b "6"))]
+        r (pm/delta-three-way main ours (set-k main :x/b "6") #{})]
     (is (= [[:config :x/a]] (keys (:ours r))) (pr-str r))
     (is (= [[:config :x/b]] (:apply r)))
     (is (empty? (:conflicts r)))
     (is (= {:config [:x/a]} (pm/divergence (:ours r))))
-    (is (= [[:config :x/a] #{:base :ours :theirs}] ((fn [c] [(:key c) (set (filter #(contains? c %) [:base :ours :theirs]))]) (first (:conflicts (pm/delta-three-way main ours (set-k main :x/a "7")))))))
-    (let [merged ours
+    (is (= [[:config :x/a] #{:base :ours :theirs}] ((fn [c] [(:key c) (set (filter #(contains? c %) [:base :ours :theirs]))]) (first (:conflicts (pm/delta-three-way main ours (set-k main :x/a "7") #{}))))))
+    (let [merged (d/db-with main (pm/merge-tx main main ours (keys (:ours r)) #{}))
           paths (seon.source/changed-files merged (:ours r))]
       (is (= [p] paths))
       (is (= {p "{:x/a 5\n :x/b 2}\n"} (seon.source/files merged paths)) "a merged entry is what the write-back writes"))))
@@ -157,24 +161,36 @@
         edit (fn [db t] (d/db-with db (seon.source/file-tx "bin/x" t)))
         ours (edit main "#!/bin/sh\necho 2\n")
         theirs (edit main "#!/bin/sh\necho 3\n")
-        r (pm/delta-three-way main ours main)]
+        r (pm/delta-three-way main ours main #{})]
     (is (= {[:script "bin/x"] [{:file "bin/x" :text text :mode "100755"} {:file "bin/x" :text "#!/bin/sh\necho 2\n" :mode "100755"}]} (:ours r)) (pr-str r))
     (is (= {:scripts ["bin/x"]} (pm/divergence (:ours r))))
-    (is (= [[:script "bin/x"] #{:base :ours :theirs}] ((fn [c] [(:key c) (set (filter #(contains? c %) [:base :ours :theirs]))]) (first (:conflicts (pm/delta-three-way main ours theirs))))) "both sides changing it is an unmerged entry")
-    (is (= "" (:seon.script/says (d/entity ours [:file/path "bin/x"]))) "what it derives rides with it")
+    (is (= [[:script "bin/x"] #{:base :ours :theirs}] ((fn [c] [(:key c) (set (filter #(contains? c %) [:base :ours :theirs]))]) (first (:conflicts (pm/delta-three-way main ours theirs #{}))))) "both sides changing it is an unmerged entry")
+    (is (= "" (:seon.script/says (d/entity (d/db-with main (pm/merge-tx main main ours (keys (:ours r)) #{})) [:file/path "bin/x"]))) "what it derives rides with it")
     (let [p "resources/seon/schemas/x.edn"
           db (let [db (empty-db)] (d/db-with db (seon.source/import-tx db {p "{:x/a :int}\n"})))
           moved (d/db-with db [{:file/path p :file/text "{:x/a :int} \n"}])]
-      (is (= {} (:ours (pm/delta-three-way db moved db))) "a schema resource's file bears no key: its entries do"))))
+      (is (= {} (:ours (pm/delta-three-way db moved db #{}))) "a schema resource's file bears no key: its entries do"))))
 
 (deftest unmap-merges-as-delete
   (let [ours (with (base) (unmap "g"))
         r (tw ours (base))
-        main' ours]
+        main' (d/db-with (base) (pm/merge-tx (base) (base) ours (keys (:ours r)) #{}))]
     (is (= #{(vk "g") [:form (fid "g" "x")]} (set (keys (:ours r)))) "the definition, and the form it leaves dead")
     (is (nil? (seon.doc/source-of main' 'app/g)))
     (is (not (program/live? main' (pdb/eid main' :form/id (fid "g" "x")))) "the form is dead on main, as on the branch")
     (is (= [#{:base :theirs}] (map (fn [c] (set (filter #(contains? c %) [:base :ours :theirs]))) (filter #(= :var (first (:key %))) (:conflicts (tw ours (with (base) (var-tx "g" "(dec x)"))))))))))
+
+;; docs/merging.md#a-branch-merges-main-in: md-scan 29's branch held the results of a test main deleted,
+;; on an entity with no :var/name, and its next test run threw on the nil test key
+(deftest a-var-main-deletes-leaves-no-facts-on-the-branch
+  (let [e #(:db/id (d/entity % [:var/name 'app/g]))
+        ours (with (base) (fn [db] [{:db/id (e db) :seon.test/digest "d1" :seon.test/status :green}]))
+        theirs (with (base) (fn [db] [[:db/retractEntity (e db)]]))
+        r (tw (base) theirs)
+        merged (d/db-with ours (pm/merge-tx ours (base) theirs (:apply r) #{}))]
+    (is (nil? (d/entity merged [:var/name 'app/g])) "the var is gone, as on main")
+    (is (empty? (d/q '[:find ?t :where [?t :seon.test/digest] (not [?t :var/name])] merged))
+        "no test facts stay on an entity whose name main retracted")))
 
 (deftest latest-redefinition-wins
   (let [ours (with (base) (var-tx "f" "1") (var-tx "f" "2") (var-tx "f" "3"))]
@@ -185,8 +201,8 @@
 (deftest a-form-s-place-does-not-make-it-another
   (let [o (with (base) [{:note/text "first" :note/agent :t}] (var-tx "n" "(* 2 x)"))
         t (with (base) (var-tx "n" "(* 2 x)"))]
-    (is (not= (get-in (pm/program o) [[:form (fid "n" "(* 2 x)")] :order])
-              (get-in (pm/program t) [[:form (fid "n" "(* 2 x)")] :order])))
+    (is (not= (get-in (pm/program o #{}) [[:form (fid "n" "(* 2 x)")] :order])
+              (get-in (pm/program t #{}) [[:form (fid "n" "(* 2 x)")] :order])))
     (is (= {:apply [] :conflicts []} (select-keys (tw o t) [:apply :conflicts])))))
 
 (deftest scratch-and-observations-never-merge
@@ -195,19 +211,87 @@
                          ;; resolve to two ids (a Datahike finding, sent to Deep fixes)
                          {:seon.eval/id "e1" :seon.eval/by {:seon.agent/key "a1" :seon.process/pid 7} :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e1 :value 3}}
                          {:task/name :x/y :task/status :done}])]
-    (is (= (pm/program (base)) (pm/program ours)))
+    (is (= (pm/program (base) #{}) (pm/program ours #{})))
     (is (empty? (:ours (tw ours (base)))))))
+
+(deftest unmerged-entry-derivation
+  (let [o (with (base) (var-tx "f" "(inc x)"))
+        t (with (base) (var-tx "f" "(dec x)"))
+        cs (:conflicts (tw o t))
+        b1 (d/db-with o (pm/unmerged-tx o cs 42))
+        unmerged (fn [db] (mapv :key (pm/unmerged db)))]
+    (are [db expected] (= expected (unmerged db))
+      ;; written, ours unchanged: unmerged
+      b1 [(vk "f")]
+      ;; re-defn of the var: resolved by derivation
+      (with b1 (var-tx "f" "(+ x 0)")) []
+      ;; resolve! keeping ours: marked
+      (d/db-with b1 (pm/resolve-tx b1 (vk "f"))) [])
+    (is (= 42 (:main-t (first (pm/entries b1)))))
+    (testing "a run's conflict evidence (the same members, no :main-t) is not an entry"
+      (is (= [(vk "f")] (mapv :key (pm/entries (d/db-with b1 [(pm/conflict-tx (first cs))]))))))
+    (testing "a second conflict on the same key replaces the entry"
+      (let [b2 (d/db-with b1 (pm/unmerged-tx b1 cs 43))]
+        (is (= [43] (map :main-t (pm/entries b2))))))))
+
+(deftest a-conflict-value-reads-a-pulled-entry
+  ;; its input is a merge entry's members
+  ;; (mg/check generated nil and 0 from its `:any` input, which state no conflict)
+  (let [c (first (:conflicts (tw (with (base) (var-tx "f" "(inc x)")) (with (base) (var-tx "f" "(dec x)")))))
+        db (d/db-with (base) [(pm/conflict-tx c)])
+        e (d/q '[:find ?e . :where [?e :seon.merge/key]] db)]
+    (is (= c (pm/conflict-value (pm/conflict-tx c))) "the inverse of conflict-tx")
+    (is (= c (pm/conflict-value (d/pull db '[*] e))) "a pulled entry")
+    (let [seed (proofs/test-seed)]
+      (is (nil? (mg/check (m/deref (contract/schema (contract/contract #'pm/conflict-value))) pm/conflict-value
+                          {:registry contract/registry ::mg/=>seed seed}))
+          (str "mg/check: every input its contract generates states a conflict; seed " seed)))))
 
 (deftest behind-means-main-program-moved
   (let [observed (with (base) [{:seon.agent/key "root" :seon.process/pid 9} {:note/text "run facts" :note/agent :t}])]
     (is (empty? (:theirs (tw (base) observed))))
     (is (seq (:theirs (tw (base) (with (base) (var-tx "f" "(dec x)"))))))))
 
+(deftest platform-records-never-put-a-branch-behind
+  ;; root's records on main (boot, quiescence, recorded errors) are platform records: with
+  ;; all data merged (the writer's :all) they change no key a branch carries; the task
+  ;; content an agent may improve (my.task/update!) is carried
+  (let [rooted (with (base) [{:seon.system/id :root :seon.system/quiescent {:t 9 :root-causes []}}])
+        tasked (with (base) [{:seon.task/id "t/x" :seon.task/plan "better"}])
+        p #(pm/program % :all)]
+    (is (empty? (:theirs (pm/three-way (p (base)) (p (base)) (p rooted)))))
+    (is (some (fn [[k]] (= [:datum :seon.task/plan] [(first k) (nth k 2)])) (:ours (pm/three-way (p (base)) (p tasked) (p (base))))))))
+
+(deftest declared-data-merges-by-key
+  ;; the data part, used by core's generic merge (every non-program, non-observation attribute)
+  (let [o (with (base) [{:db/id 900 :note/text "n" :note/agent :a1}])
+        r (pm/three-way (pm/program (base) :all) (pm/program o :all) (pm/program (base) :all))]
+    (is (= #{[:datum 900 :note/text] [:datum 900 :note/agent]} (set (keys (:ours r)))))
+    (is (empty? (:ours (pm/three-way (pm/program (base) #{}) (pm/program o #{}) (pm/program (base) #{})))))))
+
 (def ^:private facts-path "resources/seon/schemas/seon.facts.edn")
 
 (defn- registered
   "db after registering form v as schema k on it, as my.schema/register! does."
   [db k v] (d/db-with db (:tx (schema/registration db k v (= "user" (namespace k))))))
+
+(deftest a-merged-schema-entry-declares-its-own-attribute
+  ;; docs/storage.md#the-write-checks-every-datom: a key registered bare (an agent's own datum, no entity map lists it) is an attribute on the
+  ;; branch that registers it; merged, its entry arrived without its declaration, so main could not store what the branch could
+  (let [base (empty-db)
+        src (registered base :app.shape/size :int)
+        onto (d/db-with base (pm/merge-tx base base src [[:schema :app.shape/size]] #{}))]
+    (is (= :db.type/long (:db/valueType (get (d/schema onto) :app.shape/size))) "the merge carries its declaration")
+    (is (= 3 (:app.shape/size (d/entity (d/db-with onto [{:db/id 900 :app.shape/size 3}]) 900))) "and the target can store it")))
+
+(deftest a-merged-entry-imported-from-a-file-compiles-on-a-binary-without-it
+  ;; docs/source.md#an-agent-changes-a-schema: real run 9, 3 of 5 agents closed. A key the running binary doesn't hold, imported onto main
+  ;; from a file, has to compile when a branch merges it, as a registered key does; red when an imported entry was taken for the binary's
+  (let [base (empty-db)
+        src (d/db-with base (source/file-tx "resources/seon/schemas/app.shape.edn" "{:app.shape/size :int}"))
+        onto (d/db-with base (pm/merge-tx base base src [[:schema :app.shape/size]] #{}))]
+    (is (= :db.type/long (:db/valueType (get (d/schema onto) :app.shape/size))) "the merge compiled it and carries its declaration")
+    (is (= #{:app.shape/size} (set (keys (program/schema-changes onto)))) "and the branch says the binary lacks it")))
 
 (deftest a-tree-the-binary-was-built-from-states-no-schema-change
   ;; docs/source.md#a-program-file: the shipped schema resources, imported as the import reads them (seon.source/file-tx), are no change against the binary built
@@ -219,6 +303,23 @@
     (is (< 500 (count (d/datoms db :aevt :schema/key))) "and their entries imported")
     (is (= {} (program/schema-changes db)))))
 
+(deftest a-merge-declares-the-attributes-its-datoms-use-before-them
+  ;; found 2026-10-27 through 0.7 (agent a1, (my.branch/merge-main!) on the standing root): main had
+  ;; gained datoms of :form/ops, and the agent's branch was cut before the attribute: Datahike refused
+  ;; the datoms (Bad entity attribute :form/ops, not defined in current schema). A merge's tx-data
+  ;; declares, first, every attribute its datoms use that the target's schema lacks, read from the
+  ;; registry, not only for the schema keys merged
+  (let [full (empty-db)
+        schema (into {} (map (fn [[k v]] [k (dissoc v :db/id)])) (dissoc (d/schema full) :form/ops))
+        onto (datahike.core/empty-db schema {:schema-flexibility :write})
+        datoms [{:e 100 :a :form/ops :v :seon.op/x}]
+        decls (pm/attribute-declarations onto datoms)]
+    (is (= [:form/ops] (mapv :db/ident decls)) "the one attribute the branch lacks")
+    (is (= [] (pm/attribute-declarations full datoms)) "a branch that has it declares nothing")
+    (is (thrown? Exception (d/db-with onto [[:db/add 100 :form/ops :seon.op/x]])) "without it the datom is refused")
+    (is (= #{:seon.op/x} (set (map :v (d/datoms (d/db-with onto (into decls [[:db/add 100 :form/ops :seon.op/x]])) :eavt 100 :form/ops))))
+        "declared first, the datom lands")))
+
 (deftest a-merge-base-cut-before-an-attribute-diffs-it-as-the-heads
   ;; found 2026-10-27 through 0.7 (agent a1, merge-main! after the merge above declared :form/ops): the
   ;; content diff read every attribute either side declares from a base cut before :form/ops, and
@@ -226,9 +327,9 @@
   (let [full (empty-db)
         base (datahike.core/empty-db (into {} (map (fn [[k v]] [k (dissoc v :db/id)])) (dissoc (d/schema full) :form/ops))
                                      {:schema-flexibility :write})
-        head (d/db-with base [(assoc (dissoc (get (d/schema full) :form/ops) :db/id) :db/ident :form/ops) [:db/add 100 :form/ops :seon.op/x]])]
+        head (d/db-with base (into (pm/attribute-declarations base [{:e 100 :a :form/ops :v :seon.op/x}]) [[:db/add 100 :form/ops :seon.op/x]]))]
     (is (= [[100 :form/ops :seon.op/x]]
-           (mapv (juxt :e :a :v) (filter #(= :form/ops (:a %)) (#'pm/content-datoms base head))))
+           (mapv (juxt :e :a :v) (filter #(= :form/ops (:a %)) (#'pm/content-datoms base head #{}))))
         "the head's datoms of the attribute the base lacks are what moved")))
 
 (deftest content-datoms-given-a-diff-are-its-content-ones
@@ -237,12 +338,12 @@
   (let [b (base)
         branch (with b (var-tx "f" "(inc x)"))
         whole (apply concat (d/datoms-diff b branch :eavt []))
-        mine (pm/content-datoms b branch)]
+        mine (pm/content-datoms b branch #{})]
     (is (seq mine) "the branch changed the program")
-    (is (= (set mine) (set (pm/content-datoms b branch whole))) "the content ones among the whole diff are the ones read per attribute")
+    (is (= (set mine) (set (pm/content-datoms b branch #{} whole))) "the content ones among the whole diff are the ones read per attribute")
     (is (some #(= :db/txInstant (:a %)) whole) "the whole diff holds the transactions' instants")
     (is (not-any? #(= :db/txInstant (:a %)) mine) "which are no content")
-    (is (= (pm/delta-changes b branch) (pm/delta-changes b branch mine) (pm/delta-changes b branch whole)))))
+    (is (= (pm/delta-changes b branch #{}) (pm/delta-changes b branch #{} mine) (pm/delta-changes b branch #{} whole)))))
 
 (deftest a-schema-entry-merges-per-key
   ;; task seon.source/schemas-are-part-of-the-program: a schema entry is a program key,
@@ -256,7 +357,7 @@
         status (edn/read-string "[:string {:min 1}]")
         ours (-> main (registered :seon.task/reason status) (registered :user/qty :int))
         theirs (registered main :seon.task/merged-t [:int {:min 1}])
-        prog #(pm/program %)
+        prog #(pm/program % #{})
         r (pm/three-way (prog main) (prog ours) (prog theirs))]
     (is (= [[:schema :seon.task/reason]] (keys (:ours r)))
         "the branch's change is its key; a scratch key is no program")
@@ -265,10 +366,16 @@
     (is (= [] (:conflicts r)) "different keys of one resource do not conflict")
     (testing "one key changed two ways conflicts at its key"
       (let [r2 (pm/three-way (prog main) (prog ours) (prog (registered main :seon.task/reason [:string {:max 5}])))]
-        (is (= [[:schema :seon.task/reason] #{:base :ours :theirs}] ((fn [c] [(:key c) (set (filter #(contains? c %) [:base :ours :theirs]))]) (first (:conflicts r2)))))))))
+        (is (= [[:schema :seon.task/reason] #{:base :ours :theirs}] ((fn [c] [(:key c) (set (filter #(contains? c %) [:base :ours :theirs]))]) (first (:conflicts r2)))))))
+    (testing "merged into main: the entry is main's, no longer the binary's, and write-back changes only its bytes"
+      (let [main2 (d/db-with main (pm/merge-tx main main ours (keys (:ours r)) #{}))]
+        (is (= #{:seon.task/reason} (set (keys (program/schema-changes main2)))))
+        (is (= [facts-path] (source/changed-files main2 (:ours r))))
+        (is (= {facts-path (str/replace text status-line " :seon.task/reason [:string {:min 1}]")}
+               (source/files main2 (source/changed-files main2 (:ours r)))))))))
 
-(deftest the-delta-three-way-reads-schema-entries-as-the-program-does
-  ;; schema entries, besides forms and definitions:
+(deftest the-delta-three-way-reads-data-and-schema-entries-as-the-program-does
+  ;; declared data (card one and many) and schema entries, besides forms and definitions:
   ;; delta-three-way, read only where the dbs differ, answers what three-way does
   (let [b (with (empty-db) (var-tx "f" "x") (var-tx "g" "x") (var-tx "h" "x")) ; the test db holds the task :app.m0/tidy and its refs
         task (d/q '[:find ?e . :where [?e :task/name :app.m0/tidy]] b)
@@ -276,10 +383,11 @@
         o (with b [{:note/text "ours" :note/agent :t} [:db/add task :task/status :done]]
                 [{:schema/key :x/y :schema/form "[:int]" :schema/file "x.edn"}])
         t (with b [[:db/retract task :task/refs ref] [:db/add task :task/plan "theirs"]] (var-tx "g" "(dec x)"))]
-    (let [full (pm/three-way (pm/program b) (pm/program o) (pm/program t))]
-      (is (= full (pm/delta-three-way b o t)))
-      (is (seq (:ours full))))
-    (is (= (pm/changes (pm/program b) (pm/program o)) (pm/delta-changes b o)))))
+    (doseq [da [#{} :all #{:task/status :task/refs}]]
+      (let [full (pm/three-way (pm/program b da) (pm/program o da) (pm/program t da))]
+        (is (= full (pm/delta-three-way b o t da)) (pr-str da))
+        (is (seq (:ours full)))))
+    (is (= (pm/changes (pm/program b :all) (pm/program o :all)) (pm/delta-changes b o :all)))))
 
 (deftest divergence-names-each-change-a-merge-carries
   ;; owner D4 (2026-10-22): the agent sees, every turn, every change its branch's merge will
@@ -290,11 +398,11 @@
         branch (with b (var-tx "f" "(inc x)") (unmap "g") (var-tx "c" "x")
                      [{:schema/key :app/k :schema/form ":string" :schema/file "app.edn"} {:schema/key :app/n :schema/form ":int" :schema/file "app.edn"}
                       {:schema/key :app/scratch :schema/form ":int"}])
-        ch (pm/delta-changes b branch)]
+        ch (pm/delta-changes b branch #{})]
     (is (= {:added ['app/c] :changed ['app/f] :removed ['app/g] :schemas [:app/k :app/n]} (pm/divergence ch)))
     (is (= #{'app/c 'app/f 'app/g} (pm/changed-vars ch)) "the changed vars are its vars")
-    (is (= ch (pm/delta-changes b branch (apply concat (d/datoms-diff b branch :eavt [])))) "given the datoms that differ, nothing is diffed again and the changes are the same")
-    (is (= {} (pm/divergence (pm/delta-changes b b))) "an unchanged branch carries nothing")))
+    (is (= ch (pm/delta-changes b branch #{} (apply concat (d/datoms-diff b branch :eavt [])))) "given the datoms that differ, nothing is diffed again and the changes are the same")
+    (is (= {} (pm/divergence (pm/delta-changes b b #{}))) "an unchanged branch carries nothing")))
 
 (deftest a-branch-that-merged-main-carries-only-its-own-changes
   ;; root, 2026-10-22: entity ids are a branch's own, and a merge applies main's forms by
@@ -303,14 +411,94 @@
   (let [main (with (base) (var-tx "f" "(inc x)") (var-tx "m" "x"))
         ;; the branch writes entities of its own, adds k, then merges main: main's forms by content
         merged (with (base) [{:db/id "x0" :form/id "(comment 0)" :form/src "x"}] (var-tx "k" "x") (var-tx "f" "(inc x)") (var-tx "m" "x"))]
-    (is (= {:added ['app/k]} (pm/divergence (pm/delta-changes main merged))) "only k, the branch's own")
-    (is (= #{'app/k} (pm/changed-vars (pm/delta-changes main merged))) "and the tests it reaches are k's")))
+    (is (= {:added ['app/k]} (pm/divergence (pm/delta-changes main merged #{}))) "only k, the branch's own")
+    (is (= #{'app/k} (pm/changed-vars (pm/delta-changes main merged #{}))) "and the tests it reaches are k's")))
+
+(deftest a-merge-carries-the-branchs-own-datoms
+  ;; a verbatim merge (seon.merge/merge-tx): main gains exactly the datoms the branch wrote
+  ;; for the keys that merge, with their own entity ids and tx ids, and nothing else of its
+  ;; own; a card-one change carries the branch's retraction, so main writes no extra one
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [b (keyword (str (name (:branch cfg)) "-v"))
+           _ (d/transact conn ((var-tx "f" "x") @conn))
+           _ (d/branch! conn (:branch cfg) b)
+           bc (pdb/connect (assoc cfg :branch b))]
+       (try
+         (d/transact bc ((var-tx "n" "1") @bc))
+         (d/transact bc ((var-tx "f" "(inc x)") @bc))
+         (d/transact bc [{:note/text "a platform-free scratch note" :note/agent :t}])
+         (let [base (pdb/branch-base conn (:branch cfg) b) head @bc main @conn
+               r (pm/delta-three-way base head main #{})
+               ks (keys (:ours r))
+               tx (pm/merge-tx main base head ks #{})
+               rep (d/merge-db conn #{b} tx (pdb/tx-meta (:branch cfg)))
+               after (:db-after rep)
+               merge-t (:max-tx after)
+               own (remove #(= merge-t (:tx %)) (:tx-data rep))
+               carried (set (map (juxt :e :a :v :tx :added) tx))]
+           (testing "main's program at the merged keys is the branch's"
+             (is (= (pm/program-of head ks #{}) (pm/program-of after ks #{}))))
+           (testing "every datom main gained besides the merge's own is one the branch wrote, ids and tx kept"
+             (is (seq own))
+             (is (every? #(carried ((juxt :e :a :v :tx :added) %)) own)))
+           (testing "each new form is one entity on both sides"
+             (is (= (pdb/eid head :var/name 'app/n) (pdb/eid after :var/name 'app/n))))
+           (testing "the scratch note stays on the branch"
+             (is (empty? (d/datoms after :avet :note/text "a platform-free scratch note")))))
+         (finally (d/release bc) (d/delete-branch! conn b)))))))
 
 (deftest changed-vars-are-the-var-keys-of-a-change
   ;; found red on main (2026-10-27): it read each key [kind x] one level too deep, so any branch
   ;; that changed something threw "nth not supported on this type: Keyword" in every turn's test plan
   (is (= #{'app/f 'app/g} (pm/changed-vars {[:var 'app/f] [nil {:meta #{:arglists}}] [:var 'app/g] [{:meta #{:arglists}} nil] [:schema :app/k] [nil {}]})))
   (is (= #{} (pm/changed-vars {}))))
+(deftest a-merge-carries-the-namespace-of-a-form-it-carries
+  ;; task seon.system/a-behind-merge-is-bounded-and-merges-main-first (gap 3): a form in a namespace the
+  ;; target lacks was carried with its :form/ns ref but not the namespace entity it names, so the form read
+  ;; :ns nil there and the target's program differed from the branch's at that key for ever (the writer's
+  ;; behind check never settled). The merge carries the namespace entity too.
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [b (keyword (str (name (:branch cfg)) "-ns"))
+           _ (d/transact conn ((var-tx "f" "x") @conn))
+           _ (d/branch! conn (:branch cfg) b)
+           bc (pdb/connect (assoc cfg :branch b))
+           newns (fn [db] (program/record-tx db {:id "app.z/(defn z [x] x)" :src "(defn z [x] x)" :ns 'app.z :ns-form? false
+                                                  :defs [{:var 'app.z/z :meta #{:arglists} :contract "[:=> [:cat :int] :int]"}]
+                                                  :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}}))]
+       (try
+         (d/transact bc (newns @bc))
+         (let [base (pdb/branch-base conn (:branch cfg) b) head @bc main @conn
+               r (pm/delta-three-way base head main #{})
+               ks (keys (:ours r))
+               after (:db-after (d/merge-db conn #{b} (pm/merge-tx main base head ks #{}) (pdb/tx-meta (:branch cfg))))]
+           (is (some #(= :form (first %)) ks) "the form is a key to carry")
+           (is (= (pm/program-of head ks #{}) (pm/program-of after ks #{})) "main reads the branch's program at those keys, :ns included")
+           (is (= 'app.z (:ns (val (first (filter #(= :form (first (key %))) (pm/program-of after ks #{})))))) "the form's namespace")
+           (is (= {} (:ours (pm/delta-three-way head after main #{}))) "and nothing differs between the two programs any more"))
+         (finally (d/release bc) (d/delete-branch! conn b)))))))
+
+;; docs/merging.md: an agent's first prove asks for its merge candidate before it has changed anything
+(deftest a-branch-with-nothing-of-its-own-merges-nothing
+  (let [db (my.test/world)]
+    (is (empty? (pm/merge-tx db db db nil #{})))))
+
+(deftest a-namespace-both-sides-made-is-one-entity-after-the-merge
+  ;; docs/storage.md#history: the branch and main each made app.z without an (ns) form, main after making another namespace, which moves its next id past the branch's: a namespace's id is its name's content, so the merge leaves one entity and the carried form reads it
+  (let [rec (fn [nm] (fn [db] (program/record-tx db {:id (str "app.z/(defn " nm " [x] x)") :src (str "(defn " nm " [x] x)") :ns 'app.z :ns-form? false
+                                                     :defs [{:var (symbol "app.z" nm) :meta #{:arglists} :contract "[:=> [:cat :int] :int]"}]
+                                                     :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}})))
+        b (with (mt/world) (var-tx "f" "x"))
+        main (with b [{:ns/name 'app.other}] (rec "m"))
+        head (with b (rec "z"))
+        ks (keys (:ours (pm/delta-three-way b head main #{})))
+        after (d/db-with main (pm/merge-tx main b head ks #{}))]
+    (is (= 1 (count (d/datoms after :avet :ns/name 'app.z))) "one entity for the namespace")
+    (is (= 'app.z (:ns (val (first (filter #(= :form (first (key %))) (pm/program-of after ks #{})))))) "the carried form reads it")))
+
+;; docs/storage.md#mains-content-mark: two commits of main with one content mark hold the same content, so a reader of main's
+;; content asks the mark and reads no diff; a main no writer marked is diffed. Red before: content-commit diffed every attribute
 (deftest same-content-is-read-from-mains-mark
   (ts/test-branch!
     (fn [_ conn]

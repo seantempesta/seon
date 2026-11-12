@@ -15,7 +15,7 @@
 (defn three-of
   "delta-three-way's arguments: base, a branch holding n forms (app.pc/f0..fn-1), and ours
   and theirs, each a branch of it that redefined one form of its own, all read from the store."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db]]}
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db [:set :keyword]]]}
   [n]
   (let [conn @store
         cfg (pdb/store-cfg :lmdb (get-in @conn [:config :store :path]))
@@ -29,7 +29,7 @@
                           (d/transact c {:tx-data (program/record-tx @c (#'pc/acct i "(inc x)"))})
                           (d/release c)
                           (pdb/head conn s)))
-        r [(pdb/head conn b) (side "ours" 1) (side "theirs" (dec n))]]
+        r [(pdb/head conn b) (side "ours" 1) (side "theirs" (dec n)) #{}]]
     (d/release bc)
     r))
 
@@ -56,11 +56,56 @@
        :fixed {:ns 4000000 :bytes 6800000}
        :sizes [10 30 100]}))
 
+(defn data-of
+  "delta-three-way's arguments for a merge of declared data (:all): base holding n data
+  attributes (:app.data/a0..an-1, longs) and one entity with a value of the first, and ours and
+  theirs, each a branch of it that changed that one value, all read from the store."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db [:= :all]]]}
+  [n]
+  (let [conn @store
+        cfg (pdb/store-cfg :lmdb (get-in @conn [:config :store :path]))
+        b (keyword (str "d" n "-" (random-uuid)))
+        _ (d/branch! conn :db b)
+        bc (pdb/connect (assoc cfg :branch b))
+        attrs (mapv #(keyword "app.data" (str "a" %)) (range n))
+        _ (d/transact bc {:tx-data (mapv #(hash-map :db/ident % :db/valueType :db.type/long :db/cardinality :db.cardinality/one) attrs)})
+        _ (d/transact bc {:tx-data [{:app.data/a0 1}]})
+        e (d/q '[:find ?e . :where [?e :app.data/a0 1]] @bc)
+        side (fn [nm v] (let [s (keyword (str (name b) "-" nm))
+                              _ (d/branch! conn b s)
+                              c (pdb/connect (assoc cfg :branch s))]
+                          (d/transact c {:tx-data [[:db/add e :app.data/a0 v]]})
+                          (d/release c)
+                          (pdb/head conn s)))
+        r [(pdb/head conn b) (side "ours" 2) (side "theirs" 3) :all]]
+    (d/release bc)
+    r))
+
+(deftest a-merge-reads-the-data-attributes-from-the-index
+  ;; task seon.merge/data-attrs-read-from-the-attribute-index: a merge of declared data (:all)
+  ;; read which attributes are data from (d/schema db), which rebuilds the whole schema map on
+  ;; every call, once per db per read; agents merge main at every green. Now whether an attribute
+  ;; is data is asked of the attributes of the datoms that differ (seon.merge/data-attr?), so the
+  ;; merge costs the same however many attributes the store declares
+  (cost/proof
+      {:of 'seon.merge/delta-three-way :input 'seon.merge-cost-test/data-of
+       :n "data attributes the store declares, one value changed on each side"
+       :work (str "the datoms that differ (one value each side), the keys their entity bears, each "
+                  "asked whether its attribute is data: never the schema, so never the attributes' count")
+       :growth :constant
+       ;; measured, 5 repeats a size: 562 KB / 39 calls at 100, 592 KB at 300, 585 KB at 1,000
+       ;; (43 calls since touched-keys asks each of the 4 differing datoms' attributes whether a key
+       ;; reads it, one call apiece: measured with the filter inline, in a def and as a contracted
+       ;; function, 43, 43 and 47); reading (d/schema db) per db per read it was 8.11 / 11.84 / 25.57 MB and 2,726 / 3,926 /
+       ;; 8,126 calls; 46 since touched-keys calls touched-by (which takes datoms a caller already holds) once per side
+       :fixed {:bytes 650000 :calls 48}
+       :sizes [10 30 100]}))
+
 (defn embedded-of
   "delta-three-way's arguments for a main that only embedded: base holding n forms, ours changing
   nothing, and theirs a branch of it that wrote a vector fact set on each of the n forms (what
   seon.vector writes of a form's text), no form's program content changed."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db]]}
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db [:set :keyword]]]}
   [n]
   (let [conn @store
         cfg (pdb/store-cfg :lmdb (get-in @conn [:config :store :path]))
@@ -73,7 +118,7 @@
         _ (d/branch! conn b s)
         c (pdb/connect (assoc cfg :branch s))
         _ (d/transact c {:tx-data (vector/tx-data es (vec (repeat n "1")) (vec (repeat n [0.5 0.5])) "m")})
-        r [(pdb/head conn b) (pdb/head conn b) (pdb/head conn s)]]
+        r [(pdb/head conn b) (pdb/head conn b) (pdb/head conn s) #{}]]
     (d/release c) (d/release bc)
     r))
 
@@ -142,9 +187,9 @@
                       (d/release @store) (seon.lib/remove-tree! path)))))))
 
 (deftest a-main-that-only-embedded-changes-no-key
-  (let [[base ours theirs] (embedded-of 10)]
-    (is (empty? (merge/touched-keys base [theirs])) "embeddings are no program content")
-    (is (= {:theirs {} :apply [] :conflicts []} (select-keys (merge/delta-three-way base ours theirs) [:theirs :apply :conflicts])) "so main changed nothing")))
+  (let [[base ours theirs das] (embedded-of 10)]
+    (is (empty? (merge/touched-keys base [theirs] das)) "embeddings are no program content")
+    (is (= {:theirs {} :apply [] :conflicts []} (select-keys (merge/delta-three-way base ours theirs das) [:theirs :apply :conflicts])) "so main changed nothing")))
 
 (deftest a-main-that-only-embedded-costs-nothing
   ;; (its digest does not reach delta-three-way: a quoted name; this line moves it when the producer changes)
@@ -163,43 +208,5 @@
      ;; and 640 MB for no key. Before that again: 536 calls, 11 MB at n = 10
      ;; 27 calls since 2026-10-30: seon.merge/content-attr, one contracted call per side's filter, was
      ;; uncontracted (as a contracted predicate asked of each attribute it was 1,771)
-     ;; 2026-11-12: content-attr? is a contracted defn- (the contracts check: every fn contracted), and a test shard arms a private
-     ;; contract (production does not wrap a defn-), so its calls count again: content-datoms asks it of each attribute of both
-     ;; schemas, ~900 a side (1,802 measured), the 2026-10-30 count before it was taken uncontracted
-     :fixed {:bytes 4000000 :calls 2000}
+     :fixed {:bytes 4000000 :calls 27}
      :sizes [10 30 100]}))
-
-(defn plan-of
-  "seon.merge/plan's arguments for a merge up on a store holding n forms: their base, main moved by one record transaction,
-  and a branch that wrote 100 tasks of its own (about 360 datoms) in 20 transactions, all read from the store."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db]]}
-  [n]
-  (let [conn @store
-        cfg (pdb/store-cfg :lmdb (get-in @conn [:config :store :path]))
-        b (keyword (str "p" n "-" (random-uuid)))
-        _ (d/branch! conn :db b)
-        bc (pdb/connect (assoc cfg :branch b))
-        _ (doseq [part (partition-all 500 (range n))] (d/transact bc {:tx-data (vec (mapcat #(program/account-tx @bc (#'pc/acct % "x") %) part))}))
-        side (fn [nm txs] (let [s (keyword (str (name b) "-" nm)) _ (d/branch! conn b s) c (pdb/connect (assoc cfg :branch s))]
-                            (doseq [tx txs] (d/transact c {:tx-data tx :tx-meta (pdb/tx-meta s)}))
-                            (d/release c)
-                            (pdb/head conn s)))
-        r [(pdb/head conn b)
-           (side "main" [[{:seon.system/id :root :seon.system/boot "moved"}]])
-           (side "branch" (for [i (range 20)] (vec (for [j (range 5)] {:task/name (keyword "cost" (str "t" i "-" j)) :task/plan (str "plan " i j) :task/status :held}))))]]
-    (d/release bc)
-    r))
-
-(deftest a-plan-costs-what-the-two-sides-changed
-  ;; task seon.merge/a-merge-replays-the-sources-net-change: an agent's turn plans a merge whenever main moved, so a plan costs
-  ;; what the two sides changed since their base (the two net changes, the history diff, the replay), never the store: the
-  ;; identity of an entity read from the db's schema map (:schema), never (d/schema db), which built the whole map again per
-  ;; entity (32.4M ticks and 104 MB a plan on a 60,590-datom store, 2026-11-12)
-  (spit "/tmp/mergeop/plan-proof.edn"
-        (pr-str (cost/proof
-                 {:of 'seon.merge/plan :input 'seon.merge-cost-test/plan-of
-                  :n "forms the store holds; one record on main, about 360 datoms in 20 transactions on the branch"
-                  :work "the datoms that differ on each side and the branch's transactions since the base: never the store"
-                  :growth :constant
-                  :fixed {:ticks 3000000 :bytes 8000000}
-                  :sizes [100 300 1000]}))))

@@ -209,13 +209,13 @@
   (when-let [k (and (str/starts-with? nm "s") (parse-long (subs nm 1)))]
     (let [j (mod k 5)]
       (calls "Keep my side of a conflict main brought, then rewrite in my own words."
-             "(let [r (my.branch/merge-main!)] (when (seq (:conflicts r)) (my.branch/merge-main! (into {} (map (juxt :key :ours)) (:conflicts r)))))"
+             "(doseq [e (my.branch/unmerged)] (my.branch/resolve! (second (:key e)) :ours))"
              "(in-ns 'app.sw)" (defn1 (str "v" j) (str "(+ x " j (str/join (repeat (quot k 5) " 0")) ")"))))))
 
 (def ^:private generic
   "The scripted model's reply by task kind (from the name): a merge agent takes main's side of
-  every conflict a merge of main answers (my.branch/merge-main! with resolutions); a design agent improves the plan and waits."
-  {"-merge" (calls "Take main's version of each conflict." "(let [r (my.branch/merge-main!)] (when (seq (:conflicts r)) (my.branch/merge-main! (into {} (map (juxt :key :theirs)) (:conflicts r)))))")
+  every unmerged entry; a design agent improves the plan and waits."
+  {"-merge" (calls "Take main's version of each conflict." "(doseq [e (my.branch/unmerged)] (my.branch/resolve! (second (:key e)) :theirs))")
    "-design" (calls "Main's code is the base now." "(my.task/update! :seon.task/plan str \" Design: build on main's definitions as they are.\")" "(my.turn/wait)")})
 
 (def measure-replies

@@ -125,28 +125,9 @@
           ;; main's content mark is base's: only records moved main (docs/storage.md#mains-content-mark)
           (pm/same-content? base main) {}
           (= k held) after
-          :else (let [after (into {} (map (fn [[pk [_ b]]] [pk (hash b)])) (pm/delta-changes base main))]
+          :else (let [after (into {} (map (fn [[pk [_ b]]] [pk (hash b)])) (pm/delta-changes base main #{}))]
                   (swap! state assoc :main-changes {:key k :after after})
                   after))))
-
-(defn resolving-form
-  "The my.branch/merge-main! form that settles the conflict at key k. See docs/agent.md#merging."
-  {:malli/schema [:=> [:cat [:vector :any]] :any]}
-  [k] (list 'my.branch/merge-main! {k 'value}))
-
-(defn main-conflicts
-  "Branch db's conflicts with main since base, as seon.merge/plan answers them, held by the three commits. See docs/agent.md#merging."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :seon.host/db [:maybe :seon.host/db]] [:vector :seon.merge/data-conflict]]}
-  [base db main]
-  (if (or (nil? base) (nil? main) (= (d/commit-id base) (d/commit-id main)))
-    []
-    (let [k (mapv pdb/point [base db main])
-          {held :key cs :conflicts} (:main-conflicts @state)]
-      (if (= k held)
-        cs
-        (let [cs (mapv #(assoc % :seon.merge/resolve (resolving-form (pm/conflict-key %))) (:conflicts (pm/plan base db main)))]
-          (when (every? (comp some? first) k) (swap! state assoc :main-conflicts {:key k :conflicts cs}))
-          cs)))))
 
 (defn main-line
   "How main differs from branch b, both cut from base (dbs), as one line, or nil when main changed
@@ -541,49 +522,54 @@
 ;; ---- merging main into this branch (seon.merge; session M1) -------------------------------
 
 (defn merge-main!
-  "Merge main into this agent's branch as git rebases it: the branch's own transactions since the base and the resolutions
-  replayed onto main's commit, the branch's head then moved once to that value. See docs/agent.md#merging."
-  {:malli/schema [:=> [:cat :map] [:map [:ok :boolean]]]}
-  [resolutions]
+  "git merge main into this agent's branch, in this process (it owns the branch's writes):
+  main's changes since the merge base that do not conflict apply in one merge commit with
+  main as parent, each conflict stays on the branch as an unmerged entry, and the changed
+  definitions load here. The task content main carried since the base (seon.task/carry-tx,
+  the other way: another session's design, root's edit) comes in the same commit, since the
+  base moves to main's head and a member main changed would otherwise read, at the run's end,
+  as this branch reverting it (live finding F3); one both changed keeps the branch's and is
+  answered in :task-conflicts. data-attrs: the data that merges beside the program. When main's
+  content mark is the base's (seon.merge/same-content?), only records moved main: nothing is
+  diffed and nothing merges. Answers {:ok :applied :conflicts :task-conflicts :t}."
+  {:malli/schema [:=> [:cat :seon.merge/data-attrs] [:map [:ok :boolean]]]}
+  [data-attrs]
   (commit!)
-  (let [main-b (pdb/main-branch (:cfg @state))
-        b (:branch @state)
-        head @(:store-conn @state)
-        ;; main's head, on a connection of its own that only computes here (apply!) and never commits
-        mconn (pdb/connect (assoc (:cfg @state) :branch main-b))
-        main @mconn]
-    (swap! state assoc :main main)
-    (try
-      (if (= (d/commit-id main) (d/commit-id (:base @state)))
-        {:ok true :applied [] :t (:max-tx head)}
-        (let [base (pdb/branch-base (:store-conn @state) main-b b)
-              resolutions (into {} (for [[[e & more] v] resolutions] [(into [(if (vector? e) (:db/id (d/entity head e)) e)] more) v]))
-              r (pm/rebase mconn base head main b resolutions [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id main)}])]
-          (if (:seon.error/type r)
-            (assoc r :ok false :applied [] :t (:max-tx head))
-            ;; the rebased value becomes the branch's head in one move, refused when the head moved since it was read
-            (let [cid (try (d/force-branch! (:db r) b #{(d/commit-id main)} {:expected-current-commit (d/commit-id head)})
-                           (catch Throwable e
-                             (if (= :stale-branch-head (:type (ex-data e)))
-                               (contract/error :seon.writer/refused #'seon.agent/merge-main! "The branch moved during the merge: merge again." (ex-data e))
-                               (throw e))))]
-              (if (:seon.error/type cid)
-                (assoc cid :ok false :applied [] :t (:max-tx head))
-                ;; force-branch! moved the held connection to the new head with it (docs/storage.md#a-moved-head-moves-its-live-connection),
-                ;; so the connect answers that same connection, and the release after it leaves its count as it was
-                (let [conn (pdb/connect (assoc (:cfg @state) :branch b))
-                      _ (d/release (:store-conn @state))
-                      db @conn
-                      ;; what moved under this process: from its old head to main with its own work on top
-                      ops (let [[gone added] (d/datoms-diff head db :eavt [])]
-                            (into (mapv (fn [x] [:db/retract (:e x) (:a x) (:v x)]) gone) (map (fn [x] [:db/add (:e x) (:a x) (:v x)])) added))
-                      errs (program/load-changes! db ops)]
-                  (doc/carry-index! head db (map (fn [op] [(nth op 1) (nth op 2)]) ops))
-                  (swap! state #(-> % (assoc :store-conn conn :db db :base main :merged-t (:max-tx db)) (schema-moved (into #{} (map (fn [op] (nth op 2 nil))) ops))))
-                  (send! {:op :committed :t (:max-tx db) :txs 1 :commit cid})
-                  (cond-> {:ok true :applied (:applied r) :resolved (vec (keys resolutions)) :t (:max-tx db) :datoms (count ops)}
-                    (seq errs) (assoc :load-errors errs))))))))
-      (finally (dw/abandon-pending! mconn) (d/release mconn)))))
+  (let [conn (:store-conn @state)
+        main-b (pdb/main-branch (:cfg @state))
+        main (heard-main)
+        head @conn
+        ;; main's content mark is the base's: only records moved main, so nothing merges and nothing is diffed; declared data
+        ;; moves no mark, so a merge that declares some reads the diff (docs/storage.md#mains-content-mark)
+        same? (and (= #{} data-attrs) (pm/same-content? (:base @state) main))
+        ;; git's merge base: the main last merged, unless main has since merged a commit of this branch (its own merge up), which
+        ;; is then the base; read from the commit graph only when main moved, over the commits since (docs/sharing.md#a-merge)
+        base (if (or same? (= (d/commit-id main) (d/commit-id (:base @state)))) (:base @state) (pdb/branch-base conn main-b (:branch @state)))
+        r (if same? {:theirs {}} (pm/delta-three-way base head main data-attrs))]
+    (if (empty? (:theirs r))
+      {:ok true :applied [] :conflicts [] :t (:max-tx head)}
+      (let [carried (task/carry-tx base main head)
+            ;; the parent is the commit merged: a branch name would name main's head when this commits, which can be newer than what was merged
+            rep (d/merge-db conn #{(d/commit-id main)} (-> (pm/merge-tx head base main (:apply r) data-attrs)
+                                               (into (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
+                                               (into (:tx carried)))
+                             (pdb/tx-meta (:branch @state) {:seon.tx/merged main-b}))
+            ops (pdb/report->tx rep)
+            errs (program/load-changes! (:db-after rep) ops)]
+        ;; the merge base is now main's head, the value just merged, so no walk of the commit graph finds it: what main changed is not this branch's change
+        (let [attrs (into #{} (map (fn [op] (nth op 2 nil))) ops)]
+          (doc/carry-index! head @conn (map (fn [op] [(nth op 1) (nth op 2)]) ops))
+          (swap! state #(-> % (assoc :db @conn :base main) (schema-moved attrs)))
+          ;; the same on the branch's fact, or the status, which reads the fact, takes what main changed for this branch's work until a next turn writes it
+          (let [merged-t (:max-tx @conn)]
+            ;; carried like any write: skipped, the next search rebuilt the index after every merge
+            (let [r (d/transact conn [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id (:base @state))}])]
+              (doc/carry-index! (:db-before r) (:db-after r) (map (juxt :e :a) (:tx-data r))))
+            (swap! state assoc :db @conn :merged-t merged-t)))
+        (send! {:op :committed :t (:max-tx @conn) :txs 1})
+        (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:merged-t @state) :datoms (count ops)}
+          (seq (:conflicts carried)) (assoc :task-conflicts (:conflicts carried))
+          (seq errs) (assoc :load-errors errs))))))
 
 ;; ---- evaluation -----------------------------------------------------------------
 
@@ -832,7 +818,7 @@
   (let [{w-base :base w-at :point ch :changes} (:branch-changes @state)]
     (cond (nil? base) {}
           (and ch (d/commit-id db) (d/commit-id base) (= [(d/commit-id base) (:max-tx base)] w-base) (= [(d/commit-id db) (:max-tx db)] w-at)) ch
-          :else (let [ch (pm/delta-changes base db)]
+          :else (let [ch (pm/delta-changes base db #{})]
                   (swap! state assoc :branch-changes {:base (pdb/point base) :point (pdb/point db) :changes ch})
                   ch))))
 
@@ -1733,7 +1719,7 @@
                 (swap! state update :inbox (fnil conj []) {:from :fx :k (:k m) :kind (fx-done! (:k m)) :body r})
                 nil)
     ;; root asks this agent to merge main into its branch (it owns the branch's writes)
-    :merge-main [{:op :merged-main :id (:id m) :result (merge-main! (:resolutions m {}))}]
+    :merge-main [{:op :merged-main :id (:id m) :result (merge-main! (:data-attrs m #{}))}]
     :clone (do (clone! m) nil)
     :stats [{:op :stats :id (:id m) :result {:mem-mb (mem-mb) :t (:max-tx (db)) :pid (lib/c-getpid)
                                               :results (count (:results @state)) :evals (:n @state)

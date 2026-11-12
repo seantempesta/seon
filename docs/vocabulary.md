@@ -110,7 +110,7 @@ The words for tasks and their prerequisites, and the namespace that owns each.
 | **flight** | one action carried out as a chain of requests in the reconciler proc | `seon.reconcile/advance` |
 | **turn loop** | inside an agent: observe, then end or act | `seon.turn/work!` |
 | **three-way** | git's merge of program maps keyed by var, form and schema entry ([storage](storage.md#merges-read-what-changed)) | `seon.merge/three-way` |
-| **unmerged** | a branch's conflicts with main now, computed; settled by merging again with resolutions | `my.branch/unmerged` |
+| **unmerged entry** | a conflict kept on the branch until re-defn or `resolve!` | `seon.merge/unmerged` |
 | **stage** | staging the live runtime onto the branch | `seon.stage/stage!` |
 | **failure point** | a place the outside world can fail us, met by one named edge ([failure points](failure-points.md)) | |
 | **problem** | an open fact that something needs fixing ([errors](errors.md#problems)) | `seon.problems/report` |
