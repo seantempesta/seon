@@ -32,7 +32,12 @@ The owner, 2026-11-12: "we are mostly our own worst enemy in terms of processes.
      - the shell path is deleted.
    - **Target:** the minimal set in seconds; the whole suite in under 60 s.
    - **Why first:** every change by every session and every agent waits on it.
-2. **Point is the landing queue.** Every branch waits for one session to read, merge, prove and land it. Today that cost hours, five changes of plan, and two oversubscriptions of the machine.
+2. **Point is the landing queue.** Every branch waits for one session to read, merge, prove and land it. Measured on 2026-11-12:
+   - The median gap between landings was 16 min (worst 120 min overnight, 107 min with a 60-min failed landing).
+   - LAND mails waited from under 1 min to 57 min, and nine tips were still waiting after 2.5 hours.
+   - A prove reran about 60% of the suite whatever the change (median about 1,100 of 1,860 tests).
+   - The 37 check steps were the slowest part of a prove (8 to 15 min).
+   - 3 of 4 failed landings were overruns under load, or reds already on main; none was the branch's own fault.
    - **Proposal:** once item 1's service lands, each session runs `bin/land` on its own branch whenever it is green. `bin/land` already proves the merged tree, moves main atomically and updates the system.
    - Point reads each landed diff within the hour, and files a fix when it finds a problem.
 3. **Resources and order decided by hand.** Shard counts, prove caps, holds, GOs, stops and restarts all came from Point.
