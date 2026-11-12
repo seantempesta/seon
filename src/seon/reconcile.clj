@@ -1061,17 +1061,15 @@
                              id :started
                              (task/start-tx (:db st) id (:boot st) ag (:env act) now (:raise f 0))))
                  ;; root refused it (the branch is held, or too many live agents): the refused answer
-                 ;; is the task's outcome, with root's reason; the task starts again
-                 ;; once main moves for another reason (:refused, pass), or, held by an agent whose own task is
-                 ;; judged and not kept for a wake (a done task's process still ending), once that agent is stopped:
-                 ;; its end frees the branch but moves no fact the index reads, so its stop's answer is the wake-up
+                 ;; is the task's outcome, with root's reason; the task starts again once main moves for another
+                 ;; reason (:refused, pass), a process's end among them: root records it on main (:seon.process/ended-ms,
+                 ;; seon.task/agent-tx), which frees the branch it held. Held by an agent whose own task is judged and not
+                 ;; kept for a wake (a done task's process still ending), that agent is stopped, and its end is that fact too
                  (let [[st o] (write (update st :refused (fnil conj #{}) id) id :done (task/refused-tx (:db st) id r))
                        h (:agent r) ht (:task r)]
                    (if (and h ht (idx-done? (:idx st) ht) (not (idle (:idx st) ht)))
-                     (let [[st o2] (request st id :holder-ended {:op :kill :id h :ended true})] [st [o o2]])
+                     (let [[st o2] (request st id :ignored {:op :kill :id h :ended true})] [st [o o2]])
                      [st [o]])))
-      ;; the agent a refused start's branch was held by is stopped: the task asks again at the next pass
-      :holder-ended [(update st :refused disj id) []]
       ;; an outside agent works this task (seon.server): no turn loop; it hands it back
       :started (cond
                  (:died-at-spawn f) (dead st (:died-at-spawn f))
@@ -1354,9 +1352,12 @@
                                                                (and (contains? refused-attrs a)
                                                                     (= :refused (get-in idx [:tasks (second (get-in idx [:keys e])) :seon.task/outcome])))))
                                               (:ops m)))
+                 ;; a process's end (root records it: seon.task/agent-tx) frees the branch a refused start was held off: the
+                 ;; refused ask again, whoever the holder was (another task's done agent, stopped, or the task's own ending one)
+                 ended? (some (fn [[_ _ a]] (= :seon.process/ended-ms a)) (:ops m))
                  st (assoc st :db db :t t :idx idx :seen (inc (:seen st)) :lists (cond-> (:lists st 0) (not= (:prev m) (:t st -2)) inc)
                            :quiet (boolean (and (:quiet st) (not work?)))
-                           :refused (if (and work? (not only-refused?)) #{} (:refused st #{})))
+                           :refused (if (or ended? (and work? (not only-refused?))) #{} (:refused st #{})))
                  ;; a root's first listing: its restart has no pending wakes, so each waiting agent owed a message is woken; then the wakes
                  ;; held for agents that were running, which are waiting now
                  st (cond-> st (not (:idx0 st)) boot-wakes true settle-late true (assoc :idx0 true))
