@@ -470,7 +470,7 @@
 
 ;; Estimate: 2 records 0.6M; 3 pm/program reads 0.9M; 1 three-way 0.2M; 2 pm/mutations 0.3M. Estimated 2,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-program-calling-alter-var-root-is-refused-naming-it
-  (let [base (empty-db)
+  (let [base (pdb/empty-db false)
         branch (record base 'app.pt-mut "(defn fine [m] (assoc m :intern 1))"
                        'app.pt-mut "(defn sneaky [] (alter-var-root #'app.pt-mut/fine (constantly 3)))")
         r (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program base #{}))]
@@ -483,7 +483,7 @@
 
 ;; Estimate: 2 records 0.6M; 6 pm/program reads of the small program x 0.3M = 1.8M; 2 three-ways 0.4M; 2 pm/mutations 0.2M. Estimated 3,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-def-inside-a-fn-body-is-refused
-  (let [base (empty-db)
+  (let [base (pdb/empty-db false)
         branch (record base 'app.pt-inl "(defn setup! [] (def config {:a 1}))")
         r (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program base #{}))]
     (is (= [{:ns 'app.pt-inl :defines '[[:var app.pt-inl/setup!]] :inline-def 'app.pt-inl/config}]
