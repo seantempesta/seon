@@ -1925,6 +1925,24 @@
         (is (= (:seon.task/branch r) (:seon.task/branch (task/task db3 "demo/a-refine-review"))) "its review on its branch")
         (is (= :held (:seon.task/execution (task/task db3 "demo/a-refine-review"))) "the review held again")))))
 
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-refine-is-done-when-its-task-names-a-function-it-did-not
+  ;; docs/tasks.md#a-refine-curates-its-own-task (root, 2026-11-13): a refine's one proof is green before it starts, so it never knew
+  ;; what done is: three refines of the loop task, 120 turns, no write. It is refused :no-change-site until the plan of the task it
+  ;; refines cites a program function that plan did not cite at the refine's merge base: red before its write, green after; the
+  ;; agent's check and root's judging read it by one function (seon.task/names-new-site?). Estimate: three small worlds, a few pulls
+  (let [base (d/db-with (with-refine-section (db-of [(decl "a")])) [{:var/name 'app/f}])
+        base (d/db-with base (task/refine-tx base "demo/a"))
+        named (d/db-with base (task/create-tx base [(assoc (decl "a") :seon.task/plan "Make a true: the change is in `app/f`.")]))
+        reworded (d/db-with base (task/create-tx base [(assoc (decl "a") :seon.task/plan "Make a true, carefully.")]))
+        in (fn [named?] {:proofs #{'p/a} :results {'p/a :pass} :main-green #{} :allowed-red #{} :uncontracted #{} :changed? true :named-site? named?})]
+    (is (false? (task/names-new-site? base base "demo/a-refine")) "before its write: the task's plan names no new function")
+    (is (false? (task/names-new-site? base reworded "demo/a-refine")) "a reworded plan that names none is no change site")
+    (is (true? (task/names-new-site? base named "demo/a-refine")) "the plan cites app/f, which it did not before")
+    (is (nil? (task/names-new-site? base named "demo/a")) "a task that is no refine is not asked")
+    (is (= [:no-change-site] (mapv :reason (r/done-explain (in false)))) "refused until then")
+    (is (= [] (r/done-explain (in true))) "done once it names one")
+    (is (= [] (r/done-explain (dissoc (in true) :named-site?))) "not a refine: the rule says nothing")))
+
 (deftest a-cap-ends-the-run-held-and-gets-its-refine
   ;; docs/tasks.md#a-refine-curates-its-own-task (Optimization's restated claim, 2026-11-12): a cap ends the run, failed in its number
   ;; of turns; nothing parks at a cap; it is held, its release runs it again from its branch's head, and it gets its refine as any end
