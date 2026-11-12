@@ -291,6 +291,15 @@
      (let [das-b (data-attr? base data-attrs) das-d (data-attr? db data-attrs)]
        (into [] (filter (comp (content-attr das-b das-d) :a)) diff)))))
 
+(defn changed?
+  "Whether branch db did anything since base, its merge base: a datom of program content differs, or of the task content it carries
+  (carried-platform-attrs, a refine's edit of the task it refines). The one measure the done rule's :no-change reads
+  (seon.reconcile/done-explain), taken alike by the agent's turn check (seon.ctx.status/status) and root's judging
+  (seon.reconcile/judge-tx). Cost: content-datoms, one descent per content attribute (0.2M ticks on a store of main's size when
+  nothing moved, 0.5M for one var). See docs/reconcile.md#a-task-holds-how-its-work-ended."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] :boolean]}
+  [base db] (boolean (seq (content-datoms base db carried-platform-attrs))))
+
 (defn moves-content?
   "Whether a commit's resolved ops move main's content: a datom of an attribute a program key's content reads with no
   declared data (`content-attr`), or of task content a branch carries (carried-platform-attrs). What the writer marks

@@ -659,8 +659,8 @@
   (let [agent (some-> (d/entity db [:seon.task/id id]) :seon.task/agent :seon.agent/key)]
     (into (vec move)
           [[:db/cas [:seon.task/id id] :seon.task/execution :running :held]
-           {:seon.task/id id :seon.task/failure (cond-> {:reason problem} agent (assoc :agent agent))
-            :seon.task/evidence (evidence id facts problem)}])))
+           ;; what a hold writes, by the one list of it (seon.task/held-attrs: the failure, then its evidence)
+           (into {:seon.task/id id} (map vector task/held-attrs [(cond-> {:reason problem} agent (assoc :agent agent)) (evidence id facts problem)]))])))
 
 (defn quiescent
   "Main's last quiescence report on db ({:t :root-causes}, written by the reconciler proc), or nil."
@@ -923,7 +923,7 @@
                             :plan-before (when (= :design kind) (some-> (task/task base id) :seon.task/accumulated :plan))
                             :behinds (behinds main id) :told (:seon.task/reasons t)
                             ;; what the branch did: a changed key or carried task content (seon.reconcile/done-explain's :no-change)
-                            :changed? (boolean (or (seq (:ours diff)) (seq (:tx carried))))})
+                            :changed? (pm/changed? base db)})
         conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
         ;; the agent's words are the task's reason as they are, unless its end was not green and the done rule found nothing open:
         ;; then they are named as its agent's, beside what root found, so a reader never takes them for the judgment (Context's loop

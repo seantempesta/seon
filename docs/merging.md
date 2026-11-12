@@ -92,6 +92,8 @@ An agent runs its tests in children forked from itself (```seon.agent/run-tests-
 
 A test that waits on something nothing can deliver is ended by Jolt's all-asleep check, which throws a typed deadlock naming every wait; a child watches for its agent's death without waiting on the signal (```seon.intr/exit-at-eof!```) so the check can fire. A test parked on a descriptor it holds itself is not yet caught (task `seon.proofs/a-test-parked-on-a-descriptor-holds-every-agent`).
 
+A fixture is a delay a test realizes on first use, made once before tests run so no test pays it in its own budget (```seon.proofs/warm-fixtures!```). It has one of two fixture types: `:seon.test/fixture` (the test store), made by an agent before its first test fork and by a `bin/test` shard whose tests reach it; and `:seon.test/shard-fixture` (```seon.test-store/shared-root-default```, the shard's shared test root), made only by a shard, never by an agent, where it would boot a test root. A shard whose tests reach neither makes nothing.
+
 ## A branch merges main in
 
 An agent merges main when it chooses (`(my.branch/merge-main!)`); an outside agent's reply and a model's turn merge main first when it moved, so no agent runs old code, and a conflict is an unmerged entry on its status. Main's tests judge a branch whether or not it still holds them: a test the base holds that the branch removed is defined in the test child from the base's source (```seon.agent/test-plan```'s `:removed`) and still runs (`seon.agent-test/a-branch-that-deletes-mains-test-it-breaks-is-not-merged`). A work task is judged on its branch and never told it is behind main; its merge task merges main in and the gate tests what that writes ([turn](turn.md#what-a-turn-merges-from-main)).

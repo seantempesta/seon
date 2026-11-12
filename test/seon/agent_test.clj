@@ -98,7 +98,8 @@
         args (into (cond-> ["--set" (str ":seon.config.source/root=" (pr-str checkout))]
                      dirs (into ["--set" (str ":seon.config.source/dirs=" (pr-str dirs))]))
                    (mapcat (fn [x] ["--set" x])) sets)
-        root (ts/shared-root! args)
+        ;; the shard's shared root for the default arguments is a shard fixture, started before the shard's first test
+        root (if (= args (ts/default-root-args)) @ts/shared-root-default (ts/shared-root! args))
         ask (fn [m] (ts/ask root m))
         eval-root (fn [code] (ask {:op :eval :agent "root" :code code}))
         made (volatile! nil)
@@ -1162,6 +1163,17 @@
     (is (str/includes? (:content r0) "41") "the first call's answer")
     (is (= [{:id (:tool-call-id r1) :code "(+ 1 41)" :intent "Add one to the value the last call showed."}] (:tool-calls a1)) "the second call was made after the first call's answer, from it")
     (is (str/includes? (:content r1) "42") "and both answers are in the conversation")))
+
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 20000000}} a-task-green-before-its-work-does-not-end-at-turn-0
+  ;; docs/reconcile.md#a-task-holds-how-its-work-ended: one done rule on one input. A refine whose one proof was green on main ended
+  ;; :green at turn 0 with no model call, its branch fresh at main's head: the turn's check read no merge base, so it measured no
+  ;; change, where root's judge then said :no-change. The agent's check and root's measure the change alike (seon.merge/changed?),
+  ;; from the base the run holds from its start. Estimate: one in-agent run, its proof run once, two scripted calls, as its neighbours
+  (let [[end] (in-agent (fn [{:keys [task]}] [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 2})")])
+                        {:proofs #{'seon.ref-test/the-delimiter-picks-the-depth} :config {:seon.config.ai/script 'seon.fixtures/two-calls}})
+        e (:value end)]
+    (is (= [:cap 2] [(:outcome e) (:model-calls e)]) (str "its proof green before any work proves none of it: it works, then caps " (pr-str e)))
+    (is (str/includes? (str (:reason e)) "no-change") "unchanged, as root's judge would say")))
 
 (deftest the-page-is-a-message-in-the-conversation-and-the-prefix-holds
   ;; docs/render.md#a-change-is-edits-by-name (owner, 2026-11-05: "make the rendering of the hiccup a normal eval that we inject into turn
