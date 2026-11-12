@@ -939,10 +939,11 @@
 
 (defn- answer "What p was answered, or :unanswered." [p] (if (realized? p) @p :unanswered))
 
-;; Estimate: flow-error reads the throw's whole stack (Throwable->map and each frame's name), and a throw under the test runner is
-;; ~400 frames deep at ~10k ticks a frame = ~4M; the thrown case, api-state and one api step ~0.2M: ~5,000,000 ticks (it was
-;; estimated at 200 frames x 1k, which the runs measured wrong: 2M and 4.3M, by the shard's stack depth)
-(deftest ^{:seon.test/estimate {:ticks 5000000}} a-proc-defect-names-where-it-threw
+;; Estimate, each piece measured in an agent (2026-11-13): the throw, a case miss (Jolt's IllegalArgumentException) ~0.7M; flow-error
+;; ~0.13M (its trace: Jolt keeps 25 frames, ~0.1M to read at any depth); api-state ~0.2M; one api step ~0.1M; step-out-ok?'s
+;; validation ~0.3M the first time its schema compiles: 1,500,000 ticks, its own work. Measured 2M-4.3M where it ran first in its
+;; shard, which charges the process's first compiles and loads to it: a measurement defect filed for tests, not this test's work
+(deftest ^{:seon.test/estimate {:ticks 1500000}} a-proc-defect-names-where-it-threw
   ;; the standing root's worst open problem: the reconciler's "No matching clause: " 255 times, a
   ;; case meeting nil, with nothing saying in which function or on what message
   (let [ex (try (case (:op {}) :a 1) (catch Exception x x))
