@@ -97,6 +97,18 @@
     (is (= "(defn f3 [] 33)" (:form/src (:var/form (d/entity after [:var/name 'app.oe/f3])))) "the edit is the var's form")
     (is (= "(defn f5 [] 5)" (:form/src (:var/form (d/entity after [:var/name 'app.oe/f5])))) "and the others are as they were")))
 
+(deftest a-form-taken-from-the-store-is-declared-for-the-forms-after-it
+  ;; docs/source.md#main-s-program-follows-the-tree: a form the store holds whole is not analyzed again, but a later form that
+  ;; calls it is, in a process that never loaded the namespace (bin/test --health's): the held form's var must be declared
+  ;; first. Red before: "Unable to resolve symbol: helper" (Tests, 2026-11-12, an agent_test.clj metadata edit)
+  (let [text (fn [body] (str "(ns app.hd)\n\n(defn helper [] 1)\n\n(defn user-fn [] " body ")\n"))
+        db (d/db-with (ts/test-db) (source/import-tx (ts/test-db) {"src/app/hd.clj" (text "(helper)")}))
+        _ (remove-ns 'app.hd)
+        tx (source/refresh-tx db {"src/app/hd.clj" (text "(inc (helper))")})
+        after (d/db-with db tx)]
+    (is (= "(defn user-fn [] (inc (helper)))" (:form/src (:var/form (d/entity after [:var/name 'app.hd/user-fn])))) "the edit is the var's form")
+    (is (contains? (set (:form/refs (:var/form (d/entity after [:var/name 'app.hd/user-fn])))) 'app.hd/helper) "and it names the held var it calls")))
+
 (deftest importing-src-records-every-form-exactly
   (let [files (src-files)
         db (imported files)

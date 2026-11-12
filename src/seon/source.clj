@@ -130,7 +130,11 @@
                                              (when-let [a (and @ns-form (find-ns n) (alias-held-not-declared (find-ns n) @ns-form form))]
                                                (throw (ex-info (str "the form names alias " a " and this file's ns form doesn't require it: it resolves only in a process that already holds it") {:ns n :alias a})))
                                              (if-let [h (and held (held n src k @ns-src form))]
-                                               (assoc f :held h)
+                                               ;; its vars declared here, as its analysis would have: a later form calling one is
+                                               ;; analyzed in a process that may never have loaded the namespace
+                                               (do (doseq [{v :var} (:defs h) :when (and (find-ns n) (= (namespace v) (str n)))]
+                                                     (intern (find-ns n) (symbol (name v))))
+                                                   (assoc f :held h))
                                                (merge f (analyze-form n form private?))))))
         seen (volatile! {})]
     {:tail tail
@@ -414,7 +418,8 @@
                           (and m (contains? (set (:var/meta m)) :macro) (some program/file-readers (:form/refs (:var/form m))))))]
     (fn [n src k ns-src form]
       (when (and db-ns-src (= ns-src db-ns-src) (not= src ns-src)
-                 (not (and (seq? form) (#{'defmacro 'ns} (first form)))))
+                 ;; a macro (a later form's analysis expands it) and a form that defines a class are always analyzed
+                 (not (and (seq? form) (#{'defmacro 'ns 'defrecord 'deftype 'defprotocol 'definterface} (first form)))))
         (when-let [fe (and (= n nsym) (get @by-id (program/form-id n src k)))]
           (when (and (program/live? db fe) (not-any? reading (:form/refs (d/entity db fe))))
             (let [x (d/entity db fe)]
