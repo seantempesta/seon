@@ -273,7 +273,7 @@
         plan-before (when (and base (= :design kind)) (some-> (task/task base tid) :seon.task/accumulated :plan))
         ;; whether the branch did anything since its merge base: a program key moved, else the task content it carries (seon.merge/
         ;; carried-platform-attrs, a refine's edit of the task it refines), read only when no program key moved; nil: not measured
-        changed? (when base (boolean (or (seq moved) (seq (pm/content-datoms base db pm/carried-platform-attrs)))))
+        changed? (when base (r/changed? (keys ch) (when (empty? ch) (filterv (comp pm/carried-platform-attrs :a) (pm/content-datoms base db pm/carried-platform-attrs)))))
         proof? (set proofs)
         ;; main's claims only when a test outside the proofs is red: the agent's index, else one built cold
         claims (when (some (fn [[t st]] (and (= :fail st) (not (proof? t)))) results)

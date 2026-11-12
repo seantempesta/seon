@@ -85,6 +85,14 @@
            (for [k (sort unmerged)] {:reason :unmerged :key k})
            (for [k (sort caused)] {:reason :open-problem :key k})))))
 
+(defn changed?
+  "Whether a branch did anything since its merge base, from its change set: ours, the program keys it changed, and carried, the
+  task content it carries (seon.merge/carried-platform-attrs). What the done rule's :no-change reads (done-explain); its two
+  readers measure it by this one rule, the agent's turn check (seon.ctx.status/status) and root's judging (judge-tx), each from
+  the branch's merge base. See docs/reconcile.md#a-task-holds-how-its-work-ended."
+  {:malli/schema [:=> [:cat [:maybe [:sequential :any]] [:maybe [:sequential :any]]] :boolean]}
+  [ours carried] (boolean (or (seq ours) (seq carried))))
+
 (defn hairy
   "Is a merge too hairy to keep resolving, from measured facts: more conflicts than the
   config key; main deleted a var the task references (refs: its proofs and the names its plan's
@@ -923,7 +931,7 @@
                             :plan-before (when (= :design kind) (some-> (task/task base id) :seon.task/accumulated :plan))
                             :behinds (behinds main id) :told (:seon.task/reasons t)
                             ;; what the branch did: a changed key or carried task content (seon.reconcile/done-explain's :no-change)
-                            :changed? (boolean (or (seq (:ours diff)) (seq (:tx carried))))})
+                            :changed? (changed? (:ours diff) (:tx carried))})
         conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
         ;; the agent's words are the task's reason as they are, unless its end was not green and the done rule found nothing open:
         ;; then they are named as its agent's, beside what root found, so a reader never takes them for the judgment (Context's loop
