@@ -516,6 +516,11 @@
          (mapv (fn [[_ m]] {:id (:seon.message/id m) :from (sender (:seon.agent/key (:seon.message/from m))) :body (:seon.message/body m) :sent-ms (:seon.message/sent-ms m)})))
     []))
 
+(def held-attrs
+  "The attributes a hold writes on a task, what failed and its evidence (seon.reconcile/hold-tx builds its write from them, as
+  my.task/fail! holds a failure). See docs/reconcile.md#a-task-holds-how-its-work-ended."
+  [:seon.task/failure :seon.task/evidence])
+
 (def judged-attrs
   "The attributes root sets on a task when they happen (its judging, seon.reconcile/judge-tx; a refused start), and so
   retracts when they did not: otherwise an earlier end's error or deferred results read as this one's. Beside
@@ -524,6 +529,12 @@
   [:seon.task/reason :seon.task/commit :seon.task/merged-t :seon.task/error :seon.task/deferred
    :seon.task/deferred-results :seon.task/gate-unread :seon.task/changed :seon.task/conflicts :seon.task/unmerged
    :seon.task/task-conflicts :seon.task/failures :seon.task/costs :seon.task/waste])
+
+(def end-attrs
+  "Every attribute a task's end writes, defined once from what writes them: a judging's (judged-attrs), a hold's (held-attrs),
+  and the outcome, reasons and agent beside them. What a superseded refine retracts (refine-tx), so no earlier end reads as its
+  own; a released branch takes the hold's (onto-tx), the evidence its next agent answers. See docs/tasks.md#a-refine-curates-its-own-task."
+  (into (set judged-attrs) (concat held-attrs [:seon.task/outcome :seon.task/reasons :seon.task/agent])))
 
 (defn outcome-tx
   "The write that moves task id's outcome from `from` to `to` (Datahike's compare-and-swap: a racing observer, a
@@ -1084,8 +1095,8 @@
         (when (vector? tx)
           ;; started by the agent whose run it refines: its agent is that one's child (:seon.agent/parent, start-tx)
           (cond-> (-> tx
-                      ;; the end's facts: what a judging sets (judged-attrs), and beside them its outcome, its reasons and its agent
-                      (into (when prior (for [x [rid vid] a (concat judged-attrs [:seon.task/outcome :seon.task/reasons :seon.task/agent])]
+                      ;; the end's facts, every one an end writes (end-attrs)
+                      (into (when prior (for [x [rid vid] a (sort end-attrs)]
                                           [:db.fn/retractAttribute [:seon.task/id x] a])))
                       (into (execution-tx [rid] :running))
                       (into (when prior (execution-tx [vid] :held))))
