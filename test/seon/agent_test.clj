@@ -430,7 +430,7 @@
           "and the run's answer names the held pipe beside what the child wrote"))
     (is (= {:line result :held? false} (dissoc (run true) :status)) "with FD_CLOFORK on its end, the child's exit is the pipe's end of file")))
 
-(deftest a-run-error-that-names-no-test-is-said-in-the-proves-line
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-run-error-that-names-no-test-is-said-in-the-proves-line
   ;; 2026-11-12: agent-checks' first prove read {:error 1} and printed no reason: a run's report naming no test (a child that
   ;; died before a test began, a held pipe) is no test's failure, and the line said "red: 0 of 2 failed" with nothing under it
   (let [run {:pass 2 :fail 0 :error 1 :reports [{:type :pass :var "#'a-test/t"} {:type :pass :var "#'a-test/u"}

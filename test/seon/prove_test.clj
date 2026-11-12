@@ -736,7 +736,7 @@
     (is (= (min 10 (:workers st)) (count (batches outs))) "ten items over that many workers, a share each"))
   (is (= {:workers 4} (prove/admission {:cores 4}))))
 
-(deftest a-batchs-error-that-names-no-test-reaches-its-answer
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-batchs-error-that-names-no-test-reaches-its-answer
   ;; docs/merging.md#the-test-service. Found 2026-11-12 (runtime's land): agent-checks' first prove answered {:error 1} with only
   ;; its two :pass reports: run-answer kept an item's reports by its test var, so a run's report naming no test was counted and dropped
   (let [held {:type :error :exit {:signal 9} :message "test process died: {:signal 9}"}

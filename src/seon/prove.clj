@@ -393,6 +393,16 @@
 ;; queue (ask-items, the run's key its asker); it is answered when its last item is green or its first is red, from its
 ;; plan and its items' answers as they landed. Runs of different keys are in flight at once: the workers bound the work.
 
+(defn- batch-errors
+  "The reports of a run's batches that name no test (a child that died before a test began), once a batch: its items share its
+  answer, and run-answer counts its whole answer (a count with no report said nothing of why, 2026-11-12). See
+  docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [results]
+  (into [] (comp (keep (fn [[_ r]] (when (map? (:answer r)) (:answer r)))) (distinct)
+                 (mapcat (fn [a] (remove #(proofs/test-symbol (:var %)) (:reports a)))))
+        (sort-by (comp str key) results)))
+
 (defn- run-answer
   "The answer run (its plan :base) is given, its items' results (per test: the item's counts, :failures and the :answer of
   the grant that ran it; or the error its batch answered): the run-tests-forked shape the done rule and an agent's prove
@@ -408,12 +418,8 @@
         own (fn [t r] (if (contract/error? r)
                         [{:type :error :var (str "#'" t) :message (:seon.error/message r) :seon.error/type (:seon.error/type r)}]
                         (filterv #(= (str "#'" t) (:var %)) (:reports (:answer r)))))
-        ;; and a batch's errors that name no test (a held pipe, a child that died before a test began), once a batch: its
-        ;; items share its answer, and its counts count them (a count with no report said nothing of why, 2026-11-12)
-        runs (into [] (comp (keep (fn [[_ r]] (when (map? (:answer r)) (:answer r)))) (distinct)
-                            (mapcat (fn [a] (remove #(proofs/test-symbol (:var %)) (:reports a)))))
-                   (sort-by (comp str key) results))
-        reports (-> (vec (:reused-reports base)) (into (mapcat (fn [[t r]] (own t r))) (sort-by (comp str key) results)) (into runs))
+        reports (-> (vec (:reused-reports base)) (into (mapcat (fn [[t r]] (own t r))) (sort-by (comp str key) results))
+                    (into (batch-errors results)))
         ;; the reused reports' types, and each item's own counts (its answer keeps one pass report a test, its counts every assertion)
         counts (merge-with + (frequencies (map :type (:reused-reports base)))
                            (apply merge-with + {} (for [[_ r] results] (if (contract/error? r) {:error 1} (select-keys (:answer r) [:pass :fail :error])))))]

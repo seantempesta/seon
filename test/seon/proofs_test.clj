@@ -752,13 +752,14 @@
     (is (= "static" (get (seon.proofs/read-digests static rd {'a.b-test/t [{:digest "old" :reads {'a/f "f1" [:file "x.md"] nil}}]}) 'a.b-test/t))
         "a read of a kind the index does not hold whole (files, in an agent's plan) is never taken for a miss")))
 
-(defn- spawn-of-nothing [] (clojure.java.shell/sh "/nonexistent/prog"))
+(defn- throws-here [] (throw (ex-info "thrown here" {})))
 
-(deftest an-errors-verdict-names-where-it-was-thrown
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-errors-verdict-names-where-it-was-thrown
   ;; docs/machine.md#reading-a-red. Found 2026-11-12 (tests): a test's verdict kept "posix_spawn failed (errno 2)" and no
-  ;; place, since an #error prints its type and message only; finding the spawn took a trace of every call. Cost: one spawn.
-  (let [e (try (spawn-of-nothing) nil (catch Throwable e e))
+  ;; place, since an #error prints its type and message only; finding the spawn took a trace of every call. Cost: one throw
+  ;; and its print (~3M ticks).
+  (let [e (try (throws-here) nil (catch Throwable e e))
         rep (seon.agent/test-report {:type :error :message "Uncaught exception, not in assertion." :expected nil :actual e} "#'demo-test/t")
         [f] (get (proofs/failures {:reports [rep]}) 'demo-test/t)]
-    (is (some #(str/includes? % "spawn_of_nothing") (:at f)) (str "the stored failure names the function that threw: " (pr-str (:at f))))
+    (is (some #(str/includes? % "throws_here") (:at f)) (str "the stored failure names the function that threw: " (pr-str (:at f))))
     (is (<= 1 (count (:at f)) (seon.config/value :seon.config.proofs/error-frames)) "its first frames, at most the config's")))
