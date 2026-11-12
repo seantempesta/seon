@@ -43,7 +43,7 @@
  ;; each with its own pattern under :sub
  :seon.ctx/spec [:map [:star? :boolean] [:attrs [:set :keyword]] [:txs {:optional true} [:map-of :keyword :keyword]] [:ro {:optional true} [:set :keyword]]
                  [:joins [:vector [:map [:attr :qualified-keyword] [:key :keyword] [:rev? :boolean] [:by [:maybe :qualified-keyword]]
-                                   [:reverse? :boolean] [:limit [:maybe nat-int?]] [:tx {:optional true} :keyword] [:sub :map]]]]]
+                                   [:reverse? :boolean] [:limit [:maybe [:or nat-int? :qualified-keyword]]] [:tx {:optional true} :keyword] [:sub :map]]]]]
  ;; the walk's state beside a record's map (seon.ctx/node): every path each entity sits at (:at {e #{path}}, an entity
  ;; built whole at each, as d/pull holds it), each path's pattern (:spec {path spec}: two paths can pull one entity by
  ;; different sub-patterns), what each join [e key] watches ([attribute value] keys, :watch) and its reverse (:watching);

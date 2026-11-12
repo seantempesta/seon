@@ -307,6 +307,14 @@
     (doseq [[s p] ps]
       (is (= [] (vec (pattern-faults s p))) (str s ": every join keyed by its attribute, no *, each ref join one its refs imply, each history join asking :tx")))))
 
+;; docs/ctx.md#the-pattern: an entity schema's pattern is compiled once per entity index (its :specs), so a cold read of an entity
+;; (seon.ctx/build: each cite on a page, each eval's tree) compiles none again; a pattern no schema declares is compiled at its call
+(deftest a-schemas-pattern-is-compiled-once-per-index
+  (let [ix (pdb/index) p (render/schema-property ix :seon.db/agent-fact :seon.ctx/pattern)]
+    (is (identical? (render/pattern ix p) (render/pattern ix p)) "the agent schema's pattern: one compiled spec, held by the index")
+    (is (= (render/pattern ix p) (render/pattern ix p #{})) "and the same spec a compile at the call makes")
+    (is (not (identical? (render/pattern ix [:seon.agent/key]) (render/pattern ix [:seon.agent/key]))) "a pattern no schema declares is compiled at its call")))
+
 ;; docs/ctx.md#the-pattern: a pattern's :tx names the key a transaction is held under, the transaction entity whole (:db/id,
 ;; :db/txInstant, :seon.tx/branch), so what an agent does with it is a short clojure.core form (owner, 2026-11-11: "I want this to work
 ;; easily with clojure to sort and filter things"): on a join, each member's link's transaction ({[:seon.message/_to :tx :at] ...});

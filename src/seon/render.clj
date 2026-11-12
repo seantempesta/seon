@@ -1025,12 +1025,6 @@
   [w sels]
   (apply array-map (mapcat (fn [[_ k]] (when-let [f (part-form w k)] [(:id (get @(:cache w) k)) f])) (placed w sels))))
 
-(defn- placed-ids
-  "The parts of walk w placed in the lists sels that the model reads, [[id k]] in order: the element id and the cache key of each."
-  {:malli/schema [:=> [:cat :map [:sequential :string]] [:vector [:tuple :string [:vector :any]]]]}
-  [w sels]
-  (vec (for [[_ k] (placed w sels) :let [c (get @(:cache w) k)] :when (not= "page" (:wire/for (:opts c)))] [(:id c) k])))
-
 (defn keyed
   "Hiccup form x as a diff reads it: an element's children in their order, each under a name and read the same way, and under :own the element without them; an element holding text directly is text, one value, and so is an element holding a single child with no name of its own, and anything else. A child's name is what identifies it: its :key (Reagent's), else its id (a component's name-based id), else, among those with neither, its tag when no sibling shares it and its first words when one does. Names that are not distinct stay in :own. The form it read is its metadata, ::form. Local fns: no contracted call a node. See docs/render.md#a-change-is-edits-by-name."
   {:malli/schema [:=> [:cat :any] :any]}
@@ -1488,7 +1482,8 @@
   neither pull's nor :by, a :limit with no :reverse (a window is newest first), a join with no
   pattern, an entity schema with none or whose pattern reaches itself. An entity schema's name is read in the entity index ix (seon.db/index-of)."
   {:malli/schema [:function [:=> [:cat :map :any] :seon.ctx/spec] [:=> [:cat :map :any [:set :qualified-keyword]] :seon.ctx/spec]]}
-  ([ix p] (pattern ix p #{}))
+  ;; an entity schema's own pattern, here or as a join's schema name, is compiled once per index (seon.db's :specs); any other here
+  ([ix p] (if-let [s (get (:specs ix) p)] @s (pattern ix p #{})))
   ([ix p seen]
    (let [bad (fn [why clause] (throw (ex-info (str "pattern: " why) (contract/error :seon.ctx/invalid-pattern #'pattern why {:clause clause}))))
          reverse? #(str/starts-with? (name %) "_")
@@ -1512,13 +1507,14 @@
                               _ (when (and (:tx o) (:by o)) (bad "a lookup's members are joined by no datom: :tx with :by" k))
                               lim (:limit o)]
                           (cond-> {:attr (forward a) :key (or (:as o) a) :rev? (reverse? a) :by (:by o) :reverse? (boolean (:reverse o))
-                           :limit (if (keyword? lim) (config/value lim) lim)
+                           :limit lim
                            :sub (cond-> (cond (vector? sub) (pattern ix sub seen)
                                       ;; an entity schema's name: the pattern it declares
                                       (qualified-keyword? sub)
                                       (cond (seen sub) (bad (str sub "'s pattern reaches itself") clause)
-                                            :else (pattern ix (or (schema-property ix sub :seon.ctx/pattern) (bad (str sub " declares no pattern") clause))
-                                                           (conj seen sub)))
+                                            :else (let [declared (or (schema-property ix sub :seon.ctx/pattern) (bad (str sub " declares no pattern") clause))]
+                                                    ;; compiled once per index (seon.db's :specs), else here
+                                                    (if-let [s (get (:specs ix) declared)] @s (pattern ix declared (conj seen sub)))))
                                       :else (bad "a join's pattern is a vector, an entity schema's name, or a depth (a positive integer or a seon.config key naming one: the enclosing pattern again)" clause))
                                   ;; the key a member holds its link's transaction under is read-only there, as the pull's own keys are
                                   (:tx o) (update :ro (fnil conj #{}) (:tx o)))}

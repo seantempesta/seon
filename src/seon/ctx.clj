@@ -105,6 +105,13 @@
   {:malli/schema [:=> [:cat :map :map] :boolean]}
   [ix j] (not (some-> ((:schema-identities ix) ((:entity-schemas ix) (:attr j))) contract/properties :seon.db/content-id)))
 
+
+(defn- window-of
+  "Join j's window: its spec's :limit, a count or the seon.config key naming one, read here, during the walk, so a compiled
+  pattern reads no config and is kept with its entity index (seon.render/pattern). See docs/ctx.md#the-pattern."
+  {:malli/schema [:=> [:cat :map] [:maybe nat-int?]]}
+  [j] (let [l (:limit j)] (if (keyword? l) (cfg/value l) l)))
+
 (defn- members
   "The entities join j holds of entity e (m, its own attributes), in the order ctx holds them: a
   reverse join's by when each joined, newest first with :reverse, its :limit the newest n (ids
@@ -113,7 +120,8 @@
   values, a :by join's each symbol as [by v] (a symbol naming no entity joins nothing)."
   {:malli/schema [:=> [:cat :map :seon.host/db pos-int? :map :map] [:sequential pos-int?]]}
   [ix db e m j]
-  (let [{:keys [attr by limit reverse?]} j
+  (let [j (cond-> j (keyword? (:limit j)) (assoc :limit (window-of j)))
+        {:keys [attr by limit reverse?]} j
         cap (fn [xs] (if limit (take limit xs) xs))]
     (if (:rev? j)
       (if-some [v (if by (get m by) e)]
@@ -204,6 +212,7 @@
   {:malli/schema [:=> [:cat :seon.host/db pos-int? :map [:vector :any] :map :seon.ctx/ix [:sequential :any] [:map-of :any [:vector :any]]]
                   [:maybe [:tuple :map :seon.ctx/ix [:set :int]]]]}
   [db e j p old r moves touched]
+  (let [j (cond-> j (keyword? (:limit j)) (assoc :limit (window-of j)))]
   (when (and (:rev? j) (not (:by j)) (seq old) (not (:seon.ctx/by-position (meta old)))
              (or (nil? (:limit j)) (and (:reverse? j) (in-time-order? (:index r) j)))
              (every? #(and (= (:attr j) (:a %)) (= e (:v %))) moves))
@@ -229,7 +238,7 @@
                          (take-while #(and (= (:attr j) (:a %)) (= e (:v %))))
                          (map :e) (remove #(contains? v %)) (take need))))
           [v r] (reduce enter [v r] older)]
-      [v r (into (set come) older)])))
+      [v r (into (set come) older)]))))
 
 (defn- linked
   "Member node n (entity x) of join j of entity e, holding under j's :tx key the transaction that wrote their link (a reverse join's
@@ -252,6 +261,7 @@
   the members that joined, left or were touched; a member that left is forgotten (forget)."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? :map :map [:vector :any] :any :seon.ctx/ix [:map-of :any [:vector :any]]] [:tuple :any :seon.ctx/ix]]}
   [db e m j p old r touched]
+  (let [j (cond-> j (keyword? (:limit j)) (assoc :limit (window-of j)))]
   (let [r (watch r [e (:key j)] (watched e m j))
         old-map (if (map? old) old {})
         moves (when (map? touched) (get touched [e (:key j)]))
@@ -299,7 +309,7 @@
         (cond
           (nil? x) [nil (if (map? old) (forget r old p) r)]
           (and o (not (touched x))) [o r]
-          :else (let [r (if (and (map? old) (not o)) (forget r old p) r) [n r] (node db x (:sub j) p r o touched)] [(linked db e j x n) r]))))))
+          :else (let [r (if (and (map? old) (not o)) (forget r old p) r) [n r] (node db x (:sub j) p r o touched)] [(linked db e j x n) r])))))))
 
 (defn- same-node?
   "Does rebuilt node n hold what o held, every key's value the same object (identical?)?"

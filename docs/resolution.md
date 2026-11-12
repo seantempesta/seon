@@ -23,6 +23,7 @@ The sites that resolve a name held in data to a var by design.
 - `seon.render/declared-var`: the same, as its var: a component's var's contract says what it reads.
 - `seon.ctx.wire/page-message`: a call Seon writes for the model (`my.render/ctx`, `my.render/page`, `my.render/diff`) names its function as a symbol ([the render is an eval](render.md#the-render-is-an-eval)); `my.render` requires `seon.ctx.wire`, so it is resolved by name.
 - `seon.repl/undo-definition!`: a var an agent's definition just changed is put back when recording that definition threw: the agent's own eval undone, in its own process.
+- `seon.db/with-specs`: the entity index keeps each schema's compiled pattern (`seon.render/pattern`, made at its first use, [the pattern](ctx.md#the-pattern)); `seon.render` requires `seon.db`, so it is resolved by name.
 - `seon.cost/run`, `seon.cost/bound`, `seon.cost/cases`: a cost estimate names its function, input and generator as symbols in data.
 - `seon.proofs/mg-run`: a generative check's key names its function ("mg/seon.merge/f").
 - `seon.agent/test-plan`, `seon.agent/judges?`, `seon.proofs/run-tests!`: a task's proofs and a plan's tests are symbols in data, resolved to run them and to read whether each is a deftest of a merging namespace (`judges?`, shared with `my.agent/tests-reaching`).
