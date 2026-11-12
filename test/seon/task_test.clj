@@ -386,6 +386,25 @@
     (is (= [] (task/undelivered main main "a")) "inherited at the fork: delivered")
     (is (= [] (task/undelivered main removed "a")) "removed after, it stays delivered")))
 
+(deftest a-fork-writes-its-child-as-one-checked-entity-and-its-messages-have-their-entries
+  ;; the one-unit spec (section 1 and its ports): the fork writes the child with its parent, env (branch, commit, t) and options in one
+  ;; checked write; a process's end, the link's two unions and a request's address each have their entry
+  (let [db (d/db-with (ts/test-db) [{:seon.agent/key "root"}])
+        child {:seon.agent/key "c1" :seon.agent/parent [:seon.agent/key "root"] :seon.agent/branch :task-c1 :seon.agent/commit (random-uuid)
+               :seon.agent/t 12 :seon.agent/model-turns false :seon.agent/render-walk false :seon.agent/interrupts false :seon.agent/keeps-branch false}
+        ok? (fn [k v] (malli.core/validate (seon.contract/schema k) v))]
+    (is (nil? (refusal db [child])) "a test child's fork: parent, env and the four options, one checked write")
+    (is (some? (refusal db [(assoc child :seon.agent/t "12")])) "and a t that is no int is refused")
+    (is (nil? (refusal db [{:seon.process/id "c1/1" :seon.process/pid 4242 :seon.process/exit 0}])) "a process records its exit status")
+    (is (ok? :seon.process/end {:seon.process/pid 4242 :seon.process/exit 1}) "a child's end: its pid and exit status")
+    (is (not (ok? :seon.process/end {:seon.process/pid 4242})) "an end names its status")
+    (is (ok? :seon.link/down {:seon.step/request-id 3 :seon.step/to :api :op :run}) "down a link: a request")
+    (is (ok? :seon.link/down :interrupt) "or a control, interrupt among them")
+    (is (ok? :seon.link/up {:seon.step/request-id 3 :seon.step/value {:pass 1}}) "up a link: an answer")
+    (is (ok? :seon.link/up {:seon.step/at-ms 1 :type :spawned}) "an event")
+    (is (ok? :seon.link/up {:seon.step/request-id 4 :seon.step/to :api}) "or a request routed up by its address")
+    (is (not (ok? :seon.link/up {:op :run})) "and nothing else")))
+
 (deftest a-started-agent-names-the-agent-it-is-forked-from-its-parent
   ;; docs/users.md#who-started-whom: an agent names the agent it is forked from, :seon.agent/parent, in the write that makes it: the agent
   ;; that started its task (a launch, a refine), or root's agent when a person did (a person forks nothing); who asked stays the task's

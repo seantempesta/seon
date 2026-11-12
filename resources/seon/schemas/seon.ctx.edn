@@ -57,4 +57,11 @@
  :seon.ctx/ix [:map [:at {:optional true} :map] [:spec {:optional true} :map]
                [:watch {:optional true} :map] [:watching {:optional true} :map]
                ;; the entity index (seon.db/index-of) the record's pattern and joins read schemas in; built again by a patch that moved a schema entry
-               [:index {:optional true} :map] [:own-index? {:optional true} :boolean]]}
+               [:index {:optional true} :map] [:own-index? {:optional true} :boolean]]
+ ;; keys-schemas sweep
+ :seon.ctx/by-position [:boolean {:description "In a collection's metadata, true when its members are compared by position, not by their keys (seon.ctx/changes)."}]
+ :seon.ctx/none [:= {:description "What a map lookup answers for a key the map lacks, so an absent key is told from a nil value."} :seon.ctx/none]
+ :seon.ctx/unordered [:= {:description "What placing calls by their order answers when the calls hold no order to place by, so they are placed by their numbers."} :seon.ctx/unordered]
+ :seon.ctx/required [:map-of {:description "On an entity schema's properties, what a role's pattern must keep: each attribute or join (reverse ones included) to what it is, in words."} :keyword :string]
+ :seon.ctx.wire/here [:map {:description "On the ctx a wire render reads, the point it was read at: the commit and its t."} [:commit :uuid] [:t :int]]
+ :seon.ctx.wire/parts [:and {:description "In a render's opts metadata, a function answering a page-diff pair's two parts, so the walk keeps the pair's component keyed by its points, not by that function."} :seon.host/fn]}

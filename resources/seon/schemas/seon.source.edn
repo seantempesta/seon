@@ -4,4 +4,9 @@
  ;; analyzer's words. Answered by the index that met it (a seed, or my.root/import!), which changes nothing
  ;; and records no digest, so the next index tries again; bin/update brings the image up to date.
  :seon.source/unanalyzable [:and :seon.error/base [:map [:seon.error/type [:= :seon.source/unanalyzable]]
-                                                     [:files [:vector :string]]]]}
+                                                     [:files [:vector :string]]]]
+ ;; keys-schemas sweep
+ :seon.source/held? [:boolean {:description "On a form's account, true when the db holds the form whole, so it is not analyzed again."}]
+ :seon.source/made [:vector {:description "On a held form's account, the identities it makes, each [attribute value] of a definition or a declaration."} [:tuple :keyword :any]]
+ :seon.source/absent [:= {:description "What a held-form lookup answers for a form the db has none of."} :seon.source/absent]
+ :seon.source/eof [:= {:description "What a form read answers at the end of its text."} :seon.source/eof]}

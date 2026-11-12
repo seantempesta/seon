@@ -32,7 +32,7 @@ The sites that resolve a name held in data to a var by design.
 - `seon.model/scripted`: `:seon.config.ai/script` names the reply function (a fixture in `test/`; missing is `:seon.model/no-script`).
 - `seon.agent/start-ns`: the task's `:seon.task/ns` names the namespace an agent's REPL starts in, made with `create-ns` when the program has none.
 - `seon.repl/defines-program?`: a form's head is resolved in its namespace, or among the REPL's names, to know a definition of the program: a lookup.
-- `seon.agent/repl-name`: a symbol nothing in its namespace resolves is looked up among the REPL's names and named qualified for Jolt's analyzer (`jolt.host/*resolve-unresolved*`, bound by `seon.repl/eval-string`): a lookup.
+- `seon.agent/repl-name`: a symbol nothing in its namespace resolves is looked up among the REPL's names and named qualified for Jolt's analyzer (``jolt.host/*resolve-unresolved*``, bound by `seon.repl/eval-string`): a lookup.
 - `seon.repl/shadowed`: clojure.repl helpers an agent's namespace shadows are looked up to name that var in the `:helper-shadowed` finding.
 - `seon.repl/unmapped`: a form's `ns-unmap` calls are known by resolving their head, the var gone by `ns-interns`: a lookup to record the removal.
 - `seon.main/driver!`: the check driver (`seon.check`, in `test/`, outside the release binary) is loaded from source when a check mode runs, its `-main` resolved by name.
