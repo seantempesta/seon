@@ -178,12 +178,28 @@
     {:wake a}))
 
 (defn- keeps?
-  "Whether a task of kind, whose agent ended with outcome, keeps its agent's process at its end (:diffed):
-  the agent ended on a park outcome, and the task is no merge (a merge's agent ends its
-  process; a whole task, which merges too (seon.task/merges?: nothing on its branch needs it), keeps its process, since its
+  "Whether a task whose agent ended with outcome keeps its agent's process at its end (:diffed): the agent ended on a park
+  outcome, and the task is no merge step (merge-step?, seon.task/merge-step?: the last task on its branch, after another; a merge step's
+  agent ends its process; a task that merges itself (seon.task/merges?: nothing on its branch needs it), keeps its process, since its
   own work is what parked). Its judge then parks it, or stops the kept process (stop-kept)."
-  {:malli/schema [:=> [:cat [:maybe :keyword] [:maybe :keyword]] :boolean]}
-  [kind outcome] (boolean (and (park-outcomes outcome) (not= :merge kind))))
+  {:malli/schema [:=> [:cat :boolean [:maybe :keyword]] :boolean]}
+  [merge-step? outcome] (boolean (and (park-outcomes outcome) (not merge-step?))))
+
+(defn- merge-step-in?
+  "Whether task id is the merge step of a task it needs (seon.task/merge-step?), its needs and the tasks that need it read from the index. See
+  docs/merging.md#a-branch-lands-with-binland."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}
+  [idx id]
+  (let [t (get-in idx [:tasks id]) held #(some-> (get-in idx [:tasks %]) (assoc :seon.task/id %))]
+    (task/merge-step? (assoc t :seon.task/id id) (keep held (:seon.task/needs t)) (keep held (get-in idx [:needed-by id])))))
+
+(defn- merges-in?
+  "Whether task id merges its own work (seon.task/merges?), the tasks that need it read from the index. See
+  docs/merging.md#a-branch-lands-with-binland."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}
+  [idx id]
+  (task/merges? (assoc (get-in idx [:tasks id]) :seon.task/id id)
+                (keep #(some-> (get-in idx [:tasks %]) (assoc :seon.task/id %)) (get-in idx [:needed-by id]))))
 
 (defn- idx-done? {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}
   [idx id] (boolean (get-in idx [:done id :any?])))
@@ -306,8 +322,10 @@
         (mark :reap (and t (= :running o) (not live?)))
         (update :kill #(if kill (assoc % id kill) (dissoc % id)))
         (mark :judge (boolean (and t (judged-outcomes o))))
-        ;; a merge task merges while it works; a whole one (its own work first) once it is judged
-        (mark :merging (and t (case (:seon.task/kind t) :merge (or live? (judged-outcomes o)) :whole (boolean (judged-outcomes o)) false))))))
+        ;; the merge step of another task merges while it works; a task that merges its own work (its work first) once it is judged
+        ;; (read from data only for a task live or judged: every other task is none of them, and the index is listed at the cost of its tasks)
+        (mark :merging (boolean (and t (or live? (judged-outcomes o))
+                                     (or (merge-step-in? idx id) (and (judged-outcomes o) (merges-in? idx id)))))))))
 
 (defn- settle
   "Re-derive after entities changed: tasks whose needs or proofs changed (and the tasks that
@@ -337,10 +355,17 @@
                          [okind oid] (get-in idx [:keys e])]
                      (case (or kind okind)
                        :task (let [id (or (:seon.task/id v) oid)
-                                   needs? (not= (get-in idx [:tasks id :seon.task/needs]) (:seon.task/needs v))]
+                                   needs? (not= (get-in idx [:tasks id :seon.task/needs]) (:seon.task/needs v))
+                                   ;; whether a task merges its own work reads the tasks that need it on its branch (merges-in?), and whether it
+                                   ;; is a merge step reads those and the branches of the tasks it needs (merge-step-in?): where a task's needs or its branch
+                                   ;; moved, the tasks it needed or needs now are re-derived, and where its branch moved the tasks that need it too
+                                   branch? (not= (get-in idx [:tasks id :seon.task/branch]) (:seon.task/branch v))
+                                   moved? (or needs? branch?)
+                                   needed (when moved? (cond-> (into (get-in idx [:tasks id :seon.task/needs] #{}) (:seon.task/needs v))
+                                                         branch? (into (get-in idx [:needed-by id]))))]
                                [(-> idx (put-task id v) (update :keys #(if v (assoc % e [:task id]) (dissoc % e))))
                                 (cond-> nc (or needs? (nil? (get-in idx [:acc id])) (not= (get-in idx [:tasks id :seon.task/proofs]) (:seon.task/proofs v))) (conj id))
-                                (conj dirty id) all?])
+                                (into (conj dirty id) needed) all?])
                        ;; an agent's boot moved: the tasks that name it (an agent on a stage holds two) are re-derived
                        :agent (let [k (or (:seon.agent/key v) oid)]
                                 [(-> idx (put-agent k v) (update :keys #(if v (assoc % e [:agent k]) (dissoc % e))))
@@ -420,7 +445,7 @@
                   [:map [:outcome :seon.task/outcome] [:reasons [:vector :seon.reconcile/not-done]]
                    [:hold {:optional true} :string] [:verdict {:optional true} [:vector :seon.reconcile/not-done]]]]}
   [idx id {:keys [end died results main-red uncontracted unmerged caused behind plan plan-before basis deferred behinds told]}]
-  (let [t (get-in idx [:tasks id]) kind (:seon.task/kind t) merge? (task/merges? (assoc t :seon.task/id id) (keep #(some-> (get-in idx [:tasks %]) (assoc :seon.task/id %)) (get-in idx [:needed-by id]))) oc (:outcome end) execution (:seon.task/execution t)
+  (let [t (get-in idx [:tasks id]) kind (:seon.task/kind t) merge? (merges-in? idx id) step? (merge-step-in? idx id) oc (:outcome end) execution (:seon.task/execution t)
         outside (outside? (:seon.agent/env (task-agent idx id)))]
     (cond
       (not= :running execution) {:outcome :closed :reasons []}
@@ -434,7 +459,7 @@
                                ;; merge-decl), so a green work task is never judged behind; a merge that main moves under is the merge
                                ;; task's, held at :seon.config.merge/max-behind (the :octopus-merged step). Told again, a green task behind a
                                ;; busy main was held at that bound (swarm held sw/s8 and sw/s9 so, 2026-10-31)
-                               (and (some-> behind pos?) (not-any? #(= :merge (get-in idx [:tasks % :seon.task/kind])) (get-in idx [:needed-by id])))
+                               (and (some-> behind pos?) merge?)
                                (assoc :behind behind)))
             ended (str "ended" (some->> oc name (str " ")) (some->> (:reason end) (str " (") (#(str % ")"))) ": " (explain-text rs))]
         (cond
@@ -455,17 +480,17 @@
                   :else {:outcome :gate :reasons rs :deferred deferred}))
           (empty? rs) {:outcome :done :reasons rs}
           ;; it parked (waiting, out of turns): never a hold, the session waits for its next message (docs/turn.md#parked)
-          (keeps? kind oc) {:outcome (if (= :cap oc) :cap :parked) :reasons rs}
+          (keeps? step? oc) {:outcome (if (= :cap oc) :cap :parked) :reasons rs}
           ;; its end refused by the done rule (the agent's own check, or root's facts that its branch did not show): words
           ;; to the agent, with what root judged on, which wakes the session; the same verdict twice holds. A whole task's
           ;; goes back to its own session too (it merges itself, so it is told why it could not); a merge task's holds,
           ;; and an outside agent's: it read the verdict as :done's answer, and no turn loop takes messages
           ;; an outside agent's green work behind main alone: told again as behind too, never closed for main's motion;
           ;; its client hands back again, taking main first (seon.server's :done), bounded as a model agent's is
-          (and (not= :merge kind) outside (= :green oc) (every? #(= :behind (:reason %)) rs)
+          (and (not step?) outside (= :green oc) (every? #(= :behind (:reason %)) rs)
                (< behinds (cfg/value :seon.config.merge/max-behind)))
           {:outcome :behind :reasons rs :verdict rs}
-          (and (not= :merge kind) (not outside) (#{:green :red} oc))
+          (and (not step?) (not outside) (#{:green :red} oc))
           (let [behind-only? (every? #(= :behind (:reason %)) rs)
                 ;; behind alone is main moving under the branch, not the agent's news: the same count twice is two different
                 ;; mains, so it is told again, merging main first, until :seon.config.merge/max-behind judgments of the task
@@ -506,7 +531,7 @@
                 [{:op :octopus-merge :task (:task (first ready)) :members (mapv #(select-keys % [:task]) ready)}])
         closed? (some #(judged-outcomes (get-in idx [:tasks % :seon.task/outcome])) (:merging idx))
         room (max 0 (- (:max-running root) (- (count (:live idx)) (count (filter (:live idx) (keys (:kill idx)))))))
-        merge? (fn [id] (= :merge (get-in idx [:tasks id :seon.task/kind])))
+        merge? #(merge-step-in? idx %)
         merge-room (max 0 (- (:max-merging root) (count (:merging idx))))
         ;; a merge joins only when what it changes is disjoint from every merge in flight;
         ;; one whose changes are unknown runs alone; conflicting merges serialize
@@ -1095,7 +1120,7 @@
                 (refused st r)
                 (let [{:keys [tx outcome]} (judge-tx st f (:results f) r)
                       k (:key (agent-of (:db st) id))
-                      kept? (keeps? (get-in st [:idx :tasks id :seon.task/kind]) (:outcome (when k (pull-end (:db r) k))))
+                      kept? (keeps? (merge-step-in? (:idx st) id) (:outcome (when k (pull-end (:db r) k))))
                       parks? (#{:parked :cap} outcome)]
                   (cond (and kept? parks?) (one (write st id :done tx))
                         kept? (stop-kept (one (write st id :done tx)) id agent)
