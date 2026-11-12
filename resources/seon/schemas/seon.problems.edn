@@ -259,11 +259,12 @@
                                                     :stale-section "wiki sections whose cited code changed" :orphan-page "wiki pages nothing links"
                                                     :leadless-section "wiki sections with no lead" :uncited-task "tasks that cite no section"
                                                     :stale-plan "task plans that went stale" :uncited-var "functions that cite no section"
-                                                    :problem-unlinked "problem classes with no wiki section" :long-form "forms too long" :waived-proof "proofs that pass by waiver" :undeclared-test "tests that break their law"}
-                             :seon.problems/derived #{:stalled :unnamed-site :stale-pin :stale-binary :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :waived-proof :unsynced :undeclared-test}
+                                                    :problem-unlinked "problem classes with no wiki section" :long-form "forms too long" :waived-proof "proofs that pass by waiver"
+                                                    :unestimated-test "tests that state no estimate" :undeclared-test "tests that break their law"}
+                             :seon.problems/derived #{:stalled :unnamed-site :stale-pin :stale-binary :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :waived-proof :unsynced :unestimated-test :undeclared-test}
                              ;; shown, never a reason to refuse done (root's ruling, 2026-10-23: every var edit stales the sections that cite it)
                              :seon.problems/attention #{:stale-section :uncited-var :long-form}
-                             :seon.problems/areas [[:docs #{:stale-pin :stale-section :orphan-page :leadless-section :uncited-var}] [:tests #{:red :cost :waived-proof :undeclared-test}]
+                             :seon.problems/areas [[:docs #{:stale-pin :stale-section :orphan-page :leadless-section :uncited-var}] [:tests #{:red :cost :waived-proof :unestimated-test :undeclared-test}]
                                                     [:laws #{:unnamed-site :long-form}] [:merges #{:merge :task-conflict :unrun :unsynced}] [:tasks #{:failed :uncited-task :stale-plan}]
                                                     [:agents #{:stalled :dead :error :waste}] [:errors #{:platform :eval :agent :effect}] [:health #{:problem-unlinked :stale-binary}]]
                              ;; each class's section of the wiki: what it is and how it is fixed. A class with open rows whose
@@ -276,9 +277,10 @@
                                                   :dead "docs/root.md#runs-and-judging" :failed "docs/tasks.md#a-refused-run-is-held-for-root"
                                                   :unnamed-site "docs/health.md#a-laws-unnamed-site"
                                                   :stale-pin "docs/forks.md#branch-scheme" :stale-binary "docs/health.md#a-stale-binary" :stale-section "docs/health.md#a-stale-section"
-                                                  :orphan-page "docs/health.md#an-orphan-page" :leadless-section "docs/health.md#a-section-with-no-lead" :uncited-task "docs/health.md#a-task-that-cites-nothing" :stale-plan "docs/health.md#a-plan-that-went-stale" :uncited-var "docs/health.md#a-function-that-cites-no-section" :long-form "docs/health.md#a-form-too-long" :waived-proof "docs/health.md#a-proof-that-passes-by-waiver" :problem-unlinked "docs/health.md#a-problem-with-no-page" :undeclared-test "docs/testing.md#test-kinds"}}
+                                                  :orphan-page "docs/health.md#an-orphan-page" :leadless-section "docs/health.md#a-section-with-no-lead" :uncited-task "docs/health.md#a-task-that-cites-nothing" :stale-plan "docs/health.md#a-plan-that-went-stale" :uncited-var "docs/health.md#a-function-that-cites-no-section" :long-form "docs/health.md#a-form-too-long" :waived-proof "docs/health.md#a-proof-that-passes-by-waiver" :problem-unlinked "docs/health.md#a-problem-with-no-page"
+                                                  :unestimated-test "docs/merging.md#a-tests-tick-budget" :undeclared-test "docs/testing.md#test-kinds"}}
                        :stalled :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict :unnamed-site :stale-pin :stale-binary :unrun
-                       :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :waived-proof :unsynced :undeclared-test]
+                       :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :waived-proof :unsynced :unestimated-test :undeclared-test]
  :seon.problems/row [:map {:seon.render/hiccup seon.render.ui/problem-row}
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]

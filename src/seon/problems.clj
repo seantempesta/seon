@@ -426,6 +426,21 @@
            (derived-row ans s nsym (str v " is public and its docstring cites no docs/ section: cite the one that describes it")
                         {:kind :uncited-var :var v} {:var v})))))
 
+(defn unestimated-tests
+  "Each of the named vars (a set of symbols, the vars a branch changed) that is a test stating no estimate on its deftest
+  (seon.source/stated-estimate), as an :unestimated-test row: a new or changed test states what it should cost, worked from
+  what it must do, and runs under the cap until it does (docs/merging.md#a-tests-tick-budget). Closed by stating
+  ^{:seon.test/estimate {:ticks n}}. Cost: one seek per named var and its form's text for a test."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:set :symbol]] [:vector :seon.problems/row]]}
+  [db ans names]
+  (vec (for [v (sort names)
+             :let [e (pdb/eid db :var/name v) ent (when e (d/entity db e)) nsym (some-> (namespace v) symbol)
+                   src (some-> ent :var/form :form/src)]
+             :when (and ent src (contains? (set (:var/meta ent)) :test) (nil? (source/stated-estimate nsym src)))
+             :let [s (str "unestimated-test " v)]]
+         (derived-row ans s nsym (str v " states no estimate: state ^{:seon.test/estimate {:ticks n}} on its deftest, worked from what it must do")
+                      {:kind :unestimated-test :var v} {:var v}))))
+
 (defn long-forms
   "Each of the named vars (a set of symbols, the vars a branch changed), in source or in a test, whose
   form's text is longer than :seon.config.shrink/form-tokens (as the model reads it: seon.print.emit/chars-tokens), as a :long-form row with its tokens and the
@@ -490,7 +505,7 @@
 
 (defn undeclared-tests
   "Each of the named vars (the vars a branch changed) that is a test and breaks its law, one :undeclared-test row a
-  lack: it states no :seon.test/estimate, or one over its cap (:seon.config.proofs/test-ticks-cap, a system test's
+  lack (one stating no estimate is `unestimated-tests`'): its estimate is over its cap (:seon.config.proofs/test-ticks-cap, a system test's
   asks-cap, a binary test's execs-cap); it reaches a running system (:seon.config.proofs/system-vars) and names no
   :seon.test/root, or runs a command (exec-vars) and names no :seon.test/execs; or its namespace makes a store of its own
   (own-store-vars). Read from the compiler's facts (`test-reach`); a test the branch did not change is not judged.
@@ -509,7 +524,6 @@
                      reach (test-reach db v (into (set system-vars) exec-vars))
                      hit (fn [vars] (first (sort (filter #(contains? reach %) vars))))
                      lacks (cond-> []
-                             (nil? est) (conj [:estimate "states no :seon.test/estimate"])
                              (and ticks (> ticks test-ticks-cap)) (conj [:ticks (str "estimates " ticks " ticks, over the cap of " test-ticks-cap)])
                              (and root asks (> asks system-test-asks-cap)) (conj [:asks (str "estimates " asks " asks, over the cap of " system-test-asks-cap)])
                              (and cmds execs (> execs binary-test-execs-cap)) (conj [:execs (str "estimates " execs " execs, over the cap of " binary-test-execs-cap)])
@@ -523,7 +537,8 @@
 
 (def caused-classes
   "The derived classes `caused-split` reads: the only ones a branch is judged on (the health step refuses any other). An attention class among them never fails a branch."
-  #{:unnamed-site :stale-section :uncited-var :long-form :undeclared-test})
+  #{:unnamed-site :stale-section :uncited-var :long-form :unestimated-test :undeclared-test})
+
 (defn caused-datoms
   "The datoms that differ between base and head in the attributes `caused-split` reads (a section's, the var
   names, the task ids and plans, the catches and text of forms), one datahike.api/datoms-diff range each: what
@@ -579,6 +594,7 @@
                (concat (map #(assoc % :class :unnamed-site) (sites db state forms-of))
                        (map #(assoc % :class :stale-section) (stale-sections db ans {:names moved-vars :sections (eids state)}))
                        (map #(assoc % :class :uncited-var) (uncited-vars db ans moved-vars))
+                       (map #(assoc % :class :unestimated-test) (unestimated-tests db ans moved-vars))
                        (map #(assoc % :class :long-form) (long-forms db ans moved-vars))
                        (map #(assoc % :class :undeclared-test) (undeclared-tests db ans moved-vars))))
         forms-in (fn [db] (fn [fact] (set (keep #(:e (law-form-at db fact %)) (changed-forms fact)))))
