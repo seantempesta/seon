@@ -239,7 +239,7 @@
   its thread's CPU ns (cpu-ns), and the contracted calls of the epoch it opens (begin!), answered as one value
   {:value v :ticks :bytes :wall-ns :cpu-ns :calls}; a call that throws is measured too, answered {:thrown e ...}
   in place of :value (its trace is its throw's: Jolt keeps it where it is caught), and its caller decides what the
-  throw does. The one measurement of a call: the REPL's per-form cost (seon.repl/wrap-cost), a cost proof's
+  throw does; an interrupt (a ThreadDeath, seon.intr) passes, as it passes every catch below the entrant boundary. The one measurement of a call: the REPL's per-form cost (seon.repl/wrap-cost), a cost proof's
   (seon.cost/once), a test's (seon.proofs) and my.test/cost read it."
   {:malli/schema [:=> [:cat :seon.host/fn] [:map [:ticks int?] [:bytes int?] [:wall-ns int?] [:cpu-ns int?] [:calls :any]]]}
   [f]
@@ -248,7 +248,7 @@
         ;; cell, Jolt's callback's (jolt.host/ticks-of)
         r (volatile! nil)
         _ (jolt.host/ticks-of (fn [] (let [k0 (jolt.host/ticks)
-                                           x (try {:value (f)} (catch Throwable e {:thrown e}))]
+                                           x (try {:value (f)} (catch ThreadDeath e (throw e)) (catch Throwable e {:thrown e}))]
                                        (vreset! r (assoc x :ticks (- (jolt.host/ticks) k0))))))
         c1 (cpu-ns) w1 (now-ns) n (calls) a1 (alloc-bytes)]
     (assoc @r :bytes (- a1 a0) :wall-ns (- w1 w0) :cpu-ns (- c1 c0) :calls n)))

@@ -394,8 +394,9 @@
     (is (= (set (keys c)) (set (keys srcs))))))
 
 (deftest an-override-is-validated-by-the-same-schemas
-  (is (= [{:key :seon.config.web/port :problem :invalid :value "-1"}]
-         (:seon.config/problems (refused #(config/layered (config/load-layers (config/checkout) ["--set" ":seon.config.web/port=-1"]))))))
+  ;; -1 is a port the kernel assigns; -2 is no port
+  (is (= [{:key :seon.config.web/port :problem :invalid :value "-2"}]
+         (:seon.config/problems (refused #(config/layered (config/load-layers (config/checkout) ["--set" ":seon.config.web/port=-2"]))))))
   (is (= :unknown-key
          (:problem (first (:seon.config/problems (refused #(config/layered (config/load-layers (config/checkout) ["--set" ":seon.config.web/porrt=1"])))))))))
 

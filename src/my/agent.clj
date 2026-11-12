@@ -129,7 +129,7 @@
   (if-not id
     {:cited? false :threw nil}
     (try {:cited? (contains? (set (some->> (task/task db id) :seon.task/plan ref/names)) sym) :threw nil}
-         (catch Throwable e
+         (catch Exception e
            {:cited? (boolean (some #(= sym (get-in % [:seon.cite/target :var/name])) (task/task-cites db id))) :threw (or (ex-message e) (str (class e)))}))))
 
 (defn no-var
