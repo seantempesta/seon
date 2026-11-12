@@ -1923,7 +1923,14 @@
         (is (empty? (filter (d/entity db3 [:seon.task/id "demo/a-refine"]) task/end-attrs)) "holding none of the facts the end it supersedes wrote (task/end-attrs)")
         (is (not= branch0 (:seon.task/branch r)) "on a fresh branch: a new agent, none of the old one's records")
         (is (= (:seon.task/branch r) (:seon.task/branch (task/task db3 "demo/a-refine-review"))) "its review on its branch")
-        (is (= :held (:seon.task/execution (task/task db3 "demo/a-refine-review"))) "the review held again")))))
+        (is (= :held (:seon.task/execution (task/task db3 "demo/a-refine-review"))) "the review held again")))
+    ;; a refine declared when its proofs were others (a test since deleted) states its declaration's proofs again, as a changed
+    ;; task file's entry does (entity-tx): the loop task's superseded refine kept the deleted test beside the new one and capped
+    (let [stale (d/db-with capped [[:db/add [:seon.task/id "demo/a-refine"] :seon.task/proofs 'gone-test/deleted]])
+          db3 (d/db-with stale (task/refine-tx stale "demo/a"))]
+      (is (= (set (:seon.task/proofs (first (task/refine-decls {:seon.task/id "demo/a" :seon.task/ns 'demo :seon.task/name "a"}))))
+             (set (:seon.task/proofs (task/task db3 "demo/a-refine"))))
+          "only its declaration's proofs: a dropped proof is retracted"))))
 
 (deftest ^{:seon.test/estimate {:ticks 5000000}} a-refine-is-done-when-its-task-names-a-function-it-did-not
   ;; docs/tasks.md#a-refine-curates-its-own-task (root, 2026-11-13): a refine's one proof is green before it starts, so it never knew
