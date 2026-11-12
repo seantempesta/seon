@@ -384,7 +384,7 @@
   (:leadless-section, :orphan-page), a form's refs and a var's form (:waived-proof, :stale-plan), a task's needs, outcome and
   proofs and its cites (:uncited-task, :stale-plan). What `caused-datoms` diffs for them. See docs/health.md#two-kinds-of-problem."
   [:seon.doc/lead :seon.doc/references :form/refs :form/keywords :var/form :seon.task/needs :seon.task/outcome :seon.task/proofs
-   :seon.cite/of :seon.cite/target :schema/key])
+   :seon.cite/of :seon.cite/target :schema/key :schema/form])
 
 (defn- section-at
   "{:e :names :read :reviewed :baseline :text} of the section addressed a on db, by entity seeks and no
@@ -452,6 +452,25 @@
                :let [n (emit/chars-tokens (count src)) s (str "long-form " v) nsym (some-> (namespace v) symbol)]]
            (derived-row ans s nsym (str v " is " n " tokens, over the bound of " bound ": split it by what it does")
                         {:kind :long-form :var v :tokens n :bound bound} {:var v :tokens n :bound bound})))))
+
+(defn refused-values
+  "Each stored datom of the attributes attrs whose value db's own entry for its attribute refuses, as a :refused-value row naming
+  the attribute, the entity and why: a value written before its entry tightened, held to the entry now (seon.db/invalid-datom, with
+  db's own schema changes, seon.program/schema-changes, as a write on db would be). Read only for the attributes a branch's
+  move changed the entry of (`caused-split`), so it costs the datoms of those attributes, never the store; never in a full health
+  read, which has no base to say what moved. Closed by fixing the value or loosening the entry. See
+  docs/health.md#a-stored-value-its-entry-refuses."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:set :qualified-keyword]] [:vector :seon.problems/row]]}
+  [db ans attrs]
+  (if (empty? attrs)
+    []
+    (let [k (program/schema-changes db)
+          own (when (seq k) {:forms k :registry (program/schema-registry k)})]
+      (vec (for [a (sort attrs) {:keys [e v]} (d/datoms db :aevt a)
+                 :let [err (pdb/invalid-datom db [[:db/add e a v]] own)] :when err
+                 :let [s (str "refused-value " a " " e)]]
+             (derived-row ans s (symbol (namespace a)) (str a " of entity " e " holds a value its entry refuses: " (:seon.error/message err))
+                          {:kind :refused-value :attribute a :entity e} {:attribute a :entity e}))))))
 
 (def ^:private enum-members
   "Every keyword an [:enum ...] of the process's registry (seon.contract/forms) lists: values, not keys, so `unschemed-keys` asks no
@@ -584,6 +603,8 @@
         linkage? (some by-attr [:seon.doc/address :seon.doc/references])
         form-cands (ents [:form/src :form/refs])
         ;; the forms whose keywords moved, and those naming a key whose entry the branch added or removed
+        ;; the stored attributes whose entry the branch changed: their datoms are held to the new entry
+        moved-attrs (into #{} (comp (keep #(:v (first (d/datoms head :eavt % :schema/key)))) (filter #(contains? (:schema head) %))) (ents [:schema/form]))
         key-cands (into (ents [:form/keywords])
                         (for [db [base head] {k :v} (by-attr :schema/key) {e :e} (d/datoms db :avet :form/keywords k)] e))
         task-cands (fn [db]
@@ -608,6 +629,7 @@
                          (when linkage? (map #(assoc % :class :orphan-page) (orphan-pages db ans)))
                          (map #(assoc % :class :waived-proof) (waived-proofs db ans form-cands))
                          (map #(assoc % :class :unschemed-key) (unschemed-keys db ans key-cands))
+                         (map #(assoc % :class :refused-value) (refused-values db ans moved-attrs))
                          (map #(assoc % :class :uncited-task) (uncited-tasks db ans tr))
                          (map #(assoc % :class :stale-plan) (stale-plans db ans tr)))))
         forms-in (fn [db] (fn [fact] (set (keep #(:e (law-form-at db fact %)) (changed-forms fact)))))

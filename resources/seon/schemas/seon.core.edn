@@ -148,7 +148,9 @@
  :seon.test/result [:map [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]
  ;; root's API
  :seon.system/sys [:map [:graph :any] [:ext :seon.host/chan] [:conn :seon.host/conn]]
- :seon.system/api-state [:map [:agents :map] [:pending :map] [:rid :int] [:boot :string]]
+ :seon.system/api-state [:map [:agents :map] [:pending :map] [:rid :int] [:boot :string]
+                         ;; the stall check's keys, each by its entry (seon.system/stall-state reads them)
+                         [:seon.system/busy {:optional true}] [:seon.system/lost {:optional true}] [:seon.system/stall-armed {:optional true}]]
  :seon.system/request [:map [:op :keyword]]
  ;; root's system declaration (resources/seon/system.edn, seon.graph): procs by id, effect
  ;; kinds, the conns between them
@@ -175,7 +177,7 @@
  :seon.system/errors-flight [:boolean {:description "True while a write of the folded errors is in flight, so a second is not made."}]
  :seon.system/inserting [:map-of {:description "The evals given at an agent's spawn, kept by agent until its REPL queue is sent them as one write."} :keyword [:sequential :any]]
  :seon.system/killers [:map-of {:description "The callers of each agent's stop, answered when its end is recorded."} :keyword [:vector [:or :seon.host/promise :map]]]
- :seon.system/lost [:vector {:description "The messages the api's step took when it threw, which the stall check answers as lost."} :any]
+ :seon.system/lost [:maybe {:description "The messages the api's step took when it threw, which the stall check answers as lost; nil when none was."} [:vector :any]]
  :seon.system/prove [:map {:description "What the prove service last reported it holds (its state-view): runs in flight, the queue, free workers, the asks it has open."}]
  :seon.system/respawn [:map-of {:description "The agents ended for a respawn, with the caller and the spawn opts that start the next in their place."} :keyword [:map [:p [:or :seon.host/promise :map]] [:opts :map]]]
  :seon.system/restored [:map-of {:description "The agents whose spawn restores a commit, whose answer then says what was not restored."} :keyword [:= true]]
