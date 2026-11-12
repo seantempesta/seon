@@ -276,13 +276,15 @@ build_embed() {
 # between builds, so a build indexes what the tree changed), and the tree's inputs (seon.system/built-program), into
 # target/seon.program: a root resumes its main reading no source, and compares main's
 # program with this one (docs/source.md#the-binary-records-its-program)
-# record_program [BINARY]: by BINARY (default seon, the one in place; a rebuild passes seon.<tree>.new before it moves in), the
-# record written beside the old and moved over it, so a reader never sees it absent or half written
+# record_program [BINARY]: by BINARY (default seon, the one in place; a rebuild passes seon.<run>.new before it moves in), the
+# record written beside the old (seon.program.<run>.new) and moved over it, so a reader never sees it absent or half written.
+# For the binary in place it moves at once; a rebuild's record moves in with its binary (build_seon)
 record_program() {
   local bin=${1:-seon}
   local id=${ID:-$$}
   ( cd "$T" && SEON_CHECKOUT=$ROOT HOME=$T/home nice -n 15 "./$bin" built-program "$T/seon.index" --profile scripted ) > "$T/built-program.$id.log" 2>&1 &&
-    tail -1 "$T/built-program.$id.log" > "$T/seon.program.$id.new" && mv -f "$T/seon.program.$id.new" "$T/seon.program" &&
+    tail -1 "$T/built-program.$id.log" > "$T/seon.program.$id.new" &&
+    { [ "$bin" != seon ] || mv -f "$T/seon.program.$id.new" "$T/seon.program"; } &&
     mv -f "$T/built-program.$id.log" "$T/built-program.log" ||
     { rm -f "$T/seon.program.$id.new"; tail -5 "$T/built-program.$id.log" >&2; die "recording the program target/seon was built from failed; see target/built-program.$id.log"; }
   say "seon: recorded the program it was built from (target/seon.program)"
@@ -327,11 +329,14 @@ build_seon() {
   # jolt's intermediate files for this output (flat.ss, boot data, main.c): this run's alone, 386 MB, removed once it is built
   rm -rf "$T/seon.$ID.new.build" "$T/seon.new.build"
   mv -f "$T/seon-build.$ID.log" "$T/seon-build.log"
-  # a newer tree reached this checkout while it built (a later landing's update): that build moves its own in; this one is left out
-  if [ -n "$tree" ] && [ "$("$ROOT/bin/tree" "$ROOT")" != "$tree" ]; then
-    rm -f "$T/seon.$ID.new"; say "seon: built tree $tree, but the checkout holds a newer one now: left out (SUPERSEDED)"; return
-  fi
   record_program "seon.$ID.new"
+  # a newer tree reached this checkout while it built (a later landing's update): that build moves its own in; this one is
+  # left out. Asked after the record, so nothing that takes time lies between this answer and the moves below; an older
+  # build that still moves in after a newer one is caught by bin/update, which builds again until the binary is its tree's
+  if [ -n "$tree" ] && [ "$("$ROOT/bin/tree" "$ROOT")" != "$tree" ]; then
+    rm -f "$T/seon.$ID.new" "$T/seon.program.$ID.new"; say "seon: built tree $tree, but the checkout holds a newer one now: left out (SUPERSEDED)"; return
+  fi
+  mv -f "$T/seon.program.$ID.new" "$T/seon.program"
   mv -f "$T/seon.$ID.new" "$T/seon"
   [ -n "$tree" ] && { echo "$tree" > "$T/seon.tree.$ID.new" && mv -f "$T/seon.tree.$ID.new" "$T/seon.tree"; }
   [ -z "$key" ] || { echo "$key" > "$T/seon.stamp.$ID.new" && mv -f "$T/seon.stamp.$ID.new" "$T/seon.stamp"; }
