@@ -511,3 +511,16 @@
     (is (= "fix-it" (seon.system/request-name db "Fix it! Now.")))
     (is (= "work" (seon.system/request-name db "...")))
     (is (= "add-a-function-demo-math-double-2" (seon.system/request-name db2 "Add a function demo.math/double.")))))
+
+;; docs/errors.md#nothing-crashes-and-nothing-hangs: a refused write of agents' facts is a problem against each agent, and an
+;; answer that was already an error is not taken back through its :dest again. Red before: :agent-facts (a vector) went whole into
+;; err/occurrence's :agent, the api's step threw, and its :error answer re-ran back-op on the same answer, throwing again: a loop
+;; of errors each wrapping the last (bin/check problems hung on it, 2026-11-12)
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-refused-facts-write-is-each-agents-problem-and-is-not-answered-again
+  (let [st {:agents {} :pending {} :rid 0 :boot "b" :seon.system/errors {}}
+        o (volatile! {})
+        r (seon.contract/error :seon.writer/refused #'seon.system/back-op "the store refused the write" {})
+        st2 (#'seon.system/back-op st o {:dest {:agent-facts [:a1 :a2]} :r r})]
+    (is (true? (:seon.system/errors-dirty st2)) "recorded as a problem, no throw")
+    (is (= st (#'seon.system/answer-taken st o :writer {:dest {:agent-facts [:a1]} :r r} r))
+        "an answer that was already an error is not taken back through its :dest")))
