@@ -292,4 +292,6 @@
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]
                      [:at-ms [:maybe :int]]]
  :seon.problems/report [:map {:seon.render/hiccup seon.render.ui/problems :seon.render/model seon.render.ui/problems-model} [:t :int]
-                        [:classes [:map-of :seon.problems/class [:map [:n nat-int?] [:rows [:vector :seon.problems/row]]]]]]}
+                        [:classes [:map-of :seon.problems/class [:map [:n nat-int?] [:rows [:vector :seon.problems/row]]]]]]
+ ;; keys-schemas sweep
+ :seon.git/files [:vector {:description "On a git commit's error, the files the commit was to hold, sorted."} :string]}
