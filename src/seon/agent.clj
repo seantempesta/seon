@@ -1212,8 +1212,12 @@
     (jolt.host/on-quiescent!
      (fn [dump]
        (when-let [{:keys [fiber test]} (first (reset-vals! in-flight nil))]
-         (let [msg (str "the test can never go on: every fiber of its process waits and nothing can wake one (" test ")")]
-           (jolt.host/fiber-interrupt! fiber (ex-info msg (contract/error :seon.test/deadlock #'seon.agent/test-child-runs! msg {:test test :dump dump})))))))
+         ;; built under the branch's schemas, as run-tests-here binds them: the handler runs in Jolt's scheduler, outside that binding,
+         ;; and an error type the binary was not built with (a branch's) threw there, which ended the child with no answer (exit 1)
+         (let [msg (str "the test can never go on: every fiber of its process waits and nothing can wake one (" test ")")
+               e (binding [mr/*registry* (:registry (branch-schemas))]
+                   (contract/error :seon.test/deadlock #'seon.agent/test-child-runs! msg {:test test :dump dump}))]
+           (jolt.host/fiber-interrupt! fiber (ex-info msg e))))))
     ;; the run ends with its agent (a test ends by its own budget): the agent's end of this link closing raises SIGIO here
     ;; and ends the child, whatever the test is doing (the agent's own socket to root was closed at the fork, so its handler is replaced)
     (if-let [unwatched (sock/signal-at-input! fd)]
