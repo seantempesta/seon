@@ -1314,6 +1314,16 @@
         (is (= :seon.ctx/basis (:seon.error/type r)))
         (is (= 1 @calls))))))
 
+;; docs/ctx.md#the-pattern: a join's sub-pattern of :db/id and joins holds its joins, as d/pull does; only [:db/id] alone holds {:db/id}
+(deftest a-db-id-and-a-join-holds-the-join
+  (let [db (seeded 3 nil)
+        e (aid db)
+        held #(get-in (:tree (ctx/build (seon.db/index) db e :b %)) [:seon.agent/task])
+        p '[:seon.agent/key {:seon.agent/task [:db/id {:seon.agent/_task [:seon.agent/key]}]}]]
+    (is (= [{:seon.agent/key k}] (map #(dissoc % :db/id) (:seon.agent/_task (:seon.agent/task (d/pull db p e))))) "d/pull holds the join")
+    (is (= #{k} (set (map :seon.agent/key (vals (:seon.agent/_task (held p)))))) "and so does ctx, the task its id and the join")
+    (is (= {:db/id (id db [:seon.task/id "lab/ctx"])} (held '[:seon.agent/key {:seon.agent/task [:db/id]}])) "[:db/id] alone: the id, as d/pull")))
+
 ;; docs/ctx.md#the-pattern: an entity sits whole at every path the pattern pulls it, and an edit of it is by its :db/id
 (deftest an-edit-at-any-path-writes-the-entity
   (let [;; the agent's task pulled at two paths, by two sub-patterns

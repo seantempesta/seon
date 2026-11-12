@@ -1913,8 +1913,10 @@
         t0 (profile/now-ns)
         r (relay port)
         ms (profile/ms-since t0)
-        ;; a port nobody listens on: the one we listened on, closed
-        down (relay (let [s (java.net.ServerSocket. 0)] (try (.getLocalPort s) (finally (.close s)))))
+        ;; a port nobody listens on and nobody can take: 1, below 1024, which no unprivileged process binds (a port listened on and
+        ;; closed was taken by another check step's HTTP server under a whole prove's load: the relay connected, read no JSON, and
+        ;; answered nothing, red in context's two landings, 2026-11-12; a bound socket that does not listen times out on macOS)
+        down (relay 1)
         _ (clojure.java.shell/sh "rm" "-f" in)
         peak-mb (fn [r] (some-> (re-find #"(\d+)\s+peak memory footprint" (:err r)) second parse-long (/ 1048576.0)))
         lines (fn [r] (for [l (clojure.string/split-lines (:out r)) :when (clojure.string/starts-with? l "{")] (clojure.data.json/read-str l)))

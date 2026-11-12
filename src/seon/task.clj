@@ -442,7 +442,8 @@
   "Root's boot: its id for this process lifetime (the config in force, max-running among its keys, is written with it,
   config-tx), and the user, name, an agent with no process, one entity across boots (:seon.user/name, its lookup ref): the evals and messages it
   makes name it (:seon.eval/by its id), and root's page lists it with its agents; until there is a login, it is who is signed in (:seon.system/signed-in). The user
-  stores no pattern: its pull is its schema's (:seon.db/user-fact's :seon.ctx/pattern). See docs/users.md#what-each-thing-is."
+  stores no pattern: its pull is its schema's (:seon.db/user-fact's :seon.ctx/pattern). A user is never forked, so it has no :seon.agent/parent
+  and is in no agent's tree. See docs/users.md#what-each-thing-is."
   {:malli/schema [:=> [:cat :string :string] [:vector :any]]}
   [boot name]
   (into [{:db/id "user" :seon.agent/key name :seon.user/name name}
@@ -531,11 +532,22 @@
   (cond-> [[:db/cas [:seon.task/id id] :seon.task/outcome from to]]
     (seq m) (conj (assoc m :seon.task/id id))))
 
+(defn forked-from
+  "The entity id of the agent that task id's agent k is forked from, its :seon.agent/parent, on db: the agent that started the task
+  (:seon.task/started-by: an agent's launch, a subagent, a refine), or root's agent (key \"root\") when a person started it, since a
+  person forks nothing; nil when nobody started it or the parent would be k itself (root's own task). The process tree that fork, stop
+  and exit follow; who asked stays :seon.task/started-by. See docs/users.md#who-started-whom."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :string] [:maybe :int]]}
+  [db id k]
+  (let [by (:seon.task/started-by (d/entity db [:seon.task/id id]))
+        p (if (:seon.user/name by) (d/entity db [:seon.agent/key "root"]) by)]
+    (when (and p (not= k (:seon.agent/key p))) (:db/id p))))
+
 (defn start-tx
   "Agent `agent` (its id; nil: root refused the spawn, and no agent exists) begins task id in root's boot, its turn budget raised by raise (a wake's allowance) turns: the task's
   outcome :running from what it was, naming the agent (its id's name is its key, so a session's agent that continues keeps it, seon.task/agent-key), the judged attributes cleared; the agent's entity (key, task, branch and the rest of its environment,
-  its boot and when it started, and who started it, its :seon.agent/parent: the task's starter, written with the agent and kept
-  when the agent continues), its turn budget set when it is new (a raised budget stays, docs/turn.md#the-cap) and raised by raise in the same write.
+  its boot and when it started, and the agent it is forked from, its :seon.agent/parent (`forked-from`), written with the agent and
+  kept when it continues), its turn budget set when it is new (a raised budget stays, docs/turn.md#the-cap) and raised by raise in the same write.
   A refused spawn is the task's outcome :refused with root's reason and error, and no agent."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int] [:vector :any]]
                   [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int nat-int?] [:vector :any]]]}
@@ -544,13 +556,13 @@
    (let [k (when agent (name agent))
          ae (when k (d/entity db [:seon.agent/key k]))
          from (:seon.task/outcome (d/entity db [:seon.task/id id]))
-         by (:db/id (:seon.task/started-by (d/entity db [:seon.task/id id])))]
+         by (when k (forked-from db id k))]
      (into (outcome-tx db id from :running {})
            (filterv some?
                     [(when k {:seon.task/id id :seon.task/agent k})
                      (when k (cond-> {:db/id k :seon.agent/key k :seon.agent/task [:seon.task/id id]
                                       :seon.agent/branch branch :seon.agent/boot boot :seon.agent/started-ms start-ms}
-                               ;; its task's starter, none when nobody started it (never an invented one)
+                               ;; the agent it is forked from, none when nobody started its task (never an invented one)
                                (and (not (:seon.agent/parent ae)) by) (assoc :seon.agent/parent by)
                                model (assoc :seon.agent/model model)
                                holder (assoc :seon.agent/holder holder)
@@ -969,14 +981,15 @@
   (boolean (some #(= refine-section (get-in % [:seon.cite/target :seon.doc/address])) (cites-of db (pdb/eid db :seon.task/id id)))))
 
 (def ^:private refine-proofs
-  "What every refine proves, beside the refined task's own proofs: the task files and the wiki's pages still load with no refusal,
+  "What every refine proves: the task files and the wiki's pages still load with no refusal,
   which is what a refine edits (the checks of a docs-and-tasks change, AGENTS.md section 3)."
   #{'seon.task-files-test/the-trees-task-files-and-pages-load-with-no-refusal})
 
 (defn refine-decls
   "The refine of task t (a task map as db holds it: its id, ns, name, branch, proofs and agent) and its review, as declarations: a
   :work task on a branch of its own, :seon.task/after t (it starts when t has ended, whatever came of it), its plan citing t and
-  `refine-section` (what makes it a refine), its proofs t's own and `refine-proofs`; and the review, its merge step (a :merge task
+  `refine-section` (what makes it a refine), its proofs `refine-proofs` alone (it changes no code, so t's red proofs could never
+  pass on its branch), done once it changes something (seon.reconcile/done-explain's :no-change); and the review, its merge step (a :merge task
   that needs it on its branch), written held so that no model works it: a session attaches, reads the change and ends it with
   seon_done, which merges the refine or sends it back with why. See docs/tasks.md#a-refine-curates-its-own-task."
   {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id] [:seon.task/ns :symbol] [:seon.task/name :string]]] [:vector :seon.task/declaration]]}
@@ -986,7 +999,7 @@
         br (or (:seon.task/branch t) (default-branch (:seon.task/id t)))]
     [{:seon.task/ns (:seon.task/ns t) :seon.task/name nm :seon.task/kind :work
       :seon.task/after #{(:seon.task/id t)}
-      :seon.task/proofs (into refine-proofs (:seon.task/proofs t))
+      :seon.task/proofs refine-proofs
       :seon.task/plan (str "Refine the task `" (:seon.task/id t) "`, which has just ended, as " refine-section " says: read the run that "
                            "worked it (its agent " (:seon.task/agent t) " on branch " br ", read with (my.db/at {:branch " br "})), then make the task "
                            "better for whoever works it next: its plan (first what blocked the run, then what it learned and did not use), what it cites, "

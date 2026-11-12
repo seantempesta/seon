@@ -261,6 +261,9 @@
         unmerged (pm/unmerged db)
         ;; a design task's plan before the work: the plan its branch began with, its merge base's (the judge reads the same, seon.reconcile/judge)
         plan-before (when (and base (= :design kind)) (some-> (task/task base tid) :seon.task/accumulated :plan))
+        ;; whether the branch did anything since its merge base: a program key moved, else the task content it carries (seon.merge/
+        ;; carried-platform-attrs, a refine's edit of the task it refines), read only when no program key moved; nil: not measured
+        changed? (when base (boolean (or (seq moved) (seq (pm/content-datoms base db pm/carried-platform-attrs)))))
         proof? (set proofs)
         ;; main's claims only when a test outside the proofs is red: the agent's index, else one built cold
         claims (when (some (fn [[t st]] (and (= :fail st) (not (proof? t)))) results)
@@ -277,7 +280,8 @@
                                  :uncontracted (set gaps) :unmerged (mapv #(sedn/encode (:key %)) unmerged) :deferred (set deferred)}
                           (= :design kind) (assoc :plan plan)
                           (and (= :design kind) plan-before) (assoc :plan-before plan-before)))
-                (seq (:caused split)) (assoc :caused (set (:caused split))))
+                (seq (:caused split)) (assoc :caused (set (:caused split)))
+                (some? changed?) (assoc :changed? changed?))
         reasons (r/done-explain input)
         unjudged (when-let [ds (seq (sort-by str (keep (fn [[t {st :status}]] (when (= :deferred st) t)) vs)))]
                    (task/unjudged db t (vec ds)))
