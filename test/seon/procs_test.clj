@@ -941,9 +941,9 @@
 
 ;; Estimate, each piece measured in an agent (2026-11-13): the throw, a case miss (Jolt's IllegalArgumentException) ~0.7M; flow-error
 ;; ~0.13M (its trace: Jolt keeps 25 frames, ~0.1M to read at any depth); api-state ~0.2M; one api step ~0.1M; step-out-ok?'s
-;; validation ~0.3M the first time its schema compiles: ~1.5M, and a shard's first compiles and loads beside it (measured 2M-4.3M):
-;; 3,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 3000000}} a-proc-defect-names-where-it-threw
+;; validation ~0.3M the first time its schema compiles: 1,500,000 ticks, its own work. Measured 2M-4.3M where it ran first in its
+;; shard, which charges the process's first compiles and loads to it: a measurement defect filed for tests, not this test's work
+(deftest ^{:seon.test/estimate {:ticks 1500000}} a-proc-defect-names-where-it-threw
   ;; the standing root's worst open problem: the reconciler's "No matching clause: " 255 times, a
   ;; case meeting nil, with nothing saying in which function or on what message
   (let [ex (try (case (:op {}) :a 1) (catch Exception x x))
