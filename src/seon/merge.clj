@@ -37,7 +37,7 @@
   cause), carried onto main at its run's end (seon.task/carry-tx). Every other seon.* attribute is a platform record (root's boot and
   quiescence, recorded errors, runs, observations) written where it happened and never
   carried, so main writing one never puts a branch behind."
-  #{:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause})
+  #{:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause :seon.task/found-nothing})
 
 (def ^:private stated-keys
   "The program keys one entity's stated attributes hold, by key kind, as data: :id the identity naming the entity, :stated each attribute its content

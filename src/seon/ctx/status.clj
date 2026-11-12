@@ -290,7 +290,9 @@
                           (= :design kind) (assoc :plan plan)
                           (and (= :design kind) plan-before) (assoc :plan-before plan-before)))
                 (seq (:caused split)) (assoc :caused (set (:caused split)))
-                (some? changed?) (assoc :changed? changed?))
+                (some? changed?) (assoc :changed? changed?)
+                ;; a refine's one write: the task it refines names a function it did not (one function, root's judging reads it too)
+                (and base tid) (as-> m (let [n (task/names-new-site? base db tid)] (cond-> m (some? n) (assoc :named-site? n)))))
         reasons (r/done-explain input)
         unjudged (when-let [ds (seq (sort-by str (keep (fn [[t {st :status}]] (when (= :deferred st) t)) vs)))]
                    (task/unjudged db t (vec ds)))

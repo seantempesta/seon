@@ -438,6 +438,7 @@
  ;; what it waited on, how long, its pid), written with the task; then the cause its worker records
  ;; (my.task/update!): what it was, the evidence captured (sample, lsof, ps), whether it is a bug, and the
  ;; defect task filed for one. Its proofs read it (seon.stall-proofs)
+ :seon.task/found-nothing [:string {:description "A refine's typed end with no change site to name: why it found nothing in the run it read (my.task/found-nothing!). The done rule takes it as the refine's write (seon.task/names-new-site?), and the held review reads it on main."}]
  :seon.task/cause [:map {:description "The cause of a stall task: the stall root observed, what it was, the evidence captured, whether it is a bug and the defect task filed for it."} [:stall [:map [:agent :keyword] [:task {:optional true} :seon.task/id] [:quiet-ms :int] [:pid {:optional true} [:maybe :int]]
                                  [:last-op {:optional true} [:maybe :seon.agent/last-op]]
                                  ;; the api's open asks ([rid kind agent]) and the test service's state (seon.prove/state-view) when it stalled
@@ -484,6 +485,7 @@
                           [:seon.task/evidence {:optional true} :seon.task/evidence]
                           [:seon.task/failure {:optional true} :seon.task/failure] [:seon.task/gone {:optional true} :seon.task/gone]
                           [:seon.task/cause {:optional true} :seon.task/cause]
+                          [:seon.task/found-nothing {:optional true} :seon.task/found-nothing]
                           [:seon.task/agent {:optional true} :seon.task/agent] [:seon.task/outcome {:optional true} :seon.task/outcome]
                           [:seon.task/started-by {:optional true} :seon.task/started-by] [:seon.task/reason {:optional true} :seon.task/reason] [:seon.task/reasons {:optional true} :seon.task/reasons]
                           [:seon.task/commit {:optional true} :seon.task/commit]

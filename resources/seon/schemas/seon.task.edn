@@ -139,13 +139,16 @@
                              ;; the red tests that are main's, not this branch's change (red as base holds them): never a stray red
                              [:main-red {:optional true} [:set :qualified-symbol]]
                              ;; whether the branch changed a program key or carried task content since its merge base (absent: not measured)
-                             [:changed? {:optional true} :boolean]]
+                             [:changed? {:optional true} :boolean]
+                             ;; a refine's: whether the task it refines names a function its plan did not at the merge base (absent: no refine)
+                             [:named-site? {:optional true} :boolean]]
  :seon.reconcile/reason [:enum {:description "Why the done rule says a task is not done (seon.reconcile/done-explain), one reason of :seon.reconcile/not-done; each read by a person and the model in its :seon.status/title words (docs/render.md#how-the-work-stands)."
                                 :seon.status/title {:open "still open" :no-proofs "no proof registered" :proof-red "proof red" :proof-unknown "proof has no verdict"
                                                     :regression "green on main, red here" :stray-red "red test that is no proof" :contract-gap "functions without a contract"
                                                     :unmerged "unmerged entries" :no-design "plan unchanged since the run began" :open-problem "problems to clear"
-                                                    :behind "judged before main moved" :no-change "nothing changed on its branch since it began"}}
-                         :open :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem :behind :no-change]
+                                                    :behind "judged before main moved" :no-change "nothing changed on its branch since it began"
+                                                    :no-change-site "the task it refines names no function it did not before"}}
+                         :open :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem :behind :no-change :no-change-site]
  :seon.reconcile/not-done [:map {:closed true :description "One reason a judged task is not done, as its :seon.task/reasons holds them: the reason, and what it is about (the test or var, the key of an unmerged entry, how many transactions main moved). See docs/tasks.md#the-done-rule."}
                           [:reason :seon.reconcile/reason]
                           [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string] [:behind {:optional true} pos-int?]]
