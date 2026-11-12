@@ -712,7 +712,7 @@
   rows and verdict (seon.cost/proof's :actual, a generated case's arguments left to the message
   that prints them) kept as data under :cost (session W2's agent
   page renders them; the judge persists them on the run); a typed error's :seon.error/type,
-  :ticks and :budget (a test past its tick budget)."
+  :ticks and :budget (a test past its tick budget), and the type of a typed throw that ended the test."
   {:malli/schema [:=> [:cat :map [:maybe :string]] :map]}
   [m var]
   ;; a generated case's arguments (a row's :args) stay out: they may be any value, which prints
@@ -729,7 +729,9 @@
       (assoc :got (print/text (second (:actual m)) (:part print/budgets)))
       (contract/valid? :seon.cost/report cost) (assoc :cost cost)
       ;; a test past its tick budget (seon.proofs/run-tests!): the typed error and its counts
-      (:seon.error/type m) (merge (select-keys m [:seon.error/type :ticks :budget])))))
+      (:seon.error/type m) (merge (select-keys m [:seon.error/type :ticks :budget]))
+      ;; a test a typed throw ended (a deadlock, test-child-runs!): its type
+      (and (instance? Throwable (:actual m)) (contract/error? (ex-data (:actual m)))) (assoc :seon.error/type (:seon.error/type (ex-data (:actual m)))))))
 
 (defn- base-graph
   "The reach graph of base under inputs, with its index ({:graph :index}: seon.program/
@@ -1157,17 +1159,33 @@
       (count vs))))
 
 (defn- test-child-runs!
-  "A test child's body (seon.lib/fork!'s :child), fd its end of the link to its run's fold proc (test-run-step),
-  opened as a jolt.async.remote end: set up as bin/test's runner is, then tests run (run-tests-here), each value
-  put on the end's :out, and last the run's answer. The agent says nothing on the link (it closed its half at the
-  fork), so the end's reader has ended and no wait of this child's is on the agent: a test that waits for good is
-  told by Jolt's all-asleep check. A put commits when the value enters :out's buffer, not when it is written
-  (jolt.async.remote): after each, the child yields to the end's writer, so a death right after a test's start
-  still names it. See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
-  {:malli/schema [:=> [:cat :seon.lib/fd :keyword :map nat-int? [:maybe [:map-of :qualified-symbol pos-int?]] [:sequential :qualified-symbol]] :any]}
-  [fd cpid plan ticks budgets tests]
-  (let [{:keys [out sent]} (remote/open fd {:pump :fiber :codec (child-codec cpid)})
-        put! (fn [v] (a/>!! out v) (jolt.fibers/yield))]
+  "A test child's body (jolt.async.remote.flow/fork!'s child), end its end of the link to its run's fold proc
+  (test-run-step), opened by fork! over the one stream it holds: watched as seon.lib/fork!'s children are (seon.lib/end-with!,
+  so it ends with the agent's starter), set up as bin/test's runner is, then tests run (run-tests-here), each value put on
+  the end's :out, and last the run's answer; fork! then closes :out, awaits :sent and exits, a throw put last as ::flow/ex.
+  A test that can never go on is ended once, :error of the typed :seon.test/deadlock with Jolt's dump of every wait, by
+  the child's quiescence (jolt.host/on-quiescent!: every fiber but the link's pumps parked, nothing queued, no timer),
+  thrown into the test's own fiber, so its report and the run's answer still go out: the link's reader awaits the agent,
+  so Jolt's deadlock check never fires here. A put commits when the value enters :out's buffer, not when it is written (jolt.async.remote): after each, the child
+  yields to the end's writer, so a death right after a test's start still names it. See
+  docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
+  {:malli/schema [:=> [:cat :map :map nat-int? [:maybe [:map-of :qualified-symbol pos-int?]] [:sequential :qualified-symbol]] :any]}
+  [end plan ticks budgets tests]
+  (let [{:keys [out fd]} end
+        ;; the test in flight and the fiber running it, from its start to its end: what quiescence ends, once
+        in-flight (atom nil)
+        put! (fn [v]
+               (cond (:seon.test/started v) (reset! in-flight {:fiber (jolt.host/current-fiber) :test (:seon.test/started v)})
+                     (:seon.test/ended v) (reset! in-flight nil))
+               (a/>!! out v) (jolt.fibers/yield))]
+    ;; the starter's watch, armed again here as seon.lib/fork! arms it in each child: nothing it forked outlives root
+    (lib/end-with!)
+    ;; quiescence may be heard twice for one state (a pump ran): the test is taken from in-flight, so it is ended once
+    (jolt.host/on-quiescent!
+     (fn [dump]
+       (when-let [{:keys [fiber test]} (first (reset-vals! in-flight nil))]
+         (let [msg (str "the test can never go on: every fiber of its process waits and nothing can wake one (" test ")")]
+           (jolt.host/fiber-interrupt! fiber (ex-info msg (contract/error :seon.test/deadlock #'seon.agent/test-child-runs! msg {:test test :dump dump})))))))
     ;; the run ends with its agent (a test ends by its own budget): the agent's end of this link closing raises SIGIO here
     ;; and ends the child, whatever the test is doing (the agent's own socket to root was closed at the fork, so its handler is replaced)
     (if-let [unwatched (sock/signal-at-input! fd)]
@@ -1200,18 +1218,15 @@
           ;; a run's reports went as its tests ended: its answer is its end and its counts; a run that threw
           ;; streamed none, so its answer keeps the throw's report (scale's agents read :error 2 and nothing else)
           (a/>!! out (cond-> res streamed? (assoc :reports []))))))
-    ;; all it put reaches the agent before it exits
-    (a/close! out)
-    (a/<!! sent)
     nil))
 
 (defn- fork-test-child
-  "st (test-run-step's) with a test child forked for shard i's tests todo (seon.lib/fork!, the one spawning skeleton:
-  the child holds its end of a jolt.async.remote pair and no other stream) and made proc cpid of this agent's own graph
-  (jolt.async.remote.flow/proc over this end, which says nothing: its half is closed at once), its :seon.link/up routed
-  to the run's fold; its pid told (forked) and its exit watched (jolt.io-poller/exit-chan, then reaped:
-  seon.lib/wait-status) onto the fold's :seon.process/end; or st with the shard's :seon.test/fork-refused when the
-  fork was refused (another thread active). See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
+  "st (test-run-step's) with a test child forked for shard i's tests todo as proc cpid of this agent's own graph
+  (jolt.async.remote.flow/fork!, fiber pumps: the child holds its end of the link and no other stream; its
+  :seon.link/up routed to the run's fold, its :seon.link/down carrying nothing), its pid told (forked) and its exit
+  watched (jolt.io-poller/exit-chan, then reaped: seon.lib/wait-status) onto the fold's :seon.process/end; or st with
+  the shard's :seon.test/fork-refused when the fork was refused (another thread active). See
+  docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
   {:malli/schema [:=> [:cat :map nat-int? [:sequential :qualified-symbol]] :map]}
   [st i todo]
   ;; what ran ahead is committed first, so the child's db is a commit it can make again through its own env (own-store!)
@@ -1221,24 +1236,20 @@
   (let [n (inc (:n st 0))
         cpid (keyword "seon.test" (str (name (:pid st)) "-child-" n))
         {:keys [plan ticks budgets ends]} st
-        [end fd] (remote/remote-pair {:pump :fiber :codec (child-codec cpid)})]
-    (lib/fork!
-     {:fd fd
-      :child #(test-child-runs! fd cpid plan ticks budgets todo)
-      :refused (fn [k] (remote/close! end)
-                 (assoc-in st [:shards i :error]
-                           (contract/error :seon.test/fork-refused #'seon.agent/fork-test-child
-                                           (str "cannot fork the tests: " k " Chez threads active (a running future?)") {:active-threads k})))
-      :parent (fn [os]
-                (a/close! (:out end))
-                (flow/update! (:flow @state) (fn [cfg] (-> cfg (assoc-in [:procs cpid] (rflow/proc {:outs {:seon.link/up (:in end)}}))
-                                                           (update :conns (fnil conj []) [[cpid :seon.link/up] [(:pid st) :seon.link/up]]))))
-                (a/io-thread (a/<!! (poller/exit-chan os)) (a/>!! ends {:seon.process/pid os :seon.process/exit (lib/wait-status os)}))
-                ((:forked st) os)
-                (swap! state assoc :test-child os)
-                (-> st (assoc :n n)
-                    (assoc-in [:children cpid] {:shard i :os os :acc {:streamed [] :ended #{} :fns {} :heap {} :measured {}}})
-                    (assoc-in [:by-os os] cpid)))})))
+        forked (rflow/fork! (:flow @state) cpid #(test-child-runs! % plan ticks budgets todo)
+                            {:in :seon.link/down :out :seon.link/up :pump :fiber :codec (child-codec cpid)
+                             :conns [[[cpid :seon.link/up] [(:pid st) :seon.link/up]]]})]
+    (if-let [os (:pid forked)]
+      (do (a/io-thread (a/<!! (poller/exit-chan os)) (a/>!! ends {:seon.process/pid os :seon.process/exit (lib/wait-status os)}))
+          ((:forked st) os)
+          (swap! state assoc :test-child os)
+          (-> st (assoc :n n)
+              (assoc-in [:children cpid] {:shard i :os os :acc {:streamed [] :ended #{} :fns {} :heap {} :measured {}}})
+              (assoc-in [:by-os os] cpid)))
+      (let [k (lib/active-threads)]
+        (assoc-in st [:shards i :error]
+                  (contract/error :seon.test/fork-refused #'seon.agent/fork-test-child
+                                  (str "cannot fork the tests: " k " Chez threads active (a running future?)") {:active-threads k}))))))
 
 (defn- run-answered
   "st with its run's answer put on its :answer, once: when the fold threw, that throw (::threw); else, once every
