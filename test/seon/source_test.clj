@@ -537,8 +537,13 @@
         why #(root/restart-for %1 %2 %3 %4)]
     (is (nil? (why held "t1" nil inputs)) "main holds the files' tree, the binary is current for it, inputs written: keep running")
     (is (re-find #"no landing brought it in" (why held "t2" nil inputs)) "main is not at the files' tree (no bridge ran): restart, whose boot catches up")
-    (is (re-find #"reaches seon.writer/commit-batch" (why held "t1" {:binary "t0" :tree "t1" :reaches ['seon.writer/commit-batch]} inputs))
-        "what the landing changed reaches code root runs from its binary: restart, naming it")
+    ;; task seon.system/an-update-keeps-running-agents: the bridge's commit loaded the changed forms into root in place
+    ;; (seon.writer's main-commit, seon.program/load-changes!), so a form root runs is no restart; a running agent goes on
+    (is (nil? (why held "t1" {:binary "t0" :tree "t1" :reaches ['seon.writer/commit-batch]} inputs))
+        "what the landing changed is forms root runs, loaded in place by the bridge's commit: keep running")
+    (is (re-find #"reaches deps.edn" (why held "t1" {:binary "t0" :tree "t1" :reaches ["deps.edn" 'seon.writer/commit-batch]} inputs))
+        "a build input no load brings (a path): restart, naming it")
+    (is (re-find #"binary-tree" (why held "t1" {:binary nil :tree "t1" :reaches [] :missing :binary-tree} inputs)) "a binary that recorded no tree: restart")
     (is (re-find #"git said no" (why held "t1" {:binary "t0" :tree "t1" :error "git said no"} inputs)) "a diff git could not make is no answer of current")
     (is (re-find #"stale at its boot" (why (assoc held :stale-binary {:binary "t0"}) "t1" nil inputs)) "a binary stale since its boot: restart")
     (is (re-find #"no inputs" (why held "t1" nil nil)) "no inputs written for the files: restart")

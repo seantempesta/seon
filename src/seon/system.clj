@@ -1460,18 +1460,21 @@
   "Why a landing must restart this system, or nil when it can keep running: held, main's :seon.system/source after the landing's
   bridge (seon.system/landed-tx moved its :tree); tree, the git tree of main's files now (bin/tree, where git runs); stale, the
   binary's answer for held's tree (stale-binary); inputs, what bin/system start's `inputs` mode wrote for the files now
-  (held-inputs). A system keeps running, its agents with it, when main already holds the landed tree as data and the running
-  binary is current for it: the merge loaded the change in place, so only the source fact is written again with the new inputs
-  (booted-source). Each other case is the restart's reason: no source fact; main not at the files' tree (no bridge ran, so
-  only a boot's catch-up reads them); a binary that was stale at its boot, or is stale for the landed tree (a build input, or a
-  form of root-reach, changed); no inputs written. See docs/source.md#a-landing-enters-main-as-data."
+  (held-inputs). A system keeps running, its agents with it, when main already holds the landed tree as data and what the
+  running binary lacks of it is forms: the bridge's commit loaded them into root in place (seon.writer's main-commit,
+  seon.program/load-changes!) and into the fork server, which forks every later agent, so only the source fact is written again
+  with the new inputs (booted-source); the next boot builds. Each other case is the restart's reason: no source fact; main not at
+  the files' tree (no bridge ran, so only a boot's catch-up reads them); a binary that was stale at its boot; what the binary
+  lacks holds a path no load brings (a build input, or a path no rule places), or is unknown (no tree recorded, a diff git
+  could not make); no inputs written. See docs/source.md#a-landing-enters-main-as-data."
   {:malli/schema [:=> [:cat [:maybe :map] :string [:maybe :map] [:maybe :map]] [:maybe :string]]}
   [held tree stale inputs]
   (cond
     (nil? held) "main holds no source fact"
     (not= tree (:tree held)) (str "main holds tree " (:tree held) ", not the files' " tree ": no landing brought it in as data")
     (:stale-binary held) "this system's binary was stale at its boot"
-    stale (str "the running binary is not current for " tree
+    (and stale (or (:error stale) (:missing stale) (some string? (:reaches stale))))
+    (str "the running binary is not current for " tree
                (if (:error stale) (str ": " (:error stale)) (str ": what differs reaches " (str/join ", " (or (seq (:reaches stale)) [(name (:missing stale :code))])))))
     (nil? inputs) "no inputs were written for the files (runs/root-inputs.edn)"))
 
