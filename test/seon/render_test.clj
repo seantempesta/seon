@@ -428,15 +428,22 @@
 
 ;; ---- the page: every page is the walk of one entity ----
 
+(defn- started-tx
+  "User u (a ref: a lookup or a tempid) started agents as (refs), each by a task of its own naming it, as seon.task/start-tx writes a
+  person's request: a user is in no process tree, and its agents are read through its tasks (:seon.task/_started-by)."
+  [u as]
+  (vec (for [[i a] (map-indexed vector as)]
+         {:seon.task/id (str "req/s" (hash [u a]) "-" i) :seon.task/ns 'req :seon.task/name (str "s" (hash [u a]) "-" i) :seon.task/plan "p"
+          :seon.task/kind :work :seon.task/execution :running :seon.task/branch :task-b :seon.task/agent a :seon.task/started-by u})))
+
 (defn- signed-in
   "Main db with a signed-in user, \"user\", who started the agents eids: the agents list every page shows is that user's
   (seon.render.proc/user-sides)."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :int]] :seon.host/db]}
   [db eids]
-  (d/db-with db [(cond-> {:db/id "u" :seon.agent/key "user" :seon.user/name "user" :seon.agent/_parent (vec eids)}
-                   ;; a user's agent is root's child (seon.task/boot-tx), where root's agent is made
-                   (d/entity db [:seon.agent/key "root"]) (assoc :seon.agent/parent [:seon.agent/key "root"]))
-                 {:seon.system/id :root :seon.system/signed-in "u"}]))
+  ;; a user is in no process tree: the agents it started are read through the tasks it started
+  (d/db-with db (into [{:db/id "u" :seon.agent/key "user" :seon.user/name "user"} {:seon.system/id :root :seon.system/signed-in "u"}]
+                      (started-tx "u" eids))))
 
 (defn- paged-dbs
   "Main and a3's branch as production writes them: main holds root, the task, the agent (forked
@@ -1161,8 +1168,8 @@
     (is (str/includes? (p/view-html st1 [:chat :a3]) "href=\"/root\"") "root's line links to its page")
     (is (str/includes? (p/view-html st1 [:chat :a3]) "href=\"/agent/a3\"") "a link to its page, by its key: the name that survives a restart")
     (testing "a new agent the user started is a new entry in the list, its own component, appended; the others are not sent"
-      (let [main' (d/db-with (:main-db st1) (into (seon.task/agent-tx :a4 {:status :busy}) [{:seon.agent/key "a4" :seon.agent/boot "b1" :seon.agent/max-turns 40 :seon.agent/branch :task-a4}
-                                                                                         {:seon.agent/key "user" :seon.agent/_parent [[:seon.agent/key "a4"]]}]))
+      (let [main' (d/db-with (:main-db st1) (into (seon.task/agent-tx :a4 {:status :busy}) (concat [{:seon.agent/key "a4" :seon.agent/boot "b1" :seon.agent/max-turns 40 :seon.agent/branch :task-a4}]
+                                                                                                 (started-tx [:seon.agent/key "user"] [{:seon.agent/key "a4"}]))))
             st2 (#'p/advance-main st1 main')
             [st3 patch] (pass-view st2 [:chat :a3])
             added (concat (:appends patch) (:afters patch) (:prepends patch))]
@@ -1177,8 +1184,7 @@
   ;; page's own units: an agent the user started is on root's page twice (the list, root's sessions), so the user's walk names its elements
   ;; apart. Red before: agent-a3 twice, one unit overwriting the other in the view, a patch for one landing on the other
   (let [[main branch eid] (paged-dbs)
-        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact]}
-                                                {:seon.agent/key "root" :seon.agent/_parent [[:seon.agent/key "user"]]}])
+        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact]}])
         st (root-state (branch-state main branch) main)
         [st1 _] (pass-view st :root)
         html (p/view-html st1 :root)
@@ -1192,8 +1198,7 @@
   ;; :wire marks, other qualified keys, attribute values that are no plain value), counted on the pages the test world draws (an agent's,
   ;; root's, the user's), pinned so a count only goes down: each later change moves a render's look to CSS and its count to none
   (let [[main branch eid] (paged-dbs)
-        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact]}
-                                                {:seon.agent/key "root" :seon.agent/_parent [[:seon.agent/key "user"]]}])
+        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact]}])
         st (root-state (branch-state main branch) main)
         [st1 _] (pass-view st :root)
         [st2 _] (pass-view st1 [:chat :a3])
@@ -2579,7 +2584,7 @@
   ;; every page shows), each with the ones it started; where the pull's depth stops, the entry says how many are below
   (let [db (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a] ["b2/a2" :a2 :idle "x/asks" :parked :task-b] ["b2/a3" :a3 :idle "x/other" :parked :task-c]])
         started (mapv #(:db/id (d/entity db [:seon.agent/key %])) ["b2/a1" "b2/a2"])
-        db (d/db-with db [{:seon.agent/key "sean" :seon.user/name "sean" :seon.agent/_parent started}])
+        db (d/db-with db (into [{:db/id "sean" :seon.agent/key "sean" :seon.user/name "sean"}] (started-tx "sean" started)))
         sean (d/entity db [:seon.user/name "sean"])
         in (fn [units sel] (apply str (map :html (filter #(= sel (:container %)) units))))
         units (user-units db "sean")]
@@ -2594,7 +2599,7 @@
   ;; docs/users.md#whats-on-screen: an entry holds the agents it started; at the depth the user's pull stops, how many are below
   (let [db (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a] ["b2/a2" :a2 :idle "x/asks" :parked :task-b] ["b2/a3" :a3 :idle "x/other" :parked :task-c]])
         started (mapv #(:db/id (d/entity db [:seon.agent/key %])) ["b2/a1" "b2/a2"])
-        db (d/db-with db [{:seon.agent/key "sean" :seon.user/name "sean" :seon.agent/_parent started}])
+        db (d/db-with db (into [{:db/id "sean" :seon.agent/key "sean" :seon.user/name "sean"}] (started-tx "sean" started)))
         in (fn [units sel] (apply str (map :html (filter #(= sel (:container %)) units))))
         units (user-units db "sean")]
       (let [a1 (d/entity db [:seon.agent/key "b2/a1"])
@@ -2796,7 +2801,7 @@
         ks (mapv #(str "b1/a" %) (range 1 (+ n 3)))
         db (d/db-with (my.test/world) (into (seon.task/boot-tx "b1" "sean")
                                             (concat (map (fn [k] {:seon.agent/key k :seon.agent/status :running}) ks)
-                                                    [{:seon.agent/key "sean" :seon.agent/_parent [[:seon.agent/key (first ks)]]}]
+                                                    (started-tx {:seon.agent/key "sean"} [{:seon.agent/key (first ks)}])
                                                     (for [[x y] (map vector ks (rest ks))] {:seon.agent/key x :seon.agent/_parent [[:seon.agent/key y]]}))))
         tree (seon.ctx/agent-ctx (seon.db/index) db (seon.db/eid db :seon.user/name "sean"))
         levels (take-while some? (rest (iterate #(first (vals (:seon.agent/_parent %))) tree)))]
@@ -2874,12 +2879,14 @@
   (let [db0 (d/db-with (my.test/world) (seon.task/boot-tx "b1" "sean"))
         db (d/db-with db0 [{:seon.agent/key "b1/a1" :seon.agent/status :running}
                            {:seon.agent/key "b1/a2" :seon.agent/status :idle}
-                           {:seon.agent/key "sean" :seon.agent/_parent [[:seon.agent/key "b1/a1"] [:seon.agent/key "b1/a2"]]
-                            :seon.user/focus [:seon.agent/key "b1/a1"]}])
-        tree (seon.ctx/agent-ctx (seon.db/index) db (seon.db/eid db :seon.user/name "sean"))]
+                           {:seon.agent/key "sean" :seon.user/focus [:seon.agent/key "b1/a1"]}])
+        db (d/db-with db (started-tx [:seon.agent/key "sean"] [[:seon.agent/key "b1/a1"] [:seon.agent/key "b1/a2"]]))
+        tree (seon.ctx/agent-ctx (seon.db/index) db (seon.db/eid db :seon.user/name "sean"))
+        ;; a user is in no process tree: the agents it started are its tasks' (:seon.task/_started-by, each task a path to its agent)
+        agents (keep :seon.task/agent (vals (:seon.task/_started-by tree)))]
     (is (nil? (:seon.user/focus tree)) "its focus is not its page's: main's, read where home is routed")
-    (is (= #{(seon.db/eid db :seon.agent/key "b1/a1") (seon.db/eid db :seon.agent/key "b1/a2")} (set (keys (:seon.agent/_parent tree)))))
-    (is (= #{:running :idle} (set (keep :seon.agent/status (vals (:seon.agent/_parent tree))))))))
+    (is (= #{(seon.db/eid db :seon.agent/key "b1/a1") (seon.db/eid db :seon.agent/key "b1/a2")} (set (map :db/id agents))))
+    (is (= #{:running :idle} (set (keep :seon.agent/status agents))))))
 
 (deftest a-users-page-moves-with-main
   ;; docs/render.md#a-page-is-a-kept-walk: a user's page is a kept walk, as root's is: a move of main draws what it reached, so an agent it starts appears on a page already open
@@ -3014,15 +3021,19 @@
                 tid (assoc :seon.agent/task [:seon.task/id tid]))]))))
 
 (defn- tree-db
-  "`sessions-db` with the one tree (docs/users.md#who-started-whom): the person (:seon.user/name \"sean\", no pattern of its own: its schema's)
-  started root's session (the agent keyed \"root\", its pattern its role's name and a join to the users forked from it, as seon.system/root-agent-tx writes it; the user its child, as seon.task/boot-tx writes it) and the agents of started (keys; default every
-  session listed), which root's page reads through its session's pull."
+  "`sessions-db` with the one tree (docs/users.md#who-started-whom): root's session (the agent keyed \"root\", its pattern its role's
+  name, as seon.system/root-agent-tx writes it) is the first agent, and the agent of each request the person (:seon.user/name \"sean\",
+  no pattern of its own: its schema's, and in no tree) started is root's child, its task started by the person (seon.task/forked-from,
+  start-tx): those of started (default: every session listed), which root's page reads through its session's pull."
   ([boot sessions] (tree-db boot sessions (map first sessions)))
   ([boot sessions started]
-   (d/db-with (sessions-db boot sessions)
-              [{:seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact]}
-               {:seon.agent/key "sean" :seon.user/name "sean" :seon.agent/parent {:seon.agent/key "root"}
-                :seon.agent/_parent (vec (for [k started] [:seon.agent/key k]))}])))
+   (let [db (d/db-with (sessions-db boot sessions)
+                       [{:seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact]}
+                        {:seon.agent/key "sean" :seon.user/name "sean"}])
+         by (into {} (for [[k _ _ tid] sessions] [k tid]))]
+     (d/db-with db (vec (mapcat (fn [k] (cond-> [{:seon.agent/key k :seon.agent/parent [:seon.agent/key "root"]}]
+                                          (by k) (conj {:seon.task/id (by k) :seon.task/started-by [:seon.agent/key "sean"]})))
+                                started))))))
 
 
 (defn- session-eid [db k] (seon.db/eid db :seon.agent/key k))

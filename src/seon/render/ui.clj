@@ -1642,10 +1642,7 @@
         {:keys [asked reply]} (if db (last-exchange db (:db/id (ratom/untracked c)) t) {:reply (:seon.task/reason t)})
         reply (or reply (when-not asked (:reason stands)))
         ;; the agents it started, as its parent's pull holds them: entries where they were pulled, ids alone where the pull stopped
-        as (get c :seon.agent/_parent)
-        ;; who it started, read tracked (the join's key set): one added or gone draws the entry again
-        _ (when (map? (ratom/untracked as)) (doall (keys as)))
-        kids (members ix as)
+        kids (started-agents ix c)
         [shown below] ((juxt filter remove) #(some? (:seon.agent/key (ratom/untracked %))) kids)]
     [:section {:wire/for "page" :data-standing (name (where-stands stands))}
      [:a {:href (str "/agent/" (agent-address a)) :title (str/join " · " (remove nil? [(:seon.agent/key a) (:text stands) (:seon.task/id t)]))}
@@ -1719,9 +1716,7 @@
          [:span {:class "shrink-0 text-2xs muted"} "the person Seon works for"]]]
        ;; the agents it started, each by its own entry (root's session is the page itself, not listed)
        ;; who it started, read tracked by the join's key set: one added draws the entry again (read untracked, a live root's page never placed it)
-       (let [as (get c :seon.agent/_parent)]
-         (when (map? (ratom/untracked as)) (doall (keys as)))
-         (when-let [kids (seq (started-agents (:seon.render/index opts) as))] (into [:div {:class "started"}] kids)))]
+       (when-let [kids (seq (started-agents (:seon.render/index opts) c))] (into [:div {:class "started"}] kids))]
       (agent-entry (:seon.db/db opts) (:seon.render/index opts) c))
     ;; it names a render of its own this process has none of: drawn by this, its schema's, the reason said where its own would be
     (agent-page c (when-let [r (some-> (get c :seon.render/hiccup) ratom/realize)] (when-not (resolve r) [#'unresolved-list {:wire/for "page"}])))))
@@ -1816,7 +1811,7 @@
         {:keys [exchanges waiting]} (if k (stage-exchanges db ix c k turn) {:exchanges [] :waiting []})
         now (peek exchanges)
         ;; the sessions forked from root's session (the first agent's tree, its :seon.agent/_parent)
-        held (count (started-agents ix (get c :seon.agent/_parent)))]
+        held (count (started-agents ix c))]
     [:section (stage-now waiting now working? (if now (stage-values db ix c k now) []) held) (stage-folds exchanges (boolean (seq waiting)))]))
 
 (defn stage-list
@@ -1950,10 +1945,16 @@
           :else [])))
 
 (defn- started-agents
-  "The agents join value v holds (`members`), root's session left out: root's own line (`root-side`) is its entry in the agents list, and
-  the page it is on needs no entry of itself. Its key is the reserved one root's page names (seon.render.proc/location). See docs/users.md#roots-agent."
+  "The agents entity view c started, as its pull holds them: the agents forked from it (:seon.agent/_parent, an agent's) and, for a person,
+  the agents of the tasks it started (:seon.task/_started-by, each task a path, `members`), root's session left out: root's own line
+  (`root-side`) is its entry in the agents list, and the page it is on needs no entry of itself. Each join is read tracked by its key set,
+  so one added or gone draws its reader again. Its key is the reserved one root's page names (seon.render.proc/location). See
+  docs/users.md#roots-agent."
   {:malli/schema [:=> [:cat :map :any] [:sequential :any]]}
-  [ix v] (remove #(= "root" (:seon.agent/key (ratom/untracked %))) (members ix v)))
+  [ix c]
+  (remove #(= "root" (:seon.agent/key (ratom/untracked %)))
+          (mapcat (fn [k] (let [v (get c k)] (when (map? (ratom/untracked v)) (doall (keys v))) (members ix v)))
+                  [:seon.agent/_parent :seon.task/_started-by])))
 
 (defn tiles
   "The tiles entity c's pull joins, read by pattern p: each entity its joins hold that is a tile (`tile?`), in the pattern's order, as
@@ -2337,10 +2338,7 @@
   {:seon.render/style "#c-side > section { padding: 0.125rem 0.25rem; } #c-side .said { display: none; } #c-side .started { margin-left: 0.75rem; padding-left: 0.5rem; border-left: 1px solid var(--color-base-800); }"
    :seon.render/list "c-side" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx ix :seon.render/index}]
-  (let [as (get c :seon.agent/_parent)]
-    ;; who is in it, read tracked (its key set): a member added or gone draws the list again; each entry is its own component
-    (doall (keys as))
-    [:ol {:id "c-side"} [#'root-side {}] (seq (started-agents ix as))]))
+  [:ol {:id "c-side"} [#'root-side {}] (seq (started-agents ix c))])
 
 (defn root
   "The system entity (the declared html render of :seon.system/root-fact), on the system's own walk (seon.render.proc's root walk, which holds
