@@ -48,7 +48,7 @@ Run, then right, then fast. If you can't show it running, it isn't done.
 
 **One tip, one landing** ([merging](docs/merging.md#a-branch-lands-with-binland)):
 1. Each session works a short branch, `jolt/<task-name>`, in its own worktree (`bin/worktree NAME`). The main tree stays on main and clean.
-2. When the change is done, merge main into the branch and run `nice -n 15 bin/prove` once. It runs everything the change reaches and reuses every green stored at its digest; it is never a hand-picked set of namespaces. **At most two proves at once on this machine:** read the notes folder's `mail/PROVING`, add your line when fewer than two are listed, and remove it when you finish. The standing system's merge check counts as one.
+2. When the change is done, merge main into the branch and run `nice -n 15 bin/prove` once. It runs everything the change reaches and reuses every green stored at its digest; it is never a hand-picked set of namespaces. `bin/prove` asks the standing system's test service, one queue for the machine whatever the number of askers ([the test service](docs/merging.md#the-test-service)): there is nothing to count or wait for.
 3. Green: mail Point `LAND <branch> <sha>` with a landing message of 10 lines or fewer. It gives the step of THE PLAN, what the change deletes, the `src` delta, the estimate beside the measured number, and what allowed the bug. A docs-and-tasks change is never proved: commit it, mail Point, and Point lands the pending docs-and-tasks changes together after one `bin/check health` and `seon.doc-test`. A change to docs must rerun no test that does not read the docs ([what a test takes](docs/source.md#tests-run-by-reach)).
 4. Point reads the diff and lands it alone with `bin/land -F MSGFILE`, which brings the standing system up to date through `bin/update`. Tips are never batched.
 5. Never wait on a landing: start the next change from main or from your own tip.
@@ -118,7 +118,7 @@ Name things with Clojure's, its libraries', Jolt's and git's words: entity, attr
 ## 8. The machine
 
 - **Seon's target is a 16 GB MacBook M1** (`bin/check scale`). The machine the sessions build on has 18 cores and 128 GB.
-- **Heavy runs** (`bin/build`, `bin/prove`) run under `nice -n 15`, at most two proves at once (§3).
+- **Heavy runs** (`bin/build`, `bin/prove`) run under `nice -n 15`; proves share the one service (§3).
 - **Never flood it:** anything that makes threads or processes starts at n ≤ 100; one experiment at a time; never make load to reproduce something ([machine](docs/machine.md#processes)).
 - **Kill only verified PIDs:** read the full command and its cwd first; never `pkill`, `killall` or a `pgrep -f` pattern. A system's processes end with it.
 - **A hang is evidence:** capture it before killing the process ([machine](docs/machine.md#reading-a-hang)).
