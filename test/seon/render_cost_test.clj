@@ -634,8 +634,9 @@
                :n "turns of the agent, an eval each"
                :work "nothing moved: the root reused, the last answers answered"
                :growth :constant
-               ;; measured 2026-11-12 on jolt/web by the test runner: 17 calls, 19.0 KB, 3.5k ticks at every size
-               :fixed {:calls 17 :bytes 19500}
+               ;; measured 2026-11-12 on jolt/web by the test runner: 17 calls, 19.0 KB, 3.5k ticks at every size; 18 and 20.2 KB once the
+               ;; queueing of what moved became its own function (walk's form was over the token bound)
+               :fixed {:calls 18 :bytes 21000}
                :sizes [10 20 40]}))
 
 (defn newest-pair-of
