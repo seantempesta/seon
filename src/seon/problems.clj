@@ -482,7 +482,7 @@
                 :when (and (empty? (d/datoms db :avet :schema/key k)) (not (contains? contract/host-schemas k)))
                 :let [nsym (symbol (namespace k)) s (str "unschemed-key " k)
                       vars (vec (sort (keep #(some-> (first (d/datoms db :eavt % :form/defines)) :v (->> (d/entity db)) :var/name) es)))]]
-            (derived-row ans s nsym (str k " is named in src (" (str/join ", " (take 3 vars)) ") and no schema entry defines it: write its entry, with a :description")
+            (derived-row ans s nsym (str k " is named in src by " (count vars) " vars (the row's :vars) and no schema entry defines it: write its entry, with a :description")
                          {:kind :unschemed-key :key k :vars vars} {:key k :vars vars}))))))
 
 (defn waived-proofs
