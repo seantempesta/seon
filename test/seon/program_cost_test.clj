@@ -129,9 +129,9 @@
 
 (defn on-disk-changes-of
   "seon.merge/delta-changes' arguments on on-disk-diverged-of's stores: main holding n forms, its
-  branch redefining one."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db]]}
-  [n] (vec (on-disk-diverged-of n)))
+  branch redefining one, no declared data."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db [:set :keyword]]]}
+  [n] (conj (on-disk-diverged-of n) #{}))
 
 (deftest a-turns-diff-reads-what-the-branch-changed
   ;; one diff a turn (root's audit, 2026-10-27: a turn read its base-to-head diff 4-6 times,
@@ -157,66 +157,16 @@
        ;; :db/txInstant stopped being a content attribute (this store's branch has one transaction; a branch of 18 evals
        ;; has 87, ~0.4M ticks more: docs/cost.md#a-diff-per-attribute-costs-a-descent-each). What it replaced per turn: this, plus divergence three or four times (453-678 KB each), so a turn's
        ;; diff reads went from ~2.5-3.3 MB to one of these
-       ;; 2026-11-12: seon.merge/content-attr? is a contracted defn- (the contracts check), and a test shard arms a private
-       ;; contract (production does not wrap a defn-), so the predicate its filters ask of each attribute is counted (959 measured)
        :per-n {}
-       :fixed {:ticks 1400000.0 :bytes 5000000.0 :calls 1000}
+       :fixed {:ticks 1400000.0 :bytes 5000000.0 :calls 59}
        :sizes divergence-sizes})
     (finally (release-stores!))))
 
-(def ^:private rebase-sizes "The branch's own transactions the merge-down proof measures." [1 10 30])
-
-(defn on-disk-rebase-of
-  "seon.merge/rebase's arguments on an on-disk store of 100 forms: [mconn base head main b {} []], the branch holding
-  k transactions of its own since the base (each a new definition: an agent's work) and main one redefinition since.
-  Made before the measured call; release-rebase-stores! removes them."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/conn :seon.host/db :seon.host/db :seon.host/db :keyword :map [:vector :any]]]}
-  [k]
-  (let [path (on-disk-path (+ 100000 k))
-        _ (seon.lib/remove-tree! path)
-        {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
-        _ (d/transact conn {:tx-data (vec (mapcat #(program/account-tx @conn (acct % "x") %) (range 100)))})
-        base @conn
-        _ (d/branch! conn :db :branch)
-        bc (pdb/connect (assoc cfg :branch :branch))]
-    (dotimes [i k] (d/transact bc {:tx-data (program/record-tx @bc (acct (+ 100 i) "x"))}))
-    (d/transact conn {:tx-data (program/record-tx @conn (acct 50 "(inc x)"))})
-    [conn base @bc @conn :branch {} []]))
-
-(defn- release-rebase-stores!
-  "The merge-down proof's stores, released whatever holds them and removed."
-  []
-  (doseq [k rebase-sizes :let [path (on-disk-path (+ 100000 k))] :when (pdb/store? path)]
-    (doseq [b [:db :branch]] (d/release (pdb/connect (assoc (pdb/store-cfg :lmdb path) :branch b)) true))
-    (seon.lib/remove-tree! path)))
-
-(deftest a-merge-down-costs-what-it-replays
-  ;; one-merge-cost (2026-11-12: swarm ran 85 s on the one merge against main's 13.6 s): a merge down replays the
-  ;; branch's own transactions since the base onto main through the checked write, and reads main's since the base
-  (try
-    (cost/proof
-      {:of 'seon.merge/rebase :input 'seon.program-cost-test/on-disk-rebase-of
-       :n "the branch's own transactions since the base, each a new definition (main moved by one redefinition)"
-       :work (str "each of the branch's n transactions (~10 datoms, 4 entities) replayed through the checked write, "
-                  "the two histories' diff since the base, and main's one transaction read for :applied")
-       :growth :linear
-       ;; estimate (lower bound, before any run): a replayed tx of ~10 datoms is 3 index inserts each at a transient
-       ;; insert's floor (~100 ticks: ~3k), 4 entities checked against their schemas (~2.5k each: ~10k), its paths in
-       ;; the history diff (~5k): ~20k ticks and ~10 KB a tx, ~5 contracted calls. Fixed: the plan's net change of main's
-       ;; one redefinition and its replay for :applied, ~50k ticks, ~100 KB, ~60 calls (delta-changes' 59)
-       ;; measured 2026-11-12 (red, held to the estimate): ~80k ticks and ~170 KB a replayed tx (17 KB a datom: Datahike's
-       ;; transact cost a datom, task datahike.transaction/a-datom-costs-what-it-stores) and ~15 calls, ~175k ticks fixed:
-       ;; the swarm's 85 s against 13.6 s. Green once a transact costs what its datoms are
-       :per-n {:ticks 20000 :bytes 10000 :calls 5}
-       :fixed {:ticks 50000 :bytes 100000 :calls 60}
-       :sizes rebase-sizes})
-    (finally (release-rebase-stores!))))
-
 (defn on-disk-content-of
-  "seon.merge/content-datoms' arguments given a diff, on on-disk-diverged-of's stores: [base head, the whole :eavt diff
-  between them], read here, before the measured call."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db [:sequential :seon.host/datom]]]}
-  [n] (let [[base head] (on-disk-diverged-of n)] [base head (apply concat (d/datoms-diff base head :eavt []))]))
+  "seon.merge/content-datoms' arguments given a diff, on on-disk-diverged-of's stores: [base head no data
+  attributes, the whole :eavt diff between them], read here, before the measured call."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db [:set :keyword] [:sequential :seon.host/datom]]]}
+  [n] (let [[base head] (on-disk-diverged-of n)] [base head #{} (apply concat (d/datoms-diff base head :eavt []))]))
 
 (deftest content-datoms-given-a-diff-are-a-filter
   ;; docs/cost.md#a-diff-per-attribute-costs-a-descent-each: given the diff a caller read, no descent is made
@@ -226,9 +176,9 @@
        :n "forms main and the branch hold (the branch redefines one)"
        :work "one filter over the datoms that differ, by attribute; no datoms-diff, so no descent from the roots"
        :growth :constant
-       ;; one seon.merge/content-attr? per attribute of the diff, counted in a test shard since it is a contracted defn- (2026-11-12: 16 measured)
        :per-n {}
-       :fixed {:ticks 6000.0 :bytes 8000.0 :calls 16}
+       ;; 4 calls since 2026-10-30: seon.merge/content-attr builds the filter's predicate, one contracted call
+       :fixed {:ticks 6000.0 :bytes 8000.0 :calls 4}
        :sizes divergence-sizes})
     (finally (release-stores!))))
 
@@ -527,6 +477,28 @@
      :per-n {:ticks 55000.0 :bytes 480000.0}
      :fixed {:ticks 100000.0 :bytes 100000.0}
      :sizes [10 30 100]}))
+
+(defn carried-of
+  "merge-tx's arguments: a base, a branch adding n forms to it, and the keys of those forms."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db [:sequential :any] :seon.merge/data-attrs]]}
+  [n]
+  (let [base (first (branch-of 1))
+        src (reduce (fn [db i] (let [nsym (symbol (str "app.c" i))] (d/db-with db ((mt/code nsym (str "(ns " nsym ")\n(defn f [] " i ")\n")) db)))) base (range n))
+        ks (keys (:ours (seon.merge/delta-three-way base src base #{})))]
+    [base base src (vec ks) #{}]))
+
+;; docs/sharing.md#where-a-fact-lives: a merge reads the schema once. It read (d/schema src) per carried datom, which rebuilds the whole schema map:
+;; 418 M ticks a real merge of about 60 keys, 24 M since
+(deftest a-merge-costs-what-it-carries
+  (cost/proof
+    {:of 'seon.merge/merge-tx :input 'seon.program-cost-test/carried-of
+     :n "forms the branch added"
+     :work "one diff of the branch against its base, one seek per carried datom's entity, the schema read once"
+     :growth :linear
+     ;; measured: 14.0 / 21.3 / 49.2 / 134.7 MB and 5.2 / 8.7 / 22.2 / 63.7 M ticks at 10 / 30 / 100 / 300; with the schema read per datom, 285.8 MB at 10
+     :per-n {:bytes 400000.0}
+     :fixed {:bytes 10000000.0}
+     :sizes [3 10 30]}))
 
 (defn digested-of
   "program-digest's argument: a branch db holding n forms (branch-of's)."

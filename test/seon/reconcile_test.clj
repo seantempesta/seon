@@ -75,6 +75,8 @@
   {:op :spawn :task (str "demo/" nm)
    :env {:branch (task/default-branch (str "demo/" nm)) :model model :max-turns (cfg/value :seon.config.agent/max-turns)}})
 (defn- t [nm] (symbol "demo-test" (str nm "-test")))
+(def conflict-f {:key [:var 'app/f] :base {:src "(defn f [x] x)"}
+                 :ours {:src "(defn f [x] (inc x))"} :theirs {:src "(defn f [x] (dec x))"}})
 
 (defn- mdb
   "A main db of decls with their merge tasks (template/with-merge), all released."
@@ -411,7 +413,7 @@
                gate (first (:results (ask {:op :octopus-merge :branches [ab]})))
                db (db-of [(decl "a")] :extra (work "a" :running))
                judged (judgment-of db "a" {:end {:outcome :green} :results {(t "a") :pass} :uncontracted (set (:uncontracted diff))})]
-           (is (= #{'app.gaps/u} (set (pm/uncontracted (pm/delta-changes base @bc)))) "the agent's done check")
+           (is (= #{'app.gaps/u} (set (pm/uncontracted (pm/delta-changes base @bc #{})))) "the agent's done check")
            (is (= '[app.gaps/u] (:uncontracted diff)) "the writer's diff")
            (is (= [{:reason :contract-gap :symbol 'app.gaps/u}] (:reasons judged)) "root's judge: g is main's gap, fixed on main")
            (is (= :seon.merge/behind (:seon.error/type gate)) "the gate: behind first, its gaps judged once main merges in"))
@@ -1207,51 +1209,6 @@
       (is (= :closed (:seon.task/outcome tk)))
       (is (= :seon.merge/behind (:seon.error/type (:seon.task/error tk))) "with the writer's evidence"))))
 
-;; docs/reconcile.md#a-task-holds-how-its-work-ended: the one merge's refusals (seon.writer): a replayed transaction main's write
-;; check refused (main moved since the base) runs the merge again, merging main first, as behind does; a conflict and an entity
-;; with no identity hold the task (no rerun resolves them). Red before: every type but :seon.merge/behind held
-(deftest a-replay-refused-merge-runs-again-as-behind
-  (let [answer (fn [r]
-                 (let [db (mdb [(decl "add")] :extra (concat (work "add" :done) (work "add-merge" :running)))
-                       db (d/db-with db [{:seon.task/id "demo/add-merge" :seon.task/outcome :ready}])
-                       act (first (filter #(= :octopus-merge (:op %)) (actions-for db)))
-                       [st _] (#'r/start (st-of db) act)
-                       [_ outs] (#'r/advance st "demo/add-merge" :octopus-merged {:ok true :results [r]})
-                       tx (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= :write (get-in % [:req :op])) outs)))]
-                   (task/task (d/db-with db tx) "demo/add-merge")))
-        ;; each with the data its schema holds (seon.merge.edn): what the writer answers
-        err (fn [t] (contract/error t 'seon.writer/applied! "refused"
-                                    (case t
-                                      :seon.merge/replay-refused {:seon.merge/refused (assoc (contract/error :seon.system/refused 'seon.db/transact-checked "requires :task/plan" {}) :db/id 7)}
-                                      :seon.merge/conflict-refused {:seon.merge/conflicts [{:seon.merge/entity 9 :seon.merge/attribute :seon.task/plan :seon.merge/ours "a" :seon.merge/theirs "b"}]})))]
-    (let [tk (answer (err :seon.merge/replay-refused))]
-      (is (= [:running :behind] [(:seon.task/execution tk) (:seon.task/outcome tk)]) "a replay main refused: behind, it runs again"))
-    (doseq [t [:seon.merge/conflict-refused]]
-      (let [tk (answer (err t))]
-        (is (= [:held :closed] [(:seon.task/execution tk) (:seon.task/outcome tk)]) (str t ": held for root"))))))
-
-;; docs/errors.md#problems: an answer that is the writer's own fault (its invariant broken: something pending when a merge op
-;; began, :seon.writer/pending) is a problem of the system, never the task's outcome: the merge's tasks stay :ready and a gated
-;; task stays at its gate, to be tried again. Red before: the octopus step zipped the members with no results and recorded
-;; nothing anywhere; the gate marked every test :error with the writer's fault on the task
-(deftest a-writers-own-fault-is-the-systems-problem-not-the-tasks
-  (let [fault (fn [op] (contract/error :seon.writer/pending 'seon.writer/pending-refused "a merge found something pending" {:op op}))
-        db (d/db-with (mdb [(decl "add")] :extra (concat (work "add" :done) (work "add-merge" :running)))
-                      [{:seon.task/id "demo/add-merge" :seon.task/outcome :ready}])
-        act (first (filter #(= :octopus-merge (:op %)) (actions-for db)))
-        [st _] (#'r/start (st-of db) act)
-        [st2 outs] (#'r/advance st "demo/add-merge" :octopus-merged (fault :octopus-merge))
-        problems (filter #(= :problem (:op %)) outs)
-        writes (filter #(= :write (get-in % [:req :op])) outs)]
-    (is (= [:platform] (map :class problems)) "the octopus op's own refusal is the system's problem")
-    (is (empty? writes) "and nothing is written on its tasks: they stay :ready")
-    (is (nil? (get-in st2 [:flights "demo/add-merge"])) "the flight ends, so the next pass tries again")
-    (let [[st3 outs3] (#'r/advance (assoc-in st [:flights "demo/add-merge" :act] {:op :gate :task "demo/add-merge" :tests ['demo-test/add-test]})
-                                   "demo/add-merge" :gated (fault :merge-candidate))]
-      (is (= [:platform] (map :class (filter #(= :problem (:op %)) outs3))) "the gate's candidate refused by the writer: the system's problem")
-      (is (empty? (filter #(= :write (get-in % [:req :op])) outs3)) "no test marked :error, nothing on the task")
-      (is (nil? (get-in st3 [:flights "demo/add-merge"]))))))
-
 (deftest a-branch-behind-main-is-told-so-first
   ;; task seon.system/a-behind-merge-is-bounded-and-merges-main-first (gap 7): a branch behind main was judged
   ;; on a program main had moved from and read "proof-unknown"; the done rule leads with the fix, and the judging
@@ -1336,7 +1293,12 @@
              ["its proof never run" "demo/add" (:db (judge! (told unknown) "add" {:outcome :red} :results {}))
               "the same verdict again: proof-unknown demo-test/add-test" :closed]
              ["a dead agent" "demo/add" (d/db-with dead-db (#'r/dead-tx (st-of dead-db) "demo/add" died nil))
-              "its agent died: agent a-add died: exit 70" :dead]]]
+              "its agent died: agent a-add died: exit 70" :dead]
+             ["a merge conflict" "demo/add-merge"
+              (let [db (mdb two-tasks :extra (concat (work "add" :done) (work "add-merge" :running)))]
+                (:db (judge! db "add-merge" {:outcome :red} :results {(t "add") :pass}
+                             :on-branch [(assoc (pm/conflict-tx conflict-f) :seon.merge/main-t 5)] :diff {:unmerged [[:var 'app/f]]})))
+              "ended red: unmerged [:var app/f]" :closed]]]
       (testing why
         (let [tk (task/task db' id)
               before (mdb two-tasks)]
@@ -1350,6 +1312,11 @@
           (is (= id (:from (:seon.task/evidence tk))))
           (is (= outcome (:seon.task/outcome tk)) "the task is answered once")
           (is (= :failed (r/task-state (r/index db') id))))))
+    (testing "a merge conflict's evidence is the branch's entries"
+      (let [db (mdb two-tasks :extra (concat (work "add" :done) (work "add-merge" :running)))
+            {db' :db} (judge! db "add-merge" {:outcome :red} :results {(t "add") :pass}
+                              :on-branch [(assoc (pm/conflict-tx conflict-f) :seon.merge/main-t 5)] :diff {:unmerged [[:var 'app/f]]})]
+        (is (= [conflict-f] (mapv #(select-keys % (keys conflict-f)) (:conflicts (:seon.task/evidence (task/task db' "demo/add-merge"))))))))
     (testing "a merge the octopus merge refused: the reconciler proc's answer to the writer"
       (let [db (mdb [(decl "add")] :extra (concat (work "add" :done) (work "add-merge" :ready)))
             [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1" :conn conn}) :main (ts/commit-of conn db))
@@ -1488,23 +1455,19 @@
            (r/root-causes (r/index db))))))
 
 (deftest hairy-rule
-  ;; refs: the task's proofs and the names its plan's cites hold (the facts its write derived, never its text re-parsed);
-  ;; a conflict is a :seon.merge/data-conflict, and main deleted a var when main's end (:theirs) is gone on a var's entity
-  (let [sch "{:malli/schema [:=> [:cat] :int]}"
-        db (ts/test-db)
-        db (d/db-with db (source/refresh-tx db {"src/app/m.clj" (str "(ns app.m)\n" (apply str (for [n '[f g h i j z]] (str "(defn " n " " sch " [] 1)\n"))))}))
-        e (fn [n] (:db/id (d/entity db [:var/name (symbol "app.m" (name n))])))
-        refs '#{app.m/g app.m/f app.proofs/a-test}
-        c (fn [n theirs] {:seon.merge/entity (e n) :seon.merge/attribute :var/form :seon.merge/base 1 :seon.merge/ours 2 :seon.merge/theirs theirs})
-        merge-cfg {:max-conflicts 3 :max-merge-turns 2 :db db}]
+  ;; refs: the task's proofs and the names its plan's cites hold (the facts its write derived, never its text re-parsed)
+  (let [refs '#{app/g app/f app.proofs/a-test}
+        c (fn [k sides] (into {:key [:var k]} (for [s sides] [s {:src "x"}])))
+        merge-cfg {:max-conflicts 3 :max-merge-turns 2}]
     (are [conflicts merge-turns rule] (= rule (:rule (r/hairy (merge merge-cfg {:conflicts conflicts :refs refs :merge-turns merge-turns}))))
       [] 0 nil
-      [(c 'f 3)] 0 nil
-      [(c 'f 3) (c 'h 3) (c 'i 3)] 0 nil
-      [(c 'f 3) (c 'h 3) (c 'i 3) (c 'j 3)] 0 :too-many-conflicts
-      [(c 'g :seon.merge/gone)] 0 :deleted-by-them-referenced
-      [(c 'z :seon.merge/gone)] 0 nil
-      [(c 'f 3)] 3 :merge-turns)))
+      [(c 'app/f [:base :ours :theirs])] 0 nil
+      [(c 'app/f [:base :ours :theirs]) (c 'app/h [:base :ours :theirs]) (c 'app/i [:ours :theirs])] 0 nil
+      [(c 'app/f [:base :ours :theirs]) (c 'app/h [:base :ours :theirs]) (c 'app/i [:ours :theirs]) (c 'app/j [:ours :theirs])] 0 :too-many-conflicts
+      [(c 'app/g [:base :ours])] 0 :deleted-by-them-referenced
+      [(c 'app/z [:base :ours])] 0 nil
+      [(c 'app.proofs/a-test [:base :ours])] 0 :deleted-by-them-referenced
+      [(c 'app/f [:base :ours :theirs])] 3 :merge-turns)))
 
 (deftest quiescence-is-reported-when-nothing-can-move
   (ts/test-branch! (fn [_ conn]
@@ -1698,7 +1661,7 @@
     (is (= [(assoc conflict :from "demo/a")] (map :evidence (get-in (problems/report judged) [:classes :task-conflict :rows])))
         "root sees it among the problems")
     (testing "main's task plans never put a merge behind: merging merges the program, no task data"
-      (is (empty? (:theirs (pm/three-way (pm/program base) (pm/program branch) (pm/program main))))))))
+      (is (empty? (:theirs (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program main #{}))))))))
 
 (deftest a-waiting-agent-parks-its-task-and-a-message-wakes-it
   ;; design agent-loop sections 1-2 (owner, 2026-10-25: "Always park"): an agent that ends waiting

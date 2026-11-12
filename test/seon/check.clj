@@ -174,7 +174,7 @@
   straight to the writer does not wait for), as a run's end is committed before its merge."
   [sys id]
   (let [_ @(c/submit! sys id "(seon.agent/commit!)")
-        r @(c/call! sys {:op :write :req {:op :octopus-merge :branches [(get-in (c/state sys) [:agents id :branch])]}})]
+        r @(c/call! sys {:op :write :req {:op :octopus-merge :branches [(get-in (c/state sys) [:agents id :branch])] :data-attrs :all}})]
     (if (contract/error? r) r (first (:results r)))))
 
 (defn- main-q [sys query & inputs] (apply d/q query @(:conn sys) inputs))

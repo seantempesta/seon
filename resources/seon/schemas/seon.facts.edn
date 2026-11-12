@@ -735,9 +735,9 @@
                          [:seon.judge/score {:optional true} :seon.judge/score] [:seon.judge/stopped {:optional true} :seon.judge/stopped]]
  ;; ---- the program merge's facts (session D1's proto.merge.facts.edn) ----
  :seon.merge/key [:and {:seon.db/index true} :seon.db/plain]
- :seon.merge/base [:and {:description "A conflict's base: the value the two sides' base held at its key."} :seon.db/plain]
- :seon.merge/ours [:and {:description "A conflict's end on the receiving branch: a value, true for a member held, or :seon.merge/gone."} :seon.db/plain]
- :seon.merge/theirs [:and {:description "A conflict's end on the branch merged in: a value, true for a member held, or :seon.merge/gone."} :seon.db/plain]
+ :seon.merge/base :seon.db/plain
+ :seon.merge/ours :seon.db/plain
+ :seon.merge/theirs :seon.db/plain
  :seon.merge/main-t :int
  :seon.merge/resolved? :boolean
  :seon.merge/entry-fact [:map {:seon.db/attributes true}

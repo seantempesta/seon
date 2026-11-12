@@ -943,7 +943,7 @@
       (testing label
         (is (= (caused-full base head) (caused-sites base head)))
         (is (= (problems/caused base head)
-               (problems/caused base head (seon.merge/delta-changes base head) (diff base head)))
+               (problems/caused base head (seon.merge/delta-changes base head #{}) (diff base head)))
             "given the whole diff, the same rows: the datoms it holds beyond caused-datoms' are not read")))
     (testing "and the cases are not all empty"
       (is (seq (problems/caused base (get scenarios "a catch site is added")))))))
@@ -960,7 +960,7 @@
             base (catch-forms (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/c.md" page})) n)
             changed (str/replace page "## S0\n\nIt reads `" (str "## S0\n\nIt reads `app.nowhere/dead` and `"))
             head (catch-forms (d/db-with base (seon.doc/load-tx base "demo" {"demo/c.md" changed})) (inc n))]
-        [base head (seon.merge/delta-changes base head) (problems/caused-datoms base head)]))
+        [base head (seon.merge/delta-changes base head #{}) (problems/caused-datoms base head)]))
 
 (deftest caused-follows-what-changed
   ;; the program grows (n sections citing, n catch sites); the change is fixed (one section, one

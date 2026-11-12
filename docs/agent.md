@@ -206,9 +206,10 @@ The judge's test selection follows reach: a change to a namespace many others re
 
 ## Merging
 
-How merging with main works, and what to do when it conflicts. Main is merged into your branch as it moves, as git rebases: your branch starts again from main and your own transactions since the base are replayed on it. The rebased commit is built first and the branch's head moves to it once, from the head the merge read; if the head moved meanwhile, the merge is refused and nothing changes: merge again. An entity's attribute both you and main changed to your own values is a conflict (`:seon.merge/data-conflict`: `:seon.merge/entity`, `/attribute`, `/base`, `/ours`, `/theirs`); the merge writes nothing, and your status's `:unmerged` names each with its `:seon.merge/resolve`.
+How merging with main works, and what to do when your status shows an unmerged entry. Main's work is merged into your branch as main moves (a work agent's too), and a merge task's branch has main merged in: each entry both changed is unmerged, shown under your status's `:unmerged` with its `:base`, `:ours` and `:theirs`, and resolved by you at the REPL.
 
-- `(my.branch/unmerged)` lists them. Settle them by merging again with resolutions, `[entity attribute]` (the entity by its id or a lookup ref) to the value you keep: ``(my.branch/merge-main! {[[:seon.task/id "app/x"] :seon.task/plan] "the plan both need"})``; `:seon.merge/gone` retracts it.
+- `(my.branch/unmerged)` lists them. Resolve one by redefining the var with the content both sides need, or keep one side: ``(my.branch/resolve! 'ns/var :theirs)``, or ``(my.branch/resolve! 'ns/var)`` to keep yours.
+- Your branch sees only its own changes until then.
 
 ## Ending
 

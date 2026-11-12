@@ -131,9 +131,6 @@
  :seon.db/invalid-entity [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/invalid-entity]] [:entity :string] [:schema :qualified-keyword]
                           [:missing [:vector :qualified-keyword]] [:entities {:optional true} [:vector :string]]]]
  :seon.writer/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.writer/refused]]]]
- ;; an op that applies on main's connection's run-ahead (the octopus merge, the merge gate's candidate) found transactions pending
- ;; there when it started (seon.writer/pending-refused): the writer's invariant broken; it wrote and abandoned nothing
- :seon.writer/pending [:and :seon.error/base [:map [:seon.error/type [:= :seon.writer/pending]] [:op [:enum :octopus-merge :merge-candidate]]]]
  :seon.merge/uncontracted [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/uncontracted]]
                                                   [:uncontracted [:vector :qualified-symbol]]]]
  ;; a form or a test run stopped by the work it did: its engine ticks reached the budget

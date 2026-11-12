@@ -63,7 +63,7 @@ The tests run in a fork of the agent: the plan is selected in the parent (```seo
 
 ## A merge task's loop
 
-Every agent first merges main into its branch with no model call. A merge task's agent merges main again each time all is green, until a merge brings nothing new; it stops when the merge is too hairy (`seon.reconcile/hairy`, over the task's facts). It settles conflicts with main at the REPL ([agent](agent.md#merging)). Green work of any task merges main before it ends.
+Every agent first merges main into its branch with no model call. A merge task's agent merges main again each time all is green, until a merge brings nothing new; it stops when the merge is too hairy (`seon.reconcile/hairy`, over the task's facts). It resolves unmerged entries at the REPL ([agent](agent.md#merging)). Green work of any task merges main before it ends.
 
 ## What a turn merges from main
 
