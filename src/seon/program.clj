@@ -1309,7 +1309,13 @@
         whole? (fn [n] (when-let [^java.io.File file (and (tnss n) (nil? (find-ns n)) (file-of n))]
                          (and (.isFile file)
                               (every? #(:form/source (d/entity db (:e %))) (live n))
-                              (let [text (slurp file)] (every? #(str/includes? text (:src %)) (live n))))))]
+                              (let [text (slurp file)]
+                                (and (every? #(str/includes? text (:src %)) (live n))
+                                     ;; and nothing else: the file's text, each live form taken out, is only space and comments. A form
+                                     ;; the branch removed is still in main's file; required whole, it brought main's forms back over the
+                                     ;; branch's (a test child naming a var its branch deleted, 2026-11-12)
+                                     (str/blank? (str/replace (reduce (fn [t f] (str/replace-first t (:src f) "")) text (live n))
+                                                              #"(?m);.*$" "")))))))]
     (binding [mr/*registry* (schema-registry (schema-changes db))]
       (reduce (fn [[ok errs] n]
                 (if-let [e (try (require n) nil (catch Throwable e e))]
