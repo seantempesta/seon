@@ -593,6 +593,18 @@
       (is (= (:classes (seon.problems/health main2)) (:classes (:health @(get-in st2 [:root-walk :a])))) "the held health is health of the new main")
       (r/dispose-walk! (get-in st2 [:root-walk :w])))))))
 
+(deftest a-move-of-main-is-diffed-once-for-every-walk
+  ;; docs/render.md#a-page-is-a-kept-walk: the index, root's walk, each user's and the views it touched read the datoms main moved by,
+  ;; one diff of the two mains (5.4 ms on 10.8k datoms in a :memory store); each walk diffed main again, one diff more a walk
+  (let [[main branch] (paged-dbs)
+        st (-> (proc-state main branch) (assoc :watch #{}) (root-state main))
+        main2 (d/db-with (:main-db st) [{:seon.task/id "zz/one" :seon.task/ns 'zz :seon.task/name "one" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work}])
+        n (atom 0) diff d/datoms-diff
+        st2 (with-redefs [d/datoms-diff (fn [& args] (swap! n inc) (apply diff args))] (#'p/advance-main st main2))]
+    (is (= 1 @n) (str "one diff a move of main, " @n " made"))
+    (is (identical? main2 @(get-in st2 [:root-walk :at])) "root's walk is at the new main")
+    (r/dispose-walk! (get-in st2 [:root-walk :w]))))
+
 (deftest the-problems-tile-counts-what-still-holds
   ;; Optimization, 2026-11-08: 7888's tile said "effect 4" for a :seon.vector/helper-died row whose cause had passed (:open? false,
   ;; seon.problems/closed?), as health does not: the tile draws and counts a class's open rows, and a class with none is not drawn
@@ -2778,8 +2790,8 @@
                                 {:seon.agent/key "b1/a2" :seon.agent/task [:seon.task/id "request/greet"] :seon.agent/status :waiting}
                                 {:seon.agent/key "user" :seon.agent/agents [[:seon.agent/key "b1/a2"]]}])
         as (fn [k] (let [c (seon.ctx/agent-ctx (seon.db/index) db (:db/id (d/entity db [:seon.agent/key k])))]
-                     (try (binding [seon.ctx/*installing* true] (reset! seon.ctx/ctx c)) (my.user/agents)
-                          (finally (binding [seon.ctx/*installing* true] (reset! seon.ctx/ctx nil))))))
+                     (try (seon.ctx/install! {:tree c}) (my.user/agents)
+                          (finally (seon.ctx/install! nil)))))
         listed (as "root")]
     (is (some #(= {:key "b1/a2" :status :waiting :task "request/greet" :outcome :parked} %) listed) (pr-str listed))
     (is (= (sort (map :key listed)) (map :key listed)) "by key")
@@ -4538,10 +4550,10 @@
         top (r/describe ix v [] 2)]
     (is (some? target) (str "the cited task has its own entry, member by its id: " (pr-str (map :path at))))
     (is (= :seon.task/task-fact (:schema target)))
-    (is (= '[(swap! ctx assoc-in (conj [:seon.agent/task :seon.cite/_of 5 :seon.cite/target] :seon.task/plan) x)] (map second (:to-use target)))
+    (is (= '[(swap! ctx assoc-in (conj [:seon.agent/task :seon.cite/_of 5 :seon.cite/target] :seon.task/plan) x)] (map second (:seon.print/to-use target)))
         "its form, for its own path")
     (is (not-any? #(= 5 (get (:path %) 2)) top) "a first look at the whole is the overview: no member walked")
-    (is (not-any? (fn [e] (some #(some #{'v 'id 'path} (filter symbol? (tree-seq coll? seq (second %)))) (:to-use e))) (concat at top))
+    (is (not-any? (fn [e] (some #(some #{'v 'id 'path} (filter symbol? (tree-seq coll? seq (second %)))) (:seon.print/to-use e))) (concat at top))
         "no form shown holds a placeholder it could not fill")))
 
 ;; docs/ctx.md#the-pattern: root's evals are a window (the newest :seon.config.ctx/window); its line says how many it did not pull, in the printer's words

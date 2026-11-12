@@ -209,14 +209,36 @@
   (let [e (get fx/scenarios k)]
     (select-keys (if model? (merge e (:model e)) e) [:check :expect])))
 
+(defn- refine-or-review?
+  "Whether task id on d is a refine (seon.task/refine?) or a refine's review (the merge step that needs one): the next work every end
+  writes on main, not the work a scenario released (docs/tasks.md#a-refine-curates-its-own-task)."
+  [d id] (or (task/refine? d id) (some #(task/refine? d %) (:seon.task/needs (task/task d id)))))
+
 (defn- work-summaries
   "server/task-summaries of d less root's own session's task (its session is the agent keyed \"root\", seon.system/root-agent-boot-tx: made at
-  every boot, parked until a message, never done): the work a scenario released."
-  [d] (into {} (remove (fn [[id _]] (= "root" (task/agent-key d id)))) (server/task-summaries d)))
+  every boot, parked until a message, never done) and less the refines and reviews its ends wrote: the work a scenario released."
+  [d] (into {} (remove (fn [[id _]] (or (= "root" (task/agent-key d id)) (refine-or-review? d id)))) (server/task-summaries d)))
+
+(defn- refines
+  "Each ended task of the scenario's work, with the refines after it and each one's review: every end has exactly one refine, its review
+  held for a session (docs/tasks.md#a-refine-curates-its-own-task). {:ok bool :missing [ids]}."
+  [d]
+  (let [ts (task/tasks d)
+        after (fn [id] (filter #(contains? (set (:seon.task/after (val %))) id) ts))
+        bad (for [[id s] (work-summaries d)
+                  :when (task/ended (:seon.task/outcome (d/entity d [:seon.task/id id])))
+                  :let [rs (after id)
+                        review (some (fn [[rid _]] (some #(when (contains? (set (:seon.task/needs (val %))) rid) (val %)) ts)) rs)]
+                  :when (and (not (task/continues-branch? d id))
+                             (not (and (= 1 (count rs)) (= :held (:seon.task/execution review)))))]
+              id)]
+    {:ok (empty? bad) :missing (vec bad)}))
 
 (defn- all-done
-  "Every task done on d; what is not, by id."
-  [d] (let [not-done (into {} (remove (comp :done val)) (work-summaries d))] {:ok (empty? not-done) :not-done not-done}))
+  "Every task of the scenario's work done on d, what is not by id; and every end's refine written (`refines`)."
+  [d] (let [not-done (into {} (remove (comp :done val)) (work-summaries d))
+            r (refines d)]
+        {:ok (and (empty? not-done) (:ok r)) :not-done not-done :refines-missing (:missing r)}))
 
 (defn- run-scenario
   "Work one row: boot root on (merge {:datoms 300} :boot), release :specs (release!), run
@@ -342,54 +364,55 @@
      :ok (fn [{:keys [d]}] (all-done d))}))
 
 (defn- held
-  "A task that always fails parks its session at its cap, and only a raised budget and a release
-  continue it (design agent-loop section 2: always park; docs/turn.md#the-cap): add (always wrong) runs out of turns,
-  its task parked with outcome :cap, its process kept; nothing else starts, no task is created,
-  and the reconciler reports quiescence naming add as the root cause of twice and the merges
-  (parked, waiting for a message). A message does not wake a task at its cap. The owner raises add's agent's
-  :seon.agent/max-turns, holds the task (my.root/hold!) and releases it (my.root/run!): the same agent (key and branch) works on, its turn
-  count continuing from the cap, and parks again at the raised cap and is named again. Each wait ends on the
+  "A task that always fails ends at its cap, held, and only a raised budget and a release run it again (docs/turn.md#the-cap;
+  Optimization's restated claim, 2026-11-12: a cap ends the run, a failed end; nothing parks at a cap; raising the budget is
+  releasing the task again). add (always wrong) runs out of turns: its task stands :cap, held, with why; its refine is written
+  after it (a task :seon.task/after add, on its own branch) with the refine's review held for a session, once; twice and the
+  merges wait on add, which the reconciler names as their root cause at quiescence. The owner raises add's agent's
+  :seon.agent/max-turns and releases the task (my.root/run!): it runs again from its branch's head under the same agent key, its
+  turn count going on from the cap, and ends at the raised cap, held again, with no second refine. Each wait ends on the
   reconciler's quiescence report, with no deadline."
   []
   {:boot {:max-running 2 :provider {:kind :scripted :script 'seon.e2e/always-wrong}} :specs (vec (take 2 fx/calc)) :tns 'calc :max-turns 2
    :ok (fn [{:keys [sys q d]}]
-         (let [blocks ["calc/add-merge" "calc/twice" "calc/twice-merge"]
-               cause "parked: cap, waiting for a message"
-               [row & more] (:root-causes q)
+         (let [blocked #{"calc/add-merge" "calc/twice" "calc/twice-merge"}
                ts (task/tasks d)
                k (:seon.task/agent (get ts "calc/add"))
                turn-of (fn [d] (:seon.agent/turn (d/entity d [:seon.agent/key k]) 0))
-               first? (and (nil? more) (= {:task "calc/add" :cause cause :agent k :blocks blocks} row)
-                           (= :cap (:seon.task/outcome (get ts "calc/add")))
-                           (= :running (:seon.task/execution (get ts "calc/add")))
-                           ;; the scenario's tasks: root's own session's task (request/root, made at every boot) is beside them
-                           (= #{"calc/add" "calc/add-merge" "calc/twice" "calc/twice-merge"} (set (filter #(str/starts-with? % "calc/") (keys ts))))
-                           (= 1 (count (task/agents d))))
+               calc (fn [ts] (set (filter #(str/starts-with? % "calc/") (keys ts))))
+               mine (fn [rcs] (some #(when (= "calc/add" (:task %)) %) rcs))
+               row (mine (:root-causes q))
+               first? (and (= :cap (:seon.task/outcome (get ts "calc/add")))
+                           (= :held (:seon.task/execution (get ts "calc/add")))
+                           (= (into blocked #{"calc/add" "calc/add-refine" "calc/add-refine-review"}) (calc ts))
+                           (= #{"calc/add"} (:seon.task/after (get ts "calc/add-refine")))
+                           (= :held (:seon.task/execution (get ts "calc/add-refine-review")))
+                           (some? row) (every? (set (:blocks row)) blocked))
                turns1 (turn-of (:db @(c/branch-db sys (task/default-branch "calc/add"))))
-               ;; the owner raises the budget, holds the task and releases it: the same agent works on
+               ;; the owner raises the budget and releases the task: it runs again from its branch's head
                _ (println :raise (select-keys @(c/transact-main! sys [[:db/add [:seon.agent/key k] :seon.agent/max-turns 4]]) [:ok]))
-               _ (println :hold (select-keys (root/hold! sys ["calc/add"] "its budget is raised") [:ok]))
-               _ (println :held (:root-causes (quiet! sys)))
                ended-of (fn [d] (:seon.agent/ended-ms (d/entity d [:seon.agent/key k])))
                ended1 (ended-of (db sys))
                _ (println :release (select-keys (root/run! sys ["calc/add"]) [:ok]))
                ;; the release is news to the reconciler a moment after its write: the wait is on the agent's next end
-               _ (c/await-db sys "add parked at its raised cap, a second time"
+               _ (c/await-db sys "add ended at its raised cap, a second time"
                              #(and (= :cap (:seon.task/outcome (d/entity % [:seon.task/id "calc/add"]))) (< (or ended1 0) (or (ended-of %) 0))))
                q2 (quiet! sys)
                d2 (db sys)
                ts2 (task/tasks d2)
                turns2 (turn-of (:db @(c/branch-db sys (task/default-branch "calc/add"))))
                second? (and (= :cap (:seon.task/outcome (get ts2 "calc/add")))
+                            (= :held (:seon.task/execution (get ts2 "calc/add")))
                             (= k (:seon.task/agent (get ts2 "calc/add")))
-                            (= 1 (count (task/agents d2))) (= 4 (count (filter #(str/starts-with? % "calc/") (keys ts2))))
+                            (= (calc ts) (calc ts2))
                             (= 2 turns1) (= 4 turns2)
-                            (= [{:task "calc/add" :cause cause :agent k :blocks blocks}] (:root-causes q2)))]
-           {:ok (and first? second?)
-            :first-park first? :a-raised-budget-and-a-release-continue-the-same-agent second?
+                            (some? (mine (:root-causes q2))))]
+           {:ok (boolean (and first? second?))
+            :a-cap-ends-the-run-held-with-one-refine (boolean first?)
+            :a-raised-budget-and-a-release-run-it-again (boolean second?)
             :turns [turns1 turns2]
             :root-causes (:root-causes q) :root-causes-after-release (:root-causes q2)
-            :tasks (into (sorted-map) (map (fn [[id t]] [id (select-keys t [:seon.task/outcome :seon.task/agent])])) ts2)}))})
+            :tasks (into (sorted-map) (map (fn [[id t]] [id (select-keys t [:seon.task/outcome :seon.task/execution :seon.task/agent])])) ts2)}))})
 
 (defn run
   "One e2e mode; answers whether it passed. No mode, or an unknown one: its usage, then

@@ -12,6 +12,9 @@
  ;; printed, or the budget refused the value's first part (an error map)
  :seon.print/result [:or :seon.print/answer [:map [:seon.error/type :qualified-keyword] [:seon.error/message :string]]]
  :seon.print/hiccup [:vector :any]
+ ;; a tool's answer, as seon.render/answer makes it for every tool whose schema says what brings more (docs/render.md#a-render-is-a-value-printed-once)
+ :seon.print/is [:string {:description "What the answer is: the first sentence of its schema's :description."}]
+ :seon.print/to-use [:vector {:description "The forms that act on a value, each [words form], read from its schema's :seon.render/more, with v (the value), path or id filled; a describe entry's are for its own path."} [:tuple :string :any]]
  ;; text (seon.print/plain): text shown as itself under a budget; a cut says what it
  ;; omitted (characters, lines) and, given a source form, the form that reads the rest
  :seon.print/plain-opts [:map [:source {:optional true} :any] [:one-line? {:optional true} :boolean]]

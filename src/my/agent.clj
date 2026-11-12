@@ -39,9 +39,9 @@
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.walk] [datahike.core] [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.ctx.search :as search] [seon.ctx.wire :as wire] [seon.ref :as ref] [seon.doc :as doc] [seon.source :as source]
+  (:require [seon.print.emit :as emit] [clojure.walk] [datahike.core] [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.ctx.search :as search] [seon.ctx.wire :as wire] [seon.ref :as ref] [seon.doc :as doc] [seon.source :as source]
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.fx :as fx] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
-            [seon.db :as pdb] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.problems :as problems] [seon.render.ui :as ui] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
+            [seon.db :as pdb] [seon.print :as print] [seon.render :as render] [seon.problems :as problems] [seon.render.ui :as ui] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "An earlier eval's response (its live value under :value), by handle (:a3f9c1d2)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
@@ -511,7 +511,7 @@
   (wc (grep \"plan\")) before reading it whole."
   {:malli/schema [:=> [:cat :any] nat-int?]}
   [x] (let [ix (agent/branch-index) v (if-let [r (render/model ix x)] (:value r) x)]
-        (select/chars-tokens (count (if (string? v) v (:text (print/print-value v {:budget Integer/MAX_VALUE :render #(render/model ix %)})))))))
+        (emit/chars-tokens (count (if (string? v) v (:text (print/print-value v {:budget Integer/MAX_VALUE :render #(render/model ix %)})))))))
 
 (defn describe
   "What value v holds, without showing it: a vector of entries, one a path, {:path [...] :holds x}, where :holds is the value when it
@@ -601,21 +601,20 @@
                   (str "Source not found for " x# ": source reads a name or a var"))))))
 
 (defn- help-nearest
-  "What a help address that is no section may have meant: the help page's sections and the pages
-  whose address holds a word of it (four letters or more), the sections whose text the search finds
-  for it (`search`: \"schema\" named no address, though the help page says how a schema changes), then the nearest by Jolt's did-you-mean ranking (as no-var): a few
-  addresses, never the page ((doc \"docs/agent.md\") lists its sections). See docs/references.md#a-section-read-at-a-depth-with-its-edges."
+  "What a help address that is no section may have meant, read from the sections' addresses alone: the pages, then the
+  sections, whose address holds a word of it (four letters or more), then the nearest of the help page's sections and the
+  pages by Jolt's did-you-mean ranking (as no-var); at most :seon.config.render/search of them. A search by meaning is the
+  agent's to ask. See docs/references.md#a-section-read-at-a-depth-with-its-edges."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :string]]}
   [db address]
-  (let [sections (doc/page db wire/help-page :summary)
-        addresses (mapv :seon.ref/address sections)
-        pages (doc/page-paths db)
+  (let [all (sort (map :v (d/datoms db :aevt :seon.doc/address)))
+        pages (distinct (keep #(some->> (str/index-of % "#") (subs % 0)) all))
+        help (filter #(str/starts-with? % (str wire/help-page "#")) all)
         words (re-seq #"[a-z0-9]{4,}" (str/lower-case address))
-        holds? (fn [s] (some #(str/includes? (str/lower-case s) %) words))
-        ranked (jolt.analyzer/suggestions-for address (concat addresses pages))]
-    (vec (distinct (concat (filter holds? pages) (filter holds? addresses)
-                           (keep #(when (= :section (:kind %)) (:name %)) (search address {:kinds #{:section} :k 3}))
-                           ranked)))))
+        holds? (fn [s] (some #(str/includes? (str/lower-case s) %) words))]
+    (vec (take (cfg/value :seon.config.render/search)
+               (distinct (concat (filter holds? pages) (filter holds? all)
+                                 (jolt.analyzer/suggestions-for address (concat help pages))))))))
 
 (defn- cited
   "Name n as a cite of it on the agent's page shows it, on demand: a cite of n's target (seon.ref/target) at doc depth made on

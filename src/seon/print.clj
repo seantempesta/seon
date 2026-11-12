@@ -57,16 +57,6 @@
   {:malli/schema [:=> [:cat :string] [:map [:seon.print/code :string]]]}
   [s] {:seon.print/code s})
 
-(defn tokens-text
-  "A count of tokens as a reader is shown it: seon.print.emit/tokens-text, the printer's one wording of a size (docs/render.md#cut-where-a-value-is-made)."
-  {:malli/schema [:=> [:cat nat-int?] :string]}
-  [n] (emit/tokens-text n))
-
-(defn cost-text
-  "seon.print.emit/cost-text, the one wording of what work cost (docs/render.md#cost-is-shown-one-way)."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [m] (emit/cost-text m))
-
 (defn text
   "`v` as text under budget tokens: the printed text, or the error's message when even
   its first part does not fit."
@@ -82,13 +72,13 @@
   (inc (emit/chars-tokens (count (str ", :cost " (pr-str (emit/cost-text {:ms 1e12 :ticks 1e15 :bytes 1e15 :tok default-budget})))))))
 
 (defn at-handle
-  "Answer a (seon.render/answer: :seon.print/answer in its metadata) with `v` in its :to-use forms read as handle, the name its
+  "Answer a (seon.render/answer: :seon.print/answer in its metadata) with `v` in its :seon.print/to-use forms read as handle, the name its
   reader reads it by (an eval's result/..., the first point's @ctx), so each form is one to copy as it stands. Any other value is
   itself. See docs/render.md#a-render-is-a-value-printed-once."
   {:malli/schema [:=> [:cat :any :any] :any]}
   [handle a]
   (if (and (map? a) (:seon.print/answer (meta a)))
-    (with-meta (update a :to-use (fn [ps] (mapv (fn [[w f]] [w (clojure.walk/postwalk-replace {'v handle} f)]) ps))) (meta a))
+    (with-meta (update a :seon.print/to-use (fn [ps] (mapv (fn [[w f]] [w (clojure.walk/postwalk-replace {'v handle} f)]) ps))) (meta a))
     a))
 
 (defn response-text
@@ -112,7 +102,7 @@
          text (or (:text p) (:seon.error/message p))]
      ;; spliced after the printed map's last entry: the text is the only place its own size is known
      (if (and (:handle r) (:text p) (str/ends-with? text "}"))
-       (str (subs text 0 (dec (count text))) (cost (select/chars-tokens (count text))) "}")
+       (str (subs text 0 (dec (count text))) (cost (emit/chars-tokens (count text))) "}")
        text))))
 
 (defn read-rest

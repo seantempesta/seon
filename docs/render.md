@@ -40,7 +40,7 @@ A view that chooses what to show makes a value, never text: an array map of what
 
 A value too large or too host-bound to print whole declares a model render on its schema (`{:seon.render/model sym}`, ```seon.render/model```): `(f {} v)` answers the value to print in its place. The agent's process state is one (```seon.agent/state-summary```): each key as a scalar, a count or a host type, with the form that reads it whole.
 
-A tool's answer says what it is and what reads more, one way for every tool: its schema's `:seon.render/more` holds [words form] pairs, and ```seon.render/answer``` prints `{:is <the schema description's first sentence> :value <the value> :to-use [[words form] ...]}`, each form naming the answer by its handle (```seon.print/at-handle```). A form may name `v` (the answer), `path` (a part's path) and `id` (an entity); a reader that cannot fill one shows no pair naming it. A plain value prints as itself (`seon.render-test/an-answer-says-what-it-is-and-what-reads-more`).
+A tool's answer says what it is and what reads more, one way for every tool: its schema's `:seon.render/more` holds [words form] pairs, and ```seon.render/answer``` prints `{:seon.print/is <the schema description's first sentence> :value <the value> :seon.print/to-use [[words form] ...]}`, each form naming the answer by its handle (```seon.print/at-handle```). A form may name `v` (the answer), `path` (a part's path) and `id` (an entity); a reader that cannot fill one shows no pair naming it. A plain value prints as itself (`seon.render-test/an-answer-says-what-it-is-and-what-reads-more`).
 
 A render's default budget is config: `:seon.config.render/value-budget` for a value, `:seon.config.render/root-context-budget` for root's context.
 
@@ -142,7 +142,7 @@ The turn line is the heading of ```seon.render.ui/turn```, `You're in seon.progr
 
 ### Cost is shown one way
 
-Wherever work is shown it is one line from ```seon.print/cost-text``` (```seon.print.emit/cost-text```): `5.2 ms · 873k ticks · 4.1 MB · ~1.2k tok`. An eval's text carries it last, `:cost "..."` (```seon.print/response-text```), `"not run"` when none was recorded; the numbers stay data (`:ms :ticks :bytes`). Every origin goes through `seon.repl/eval-string`, so every eval carries a cost, a thrown one too (`seon.repl-test/every-eval-carries-its-cost-whatever-asked-it-and-whether-it-threw`).
+Wherever work is shown it is one line from ```seon.print.emit/cost-text```: `5.2 ms · 873k ticks · 4.1 MB · ~1.2k tok`. An eval's text carries it last, `:cost "..."` (```seon.print/response-text```), `"not run"` when none was recorded; the numbers stay data (`:ms :ticks :bytes`). Every origin goes through `seon.repl/eval-string`, so every eval carries a cost, a thrown one too (`seon.repl-test/every-eval-carries-its-cost-whatever-asked-it-and-whether-it-threw`).
 
 ### A search is a part
 
@@ -292,7 +292,7 @@ Which lists the model reads as parts is the lists' own: ```seon.render/page-list
 
 ### A page is a kept walk
 
-A page root draws is a walk kept across moves, advanced by what each move changed: root's own, and one per agent a tab watches, held with the branch's one read (`:branch-reads`) and disposed with it. `seon.render.proc/kept-walk` builds one (`seon.ctx/build` in a reactive atom); `seon.render.proc/advance-walk!` moves it to a later value (`seon.ctx/patch` with the moved datoms, else `seon.ctx/moved` diffs the two values); `seon.render.proc/branch-walk!` is an agent's. A move that adds a record reruns its turn's component (```seon.render.ui/conversation-turn```) and the record's own; earlier turns are a marker lookup each. The debug page's turn to come draws the tree cold (`seon.ctx.wire/render`), which measured cheaper than moving a kept walk over it and back.
+A page root draws is a walk kept across moves, advanced by what each move changed: root's own, and one per agent a tab watches, held with the branch's one read (`:branch-reads`) and disposed with it. `seon.render.proc/kept-walk` builds one (`seon.ctx/build` in a reactive atom); `seon.render.proc/advance-walk!` moves it to a later value (`seon.ctx/patch` with the moved datoms: a move of main is diffed once, in `seon.render.proc/advance-main`, for the index, root's walk and each user's, `seon.render-test/a-move-of-main-is-diffed-once-for-every-walk`; else `seon.ctx/moved` diffs the two values); `seon.render.proc/branch-walk!` is an agent's. A move that adds a record reruns its turn's component (```seon.render.ui/conversation-turn```) and the record's own; earlier turns are a marker lookup each. The debug page's turn to come draws the tree cold (`seon.ctx.wire/render`), which measured cheaper than moving a kept walk over it and back.
 
 The model's page (```seon.ctx.wire/page-parts-through```) is kept the same way at the last point it drew: a later point of the same branch within ```:seon.config.ctx/kept-walk-steps``` parents advances it, the same point moves nothing, and anything else is drawn again (```seon.ctx.wire-test/a-later-point-advances-the-kept-page-walk-and-answers-a-cold-draw```). The slot also holds the page at its chain's first point, so a flush between turns leaves the next turn's pair to advance, flat in turns (```seon.ctx.wire-test/a-flush-between-turns-leaves-the-next-turns-pair-to-advance```, ```seon.ctx.wire-cost-test/a-turns-pair-after-a-flush-costs-flat-in-turns```). A turn's page message reads the db only at its two fixed past points, which no later write changes, so those reads are not tracked; the render that places the pairs reads the current db and reruns at a write (```seon.ctx.wire-test/a-write-reruns-the-placing-render-and-no-earlier-page-pair```).
 
@@ -340,6 +340,7 @@ Text for the wire, storage, a digest, a file, a URL, a command line or code to e
 - `seon.edn/encode`: EDN for storage and the wire, whole.
 - `seon.program/form-ids`: a form's code digest text, under `seon.edn/encode`'s bindings ([source](source.md#what-a-test-takes-of-a-forms-text)).
 - `seon.render.ui/table-cells`: telling a Markdown table's rule row from its rows; a cut of data, not output.
+- `my.agent/help-nearest`: a doc miss's nearest addresses, the best `:seon.config.render/search` of them as a search's hits are; a cut of data, not output.
 - `seon.render/result-text`: the EDN envelope of a user message around a response already printed.
 - `seon.ctx.search/search`: the call in its last hit's `:more`, code to evaluate.
 - `seon.ctx.wire/describe-msgs`: the path in the call it generates, code to evaluate.

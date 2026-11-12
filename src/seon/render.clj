@@ -23,7 +23,7 @@
     3. the one value printer (seon.print/print-value), the default render.
   A nested value renders by a call ([render opts v] in hiccup, or render's result)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [seon.db :as pdb :refer [parents own-keys extends? most-specific]] [seon.program :as program] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]
+  (:require [seon.print.emit :as emit] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [seon.db :as pdb :refer [parents own-keys extends? most-specific]] [seon.program :as program] [seon.print :as print] [seon.config :as config]
             [clojure.string :as str] [clojure.walk] [datahike.api :as d] [datahike.reads :as reads] [datahike.db.utils :as dbu] [seon.web.html :as h] [seon.ratom :as ratom] [seon.profile :as profile] [editscript.core :as ed]))
 
 (defn props
@@ -95,7 +95,7 @@
   [ix k shown more handle]
   (let [d (schema-property ix k :description)
         is (when (string? d) (first (str/split d #"(?<=\.)\s" 2)))]
-    (cond-> (with-meta (cond-> (array-map) is (assoc :is is) true (assoc :value shown) true (assoc :to-use (vec more)))
+    (cond-> (with-meta (cond-> (array-map) is (assoc :seon.print/is is) true (assoc :value shown) true (assoc :seon.print/to-use (vec more)))
               {:seon.print/answer true})
       handle (->> (print/at-handle handle)))))
 
@@ -950,7 +950,7 @@
   "What x costs the context in tokens: the one sizer (`seon.print.emit/chars-tokens`) over the characters x holds, the same count
   a part's head (`part-form`) and the tree (`tree`) give."
   {:malli/schema [:=> [:cat :map :any] nat-int?]}
-  [ix x] (select/chars-tokens (size ix x)))
+  [ix x] (emit/chars-tokens (size ix x)))
 
 (declare part-form)
 
@@ -1529,7 +1529,7 @@
   "What value v holds at path, depth levels in, as entries {:path :holds [:schema :doc :render]} read in entity index ix: the body of
   my.agent/describe (its docstring says the shape), here so root can describe a record at a point without an agent (the first
   point's (describe @ctx) and a task switch's, seon.ctx.wire/describe-msgs). Paths are keys, never positions. An entry whose schema says
-  what acts on it (:seon.render/more) carries those forms for its own path (:to-use). See docs/ctx.md#the-pattern."
+  what acts on it (:seon.render/more) carries those forms for its own path (:seon.print/to-use). See docs/ctx.md#the-pattern."
   {:malli/schema [:=> [:cat :map :any [:sequential :any] pos-int?] [:vector :map]]}
   [ix v path depth]
   (let [
@@ -1561,7 +1561,7 @@
                                  r (when s (render-for ix s :seon.render/hiccup))
                                  f (forms s q)]
                              (cond-> {} (and s (not= s k)) (assoc :schema s) (and s (= s k) (or d r f)) (assoc :schema s) d (assoc :doc d)
-                                     r (assoc :render r) f (assoc :to-use (vec f)))))
+                                     r (assoc :render r) f (assoc :seon.print/to-use (vec f)))))
          ;; a join keyed by ids is walked into, member by its id, when a path was asked (a first look is the overview; a path asks for the
          ;; detail): its members cost the join no level, so (describe @ctx [:seon.agent/task]) reaches a cited task's own entry
          walk (fn walk [p node left]

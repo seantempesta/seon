@@ -16,13 +16,13 @@ A task's attributes on main say how its work stands, written only by root when i
 - **A task's agent**: `:seon.task/agent` refs the agent working it (`seon.task/start-tx` writes it with the outcome swap). The agent holds its environment on main (`:seon.agent/task` `branch` `model` `holder` `max-turns` `boot` `started-ms` `ended-ms`) and its own end on its branch (`outcome` `reason` `ended-turn` `error` `waste`, by `seon.agent/write-end!`). A retry, a wake and a load are the same agent (key `<boot>/<id>`).
 - **The end is read once** (`seon.reconcile/pull-end`): each wake first clears the previous wake's end on its branch (`seon.agent/clear-end!`), so a wake that died silently has none and is judged on what root measured. A flight (the chain of requests of one action) is keyed by task id.
 
-A `:cap` task continues when a message wakes it, which raises `:seon.agent/max-turns` by the wake allowance ([the cap](turn.md#the-cap)), or when a person releases it again (`my.root/run!`, which retracts the reasons).
+A `:cap` task has ended, held, its turns spent with its work not done; a release (`my.root/run!`, which retracts the reasons) runs it again from its branch's head ([the cap](turn.md#the-cap)).
 
 `seon.reconcile/judgment` is pure: given the index and the measured facts (the agent's end, a death, proof results, contract gaps, unmerged keys, how far behind main, how often judged behind, the reasons last told), it answers the outcome, the done rule's reasons, a hold, and a verdict when the agent is told. In order:
 
 - a task no longer `:running` is `:closed`; a dead agent is `:dead` and held;
 - a merge task the done rule refuses nothing is `:ready`, or `:gate` when its change reaches process tests (held when this root has no checkout to run them on); any other task is `:done`;
-- an agent that ended `:waiting` or `:cap` on a task that is no merge parks (`:parked` or `:cap`), never a hold ([turn](turn.md#parked));
+- an agent that ended `:waiting` on a task that is no merge parks (`:parked`), never a hold ([turn](turn.md#parked)); one that ended `:cap` with its work not done is held, `:cap`;
 - an end the done rule refuses is told why (`:told`, a verdict message that wakes the session); the same reasons again hold the task. `:behind` alone is told again until `:seon.config.merge/max-behind` judgments, an outside agent's hand-back too (`seon_done`, asked of main itself: `seon.reconcile-test/an-outside-agents-green-work-behind-main-is-judged-behind-not-closed`); a task a merge task follows is never judged behind;
 - every other reason holds the task ([tasks](tasks.md#a-refused-run-is-held-for-root)).
 

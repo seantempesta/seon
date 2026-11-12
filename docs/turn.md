@@ -18,7 +18,7 @@ An agent's end is a fact on its branch, which root reads once to decide how its 
 
 ## The cap
 
-The cap is the agent's own: `:seon.agent/turn` against `:seon.agent/max-turns`, never restarting across wakes. The write that starts a woken agent adds `:seon.config.agent/wake-turns` to `:seon.agent/max-turns` (``seon.task/start-tx``; `seon.reconcile-test/a-wake-raises-max-turns-by-its-allowance`), so an agent nobody messages is never woken and one that is has an allowance. An agent whose turns are spent ends `:cap`, never `:waiting` (`seon.agent-test/a-task-at-its-cap-is-recorded-cap-never-waiting`); a person may raise its max and release the task (`my.root/run!`) and the same agent continues. A reply with no evals stops it early (`seon.agent-test/a-reply-with-no-evals-stops-with-turns-left`). The page shows the cap on the turn line (`seon.render.ui/turn`).
+The cap is the agent's own: `:seon.agent/turn` against `:seon.agent/max-turns`, never restarting across wakes. The write that starts a woken agent adds `:seon.config.agent/wake-turns` to `:seon.agent/max-turns` (``seon.task/start-tx``; `seon.reconcile-test/a-wake-raises-max-turns-by-its-allowance`), so an agent nobody messages is never woken and one that is has an allowance. An agent whose turns are spent ends `:cap`, never `:waiting` (`seon.agent-test/a-task-at-its-cap-is-recorded-cap-never-waiting`). A cap ends the run, held, and nothing parks on it (`seon.reconcile-test/a-cap-ends-the-run-held-and-gets-its-refine`); a person may raise its max and release the task (`my.root/run!`), which runs it again from its branch's head. A reply with no evals stops it early (`seon.agent-test/a-reply-with-no-evals-stops-with-turns-left`). The page shows the cap on the turn line (`seon.render.ui/turn`).
 
 ## Observe
 
@@ -79,7 +79,7 @@ An agent reaches outside only through root's owner procs ([root](root.md)): ```s
 
 ## Parked
 
-An agent that ends waiting or at its cap parks its process on the task (`:parked`, `:cap`) until the next message wakes it with its allowance ([the cap](#the-cap)): the same process, no fork ([processes](processes.md#a-parked-process)), costing only its memory ([decisions](decisions.md#a-parked-agent-stays-in-memory-and-replay-is-deliberate)). A reply with text and no calls parks it whatever its proofs say ([decisions](decisions.md#a-reply-with-no-calls-pauses-the-agent-whatever-its-proofs-say)). A message is on main first, so a lost wake or a dead process loses nothing: the task is `:lost` and the next start a spawn. Resuming a session by replaying its pure evals is planned, not built (task `seon.reconcile/root-work-is-tasks`).
+An agent that ends waiting parks its process on the task (`:parked`) until the next message wakes it with its allowance ([the cap](#the-cap)): the same process, no fork ([processes](processes.md#a-parked-process)), costing only its memory ([decisions](decisions.md#a-parked-agent-stays-in-memory-and-replay-is-deliberate)). A reply with text and no calls parks it whatever its proofs say ([decisions](decisions.md#a-reply-with-no-calls-pauses-the-agent-whatever-its-proofs-say)). A message is on main first, so a lost wake or a dead process loses nothing: the task is `:lost` and the next start a spawn. Resuming a session by replaying its pure evals is planned, not built (task `seon.reconcile/root-work-is-tasks`).
 
 ## An outside agent
 

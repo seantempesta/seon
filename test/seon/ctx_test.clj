@@ -928,8 +928,8 @@
           db (:db-after (d/with db [{:seon.agent/key k :lab.ctx/steps ["read the plan" "write the test" "read the plan"]}]))
           tree (:tree (ctx/build (seon.db/index) db (aid db) :b))
           c (with-meta tree {:seon.render/schema :seon.ctx/ctx})
-          as-agent (fn [f] (try (enter-agent! {:db db}) (binding [ctx/*installing* true] (reset! ctx/ctx c)) (f)
-                                (finally (binding [ctx/*installing* true] (reset! ctx/ctx nil)) (end-agent!))))
+          as-agent (fn [f] (try (enter-agent! {:db db}) (ctx/install! {:tree c}) (f)
+                                (finally (ctx/install! nil) (end-agent!))))
           rec (as-agent #(seon.repl/record-details "@ctx" {:handle 'result/e9 :value c} {}))
           drawn (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (end-agent!)))
           ;; the keys it added, one component (ctx-keys) holding each key's own, each a unit of its own inside it
@@ -1609,9 +1609,9 @@
         tree (:tree (ctx/build (seon.db/index) db (aid db) :b))
         c (with-meta tree {:seon.render/schema :seon.ctx/ctx :seon.render/basis {:t (:t tree) :branch :b}})
         rec (fn [v] (try (enter-agent! {:db db :key k :branch :b})
-                         (binding [ctx/*installing* true] (reset! ctx/ctx c))
+                         (ctx/install! {:tree c})
                          (seon.repl/record-details "x" {:handle 'result/e9 :value v} {})
-                         (finally (binding [ctx/*installing* true] (reset! ctx/ctx nil)) (end-agent!))))
+                         (finally (ctx/install! nil) (end-agent!))))
         text (fn [r] (try (enter-agent! {:db db :key k :branch :b})
                           (:content (first (seon.fixtures/eval-messages {:db db} (assoc r :seon.eval/id "e9" :seon.eval/by {:seon.agent/key "a1"}))))
                           (finally (end-agent!))))
@@ -1846,3 +1846,34 @@
         (is (= 10 (count (:evals (:tree c')))))
         (is (every? :at (vals (:evals (:tree c')))))
         (is (= c' (build db')) "as a build holds it")))))
+
+(deftest a-swap-and-a-patch-interleaved-give-one-history
+  ;; docs/ctx.md#changing-it-swap (the owner, 2026-11-12: fences, guards and locks are likely bugs): ctx is one reference
+  ;; type with one writer path, no validator, no flag; the agent's swap! and another hand's transaction on the branch reach
+  ;; the record the same way, as the patch of each report, in order
+  (let [st {:db (seeded 3) :key k :branch :b :mode :test :schema-registry {:key {} :registry {} :index (seon.db/index)}}
+        plan [:task :seon.task/plan]
+        told (atom [])]
+    (try
+      (enter-agent! st)
+      (add-watch ctx/ctx ::told (fn [_ _ o n] (swap! told conj (get-in n plan))))
+      (let [r1 (swap! ctx/ctx assoc-in plan "A.")
+            ;; another hand's transaction on the branch: the system's, not a swap!
+            _ (seon.agent/transact! [[:db/add (:db/id (:task @ctx/ctx)) :seon.task/plan "B."]])
+            r2 @ctx/ctx
+            refused (try (swap! ctx/ctx assoc :t 0) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))
+            r3 @ctx/ctx
+            stale (compare-and-set! ctx/ctx r1 (assoc-in r1 plan "C."))
+            fresh (compare-and-set! ctx/ctx r3 (assoc-in r3 plan "D."))]
+        (is (not (instance? clojure.lang.Atom ctx/ctx)) "one reference type, no atom with a validator beside it")
+        (is (nil? (get-validator ctx/ctx)) "no validator: write! is the one writer path")
+        (is (= "A." (get-in r1 plan)) "swap! answers the record after its own report's patch")
+        (is (= "B." (get-in r2 plan)) "another hand's transaction patches the record the same way")
+        (is (< (:t r1) (:t r2)) "in order: a later report's patch lands after an earlier one's")
+        (is (= :seon.ctx/basis (:seon.error/type refused)) "a refused swap! answers its typed error")
+        (is (identical? r2 r3) "and leaves the record as it was")
+        (is (false? stale) "compare-and-set! on an older record writes nothing")
+        (is (true? fresh) "and on the current one writes, by the same path")
+        (is (= "D." (get-in @ctx/ctx plan)))
+        (is (= ["A." "B." "D."] @told) "watches are told each patch, in order, and nothing for a refused write"))
+      (finally (remove-watch ctx/ctx ::told) (end-agent!)))))

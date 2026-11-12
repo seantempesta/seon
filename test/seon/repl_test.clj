@@ -891,7 +891,10 @@
     (is (= #{:no-section :nearest :read-one} (set (keys (:value miss)))) "a miss is the declared map, not nil")
     (is (some #(str/starts-with? % "docs/references.md") (:nearest (:value miss))) "a miss names the nearest addresses: the page that holds the word")
     (is (< (count (printed miss)) 1500) "and not the help page: a miss costs what it names")
-    (is (str/includes? (printed miss) "lists a page's sections") "and the form that reads one")))
+    (is (str/includes? (printed miss) "lists a page's sections") "and the form that reads one")
+    ;; its estimate: the sections' addresses read once (about 1,500 datoms) and matched by words, no search by meaning:
+    ;; under 5 M ticks (it was 40.5 M, 1.2 s, with a search by meaning in it)
+    (is (< (:ticks miss) 5e6) (str "a miss costs reading the addresses: " (:ticks miss) " ticks"))))
 
 (deftest the-repl-tools-answer-in-words-in-every-namespace
   ;; owner, 2026-11-05: doc, dir, source and source-fn work bare and qualified in any namespace, and a name that is none,
