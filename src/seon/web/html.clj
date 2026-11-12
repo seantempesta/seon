@@ -95,8 +95,8 @@
                             v)))
       (.append sb "\""))))
 
-(defn- write! {:malli/schema [:=> [:cat :any :any] :any]}
-  [^StringBuilder sb node]
+(defn- write! {:malli/schema [:=> [:cat :any :any :seon.host/fn] :any]}
+  [^StringBuilder sb node on-throw]
   (cond
     (nil? node) nil
     (false? node) nil
@@ -104,12 +104,14 @@
     ;; a vector headed by a function (or its var) is a call, as in Reagent: [task-row {:as :inline}
     ;; task] writes what (task-row {:as :inline} task) answers, itself expanded
     ;; (a keyword or symbol head is an element: Jolt answers fn? true for a keyword)
-    ;; one that throws is a component's render failing (docs/failure-points.md), written in its place as
-    ;; what threw, and the page around it drawn: this writes after render! has drawn, outside its boundary
+    ;; one that throws is a component's render failing (docs/failure-points.md): written in its place as what on-throw answers for
+    ;; it (a walk's: the error drawn by its render and recorded as a component's defect, seon.render/placed-units), and the page around it drawn
     (and (vector? node) (not (keyword? (first node))) (not (symbol? (first node))) (or (fn? (first node)) (var? (first node))))
     (write! sb (try (apply (first node) (rest node))
-                    (catch Throwable e
-                      [:span {:class "err"} (str (if (var? (first node)) (symbol (first node)) "a render") " threw: " (or (ex-message e) (str e)))])))
+                    ;; root's interrupt (a ThreadDeath, seon.intr) passes, as any other Error but a stack overflow
+                    (catch Exception e (on-throw (first node) e))
+                    (catch StackOverflowError e (on-throw (first node) e)))
+            on-throw)
     ;; an element for the model alone (docs/render.md#a-part-prints-as-its-render) is no part of the page
     (and (vector? node) (map? (second node)) (= "model" (:wire/for (second node)))) nil
     (vector? node)
@@ -124,14 +126,15 @@
         ;; a style element's text is CSS, HTML's raw text: a selector's > is no markup
         (if (= "style" tag)
           (doseq [c children] (.append sb (str c)))
-          (doseq [c children] (write! sb c)))
+          (doseq [c children] (write! sb c on-throw)))
         (.append sb "</") (.append sb tag) (.append sb ">")))
-    (seq? node) (doseq [c node] (write! sb c))
+    (seq? node) (doseq [c node] (write! sb c on-throw))
     ;; a value that is not text is shown by the one value printer
     :else (.append sb (escape (if (or (string? node) (number? node) (char? node)) node (print/text node))))))
 
 (defn html
-  "node (hiccup) as its HTML text."
-  {:malli/schema [:=> [:cat :any] :string]}
-  [node]
-  (let [sb (StringBuilder.)] (write! sb node) (.toString sb)))
+  "node (hiccup) as its HTML text. on-throw (f e), given, answers the hiccup written where a call [f & args] threw e: a walk's records the
+  defect and draws it (seon.render/placed-units); without it, what threw is written as a line saying so."
+  {:malli/schema [:function [:=> [:cat :any] :string] [:=> [:cat :any :seon.host/fn] :string]]}
+  ([node] (html node (fn [f e] [:span {:class "err"} (str (if (var? f) (symbol f) "a render") " threw: " (or (ex-message e) (str e)))])))
+  ([node on-throw] (let [sb (StringBuilder.)] (write! sb node on-throw) (.toString sb))))
