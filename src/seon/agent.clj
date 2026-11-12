@@ -550,41 +550,48 @@
                :else [:db/add e a v]))))
 
 (defn merge-main!
-  "Merge main into this agent's branch by the one merge, settling conflicts by resolutions. See docs/agent.md#merging."
+  "Merge main into this agent's branch as git rebases it: unless the conflict check refuses, the branch starts again from main's
+  commit and its own transactions since the base are replayed on it, then resolutions, one commit or none. See docs/agent.md#merging."
   {:malli/schema [:=> [:cat :map] [:map [:ok :boolean]]]}
   [resolutions]
   (commit!)
-  (let [conn (:store-conn @state)
-        main-b (pdb/main-branch (:cfg @state))
+  (let [main-b (pdb/main-branch (:cfg @state))
+        b (:branch @state)
         main (heard-main)
-        head @conn]
+        head @(:store-conn @state)
+        ;; the branch's connection again, after its head was moved under it (datahike.api/force-branch!)
+        reconnect! #(let [c (pdb/connect (assoc (:cfg @state) :branch b))] (d/release (:store-conn @state)) (swap! state assoc :store-conn c :db @c) c)]
     (if (= (d/commit-id main) (d/commit-id (:base @state)))
       {:ok true :applied [] :t (:max-tx head)}
-      (let [base (pdb/branch-base conn main-b (:branch @state))
+      (let [base (pdb/branch-base (:store-conn @state) main-b b)
             resolutions (into {} (for [[[e & more] v] resolutions] [(into [(if (vector? e) (:db/id (d/entity head e)) e)] more) v]))
             p (pm/plan base head main resolutions)]
         (if-let [why (pm/refusal p)]
           (assoc why :ok false :applied [] :t (:max-tx head))
-          (let [a (pm/apply-groups! conn head (pdb/tx-meta (:branch @state)) (:groups p))
-                own (fn [tx-data opts] (dw/apply! conn (cond-> {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:op opts) (assoc :seon.tx/merged main-b)))}
-                                                         (:op opts) (assoc :parents #{(d/commit-id main)}))
-                                                  opts))
-                resolved (when (and (not (:refused a)) (seq resolutions)) (own (resolution-tx resolutions) nil))
+          (let [_ (d/force-branch! main b #{(d/commit-id main)} {:expected-current-commit (d/commit-id head)})
+                conn (reconnect!)
+                a (pm/apply-groups! conn @conn (pdb/tx-meta b) (pm/replay base head main-b))
+                own (fn [tx-data] (dw/apply! conn {:tx-data tx-data :tx-meta (pdb/tx-meta b)}))
+                resolved (when (and (not (:refused a)) (seq resolutions)) (own (resolution-tx resolutions)))
                 final (when (and (not (:refused a)) (or (nil? resolved) (map? resolved)))
-                        (own [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id main)}] {:op 'merge!}))
-                ;; the branch's own write refused (a resolution, the merge's transaction): the write check's own error
+                        (own [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id main)}]))
                 own-refused (fn [e] (or (when (:seon.error/type (ex-data e)) (ex-data e))
                                         (contract/error :seon.writer/refused #'seon.agent/merge-main! (or (ex-message e) (str e)) (or (ex-data e) {}))))
                 why (cond (:refused a) (pm/refusal (:tx (:refused a)) (:exception (:refused a)))
                           (and resolved (not (map? resolved))) (own-refused resolved)
                           (and final (not (map? final))) (own-refused final))]
             (if why
-              (do (dw/abandon-pending! conn) (assoc why :ok false :applied [] :t (:max-tx head)))
+              ;; nothing of it is kept: the branch's head goes back to what it was
+              (do (dw/abandon-pending! conn)
+                  (d/force-branch! head b #{(d/commit-id head)} {:expected-current-commit (d/commit-id main)})
+                  (reconnect!)
+                  (assoc why :ok false :applied [] :t (:max-tx head)))
               (let [c (try (dw/commit-pending! conn) (finally (when (dw/pending? conn) (dw/abandon-pending! conn))))
-                    ops (vec (mapcat pdb/report->tx (cond-> (:reps a) resolved (conj resolved) true (conj final))))
+                    ;; what moved under this process: from its old head to main with its own work on top
+                    ops (let [[gone added] (d/datoms-diff head (:db c) :eavt [])]
+                          (into (mapv (fn [x] [:db/retract (:e x) (:a x) (:v x)]) gone) (map (fn [x] [:db/add (:e x) (:a x) (:v x)])) added))
                     errs (program/load-changes! (:db c) ops)]
                 (doc/carry-index! head (:db c) (map (fn [op] [(nth op 1) (nth op 2)]) ops))
-                ;; the merge base is now main's head, the value just merged
                 (swap! state #(-> % (assoc :db (:db c) :base main :merged-t (:max-tx (:db c))) (schema-moved (into #{} (map (fn [op] (nth op 2 nil))) ops))))
                 (send! {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c)})
                 (cond-> {:ok true :applied (:applied a) :resolved (vec (keys resolutions)) :t (:max-tx (:db c)) :datoms (count ops)}

@@ -192,7 +192,7 @@ A change to a namespace many others require reaches many tests.
 
 ## Merging
 
-How merging with main works, and what to do when it conflicts. Main is merged into your branch as it moves: main's transactions since your merge base, replayed whole. An entity's attribute both you and main changed to your own values is a conflict (`:seon.merge/data-conflict`: `:seon.merge/entity`, `/attribute`, `/base`, `/ours`, `/theirs`); the merge writes nothing, and your status's `:unmerged` names each with its `:seon.merge/resolve`.
+How merging with main works, and what to do when it conflicts. Main is merged into your branch as it moves, as git rebases: your branch starts again from main and your own transactions since the base are replayed on it. An entity's attribute both you and main changed to your own values is a conflict (`:seon.merge/data-conflict`: `:seon.merge/entity`, `/attribute`, `/base`, `/ours`, `/theirs`); the merge writes nothing, and your status's `:unmerged` names each with its `:seon.merge/resolve`.
 
 - `(my.branch/unmerged)` lists them. Settle them by merging again with resolutions, `[entity attribute]` (the entity by its id or a lookup ref) to the value you keep: ``(my.branch/merge-main! {[[:seon.task/id "app/x"] :seon.task/plan] "the plan both need"})``; `:seon.merge/gone` retracts it.
 
