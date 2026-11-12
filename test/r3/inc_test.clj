@@ -37,6 +37,12 @@
 
 (defn- acyclic? [db] (some? (try (r/actions (r/index db)) (catch Throwable _ nil))))
 
+(defn- adds-need?
+  "Does tx add a :seon.task/needs edge (rand-step's kinds 3 and 7)? Only a need can close a cycle, so only after one is the
+  whole db reindexed to check (acyclic?): a full index a commit was a third of this test's ticks."
+  [tx]
+  (boolean (some #(or (and (map? %) (contains? % :seon.task/needs)) (and (vector? %) (= :seon.task/needs (nth % 2 nil)))) tx)))
+
 (defn- equals-full
   "A random history from seed, 150 commits: after each, the incremental reconciler's actions
   against the oracle's."
@@ -49,7 +55,7 @@
           (is (zero? bad) (str "seed " seed))
           (let [tx (rand-step @conn rng k)
                 rep (when (seq tx) (try (d/transact conn {:tx-data (vec tx)}) (catch Throwable _ nil)))]
-            (if (or (nil? rep) (not (acyclic? @conn)))
+            (if (or (nil? rep) (and (adds-need? tx) (not (acyclic? @conn))))
               (recur (inc k) (r/index @conn) bad)
               (let [_ (is (< (:max-tx (:db-before rep)) (:max-tx (:db-after rep))) "main's t moves forward with each commit")
                     idx' (r/observe idx (:db-after rep) (pdb/report->tx rep))
