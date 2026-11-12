@@ -1231,6 +1231,9 @@
                ;; a run of a session's checkout (seon.system/prove-tree!): its tests read that checkout's files, as their digests
                ;; (the tree's) say, never root's, which this agent was forked from (seon.config/checkout reads SEON_CHECKOUT)
                (when-let [co (:checkout plan)] (lib/c-setenv "SEON_CHECKOUT" co 1))
+               ;; a batch the test service granted: every process this child starts carries it, so the service reads what its
+               ;; running batches hold (seon.prove/held-processes)
+               (when-let [b (:seon.prove/batch plan)] (lib/c-setenv "SEON_PROVE_BATCH" b 1))
                ;; its tests run as bin/test's runner runs them: no interrupt or eval of the agent's
                ;; (task seon.agent/a-test-child-starts-as-a-test-runner-does)
                (intr/forked!)
@@ -1427,7 +1430,8 @@
                   [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
                   [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
                   [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe [:map-of :qualified-symbol :string]]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe [:map-of :qualified-symbol :string]] [:maybe :string]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]]}
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe [:map-of :qualified-symbol :string]] [:maybe :string]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe [:map-of :qualified-symbol :string]] [:maybe :string] [:maybe :string]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]]}
   ([ticks proofs mode] (run-tests-forked ticks proofs mode (fn [_] nil)))
   ([ticks proofs mode forked] (run-tests-forked ticks proofs mode forked nil))
   ([ticks proofs mode forked names] (run-tests-forked ticks proofs mode forked names nil))
@@ -1435,7 +1439,9 @@
   ;; checkout: the session's checkout whose files a run of its tree reads (seon.system/prove-tree!): its test children read it
   ;; (test-child's SEON_CHECKOUT), whichever plan the run takes; it rode on the held plan alone, so a run that planned again read
   ;; the main tree's (its process tests found no process store there, 2026-11-12)
-  ([ticks proofs mode forked names items checkout]
+  ([ticks proofs mode forked names items checkout] (run-tests-forked ticks proofs mode forked names items checkout nil))
+  ;; batch: the test service's tag of the batch this run is (seon.prove/batch-tag), set in its test children's environment
+  ([ticks proofs mode forked names items checkout batch]
   ;; an item the test service granted, at the digest this agent's plan of the run gave it: run as planned, nothing planned again
   ;; the runtime invariant (docs/merging.md#a-session-proves-through-root): this process runs its branch's program before a
   ;; test of it is judged; a definition it holds another form of is named, never judged (seon.program/program-differs)
@@ -1444,7 +1450,8 @@
                     (str "this agent runs another program than its branch: " (str/join ", " (map :var differs)))
                     {:differs differs})
   (let [{:keys [unread] :as sel} (cond-> (grant-selection (:held-plan @state) items #(run-plan proofs mode names))
-                                    checkout (assoc-in [:plan :checkout] checkout))]
+                                    checkout (assoc-in [:plan :checkout] checkout)
+                                    batch (assoc-in [:plan :seon.prove/batch] batch))]
   (if unread
     unread
   (let [{:keys [plan judge deferred selected run reused digests reused-reports]} sel
@@ -1752,7 +1759,8 @@
                                      (some-> (:names m) set)
                                      (:items m)
                                      ;; items of a run of a session's checkout: their test children read that checkout's files
-                                     (:checkout m))]
+                                     (:checkout m)
+                                     (:seon.prove/batch m))]
              [{:op :tests :id (:id m) :result (if (and (map? r) (not (contract/error? r))) (proofs/answer r (asked m proofs (:selected r))) r) :mem-mb (mem-mb)}]))
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
     :fx-reply (let [r (dissoc m :op :k)]
