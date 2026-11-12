@@ -3,7 +3,7 @@
   opens it by default, holds the schema and nothing else; root's warm-up needs no seed."
   (:require [seon.lib] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d]
-            [seon.db :as pdb] [seon.program] [seon.system :as root] [seon.main] [seon.test-store :as ts] [test-runner :as runner]))
+            [seon.db :as pdb] [seon.program] [seon.system :as root] [seon.main] [seon.test-store :as ts] [test-runner :as runner] [my.test]))
 
 (defn- program-datoms [db]
   (vec (mapcat #(d/datoms db :aevt %) [:ns/name :form/id :var/name :task/name])))
@@ -301,3 +301,19 @@
     (is (= [0 "main"] [e1 (:mode merge)]) (str "--merge asks every key against no base: " (pr-str merge)))
     (is (not (contains? merge :names)) "and names no namespace")
     (is (= [0 "judge" ["seon.x-test"]] [e2 (:mode judge) (:names judge)]) "a plain run is the judge's, of what it names")))
+
+;; docs/merging.md#a-tests-tick-budget: every test that states no estimate is listed, with what it spends, costliest first,
+;; for its area to state one from what it must do (plans: tests-spent-ticks); one that states an estimate is not. T1: the
+;; world's two tests, one given an estimate.
+(deftest ^{:seon.test/estimate {:ticks 20000000}} every-test-stating-no-estimate-is-listed
+  (let [db (my.test/with (my.test/world)
+             (my.test/code 'app.est-test (str "(ns app.est-test (:require [clojure.test :refer [deftest is]]))\n"
+                                              "(deftest ^{:seon.test/estimate {:ticks 1000}} stated (is true))\n"
+                                              "(deftest unstated (is true))\n")))
+        u (runner/unestimated db)
+        names (set (map :test u))]
+    (is (contains? names 'app.est-test/unstated) "a test stating no estimate is listed")
+    (is (contains? names 'app.calc-test/add-adds) "the world's tests, which state none, too")
+    (is (not (contains? names 'app.est-test/stated)) "a test stating one is not")
+    (is (= '[app.est-test app.calc-test] [(:ns (first (filter #(= 'app.est-test/unstated (:test %)) u))) (:ns (first (filter #(= 'app.calc-test/add-adds (:test %)) u)))])
+        "each with its namespace, the area that states its estimate")))

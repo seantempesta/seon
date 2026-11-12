@@ -944,6 +944,19 @@
                  :when (seq ms)]
              [t (nth ms (quot (count ms) 2))]))))
 
+(defn typical-ticks
+  "{test ticks} of tests: the median of the engine ticks their newest greens spent (history), whatever the digest: what a test
+  stating no estimate is seen to cost (health's list of them, test-runner/unestimated), never its budget (the owner: a budget
+  is worked from what a test must do, never the last run). A test with none is left out. docs/merging.md#a-tests-tick-budget."
+  {:malli/schema [:function [:=> [:cat [:sequential :qualified-symbol]] [:map-of :qualified-symbol :int]]
+                  [:=> [:cat :string [:sequential :qualified-symbol]] [:map-of :qualified-symbol :int]]]}
+  ([tests] (typical-ticks (cfg/value :seon.config.proofs/results-dir) tests))
+  ([dir tests]
+   (into {} (for [t (distinct tests)
+                  :let [ts (sort (keep second (history dir t)))]
+                  :when (seq ts)]
+              [t (nth ts (quot (count ts) 2))]))))
+
 (defn slow-tests
   "{test ms} of the tests of digests ({test digest}) that run past bound (:seon.config.proofs/slow-test-ms): by the fastest of
   its newest greens (recent-verdict-files) and its green at its own digest, so a test made fast comes back as soon as it is
