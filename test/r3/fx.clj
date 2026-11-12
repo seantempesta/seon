@@ -22,7 +22,7 @@
   (let [k "a0" e (env id)]
     [(merge {:seon.task/id id :seon.task/outcome outcome :seon.task/agent k} members)
      {:db/id k :seon.agent/key k :seon.agent/task [:seon.task/id id] :seon.agent/branch (:branch e)
-      :seon.agent/boot boot :seon.agent/started-ms 0 :seon.agent/max-turns (:max-turns e)}]))
+      :seon.agent/boot boot :seon.agent/started-ms 0 :seon.agent/max-turns (:max-turns e) :seon.agent/parent {:seon.agent/key "user"}}]))
 
 (defn runs-tx
   "How the work of task k and its merge stands, by k mod 10 (see ns doc)."

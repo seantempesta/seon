@@ -106,7 +106,7 @@ The parts, in the order they unblock each other. Parts 4 to 7 run beside the oth
    - The rest of this list is the design's direction, built only as each step reaches it.
    - A session is an agent: an agent names the agent whose conversation it continues, a fork's branch is the cut, and the words that open a conversation are data.
    - An agent holds a set of tasks, and all must pass.
-   - The hierarchy is `:seon.agent/agents` at any depth; a question goes to whoever started the task; `:seon.agent/root` goes (it is still written in `src/seon/system.clj` and `src/seon/task.clj`).
+   - The hierarchy is `:seon.agent/parent` at any depth; a question goes to whoever started the task; `:seon.agent/root` goes (it is still written in `src/seon/system.clj` and `src/seon/task.clj`).
    - What is observed is a fact on the thing observed; what is computed from facts (a score, a problem, a standing against a bound) is a render, never stored.
    - One store erase carries every change of a stored attribute. Debt: `:seon.task/kind` is read on 33 lines of `src` against the 2026-11-08 ruling; no template adds a value to it.
 2. **The self-improvement loop** (Context, once part 1 is agreed).
