@@ -2838,7 +2838,7 @@
         [names mine sum status problems]
         (in-agent (fn [names]
                     [(fn [_] names)
-                     "(my.agent/uncite! \"docs/none.md\")" "(+ 1 2)"
+                     "(#'my.agent/own-cites)" "(+ 1 2)"
                      {:op :eval :agent "root" :code (str "(:seon.agent/missing-cites (get (:agents (c/state sys)) :" (:agent names) "))")}
                      {:op :eval :agent "root" :code problem-code}])
                   {:config {:seon.config.agent/cites [gone held]}})]
