@@ -67,11 +67,6 @@
 
 ;; ---- one definition of each entity (docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together) ----------
 
-(defn identity-attr?
-  "Is attribute a an upsert key ([:and {:seon.db/identity true} ...])? See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [a] (boolean (:seon.db/identity (contract/properties a))))
-
 (defn- form-props
   "The properties of named schema k's form in forms ([:type {props} ...]), or nil. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat :map :any] [:maybe :map]]}
@@ -143,9 +138,18 @@
      ;; the ref attributes some entity schema requires: what the write check's cascade follows from a retracted entity, once
      :required-refs (vec (sort (distinct (for [k (distinct (vals es)) a (required (get forms k)) :when (:seon.db/to (form-props forms a))] a))))}))
 
+(defn- with-specs
+  "Index ix with :specs, each pattern an entity schema declares (:seon.ctx/pattern) to its compiled spec, made at its
+  first use (seon.render/pattern answers from it): derived data that travels with the index, so a cold read of an
+  entity compiles no schema's pattern again. See docs/ctx.md#the-pattern."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [ix]
+  (assoc ix :specs (into {} (for [k (distinct (vals (:entity-schemas ix))) :let [p (:seon.ctx/pattern (form-props (:forms ix) k))] :when p]
+                              [p (delay ((requiring-resolve 'seon.render/pattern) ix p #{}))]))))
+
 (def ^:private binary-index
   "The binary's `entity-index`, derived once from its registry. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  (entity-index contract/forms))
+  (with-specs (entity-index contract/forms)))
 
 (defn index
   "The binary's `entity-index`: what every write is held to unless its branch changed an entity schema (`index-of`), and what
@@ -216,7 +220,7 @@
   docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat [:maybe :map]] :map]}
   [schemas]
-  (if (seq (:forms schemas)) (entity-index (merge contract/forms (:forms schemas))) binary-index))
+  (if (seq (:forms schemas)) (with-specs (entity-index (merge contract/forms (:forms schemas)))) binary-index))
 
 (defn- write-index
   "The `entity-index` a write is held to, given its branch's own schema changes ({:forms :registry}, or nil): the binary's

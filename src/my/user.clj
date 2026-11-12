@@ -1,18 +1,18 @@
 (ns my.user
   "The agent's functions on the person it works for (Seon's my.user): the sessions working for them, and move their view. See docs/users.md#whats-on-screen.
-    (my.user/sessions)       every session on main as this agent last heard it: [{:key :status :task :outcome}], by key
+    (my.user/agents)       every agent on main as this agent last heard it: [{:key :status :task :outcome}], by key
     (my.user/focus! \"k\")     move the person's view to session k's page"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.ctx :as ctx] [seon.ratom :as ratom]))
 
 (defn- started
-  "The agents join value as a context holds it (a map of agents, or one agent, or none), as a sequence of them. See docs/users.md#roots-session."
+  "The agents join value as a context holds it (a map of agents, or one agent, or none), as a sequence of them. See docs/users.md#roots-agent."
   {:malli/schema [:=> [:cat :any] [:sequential :map]]}
   [v] (cond (nil? v) [] (:db/id v) [v] (map? v) (vec (vals v)) :else (vec v)))
 
 (defn- below
   "The agents join value as holds, each with the ones it started, as deep as the pull joined them: [the agents that hold their key, how many
-  are held as ids alone (where the pull stopped)]. See docs/users.md#roots-session."
+  are held as ids alone (where the pull stopped)]. See docs/users.md#roots-agent."
   {:malli/schema [:=> [:cat :any] [:tuple [:vector :map] nat-int?]]}
   [as]
   (reduce (fn [[ks n] a] (if (:seon.agent/key a)
@@ -20,13 +20,13 @@
                            [ks (inc n)]))
           [[] 0] (started as)))
 
-(defn sessions
+(defn agents
   "Every session as this agent's record holds them, at the point its turn heard main: each {:key :status :task :outcome}, by key.
   Read from the record's join to whoever started it (root's session's pattern, [:seon.db/agent-fact {:seon.agent/_agents :seon.db/user-fact}]: the user's tree), the agents
   it started and, under each, the ones it started, to :seon.config.render/agent-tree-depth levels: when the pull stopped short of some, a last entry
   {:more n :depth :seon.config.render/agent-tree-depth} says how many it left out, so the answer never cuts silently; it reads no db. An agent
   whose pattern holds no such join has none. What root's session asks when it looks for a session already on a person's request (its page's
-  model reads none in each request). See docs/users.md#roots-session."
+  model reads none in each request). See docs/users.md#roots-agent."
   {:malli/schema [:=> [:cat] [:vector [:or [:map [:key :string] [:status {:optional true} :any] [:task {:optional true} [:maybe :string]] [:outcome {:optional true} :any]]
                                          [:map [:more pos-int?] [:depth :qualified-keyword]]]]]}
   []

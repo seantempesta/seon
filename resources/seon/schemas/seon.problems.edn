@@ -61,7 +61,8 @@
  :seon.agent/load-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/load-failed]] [:ns :symbol]]]
  ;; an agent's config cites a wiki section its store holds no entity for (seon.task/agent-cites-missing, said in its hello): it runs
  ;; citing the rest (docs/references.md#an-entity-cites)
- :seon.agent/cite-missing [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/cite-missing]] [:address :string]]]
+ :seon.agent/cite-missing [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/cite-missing]] [:seon.doc/address :string]]]
+ :seon.agent/missing-cites [:vector {:description "The addresses an agent's config cites that its store holds no entity for, as its hello, its status and its spawn's answer carry them. See docs/references.md#an-entity-cites."} :string]
  ;; an agent forked from a program that did not load (seon.system's set-agent at its hello): every load error it was given; the agent runs
  :seon.agent/program-differs [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/program-differs]] [:differs [:vector :map]]]]
  :seon.agent/started-without-program [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/started-without-program]] [:errors [:vector :seon.program/error]]]]
@@ -84,7 +85,7 @@
  ;; a cancel (my.root/cancel-tx) of an id that names no task: answered, never upserted as a task
  :seon.system/unknown-task [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/unknown-task]] [:task :string]]]
  ;; seon.ctx.session/session-tx of a key no agent holds, of a session with no request to show or with a record of a kind an
- ;; example does not hold: docs/tasks.md#a-task-names-example-sessions
+ ;; example does not hold: docs/tasks.md#a-task-names-examples
  ;; a request whose tree drew no system message (seon.ctx.wire/request): refused, what stood first in its place named
  ;; a definition that broke Seon's recording of it, undone (seon.repl/undo-definition!)
  :seon.repl/definition-undone [:and :seon.error/base [:map [:seon.error/type [:= :seon.repl/definition-undone]] [:vars [:vector :any]]]]
