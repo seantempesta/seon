@@ -14,7 +14,8 @@
 
 ;; docs/cost.md#counting-calls: what a test read is what its verdict's digest will be made of, so a nested measure (an eval, a cost proof) must not lose it
 ;; docs/sharing.md#a-functions-cost-is-a-fact: stats add exactly, however they were split
-(deftest stats-add-the-same-however-they-were-split
+;; Estimate: 3 accrue calls and one stats-sum, ~10 contracted calls x ~30k with checks: ~300k ticks.
+(deftest ^{:seon.test/estimate {:ticks 300000}} stats-add-the-same-however-they-were-split
   (let [f (fn [c t] {:var 'a/f :calls c :ticks t :self-ticks t :bytes t :self-bytes t})
         once (profile/accrue {} [(f 2 100) (f 1 1000)] "e1")
         apart (profile/stats-sum (get (profile/accrue {} [(f 2 100)] "e1") 'a/f) (get (profile/accrue {} [(f 1 1000)] "e1") 'a/f))]
@@ -22,7 +23,8 @@
     (is (= {:self-ticks 1000 :eval "e1"} (:worst apart)) "the worst is the one with the most self-ticks")
     (is (= {5 2 9 1} (:hist apart)) "calls by the log2 of their self-ticks a call")))
 
-(deftest a-nested-measure-keeps-what-ran
+;; Estimate: two counted wrappers, reads-begin!, begin!, one measure!, touched x2: ~8 calls x 25k: ~200k ticks.
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-nested-measure-keeps-what-ran
   (let [before (profile/counted 'seon.profile-test/before-the-nested (fn [] 1))
         inside (profile/counted 'seon.profile-test/inside-the-nested (fn [] 2))]
     (profile/reads-begin!)
@@ -36,7 +38,8 @@
     (profile/reads-begin!)
     (is (not (contains? (profile/reads) 'seon.profile-test/before-the-nested)) "a new record starts over")))
 
-(deftest every-call-of-a-contracted-function-is-counted
+;; Estimate: 1,000 + 3 leaf calls x ~300 (counted, checked) = 0.3M; 3 epochs (begin!, touched) ~70k each: ~500k ticks.
+(deftest ^{:seon.test/estimate {:ticks 500000}} every-call-of-a-contracted-function-is-counted
   (when contract/on?
     (is (= {'seon.profile-test/branch 1 'seon.profile-test/leaf 1000} (cost-of #(branch 1000))))
     (testing "a new epoch starts from zero"
@@ -44,7 +47,8 @@
     (testing "an epoch that calls nothing touched nothing"
       (is (= {} (cost-of (fn [] nil)))))))
 
-(deftest calls-is-the-epochs-total
+;; Estimate: 201 contracted calls x 300 = 60k, one epoch: ~100k ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000}} calls-is-the-epochs-total
   (when contract/on?
     (profile/begin!)
     (branch 200)
@@ -54,7 +58,8 @@
 ;; either call breaks these identities for that one measure (SIGIO reaches an agent's test child: about 1 measure in 3,000 under a
 ;; flood of them). Holding interrupts is no answer, as it stops the tick counter too. A counting defect breaks every measure, so one of
 ;; three exact says the counting is right.
-(deftest a-functions-own-work-is-its-work-less-its-callees
+;; Estimate: 3 runs x (51 calls x 300 + an epoch ~70k): ~200k ticks.
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-functions-own-work-is-its-work-less-its-callees
   (when contract/on?
     (let [measure (fn [] (profile/begin!) (branch 50)
                     (let [by (into {} (map (juxt :var identity)) (profile/touched))]
@@ -71,7 +76,8 @@
 
 (defn interrupted {:malli/schema [:=> [:cat :int] :int]} [n] (+ (branch n) (profile/aside #(branch n))))
 
-(deftest work-set-aside-is-not-the-interrupted-calls
+;; Estimate: 102 contracted calls x 300 = 30k, one epoch, one aside: ~100k ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000}} work-set-aside-is-not-the-interrupted-calls
   ;; docs/cost.md#counting-calls: a signal handler runs at a safe point inside whatever call is running
   ;; (seon.intr); md-scan #28's test child counted its SIGIO handler's calls in the eval it interrupted.
   ;; Work set aside (seon.profile/aside) is neither counted nor the interrupted call's own
@@ -88,7 +94,8 @@
 
 (defn- bare-leaf [x] (* x x))
 
-(deftest counting-a-call-allocates-nothing-and-costs-a-few-ticks
+;; Estimate: 2 measures of 10,000 calls: plain 10 ticks, counted 15 ticks a call = 0.25M, plus 2 measure! ~50k each: ~400k ticks.
+(deftest ^{:seon.test/estimate {:ticks 400000}} counting-a-call-allocates-nothing-and-costs-a-few-ticks
   ;; measured 2026-10-27: a call of bare-leaf 10 ticks; counted (calls, ticks, bytes) 15
   (let [counted (profile/counted 'seon.profile-test/bare-leaf bare-leaf)
         n 10000
@@ -97,7 +104,8 @@
     (is (<= (- (:bytes wrapped) (:bytes plain)) 1024) (str n " counted calls allocated " (:bytes wrapped) " bytes, plain " (:bytes plain)))
     (is (<= (- (:ticks wrapped) (:ticks plain)) (* 8 n)) (str n " counted calls " (:ticks wrapped) " ticks, plain " (:ticks plain)))))
 
-(deftest an-evals-record-carries-its-costliest-functions
+;; Estimate: eval-string of one call form: read, analyze, compile ~0.5M; 301 counted calls x 300; the record: ~1M ticks.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} an-evals-record-carries-its-costliest-functions
   (when contract/on?
     ;; the REPL's own handler in this process, as a scratch session (not agent mode: nothing is transacted)
     (let [old @agent/state
@@ -114,12 +122,14 @@
 ;; one every process on the machine reads
 (ffi/defcfn ^:private uptime-raw "clock_gettime_nsec_np" [:int] :long)
 
-(deftest the-clock-is-the-one-every-process-reads
+;; Estimate: two foreign calls and one now-ns: ~20k ticks.
+(deftest ^{:seon.test/estimate {:ticks 20000}} the-clock-is-the-one-every-process-reads
   (testing "profile/now-ns is the machine's CLOCK_UPTIME_RAW, not a count from this process's start"
     (let [a (uptime-raw 8) t (profile/now-ns) b (uptime-raw 8)]
       (is (<= a t b) (str "system " a " .. " b ", profile/now-ns " t)))))
 
-(deftest reading-the-clock-allocates-nothing
+;; Estimate: 10,000 now-ns calls x ~50 ticks (a foreign call) = 0.5M, an empty loop 10k x 10: ~600k ticks.
+(deftest ^{:seon.test/estimate {:ticks 600000}} reading-the-clock-allocates-nothing
   (let [n 10000
         bytes (fn [f] (let [a0 (profile/alloc-bytes)] (f) (- (profile/alloc-bytes) a0)))
         empty-loop (bytes #(dotimes [_ n] nil))
@@ -143,7 +153,8 @@
   "One thread allocating until stopped (a vector of 100 longs, again and again), running when answered."
   [] (busy-threads 1 #(dotimes [_ 1000] (vec (range 100)))))
 
-(deftest a-threads-allocation-is-its-own
+;; Estimate: three windows each a thread start and a join ~50k; the other threads' work is theirs, not counted; one 1 MB array (C fill): ~300k ticks.
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-threads-allocation-is-its-own
   ;; alloc-bytes counted the whole
   ;; process (1,712 B idle against 1.4 GB in 200 ms while another thread allocated), so a cost
   ;; proof read other threads' work as its own. Now it is the calling thread's count alone.
@@ -160,7 +171,8 @@
     (let [a0 (profile/alloc-bytes) b (byte-array 1000000) a1 (profile/alloc-bytes)]
       (is (<= 1000000 (- a1 a0) 1100000) (str "the caller's own " (count b) " bytes counted as " (- a1 a0))))))
 
-(deftest a-collection-in-a-measured-call-is-not-its-bytes
+;; Estimate: measure's settle rule: ~17 calls alone and ~17 beside the allocating thread = 34 calls of (into [] (range 100000)) x ~15 ticks an element = 1.5M each: ~50M ticks.
+(deftest ^{:seon.test/estimate {:ticks 50000000}} a-collection-in-a-measured-call-is-not-its-bytes
   ;; task seon.cost/a-cost-proof-is-the-same-under-load: a collection tripped inside a measured
   ;; call charged the call the collector's bookkeeping (17,344 B for an explicit collect, 67,264 B
   ;; a call of seon.vector/near beside an allocating thread), so a proof's sizes read different
@@ -179,7 +191,8 @@
     (is (<= (Math/abs (- (:bytes beside) (:bytes alone))) 4096.0)
         (str "alone " (long (:bytes alone)) " B, beside " (long (:bytes beside)) " B, over " gcs " collections"))))
 
-(deftest a-new-stack-is-not-the-calls-bytes
+;; Estimate: ~6 calls of a 20,000-deep recursion x ~10 ticks a frame = 0.2M each, 3 collections' own handler not counted: ~1M ticks.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-new-stack-is-not-the-calls-bytes
   ;; task seon.cost/a-cost-proof-is-the-same-under-load: a call deep enough to overflow its stack
   ;; takes a cached stack segment, or allocates one when a collection has emptied the cache, so
   ;; the same call read 5,794,784 B or ~65 KB more (seon.vector/near at 500, alone), and beside an
@@ -205,7 +218,8 @@
         cold (do (System/gc) (window))]
     (is (<= (Math/abs (- cold warm)) 4096) (str "a try: warm " warm " B, after a collection " cold " B"))))
 
-(deftest a-measure-is-the-same-beside-another-thread
+;; Estimate: ~34 calls (17 settle alone, 17 beside) of (reduce + (map leaf (range 1000))) x ~50 ticks an element = 50k each: ~2M ticks.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-measure-is-the-same-beside-another-thread
   ;; the measured call's bytes are the same alone and while another thread allocates
   (let [f (fn [] (reduce + (map leaf (range 1000))))
         alone (seon.cost/measure f [] (seon.config/value :seon.config.proofs/cost-max-samples))
@@ -213,7 +227,8 @@
         beside (try (seon.cost/measure f [] (seon.config/value :seon.config.proofs/cost-max-samples)) (finally (end-threads! busy)))]
     (is (<= (:bytes beside) (* 1.25 (max 1.0 (:bytes alone)))) (str "alone " alone ", beside " beside))))
 
-(deftest a-measure-is-the-call-at-its-steady-state
+;; Estimate: warming: 9 calls of 3000 elements x 15 = 45k, then 17 of 100; steady: 17 of 100 x 1.5k: ~500k ticks.
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-measure-is-the-call-at-its-steady-state
   ;; task seon.cost/a-call-allocates-the-same-bytes-each-time: a call allocates more on its first calls
   ;; (seon.merge/delta-three-way: 3,776 2,752 1,536 3,584 B over its settled bytes, down to 320 by the
   ;; 14th); the measure given a cap (a call over its estimate, or a perf problem: one call is the default) is the settled call's, never
@@ -225,7 +240,8 @@
     (is (< 10 @calls) "the measure went on past the warm-up")
     (is (= (:bytes steady) (:bytes warming)) (str "the warm-up is not the cost: " warming " against " steady))))
 
-(deftest a-measure-that-never-settles-answers-its-least-and-says-so
+;; Estimate: a call that never settles runs to cost-max-samples = 60 calls of (vec (range ~97,000)) x ~15 ticks an element = 1.5M each; the other measures are one call of 100 elements: ~90M ticks.
+(deftest ^{:seon.test/estimate {:ticks 90000000}} a-measure-that-never-settles-answers-its-least-and-says-so
   ;; a call allocating fewer bytes every time never reaches a steady state: the measure stops at its cap, answers
   ;; the least of its calls and marks it (an error here failed by chance on a large call whose noise lowers the
   ;; least now and then: seon.cost-test/the-unit-table-is-current, once in three runs)
@@ -240,14 +256,16 @@
       (seon.cost/measure (fn [] (swap! calls inc)) [])
       (is (= 1 @calls) "by default a measure is one call"))))
 
-(deftest a-measure-is-one-number-beside-another-thread
+;; Estimate: 10 measures x ~17 calls (settle) of 1000 elements x ~50 ticks = 50k a call: ~9M ticks.
+(deftest ^{:seon.test/estimate {:ticks 9000000}} a-measure-is-one-number-beside-another-thread
   ;; the same call measured ten times while another thread allocates reads one byte count
   (let [f (fn [] (reduce + (map leaf (range 1000))))
         busy (allocating-thread)
         counts (try (vec (repeatedly 10 #(:bytes (seon.cost/measure f [] (seon.config/value :seon.config.proofs/cost-max-samples))))) (finally (end-threads! busy)))]
     (is (= 1 (count (distinct counts))) (str "bytes " (sort counts)))))
 
-(deftest a-call-is-measured-one-way
+;; Estimate: measure! of branch 100 (101 counted calls x 300) and of branch 10, two epochs: ~300k ticks.
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-call-is-measured-one-way
   ;; task seon.profile/a-call-is-measured-one-way: one measurement of a call, which the REPL's
   ;; per-form cost and the cost proof both read
   (testing "the call's value is answered with what it measured, one value"

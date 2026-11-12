@@ -140,9 +140,12 @@
  :seon.repl/bytes-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.repl/bytes-spent]] [:bytes :int] [:budget :int]]]
  ;; the agent could not fork its test run (threads were active): no proof ran
  :seon.test/fork-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/fork-refused]] [:active-threads :int]]]
- ;; a line the agent's test process sent does not read (a value that prints as no EDN in it): its test
- ;; ends :error with the line's head, and the agent goes on (seon.agent/child-line)
+ ;; a value the agent's test process sent does not read (a value that prints as no EDN in it): its test
+ ;; ends :error with the value's head, and the agent goes on (seon.agent/child-codec)
  :seon.test/unreadable-line [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/unreadable-line]]]]
+ ;; a test that can never go on: its test child went quiescent (every fiber but the link's pumps parked, nothing queued,
+ ;; no timer: jolt.host/on-quiescent!) while it ran; the test ends :error with Jolt's dump of every wait (seon.agent/test-child-runs!)
+ :seon.test/deadlock [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/deadlock]] [:test :string] [:dump :string]]]
  ;; the OS refused the thread that ends a process with its starter (seon.lib/end-with!)
  :seon.lib/starter-unwatched [:and :seon.error/base [:map [:seon.error/type [:= :seon.lib/starter-unwatched]] [:pid [:maybe :int]]]]
  :seon.test/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int]

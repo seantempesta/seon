@@ -5,7 +5,7 @@
   oracle reads the stored answer, as `seon.reconcile/actions` does, and never derives the done rule."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.task :as task] [clojure.string :as str]
-            [seon.config :as cfg]))
+            [seon.config :as cfg] [datahike.api :as d]))
 
 (def default-max-turns
   "Turns an agent may take when its task sets no :seon.config.agent/max-turns: the config's."
@@ -22,12 +22,27 @@
 
 ;; ---- the view: one read of main ---------------------------------------------------
 
+(def ^:private task-pattern
+  "What the oracle reads of a task, named (AGENTS.md §3a.5): its state, its environment's keys (desired-env), its needs and
+  agent by their identities, and a gate's deferred proofs. task/tasks pulled every attribute of the task schema and folded each
+  task's needs' plans and proofs, which no rule here reads (~80k ticks a task a reconcile)."
+  [:seon.task/id :seon.task/outcome :seon.task/execution :seon.task/branch :seon.task/model :seon.config.agent/max-turns
+   :seon.task/deferred {:seon.task/needs [:seon.task/id]} {:seon.task/agent [:seon.agent/key]}])
+
+(defn- tasks
+  "Every task on db by id, as task-pattern names it: needs a set of ids, agent its key (seon.task's shapes)."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :seon.task/id :map]]}
+  [db]
+  (into {} (for [t (d/q '[:find [(pull ?e pattern) ...] :in $ pattern :where [?e :seon.task/id]] db task-pattern)]
+             [(:seon.task/id t) (cond-> (update t :seon.task/needs #(set (map :seon.task/id %)))
+                                  (:seon.task/agent t) (update :seon.task/agent :seon.agent/key))])))
+
 (defn view
-  "Everything the reconciler reads from db, once: tasks (their stored outcomes among them), agents,
-  root's boot and config keys."
+  "Everything the reconciler reads from db, once: tasks (their stored outcomes among them, as task-pattern names them),
+  agents, root's boot and config keys."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
-  {:tasks (task/tasks db)
+  {:tasks (tasks db)
    :agents (task/agents db)
    :root (or (task/root db) {:boot "" :max-running default-max-running :max-merging default-max-merging})})
 
@@ -55,7 +70,7 @@
 
 (defn desired-env
   "The environment task t's agent must work in."
-  {:malli/schema [:=> [:cat :seon.task/task] :seon.task/env]}
+  {:malli/schema [:=> [:cat :map] :seon.task/env]}
   [t]
   {:branch (:seon.task/branch t) :model (:seon.task/model t)
    :max-turns (or (:seon.config.agent/max-turns t) default-max-turns)})
@@ -76,7 +91,7 @@
 (defn- ready?
   "Should task t have an agent working: released, not done, every need done, none live or awaiting its merge,
   and, parked or told, woken (none here: the generated histories wake none)."
-  {:malli/schema [:=> [:cat :map :seon.task/task] :boolean]}
+  {:malli/schema [:=> [:cat :map :map] :boolean]}
   [v t]
   (let [id (:seon.task/id t) o (:seon.task/outcome t)]
     (and (= :running (:seon.task/execution t))

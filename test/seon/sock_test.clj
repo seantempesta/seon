@@ -10,7 +10,8 @@
             (realized? sent) (let [m (sock/next-frame! c)] (when (not= :none m) m))
             :else (recur)))))
 
-(deftest a-frame-larger-than-the-socket-buffer-reaches-a-slow-live-peer-whole
+;; Estimate: 61k characters built (~5 ticks) = 0.3M; the 3.4 MB frame encoded once here (the sender's encode is on its thread) and read by next-frame! at ~2 ticks a byte = 14M; a compare of the value; the writer's work is its thread's: ~10M ticks.
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-frame-larger-than-the-socket-buffer-reaches-a-slow-live-peer-whole
   ;; (docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data):
   ;; agent a2's 3 MB :tests answer failed whole in the kernel and seon.sock/write-all! read the errno as
   ;; :epipe, so root never heard it and its api held the ask forever. A write the kernel cannot take now
@@ -36,7 +37,8 @@
     (is (= true @sent) "the send answers true: the peer is alive")
     (is (= v got) "the peer reads the whole value")))
 
-(deftest a-frame-larger-than-the-socket-buffer-carries-its-descriptor-whole
+;; Estimate: 3000 x (apply str (repeat 900 "p")) = 2.7M characters x ~5 ticks = 13M; the 2.7 MB frame encoded once here and decoded by the reader at ~3 ticks a byte = 16M; the value compared 3M; the reader's polling while the writer encodes: ~40M ticks.
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-frame-larger-than-the-socket-buffer-carries-its-descriptor-whole
   ;; send-frame! with a descriptor sends it with the first
   ;; bytes (sendmsg) and the rest as plain writes from where that stopped; a full buffer waits, as
   ;; for a frame alone. The descriptor that arrives still reaches its socket's peer.
@@ -61,7 +63,8 @@
       (lib/c-close x2))
     (run! lib/c-close [a b x y])))
 
-(deftest a-write-the-kernel-refuses-names-its-errno
+;; Estimate: one frame encode of a small map and one failing foreign write, an ex-info: ~100k ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-write-the-kernel-refuses-names-its-errno
   ;; a write that fails for any reason but a gone peer
   ;; throws a typed error carrying the kernel's errno, never answers :epipe. Writing to -1, no
   ;; descriptor at all (a closed one's number may already be another file's), is EBADF (9).
@@ -69,7 +72,8 @@
     (is (= :seon.sock/write-failed (:seon.error/type r)) (str "answered " r))
     (is (= 9 (:errno r)))))
 
-(deftest a-write-to-a-gone-peer-is-epipe
+;; Estimate: a socketpair, two closes, one small frame and a write that answers EPIPE: ~100k ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-write-to-a-gone-peer-is-epipe
   ;; EPIPE (the peer closed) is :epipe, the one answer that
   ;; means the peer is gone.
   (let [[a b] (sock/socketpair)]
@@ -77,7 +81,8 @@
     (is (= :epipe (sock/send! a {:op :hello})))
     (lib/c-close a)))
 
-(deftest a-spawned-command-holds-no-socketpair-end
+;; Estimate: a socketpair, two fcntl calls and two closes: ~50k ticks.
+(deftest ^{:seon.test/estimate {:ticks 50000}} a-spawned-command-holds-no-socketpair-end
   ;; docs/processes.md#a-child-holds-what-it-is-given: a test child's pipe was read as held
   ;; because a process other than the child kept its write end; both ends are close-on-exec (FD_CLOEXEC,
   ;; fcntl F_GETFD bit 1), so a command the process spawns while a pair is open holds neither, and a

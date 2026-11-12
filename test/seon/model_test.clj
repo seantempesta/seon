@@ -25,7 +25,8 @@
    (chunk-line {:model "deepseek-flash" :choices [] :usage {:prompt_tokens 120 :completion_tokens 30 :prompt_cache_hit_tokens 64}})
    "data: [DONE]\n\n"])
 
-(deftest each-eval-carries-its-place-in-the-reply
+;; Estimate: one reply-of with 3 tool calls (3 JSON reads of ~60 bytes at ~20 ticks) and 3 stream-id calls ~25k each: ~300k ticks.
+(deftest ^{:seon.test/estimate {:ticks 300000}} each-eval-carries-its-place-in-the-reply
   ;; task seon.fx/an-effect-streams-what-it-reads: the stream reader files an eval's code under <call>/<k>/eval-0 (k the tool call's :index),
   ;; so its output must file under the same: reply-of puts [k 0] on each eval, as data, and the stream id is made from it, never from the eval's id
   (let [tc (fn [index id code] {:index index :id id :function {:name "repl" :arguments (json/write-str {"intent" "i" "code" code})}})
@@ -37,7 +38,8 @@
     (is (= ["ta" "tb" "tc"] (mapv :id calls)) "each call its own id")
     (is (= ["c/0/eval-0/out" "c/1/eval-0/out" "c/2/eval-0/out"] ids) "three tool calls: each eval's output under its own call")))
 
-(deftest a-call-that-came-back-as-text-is-answered-not-parked
+;; Estimate: 2 reply-of calls on small maps, one includes?: ~200k ticks.
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-call-that-came-back-as-text-is-answered-not-parked
   ;; deepseek-run4, 2026-11-07: v4-pro's reply was text ending in its own closing tag, finish stop, no call and no opening tag to read one
   ;; from; read as a message it parked all 3 agents silently. It is one eval that says so, so the run goes on, with its usage
   (let [body (fn [content] {:usage {:prompt_tokens 10 :completion_tokens 2}
@@ -49,7 +51,8 @@
     (is (= 10 (:prompt-tokens garbled)) "its usage is the reply's")
     (is (nil? (:tool-calls plain)) "a reply that is only text stays a reply")))
 
-(deftest a-streamed-reply-ends-when-the-server-ends-it
+;; Estimate: one complete call over loopback (connect, request JSON read by the server on its thread, 7 chunk lines read and parsed ~10k a line); the server's own work is its thread's: ~2M ticks.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-streamed-reply-ends-when-the-server-ends-it
   (let [port (+ 20000 (rand-int 20000))
         seen (promise)
         server (adapter/run-server
@@ -71,12 +74,14 @@
         (is (= ["stop" "deepseek-flash" 120 30 64] ((juxt :finish-reason :model :prompt-tokens :completion-tokens :cache-hit-tokens) r))))
       (finally (stop-now! server)))))
 
-(deftest a-dropped-connection-is-a-transport-failure
+;; Estimate: one complete call to a refused port: a connect, its error as data: ~500k ticks.
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-dropped-connection-is-a-transport-failure
   (let [r (model/complete {:kind :openai-compat :base-url "http://127.0.0.1:1" :model "m" :api-key-env "HOME" :max-tokens 2048}
                           {:messages [{:role "user" :content "x"}] :task "t/x" :turn 0})]
     (is (= :seon.model/transport (:seon.error/type r)) (pr-str r))))
 
-(deftest a-reply-without-usage-records-no-tokens
+;; Estimate: 2 parse-reply calls on ~100-byte JSON: ~200k ticks.
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-reply-without-usage-records-no-tokens
   (testing "the provider sent no usage: the completion states no token counts (absent is not 0)"
     (let [c (model/parse-reply "{\"choices\":[{\"message\":{\"content\":\"(+ 1 2)\"}}]}" 12.0 2048)]
       (is (= "(+ 1 2)" (:text c)))
@@ -85,7 +90,8 @@
     (let [c (model/parse-reply "{\"choices\":[{\"message\":{\"content\":\"x\"}}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3}}" 12.0 2048)]
       (is (= [7 3] [(:prompt-tokens c) (:completion-tokens c)])))))
 
-(deftest a-reply-calls-the-one-tool-repl
+;; Estimate: one request-body and 3 parse-reply calls on ~300-byte JSON at ~20 ticks a byte plus ~25k a contracted call: ~500k ticks.
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-reply-calls-the-one-tool-repl
   ;; owner, 2026-10-22: a turn is native tool calls, one tool, repl, so the model sees each
   ;; evaluation's answer before its next call (DeepSeek's OpenAI-compatible tool_calls)
   (testing "the request declares the one tool, and the conversation's calls and answers go as the API reads them"
@@ -115,7 +121,8 @@
       (is (= ["c" "{\"code\":\"(+ 1"] ((juxt :id :code) (first (:tool-calls c)))) "its arguments as they came")
       (is (re-find #"not run: the arguments are cut off" (:problem (first (:tool-calls c)))) "and nothing runs: the agent is told why"))))
 
-(deftest a-reply-is-its-text-and-a-call-for-each-eval
+;; Estimate: about 8 parse-reply and request-body calls on ~300-byte JSON at ~20 ticks a byte plus ~25k a contracted call, eval-of x 2: ~1M ticks.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-reply-is-its-text-and-a-call-for-each-eval
   ;; docs/model.md#one-tool-repl: the message is the reply's text; each eval is a call of its own, with an intent, answered by a tool message of its own
   (let [provider {:kind :openai-compat :base-url "" :model "m" :api-key-env "" :max-tokens 10}
         call (fn [id args] {:id id :function {:name "repl" :arguments (json/write-str args)}})
@@ -150,7 +157,8 @@
       (is (re-find #"code is missing" (:problem (second (:tool-calls (reply "Hi" [(call "ca" {:intent "f" :code "(f)"}) (call "cb" {:intent "g"})]))))) "an eval with no code, beside one that reads")
       (is (re-find #"there is one tool, repl; message is not a tool" (:problem (first (:tool-calls (reply "" [{:id "c" :function {:name "message" :arguments "{\"message-md\":\"Hi\"}"}}])))))))))
 
-(deftest a-request-lets-the-model-reply-with-no-call
+;; Estimate: 3 request-body calls ~50k each (contract check of the request) and a pr-str of the tools: ~300k ticks.
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-request-lets-the-model-reply-with-no-call
   ;; docs/render.md (step 0 measured it live: four DeepSeek turns,
   ;; thinking on, all 200, cache hits 87-96% from turn 2): tool_choice auto (DeepSeek refuses
   ;; `required` with thinking on), so a reply may be a message with no call; the eval tool takes its intent and code; the reasoning goes back as it was returned; no ;; reaches the model
@@ -170,7 +178,8 @@
     (is (= "c1" (:tool_call_id (second (:messages b)))) "the response answers its call by the provider's id")))
 
 
-(deftest a-turn-whose-cache-misses-its-prefix-is-a-problem
+;; Estimate: about 20 cache-miss calls over 3,200-character messages: 4 shared messages x 3.2k x 0.8 = 10k + the error and its contract ~25k each: ~500k ticks.
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-turn-whose-cache-misses-its-prefix-is-a-problem
   ;; the shape of the recorded requests (2026-10-25, 94 turn pairs of 6 runs on DeepSeek): the
   ;; system prompt, the task's data, the turn's evals, then the screen, evaluated fresh each turn;
   ;; the provider counts its cache hit in blocks of 128. Each message is 1,000 tokens to the
@@ -212,7 +221,8 @@
   (let [m (fn [w] {:role "user" :content (subs (str w " " (apply str (repeat (quot n 25) "word "))) 0 (quot n 5))})]
     [(mapv m ["a" "b" "c" "d" "s1"]) (mapv m ["a" "b" "c" "d" "e" "s2"]) {:prompt-tokens 6000 :cache-hit-tokens 0} 128]))
 
-(deftest a-cache-check-costs-its-shared-prefix-not-a-copy
+;; Estimate: 6 sizes, 11 messages each, 0.44 x n characters built in all = 0.5M items x ~2 ticks (apply str on repeat) + 0.8 ticks a shared character = 0.9M + 6 x 3k fixed: ~2M ticks.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-cache-check-costs-its-shared-prefix-not-a-copy
   (seon.cost/proof
     {:of 'seon.turn/cache-miss :input 'seon.model-test/requests
      :n "characters of the request"
@@ -224,7 +234,8 @@
      :fixed {:ticks 3000 :bytes 20500}
      :sizes [250 500 1000 10000 100000 1000000]}))
 
-(deftest a-transport-failure-is-answered-to-the-agent
+;; Estimate: one complete call to a refused port (a connect error as data ~0.5M) and two owner-proc steps: ~1M ticks.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-transport-failure-is-answered-to-the-agent
   (let [failure (model/complete {:kind :openai-compat :base-url "http://127.0.0.1:1" :model "m" :api-key-env "HOME" :max-tokens 2048}
                                 {:messages [{:role "user" :content "x"}] :task "t/x" :turn 0})
         dest {:agent "boot/1" :op :fx-reply :k 1}
@@ -272,7 +283,8 @@
 (defn- fold [lines]
   (reduce (fn [[st out] l] (let [[st' ms] (model/sse-step st l)] [st' (into out ms)])) [(model/sse-init "c1" "boot/1") []] lines))
 
-(deftest a-streamed-reply-cut-at-any-byte-is-the-whole-reply
+;; Estimate: about 3 KB stream of 25 lines cut at ~450 points (every 17th byte and 3 bytes either side of each newline and non-ASCII byte): each cut reads it through read-lines! and folds 25 lines x ~8.8k ticks (a-line-costs-its-bytes-not-the-lines-before-it's per-line price) = 0.22M, so ~100M, and one run in pieces of five bytes (~600 cuts' reading) ~1M: ~100M ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000000}} a-streamed-reply-cut-at-any-byte-is-the-whole-reply
   ;; the lines are split on the newline byte and each decoded whole; the pieces are cut mid-line and inside a character
   (let [bs (.getBytes ^String deepseek-stream "UTF-8")
         whole (model/parse-reply deepseek-stream 1.0 2048)
@@ -290,7 +302,8 @@
     (let [[lines _] (via-reader bs (range 1 (alength bs) 5))]
       (is (= whole (model/stream-reply (first (fold lines)) 1.0 2048)) "and in pieces of five bytes"))))
 
-(deftest what-streams-is-what-is-committed
+;; Estimate: one fold of 25 lines x 8.8k ticks = 0.22M, a parse-reply of the stream, 3 close calls and the assertions: ~500k ticks.
+(deftest ^{:seon.test/estimate {:ticks 500000}} what-streams-is-what-is-committed
   (let [[st out] (fold (str/split-lines deepseek-stream))
         whole (model/parse-reply deepseek-stream 1.0 2048)
         args (json/read-str call-args)
@@ -323,7 +336,8 @@
                               [(model/sse-init nil nil) []] (str/split-lines deepseek-stream))))
         "a state with no call streams nothing")))
 
-(deftest the-json-reader-keeps-its-place-between-fragments
+;; Estimate: feeds of a 45-character document whole (45 x ~500) and one character at a time (45 json-feed calls x ~2k) and 15 pieces, ~6 x: ~300k ticks.
+(deftest ^{:seon.test/estimate {:ticks 300000}} the-json-reader-keeps-its-place-between-fragments
   (let [feed (fn [frags] (let [[_ evs] (reduce (fn [[st evs] f] (let [[st' e] (model/json-feed st f)] [st' (into evs e)])) [nil []] frags)]
                            (->> evs (filter (comp string? second)) (group-by first) (map (fn [[p xs]] [p (apply str (map second xs))])) (into {}))))
         doc "{\"a\":\"x\\\"y\",\"k\":\"\\u00e9\\ud83d\\ude00!\",\"b\\n\":\"z\"}"]
@@ -343,7 +357,8 @@
   [(into [(str "data: " (json/write-str {:choices [{:delta {:tool_calls [{:index 0 :id "c" :function {:name "repl" :arguments "{\"intent\":\"i\",\"code\":\""}}]}}]}))]
          (repeat n (str "data: " (json/write-str {:choices [{:delta {:tool_calls [{:index 0 :function {:arguments "(+ 1 2) "}}]}}]}))))])
 
-(deftest a-line-costs-its-bytes-not-the-lines-before-it
+;; Estimate: sizes 10+100+1000 = 1,110 lines x 8.8k ticks (its own per-line price) = 9.8M; building the lines is one write-str, repeated: ~10M ticks.
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-line-costs-its-bytes-not-the-lines-before-it
   ;; the line step folds one line into a state that grows by pieces: no copy of what came before
   (cost/proof
     {:of 'seon.model-test/fold-stream :input 'seon.model-test/fragment-lines
@@ -354,7 +369,8 @@
      :fixed {:calls 20 :ticks 20000 :bytes 70000}
      :sizes [10 100 1000]}))
 
-(deftest a-call-that-names-itself-is-answered-as-a-stream-over-the-socket
+;; Estimate: two complete calls over loopback (client connect, request JSON, 7 chunk lines each read and parsed ~10k a line) ~1M each, read-lines! and the steps ~0.5M; the server thread's work is its own: ~3M ticks.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-call-that-names-itself-is-answered-as-a-stream-over-the-socket
   ;; http-post's streaming answer, end to end on a local server: the pieces, the step and the final make the completion the whole read does
   (let [port (+ 20000 (rand-int 20000))
         server (adapter/run-server
@@ -379,7 +395,8 @@
 ;; docs/model.md#thinking-is-on-at-low-effort: a task states thinking and reasoning effort, and the
 ;; request built from its resolved provider (seon.config/provider-at) carries them; one that
 ;; states nothing gets the file's values (thinking on, effort :low); one that turns thinking off is sent no effort
-(deftest a-request-carries-its-tasks-resolved-settings
+;; Estimate: test-branch! (a fork of the shared world ~1M); config-tx of the whole config ~600 keys x ~10k = 6M and its transact; two more transacts and 3 request-body provider-at reads ~0.3M each: ~8M ticks.
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-request-carries-its-tasks-resolved-settings
   (ts/test-branch! (fn [cfg conn]
     (let [c (merge config/config {:seon.config.ai/provider :openai-compat})
           base {:seon.task/ns (quote a) :seon.task/plan "p" :seon.task/execution :held :seon.task/kind :work}

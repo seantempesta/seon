@@ -63,7 +63,8 @@
   (let [db (empty-db)] (d/db-with db (source/import-tx db files))))
 
 ;; docs/sharing.md: an inserted form renumbered every later form in its file, on entities spread through EAVT by content id, and a merge ignores a form's place, so branches held it stale
-(deftest a-form-inserted-writes-one-place
+;; Estimate: import of 9 forms 0.9M + 2 refresh-tx 1.5M + 2 db-with and 3 file-text 0.6M = 3000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-form-inserted-writes-one-place
   (let [text (fn [& fs] (str "(ns app.pl)\n\n" (str/join "\n\n" fs) "\n"))
         fs (mapv #(str "(defn f" % " [] " % ")") (range 8))
         db (d/db-with (ts/test-db) (source/import-tx (ts/test-db) {"src/app/pl.clj" (apply text fs)}))
@@ -79,7 +80,8 @@
           a2 (d/db-with after tx2)]
       (is (= moved (source/file-text a2 'app.pl)) "a form moved reads back where the file has it"))))
 
-(deftest an-edit-of-one-form-analyzes-that-form-not-its-file
+;; Estimate: import of 9 forms 0.9M + refresh-tx analyzing 2 forms 0.5M + db-with, 2 entity reads and file-text 0.4M = 2000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} an-edit-of-one-form-analyzes-that-form-not-its-file
   ;; docs/source.md#a-boot-catches-up-with-its-checkout: a catch-up of a file with one form changed analyzed every form of the file
   ;; (0.8 MB a form: a one-file catch-up 100 MB, a seven-file one 2.4 GB, 2026-11-12); a form the store holds whole, under
   ;; the same ns form, is taken from the store. Red before: 9 analyses (the ns form and the eight defns)
@@ -97,7 +99,8 @@
     (is (= "(defn f3 [] 33)" (:form/src (:var/form (d/entity after [:var/name 'app.oe/f3])))) "the edit is the var's form")
     (is (= "(defn f5 [] 5)" (:form/src (:var/form (d/entity after [:var/name 'app.oe/f5])))) "and the others are as they were")))
 
-(deftest a-held-form-is-checked-against-the-file-reading-macros-not-a-seek-a-reference
+;; Estimate: file-text of seon.system (126 forms x 64k, as the write-back proof) 8M + refresh-tx of one form (2 analyses + gate) 1.9M = 10000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-held-form-is-checked-against-the-file-reading-macros-not-a-seek-a-reference
   ;; docs/source.md#a-boot-catches-up-with-its-checkout: whether a held form expands a macro that reads files is asked of the program's
   ;; file-reading macros, found once a refresh (file-reading-macros), never by seeking each reference's var: a one-form edit of
   ;; seon.system (126 forms, 2,573 references) sought 2,573 vars, 19 of its 80 MB (2026-11-12). Estimate: no :var/name seek a
@@ -113,7 +116,8 @@
     (is (str/includes? (pr-str tx) "(edited) What brings") "the edited form is written")
     (is (< @n 126) (str @n " :var/name seeks for a one-form edit of a 126-form file"))))
 
-(deftest a-form-taken-from-the-store-is-declared-for-the-forms-after-it
+;; Estimate: 2 imports of 2-3 forms 0.5M + 2 refresh-tx (analyze the changed form and the declare) 0.6M + db-with 0.5M = 2000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-form-taken-from-the-store-is-declared-for-the-forms-after-it
   ;; docs/source.md#a-boot-catches-up-with-its-checkout: a form the store holds whole is not analyzed again, but a later form that
   ;; calls it is, in a process that never loaded the namespace (bin/test --health's): the held form's var must be declared
   ;; first. Red before: "Unable to resolve symbol: helper" (Tests, 2026-11-12, an agent_test.clj metadata edit)
@@ -131,7 +135,8 @@
           after (d/db-with db (source/refresh-tx db {"src/app/hd2.clj" (text "(inc (later))")}))]
       (is (= "(defn user-fn [] (inc (later)))" (:form/src (:var/form (d/entity after [:var/name 'app.hd2/user-fn])))) "a declared var resolves too")))
 
-(deftest importing-src-records-every-form-exactly
+;; Estimate: read src 1M + 2 imports of 3 files (8 forms) 2M + load-all! 366 example forms x 100k 36M + load-changes! of every form datom of the db (~370 x 100k) 37M + queries 2M = 80000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 80000000}} importing-src-records-every-form-exactly
   (let [files (src-files)
         db (imported files)
         forms-of (fn [nsym] (d/q '[:find ?id ?src :in $ ?n :where [?ns :ns/name ?n] [?f :form/ns ?ns] [?f :form/id ?id] [?f :form/src ?src]] db nsym))]
@@ -165,7 +170,8 @@
 ;; changed (a boot's catch-up of the checkout's edit; a landing that kept the system running, then a restart on the same binary) is
 ;; loaded over it. Red before: held? read a form imported from a file, every var it defines bound, as the binary's own, so a fork
 ;; server ran the binary's text of an agent-side form main had changed, and an agent's plan lacked what the edit added
-(deftest a-form-main-changed-is-loaded-over-the-binarys-text
+;; Estimate: read src 1M + 3 imports of my.fx (2 forms) 0.6M + 2 load-all! x (366 example forms x 100k) 73M = 70000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 70000000}} a-form-main-changed-is-loaded-over-the-binarys-text
   (let [real (get (src-files) "src/my/fx.clj")
         edited (str/replace real "(defn send \"" "(defn send  \"")
         loaded #(get @@#'seon.program/loaded 'my.fx/send)
@@ -188,7 +194,8 @@
         (is (= [] (program/program-differs base db binary)) "and nothing differs"))
       (finally (swap! @#'seon.program/loaded #(if before (assoc % 'my.fx/send before) (dissoc % 'my.fx/send)))))))
 
-(deftest root-loads-the-program-and-leaves-test-namespaces-unevaluated
+;; Estimate: 2 load-all! x (366 example forms x 100k) 73M + import of 2 files (4 forms) 0.4M + 2 load-changes! of 2 forms 0.4M = 80000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 80000000}} root-loads-the-program-and-leaves-test-namespaces-unevaluated
   ;; task seon.system/root-holds-no-test-code, docs/source.md#a-process-holds-the-tests-only-when-it-runs-them:
   ;; root imports test/ as facts and evaluates its src; the fork server (load-all! with no option) evaluates
   ;; both, so every agent inherits main's tests. A form changed later follows the same rule
@@ -215,7 +222,8 @@
       (is (= [] (:errors (program/load-all! db))))
       (is (true? (bound? 'x.rnt-thing-test/helper))))))
 
-(deftest a-test-namespace-loads-whole-from-the-tree-main-was-imported-from
+;; Estimate: import of 1 file 0.2M + 2 requires of a one-def file 1M + live-forms and a refresh-tx 0.6M = 2000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-test-namespace-loads-whole-from-the-tree-main-was-imported-from
   ;; docs/source.md#a-process-holds-the-tests-only-when-it-runs-them: a test namespace whose forms are all its file's is loaded whole
   ;; by require (compiled once through Jolt's AOT cache), its file found under the tree main's program was imported from, as main
   ;; states it on root's :seon.system/source fact. Read from the process's config instead, a root given its source as start!'s
@@ -242,7 +250,8 @@
             [whole _] (#'program/required! db2 lf lf)]
         (is (not (contains? whole 'seon.required-whole)) "a file holding a form the branch removed is not loaded whole")))))
 
-(deftest a-speculation-of-what-it-reads-reads-what-the-whole-would
+;; Estimate: 3 same? runs x (whole speculation of ~2,000 datoms 10M + two cuts 2M + three reads 3M) + 4 tx-of imports 8M + 2 config-refused 10M = 60000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-speculation-of-what-it-reads-reads-what-the-whole-would
   ;; docs/storage.md#the-write-checks-every-entity-it-touches: seon.db/project-tx cuts a transaction to the attributes a speculation reads
   ;; after it (program/config-refused's config and schema entries, root/import-of's counts), so a full import is applied once, by its
   ;; write, not three times (the checkout's: 2.7 G ticks and 4.7 GB a speculation, 2026-11-10). What is read after the cut is what is
@@ -287,7 +296,8 @@
         (is (nil? (program/config-refused db0 (source/tx-of db0 (assoc files schema-file schema-text config/shipped-file (str/replace-first conf ":seon.config.zz/k 0" ":seon.config.zz/k 5")) false)))
             "and one valid only under the schema the same import registers is not")))))
 
-(deftest a-binary-is-current-for-a-tree-unless-what-differs-reaches-root
+;; Estimate: kept reach graph brought to date 20M + 13 built-with x 5 git calls x 70k 4.5M + 14 binary-current x ~1M (tree diff and reach walk) = 40000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-binary-is-current-for-a-tree-unless-what-differs-reaches-root
   ;; docs/source.md#the-binary-records-its-program: the one rule (Point, 2026-11-10) the gate's build, the spawn refusal and the
   ;; stale-binary row ask. db is the checkout's program, so tree is its working tree; each case is the binary's tree made from it
   ;; with one change (a git index of its own: the repository is not touched)
@@ -308,11 +318,18 @@
                          (let [blob (str/trim (:out (sh/sh "git" "-C" here "hash-object" "-w" "--stdin" :in (f (let [fl (java.io.File. (str here "/" path))] (if (.isFile fl) (slurp fl) ""))))))]
                            (git env "update-index" "--add" "--cacheinfo" (str "100644," blob "," path))))
                        (let [t (str/trim (git env "write-tree"))] (.delete (java.io.File. idx)) t)))
-        current (fn [from] (root/binary-current db {:inputs {:tree from}} tree g))
+        current (fn [from] (root/binary-current db {:inputs {:tree from}} tree {:graph g :scope :root}))
+        ;; what a process on a store without Seon's source runs (bin/check's roots, a binary test's): every var the binary holds
+        current-all (fn [from] (root/binary-current db {:inputs {:tree from}} tree {:graph g :scope :all}))
         tweak (fn [marker] (fn [text] (str/replace-first text marker (str marker " "))))]
     (is (nil? (current tree)) "the same tree")
     (is (nil? (current (built-with "test/seon/required_whole.clj" #(str % "\n;; a test changed\n")))) "a test's change: a process loads it from main")
-    (is (nil? (current (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))) "an agent-only form's change: the agent loads it from main")
+    (is (nil? (current (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))) "an agent-only form's change: root's agents load it from main")
+    ;; the land that hung 58 min (2026-11-12): bin/check's roots run on a store seeded with an example program, so their agents ran
+    ;; the binary's old seon.agent/test-child, which the plan judged current and never built
+    (let [r (current-all (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))]
+      (is (some #{'seon.agent/run-selection} (:reaches r)) (str "an agent-only form's change, for a process whose main holds no Seon source: not current " (pr-str r))))
+    (is (nil? (current-all (built-with "test/seon/required_whole.clj" #(str % "\n;; a test changed\n")))) "a test's change, for any process: the binary holds no test")
     ;; batch 90 (Point, 2026-11-12): the plan judged the binary current for a change root runs none of, built nothing, and each
     ;; test's system refused every spawn, judging the same two trees over its own store, which holds another program: one answer
     ;; for two trees, the one the plan judged over the tree's program, whatever db reads it after
@@ -325,8 +342,8 @@
       ;; rule (a), as bin/test reads it (the plan's out/build): a process test selected, and a build only for a binary not current
       (testing "bin/test builds target/seon for a root-side change and for nothing else"
         (is (seq (test-runner/build-text ['seon.agent-test/in-agent-sample] r)) "the root-side change builds")
-        (is (= "" (test-runner/build-text ['seon.agent-test/in-agent-sample] (current (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))))
-            "an agent-only change builds nothing")
+        (is (seq (test-runner/build-text ['seon.agent-test/in-agent-sample] (current-all (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))))
+            "an agent-only change builds: a step's agents run the binary's code")
         (is (= "" (test-runner/build-text [] r)) "and no process test selected builds nothing")))
     (is (= ["reference-code/lmdb"] (:reaches (current (built-with "reference-code/lmdb" :pin)))) "a pin: not current")
     ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a candidate whose build input differs from the running binary's only in its runtime
@@ -340,10 +357,11 @@
     (is (= ["zz-unplaced.txt"] (:reaches (current (built-with "zz-unplaced.txt" (constantly "x"))))) "a path no rule places: not current")
     (is (nil? (current (built-with "claude_scratch/notes.md" (constantly "x"))))
         "a path the tree's id leaves out (:seon.config.source/tree-excludes, which no build reads) never makes a binary stale")
-    (is (= :binary-tree (:missing (root/binary-current db {} tree g))) "a binary that recorded no tree, against a main that holds one: unknown, never current")
-    (is (nil? (root/binary-current db {:inputs {:tree tree}} nil g)) "a main with no source fact: nothing known differs")))
+    (is (= :binary-tree (:missing (root/binary-current db {} tree {:graph g :scope :root}))) "a binary that recorded no tree, against a main that holds one: unknown, never current")
+    (is (nil? (root/binary-current db {:inputs {:tree tree}} nil {:graph g :scope :root})) "a main with no source fact: nothing known differs")))
 
-(deftest a-config-entry-writes-back-only-its-own-bytes
+;; Estimate: import of 3 entries 0.1M + 4 db-with 0.2M + 4 write-backs 0.2M + edit-tx 0.1M = 600000 ticks
+(deftest ^{:seon.test/estimate {:ticks 600000}} a-config-entry-writes-back-only-its-own-bytes
   ;; docs/source.md#a-program-file: the config file is one entity per entry, each form its exact text with its tags unread, and a write-back changes only what an entry changed
   (let [p config/shipped-file
         text ";; the file's own words\n{;; a's words\n :x/a 1 ;; beside a\n ;; b's words\n :x/b #or [#env NOPE 2]\n :x/c #ref [:x/a]}\n"
@@ -388,7 +406,8 @@
          " (my.schema/register! :seon.config/config (conj (my.schema/forms :seon.config/config) [" k " {:optional true} " k "]))"
          " (seon.repl/edit! seon.config/shipped-file \" :seon.config.root/death-stderr-bytes\" \" " k " 7\\n :seon.config.root/death-stderr-bytes\"))")))
 
-(deftest a-branchs-config-is-its-own-and-reaches-the-next-process
+;; Estimate: one root clone, boot and stop (the root's work is not ours) 0.5M + ~25 asks x 30k 0.8M + 3 config-file reads and spits of ~50 KB 0.3M + git show child = 2000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-branchs-config-is-its-own-and-reaches-the-next-process
   ;; docs/config.md#a-process-holds-its-branchs-config, reproducing 2026-11-07: one agent's unmerged spit of a key with no schema into the config file reached a second agent's live test
   ;; and stopped a new process. Here it acts on nothing, a boot reads no file and a re-index that meets it says which file and which commit, and a key a branch adds merges, writes back byte-preserved and reads at the next process.
   (let [{:keys [tree cloned root ask at-root in]} (config-root!)
@@ -435,7 +454,8 @@
       (finally
         (when @root (ts/stop-root! @root))))))
 
-(deftest import-then-write-back-is-a-zero-diff
+;; Estimate: read src 1M + import of 8 forms 1M + write-back 0.5M + 3 file writes and one diff child 0.5M = 3000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} import-then-write-back-is-a-zero-diff
   (let [files (src-files)
         db (imported files)
         out (source/files db (source/source-files db))
@@ -458,7 +478,8 @@
 ;; build (1.23 G ticks and 5.4 GB of analysis, 2.34 G and 4.9 GB of checked transaction, 10.7 s at load 2); it is now the
 ;; seed's own incremental index on a store the build keeps, so a build pays for what its tree changed. Its digest is the
 ;; one a fresh index of the same tree holds. A scratch repository of two files, two stores of the test's own, removed
-(deftest the-code-that-indexes-is-keyed-by-its-reach
+;; Estimate: world + 3 imports of 1-2 forms 0.5M + 6 index-code x 0.2M = 2000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} the-code-that-indexes-is-keyed-by-its-reach
   ;; docs/source.md#the-binary-records-its-program: a kept index is a cache of what the indexing code made of the files,
   ;; so its key holds that code (seon.program/index-code: the reach digest of its roots), and a change the code does not reach
   ;; keeps it. On the world: roots app.ix/make, which calls app.ix/rule; app.other is reached by nothing
@@ -475,7 +496,8 @@
     (is (not= k (program/index-code db (assoc in :env "e2") '[app.ix/make])) "and so does the runtime it runs on")
     (is (nil? (program/index-code db in '[app.none/x])) "roots the program does not define: no key, made again")))
 
-(deftest a-builds-kept-index-holds-the-program-a-fresh-index-holds
+;; Estimate: 3 from-nothing indexes of a 3-file tree, each a schema install and ~6 forms ~5M, + 2 incremental 1M + ~15 git calls x 70k 1M + 2 lmdb opens = 20000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-builds-kept-index-holds-the-program-a-fresh-index-holds
   ;; and it is made again from nothing when a change reaches the code that indexes (seon.program/index-code; here
   ;; the roots app.bp/make, which calls app.bp/rule), and only then
   (let [dir (scratch-dir "built")
@@ -517,7 +539,8 @@
           (is (= c (index (str dir "/fresh2"))) "and it holds what a fresh index holds")))
       (finally (seon.lib/remove-tree! dir)))))
 
-(deftest a-landing-moves-roots-source-fact-to-the-landed-tree
+;; Estimate: 2 checked writes x 0.1M + landed-tx of one file 0.3M + empty-db and pull 0.2M = 800000 ticks
+(deftest ^{:seon.test/estimate {:ticks 800000}} a-landing-moves-roots-source-fact-to-the-landed-tree
   ;; docs/source.md#a-landing-enters-main-as-data: what the bridge writes (seon.system/landed-tx) moves root's source fact to
   ;; the landed tree, so the next re-index reads what differs from it, not every file landed since the last import
   (let [db0 (pdb/empty-db false)
@@ -530,7 +553,8 @@
     (is (= ["/r" ["src"]] [(:root fact) (:dirs fact)]) "what the import read from stays")
     (is (some? (d/entity db1 [:var/name 'app.landed/f])) "and the landed file's facts are main's")))
 
-(deftest a-landing-keeps-the-system-running-only-when-nothing-calls-for-a-restart
+;; Estimate: 8 restart-for x 5k + 2 empty-db and checked writes 0.2M + booted-source and 2 test-inputs pulls 0.1M = 400000 ticks
+(deftest ^{:seon.test/estimate {:ticks 400000}} a-landing-keeps-the-system-running-only-when-nothing-calls-for-a-restart
   ;; docs/source.md#a-landing-enters-main-as-data: after the bridge moved main's source fact to the landed tree, bin/update keeps
   ;; the system running (my.root/landed!) when its binary is current for that tree and the inputs of the files were written;
   ;; 7 of 11 landings on 2026-11-11 changed nothing the binary runs, and each restarted, ending every agent's work
@@ -539,8 +563,13 @@
         why #(root/restart-for %1 %2 %3 %4)]
     (is (nil? (why held "t1" nil inputs)) "main holds the files' tree, the binary is current for it, inputs written: keep running")
     (is (re-find #"no landing brought it in" (why held "t2" nil inputs)) "main is not at the files' tree (no bridge ran): restart, whose boot catches up")
-    (is (re-find #"reaches seon.writer/commit-batch" (why held "t1" {:binary "t0" :tree "t1" :reaches ['seon.writer/commit-batch]} inputs))
-        "what the landing changed reaches code root runs from its binary: restart, naming it")
+    ;; task seon.system/an-update-keeps-running-agents: the bridge's commit loaded the changed forms into root in place
+    ;; (seon.writer's main-commit, seon.program/load-changes!), so a form root runs is no restart; a running agent goes on
+    (is (nil? (why held "t1" {:binary "t0" :tree "t1" :reaches ['seon.writer/commit-batch]} inputs))
+        "what the landing changed is forms root runs, loaded in place by the bridge's commit: keep running")
+    (is (re-find #"reaches deps.edn" (why held "t1" {:binary "t0" :tree "t1" :reaches ["deps.edn" 'seon.writer/commit-batch]} inputs))
+        "a build input no load brings (a path): restart, naming it")
+    (is (re-find #"binary-tree" (why held "t1" {:binary nil :tree "t1" :reaches [] :missing :binary-tree} inputs)) "a binary that recorded no tree: restart")
     (is (re-find #"git said no" (why held "t1" {:binary "t0" :tree "t1" :error "git said no"} inputs)) "a diff git could not make is no answer of current")
     (is (re-find #"stale at its boot" (why (assoc held :stale-binary {:binary "t0"}) "t1" nil inputs)) "a binary stale since its boot: restart")
     (is (re-find #"no inputs" (why held "t1" nil nil)) "no inputs written for the files: restart")
@@ -556,7 +585,8 @@
     (is (= "t0m" (:tree (first (seon.agent/test-inputs db)))) "before: the boot's inputs")
     (is (= "t1m" (:tree (first (seon.agent/test-inputs db1)))) "after the kept landing, the landed files' inputs, under the same boot")))
 
-(deftest a-landing-through-the-bridge-is-a-zero-diff
+;; Estimate: read src 1M + 3 changed-tx/import of ~12 forms, a page, a task, a script through the checked write 4M + write-backs and 2 program digests 2M = 7000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 7000000}} a-landing-through-the-bridge-is-a-zero-diff
   ;; task seon.system/a-boot-resumes-from-the-db: a Claude session's landing enters main as data, the changed files' facts
   ;; (seon.system/changed-tx, what bin/land's bridge has root write on main).
   ;; Main indexed so from tree A, then from what A -> B changed (a form changed, a namespace added, a script's text and
@@ -606,7 +636,8 @@
         r (pm/three-way (pm/program main #{}) (pm/program branch #{}) (pm/program main #{}))]
     [(d/db-with main (pm/merge-tx main main branch (keys (:ours r)) #{})) (:ours r)]))
 
-(deftest a-change-to-a-namespace-with-no-file-is-named-never-dropped
+;; Estimate: 2 merges x (record + 3 programs of the 366-form example + merge-tx ~7M) + main-with-file 0.5M = 20000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-change-to-a-namespace-with-no-file-is-named-never-dropped
   ;; changed-files leaves a form out when its namespace has no :ns/file; unfiled-forms names it,
   ;; so a merge of source with nowhere to write it records that (seon.reconcile :octopus-merged)
   (let [main (main-with-file)
@@ -616,7 +647,8 @@
     (is (= [] (source/changed-files main3 ours3)))
     (is (= {'app.no-file [[:var 'app.no-file/probe]]} (source/unfiled-forms main3 ours3)))))
 
-(deftest a-merged-change-rewrites-only-its-form
+;; Estimate: 2 merges x (record + 3 programs of the 366-form example + merge-tx ~7M) + main-with-file 0.5M + 3 write-backs 0.5M = 20000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-merged-change-rewrites-only-its-form
   (let [main (main-with-file)]
     (is (= {"src/app/pt_src.clj" pt-text} (source/files main ["src/app/pt_src.clj"])))
     (let [[main2 ours] (merged main 'app.pt-src "(defn twice [x] (* 2 x))")]
@@ -629,7 +661,8 @@
         (is (= (str pt-text "\n(defn thrice [x] (* 3 x))\n")
                (get (source/files main2 (source/changed-files main2 ours)) "src/app/pt_src.clj")))))))
 
-(deftest a-moved-tree-replaces-mains-program
+;; Estimate: 1 merge ~7.5M + 3 replace-tx of a 4-form file 2M + 4 live-forms of ~370 forms x 2k 3M + queries and imports 2M = 20000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-moved-tree-replaces-mains-program
   ;; task seon.system/main-follows-its-source-tree: main imported the file, then merged a new
   ;; form; the tree moves on (one function changed, one removed, the merged form in it)
   (let [[main _] (merged (main-with-file) 'app.pt-src "(defn thrice [x] (* 3 x))")
@@ -655,7 +688,8 @@
              (source/file-text (d/db-with db (source/replace-tx db {"src/app/pt_src.clj" pt-text})) 'app.pt-src))
           "on a db holding no import it is the import"))))
 
-(deftest an-agent-runs-its-branchs-change-to-imported-source
+;; Estimate: hold! (366 example forms x 100k + 5 forms) 37M + load-all! again 37M + main-with-file, record, load-diff! 2M = 80000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 80000000}} an-agent-runs-its-branchs-change-to-imported-source
   (let [main (main-with-file)
         branch (pt/record main 'app.pt-src "(defn twice [x] (* 2 x))")]
     ;; the process holds the imported namespace, as a binary built from that source does: every var it defines bound, and
@@ -669,7 +703,8 @@
       (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
       (is (identical? add0 @(resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again"))))
 
-(deftest an-agent-runs-its-branchs-change-to-imported-source-imported-too
+;; Estimate: hold! (366 example forms x 100k + 5) 37M + main-with-file, replace-tx, load-diff! 1.5M = 40000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 40000000}} an-agent-runs-its-branchs-change-to-imported-source-imported-too
   ;; Context's first bin/prove --root (2026-11-11) judged main's code: a tree branch's catch-up imports the checkout's changed
   ;; file, so its changed form came from a source tree too, and load-diff! read it as the binary's own (every var bound) and
   ;; kept main's definition. A change the branch imported runs in the agent as one it evaluated does
@@ -681,7 +716,8 @@
     (is (= [] (program/load-diff! main branch)))
     (is (= 9 ((resolve 'app.pt-src/twice) 3)) "the branch's imported redefinition runs in the agent")))
 
-(deftest a-process-that-runs-another-program-than-its-branch-is-told-so
+;; Estimate: hold! (366 example forms x 100k + 5) 37M + 2 program-differs x 366 forms x 2k 1.5M + main-with-file, replace-tx, load-diff! 1.5M = 40000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-process-that-runs-another-program-than-its-branch-is-told-so
   ;; Sean, 2026-11-11 (the runtime invariant): a process runs its branch's program, and a run asks before its first item.
   ;; Tonight's first class: a tree branch's imported change never loaded, so the agent ran main's twice
   (let [main (main-with-file)
@@ -691,14 +727,16 @@
     (program/load-diff! main branch)
     (is (= [] (program/program-differs main branch)) "after it: the branch's program")))
 
-(deftest a-test-fixture-is-a-file-fact-of-the-branch
+;; Estimate: import of one file 0.1M + held-text = 200000 ticks
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-test-fixture-is-a-file-fact-of-the-branch
   ;; Data model, 2026-11-11: a fixture a test reads is a file fact (:fixture in :seon.config.source/things), read from the
   ;; branch (my.branch/file over seon.source/held-text), so an agent's run reads the branch's fixture, never a checkout's
   (let [db (empty-db)
         db (d/db-with db (source/import-tx db {"test/seon/pt_fixture.edn" "{:recorded 1}\n"}))]
     (is (= "{:recorded 1}\n" (source/held-text db "test/seon/pt_fixture.edn")))))
 
-(deftest a-form-that-fails-at-load-is-named
+;; Estimate: main-with-file 0.5M + record (evaluates one form) 0.3M + load-diff! comparing ~370 forms x 2 x 2k 1.5M + one throw 0.2M = 3000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-form-that-fails-at-load-is-named
   ;; root's ruling, 2026-10-27: a definition that fails at load fails the load loudly, naming the
   ;; form; it said only "did not load in seon.task-test: nil where a ... Future is required"
   (let [main (main-with-file)
@@ -712,7 +750,8 @@
     (is (= "(def boom (throw (ex-info \"boom at load\" {})))" (:lead e)) "and its text's first line")
     (is (clojure.string/includes? (str (:message e)) "boom at load"))))
 
-(deftest an-imported-namespace-the-process-does-not-hold-is-loaded
+;; Estimate: load-all! of 366 example forms + 4 forms x 100k 36.4M + main-with-file 0.5M = 40000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 40000000}} an-imported-namespace-the-process-does-not-hold-is-loaded
   ;; test/ is imported but not built into the
   ;; binary; its forms load where main's program runs (root, the fork server, so every agent)
   (let [main (main-with-file)]
@@ -726,7 +765,8 @@
     (is (zero? (:exit r)) (str args " " (:err r)))
     (str/trim (:out r))))
 
-(deftest a-script-merged-is-written-back-with-its-mode
+;; Estimate: ~15 git calls x 70k 1M + read-source, import, modes, one merge of a 1-file program ~1.5M = 3000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-script-merged-is-written-back-with-its-mode
   ;; docs/source.md#a-program-file: read from the tree with its mode, edited on a branch, merged, committed: the tree's text is main's and the execute bit is kept (the roots-log agent's spit took it off)
   (let [tree (scratch-dir "script")
         p (str tree "/bin/x")
@@ -749,13 +789,15 @@
     (is (= (str/trim edited) (git tree "show" "jolt/seon-merges:bin/x")) "the tree's text is main's")
     (is (str/starts-with? (git tree "ls-tree" "jolt/seon-merges" "bin/x") "100755 ") "the execute bit is kept")))
 
-(deftest a-script-says-what-its-for-and-how-to-call-it
+;; Estimate: import of one script 0.1M + a pull and its render 0.05M = 200000 ticks
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-script-says-what-its-for-and-how-to-call-it
   ;; docs/source.md#a-program-file: what its lead comment says is held beside its text, and its render draws it
   (let [db (let [db (empty-db)] (d/db-with db (source/import-tx db {"bin/x" "#!/bin/sh\n# bin/x NAME says hello to NAME\n# and nothing else\necho 1\n"})))]
     (is (= [:section [:h3 "bin/x"] [:p "bin/x NAME says hello to NAME\nand nothing else"] [:pre "bin/x NAME says hello to NAME"]]
            (seon.render.ui/script {} (d/pull db [:file/path :seon.script/says :seon.script/usage] [:file/path "bin/x"]))))))
 
-(deftest a-merge-is-committed-on-the-merges-branch
+;; Estimate: 2 merges x (record + 3 programs of the 366-form example + merge-tx ~7M) + ~35 git calls x 70k 2.5M + commits = 20000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-merge-is-committed-on-the-merges-branch
   (let [tree (scratch-dir "git")
         ;; the base commit is the test's own; the tree holds no identity of its own, as a
         ;; root's checkout has none under its HOME (target/home)
@@ -790,7 +832,8 @@
   (is (= {:value {:sha nil :files 0}} (fx/git-commit {:req {:dir "/nonexistent" :branch "b" :files {} :message "m"}}))
       "nothing to write commits nothing"))
 
-(deftest a-file-whose-namespace-is-not-loaded-imports
+;; Estimate: import of 2 files (5 forms) 0.5M + 3 queries 0.2M + db-with = 1000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-file-whose-namespace-is-not-loaded-imports
   ;; task seon.source/the-tests-are-part-of-the-program: a root imports test/ whose
   ;; namespaces its binary never loaded (proofs live there), so the analyzer reads a
   ;; form's aliases from the file's own ns form, not from a loaded namespace
@@ -810,7 +853,8 @@
                    'x.z-support/k)
         "a namespace required from a later file is analyzed first, and its alias reads ::z/k")))
 
-(deftest a-changed-ns-form-applies-its-requires-before-its-forms
+;; Estimate: 2 ns evals 0.2M + import of 3 forms 0.4M + a query = 1000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-changed-ns-form-applies-its-requires-before-its-forms
   ;; a restarted root
   ;; loads main's program first (seon.program/load-all!), which runs a test namespace's old
   ;; ns form and so marks it loaded; the import of its changed file must still apply the
@@ -829,7 +873,8 @@
                    'x.reloaded-support/k)
         "the alias the changed ns form adds resolves in the form after it")))
 
-(deftest a-schema-file-round-trips-through-the-program
+;; Estimate: import of seon.task.edn (22 KB, ~100 entries x 15k) 1.5M + write-back 0.5M = 2000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-schema-file-round-trips-through-the-program
   ;; task seon.source/schemas-are-part-of-the-program: a schema resource is program data
   ;; like a source file (v1: the program is entities: functions, tests, schemas), so an
   ;; agent can change it on its branch and the merge writes it back; imported then written
@@ -843,7 +888,8 @@
 
 (def ^:private facts-path "resources/seon/schemas/seon.facts.edn")
 
-(deftest a-task-file-loses-only-the-entries-named
+;; Estimate: 4 task-file-text of a 3-entry text x 60k (a rewrite-clj parse each) = 300000 ticks
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-task-file-loses-only-the-entries-named
   ;; docs/source.md#a-merged-task-reaches-mains-files: a reviewed sync removes a task's entry with its lead (the whitespace and
   ;; comments before it), the file's first with the whitespace after it; every other byte, a namespaced map's too, is kept
   (let [text "[#:seon.task{:name \"a\",\n             :plan \"one\"}\n ;; b is next\n {:seon.task/name \"b\" :seon.task/plan \"two\" :seon.task/proofs #{x/y}}\n {:seon.task/name \"c\" :seon.task/plan \"three\"}]\n"]
@@ -854,7 +900,8 @@
     (is (= "[]\n" (source/task-file-text text #{"a" "b" "c"})) "every entry gone")
     (is (= text (source/task-file-text text #{"z"})) "a name no entry has changes nothing")))
 
-(deftest a-changed-schema-entry-rewrites-only-itself
+;; Estimate: import of seon.facts.edn (~300 entries x 4 datoms x 5k) 6M + all 34 schema files imported and written back ~25M + 3 edits x (db-with + 91 KB file rewrite) 9M = 40000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-changed-schema-entry-rewrites-only-itself
   ;; task seon.source/schemas-are-part-of-the-program: write-back rewrites only the changed
   ;; entries of a schema resource (v1's schema-file-text over rewrite-clj), every other byte
   ;; as it was: a replaced value in its old layout, a removed entry with its line, a new key
@@ -921,13 +968,15 @@
         rep (d/with main (pm/merge-tx main main branch (keys (:ours r)) #{}))]
     [(:db-after rep) (program/load-changes! (:db-after rep) (pdb/report->tx rep))]))
 
-(deftest a-merge-to-imported-source-loads-in-place
+;; Estimate: 2 hold! x (366 example forms x 100k + 4 forms) 73M + import, record, 3 programs and merge-tx 4M = 80000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 80000000}} a-merge-to-imported-source-loads-in-place
   (let [main (held-main 'app.pt-src pt-text "src/app/pt_src.clj")
         [_ errs] (merge-loaded main 'app.pt-src pt-text 'app.pt-src "(defn add [a b] (+ a b 100))")]
     (is (= [] errs))
     (is (= 106 ((resolve 'app.pt-src/twice) 3)) "the binary's compiled caller reaches the merged definition")))
 
-(deftest a-changed-macro-reloads-the-forms-it-expanded-in
+;; Estimate: 2 hold! x (366 example forms x 100k + 7 forms) 74M + import, record, 3 programs, merge-tx and 3 reloads 6M = 80000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 80000000}} a-changed-macro-reloads-the-forms-it-expanded-in
   (let [main (held-main 'app.mm-src mm-text "src/app/mm_src.clj")
         f (fn [] ((resolve 'app.mm-src/f) 2))]
     (is (= 4 (f)))
@@ -935,20 +984,23 @@
       (is (= [] errs))
       (is (= 6 (f)) "f, compiled against the old expansion and held by the binary, is reloaded"))))
 
-(deftest a-merged-protocol-keeps-its-records
+;; Estimate: 2 hold! x (366 example forms x 100k + 7 forms) 74M + import, record, 3 programs and merge-tx 5M = 80000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 80000000}} a-merged-protocol-keeps-its-records
   (let [main (held-main 'app.mm-src mm-text "src/app/mm_src.clj")
         [_ errs] (merge-loaded main 'app.mm-src mm-text 'app.mm-src "(defprotocol Sized \"How big a thing is.\" (size [x]))")]
     (is (= [] errs))
     (is (= 5 ((resolve 'app.mm-src/g) 5)) "Box dispatches through the redefined protocol (Jolt needs no reload of its record)")))
 
-(deftest a-merged-record-is-the-one-its-callers-see
+;; Estimate: 2 hold! x (load-all! of the 366-form example program x 100k = 36M + 7 forms) 74M + import, record, 3 programs and merge-tx 6M = 80000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 80000000}} a-merged-record-is-the-one-its-callers-see
   (let [main (held-main 'app.mm-src mm-text "src/app/mm_src.clj")
         [_ errs] (merge-loaded main 'app.mm-src mm-text 'app.mm-src "(defrecord Box [n] Sized (size [_] (inc n)))")]
     (is (= [] errs))
     (is (= 6 ((resolve 'app.mm-src/g) 5)) "the new record")
     (is (true? ((resolve 'app.mm-src/box?) ((resolve 'app.mm-src/->Box) 1))) "an instance? test held by the binary sees the redefined record")))
 
-(deftest a-form-imported-into-a-loaded-namespace-is-loaded-not-unmapped
+;; Estimate: load-all! of 366 example forms + 3 x 100k 36.3M + import and replace of 3 forms 0.6M + stage-tx over ~370 forms x 5k 2M = 40000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-form-imported-into-a-loaded-namespace-is-loaded-not-unmapped
   ;; the step E dry run (2026-10-22): a root restarted on a tree whose test namespace gained a
   ;; deftest imported it onto main, but held? read the namespace's existence as "the binary
   ;; holds it", so neither root nor the fork server loaded it; the next agent's stage read
@@ -967,7 +1019,8 @@
 ;; docs/source.md#a-process-holds-the-tests-only-when-it-runs-them: agents forked before an import ran the previous main's tests against the new program,
 ;; red with nothing to see: their records said the new text, their vars the old
 ;; docs/source.md#indexing-a-tree: a changed test file in a root that loaded no test namespace: its require looked on disk, the import failed whole and main stayed old
-(deftest a-refresh-reads-what-a-changed-file-requires-and-this-process-has-not-loaded
+;; Estimate: import of 3 files (6 forms) 0.6M + refresh-tx reading top and loading the 2 namespaces it requires (~5 forms) 1M = 2000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-refresh-reads-what-a-changed-file-requires-and-this-process-has-not-loaded
   ;; a macro from a namespace this process hasn't loaded expands as it should, because db's text set the namespace up first: without it the form's references lose what the macro expands to, and a test's reach with them.
   ;; An import loads what it reads, so this process forgets them (a root has loaded no test namespace)
   (let [names '[app.rq-dep app.rq-mid app.rq-top]
@@ -983,7 +1036,8 @@
       (is (= (top 2) (source/file-text after 'app.rq-top)) "and the change lands")
       (is (= mid (source/file-text after 'app.rq-mid)) "what was only read changes nothing"))))
 
-(deftest a-form-an-import-replaces-runs-its-new-text
+;; Estimate: load-all! of 366 example forms + 2 x 100k 36.2M + import, replace-tx and load-changes! of 2 forms 0.8M = 40000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-form-an-import-replaces-runs-its-new-text
   (let [nsym (symbol (str "app.replaced-" (random-uuid)))
         path (str "test/app/" (str/replace (name nsym) "-" "_") ".clj")
         text (fn [n] (str "(ns " nsym ")\n\n(defn a [] " n ")\n"))
@@ -995,7 +1049,8 @@
     (is (= [] (program/load-changes! (:db-after rep) (pdb/report->tx rep))))
     (is (= 2 (run)) "the process runs what main now holds")))
 
-(deftest the-source-read-carries-each-reference-code-pin
+;; Estimate: read-source of src 1M + each gitlink read once (~10 child calls x 70k) 0.7M = 2000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} the-source-read-carries-each-reference-code-pin
   ;; land6 review, must-fix 4: a cited reference-code file shows the revision main's source
   ;; pins it at; the :source effect reads each gitlink once, at import, so no render runs git
   (let [r (fx/read-source {:req {:root here :dirs ["src"]}})
@@ -1003,7 +1058,8 @@
     (is (= head-tree (get (:pins r) "reference-code/malli")) "the gitlink HEAD's tree records for it")
     (is (every? #(str/starts-with? % "reference-code/") (keys (:pins r))))))
 
-(deftest a-test-that-reaches-a-process-is-found-by-the-reach-walk
+;; Estimate: import of 3 files (~12 forms) 1.3M + reach-index and reach-graph over ~380 forms x 20k 7.6M each = 20000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-test-that-reaches-a-process-is-found-by-the-reach-walk
   ;; root's ruling (2026-10-22, owner 2026-10-23): a test that reaches a process (an agent, a
   ;; fork, a root of its own, the binary) never runs automatically, only when named; a shell call
   ;; is none (audit 2026-10-26, item 7: it left main-test's laws out of every plain prove). It is
@@ -1055,7 +1111,8 @@
   "db's live forms as the reach walk reads them: by id, their text, refs, requires and lead."
   [db] (into (sorted-map) (for [f (program/live-forms db)] [(:id f) (select-keys f [:src :refs :requires :ns :lead])])))
 
-(deftest a-refresh-is-the-whole-trees-replace-at-the-cost-of-what-changed
+;; Estimate: import of 6 forms 0.6M + 3 replace-tx of the tree 2M + 3 refresh-tx 1.5M + 6 program-of 0.6M = 5000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-refresh-is-the-whole-trees-replace-at-the-cost-of-what-changed
   ;; root's ruling (2026-10-23): the test service's branch follows main by re-importing what a
   ;; change reaches, not the program: a namespace whose file changed, and every one requiring it
   (let [files {"src/rf/mac.clj" "(ns rf.mac)\n\n(defmacro twice [x] `(* 2 ~x))\n"
@@ -1076,7 +1133,8 @@
     (testing "an unchanged tree: nothing to do"
       (is (= [] (source/refresh-tx db {}))))))
 
-(deftest a-refresh-reads-again-a-form-whose-macro-read-a-changed-file
+;; Estimate: import of 2 files (4 forms) 0.4M + refresh-tx 0.5M + replace-tx 0.5M + 2 program-of 0.3M + file writes = 2000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-refresh-reads-again-a-form-whose-macro-read-a-changed-file
   ;; docs/source.md#indexing-a-tree: a form whose expansion reads a file (a macro calling slurp, as seon.config/schema-forms
   ;; bakes the schema resources) is the analysis of that file's text, so a refresh changing only that file reads the form's
   ;; namespace again, as the whole tree's replace would: main's gate test read the nearest kept tree's schema keywords
@@ -1096,7 +1154,8 @@
     (is (= (program-of (d/db-with db (source/replace-tx db (merge files changed)))) (program-of refreshed))
         "as the whole tree's replace reads it")))
 
-(deftest the-programs-baking-forms-are-found-by-their-macros-reads
+;; Estimate: one file-reading-expansions over the kept program: the file-reading macros once, then the forms referencing them (a seek each) = 1000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} the-programs-baking-forms-are-found-by-their-macros-reads
   ;; docs/source.md#indexing-a-tree: on the checkout's own program, the forms baking the schema resources and the shipped
   ;; config file (seon.config/schema-forms, built-text) are found from the facts, so a refresh changing a schema reads them again
   (is (= 'seon.config (get (source/file-reading-expansions (test-runner/program)) "src/seon/config.clj"))))
@@ -1160,7 +1219,8 @@
   "The namespaces whose forms tx writes (each form map's :form/ns tempid)."
   [tx] (set (keep #(when (and (map? %) (:form/src %)) (:form/ns %)) tx)))
 
-(deftest a-body-edit-writes-only-its-form
+;; Estimate: 5 programs of 22 forms imported x 100k 11M + 5 refresh-tx x 0.5-1.9M 6M + 3 replace-tx of 2 files 3M = 20000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-body-edit-writes-only-its-form
   (let [[db ch] (refresh-of 10)
         tx (source/refresh-tx db ch)
         after (d/db-with db tx)
@@ -1264,22 +1324,28 @@
     (testing (str (:of e) " on " (:input e))
       (cost/proof e))))
 
-(deftest a-fixed-change-costs-the-same-at-any-program-size
+;; Estimate: 3 proofs x 3 sizes x (input: refresh-of n imports 22-44 forms x 100k ~3M + one call 0.3-1.3M) = 30000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 30000000}} a-fixed-change-costs-the-same-at-any-program-size
   (prove-fixed 0 1 2))
 
-(deftest a-fixed-change-is-transacted-at-the-same-cost-at-any-program-size
+;; Estimate: 3 sizes x (refresh-of n: 22-44 forms x 100k ~3M + refresh-tx 1.9M + the db-with 0.4M) = 20000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-fixed-change-is-transacted-at-the-same-cost-at-any-program-size
   (prove-fixed 3))
 
-(deftest a-fixed-leaf-edit-costs-the-same-at-any-program-size
+;; Estimate: 3 sizes x (refresh-of n: 22-44 forms x 100k ~3M + one call 1.9M) = 20000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-fixed-leaf-edit-costs-the-same-at-any-program-size
   (prove-fixed 4))
 
-(deftest a-fixed-ns-form-edit-costs-the-same-at-any-program-size
+;; Estimate: 3 sizes x (hub-refresh-of n: 22-44 forms x 100k ~3M + file-text + one call 1.4M) = 10000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-fixed-ns-form-edit-costs-the-same-at-any-program-size
   (prove-fixed 5))
 
-(deftest a-fixed-hub-edit-costs-the-same-at-any-program-size
+;; Estimate: 3 sizes x (hub-refresh-of n: 22-44 forms x 100k ~3M + one call 1.9M) = 20000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-fixed-hub-edit-costs-the-same-at-any-program-size
   (prove-fixed 6))
 
-(deftest a-helper-recorded-after-its-user-is-written-before-it
+;; Estimate: 3 imports of 2-3 forms 0.7M + 3 records x 0.4M + 6 file-text 0.6M + one load-string 0.3M = 3000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-helper-recorded-after-its-user-is-written-before-it
   ;; step E run #10 (2026-10-23): an agent defined form-of at its REPL, then redefined
   ;; summary-of (which keeps its place) to call it; the merge wrote form-of after summary-of,
   ;; a file that cannot load fresh. file-text writes a form after what it references in its
@@ -1306,7 +1372,8 @@
         (let [dbd (d/db-with db0 (source/import-tx db0 {"src/app/wd.clj" src}))]
           (is (= src (source/file-text dbd 'app.wd))))))))
 
-(deftest the-write-back-of-a-file-is-one-pass-over-its-forms
+;; Estimate: sizes 5, 15, 50: 70 forms x 64k per form 4.5M + 3 x 0.2M fixed + inputs: 70 forms imported x 100k 7M + 3 records 3M = 20000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 20000000}} the-write-back-of-a-file-is-one-pass-over-its-forms
   (cost/proof {:of 'seon.source/file-text :input 'seon.source-test/file-of
                :n "functions in the namespace, each calling the five before it and a declared one"
                :work "per form: its row (seon.program/form-row: the entity and its definitions, refs and declares) and its refs looked up once in seon.program/load-order"
@@ -1317,7 +1384,8 @@
                :fixed {:ticks 200000 :bytes 500000 :calls 15}
                :sizes [5 15 50]}))
 
-(deftest a-gates-checkout-takes-its-roots-built-products
+;; Estimate: 8 child calls (git, bin/worktree --at) x 60k = 500000 ticks
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-gates-checkout-takes-its-roots-built-products
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: bin/worktree --at given FROM clones FROM's built products into the checkout's
   ;; target/ (the runtime and native libraries a gate's runner runs on), not the main tree's: a gate's checkout is made from the
   ;; checkout of the root that runs it (seon.fx/run-on-checkout). Red before: --at took no FROM and cloned the main tree's
@@ -1336,7 +1404,8 @@
         (is (= "the root's product" (slurp (str wt "/target/zz"))) "and so is the product"))
       (finally (sh/sh "git" "-C" repo "worktree" "remove" "--force" wt) (seon.lib/remove-tree! tmp)))))
 
-(deftest a-checkout-whose-submodule-moved-is-synced-to-its-pin
+;; Estimate: 21 child calls (git, bin/worktree --sync) x 70k 1.5M = 2000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-checkout-whose-submodule-moved-is-synced-to-its-pin
   ;; root, 2026-10-27: a worktree that merged main kept its old Jolt checked out (no one ran
   ;; bin/worktree --sync), and bin/build built that Jolt, not the pin: the forks step hung on a
   ;; Jolt three fixes old. The one sync path moves a submodule checkout to the commit its HEAD pins
@@ -1379,7 +1448,8 @@
 
 ;; a scratch repository of one file on a store of its own, empty: the seed is one of the claims, and none reads more
 ;; than one namespace (the checkout's tree analysed at each boot was 81 s)
-(deftest a-boot-resumes-main-and-reads-no-file
+;; Estimate: ~10 git calls x 70k 0.7M + 3 root boots and stops (their own work not ours) 0.3M + ~15 asks x 30k 0.5M + 2 mv children = 2000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-boot-resumes-main-and-reads-no-file
   ;; task seon.system/a-boot-resumes-from-the-db (owner, 2026-11-09: "Boot's job is to resume the existing system or if
   ;; it's fresh to index it and get it to the point that everything is running off the db. From that point on we are
   ;; syncing data TO files not reading from them"), end to end through bin/system: a fresh store is indexed once, at its
@@ -1438,7 +1508,8 @@
 ;; and left out; with nothing changed the boot indexes nothing; a file a merged task main holds unsynced also changed is left out,
 ;; naming the task, and main keeps the merge's text. Red before: every restart resumed main as it was (the test above's rule,
 ;; now the explicit :seon.config.root/catch-up-on-boot false)
-(deftest a-boot-catches-up-with-what-its-checkout-changed
+;; Estimate: ~5 git calls 0.35M + 2 root boots (their work not ours) + ~12 asks x 30k 0.4M + 4 log reads 0.1M = 1000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-boot-catches-up-with-what-its-checkout-changed
   (let [dir (scratch-dir "catchup")
         co (str dir "/co")
         git (fn [d & args] (let [r (apply sh/sh "git" "-C" d "-c" "user.name=t" "-c" "user.email=t@t" args)]
@@ -1503,7 +1574,8 @@
     (dotimes [i n] (spit (str d "/src/f" i ".clj") (str "(ns f" i ")\n\n(defn a [] " i ")\n")))
     [{:req {:root d :dirs ["src"] :paths #{"src/f0.clj"}}}]))
 
-(deftest a-batch-of-edits-reads-the-changed-files-not-the-tree
+;; Estimate: inputs: 1,110 files written x ~1k ticks 1.1M + 3 sizes x 20 calls of the changed file's read 0.3M = 1000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-batch-of-edits-reads-the-changed-files-not-the-tree
   ;; my.root/import! with paths names its files, and the :source read takes
   ;; them (seon.fx/read-source :paths) in place of walking and reading every file, so an edit costs
   ;; the same in a tree of any size (task seon.source/an-import-reads-only-changed-files)
@@ -1514,7 +1586,8 @@
                :fixed {:bytes 500000 :calls 20}
                :sizes [10 100 1000]}))
 
-(deftest an-ns-form-adds-to-a-recorded-form
+;; Estimate: 7 ns-text-adding x 25k (a rewrite-clj parse of a 6-line form) = 200000 ticks
+(deftest ^{:seon.test/estimate {:ticks 200000}} an-ns-form-adds-to-a-recorded-form
   ;; docs/agent.md#the-repl: the recorded text as a REPL's ns form leaves the namespace: what it adds, every other byte kept
   (let [old "(ns a.b\n  \"Doc.\"\n  (:refer-clojure :exclude [defn])\n  ;; why\n  (:require [x.y :as y]\n            [z.w]))"]
     (is (= old (source/ns-text-adding old '(ns a.b))) "a bare ns switches and adds nothing")
@@ -1527,7 +1600,8 @@
     (is (= #{'q.r} (seon.program/ns-requires (read-string (source/ns-text-adding "(ns a.b)" '(ns a.b (:require q.r)))))) "a form with no :require takes one")
     (is (some #(= '(:import [java.io File]) %) (read-string (source/ns-text-adding old '(ns a.b (:import [java.io File]))))) "another clause is added whole")))
 
-(deftest an-alias-only-the-process-holds-is-refused
+;; Estimate: ns eval 0.1M + 3 accounts of a one-form file x 0.1M = 400000 ticks
+(deftest ^{:seon.test/estimate {:ticks 400000}} an-alias-only-the-process-holds-is-refused
   ;; docs/source.md#a-boot-catches-up-with-its-checkout: real run 10: a file whose ns form had lost its requires passed analysis in a process that still held them, and merged.
   ;; What a file's forms name must be what its own ns form declares, in any process
   (binding [*ns* *ns*]
@@ -1538,7 +1612,8 @@
   (is (map? (source/accounts 'app.held-alias "(ns app.held-alias (:require [clojure.string :as held]))\n\n(defn f [] (held/join []))\n")) "declared: read")
   (is (map? (source/accounts 'app.held-alias "(ns app.held-alias)\n\n(defn g [] (clojure.string/join []) (Math/abs 1) '(held/x))\n")) "a full name, a class's static and quoted data are not aliases"))
 
-(deftest a-var-the-import-makes-public-may-be-named-by-a-later-file
+;; Estimate: ns eval 0.1M + 3 tx-of of 1-2 small files x 0.2M = 800000 ticks
+(deftest ^{:seon.test/estimate {:ticks 800000}} a-var-the-import-makes-public-may-be-named-by-a-later-file
   ;; the standing root's main held test-runner/tree-branch private (defn-) while the tree made it
   ;; public and seon.proofs-test named it: every import of main failed "is not public" and root's
   ;; program stayed stale (seon.source/analyze-form; docs/failure-points.md)
@@ -1551,7 +1626,8 @@
     (is (:private (meta (resolve 'app.pubsrc/g))) "and the image's var is as it was: analysis changes none (the tree's privacy answers, seon.source/tree-private)")
     (is (vector? (source/tx-of db {"src/app/pubsrc.clj" "(ns app.pubsrc)\n\n(defn- g [] 1)\n"} true)))))
 
-(deftest a-var-is-as-private-as-the-tree-analyzed-holds-it
+;; Estimate: 4 tx-of/analyses of a 2-file, 4-form tree x 0.4M + 2 ns evals 0.2M + db-with = 2000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-var-is-as-private-as-the-tree-analyzed-holds-it
   ;; docs/source.md#a-var-is-private-as-the-tree-analyzed-holds-it: whether a file may name a var is the privacy of the tree analyzed, never
   ;; the image's var, which analysis does not change: tree A defines app.privt/g with defn-, tree B with defn and a changed file names it;
   ;; analyzed A, B, A, then B again (a changed file only, as health analyzes a head after its base) B names it, and the image's var is as it was
@@ -1569,7 +1645,8 @@
     (is (vector? (source/tx-of db-b {"src/app/privuser.clj" user-b} true)) "B's changed file alone, after A: g is public as B's program holds it")
     (is (= private-before (:private (meta (resolve 'app.privt/g)))) "the image's var is as it was before the four analyses")))
 
-(deftest a-dependent-read-again-takes-the-privacy-of-every-file-the-refresh-read
+;; Estimate: import of 4 forms 0.4M + refresh-tx reading 2 files, then the dependent again, 3 analyses 0.6M = 1000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-dependent-read-again-takes-the-privacy-of-every-file-the-refresh-read
   ;; docs/source.md#a-var-is-private-as-the-tree-analyzed-holds-it: refresh-tx reads a dependent again in a later round (its
   ;; required namespace lost a name it references), and that round's analysis asks the tree's privacy of every file the refresh
   ;; read, never only that round's: a seed of a store holding seon.db/index as a private def failed "var: #'seon.db/index is not
@@ -1582,7 +1659,8 @@
     (is (vector? tx) "rp.b, read again because rp.a lost g, names rp.a/f, public in the tree the refresh read")
     (is (some? (seon.db/eid (d/db-with db tx) :var/name 'rp.b/h)))))
 
-(deftest a-source-the-image-cannot-analyze-is-an-error-not-a-throw
+;; Estimate: 4 tx-of of one-form files x 0.15M = 600000 ticks
+(deftest ^{:seon.test/estimate {:ticks 600000}} a-source-the-image-cannot-analyze-is-an-error-not-a-throw
   ;; the standing root's watcher died of "var: #'seon.db/install-missing! is not public": a changed file named a var
   ;; the running (older) image held as private; the import threw out of the batch handler (task
   ;; seon.source/analysis-failure-is-data)
@@ -1595,7 +1673,8 @@
     (is (vector? (source/tx-of db {"src/app/ok.clj" "(ns app.ok)\n\n(defn f [] 1)\n"} true)) "a file that analyzes is its facts")
     (is (vector? (source/tx-of db {"src/app/ok.clj" "(ns app.ok)\n\n(defn f [] 1)\n"} false)) "whole tree too")))
 
-(deftest a-forms-head-reads-without-its-namespace-loaded
+;; Estimate: 3 first-head x 10k (a read-string of one form) = 30000 ticks
+(deftest ^{:seon.test/estimate {:ticks 30000}} a-forms-head-reads-without-its-namespace-loaded
   ;; docs/health.md#a-function-that-cites-no-section: seon.source/first-head read a recorded form with
   ;; read-string in its namespace, found by find-ns; in a process that never loaded it (bin/check health),
   ;; a form holding `::flow/in-ports` did not read, and the check failed on any change to such a var
@@ -1603,7 +1682,8 @@
   (is (= "defmacro" (seon.source/first-head 'never.loaded.ns "(defmacro m [x] `(do ~x ::a/b))")))
   (is (nil? (seon.source/first-head 'never.loaded.ns "[::a/b 1]"))))
 
-(deftest a-renamed-alias-target-analyzes-beside-the-image
+;; Estimate: 2 imports of 2 files (4 forms) 0.8M + 2 refresh-tx of 3 files 1.2M = 2000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-renamed-alias-target-analyzes-beside-the-image
   ;; task seon.source/another-trees-ns-form-analyzes-beside-the-image: one process analyzes two trees whose
   ;; namespaces disagree (a namespace renamed, the alias of its requirer pointed at the new one), in either
   ;; direction: the removed file's old text is never read again (refresh-tx's dependents), and a namespace
@@ -1622,18 +1702,21 @@
     (is (some? (seon.db/eid back :var/name 'ra.old-lib/f)) "and back: a namespace on no root answers its requirer")
     (is (nil? (seon.db/eid back :var/name 'ra.new-lib/f)))))
 
-(deftest a-comment-typed-at-a-repl-keeps-its-line
+;; Estimate: main-with-file 0.5M + db-with and file-text 0.2M = 700000 ticks
+(deftest ^{:seon.test/estimate {:ticks 700000}} a-comment-typed-at-a-repl-keeps-its-line
   ;; found checking a real sync, 2026-11-07: a REPL form's lead is its comment alone, so "(ns x);; c(deftest t ...)" read the deftest as part of the comment
   (let [main (d/db-with (main-with-file) [{:db/id "f" :form/id "repl-f" :form/ns [:ns/name 'app.pt-src] :form/src "(def lead-kept 1)" :form/lead ";; why" :form/order 100000}])
         text (source/file-text main 'app.pt-src)]
     (is (clojure.string/includes? text "\n\n;; why\n(def lead-kept 1)") text)))
 
-(deftest a-new-namespace-takes-a-file-by-its-name
+;; Estimate: 2 namespace-path x 5k (string ops) = 10000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000}} a-new-namespace-takes-a-file-by-its-name
   ;; the owner, 2026-11-07: "these changed forms name no source file to write back" stops being an outcome: a namespace made at a REPL reaches disk as any other
   (is (= "src/app/my_lib/core.clj" (source/namespace-path 'app.my-lib.core)))
   (is (= "test/app/core_test.clj" (source/namespace-path 'app.core-test))))
 
-(deftest an-update-never-says-ok-on-a-merge-that-did-nothing
+;; Estimate: ~25 child calls (git, bin/update, whose own work is not ours) x 70k 1.7M = 2000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} an-update-never-says-ok-on-a-merge-that-did-nothing
   ;; 2026-11-11: the standing root's write-back (seon.fx/git-commit: plumbing, then update-ref, until it committed through a
   ;; checked-out tree) moved jolt/merges, the
   ;; branch the write-back tree has checked out, so that tree's index stayed at the parent: the merged files read as
