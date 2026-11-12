@@ -1507,7 +1507,7 @@
                               _ (when (and (:tx o) (:by o)) (bad "a lookup's members are joined by no datom: :tx with :by" k))
                               lim (:limit o)]
                           (cond-> {:attr (forward a) :key (or (:as o) a) :rev? (reverse? a) :by (:by o) :reverse? (boolean (:reverse o))
-                           :limit (if (keyword? lim) (config/value lim) lim)
+                           :limit lim
                            :sub (cond-> (cond (vector? sub) (pattern ix sub seen)
                                       ;; an entity schema's name: the pattern it declares
                                       (qualified-keyword? sub)
