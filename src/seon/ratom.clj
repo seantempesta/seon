@@ -82,6 +82,24 @@
     (when-not (= c (-get r :last)) (-update-watching r c))
     res))
 
+(defn reads-of
+  "(f) run in no reaction, answering [its value, the reads it made through views of reference ref: #{[path kind]}]: what a walk
+  kept as a value (seon.render/walk) keeps of a component's run, matched against the tree's next diff (`reached`). Its reads of
+  anything else are not kept. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :any :seon.host/fn] [:tuple :any [:set [:tuple [:vector :any] :keyword]]]]}
+  [ref f]
+  (let [cap (volatile! nil)
+        r (reify IReaction
+            (-get [_ k] (when (= k :captured) @cap))
+            (-set! [_ k v] (when (= k :captured) (vreset! cap v)))
+            (-handle-change [_ _ _ _] nil)
+            (-update-watching [_ _] nil)
+            (-queued-run [_] nil)
+            (-run [_ _] nil)
+            (-set-opts [_ _] nil))
+        v (binding [*ratom-context* r] (f))]
+    [v (into #{} (keep (fn [x] (when (and (vector? x) (identical? ref (:ref (first x)))) [(nth x 1) (nth x 2)]))) @cap)]))
+
 ;;; --- which reads a change reaches ---------------------------------------------------------
 
 (defn prefixes
@@ -262,12 +280,13 @@
     (= a b)))
 
 (defn fresh
-  "x as of now: a view made again over its source's current value at its path (a stored view
-  holds the value it was made with; an RCursor reads its ratom at each deref), else x."
-  {:malli/schema [:=> [:cat :any] :any]}
-  [x]
+  "x as of now in source src (nil: x's own): a view made again over the source's current value at its path (a stored view holds
+  the value it was made with; an RCursor reads its ratom at each deref), else x. A walk kept as a value (seon.render/walk) holds
+  the views of last time's source and draws again over this time's."
+  {:malli/schema [:=> [:cat [:maybe :map] :any] :any]}
+  [src x]
   (if (view? x)
-    (let [src (.-src x) p (.-path x) v (get-in (binding [*ratom-context* nil] @(:ref src)) p)]
+    (let [src (or src (.-src x)) p (.-path x) v (get-in (binding [*ratom-context* nil] @(:ref src)) p)]
       (if (and (map? v) (sorted? v)) (sorted-view src v p) (view src v p)))
     x))
 
@@ -303,20 +322,39 @@
 
 (declare source-changed)
 
+(defn read-index
+  "Read index ix ({:pre :deep :keys}, each {path #{reader}}; nil: none) with reader r's reads of one source ([[path kind] ...])
+  added (f conj) or removed (f disj): a read at path indexed at each of its prefixes (:pre), a whole read at its path (:deep), an
+  iteration at the node it iterated (:keys). The one index a change is matched against (`reached`). See docs/render.md#reactive-renders."
+  {:malli/schema [:=> [:cat [:maybe :map] :any [:maybe [:or [:set [:tuple [:vector :any] :keyword]] [:sequential [:tuple [:vector :any] :keyword]]]] :seon.host/fn] :map]}
+  [ix r reads f]
+  (let [add (fn [m k] (let [v (f (get m k #{}) r)] (if (seq v) (assoc m k v) (dissoc m k))))]
+    (reduce (fn [ix [p kind]]
+              (cond-> (reduce #(update %1 :pre add %2) ix (prefixes p))
+                (= kind :deep) (update :deep add p)
+                (= kind :keys) (update :keys add p)))
+            (or ix {:pre {} :deep {} :keys {}}) reads)))
+
+(defn reached
+  "The readers of read index ix (`read-index`) a diff's changes ([[op path ...] ...]) reach: a read at or below a changed path
+  (:pre), a whole read above it (:deep), a node iterated whose direct value it added, removed or replaced (:keys). See
+  docs/render.md#reactive-renders."
+  {:malli/schema [:=> [:cat [:maybe :map] [:sequential [:vector :any]]] [:set :any]]}
+  [ix changes]
+  (let [{:keys [pre deep keys]} ix]
+    (reduce (fn [acc [_ p]]
+              (cond-> (into (into acc (get pre p)) (mapcat #(get deep %)) (prefixes p))
+                (seq p) (into (get keys (pop p)))))
+            #{} changes)))
+
 (defn- index-reads!
   "Reaction r's reads of source src ([[path kind] ...]) added to its index (f conj) or removed
   (f disj); the source watched while any reaction reads it, and let go when none does."
   {:malli/schema [:=> [:cat :map :any [:set [:tuple [:vector :any] :keyword]] :seon.host/fn] :nil]}
   [src r reads f]
   (let [ref (:ref src)
-        add (fn [m k] (let [v (f (get m k #{}) r)] (if (seq v) (assoc m k v) (dissoc m k))))
         had? (contains? @sources ref)]
-    (vswap! sources update ref
-            (fn [ix] (reduce (fn [ix [p kind]]
-                               (cond-> (reduce #(update %1 :pre add %2) ix (prefixes p))
-                                 (= kind :deep) (update :deep add p)
-                                 (= kind :keys) (update :keys add p)))
-                             (assoc (or ix {:pre {} :deep {} :keys {}}) :changes (:changes src)) reads)))
+    (vswap! sources update ref (fn [ix] (assoc (read-index ix r reads f) :changes (:changes src))))
     (cond (and (not had?) (seq (get-in @sources [ref :pre]))) (add-watch ref ::paths source-changed)
           (empty? (get-in @sources [ref :pre])) (do (vswap! sources dissoc ref) (when had? (remove-watch ref ::paths)))))
   nil)
@@ -329,11 +367,8 @@
   {:malli/schema [:=> [:cat :any :any :any :any] :nil]}
   [_ ref old new]
   (when-not (identical? old new)
-    (let [{:keys [changes pre deep keys]} (get @sources ref)
-          hit (reduce (fn [acc [op p]]
-                        (cond-> (into (into acc (get pre p)) (mapcat #(get deep %)) (prefixes p))
-                          (seq p) (into (get keys (pop p)))))
-                      #{} (changes old new))]
+    (let [ix (get @sources ref)
+          hit (reached ix ((:changes ix) old new))]
       (doseq [r hit] (-handle-change r ::reached old new))))
   nil)
 

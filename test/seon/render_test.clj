@@ -1042,6 +1042,26 @@
                    kw0 [3 4 3 1 5 0 4 4 2])]
     (r/dispose-walk! (:w kw))))
 
+;; See docs/render.md#a-page-is-a-kept-walk
+(deftest a-walk-kept-as-a-value-answers-what-a-cold-request-does
+  ;; seon.render/walk moved to any value of the branch, forward, back and across several turns, by the datoms between, answers the
+  ;; model's messages the request drawn cold there answers (seon.ctx.wire/render); the same value again runs nothing and answers the same
+  (let [[db0 ix _ at] (#'seon.render-cost-test/session-of 2)
+        vs (vec (reductions (fn [db i] (d/db-with db (#'seon.render-cost-test/session-eval (str "e" i) (inc i)))) db0 (range 2 7)))
+        basis (fn [db] {:commit (d/commit-id db) :t (:max-tx db) :task "t/x" :turn 1 :max-turns 9 :origin :model :agent "a1"})
+        msgs (fn [p] (mapv first (:seon.render/openai-compat (:answers p))))
+        p0 (r/walk nil (at (nth vs 2)))
+        [p db] (reduce (fn [[p db0] i]
+                         (let [db (nth vs i)
+                               p' (r/walk p (assoc (at db) :moved (seon.ctx/moved db0 db nil)))]
+                           (is (= (:messages (seon.ctx.wire/render db (basis db) {:index ix})) (msgs p')) (str "its messages at " i))
+                           [p' db]))
+                       [p0 (nth vs 2)] [3 4 3 1 5 0 4 4 2])
+        again (r/walk p (assoc (at db) :tree (:tree p) :moved []))]
+    (is (not-any? #(str/includes? (str (:content %)) ":render-threw") (msgs p)) "no render threw")
+    (is (= {} (:ran again)) "the same value again runs nothing")
+    (is (identical? (:answers p) (:answers again)) "and answers what it answered")))
+
 (deftest a-record-of-another-turn-reads-nothing-this-turn-read
   ;; docs/render.md#the-page: an agent's page is a component for each turn number, each reading its records through the index by
   ;; that number: a new eval at turn n draws turn n's component and its eval, and no other turn's, nor the list's
