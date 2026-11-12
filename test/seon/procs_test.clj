@@ -939,8 +939,10 @@
 
 (defn- answer "What p was answered, or :unanswered." [p] (if (realized? p) @p :unanswered))
 
-;; Estimate: 1 thrown case with its stack 20k + flow-error reading the stack's frames (~200 x 1k = 0.2M) + api-state 50k + 1 api step 50k + pr-str of the answer ~ 0.4M ~ 400,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 400000}} a-proc-defect-names-where-it-threw
+;; Estimate: flow-error reads the throw's whole stack (Throwable->map and each frame's name), and a throw under the test runner is
+;; ~400 frames deep at ~10k ticks a frame = ~4M; the thrown case, api-state and one api step ~0.2M: ~5,000,000 ticks (it was
+;; estimated at 200 frames x 1k, which the runs measured wrong: 2M and 4.3M, by the shard's stack depth)
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-proc-defect-names-where-it-threw
   ;; the standing root's worst open problem: the reconciler's "No matching clause: " 255 times, a
   ;; case meeting nil, with nothing saying in which function or on what message
   (let [ex (try (case (:op {}) :a 1) (catch Exception x x))
