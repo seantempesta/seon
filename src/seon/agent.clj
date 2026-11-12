@@ -1425,11 +1425,16 @@
   {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
                   [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
                   [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe [:map-of :qualified-symbol :string]]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]]}
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe [:map-of :qualified-symbol :string]]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe [:map-of :qualified-symbol :string]] [:maybe :string]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]]}
   ([ticks proofs mode] (run-tests-forked ticks proofs mode (fn [_] nil)))
   ([ticks proofs mode forked] (run-tests-forked ticks proofs mode forked nil))
   ([ticks proofs mode forked names] (run-tests-forked ticks proofs mode forked names nil))
-  ([ticks proofs mode forked names items]
+  ([ticks proofs mode forked names items] (run-tests-forked ticks proofs mode forked names items nil))
+  ;; checkout: the session's checkout whose files a run of its tree reads (seon.system/prove-tree!): its test children read it
+  ;; (test-child's SEON_CHECKOUT), whichever plan the run takes; it rode on the held plan alone, so a run that planned again read
+  ;; the main tree's (its process tests found no process store there, 2026-11-12)
+  ([ticks proofs mode forked names items checkout]
   ;; an item the test service granted, at the digest this agent's plan of the run gave it: run as planned, nothing planned again
   ;; the runtime invariant (docs/merging.md#a-session-proves-through-root): this process runs its branch's program before a
   ;; test of it is judged; a definition it holds another form of is named, never judged (seon.program/program-differs)
@@ -1437,7 +1442,8 @@
     (contract/error :seon.agent/program-differs #'seon.agent/run-tests-forked
                     (str "this agent runs another program than its branch: " (str/join ", " (map :var differs)))
                     {:differs differs})
-  (let [{:keys [unread] :as sel} (or (item-selection (:held-plan @state) items) (run-plan proofs mode names))]
+  (let [{:keys [unread] :as sel} (cond-> (or (item-selection (:held-plan @state) items) (run-plan proofs mode names))
+                                    checkout (assoc-in [:plan :checkout] checkout))]
   (if unread
     unread
   (let [{:keys [plan judge deferred selected run reused digests reused-reports]} sel
@@ -1740,14 +1746,14 @@
                                                            :deferred-digests (into {} (for [t (:deferred sel)] [t (get (:base-digests (:plan sel)) t)])))
                                pp (merge (select-keys pp [:process :steps :mg :build :missing]))))}])
            (let [proofs (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
-                 ;; items of a run of a session's checkout: their test children read that checkout's files (test-child)
-                 _ (when (and (:checkout m) (:held-plan @state)) (swap! state assoc-in [:held-plan :plan :checkout] (:checkout m)))
                  r (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
                                      proofs
                                      (or (:mode m) :judge)
                                      #(send! {:op :tests-started :id (:id m) :pid %})
                                      (some-> (:names m) set)
-                                     (:items m))]
+                                     (:items m)
+                                     ;; items of a run of a session's checkout: their test children read that checkout's files
+                                     (:checkout m))]
              [{:op :tests :id (:id m) :result (if (and (map? r) (not (contract/error? r))) (proofs/answer r (asked m proofs (:selected r))) r) :mem-mb (mem-mb)}]))
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
     :fx-reply (let [r (dissoc m :op :k)]

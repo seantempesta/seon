@@ -113,7 +113,10 @@
   {:malli/schema [:function [:=> [:cat] :string] [:=> [:cat :string] :string]]}
   ([] (process-store (seon.config/checkout)))
   ([checkout]
-   (let [path (str checkout "/target/runs/test-store-" pdb/schema-digest)]
+   ;; the path its maker recorded (make-process-store!), never one this process derives: a test child of the standing system's
+   ;; agent runs main's program and derived another schema digest than the checkout's seed made the store under (2026-11-12)
+   (let [rec (java.io.File. (str checkout "/target/process-store.path"))
+         path (if (.isFile rec) (clojure.string/trim (slurp rec)) (str checkout "/target/runs/test-store-" pdb/schema-digest))]
      (when-not (pdb/store? path)
        (throw (ex-info (str "no process store at " path ": bin/test makes it (its plan: make-process-store!) before any shard starts; run the test through bin/test, or as an agent through (my.agent/prove '#{its-name}), which runs it on the gate's checkout")
                        {:seon.error/type :seon.test-store/no-process-store :path path})))
@@ -122,13 +125,15 @@
 (defn make-process-store!
   "The process tests' store (process-store) of checkout, made when missing (the schema and no
   example program on :db, as a root's own store starts) and every one of another schema removed
-  (seon.db/kept-store!): bin/test's plan calls it before any shard starts, when a selected test runs
-  the binary. Answers its path."
+  (seon.db/kept-store!): bin/test's plan and the service's seed call it before any test runs the binary. Its path is
+  recorded in <checkout>/target/process-store.path, which process-store reads. Answers its path."
   {:malli/schema [:=> [:cat :string] :string]}
   [checkout]
   (let [path (pdb/kept-store! (str checkout "/target/runs/test-store"))]
     (.mkdirs (.getParentFile (java.io.File. ^String path)))
     (d/release (:conn (pdb/open! :lmdb path 0 :db)))
+    ;; its path recorded where every reader looks (process-store): whoever makes the store names it
+    (spit (str checkout "/target/process-store.path") path)
     path))
 
 (defn clone-process-store!

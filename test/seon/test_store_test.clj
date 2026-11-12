@@ -195,3 +195,18 @@
         (is (clojure.string/includes? wts wt-live) "this live process's is kept"))
       (finally (git "worktree" "remove" "--force" wt-live)
                (seon.lib/remove-tree! repo (str repo "-fix") store)))))
+
+(deftest ^{:seon.test/estimate {:ticks 40000000}} the-process-store-is-the-one-its-maker-recorded
+  ;; docs/testing.md#a-root-costs-what-it-boots. Found 2026-11-12 (jolt/tests's land through the standing system): the seed made
+  ;; the checkout's process store under the digest its own runtime derives, and a test child of the system's agent, running main's
+  ;; program, derived another and found none: 197 process tests red. The maker records the path; every reader reads it.
+  (let [co (str (seon.config/checkout) "/target/tmp/pstore-" (random-uuid))
+        made (ts/make-process-store! co)]
+    (try
+      (is (= made (clojure.string/trim (slurp (str co "/target/process-store.path")))) "the maker records its path")
+      (let [other (str co "/target/runs/test-store-elsewhere")]
+        (.mkdirs (java.io.File. other))
+        (sh/sh "cp" "-c" (str made "/data.mdb") (str other "/data.mdb"))
+        (spit (str co "/target/process-store.path") other)
+        (is (= other (ts/process-store co)) "a reader takes the recorded path, never one it derives"))
+      (finally (seon.lib/remove-tree! co)))))

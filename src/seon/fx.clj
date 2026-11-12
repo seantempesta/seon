@@ -1331,7 +1331,7 @@
                 ;; max-bytes, the one caller that may remove it), so the items that clone it import nothing
                 :seed (let [prog (str "(require 'seon.test-store 'test-runner) (test-runner/program-db \\\"$PWD\\\" (seon.test-store/kept-program-store)"
                                       " (seon.fx/tree-id \\\"$PWD\\\") (seon.config/value :seon.config.proofs/program-store-max-bytes))"
-                                      (when (:binary? req) " (spit \\\"target/process-store.path\\\" (seon.test-store/make-process-store! \\\"$PWD\\\"))"))]
+                                      (when (:binary? req) " (seon.test-store/make-process-store! \\\"$PWD\\\")"))]
                         (when (:binary? req) (lib/remove-tree! store))
                         (sh "zsh" "-c" (str "ROOT=$PWD; . bin/env; "
                                             (when (:binary? req) "(cd target && ../bin/held ./seon seed 2000 --profile scripted 7>&- 3>&-) && ")
