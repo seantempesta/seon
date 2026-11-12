@@ -1,88 +1,62 @@
 # core.async.flow on Jolt
 
-Every Seon component is a Flow proc, and Jolt's Flow is upstream's API over Jolt's own `reference-code/jolt/stdlib/clojure/core/async/flow/impl.clj`; this page states the proc contract, where each workload runs, what the API really does and the hazards, read from the pinned Jolt source and checked in the REPL.
-
-The source is the pinned Jolt's: `reference-code/jolt/stdlib/clojure/core/async/flow.clj` (the API), `reference-code/jolt/stdlib/clojure/core/async/flow/impl.clj`, `reference-code/jolt/stdlib/clojure/core/async/flow/spi.clj`, `reference-code/jolt/stdlib/clojure/core/async/flow/impl/graph.clj` and `reference-code/jolt/stdlib/clojure/core/async/impl/dispatch.clj`. Each claim names the function that carries it. Read [core-async](core-async.md) first.
+Every Seon component is a Flow proc. Jolt's Flow is upstream's API over Jolt's own implementation; this page states the proc contract, where each workload runs, what the API really does and its hazards, read from the pinned source under `reference-code/jolt/stdlib/clojure/core/async/` (`flow.clj`, `flow/impl.clj`, `flow/spi.clj`, `flow/impl/graph.clj`, `impl/dispatch.clj`). Read [core-async](core-async.md) first.
 
 ## Where Jolt's Flow differs from upstream
 
-Where Jolt's Flow departs from upstream's dev-flow-alpha.
+`flow.clj` and `flow/spi.clj` are upstream's `dev-flow-alpha` plus `update!`. `flow/impl.clj` is Jolt's:
 
-- **`reference-code/jolt/stdlib/clojure/core/async/flow.clj` and `reference-code/jolt/stdlib/clojure/core/async/flow/spi.clj`** are upstream's `dev-flow-alpha`, plus `update!`.
-- **`reference-code/jolt/stdlib/clojure/core/async/flow/impl.clj` is Jolt's** (its header comment):
-  - each proc has its own control channel (there is no control mult);
-  - outputs are routed when they are sent, by a resolver per pid reading a live table (`proc-resolver`);
-  - `update!` diffs procs by fingerprint;
-  - `stop` awaits every exit and finishes in-flight outputs;
-  - Flow's own plumbing runs on fibers;
-  - `:chan-opts {:in {:chan c}}` uses a channel you made (`make-chan`);
-  - an output to a pid that isn't in the flow is reported, not thrown (`proc-resolver`).
-- **The `update!` docstring is wrong** (a Jolt docstring defect). It promises `{:added :removed :rewired :running}`; the impl answers `{:stopped :started :kept :lost :missed-exit :ms}` (`create-flow`'s `update-flow`). `:lost` counts only in-chans that were dropped, never a message a stopped proc held in its state.
+- each proc has its own control channel (no control mult);
+- outputs are routed when sent, by a resolver per pid reading a live table (`proc-resolver`), and an output to a pid not in the flow is reported, not thrown;
+- `update!` diffs procs by fingerprint;
+- `stop` awaits every exit and finishes in-flight outputs;
+- Flow's own plumbing runs on fibers;
+- `:chan-opts {:in {:chan c}}` uses a channel you made.
 
-## Workloads (`reference-code/jolt/stdlib/clojure/core/async/impl/dispatch.clj` `executor-for`, `reference-code/jolt/stdlib/clojure/core/async/flow/impl.clj` `proc`)
+`update!`'s docstring promises `{:added :removed :rewired :running}`, but it answers `{:stopped :started :kept :lost :missed-exit :ms}` (`create-flow`'s `update-flow`); `:lost` counts dropped in-chans only, never a message a stopped proc held.
 
-What each :workload decides: whether a proc runs on a fiber or on an OS thread of its own.
+## Workloads
 
-| `:workload` | the proc loop runs on | transform runs on | note |
-|---|---|---|---|
-| `:io` | a **fiber** | that fiber | 50 procs add no thread |
-| `:mixed` (**the default** when describe names none) | **an OS thread per proc, for its life** | that thread | 5 procs = +5 threads |
-| `:compute` | a fiber | a cached thread pool, one future per message, awaited with `.get` for **`compute-timeout-ms` (5000)** | past the bound: a `TimeoutException` on the error chan and the step's result is lost, **but the step keeps running** |
+`:workload` decides where a proc's loop runs (`impl/dispatch.clj` `executor-for`, `flow/impl.clj` `proc`):
 
-## The proc contract (`reference-code/jolt/stdlib/clojure/core/async/flow.clj` `process`, `reference-code/jolt/stdlib/clojure/core/async/flow/impl.clj` `proc`)
+- `:io`: a fiber; 50 procs add no thread.
+- `:mixed` (the default when describe names none): an OS thread per proc for its life.
+- `:compute`: a fiber, with each transform run as a future on a cached pool and awaited for `compute-timeout-ms` (5000); past it a `TimeoutException` goes to the error chan and the result is lost, but the step keeps running.
 
-When Flow calls each of a proc's four functions and what it may return: describe once, init at start, transition on a status change.
+## The proc contract
 
-- **describe `()`** is called **once**, when `flow/process` builds the launcher. Its `:ins`, `:outs`, `:params`, `:workload`, `:signal-select` and `:ping-map-fn` are fixed for the proc's life; a redefined Var changes none of them.
-- **init `(args)`** runs **inside `flow/start`** (or `update!`), with `::flow/pid` added to args. A throw surfaces from `flow/start`. The state it returns may carry:
-  - `::flow/in-ports {cid chan}` and `::flow/out-ports {cid chan}`, which are **read once, from init's state**. A port can't be added later.
-  - `::flow/input-filter`, a predicate of cid. Any state may carry it; it is re-read each step.
-- **transition `(state t)`**, with t one of `::flow/resume`, `::flow/pause`, `::flow/stop`. It runs only when the status changes (`handle-transition`).
-- **transform `(state in msg)`** answers `[state' {out [msgs]}]`. `in` is an in-port id, or a signal id for a cast. Reloading the Var takes effect at the next step.
+Flow calls a proc's four functions so (`flow.clj` `process`, `flow/impl.clj` `proc`):
 
-**The loop, step by step** (`proc`):
-- **Paused**, it reads only its control chan. Messages queue and casts wait.
-- **Running**, it does `alts!! :priority true` over `[control casts & ins]`, filtered by `::flow/input-filter`, with control first.
-- **A closed in-port** gives transform `msg = nil` once, then leaves the read set.
-- **A throw in transform:** the state is unchanged, the outputs are dropped, `{::flow/pid ::flow/msg ::flow/ex ...}` goes to the error chan, and the proc carries on. Root answers the message's caller (see [request and answer](#idioms-for-seon)).
-- **Outputs** are put one at a time with `alts!!` against control, so a pause or stop reaches a proc parked on a full output (`send-outputs`).
+- **describe** is called once, when `flow/process` builds the launcher; its `:ins`, `:outs`, `:params`, `:workload`, `:signal-select` and `:ping-map-fn` are fixed for the proc's life.
+- **init** runs inside `flow/start` (or `update!`) with `::flow/pid` in args; a throw surfaces from `start`. `::flow/in-ports` and `::flow/out-ports` are read once from its state, so a port can't be added later. `::flow/input-filter`, a predicate of cid, is re-read each step.
+- **transition** runs only when the status changes (`::flow/resume`, `::flow/pause`, `::flow/stop`).
+- **transform** `(state in msg)` answers `[state' {out [msgs]}]`; a reloaded Var takes effect at the next step.
 
-**Where an output goes** (`proc-resolver`):
+The loop: paused, it reads only control; running, `alts!! :priority true` over control, casts and the filtered ins. A closed in-port gives `msg = nil` once, then leaves the read set. A throw in transform keeps the old state, drops the outputs, sends `{::flow/pid ::flow/msg ::flow/ex}` to the error chan and carries on. Outputs are put one at a time against control, so a stop reaches a proc parked on a full output.
 
-| the output key | where it goes |
-|---|---|
-| a connected out | its consumer's in-chan (1:1) or a mult (fan-out) |
-| a declared out with no conn | **dropped, no report** |
-| `[pid in]` | that in-chan (dynamic routing, e.g. a reply) |
-| `[pid in]` for a pid that isn't in the flow | dropped, `{::flow/undeliverable coord}` on the report chan |
-| `::flow/report` | the report chan |
-| `[::flow/cast sig]` | every proc whose `:signal-select` accepts `sig` |
-
-**Fan-out is a mult** (`routes-for`), so it inherits `put!`: one full consumer holds back every consumer, as a callback waiter rather than a thread ([core-async](core-async.md#the-library-over-the-primitives)).
+Where an output goes (`proc-resolver`): a connected out to its consumer (a mult for fan-out); a declared out with no conn is dropped with no report; `[pid in]` to that in-chan, or, for a pid not in the flow, dropped with `{::flow/undeliverable coord}` on the report chan; `::flow/report` to the report chan; `[::flow/cast sig]` to every proc whose `:signal-select` takes it. Fan-out is a mult, so one full consumer holds back all ([core-async](core-async.md#the-library-over-the-primitives)).
 
 ## The API
 
-What each call of Flow's API really does in Jolt, with its timeouts and literals.
+What each function of Jolt's Flow API does, with its defaults.
 
-| call | what it really does (Jolt) | timeouts and literals |
-|---|---|---|
-| `create-flow` `{:procs :conns :stop-timeout-ms}` | plans procs; validates conns | `:stop-timeout-ms` default **10000**; in-port buffer default **10** (`make-chan`) |
-| `start` | makes report and error chans, runs every init, starts every proc **paused** | report and error chans are **sliding 100**: old reports and errors are dropped silently |
-| `resume`/`pause`, `resume-proc`/`pause-proc` | put a command on each proc's control chan with `>!!`, **under the graph lock** (`send-control!`) | control chan is `(chan 10)` (`start-proc!`) |
-| `ping`/`ping-proc` | a ping command; waits up to `timeout-ms` for the pongs; a proc inside a step can't answer and is **left out** | `timeout-ms` default **1000** |
-| `inject` `[pid in]` or `[::flow/cast sig]` | runs on an `:io` fiber, puts each msg with `>!!`, answers a **Future at once**; the caller isn't parked | an edge must deref it to feel back-pressure |
-| `update!` | diffs fingerprints (step Var, describe without fns, args, chan-opts): unchanged procs keep their loop, state and queue; changed and removed ones are stopped and their exit awaited; in-chans survive by coord and options | per stop, `:stop-timeout-ms` |
-| `stop` | stop to every proc; awaits each exit up to `:stop-timeout-ms` (`await-exits`); closes control chans, mult sources, error and report; answers `true` or `{::flow/running #{pids}}` | a proc parked on a full output **finishes its outputs, waiting up to 1000 ms per message** (`finish-outputs!`, called from `send-outputs`), then puts `{::flow/dropped-on-stop out}` on the report chan |
-| casts | a cast is delivered to each selecting proc's castee chan | **sliding 100**: a cast a proc doesn't take in time is dropped |
+- `create-flow`: `:stop-timeout-ms` default 10000; in-port buffer default 10.
+- `start`: makes the report and error chans (sliding 100: old entries dropped silently), runs every init, starts every proc paused.
+- `resume`, `pause` and their `-proc` forms put on the proc's control chan (`(chan 10)`) with `>!!` under the graph lock.
+- `ping`: waits up to 1000 ms; a proc inside a step is left out.
+- `inject`: puts on an `:io` fiber and answers a Future at once; an edge derefs it to feel back-pressure.
+- `update!`: unchanged procs (step Var, describe, args, chan-opts) keep loop, state and queue; changed and removed ones are stopped and awaited.
+- `stop`: awaits each exit up to `:stop-timeout-ms`, then closes everything, answering `true` or `{::flow/running #{pids}}`; a proc parked on a full output finishes its outputs, up to 1000 ms per message, then reports `{::flow/dropped-on-stop out}`.
+- casts: a sliding 100 per proc; one not taken in time is dropped.
 
 ## Hazards found in the source and confirmed
 
-The ways a Flow graph wedges, hangs or drops messages silently, found in Jolt's source and confirmed.
+The ways a Flow graph can wedge or lose data, each read in the source and confirmed.
 
-1. **A proc stuck inside a step wedges the whole graph's control.** Its control chan holds 10, and commands are put with `>!!` under the graph lock. After 10 unanswered commands (pings, say), the 11th blocks while holding the lock. From then on, `ping` of any other proc, `pause`, `update!` and `stop` all wait until that step returns.
-2. **A step that never returns can't be stopped.** `stop` gives up after `:stop-timeout-ms` and names it, but the fiber or thread lives on.
-3. **Time inside Flow:** `compute-timeout-ms` 5000, `finish-outputs!` 1000 ms per message, `stop-timeout-ms` 10000, and ping's 1000. Each is a clock that decides, in the dependency ([clocks](clocks.md)).
-4. **Silent drops:** an unconnected out, report and error chans past 100, casts past 100, and a mult with no taps.
+1. **A proc stuck inside a step wedges the graph's control.** Its control chan holds 10 and commands are put under the graph lock, so the 11th blocks holding it: `ping`, `pause`, `update!` and `stop` of every proc then wait for that step.
+2. **A step that never returns can't be stopped:** `stop` names it after `:stop-timeout-ms`, and it lives on.
+3. **Clocks inside Flow:** `compute-timeout-ms`, `finish-outputs!`'s 1000 ms, `stop-timeout-ms`, ping's 1000 ([clocks](clocks.md)).
+4. **Silent drops:** an unconnected out, report and error chans past 100, casts past 100, a mult with no taps.
 
 ## The step-fn contract every proc follows
 
@@ -94,52 +68,43 @@ Every component of Seon is a step-fn proc declared as data (`resources/seon/syst
 - buffers are bounded by their loss semantics; a dependency is a channel a proc parks on, and back-pressure is a full one;
 - procs run on fibers, and a blocking foreign call gets a declared thread; no thread, future or atom lives outside procs, except an edge reader for a blocking read;
 - a proc reports its own problems as facts and its changes as events, and steps only when a message arrived;
-- the work is done when the count of messages reaches zero: each one promised is counted, each one taken is taken off, and zero is quiet ([below](#idioms-for-seon)).
-- a proc never binds an out-port to its own in-port's channel: Flow names each channel by its port (one map of channel to port id), so the out-port took the in-port's name, and when that in-port closed at a stop Flow dropped the wrong port and the proc read the closed channel forever (seon.writer, 2026-11-10: a root's stop spun at 99% CPU). A proc that must ask itself for a later step asks another proc that answers on its in-port, as the writer asks the flusher for its :commit.
+- the work is done when the count of messages reaches zero: each one promised is counted, each one taken is taken off, and zero is quiet ([below](#idioms-for-seon));
+- a proc never binds an out-port to its own in-port's channel: Flow names a channel by one port, so the in-port's close is missed and the proc reads a closed channel forever. A proc that needs a later step of its own asks another proc that answers on its in-port (the writer asks the flusher for its `:commit`).
 
 ## Idioms for Seon
 
-How Seon meets each need (a dependency, a backlog, a delayed retry, quiet) on Flow.
+How Seon meets each need on Flow.
 
-- **Dependency:** a conn. The consumer parks on its in-port and starts on its first message; there is no start order. A join reads only what it still lacks: `::flow/input-filter`.
-- **Backlog and admission:** the in-port is the queue. Size it by loss semantics (fixed for data that matters). An owner admits by **leaving `:in` out of its read set** while it is at its cap, so the unread queue fills and askers park. `seon.fx/owner-proc` does so (`seon.fx/bound`), and its workers compete for one shared in-port (`seon.fx/worker-proc`): proven by `seon.patterns-test/a-backlog-is-the-unread-queue` and `seon.patterns-test/workers-compete-for-one-shared-in-port`. A kind with `:batch n` gives a free worker its head request and those queued behind it as one item, taken from the queue, never waited for (`seon.fx/dispatch`; the `:embed` kind's texts encode together); a kind with `:open` makes its host object (a model) on the worker's first item and keeps it in the worker's state (`seon.fx/worker-proc`; `seon.fx-test/a-batch-kind-takes-what-is-queued`, `seon.fx-test/a-worker-performs-a-batch-in-one-call-and-opens-once`).
-- **Delayed retry:** a timeout channel can't be an in-port itself, because in-ports are fixed at init. Give the proc one `:retry` in-port, made in init and placed in `::flow/in-ports`. To retry `m` in `ms`, start `(go (<! (timeout ms)) (>! retry m))`: one heap entry on the one timer thread and a parked fiber. **No cron proc.** Cron is only for scheduled work that isn't a reply to anything.
-- **Request and answer:** a request carries `:reply [pid port]`, and the answer is an output to that coord: exactly one answer, `{:value}` or `{:error typed}`. **Credit:** the asker leaves `:ask` out of its read set at N outstanding, and its answer in-port holds N. Without credit, request and reply between bounded in-ports deadlock.
-  - **The asker's side has one implementation:** ```seon.step/pend```, ```seon.step/ask``` and ```seon.step/answered``` (a second answer to the same id finds nothing). Root's api (`seon.system/pend`, `seon.system/deliver-rid`), the reconciler (`seon.reconcile/request`), the render proc (`seon.render.proc/ask`) and the web proc (`seon.web/web-proc`) keep their asks so. A request in flight is the render proc's coalescing window; no clock re-asks.
-  - **An edge asks one way:** a caller outside the graph (the web's handler, root's REPL surface through `seon.system/call!`, root's stop) puts its request with a fresh promise as `:p` through ```seon.step/ask-edge```, and the proc delivers its one answer to it. A channel already closed answers the caller's closed value at once, so no request waits on a proc that will never take it (`seon.step-test/an-edge-asks-one-way`); no other src form puts a request carrying `:p` (`seon.main-test/an-edge-asks-one-way`).
-  - **A throwing step's message is answered:** Flow's error channel is piped into the api's `:back` (`seon.system/start!`: `a/pipe` through a channel that maps each defect to an `:error` message; no thread), so each defect reaches the api with the `::flow/msg` the step took, and `seon.system/answer-taken` answers its caller with the defect, once. The api's own step takes a batch, so it keeps what it took in a volatile of its state (`::taken`) that survives Flow's revert, carries it as `::lost` into its next step, and answers all of it when the defect arrives.
-  - **A throwing step is an event too** (`{:type :proc-defect :pid :message}` on root's events, ```seon.system/api-proc```): what the proc owed someone who waits on events, not on a request (a check awaiting `:fork-server-up` after a fork server's death), may never come, so the wait ends with the defect, never silence (bin/check robust waited for good when a fork server's promote threw, 2026-10-30; the checks' `await-event` throws on it).
-  - **An answer and the fact it made arrive on two ins, in no set order:** the writer answers a write on main before its commit reaches a proc's `:main`, so a step that reads main after its own write takes the answer only once main holds it. The reconciler holds such an answer (```seon.reconcile/behind?```) and takes it when `:main` brings its t, as it holds a wait on main (`seon.reconcile/answer-waits`); without the hold, a stage's `:started` read a db without the agent its `:spawned` wrote and opened the stage with no `:stage` entry (`seon.reconcile-test/a-step-reads-the-db-its-own-write-made`).
-  - Not this: a counter and a pending map per proc, or a deadline that counts an answer as gone.
-- **A fact or a channel:** whatever must outlive the process that made it (a message, a verdict, a request someone may answer after a restart) is a fact first, written by its one writer, and its readers find it in the db at t; a channel carries the notice that it arrived (the writer's commit to the procs that read main, a wake to the reconciler) and the requests and answers between live procs, never the only copy of something that matters. A watch is a channel too: the writer's commit notice is a proc's in-port, never a poll. So a message to an agent is a fact on main to its branch (```seon.task/message-tx```), the api, once the writer has answered, puts the recipient on the reconciler's `:wake` port (a Flow channel, never a watch on the commit), which wakes a waiting agent, and the agent takes it onto its branch at its next act; a frame alone left an agent with nothing when its process had gone (```seon.agent/undelivered```).
-- **Failure:** send typed errors as answers, not throws ([errors](errors.md#errors)); a throw is a defect, and its message is answered as above.
-- **Quiet:** Flow can't see it, because channels are opaque and ping misses procs inside a step. Count messages: +1 when promised (outputs, injects, answers owed by an edge, a step in progress), −1 when taken. Zero is quiet. A stall is named from each queue's fill, its capacity, its writer, and its reader's read set.
-- **Never** let a step block on another proc (hazard 1). Make every slow wait a message and a park.
+- **Dependency:** a conn; the consumer parks on its in-port, so there is no start order. A join reads only what it still lacks (`::flow/input-filter`).
+- **Backlog and admission:** the in-port is the queue, sized by loss semantics. An owner admits by leaving `:in` out of its read set at its cap, so askers park (`seon.fx/owner-proc`, `seon.fx/bound`); its workers compete for one shared in-port (`seon.fx/worker-proc`; `seon.patterns-test/a-backlog-is-the-unread-queue`, `seon.patterns-test/workers-compete-for-one-shared-in-port`). A kind with `:batch n` hands a free worker its head request with those queued behind it (`seon.fx/dispatch`); a kind with `:open` makes its host object on the worker's first item and keeps it (`seon.fx-test/a-batch-kind-takes-what-is-queued`, `seon.fx-test/a-worker-performs-a-batch-in-one-call-and-opens-once`).
+- **Delayed retry:** in-ports are fixed at init, so the proc has one `:retry` in-port and `(go (<! (timeout ms)) (>! retry m))` puts on it ([clocks](clocks.md)).
+- **Request and answer:** a request carries `:reply [pid port]`; the answer is one output to that coord, `{:value}` or `{:error typed}`. With credit: the asker leaves `:ask` out of its read set at N outstanding, its answer in-port holding N; without it, bounded request and reply deadlock.
+  - **The asker's side has one implementation:** ```seon.step/pend```, ```seon.step/ask``` and ```seon.step/answered``` (a second answer finds nothing), used by root's api (`seon.system/pend`, `seon.system/deliver-rid`), the reconciler (`seon.reconcile/request`), the render proc (`seon.render.proc/ask`) and the web proc.
+  - **An edge asks one way:** a caller outside the graph puts its request with a fresh promise as `:p` through ```seon.step/ask-edge```; a closed channel answers at once (`seon.step-test/an-edge-asks-one-way`, `seon.main-test/an-edge-asks-one-way`).
+  - **A throwing step's message is answered:** Flow's error chan is piped into the api's `:back` (`seon.system/start!`), and `seon.system/answer-taken` answers the caller with the defect, once; the api keeps the batch it took in `::taken`, which survives Flow's revert. The defect is also a `:proc-defect` event (```seon.system/api-proc```), so a wait on events ends with it.
+  - **An answer and the fact it made arrive on two ins, in no set order:** a step that reads main after its own write holds the answer (```seon.reconcile/behind?```) until `:main` brings its t (`seon.reconcile-test/a-step-reads-the-db-its-own-write-made`).
+- **A fact or a channel:** what must outlive its process (a message, a verdict, a request answerable after a restart) is a fact first, written by its one writer; a channel carries only the notice (the writer's commit to `:main`, a `:wake` to the reconciler) and live requests and answers. A message to an agent is a fact on main (```seon.task/message-tx```) plus a wake, and the agent takes it onto its branch at its next act (```seon.agent/undelivered```).
+- **Failure:** typed errors are answers, not throws ([errors](errors.md#errors)); a throw is a defect, answered as above.
+- **Quiet:** Flow can't see it, so count messages: +1 when promised, −1 when taken; zero is quiet. A stall is named from each queue's fill, capacity, writer and reader's read set.
 
 ## Flow inside an agent
 
 An agent is a Flow graph of three `:io` procs on its main carrier, so it stays one OS thread and forks its test children and clones as before (```seon.repl/serve!```, [processes](processes.md#the-agent-process)).
 
-- **Measured in scratch Jolt processes, 2026-10-30:** a graph of `:io` procs on the main carrier keeps one active thread through `start`, `resume`, `inject`, `ping` and `stop`, and a fork succeeds at each (a parked carrier, timer or poller thread is not an active one, `seon.lib/fork!`); starting a three-proc graph takes 0.06-0.17 ms (source mode), against an agent's 12-20 ms own start ([machine](machine.md#what-a-spawn-costs)).
-- **A wait inside a step is an edge's ask:** the `:repl` proc's step runs an eval, which may wait for root's answer to its own request; Flow has no request and reply between a proc and the graph beneath its own step, so the wait is a promise the `:transport` proc delivers by the request's key (```seon.agent/await-reply```), and the fiber parks while the other procs run. An eval parked so is stopped by root's interrupt (measured: 206 ms after its token was set); one that never parks (a busy loop) lets no other fiber run, and only its tick budget or root's signal stops it.
-- **A fiber's allocation is its own:** a byte or tick budget (`jolt.host/run-interruptible`) counts what its eval's fiber does, so a run the `:tests` proc does while an eval waits is never charged to that eval (measured: a fiber allocating ~2M objects beside a parked eval under a 10 MB budget did not stop it; the same allocation in the eval stopped it at 10.88 MB).
-- **Hazards 1 and 2 above hold inside it:** the `:repl` proc is inside one step for a whole work (`seon.turn/work!` is one eval), so a `ping` leaves it out and nothing in the agent pings or stops its graph: root's stop is a `:stop` message the REPL takes after the requests before it, then the process ends.
-- **The bound between them:** the `:repl` and `:tests` procs' in-ports each hold `:seon.config.agent/inbox-size` messages, as root's end of the socket does. At the bound the transport waits to hand on the next and reads nothing meanwhile, so an eval waiting for an answer behind that many queued requests waits until one is taken: root would have to queue that many requests for one agent while it waits (each outside eval and each render waits for its own answer, so a client queues one at a time).
-- **One loop on every platform:** the agent runs on the main carrier everywhere; the platform gaps are Jolt's (tasks jolt.io-poller/wake-on-signals-on-linux, jolt.async/a-forked-child-closes-inherited-ends-on-linux).
+- **One active thread:** such a graph keeps one active thread through `start`, `resume`, `inject`, `ping` and `stop`, so a fork succeeds at each (`seon.lib/fork!`) ([machine](machine.md#what-a-spawn-costs)).
+- **A wait inside a step is an edge's ask:** the `:repl` proc's eval may wait for root's answer to its own request; that wait is a promise the `:transport` proc delivers by key (```seon.agent/await-reply```), and the fiber parks meanwhile. Root's interrupt stops a parked eval; a busy loop that never parks is stopped only by its tick budget or root's signal.
+- **A fiber's allocation is its own:** a byte or tick budget (`jolt.host/run-interruptible`) counts only its eval's fiber, never the `:tests` proc's work beside it.
+- **Hazards 1 and 2 hold inside it:** `:repl` is inside one step for a whole work (`seon.turn/work!`), so nothing in the agent pings or stops its graph; root's stop is a `:stop` message the REPL takes in order.
+- **The bound:** the `:repl` and `:tests` in-ports each hold `:seon.config.agent/inbox-size`; at it the transport stops reading until one is taken.
 
 ## Effects: one owner and its workers per kind
 
-Every outside effect has one owner proc and a few worker procs per kind, declared as data in `resources/seon/system.edn`. ```seon.graph/read-decl``` reads that file with aero (`{:procs :fx :conns}`); `seon.graph/build` builds the graph from it and keeps a proc whose declaration is unchanged; ```seon.graph/fx-owners``` answers the owners' pids in a built graph, the only procs an agent's proc may address. ```seon.fx/procs``` builds the owner `:fx/<kind>` and its workers `:fx.<kind>/<i>` for a kind, sharing one work channel ([the owner and workers](#idioms-for-seon): `seon.fx/owner-proc` admits, `seon.fx/worker-proc` performs). Every qualified symbol the file names is resolved by name at boot, so ```seon.fx/declared-refs``` lists them as the reach edges of `seon.graph/read-decl` and a test that boots root reaches its procs.
+Every outside effect has one owner proc and a few worker procs per kind, declared as data in `resources/seon/system.edn`. ```seon.graph/read-decl``` reads it (`{:procs :fx :conns}`); `seon.graph/build` builds the graph; ```seon.graph/fx-owners``` answers the owners' pids, the only procs an agent's proc may address. ```seon.fx/procs``` builds the owner `:fx/<kind>` and workers `:fx.<kind>/<i>` on one work channel. ```seon.fx/declared-refs``` lists the file's symbols as reach edges, so a test that boots root reaches its procs.
 
-An agent reaches an owner through ```my.fx/call``` (the outcome, `{:value ...}` or the kind's declared error, with `{:prio :budget :budget-key}` options) or ```my.fx/send``` (answers a key now; the outcome arrives as a message). Inside a test, a fork of the agent, nothing leaves the process. The owner admits a request while a worker is free, its task has budget left and the provider's bucket holds its estimate. The bucket is data, ```seon.fx/refill```: tokens grow at the configured rate up to its cap since the time it was last read, a rate-limit outcome halves the rate and every other raises it a twentieth toward the configured rate ([clocks](clocks.md#time-decides-the-owners-exceptions)). A request the bucket cannot yet cover waits for the owner's `:tick`; a request whose task has spent its budget is answered `:seon.fx/budget-spent`.
+An agent reaches an owner through ```my.fx/call``` (the outcome, with `{:prio :budget :budget-key}` options) or ```my.fx/send``` (a key now, the outcome later as a message); inside a test fork nothing leaves the process. The owner admits while a worker is free, the task has budget and the provider's bucket (```seon.fx/refill```: refills at the configured rate, halves on a rate limit, regains a twentieth otherwise, [clocks](clocks.md#time-decides-the-owners-exceptions)) covers the estimate; otherwise it waits for the owner's `:tick`, or is answered `:seon.fx/budget-spent`.
 
-An owner holds at most `:seon.config.fx/buf` of the agents' requests: at that bound it stops reading `:in` (Flow's input filter), so the asking agents' procs park there, back-pressure to the asker. Root's own asks (the api's `{:op :fx}`, the test service's item grants, a stall's evidence, a gate's tests) go to the owner's `:ask` port, which the bound never closes: the api answers every asker and must never wait behind one owner's agents; root's asks are bounded where they start (```seon.fx-test/the-api-answers-while-an-effects-queue-is-full```).
+An owner holds at most `:seon.config.fx/buf` agent requests, then stops reading `:in`, so asking agents park. Root's own asks go to the owner's `:ask` port, which the bound never closes, so the api never waits behind agents (```seon.fx-test/the-api-answers-while-an-effects-queue-is-full```).
 
-The performers are Vars of `seon.fx`, each answering `{:value ...}` or a declared error ([failure points](failure-points.md#edges-that-catch-each-names-its-one-variant)):
-- ```seon.fx/echo```: the test effect, which answers its request as its value.
-- ```seon.fx/model```: the model call (`seon.model/complete`) under root's provider, a request's `:model` overriding the provider's; the answer carries `:cost`, the tokens used, which settles the owner's bucket and the task's spend.
-- ```seon.fx/stall-evidence```: a stalled agent's fiber dump, `sample`, `lsof` and `ps` of its process group, each a file in the given dir, captured while it is stuck ([processes](processes.md#a-stalled-agent)).
-- ```seon.fx/test-results```: the status of each test of a merge candidate's run, read from its verdict at its digest in the results directory (`:pass` for a stored green, `:fail` for a red, `:error` when the run never reached it: no verdict is not a pass), for `seon.fx/run-tests`.
-- ```seon.fx/tree-of```: git's id of a commit's tree, one of the reads of the repository the loaders and checks share ([health](health.md#checks-are-callers-of-seon)).
+The performers are Vars of `seon.fx`, each answering `{:value ...}` or a declared error ([failure points](failure-points.md#edges-that-catch-each-names-its-one-variant)), among them ```seon.fx/echo``` (the test effect), ```seon.fx/model``` (`seon.model/complete`; its `:cost` settles the bucket and the task's spend), ```seon.fx/stall-evidence``` ([processes](processes.md#a-stalled-agent)), ```seon.fx/test-results``` (no verdict is never a pass) and ```seon.fx/tree-of``` ([health](health.md#checks-are-callers-of-seon)).
 
-**A streaming perform** answers `{:stream {:pull :init :step :final :close}}` in place of its outcome, as ```seon.model/complete``` does for a request that names its model call (`:call`, with its `:agent`'s `:seon.agent/key`; ```seon.turn/act!``` sends both). A Flow step's outputs leave only when the step returns, so a worker that read the whole reply inside one step would show nothing until the end. ```seon.fx/worker-proc``` instead starts one edge reader (```seon.fx/read-lines!```: the one blocking read [the step-fn contract](#the-step-fn-contract-every-proc-follows) allows, as `seon.fork-server`'s socket reader) that pulls the body's pieces, splits them on the newline byte (never inside a multi-byte character) and puts each whole line on the worker's own `:lines` in-port, then `{:end true}`, or `{:error e}` when the pull answers an error (a socket failure is `:seon.model/transport`, made at `seon.model/http-post`, the one edge). The worker's step (```seon.fx/stream-step```) folds one line with `:step` and outputs the messages it made to `[:web :streams]` (the dynamic route `[pid in]`; a graph without that proc drops them and reports `::flow/undeliverable`); while a call is in flight its input filter reads `:lines` only, so it keeps its slot and the owner's admission is unchanged. At the end it gives the owner `:done` once, the outcome of `(:final state)` or the error, after the `:close` messages that end every id still open. The model's step (```seon.model/sse-step```) is also the parser of `seon.model/sse-reply`, and ```seon.model/json-feed``` reads a tool call's arguments as they arrive, keeping its place between fragments; what streams is display only, and the committed reply is read from the whole arguments.
+**A streaming perform** answers `{:stream {:pull :init :step :final :close}}` in place of its outcome, as ```seon.model/complete``` does for a request naming its model call (```seon.turn/act!```). Since a step's outputs leave only when it returns, ```seon.fx/worker-proc``` starts one edge reader (```seon.fx/read-lines!```) that puts each whole line on the worker's `:lines` in-port, then `{:end true}` or `{:error e}` (a socket failure is `:seon.model/transport`, from `seon.model/http-post`). ```seon.fx/stream-step``` folds each line and outputs to `[:web :streams]`, reading only `:lines` while the call is in flight, then gives the owner `:done` once. ```seon.model/sse-step``` is also `seon.model/sse-reply`'s parser, and ```seon.model/json-feed``` reads a tool call's arguments as they arrive; what streams is display only, and the committed reply is read from the whole arguments.
