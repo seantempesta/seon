@@ -64,6 +64,9 @@
     (is (and ev (.isFile (java.io.File. (str ev "/ps.txt")))) "its process tree was captured before it was ended")
     (is (not (re-find #"(?m)^laws OK" (:out r))) "and it did not run on to its own end")
     (is (re-find #"^laws \d+\n$" ms) "its time is kept for its verdict, as a green step's is")
+    ;; a unit's root runs in a runs directory of its own (SEON_RUNS beside its store), never the checkout's runs/, which a
+    ;; system running in the checkout owns: a failed unit keeps it with its store, to be read
+    (is (and out (.isDirectory (java.io.File. (str out "/stores/laws-runs")))) "the unit's own runs directory, kept with its failed store")
     (some->> out (clojure.java.shell/sh "rm" "-rf"))))
 
 (deftest steps-are-branches-of-one-store

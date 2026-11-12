@@ -527,6 +527,15 @@
   {:malli/schema [:=> [:cat :map :any] :boolean]}
   [rd k] (contains? (:seon.proofs/covers rd) (if (vector? k) (first k) :var)))
 
+(defn reads-reusable
+  "The tests of index (graph-index's: {test {:process? ...}}) whose green may be reused by what it recorded it read: every one
+  but those that reach a process of their own. Such a test's run records what its own process called, never what the agent or
+  root it drives ran for it (an eval's code is a string no reach shows: a change to seon.repl/edit! left
+  seon.repl-test/a-namespace-edit-names-the-var-that-holds-the-text at its recorded reads), so it is reused at its digest only.
+  See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat [:map-of :any :map]] [:vector :any]]}
+  [index] (vec (sort-by str (remove #(:process? (index %)) (keys index)))))
+
 (defn read-digests
   "Each test of static ({test digest}, its reach digest) at the digest of its newest verdict in held ({test [verdict]}) whose
   :reads (reads-key) all still have their digest in rd, the program now: so a run looks it up there and reuses it while

@@ -37,6 +37,10 @@
 # end before the answer: the socket's EOF, never a timer). The client is target/seon's prove mode (seon.main/prove-client).
 # The process tests, the check steps, the build and the seed are items of the same run (docs/merging.md#the-test-service),
 # run on this checkout by root's effect owner; no marker is written.
+# bin/prove --root PORT --merge — the same, every key with no green at its digest, against no base (mode main): a whole tree.
+# The bootstrap case's proof: a branch that changes the prover is proved through a system running its own code (this worktree's,
+# bin/system start), whose main is the branch, so a judge against that main would see no change. Green, it writes the tree's
+# marker (results/proved/both-<tree>, naming the run), which bin/land then reads, as for a proof through the standing system.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # a run is a process group of its own, and a stop (TERM, INT, HUP: a timeout, a ^C, bin/land stopped) ends the
 # whole group, so nothing it started outlives it (2026-11-08: a stopped landing left its prove, shards and check
@@ -74,6 +78,16 @@ if [[ ${1:-} == --root ]]; then
   PORT=$2; shift 2
   # the binary's environment and its libraries (bin/env exports them), and its home, as bin/system runs it
   . "$ROOT/bin/env"
+  if [[ ${1:-} == --merge ]]; then
+    TREE=$("$ROOT/bin/tree" "$ROOT") || TREE=
+    (cd "$ROOT/target" && SEON_CHECKOUT=$ROOT HOME=$ROOT/target/home ./seon prove "$PORT" "$ROOT" "$@"); st=$?
+    # green and the tree unmoved: its marker, as the service path writes it (below), naming the system it was proved through
+    if (( st == 0 )) && [[ -n $TREE && $("$ROOT/bin/tree" "$ROOT") == $TREE ]]; then
+      M=$SEON_RESULTS_DIR/proved/both-$TREE
+      mkdir -p "${M:h}" && print -r -- "$(date '+%Y-%m-%d %H:%M') --root $PORT --merge" > "$M.$$" && mv "$M.$$" "$M"
+    fi
+    exit $st
+  fi
   cd "$ROOT/target" && SEON_CHECKOUT=$ROOT HOME=$ROOT/target/home exec ./seon prove "$PORT" "$ROOT" "$@"
 fi
 # every other run (bare, named tests, --merge) asks the standing system's test service (docs/merging.md#the-test-service): the main

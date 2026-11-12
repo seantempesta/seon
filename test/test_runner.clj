@@ -271,8 +271,10 @@
      ;; :reads holds beside the functions it called, so a reuse is sound until those reads are recorded as they happen
      :static-reads (into {} (keep (fn [[t v]] (when (seq (:reads v)) [t (:reads v)]))) idx)
      ;; recorded reads (seon.proofs/read-digests): the tests' newest greens that recorded what they read, and, when any did,
-     ;; the digest of everything a run can read on this tree; an unreadable record only makes its test run
-     :held (let [h (fx/held-reads (vec (keys idx)))] (if (:seon.error/type h) {} h))
+     ;; the digest of everything a run can read on this tree; an unreadable record only makes its test run. Not a test that
+     ;; reaches a process of its own: its run records what its own process called, never what the agent or root it drives
+     ;; ran for it (an eval's code is a string no reach shows), so it is reused at its digest only
+     :held (let [h (fx/held-reads (proofs/reads-reusable idx))] (if (:seon.error/type h) {} h))
      ;; the proofs of this tree that pass by a waiver (an :overrun in the form), counted on the db the plan reads
      :waived (count (problems/waived-proofs db {}))
      :process (set (keep (fn [[t v]] (when (:process? v) t)) idx))
@@ -523,7 +525,7 @@
     (do (println (str "TEST FAILED: " bad)) 1)
   (let [t0 (profile/now-ns)
         ;; the selection's time is the plan's: program db, reach graph, digests and the results read
-        plan (plan-of (source-tree) what all? names (seon.db/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest))]
+        plan (plan-of (source-tree) what all? names (seon.db/kept-store! (config/value :seon.config.proofs/program-store) @ts/kept-program-digest))]
   (if-let [u (:unread plan)]
     ;; a read that failed is not zero greens: nothing runs, and the run says why
     (do (println (str "TEST FAILED: " (:seon.error/message u)))
@@ -771,11 +773,17 @@
         tree (let [r (lib/sh (str (config/checkout) "/bin/tree") root base)]
                (if (zero? (:exit r)) (str/trim (:out r)) (throw (ex-info (str "bin/tree " root " " base ": " (:err r)) {}))))
         b (keyword (str (prefix-of #(fx/tree-file root base %)) tree))
-        path (str stem "-" ts/kept-program-digest)]
+        path (str stem "-" @ts/kept-program-digest)
+        ;; the base's own runner names its store by its own key (seon.test-store/program-store-key: its runtime and pins may be
+        ;; another's), so its branch is read from whichever store of the stem holds it, never only this code's
+        stems (fn [] (let [d (.getParentFile (io/file stem)) n (.getName (io/file stem))]
+                       (for [f (sort (or (.list d) (make-array String 0))) :when (re-matches (re-pattern (str "\\Q" n "\\E-[0-9a-f]{8}")) f)]
+                         (str d "/" f))))
+        any (fn [] (some #(read-branch % b) (stems)))]
     (or (read-branch store (tree-branch tree))
-        (read-branch path b)
+        (any)
         (make-base-tree! root base tree store stem path at)
-        (read-branch path b)
+        (any)
         (contract/error :seon.fx/io-error #'test-runner/base-program
                         (str "the base's program store " path " keeps no branch " b ": the base's program schema or importer is not this code's") {:path path}))))
 
@@ -792,7 +800,7 @@
         base (fx/base-commit root)]
     (if-not base
       (do (println (str "HEALTH FAILED: no base: " root " has no commit before this one on " (config/value :seon.config.source/main))) 1)
-      (let [store (seon.db/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest)
+      (let [store (seon.db/kept-store! (config/value :seon.config.proofs/program-store) @ts/kept-program-digest)
             head (with-wiki (program-db root store) root)
             ;; the base's tasks and wiki, as git holds them, in a directory of this run's own, removed once read; and where the base's
             ;; checkout is made when its program must be (base-program), removed once its runner ran

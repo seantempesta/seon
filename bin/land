@@ -4,7 +4,7 @@
 # (bin/worktree NAME), never the main tree, which stays on main and clean.
 #   1. merge main into the branch (a conflict stops it: resolve, commit, run it again);
 #   1b. bin/check health and bin/laws, seconds: a red stops the landing before any prove;
-#   2. bin/prove --merge on that tip, niced, beside any other run (results are shared by digest across
+#   2. bin/prove --out DIR --merge on that tip (the local path: see step 2's note below), niced, beside any other run (results are shared by digest across
 #      every checkout, and each run writes under its own target/prove/<id>: no run waits on another); a diff of
 #      docs/, resources/seon/tasks/ and top-level *.md only runs bin/check health and seon.doc-test instead (AGENTS.md §3).
 #      The log and the run's directory are kept in the main tree's target/land/, past the worktree's removal;
@@ -123,12 +123,17 @@ DOCS=$(print -r -- "$CHANGED" | grep -vE '^(docs/|resources/seon/tasks/)|^[^/]+\
 if [[ -n $CHANGED && -z $DOCS ]]; then
   { nice -n 15 "$HERE/bin/test" seon.doc-test && print "MERGE OK"; } > "$LOG" 2>&1 & PJ=$!
 else
-  nice -n 15 "$HERE/bin/prove" --merge > "$LOG" 2>&1 & PJ=$!
+  # by the owner's fallback (2026-11-11: a run forks main and loads the branch's whole program in order in one eval, from the
+  # branch in the store, as replay does; the fallback a binary built from the branch's source, its tests forked from it):
+  # this checkout's own build and runner. The standing system's items are forks of an agent started in the main tree and
+  # carry its loaded config and libraries (jolt/runtime's land, 2026-11-12), so it proves no landing until its run loads the
+  # branch whole as ruled.
+  nice -n 15 "$HERE/bin/prove" --out "$MAIN/target/land/$STAMP-run" --merge > "$LOG" 2>&1 & PJ=$!
 fi
 trap 'kill -TERM -$PJ 2>/dev/null || kill -TERM $PJ 2>/dev/null; fail "stopped: its proof was ended with it"' TERM INT HUP
 wait $PJ; st=$?; trap - TERM INT HUP
 RUN=$(sed -nE 's/^(prove|test): run [^,]*, logs in (.*)$/\2/p' "$LOG" | tail -1)
-[[ -n $RUN && -d $RUN ]] && cp -cR "$RUN" "$MAIN/target/land/$STAMP-run" 2>/dev/null
+[[ -n $RUN && -d $RUN && ${RUN:A} != "$MAIN/target/land/$STAMP-run" ]] && cp -cR "$RUN" "$MAIN/target/land/$STAMP-run" 2>/dev/null
 grep -q "proved green already" "$LOG" && print "proved by an earlier prove of this very tree: merging, nothing run"
 grep -E '^RED |^FAILED ' "$LOG" | cut -c1-200 | head -12
 if [[ -n $CHANGED && -z $DOCS ]]; then LINE="bin/land: docs and tasks only: bin/check health, bin/laws and seon.doc-test green"
