@@ -32,8 +32,7 @@
 
 (defn- occ [e agent ms] (err/occurrence e :eval {:agent agent :task "t/a" :form "(f 1)"} ms))
 
-;; a branch of the test store (ts/test-branch!), cold in its process: ~60M ticks, which the estimate counts beside the test's own work
-(deftest ^{:seon.test/estimate {:ticks 70000000}} a-storm-is-one-write-per-window
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-storm-is-one-write-per-window
   (ts/test-branch! (fn [_ conn] (let [f (reduce err/fold {} (concat (for [i (range 1000)] (occ (invalid 'app/f i) (if (even? i) :a1 :a2) (+ 1000 i)))
                                      (for [i (range 10)] (occ (invalid 'app/g i) :a3 (+ 5000 i)))))
         [f tx] (err/flush-tx f @conn)
@@ -62,8 +61,7 @@
 
 ;; ---- a repeated defect is not a write (task seon.error/a-repeated-defect-writes-nothing) ------
 
-;; a branch of the test store (ts/test-branch!), cold in its process: ~60M ticks, which the estimate counts beside the test's own work
-(deftest ^{:seon.test/estimate {:ticks 80000000}} a-written-signature-is-not-written-again
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-written-signature-is-not-written-again
   ;; the window's write is one entity per signature that CHANGED (a-storm-is-one-write-per-window);
   ;; a signature already on main whose only change is one more occurrence is the same fact,
   ;; counted in the observer's fold: transacting its count is what made 41,709 commits in 70 s
@@ -509,8 +507,7 @@
     ;; task-reads is in uncited-task's, stale-plan's and unsynced's rows (each measured alone makes it), and health makes it once (other-derived)
     (is (<= (:calls m) (- (apply + (vals bounds)) 2)) (str "one health read makes " (:calls m) " contracted calls: the classes' bounds sum to " (apply + (vals bounds)) ", less task-reads counted three times"))))
 
-;; a branch of the test store (ts/test-branch!), cold in its process: ~60M ticks, which the estimate counts beside the test's own work
-(deftest ^{:seon.test/estimate {:ticks 80000000}} problems-lists-every-class-with-what-a-declaration-needs
+(deftest ^{:seon.test/estimate {:ticks 20000000}} problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
         s (:signature (first (get-in (problems/report db) [:classes :eval :rows])))
         [_ conn] [nil nil]
@@ -690,8 +687,7 @@
     (is (true? (:truncated? (model/parse-reply (body "length") 9.0 4096))))
     (is (nil? (:truncated? (model/parse-reply (body "stop") 9.0 4096))) "a reply that stopped on its own is not cut")))
 
-;; a branch of the test store (ts/test-branch!), cold in its process: ~60M ticks, which the estimate counts beside the test's own work
-(deftest ^{:seon.test/estimate {:ticks 65000000}} another-tasks-unfinished-proof-is-not-a-problem
+(deftest ^{:seon.test/estimate {:ticks 5000000}} another-tasks-unfinished-proof-is-not-a-problem
   ;; T5's real run: one agent's test run reports every program test, so 210 rows named other
   ;; tasks' proofs not done yet (allowed reds); only the task's own proofs are its problems
   (ts/test-branch! (fn [_ conn]

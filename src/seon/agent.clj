@@ -1192,10 +1192,9 @@
   []
   (if (:fixtures-warm @state)
     0
-    (let [vs (for [n (all-ns) [_ v] (ns-interns n) :when (:seon.test/fixture (meta v))] v)]
-      (doseq [v vs] (force @v))
+    (let [n (proofs/warm-fixtures!)]
       (swap! state assoc :fixtures-warm true)
-      (count vs))))
+      n)))
 
 (defn- test-child
   "Fork this agent to run tests in a child (run-tests-here), its pipe's write end the child's own (lib/fork!'s :fd: closed here in
