@@ -179,11 +179,12 @@
               :else (recur (inc j) depth false))))))))
 
 (defn test-shape
-  "Where an unwritten proof p goes, as the agent needs it to write one: its test namespace's `:require` entries that the example
-  uses (an alias it calls, `clojure.test`, the namespace under test), the helpers the example calls (the rest are `(dir ns)`), and
-  one test of it to copy: the shortest that uses a helper or `my.test`, else the shortest. Nil when the branch has no such
-  namespace yet (the agent makes it first). One index read, and each var of the namespace read once. See
-  docs/render.md#how-the-work-stands."
+  "Where an unwritten proof p goes, as the agent needs it to write one: its test namespace's whole `:require` (every alias a
+  new test there may call; a filtered one cost an agent twelve turns finding the rest,
+  seon.render-test/a-proof-to-write-is-described-with-its-namespace), its `use-fixtures` forms as written, the helpers the example
+  calls (the rest are `(dir ns)`), and one test of it to copy: the shortest that uses a helper or `my.test`, else the shortest.
+  Nil when the branch has no such namespace yet (the agent makes it first). One index read, and each var and each form that
+  defines nothing of the namespace read once. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :map]]}
   [db p]
   (when-let [n (d/entity db [:ns/name (symbol (namespace p))])]
@@ -198,14 +199,14 @@
           ;; the shortest that uses a helper or my.test, found from the shortest up, else the shortest
           src (or (first (filter uses? srcs)) (first srcs))
           ns-src (get-in n [:ns/form :form/src])
-          under (str/replace (namespace p) #"-test$" "")
-          req (when-let [i (some-> ns-src (str/index-of "(:require"))] (form-at ns-src i))
-          entries (when req (re-seq #"\[[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\]" req))
-          keep? (fn [e] (let [alias (second (re-find #":as\s+(\S+?)[\s\]]" e))]
-                          (or (and alias src (str/includes? src (str alias "/"))) (str/includes? e "clojure.test") (str/starts-with? e (str "[" under " ")) (str/starts-with? e (str "[" under "]")))))
-          requires (when (seq entries) (str "(:require " (str/join " " (filter keep? entries)) ")"))]
+          requires (when-let [i (some-> ns-src (str/index-of "(:require"))] (form-at ns-src i))
+          ;; a use-fixtures is a form that defines nothing (a text form): its source is read where it says so
+          fixtures (->> (d/q '[:find ?o ?s :in $ ?n :where [?f :form/ns ?n] [(missing? $ ?f :form/defines)] [?f :form/src ?s] [?f :form/order ?o]]
+                             db (:db/id n))
+                        (filter #(str/starts-with? (str/triml (second %)) "(use-fixtures")) (sort-by first) (mapv second))]
       (cond-> {:ns (symbol (namespace p))}
         requires (assoc :requires requires)
+        (seq fixtures) (assoc :fixtures fixtures)
         (and src (seq others)) (assoc :helpers (vec (sort (map symbol (filter named (heads src))))))
         src (assoc :example src)))))
 

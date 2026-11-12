@@ -79,6 +79,58 @@
           a2 (d/db-with after tx2)]
       (is (= moved (source/file-text a2 'app.pl)) "a form moved reads back where the file has it"))))
 
+(deftest an-edit-of-one-form-analyzes-that-form-not-its-file
+  ;; docs/source.md#a-boot-catches-up-with-its-checkout: a catch-up of a file with one form changed analyzed every form of the file
+  ;; (0.8 MB a form: a one-file catch-up 100 MB, a seven-file one 2.4 GB, 2026-11-12); a form the store holds whole, under
+  ;; the same ns form, is taken from the store. Red before: 9 analyses (the ns form and the eight defns)
+  (let [text (fn [& fs] (str "(ns app.oe)\n\n" (str/join "\n\n" fs) "\n"))
+        fs (mapv #(str "(defn f" % " [] " % ")") (range 8))
+        db (d/db-with (ts/test-db) (source/import-tx (ts/test-db) {"src/app/oe.clj" (apply text fs)}))
+        edited (assoc fs 3 "(defn f3 [] 33)")
+        n (atom 0)
+        analyze @#'seon.source/analyze-form
+        tx (with-redefs [seon.source/analyze-form (fn [& args] (swap! n inc) (apply analyze args))]
+             (source/refresh-tx db {"src/app/oe.clj" (apply text edited)}))
+        after (d/db-with db tx)]
+    (is (= 2 @n) "the ns form and the one edited form are analyzed, no other")
+    (is (= (apply text edited) (source/file-text after 'app.oe)) "the file reads back whole")
+    (is (= "(defn f3 [] 33)" (:form/src (:var/form (d/entity after [:var/name 'app.oe/f3])))) "the edit is the var's form")
+    (is (= "(defn f5 [] 5)" (:form/src (:var/form (d/entity after [:var/name 'app.oe/f5])))) "and the others are as they were")))
+
+(deftest a-held-form-is-checked-against-the-file-reading-macros-not-a-seek-a-reference
+  ;; docs/source.md#a-boot-catches-up-with-its-checkout: whether a held form expands a macro that reads files is asked of the program's
+  ;; file-reading macros, found once a refresh (file-reading-macros), never by seeking each reference's var: a one-form edit of
+  ;; seon.system (126 forms, 2,573 references) sought 2,573 vars, 19 of its 80 MB (2026-11-12). Estimate: no :var/name seek a
+  ;; reference; the analysis of the ns form and the edited form seeks what those two name (under 126, the file's forms)
+  (let [db (test-runner/program)
+        text (source/file-text db 'seon.system)
+        edited (str/replace-first text "(defn catch-up\n  \"What brings" "(defn catch-up\n  \"(edited) What brings")
+        n (atom 0)
+        eid pdb/eid
+        tx (with-redefs [pdb/eid (fn [db a v] (when (= :var/name a) (swap! n inc)) (eid db a v))]
+             (source/refresh-tx db {"src/seon/system.clj" edited}))]
+    (is (not= text edited) "the edit is made")
+    (is (str/includes? (pr-str tx) "(edited) What brings") "the edited form is written")
+    (is (< @n 126) (str @n " :var/name seeks for a one-form edit of a 126-form file"))))
+
+(deftest a-form-taken-from-the-store-is-declared-for-the-forms-after-it
+  ;; docs/source.md#a-boot-catches-up-with-its-checkout: a form the store holds whole is not analyzed again, but a later form that
+  ;; calls it is, in a process that never loaded the namespace (bin/test --health's): the held form's var must be declared
+  ;; first. Red before: "Unable to resolve symbol: helper" (Tests, 2026-11-12, an agent_test.clj metadata edit)
+  (let [text (fn [body] (str "(ns app.hd)\n\n(defn helper [] 1)\n\n(defn user-fn [] " body ")\n"))
+        db (d/db-with (ts/test-db) (source/import-tx (ts/test-db) {"src/app/hd.clj" (text "(helper)")}))
+        _ (remove-ns 'app.hd)
+        tx (source/refresh-tx db {"src/app/hd.clj" (text "(inc (helper))")})
+        after (d/db-with db tx)]
+    (is (= "(defn user-fn [] (inc (helper)))" (:form/src (:var/form (d/entity after [:var/name 'app.hd/user-fn])))) "the edit is the var's form")
+    (is (contains? (set (:form/refs (:var/form (d/entity after [:var/name 'app.hd/user-fn])))) 'app.hd/helper) "and it names the held var it calls"))
+    ;; and a var a held (declare ...) names, defined later in the file (render_test.clj's sessions-db; the landing's build, 2026-11-12)
+    (let [text (fn [body] (str "(ns app.hd2)\n\n(declare later)\n\n(defn user-fn [] " body ")\n\n(defn later [] 1)\n"))
+          db (d/db-with (ts/test-db) (source/import-tx (ts/test-db) {"src/app/hd2.clj" (text "(later)")}))
+          _ (remove-ns 'app.hd2)
+          after (d/db-with db (source/refresh-tx db {"src/app/hd2.clj" (text "(inc (later))")}))]
+      (is (= "(defn user-fn [] (inc (later)))" (:form/src (:var/form (d/entity after [:var/name 'app.hd2/user-fn])))) "a declared var resolves too")))
+
 (deftest importing-src-records-every-form-exactly
   (let [files (src-files)
         db (imported files)
@@ -119,18 +171,21 @@
         loaded #(get @@#'seon.program/loaded 'my.fx/send)
         before (loaded)
         base (empty-db)
-        on (fn [text] (d/db-with base (source/import-tx base {"src/my/fx.clj" text})))]
+        on (fn [text] (d/db-with base (source/import-tx base {"src/my/fx.clj" text})))
+        ;; the binary's forms, as a build of the real file records them (seon.system/built-program's :forms): passed, so the test
+        ;; reads no record of a build
+        binary (into #{} (comp (filter #(= 'my.fx (:ns %))) (map :id)) (program/live-forms (on real)))]
     (is (not= real edited) "the edit changes the form's text, and its code not at all")
     (try
       (let [db (on real)]
-        (is (= [] (program/program-differs base db)) "the binary's own text: this process holds it, nothing differs")
-        (is (= (count (program/live-forms base)) (:loaded (program/load-all! db))) "and none of it loads"))
+        (is (= [] (program/program-differs base db binary)) "the binary's own text: this process holds it, nothing differs")
+        (is (= (count (program/live-forms base)) (:loaded (program/load-all! db {:forms binary}))) "and none of it loads"))
       (let [db (on edited)
             id (:form/id (:var/form (d/entity db [:var/name 'my.fx/send])))]
-        (is (= ['my.fx/send] (mapv :var (program/program-differs base db))) "main's text of send is not the binary's")
-        (is (= (inc (count (program/live-forms base))) (:loaded (program/load-all! db))) "the fork server's load takes it, and only it")
+        (is (= ['my.fx/send] (mapv :var (program/program-differs base db binary))) "main's text of send is not the binary's")
+        (is (= (inc (count (program/live-forms base))) (:loaded (program/load-all! db {:forms binary}))) "the fork server's load takes it, and only it")
         (is (= id (loaded)) "this process now runs main's form")
-        (is (= [] (program/program-differs base db)) "and nothing differs"))
+        (is (= [] (program/program-differs base db binary)) "and nothing differs"))
       (finally (swap! @#'seon.program/loaded #(if before (assoc % 'my.fx/send before) (dissoc % 'my.fx/send)))))))
 
 (deftest root-loads-the-program-and-leaves-test-namespaces-unevaluated
@@ -596,16 +651,15 @@
   (let [main (main-with-file)
         branch (pt/record main 'app.pt-src "(defn twice [x] (* 2 x))")]
     ;; the process holds the imported namespace, as a binary built from that source does: every var it defines bound, and
-    ;; its forms among the binary's (seon.program/binary-program, the build's record)
+    ;; its forms among the binary's (load-all!'s :forms, the build's record by default)
     (hold! 'app.pt-src pt-text)
     (let [add0 @(resolve 'app.pt-src/add)
-          built (assoc (program/binary-program) :forms (into (set (:forms (program/binary-program))) (comp (filter #(= 'app.pt-src (:ns %))) (map :id)) (program/live-forms main)))]
-      (with-redefs [program/binary-program (fn [] built)]
-        (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! main))
-            "main's imported text whose namespace this process holds is the binary's: never evaluated (the example program is)")
-        (is (= [] (program/load-diff! main branch)))
-        (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
-        (is (identical? add0 @(resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again")))))
+          binary (into #{} (comp (filter #(= 'app.pt-src (:ns %))) (map :id)) (program/live-forms main))]
+      (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! main {:forms binary}))
+          "main's imported text whose namespace this process holds is the binary's: never evaluated (the example program is)")
+      (is (= [] (program/load-diff! main branch)))
+      (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
+      (is (identical? add0 @(resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again"))))
 
 (deftest an-agent-runs-its-branchs-change-to-imported-source-imported-too
   ;; Context's first bin/prove --root (2026-11-11) judged main's code: a tree branch's catch-up imports the checkout's changed
@@ -1466,7 +1520,7 @@
     (is (some #(= '(:import [java.io File]) %) (read-string (source/ns-text-adding old '(ns a.b (:import [java.io File]))))) "another clause is added whole")))
 
 (deftest an-alias-only-the-process-holds-is-refused
-  ;; docs/source.md#main-s-program-follows-the-tree: real run 10: a file whose ns form had lost its requires passed analysis in a process that still held them, and merged.
+  ;; docs/source.md#a-boot-catches-up-with-its-checkout: real run 10: a file whose ns form had lost its requires passed analysis in a process that still held them, and merged.
   ;; What a file's forms name must be what its own ns form declares, in any process
   (binding [*ns* *ns*]
     (eval '(ns app.held-alias (:require [clojure.string :as held]))))
