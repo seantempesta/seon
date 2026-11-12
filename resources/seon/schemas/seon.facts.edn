@@ -448,8 +448,8 @@
  :seon.task/failure [:map {:description "The failure the task was held or marked failed with: its reason, counterexample, agent and turn."} [:reason :string] [:counterexample {:optional true} :string] [:agent {:optional true} :string] [:turn {:optional true} :int]]
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared [:string {:description "The declaration that a task file last stated for this task, as EDN."}]
- ;; the digest its cites are kept by: its texts and the citation reader's code (seon.task/cites-digest), so a reader change reads every task again
- :seon.task/cites-digest [:string {:description "The digest of a task's texts and of the code that read its cites (seon.task/cites-digest): its cites are read again when it moves. See docs/data-modeling.md#derived-data-is-a-cache-never-relied-on."}]
+ ;; the citation reader's code its cites were read by (seon.task/reader-digest): a reader change reads every task again; a text change is its declaration's
+ :seon.task/cites-digest [:string {:description "The digest of the code that read this task's cites (seon.task/reader-digest): load-tx reads its cites again when the reader's code moved. See docs/data-modeling.md#derived-data-is-a-cache-never-relied-on."}]
  ;; a task may hold config keys as its overrides, by their own names; each key is defined once, by its own schema
  ;; (seon.config.agent.edn, seon.config.merge.edn), never listed here (an attribute is named by one entity schema)
  :seon.task/task-fact [:map {:seon.db/attributes true
