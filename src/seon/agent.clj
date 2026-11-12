@@ -1000,8 +1000,8 @@
   "In a test child, define each of main's tests the branch removed that this run runs (test-plan's :removed, {test src}, of
   tests) from base's source, in its own namespace (its ns form first when the branch removed that too), so it runs as main
   holds it. Answers {test message} of those whose source no longer loads on the branch (it names what the branch removed too):
-  each is that test's error, never the run's: one removed test naming a removed var ended every child of a branch, before any
-  test ran, 2026-11-12."
+  each is that test's error, never the run's: one removed test naming a removed var once ended every child of a branch, before any
+  test ran."
   {:malli/schema [:=> [:cat [:map-of :qualified-symbol :string] [:sequential :qualified-symbol]] [:map-of :qualified-symbol :string]]}
   [removed tests]
   (into {} (for [[t src] (select-keys removed tests)
@@ -1374,7 +1374,7 @@
 (defn- grant-selection
   "What a run selects: items given (the test service's grant, {test digest}) are what it runs, as held planned them
   (item-selection), or, held gone or of another program, as planned again (plan: run-plan of their names); given and empty,
-  nothing (a grant of no items ran every test, 1,765 of them, 2026-11-12); items not given (nil), a plan of its own. See
+  nothing (a grant of no items once ran every test, 1,765 of them); items not given (nil), a plan of its own. See
   docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat [:maybe :map] [:maybe [:map-of :qualified-symbol :string]] :seon.host/fn] :map]}
   [held items plan]
