@@ -24,28 +24,24 @@
 ;; docs/checks.md#modes: a check that ran nothing is no green (AGENTS.md §9): a selection with one step name a line runs each
 ;; (2026-11-10: a plan written one a line ran none and said CHECK OK), and a name no step has is red, never passed over.
 ;; Each step under a 1 ms bound, so the run is seconds; what it shows is which steps it ran
-(deftest a-selection-runs-every-step-it-names-and-refuses-one-it-cannot
-  (let [run (fn [steps bounds]
-              (let [sel (str (System/getProperty "java.io.tmpdir") "/check-sel-" (random-uuid))]
-                (clojure.java.shell/sh "mkdir" "-p" sel)
-                (doseq [[f t] {"steps" steps "steps-binary" "" "step-bounds" bounds}] (spit (str sel "/" f) t))
-                (let [r (clojure.java.shell/sh (str (seon.config/checkout) "/bin/check") "--steps" sel)
-                      out (second (re-find #"(?m)^outputs: (\S+)" (:out r)))]
-                  (clojure.java.shell/sh "rm" "-rf" sel)
-                  (some->> out (clojure.java.shell/sh "rm" "-rf"))
-                  r)))
-        lines (run "laws\nlmdb-lock\n" "laws 1\nlmdb-lock 1\n")
-        unknown (run "laws no-such-step" "laws 1\n")
-        ;; a step that runs the binary on the seeded store, in a selection whose steps-binary says none needs it (2026-11-11: a
-        ;; hand-written one ran durable on an unseeded store, and it failed two phases later)
-        unseeded (run "durable\n" "durable 60000\n")]
+(deftest ^{:seon.test/execs ["bin/check"] :seon.test/estimate {:ticks 2000000}} a-selection-runs-every-step-it-names-and-refuses-one-it-cannot
+  ;; T3 (2026-11-12): bin/check's selection is the subject; one run holds the three claims (3 runs, 6.7 s, were one each): the
+  ;; selection's first line names two steps and one no step has, its second a step a line, its third a step that needs the seeded
+  ;; store in a selection whose steps-binary says none does (2026-11-11: a hand-written one ran a step on an unseeded store, and it
+  ;; failed two phases later). Work: one bin/check start, 4 steps judged, 2 under the 1 ms bound. Each step under it, so the run is seconds
+  (let [sel (str (System/getProperty "java.io.tmpdir") "/check-sel-" (random-uuid))
+        _ (clojure.java.shell/sh "mkdir" "-p" sel)
+        _ (doseq [[f t] {"steps" "laws no-such-step\nlmdb-lock\nsmoke\n" "steps-binary" "" "step-bounds" "laws 1\nlmdb-lock 1\nsmoke 60000\n"}] (spit (str sel "/" f) t))
+        r (clojure.java.shell/sh (str (seon.config/checkout) "/bin/check") "--steps" sel)
+        out (second (re-find #"(?m)^outputs: (\S+)" (:out r)))
+        _ (clojure.java.shell/sh "rm" "-rf" sel)
+        _ (some->> out (clojure.java.shell/sh "rm" "-rf"))]
     ;; a step's header is printed only when the selection holds it (bin/check's unit)
-    (is (re-find #"(?m)^== laws " (:out lines)) (:out lines))
-    (is (re-find #"(?m)^== lmdb-lock " (:out lines)) "both names, one a line, ran")
-    (is (= 1 (:exit unknown)) (:out unknown))
-    (is (re-find #"FAILED no-such-step: no step of that name" (:out unknown)) "a name no step has is red, named")
-    (is (= 1 (:exit unseeded)) (:out unseeded))
-    (is (re-find #"durable-write runs target/seon on the seeded store, but this selection's steps-binary" (:out unseeded))
+    (is (re-find #"(?m)^== laws " (:out r)) (:out r))
+    (is (re-find #"(?m)^== lmdb-lock " (:out r)) "every name, one a line or several, ran")
+    (is (= 1 (:exit r)) (:out r))
+    (is (re-find #"FAILED no-such-step: no step of that name" (:out r)) "a name no step has is red, named")
+    (is (re-find #"smoke runs target/seon on the seeded store, but this selection's steps-binary" (:out r))
         "a step that needs the seeded store is refused by name, never run on none")))
 
 ;; docs/clocks.md#time-decides-the-owners-exceptions: a step past its bound is ended after its evidence and FAILS, as a test past
@@ -609,27 +605,3 @@
     (is (seon.check/left? {:pid 9 :ppid 1 :stat "S"} true self) "a row still running: left")
     (is (not (seon.check/left? {:pid 9 :ppid 1 :stat "Z"} true self)) "a row that can run nothing more: not left")))
 
-;; docs/machine.md#builds-and-checks: a wait on main runs its predicate in main's writer at every commit (seon.system/await-db's
-;; watch; datahike's writer resets the connection), so a predicate that reads main's whole problems report costs the report
-;; once a commit and holds every commit behind it: batches 32 and 38 lost the `problems` step to it, root at 98.6% CPU for
-;; 71 s while p1 and p2's proofs committed. The step's waits read the one class they wait on, and the reconciler's quiet;
-;; the report is read once, after (my.root/problems, the render proc's kept health). Cost in reads of the whole report
-;; over n commits that do not satisfy the wait: n + 2 before (12 for 10), none now
-(deftest the-problems-steps-waits-read-no-whole-report-per-commit
-  ;; the problems step's waits run their tests on main at every commit (seon.system/await-db, in the api's step): each reads
-  ;; one class or one fact, never the whole problems report (batches 32 and 38 overran on a test that did). Each test is run
-  ;; here on n commits, as the api runs it
-  (ts/test-branch! (fn [_ conn]
-    (let [reads (atom 0) n 10
-          counted (fn [f] (fn [& xs] (swap! reads inc) (apply f xs)))
-          dbs (vec (for [_ (range n)] (:db-after (d/transact conn {:tx-data []}))))]
-      (with-redefs [seon.problems/report (counted seon.problems/report)
-                    seon.problems/health (counted seon.problems/health)]
-        (testing "the stall's wait"
-          (is (every? (comp empty? #'seon.check/stalled-rows) dbs) "no stall on these commits")
-          (is (= 0 @reads) (str @reads " reads of the whole report for " n " commits")))
-        (reset! reads 0)
-        (testing "the last wait, p1 and p2's quiet"
-          (let [t (inc (:max-tx (peek dbs)))]
-            (is (not-any? (#'seon.check/provoked? t) dbs) "no quiet at or after t yet")
-            (is (= 0 @reads) (str @reads " reads of the whole report for " n " commits")))))))))

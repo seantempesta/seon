@@ -76,6 +76,9 @@
            (is (= 22 ((resolve 'x.repl-shown/f) 1)) "the edited definition is the one called"))
          (finally (reset! agent/state old)))))
 
+;; docs/agent.md#changing-a-definition: an edit that changes nothing is thrown, its error map its ex-data
+(defn- refusal [f] (try (f) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))
+
 (deftest an-edit-replaces-exact-text-once-and-evaluates-the-definition
   ;; docs/agent.md#changing-a-definition: the md-scan bench's agent string-edited a copy of a
   ;; 250-line scan for 30 turns; edit! replaces one exact piece of the recorded source and evaluates it whole
@@ -87,18 +90,18 @@
            (is (= 'x.repl-edit/f (get-in r [:edited :var])))
            (is (some #(str/includes? (second %) "c 20") (get-in r [:edited :lines])) "the lines around the change")
            (is (str/includes? (my.agent/source-fn 'x.repl-edit/f) "c 20") "its source is the new text: the next edit reads it"))
-         (let [r (repl/edit! 'x.repl-edit/f "c 3" "c 4")]
+         (let [r (refusal #(repl/edit! 'x.repl-edit/f "c 3" "c 4"))]
            (is (= :not-found (:seon.repl/refused-because r)) "old text not there: refused, nothing changed")
            (is (= 22 ((resolve 'x.repl-edit/f) 1))))
          ;; md-scan #23: ten evals printing lines with visible whitespace; the refused edit names the line and how it differs
-         (let [r (repl/edit! 'x.repl-edit/f "(let [b 1\n      c 20]" "(let [b 1\n      c 3]")]
+         (let [r (refusal #(repl/edit! 'x.repl-edit/f "(let [b 1\n      c 20]" "(let [b 1\n      c 3]"))]
            (is (= :not-found (:seon.repl/refused-because r)))
            (is (= {:line 3 :old "      c 20]" :source "        c 20]" :indent [6 8]} (first (:seon.repl/differs r))) (pr-str r))
            (is (str/includes? (:seon.error/message r) "at line 3") (:seon.error/message r))
            (is (str/includes? (:seon.error/message r) "6 leading spaces, the source 8") (:seon.error/message r)))
          (let [r (repl/edit! 'x.repl-edit/f "  (let [b 1" "(let [b 1")]
            (is (nil? (:seon.repl/refused-because r)) "indentation is text: the exact match holds"))
-         (let [r2 (repl/edit! 'x.repl-edit/f "c" "d")]
+         (let [r2 (refusal #(repl/edit! 'x.repl-edit/f "c" "d"))]
            (is (= :ambiguous (:seon.repl/refused-because r2)) "there more than once: refused")
            (is (<= 2 (count (:seon.repl/lines r2))) "naming each candidate's line"))
          ;; an edit one paren short is read as a reply's code is: the delimiter closed at the definition's end, said in :repaired
@@ -116,7 +119,7 @@
          (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(str \\) \")\" ;)\n 1)")]
            (is (nil? (:seon.repl/refused-because r)) (str "a closer in a character literal, a string or a comment is none: " (pr-str r)))
            (is (= "))1" ((resolve 'x.repl-edit/g)))))
-         (is (= :no-source (:seon.repl/refused-because (repl/edit! 'clojure.core/nope "a" "b"))) "no recorded source (outside an agent: no branch to name the nearest from)")
+         (is (= :no-source (:seon.repl/refused-because (refusal #(repl/edit! 'clojure.core/nope "a" "b")))) "no recorded source (outside an agent: no branch to name the nearest from)")
          ;; md-scan bench-b13: a loop's new binding and its recur, edited one by one, each failed to compile; the
          ;; error sat nested in the edit's value, cut from sight, and the agent read 33 turns of edits as held
          (repl/eval-string "(in-ns 'x.repl-edit) (defn l [n] (loop [i 0 acc 0] (if (< i n) (recur (inc i) (+ acc i)) acc))) (in-ns 'user)" {})
@@ -136,16 +139,16 @@
            (is (= 4 ((resolve 'x.repl-edit/m) 1)) (pr-str r))
            (is (some #{[5 "       a b)))"]} (get-in r [:edited :lines])) (str "the second change at its line in the new text: " (pr-str (get-in r [:edited :lines]))))
            (is (apply < (map first (get-in r [:edited :lines]))) "each line once, in order"))
-         (let [r (repl/edit! 'x.repl-edit/l [["(recur (inc i)" "(recur (+ i 1)"] ["(inc i) (+ acc" "(+ 1 i) (+ acc"]])]
+         (let [r (refusal #(repl/edit! 'x.repl-edit/l [["(recur (inc i)" "(recur (+ i 1)"] ["(inc i) (+ acc" "(+ 1 i) (+ acc"]]))]
            (is (= :overlap (:seon.repl/refused-because r)) (str "two changes whose texts overlap, neither the other: " (pr-str r))))
-         (let [r (repl/edit! 'x.repl-edit/l "" "x")]
+         (let [r (refusal #(repl/edit! 'x.repl-edit/l "" "x"))]
            (is (= :empty (:seon.repl/refused-because r)) (str "an empty old text is refused, never matched everywhere: " (pr-str r))))
          ;; a form wrapped by two changes, its opener in one and its closer in another, leaves the definition balanced
          (repl/eval-string "(in-ns 'x.repl-edit) (defn w [n] (let [a n]\n  (+ a 1))) (in-ns 'user)" {})
          (let [r (repl/edit! 'x.repl-edit/w [["(let [a n]" "(inc (let [a n]"] ["(+ a 1)))" "(+ a 1))))"]])]
            (is (get-in r [:edited :var]) (str "wrapped: " (pr-str r)))
            (is (= 4 ((resolve 'x.repl-edit/w) 2)) "and it runs"))
-         (let [r (repl/edit! 'x.repl-edit/l [["(loop [i 0" "(loop [i 0"] ["0 acc" "0 acc"]])]
+         (let [r (refusal #(repl/edit! 'x.repl-edit/l [["(loop [i 0" "(loop [i 0"] ["0 acc" "0 acc"]]))]
            (is (= :overlap (:seon.repl/refused-because r)) (str "two changes over one text: " (pr-str r))))
          (finally (reset! agent/state old) (remove-ns 'x.repl-edit)))))
 
@@ -203,7 +206,7 @@
       (is (str/includes? (:seon.text/said r) abs) "it names the absolute path")
       (is (str/includes? (:seon.text/said r) "no branch") "and that no branch carries it"))
     (is (= {:unchanged p} (repl/edit! p "c" "c")) "the same text writes nothing")
-    (let [r (repl/edit! (str d "/absent") "a" "b")]
+    (let [r (refusal #(repl/edit! (str d "/absent") "a" "b"))]
       (is (= :no-source (:seon.repl/refused-because r)) (pr-str r))
       (is (str/includes? (:seon.error/message r) (.getCanonicalPath (java.io.File. ^String d))) "it names where it looked"))))
 
@@ -217,7 +220,7 @@
       (reset! agent/state {:mode :test :db main :n 0 :ns (create-ns 'seon.repl-test.scratch)})
       (let [named (repl/edit! p "echo 1" "echo 2")
             by-path (repl/edit! abs "echo 2" "echo 3")
-            bad (repl/edit! p "echo 3" "if then")
+            bad (refusal #(repl/edit! p "echo 3" "if then"))
             branch (agent/db)]
         (is (= p (get-in named [:edited :script])) (pr-str named))
         (is (= p (get-in by-path [:edited :script])) (str "its absolute path is the same place: " (pr-str by-path)))
@@ -241,7 +244,7 @@
                          :code (lead (str "(:db @(seon.system/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))"))}
                         {:op :eval :agent "root" :code (lead "@(:conn sys)")}]))]
     (is (= a (get-in edit [:value :edited :doc])) (pr-str edit))
-    (is (= :not-found (get-in missing [:value :seon.repl/refused-because])) (pr-str missing))
+    (is (= :not-found (get-in missing [:ex :seon.repl/refused-because])) (pr-str missing))
     (is (str/ends-with? (str (:value branch)) "the task's failure (as the turn ends.") (str "the branch's doc derives its new lead: " (pr-str branch)))
     (is (str/ends-with? (str (:value main)) "the task's failure.") (str "main's is its own: " (pr-str main)))))
 
@@ -293,7 +296,7 @@
     (is (nil? (:ex more)) (pr-str more))
     (is (nil? (:ex fewer)) (pr-str fewer))
     (is (= #{'clojure.walk} (seon.program/ns-requires (read-string (:value src)))) (pr-str src))
-    (is (= :seon.repl/edit-refused (:seon.error/type (:value plain))) (pr-str plain))))
+    (is (= :seon.repl/edit-refused (:seon.error/type (:ex plain))) (pr-str plain))))
 
 (deftest an-edit-of-a-namespaces-file-says-how-it-changes
   ;; docs/agent.md#changing-a-file: real run 11: the path of a test file, relative, said only that no file was there; absolute, it wrote the checkout, which no branch reads. Either way the answer names the route
@@ -305,22 +308,24 @@
 (deftest a-namespace-edit-names-the-var-that-holds-the-text
   ;; docs/agent.md#changing-a-definition: loop PU (2026-11-12) spent e17-34 changing one function's tail: (lines 'the.ns 380 470) was empty
   ;; (a namespace's text was its ns form alone) and (edit! 'the.ns old new) was :not-found, the text being in a var; loop D0 lost t35-44 so
+;; the calls are made of #'repl/edit! itself, so this test reaches what it tests (code in a string reaches nothing)
   (let [[_ in-var nowhere ls] (at/in-agent (fn [{:keys [ns]}]
                                              (let [n (str ns ".held")]
                                                [(str "(ns " n ") (defn f [a] (+ a 1)) (defn g [] (* 2 3))")
-                                                (str "(seon.repl/edit! '" n " \"(+ a 1)\" \"(+ a 2)\")")
-                                                (str "(seon.repl/edit! '" n " \"(defn h\" \"(defn- h\")")
+                                                (str "(" (symbol #'repl/edit!) " '" n " \"(+ a 1)\" \"(+ a 2)\")")
+                                                (str "(:edited (" (symbol #'repl/edit!) " '" n " \"(defn h\" \"(defn- h\"))")
                                                 (str "(mapv :text (my.agent/lines '" n "))")])))
         n (fn [s] (re-find #"\S+\.held" s))]
-    (is (= :not-found (get-in in-var [:value :seon.repl/refused-because])) (pr-str in-var))
-    (let [m (get-in in-var [:value :seon.error/message])
+    (is (= :not-found (get-in in-var [:ex :seon.repl/refused-because])) (pr-str in-var))
+    (let [m (get-in in-var [:ex :seon.error/message])
           ns (n m)]
       (is (str/includes? m (str ns "/f")) (str "names the var whose source holds the text: " m))
       (is (str/includes? m (str "(seon.repl/edit! '" ns "/f ")) (str "and the edit on it, ready: " m))
-      (is (= [(symbol (str ns "/f"))] (get-in in-var [:value :seon.repl/held-by])) "the holders as data: the refusal found them"))
-    (let [m (get-in nowhere [:value :seon.error/message])
+      (is (= [(symbol (str ns "/f"))] (get-in in-var [:ex :seon.repl/held-by])) "the holders as data: the refusal found them"))
+    (let [m (get-in nowhere [:ex :seon.error/message])
           ns (n m)]
-      (is (= :not-found (get-in nowhere [:value :seon.repl/refused-because])) (pr-str nowhere))
+      ;; loop 2026-11-12: (:edited (edit! ...)) of a refusal read nil, and the agent never saw why: the refusal is the eval's error
+      (is (= :not-found (get-in nowhere [:ex :seon.repl/refused-because])) (str "a field read of an edit that changed nothing still says why: " (pr-str nowhere)))
       (is (str/includes? m (str "(in-ns '" ns ")")) (str "an insertion: a new definition is evaluated in its namespace: " m)))
     (is (some #(str/includes? % "(+ a 1)") (:value ls)) (str "lines of a namespace are its file, its definitions with its ns form: " (pr-str ls)))))
 
@@ -805,14 +810,21 @@
     (is (= :my.agent/no-var (:seon.error/type (:value ns-typo))) (str "a bare name that is no namespace says so, nearest namespaces named: " (pr-str ns-typo)))
     (is (= '[demo-test/t seon.task-test/no-such-test] (:value unmatched)) (str "a prove naming no test says which: " (pr-str unmatched)))))
 
-(deftest grep-refuses-what-it-does-not-take
+(deftest ^{:seon.test/estimate {:ticks 100000000}} grep-refuses-what-it-does-not-take
   ;; docs/vector.md#search: an option grep does not take, ignored, reads as what it asked for, and so does []
   ;; for a string holding a regex's | ( ^. grep's options are a closed map, and a string with a regex's
   ;; operators that matches nothing is [] shown with its regex form, a value, so the reply's next call runs
-  (let [[kinds piped regex quoted] (at/in-agent ["(try (my.agent/grep \"accumulate\" {:kinds #{:var}}) (catch Exception e (:seon.error/message (ex-data e))))"
-                                                 "(my.agent/grep \"defn (accumulate|tasks)\" {:ns \"seon.task\"})"
-                                                 "(count (my.agent/grep #\"defn (accumulate|tasks)\" {:ns \"seon.task\"}))"
-                                                 "(my.agent/grep \"(\\\"no such\\\")\")"])]
+  ;; T1: grep reads the agent's db (agent/state :db), here the test store's seed (its ids come from a store) with seon.task's accumulate and tasks as code, evaluated
+  ;; in this process by repl/eval-string as the agent's REPL does; 4 evals, a grep each; the one cost is the text index built once over the seed (~70 M ticks measured, ~2,000 datoms)
+  (let [db (my.test/with (ts/test-db) (my.test/code 'seon.task "(ns seon.task)\n(defn accumulate [x] x)\n(defn tasks [] 1)"))
+        old @agent/state
+        ev (fn [code] (try (reset! agent/state {:mode :test :db db :n 0 :ns (create-ns 'seon.repl-test.scratch)})
+                           (repl/eval-string code {})
+                           (finally (reset! agent/state old))))
+        [kinds piped regex quoted] (map ev ["(try (my.agent/grep \"accumulate\" {:kinds #{:var}}) (catch Exception e (:seon.error/message (ex-data e))))"
+                                            "(my.agent/grep \"defn (accumulate|tasks)\" {:ns \"seon.task\"})"
+                                            "(count (my.agent/grep #\"defn (accumulate|tasks)\" {:ns \"seon.task\"}))"
+                                            "(my.agent/grep \"(\\\"no such\\\")\")"])]
     (is (re-find #":kinds.*does not admit.*:in" (str (:value kinds))) (str "an option grep does not take is refused, the ones it takes named: " (pr-str kinds)))
     (is (= [] (:value piped)) (str "a value, no error, so a reply's later calls run: " (pr-str piped)))
     (is (str/includes? (str (:text piped)) "(my.agent/grep #\"defn (accumulate|tasks)\" {:ns \"seon.task\"})") (str "it shows the regex form, its options kept: " (pr-str piped)))
@@ -1456,3 +1468,17 @@
         (is (= 1 (count said)) (pr-str said)))
       (is (some #(= (str own ":1") (:at %)) (rows-in {}))
           "an asker that works no task loses nothing")))
+
+;; docs/flow.md#the-step-fn-contract-every-proc-follows (AGENTS.md section 3 step 4): a value made by one eval is threaded
+;; through the calls that make it, never a cell: code's forms and a top-level form's own read each other by letfn. A form's
+;; cost and compiler account still cross its throw in a cell (wrap-cost's, wrap-record's last): on Jolt a trace is the
+;; catcher's, so only the entrant boundary (eval-code's try) may catch, until Jolt keeps a trace from its throw
+(deftest the-eval-path-threads-its-values
+  (is (= 0 (count (re-seq #"\(volatile! " (clojure.repl/source-fn 'seon.repl/eval-code)))) "code's forms by letfn")
+  (let [rs (let [got (volatile! []) old @agent/state]
+             (try (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
+                  ((repl/handler) {"code" "(+ 1 2) (do (load-string \"(def x 1)\") (/ 1 0))" :reply #(vswap! got conj %)})
+                  @got
+                  (finally (reset! agent/state old))))]
+    (is (= [true true true false] (mapv #(contains? % :ticks) rs)) (str "each form's reply its own cost (a do's forms each their own), the done none: " (pr-str rs)))
+    (is (= 3 (:repl/value (first rs))))))
