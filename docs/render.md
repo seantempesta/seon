@@ -329,7 +329,6 @@ Everything a model is sent is read from the tree, through one conversion, and an
 - `seon.render.ui/root-input`: a person's request on their own page, a sentence that becomes a task an agent starts on (``seon.system/ask!``); on root's page a person talks to root's session (```seon.render.ui/agent-input```). An agent messages root, or a person's `seon_eval root` asks by the same call.
 - `seon.render.ui/root-tools`: root's spawn and evaluate-in-every-agent, on root's debug page, for whoever works on Seon itself. An agent messages root, or a person's `seon_eval root` does the same by the same call.
 - `seon.render.ui/debug`, `seon.render.ui/debug-turn`: stepping through recorded requests and opening one's rows. The model reads its own conversation whole.
-- `seon.render.ui/more`: a long list's next members as it scrolls. The model is sent the list whole.
 - `seon.render.ui/toggle`: a fold's open and close. The model reads what is in it.
 - `seon.render.ui/evaluation`, `seon.print.emit/elided-hiccup`: a cut opened where it stands. The model has the form the cut prints, which reads the same rest.
 - `seon.render.ui/eval-step`: a person's opening of an eval, recorded for root's page (`seon.system/opened!`). The model reads the eval whole.
@@ -398,4 +397,4 @@ Uses of take, subs and the like in display code that choose what to find or read
 - `seon.repl/streaming`: a Writer's `write(str, off, len)` slice (`subs` takes exactly the characters the caller writes; the record and the stream keep every one).
 - `seon.web/handler`, `seon.web/view-of`, `seon.server/mcp-reply`: parsing a request's path and a tool's name.
 - `seon.ctx.search/near`: the whole line a repaired delimiter is on, the printer budgets it.
-- `seon.render.proc/pass`: root's process keeps the newest `:seon.config.render.list/stream` events, and its tile (`seon.render.ui/process-tile`) draws the newest `:seon.config.render.list/history` of them: a window of data, as ctx's are.
+- `seon.render.proc/pass`: root's process keeps the newest `:seon.config.render.list/stream` events: a window of data, as ctx's are.

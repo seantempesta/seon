@@ -855,23 +855,6 @@
          :usage (select-keys m [:seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens :seon.model-call/ms :seon.model-call/model])
          :error (:seon.model-call/error m)}))))
 
-(defn more
-  "The list's end, the unit's element (opts :unit): how many older rows there are, unrendered; it
-  asks for the next ones when it scrolls into view (Datastar's data-on-intersect posting /more).
-  Its id carries how many rows are shown, so each next is a new element whose view is watched anew.
-  input {:older n :view param :click? b}: click?, the next come when it is clicked (a list whose
-  older end is at its top, an agent's conversation: in view as the page opens, it would ask for
-  every row)."
-  {:malli/schema [:=> [:cat :seon.render/opts [:map [:older nat-int?] [:view :string] [:click? {:optional true} :boolean]]] :any]}
-  [opts {:keys [older view click?]}]
-  (if (pos? older)
-    (if click?
-      [:button {:id (:unit opts) :type "button" :class "py-2 text-center text-text-500 underline" (keyword "data-on:click") (str "@post('/more?view=" view "')")}
-       (str older (if (= 1 older) " older part" " older parts") ", shown when this is clicked")]
-      [:p {:id (:unit opts) :class "py-3 text-center text-text-500" :data-on-intersect (str "@post('/more?view=" view "')")}
-       (str older (if (= 1 older) " older row" " older rows") ", rendered as this line scrolls into view")])
-    [:p {:id (:unit opts) :class "py-3 text-center text-text-500"} "nothing older"]))
-
 ;;; --- render-ctx: an agent's ctx as components (docs/render.md#components) ----------------------
 
 (defn- relevant

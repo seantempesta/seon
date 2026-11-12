@@ -2,6 +2,14 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in git history.
 
+## 2026-11-12 rulings
+
+The owner's rulings of 2026-11-12, on the code a page no longer uses.
+
+### Dead page code that fetched older history on scroll is deleted (owner, 2026-11-12)
+
+Asked in plain words whether to delete the page code that fetched an agent's older history when its list's end scrolled into view (seon.render.ui/more, the web's /more route and the :more ops of the web and render procs, seon.render.proc/history-cap and :seon.config.render.list/history), which no page drew any more and whose effect (a tab's :shown) nothing read: "Yes". A list now holds a window and says how many it left out (:seon.ctx/count, docs/ctx.md#the-pattern).
+
 ## 2026-11-11 rulings
 
 The owner's rulings of 2026-11-11, on the system goal and its first loop, on one agent mechanism for every role, on how the data is designed, on sessions, examples and their review, and on how a session leaves the system up to date.
