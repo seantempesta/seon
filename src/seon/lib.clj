@@ -6,7 +6,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [jolt.ffi :as ffi] [jolt.scheme :as scm]
             [seon.contract :refer [defn defn- defchecked] :as contract] [seon.config :as config]
-            [seon.edn :as sedn] [clojure.java.shell :as sh] [konserve.jolt.lmdb :as klmdb] [jolt.fibers :as fibers]))
+            [seon.edn :as sedn] [clojure.java.shell :as sh] [konserve.jolt.lmdb :as klmdb] [jolt.fibers :as fibers] [jolt.async.remote :as remote]))
 
 (defn sh
   "Run a command as clojure.java.shell/sh does (args, its options among them; answers {:exit :out :err}), always on a fiber: there
@@ -45,7 +45,6 @@
 (defc c-chdir "chdir" [:string] :int)
 (defc c-waitpid "waitpid" [:int :pointer :int] :int {:blocking true})
 (defc c-close "close" [:int] :int)
-(defc c-lseek "lseek" [:int :int64 :int] :int64)
 (defc c-shutdown "shutdown" [:int :int] :int)
 (defc c-write "write" [:int :pointer :size_t] :ssize_t {:blocking true :capture-native-error true})
 (defc c-signal "signal" [:int :pointer] :pointer)
@@ -268,22 +267,11 @@
   {:malli/schema [:=> [:cat :seon.lib/pid] :seon.lib/exit-status]}
   [pid] (let [b (ffi/alloc 4)] (c-waitpid pid b 0) (decode-status (ffi/read b :int))))
 
-(defn- close-streams-but!
-  "Close every stream descriptor (a socket, pipe or FIFO: one lseek refuses) this process holds but 0-2 and those of keep:
-  a forked child holds the stream ends it is given and no other, so a stream's end of file is the end of the processes it
-  was made for (ProcessBuilder's rule, for the descriptors an end of file is read from). A file stays: the native
-  libraries keep their own (the LMDB build's lock), which a child must not close (seon.db/after-fork! forgets them).
-  Read from /dev/fd, the descriptors open now. See docs/processes.md#a-child-holds-what-it-is-given."
-  {:malli/schema [:=> [:cat [:set :int]] :nil]}
-  [keep]
-  (doseq [s (.list (java.io.File. "/dev/fd")) :let [fd (parse-long s)]
-          :when (and fd (< 2 fd) (not (keep fd)) (neg? (c-lseek fd 0 1)))]
-    (c-close fd)))
-
 (defn fork!
   "The one spawning skeleton (docs/failure-points.md#physics-who-may-run-threads): fork only while this is the one active Chez
   thread (E11/E13: a fork beside a running thread breaks the child), checked once. The child closes every stream descriptor
-  but 0-2, fd and keep (close-streams-but!), once, before anything else runs in it. Then
+  but 0-2, fd and keep (jolt.async.remote/close-streams-but!, the one rule, docs/processes.md#a-child-holds-what-it-is-given),
+  once, before anything else runs in it. Then
   (child) in the child, exiting 0 if it returns and 1 however else it ends (a throw, said on
   stderr with the frames it unwound from; a raise or an escape no catch takes): the child holds a copy of the parent's frames,
   and unwinding into them would run the parent's code in the child; (refused n) here, n the
@@ -296,7 +284,7 @@
   (let [pid (fork-alone*)]
     (if (zero? pid)
       (let [status (volatile! 1) said? (volatile! false)]
-        (close-streams-but! (cond-> (set keep) fd (conj fd)))
+        (remote/close-streams-but! (cond-> (set keep) fd (conj fd)))
         (try (when (or (not double?) (zero? (c-fork))) (end-with!) (child))
              (vreset! status 0)
              (catch Throwable e

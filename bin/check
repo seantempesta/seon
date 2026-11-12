@@ -85,12 +85,13 @@ VERDICT=CHECK; [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]] && VERDICT=${(U)1}
 # a binary not current for this tree checks another program (and may refuse this tree's config before it says anything).
 # Current is seon.system/binary-current's answer, the one rule the plan's build asked: the binary's own tree (bin/build
 # records it, target/seon.tree), or the answer the plan kept for the binary's tree and this one
-# (target/binary-current/FROM-TO.edn, {:answer nil} when current). With neither (no plan judged these two trees: a
+# for every var (scope :all: this run's roots seed an example program, so their agents run all of Seon from the binary)
+# (target/binary-current/FROM-TO.all.edn, {:answer nil} when current). With neither (no plan judged these two trees: a
 # checkout of its own, seon.check-test/a-stale-binary-is-refused) it is refused: bin/test or bin/build seon judges it.
 # docs/source.md#the-binary-records-its-program
 if (( NEEDS )); then
   BUILT=$(cat "$ROOT/target/seon.tree" 2>/dev/null) HERE=$("$ROOT/bin/tree" "$ROOT")
-  JUDGED=$ROOT/target/binary-current/$BUILT-$HERE.edn
+  JUDGED=$ROOT/target/binary-current/$BUILT-$HERE.all.edn
   if [[ -z $BUILT || ( $BUILT != $HERE && $(cat "$JUDGED" 2>/dev/null) != "{:answer nil}" ) ]]; then
     echo "check: target/seon was built from tree ${BUILT:-unknown}; this checkout is tree ${HERE:-unknown}: run bin/build seon"
     echo "$VERDICT FAILED (stale binary)"; exit 1

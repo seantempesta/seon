@@ -10,7 +10,8 @@
 #   bin/build            every step; chez, jolt, native, lmdb, lz4, zstd, embed and css are skipped when their stamp matches their pin; hello and seon when it matches the tree and the toolchain's pins
 #   bin/build chez|jolt|hello|native|lmdb|lz4|zstd|embed|css|seon   one step, and each step it needs whose stamp is stale
 #   bin/build libs       the four native libraries the runtime loads (native, lmdb, lz4, zstd), each skipped when its stamp
-#                        matches: what bin/test asks before its plan, a stamp compare each when nothing moved
+#                        matches, after the runtime is refused unless it is this tree's (current): what bin/test asks before its plan
+#   bin/build current    refuse (exit 1, naming the act) a chez or jolt whose stamp is not its pin
 #   BUILD_FORCE=1 bin/build     every stamp removed first: each step rebuilds, once
 #
 # Everything is written under target/; nothing is installed outside it. Dependency
@@ -75,6 +76,16 @@ CHEZ_PIN=$(pin "$RC/chez")
 JOLT_PIN=$(pin "$RC/jolt")
 CHEZ=$T/chez/bin/scheme
 JOLT=$T/jolt/jolt
+
+# current: refuse a runtime that is not this tree's (2026-11-12: a worktree's target/jolt built for the old Jolt pin ran over
+# the new pinned sources, and every store read "variable is not bound"). Each submodule is at its pin already (the
+# --sync above); here each of chez and jolt must be stamped with that pin. Refused, naming the act, never rebuilt here: a
+# build is minutes, and two runs would build at once. bin/test asks it before every run (bin/build libs).
+# docs/source.md#the-binary-records-its-program
+runtime_current() {
+  fresh chez "$CHEZ_PIN" || die "target/chez was built for $(cat "$T/chez.stamp" 2>/dev/null || echo nothing); its pin is $CHEZ_PIN: run bin/build"
+  fresh jolt "$JOLT_PIN" || die "target/jolt was built for $(cat "$T/jolt.stamp" 2>/dev/null || echo nothing); its pin is $JOLT_PIN: run bin/build jolt"
+}
 
 build_chez() {
   if fresh chez "$CHEZ_PIN" && [ -x "$CHEZ" ]; then say "chez up to date ($CHEZ_PIN)"; return; fi
@@ -357,8 +368,9 @@ case $STEP in
   zstd) build_zstd ;;
   embed) build_embed ;;
   css) build_css ;;
-  libs) build_native; build_lmdb; build_lz4; build_zstd ;;
+  current) runtime_current ;;
+  libs) runtime_current; build_native; build_lmdb; build_lz4; build_zstd ;;
   seon) build_seon ;;
   all) build_chez; build_jolt; build_native; build_lmdb; build_lz4; build_zstd; build_embed; build_css; build_hello; build_seon ;;
-  *) die "unknown step $STEP (chez | jolt | hello | native | lmdb | lz4 | zstd | libs | embed | css | seon | all)" ;;
+  *) die "unknown step $STEP (chez | jolt | hello | native | lmdb | lz4 | zstd | libs | current | embed | css | seon | all)" ;;
 esac
