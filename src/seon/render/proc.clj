@@ -33,7 +33,6 @@
             [seon.config :as config] [seon.step :as step] [seon.problems :as problems]))
 
 (defn- event-cap "Events the stream keeps (:seon.config.render.list/stream)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/stream))
-(defn- history-cap "Rows a page renders at first, and more each time its list's end scrolls into view (:seon.config.render.list/history)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/history))
 
 ;;; --- requests -------------------------------------------------------------------------
 
@@ -1189,8 +1188,6 @@
                                                           :r (or h (problems/health (:main-db st)))})
                                     (pass st o))
                           :context (let [st (-> st health! with-context)] (step/out! o :to-web {:op :text :k (:k m) :text (get-in st [:context :text] "")}) st)
-                          ;; the end of a view's list scrolled into view: the next rows are rendered
-                          :more (if (contains? (:watch st) (:view m)) (pass (update-in st [:tab (:view m) :shown] (fnil + (history-cap)) (history-cap)) o) st)
                           ;; the debug timeline stepped to a turn, or to latest
                           :at (if (contains? (:watch st) (:view m)) (pass (assoc-in st [:tab (:view m) :at] (:turn m)) o) st)
                           ;; a row's <details> opened or closed: its whole content is rendered while it is open
