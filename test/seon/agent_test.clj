@@ -3087,7 +3087,7 @@
     (is (= {:test 'app.x-test/u :status :pass} (read green)) "a passing one is its name and status")))
 
 (defn- down-agent
-  "(f {:conn :store-conn :t :k :main-b :ab}) as agent a-down on its branch of a fresh main holding task :gen/down, this
+  "(f {:conn :cfg :store-conn :t :k :main-b :ab}) as agent a-down on its branch of a fresh main holding task :gen/down, this
   process's state held for it (its branch's connection, a socketpair standing for root), restored after."
   [f]
   (ts/test-branch!
@@ -3104,7 +3104,7 @@
        (try
          (reset! agent/link {:fd a})
          (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key k :db @store-conn :base @conn :main @conn})
-         (f {:conn conn :store-conn store-conn :t (pdb/eid @conn :task/name :gen/down) :k k :main-b main-b :ab ab})
+         (f {:conn conn :cfg cfg :store-conn store-conn :t (pdb/eid @conn :task/name :gen/down) :k k :main-b main-b :ab ab})
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest an-agent-merges-main-down-by-the-one-merge
@@ -3145,6 +3145,29 @@
          (is (:ok r) (pr-str r))
          (is (= "settled" (:task/plan (d/entity @store-conn t))) "the resolution is the branch's value")
          (is (= (d/commit-id @conn) (d/commit-id (pdb/branch-base conn main-b ab))) "and the base moved"))))))
+
+(deftest a-branch-moved-during-its-merge-down-is-refused
+  ;; seon.agent/merge-main! (docs/agent.md#merging): the branch's head moves once, from the head the merge read; a head moved
+  ;; between the plan and that move (here by a second writer while the merge replays) is the typed refusal, and the merge writes nothing
+  (down-agent
+   (fn [{:keys [conn store-conn t main-b ab cfg]}]
+     (d/transact conn {:tx-data [[:db/add t :task/status :ready]] :tx-meta (pdb/tx-meta main-b)})
+     (agent/transact! [{:task/name :gen/agents :task/plan "the agent's" :task/status :held}])
+     (agent/commit!)
+     (let [replay pm/replay moved (atom nil)
+           r (with-redefs [pm/replay (fn [& args]
+                                       (let [c2 (pdb/connect (assoc cfg :branch ab))]
+                                         (try (d/transact c2 {:tx-data [[:db/add t :task/plan "a second writer's"]] :tx-meta (pdb/tx-meta ab)})
+                                              (reset! moved (d/commit-id @c2))
+                                              (finally (d/release c2))))
+                                       (apply replay args))]
+               (agent/merge-main! {}))
+           c2 (pdb/connect (assoc cfg :branch ab))]
+       (try
+         (is (not (:ok r)) (pr-str r))
+         (is (= :seon.writer/refused (:seon.error/type r)) (pr-str r))
+         (is (= @moved (d/commit-id @c2)) "the head is the second writer's: the merge wrote nothing")
+         (finally (d/release c2)))))))
 
 (deftest a-resolution-on-an-entity-main-retracted-is-refused
   ;; main retracted the task whole, the branch changed its plan: a conflict whose main end is :seon.merge/gone. A resolution
