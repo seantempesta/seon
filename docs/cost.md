@@ -9,6 +9,7 @@ A cost proof (`seon.cost/proof`) states what a function's work should cost as it
 The constants a lower bound is worked from (AGENTS.md §3a), measured on 2026-11-12 on the build machine. Each is a fact to estimate with, or a target where today's number is a bug.
 - A fork of a running agent costs about 65 ms; one in-process test in a warm fork is about 21 ms, and the median test is about 10 ms of work.
 - A transaction of about 10 datoms should cost about 50k ticks and 60 KB; an AVET seek costs microseconds; a tick is about 3 to 10 ns.
+- A stored index node's read on a cache miss (konserve's `get-immutable`, a 32-entry branch) costs 28 KB and 5.0k ticks, against a floor of about 12 KB and 3k (`seon.program-cost-test/a-stored-node-reads-at-its-decode`).
 - Reading source should allocate at most 20 bytes a character, against 56 today.
 - A system's first agent should be ready in under 2 s, against 16 s today; a system boot is 10.7 s today, which is a cost to remove, not a constant to plan with.
 - The whole suite should run in under 60 s of wall time, and a typical change's minimal set in seconds.
@@ -22,6 +23,8 @@ A proof measures the function under test on the thread that calls it, and nothin
 - **time**, the thread's CPU time (`seon.profile/cpu-ns`): another thread's work and a wait are not the call's (`seon.profile-test/a-measure-is-the-same-beside-another-thread`), but a collection on the thread and the core's speed under load are, so time over its estimate is shown (`TIME OVER (measured, not red)`), never red.
 
 Each size is one call (```seon.cost/measure```), less what measuring an empty call costs. Only a size whose one call is over its estimate is measured again (```seon.cost/run```): calls until `:seon.config.proofs/cost-settled` calls after the one that allocated the fewest bytes allocate no fewer, at most `:seon.config.proofs/cost-max-samples`, ticks and calls their least; the row keeps `:calls`, and one that does not settle is marked `:unsettled`. When every size passes but the curve does not, the sizes measured by one call are measured again this way and the curve judged on those (`seon.cost-test/a-curve-is-judged-on-warm-sizes`). Proofs: `seon.profile-test/a-threads-allocation-is-its-own`, `seon.cost-test/a-measure-takes-a-count-of-samples-never-a-time`.
+
+A measurement by hand is made in the built program, never a `-M` script (which compiles without the build's settings): `bin/deps-probe FILE` (its header is its manual) evaluates FILE in this checkout's root, test namespaces loadable.
 
 ## Counting calls
 

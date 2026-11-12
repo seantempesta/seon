@@ -1,0 +1,14 @@
+#!/bin/zsh
+# bin/deps-probe FILE   evaluate FILE's forms in this checkout's root, as a measurement in the built program sees
+# them (docs/cost.md#what-is-measured: a -M script compiles without the build's settings, so its numbers are
+# not the program's). Starts this checkout's system when none is up (bin/system start, which builds what
+# changed), puts the checkout's test/ on root's source roots so a test namespace's input functions load
+# (seon.program-cost-test/node-read-of, seon.merge-cost-test/diff-of), and sends FILE through
+# `bin/mcp call eval agent=root code=-`, printing root's reply. A probe prints what it measures itself
+# (println lines) and releases what it opened. A form that throws is the reply's :ex (exit 0, as bin/mcp
+# answers it); exit 1 when FILE is missing, the system will not start or the relay errs.
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+[[ -f $1 ]] || { echo "deps-probe: no file ${1:-(none given)}"; exit 1 }
+"$ROOT/bin/system" status 2>/dev/null | grep -q ' up: ' || nice -n 15 "$ROOT/bin/system" start || exit 1
+{ print -r -- "(jolt.host/set-source-roots! (vec (distinct (conj (vec (jolt.host/source-roots)) \"$ROOT/test\"))))"
+  cat "$1" } | "$ROOT/bin/mcp" call eval agent=root code=-
