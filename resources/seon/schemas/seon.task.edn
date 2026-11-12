@@ -18,7 +18,7 @@
                     ;; the model that answers its turns: a test's scripted reply or no provider (docs/config.md#the-resolver), read by seon.config/provider-at
                     [:seon.config.ai/provider {:optional true} :seon.config.ai/provider]
                     [:seon.config.ai/script {:optional true} :seon.config.ai/script]
-                    ;; whether this task's model reasons, and how hard (docs/model.md#thinking-is-off-by-default), read by seon.config/provider
+                    ;; whether this task's model reasons, and how hard (docs/model.md#thinking-is-on-at-low-effort), read by seon.config/provider
                     [:seon.config.ai/thinking {:optional true} :seon.config.ai/thinking]
                     [:seon.config.ai/reasoning-effort {:optional true} :seon.config.ai/reasoning-effort]
                     ;; what a first-move pass may spend before it scores this task (my.root/first-moves!)

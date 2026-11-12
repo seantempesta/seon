@@ -71,6 +71,7 @@ The head and the list read main, so they say what main judged; the task tile (``
 
 How an agent's work on its task stands is one value, ```seon.ctx.status/status```, a function of its branch at a t, read by the turn (`seon.turn/status-now`, once a turn) and drawn by ```seon.render.ui/status``` (its hiccup ```seon.render.ui/status-hiccup```), which the page and the model both read. It holds:
 - each proof of the task's accumulated plan (```seon.task/pulled-accumulated```), with the verdict its record pulled (```seon.ctx.status/task-of```: `:seon.test/status`, `:seon.test/failures`; [verdicts are a cache](merging.md#verdicts-are-a-cache)), never read again from the db (`seon.render-test/the-status-proofs-are-what-the-record-pulled`);
+- each proof not written yet with where it goes (```seon.ctx.status/test-shape```): its test namespace's whole `:require`, its `use-fixtures` forms and one test there to copy (`seon.render-test/a-proof-to-write-is-described-with-its-namespace`);
 - the done rule's reasons (```seon.reconcile/done-explain```), each with the form that acts on it;
 - from one diff of the branch against `:seon.agent/base-commit` (```seon.merge/content-datoms```): functions without a contract, problems caused and sections made stale (```seon.problems/caused-split```), what its merge carries, and its unmerged entries;
 - a test run that failed as a whole (`:seon.agent/test-error`).

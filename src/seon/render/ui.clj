@@ -1168,7 +1168,7 @@
      (when (next proofs)
        (into [:ul {:key :proofs}] (for [{:keys [test status]} proofs] [:li {:key test} [:code (str test)] ": " (or (proof-state :seon.status/title status) (kname status))])))
      ;; not written: where it goes, and a namespace's example once, its own, so a proof written moves neither
-     (for [[n us] (group-by #(:ns (:shape %)) unwritten) :let [{:keys [requires helpers example]} (:shape (first us))]]
+     (for [[n us] (group-by #(:ns (:shape %)) unwritten) :let [{:keys [requires fixtures helpers example]} (:shape (first us))]]
        (concat
         (for [[i {:keys [test]}] (map-indexed vector us)]
           [:div {:key test}
@@ -1178,6 +1178,8 @@
           [[:div {:key n}
             (when requires [:p "A test in " [:code (str n)] " requires:"])
             (when requires [:pre [:code requires]])
+            (when (seq fixtures) [:p "Its fixtures:"])
+            (when (seq fixtures) [:pre [:code (str/join "\n" fixtures)]])
             (when (seq helpers) [:p "Helpers a test there uses: " (str/join ", " (map #(str "`" (name %) "`") helpers)) ". Every helper there: " [:code (str "(dir " n ")")]])
             (when example [:p "Example:"])
             (when example [:pre [:code example]])]])))

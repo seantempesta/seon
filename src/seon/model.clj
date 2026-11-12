@@ -184,7 +184,7 @@
   model may call or not (tool_choice auto: a reply with no call is a message to the user, and pauses the agent; DeepSeek
   refuses `required` with thinking on), its :max-tokens, earlier turns' reasoning as
   returned unless :replay-reasoning is false, and its temperature and DeepSeek's thinking mode and
-  effort only when the provider sets them (absent: the provider's own default)."
+  effort only when the provider sets them (absent: the provider's own default; no effort when thinking is :disabled)."
   {:malli/schema [:=> [:cat :seon.model/provider :seon.model/request] :map]}
   [{:keys [model max-tokens temperature thinking reasoning-effort replay-reasoning]} request]
   (cond-> {:model model
@@ -196,7 +196,8 @@
            :stream true :stream_options {:include_usage true}}
     temperature (assoc :temperature temperature)
     thinking (assoc :thinking {:type (name thinking)})
-    reasoning-effort (assoc :reasoning_effort (name reasoning-effort))))
+    ;; an effort is how hard thinking reasons: with thinking off there is none to send
+    (and reasoning-effort (not= :disabled thinking)) (assoc :reasoning_effort (name reasoning-effort))))
 
 (defn- eval-call
   "One eval e as read ({\"intent\" \"code\"}) under id: {:id :code} with its :intent when it is a string; an eval whose code is missing or not a string is that eval's :problem, shape saying what is right, and :code holds what came, for the record. See docs/model.md#one-tool-repl."

@@ -36,9 +36,9 @@ On the wire (`seon.model/wire-messages`, by `seon.model/wire-groups`) a reply go
 
 `:seon.config.ai/temperature` is absent, so a request sends none and the provider's default applies. At 0 an agent copied its last reply: on 5 replayed loop starts, 11 of 15 repeated at 0, 3 of 15 at 0.5, 0 of 15 at the default.
 
-## Thinking is off by default
+## Thinking is on at low effort
 
-`:seon.config.ai/thinking` is `:disabled`: a task whose next step needs long reasoning is a context or instruction defect, not a cost to pay every turn. A model or a task turns it on through the resolver ([config](config.md#the-resolver)), with `:seon.config.ai/reasoning-effort` (DeepSeek: `:low`, `:high` or `:max`; on by default there, so we send `:disabled`).
+`:seon.config.ai/thinking` is `:enabled` and `:seon.config.ai/reasoning-effort` is `:low`: the reasoning shows what the model found confusing in its context, which is then fixed ([decisions](decisions.md)). A model or a task changes either through the resolver ([config](config.md#the-resolver)); the efforts are the schema's (`:low`, `:medium`, `:high`), and a task that turns thinking `:disabled` is sent no effort.
 
 With thinking on, a reply that spent all of `:seon.config.ai/max-tokens` on reasoning is `:seon.model/reasoning-ate-reply`. DeepSeek with tools requires each earlier assistant message's `reasoning_content` sent back (a 400 otherwise), so a reply's reasoning, stored on its first eval, goes back as returned (`seon.model/wire-messages`). `:seon.config.ai/replay-reasoning` false leaves it out, and thinking on with replay false is refused at load (`:seon.config.ai/reasoning-pair`).
 
