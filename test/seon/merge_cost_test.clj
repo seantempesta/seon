@@ -163,7 +163,10 @@
      ;; and 640 MB for no key. Before that again: 536 calls, 11 MB at n = 10
      ;; 27 calls since 2026-10-30: seon.merge/content-attr, one contracted call per side's filter, was
      ;; uncontracted (as a contracted predicate asked of each attribute it was 1,771)
-     :fixed {:bytes 4000000 :calls 27}
+     ;; 2026-11-12: content-attr? is a contracted defn- (the contracts check: every fn contracted), and a test shard arms a private
+     ;; contract (production does not wrap a defn-), so its calls count again: content-datoms asks it of each attribute of both
+     ;; schemas, ~900 a side (1,802 measured), the 2026-10-30 count before it was taken uncontracted
+     :fixed {:bytes 4000000 :calls 2000}
      :sizes [10 30 100]}))
 
 (defn plan-of
