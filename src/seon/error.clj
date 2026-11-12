@@ -34,7 +34,8 @@
   triage of its trace, or nil when it names none. A wrapper that runs a call is never where an error is: a contract's (malli's
   instrumented fn, seon.contract's), whose frame tops the trace by what is armed, and the measurement's (seon.profile/measure!,
   the REPL's per-form cost), whose frame is the caller of a form's unnamed fn, which has none of its own. The one reading of it: an eval's error (seon.repl's
-  located) and a component's defect (seon.render/render!). See docs/render.md#a-component-answers-hiccup."
+  located), a component's defect (seon.render/render!), a page that threw (seon.render.proc's pass-view), a proc's defect and an
+  uncaught error (seon.system's flow-error, uncaught-message). Jolt keeps 25 frames of a trace, read whole here (~0.1M ticks). See docs/render.md#a-component-answers-hiccup."
   {:malli/schema [:=> [:cat :seon.host/throwable] [:maybe :qualified-symbol]]}
   [e]
   (let [d (merge (clojure.main/ex-triage (assoc (Throwable->map e) :clojure.error/phase :execution)) (ex-data e))]
