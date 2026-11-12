@@ -1304,7 +1304,11 @@
               refused (when (seq task-texts) (let [x (task/load-tx db (tasks-of task-texts))] (when (contract/error? x) (:seon.error/message x))))
               skipped (vec (for [[p t] (:value r)
                                  :let [why (cond (unsynced p) (str "merged task " (unsynced p) " changed it and main holds it unsynced: (my.root/sync! sys [\"" (unsynced p) "\"]), then start again")
-                                                 (and t (fx/unreadable p t)) (fx/unreadable p t)
+                                                 ;; a file that does not read; the shipped config only has to read here, since the
+                                                 ;; write that follows checks it against the schema the change itself states
+                                                 ;; (seon.program/config-refused): checked here against this process's schema, a
+                                                 ;; change to a config key and its schema entry together was skipped (Tests, 2026-11-12)
+                                                 (and t (fx/unread-text p t)) (fx/unread-text p t)
                                                  (and refused (task? p)) (str "the task files are refused: " refused))]
                                  :when why]
                              {:path p :reason why}))
