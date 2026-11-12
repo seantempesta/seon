@@ -32,7 +32,7 @@ A tool's text is what a model should read: `seon_context`'s is the block, an eva
 
 A Claude agent works a task as a Seon agent does, on its own root and branch, and plays the model: what it reads and what it evals are what a model reads and evals, and no model is called.
 
-A session's `seon_*` tools reach the root of the checkout the session started in. A helper in a worktree reaches its own root with `bin/mcp call OP KEY=VALUE` (the tool `seon_<OP>`, its checkout's `runs/root.port`, the checkout as client); `--port PORT` reaches another root.
+A session's `seon_*` tools reach the root of the checkout the session started in. A session's worktree reaches its own root with `bin/mcp call OP KEY=VALUE` (the tool `seon_<OP>`, its checkout's `runs/root.port`, the checkout as client); `--port PORT` reaches another root.
 
 ```
 bin/worktree NAME; cd "$(bin/worktree --path NAME)"
