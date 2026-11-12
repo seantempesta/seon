@@ -3488,7 +3488,7 @@
 (defn interrupted-view
   "A component whose run is interrupted."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
-  [_] (throw (ex-info "interrupted" {:interrupted true})))
+  [_] (throw (ThreadDeath.)))
 
 (defn interrupted-layout
   "A layout whose only component is interrupted while it draws."
@@ -3520,6 +3520,30 @@
            (is (= "drawn" (last fine)) "the other part draws"))
          (finally (r/dispose-walk! w)))))
 
+(defn- plain-thrower
+  "A plain call (its contract asks no input: the walk keeps it as written, the writer calls it) that throws."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [_] (throw (ex-info "the plain call broke" {:at :plain})))
+
+(defn- plain-call-layout
+  "A layout placing a plain call that throws beside a part that draws. It reads no db, so the walk builds none."
+  {:malli/schema [:=> [:cat :seon.render/opts] :any]}
+  [_] [:div [:div {:id "parts"} [:p "drawn"] [#'plain-thrower {}]]])
+
+;; See docs/failure-points.md
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-plain-call-that-throws-is-drawn-and-recorded-as-a-component-defect
+  ;; estimate: a walk of two components (~0.4M) and one error drawn by its render (~5M, the printer over the error as data)
+  ;; one boundary for a render that throws: a plain call the writer makes is drawn by the error's render, never a bare span, and the
+  ;; walk records it as it records a component's (take-defects!), so health and the model see it
+  (let [w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly nil) [#'plain-call-layout {}] (seon.db/index))]
+    (try (r/flush! w nil)
+         (let [html (apply str (map :html (r/placed-units w)))]
+           (is (str/includes? html "drawn") "the part beside it draws")
+           (is (str/includes? html "the plain call broke") "what threw is on the page")
+           (is (not (str/includes? html "<span class=\"err\">")) "by the error's render, not a bare span"))
+         (is (= [:seon.render/component-defect] (map :seon.error/type (r/take-defects! w))) "recorded as a component's defect")
+         (finally (r/dispose-walk! w)))))
+
 (deftest a-component-that-throws-is-a-problem-health-reads
   ;; docs/health.md: a defect a person alone would see is a fact too: the walk answers it once to whoever records problems. An interrupt is nobody's defect: it passes
   (let [w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly (ts/test-db)) [#'two-part-layout {}])]
@@ -3528,7 +3552,7 @@
          (is (= [] (r/take-defects! w)) "taken once")
          (finally (r/dispose-walk! w))))
   (let [w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly (ts/test-db)) [#'interrupted-layout {}])]
-    (try (is (:interrupted (try (r/flush! w nil) nil (catch Throwable e (ex-data e)))))
+    (try (is (instance? ThreadDeath (try (r/flush! w nil) nil (catch Throwable e e))) "an interrupt passes the render's edge, as root's interrupt is raised (seon.intr)")
          (is (= [] (r/take-defects! w)))
          (finally (r/dispose-walk! w)))))
 

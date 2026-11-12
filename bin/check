@@ -58,9 +58,9 @@ trap 'rm -rf "$CHECK_RESULTS"' EXIT
 export SEON_WEB_PORT=0
 # every check root has a store of its own: its wiki's baseline from git (4 s) is not what a check asks
 export SEON_WIKI_BASELINE=${SEON_WIKI_BASELINE:-false}
-# idle watches a tab on its root's dashboard, so its root serves one: on this run's own port, in a
-# full run and a single mode alike
-IDLE_WEB_PORT=$((20000 + $$ % 20000))
+# idle watches a tab on its root's dashboard, so its root serves one: on a port the kernel assigns (-1), which the
+# check reads from the web proc's ping, in a full run and a single mode alike; no check binds a fixed port
+IDLE_WEB_PORT=-1
 # agents' turns are the scripted provider's (a test fixture; a root with no profile has no model
 # provider): every process of the binary below is given --profile scripted on its command line
 # (seon.config reads it there; no environment variable selects a profile)
