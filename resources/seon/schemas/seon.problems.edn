@@ -294,4 +294,10 @@
  :seon.problems/report [:map {:seon.render/hiccup seon.render.ui/problems :seon.render/model seon.render.ui/problems-model} [:t :int]
                         [:classes [:map-of :seon.problems/class [:map [:n nat-int?] [:rows [:vector :seon.problems/row]]]]]]
  ;; keys-schemas sweep
- :seon.git/files [:vector {:description "On a git commit's error, the files the commit was to hold, sorted."} :string]}
+ :seon.git/files [:vector {:description "On a git commit's error, the files the commit was to hold, sorted."} :string]
+ ;; keys-schemas sweep: the properties of :seon.problems/class
+ :seon.problems/areas [:vector {:description "On :seon.problems/class, each area the health page groups classes under, with the classes in it: [area #{class}]."} [:tuple :keyword [:set :keyword]]]
+ :seon.problems/attention [:set {:description "On :seon.problems/class, the classes that are shown but never a reason to refuse done (upkeep)."} :keyword]
+ :seon.problems/caused [:set {:description "On :seon.problems/class, the derived classes a branch's content can make, which a branch is judged on."} :keyword]
+ :seon.problems/derived [:set {:description "On :seon.problems/class, the classes derived from the program and the system's state, not recorded as errors."} :keyword]
+ :seon.problems/docs [:map-of {:description "On :seon.problems/class, each class's section of the wiki, as path#anchor: what it is and how it is fixed."} :keyword :string]}
