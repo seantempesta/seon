@@ -30,7 +30,7 @@
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.program :as program] [seon.render.ui :as ui] [seon.print :as print] [seon.print.select :as select] [seon.repl :as repl] [seon.system :as c]
             [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.db] [datahike.index.interface]
-            [seon.config :as config] [seon.step :as step] [seon.problems :as problems]))
+            [seon.config :as config] [seon.step :as step] [seon.problems :as problems] [seon.error :as err]))
 
 (defn- event-cap "Events the stream keeps (:seon.config.render.list/stream)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/stream))
 
@@ -906,11 +906,11 @@
       r)
     (catch Exception ex
       (let [held (get-in st [:views view-id])
-            d (clojure.main/ex-triage (assoc (Throwable->map ex) :clojure.error/phase :execution))
+            in (err/thrown-in ex)
             named (java.net.URLDecoder/decode (ui/view-param view-id) "UTF-8")
             e (contract/error :seon.render/view-defect #'pass-view (str "the page " named " threw rendering: " (step/error-msg ex))
                               (cond-> {:view named :class (.getName (class ex))}
-                                (:clojure.error/symbol d) (assoc :seon.error/in (:clojure.error/symbol d))))
+                                in (assoc :seon.error/in in)))
             hc (error-page e)]
         (when-not (= e (:error held))
           (step/out! o :to-api {:op :error :pid :render :message (:seon.error/message e) :data e}))

@@ -123,7 +123,8 @@
                 (d/db-with (booted-tx "boot-1" max-running)))
       (seq extra) (d/db-with extra))))
 
-(deftest who-launched-a-task-hears-how-it-ends
+;; Estimate: 3 transacts or db-withs x 50k ~ 200,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 200000}} who-launched-a-task-hears-how-it-ends
   ;; docs/agent.md#working-for-a-person: every end tells them, since a launched agent that died can't say so itself
   (let [db (ts/test-db)
         id "demo/child"
@@ -141,7 +142,8 @@
               (:seon.message/id (first (told (d/db-with asked [{:seon.task/id id :seon.task/plan "q"}]) :parked))))
         "parking again is a new message, which wakes it again")))
 
-(deftest task-state-is-what-happened
+;; Estimate: 2 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} task-state-is-what-happened
   ;; the one derivation of a task's observed state, from the index
   (let [db (db-of diamond :extra (into (merged "a") (concat (work "b" :done) (work "c" :running))))
         idx (r/index db)]
@@ -149,7 +151,8 @@
            (into {} (for [id ["demo/a" "demo/b" "demo/c" "demo/d"]] [id (r/task-state idx id)]))))
     (is (= :held (r/task-state (r/index (db-of diamond :released [])) "demo/a")) "never released")))
 
-(deftest needs-dag-starts-in-dependency-order
+;; Estimate: 5 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} needs-dag-starts-in-dependency-order
   (are [db expected] (= expected (actions-for db))
     ;; nothing done: only the root of the diamond can start
     (db-of diamond) [(spawn "a")]
@@ -162,7 +165,8 @@
     ;; all merged: nothing to do
     (db-of diamond :extra (mapcat merged ["a" "b" "c" "d"])) []))
 
-(deftest max-running-caps-parallel-agents
+;; Estimate: 4 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} max-running-caps-parallel-agents
   (let [three [(decl "x") (decl "y") (decl "z")]]
     (are [db expected] (= expected (actions-for db))
       (db-of three :max-running 1) [(spawn "x")]
@@ -172,7 +176,8 @@
       ;; two running: none left
       (db-of three :max-running 2 :extra (concat (work "x" :running) (work "y" :running))) [])))
 
-(deftest nothing-autoruns-held-and-cancelled
+;; Estimate: 3 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} nothing-autoruns-held-and-cancelled
   (let [three [(decl "x") (decl "y") (decl "z")]]
     (are [db expected] (= expected (actions-for db))
       ;; written tasks are held
@@ -182,7 +187,8 @@
       ;; cancelled after release
       (db-of three :released ["demo/y"] :extra (task/execution-tx ["demo/y"] :cancelled)) [])))
 
-(deftest cancel-kills-and-blocks-dependents
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 4 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 transacts or db-withs x 50k ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} cancel-kills-and-blocks-dependents
   (let [db (db-of diamond :extra (concat (merged "a") (work "b" :running) (work "c" :running)
                                          (task/execution-tx ["demo/b"] :cancelled)))]
     (is (= [{:op :kill :task "demo/b" :reason :cancelled}] (actions-for db)))
@@ -193,11 +199,13 @@
       (is (= [] (actions-for db)))
       (is (= #{"demo/b"} (r/blocked-by (r/index db) "demo/d"))))))
 
-(deftest held-kills-without-restart
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} held-kills-without-restart
   (let [db (db-of [(decl "x")] :extra (concat (work "x" :running) (task/execution-tx ["demo/x"] :held)))]
     (is (= [{:op :kill :task "demo/x" :reason :held}] (actions-for db)))))
 
-(deftest an-outside-agent-is-not-killed-for-the-tasks-own-model
+;; Estimate: 5 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 5 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 6,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 6000000}} an-outside-agent-is-not-killed-for-the-tasks-own-model
   ;; task seon.system/an-outside-agent-is-a-first-class-worker (gap 5): attach starts an agent whose env
   ;; says model "outside" and leaves the task's model alone, so the task's next agent is its own
   (let [db (db-of [(decl "x" :model "m1")] :extra (work "x" :running :model "outside"))]
@@ -213,7 +221,8 @@
   (let [db (db-of [(decl "x" :model "m1")] :extra (work "x" :running :model "outside" :boot "boot-0"))]
     (is (= [{:op :reap :task "demo/x"}] (actions-for db)) "a reap is the task's one action this pass")))
 
-(deftest root-takes-a-running-task-back-and-releases-it-again
+;; Estimate: 2 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 3 transacts or db-withs x 50k ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} root-takes-a-running-task-back-and-releases-it-again
   ;; task seon.system/an-outside-agent-is-a-first-class-worker (gap 6): my.root/hold! pauses a running
   ;; task (cancel! is final); run! releases it and its next agent continues the branch
   (let [db (db-of [(decl "x") (decl "y")] :extra (concat (work "x" :running) (task/execution-tx ["demo/y"] :held)))
@@ -232,7 +241,8 @@
     (is (= [] taken) "a task that is done is not taken back: merged work keeps :running")
     (is (= ["task demo/z is done, not running: nothing to take back"] (map :seon.error/message not-running)))))
 
-(deftest a-cancel-never-makes-a-task
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 transacts or db-withs x 50k ~ 600,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 600000}} a-cancel-never-makes-a-task
   ;; 2026-10-28: a bare name given as a task's id (ns/name) was upserted alone, an entity with no
   ;; namespace, name or plan, and every reader of tasks refused it at root's next boot
   (let [db (db-of [(decl "x")])
@@ -244,21 +254,24 @@
     (is (nil? (pdb/eid after :seon.task/id "x")) "and no task is made for it")
     (is (nil? (pdb/eid after :seon.task/id "demo/none")))))
 
-(deftest environment-change-restarts-clean
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 transacts or db-withs x 50k ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} environment-change-restarts-clean
   (let [db (db-of [(decl "x" :model "m1")] :extra (concat (work "x" :running :model "m1")
                                                           (task/env-tx "demo/x" {:model "m2"})))]
     (is (= [{:op :kill :task "demo/x" :reason :env-changed}] (actions-for db)))
     (let [db (d/db-with db (task/move-tx "demo/x" :running :killed {}))]
       (is (= [(spawn "x" :model "m2")] (actions-for db))))))
 
-(deftest a-previous-roots-work-is-reaped-and-resumed
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-previous-roots-work-is-reaped-and-resumed
   (let [db (db-of [(decl "x") (decl "y" :needs ["x"])] :extra (work "x" :running :boot "boot-0"))]
     (is (= [{:op :reap :task "demo/x"}] (actions-for db)) "one action a task: its flight is one, and the spawn is the next pass's, once the reap has written :lost")
     (is (= #{} (:live (r/index db))))))
 
 ;; A lone work task, which nothing on its branch needs, merges itself (seon.task/merges?): its green end is :ready, the merge's
 ;; to make, where a work task its merge task follows is :done (a-green-work-task-judged-behind-is-done-and-its-merge-runs)
-(deftest ended-work-is-judged-by-the-done-rule
+;; Estimate: 2 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 2 judgings x 0.7M (the index and the judge-tx) ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} ended-work-is-judged-by-the-done-rule
   ;; the decision is made once, where an end's facts are in hand (`judgment`, pure), and stored on the task
   (let [db (db-of diamond :extra (work "a" :running))
         j (fn [facts] (judgment-of db "a" facts))
@@ -288,7 +301,8 @@
                (judgment-of db "b" {:end {:outcome :green} :results {(t "a") :fail (t "b") :pass}})))
         (is (= [(spawn "c")] (actions-for db)) "and c, which needs a only, starts beside it")))))
 
-(deftest a-done-counts-only-the-reds-its-change-reaches
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 judgings x 0.7M (the index and the judge-tx) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-done-counts-only-the-reds-its-change-reaches
   ;; docs/tasks.md#the-done-rule: base holds demo-test/other red and the branch's change does not reach it (main-red:
   ;; its digest is base's, or base's verdict at it is red), the task's proof green: the task is done; the same red
   ;; reached by the change (not main's) holds it, and a main red that the task names as a proof still holds it
@@ -311,7 +325,8 @@
         fake (assoc (decl "f") :seon.task/kind :merge)]
     {:step step :fake fake :decls [(decl "w") step fake (decl "l")]}))
 
-(deftest a-merge-step-is-known-by-its-needs-and-branch
+;; Estimate: 4 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 4 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 judgings x 0.7M (the index and the judge-tx) ~ 6,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-merge-step-is-known-by-its-needs-and-branch
   (let [{:keys [decls step]} step-world
         j (fn [db nm facts] (judgment-of db nm facts))]
     (testing "the :merging mark: the step while it works, a task that merges itself once judged, a :merge kind with no need never while it works"
@@ -335,7 +350,8 @@
         (is (= {:outcome :done :reasons []} (j db "w" behind)) "w is followed by a step on its branch: never behind")
         (is (= [:behind] (mapv :reason (:reasons (j db "l" behind)))) "a lone task, merging itself, is")))))
 
-(deftest a-merge-step-keeps-no-process-and-holds-where-a-task-that-merges-itself-is-told
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 4 judgings x 0.7M (the index and the judge-tx) ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-merge-step-keeps-no-process-and-holds-where-a-task-that-merges-itself-is-told
   (let [{:keys [decls]} step-world
         db (db-of decls :extra (concat (work "w-merge" :running) (work "f" :running)))
         waiting (fn [nm] {:end {:outcome :waiting} :results {(t nm) :fail}})
@@ -345,14 +361,16 @@
     (is (= :closed (:outcome (judgment-of db "w-merge" (red "w-merge")))) "the step's red holds for root")
     (is (= :told (:outcome (judgment-of db "f" (red "f")))) "the other is told")))
 
-(deftest merges-start-one-at-a-time-for-a-merge-step-read-from-data
+;; Estimate: 2 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} merges-start-one-at-a-time-for-a-merge-step-read-from-data
   (let [{:keys [fake]} step-world
         spawned #(set (map :task (filter (comp #{:spawn} :op) (actions-for %))))
         step-of (fn [nm] (assoc (decl (str nm "-merge") :needs [nm]) :seon.task/kind :work :seon.task/branch (task/default-branch (str "demo/" nm))))]
     (is (= 1 (count (spawned (db-of [(decl "a") (step-of "a") (decl "b") (step-of "b")] :extra (concat (work "a" :done) (work "b" :done)))))) "two steps, one starts")
     (is (= #{"demo/f" "demo/g"} (spawned (db-of [fake (assoc (decl "g") :seon.task/kind :merge)]))) "two tasks of kind :merge with no need, both")))
 
-(deftest a-need-that-is-a-merge-step-leaves-its-cites-out-of-the-tasks
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 2 transacts or db-withs x 50k ~ 600,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 600000}} a-need-that-is-a-merge-step-leaves-its-cites-out-of-the-tasks
   (let [{:keys [step fake]} step-world
         db0 (d/db-with (empty-db) [{:seon.doc/address "docs/vector.md#the-pyramid" :seon.doc/heading "The pyramid"}
                                    {:seon.doc/address "docs/agent.md#working-a-task" :seon.doc/heading "Working a task"}])
@@ -362,7 +380,8 @@
         db (d/db-with db0 (task/create-tx db0 ds))]
     (is (= ["docs/agent.md#working-a-task"] (mapv task/cited-name (task/task-cites db "demo/x"))))))
 
-(deftest an-agent-with-no-end-records-no-fake-spend
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 judgings x 0.7M (the index and the judge-tx) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} an-agent-with-no-end-records-no-fake-spend
   ;; task seon.model/budgets-are-data-and-spend-is-measured: the agent wrote no end (it died
   ;; or was killed before write-end!), so its turns, tokens and time are unknown: absent, never 0
   (let [db (db-of diamond :extra (work "a" :running))
@@ -372,7 +391,8 @@
     (is (= "the agent wrote no end" (:seon.task/reason tk)) "said so")
     (is (not-any? #(contains? tk %) [:seon.task/waste :seon.task/costs :seon.task/failures]) "and nothing measured of it is recorded")))
 
-(deftest an-ends-words-the-judgment-does-not-share-are-named-as-its-agents
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 3 judgings x 0.7M (the index and the judge-tx) ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-ends-words-the-judgment-does-not-share-are-named-as-its-agents
   ;; docs/reconcile.md#a-task-holds-how-its-work-ended: Context's loop D3, a task capped saying "proof-unknown ..." while root,
   ;; reading its proof green at its digest, found nothing open: the sentence stood as the task's reason beside root's outcome
   ;; and misled whoever read it. Named as its agent's, beside what root found; words root agrees with stay as they are
@@ -392,7 +412,8 @@
                          :ns 'app.gaps :ns-form? false :defs [(cond-> {:var (symbol "app.gaps" nm) :meta #{:arglists}} c (assoc :contract c))]
                          :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}}))
 
-(deftest the-judge-and-the-merge-gate-agree-on-contract-gaps
+;; Estimate: 1 test-branch! 1M + 3 fn-tx transacts 0.3M + 1 branch and connect 0.4M + 1 :branch-diff step ~1M + 1 :octopus-merge step ~2M + 1 db-of 0.5M + 1 judgment 0.7M + uncontracted over a delta ~1M ~ 7M ~ 7,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 7000000}} the-judge-and-the-merge-gate-agree-on-contract-gaps
   ;; one question, asked by the agent's done check (seon.turn), the writer's diff that root's
   ;; judge reads, and the merge gate: which functions the BRANCH adds without a contract. A
   ;; branch behind a main that fixed its own gap after the fork still holds main's old
@@ -426,7 +447,8 @@
 ;; still calls is seen whichever side the call is on: (1) an octopus merge's members, one removing f and one calling it, each pass
 ;; alone (disjoint keys) and must not merge together; (2) one branch removing f that main's unchanged g calls must not merge at all.
 ;; Read from the forms' recorded references (seon.merge/dangling): Jolt compiles x/f with no var as a lookup at each call, so a load would not see it
-(deftest a-merge-leaves-no-name-unbound
+;; Estimate: 1 test-branch! 1M + 5 source/refresh-tx of 2-line files (~0.5M each = 2.5M) + 3 branches and connects (0.5M each = 1.5M) + 3 octopus-merge and 1 merge-candidate steps (~2M each: the merge's dangling-call check over the seed's forms) ~ 13M, about 1e7 ~ 10,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-merge-leaves-no-name-unbound
   (ts/test-branch!
    (fn [cfg conn]
      (let [x "src/app/oct/x.clj" y "src/app/oct/y.clj"
@@ -463,14 +485,16 @@
              (is (= ['app.oct.x/f] (mapv :ref (:dangling rc))) "naming what main's g still calls")))
          (finally (run! d/release @conns)))))))
 
-(deftest an-agent-without-an-end-reads-nil
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M) ~ 500,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 500000}} an-agent-without-an-end-reads-nil
   ;; no end written (a silent death) is nothing to read, not an empty end; an end of an earlier wake is none of this one's
   (let [db (db-of diamond :extra (work "a" :running))]
     (is (nil? (r/pull-end db (akey "a"))))
     (is (= {:outcome :green :reason "done" :ended-turn 2} (r/pull-end (ended db "a" {:outcome :green :reason "done"} :turn 2) (akey "a")))
         "an end names its turn")))
 
-(deftest a-wake-that-wrote-no-end-is-judged-so
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 3 judgings x 0.7M (the index and the judge-tx) ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-wake-that-wrote-no-end-is-judged-so
   ;; each wake clears the end before it (seon.agent/clear-end!, seon.agent-test/a-wake-that-ran-no-turn-has-no-end): one that
   ;; died or threw silently has none on its branch, and is judged on what root measured, never on another wake's words
   (let [db (db-of diamond :extra (work "a" :running))
@@ -482,7 +506,8 @@
       (is (= :closed (:outcome (judge! db "a" nil :results {(t "a") :fail}))))
       (is (= :told (:outcome (judge! db "a" {:outcome :green :reason "all green"} :results {(t "a") :fail})))))))
 
-(deftest a-death-names-its-cause
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 judgings x 0.7M (the index and the judge-tx); 1 transacts or db-withs x 50k ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-death-names-its-cause
   ;; task seon.agent/a-death-names-its-cause: a dead agent's task carries the end it wrote
   ;; on its branch before it exited (its cause), beside the death root observed (exit status);
   ;; a silent death (no end) is named by its exit; a turn loop that threw (the agent's REPL
@@ -506,7 +531,8 @@
         (is (= "seon.turn/work! threw: boom" (:seon.task/reason tk)))
         (is (= "boom" (:seon.error/message (:seon.task/error tk))))))))
 
-(deftest an-agent-dead-in-its-turn-loop-records-its-cause
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M) ~ 500,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 500000}} an-agent-dead-in-its-turn-loop-records-its-cause
   ;; root answers the turn loop's eval with the death itself (the one error map, no eval
   ;; item): the flight reads the branch's end next and keeps the death, exit and stderr,
   ;; rather than asking the dead agent for tests and recording "no live agent"
@@ -516,7 +542,8 @@
     (is (= died (get-in st' [:flights "demo/a" :died])) "the death is the flight's cause")
     (is (= [{:op :write :req {:op :branch-db :branch :demo/a}}] (mapv :req outs)) "its end is read from the branch next")))
 
-(deftest a-refused-end-is-a-verdict-that-wakes-and-the-same-one-again-holds
+;; Estimate: 3 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 5 judgings x 0.7M (the index and the judge-tx); 2 transacts or db-withs x 50k ~ 8,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-refused-end-is-a-verdict-that-wakes-and-the-same-one-again-holds
   ;; design one-derivation 4.1 section 5 and root's ruling (2026-10-26): a work task's end the done
   ;; rule refuses is words to the agent, a :verdict message with the reasons and the facts root
   ;; judged on (v-<task>-<turn>), which wakes its session; the same reasons again hold the task
@@ -578,7 +605,8 @@
 ;; agent's is, so its client hands back again taking main (seon.server's :done), never closed for main's motion; at
 ;; :seon.config.merge/max-behind it is held as a model agent's is. Red before: closed, "ended green: behind 78" (Data model's real
 ;; task on the standing system, 2026-11-11)
-(deftest an-outside-agents-green-work-behind-main-is-judged-behind-not-closed
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 3 judgings x 0.7M (the index and the judge-tx) ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-outside-agents-green-work-behind-main-is-judged-behind-not-closed
   (let [db (db-of [(decl "a")] :extra (work "a" :running :model "outside"))
         facts {:end {:outcome :green} :results {(t "a") :pass} :behind 3}
         max-b (cfg/value :seon.config.merge/max-behind)]
@@ -586,7 +614,8 @@
     (is (= :closed (:outcome (judgment-of db "a" (assoc facts :behinds max-b)))) "at the bound: held, as a model agent's")
     (is (= :closed (:outcome (judgment-of db "a" (assoc facts :end {:outcome :red} :results {(t "a") :fail})))) "red is no motion of main: closed as before")))
 
-(deftest a-judging-retracts-what-it-does-not-set
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 judgings x 0.7M (the index and the judge-tx) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-judging-retracts-what-it-does-not-set
   ;; the judged attributes are the end's, never an earlier end's: an error and deferred results a task held from its last judging
   ;; do not survive a later one that has none (seon.task/outcome-tx)
   (let [stale {:seon.task/error {:seon.error/type :seon.fx/io-error :seon.error/message "the last gate failed"}
@@ -599,7 +628,8 @@
     (is (= stale (select-keys (task/task db "demo/a") (keys stale))) "the earlier end's facts are on the task before")
     (is (not-any? #(contains? tk %) (keys stale)) "and gone after a judging that set none of them")))
 
-(deftest a-woken-task-whose-agent-never-started-is-spawned-under-its-key
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-woken-task-whose-agent-never-started-is-spawned-under-its-key
   ;; docs/users.md#roots-agent: a parked task names an agent no root has started (a key and no boot, as root's session is at boot); a
   ;; message to that key makes the task ready, and its action is a spawn, which takes the session's key (seon.task/agent-key). The
   ;; woken check reads the task's agent key itself, so what an agent is in the index does not change (Optimization, 2026-11-08)
@@ -609,7 +639,8 @@
     (is (= [(spawn "a")] (actions-for db :woken ["never-started"])) "woken, it is spawned")
     (is (= "never-started" (task/agent-key db "demo/a")) "under its own key")))
 
-(deftest a-wake-whose-parked-process-is-gone-is-lost-and-the-next-start-a-spawn
+;; Estimate: 2 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 transacts or db-withs x 50k ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-wake-whose-parked-process-is-gone-is-lost-and-the-next-start-a-spawn
   ;; flow-lab's hazard 6 (design agent-loop section 4): the parked process died before the wake's
   ;; work! reached it, so root answers that agent ended; the task took nothing, so it is :lost, not a
   ;; death, and the session's next start is a spawn, a load of the session, never a wake of a
@@ -627,7 +658,8 @@
            (actions-for (db-of [(decl "a")] :extra (work "a" :lost)) :woken [(akey "a")]))
         "the next start is a spawn")))
 
-(deftest the-judge-reads-its-branch-in-one-request
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M) ~ 500,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 500000}} the-judge-reads-its-branch-in-one-request
   ;; task seon.reconcile/the-judge-reads-its-branch-in-one-request: once the tests answer, the flight
   ;; asks the writer once (:branch-diff, whose answer holds the head, its merge base and what it
   ;; changed), never :branch-db then :branch-diff; that one answer is what the task is judged on
@@ -644,7 +676,8 @@
       (is (some #(= [:db/cas [:seon.task/id "demo/a"] :seon.task/outcome :running :closed] %) (get-in (second outs) [:req :req :tx-data]))
           "and its end judged from that one answer"))))
 
-(deftest a-typed-error-from-work-or-the-judge-holds-the-task-and-is-no-death
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 transacts or db-withs x 50k ~ 600,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 600000}} a-typed-error-from-work-or-the-judge-holds-the-task-and-is-no-death
   ;; docs/errors.md: an error flows to whoever can fix it. :briefed, :worked and :tested each took any typed error for the
   ;; agent's death: data's agent "died" before turn 1 when its prove answered no verdict (tests, 2026-11-12). Only
   ;; :seon.agent/died, :seon.system/no-agent and :seon.system/ended are deaths (as :spawned reads them); any other error holds
@@ -670,7 +703,8 @@
             [st _] (#'r/advance (st-of db :flights {"demo/a" (assoc flight :step :tested)}) "demo/a" :tested died)]
         (is (some #(= :dead-read %) (map second (vals (:pending st)))) "it reads the agent's end")))))
 
-(deftest a-task-is-judged-with-how-far-behind-main-its-branch-was
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 judgings x 0.7M (the index and the judge-tx); 1 transacts or db-withs x 50k ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-task-is-judged-with-how-far-behind-main-its-branch-was
   ;; the wiring of gap 7: the writer's :theirs reaches the judging as the done rule's :behind, and the reasons say so
   (let [db (db-of [(decl "a")] :extra (work "a" :running))
         flight {:act {:op :spawn :task "demo/a" :env {:branch :demo/a}} :agent :a-a :step :diffed :results {}}
@@ -682,7 +716,8 @@
     (is (= {:reason :behind :behind 4} (first (:verdict (judgment-of db "a" {:end {:outcome :green} :results {(t "a") :pass} :behind 4}))))
         "the verdict told to the session leads with how far behind it was")))
 
-(deftest a-refused-diff-ends-the-task-with-its-cause
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 transacts or db-withs x 50k ~ 600,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 600000}} a-refused-diff-ends-the-task-with-its-cause
   ;; the writer refuses to diff the branch: the task is not judged on facts nobody
   ;; measured (no changed keys, no gaps); its agent is stopped and the task ends with the
   ;; reason as its error, the read not asked again
@@ -695,7 +730,8 @@
     (is (= [:closed "no branch :demo/a" no] ((juxt :seon.task/outcome :seon.task/reason :seon.task/error) tk)))
     (is (= :done (get-in st' [:pending (:tag (second outs)) 1])) "its flight ends with the write")))
 
-(deftest a-judged-task-that-is-no-longer-running-is-closed
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 judgings x 0.7M (the index and the judge-tx) ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-judged-task-that-is-no-longer-running-is-closed
   ;; a merge ready for the octopus merge whose task was cancelled meanwhile is closed, never merged
   (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :ready) (task/execution-tx ["demo/a-merge"] :cancelled)))]
     (is (= [{:op :close :task "demo/a-merge"}] (actions-for db)))
@@ -704,7 +740,8 @@
                         {:end {:outcome :green} :results {(t "a") :pass}}))
         "and a cancelled task whose agent ended is judged closed")))
 
-(deftest done-explain-table
+;; Estimate: pure data in, pure data out, a few 10k ticks ~ 50,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 50000}} done-explain-table
   (are [in expected] (= expected (mapv (juxt :reason :symbol) (r/done-explain in)))
     {:proofs #{'p/a} :results {'p/a :pass} :main-green #{} :allowed-red #{} :uncontracted #{}} []
     {:proofs #{} :results {} :main-green #{} :allowed-red #{} :uncontracted #{}} [[:no-proofs nil]]
@@ -717,13 +754,15 @@
     {:proofs #{'p/a} :results {'p/a :pass} :main-green #{} :allowed-red #{} :uncontracted #{'app/f}} [[:contract-gap 'app/f]]
     {:proofs #{'p/a} :results {'p/a :pass} :main-green #{} :allowed-red #{} :uncontracted #{} :unmerged ["[:var app/f]"]} [[:unmerged nil]]))
 
-(deftest the-writer-refuses-cycles-and-unknown-needs
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M) ~ 500,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 500000}} the-writer-refuses-cycles-and-unknown-needs
   (let [db (empty-db)]
     (is (= :seon.task/refused (:seon.error/type (task/create-tx db [(decl "a" :needs ["b"]) (decl "b" :needs ["a"])]))))
     (is (= :seon.task/refused (:seon.error/type (task/create-tx db [(decl "a" :needs ["nope"])]))))
     (is (vector? (task/create-tx db diamond)))))
 
-(deftest regression-is-judged-against-main-at-the-judgings-basis
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 judgings x 0.7M (the index and the judge-tx) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} regression-is-judged-against-main-at-the-judgings-basis
   ;; x merged at main t 100; y (independent of x) was observed against main at t 50,
   ;; before x's merge, so x's red proof there is not a regression of the main y holds
   (let [two [(decl "x") (decl "y")]
@@ -732,7 +771,8 @@
     (is (= {:outcome :ready :reasons []} (y 50)))
     (is (= :told (:outcome (y 150))) "refused: told the agent")))
 
-(deftest contracts-are-checked
+;; Estimate: pure data in, pure data out, a few 10k ticks ~ 50,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 50000}} contracts-are-checked
   ;; with the contracts on (:seon.config.contract/instrument, config: in every digest), a call
   ;; outside its contract is refused at entry with the one error map. (It read an inherited
   ;; PROTO_INSTRUMENT, an input no digest held; pure-tests 2026-10-23.)
@@ -742,7 +782,8 @@
 
 ;; ---- true branches: merge tasks, unmerged entries, behind, a refused run held for root ----
 
-(deftest plan-and-proofs-accumulate-along-needs
+;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} plan-and-proofs-accumulate-along-needs
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])])
         acc #(:seon.task/accumulated (task/task db %))]
     (testing "a merge task inherits its work task's plan and proofs"
@@ -756,7 +797,8 @@
              (mapv (juxt :reason :symbol)
                    (r/done-explain (r/done-input (r/index db) "demo/b-merge" {(t "b") :pass (t "a") :fail} #{} [] nil nil #{}))))))))
 
-(deftest an-index-observed-from-the-last-is-the-index-listed
+;; Estimate: 1 db-of 0.5M + 7 steps, each a d/with 0.05M + the full index listed at the new db 0.6M + the index observed from the last by a diff 0.3M + by a commit's ops 0.3M = 1.25M each ~ 9.3M, about 1e7 ~ 10,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} an-index-observed-from-the-last-is-the-index-listed
   (observed-steps (db-of diamond)
                   [["a plan improved" [{:seon.task/id "demo/b" :seon.task/plan "Make b truer."}]]
                    ["a task started" (work "a" :running)]
@@ -766,7 +808,8 @@
                    ["a proof added" [{:seon.task/id "demo/a" :seon.task/proofs #{(t "a") 'demo-test/more}}]]
                    ["a new boot" (booted-tx "boot-2" 4)]]))
 
-(deftest an-agents-boot-moving-re-derives-every-task-that-names-it
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 3 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 2 transacts or db-withs x 50k ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-agents-boot-moving-re-derives-every-task-that-names-it
   ;; on a stage two tasks hold one agent (:seon.task/agent on both): the agent's boot moving moves what the index
   ;; derives of BOTH, and the index observed from the last is the one listed
   (let [br (task/default-branch "demo/d")
@@ -785,7 +828,8 @@
         (is (= #{} (ready (r/index db))))
         (is (= #{"demo/d" "demo/i"} (ready (r/wake (r/index db) db k))))))))
 
-(deftest actions-read-the-judgment-stored-on-the-task
+;; Estimate: 2 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 3 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 5 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 8,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 8000000}} actions-read-the-judgment-stored-on-the-task
   ;; the decision is made once, at the agent's end (`judgment`) and written; `actions` reads the outcome stored, never the done rule
   (let [octopus {:op :octopus-merge :task "demo/a-merge" :members [{:task "demo/a-merge"}]}
         gate {:seon.system/id :root :seon.config.source/gate-checkout "/the/merges/tree"}
@@ -804,7 +848,8 @@
       (is (= [] (actions-for (db-of [(decl "a")] :extra (concat (work "a" :closed :members {:seon.task/reasons [{:reason :proof-red :symbol (t "a")}]})
                                                                 (task/execution-tx ["demo/a"] :held)))))))))
 
-(deftest every-message-a-reconciler-write-holds-wakes-its-recipient
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M) ~ 500,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 500000}} every-message-a-reconciler-write-holds-wakes-its-recipient
   ;; docs/users.md#messages: a write the reconciler builds (seon.reconcile/write) holds a wake for every :seon.message/to its transaction
   ;; carries, not only for the one tell-tx adds, so a verdict the judge writes to the agent itself (:told) wakes it as a person's message
   ;; does (a refused green waited for a restart: an audit, 2026-11-08)
@@ -817,7 +862,8 @@
           [st _] (#'r/write (st-of db) "demo/a" :done by-id)]
       (is (= #{(akey "a")} (get-in st [:idx :late])) "a recipient named by its entity id too; a tempid, an entity the write makes, is owed nothing"))))
 
-(deftest a-parked-task-is-woken-only-by-a-wake
+;; Estimate: 2 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 3 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-parked-task-is-woken-only-by-a-wake
   ;; idx-ready?: parked or told, a task is ready again only when its agent is woken (r/wake: a message reached it, over the
   ;; reconciler's :wake port); a wake for a running agent starts nothing and is held until it waits (docs/users.md#messages)
   (let [br (task/default-branch "demo/a")
@@ -833,7 +879,8 @@
         (is (= [] (r/actions idx)))
         (is (= [#{} #{(akey "a")}] [(:woken idx) (:late idx)]))))))
 
-(deftest a-wake-raises-max-turns-by-its-allowance
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 transacts or db-withs x 50k ~ 600,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 600000}} a-wake-raises-max-turns-by-its-allowance
   ;; docs/users.md#messages: the write that starts a woken agent raises :seon.agent/max-turns by :seon.config.agent/wake-turns, whoever sent
   ;; the message and whatever the task stood at, a cap included; a start with no wake raises nothing; the start consumes the wake
   (let [allowance (cfg/value :seon.config.agent/wake-turns)
@@ -851,7 +898,8 @@
         (is (not (contains? woken k)) "and the start consumes the wake")
         (is (= (max-of db) (max-of (:db (started db false)))) "a start with no wake leaves the budget")))))
 
-(deftest a-kept-message-does-not-wake-again
+;; Estimate: 1 test-branch! x 1M (a pointer write, connect, release, delete); 3 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-kept-message-does-not-wake-again
   ;; docs/users.md#messages: only a send wakes. A wake for an agent that was running is held until it waits, then looked at against its branch:
   ;; a message not on its branch wakes it; one it holds (and keeps) does not
   (ts/test-branch!
@@ -880,7 +928,8 @@
                   (is (= [] (r/actions (:idx st)))))
                 (finally (d/release bc)))))))))
 
-(deftest two-agents-answering-each-other-end
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 2 transacts or db-withs x 50k ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} two-agents-answering-each-other-end
   ;; docs/users.md#messages: each message wakes the agent it is to and raises its budget by the allowance; the exchange ends because an agent
   ;; stops answering (a reply with no message sent), and for no other reason. Nothing in the system bounds a pair that keeps answering:
   ;; each wake adds the allowance, and the sum grows with the exchange (a total limit is undecided).
@@ -941,7 +990,8 @@
       (d/transact conn [{:seon.task/id "demo/u0" :seon.task/plan "Make u0 truer."}])
       [(r/index db0) db0 @conn])))
 
-(deftest an-index-is-observed-at-the-cost-of-what-changed
+;; Estimate: the proofs' disk store seeded once per process (2,000 datoms; this test runs first so it pays it, 10M by 5k ticks a datom, measured about 70M) + sizes 10, 30, 100: each its input (140 tasks x ~60k create-tx = 8M, three transacts a size, the index and the changed plan) + the proof's own per-size work (fixed 1.05M x 3 + 100k x 140 = 17M) ~ 40M by the constants; 1e8 holds the measured seed ~ 100,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 100000000}} an-index-is-observed-at-the-cost-of-what-changed
   (do
     (cost/proof {:of 'seon.reconcile/index :input 'seon.reconcile-test/observed-input
                  :n "unrelated tasks on main, beside one whose plan changed"
@@ -979,7 +1029,8 @@
     (d/transact conn (booted-tx "boot-1" 4))
     [@conn]))
 
-(deftest an-index-is-listed-at-the-cost-of-its-tasks
+;; Estimate: sizes 5, 15, 50 on the shared disk store (its seed paid by the observed proof): 70 tasks x ~75k create-tx with a 1.4 KB plan = 5M + the listing proof's own work (fixed 0.2M x 3 + 100k x 70 = 7.6M) ~ 12.6M, about 1e7 ~ 10,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} an-index-is-listed-at-the-cost-of-its-tasks
   ;; an agent's first request build lists the index (seon.agent/reconcile-index); every reconciler helper
   ;; takes the index, so its contract checks it shallowly (each entry is checked where it enters)
   (do
@@ -1002,7 +1053,8 @@
                  :per-n {:ticks 100000.0 :bytes 320000.0 :calls 11.0}
                  :sizes listed-sizes})))
 
-(deftest with-merge-chains-work-through-merges
+;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 3 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 transacts or db-withs x 50k ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} with-merge-chains-work-through-merges
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])])]
     (is (= {:seon.task/kind :merge :seon.task/needs #{"demo/a"} :seon.task/branch :task-demo-a}
            (select-keys (task/task db "demo/a-merge") [:seon.task/kind :seon.task/needs :seon.task/branch])))
@@ -1014,14 +1066,16 @@
         (testing "b waits for a's merge, not a's work"
           (is (= #{"demo/a-merge"} (r/blocked-by (r/index db) "demo/b"))))))))
 
-(deftest green-merge-task-merges
+;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 judgings x 0.7M (the index and the judge-tx); 1 transacts or db-withs x 50k ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} green-merge-task-merges
   ;; an octopus merge of one: no other merge runs
   (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :running)))]
     (is (= {:outcome :ready :reasons []} (judgment-of db "a-merge" {:end {:outcome :green} :results {(t "a") :pass}})) "a green end is a merge ready")
     (is (= [{:op :octopus-merge :task "demo/a-merge" :members [{:task "demo/a-merge"}]}]
            (actions-for (d/db-with db (task/move-tx "demo/a-merge" :running :ready {})))))))
 
-(deftest a-whole-task-works-in-parallel-and-its-green-merges
+;; Estimate: 3 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 judgings x 0.7M (the index and the judge-tx) ~ 4,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-whole-task-works-in-parallel-and-its-green-merges
   ;; owner, 2026-10-26 (seon.template/request): a whole task's agents start as work does, not one at a
   ;; time as merges do; its green end merges into main as a merge task's does; out of turns, it stays at its cap
   (let [whole (fn [nm] (assoc (decl nm) :seon.task/kind :whole))
@@ -1040,7 +1094,8 @@
     (is (= [:told [:unmerged]]
            ((juxt :outcome #(mapv :reason (:verdict %))) (j {:end {:outcome :green} :results {(t "a") :pass} :unmerged ["[:var app/f]"]}))))))
 
-(deftest a-requests-green-work-is-merged-by-its-merge-task
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 3 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 judgings x 0.7M (the index and the judge-tx); 3 transacts or db-withs x 50k ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-requests-green-work-is-merged-by-its-merge-task
   ;; owner, 2026-10-26: "design-build and merge" (seon.template/design-build, an experiment's choice): the green design-build task is done, not merged
   ;; by itself; its merge task then runs on the branch, and its green end is the octopus merge
   (let [db-req (fn [extra] (let [db (empty-db) ds (tpl/design-build (decl "a"))]
@@ -1053,7 +1108,8 @@
            (actions-for (db-req (concat (work "a" :done) (work "a-merge" :ready)))))
         "and the merge task's green end is the merge")))
 
-(deftest a-merge-with-deferred-tests-is-gated-with-nobody-asking
+;; Estimate: 3 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 3 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 judgings x 0.7M (the index and the judge-tx); 1 transacts or db-withs x 50k ~ 6,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-merge-with-deferred-tests-is-gated-with-nobody-asking
   ;; the owner's ruling (2026-10-27: process tests the change reaches run automatically at the
   ;; judge; it replaces 2026-10-23's "never automatically" for merges): the process tests a
   ;; branch's change reaches run before its merge, on a worktree of the root's declared gate
@@ -1108,7 +1164,8 @@
         (is (= :closed (:outcome j)))
         (is (str/includes? (:hold j) "no checkout to run them on"))))))
 
-(deftest what-no-gate-runs-is-said-and-what-a-task-owes-is-its-proofs
+;; Estimate: 4 db builds (test-db fork 0.1M + the root-tx transact 50k = 0.15M each, 0.6M) + 7 task/proof? and unjudged calls of ~10k each ~ 0.7M ~ 700,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 700000}} what-no-gate-runs-is-said-and-what-a-task-owes-is-its-proofs
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: seon.task/proof? is the one reading, a test var against the accumulated proofs (a
   ;; namespace's name is no proof); seon.task/unjudged says what the gate leaves and why, for the status and the run's end
   (let [t 'seon.system-test/boots u 'seon.system-test/other
@@ -1123,7 +1180,8 @@
     (is (= [t u] (:tests (task/unjudged (db gate) (assoc tk :seon.task/kind :design) [t u]))) "a design: all")
     (is (= {:tests [u]} (select-keys (task/unjudged (db (assoc gate :seon.system/started-by (str u))) tk [t u]) [:tests])) "the test that started this root: itself")))
 
-(deftest a-deferred-proof-is-neither-red-nor-unknown
+;; Estimate: pure data in, pure data out, a few 10k ticks ~ 50,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 50000}} a-deferred-proof-is-neither-red-nor-unknown
   ;; owner's ruling (2026-10-23): a process test never runs in an agent's turn or root's judge,
   ;; a proof among them; the done rule reads it as deferred to root's gate, and still refuses a
   ;; proof that is neither green nor deferred
@@ -1132,7 +1190,8 @@
     (is (= [] (r/done-explain (assoc in :deferred #{'app/q}))))
     (is (= [{:reason :proof-red :symbol 'app/p}] (r/done-explain (assoc in :results {'app/p :fail} :deferred #{'app/q}))))))
 
-(deftest merges-run-one-at-a-time
+;; Estimate: 2 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} merges-run-one-at-a-time
   ;; git's merge queue: a merge agent's last merge-main and root's merge see the same main,
   ;; so a merge is never behind; work tasks still run in parallel
   (let [three [(decl "x") (decl "y") (decl "z")]
@@ -1148,7 +1207,8 @@
     (testing "work tasks are not queued"
       (is (= ["demo/x" "demo/y" "demo/z"] (map :task (actions-for (mdb three))))))))
 
-(deftest boot-records-merge-max-running-one
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 transacts or db-withs x 50k ~ 600,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 600000}} boot-records-merge-max-running-one
   ;; DECISIONS: octopus merges stay off (one merge at a time) until the octopus merge's combined test run
   ;; and the par-200 hang are fixed; the config value in force is a fact on main a person can read
   (let [n (cfg/value :seon.config.agent/max-running)
@@ -1156,7 +1216,8 @@
     (is (= 1 (cfg/value :seon.config.merge/max-running)))
     (is (= {:boot "boot-1" :max-running n :max-merging 1} (task/root db)) "both config keys are recorded at boot")))
 
-(deftest two-ready-disjoint-merges-run-one-at-a-time-by-default
+;; Estimate: 2 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} two-ready-disjoint-merges-run-one-at-a-time-by-default
   ;; x and y change disjoint definitions: an octopus merge could take both, but the config says 1
   (let [two [(decl "x") (decl "y")]
         extra (concat (work "x" :done :members {:seon.task/changed #{"[:var app.m/x]"}}) (work "y" :done :members {:seon.task/changed #{"[:var app.m/y]"}}))]
@@ -1165,13 +1226,15 @@
       (is (= ["demo/x-merge" "demo/y-merge"]
              (map :task (filter #(= :spawn (:op %)) (actions-for (mdb two :extra (concat extra (ts/root-tx {:seon.config.merge/max-running 8})))))))))))
 
-(deftest unmerged-refuses-done
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 judgings x 0.7M (the index and the judge-tx) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} unmerged-refuses-done
   (let [db (db-of diamond :extra (work "a" :running))
         reasons [{:reason :unmerged :key "[:var app/f]"}]]
     (is (= {:outcome :told :reasons reasons :verdict reasons}
            (judgment-of db "a" {:end {:outcome :green} :results {(t "a") :pass} :unmerged ["[:var app/f]"]})))))
 
-(deftest an-open-problem-its-work-caused-refuses-done
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 judgings x 0.7M (the index and the judge-tx) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} an-open-problem-its-work-caused-refuses-done
   ;; docs/health.md: recorded at its end (seon.problems/caused), refused by
   ;; the done rule, so the agent is told naming it (a :verdict); its evaluations were never refused
   (let [msg "docs/x.md#y cites app/f, which names nothing"
@@ -1181,12 +1244,14 @@
     (is (= reasons
            (r/done-explain {:proofs #{(t "a")} :results {(t "a") :pass} :main-green #{} :allowed-red #{} :uncontracted #{} :caused #{msg}})))))
 
-(deftest behind-merge-gets-a-new-agent
+;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} behind-merge-gets-a-new-agent
   (testing "root's merge found main moved: the merge task starts again, the same session; no catch-up"
     (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :behind)))]
       (is (= [(mspawn "a-merge")] (actions-for db))))))
 
-(deftest a-merge-behind-again-and-again-is-held-for-root
+;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 4 transacts or db-withs x 50k ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-merge-behind-again-and-again-is-held-for-root
   ;; task seon.system/a-behind-merge-is-bounded-and-merges-main-first (gap 4): a :behind answer is green, so max-merge-turns
   ;; never counted it and a merge refused behind ran again for ever; past :seon.config.merge/max-behind
   ;; behind judgings of one merge task (its outcome's history) the next behind answer holds the task for root with the evidence
@@ -1212,7 +1277,8 @@
       (is (= :closed (:seon.task/outcome tk)))
       (is (= :seon.merge/behind (:seon.error/type (:seon.task/error tk))) "with the writer's evidence"))))
 
-(deftest a-branch-behind-main-is-told-so-first
+;; Estimate: pure data in, pure data out, a few 10k ticks ~ 50,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 50000}} a-branch-behind-main-is-told-so-first
   ;; task seon.system/a-behind-merge-is-bounded-and-merges-main-first (gap 7): a branch behind main was judged
   ;; on a program main had moved from and read "proof-unknown"; the done rule leads with the fix, and the judging
   ;; records how far behind it was (a-task-is-judged-with-how-far-behind-main-its-branch-was)
@@ -1221,7 +1287,8 @@
     (is (= "behind 3; proof-unknown p/a" (r/explain-text (r/done-explain in))))
     (is (= [{:reason :proof-unknown :symbol 'p/a}] (r/done-explain (dissoc in :behind))) "a branch not behind is judged as before")))
 
-(deftest a-green-work-task-judged-behind-is-done-and-its-merge-runs
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 judgings x 0.7M (the index and the judge-tx) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-green-work-task-judged-behind-is-done-and-its-merge-runs
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a green end of a work task judged behind main's newer
   ;; merges is done, and its merge task (which merges main into the branch and is gated) runs next; told again it
   ;; was held for root once :seon.config.merge/max-behind of its judgings were behind a busy main (bin/check swarm held
@@ -1233,7 +1300,8 @@
     (is (= {:reason :behind :behind 4} (first (:verdict (judged [(decl "a") (decl "b" :needs ["a"])]))))
         "a follower that is no merge task brings no main in: told it is behind")))
 
-(deftest design-may-leave-its-proofs-red
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 4 transacts or db-withs x 50k ~ 700,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 700000}} design-may-leave-its-proofs-red
   ;; a design step's work is the plan: done only when the plan differs from the one it began with
   (are [in expected] (= expected (mapv :reason (r/done-explain in)))
     {:kind :design :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{} :plan "B" :plan-before "A"} []
@@ -1257,7 +1325,8 @@
         db (d/db-with db (task/create-tx db d))]
     (-> db (d/db-with (task/execution-tx ["demo/a"] :running)) (d/db-with (booted-tx "boot-1" 4)) (d/db-with extra))))
 
-(deftest a-design-step-is-not-done-at-its-start
+;; Estimate: 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 judgings x 0.7M (the index and the judge-tx) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-design-step-is-not-done-at-its-start
   ;; measured 2026-10-21: a design ended :done :green with 0 turns; its proofs may stay
   ;; red, so at its start nothing refused it
   (let [db (design-db (work "a" :running))
@@ -1269,7 +1338,8 @@
       (is (= {:outcome :told :reasons [{:reason :no-design}] :verdict [{:reason :no-design}]}
              (judgment-of db "a" {:end {:outcome :green} :results {(t "a") :fail} :plan plan :plan-before plan}))))))
 
-(deftest a-design-step-is-done-when-it-improved-the-plan
+;; Estimate: 1 judgings x 0.7M (the index and the judge-tx) ~ 700,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 700000}} a-design-step-is-done-when-it-improved-the-plan
   ;; root's judge carries the plan the agent improved on its branch to main (judge)
   (let [better "Make a true. Design: (defn f [xs] ...) one pass over xs."
         {:keys [db outcome]} (judge! (design-db (work "a" :running)) "a" {:outcome :green} :results {(t "a") :fail}
@@ -1277,7 +1347,8 @@
     (is (= :ready outcome))
     (is (= better (:seon.task/plan (task/task db "demo/a"))) "and the plan is on main")))
 
-(deftest a-refused-end-holds-its-task-and-creates-none
+;; Estimate: 1 test-branch! x 1M (a pointer write, connect, release, delete); 6 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 4 judgings x 0.7M (the index and the judge-tx); 2 transacts or db-withs x 50k ~ 10,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-refused-end-holds-its-task-and-creates-none
   (ts/test-branch! (fn [_ conn]
   ;; owner, 2026-10-23: "no automatic retries, send it to root to decide if it should be
   ;; retried", and root, 2026-10-26: a work task's refused end is told to the agent once (a
@@ -1337,7 +1408,8 @@
         (is (= reason (:seon.task/error tk)) "the writer's reason, on the task")))))
 ))
 
-(deftest a-merge-of-source-with-no-file-records-what-it-wrote-no-file-for
+;; Estimate: 1 test-branch! x 1M (a pointer write, connect, release, delete); 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 2 transacts or db-withs x 50k ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-merge-of-source-with-no-file-records-what-it-wrote-no-file-for
   (ts/test-branch! (fn [_ conn]
   ;; a merged member that changed no source file: no write-back runs and its task holds no error;
   ;; one whose files main holds no text for holds a typed :seon.git/commit-failed error naming them
@@ -1370,7 +1442,8 @@
         (is (= ["src/app/none.clj"] (:seon.git/files (:seon.task/error tk))) "held as a lost write-back, named by file"))))))
 )
 
-(deftest a-failed-write-back-is-a-root-cause-until-a-commit-holds-its-files
+;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 4 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 3 transacts or db-withs x 50k ~ 4,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-failed-write-back-is-a-root-cause-until-a-commit-holds-its-files
   ;; the :git effect refused the write-back of a merged task (a locked ref): it holds a typed error naming the files,
   ;; quiescence names it, and a later commit of them (my.root/write-back!) clears it; a commit that
   ;; left a file out (main has no text for it) holds the error again, for that file alone
@@ -1399,7 +1472,8 @@
       (is (= ["src/app/m.clj"] (:seon.git/files (:seon.task/error (task-of partial)))))
       (is (= 1 (count (r/root-causes (r/index partial))))))))
 
-(deftest a-held-task-shows-its-reason-among-the-problems
+;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 judgings x 0.7M (the index and the judge-tx) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-held-task-shows-its-reason-among-the-problems
   (let [red [{:reason :proof-red :symbol (t "add")}]
         {db' :db} (judge! (mdb [(decl "add")] :extra (work "add" :running :members {:seon.task/reasons red})) "add" {:outcome :red} :results {(t "add") :fail})
         [row & more] (get-in (problems/report db') [:classes :failed :rows])]
@@ -1409,7 +1483,8 @@
     (is (= [(t "add")] (get-in row [:evidence :red])) "with its measured evidence")
     (is (= [] (:answered-by row)) "its own evidence is not an answer to it")))
 
-(deftest roots-release-starts-again-on-the-same-branch-with-the-evidence
+;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 judgings x 0.7M (the index and the judge-tx); 2 transacts or db-withs x 50k ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} roots-release-starts-again-on-the-same-branch-with-the-evidence
   (let [red [{:reason :proof-red :symbol (t "add")}]
         db (mdb [(decl "add")] :extra (work "add" :running :members {:seon.task/reasons red}))
         {db' :db} (judge! db "add" {:outcome :red} :results {(t "add") :fail})
@@ -1428,7 +1503,8 @@
         (is (= "a-add" (:agent (:seon.task/failure tk))))))
     (is (not= :failed (r/task-state (r/index released) "demo/add")) "released, it is no longer failed")))
 
-(deftest an-idle-system-does-nothing-after-a-reason
+;; Estimate: 1 test-branch! x 1M (a pointer write, connect, release, delete); 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 judgings x 0.7M (the index and the judge-tx); 2 transacts or db-withs x 50k ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-idle-system-does-nothing-after-a-reason
   (ts/test-branch! (fn [_ conn]
   ;; the reconciler proc's own steps: the reason's hold is one write, made where it was judged (the judging); once it is committed
   ;; nothing is left to do (quiet, naming the held task as a root cause); a root-only commit after it asks nothing
@@ -1452,12 +1528,14 @@
       (is (empty? (reqs outs3)) "a commit of root's own report asks nothing")))))
 )
 
-(deftest stuck-names-cancelled-and-held-roots
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} stuck-names-cancelled-and-held-roots
   (let [db (db-of diamond :extra (concat (merged "a") (task/execution-tx ["demo/b"] :cancelled) (task/execution-tx ["demo/c"] :held)))]
     (is (= [{:task "demo/b" :cause "cancelled" :blocks ["demo/d"]} {:task "demo/c" :cause "held" :blocks ["demo/d"]}]
            (r/root-causes (r/index db))))))
 
-(deftest hairy-rule
+;; Estimate: pure data in, pure data out, a few 10k ticks ~ 50,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 50000}} hairy-rule
   ;; refs: the task's proofs and the names its plan's cites hold (the facts its write derived, never its text re-parsed)
   (let [refs '#{app/g app/f app.proofs/a-test}
         c (fn [k sides] (into {:key [:var k]} (for [s sides] [s {:src "x"}])))
@@ -1472,7 +1550,8 @@
       [(c 'app.proofs/a-test [:base :ours])] 0 :deleted-by-them-referenced
       [(c 'app/f [:base :ours :theirs])] 3 :merge-turns)))
 
-(deftest quiescence-is-reported-when-nothing-can-move
+;; Estimate: 1 test-branch! x 1M (a pointer write, connect, release, delete); 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} quiescence-is-reported-when-nothing-can-move
   (ts/test-branch! (fn [_ conn]
   ;; the reconciler proc's own steps over real commits: a task held for root and its dependents, nothing live
   (let [db (mdb [(decl "add") (decl "twice" :needs ["add"])]
@@ -1509,7 +1588,8 @@
           (is (nil? (report-in outs4)))))))))
 )
 
-(deftest every-way-a-task-leaves-running-writes-its-outcome
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 transacts or db-withs x 50k ~ 600,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 600000}} every-way-a-task-leaves-running-writes-its-outcome
   ;; root, 2026-10-26: a task with no outcome reads as a running one (an agent's ctx and its page's tile read it so),
   ;; so every way root moves a task off :running writes one with its reason: a reap (root restarted), a kill of a
   ;; live agent, a death, the writer refusing to read its branch; a refused spawn and a lost wake (their own tests), and
@@ -1527,7 +1607,8 @@
                                          (contract/error :seon.writer/refused 'seon.writer/refused "no branch :task-demo-a" {}))))
         "the writer refused its branch: closed, with its reason")))
 
-(deftest a-stall-task-starts-no-agent
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-stall-task-starts-no-agent
   ;; owner, 2026-10-26: "Hold off launching paid agents for now": root's stall task is created and
   ;; shown, and worked by a Claude session through seon_attach; the reconciler forks nothing for it
   (let [db (db-of [(tpl/stall :a1 "demo/t#1" {:quiet-ms 4000 :pid 77})] :released [])]
@@ -1536,7 +1617,8 @@
 
 (def ^:private held-why "branch :demo/a is held by live agent a9")
 
-(deftest a-refused-spawn-writes-the-refused-outcome
+;; Estimate: 1 test-branch! x 1M (a pointer write, connect, release, delete); 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 2 transacts or db-withs x 50k ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-refused-spawn-writes-the-refused-outcome
   (ts/test-branch! (fn [_ conn]
   ;; root refuses the spawn (the branch is held, or too many live agents): the refused answer is
   ;; the task's outcome, written on main, and the next pass starts the task again
@@ -1554,7 +1636,8 @@
     (is (= [(spawn "a")] (actions-for (d/db-with db written))) "the next pass starts the task again"))))
 )
 
-(deftest a-refused-task-asks-again-when-main-moves
+;; Estimate: 1 test-branch! x 1M (a pointer write, connect, release, delete); 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 transacts or db-withs x 50k ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-refused-task-asks-again-when-main-moves
   (ts/test-branch! (fn [_ conn]
   ;; if nothing has changed, asking again is refused again: neither the refused answer nor
   ;; its own commit starts the task; other work on main lets it ask again
@@ -1582,7 +1665,8 @@
 ;; judged (a done task's process still ending) asks again once that agent is stopped, with nothing else moving main. The order is
 ;; forced: the holder's end comes after the refusal. Red before: the refusal waited for main to move for another reason, the
 ;; holder's end moves no fact the index reads, and the task stayed refused (batch 78's e2e-newns, 2026-11-11)
-(deftest a-refused-start-is-asked-again-when-its-holder-ends
+;; Estimate: 1 test-branch! x 1M (a pointer write, connect, release, delete); 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 transacts or db-withs x 50k ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-refused-start-is-asked-again-when-its-holder-ends
   (ts/test-branch! (fn [_ conn]
   (let [commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
         main (fn [st db ops] (r/reconciler-proc st :main (assoc (ts/commit-of conn db) :ops ops)))
@@ -1599,15 +1683,47 @@
         [st outs3] (r/reconciler-proc st :answers {:tag (:tag w) :r {:ok true}})
         [db2 ops2] (commit db (get-in w [:req :req :tx-data]))
         [st outs4] (main st db2 ops2)
-        ;; the holder's end, after the refusal: root answers the stop
-        [_ outs5] (if k (r/reconciler-proc st :answers {:tag (:tag k) :r {:killed :a-a}}) [st {}])]
+        ;; root answers the stop: an answer is no fact, and asks nothing again
+        [st outs5] (if k (r/reconciler-proc st :answers {:tag (:tag k) :r {:killed :a-a}}) [st {}])
+        ;; the holder's end, after the refusal: root records its process ended (seon.task/agent-tx's :seon.process/ended-ms)
+        [db3 ops3] (commit db2 [{:seon.process/id "p-a-a" :seon.process/ended-ms 1}])
+        [_ outs6] (main st db3 ops3)]
     (is (= ["demo/b"] (spawns outs)) "b is asked for")
     (is (= [:a-a] (kills outs2)) "refused by a done task's agent: that agent is stopped")
     (is (= [] (spawns outs3)) "the write's answer starts nothing")
     (is (= [] (spawns outs4)) "nor does the refused answer's own commit")
-    (is (= ["demo/b"] (spawns outs5)) "the holder's end: b asks again, nothing else having moved main")))))
+    (is (= [] (spawns outs5)) "nor the stop's answer: it is no fact")
+    (is (= ["demo/b"] (spawns outs6)) "the holder's end, a fact on main: b asks again, nothing else having moved main")))))
 
-(deftest a-start-refused-by-a-working-agent-stops-nothing
+;; docs/reconcile.md#a-task-holds-how-its-work-ended (context's worktree run, 2026-11-12 18:01): a task told and woken while its own
+;; agent's process is still ending is refused, its branch held by that process; nothing is stopped (its task is told, not done), and
+;; it asked again only when main moved for another reason: it stood :running/:refused for an hour. The process's end is a fact on
+;; main (:seon.process/ended-ms), and a commit holding one lets a refused start ask again.
+;; Estimate: as its neighbour: 1 test-branch! x 1M, 1 db-of x 0.5M, three commits and the reconciler's steps ~0.5M ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-wake-refused-by-its-own-ending-process-asks-again-at-its-end
+  (ts/test-branch! (fn [_ conn]
+  (let [commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
+        main (fn [st db ops] (r/reconciler-proc st :main (assoc (ts/commit-of conn db) :ops ops)))
+        spawns (fn [outs] (vec (keep #(when (= :spawn (get-in % [:req :op])) (get-in % [:req :opts :task])) (:to-api outs))))
+        why "branch :demo/a is held by live agent a-a working demo/a: its seon_done or an end frees it"
+        db (db-of [(decl "a")])
+        [st outs] (main (r/reconciler-proc {:boot "boot-1" :conn conn}) db [])
+        asked (first (filter #(= :spawn (get-in % [:req :op])) (:to-api outs)))
+        ;; refused by its own agent, whose task (this one) is no done task: nothing is stopped
+        [st outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r (contract/error :seon.system/refused 'seon.system/spawn! why {:branch :demo/a :agent :a-a :task "demo/a"})})
+        w (first (filter #(= :write (get-in % [:req :op])) (:to-api outs2)))
+        [st _] (r/reconciler-proc st :answers {:tag (:tag w) :r {:ok true}})
+        [db2 ops2] (commit db (get-in w [:req :req :tx-data]))
+        [st outs4] (main st db2 ops2)
+        [db3 ops3] (commit db2 [{:seon.process/id "p-a-a" :seon.process/ended-ms 1 :seon.process/exit 0}])
+        [_ outs5] (main st db3 ops3)]
+    (is (= ["demo/a"] (spawns outs)) "a is asked for")
+    (is (not-any? #(= :kill (get-in % [:req :op])) (:to-api outs2)) "its own agent is not stopped: its task is not done")
+    (is (= [] (spawns outs4)) "the refused answer's own commit asks nothing again")
+    (is (= ["demo/a"] (spawns outs5)) "its process's end, a fact on main: a asks again")))))
+
+;; Estimate: 1 test-branch! x 1M (a pointer write, connect, release, delete); 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-start-refused-by-a-working-agent-stops-nothing
   ;; the other side of the rule: a holder whose task is still running is working the branch, and is never stopped for another
   (ts/test-branch! (fn [_ conn]
   (let [db (db-of [(decl "a") (decl "b")] :extra (work "a" :running))
@@ -1617,13 +1733,15 @@
     (is (some? asked) (pr-str (:to-api outs)))
     (is (not-any? #(= :kill (get-in % [:req :op])) (:to-api outs2)) "nothing is stopped")))))
 
-(deftest quiescence-names-a-task-that-cannot-start
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} quiescence-names-a-task-that-cannot-start
   ;; a refused task is a root cause at quiescence, naming what it blocks
   (let [db (db-of [(decl "a") (decl "b" :needs ["a"])]
                   :extra [{:seon.task/id "demo/a" :seon.task/outcome :refused :seon.task/reason held-why}])]
     (is (= [{:task "demo/a" :cause held-why :blocks ["demo/b"]}] (r/root-causes (r/index db))))))
 
-(deftest a-task-marked-failed-is-held-for-root
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 3 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 judgings x 0.7M (the index and the judge-tx); 1 transacts or db-withs x 50k ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-task-marked-failed-is-held-for-root
   ;; owner, 2026-10-22: a failure is task data and root reacts to it; D2(a): held for root,
   ;; no automatic retry. my.task/fail! writes the failure on the branch; root's judge
   ;; carries this agent's turn's onto main with the task held, and the task is closed
@@ -1648,7 +1766,8 @@
     (is (nil? (:seon.task/failure (task/task (:db (judge (assoc f :turn 0))) "demo/a")))
         "an earlier turn's failure on a reused branch is not this end's")))
 
-(deftest a-branch-carries-every-task-it-changed-and-records-a-two-sided-edit
+;; Estimate: 1 db-of of 3 tasks 0.5M + 2 db-withs 0.1M + 1 judging 0.7M + 4 task pulls 0.4M + the problems report (index + derive, ~1M) + 3 programs read from the seed's ~2,000 datoms and 1 three-way (~1M each = 3M) ~ 5.7M, about 6e6 ~ 6,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-branch-carries-every-task-it-changed-and-records-a-two-sided-edit
   ;; owner, 2026-10-22 (D4): when a branch's agent ends, a task version newer than main's
   ;; overwrites it; one edited on both sides differently is a conflict for root
   (let [base (db-of [(decl "a") (decl "b") (decl "c")] :extra (work "a" :running))
@@ -1666,7 +1785,8 @@
     (testing "main's task plans never put a merge behind: merging merges the program, no task data"
       (is (empty? (:theirs (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program main #{}))))))))
 
-(deftest a-waiting-agent-parks-its-task-and-a-message-wakes-it
+;; Estimate: 11 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 11 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 4 judgings x 0.7M (the index and the judge-tx); 1 transacts or db-withs x 50k ~ 20,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-waiting-agent-parks-its-task-and-a-message-wakes-it
   ;; design agent-loop sections 1-2 (owner, 2026-10-25: "Always park"): an agent that ends waiting
   ;; or without progress parks its session; out of turns, it stays at its cap. The task is parked, never held, and stays
   ;; released. Until a message to the session comes, the task does not start again; once one
@@ -1710,7 +1830,8 @@
         (is (= [{:op :kill :task "demo/a" :reason :env-changed}] (actions-for db :woken [(akey "a")])) "a task has one flight, so one action a pass")
         (is (= [(assoc-in (spawn "a") [:env :branch] :elsewhere)] (actions-for (d/db-with db (task/move-tx "demo/a" :parked :killed {})) :woken [(akey "a")])))))))
 
-(deftest a-sessions-next-stage-opens-with-roots-message
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 3 transacts or db-withs x 50k ~ 600,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 600000}} a-sessions-next-stage-opens-with-roots-message
   ;; live finding A1 (2026-10-25): a session's next stage (another task, the same agent) opens
   ;; with root's message naming the new task and its task data; a wake of the same task opens with none. The task the
   ;; agent worked before is the one its :seon.agent/task held before (d/history)
@@ -1724,7 +1845,8 @@
     (is (nil? (#'r/stage-boundary db "demo/d")) "a session's first stage opens with none")
     (is (nil? (#'r/stage-boundary (d/db-with db (ts/work-tx "demo/i" :running {:agent :a1 :start-ms 3000})) "demo/i")) "nor does a wake of the same task")))
 
-(deftest a-step-reads-the-db-its-own-write-made
+;; Estimate: 1 test-branch! x 1M (a pointer write, connect, release, delete); 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-step-reads-the-db-its-own-write-made
   (ts/test-branch! (fn [_ conn]
   ;; the stage-boundary red (seon.agent-test/a-requests-implement-continues-its-designs-request):
   ;; the writer answers a write before main's commit reaches the reconciler (two ins), so :started
@@ -1757,7 +1879,8 @@
     (is (= 1 (count (stage outs5))) "a later commit than the write's takes it as well"))))
 )
 
-(deftest a-proof-a-branch-registers-reaches-main-at-the-agents-end
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 5 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 2 judgings x 0.7M (the index and the judge-tx); 6 transacts or db-withs x 50k ~ 6,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-proof-a-branch-registers-reaches-main-at-the-agents-end
   ;; owner, 2026-10-25 (Dogfood rulings): a design registers the red proofs it writes
   ;; (my.task/update! :seon.task/proofs conj 't); the judge carries them onto main like the plan,
   ;; so the done rule sees them at design and the implement step inherits them
@@ -1788,7 +1911,8 @@
                  :ours #{'demo-test/kept-test} :theirs #{'demo-test/kept-test 'demo-test/dropped-test 'demo-test/mains-test}}]
                (filter #(= "demo/b" (:task %)) conflicts)))))))
 
-(deftest a-refused-merge-candidate-is-the-gates-error
+;; Estimate: pure data in, pure data out, a few 10k ticks ~ 50,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 50000}} a-refused-merge-candidate-is-the-gates-error
   ;; the Sonnet review of gate-schema (2026-10-30): the gate took the candidate's :text with no check, so a
   ;; writer that refused the candidate sent the gate no files, and it would have tested main as it is
   (let [id "demo/a-merge"
@@ -1802,7 +1926,8 @@
           (str "each deferred test :error: " (pr-str tx)))
       (is (some #(= refused (:seon.task/error %)) tx) "with why it was refused as the task's error"))))
 
-(deftest a-test-red-on-main-at-its-base-decides-nothing-at-the-gate
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 2 transacts or db-withs x 50k ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-test-red-on-main-at-its-base-decides-nothing-at-the-gate
   ;; docs/tasks.md#the-done-rule: a deferred test red on main at the task's base digest (the :tests effect's :main-red,
   ;; seon.proofs/main-red) is main's: recorded with the rest, left out of the gate's decision, and told once as the system's
   ;; problem (:seon.prove/full-run-red); a red of the task's own still holds it
@@ -1836,7 +1961,8 @@
         (is (= :closed (:seon.task/outcome (task/task (after outs) id))))
         (is (not-any? #(= :problem (:op %)) outs))))))
 
-(clojure.test/deftest
+;; Estimate: 1 db-of 0.5M + 1 d/with of a retractEntity 50k + the index listed twice (0.6M each) + 1 observe from the last 0.3M ~ 2M ticks
+(clojure.test/deftest ^{:seon.test/estimate {:ticks 2000000}}
  an-observed-retraction-leaves-no-residue
  (let [db (db-of diamond)
        {db' :db-after txd :tx-data} (d/with db [[:db/retractEntity [:seon.task/id "demo/d"]]])
@@ -1854,7 +1980,8 @@
      (is (not (contains? (:needed-by obs) "demo/d")))
      (is (every? seq (vals (:needed-by obs))) "no empty needed-by set"))))
 
-(deftest an-end-that-parks-runs-no-tests
+;; Estimate: 1 transacts or db-withs x 50k ~ 50,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 50000}} an-end-that-parks-runs-no-tests
   ;; docs/turn.md#parked: an agent with no proofs that says something and waits, or spends its turns, has claimed nothing, so nothing is judged by tests: a chat reply isn't "working" through a test run
   (is (= :diffed (r/after-work {:value {:outcome :waiting}} nil)))
   (is (= :tested (r/after-work {:value {:outcome :cap}} #{})) "a cap is an end, not a park: it is judged")
@@ -1868,7 +1995,8 @@
   world holds no page but the prompt's stub, and a plan's cite is written only to a section the store holds."
   [db] (d/db-with db (seon.doc/load-tx db "docs" {"docs/tasks.md" "# Tasks\n\n## A refine curates its own task\n\nA refine curates the task it needs.\n"})))
 
-(deftest every-end-gets-a-refine-after-it-and-its-review
+;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 transacts or db-withs x 50k ~ 600,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 600000}} every-end-gets-a-refine-after-it-and-its-review
   ;; docs/tasks.md#a-refine-curates-its-own-task (the owner, 2026-11-12: "It has proofs and a needs pointing at the task and the normal
   ;; task machinery should just work"): a task's end writes its refine, a :work task after it on a branch of its own, proved by what it
   ;; edits and the task's own proofs, released; and the refine's review, its merge step, held for a session
@@ -1979,7 +2107,8 @@
                 tests (when (.exists f) (set (for [x (reader/read-text (slurp f) 'user) :when (and (seq? x) (= "deftest" (name (first x))))] (second x))))]]
     (is (contains? tests (symbol (name p))) (str p " names no test the tree holds"))))
 
-(deftest a-cap-ends-the-run-held-and-gets-its-refine
+;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 judgings x 0.7M (the index and the judge-tx) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-cap-ends-the-run-held-and-gets-its-refine
   ;; docs/tasks.md#a-refine-curates-its-own-task (Optimization's restated claim, 2026-11-12): a cap ends the run, failed in its number
   ;; of turns; nothing parks at a cap; it is held, its release runs it again from its branch's head, and it gets its refine as any end
   (let [db0 (with-refine-section (mdb [(decl "a")] :extra (work "a" :running)))
@@ -1991,13 +2120,15 @@
     (is (some #(and (= :spawn (:op %)) (= "demo/a-refine" (:task %))) (actions-for db1))
         "the refine starts as any task does: a new agent on its own branch")))
 
-(deftest a-green-end-gets-its-refine-too
+;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 judgings x 0.7M (the index and the judge-tx) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-green-end-gets-its-refine-too
   ;; docs/tasks.md#a-refine-curates-its-own-task: the owner's flow, every end; a done task's refine curates what worked
   (let [db0 (with-refine-section (mdb [(decl "a")] :extra (work "a" :running)))
         {db1 :db} (judge! db0 "a" {:outcome :green} :results {(t "a") :pass})]
     (is (task/task db1 "demo/a-refine"))))
 
-(deftest a-task-after-another-starts-when-it-ends-whatever-its-outcome
+;; Estimate: 2 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-task-after-another-starts-when-it-ends-whatever-its-outcome
   ;; docs/tasks.md#a-refine-curates-its-own-task (Data model's ruling, 2026-11-12): :seon.task/after waits for the END of a task, its
   ;; outcome whatever it is, where :seon.task/needs waits for its result (merged or done); a refine is after the task it refines
   (let [decls [(decl "a") (assoc (decl "r") :seon.task/after #{"demo/a"}) (decl "n" :needs ["a"])]
@@ -2065,7 +2196,8 @@
                  (is (every? #(not= "x" (second (re-find #"\[x\] (.*)\)$" (src-of @conn %)))) (range 5)) "no var is left as it began")))))
          (finally (run! d/release @conns)))))))
 
-(deftest a-refine-is-done-by-its-own-change-and-a-run-that-took-no-turn-gets-none
+;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 3 judgings x 0.7M (the index and the judge-tx); 1 transacts or db-withs x 50k ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-refine-is-done-by-its-own-change-and-a-run-that-took-no-turn-gets-none
   ;; docs/tasks.md#a-refine-curates-its-own-task (context's loops, 2026-11-12): loop 1's refine was done at turn 0 (its proofs the task's,
   ;; green), loop 2's capped never able to pass (the task's, red), and data's run died before turn 1 and its refine capped with
   ;; nothing to read. The done rule refuses a branch that changed nothing (:no-change, red first for every task); a refine proves

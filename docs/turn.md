@@ -59,7 +59,7 @@ Which tests run where: each turn, the gate, the judge and the merge.
 - **the judge**, in root: root asks the agent's REPL for its `:tests` (greens at their digest reused) and judges the end from them, the branch's diff and its end (`seon.reconcile/judge-tx`); a process test that is no proof is read as deferred;
 - **the merge**: the writer's gate takes the branch only with no contract gaps (`seon.merge/uncontracted`) and runs the process tests the change reaches ([merging](merging.md#a-merge-runs-what-the-change-reaches)).
 
-The tests run in a fork of the agent: the plan is selected in the parent (```seon.agent/test-inputs```, ```seon.agent/branch-graph```, ```seon.agent/judges?```) and run in the child, which writes each test's name to a pipe as it starts so a death names it. The parent reads the pipe (```seon.agent/read-to-exit```) and answers (```seon.agent/test-run-answer```); ```seon.agent/test-report``` keeps one `clojure.test` report per test.
+The tests run in a fork of the agent: the plan is selected in the parent (```seon.agent/test-inputs```, ```seon.agent/branch-graph```, ```seon.agent/judges?```) and run in the child, a proc of the agent's graph, which puts each test's name on its link as it starts so a death names it. A proc of the run folds what the children put (```seon.agent/test-run-step```) and answers (```seon.agent/test-run-answer```); ```seon.agent/test-report``` keeps one `clojure.test` report per test.
 
 ## A merge task's loop
 

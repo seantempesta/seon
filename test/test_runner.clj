@@ -268,7 +268,7 @@
      :rd (delay (reads-index-of root store tree g in))
      ;; whether the binary target/seon is (its build record, target/seon.program) runs this tree's program as a build of it would:
      ;; nil, or what differs that it bakes (seon.system/binary-current, the one rule; docs/source.md#the-binary-records-its-program)
-     :binary-current (seon.system/binary-current db (seon.program/binary-program) tree g)
+     :binary-current (seon.system/binary-current db (seon.program/binary-program) tree {:graph g :scope :all})
      :no-test (vec (sort-by str (concat (remove (set (map (comp symbol namespace key) all)) nss)
                                         (remove all vars))))
      :digests (update-vals idx :digest)
@@ -667,7 +667,7 @@
         ;; a step that runs a seon.check mode ran on target/seon: kept only if that binary is current for the plan's tree, the
         ;; one rule the build asked (an empty out/build: current; the plan kept its answer beside the builds, so this reads it);
         ;; laws and the lmdb steps ran no mode, so no binary is theirs to judge
-        current? (delay (nil? (seon.system/binary-current (program) (seon.program/binary-program) tree)))
+        current? (delay (nil? (seon.system/binary-current (program) (seon.program/binary-program) tree {:scope :all})))
         keep? (fn [k] (and (green k) (or (not (proofs/step-needs-binary? k)) @current?)))
         ;; each step's wall ms as bin/check measured it (out/step-ms, "<step> <ms>" a line; a kill/reopen pair's two phases
         ;; summed under their step), kept on its verdict: its bound's measure (out/step-bounds) and the deal's

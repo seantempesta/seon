@@ -639,6 +639,8 @@
                     :tests (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m)) (:names m) (assoc :names (:names m)) (:mode m) (assoc :mode (:mode m)) (:plan? m) (assoc :plan? true) (:process? m) (assoc :process? true) (:items m) (assoc :items (:items m))
                                             ;; a session's or a landing's checkout: its granted items' test children read its files and its process store
                                             (:checkout m) (assoc :checkout (:checkout m))
+                                            ;; the test service's batch: its test child and what that starts carry it (seon.prove/held-processes)
+                                            (:seon.prove/batch m) (assoc :seon.prove/batch (:seon.prove/batch m))
                                             (get-in st [:view :agents id :task]) (assoc :task (get-in st [:view :agents id :task])))
                     :judge {:op :judge}
                     :stats {:op :stats}
@@ -1468,18 +1470,21 @@
   "Why a landing must restart this system, or nil when it can keep running: held, main's :seon.system/source after the landing's
   bridge (seon.system/landed-tx moved its :tree); tree, the git tree of main's files now (bin/tree, where git runs); stale, the
   binary's answer for held's tree (stale-binary); inputs, what bin/system start's `inputs` mode wrote for the files now
-  (held-inputs). A system keeps running, its agents with it, when main already holds the landed tree as data and the running
-  binary is current for it: the merge loaded the change in place, so only the source fact is written again with the new inputs
-  (booted-source). Each other case is the restart's reason: no source fact; main not at the files' tree (no bridge ran, so
-  only a boot's catch-up reads them); a binary that was stale at its boot, or is stale for the landed tree (a build input, or a
-  form of root-reach, changed); no inputs written. See docs/source.md#a-landing-enters-main-as-data."
+  (held-inputs). A system keeps running, its agents with it, when main already holds the landed tree as data and what the
+  running binary lacks of it is forms: the bridge's commit loaded them into root in place (seon.writer's main-commit,
+  seon.program/load-changes!) and into the fork server, which forks every later agent, so only the source fact is written again
+  with the new inputs (booted-source); the next boot builds. Each other case is the restart's reason: no source fact; main not at
+  the files' tree (no bridge ran, so only a boot's catch-up reads them); a binary that was stale at its boot; what the binary
+  lacks holds a path no load brings (a build input, or a path no rule places), or is unknown (no tree recorded, a diff git
+  could not make); no inputs written. See docs/source.md#a-landing-enters-main-as-data."
   {:malli/schema [:=> [:cat [:maybe :map] :string [:maybe :map] [:maybe :map]] [:maybe :string]]}
   [held tree stale inputs]
   (cond
     (nil? held) "main holds no source fact"
     (not= tree (:tree held)) (str "main holds tree " (:tree held) ", not the files' " tree ": no landing brought it in as data")
     (:stale-binary held) "this system's binary was stale at its boot"
-    stale (str "the running binary is not current for " tree
+    (and stale (or (:error stale) (:missing stale) (some string? (:reaches stale))))
+    (str "the running binary is not current for " tree
                (if (:error stale) (str ": " (:error stale)) (str ": what differs reaches " (str/join ", " (or (seq (:reaches stale)) [(name (:missing stale :code))])))))
     (nil? inputs) "no inputs were written for the files (runs/root-inputs.edn)"))
 
@@ -1496,11 +1501,12 @@
 
 (defn- judged-path
   "Where binary-current's answer for a binary built from tree from, judged for tree to over to's own program, is kept beside the
-  checkout's builds: target/binary-current/FROM-TO.edn (derived data, as seon.fx/tree-diff's diff is). The answer is a function
-  of the two trees, so whoever judged it with the tree's program (the plan, bin/test) answers every later reader, a boot
-  whose store holds another program among them. See docs/source.md#the-binary-records-its-program."
-  {:malli/schema [:=> [:cat :string :string] :string]}
-  [from to] (str (cfg/checkout) "/target/binary-current/" from "-" to ".edn"))
+  checkout's builds: target/binary-current/FROM-TO.edn for scope :root, FROM-TO.all.edn for :all (derived data, as
+  seon.fx/tree-diff's diff is). The answer is a function of the two trees and the scope, so whoever judged it with the tree's
+  program (the plan, bin/test) answers every later reader, a boot whose store holds another program among them. See
+  docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :string :string [:enum :root :all]] :string]}
+  [from to scope] (str (cfg/checkout) "/target/binary-current/" from "-" to (when (= :all scope) ".all") ".edn"))
 
 (defn binary-current
   "Whether a binary built from built's tree (seon.program/binary-program's record, its :inputs :tree) runs tree's program as tree
@@ -1509,17 +1515,21 @@
   against a main that holds one is unknown, never current ({:missing :binary-tree}). What differs is git's changed paths between the two trees: a build
   input (build-input?) is not current; a source file under src/ is not current when a var defined by one of its forms
   that changed (its text on db, main holding tree's program, is not in the file as the binary's tree has it) is in
-  root-reach of db's reach graph, or when db holds no namespace of it (added or gone: what it held is unknown); a path
-  of none of these that does not run from the checkout or main (tests, the wiki, task files, bin/'s scripts) is not current. Anything else (tests, the wiki, task files, agent-side code) is current: a process
-  loads it from main's db. The one rule a spawn refusal, the stale-binary row and the gate's build all ask, and one answer for two
-  trees: a caller holding the tree's own graph (g, the plan's) keeps its answer beside the builds (judged-path), which every later
-  caller reads first, so a boot whose store holds another program (a test's system) never answers otherwise than the plan did.
-  Cost: one git diff, one reach graph of db (or g, when the caller holds one), O(changed files' forms).
+  in scope, or when db holds no namespace of it (added or gone: what it held is unknown); a path
+  of none of these that does not run from the checkout or main (tests, the wiki, task files, bin/'s scripts) is not current. Anything
+  else (tests, the wiki, task files) is current. scope says which vars are in scope: :root (the default), root-reach of db's reach
+  graph, what root runs from its binary while its agents load the rest from main (a root booted on Seon's source: the stale-binary
+  row, a spawn refusal); :all, every var, for a process whose main holds no Seon source and so runs all of it from the binary
+  (bin/check's roots, on a store seeded with an example program; a test that runs the binary): the build bin/test's plan asks
+  and bin/check's steps. One answer for two trees and a scope: a caller holding the tree's own graph (opts' :graph, the plan's) keeps
+  both scopes' answers beside the builds (judged-path), which every later caller reads first, so a boot whose store holds another
+  program (a test's system) never answers otherwise than the plan did.
+  Cost: one git diff, one reach graph of db (or the caller's), O(changed files' forms).
   See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:maybe :map] [:maybe :string]] [:maybe :map]]
-                  [:=> [:cat :seon.host/db [:maybe :map] [:maybe :string] [:maybe :map]] [:maybe :map]]]}
-  ([db built tree] (binary-current db built tree nil))
-  ([db built tree g]
+                  [:=> [:cat :seon.host/db [:maybe :map] [:maybe :string] [:map [:graph {:optional true} [:maybe :map]] [:scope {:optional true} [:enum :root :all]]]] [:maybe :map]]]}
+  ([db built tree] (binary-current db built tree {}))
+  ([db built tree {g :graph scope :scope :or {scope :root}}]
    (let [from (get-in built [:inputs :tree])]
      (cond
        ;; no source fact: main was never brought to a tree, so nothing is known to differ
@@ -1528,7 +1538,7 @@
        (nil? from) {:binary nil :tree tree :reaches [] :missing :binary-tree}
        (= from tree) nil
        ;; judged before over the tree's own program (the plan's graph, below): the answer for these two trees, whatever db asks
-       (.isFile (java.io.File. ^String (judged-path from tree))) (:answer (sedn/decode (slurp (judged-path from tree))))
+       (.isFile (java.io.File. ^String (judged-path from tree scope))) (:answer (sedn/decode (slurp (judged-path from tree scope))))
        :else
        (let [changed (fx/tree-diff (cfg/checkout) from tree)]
          (if (contract/error? changed)
@@ -1552,13 +1562,16 @@
                                           (for [[id src] (d/q '[:find ?id ?src :in $ ?n :where [?ns :ns/name ?n] [?f :form/ns ?ns] [?f :form/id ?id] [?f :form/src ?src]] db n)
                                                 :when (not (and old (str/includes? old src)))
                                                 [k s] (:defines (get (:rows g) id)) :when (= :var k)] s)))
-                 hits (vec (for [p src :let [n (ns-of p)] v (if n (filter reach (changed-vars n p)) [(symbol p)])] v))
-                 reaches (-> inputs (into unplaced) (into hits))
-                 r (when (seq reaches) {:binary from :tree tree :reaches reaches})]
-             ;; a caller holding the tree's own graph (g: the plan's, bin/test) judged over the tree's program, so its answer is
-             ;; the two trees' and is kept for every later reader, a boot whose store holds another program among them
-             (when given-g (fx/write-file {:req {:path (judged-path from tree) :text (sedn/encode {:answer r})}}))
-             r)))))))
+                 ;; per changed file: its changed vars, or its path when db holds no namespace of it
+                 files (vec (for [p src :let [n (ns-of p)]] (if n {:vars (changed-vars n p)} {:path (symbol p)})))
+                 ;; the vars in scope (root's: root-reach; :all, every one) and every unheld path
+                 answer (fn [in?] (let [reaches (-> inputs (into unplaced) (into (for [{:keys [vars path]} files v (if path [path] (filter in? vars))] v)))]
+                                    (when (seq reaches) {:binary from :tree tree :reaches reaches})))
+                 r {:root (answer reach) :all (answer any?)}]
+             ;; a caller holding the tree's own graph (the plan's, bin/test) judged over the tree's program, so its answers are
+             ;; the two trees' and are kept for every later reader, a boot whose store holds another program among them
+             (when given-g (doseq [[sc a] r] (fx/write-file {:req {:path (judged-path from tree sc) :text (sedn/encode {:answer a})}})))
+             (r scope))))))))
 
 (defn- previous-end
   "How the root before this boot on main ended: the stop fact it wrote, or, when it wrote
@@ -1635,13 +1648,6 @@
                  {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :retained retained :dropped-trees dropped-trees
                   :seeded seeded :caught-up caught :seed-ms seed-ms :config-errors config-errors :digest digest :digest-ms digest-ms :contracts contracts :main-inputs main-inputs}))))))
 
-(defn- thrown-in
-  "The fn throwable ex was thrown in: clojure.main's triage of its top frame (as seon.repl/located reads an eval's), a
-  qualified symbol, or nil when the triage names none."
-  {:malli/schema [:=> [:cat :any] [:maybe :symbol]]}
-  [ex] (let [in (:clojure.error/symbol (clojure.main/ex-triage (assoc (Throwable->map ex) :clojure.error/phase :execution)))]
-         (when (qualified-symbol? in) in)))
-
 (defn- flow-error
   "Flow's error-channel value e as the api's :error message: the proc, the throw's message and
   data, the message its step took (:msg), and the fn it was thrown in (:in, clojure.main's triage
@@ -1650,7 +1656,7 @@
   {:malli/schema [:=> [:cat :map] :map]}
   [e]
   (let [ex (::flow/ex e)
-        in (when ex (thrown-in ex))]
+        in (when ex (err/thrown-in ex))]
     (cond-> {:op :error :pid (::flow/pid e) :message (or (some-> ex ex-message) (str e)) :data (some-> ex ex-data contract/bounded) :msg (::flow/msg e)}
       (qualified-symbol? in) (assoc :in in))))
 
@@ -1665,7 +1671,7 @@
   lands on main as any proc's defect does, named, never only on stderr. See docs/errors.md#nothing-crashes-and-nothing-hangs."
   {:malli/schema [:=> [:cat :any :any] :map]}
   [thread ex]
-  (let [in (thrown-in ex)
+  (let [in (err/thrown-in ex)
         where (if thread (str "thread " (.getName ^Thread thread)) "a go or fiber body")
         msg (str "uncaught in " where ": " (or (ex-message ex) (str ex)))]
     (cond-> {:op :error :pid :uncaught :message msg

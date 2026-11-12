@@ -5,4 +5,6 @@
  :seon.proofs/unread [:and :seon.error/base [:map [:seon.error/type [:= :seon.proofs/unread]] [:why :any]]]
  ;; the request a session or an agent's turn makes of the service, and its answer
  :seon.prove/request [:map [:branch :keyword] [:t :int] [:agent {:optional true} [:maybe :keyword]] [:proofs {:optional true} [:set :qualified-symbol]]]
+ ;; a batch's tag: what every process it starts carries as SEON_PROVE_BATCH (seon.prove/batch-tag)
+ :seon.prove/batch [:string {:description "The test service's tag of a batch it granted, its process's pid and the batch's number: every process the batch starts carries it as SEON_PROVE_BATCH, so seon.prove/held-processes counts what each running batch holds. See docs/merging.md#the-test-service."}]
  :seon.prove/answer [:map [:key :string] [:ran :boolean] [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]}
