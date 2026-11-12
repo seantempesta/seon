@@ -1437,3 +1437,19 @@
     (is (= :repaired (:problem (rp "(+ 1 2))"))) "a closer dropped does not")
     (is (= :repaired (:problem (rp "(let [s 1]\n# the plan, better\n  (swap! ctx assoc :x s))")))
         "a line inside the form the reader would comment out (D2: the swap!'s lines) does not")))
+
+(clojure.test/deftest grep-leaves-out-the-askers-own-plan
+    ;; docs/vector.md#search: the plan of the task the asker works is left out of grep's hits, its ctx holding
+    ;; it already, and one line says so; the code's hits and other tasks' plans are hits as any text
+    (let [db (my.test/world)
+          own "app.calc/total-is-exact"
+          rows-in (fn [c] (with-redefs [seon.agent/db (constantly db) seon.ctx/ctx (atom c)]
+                            (my.agent/grep "total")))]
+      (let [rows (rows-in {:seon.agent/task {:seon.task/id own}})
+            said (filter #(= :own-task (:kind %)) rows)]
+        (is (not (some #(= (str own ":1") (:at %)) rows)) (str "its own task's plan is left out: " (pr-str rows)))
+        (is (some #(= :var (:kind %)) rows) "the code's hits stay")
+        (is (str/includes? (str (:text (first said))) own) (str "one line names its own task as left out: " (pr-str said)))
+        (is (= 1 (count said)) (pr-str said)))
+      (is (some #(= (str own ":1") (:at %)) (rows-in {}))
+          "an asker that works no task loses nothing")))
