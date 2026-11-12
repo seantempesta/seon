@@ -382,7 +382,7 @@ Uses of take, subs and the like in display code that choose what to find or read
 - `my.agent/file-source`, `seon.repl/form-src`: a form's own text at a reader's offsets.
 - `my.agent/lines`: the lines a to b the agent asked for.
 - `seon.repl/do-parts`: a top-level `(do ...)` split into its inner forms by the reader's positions.
-- `seon.repl/edit!`, `seon.repl/place`: rebuilding a source around an edit's offsets.
+- `seon.repl/edit-answer`, `seon.repl/place`: rebuilding a source around an edit's offsets.
 - `seon.repl/file-name`: a path relative to a root it is under.
 - `seon.repl/streaming`: a Writer's `write(str, off, len)` slice.
 - `seon.web/handler`, `seon.web/view-of`, `seon.server/mcp-reply`: parsing a request's path and a tool's name.

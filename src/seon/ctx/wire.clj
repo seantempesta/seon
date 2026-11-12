@@ -263,7 +263,8 @@
   ;; an element's children as the tree holds them: a seq a render returned (a `for`) spliced in its place, nils dropped, so the
   ;; model reads vectors only and a diff names each child (seon.render/keyed). A local fn: no contracted call an element
   (letfn [(children [xs] (into [] (comp (mapcat #(if (seq? %) (children %) [%])) (remove nil?)) xs))]
-  (clojure.walk/postwalk (fn [x] (if (and (vector? x) (keyword? (first x)) (map? (second x)))
+  ;; a map entry is a vector too, [k v], and never an element: a map in the page's data (a record shown whole) keeps its entries
+  (clojure.walk/postwalk (fn [x] (if (and (vector? x) (not (map-entry? x)) (keyword? (first x)) (map? (second x)))
                                        (let [m (second x)
                                              ;; and the page's own marks (:wire/for \"page\"): what the page alone shows says nothing to the model
                                              ;; and what drives the page's script or a screen reader (:data-*, :aria-*): the page's alone too
@@ -272,7 +273,7 @@
                                                              m)
                                                  (and (:id m) (:render m)) (assoc :id (:id m)))]
                                          (into (if (seq a) [(first x) a] [(first x)]) (children (nnext x))))
-                                       (if (and (vector? x) (keyword? (first x))) (into [(first x)] (children (next x))) x)))
+                                       (if (and (vector? x) (not (map-entry? x)) (keyword? (first x))) (into [(first x)] (children (next x))) x)))
                              h)))
 
 (defn- descends?

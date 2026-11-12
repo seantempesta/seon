@@ -1071,7 +1071,7 @@
   compile. Answers what the place's write answered with :edited, the place and the lines
   around each change. Every way it changes nothing is thrown, its ex-data the error map, so the eval it is called in answers
   it as its own :ex (an error nested in an edit's value is cut from sight or read past: (:edited (edit! ...)) of a refusal
-  read nil, and an agent took eight turns to find why, 2026-11-12; a caller outside an eval catches it): the evaluation's
+  read nil, and an agent took eight turns to find why; a caller outside an eval catches it): the evaluation's
   error when a new definition does not compile or load, its message saying nothing changed; no such place (my.agent/no-var);
   a write that failed; or :seon.repl/edit-refused: no such place, an old not in it (with the lines that
   hold its first line, ignoring indentation), an old there more than once (each candidate's line), two olds that overlap (:overlap), or an empty old (:empty). Exact text and one occurrence, as file editors converged
