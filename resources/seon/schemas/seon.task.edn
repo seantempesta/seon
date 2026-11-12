@@ -219,4 +219,5 @@
  :seon.task/accumulated [:map {:description "A task's plan and proofs accumulated along its needs, theirs first: what its agent works from."} [:plan :string] [:proofs :seon.task/proofs]]
  :seon.task/blocked-by [:set {:description "On a task's summary, the needs of the task that are not done."} :seon.task/id]
  :seon.task/eof [:= {:description "What a read of a tasks file answers at its end."} :seon.task/eof]
- :seon.task/refused [:map {:description "The error a task file or a need refused with: the operation, and a message saying why."} [:seon.error/type [:= :seon.task/refused]] [:seon.error/operation :symbol] [:seon.error/message :string]]}
+ :seon.task/refused [:and {:description "The error a task file or a need refused with: the operation, and a message saying why."} :seon.error/base [:map [:seon.error/type [:= :seon.task/refused]]]]
+}

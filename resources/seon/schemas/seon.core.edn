@@ -173,6 +173,10 @@
  :seon.system/update [:boolean {:description "True when the agent procs changed and the flow graph is yet to be updated with them."}]
  ;; keys the code names with no entry before (keys-schemas sweep): schema properties, metadata keys, map keys and the sentinels a function answers
  ;; a property a schema carries, read by seon.schema.datahike when it declares the attribute (docs/storage.md)
+ :seon.db/attributes [:boolean {:description "On a schema's properties, true when it is an entity schema: the keys of its map are attributes, and an entity holding one is checked against its required keys. See docs/storage.md#the-write-checks-every-entity-it-touches."}]
+ :seon.db/identity [:boolean {:description "On an attribute's schema, true when its value identifies its entity, a lookup ref (Datahike's :db.unique/identity)."}]
+ :seon.db/index [:boolean {:description "On an attribute's schema, true when its values are indexed for lookup by value (Datahike's :db/index)."}]
+ :seon.db/to [:vector {:description "On a ref attribute's schema, the entity schemas the entity it refers to may be."} :qualified-keyword]
  :seon.db/component [:boolean {:description "On an attribute's schema, true when it is a component: what its entity references is owned by it (Datahike's :db/isComponent)."}]
  :seon.db/content-id [:boolean {:description "On the schema of an identity attribute, true when its value names its entity's id in every branch (Datahike's :db/contentId)."}]
  :seon.db/no-history? [:boolean {:description "On an attribute's schema, true when the store keeps no history of its values (Datahike's :db/noHistory)."}]
@@ -188,9 +192,9 @@
  :seon.contract/raw [:and {:description "In a var's metadata, the fn the var held before instrument! wrapped it; a var with it has its source read from the recorded form."} :seon.host/fn]
  :seon.contract/checked-at [:= {:description "In a var's metadata, :definition when its contract is checked from the definition on."} :definition]
  :seon.contract/var [:qualified-symbol {:description "On a contract error, the var whose contract was refused."}]
- :seon.lib/load-refused [:map {:description "The error data when the OS refuses the machine's load average (getloadavg)."} [:seon.error/type [:= :seon.lib/load-refused]] [:seon.error/message :string]]
- :seon.lib/sysmem-refused [:map {:description "The error data when the OS refuses the machine's memory figures (host_statistics64)."} [:seon.error/type [:= :seon.lib/sysmem-refused]] [:seon.error/message :string]]
- :seon.fork-server/not-single-threaded [:map {:description "The error data when the fork server cannot fork because root boots with more than one thread: how many are active."} [:seon.error/type [:= :seon.fork-server/not-single-threaded]] [:active-threads :int]]
+ :seon.lib/load-refused [:and {:description "The error when the OS refuses the machine's load average (getloadavg)."} :seon.error/base [:map [:seon.error/type [:= :seon.lib/load-refused]]]]
+ :seon.lib/sysmem-refused [:and {:description "The error when the OS refuses the machine's memory figures (host_statistics64)."} :seon.error/base [:map [:seon.error/type [:= :seon.lib/sysmem-refused]]]]
+ :seon.fork-server/not-single-threaded [:and {:description "The error data when the fork server cannot fork because root boots with more than one thread: how many are active."} :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/not-single-threaded]] [:active-threads :int]]]
  :seon.warm/tidy [:= {:description "The name of the held task the warm boot makes to pull a var's refs, so a first pull is warm."} :seon.warm/tidy]
  :seon.program/expr [:= {:description "What a node's literal value answers when the node is neither a constant nor a quote."} :seon.program/expr]
  :seon.program/unbound [:= {:description "What a var's root answers when the var has none (seon.program/root-of), so a readback compares it by identity."} :seon.program/unbound]

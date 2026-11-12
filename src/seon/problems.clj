@@ -462,7 +462,7 @@
   "Each of Seon's own qualified keywords (a seon or my namespace) that a source form names (:form/keywords of a form whose namespace's
   file is under src/) and that no schema entry on db defines (:schema/key), as an :unschemed-key row naming the key and the forms that
   name it: every key is one schema entry (the owner, 2026-11-12: \"proper schemas for all fully namespaced keywords\"). A reverse
-  ref (its name starting with _) and an enum's value are not keys; a host type (seon.contract/host-schemas, a predicate defined in
+  ref (its name starting with _), a destructuring directive (:ns/keys) and an enum's value are not keys; a host type (seon.contract/host-schemas, a predicate defined in
   code) is its entry. Closed by writing the key's entry, or by naming a key that has one.
   only, a set of form entities (a branch's candidates, `split-rows`), reads the keywords of those forms alone. Cost: the :form/keywords
   datoms read (all, or only's), one :schema/key seek per distinct key. See docs/health.md#a-key-with-no-schema."
@@ -473,7 +473,8 @@
          ours? (fn [k] (let [n (namespace k)] (or (str/starts-with? n "seon") (str/starts-with? n "my."))))
          named (if only (mapcat #(d/datoms db :eavt % :form/keywords) only) (d/datoms db :aevt :form/keywords))
          by-key (reduce (fn [m {:keys [e v]}]
-                          (if (and (ours? v) (not (str/starts-with? (name v) "_")) (not (@enum-members v))
+                          ;; a destructuring directive ({:ns/keys [...]}) names keys, it is none
+                          (if (and (ours? v) (not (str/starts-with? (name v) "_")) (not (@enum-members v)) (not (#{"keys" "syms" "strs"} (name v)))
                                    (some-> (:v (first (d/datoms db :eavt e :form/ns))) src?))
                             (update m v (fnil conj (sorted-set)) e) m))
                         {} named)]
