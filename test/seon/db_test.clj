@@ -138,11 +138,12 @@
                                     {:var/name (symbol "app" (str "v" i)) :var/form (- (inc i))}])
                            (range n))))])
 
-(deftest ^{:seon.test/estimate {:ticks 40000000}} a-query-costs-the-same-in-either-clause-order
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-query-costs-the-same-in-either-clause-order
   ;; notes plans/deps-query-planner.md: seon.check-test's launcher query, var-first, was 17.2M ticks on the program
   ;; (5,733 vars) against 0.1M with its selective clause written first; the planner chose a two-pattern group's scan
-  ;; by written order. Planned in execution order, the var-first query costs the seek-first one. The test: the three
-  ;; fixtures (1,400 vars, ~4.2k datoms at ~7k ticks) ~30M, the measured queries ~1M: 40M.
+  ;; by written order. Planned in execution order, the var-first query costs the seek-first one (measured at 1,000 vars:
+  ;; 53.8k ticks either way). The test: the three fixtures (1,400 vars, ~4.2k datoms) in memory, d/db-with writing no
+  ;; store (~1.2k ticks a datom: ~5M), the measured queries ~1M: 10M (measured 7.2M).
   (cost/proof
     {:of 'datahike.api/q :input 'seon.db-test/vars-and-forms-of
      :n "vars in the db (one form in a hundred names the target)"
