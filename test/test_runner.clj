@@ -773,11 +773,17 @@
         tree (let [r (lib/sh (str (config/checkout) "/bin/tree") root base)]
                (if (zero? (:exit r)) (str/trim (:out r)) (throw (ex-info (str "bin/tree " root " " base ": " (:err r)) {}))))
         b (keyword (str (prefix-of #(fx/tree-file root base %)) tree))
-        path (str stem "-" ts/kept-program-digest)]
+        path (str stem "-" ts/kept-program-digest)
+        ;; the base's own runner names its store by its own key (seon.test-store/program-store-key: its runtime and pins may be
+        ;; another's), so its branch is read from whichever store of the stem holds it, never only this code's
+        stems (fn [] (let [d (.getParentFile (io/file stem)) n (.getName (io/file stem))]
+                       (for [f (sort (or (.list d) (make-array String 0))) :when (re-matches (re-pattern (str "\\Q" n "\\E-[0-9a-f]{8}")) f)]
+                         (str d "/" f))))
+        any (fn [] (some #(read-branch % b) (stems)))]
     (or (read-branch store (tree-branch tree))
-        (read-branch path b)
+        (any)
         (make-base-tree! root base tree store stem path at)
-        (read-branch path b)
+        (any)
         (contract/error :seon.fx/io-error #'test-runner/base-program
                         (str "the base's program store " path " keeps no branch " b ": the base's program schema or importer is not this code's") {:path path}))))
 
