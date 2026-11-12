@@ -7,7 +7,7 @@
                                       into OUT/steps (WHAT: tests, checks or both)
     --shard FILE                      one shard's tests run here, each result stored
     --store-steps OUT                 the steps bin/check ran green stored at their digests
-    --overran FILE                    a shard bin/stalls ended: its overran test a signal (no verdict stored), the rest to FILE's -rest.edn
+    --overran FILE                    a shard bin/stalls ended: its overran test stored as an error, the rest to FILE's -rest.edn
   bin/test runs each shard in a process of its own, at once. The program the plan reads is kept
   per git tree in a store of its own (program-db)."
   (:require [konserve.jolt.lmdb :as klmdb] [seon.profile :as profile] [konserve.jolt.fasl-store :as fasl] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
@@ -422,20 +422,27 @@
 
 (defn- overran!
   "A shard bin/stalls ended (its log, file's .log, holds \"OVERRAN <test> <bound> ms ...\": the test ran past its end bound,
-  docs/clocks.md#time-decides-the-owners-exceptions): each overran test is a SIGNAL about the run, never a verdict about
-  the test (the owner, 2026-11-11: \"The step bounds are signals not hard constraints\"; a bound past which a starved machine
-  ends a test is the machine's load, which no assertion may read): nothing is cached at its digest, it runs again at the next
-  prove, and it is printed OVERRAN as no verdict (a red cached from an overrun at load 46 made batch 89's tip flaky, 2026-11-12); the shard's tests that never ended (no ended,
+  docs/clocks.md#time-decides-the-owners-exceptions): each overran test is a bug, recorded as an error at its digest with the
+  line as its failure (unless the tree is not the plan's, as shard! keeps) and printed RED (the owner, 2026-11-12: \"A test
+  killed for running too long is a bug and it should be recorded as an error and fixed ... we shoudln't do nothing and not
+  record anything\"); the shard's tests that never ended (no ended,
   reused or OVERRAN line) and its generative keys (which a shard runs last) written to file's -rest.edn, for bin/test to
   run in a shard of their own (nothing left, no file). The reds of tests that ended before are not stored, as a stopped
   shard's are not (shard!). Answers 1: the shard ran a red."
   [file]
-  (let [{:keys [tests digests rerun mg] :as sh} (edn/read-string (slurp file))
+  (let [{:keys [tests digests tree rerun mg] :as sh} (edn/read-string (slurp file))
         lines (str/split-lines (slurp (str/replace file #"\.edn$" ".log")))
         over (into (sorted-map) (keep #(when-let [[_ t] (re-matches #"OVERRAN (\S+) .*" %)] [(symbol t) %])) lines)
         done (into (set (keys over)) (keep #(when-let [[_ t] (re-matches #"(?:ended|reused) (\S+)(?: .*)?" %)] (symbol t))) lines)
-        left (vec (remove done tests))]
-    (doseq [[t l] over] (println "OVERRAN-NO-VERDICT" t (pr-str {:message l})))
+        left (vec (remove done tests))
+        same? (= tree (fx/tree-id (config/checkout)))
+        unstored (when same?
+                   (record-run! {:id (str "bin/test overran " tree " " (random-uuid)) :tree tree}
+                                (into {} (for [t (keys over)] [t {:test t :digest (digests t) :pass 0 :fail 0 :error 1}]))
+                                (into {} (for [[t l] over] [t [{:type :error :message l}]]))))]
+    (doseq [[t l] over] (println "RED" t (pr-str {:pass 0 :fail 0 :error 1 :message l})))
+    (when-not same? (println "the tree changed since the plan: no result stored"))
+    (doseq [u unstored] (println "UNRECORDED" (:key u) (:message u)))
     (when (or (seq left) (seq mg))
       (write! (str/replace file #"\.edn$" "-rest.edn")
               (sedn/encode (assoc sh :tests left :digests (select-keys digests left) :rerun (into (sorted-set) (filter (set left)) rerun)))))
@@ -596,34 +603,33 @@
 (defn- store-steps!
   "bin/prove's last part: each step of out/steps.edn that bin/check named green in out/green
   (check-<step>, space separated) cached green at its digest (seon.fx/write-verdicts!),
-  unless the step ran on a binary (seon.proofs/step-needs-binary?) built from another tree
-  than the plan's (target/seon.tree, bin/build's): an edit between the plan and the build. A red one is not
-  stored, so it runs again. Answers the exit status: 1 when a step ran red or was not stored."
+  unless the step ran on a binary (seon.proofs/step-needs-binary?) not current for the plan's tree (seon.system/binary-current,
+  the rule the plan's build asked: an edit between the plan and the build). A red one is not
+  stored, so it runs again. Answers the exit status: 1 when a step ran red or was not stored.
+  See docs/source.md#the-binary-records-its-program."
   [out]
   (let [{:keys [tree digests]} (edn/read-string (slurp (str out "/steps.edn")))
         f (io/file out "green")
         green (set (when (.isFile f) (map #(str/replace % #"^check-" "") (str/split (str/trim (slurp f)) #"\s+"))))
-        ;; a step bin/check ended past its bound (out/overran): a signal, no verdict, never a red (the owner, 2026-11-11: "The
-        ;; step bounds are signals not hard constraints"); not stored, so it runs again
-        overran (let [o (io/file out "overran")] (set (when (.isFile o) (str/split-lines (slurp o)))))
-        red (sort (remove (some-fn green overran) (keys digests)))
-        built (let [b (io/file (config/checkout) "target/seon.tree")] (when (.isFile b) (str/trim (slurp b))))
-        ;; a step that runs a seon.check mode ran on target/seon: kept only if built from the plan's tree;
-        ;; laws and the lmdb steps ran no mode, so no binary's tree is theirs to compare
-        keep? (fn [k] (and (green k) (or (= tree built) (not (proofs/step-needs-binary? k)))))
+        ;; a step bin/check ended past its bound is one of its reds (STEP-OVERRAN, the owner, 2026-11-12), as any step it failed
+        red (sort (remove green (keys digests)))
+        ;; a step that runs a seon.check mode ran on target/seon: kept only if that binary is current for the plan's tree, the
+        ;; one rule the build asked (an empty out/build: current; the plan kept its answer beside the builds, so this reads it);
+        ;; laws and the lmdb steps ran no mode, so no binary is theirs to judge
+        current? (delay (nil? (seon.system/binary-current (program) (seon.program/binary-program) tree)))
+        keep? (fn [k] (and (green k) (or (not (proofs/step-needs-binary? k)) @current?)))
         ;; each step's wall ms as bin/check measured it (out/step-ms, "<step> <ms>" a line; a kill/reopen pair's two phases
         ;; summed under their step), kept on its verdict: its bound's measure (out/step-bounds) and the deal's
         step-ms (let [f (io/file out "step-ms")]
                   (reduce (fn [m [nm ms]] (update m (str/replace nm #"-(write|read)$" "") (fnil + 0) (parse-long ms))) {}
                           (when (.isFile f) (keep #(next (re-matches #"(\S+) (\d+)" %)) (str/split-lines (slurp f))))))
-        unstored (do (when (and (not= tree built) (some #(and (green %) (proofs/step-needs-binary? %)) (keys digests)))
-                       (println "prove: the binary was built from another tree than the plan's: no step that ran on it stored"))
+        unstored (do (when (and (some #(and (green %) (proofs/step-needs-binary? %)) (keys digests)) (not @current?))
+                       (println "prove: the binary is not current for the plan's tree (seon.system/binary-current): no step that ran on it stored"))
                      (record-run! {:id (str "bin/prove steps " tree " " (random-uuid)) :tree tree}
                                   (into {} (for [[k dg] digests :when (keep? k)] [k (cond-> {:step k :digest dg :pass 1 :fail 0 :error 0} (step-ms k) (assoc :ms (step-ms k)))])) {}))]
     (doseq [u unstored] (println "UNRECORDED" (:key u) (:message u)))
     (println (str "prove: " (count (filter green (keys digests))) " check steps green, " (count red) " red"
-                  (when (seq red) (str ": " (str/join " " red)))
-                  (when (seq overran) (str "; " (count overran) " past their bound (signals, not stored): " (str/join " " (sort overran))))))
+                  (when (seq red) (str ": " (str/join " " red)))))
     (if (and (empty? red) (empty? unstored)) 0 1)))
 
 (defn branch-health
