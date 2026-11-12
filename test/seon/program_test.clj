@@ -808,6 +808,13 @@
     (is (schemas 'walks-the-keys) "a test walking the registry takes the schema class: every entry is its input")
     (is (schemas 'reads-entity-index) "a test reading the entity index takes the schema class: the entity schema it chooses at run time is its input")
     (is (schemas 'walks-by-a-helper) "and so does one walking it by a helper of its namespace")
+    ;; docs/source.md#tests-run-by-reach: what a digest takes besides code is its test's static reads, kept with its verdict
+    ;; until its run records them (seon.proofs/reads-key's :keys)
+    (let [r (update-vals (program/graph-index g (assoc-in in [:config :seon.env/schemas] "s") nil) :reads)]
+      (is (contains? (r 'app.fc-test/starts-a-process) [:root]) "a test starting processes reads what the system runs")
+      (is (contains? (r 'app.fc-test/reads-schemas) [:config :seon.env/schemas]) "and one reaching the schema reader, the schema class")
+      (is (not (contains? (r 'app.fc-test/pure) [:root])) "a pure test reads neither")
+      (is (every? #(contains? % [:env]) (vals r)) "and every test reads :env, the runtime's pins among it"))
     (is (not (schemas 'boots-a-root)) "a test reaching src's use of the registry does not: 1,426 of 1,469 tests do")
     (doseq [[c m] [[:bin bin] [:web web] [:system system] [:deps deps]]]
       (is (m 'starts-a-process) (str "a test starting processes takes the " c " class"))
@@ -1608,3 +1615,20 @@
         b (dg (mt/with db (form 'seon.check "fork-cases" :fn '#{} "(def fork-cases {:line-parks 2})")))]
     (is (not= (a 'app.rb-test/runs-the-binary) (b 'app.rb-test/runs-the-binary)) "a change to a check mode's code moves the test running the binary")
     (is (= (a 'app.rb-test/starts-a-process) (b 'app.rb-test/starts-a-process)) "and not a test that only starts a process (root runs no check mode)")))
+
+;; docs/source.md#tests-run-by-reach: what a call depends on is its own form and what it uses without calling; a contracted
+;; var it references is in a run's call record only when it ran, so editing one it did not call moves nothing of it
+(deftest a-vars-read-digest-moves-with-what-a-call-of-it-uses
+  (let [w (fn [g-body h-body] (program/reach-graph (mt/with (mt/world)
+                                                            (mt/code 'app.rd (str "(ns app.rd (:require [seon.contract :refer [defn]]))\n"
+                                                                                  "(def limit " h-body ")\n"
+                                                                                  "(defn g {:malli/schema [:=> [:cat :int] :int]} [x] (+ x " g-body "))\n"
+                                                                                  "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (if (< x limit) x (g x)))\n")))
+                                                   nil))
+        rd (fn [g] (program/reads-index g {:env "e" :tree "t" :config {:a/k "1"}} {"docs/x.md" "b1"}))
+        a (rd (w "1" "10")) b (rd (w "2" "10")) c (rd (w "1" "11"))]
+    (is (and (get a 'app.rd/f) (= "1" (get a [:config :a/k])) (= "b1" (get a [:file "docs/x.md"])) (= "t" (get a [:tree])) (string? (get a [:root])))
+        "vars, config values, files, the tree and what the system runs, each by its digest")
+    (is (= (get a 'app.rd/f) (get b 'app.rd/f)) "g edited: f, which calls it, does not move: a run that called g records g")
+    (is (not= (get a 'app.rd/g) (get b 'app.rd/g)) "and g moves")
+    (is (not= (get a 'app.rd/f) (get c 'app.rd/f)) "the data def f reads without calling moves f")))
