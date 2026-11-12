@@ -642,7 +642,12 @@
 
 ;; ---- the reader ------------------------------------------------------------------
 
-(def ^:private task-pull '[* {:seon.task/needs [:seon.task/id]} {:seon.task/agent [:seon.agent/key]}])
+(def ^:private task-pull
+  "What a reader of a task pulls: the task schema's own attributes as the binary's entity index names them, but the declaration its
+  file stated (:seon.task/declared, which only load-tx compares), and its needs and agent by their identities. A named pull, as every
+  pattern is: the shape the reader needs and nothing more. See docs/ctx.md#the-pattern."
+  (into (vec (remove #{:seon.task/declared :seon.task/needs :seon.task/agent} (pdb/attributes-of (pdb/index) :seon.task/task-fact)))
+        [{:seon.task/needs [:seon.task/id]} {:seon.task/agent [:seon.agent/key]}]))
 
 (defn- task-value
   "A pulled task's own members (needs as a set of ids, proofs and references sets), without
@@ -651,7 +656,7 @@
   {:malli/schema [:=> [:cat :seon.task/pulled] :seon.task/own]}
   [t]
   (cond-> (-> t
-              (dissoc :db/id :seon.task/declared)
+              (dissoc :db/id)
               (update :seon.task/needs #(set (map :seon.task/id %)))
               (update :seon.task/proofs set)
               (update :seon.task/kind #(or % :work)))

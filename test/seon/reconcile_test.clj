@@ -966,8 +966,12 @@
                  ;; measured on LMDB (sizes 5, 15, 50 now; first at 10, 300 and 600): 0.36M ticks / 1.7 MB at 10, 10.1M / 50.6 MB at 300, 20.3M / 102 MB at 600, 34k ticks
                  ;; and 169 KB a task (about 26k / 135 KB its pull, seon.task/entity-value); 10 contracted calls a task and 12 fixed.
                  ;; Checked deeply, the same input read n^1.5 and more (each helper validated every entry)
+                 ;; a task is pulled by its schema's named attributes (seon.task's task-pull): on Datahike's pull today each named
+                 ;; attribute is a seek of its own, 35 seeks a task in place of the one :eavt range read '* made, so a task costs about
+                 ;; 100k ticks and 320 KB (measured at 5 and 15). Deep fixes' named-pull item (a named pull reads the entity's
+                 ;; :eavt range once) should bring it back under the old figure, 36k ticks and 180 KB a task
                  :fixed {:ticks 200000.0 :bytes 600000.0 :calls 20.0}
-                 :per-n {:ticks 36000.0 :bytes 180000.0 :calls 11.0}
+                 :per-n {:ticks 100000.0 :bytes 320000.0 :calls 11.0}
                  :sizes listed-sizes})))
 
 (deftest with-merge-chains-work-through-merges
