@@ -485,7 +485,9 @@
         ;; its own fact, as the stall's: the api's defect reaches main through its fold and flush, which the reconciler's quiet
         ;; (await-provoked) does not wait on; read before it under load, :platform failed a landing (runtime's, 2026-11-12)
         _ (out! "PROBLEMS WAIT the api's platform defect on main")
-        platform (seon.system/await-db sys "the api's platform defect on main" platform-defect?)
+        ;; unnamed: a named wait also ends at the reconciler's quiet (:seon.system/quiet-before-true), and this defect is the
+        ;; api's fold, not the reconciler's work, so a named wait answered quiet before the fact and :platform read false
+        platform (seon.system/await-db sys platform-defect?)
         r3 @(c/submit! sys b "(spit \"/dev/stderr\" \"D2 boom: the agent writes its last words\\n\" :append true) (seon.lib/c-exit 3)")
         _ (doseq [tx (seon.fixtures/program-txs @(:conn sys) problem-specs)] @(c/transact-main! sys tx))
         ds (mapv #(assoc % :seon.task/config {:seon.config.agent/max-turns 1})
