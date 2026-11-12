@@ -261,6 +261,9 @@
                                                     :stale-plan "task plans that went stale" :uncited-var "functions that cite no section"
                                                     :problem-unlinked "problem classes with no wiki section" :long-form "forms too long" :waived-proof "proofs that pass by waiver"}
                              :seon.problems/derived #{:stalled :unnamed-site :stale-pin :stale-binary :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :waived-proof :unsynced}
+                             ;; the derived classes a branch's content can make, which seon.problems/caused-split reads from what it moved
+                             ;; and judges it on (seon.problems/caused-classes); the rest of :seon.problems/derived is the running system's state
+                             :seon.problems/caused #{:unnamed-site :stale-section :uncited-var :long-form :leadless-section :orphan-page :waived-proof :uncited-task :stale-plan}
                              ;; shown, never a reason to refuse done (root's ruling, 2026-10-23: every var edit stales the sections that cite it)
                              :seon.problems/attention #{:stale-section :uncited-var :long-form}
                              :seon.problems/areas [[:docs #{:stale-pin :stale-section :orphan-page :leadless-section :uncited-var}] [:tests #{:red :cost :waived-proof}]
