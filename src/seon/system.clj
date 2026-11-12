@@ -650,7 +650,7 @@
               (if-not (and checkout (:branch (:source st)))
                 (reply! st o p (contract/error :seon.system/no-gate-checkout #'seon.system/ext-op "this root has no checkout to run process tests on (:seon.config.source/gate-checkout, or a source root)"))
                 (let [[st rid] (pend st p :gate nil)]
-                  (step/out! o :to-writer {:op :merge-candidate :branch (:branch m) :dest {:gate rid :tests (:tests m) :repo checkout :prio (:prio m 0)}})
+                  (step/out! o :to-writer {:op :merge-candidate :branch (:branch m) :dest {:gate rid :tests (:tests m) :base (:base m) :repo checkout :prio (:prio m 0)}})
                   st)))
       ;; the test service (seon.prove): the request goes to its proc, the caller (a session, or an
       ;; agent's turn through its proc) is answered when the run it joined ends
@@ -735,7 +735,7 @@
                              (seq unread) (deliver-rid st o rid {:unread unread})
                              ;; no process test reached: the writer's analysis of the candidate was the check
                              (empty? (:tests dest)) (deliver-rid st o rid {:value {:results {}}})
-                             :else (do (step/out! o [:fx/tests :ask] {:req {:repo (:repo dest) :branch (:branch (:source st)) :files (:text r) :tests (:tests dest)}
+                             :else (do (step/out! o [:fx/tests :ask] {:req {:repo (:repo dest) :branch (:branch (:source st)) :files (:text r) :tests (:tests dest) :base (:base dest)}
                                                                      :prio (:prio dest 0) :dest {:rid rid}})
                                        st)))
         (:asked dest) (deliver-rid st o (:rid dest) (if (contract/error? r) r {:task (:asked dest)}))

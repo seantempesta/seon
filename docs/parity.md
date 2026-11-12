@@ -1,110 +1,96 @@
 # Parity with v1 Seon
 
-next replaces v1 Seon (`~/src/seon`, JVM, read-only): each capability v1 had is present here, in progress, or left behind on purpose with its reason in [BAGGAGE](../BAGGAGE.md). This page is the tracker: a change that closes a gap updates its entry in the same commit. Each entry is checked in code unless it says "doc".
+next replaces v1 Seon (`~/src/seon`, JVM, read-only): each capability v1 had is present here, in progress, or left behind on purpose with its reason in [BAGGAGE](../BAGGAGE.md). This page is the tracker: a change that closes a gap updates its entry in the same commit.
 
-Status words: **present** (the code exists here; not a claim that it passes), **partial**, **missing**, **dropped** (on purpose; BAGGAGE says why), **new** (v1 had none).
+Status words: **present** (the code exists; not a claim that it passes), **partial**, **missing**, **dropped** (BAGGAGE says why), **new** (v1 had none). Each entry reads v1 → next: status.
 
 ## Operating the system
 
-Each v1 way of starting, stopping and watching the system, and where it stands here.
+Each v1 way of starting, stopping and watching the system.
 
-| v1 | next | Status |
-|---|---|---|
-| ``bin/seon start``, ``start --head``, ``status``, ``stop`` | `bin/system start`, `next` (the newest built generation), `status`, `stop`; every end is a fact on main (`:seon.system/stopped` with its cause, `:seon.system/previous-end` at the next boot, `:unclean` after a SIGKILL or a crash: `seon.system/stop!`) | present |
-| ``bin/seon logs`` | `runs/root.log`, no command | partial |
-| ``bin/seon open``, ``init``, ``reset``, ``nuke`` | none (one root per checkout; per-checkout ports, `bin/ports`) | missing |
-| ``bin/seon config apply`` (sparse, per branch) | config layers plus `--set`; `seon.system/apply!` re-reads `resources/seon/system.edn` | partial |
-| ``bin/worker`` claims and proven commits | worktrees (`bin/worktree`) and root's merges | dropped |
+- ``bin/seon start``, ``status``, ``stop`` → `bin/system start`, `next`, `status`, `stop`; every end is a fact on main (`:seon.system/stopped`, `:seon.system/previous-end`, `:unclean`: `seon.system/stop!`): present.
+- ``bin/seon logs`` → `runs/root.log`, no command: partial.
+- ``bin/seon open``, ``init``, ``reset``, ``nuke`` → none (one root per checkout, ports by `bin/ports`): missing.
+- ``bin/seon config apply`` → config layers plus `--set`; `seon.system/apply!` re-reads `resources/seon/system.edn`: partial.
+- ``bin/worker`` → worktrees (`bin/worktree`) and root's merges: dropped.
 
 ## The MCP server
 
-Each v1 MCP tool and where it stands here.
+Each v1 MCP tool.
 
-| v1 | next | Status |
-|---|---|---|
-| ``eval_clj`` (an agent's REPL or root's) | `seon_eval` (one evaluator: no JVM mode) | present |
-| ``runtime_status`` (health, problems, flow, readiness) | `seon_agents` lists agents and tasks; health only on the dashboard | partial |
-| an outside agent works a task | `seon_attach`, `seon_context`, `seon_done` | new |
-| reasons and defects answered per request | a defect answers that request the typed `:seon.server/defect` and the server goes on (`seon.server/respond`); a refused attach still writes the task's state first | partial |
+- ``eval_clj`` → `seon_eval` (no JVM mode): present.
+- ``runtime_status`` → `seon_agents` lists live agents and running or judged tasks (`seon.server/live-tasks`); health only on the dashboard: partial.
+- an outside agent works a task → `seon_attach`, `seon_context`, `seon_done`: new.
+- defects answered per request → a defect answers that request `:seon.server/defect` and the server goes on (`seon.server/respond`): partial.
 
-The server's ops, the MCP tools and root's evaluation path are [server](server.md#ops). `seon_agents` answers the live agents and the tasks running or judged, and counts the rest (```seon.server/live-tasks```).
+The ops and tools: [server](server.md#ops).
 
 ## The agent's REPL (`my.*`)
 
-Each v1 function of the agent's REPL and where it stands here.
+Each v1 function of the agent's REPL.
 
-| v1 | next | Status |
-|---|---|---|
-| `my.task/current`, `update!`, `send-back!`; `my.turn/wait` | `current`, `update!`, `fail!` (send-back replaced: a failure is task data, held for root: [tasks](tasks.md#a-refused-run-is-held-for-root)); `my.turn/wait` | present (an agent holds its task from the fork: [tasks](tasks.md#the-agent-knows-its-task)) |
-| `my.program/callers`, `source`, `tests-reaching` | `my.agent/callers` (a var's callers, or the functions using a qualified keyword), `callees`, `grep`, `source-fn`; `seon.program/graph-index` (the digest of what a test reaches; `my.agent/prove` runs the tests a change reaches) | present |
-| `my.program/history` | none yet; the store keeps history ([storage](storage.md#history)), the function is not built | missing |
-| `my.program/search`, `similar` (embeddings) | `my.agent/similar` ('ns/f or text); `seon.vector/near` in any query; fused with the call graph ([vectors](vector.md)); EmbeddingGemma-2 in process (llama.cpp) where v1 ran MLX over HTTP | present, better |
-| `my.program/diff`, `sizes`, `breaks` | `seon.system/branch-diff` (root only) | partial |
-| `my.program/write-branch!` | write-back at merge (`seon.source`, the `:git` effect) | present, better |
-| `my.message/inbox`, `send` (stored facts) | `my.agent/messages`, `send-message`: a person's message one entity on main, to the agent (`:seon.message/to`), and on the delivering agent's branch (`:seon.message/*`); another agent's send the same entity, written by root whether or not the recipient's process lives, which wakes it if it waits | partial |
-| ``my.test/run``, ``check`` (v1's) | proofs run by themselves after each evaluation, and `my.agent/prove` runs the same selection at the REPL ([turn](turn.md#who-runs-which-tests)) | present |
-| removal that refuses while a referrer remains (`my.program/unmap-subject!`) | plain `ns-unmap`, observed and recorded on the branch (`seon.repl/unmapped`); a referrer is not refused (it fails where it loads and in its tests) | partial |
-| `my.web/fetch`, `search` | none (no `:web` effect) | missing |
-| `my.fs/*` (read, write, list files), `my.edit/*` (exact-span text edits), `my.shell/run!` (a command, its output and exit), and their handlers' policy (fs roots, no symlink following, a digest precondition on write, argv-only shell with an env allowlist) | none; they go through the effect owner (`my.fx/call`), like every outside-world call. Seon does any work its user wants (AGENTS §1); only Seon's own code changes at the REPL | missing |
-| `my.schema/register!`, `my.branch/merge-main!`, `unmerged`, `resolve!` | `register!`, `merge-main!` (stages the live runtime onto the branch, then merges main's transactions since the merge base; a conflict settles by merging again with resolutions), `unmerged` (computed, never stored); no `resolve!`, the resolutions are its form | present |
-| an effect's receipt committed before its handler runs, settled once, never sent again (`seon.effect`) | the outcome only, in the answer of the eval that asked; a dead agent's effect in flight leaves no record | missing |
+- `my.task/current`, `update!`, `send-back!`; `my.turn/wait` → `current`, `update!`, `fail!` (a failure is task data held for root: [tasks](tasks.md#a-refused-run-is-held-for-root)), `my.turn/wait`: present ([tasks](tasks.md#the-agent-knows-its-task)).
+- `my.program/callers`, `source`, `tests-reaching` → `my.agent/callers`, `callees`, `grep`, `source-fn`; `my.agent/prove` runs the tests a change reaches (`seon.program/graph-index`): present.
+- `my.program/history` → not built; the store keeps history ([storage](storage.md#history)): missing.
+- `my.program/search`, `similar` → `my.agent/similar`, `seon.vector/near`, in process ([vectors](vector.md)): present, better.
+- `my.program/diff`, `sizes`, `breaks` → `seon.system/branch-diff` (root only): partial.
+- `my.program/write-branch!` → write-back at merge (`seon.source`, the `:git` effect): present, better.
+- `my.message/inbox`, `send` → `my.agent/messages`, `send-message`; a message is one entity on main, delivered onto the recipient's branch ([users](users.md#messages)): partial.
+- ``my.test/run``, ``check`` → proofs run after each eval; `my.agent/prove` at the REPL ([turn](turn.md#who-runs-which-tests)): present.
+- `my.program/unmap-subject!` (refuses while a referrer remains) → plain `ns-unmap`, recorded on the branch (`seon.repl/unmapped`); a referrer fails where it loads: partial.
+- `my.web/fetch`, `search` → none (no `:web` effect): missing.
+- `my.fs/*`, `my.edit/*`, `my.shell/run!` and their policy → none; outside-world calls go through the effect owner (`my.fx/call`): missing.
+- `my.schema/register!`, `my.branch/merge-main!`, `unmerged` → the same names: present; `resolve!` is the resolutions of `merge-main!`.
+- an effect's receipt committed before its handler runs (`seon.effect`) → only the outcome, in the answer of the eval that asked: missing.
 
 ## Tasks, merges, tests
 
-Each v1 capability for tasks, merges and tests, and where it stands here.
+Each v1 capability for tasks, merges and tests.
 
-| v1 | next | Status |
-|---|---|---|
-| tasks as data, `:needs`, one reconciler, green at start ends with no model call | `seon.task`, `seon.reconcile` | present |
-| ``chain!`` and ``:seon.task/next`` | `:needs` only | dropped |
-| step templates (design, prove, implement, merge) | `seon.template/request` by default (one task that merges itself), one transaction; for experiments, `seon.template/design-build` (design-build, then merge) and `seon.template/stages` (design → implement → merge on one branch) ([tasks](tasks.md#a-request-is-one-transaction)) | present |
-| three-way program merge, conflicts as entries, merge of main into the branch | `seon.merge` (the one merge: each side's net change by identity, a conflict answered and computed, never stored: [merging](merging.md#seons-merge-is-a-three-way-merge-of-the-program)), `my.branch/merge-main!` | present |
-| many agents merging onto shared definitions at once (v1's swarm) | `bin/check swarm` (`seon.e2e`'s swarm entry: 20 tasks over 5 shared vars, 8 agents at once; red unless conflicts arose and every one was resolved, every task done, and a fresh agent on main gets every proof's value) | present |
-| main wins a conflict | ours is kept | missing |
-| a changed function no test reaches refuses the branch (``:seon.test/unreached``, ``:seon.source/unreached``) | none: `seon.reconcile/done-explain` has no coverage reason | missing |
-| one done rule shared with merge | `seon.reconcile/done-explain` (a proof that never ran is `:proof-unknown`, not red; a process test left out of a judging is neither; a problem the branch made true is `:open-problem`; [tasks](tasks.md#the-done-rule)) | present |
-| tests selected by reach; results reused by reach digest | `seon.proofs/plan` over `seon.program/graph-index`: `bin/prove`, `bin/test` and `bin/check` reuse the verdicts cached by digest in the main tree's `target/results`, where every checkout's runs write them ([merging](merging.md#verdicts-are-a-cache)) (check steps keyed too); agents' runs select and reuse by the same plan against their merge base (`seon.agent/test-plan`), from the same facts | present; an agent shares the greens when its root's binary is built from its source tree ([merging](merging.md#a-merge-runs-what-the-change-reaches)) |
-| contracts armed at definition; cost proofs; per-function profile | `seon.contract`, `seon.cost`, `seon.profile` | present |
-| turns-to-green report (median, p90) | `seon.learn` charges overrun per agent (stored as ``:seon.task/waste``) | partial |
-| scheduled work (``seon.schedule``) | the cron proc (``seon.cron``): one daily message, the full run of main (`:seon.config.proofs/full-run-at`); no general schedules | partial |
+- tasks as data, `:needs`, one reconciler → `seon.task`, `seon.reconcile`: present.
+- ``chain!``, ``:seon.task/next`` → `:needs` only: dropped.
+- step templates → `seon.template/request` by default; `seon.template/design-build` and `seon.template/stages` for experiments ([tasks](tasks.md#a-request-is-one-transaction)): present.
+- three-way program merge, conflicts as entries → `seon.merge`, `my.branch/merge-main!`: present.
+- many agents merging onto shared definitions (v1's swarm) → `bin/check swarm` (10 tasks over 5 shared vars, 8 running): present.
+- main wins a conflict → ours is kept: missing.
+- a changed function no test reaches refuses the branch → `seon.reconcile/done-explain` has no coverage reason: missing.
+- one done rule shared with merge → `seon.reconcile/done-explain` ([tasks](tasks.md#the-done-rule)): present.
+- tests selected by reach, reused by digest → `seon.proofs/plan` over `seon.program/graph-index`, for `bin/prove`, `bin/test`, `bin/check` and agents (`seon.agent/test-plan`) ([merging](merging.md#verdicts-are-a-cache)): present.
+- contracts armed at definition; cost proofs; profile → `seon.contract`, `seon.cost`, `seon.profile`: present.
+- turns-to-green report → `seon.learn` charges overrun (``:seon.task/waste``): partial.
+- scheduled work (``seon.schedule``) → the cron proc (``seon.cron``), one daily full run of main (`:seon.config.proofs/full-run-at`): partial.
 
 ## Context, printing, the page
 
-Each v1 capability for building and printing the model's context, and where it stands here.
+Each v1 capability for the model's context, printing and the page.
 
-| v1 | next | Status |
-|---|---|---|
-| generated task context; one reference rule (`seon.ref`); forgiving reader | `seon.ctx`, `seon.ref`, `seon.reader/forgive` | present |
-| `(help)` checked against the program | [agent](agent.md), the system message; `my.agent/help`; every form on it run in an agent by `seon.repl-test/the-template-instructions-and-the-help-page-run` | present |
-| context: stable session sections, cached; small turn sections; must-reads capped | ```seon.ctx.wire/request``` (the help, the session's records, the page among them as evals Seon ran: whole, then what moved); vars at their citation's depth, cut only by the printer at the context's budget; cache hits on each turn | present |
-| one printer with a budget and runnable continuations; renders on schemas | `seon.print`, `seon.render` | present |
-| wiki sections in the context | `seon.doc` | new |
-| Datastar pages: `/`, `/agent/{id}` | `seon.web` | present |
-| `/agent/{id}/debug`: each model call, what it was sent, its tokens | `/agent/{id}/debug` (`seon.render.proc/debug-value`; `/agent/{id}/ctx` is the agent's `@ctx` printed): the raw wire, a bar for each model turn and one request's messages as sent in wire order, made again from its records (```seon.ctx.wire/wire-turn```) and compared with the hash the turn recorded (`:seon.model-call/sent-hash`), each message beside the record that made it, with its tokens, cache share and, for a failed call, its typed error | present (`seon.ctx.wire-test/the-request-is-a-conversation-of-evals-and-the-page`) |
-| `/agent/{id}/message` (the person's input bar) | the page's input (its words, told apart from its forms by `seon.reader/words-and-forms`) and the server's `:message` op, both `seon.system/message!`: root's one write of the fact (`seon.system/message-write`), which the agent's next act delivers onto its branch | present: a fact on main (from the user's name, to the agent), and on the agent's branch once delivered, placed in a turn by ``:seon.message/call`` |
-| `/ns/{ns}` and its debug pages; `/data`; `/chains`; `/health` | none (task `seon.render/namespace-agent-debug-and-data-pages`; the routes here: [dashboard](dashboard.md)) | missing |
-| POSTs refuse a cross-origin request (``::same-origin``) | every POST (a call, a cut opened, a debug step) is refused with 403 before any route reads it when its Origin is another's or its Sec-Fetch-Site says cross-site (`seon.web/same-origin?`, `seon.web/handler`; `seon.web-test/a-cross-origin-post-is-refused`) | present |
+- generated task context, one reference rule, forgiving reader → `seon.ctx`, `seon.ref`, `seon.reader/forgive`: present.
+- `(help)` checked against the program → [agent](agent.md), `my.agent/help`, every form run by `seon.repl-test/the-template-instructions-and-the-help-page-run`: present.
+- cached context sections → `seon.ctx.wire/request` ([ctx](ctx.md)): present.
+- one printer with a budget; renders on schemas → `seon.print`, `seon.render`: present.
+- wiki sections in the context → `seon.doc`: new.
+- Datastar pages `/`, `/agent/{id}` → `seon.web`: present.
+- `/agent/{id}/debug` → the same route (`seon.render.proc/debug-value`), each request remade from its records (`seon.ctx.wire/wire-turn`) and checked against `:seon.model-call/sent-hash` (`seon.ctx.wire-test/the-request-is-a-conversation-of-evals-and-the-page`): present.
+- `/agent/{id}/message` → the page's input and the server's `:message` op, both `seon.system/message!`: present.
+- `/ns/{ns}`, `/data`, `/chains`, `/health` → none (task `seon.render/namespace-agent-debug-and-data-pages`; [dashboard](dashboard.md)): missing.
+- POSTs refuse cross-origin → `seon.web/same-origin?` (`seon.web-test/a-cross-origin-post-is-refused`): present.
 
 ## Storage, config, errors
 
-Each v1 capability for storage, config and errors, and where it stands here.
+Each v1 capability for storage, config and errors.
 
-| v1 | next | Status |
-|---|---|---|
-| one store, many Datahike branches | `seon.db` (LMDB), `seon.writer` | present |
-| history kept | `:seon.config.store/keep-history?` (default true), fixed when a store is made; a kept store made without it keeps its layout ([storage](storage.md#history)) | present |
-| storage collection, log rotation (``seon.maintenance``) | root collects at quiescence with no agent live, when a branch is gone ([storage](storage.md#collection)); no log rotation | partial |
-| blobs out of line (``seon.blob``) | large values out of line inside Datahike's own store, written once, kept by GC's mark ([storage](storage.md#values-out-of-line)); zstd for every stored value, built from source ([storage](storage.md#compression)); plain values stored as data, not EDN text ([storage](storage.md#plain-values)) | present |
-| every config key documented | one aero file, one resolver (`seon.config`) | present |
-| one error shape, recorded once per signature, problem report | `seon.contract/error`, `seon.error`, `seon.problems` | present |
-| named catch sites | [failure points](failure-points.md), `bin/laws` | new |
+- one store, many Datahike branches → `seon.db` (LMDB), `seon.writer`: present.
+- history kept → `:seon.config.store/keep-history?`, fixed when a store is made ([storage](storage.md#history)): present.
+- collection, log rotation (``seon.maintenance``) → root collects at quiescence ([storage](storage.md#collection)); no log rotation: partial.
+- blobs out of line (``seon.blob``) → large values out of line in Datahike's store ([storage](storage.md#values-out-of-line)), zstd ([storage](storage.md#compression)): present.
+- every config key documented → one aero file, one resolver (`seon.config`): present.
+- one error shape, recorded per signature → `seon.contract/error`, `seon.error`, `seon.problems`: present.
+- named catch sites → [failure points](failure-points.md), `bin/laws`: new.
 
 ## Onboarding and docs
 
-Each v1 way of onboarding agents and keeping docs, and where it stands here.
+Each v1 way of onboarding agents and keeping docs.
 
-| v1 | next | Status |
-|---|---|---|
-| `CLAUDE.md` (the laws) | `AGENTS.md` alone: Claude Code reads it when the folder has no `CLAUDE.md` | present |
-| 13 skills in ``.agents/skills`` | the task's context and this wiki | dropped |
-| architecture pages | topic pages and the [map](README.md), loaded into the store as sections (`seon.doc`); no check fails on a dangling citation (task `seon.doc/the-wiki-stays-true-and-healthy`) | partial |
+- `CLAUDE.md` → `AGENTS.md` alone: present.
+- 13 skills in ``.agents/skills`` → the task's context and this wiki: dropped.
+- architecture pages → topic pages and the [map](README.md), loaded as sections (`seon.doc`); a citation of a lost name is a health problem ([health](health.md)): present.

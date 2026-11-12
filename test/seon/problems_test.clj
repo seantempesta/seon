@@ -702,7 +702,7 @@
   (let [att (fn [extra] (:db-after (d/with (seeded 1 5)
                                            [(ended "t/u" (merge {:seon.task/branch :u :seon.task/kind :merge :seon.task/outcome :merged
                                                                  :seon.task/agent {:seon.agent/key "b/a9" :seon.agent/ended-ms 9}
-                                                                 :seon.task/deferred #{'seon.system-test/boots 'seon.check-test/clean}}
+                                                                 :seon.task/deferred {'seon.system-test/boots "d1" 'seon.check-test/clean nil}}
                                                                 extra))])))
         rows #(get-in (problems/report %) [:classes :unrun :rows])]
     (is (= [["t/u" "merged with 2 process tests unrun" true]] (mapv (juxt :task :reason :open?) (rows (att {})))))
