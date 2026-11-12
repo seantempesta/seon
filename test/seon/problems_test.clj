@@ -1482,8 +1482,8 @@
   (t/with (world) (t/code 'app.law-test (apply str "(ns app.law-test (:require [clojure.test :refer [deftest is]] [seon.test-store :as ts] [datahike.api :as d]))\n"
                                                (map #(str % "\n") forms)))))
 
-(deftest ^{:seon.test/estimate {:ticks 60000000}} a-changed-test-states-what-its-kind-needs
-  ;; docs/testing.md#test-kinds: a test the branch added or changed that reaches a root (directly or through its namespace's
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-changed-test-states-what-its-type-needs
+  ;; docs/testing.md#test-types: a test the branch added or changed that reaches a root (directly or through its namespace's
   ;; helper) naming none, or calls a store of its own is a caused :undeclared-test, one row a lack (stating no estimate is
   ;; :unestimated-test's); declared, none but an estimate over its cap; an unchanged undeclared test is not judged. Work: the world (cached), three imports of a
   ;; six-form namespace (~5 M ticks each) and two caused-splits over the few vars they change.

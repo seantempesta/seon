@@ -359,7 +359,7 @@
 
 (defn- var-attributes
   "Of keys, the attributes a schema extending a var's (:seon.db/var-fact) owns, as the entity index says (`seon.db/owners`):
-  the metadata that makes a var a more specific thing (a test). See docs/testing.md#test-kinds."
+  the metadata that makes a var a more specific thing (a test). See docs/testing.md#test-types."
   {:malli/schema [:=> [:cat [:sequential :any]] [:sequential :qualified-keyword]]}
   [ks]
   (let [ix (pdb/index)]
@@ -367,7 +367,7 @@
 
 (defn- def-facts
   "A defined var's metadata keys that are `var-attributes`, each with its value (the live var's when it is plain data, else
-  as written): its facts on the var entity. See docs/testing.md#test-kinds."
+  as written): its facts on the var entity. See docs/testing.md#test-types."
   {:malli/schema [:=> [:cat [:maybe :seon.host/var] :map] [:map-of :qualified-keyword :any]]}
   [v d]
   (let [m (merge (:meta d) (some-> v meta))]
@@ -607,7 +607,7 @@
   "tx-data making definition k point at the form content names (content {:form :meta :facts
   :contract :doc :file}), retracting what it held that content does not, or, for nil
   content, retracting what it held. e: its entity on db (def-eid), or nil. A var's :facts are its metadata
-  that are attributes, asserted as they are (docs/testing.md#test-kinds)."
+  that are attributes, asserted as they are (docs/testing.md#test-types)."
   {:malli/schema [:=> [:cat :seon.host/db :any [:maybe :int] [:maybe :map]] :seon.db/tx-data]}
   [db k e content]
   (let [x (when e (d/entity db e))

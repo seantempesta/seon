@@ -438,7 +438,7 @@
 
 (defn unestimated-tests
   "Each of the named vars (a set of symbols, the vars a branch changed) that is a test stating no estimate on its deftest
-  (no :seon.test/estimate fact on its var: docs/testing.md#test-kinds), as an :unestimated-test row: a new or changed test states what it should cost, worked from
+  (no :seon.test/estimate fact on its var: docs/testing.md#test-types), as an :unestimated-test row: a new or changed test states what it should cost, worked from
   what it must do, and runs under the cap until it does (docs/merging.md#a-tests-tick-budget). Closed by stating
   ^{:seon.test/estimate {:ticks n}}. Cost: one seek per named var."
   {:malli/schema [:=> [:cat :seon.host/db :map [:set :symbol]] [:vector :seon.problems/row]]}
@@ -502,7 +502,7 @@
   "{name local?} of what test var t reaches through the test namespaces' own code, by the compiler's facts: its form's
   :form/refs and, followed, those of each var they name that a namespace under test/ defines and that is none of stop (a src var,
   the shared world's among them, is not entered); local? when a form of t's own namespace names it. Cost: one seek and one
-  form's refs a test-tree var reached. See docs/testing.md#test-kinds."
+  form's refs a test-tree var reached. See docs/testing.md#test-types."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol [:set :qualified-symbol]] [:map-of :symbol :boolean]]}
   [db t stop]
   (let [nsym (namespace t)
@@ -521,7 +521,7 @@
   asks-cap, a binary test's execs-cap); it reaches a running system (:seon.config.proofs/system-vars) and names no
   :seon.test/root, or runs a command (exec-vars) and names no :seon.test/execs; or its namespace makes a store of its own
   (own-store-vars). Read from the compiler's facts (`test-reach`); a test the branch did not change is not judged.
-  Closed by stating what it lacks on the deftest. See docs/testing.md#test-kinds."
+  Closed by stating what it lacks on the deftest. See docs/testing.md#test-types."
   {:malli/schema [:=> [:cat :seon.host/db :map [:set :symbol]] [:vector :seon.problems/row]]}
   [db ans names]
   (let [c (delay (into {} (for [k [:test-ticks-cap :system-test-asks-cap :binary-test-execs-cap :system-vars :exec-vars :own-store-vars]]

@@ -1640,7 +1640,7 @@
          (map-indexed (fn [i m] (str "(deftest " (when m (str "^" (pr-str m) " ")) "t" i " (is true))\n")) metas)))
 
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-tests-metadata-is-its-facts-and-names-it
-  ;; docs/testing.md#test-kinds: a metadata key an entity schema owns is that attribute's fact on the var, value and all, so
+  ;; docs/testing.md#test-types: a metadata key an entity schema owns is that attribute's fact on the var, value and all, so
   ;; the test is named by the attributes it holds (seon.db/most-specific); taken off its deftest, the fact is retracted
   ;; and the var is a var again (the write check holds a test to its own keys, not its parent's). Work: the world (cached) and two
   ;; imports of a four-form namespace, ~5 M ticks each.

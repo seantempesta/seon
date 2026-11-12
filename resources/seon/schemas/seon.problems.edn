@@ -287,7 +287,7 @@
                                                   :unnamed-site "docs/health.md#a-laws-unnamed-site"
                                                   :stale-pin "docs/forks.md#branch-scheme" :stale-binary "docs/health.md#a-stale-binary" :stale-section "docs/health.md#a-stale-section"
                                                   :orphan-page "docs/health.md#an-orphan-page" :leadless-section "docs/health.md#a-section-with-no-lead" :uncited-task "docs/health.md#a-task-that-cites-nothing" :stale-plan "docs/health.md#a-plan-that-went-stale" :uncited-var "docs/health.md#a-function-that-cites-no-section" :long-form "docs/health.md#a-form-too-long" :waived-proof "docs/health.md#a-proof-that-passes-by-waiver" :problem-unlinked "docs/health.md#a-problem-with-no-page"
-                                                  :unestimated-test "docs/merging.md#a-tests-tick-budget" :undeclared-test "docs/testing.md#test-kinds"}}
+                                                  :unestimated-test "docs/merging.md#a-tests-tick-budget" :undeclared-test "docs/testing.md#test-types"}}
                        :stalled :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict :unnamed-site :stale-pin :stale-binary :unrun
                        :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :waived-proof :unsynced :unestimated-test :undeclared-test]
  :seon.problems/row [:map {:seon.render/hiccup seon.render.ui/problem-row}

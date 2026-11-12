@@ -50,7 +50,7 @@ A test that runs a process (a root, its fork server, an agent) waits on boots, n
 
 A test reads a root's branches from the store in its own process, never by asking the root: ```seon.test-store/read-branch```, ```seon.test-store/read-main``` and ```seon.test-store/read-task-branch```, through one read connection per store path (```seon.test-store/reader```). An agent commits a request's writes before it replies, and the writer commits before it answers, and LMDB's readers see every process's commits ([storage](storage.md)). In `in-agent`, a function among the forms runs in the test's process with `{:root :names}`. A read through root costs a request, an eval and a commit on root's main (about 14 ms against 1 ms direct). Ask root only when the claim is that root answers, or for state it holds only in memory (a proc's state).
 
-## Test kinds
+## Test types
 
 A test is what its deftest's metadata states: each metadata key an entity schema owns is written on the test's var as that attribute's fact (```seon.program/def-tx```), so a test is named as any entity is (```seon.db/most-specific```). Three sets of attributes:
 - **`:seon.test/test`**: `:seon.test/estimate`, `{:ticks n}` worked from what it must do (optional `:bytes`, `:asks`, `:execs`). It is given the shared world (`my.test/world`, `seon.test-store/test-db`, `test-branch!`) and runs in process.

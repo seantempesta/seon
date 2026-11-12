@@ -593,7 +593,7 @@
  ;; growing with the digests it has had. Provenance: all of them cost 30.6 s across 1,708 tests, the newest 5 cost 4.4 s, and the same 1,524
  ;; tests got a time (2026-11-06, commit message). At the bound: older verdicts are not read.
  :seon.config.proofs/recent-verdicts 5
- ;; What each set of tests may state and reach (docs/testing.md#test-kinds; seon.problems/undeclared-tests judges the tests a
+ ;; What each set of tests may state and reach (docs/testing.md#test-types; seon.problems/undeclared-tests judges the tests a
  ;; branch changed). Unit: engine ticks. The most a test's :seon.test/estimate may state as :ticks: its budget is ten times
  ;; it, so a test past 1e9 ticks is split or moved to a system test's root. At the bound: an :undeclared-test row naming it.
  :seon.config.proofs/test-ticks-cap 100000000

@@ -134,13 +134,13 @@
                      [:seon.test/ticks {:optional true} :seon.test/ticks]
                      [:seon.test/bytes {:optional true} :seon.test/bytes]]
  ;; a test's kind is the attributes its deftest's metadata states (seon.program/def-facts), read as any entity's (seon.db/most-specific)
- :seon.test/root [:vector {:description "The root a system test asks for, as its arguments ([] the shared default root). See docs/testing.md#test-kinds."} :string]
- :seon.test/execs [:vector {:description "The commands a binary test runs, e.g. [\"target/seon\"]. See docs/testing.md#test-kinds."} :string]
- :seon.test/test [:and {:seon.db/attributes true :description "A test that states its estimate: run in process on the shared world, held to its kind's cap. See docs/testing.md#test-kinds."}
+ :seon.test/root [:vector {:description "The root a system test asks for, as its arguments ([] the shared default root). See docs/testing.md#test-types."} :string]
+ :seon.test/execs [:vector {:description "The commands a binary test runs, e.g. [\"target/seon\"]. See docs/testing.md#test-types."} :string]
+ :seon.test/test [:and {:seon.db/attributes true :description "A test that states its estimate: run in process on the shared world, held to its type's cap. See docs/testing.md#test-types."}
                   :seon.db/var-fact [:map [:seon.test/estimate :seon.test/estimate]]]
- :seon.test/system-test [:and {:seon.db/attributes true :description "A test given a running system: the root it names in :seon.test/root. See docs/testing.md#test-kinds."}
+ :seon.test/system-test [:and {:seon.db/attributes true :description "A test given a running system: the root it names in :seon.test/root. See docs/testing.md#test-types."}
                          :seon.test/test [:map [:seon.test/root :seon.test/root]]]
- :seon.test/binary-test [:and {:seon.db/attributes true :description "A test that runs the commands it names in :seon.test/execs. See docs/testing.md#test-kinds."}
+ :seon.test/binary-test [:and {:seon.db/attributes true :description "A test that runs the commands it names in :seon.test/execs. See docs/testing.md#test-types."}
                          :seon.test/test [:map [:seon.test/execs :seon.test/execs]]]
  :seon.db/method-fact [:map {:seon.db/attributes true}
                         [:method/key :method/key] [:method/multi :method/multi] [:method/dispatch :method/dispatch]
