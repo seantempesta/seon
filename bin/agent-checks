@@ -17,8 +17,13 @@ st=0
 P=(); [[ -n ${2:-} ]] && P=(--port $2)
 call() { timeout 300 bin/mcp call $P "$@" 2>&1 }
 ev() { local intent=$1 code=$2; call eval agent=$A intent="$intent" code="$code" }
+# a failed check shows what it was answered: the lines that name a verdict, else the answer's head whole (an error, a refusal), never nothing
 check() { local name=$1 want=$2 got=$3
-  if print -r -- "$got" | grep -q -- "$want"; then print "CHECK $name ok"; else print "CHECK $name FAILED: wanted $want"; print -r -- "$got" | grep -E "red: |green: |✗ |:value" | head -6; st=1; fi }
+  if print -r -- "$got" | grep -q -- "$want"; then print "CHECK $name ok"; else
+    print "CHECK $name FAILED: wanted $want"
+    local hit=$(print -r -- "$got" | grep -E "red: |green: |✗ |:value" | head -6)
+    if [[ -n $hit ]]; then print -r -- "$hit"; else print "  its answer:"; print -r -- "$got" | head -12 | sed 's/^/  /'; fi
+    st=1; fi }
 prove() { ev "prove the checks' tests" "(my.agent/prove '#{tests.inv.lab/twice-doubles tests.inv.lab/amount-passes})" }
 call create ns=tests.inv name=agent-checks-$$ plan="bin/agent-checks: the runtime invariant through the MCP tools" > /dev/null
 A=$(call attach task=$T | sed -n 's/^{:agent :\([a-z0-9]*\),.*/\1/p')
@@ -30,11 +35,8 @@ ev "redefine twice so its test fails" "(in-ns 'tests.inv.lab) (defn twice {:mall
 check i "tests.inv.lab/twice-doubles" "$(prove)"
 ev "narrow the registered entry so the contracted test fails" "(my.schema/register! :tests.inv.lab/amount [:int {:min 10}])" > /dev/null
 check ii "tests.inv.lab/amount-passes" "$(prove)"
-call eval agent=root intent="end the checks' agent: an attach resumes it in a new process" code="(seon.system/kill! sys :$A)" > /dev/null
-# the kill's end, read from root's view (an event: its status gone from :idle), never a sleep; bounded by the asks it makes
-for i in {1..60}; do
-  call eval agent=root intent="read the checks' agent's status" code="(get-in (seon.system/state sys) [:agents :$A :status])" | grep -q ":value :idle" || break
-done
+# the kill answers once the agent's end is recorded (seon.system/kill!), so the attach after it finds it ended: no poll
+call eval agent=root intent="end the checks' agent: an attach resumes it in a new process" code="@(seon.system/kill! sys :$A)" > /dev/null
 call attach task=$T > /dev/null
 R=$(prove)
 check iv-twice "tests.inv.lab/twice-doubles" "$R"
