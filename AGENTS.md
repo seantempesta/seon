@@ -46,11 +46,11 @@ Run, then right, then fast. If you can't show it running, it isn't done.
 4. **Act:** the simplest code that passes, at the cause, in the owner of the bad value. **A bug is a class:** find what allowed it, change that so the class cannot recur, and sweep for its siblings. No special case, retry, guard or hand-kept list. **Fences, guards, locks, waits and timers are likely bugs:** a stateful process is a Flow proc, coordination is channels, shared state is one atom, and everything else is an immutable value ([flow](docs/flow.md#the-step-fn-contract-every-proc-follows)).
 5. **Work it as a Seon agent would,** through the server (§6). A change to what the owner sees is checked in a browser.
 
-**One tip, one landing** ([merging](docs/merging.md#a-branch-lands-with-binland)):
-1. Each session works a short branch, `jolt/<task-name>`, in its own worktree (`bin/worktree NAME`). The main tree stays on main and clean.
-2. When the change is done, merge main into the branch and run `nice -n 15 bin/prove` once. It runs everything the change reaches and reuses every green stored at its digest; it is never a hand-picked set of namespaces. **At most two proves at once on this machine:** read the notes folder's `mail/PROVING`, add your line when fewer than two are listed, and remove it when you finish. The standing system's merge check counts as one.
+**One branch per session, landed often** ([merging](docs/merging.md#a-branch-lands-with-binland)):
+1. **Each session has one worktree and one branch,** `jolt/<session>` (`bin/worktree NAME`), and works all its items there together: build, iterate and test them as one, and merge main in often so nothing waits (owner, 2026-11-12: "they work on multiple things at once ... and it gets merged with main regularly so it isn't a bottleneck"). No branch per small change. The main tree stays on main and clean.
+2. When the branch holds something worth landing, merge main into it and run `nice -n 15 bin/prove`. It runs everything the change reaches and reuses every green stored at its digest; it is never a hand-picked set of namespaces. There is no cap on proves at once: the test system sets its workers from the machine's cores.
 3. Green: mail Point `LAND <branch> <sha>` with a landing message of 10 lines or fewer. It gives the step of THE PLAN, what the change deletes, the `src` delta, the estimate beside the measured number, and what allowed the bug. A docs-and-tasks change is never proved: commit it, mail Point, and Point lands the pending docs-and-tasks changes together after one `bin/check health` and `seon.doc-test`. A change to docs must rerun no test that does not read the docs ([what a test takes](docs/source.md#tests-run-by-reach)).
-4. Point reads the diff and lands it alone with `bin/land -F MSGFILE`, which brings the standing system up to date through `bin/update`. Tips are never batched.
+4. Point reads the diff and lands each session's branch alone with `bin/land -F MSGFILE`, which brings the standing system up to date through `bin/update`. Branches of different sessions are never batched into one landing.
 5. Never wait on a landing: start the next change from main or from your own tip.
 
 - **A change lands with what uses it.** A capability comes in the tip of its first caller, or with the deletion it makes possible. A docs change and a pure deletion land alone.
@@ -118,7 +118,7 @@ Name things with Clojure's, its libraries', Jolt's and git's words: entity, attr
 ## 8. The machine
 
 - **Seon's target is a 16 GB MacBook M1** (`bin/check scale`). The machine the sessions build on has 18 cores and 128 GB.
-- **Heavy runs** (`bin/build`, `bin/prove`) run under `nice -n 15`, at most two proves at once (§3).
+- **Heavy runs** (`bin/build`, `bin/prove`) run under `nice -n 15`; the test system sets its workers from the cores (§3).
 - **Never flood it:** anything that makes threads or processes starts at n ≤ 100; one experiment at a time; never make load to reproduce something ([machine](docs/machine.md#processes)).
 - **Kill only verified PIDs:** read the full command and its cwd first; never `pkill`, `killall` or a `pgrep -f` pattern. A system's processes end with it.
 - **A hang is evidence:** capture it before killing the process ([machine](docs/machine.md#reading-a-hang)).
@@ -131,7 +131,7 @@ Name things with Clojure's, its libraries', Jolt's and git's words: entity, attr
 - Fanning out, and building infrastructure instead of the product.
 - A number accepted without an estimate to hold it against: a test spending 8,000 times what it should, a suite rerun 52 times a day.
 - Switching a mechanism off, or routing around it, because it has a bug: a forked test child that died was answered by turning forks off, and every test ran as a cold process after that. A bug is fixed at its cause; nothing is switched off for it.
-- Batching tips, or calling a hand-picked set of tests a prove.
+- Batching different sessions' branches into one landing, or calling a hand-picked set of tests a prove.
 - A rule added after every incident, instead of the cause fixed and the old text deleted.
 - A parallel system, or a mechanism built twice.
 - A swallowed error, a fake default, a clock standing in for a dependency.
