@@ -94,6 +94,25 @@
            (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (seon.lib/remove-tree! path))))
            path)))
 
+(defn shared-program-store!
+  "The path of the program store at base for key (program-store-key), base-<key>: the repository's, which checkouts at other
+  keys share at once (another Jolt pin, another program schema), so a store of another key is never removed for being another
+  key's (seon.db/kept-store!'s rule, made for a store one process owns, deleted a store a plan of the new key was opening,
+  2026-11-12). This one is marked used (its directory's mtime); stores of other keys beyond the
+  :seon.config.proofs/program-stores-kept most recently used are removed, so the disk stays bounded. Nothing is made here.
+  See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [base k]
+  (let [f (java.io.File. ^String base) dir (.getParentFile f) stem (.getName f)
+        path (str dir "/" stem "-" k)
+        own (java.io.File. path)
+        others (for [n (some-> dir .list seq) :when (and (re-matches (re-pattern (str "\\Q" stem "\\E-[0-9a-f]{8}")) n) (not= n (.getName own)))]
+                 (java.io.File. dir ^String n))]
+    (when (.isDirectory own) (.setLastModified own (System/currentTimeMillis)))
+    (doseq [^java.io.File o (drop (dec (config/value :seon.config.proofs/program-stores-kept)) (sort-by #(- (.lastModified ^java.io.File %)) others))]
+      (seon.lib/remove-tree! (.getPath o)))
+    path))
+
 (defn kept-program-store
   "The path of the plan's program store (:seon.config.proofs/program-store, keyed by kept-program-digest): the
   one bin/test's plan imported the checkout's tree into before any shard started, so a test that reads the
@@ -102,7 +121,7 @@
   imports another tree takes program-store, a store of its process's own: its branches are scratch, and
   never the plan's to choose a nearest tree from. docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat] :string]}
-  [] (pdb/kept-store! (config/value :seon.config.proofs/program-store) @kept-program-digest))
+  [] (shared-program-store! (config/value :seon.config.proofs/program-store) @kept-program-digest))
 
 (defn reach-index
   "{key {:digest :process? :binary?}} of db's tests under inputs (or of each key of roots, {key [var ...]}):

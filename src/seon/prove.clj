@@ -84,22 +84,25 @@
   (each nil when unset): {:workers n}, n the least of the count bounds set (max-workers; max-cores, a share in (0,1] of the
   cores rounded down, at least 1), the cores when neither is set; with :max-load when it is set."
   {:malli/schema [:=> [:cat [:map [:cores pos-int?] [:max-workers {:optional true} [:maybe pos-int?]]
-                             [:max-cores {:optional true} [:maybe double?]] [:max-load {:optional true} [:maybe number?]]]]
-                  [:map [:workers pos-int?] [:max-load {:optional true} number?]]]}
-  [{:keys [max-workers max-cores max-load cores]}]
+                             [:max-cores {:optional true} [:maybe double?]] [:max-load {:optional true} [:maybe number?]]
+                             [:root-weight {:optional true} [:maybe pos-int?]]]]
+                  [:map [:workers pos-int?] [:max-load {:optional true} number?] [:root-weight {:optional true} pos-int?]]]}
+  [{:keys [max-workers max-cores max-load cores root-weight]}]
   (let [by-cores (when max-cores (max 1 (long (Math/floor (* max-cores cores)))))
         counts (filterv some? [max-workers by-cores])]
     (cond-> {:workers (if (seq counts) (reduce min counts) cores)}
-      max-load (assoc :max-load max-load))))
+      max-load (assoc :max-load max-load)
+      root-weight (assoc :root-weight root-weight))))
 
 (defn config-admission
   "admission of the config this process holds: its optional keys as its branch states them, absent when unset. See
   docs/merging.md#the-test-service."
-  {:malli/schema [:=> [:cat] [:map [:workers pos-int?] [:max-load {:optional true} number?]]]}
+  {:malli/schema [:=> [:cat] [:map [:workers pos-int?] [:max-load {:optional true} number?] [:root-weight {:optional true} pos-int?]]]}
   []
   (let [c (:config (cfg/in-force))]
     (admission {:max-workers (:seon.config.proofs/max-workers c) :max-cores (:seon.config.proofs/max-cores c)
-                :max-load (:seon.config.proofs/max-load c) :cores (cfg/value :seon.config.machine/cores)})))
+                :max-load (:seon.config.proofs/max-load c) :cores (cfg/value :seon.config.machine/cores)
+                :root-weight (cfg/value :seon.config.proofs/root-item-workers)})))
 
 (defn machine-load
   "The machine's 1-minute load average, as grant reads it: the one reading of the load the service's step makes (a test
@@ -107,11 +110,24 @@
   {:malli/schema [:=> [:cat] number?]}
   [] (lib/load-average))
 
+(defn root-item?
+  "Does item it (its queued state) boot a root of its own when it runs: a process test (its batch shares the test root the
+  first starts, with its fork server and agents), a check step on the binary, a build or a seed. Such an item is about
+  :seon.config.proofs/root-item-workers processes, not one: 18 of them at once were once 51 roots at load 46 on 18 cores.
+  See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
+  [it] (boolean (or (:process? it) (#{:build :seed} (:kind it)) (and (= :step (:kind it)) (:binary? it)))))
+
+(defn- batch-weight
+  "The workers running batch b of st takes: :root-weight when one of its items boots a root (root-item?), else one."
+  {:malli/schema [:=> [:cat :map [:set :any]] :int]}
+  [st b] (if (some #(root-item? (get-in st [:items %])) b) (:root-weight st 1) 1))
+
 (defn- free-workers
-  "The items st may still start under its count bound: its :workers less the items running (its batches). See
-  docs/merging.md#the-test-service."
+  "The workers st may still start items on under its count bound: its :workers less what its running batches take
+  (batch-weight: a batch that boots a root takes :root-weight). See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :map] :int]}
-  [st] (- (:workers st 0) (count (:batches st))))
+  [st] (- (:workers st 0) (reduce + 0 (map #(batch-weight st %) (vals (:batches st))))))
 
 (defn item-value
   "What running queued item it next is worth, bid grants made so far: the askers waiting on it, plus the times it was
@@ -200,7 +216,9 @@
           [k it] (when free?
                    (reduce-kv (fn [best k it]
                                 ;; an item that needs its tree's build or seed waits while that is queued or running (a red one ends it)
-                                (if (and (= :queued (:status it)) (not-any? (:items st) (:needs it)))
+                                (if (and (= :queued (:status it)) (not-any? (:items st) (:needs it))
+                                         ;; an item that boots a root only where its weight fits, or with nothing running (never stalled)
+                                         (or (not (root-item? it)) (zero? running) (>= (free-workers st) (:root-weight st 1))))
                                   ;; a turn's first; then the item of the asker nearest done (shortest remaining work first: the least
                                   ;; mean time to an answer over askers); its waiters and age only break a tie
                                   (let [v (+ (if (and (seq turns) (some turns (:waiters it))) 1e12 0)
@@ -307,7 +325,7 @@
     (let [st (reduce (fn [st [k m]]
                        (if (get-in st [:items k])
                          (update-in st [:items k :waiters] conj rid)
-                         (assoc-in st [:items k] (assoc (select-keys m [:agent :ms :mode :kind :needs :tree :checkout :binary? :bound]) :status :queued :waiters #{rid} :at (:bid st 0)))))
+                         (assoc-in st [:items k] (assoc (select-keys m [:agent :ms :mode :kind :needs :tree :checkout :binary? :bound :process?]) :status :queued :waiters #{rid} :at (:bid st 0)))))
                      (assoc-in st [:askers rid] {:left (set (keys items)) :prio prio :results {}
                                                  ;; the items that are its proofs: past a red it still waits for these (item-ended)
                                                  :proofs (into #{} (filter #(contains? proofs (first %))) (keys items))}) items)]
@@ -546,7 +564,7 @@
                   ;; the one test root the first starts, ~20 s, then ~0.5 s a test), never a cold bin/test process (~10 s more each);
                   ;; it needs the tree's seed: the binary and the process tests' store
                   (concat (for [[t d] (:process r)]
-                            [[t d] (cond-> (assoc on :kind :test :agent (:agent run) :mode (:mode run) :ms (get-in r [:ms t])) seed? (assoc :needs #{sk}))])
+                            [[t d] (cond-> (assoc on :kind :test :process? true :agent (:agent run) :mode (:mode run) :ms (get-in r [:ms t])) seed? (assoc :needs #{sk}))])
                           (for [[s {:keys [digest binary? bound]}] (:steps r)]
                             [[s digest] (cond-> (assoc on :kind :step :binary? (boolean binary?) :bound bound)
                                           seed? (assoc :needs #{sk}))])))
