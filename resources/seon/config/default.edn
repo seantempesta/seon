@@ -664,13 +664,6 @@
  ;; the verdict cache's process tests, 2026-11-10: 1,220 over 228 of 228 (mean 3,027). A gate of 234 unmeasured process tests is
  ;; still worth every shard (234 x 1,220 / 30,000 = 9.5).
  :seon.config.proofs/unmeasured-process-ms 1220
- ;; Unit: boolean. Whether each commit that moves main's program starts a run of main's tests
- ;; (seon.prove: a prove agent forked from main, results as facts every agent forked after reuses).
- ;; Provenance: task seon.proofs/main-is-proved-in-a-fork. Off: the run of all of main's
- ;; in-process tests (344 in one child) dies at a varying test with exit 1 and no stderr, losing
- ;; every result, about 200 s of CPU per commit for nothing; named runs (seon_prove, a turn's)
- ;; are unaffected. On again when task seon.agent/a-test-run-streams-its-reports and the child's
- ;; death are fixed. At the bound: a program commit starts no run.
  ;; Unit: hh:mm UTC. The cron proc's daily full run of main (bin/test --all, which runs every test,
  ;; process tests included, green or not): the net under the narrow digests (a test takes only what
  ;; its reach names, owner 2026-10-27), so what a reach cannot show is found within a day. "" is
