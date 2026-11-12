@@ -11,7 +11,7 @@
 
 (defn- move [& calls] (judge/first-move subject (vec calls)))
 
-(deftest a-first-move-is-read-by-the-compiler
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-first-move-is-read-by-the-compiler
   (testing "a deftest naming the cited var is defined, references it and the proof's name"
     (let [fs (judge/form-facts 'seon.judge-test "(clojure.test/deftest p (clojure.test/is (map? (seon.judge/score {} []))))")]
       (is (= 1 (count fs)))
@@ -31,7 +31,7 @@
       (is (= :seon.judge/uncompiled (get-in (first fs) [:error :seon.error/type])))
       (is (= #{'seon.judge-test/ok} (:defs (second fs)))))))
 
-(deftest the-score-says-what-the-first-move-did
+(deftest ^{:seon.test/estimate {:ticks 5000000}} the-score-says-what-the-first-move-did
   (is (= {:acted true :right-var true :right-test true :waste 0 :uncompiled 0 :green true}
          (move "(clojure.test/deftest p (clojure.test/is (map? (seon.judge/score {} []))))"))
       "the proof written, on the cited var: green")
@@ -58,7 +58,7 @@
          (move "(ns judge.scratch-b)\n(def p 1)"))
       "a def named like the proof in another namespace is not the proof"))
 
-(deftest a-request-is-keyed-by-what-it-sends
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-request-is-keyed-by-what-it-sends
   (let [r {:messages [{:role "user" :content "a"}] :model "m" :thinking :disabled}]
     (is (= (judge/digest r) (judge/digest r)))
     (is (not= (judge/digest r) (judge/digest (assoc r :thinking :enabled))) "the mode is part of the request")
@@ -66,14 +66,14 @@
 
 ;; docs/model.md#the-first-move-judge: the request is the one a fresh agent's turn 1 is sent, its record and page drawn from the
 ;; db the agent is speculated on, never from the stored commit that db's point names (which holds no such agent)
-(deftest a-first-request-shows-the-task-it-is-of
+(deftest ^{:seon.test/estimate {:ticks 30000000}} a-first-request-shows-the-task-it-is-of
   (let [db0 (ts/test-db)
         db (:db-after (d/with db0 (task/create-tx db0 [{:seon.task/ns 'app.x :seon.task/name "j" :seon.task/plan "Make app.x/f0 double its argument." :seon.task/proofs #{'app.x-test/t0}}])))
         ms (:messages (judge/request db (task/task db "app.x/j")))]
     (is (some #(str/includes? (str (:content %)) "double its argument") (rest ms)) "the task's plan, on the page the model reads")
     (is (some #(str/includes? (str (:content %)) ":seon.agent/task") ms) "and the record holds the agent's task")))
 
-(deftest a-pass-scores-each-request-once
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-pass-scores-each-request-once
   ;; root's ruling (2026-10-23): the :seon.judge fact is the record; a pass asks the model only
   ;; for a request it holds none for, and a cost it cannot price ends the pass (unknown, never 0).
   ;; The scripted model reports no cache split, so its first move is scored (in the agent the
@@ -87,7 +87,7 @@
                                               " (boolean (some #(when (= (:v %) " (pr-str (:task %)) ") (pos-int? (get-in (datahike.api/entity @(:conn sys) (:e %)) [:seon.judge/score :usage :seon.model-call/tokens]))) (datahike.api/datoms @(:conn sys) :aevt :seon.judge/task)))])")}))]
     (is (= [:seon.judge/cost-unknown [false] true [true] 0.0 1 true] (:value r)) (pr-str r))))
 
-(deftest a-pass-stops-at-its-bound
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-pass-stops-at-its-bound
   ;; at :seon.config.ai/judge-pass-usd the pass makes no further call and writes what it left. The bound is
   ;; the task's own setting (its :seon.task/config, which the pass resolves first: seon.config/resolve-in), 0.0, so
   ;; the shard's shared root and its config are untouched (docs/config.md#the-resolver)

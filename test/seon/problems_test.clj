@@ -21,7 +21,7 @@
 
 ;; ---- the signature and the fold (ported from R4's seon.error-test) ----------------------
 
-(deftest one-cause-one-signature
+(deftest ^{:seon.test/estimate {:ticks 500000}} one-cause-one-signature
   (is (= (err/signature (invalid 'app/f nil)) (err/signature (invalid 'app/f 42))) "values never enter it")
   (is (not= (err/signature (invalid 'app/f nil)) (err/signature (invalid 'app/g nil))) "another producer, another signature")
   (is (= (err/signature {:seon.error/type :x/y :seon.error/message "slot 17 of 64"})
@@ -32,7 +32,7 @@
 
 (defn- occ [e agent ms] (err/occurrence e :eval {:agent agent :task "t/a" :form "(f 1)"} ms))
 
-(deftest a-storm-is-one-write-per-window
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-storm-is-one-write-per-window
   (ts/test-branch! (fn [_ conn] (let [f (reduce err/fold {} (concat (for [i (range 1000)] (occ (invalid 'app/f i) (if (even? i) :a1 :a2) (+ 1000 i)))
                                      (for [i (range 10)] (occ (invalid 'app/g i) :a3 (+ 5000 i)))))
         [f tx] (err/flush-tx f @conn)
@@ -61,7 +61,7 @@
 
 ;; ---- a repeated defect is not a write (task seon.error/a-repeated-defect-writes-nothing) ------
 
-(deftest a-written-signature-is-not-written-again
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-written-signature-is-not-written-again
   ;; the window's write is one entity per signature that CHANGED (a-storm-is-one-write-per-window);
   ;; a signature already on main whose only change is one more occurrence is the same fact,
   ;; counted in the observer's fold: transacting its count is what made 41,709 commits in 70 s
@@ -78,7 +78,7 @@
 
 ;; ---- eval errors: the error map as data, on the branch, and counted across agents ------
 
-(deftest an-eval-error-is-recorded-as-data
+(deftest ^{:seon.test/estimate {:ticks 2000000}} an-eval-error-is-recorded-as-data
   (testing "a foreign exception is the :seon.agent/eval-error variant"
     (let [e (agent/error-map (ArithmeticException. "Divide by zero"))]
       (is (contract/valid? :seon.agent/eval-error e))
@@ -105,7 +105,7 @@
 
 ;; ---- red proofs: the failing assertions and cost verdicts, persisted ---------------------
 
-(deftest a-red-assertion-is-persisted
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-red-assertion-is-persisted
   (let [verdict {:ok? false :over [{:dim :calls :n 10 :ratio 2.0}] :steeper [] :under [] :unmeasured []}
         run {:pass 1 :fail 10 :error 0
              :reports (into [{:type :pass :var "#'app.t/ok"}
@@ -132,7 +132,7 @@
 
 (defn- writes [outs] (vec (keep #(when (= :tx (:op %)) (:tx-data %)) (:to-writer outs))))
 
-(deftest a-platform-error-is-written-once
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-platform-error-is-written-once
   (let [msg {:op :error :pid :api :message "class java.lang.String cannot be cast to java.lang.Number (17)" :data nil}
         [st o1] (step (api) :back msg)
         [w] (writes o1)
@@ -145,7 +145,7 @@
     (is (= 'seon.system/api-proc (:seon.error/operation (first w))) "the failed proc is the producer")
     (is (= [] (writes o3)) "the answered write is followed by nothing: 500 repeats of a written signature are counted in the fold")))
 
-(deftest an-agent-death-is-recorded-with-its-cause
+(deftest ^{:seon.test/estimate {:ticks 1000000}} an-agent-death-is-recorded-with-its-cause
   (let [dir (str (System/getProperty "java.io.tmpdir") "/d2-death-" (random-uuid))
         _ (.mkdirs (java.io.File. (str dir "-agents")))
         _ (spit (str dir "-agents/a1.err") (str (apply str (repeat 3000 "x")) "\nChez: out of memory\n"))
@@ -180,7 +180,7 @@
             [_ o] (step st :from-fs {:ev :exit :pid 78 :status {:exit 0}})]
         (is (= [] (writes o)))))))
 
-(deftest root-records-what-went-wrong-in-an-agent
+(deftest ^{:seon.test/estimate {:ticks 1000000}} root-records-what-went-wrong-in-an-agent
   ;; the one producer of what is wrong (root's problems tile, seon.render.ui/problems-tile, reads only what is recorded):
   ;; root records a red test run of an agent with no task, and a refused spawn
   (let [view {:agents {:a1 {:status :idle} :a2 {:status :idle :task "t/x"}}}
@@ -196,7 +196,7 @@
              (written (step (api view) :back {:op :status :agent :a2
                                               :set {:error (contract/error :seon.agent/failed 'seon.system/spawn! "fork server went down before the fork" {:agent :a2})}})))))))
 
-(deftest a-stall-is-observed-by-the-agent-proc
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-stall-is-observed-by-the-agent-proc
   (let [end {:in (a/chan 4) :out (a/chan 16)}
         st (#'ap/agent-proc {:id :a1 :end end :branch :b1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4) :fx-kinds #{:fx/model}})
         [st _] (#'ap/agent-proc st :in {:op :req :rid 1 :kind :eval :msg {:op :eval :forms "(Thread/sleep 99999)"}})
@@ -220,7 +220,7 @@
         (is (= {:kind :tests :form "#'app.t/hangs"} (get-in (first (:to-api outs)) [:error :last-op])) "the stall names the test")
         (is (some #(= {:op :spoke :agent :a1} %) (:to-api outs2)) "its next frame: it spoke")))))
 
-(deftest a-stall-is-a-fact-on-the-agent-until-it-speaks-or-ends
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-stall-is-a-fact-on-the-agent-until-it-speaks-or-ends
   ;; root, 2026-10-26 (the owner: "the hangs are super bad especially if you don't notice an agent
   ;; has been stuck"): a stall root observes is a fact on the agent, with what it waits on, so
   ;; my.root/problems, root's page and every ctx holding the agent show it, until the agent's next
@@ -237,7 +237,7 @@
     (is (retracts? (second (step st :back {:op :spoke :agent :a1}))) "retracted when it speaks")
     (is (retracts? (second (step st :back {:op :status :agent :a1 :set {:status :dead}}))) "and when it ends")))
 
-(deftest a-stall-in-a-live-task-makes-one-task-for-root
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-stall-in-a-live-task-makes-one-task-for-root
   ;; owner, 2026-10-26: no push; a stall "becomes a task for root to deal with, from a template":
   ;; the first write of a stall in a live task writes one task (seon.template/stall), its cause
   ;; pre-filled with the stall, its proofs the boundary conditions; a later stall of the same task
@@ -261,7 +261,7 @@
         "a later stall of the same task writes none")
     (is (empty? (tasks (second (step (assoc (api view) :conn (atom db)) :back (stalled :a2))))) "an agent working no task: none")))
 
-(deftest a-stall-tasks-evidence-is-captured-while-it-is-stuck
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-stall-tasks-evidence-is-captured-while-it-is-stuck
   ;; the evening audit (a6's hang left no evidence: the root restarted and the process went with
   ;; it): the stall task's first write asks for the stuck process's evidence (the :evidence effect,
   ;; seon.fx/stall-evidence), and its answer's files are written into the task's cause on main
@@ -283,7 +283,7 @@
     (is (= files (:evidence cause)) "the evidence's files on the task's cause")
     (is (= :a1 (get-in cause [:stall :agent])) "beside the stall it was captured for")))
 
-(deftest a-stalled-agent-is-an-open-problem-while-the-fact-holds
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-stalled-agent-is-an-open-problem-while-the-fact-holds
   (let [db (d/db-with (world) [{:seon.agent/key "a1"}
                                     {:seon.process/id "a1/77" :seon.process/agent [:seon.agent/key "a1"] :seon.process/pid 77 :seon.process/forked-ms 10.0
                                      :seon.process/stall {:quiet-ms 4000 :last-op {:kind :tests :form "#'app.t/hangs"}}}
@@ -302,14 +302,14 @@
 
 (defn- gone-ended? [r] (= :seon.system/ended (:seon.error/type r)))
 
-(deftest a-late-live-status-leaves-a-gone-agent-gone
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-late-live-status-leaves-a-gone-agent-gone
   ;; task seon.system/a-gone-agent-stays-gone-and-every-request-is-answered, path A
   (testing "A: a late live status leaves a gone agent gone, out of the stall check's set"
     (let [[st _] (step (api {:agents {:a1 {:status :dead :pid 77 :ended-ms 5}}}) :back {:op :status :agent :a1 :set {:status :busy :running {:form "(work!)" :since-ms 6}}})]
       (is (= [:dead nil] ((juxt :status :running) (get-in st [:view :agents :a1]))))
       (is (not (contains? (:seon.system/busy st) :a1))))))
 
-(deftest an-ending-agents-every-request-is-answered
+(deftest ^{:seon.test/estimate {:ticks 1000000}} an-ending-agents-every-request-is-answered
   ;; task seon.system/a-gone-agent-stays-gone-and-every-request-is-answered, path A
   (testing "A: an ending agent's every request the api holds is answered, one that never reached its proc too; a prove is the test service's"
     (let [p (promise) q (promise)
@@ -321,14 +321,14 @@
       (is (= ::unanswered (deref q 0 ::unanswered)) "the prove: left to the service that answers it")
       (is (contains? (:pending st') 6)))))
 
-(deftest a-stopped-agents-exit-is-recorded-on-it
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-stopped-agents-exit-is-recorded-on-it
   ;; task seon.system/a-gone-agent-stays-gone-and-every-request-is-answered, path B
   (testing "B: a stopped agent's exit, which no death waits on, is still recorded on it"
     (let [[st _] (step (api {:agents {:a0 {:status :dead :pid 77 :ended-ms 1 :exit {:exit 0}} :a1 {:status :killed :pid 77 :ended-ms 9}}})
                        :from-fs {:ev :exit :pid 77 :status {:signal 9}})]
       (is (= [{:exit 0} {:signal 9}] (mapv #(get-in st [:view :agents % :exit]) [:a0 :a1]))))))
 
-(deftest an-exit-goes-to-the-death-waiting-on-its-pid
+(deftest ^{:seon.test/estimate {:ticks 1000000}} an-exit-goes-to-the-death-waiting-on-its-pid
   ;; task seon.system/a-gone-agent-stays-gone-and-every-request-is-answered, path B
   (testing "B: an exit goes to the death waiting on its pid, never to an ended agent's entry with the same pid"
     (let [died (contract/error :seon.agent/died 'seon.system/end-agent "agent a1 died" {:agent :a1 :pid 77})
@@ -338,7 +338,7 @@
       (is (= [nil {:signal 9}] (mapv #(get-in st [:view :agents % :exit]) [:a0 :a1])))
       (is (empty? (:seon.system/dying st)) "the death recorded"))))
 
-(deftest the-hello-answers-the-spawn-whatever-its-status
+(deftest ^{:seon.test/estimate {:ticks 1000000}} the-hello-answers-the-spawn-whatever-its-status
   ;; task seon.system/a-gone-agent-stays-gone-and-every-request-is-answered, path D
   (testing "D: the hello answers the spawn though an eval sent before it made the agent busy"
     (let [p (promise)
@@ -346,7 +346,7 @@
           _ (step st :back {:op :status :agent :a1 :set {:ready true}})]
       (is (= {:id :a1} (deref p 0 nil))))))
 
-(deftest a-new-boot-ends-an-earlier-boots-live-agents
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-new-boot-ends-an-earlier-boots-live-agents
   ;; task seon.system/a-gone-agent-stays-gone-and-every-request-is-answered, path C
   (testing "C: a new boot writes :dead for an earlier boot's agent still shown live"
     (let [db (d/db-with (world) [{:db/id "r" :seon.system/id :root} {:seon.agent/key "b0/a1" :seon.agent/root "r"
@@ -367,7 +367,7 @@
       (is (= :dead (:seon.agent/status (d/entity db [:seon.agent/key "root"]))) "though its process ended with the boot")
       (is (= root-e (:db/id (:seon.agent/root (d/entity db [:seon.agent/key "b0/a2"])))) "an earlier boot's agent keeps its link"))))
 
-(deftest an-effect-error-is-counted-by-root
+(deftest ^{:seon.test/estimate {:ticks 1000000}} an-effect-error-is-counted-by-root
   (testing "the owner of an effect kind tells the api about each error outcome"
     (let [st (#'fx/owner-proc {:kind :model :workers 1 :work (a/chan 4) :back (a/chan 4)})
           outcome (contract/error :seon.model/rate-limited 'seon.model/complete "HTTP 429: slow down" {:status 429})
@@ -382,7 +382,7 @@
 ;; root code records its own failed effect with its fact, once (root, 2026-10-26); before, root's api
 ;; counted it in a transaction of its own, which raced the asker's write of the fact, so a row naming
 ;; the fact could not close at the next good outcome
-(deftest an-askers-failed-effect-is-one-row-closed-by-its-next-good-outcome
+(deftest ^{:seon.test/estimate {:ticks 5000000}} an-askers-failed-effect-is-one-row-closed-by-its-next-good-outcome
   (let [co (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-unreadable-" (random-uuid)) "src") (.mkdirs))
         _ (doto (java.io.File. co "a.clj") (spit "(ns a)") (.setReadable false))
         ;; the source's read failed, as its owner answers it: stamped with when (seon.fx/worker-proc)
@@ -446,7 +446,7 @@
                                                       {:seon.task/outcome :dead :seon.task/reason "its agent died"
                                                        :seon.task/error (contract/error :seon.agent/died 'seon.system/end-agent "agent a1 died" {:agent :a1})})))))))
 
-(deftest a-cancelled-tasks-problems-close
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-cancelled-tasks-problems-close
   (let [db (seeded 2 1)
         red (fn [db] (get-in (problems/report db) [:classes :red :rows]))
         dead (fn [db] (get-in (problems/report db) [:classes :dead :rows]))]
@@ -468,7 +468,7 @@
   [f]
   (:calls (profile/measure! f)))
 
-(deftest health-reads-each-part-once
+(deftest ^{:seon.test/estimate {:ticks 10000000}} health-reads-each-part-once
   (let [db0 (seeded 3 2)
         db (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" "# P\n\nIt says what it is about.\n"}))
         [h m] (measured-health db)
@@ -507,7 +507,7 @@
     ;; task-reads is in uncited-task's, stale-plan's and unsynced's rows (each measured alone makes it), and health makes it once (other-derived)
     (is (<= (:calls m) (- (apply + (vals bounds)) 2)) (str "one health read makes " (:calls m) " contracted calls: the classes' bounds sum to " (apply + (vals bounds)) ", less task-reads counted three times"))))
 
-(deftest problems-lists-every-class-with-what-a-declaration-needs
+(deftest ^{:seon.test/estimate {:ticks 20000000}} problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
         s (:signature (first (get-in (problems/report db) [:classes :eval :rows])))
         [_ conn] [nil nil]
@@ -551,7 +551,7 @@
   fixed clean program."
   [n] [(seeded n 4)])
 
-(deftest problems-reads-only-the-problems
+(deftest ^{:seon.test/estimate {:ticks 20000000}} problems-reads-only-the-problems
   (cost/proof {:of 'seon.problems/report :input 'seon.problems-test/rows-input
                :n "recorded problems of each class (per n: one signature, one red task, one dead task)"
                :work (str "one index seek per class, then per row one pull: the signature's 13 attributes; a task's "
@@ -593,7 +593,7 @@
                                  :seon.agent/max-turns 2 :seon.agent/task [:seon.task/id "t/h0"]}])]
         [db (pdb/eid db :seon.agent/key "b/own")]))
 
-(deftest an-agents-own-problems-cost-nothing-for-the-history
+(deftest ^{:seon.test/estimate {:ticks 30000000}} an-agents-own-problems-cost-nothing-for-the-history
   (cost/proof {:of 'seon.problems/own :input 'seon.problems-test/own-input
                :n "finished tasks, each merged by an agent of its own, beside the agent asked for"
                :work "the agent's task's pull (its outcome, agent and attributes), and the error signatures' last-task datoms: none per finished task"
@@ -602,7 +602,7 @@
                :fixed {:ticks 85000 :bytes 320000 :calls 4}
                :sizes [10 30 100]}))
 
-(deftest problems-move-at-the-cost-of-what-changed
+(deftest ^{:seon.test/estimate {:ticks 30000000}} problems-move-at-the-cost-of-what-changed
   ;; main moves by one task's ending while its finished history grows: the health of the move reads the task it
   ;; touched, not the history (health-moved; report read every task's cost verdict and waste)
   (cost/proof {:of 'seon.problems/health-moved :input 'seon.problems-test/history-input
@@ -624,7 +624,7 @@
                                                                    ; base and head (tests, 2026-11-12: 69 -> 73 with data's)
                :sizes [10 30 100]}))
 
-(deftest problems-cost-nothing-for-a-clean-program
+(deftest ^{:seon.test/estimate {:ticks 25000000}} problems-cost-nothing-for-a-clean-program
   (cost/proof {:of 'seon.problems/report :input 'seon.problems-test/clean-input
                :n "clean tasks (each done), beside 4 problems of each class"
                :work "none per clean task: the indexes the read seeks hold only problem rows; the 4 problem sets cost what they cost"
@@ -638,7 +638,7 @@
 (def ^:private deepseek {:kind :openai-compat :base-url "https://api.example" :model "deepseek-flash" :api-key-env "NONE" :max-tokens 2048})
 (def ^:private req {:messages [{:role "user" :content "hi"}] :task "t/a" :turn 0})
 
-(deftest the-request-sets-thinking-only-when-the-provider-does
+(deftest ^{:seon.test/estimate {:ticks 1000000}} the-request-sets-thinking-only-when-the-provider-does
   ;; tool_choice auto: the model may reply in text alone, which ends the turn (design, owner 2026-10-24)
   (is (= {:model "deepseek-flash" :messages (:messages req) :tools [model/eval-tool] :tool_choice "auto" :max_tokens 2048 :stream true :stream_options {:include_usage true}}
          (model/request-body deepseek req)) "thinking absent: the provider's default; max-tokens the provider's; the model chooses whether to call; streamed with its usage")
@@ -647,7 +647,7 @@
   (is (not (contains? (model/request-body (assoc deepseek :thinking :disabled :reasoning-effort :low) req) :reasoning_effort)) "thinking off: no effort sent")
   (is (contract/valid? :seon.model/provider (assoc deepseek :thinking :enabled :reasoning-effort :low))))
 
-(deftest thinking-on-every-assistant-message-says-its-reasoning
+(deftest ^{:seon.test/estimate {:ticks 1000000}} thinking-on-every-assistant-message-says-its-reasoning
   ;; docs/model.md#thinking-is-on-at-low-effort: DeepSeek answers 400 at the first request otherwise, whose first
   ;; message after the system's is an eval Seon inserted, which no reasoning made
   (let [inserted {:role "assistant" :content "Seon ran this." :tool-calls [{:id "eval-e1" :code "(+ 1 2)"}]}
@@ -660,7 +660,7 @@
     (is (= [nil nil nil [:reasoning_content "Square it."]]
            (reasoning (assoc deepseek :thinking :disabled :replay-reasoning true))) "off, a request stays as it was: nothing added to its bytes")))
 
-(deftest a-reply-carries-what-it-cost-and-an-eaten-reply-is-a-problem
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-reply-carries-what-it-cost-and-an-eaten-reply-is-a-problem
   (testing "content, with the usage DeepSeek reports"
     (let [c (model/parse-reply (clojure.data.json/write-str
                                  {:choices [{:message {:content "(+ 1 2)" :reasoning_content "think"}}]
@@ -680,14 +680,14 @@
       (testing "and root counts it as an effect problem, like any failed effect"
         (is (= :effect (:class (err/occurrence e :effect {} 1))))))))
 
-(deftest a-reply-cut-at-max-tokens-is-marked-cut
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-reply-cut-at-max-tokens-is-marked-cut
   ;; T5's first real run: replies of exactly max-tokens whose code was cut, recorded nowhere
   (let [body (fn [finish] (clojure.data.json/write-str {:choices [{:message {:content "(defn f [x]" } :finish_reason finish}]
                                                         :usage {:prompt_tokens 10 :completion_tokens 4096}}))]
     (is (true? (:truncated? (model/parse-reply (body "length") 9.0 4096))))
     (is (nil? (:truncated? (model/parse-reply (body "stop") 9.0 4096))) "a reply that stopped on its own is not cut")))
 
-(deftest another-tasks-unfinished-proof-is-not-a-problem
+(deftest ^{:seon.test/estimate {:ticks 5000000}} another-tasks-unfinished-proof-is-not-a-problem
   ;; T5's real run: one agent's test run reports every program test, so 210 rows named other
   ;; tasks' proofs not done yet (allowed reds); only the task's own proofs are its problems
   (ts/test-branch! (fn [_ conn]
@@ -696,7 +696,7 @@
                                                          'app.t/other-test [{:type :fail :expected "3" :actual "4"}]}})])
     (is (= ['app.t/a-test] (mapv :test (get-in (problems/report @conn) [:classes :red :rows])))))))
 
-(deftest a-lost-task-is-a-death
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-lost-task-is-a-death
   ;; task seon.render/one-owner-per-view-path (A1): the failed outcomes are the
   ;; declared set (:seon.status/failed), not a literal in the reader
   (let [db (:db-after (d/with (seeded 1 5)
@@ -706,7 +706,7 @@
     (is (= :lost (:status (first (filter #(= "t/l" (:task %)) rows)))))
     (is (not-any? #(= "t/l" (:task %)) (get-in (problems/report db) [:classes :error :rows])))))
 
-(deftest a-merge-with-its-process-tests-unrun-is-an-open-problem
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-merge-with-its-process-tests-unrun-is-an-open-problem
   ;; owner's ruling, 2026-10-23: a change that reaches process tests merges with them unrun
   ;; unless root asked; unknown stays visible, an open :unrun row, until each is recorded
   ;; passing (the reconciler's :gate records them): one passing of two, or a red, keeps it open
@@ -732,7 +732,7 @@
 ;; the files its changes touch, until a reviewed sync lands; the sync (my.root/sync-req, committed by the :git effect on a scratch
 ;; repository) puts those files from main and the task file without its entry on a branch from git's main, so the work is in git
 ;; whatever becomes of the store; the landing's seon.task/load-tx of that file (the entry gone) closes the row
-(deftest a-merged-task-is-unsynced-until-its-reviewed-sync-lands
+(deftest ^{:seon.test/estimate {:ticks 15000000}} a-merged-task-is-unsynced-until-its-reviewed-sync-lands
   (let [db0 (world)
         [fid path] (first (sort (for [[id] (d/q '[:find ?id :where [_ :form/id ?id]] db0)
                                       :let [p (seon.source/ns-file db0 (symbol (first (str/split id #"/" 2))))] :when p]
@@ -771,7 +771,7 @@
 
 (declare catch-forms)
 
-(deftest caused-is-what-the-branch-made-true
+(deftest ^{:seon.test/estimate {:ticks 5000000}} caused-is-what-the-branch-made-true
   ;; a catch site its page does not name (an :unnamed-site) is a derived row: what the branch made true is the rows head
   ;; has that base had not
   (let [base (catch-forms (world) 1)]
@@ -783,7 +783,7 @@
         (is (= 1 (count made)))
         (is (str/includes? (first made) "app.cost/v2"))))))
 
-(deftest a-catch-its-page-does-not-name-is-a-law-problem
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-catch-its-page-does-not-name-is-a-law-problem
   ;; bin/laws catch's rule, from the compiler's facts: a live form carrying :form/catches, by
   ;; the var it defines, named by docs/failure-points.md's cited names
   (let [db0 (world)
@@ -803,7 +803,7 @@
       (let [page (str "# Failure points\n\n| failure | edge |\n|---|---|\n| x | `" v "` |\n")]
         (is (= [] (unnamed (d/db-with db1 (seon.doc/load-tx db1 "docs" {"docs/failure-points.md" page})))))))))
 
-(deftest a-root-on-a-stale-binary-is-a-problem
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-root-on-a-stale-binary-is-a-problem
   ;; task seon.problems/a-root-on-a-stale-binary-is-a-problem, docs/health.md#a-stale-binary: a boot holds seon.system/stale-binary's
   ;; answer (is the binary current for the tree main was last brought to, by what differs reaching root's code) on root's source
   ;; fact (seon.system/booted-source), and health derives one :stale-binary row from it while it is there, gone at the next boot on a
@@ -833,7 +833,7 @@
       (is (= ["b2" "p0" "p0" "t1"] ((juxt :boot :binary :program :binary-tree) (source merged)))
           "and its program the binary's, the one those inputs describe"))))
 
-(deftest a-pin-the-wiki-states-is-the-recorded-gitlink
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-pin-the-wiki-states-is-the-recorded-gitlink
   (let [db0 (world)
         page "# Forks\n\n## Jolt\n\n`reference-code/jolt` pinned at `4342b73c`, the tip of ``jolt/x``.\n\n## Chez\n\n`reference-code/chez` pinned at `80e4b9f`.\n"
         db (d/db-with db0 (seon.doc/load-tx db0 "docs" {"docs/forks.md" page}))
@@ -845,7 +845,7 @@
     (is (= [["reference-code/chez" "80e4b9f" "d19eb3b0"]] (pinned {"reference-code/jolt" "4342b73cdeadbeef" "reference-code/chez" "d19eb3b0"})))
     (is (= [["reference-code/jolt" "4342b73c" nil]] (pinned {"reference-code/chez" "80e4b9f0"})) "a pin with no gitlink")))
 
-(deftest an-error-closes-when-its-subject-changes
+(deftest ^{:seon.test/estimate {:ticks 2000000}} an-error-closes-when-its-subject-changes
   ;; a recorded error may name :seon.error/subject; it is never retracted, and closes when its subject changes
   (let [db0 (world)
         row #(first (get-in (problems/report %) [:classes :platform :rows]))]
@@ -882,7 +882,7 @@
             db (d/db-with db0 (seon.doc/load-tx db0 "docs" {"docs/forks.md" page}))]
         [(d/db-with db [{:seon.system/id :root :seon.system/source {:pins (into {} (for [i (range n)] [(str "reference-code/lib" i) (str "def" i)]))}}]) {}]))
 
-(deftest unnamed-sites-follow-the-catch-forms
+(deftest ^{:seon.test/estimate {:ticks 20000000}} unnamed-sites-follow-the-catch-forms
   (cost/proof {:of 'seon.problems/unnamed-sites :input 'seon.problems-test/catch-input
                :n "live forms carrying a catch, each defining one var, none named by the page"
                :work "once: the page's cited names as a set, the method and impl owners, the program's namespaces (seon.program/program-nss); per site: its form entity, its defines and one row"
@@ -893,7 +893,7 @@
                :fixed {:ns 50000 :bytes 50000 :calls 9}
                :sizes [10 30 100]}))
 
-(deftest stale-pins-follow-the-pin-page
+(deftest ^{:seon.test/estimate {:ticks 15000000}} stale-pins-follow-the-pin-page
   (cost/proof {:of 'seon.problems/stale-pins :input 'seon.problems-test/pins-input
                :n "sections of docs/forks.md, each stating one stale pin"
                :work "one AVET range of addresses, then per section a pull of its text, one regex scan and one row"
@@ -902,7 +902,7 @@
                :fixed {:ns 600000 :bytes 600000 :calls 5}
                :sizes [10 30 100]}))
 
-(deftest health-follows-what-is-recorded-and-cited
+(deftest ^{:seon.test/estimate {:ticks 30000000}} health-follows-what-is-recorded-and-cited
   (cost/proof {:of 'seon.problems/health :input 'seon.problems-test/health-input
                :n "unnamed catch sites (the derived classes dominate; the recorded part is the seed's)"
                :work "report once, then the three derived reads; the sites dominate"
@@ -928,7 +928,7 @@
         before (into #{} (map :signature) (derived base))]
     (into (sorted-set) (comp (remove (comp before :signature)) (map :message)) (derived head))))
 
-(deftest caused-agrees-with-the-full-reading
+(deftest ^{:seon.test/estimate {:ticks 80000000}} caused-agrees-with-the-full-reading
   (let [db0 (world)
         [v w] ['app.calc/inc2 'app.calc/add]
         e (fn [db s] (pdb/eid db :var/name s))
@@ -970,7 +970,7 @@
             head (catch-forms (d/db-with base (seon.doc/load-tx base "demo" {"demo/c.md" changed})) (inc n))]
         [base head (seon.merge/delta-changes base head #{}) (problems/caused-datoms base head)]))
 
-(deftest caused-follows-what-changed
+(deftest ^{:seon.test/estimate {:ticks 50000000}} caused-follows-what-changed
   ;; the program grows (n sections citing, n catch sites); the change is fixed (one section, one
   ;; site): the work is the scan of the attributes' datoms, a few bytes each, never a pull or a rule
   ;; per citation or site. Before: ~150 KB per catch site, both dbs read in full. 24 contracted calls were its three
@@ -1010,7 +1010,7 @@
   (let [ve (pdb/eid db :var/name v)]
     (d/db-with (change-var db v) [[:db/add ve (or attr :var/doc) (str "changed " (random-uuid))]])))
 
-(deftest health-moved-is-health
+(deftest ^{:seon.test/estimate {:ticks 15000000}} health-moved-is-health
   ;; health-moved carries prev's rows and reads where base and head differ: for each kind of move
   ;; of main it equals health read whole (set of rows by class; the row order is the scan's)
   (let [db0 (world)
@@ -1051,7 +1051,7 @@
             whole (problems/health db3)]
         (is (= (get-in whole [:classes :dead :rows]) (get-in moved [:classes :dead :rows])))))))
 
-(deftest a-section-is-stale-when-the-code-it-cites-changed-after-its-text
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-section-is-stale-when-the-code-it-cites-changed-after-its-text
   (let [db0 (world)
         [v w] ['app.calc/inc2 'app.calc/add]
         page (str "# P\n\nIt reads `" v "`.\n")
@@ -1093,7 +1093,7 @@
         (is (= #{} (problems/caused db1 head)))
         (is (contains? (:seon.problems/attention (contract/properties :seon.problems/class)) :stale-section))))))
 
-(deftest a-page-nothing-links-to-is-an-orphan-until-something-does
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-page-nothing-links-to-is-an-orphan-until-something-does
   (let [db0 (world)
         pages {"docs/README.md" "# Map\n\nThe map.\n\n- [a](a.md)\n" "docs/a.md" "# A\n\nThe page A.\n" "docs/b.md" "# B\n\nThe page B.\n"}
         db (d/db-with db0 (seon.doc/load-tx db0 "docs" pages))
@@ -1105,7 +1105,7 @@
     (is (= [] (orphans (d/db-with db0 (seon.doc/load-tx db0 "docs" (dissoc pages "docs/README.md")))))
         "no map in the db: unknown, not every page an orphan")))
 
-(deftest a-section-with-no-lead-is-a-problem
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-section-with-no-lead-is-a-problem
   (let [db0 (world)
         page "# A\n\nThe page A.\n\n## Listed\n\n- one\n- two\n\n## Said\n\nA sentence that says what it is.\n"
         db (d/db-with db0 (seon.doc/load-tx db0 "docs" {"docs/a.md" page}))
@@ -1120,7 +1120,7 @@
   [n] (let [db0 (world)]
         [(d/db-with db0 (seon.doc/load-tx db0 "docs" {"docs/p.md" (apply str "# P\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\n- item\n")))})) {}]))
 
-(deftest leadless-sections-follow-the-sections
+(deftest ^{:seon.test/estimate {:ticks 15000000}} leadless-sections-follow-the-sections
   (cost/proof {:of 'seon.problems/leadless-sections :input 'seon.problems-test/leadless-input
                :n "sections, none with a lead"
                :work "the sections' addresses and the lead datoms once, sorted by address, then a row per section"
@@ -1129,7 +1129,7 @@
                :fixed {:bytes 9000 :calls 1}
                :sizes [10 30 100]}))
 
-(deftest an-issue-with-no-page-is-a-problem
+(deftest ^{:seon.test/estimate {:ticks 4000000}} an-issue-with-no-page-is-a-problem
   (let [;; the world holds docs/calc.md; the test's first case is a db with no wiki, so its sections go
         db0 (let [db (world)] (d/db-with db (for [{:keys [e]} (d/datoms db :aevt :seon.doc/address)] [:db/retractEntity e])))
         err {:seon.error/signature "eeeeeeeeeeeeeeee" :seon.error/class :platform :seon.error/count 1 :seon.error/agents 0
@@ -1142,7 +1142,7 @@
       (let [fixed (d/db-with wiki (seon.doc/load-tx wiki "docs" {"docs/README.md" "# Map\n\nThe map.\n" "docs/errors.md" "# Errors\n\n## Problems\n\nHow they are read.\n"}))]
         (is (= [] (unlinked fixed)) "the section exists: closed, nothing written")))))
 
-(deftest every-problem-class-points-at-a-section-of-the-real-wiki
+(deftest ^{:seon.test/estimate {:ticks 100000000}} every-problem-class-points-at-a-section-of-the-real-wiki
   (let [docs (:seon.problems/docs (contract/properties :seon.problems/class))
         db0 (world)
         db (d/db-with db0 (seon.doc/load-dir-tx db0 (seon.config/checkout) "docs"))]
@@ -1158,7 +1158,7 @@
             db (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/c.md" page}))]
         [(reduce change-meaning db (distinct vs)) {}]))
 
-(deftest stale-sections-follow-the-recorded-names
+(deftest ^{:seon.test/estimate {:ticks 30000000}} stale-sections-follow-the-recorded-names
   (cost/proof {:of 'seon.problems/stale-sections :input 'seon.problems-test/stale-input
                :n "sections each citing a var whose docstring then changed"
                :work "the read, review, vars' and forms' datoms in one scan each, then per recorded name whose form moved a seek of its var, its name's history and each meaning attribute's history (value-at), and a row"
@@ -1175,7 +1175,7 @@
   [n] (let [db0 (world)]
         [(d/db-with db0 (seon.doc/load-tx db0 "docs" (into {"docs/README.md" "# Map\n\nThe map.\n"} (for [i (range n)] [(str "docs/p" i ".md") (str "# P" i "\n\nThe page.\n")])))) {}]))
 
-(deftest orphan-pages-follow-the-sections
+(deftest ^{:seon.test/estimate {:ticks 10000000}} orphan-pages-follow-the-sections
   (cost/proof {:of 'seon.problems/orphan-pages :input 'seon.problems-test/orphan-input
                :n "pages, none linked"
                :work "the sections' addresses and the reference datoms once, then a row per orphan"
@@ -1191,7 +1191,7 @@
             cs (:seon.problems/docs (contract/properties :seon.problems/class))]
         [db {} (into {} (for [c (keys cs)] [c {:n n :rows (vec (repeat n {:open? true}))}]))]))
 
-(deftest problem-unlinked-follows-the-classes-not-their-rows
+(deftest ^{:seon.test/estimate {:ticks 5000000}} problem-unlinked-follows-the-classes-not-their-rows
   (cost/proof {:of 'seon.problems/problem-unlinked :input 'seon.problems-test/unlinked-input
                :n "open rows in each class"
                :work "one lookup per class with an open row, found at the first row"
@@ -1208,7 +1208,7 @@
                :fixed {:ns 3000000 :bytes 4000000 :calls 64}
                :sizes [10 30 100]}))
 
-(deftest attention-survives-a-store-write
+(deftest ^{:seon.test/estimate {:ticks 4000000}} attention-survives-a-store-write
   ;; the turn records what it observed in its basis; a sorted set cannot be written to the store
   ;; (konserve's fasl), which ended every scripted turn's agent. caused-split answers vectors.
   (let [db0 (world)
@@ -1252,7 +1252,7 @@
   [n] (let [v 'app.calc/inc2]
         [(uncited-fixture (for [i (range (quot n 2))] [(str "t" i) (str "It changes `" v "`.")]) #{}) {}]))
 
-(deftest uncited-tasks-cost-the-tasks-they-examine
+(deftest ^{:seon.test/estimate {:ticks 40000000}} uncited-tasks-cost-the-tasks-they-examine
   ;; Sean, 2026-11-10: n restated as tasks examined (it was design/implement pairs): every task now gets its ready check, so
   ;; the class's work is per task; 68 calls measured at 20 tasks against 85 (per-n 4, fixed 5, unchanged)
   (cost/proof {:of 'seon.problems/uncited-tasks :input 'seon.problems-test/uncited-input
@@ -1263,7 +1263,7 @@
                :fixed {:ns 500000 :bytes 500000 :calls 5}
                :sizes [20 60 200]}))
 
-(deftest a-ready-implement-task-that-cites-nothing-is-a-problem
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-ready-implement-task-that-cites-nothing-is-a-problem
   ;; the context is only as good as the plan it is built from: an implement step whose accumulated
   ;; plan (its design step's) cites no var, attribute or section reaches no reference, so the walk
   ;; pulls nothing (task seon.render/spend-has-a-render, 2026-10-23). A design step's text plan is
@@ -1283,7 +1283,7 @@
         (is (= #{["app/waits" :no-references]} (rows (uncited-fixture fixed #{"waits"}))) "only the ready step still citing nothing")))
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :uncited-task))))
 
-(deftest a-plan-goes-stale-when-what-it-cites-changes
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-plan-goes-stale-when-what-it-cites-changes
   ;; in a real run two agents spent evals because a plan, written before a function existed, said it was missing
   ;; (docs/health.md#a-plan-that-went-stale)
   (let [v 'app.calc/inc2
@@ -1298,7 +1298,7 @@
       (is (= [] (rows (d/db-with moved [{:seon.task/id "app/plan" :seon.task/plan (str "It changes `" v "`, as it now is.")}])))
           "the plan written again closes it"))))
 
-(deftest a-ready-task-of-any-kind-that-cites-nothing-is-a-problem
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-ready-task-of-any-kind-that-cites-nothing-is-a-problem
   ;; the class judged only :implement tasks, and no task on the store had that kind (all :whole, 2026-11-10): a check keyed on a
   ;; kind matched nothing and never fired. A ready task is judged by its plan, whatever its kind
   (let [db (world)
@@ -1307,7 +1307,7 @@
         rows (into #{} (map (juxt (comp :task :evidence) (comp :reason :evidence))) (get-in (problems/health db) [:classes :uncited-task :rows]))]
     (is (contains? rows ["app/tile" :no-references]) "a ready :whole task whose plan names nothing the context can pull")))
 
-(deftest a-cite-ends-with-its-target-and-its-task-shows-what-is-gone
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-cite-ends-with-its-target-and-its-task-shows-what-is-gone
   ;; docs/storage.md#the-write-checks-every-entity-it-touches, docs/references.md#task-references: an import that retracts a var
   ;; a task cites left the cite without its required target, so the write check refused the whole import (2026-11-10:
   ;; generated slow-test tasks citing tests, and root on main's older code could not boot). The cite ends with its target on
@@ -1334,7 +1334,7 @@
       (is (nil? (:seon.task/gone (task fixed))) "the plan rewritten without the name clears the fact")
       (is (not-any? #(= :gone (:reason %)) (rows fixed)) "and the row"))))
 
-(deftest a-task-citing-a-section-cites-something
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-task-citing-a-section-cites-something
   ;; the standing root, 2026-11-10: 100 of 132 :no-references rows cited sections, files, schema keys or a dependency's vars, which
   ;; the context pulls; only a cite of a program var counted. Any cite counts: each names what exists, a dead one refused at the write
   (let [db0 (world)
@@ -1369,7 +1369,7 @@
        (into #{} (map #(symbol (cite-ns (world)) (str "v" %))) (range 1 (inc n)))])
 
 ;; See docs/health.md#a-function-that-cites-no-section
-(deftest a-public-var-cites-the-section-that-describes-it
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-public-var-cites-the-section-that-describes-it
   (let [db (var-forms (world) 7
                       (fn [i] (case (int i)
                                 7 {:src "(seon.contract/defn n [])" :doc "Does a thing."}
@@ -1393,7 +1393,7 @@
         (is (not-any? #(re-find #"/v1 is public" %) (:attention split)))))
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :uncited-var))))
 
-(deftest a-persons-code-owes-no-wiki-citation
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-persons-code-owes-no-wiki-citation
   ;; the request measurement, 2026-11-10: an agent adding demo.math/triple for a person spent its turns finding a section to cite,
   ;; because the write-back gave demo.math a file under src/ and the class judged it as the program's. The wiki describes Seon's own
   ;; namespaces, each docstring citing its section; a person's namespace cites none, and its code owes none
@@ -1405,7 +1405,7 @@
     (is (= [] (problems/uncited-vars persons {} #{v})) "the same var in a namespace whose docstring cites no section, a person's: no row")))
 
 ;; See docs/health.md#a-function-that-cites-no-section
-(deftest uncited-vars-follow-the-vars-asked-for
+(deftest ^{:seon.test/estimate {:ticks 20000000}} uncited-vars-follow-the-vars-asked-for
   (cost/proof {:of 'seon.problems/uncited-vars :input 'seon.problems-test/uncited-var-input
                :n "changed public vars, each with a docstring that cites nothing"
                :work "once: the program's namespaces (seon.program/program-nss); per named var: one AVET seek, its entity, its docstring and its form's head (read by seon.source/first-head), and one row"
@@ -1425,7 +1425,7 @@
        (into #{} (map #(symbol (cite-ns (world)) (str "v" %))) (range 1 (inc n)))])
 
 ;; See docs/health.md#a-form-too-long
-(deftest a-form-over-the-bound-is-a-long-form-until-it-is-split
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-form-over-the-bound-is-a-long-form-until-it-is-split
   (let [bound (seon.config/value :seon.config.shrink/form-tokens)
         pad #(str "(defn f [] \"" (apply str (repeat % \x)) "\")")
         long-src (pad (* 4 bound)) short-src (pad 10)
@@ -1448,7 +1448,7 @@
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :long-form))))
 
 ;; See docs/health.md#a-form-too-long
-(deftest long-forms-follow-the-vars-asked-for
+(deftest ^{:seon.test/estimate {:ticks 15000000}} long-forms-follow-the-vars-asked-for
   (cost/proof {:of 'seon.problems/long-forms :input 'seon.problems-test/long-form-input
                :n "changed vars, each with a form under the bound"
                :work "per named var: one AVET seek, its entity and its form's text length"
@@ -1458,7 +1458,7 @@
                :sizes [10 30 100]}))
 
 ;; See docs/health.md#a-proof-that-passes-by-waiver
-(deftest a-proof-whose-form-carries-an-overrun-is-a-waived-proof-until-it-is-deleted
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-proof-whose-form-carries-an-overrun-is-a-waived-proof-until-it-is-deleted
   (let [proof (fn [overrun] (str "(deftest p [] (cost/proof {:of 'a/b :input 'a/c :n \"x\" :work (str \"w\") :growth :linear"
                                  " :per-n {:ticks 1000 :bytes 100} :sizes [10 30 100]" overrun "}))"))
         world-of (fn [overrun] (var-forms (world) 2 (fn [i] (case (int i)
@@ -1475,7 +1475,7 @@
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :waived-proof))))
 
 ;; See docs/health.md#a-proof-that-passes-by-waiver
-(deftest a-branch-that-adds-an-overrun-is-caused-the-waived-proof
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-branch-that-adds-an-overrun-is-caused-the-waived-proof
   ;; the owner, 2026-11-12: nothing switched off, sampled or waived. A waiver is a branch's content, so a branch that adds an
   ;; :overrun to a proof is caused the :waived-proof row (it was listed by health and never judged on a branch until then),
   ;; and one that deletes it closes it
@@ -1517,7 +1517,7 @@
 ;; docs/health.md#two-kinds-of-problem: a branch is judged on the content it makes, every class of it (the owner, 2026-11-12:
 ;; nothing switched off). For each content class a branch can make, the rows caused-split answers from what the branch moved are
 ;; the rows health reads in full on head and not on base
-(deftest a-branch-is-caused-each-content-class-it-makes
+(deftest ^{:seon.test/estimate {:ticks 15000000}} a-branch-is-caused-each-content-class-it-makes
   (let [made (fn [base head c]
                (let [msgs (fn [db] (into #{} (map :message) (get-in (problems/health db) [:classes c :rows])))]
                  [(into #{} (comp (filter #(= c (:class %))) (map :message)) (:rows (problems/caused-split base head)))
@@ -1539,7 +1539,7 @@
            seon.problems/caused-classes)
         "the classes a branch is judged on are the content classes, as :seon.problems/class declares them")))
 
-(deftest a-key-with-no-schema-entry-is-a-problem-and-a-branch-that-names-one-is-caused-it
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-key-with-no-schema-entry-is-a-problem-and-a-branch-that-names-one-is-caused-it
   ;; docs/health.md#a-key-with-no-schema (the owner, 2026-11-12: "proper schemas for all fully namespaced keywords")
   (let [db0 (world)
         src-ns [{:db/id "ns" :ns/name 'seon.zz :ns/file "src/seon/zz.clj"} {:db/id "tns" :ns/name 'seon.zz-test :ns/file "test/seon/zz_test.clj"}]
@@ -1556,7 +1556,7 @@
     (is (some #(str/includes? % ":seon.zz/new-key") (problems/caused base head)) "a branch that names a new key with no entry is caused it")
     (is (not-any? #(str/includes? % ":seon.zz/new-key") (problems/caused base (d/db-with head entry))) "and one that writes the entry too is not")))
 
-(deftest a-branch-that-tightens-an-entry-is-caused-the-stored-values-it-refuses
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-branch-that-tightens-an-entry-is-caused-the-stored-values-it-refuses
   ;; docs/health.md#a-stored-value-its-entry-refuses: a value written before its attribute's entry tightened is held to the new entry
   ;; when a branch changes that entry: the store's datoms of that attribute alone, each refused one a row
   (let [base (d/db-with (world) [{:seon.agent/key "old" :seon.agent/boot "b" :seon.agent/started-ms 5}])
@@ -1565,7 +1565,7 @@
     (is (seq (caused-of (d/db-with base (entry "[:int {:min 10 :description \"Ms.\"}]")))) "an entry tightened under a stored value is caused it")
     (is (empty? (caused-of (d/db-with base (entry "[:int {:min 0 :description \"Ms.\"}]")))) "one every stored value still fits is not")))
 
-(deftest a-branch-that-changes-what-its-plan-cites-is-shown-the-stale-plan-never-refused
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-branch-that-changes-what-its-plan-cites-is-shown-the-stale-plan-never-refused
   ;; docs/health.md#a-plan-that-went-stale: changing the code a plan cites is the work (an agent's own task cites what it
   ;; changes), so a stale plan is attention, as a stale section is; the e2e loop and swarm held every task at its cap when it refused
   (let [db0 (world)
