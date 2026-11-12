@@ -306,11 +306,11 @@
       (is (< 40 (count nss)))
       (is (< 100 (count forms))))
     (testing "every var printing beside the one printer is named with its reason"
-      (is (= [] (remove named (sites forms printer-vars printer?)))))
+      (is (= [] (remove named (sites forms printer-vars printer?))) "each var listed is a new site: print through seon.print/text, or name it in docs/render.md#one-printer as a list item, - `ns/f`: its reason (the wire, storage, code text, or a cut of data, not of output)"))
     (testing "every var cutting in a display namespace is named with its reason"
-      (is (= [] (remove named (sites forms cut-vars display?)))))
+      (is (= [] (remove named (sites forms cut-vars display?))) "each var listed is a new site: print through seon.print/text, or name it in docs/render.md#one-printer as a list item, - `ns/f`: its reason (the wire, storage, code text, or a cut of data, not of output)"))
     (testing "every var cutting to a budget where a value is made, outside a display namespace, is named"
-      (is (= [] (remove named (sites forms budgeted-vars #(and (printer? %) (not (display? %))))))))
+      (is (= [] (remove named (sites forms budgeted-vars #(and (printer? %) (not (display? %)))))) "each var listed is a new site: print through seon.print/text, or name it in docs/render.md#one-printer as a list item, - `ns/f`: its reason (the wire, storage, code text, or a cut of data, not of output)"))
     (testing "a site named that no longer prints or cuts is gone from the page too"
       (is (= [] (remove (set (concat (sites forms printer-vars printer?) (sites forms cut-vars display?)
                                      (sites forms budgeted-vars #(and (printer? %) (not (display? %))))))
