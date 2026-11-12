@@ -201,3 +201,5 @@ fiberunread
 atomwatchorder
 imagelegacyclaim
 buildemptycacheentry
+siginfodump
+foreignlookuponce
