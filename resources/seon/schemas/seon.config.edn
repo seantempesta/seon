@@ -234,4 +234,9 @@
  :seon.config/problems [:vector :seon.config/problem]
  :seon.config/refused [:map {:description "The config does not satisfy :seon.config/config: boot is refused, naming each key."}
                        [:seon.error/type [:= :seon.config/refused]] [:seon.error/operation :qualified-symbol]
-                       [:seon.error/message :string] [:seon.config/problems {:optional true} :seon.config/problems]]}
+                       [:seon.error/message :string] [:seon.config/problems {:optional true} :seon.config/problems]]
+ ;; keys-schemas sweep: the properties of a config key's schema, and an option of the config reader
+ :seon.config/at-load [:boolean {:description "On a config key's schema, true when the value is read once at load and a branch's change of it does not act until a rebuild."}]
+ :seon.config/place [:boolean {:description "On a config key's schema, true when it names a place (a port, a path) read before any db, so a branch's statement of it does not act until a rebuild."}]
+ :seon.config/unit [:string {:description "On a config key's schema, the unit its value is in (\"ms\", \"bytes\", \"path\"), shown beside it."}]
+ :seon.config/checkout [:string {:description "In the options the config file is read with, the absolute path of the checkout that #seon/checkout paths are read under."}]}

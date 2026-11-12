@@ -306,11 +306,11 @@
       (is (< 40 (count nss)))
       (is (< 100 (count forms))))
     (testing "every var printing beside the one printer is named with its reason"
-      (is (= [] (remove named (sites forms printer-vars printer?)))))
+      (is (= [] (remove named (sites forms printer-vars printer?))) "each var listed is a new site: print through seon.print/text, or name it in docs/render.md#one-printer as a list item, - `ns/f`: its reason (the wire, storage, code text, or a cut of data, not of output)"))
     (testing "every var cutting in a display namespace is named with its reason"
-      (is (= [] (remove named (sites forms cut-vars display?)))))
+      (is (= [] (remove named (sites forms cut-vars display?))) "each var listed is a new site: print through seon.print/text, or name it in docs/render.md#one-printer as a list item, - `ns/f`: its reason (the wire, storage, code text, or a cut of data, not of output)"))
     (testing "every var cutting to a budget where a value is made, outside a display namespace, is named"
-      (is (= [] (remove named (sites forms budgeted-vars #(and (printer? %) (not (display? %))))))))
+      (is (= [] (remove named (sites forms budgeted-vars #(and (printer? %) (not (display? %)))))) "each var listed is a new site: print through seon.print/text, or name it in docs/render.md#one-printer as a list item, - `ns/f`: its reason (the wire, storage, code text, or a cut of data, not of output)"))
     (testing "a site named that no longer prints or cuts is gone from the page too"
       (is (= [] (remove (set (concat (sites forms printer-vars printer?) (sites forms cut-vars display?)
                                      (sites forms budgeted-vars #(and (printer? %) (not (display? %))))))
@@ -1081,6 +1081,12 @@
                        [p0 (nth vs 2)] [3 4 3 1 5 0 4 4 2])
         again (r/walk p (assoc (at db) :tree (:tree p) :moved []))]
     (is (not-any? #(str/includes? (str (:content %)) ":render-threw") (msgs p)) "no render threw")
+    (testing "asked :resolve, the page as hiccup, what a cold draw at that db resolves, warm as cold"
+      (let [cold (let [o (at db) w (draw (:tree o) seon.ctx/changes db (:root o) {:model-only true :index ix :outputs (:outputs o)})]
+                   (try (r/resolved w @(:out w) false) (finally (r/dispose-walk! w))))
+            p0' (r/walk nil (assoc (at (nth vs 3)) :resolve true))
+            p1' (r/walk p0' (assoc (at db) :resolve true :moved (seon.ctx/moved (nth vs 3) db nil)))]
+        (is (= cold (:hiccup p1')))))
     (is (= {} (:ran again)) "the same value again runs nothing")
     (is (identical? (:answers p) (:answers again)) "and answers what it answered")))
 
@@ -4781,7 +4787,11 @@
     (is (str/includes? rows "system message") "the conversation is drawn")
     (is (not (str/includes? rows "NOTE-HTML")) "no member of it is placed in the conversation")
     (is (str/includes? page "NOTE-HTML the note") "the page draws it as a part")
-    (is (not (str/includes? msgs "the note")) "nor read by the model")))
+    ;; the model reads it as the page shows it (its page message), never as a member of the conversation; before seon.ctx.wire/db-at
+    ;; read a point that is db's own as db, this world's first page was drawn at the parent commit, where the agent was not yet, and
+    ;; held nothing at all
+    (let [holding (for [[ref ms] (:parts (registered-schema-world {:history? false})) :when (str/includes? (pr-str ms) "the note")] (first ref))]
+      (is (= [:page] (distinct holding)) (str "nor read by the model as a conversation member: " (pr-str holding))))))
 
 (deftest an-eval-by-another-hand-reaches-the-request-only-as-the-systems-with-an-intent
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: an eval no call holds is placed (seon.ctx/placed-messages) and the

@@ -8,11 +8,29 @@
   :seon.task/waste by the judge). R4's template rows and trials are not ported (next)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [seon.error :as err]
-            [seon.reader :as reader]))
+            [seon.reader :as reader] [datahike.api :as d]))
 
 (def ^:private explore-ops
-  "Heads of forms that look for code instead of changing it."
-  '#{source doc dir ns-publics ns-interns ns-map meta resolve find-var all-ns apropos find-doc source-fn})
+  "Heads of forms that look for code instead of changing it (the REPL's and the agent's tools, my.agent: grep, lines, search,
+  callers, callees; and a file read past them, slurp)."
+  '#{source doc dir ns-publics ns-interns ns-map meta resolve find-var all-ns apropos find-doc source-fn
+     grep lines search callers callees slurp})
+
+(defn turns-of
+  "Agent k's run on db (its branch) as waste folds it: each model call's turn in order, {:n :shown :items [{:form :error :value :out}]},
+  each eval of that call (:seon.eval/call) with its code and its result's error, value and printed output (:seon.eval/result), and shown, what its
+  context showed by producer ({producer #{symbol}}). Read from the evals the REPL recorded, so a run cut by a restart is read
+  whole. O(the run's evals): one pull an eval."
+  {:malli/schema [:=> [:cat :any :string [:map-of :any [:set :any]]] [:vector [:map [:n :int] [:items [:vector :map]]]]]}
+  [db k shown]
+  (let [calls (sort-by :seon.model-call/n (d/q '[:find [(pull ?m [:db/id :seon.model-call/n]) ...] :in $ ?k
+                                                 :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a]] db k))]
+    (vec (for [c calls]
+           {:n (:seon.model-call/n c) :shown shown
+            :items (vec (for [e (sort (d/q '[:find [?e ...] :in $ ?m :where [?e :seon.eval/call ?m]] db (:db/id c)))
+                              :let [{code :seon.eval/code {:seon.result/keys [ex value out]} :seon.eval/result}
+                                    (d/pull db [:seon.eval/code {:seon.eval/result [:seon.result/ex :seon.result/value :seon.result/out]}] e)]]
+                          (cond-> {:form code :error ex :value value} (seq (:seon.print/code out)) (assoc :out (:seon.print/code out)))))}))))
 
 (defn aliases
   "The aliases the forms of a run set up with (require '[ns :as a]): a -> ns."
@@ -26,11 +44,12 @@
 (defn form-reads
   "What one evaluated form reads, by its shape: :explore? when a head in it looks for code,
   and the qualified symbols and namespaces it names (aliases resolved through as)."
-  {:malli/schema [:=> [:cat :string [:map-of :symbol :symbol]] [:map [:explore? :boolean] [:targets [:set :symbol]]]]}
+  {:malli/schema [:=> [:cat :string [:map-of :symbol :symbol]] [:map [:explore? :boolean] [:targets [:set :symbol]] [:head [:maybe :symbol]]]]}
   [s as]
   (let [nodes (mapcat #(tree-seq coll? seq %) (or (reader/read-text s 'user) []))
-        expand (fn [sym] (if-let [a (and (namespace sym) (as (symbol (namespace sym))))] (symbol (str a) (name sym)) sym))]
-    {:explore? (boolean (some #(and (seq? %) (symbol? (first %)) (explore-ops (symbol (name (first %))))) nodes))
+        expand (fn [sym] (if-let [a (and (namespace sym) (as (symbol (namespace sym))))] (symbol (str a) (name sym)) sym))
+        head (some #(when (and (seq? %) (symbol? (first %)) (explore-ops (symbol (name (first %))))) (first %)) nodes)]
+    {:explore? (boolean head) :head head
      :targets (into #{} (comp (filter symbol?) (map expand)
                               (filter #(or (namespace %) (str/includes? (str %) ".")))
                               (remove #(#{"clojure.core" "clojure.repl" "clojure.string"} (or (namespace %) (str %)))))
@@ -39,11 +58,12 @@
 (defn waste
   "The waste of a run's turns, each form charged to a producer. turns: [{:n :shown
   {producer #{symbol}} :items [{:form :error}]}]; final: the qualified symbols the
-  run's error-free definitions use. A form looking for code a producer showed already
-  is :re-read (charged to that producer: its render did not satisfy); looking for code the
-  final definitions use but nothing showed is :missing, and anything else :search (both
-  charged to :template); an error repeating an earlier turn's signature is :repeats-error
-  (charged to seon.ctx.status/status, which delivered it)."
+  run's error-free definitions use. An error repeating an earlier turn's signature is :repeats-error
+  (charged to seon.ctx.status/status, which delivered it); an error first seen is :error, charged to what answered it (its
+  :seon.error/operation, else :template); a look-up that answered nothing (nil, or an empty collection) is :empty, charged to
+  the look-up as written (its head), when it printed nothing either. A form looking for code a producer showed already is :re-read (charged to that
+  producer: its render did not satisfy); looking for code the final definitions use but nothing showed is :missing, and
+  anything else :search (both charged to :template)."
   {:malli/schema [:=> [:cat [:sequential :map] [:set :symbol]] [:vector [:map [:turn :int] [:rule :keyword] [:producer :any] [:form :string]]]]}
   [turns final]
   (let [as (aliases (for [t turns it (:items t)] (:form it)))
@@ -53,11 +73,14 @@
         acc
         (let [shown-by (into {} (for [[p syms] (:shown t) s syms] [s p]))
               sig #(some-> % err/signature)
-              charged (for [{:keys [form error]} (:items t)
-                            :let [{:keys [explore? targets]} (form-reads (or form "") as)]
+              charged (for [{:keys [form error value out]} (:items t)
+                            :let [{:keys [explore? targets head]} (form-reads (or form "") as)]
                             r [(cond
                                  (and error (seen (sig error))) {:rule :repeats-error :producer 'seon.ctx.status/status}
+                                 error {:rule :error :producer (or (:seon.error/operation error) :template)}
                                  (not explore?) nil
+                                 ;; a look-up that printed its answer (source, doc) answered, though its value is nil
+                                 (and (nil? out) (or (nil? value) (and (coll? value) (empty? value)))) {:rule :empty :producer head}
                                  (and (seq targets) (every? shown-by targets)) {:rule :re-read :producer (shown-by (first targets))}
                                  (some #(or (final %) (final-ns %)) targets) {:rule :missing :producer :template}
                                  :else {:rule :search :producer :template})]

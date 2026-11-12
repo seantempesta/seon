@@ -618,8 +618,10 @@
                                                               1    ; seon.problems/unsynced-tasks' own contract (Optimization, 2026-11-10: a seek a declared task, no call)
                                                               6    ; caused-split's content-class readers on base and head, for the move's candidates only
                                                                    ; (Data model, 2026-11-12: nothing switched off; measured 58 -> 64)
+                                                              3    ; seon.problems/unschemed-keys: on base and head for the move's forms, and in the full read (data, 64 -> 67)
+                                                              2    ; seon.problems/refused-values' contract on base and head (data, 67 -> 69)
                                                               4)}  ; the test law's two classes (unestimated-tests, undeclared-tests), one reader each on
-                                                                   ; base and head (tests, 2026-11-12: measured 64 -> 68)
+                                                                   ; base and head (tests, 2026-11-12: 69 -> 73 with data's)
                :sizes [10 30 100]}))
 
 (deftest problems-cost-nothing-for-a-clean-program
@@ -1199,8 +1201,10 @@
                ;; 52: :long-form one more class to look up
                ;; 54: :stale-plan one more (its seon.db/eid and derived-row), 2026-11-10
                ;; 56: :unsynced one more (its seon.db/eid and derived-row), 2026-11-10
-               ;; 60: :unestimated-test and :undeclared-test two more (each its seon.db/eid and derived-row)
-               :fixed {:ns 3000000 :bytes 4000000 :calls 60}
+               ;; 58: :unschemed-key one more (its seon.db/eid and derived-row: this input gives every declared class open rows)
+               ;; 60: :refused-value one more, the same two
+               ;; 64: :unestimated-test and :undeclared-test two more (each its seon.db/eid and derived-row)
+               :fixed {:ns 3000000 :bytes 4000000 :calls 64}
                :sizes [10 30 100]}))
 
 (deftest attention-survives-a-store-write
@@ -1530,9 +1534,35 @@
             :let [[caused full] (made base head c)]]
       (is (seq full) (str (name c) ": the branch made a row"))
       (is (= full caused) (str (name c) ": caused-split answers it, as the full reading does")))
-    (is (= (set (keys {:unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated-test 1 :undeclared-test 1}))
+    (is (= (set (keys {:unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated-test 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1}))
            seon.problems/caused-classes)
         "the classes a branch is judged on are the content classes, as :seon.problems/class declares them")))
+
+(deftest a-key-with-no-schema-entry-is-a-problem-and-a-branch-that-names-one-is-caused-it
+  ;; docs/health.md#a-key-with-no-schema (the owner, 2026-11-12: "proper schemas for all fully namespaced keywords")
+  (let [db0 (world)
+        src-ns [{:db/id "ns" :ns/name 'seon.zz :ns/file "src/seon/zz.clj"} {:db/id "tns" :ns/name 'seon.zz-test :ns/file "test/seon/zz_test.clj"}]
+        base (d/db-with db0 src-ns)
+        form (fn [id ns ks] [{:db/id id :form/id (str "f-" id) :form/src "(def k :seon.zz/new-key)" :form/ns [:ns/name ns] :form/keywords ks}])
+        head (d/db-with base (concat (form "a" 'seon.zz #{:seon.zz/new-key :seon.zz/_reverse :seon.host/fn}) (form "t" 'seon.zz-test #{:seon.zz/only-in-a-test})))
+        keys-of (fn [db] (set (map :key (problems/unschemed-keys db {}))))
+        entry [{:schema/key :seon.zz/new-key :schema/form "[:int {:description \"A key.\"}]"}]]
+    (is (contains? (keys-of head) :seon.zz/new-key) "a key a source form names with no entry is a row")
+    (is (not (contains? (keys-of head) :seon.zz/_reverse)) "a reverse ref is no key")
+    (is (not (contains? (keys-of head) :seon.host/fn)) "a host type is its own entry (seon.contract/host-schemas)")
+    (is (not (contains? (keys-of head) :seon.zz/only-in-a-test)) "a test's keyword is not src's")
+    (is (not (contains? (keys-of (d/db-with head entry)) :seon.zz/new-key)) "its entry closes it")
+    (is (some #(str/includes? % ":seon.zz/new-key") (problems/caused base head)) "a branch that names a new key with no entry is caused it")
+    (is (not-any? #(str/includes? % ":seon.zz/new-key") (problems/caused base (d/db-with head entry))) "and one that writes the entry too is not")))
+
+(deftest a-branch-that-tightens-an-entry-is-caused-the-stored-values-it-refuses
+  ;; docs/health.md#a-stored-value-its-entry-refuses: a value written before its attribute's entry tightened is held to the new entry
+  ;; when a branch changes that entry: the store's datoms of that attribute alone, each refused one a row
+  (let [base (d/db-with (world) [{:seon.agent/key "old" :seon.agent/boot "b" :seon.agent/started-ms 5}])
+        entry (fn [form] [{:schema/key :seon.agent/started-ms :schema/form form}])
+        caused-of (fn [head] (filter #(str/includes? % ":seon.agent/started-ms") (problems/caused base head)))]
+    (is (seq (caused-of (d/db-with base (entry "[:int {:min 10 :description \"Ms.\"}]")))) "an entry tightened under a stored value is caused it")
+    (is (empty? (caused-of (d/db-with base (entry "[:int {:min 0 :description \"Ms.\"}]")))) "one every stored value still fits is not")))
 
 (deftest a-branch-that-changes-what-its-plan-cites-is-shown-the-stale-plan-never-refused
   ;; docs/health.md#a-plan-that-went-stale: changing the code a plan cites is the work (an agent's own task cites what it

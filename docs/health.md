@@ -54,6 +54,14 @@ A ready task whose own plan cites a var whose `:var/form` datom was written afte
 
 A public function, macro or def of Seon's own source whose docstring cites no `docs/` section is an `:uncited-var` (`seon.problems/uncited-vars`; [the summary depth](references.md#the-delimiter-picks-the-depth)). It is read only for the vars a branch changed (`seon.problems/caused-split`) and shown as attention, never refusing done ([processes](processes.md#an-agent-is-never-gated)). A private var and a test are not judged; a definition is told by its recorded form's head (`seon.source/first-head`). The fix is the citation, with the mechanism written into the section, not the docstring.
 
+## A key with no schema
+
+Every key Seon names is one schema entry: each of Seon's own qualified keywords (a `seon` or `my` namespace) that a source form names (`:form/keywords`) and no entry defines (`:schema/key`) is an `:unschemed-key` (```seon.problems/unschemed-keys```), one row a key naming the vars that use it. A reverse ref and an enum's value are not keys. A branch that names a new key without its entry, or removes the entry of a key still named, is caused the row; it closes when the entry is written, with its `:description`.
+
+## A stored value its entry refuses
+
+Every stored value fits its attribute's entry: each write is checked, and a branch that changes an entry is held to the values already stored. A datom of an attribute whose entry the branch changed, whose value the new entry refuses (```seon.db/invalid-datom```, with the branch's own schema changes), is a `:refused-value` (```seon.problems/refused-values```), one row a value, read from that attribute's datoms alone. It closes when the value is fixed or the entry loosened.
+
 ## A form too long
 
 A live form whose `:form/src` is longer than `:seon.config.shrink/form-tokens` tokens (`seon.print.emit/chars-tokens`) is a `:long-form` (`seon.problems/long-forms`), read only for the vars a branch changed and shown as attention.

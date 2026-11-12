@@ -30,4 +30,9 @@
                    :seon.db/plain]
  ;; the instrumented wrapper's errors (Seon's variant names)
  :seon.instrument/contract-error [:and :seon.error/base [:map [:seon.error/type [:enum :seon.instrument/contract-error]]]]
- :seon.instrument/arity-error [:and :seon.error/base [:map [:seon.error/type [:enum :seon.instrument/arity-error]]]]}
+ :seon.instrument/arity-error [:and :seon.error/base [:map [:seon.error/type [:enum :seon.instrument/arity-error]]]]
+ ;; keys-schemas sweep
+ :seon.error/data [:map {:description "On an error, plain data the error carries beside its message: what a reader needs to act (the path of a value, for example)."}]
+ :seon.error/expected [:any {:description "On an error, what was expected: a sentence, or a schema's form."}]
+ :seon.error/given [:vector {:description "On a macro's syntax error, the forms its call was given, each whole as read (seon.repl/given)."} :string]
+ :seon.error/offending [:any {:description "On an error, the value that offended: a budget, a count, a form."}]}
