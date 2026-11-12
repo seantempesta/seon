@@ -1695,7 +1695,7 @@
 (defn asked
   "The tests a :tests request m's asker reads a verdict of, so its answer keeps a pass report for each (seon.proofs/answer): the
   task's proofs, the tests m names (a namespace's name, its tests among selected) and the items the test service granted (:items):
-  an item kept no pass and read as no verdict at the service (seon.prove/batch-ended), 2026-11-12. See
+  an item kept no pass and read as no verdict at the service (seon.prove/batch-ended). See
   docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :map [:set :qualified-symbol] [:maybe [:sequential :qualified-symbol]]] [:set :qualified-symbol]]}
   [m proofs selected]

@@ -388,7 +388,7 @@
 
 (defn- batch-errors
   "The reports of a run's batches that name no test (a child that died before a test began), once a batch: its items share its
-  answer, and run-answer counts its whole answer (a count with no report said nothing of why, 2026-11-12). See
+  answer, and run-answer counts its whole answer (a count with no report said nothing of why). See
   docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [results]

@@ -857,7 +857,7 @@
   removed). The size is kept in the cache's .size ledger, so a write that leaves the cache under the
   bound reads and rewrites one small file and counts nothing; past it (or with no ledger) the
   verdict files are counted once, and the least recently used (the oldest mtime: seon.fx/stored-results touches a verdict
-  it reads) go first, greens and reds alike (an LRU cache: the owner, 2026-11-12), until the cache is
+  it reads) go first, greens and reds alike (an LRU cache, the owner's ruling), until the cache is
   :seon.config.proofs/results-evict-percent under the bound, so the writes after it count nothing, and the ledger is set to
   the true size. A file that is no verdict (full-run.edn) is never counted or deleted. Other writers' additions and removals make the ledger a lower or
   higher guess, corrected by the next count. A file that would not delete stays (a cache a little
