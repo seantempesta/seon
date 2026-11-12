@@ -579,7 +579,7 @@
 ;; z filter and the order are SQLite's, so only the texts at z-min or above cross into the process. Measured 2026-11-12 on main:
 ;; the plan of one task matched 8,181 of 8,538 texts, every row read into the process, 75M ticks a search. Estimate: one FTS5
 ;; query (native) and per hit its names, about 20k ticks a hit; a world whose every text matches costs the same at 40 texts and 320
-(deftest a-ranked-search-costs-its-hits
+(deftest ^{:seon.test/estimate {:ticks 25000000}} a-ranked-search-costs-its-hits
   (let [world (fn [n] (mt/with (mt/world)
                                (mt/code 'app.hits (apply str "(ns app.hits)\n" "(defn rare \"needle needle needle needle haystack\" [] 0)\n"
                                                          (for [i (range n)] (str "(defn f" i " \"haystack " i "\" [] " i ")\n"))))))

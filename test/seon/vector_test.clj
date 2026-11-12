@@ -516,7 +516,7 @@
 ;; and the filter of an :of attribute with them: a page's search asks near three times on one value (one attribute each), and
 ;; each call scanned every coarse row and built the set of every form again (main, 2026-11-12: 9,127 vectors, 2.5M ticks a scan,
 ;; 15M with :of :form/id). A call on a kept value is the coarse kernel and the fine shortlist: the first's cost less its scan
-(deftest near-reads-the-coarse-rows-once-a-db-value
+(deftest ^{:seon.test/estimate {:ticks 20000000}} near-reads-the-coarse-rows-once-a-db-value
   (let [vs (vectors 11 600 12 768)
         db (db-with-vectors vs)
         q (nth vs 3)
