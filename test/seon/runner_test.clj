@@ -17,7 +17,7 @@
 ;; docs/source.md#tests-run-by-reach: a run's shards key each green by what it read, so the plan hands them its reads index and each
 ;; test's static reads (write-reads!), which a shard reads back whole from beside its shard file (shard-reads); a run that runs
 ;; nothing writes none, and its shards key nothing
-(deftest a-runs-reads-reach-its-shards-whole
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-runs-reads-reach-its-shards-whole
   (let [out (str (System/getProperty "java.io.tmpdir") "/seon-reads-" (random-uuid))
         rd {'a/f "d1" [:config :k] "v" [:tree] "t0" :seon.proofs/covers #{:var :config}}
         plan {:rd (delay rd) :static-reads {'a/t #{[:config :k] [:tree]} 'a/u #{[:tree]}}}]

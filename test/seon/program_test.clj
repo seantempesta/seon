@@ -1615,7 +1615,7 @@
 
 ;; docs/source.md#tests-run-by-reach: what a call depends on is its own form and what it uses without calling; a contracted
 ;; var it references is in a run's call record only when it ran, so editing one it did not call moves nothing of it
-(deftest a-vars-read-digest-moves-with-what-a-call-of-it-uses
+(deftest ^{:seon.test/estimate {:ticks 50000000}} a-vars-read-digest-moves-with-what-a-call-of-it-uses
   (let [w (fn [g-body h-body] (program/reach-graph (mt/with (mt/world)
                                                             (mt/code 'app.rd (str "(ns app.rd (:require [seon.contract :refer [defn]]))\n"
                                                                                   "(def limit " h-body ")\n"

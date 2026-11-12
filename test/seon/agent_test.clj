@@ -655,7 +655,7 @@
         (str "red as recorded, with its failure, nothing run and no child forked " (pr-str judge)))
     (is (= [:pass 1] (:value other)) (str "another's red runs, and is green: " (pr-str other)))))
 
-(deftest an-agents-green-records-what-it-read
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 20000000 :asks 3}} an-agents-green-records-what-it-read
   ;; docs/source.md#tests-run-by-reach: a green an agent's run stores is keyed by what it read (seon.proofs/reads-key): the
   ;; functions it called and itself, at the digests of the agent's reads index, beside its verdict as reads.edn, so a later plan
   ;; reuses it while none of those moved (seon.proofs/read-digests). Red before: an agent's run wrote no reads
@@ -2271,7 +2271,7 @@
 ;; docs/merging.md#the-test-service: a tree proved as a merge (mode :main: every key with no green at its digest, as the shell's
 ;; bin/prove --merge plans it, seon.proofs/plan-of :merge) carries its generative-contract keys too, as items, where the run
 ;; dropped them (seon.agent/process-plan's (remove mg-key? ...)): a landing through the system proved less than the shell's
-(deftest a-merge-plan-carries-the-contract-keys
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 20000000 :asks 4}} a-merge-plan-carries-the-contract-keys
   (let [_ '[seon.agent/handle! seon.agent/process-plan seon.proofs/plan-of seon.proofs/mg-key?]
         k "mg/seon.ref/lead-sentence"
         plan "(set (keys (:mg (:result (first (seon.agent/handle! {:op :tests :id :x :plan? true :process? true :mode :main}))))))"

@@ -735,7 +735,7 @@
 
 ;; docs/source.md#tests-run-by-reach: a test is keyed by what its run read (recorded reads, ninja's depfiles): its verdict
 ;; holds each read's digest, and it is reused while every one still has it, whatever else moved
-(deftest a-verdict-is-reused-while-everything-its-run-read-is-unchanged
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-verdict-is-reused-while-everything-its-run-read-is-unchanged
   (let [rd {'a/f "f1" 'a/g "g1" 'a/h "h1" [:schema :a/e] "e1" :seon.proofs/covers #{:var :schema :config}}
         raw {:fns #{'a/f 'a/g} :entities #{:a/e :a/missing}}
         k (seon.proofs/reads-key rd raw)

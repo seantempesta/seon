@@ -556,7 +556,7 @@
 ;; docs/config.md#a-process-holds-its-branchs-config: a branch's config file is checked against the schema the same change
 ;; states: a key its schema file adds is read, never refused by this process's older schema (Tests' prove of a branch that
 ;; changed both, through the system, was skipped: 2026-11-12). Red before: text-refusal took no schema changes
-(deftest a-config-file-is-checked-against-the-schema-its-change-states
+(deftest ^{:seon.test/estimate {:ticks 30000000}} a-config-file-is-checked-against-the-schema-its-change-states
   (let [text (slurp (str (config/checkout) "/" config/shipped-file))
         with-key (clojure.string/replace-first text "{" "{:seon.config.zz/new-key 3\n ")
         form (get config/schema-forms :seon.config/config)

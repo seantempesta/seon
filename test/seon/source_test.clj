@@ -79,7 +79,7 @@
           a2 (d/db-with after tx2)]
       (is (= moved (source/file-text a2 'app.pl)) "a form moved reads back where the file has it"))))
 
-(deftest an-edit-of-one-form-analyzes-that-form-not-its-file
+(deftest ^{:seon.test/estimate {:ticks 5000000}} an-edit-of-one-form-analyzes-that-form-not-its-file
   ;; docs/source.md#main-s-program-follows-the-tree: a catch-up of a file with one form changed analyzed every form of the file
   ;; (0.8 MB a form: a one-file catch-up 100 MB, a seven-file one 2.4 GB, 2026-11-12); a form the store holds whole, under
   ;; the same ns form, is taken from the store. Red before: 9 analyses (the ns form and the eight defns)
