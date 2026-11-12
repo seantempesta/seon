@@ -618,6 +618,12 @@
  ;; machine: its cores (#seon/cores; a forked test child is 16-35 MB of its own and about a core while it runs). At the
  ;; bound: an item waits in the queue for a running one to end.
  :seon.config.proofs/max-workers #seon/cores nil
+ ;; Unit: workers. What an item that boots a root takes of max-workers while it runs (seon.prove/root-item?: a process test's
+ ;; batch, its test root with its fork server and agents; a check step on the binary; a build or a seed), so the processes in
+ ;; flight stay near the cores (AGENTS.md §3a.7). Measured 2026-11-12: 18 such items at once were 51 roots at load 46 on 18
+ ;; cores, about 3 processes an item. At the bound: such an item waits for its workers to be free (one is granted with
+ ;; nothing running).
+ :seon.config.proofs/root-item-workers 3
  ;; Unit: a share of :seon.config.machine/cores in (0,1] (rounded down, at least 1); a count of items is max-workers. Unset:
  ;; no core bound. At the bound: as max-workers; the least of the two set holds.
  ;; :seon.config.proofs/max-cores 0.5
@@ -697,6 +703,10 @@
  ;; importers of one tree keep the first (test-runner/keep-tree!). Unset: this checkout's own. Derived data: deleting it costs
  ;; one import. At the bound: see program-store-max-bytes.
  :seon.config.proofs/program-store #or [#env SEON_PROGRAM_STORE #seon/checkout "target/program-store"]
+ ;; Unit: stores. The program store's keys kept on disk (seon.test-store/shared-program-store!): the one in use and the most
+ ;; recently used of the others, which checkouts on another Jolt pin or program schema share at once. 3: main's, a branch with a
+ ;; new pin, and one more. At the bound: the least recently used other key's store is removed (made again on its next plan).
+ :seon.config.proofs/program-stores-kept 3
  ;; Unit: bytes. The kept program dbs' store on disk (its data.mdb). Measured 2026-10-23: 12 MB
  ;; for the whole program (118 files), about 2 MB more a kept tree that changed a file. At the
  ;; bound: the store is removed before it is opened and starts again from the run's tree (one
