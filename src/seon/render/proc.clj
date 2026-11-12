@@ -388,7 +388,7 @@
   "A walk kept across moves: entity e's ctx on db (seon.ctx/build, its tree as mark makes it) in a reactive
   atom, drawn once by its entity's render (seon.render/render-var-of: its tree, with ident, the identity the caller
   holds of it, for a branch that holds no entity yet) over the db it holds: {:w :a :c :at}, :at a volatile of that db.
-  Root's own page (root-walk), each user's (`user-walk`) and each watched agent's branch (`branch-walk!`) keep one; `advance-walk!`
+  Root's own page (root-walk), each user's (`user-walk`) and each watched agent's branch (`branch-walk`) keep one; `advance-walk!`
   moves it. Walk-opts go on the walk (:id-prefix, `user-walk`'s). See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:maybe pos-int?] :any :map :seon.host/fn] :map]
                   [:=> [:cat :seon.host/db [:maybe pos-int?] :any :map :seon.host/fn [:map [:id-prefix {:optional true} :string]]] :map]]}
@@ -426,28 +426,27 @@
         (render/flush! w' nil)
         (assoc kw :w w' :c c'))))))
 
-(defn- branch-walk!
-  "The kept walk of agent e's page (e on main) on its branch, as of bdb, the evals main records it opened
-  (:seon.agent/opened) drawn opened: one a branch, held in its read's cell (:branch-reads b :walk, a
-  volatile) so every view of the agent (its chat drawn from its branch, @ctx, the debug page's latest)
+(defn- branch-walk
+  "Kept walk kw (nil: none yet) of agent e's page (e on main) on its branch, as of bdb, the evals main records it opened
+  (:seon.agent/opened) drawn opened: one a branch, held in its read's state (:branch-reads b :walk, which the pass that drew it
+  writes, `pass-view`) so every view of the agent (its chat drawn from its branch, @ctx, the debug page's latest)
   draws from it; built at the first, after it advanced (`advance-walk!`), made again when the agent's entity on
-  the branch is not the one it holds (none yet at its first draw); at the same db and opened, nothing at all. Answers {:w :c}. See docs/render.md#a-page-is-a-kept-walk."
-  {:malli/schema [:=> [:cat :seon.host/volatile :seon.host/db :any] :map]}
-  [cell bdb e]
+  the branch is not the one it holds (none yet at its first draw); at the same db and opened, kw itself. Answers {:w :c}. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat [:maybe :map] :seon.host/db :any] :map]}
+  [kw bdb e]
   (let [opened (set (:seon.agent/opened e))
         branch (or (:seon.agent/branch e) :db)
-        mark (fn [t] (cond-> t (seq opened) (update :seon.eval/_agent #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %))))
-        kw @cell]
+        mark (fn [t] (cond-> t (seq opened) (update :seon.eval/_agent #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %))))]
     (binding [datahike.index.interface/*reads* nil]
       (let [eid (seon.db/eid bdb :seon.agent/key (:seon.agent/key e))]
       (cond
         ;; a walk of another entity than the branch holds now (none, before the agent's first write to its
         ;; branch; another, a branch made again) is made again: a patch reaches only what its ctx holds
         (or (nil? kw) (not= eid (get-in kw [:c :tree :db/id])))
-        (do (some-> kw :w render/dispose-walk!)
-            (vreset! cell (assoc (kept-walk bdb eid branch {:seon.agent/key (:seon.agent/key e)} mark) :opened opened)))
+        ;; the walk it replaces is disposed by the pass that writes this one to st (`pass-view`)
+        (assoc (kept-walk bdb eid branch {:seon.agent/key (:seon.agent/key e)} mark) :opened opened)
         (and (identical? @(:at kw) bdb) (= opened (:opened kw))) kw
-        :else (vreset! cell (assoc (advance-walk! kw bdb branch mark) :opened opened)))))))
+        :else (assoc (advance-walk! kw bdb branch mark) :opened opened))))))
 
 (defn- live?
   "Is agent id a process root's view holds, running (it answers what it is asked)?"
@@ -470,17 +469,15 @@
           st (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st)))))
 
 (defn- user-walk
-  "The kept walk of user e's page on main db, by its declared layout, made at its first draw and held in the proc's cell (:user-walks, one a user), or nil when e is no user. `user-walks` advances it as main moves. See docs/render.md#a-page-is-a-kept-walk."
+  "The kept walk of user e's page on main db, by its declared layout: the one st holds (:user-walks, one a user, written by the pass
+  that made it, `pass-view`), else made now; nil when e is no user. `user-walks` advances it as main moves. See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :map :seon.host/db :any] [:maybe :map]]}
   [st db e]
-  (when-let [cell (when (and (:seon.agent/key e) (nil? (:seon.agent/branch e))) (:user-walks st))]
-    (let [n (:seon.agent/key e)]
-      (or (get @cell n)
-          ;; a user's walk draws the agents list the frame puts on every page, beside another walk's units: its elements are named apart
-          ;; (a page's units are keyed by element id, and an agent's entry is on root's page twice: the list and root's sessions)
-          (let [kw (kept-walk db (:db/id e) :main {} identity (if (:seon.user/name e) {:id-prefix "u-"} {}))]
-            (vswap! cell assoc n kw)
-            kw)))))
+  (when (and (:seon.agent/key e) (nil? (:seon.agent/branch e)))
+    (or (get-in st [:user-walks (:seon.agent/key e)])
+        ;; a user's walk draws the agents list the frame puts on every page, beside another walk's units: its elements are named apart
+        ;; (a page's units are keyed by element id, and an agent's entry is on root's page twice: the list and root's sessions)
+        (kept-walk db (:db/id e) :main {} identity (if (:seon.user/name e) {:id-prefix "u-"} {})))))
 
 (defn- list-units
   "The units of list sel among units (seon.render/placed-units, a parent before its children): those placed in it and every unit
@@ -495,28 +492,26 @@
   {:malli/schema [:function [:=> [:cat :map :seon.host/db] :map] [:=> [:cat :map :seon.host/db [:maybe :map]] :map]]}
   ([st db] (user-walks st db nil))
   ([st db known]
-  (let [cell (or (:user-walks st) (volatile! {}))
+  (let [walks (or (:user-walks st) {})
         ;; the signed-in user's agents list is every page's (`user-sides`): its change redraws every view
         signed (some-> db (d/entity [:seon.system/id :root]) :seon.system/signed-in :seon.user/name)
-        side (fn [] (when-let [kw (get @cell signed)] (into {} (for [u (list-units (render/placed-units (:w kw)) "#c-side")] [(:id u) (:rev u)]))))
-        before (side)]
-    (doseq [[n kw] @cell] (vswap! cell assoc n (advance-walk! kw db :main identity known)))
-    (cond-> st
-      (not= before (side)) (update :dirty (fnil into #{}) (keys (:views st)))
-      (seq @cell) (update :dirty (fnil into #{})
+        side (fn [walks] (when-let [kw (get walks signed)] (into {} (for [u (list-units (render/placed-units (:w kw)) "#c-side")] [(:id u) (:rev u)]))))
+        before (side walks)
+        walks (into {} (map (fn [[n kw]] [n (advance-walk! kw db :main identity known)])) walks)]
+    (cond-> (assoc st :user-walks walks)
+      (not= before (side walks)) (update :dirty (fnil into #{}) (keys (:views st)))
+      (seq walks) (update :dirty (fnil into #{})
                           ;; the views of the agents these walks draw (each branchless: a user, root's session): their pages moved with main
                           (filter (fn [v] (let [x (if (vector? v) (second v) v)]
-                                            (when (keyword? x) (some->> (location db x) (d/entity db) :seon.agent/key (contains? @cell))))) (keys (:views st))))))))
+                                            (when (keyword? x) (some->> (location db x) (d/entity db) :seon.agent/key (contains? walks))))) (keys (:views st))))))))
 
 (defn- user-sides
   "The agents list every page shows: the signed-in user's (root's :seon.system/signed-in), as that user's kept walk drew it (seon.render.ui/agents-list,
-  its page's c-side): root, then what the user started, each with what it started under it. Nothing before main is read or with no one signed in.
+  its page's c-side; kw, that user's walk, `user-walk`): root, then what the user started, each with what it started under it. Nothing before main is read or with no one signed in.
   See docs/users.md#whats-on-screen."
-  {:malli/schema [:=> [:cat :map [:maybe :seon.host/db]] [:vector :map]]}
-  [st db]
-  (if-let [kw (when-let [u (some-> db (d/entity [:seon.system/id :root]) :seon.system/signed-in)] (user-walk st db u))]
-    (list-units (render/placed-units (:w kw)) "#c-side")
-    []))
+  {:malli/schema [:=> [:cat [:maybe :map]] [:vector :map]]}
+  [kw]
+  (if kw (list-units (render/placed-units (:w kw)) "#c-side") []))
 
 (defn- system-units
   "Which system a page is: the system walk's unit in #p-system (seon.render.ui/system-source), which the frame places in the top bar of
@@ -551,14 +546,19 @@
         ;; the evals a reader opened (main's :seon.agent/opened, read here, so its commit passes the
         ;; page again): drawn opened, as the agent draws them once it takes the fact
         opened (set (:seon.agent/opened e))
-        ;; the branch's kept walk (branch-walk!), one a branch; an agent read from main is drawn once, its reads the page's
-        cell (get-in st [:branch-reads (get-in st [:branches view :branch]) :walk])
-        walked #(when (and cell (not branchless?)) (branch-walk! cell bdb e))
+        ;; the branch's kept walk (branch-walk), one a branch; an agent read from main is drawn once, its reads the page's
+        b (get-in st [:branches view :branch])
+        ;; made or advanced here, at most once a view, and written to st by the pass (`pass-view`), with the users' walks it made
+        bw (delay (when (and (contains? (:branch-reads st) b) (not branchless?)) (branch-walk (get-in st [:branch-reads b :walk]) bdb e)))
+        walked #(deref bw)
+        ew (delay (user-walk st db e))
+        signed (some-> db (d/entity [:seon.system/id :root]) :seon.system/signed-in)
+        sw (delay (when signed (user-walk st db signed)))
         bix (delay (program/index-of-db bdb))
         cold-tree #(quiet (fn [] (:tree (ctx/build @bix bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (or (:seon.agent/branch e) :db)))))
         ;; a branchless agent's kept walk (`user-walk`: a user's, root's session's) tracks its own reads and `user-walks` marks its views
         ;; dirty when main moves it: its first draw here is no read of this page's
-        branch-units (fn [] (if-let [kw (or (walked) (binding [datahike.index.interface/*reads* nil] (user-walk st db e)))]
+        branch-units (fn [] (if-let [kw (or (walked) (binding [datahike.index.interface/*reads* nil] @ew))]
                               (binding [datahike.index.interface/*reads* nil] (render/placed-units (:w kw)))
                               (let [t (cond-> (cold-tree) (seq opened) (update :seon.eval/_agent #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
                                     w (quiet #(render/draw t ctx/changes bdb (render/render-var-of @bix (merge {:seon.agent/key (:seon.agent/key e)} t)) {:index @bix}))]
@@ -601,7 +601,7 @@
         ;; every agent's page draws its own agents list; the frame shows the signed-in user's on every page, one walk's (`user-sides`)
         own-side (set (map :id (list-units (or units []) "#c-side")))
         units (vec (remove (comp own-side :id) units))
-        sides (user-sides st db)
+        sides (user-sides @sw)
         ;; root's session (the agent keyed "root", the reserved key `location` names for root's page): beside its page, the
         ;; system's own view (its head, process and problems: root's runtime values, never written) from the system's walk, placed by
         ;; the frame as the agents list is, the same mechanism
@@ -614,7 +614,8 @@
                (not (task/this-boots db e)) (dissoc :processes))
         head-unit {:id "p-agent-head" :container "#p-head" :rev (hash head)
                    :html (h/html [:section {:id "p-agent-head" :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (ui/agent-head {} head)])}]
-    (ui/page-chrome {:units (vec (concat (system-units st) sides [head-unit] system units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
+    ;; the walks this page made or advanced, for the pass to write to st (`pass-view`)
+    (assoc (ui/page-chrome {:units (vec (concat (system-units st) sides [head-unit] system units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
                       ;; never a wait: drawn from its branch until its process answers, the page says so
                       :caption (when (and chat? (not own?))
                                  (when (:error held) (str "Its process didn't answer, so this may be behind: " (:seon.error/message (:error held)))))
@@ -626,7 +627,11 @@
                               :busy? (= :busy (:seon.agent/status e)) :talks? (some? (or (:seon.agent/task e) (first (:seon.task/_agent e))))
                                       :held (d/q '[:find ?id . :in $ ?a :where [?a :seon.agent/task ?t] [?t :seon.task/execution :held] [?t :seon.task/id ?id]] db eid)}})}
                      ;; its tabs name it by its id in this boot, else by its branch (an earlier boot's agent)
-                     (focus db view))))
+                     (focus db view))
+           ::walks (cond-> {}
+                     (and (realized? bw) @bw) (assoc :branch [b @bw])
+                     (and (realized? ew) @ew) (assoc-in [:users (:seon.agent/key e)] @ew)
+                     (and (realized? sw) @sw) (assoc-in [:users (:seon.agent/key signed)] @sw)))))
 
 (defn- root-walk
   "St with root's walk current as of main db: root's ctx (seon.ctx/build of root's entity on main)
@@ -841,6 +846,14 @@
   [st view-id]
   (let [held (get-in st [:views view-id])
         [out reads] (d/with-reads #(page-value st view-id))
+        ;; the walks the page made or advanced (`agent-view`): the branch's and the users', held in st from here
+        {[b bw] :branch users :users} (when (map? out) (::walks out))
+        out (cond-> out (map? out) (dissoc ::walks))
+        old (get-in st [:branch-reads b :walk :w])
+        _ (when (and bw old (not (identical? old (:w bw)))) (render/dispose-walk! old))
+        st (cond-> st
+             bw (assoc-in [:branch-reads b :walk] bw)
+             (seq users) (update :user-walks merge users))
         st (-> st (update-in [:counts :walked] (fnil inc 0)) (update :last-walked (fnil conj []) view-id) (update :dirty disj view-id))
         read-keys (d/reads-index reads)
         hold (fn [st v] (-> (reindex st view-id (:reads held) read-keys)
@@ -882,7 +895,7 @@
   (try
     (let [r (pass-view st view-id)]
       ;; a component that threw in a kept walk is a problem root records, as a view that threw is
-      (doseq [w (concat (some-> (:root-walk (first r)) :w vector) (keep #(some-> (:walk (val %)) deref :w) (:branch-reads (first r))) (map :w (some-> (:user-walks (first r)) deref vals)))
+      (doseq [w (concat (some-> (:root-walk (first r)) :w vector) (keep #(some-> (:walk (val %)) :w) (:branch-reads (first r))) (map :w (vals (:user-walks (first r)))))
               d (render/take-defects! w)]
         (step/out! o :to-api {:op :error :pid :render :message (:seon.error/message d) :data d}))
       r)
@@ -909,10 +922,10 @@
     (compose skeleton units order)))
 
 (defn- drop-read
-  "St without branch b's read (no view shows it): its db let go and its kept walk (branch-walk!) disposed."
+  "St without branch b's read (no view shows it): its db let go and its kept walk (branch-walk) disposed."
   {:malli/schema [:=> [:cat :map :any] :map]}
   [st b]
-  (some-> (get-in st [:branch-reads b :walk]) deref :w render/dispose-walk!)
+  (some-> (get-in st [:branch-reads b :walk]) :w render/dispose-walk!)
   (update st :branch-reads dissoc b))
 
 (defn- drop-view
@@ -1110,8 +1123,8 @@
           moved (when (and held (not err?)) (apply concat (d/datoms-diff held (:db r) :eavt [])))
           ;; an answer for a branch no view shows any more (its page was dropped while it was asked) is let go
           st (if (some #(= b (:branch %)) (vals (:branches st)))
-               ;; its kept walk (branch-walk!) stays with the branch across reads
-               (assoc-in st [:branch-reads b] (cond-> {:at asking :walk (or (get-in st [:branch-reads b :walk]) (volatile! nil))}
+               ;; its kept walk (branch-walk) stays with the branch across reads
+               (assoc-in st [:branch-reads b] (cond-> {:at asking :walk (get-in st [:branch-reads b :walk])}
                                                 err? (assoc :error r) (not err?) (assoc :db (:db r))))
                (drop-read st b))
           st (reduce #(take-read %1 %2 b) st (filter #(= b (get-in st [:branches % :branch])) (keys (:branches st))))]
@@ -1137,7 +1150,7 @@
    ;; no beat: a pass happens on an event, an api answer or a tab's request, never on a clock
    (let [events (a/chan (a/sliding-buffer 4096))]
      (a/tap (:events-mult args) events)
-     {:user-walks (volatile! {}) :events-ch events :mult (:events-mult args) :system-p (:system args) :conn (:conn args) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{}
+     {:user-walks {} :events-ch events :mult (:events-mult args) :system-p (:system args) :conn (:conn args) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{}
       :new-events [] :events [] :views {} :branches {}
       ::flow/in-ports {:events events}}))
   ([st tr]

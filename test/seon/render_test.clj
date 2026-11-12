@@ -478,7 +478,7 @@
   "The render proc's state as it holds a read of main and of a3's branch: root's view (a3 busy;
   root's boot, b1, is its entity's on main), main's open problems."
   [main branch]
-  {:rid 1 :pending {} :watch #{:root [:chat :a3]} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :user-walks (volatile! {}) :branches {:a3 {:db branch :branch :task-demo-f} [:chat :a3] {:db branch :branch :task-demo-f}}
+  {:rid 1 :pending {} :watch #{:root [:chat :a3]} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :user-walks {} :branches {:a3 {:db branch :branch :task-demo-f} [:chat :a3] {:db branch :branch :task-demo-f}}
    ;; the one read of a3's branch every view of it shows (seon.render.proc/ask-branches)
    :branch-reads {:task-demo-f {:db branch}}
    :merges 0 :main-db main :view {:agents {:a3 {:status :busy :branch :task-demo-f}}}})
@@ -537,7 +537,7 @@
   {:malli/schema [:=> [:cat :map :any] [:tuple :map :any]]}
   [st view]
   (let [r (#'p/pass-view st view)]
-    (doseq [w (concat (some-> (:root-walk (first r)) :w vector) (keep #(some-> (:walk (val %)) deref :w) (:branch-reads (first r))) (map :w (some-> (:user-walks (first r)) deref vals)))]
+    (doseq [w (concat (some-> (:root-walk (first r)) :w vector) (keep #(some-> (:walk (val %)) :w) (:branch-reads (first r))) (map :w (vals (:user-walks (first r)))))]
       (seon.fixtures/no-error-render @(:defects w)))
     r))
 
@@ -965,11 +965,11 @@
         cold (let [w (draw (:tree (seon.ctx/build (seon.db/index) branch' (seon.db/eid branch' :seon.agent/key k) (:seon.agent/branch e))) seon.ctx/changes branch'
                              #'seon.render.ui/agent)]
                (try (mapv (juxt :id :html) (r/placed-units w)) (finally (r/dispose-walk! w))))]
-    (is (some? (:w @cell)) "the branch's read holds its walk")
-    (is (= cold (mapv (juxt :id :html) (r/placed-units (:w @cell)))) "after the move, what a cold draw at the head draws")
-    (let [w (:w @cell) [st3 _] (pass-view st2 :a3)
+    (is (some? (:w cell)) "the branch's read holds its walk")
+    (is (= cold (mapv (juxt :id :html) (r/placed-units (:w cell)))) "after the move, what a cold draw at the head draws")
+    (let [w (:w cell) [st3 _] (pass-view st2 :a3)
           html (p/view-html st3 :a3)]
-      (is (identical? w (:w @(get-in st3 [:branch-reads :task-demo-f :walk]))) "@ctx draws from the same walk")
+      (is (identical? w (:w (get-in st3 [:branch-reads :task-demo-f :walk]))) "@ctx draws from the same walk")
       ;; owner, 2026-11-03: "the record is @ctx with each part that was rendered and the rendered part"
       (doseq [[id content] (r/placed-hiccup w (r/page-lists w))]
         (is (str/includes? html (str "data-part=\"" id "\"")) (str "@ctx pairs part " id))
@@ -980,7 +980,7 @@
             back (let [w (draw (:tree (seon.ctx/build (seon.db/index) branch (seon.db/eid branch :seon.agent/key k) (:seon.agent/branch e))) seon.ctx/changes branch
                                  #'seon.render.ui/agent)]
                    (try (mapv (juxt :id :html) (r/placed-units w)) (finally (r/dispose-walk! w))))]
-        (is (= back (mapv (juxt :id :html) (r/placed-units (:w @(get-in st5 [:branch-reads :task-demo-f :walk]))))))))
+        (is (= back (mapv (juxt :id :html) (r/placed-units (:w (get-in st5 [:branch-reads :task-demo-f :walk]))))))))
     (testing "the branch's read let go: its walk is disposed"
       (let [[st4 _] (p/render-proc st2 :from-web {:op :views :views #{} :tabs 0})]
         (is (nil? (get-in st4 [:branch-reads :task-demo-f])))))))
@@ -1091,13 +1091,12 @@
         k "a3"
         bare (d/db-with branch [[:db/retractEntity (seon.db/eid branch :seon.agent/key k)]])
         st (assoc (proc-state main bare) :watch #{:a3})
-        st (assoc-in st [:branch-reads :task-demo-f :walk] (volatile! nil))
         [st1 _] (pass-view st :a3)
         st2 (#'p/answered st1 o [:branch :task-demo-f] {:db branch})
         html (p/view-html st2 :a3)]
     (is (not (str/includes? (p/view-html st1 :a3) "data-part=")) "no agent on its branch yet: no parts")
     (is (str/includes? html "data-part=") "the agent written: its parts")
-    (is (= (seon.db/eid branch :seon.agent/key k) (get-in @(get-in st2 [:branch-reads :task-demo-f :walk]) [:c :tree :db/id])) "the walk holds the agent")))
+    (is (= (seon.db/eid branch :seon.agent/key k) (get-in st2 [:branch-reads :task-demo-f :walk :c :tree :db/id])) "the walk holds the agent")))
 
 (deftest a-branch-read-anew-renders-its-components-again
   ;; a branch read after an error has nothing held to diff against: what was cached from that
@@ -1194,17 +1193,22 @@
         st (root-state (branch-state main branch) main)
         [st1 _] (pass-view st :root)
         [st2 _] (pass-view st1 [:chat :a3])
-        ws (concat [(get-in st2 [:root-walk :w])] (keep #(some-> (:walk (val %)) deref :w) (:branch-reads st2)) (map :w (vals @(:user-walks st2))))
+        ws (concat [(get-in st2 [:root-walk :w])] (keep #(some-> (:walk (val %)) :w) (:branch-reads st2)) (map :w (vals (:user-walks st2))))
         seen (apply merge-with #(merge-with + %1 %2) (map r/misfits-by-render ws))
         ;; root's session is in this world, so root's page draws the user's tree (the person, a3 under it): more agent renders, and root's nested sessions render, deleted, 3 classes fewer
-        ;; measured 2026-11-11, the walk's own class on each component's root (its render's name) among them: it goes when data-render replaces it
-        pinned '{seon.render.ui/agent {:wire 4 :class 22} seon.render.ui/agent-parts {:class 2} seon.render.ui/agent-state {:wire 2 :class 2}
-                 seon.render.ui/agents-list {:class 1} seon.render.ui/conversation-list {:class 2} seon.render.ui/eval-output {:class 7}
-                 seon.render.ui/evaluation {:class 5} seon.render.ui/page-rules {:class 2} seon.render.ui/problems-tile {:class 1}
+        ;; measured 2026-11-11, the walk's own class on each component's root (its render's name) among them: it goes when data-render replaces it.
+        ;; 2026-11-12: a3's page counted too (its branch's kept walk, which the pass now keeps for every branch read: before, a read with no
+        ;; :walk cell drew a3 cold, uncounted); no render's own count went up
+        pinned '{seon.render.ui/agent {:wire 4 :class 23} seon.render.ui/agent-parts {:class 3} seon.render.ui/agent-state {:wire 3 :class 3}
+                 seon.render.ui/agents-list {:class 1} seon.render.ui/chat-ask {:class 3} seon.render.ui/chat-end {:class 1} seon.render.ui/cite {:class 2}
+                 seon.render.ui/conversation-list {:class 3} seon.render.ui/conversation-turn {:class 5} seon.render.ui/eval-output {:class 75 :qualified 36}
+                 seon.render.ui/evaluation {:class 21 :qualified 9} seon.render.ui/message {:class 2} seon.render.ui/model-call-view {:class 2}
+                 seon.render.ui/page-rules {:class 3} seon.render.ui/problems-tile {:class 1}
                  seon.render.ui/process-tile {:class 4} seon.render.ui/root {:class 1} seon.render.ui/root-evals {:class 3}
-                 seon.render.ui/root-head {:class 2} seon.render.ui/root-side {:class 6} seon.render.ui/rules-list {:class 2}
+                 seon.render.ui/root-head {:class 2} seon.render.ui/root-side {:class 6} seon.render.ui/rules-list {:class 3}
+                 seon.render.ui/status {:class 1} seon.render.ui/task-view {:class 5} seon.render.ui/turn {:class 1}
                  ;; the tree fixture's root session names no own render, so it is drawn by agent here, not by its stage
-                 seon.render.ui/system-message {:class 4 :wire 2}}]
+                 seon.render.ui/system-message {:class 6 :wire 3}}]
     (try (is (= pinned seen) (str "a count moved: write the new one here when it went down, never when it went up\n"
                                   (pr-str (into (sorted-map) seen))))
          (finally (doseq [w ws] (r/dispose-walk! w))))))
@@ -2851,8 +2855,8 @@
   ;; docs/render.md#a-page-is-a-kept-walk: a user's page is a kept walk, as root's is: a move of main draws what it reached, so an agent it starts appears on a page already open
   (let [db0 (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a]])
         db1 (d/db-with db0 [{:seon.agent/key "sean" :seon.user/name "sean"}])
-        st {:user-walks (volatile! {}) :views {[:chat :sean] {} [:chat :a1] {}}}
-        kw (#'p/user-walk st db1 (d/entity db1 [:seon.user/name "sean"]))
+        kw (#'p/user-walk {} db1 (d/entity db1 [:seon.user/name "sean"]))
+        st {:user-walks {"sean" kw} :views {[:chat :sean] {} [:chat :a1] {}}}
         side (fn [w] (apply str (map :html (filter #(= "#c-side" (:container %)) (seon.fixtures/page-units w)))))
         before (side (:w kw))
         rows (fn [w] (apply str (map :html (filter #(= "#p-task" (:container %)) (seon.fixtures/page-units w)))))
@@ -2861,9 +2865,9 @@
         db2 (d/db-with db1 [{:seon.agent/key "sean" :seon.agent/agents [(:db/id (d/entity db1 [:seon.agent/key "b2/a1"]))]}])
         st' (#'p/user-walks st db2)]
     (is (not (str/includes? before "/agent/b2/a1")) "nothing started yet")
-    (is (str/includes? (side (:w (get @(:user-walks st') "sean"))) "/agent/b2/a1") "the agent it started is on the page, with no new draw")
+    (is (str/includes? (side (:w (get (:user-walks st') "sean"))) "/agent/b2/a1") "the agent it started is on the page, with no new draw")
     (is (not (str/includes? rows-before "/agent/b2/a1")) "no tile while nothing is started")
-    (is (str/includes? (rows (:w (get @(:user-walks st') "sean"))) "/agent/b2/a1") "the first agent's entry too, among the page's tiles")
+    (is (str/includes? (rows (:w (get (:user-walks st') "sean"))) "/agent/b2/a1") "the first agent's entry too, among the page's tiles")
     (is (contains? (:dirty st') [:chat :sean]) "and its view is dirty")
     (is (not (contains? (:dirty st') [:chat :a1])) "another's isn't")))
 
