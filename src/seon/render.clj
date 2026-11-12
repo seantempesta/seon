@@ -1521,8 +1521,8 @@
   pattern handed in); :clauses, the pattern clause by clause; :unasked, the attributes its schema names that the pattern does
   not ask; :held-unasked, the attributes the entity holds on db that the pattern does not ask (none when db is nil); :renders
   {:hiccup :model}, the renders its schema names for a page and for the model}. A clause that asks an attribute is {:clause
-  :attr :key :value :tx}, :key where the pull holds it (an :as, else the attribute), :value nil when the pull holds nothing for
-  it and :tx the transaction of its datom when the pull holds that; one that joins is {:clause :attr :key :members n :pattern
+  :attr :key :value}, :key where the pull holds it (an :as, else the attribute), :value nil when the pull holds nothing for
+  it (a transaction the pattern asks with [attr :tx k] is the :value of its key k); one that joins is {:clause :attr :key :members n :pattern
   :sub [{:clause :held k}]}, a sub-pattern given by a schema's name read as the pattern that schema declares, and :held how
   many of the n members hold that sub-clause. One level: a member is read deeper by this same call with the join's :pattern.
   nil for an entity with no pattern to read. The one producer of this reading: seon.render.ui/pull-front lays it out and
@@ -1544,8 +1544,7 @@
                           :sub (vec (for [k2 (sub-keys sp)] {:clause k2 :held (count (filter #(some? (get % (key-of k2))) ms))}))})
                        [(if (= '* x)
                           {:clause x}
-                          (cond-> {:clause x :attr (attr-of x) :key (key-of x) :value (get u (key-of x))}
-                            (get-in u [:seon.ctx/tx (attr-of x)]) (assoc :tx (get-in u [:seon.ctx/tx (attr-of x)]))))]))
+                          {:clause x :attr (attr-of x) :key (key-of x) :value (get u (key-of x))})]))
             clauses (vec (mapcat clause p))
             asked (into #{} (keep :attr) clauses)
             held (when (and db (:db/id u)) (into #{} (map :a) (d/datoms db :eavt (:db/id u))))]

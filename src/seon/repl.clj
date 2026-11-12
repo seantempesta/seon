@@ -180,8 +180,9 @@
         ;; one top-level form from ns: [ns' :ok], or [ns' how] when it ended the request (:err); a form
         ;; written as (do ...) is its inner forms, each one as a top-level form (do-parts), the comments
         ;; before the do leading the first of them
-        forms-ref (volatile! nil)
-        exec! (fn exec! [form src lead ns top]
+        ]
+    ;; code's forms and a top-level form's own (a load-file's, a do's) read each other: one letfn
+    (letfn [(exec! [form src lead ns top]
                 (cond
                   ;; a top-level (load-file "path") of a file that exists is the file's forms, each a top-level
                   ;; form of this request (recorded, its text its var's :source); else clojure.core's, which
@@ -189,7 +190,7 @@
                   (and (seq? form) (= 'load-file (first form)) (= 2 (count form)) (string? (second form))
                        (.isFile (java.io.File. ^String (second form))))
                   ;; the file's end is this form's: the request's next form runs after it
-                  (let [[ns' how] (@forms-ref (slurp (second form)) ns top)] [ns' (if (= :eof how) :ok how)])
+                  (let [[ns' how] (forms! (slurp (second form)) ns top)] [ns' (if (= :eof how) :ok how)])
 
                   (do-parts form src ns)
                   (let [parts (do-parts form src ns)]
@@ -230,7 +231,7 @@
                          [ns :err])))))
         ;; code's forms in order, from ns: [ns' how], how :eof, :read (a read error) or :err; each
         ;; answer names its top-level form (:top, its place in the code; a top-level do's forms its own)
-        forms! (fn forms! [code ns top]
+        (forms! [code ns top]
                  (let [r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. code))
                        starts (delay (reader/line-starts code))]
                    (loop [ns ns prev 0 k 0]
@@ -252,13 +253,13 @@
                          :else
                          (let [[ns' how] (exec! form src lead ns (or top k))]
                            (if (= :ok how) (recur ns' end (inc k)) [ns' how])))))))
-        _ (vreset! forms-ref forms!)
-        start (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state))
-        [ns how] (forms! (get req "code") start nil)]
+]
+      (let [start (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state))
+            [ns how] (forms! (get req "code") start nil)]
     ;; a read error leaves the agent's namespace as it was, and so does an eval that did not move it: one run inside it may have (an outside agent's reply)
     (when (and (not= :read how) (or (not= ns start) (and (get req "ns") (not (:within req)))))
       (swap! agent/state assoc :ns ns))
-    (reply {"status" ["done"]})))
+    (reply {"status" ["done"]})))))
 
 ;; ---- middleware -------------------------------------------------------------------
 
@@ -1059,6 +1060,8 @@
              (str ": its place is its ns form, and no definition of " nsym " holds it either. A new definition has no place in a file"
                   " to insert it: evaluate it in its namespace, (in-ns '" nsym ") then (defn- f ...), and it is recorded as program"))}))
 
+(declare edit-answer)
+
 (defn edit!
   "Change the text at a place by replacing old, exact text that occurs once in it, with new: a
   definition var sym names (`(source sym)`), a doc's address (its own block) or any other path (the file on disk), place being the one edge
@@ -1066,18 +1069,25 @@
   so and all are applied together, then written once: a change that must reach several places at
   once (a loop's bindings and each of its recurs) is one edit, since any of them alone does not
   compile. Answers what the place's write answered with :edited, the place and the lines
-  around each change; throws the evaluation's error when a new definition does not compile or load,
-  its message saying nothing changed, so the eval it is called in answers it as its own :ex (an error nested in an edit's value
-  could be cut from sight and read as a change that held; a caller
-  outside an eval catches it, its ex-data the error map); or
-  :seon.repl/edit-refused, nothing changed: no such place, an old not in it (with the lines that
+  around each change. Every way it changes nothing is thrown, its ex-data the error map, so the eval it is called in answers
+  it as its own :ex (an error nested in an edit's value is cut from sight or read past: (:edited (edit! ...)) of a refusal
+  read nil, and an agent took eight turns to find why; a caller outside an eval catches it): the evaluation's
+  error when a new definition does not compile or load, its message saying nothing changed; no such place (my.agent/no-var);
+  a write that failed; or :seon.repl/edit-refused: no such place, an old not in it (with the lines that
   hold its first line, ignoring indentation), an old there more than once (each candidate's line), two olds that overlap (:overlap), or an empty old (:empty). Exact text and one occurrence, as file editors converged
   on (docs/agent.md#changing-a-definition, docs/agent.md#changing-a-doc, docs/agent.md#changing-a-file)."
   {:malli/schema [:function
-                  [:=> [:cat [:or :symbol :string] :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.text/edited :seon.fx/io-error [:map [:unchanged :any]]]]
-                  [:=> [:cat [:or :symbol :string] [:vector {:min 1} [:tuple :string :string]]] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.text/edited :seon.fx/io-error [:map [:unchanged :any]]]]]}
+                  [:=> [:cat [:or :symbol :string] :string :string] [:or :seon.repl/answer :seon.text/edited [:map [:unchanged :any]]]]
+                  [:=> [:cat [:or :symbol :string] [:vector {:min 1} [:tuple :string :string]]] [:or :seon.repl/answer :seon.text/edited [:map [:unchanged :any]]]]]}
   ([sym old new] (edit! sym [[old new]]))
   ([sym changes]
+   (let [r (edit-answer sym changes)]
+     (if (:seon.error/type r) (throw (ex-info (str (:seon.error/message r)) r)) r))))
+
+(defn- edit-answer
+  "What edit! of sym by changes answers, a refusal or a failed write as its error map (`edit!` throws it)."
+  {:malli/schema [:=> [:cat [:or :symbol :string] [:vector {:min 1} [:tuple :string :string]]] :map]}
+  [sym changes]
    (let [p (place sym)]
      (if-not (:seon.text/at p)
        p
@@ -1131,7 +1141,7 @@
                                                (conj acc [(+ (line-of at) shift) new])])
                                             [0 []] ordered))]
                  (-> (dissoc r :seon.text/text)
-                     (assoc-in [:edited :lines] (into [] (comp (mapcat (fn [[from new]] (numbered text (- from k) (+ from (count (filter #{\newline} new)) k)))) (distinct)) starts))))))))))))
+                     (assoc-in [:edited :lines] (into [] (comp (mapcat (fn [[from new]] (numbered text (- from k) (+ from (count (filter #{\newline} new)) k)))) (distinct)) starts)))))))))))
 
 (defn unrun
   "A model's eval call that never ran, recorded as an eval whose response is error e, why
