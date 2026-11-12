@@ -32,12 +32,13 @@
                      (cond-> {:var/name n :var/ns (cond-> {:ns/name nsym} nd (assoc :ns/doc nd))}
                        (:doc (meta v)) (assoc :var/doc (:doc (meta v))))))))))
 
-(def ^:private store
-  "The test store's config, made and seeded with about 2,000 datoms when this namespace loads, what every agent and template
-  cites (standing-targets-tx) and a stub of the system prompt. Made at load, never on first use: the fork server loads it, so
-  every agent and test fork inherits it seeded (a fork seeding its own cost 55M ticks, 1 to 3 s, each in-process test item).
-  See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
-  (let [cfg (pdb/made-cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write
+(def ^:private ^:seon.test/fixture store
+  "The test store's config, made and seeded with about 2,000 datoms on first use, what every agent and template cites
+  (standing-targets-tx) and a stub of the system prompt. A fixture: an agent forces it once before its first test fork
+  (seon.agent/warm-fixtures!), so every fork inherits it seeded (one seeding a fork cost 65M ticks, 1 to 3 s, each in-process
+  test item); never at load, where a binary that loads test namespaces would start its fibers before its main carrier. See
+  docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
+  (delay (let [cfg (pdb/made-cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write
                                    :writer pdb/writer-cfg})]
            (d/create-database cfg)
            (let [conn (pdb/connect cfg)]
@@ -47,7 +48,7 @@
              ;; and a world without it renders an error where the agent's page goes. A test of the prompt itself loads the wiki's
              (d/transact conn {:tx-data (doc/load-tx @conn "docs" {doc/system-page "# A stub of the system prompt\n\nBe brief."})})
              (d/release conn))
-           cfg))
+           cfg)))
 
 (defn program-schema-digest
   "The digest (8 hex digits) of the declarations in `decls` (seon.db/schema's form) of the attributes
@@ -151,7 +152,7 @@
   program), for a test that only reads or uses d/db-with: no branch is made."
   {:malli/schema [:=> [:cat] :seon.host/db]}
   []
-  (let [c (pdb/connect store)] (try @c (finally (d/release c)))))
+  (let [c (pdb/connect @store)] (try @c (finally (d/release c)))))
 
 (defn test-branch!
   "(f cfg conn) on a fresh branch of the test store (its seed: the schema and about 2,000
@@ -160,9 +161,9 @@
   {:malli/schema [:=> [:cat [:=> [:cat :seon.db/cfg :seon.host/conn] :any]] :any]}
   [f]
   (let [b (keyword (str "test-" (random-uuid)))
-        [conn _] (pdb/open-main! store b)
-        seed (pdb/connect store)]
-    (try (f (assoc store :branch b) conn)
+        [conn _] (pdb/open-main! @store b)
+        seed (pdb/connect @store)]
+    (try (f (assoc @store :branch b) conn)
          (finally (d/release conn) (pdb/delete-main! seed b) (d/release seed)))))
 
 (defn root-tx

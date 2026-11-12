@@ -2,16 +2,20 @@
   "The test store's own rules: the process tests' store is made once, before any shard, and a
   test process's agent tests share one root of it."
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [datahike.api :as d]
-            [seon.config] [seon.db :as pdb] [seon.lib] [seon.profile] [seon.test-store :as ts] [seon.agent-test :as at])
+            [seon.config] [seon.db :as pdb] [seon.lib] [seon.profile] [seon.agent] [seon.test-store :as ts] [seon.agent-test :as at])
   (:import [clojure.lang ExceptionInfo]))
 
-(deftest the-test-store-is-seeded-when-its-namespace-loads
-  ;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: the store was a delay seeded on first use, so every test fork
-  ;; (forked from an agent that never used it) seeded it again: 55M ticks, 1 to 3 s, each in-process test item (2026-11-12).
-  ;; Seeded at load, the fork server holds it and a fork's first test-db reads it, no seed (seon.db/seed! not called)
-  (let [m (volatile! nil)]
-    (seon.profile/measure! #(ts/test-db) #(vreset! m %))
-    (is (< (:ticks @m) 5000000) (str "test-db after load reads the seeded store: " (:ticks @m) " ticks"))))
+(deftest an-agent-makes-its-fixtures-once-before-its-test-forks
+  ;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: the test store is a fixture (a delay, ^:seon.test/fixture); every fresh
+  ;; test fork realized it again, 65M ticks and 1 to 3 s each in-process test item (2026-11-12). The agent forces its fixtures once
+  ;; before its first fork, so a fork's test-db reads the seeded store; the second call forces nothing
+  (with-redefs [seon.agent/state (atom {})]
+    (let [n (#'seon.agent/warm-fixtures!)
+          m (volatile! nil)]
+      (seon.profile/measure! #(ts/test-db) #(vreset! m %))
+      (is (pos? n) "the test store is among the fixtures it forced")
+      (is (< (:ticks @m) 5000000) (str "test-db after the agent's warm reads the seeded store: " (:ticks @m) " ticks"))
+      (is (zero? (#'seon.agent/warm-fixtures!)) "once an agent"))))
 
 (deftest the-process-store-is-made-before-any-shard
   ;; task seon.test-store/the-process-store-is-made-before-any-shard: shards' roots that each made

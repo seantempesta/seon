@@ -1172,6 +1172,20 @@
                             (get-in st [:index :db]) (update-in [:index :db] own))))
     conn))
 
+(defn- warm-fixtures!
+  "Force, once in this agent, every loaded var marked ^:seon.test/fixture (a delay a test realizes on first use: the test store),
+  so each test child forked after inherits it made: realized in the child, it was made again each fork (65M ticks, 1 to 3 s a
+  test item, 2026-11-12) and dropped with it. Never at load: a binary loads the test namespaces before its main carrier. Answers
+  how many it forced. See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
+  {:malli/schema [:=> [:cat] nat-int?]}
+  []
+  (if (:fixtures-warm @state)
+    0
+    (let [vs (for [n (all-ns) [_ v] (ns-interns n) :when (:seon.test/fixture (meta v))] v)]
+      (doseq [v vs] (force @v))
+      (swap! state assoc :fixtures-warm true)
+      (count vs))))
+
 (defn- test-child
   "Fork this agent to run tests in a child (run-tests-here; fds the run's atom of the pipe ends open here) and read it to its end: {:answer
   (test-run-answer: the child's final line, or the one :error report of the test it died in),
@@ -1187,7 +1201,9 @@
         ;; one but its own write end: a sibling's end held here would keep the agent's death from ending that sibling
         _ (swap! fds conj r w)
         ;; what ran ahead is committed first, so the child's db is a commit it can make again through its own env (own-store!)
-        _ (when (:dirty? @state) (commit!))]
+        _ (when (:dirty? @state) (commit!))
+        ;; the fixtures made here once, so this child and every later one inherits them
+        _ (warm-fixtures!)]
     (lib/fork!
      {:refused (fn [n] (lib/c-close r) (lib/c-close w) (swap! fds disj r w)
                  (contract/error :seon.test/fork-refused #'seon.agent/test-child

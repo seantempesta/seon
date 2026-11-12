@@ -56,22 +56,28 @@
           (is (empty? (filter :req o))))))))
 
 (deftest a-commit-starts-no-run-of-main-unless-the-config-says-so
-  ;; task seon.proofs/main-is-proved-in-a-fork: the writer's commit notice records main's t and, with
-  ;; :seon.config.proofs/prove-main-on-commit (off by default: the run of all of main's tests dies
-  ;; in its child), a commit that moves the program starts a run of main (the process test below,
-  ;; removed 2026-11-08: it proved a path the config leaves off). Off, neither a data commit nor a program commit
-  ;; runs anything, and a session's request for main runs as ever, at the t the notice recorded
+  ;; docs/merging.md#the-test-service: the writer's commit notice records main's t; with :seon.config.proofs/prove-main-on-commit
+  ;; (on since 2026-11-12) a commit that moves the program starts one run of main, which every branch's plan then reuses, and a
+  ;; data commit none. Off, neither runs anything, and a session's request for main runs as ever, at the t the notice recorded
   (let [db (ts/test-db)
         dg (seon.program/program-digest db)
-        [st o] (feed (proc0) [[:main {:t 5 :ops [[:db/add 900 :task/name "x" 5 true]] :db db}]
-                                            [:main {:t 6 :ops [[:db/add 901 :form/src "(defn f [] 1)" 6 true]] :db db}]])]
-    (is (empty? o) "no run from either commit")
-    (is (= 6 (:main-t st)))
-    (let [[st o2] (feed st [[:req {:rid 7 :branch :main :digest dg :mode :main}]])
-          [_ all] (run-through st o2 test-run-answer)]
-      (is (= 1 (count (asks o2 :spawn))) "a session's request runs main")
-      (is (= [7] (waiters-answered all)) "and is answered once, at its end")
-      (is (= 0 (count (asks all :write))) "nothing written to the store: its agent cached its verdicts"))))
+        commits [[:main {:t 5 :ops [[:db/add 900 :task/name "x" 5 true]] :db db}]
+                 [:main {:t 6 :ops [[:db/add 901 :form/src "(defn f [] 1)" 6 true]] :db db}]]
+        value seon.config/value
+        with-on (fn [on? f] (with-redefs [seon.config/value (fn [k] (if (= k :seon.config.proofs/prove-main-on-commit) on? (value k)))
+                                          seon.db/at-commit (fn [_ _] db)]
+                              (f)))]
+    (with-on true #(let [[_ o] (feed (proc0) commits)]
+                     (is (= 1 (count (asks o :spawn))) "on: the program commit starts one run of main, the data commit none")))
+    (with-on false
+      #(let [[st o] (feed (proc0) commits)]
+         (is (empty? o) "off: no run from either commit")
+         (is (= 6 (:main-t st)))
+         (let [[st o2] (feed st [[:req {:rid 7 :branch :main :digest dg :mode :main}]])
+               [_ all] (run-through st o2 test-run-answer)]
+           (is (= 1 (count (asks o2 :spawn))) "a session's request runs main")
+           (is (= [7] (waiters-answered all)) "and is answered once, at its end")
+           (is (= 0 (count (asks all :write))) "nothing written to the store: its agent cached its verdicts"))))))
 
 (deftest an-answer-whose-child-died-is-never-remembered
   ;; THE PLAN 0.7 (root, 2026-10-27): a judge's run whose test child died answered every later ask
