@@ -727,6 +727,6 @@
 ;; on the store made at 06:46 carried a nil base digest for all 244 deferred tests, read as "new on the branch", and every red held it
 (deftest a-runs-answer-carries-each-deferred-tests-base-digest
   (let [base {:deferred ['a.b-test/p 'a.b-test/q] :deferred-digests {'a.b-test/p "bp" 'a.b-test/q nil} :selected [] :at-judge 0}
-        r (#'seon.prove/run-answer base {} nil)]
+        r (#'seon.prove/run-answer base {})]
     (is (= ['a.b-test/p 'a.b-test/q] (:deferred r)))
     (is (= {'a.b-test/p "bp" 'a.b-test/q nil} (:deferred-digests r)) "each deferred test's base digest, nil only for a test new on the branch")))
