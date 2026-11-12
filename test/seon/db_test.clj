@@ -1800,3 +1800,14 @@
       (is (= :db/txInstant (:attribute (refused #(d/transact conn {:tx-data [{:seon.agent/key "t3"}] :tx-meta {:db/txInstant past}}))))
           "in tx-meta, through a connection's checked transact")
       (is (some? (:db-after (d/transact conn {:tx-data [{:seon.agent/key "t4"}]}))) "and a write that supplies none is the store's to stamp")))))
+
+(deftest ^{:seon.test/estimate {:ticks 20000000}} an-identity-a-branch-can-make-again-takes-its-content-id
+  ;; docs/storage.md (content ids): each identity a branch can mint as main does (a section, an error's signature, a judge's digest, a
+  ;; task, the system, a model and its provider, a function's spec) takes the id of its value, so two branches minting it mint one entity
+  ;; and a merge carries its datoms with no remapping. Counter identities stay where the id is a time order (an eval, a model call, a
+  ;; process: windows read the newest first by id) and a user's name (its entity's id is its agent key's)
+  (let [db (ts/test-db)]
+    (doseq [[a v] {:seon.doc/address "docs/x.md#y" :seon.error/signature "0123456789abcdef" :seon.judge/digest "d1" :seon.task/id "app/t"
+                   :seon.system/id :other-root :seon.ai.model/id "model-1"
+                   :seon.ai.model/provider-id "provider-1" :seon.fn/var 'app/f}]
+      (is (= (datahike.db.transaction/content-eid a v) (get-in (d/with db [{:db/id "x" a v}]) [:tempids "x"])) (str a " takes its content id")))))

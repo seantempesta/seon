@@ -100,7 +100,7 @@
  :config/form :string
  :config/file [:and {:seon.db/index true} :string]
  ;; what a function cost on this branch, one entity a function, sorted together by an issued id: docs/sharing.md#a-functions-cost-is-a-fact
- :seon.fn/var [:and {:seon.db/identity true} :qualified-symbol]
+ :seon.fn/var [:and {:seon.db/identity true :seon.db/content-id true} :qualified-symbol]
  :seon.fn/stats [:and {:seon.db/no-history? true} [:map [:calls :int] [:ticks :int] [:self-ticks :int] [:bytes :int] [:self-bytes :int] [:hist [:map-of :int :int]] [:worst [:map [:self-ticks :int] [:eval [:maybe :string]]]]]]
  :seon.db/fn-fact [:map {:seon.db/attributes true} [:seon.fn/var :seon.fn/var] [:seon.fn/stats {:optional true} :seon.fn/stats]]
  :seon.db/config-fact [:map {:seon.db/attributes true} [:config/key :config/key] [:config/form :config/form] [:config/file :config/file]]
@@ -408,7 +408,7 @@
                        [:seon.cite/depth :seon.cite/depth] [:seon.cite/order :seon.cite/order]]
  ;; ---- tasks, runs, proof results, root's boot, turns and ends (session D1's proto.agents.facts.edn) ----
 ;; ---- the task ----
- :seon.task/id [:and {:seon.db/identity true :description "The task's identity."} :string]
+ :seon.task/id [:and {:seon.db/identity true :seon.db/content-id true :description "The task's identity."} :string]
  :seon.task/ns [:symbol {:description "The namespace the task's code lives in; its agent's REPL starts there."}]
  :seon.task/name [:string {:description "The task's name within its namespace."}]
  :seon.task/plan :seon.db/text
@@ -535,7 +535,7 @@
  ;; digest outside the store (docs/merging.md#verdicts-are-a-cache)
  :seon.proof/status [:enum :pass :fail :error :none]
  ;; ---- root's boot and config keys (main) ----
- :seon.system/id [:and {:seon.db/identity true} :keyword]
+ :seon.system/id [:and {:seon.db/identity true :seon.db/content-id true} :keyword]
  :seon.system/boot :string
  ;; the config in force, an entity of its own (docs/config.md#facts-on-main): root's entity holds root's attributes only
  :seon.system/config [:and {:seon.db/to [:seon.config/config-fact]} :seon.db/ref]
@@ -740,7 +740,7 @@
                           [:seon.model-call/basis {:optional true} :seon.model-call/basis] [:seon.model-call/sent-hash {:optional true} :seon.model-call/sent-hash]]
  ;; ---- a first move scored (seon.judge, my.root/first-moves!) ----
  ;; the digest of the request it answers (seon.judge/digest): the same context is scored once
- :seon.judge/digest [:and {:seon.db/identity true} :string]
+ :seon.judge/digest [:and {:seon.db/identity true :seon.db/content-id true} :string]
  :seon.judge/task :seon.task/id
  ;; the score from the compiler's facts, with the version that served the context (root's
  ;; source tree and its commit), the reply's eval calls and their cost in USD when priced
