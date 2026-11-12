@@ -37,7 +37,7 @@ Run, then right, then fast. If you can't show it running, it isn't done.
 
 ## 3. How work moves
 
-**Work is tasks** ([tasks](docs/tasks.md)): an entry in `resources/seon/tasks/<owning-ns>.edn` with `:seon.task/plan` (what exists, the cause, what it replaces and deletes), `:seon.task/proofs` (the tests that say it is done) and `:seon.task/needs`. The plan is written before anything is built. Order: delete first, then foundations, then fixes. A problem outside your task is filed as a task, never fixed in passing.
+**Work is tasks** ([tasks](docs/tasks.md)): an entry in `resources/seon/tasks/<owning-ns>.edn` with `:seon.task/plan` (what exists, the cause, what it replaces and deletes), `:seon.task/proofs` (the tests that say it is done) and `:seon.task/needs`. The plan is written before anything is built, and its owner's lead reads it before the build starts (owner, 2026-11-12: "The broken ones mean we don't have clear research or plans in place. Do more forward planning"). A plan names every path that runs the change: `bin/land`, `bin/prove`, the prove service, agents on the standing system, test children, worktree systems, `bin/update`. A change to shared machinery (the `bin/` scripts, the prove service, a pin, the api or fork server, a key, schema or config entry other areas read) is run end to end through each of those paths before anything relies on it. A cause is named only after both ends of its code path are read. Order: delete first, then foundations, then fixes. A problem outside your task is filed as a task, never fixed in passing.
 
 **The method:**
 1. **Learn.** List what exists before designing. Ask what the ordinary Clojure (or library) way is, and why ours is it or is not.

@@ -6,6 +6,10 @@ The owner's standing rulings, one entry each: his words and date, and where the 
 
 The owner's rulings of this day, each with his words and where it is now stated.
 
+### Plan forward: research and a written plan before a build
+
+22:20: "The broken ones mean we don't have clear research or plans in place. Do more forward planning." That night a `bin/land` change, built before its reach was mapped, broke every landing three ways in turn, and fixes went out for causes nobody had read in code. Stated in `AGENTS.md` §3 (work is tasks): a plan names every path that runs the change; shared machinery runs end to end through each before anything relies on it; a cause is named only after both ends of its path are read.
+
 ### Root is the first agent; a child agent is a Flow proc in its parent's graph
 
 Set with runtime, 2026-11-12: "Root is not special: it's the first agent; everyone descends from it." A child agent is a remote Flow proc in its parent's graph, linked at the fork; its results are values, and its end is `::flow/closed` and its exit event. Resources are made in a proc's init and released at its stop. The tree of agents is data (parent refs), and the fork server is root's template child, declared as an option. Errors travel only on Flow's error channel; stderr is a dead process's last words. One writer proc owns the store, and every agent's writes are messages to it. Each family of duplicated machinery (process links, tracking, endings, request and answer, waits on main, run loops, socket readers, writers) has one form. Being built: schedule items fork-one, one-ask, one-wait-on-main and one-writer.
