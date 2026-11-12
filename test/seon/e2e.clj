@@ -299,7 +299,8 @@
                  (when-not (some #(and (ready (:agent %)) (= "calc/neg" (:task %))) (task/running (db sys)))
                    (recur ready))))
              (println :cancel-neg (select-keys (root/cancel! sys ["calc/neg"]) [:ok])))
-   :check "[(app.calc/sum-sq 3 4) (count (my.db/q '[:find ?e :where [?e :seon.model-call/id]]))]" :expect ["[25 0]"]
+   ;; main holds each merged task's model calls (the merge takes every non-conflicting datom): add, twice and sum-sq 1 each, square 2; neg's and the refines' stay off it
+   :check "[(app.calc/sum-sq 3 4) (count (my.db/q '[:find ?e :where [?e :seon.model-call/id]]))]" :expect ["[25 5]"]
    :ok (fn [{:keys [sys q d]}]
          (let [idx (r/index d)
                done? (every? #(r/done? idx %) ["calc/add-merge" "calc/twice-merge" "calc/square-merge" "calc/sum-sq-merge"])
