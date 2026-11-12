@@ -14,7 +14,7 @@ How a branch is proved and landed on main: `bin/prove`, the verdict cache by dig
 
 ## A branch lands with bin/land
 
-Point lands each proved tip with `bin/land [-F MSGFILE]` run in a worktree of its own (AGENTS.md §3); the main tree stays on main and clean. `bin/land` (its header is its manual):
+A session lands its one branch with `bin/land [-F MSGFILE]`, run in its one worktree (AGENTS.md §3); the main tree stays on main and clean. `bin/land` (its header is its manual):
 1. merges main into the branch (a conflict stops it) and syncs its submodules; refuses a message whose `Completes: ns/name` names a task the tree still holds ([below](#a-merge-says-what-it-completes));
 2. runs `nice -n 15 bin/prove --merge` as a process group of its own; a tree a bare `bin/prove` already proved green answers at once, and otherwise only what main's new commits reach runs;
 3. moves main to a merge commit whose tree is the proved tip's (`git commit-tree`, then `git update-ref` against main's old value: no checkout of main). If another landing moved main meanwhile, it merges main in and lands without proving again, saying so in the message; only a conflict stops it, and the daily full run covers the combination;
