@@ -214,7 +214,7 @@
   (is (= :disabled (:seon.config.ai/thinking (config/resolved (assoc config/config :seon.config.ai/thinking :disabled))))))
 
 (deftest a-key-the-config-lacks-is-refused-not-nil
-  (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.ai/reasoning-effort)))))
+  (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.ai/temperature)))))
   (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.nope/x))))))
 
 (deftest the-provider-is-the-config-s
@@ -222,7 +222,8 @@
   (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider (shipped :scripted))))
   (let [p (config/provider (assoc config/config :seon.config.ai/provider :openai-compat :seon.config.ai/thinking :disabled))]
     (is (= {:kind :openai-compat :base-url "https://api.deepseek.com" :model "deepseek-flash" :api-key-env "DEEPSEEK_API_KEY"
-            :max-tokens (config/value :seon.config.ai/max-tokens) :replay-reasoning (config/value :seon.config.ai/replay-reasoning) :thinking :disabled}
+            :max-tokens (config/value :seon.config.ai/max-tokens) :replay-reasoning (config/value :seon.config.ai/replay-reasoning) :thinking :disabled
+            :reasoning-effort (config/value :seon.config.ai/reasoning-effort)}
            p))
     ;; whether earlier reasoning goes back is the config key, obeyed as written (owner, 2026-10-24)
     (let [off (config/provider (assoc config/config :seon.config.ai/provider :openai-compat :seon.config.ai/thinking :disabled
@@ -434,7 +435,7 @@
   (is (= [:config "resources/seon/config/default.edn"] (:source (config/resolve :seon.config.root/max-agents)))))
 
 (deftest a-setting-set-nowhere-is-refused-not-nil
-  (is (= :seon.config/refused (:seon.error/type (refused #(config/resolve :seon.config.ai/reasoning-effort {:model "deepseek-flash"})))))
+  (is (= :seon.config/refused (:seon.error/type (refused #(config/resolve :seon.config.ai/temperature {:model "deepseek-flash"})))))
   (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.nope/x))))))
 
 (deftest the-manifest-is-validated-and-written-as-entities-on-main

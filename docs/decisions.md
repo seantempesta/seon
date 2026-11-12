@@ -6,6 +6,10 @@ The owner's standing rulings, one entry each: his words and date, and where the 
 
 The owner's rulings of this day, each with his words and where it is now stated.
 
+### Reasoning is on at low effort for work tasks
+
+Asked whether reasoning `:low` should be the default for work tasks: "Sure". It replaces thinking off (2026-10-21). Stated in [model](model.md#thinking-is-on-at-low-effort).
+
 ### Dead history-on-scroll page code is deleted
 
 Asked whether to delete `seon.render.ui/more`, the web's /more route and the `:more` ops, which no page used: "Yes". A list holds a window and says how many it left out ([ctx](ctx.md#the-pattern)).
@@ -1467,7 +1471,7 @@ Superseded on 2026-10-27 by a merge runs the process tests its change reaches, a
 
 ### Thinking is off by default
 
-"if we can't have intuitive function calling based on the context our context is bad and instructions need help". Stated in [model](model.md#thinking-is-off-by-default).
+Reversed 2026-11-12: [reasoning is on at low effort](#reasoning-is-on-at-low-effort-for-work-tasks).
 
 ### No automatic retries: a refused or failed run is held for root
 
