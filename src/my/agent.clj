@@ -26,8 +26,8 @@
                               what it changed since main, each one with a result at its digest reused
     (process-test? 'ns/t-test) why test t reaches a process (nil: it does not): it runs at the judge
     @ctx                      this agent's record as a map: :seon.agent/task, :seon.model-call/_agent, :seon.message/_to and :seon.eval/_agent,
-                              kept current as it works; the page shows it as a block (@seon.ctx/ctx
-                              from any namespace)
+                              kept current as it works; the page shows it as a block. ctx is seon.ctx/ctx,
+                              read so when a form compiles: (resolve 'ctx) is nil, #'seon.ctx/ctx its var
     (swap! ctx assoc-in p v)  a change to it, as to any atom (assoc-in, update-in, dissoc): one checked
                               transaction on the branch, or refused with why; the next turn tells it
     (cite! \"docs/x.md?full#y\") read a section (a page whole with no anchor, or a name) beside the task,
