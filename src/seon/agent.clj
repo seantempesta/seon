@@ -207,7 +207,7 @@
 
 (defn own-message-tx
   "Message mid from from (its sender's lookup, seon.task/sender), sent at sent-ms: the one message entity (seon.task/message-tx) as this agent's branch holds it, `to` its own ref only. Its being on the branch is its delivery, and the turn that
-  took it is derived from the transaction that wrote it (seon.ctx/turn-members). Its sender is written by its identity (seon.task/sender),
+  took it is derived from the transaction that wrote it (seon.ctx/placed-messages). Its sender is written by its identity (seon.task/sender),
   an upsert, so a sender made after this branch forked resolves here too. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :string :map :any :int] :seon.db/tx-data]}
   [mid from body sent-ms]
@@ -412,7 +412,7 @@
 (defn deliver!
   "Bring what main holds for this agent onto its branch, committed: its messages (undelivered) and the facts of
   its own entities (untaken-facts). The one delivery, a turn's (seon.turn/deliver!) and its code's (messages). A message
-  on the branch is delivered; the turn that read it is derived from its transaction (seon.ctx/turn-members). Answers the
+  on the branch is delivered; the turn that read it is derived from its transaction (seon.ctx/placed-messages). Answers the
   messages delivered. See docs/users.md#messages."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
@@ -1172,6 +1172,20 @@
                             (get-in st [:index :db]) (update-in [:index :db] own))))
     conn))
 
+(defn- warm-fixtures!
+  "Force, once in this agent, every loaded var marked ^:seon.test/fixture (a delay a test realizes on first use: the test store),
+  so each test child forked after inherits it made: realized in the child, it was made again each fork (65M ticks, 1 to 3 s a
+  test item) and dropped with it. Never at load: a binary loads the test namespaces before its main carrier. Answers
+  how many it forced. See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
+  {:malli/schema [:=> [:cat] nat-int?]}
+  []
+  (if (:fixtures-warm @state)
+    0
+    (let [vs (for [n (all-ns) [_ v] (ns-interns n) :when (:seon.test/fixture (meta v))] v)]
+      (doseq [v vs] (force @v))
+      (swap! state assoc :fixtures-warm true)
+      (count vs))))
+
 (defn- test-child
   "Fork this agent to run tests in a child (run-tests-here; fds the run's atom of the pipe ends open here) and read it to its end: {:answer
   (test-run-answer: the child's final line, or the one :error report of the test it died in),
@@ -1187,7 +1201,9 @@
         ;; one but its own write end: a sibling's end held here would keep the agent's death from ending that sibling
         _ (swap! fds conj r w)
         ;; what ran ahead is committed first, so the child's db is a commit it can make again through its own env (own-store!)
-        _ (when (:dirty? @state) (commit!))]
+        _ (when (:dirty? @state) (commit!))
+        ;; the fixtures made here once, so this child and every later one inherits them
+        _ (warm-fixtures!)]
     (lib/fork!
      {:refused (fn [n] (lib/c-close r) (lib/c-close w) (swap! fds disj r w)
                  (contract/error :seon.test/fork-refused #'seon.agent/test-child
@@ -1478,7 +1494,9 @@
                   ;; a cache that cannot be read excuses nothing: the red stays the branch's
                   (assoc r :main-red (proofs/main-red reds digests bd (if (or (nil? stored) (contract/error? stored)) {} stored)))))
         (assoc :reused (count (filter reused selected)) :ran (count (distinct (keep :var (:reports res))))
-               :selected selected :deferred deferred :at-judge (count judge))
+               :selected selected :deferred deferred :at-judge (count judge)
+               ;; each deferred test's digest as main held it (the plan's base): what the merge gate reads main's own verdict of it by
+               :deferred-digests (into {} (for [t deferred] [t (get (:base-digests plan) t)])))
         ;; why each was left out: the process it reaches and the calls to it (seon.program/process-path)
         (cond-> (seq deferred) (assoc :why (into {} (for [t deferred] [t (program/process-path (:graph plan) t)])))))))]
     (finish (run-all send!))))))))
@@ -1621,8 +1639,7 @@
   bound (a step never measured has none, as under bin/prove: it ends by its own waits' bounds, and that run measures it), :binary? seon.proofs/step-needs-binary?; a request naming tests or namespaces (names) runs only the
   steps it names among them (bin/prove --root PORT seon.config-test config), as the plain bin/prove NS runs none; :missing, the steps with no digest here (one naming a
   function the program lacks; health, keyed by a base tree no branch holds); :build {:tree :needed?}, needed when a process
-  test or a binary step is among them; :bounds {test ms}, each process test's bound as a step's (the factor times its median
-  measured ms, floored; none when never measured), which its item carries (seon.prove/plan-items); :deferred, what it left that is no process item. Or {:unread error}: the cache
+  test or a binary step is among them; :deferred, what it left that is no process item. Or {:unread error}: the cache
   could not be read."
   {:malli/schema [:=> [:cat :map [:maybe [:set :symbol]]] :map]}
   [sel names]
@@ -1635,13 +1652,12 @@
         ms (if (or (seq run) (seq process)) (fx/typical-ms (into run (keys process))) {})
         k (cfg/value :seon.config.check/step-end-factor) floor (cfg/value :seon.config.agent/stall-ms)
         ;; a process test's bound, as a step's: the factor times its median measured ms, floored; none when never measured
-        bounds (into {} (for [t (keys process) :let [m (ms t)] :when m] [t (max floor (* k m))]))
         steps (into {} (for [s run] [s (cond-> {:digest (get (:steps p) s) :binary? (proofs/step-needs-binary? s) :bound nil}
                                          (ms s) (assoc :bound (max floor (* k (ms s))))
                                          (proofs/machine-steps s) (assoc :alone? true))]))]
     (if-let [u @unread]
       {:unread u}
-      {:process process :bounds bounds :steps steps :missing (vec (:missing p)) :deferred (vec (remove process (:deferred sel)))
+      {:process process :steps steps :missing (vec (:missing p)) :deferred (vec (remove process (:deferred sel)))
        :build {:tree (:tree (:inputs plan)) :needed? (boolean (or (seq process) (some :binary? (vals steps))))}})))
 
 (defn handle!
@@ -1677,11 +1693,11 @@
                  :result (or (:unread sel) (:unread pp)
                              (cond-> {:items (select-keys (:digests sel) (:run sel)) :selected (:selected sel) :deferred (:deferred sel)
                                       ;; each item's measured ms, or its class's estimate (seon.proofs/estimated-ms): what the service orders by
-                                      :ms (proofs/estimated-ms (:run sel) (fx/typical-ms (:run sel)) (:process (:plan sel)))
+                                      :ms (let [ts (into (:run sel) (keys (:process pp)))] (proofs/estimated-ms ts (fx/typical-ms ts) (:process (:plan sel))))
                                       :at-judge (count (:judge sel)) :reused-reports (:reused-reports sel)
                                       :digests (select-keys (:digests sel) (filter (:reused sel) (:selected sel)))}
                                (seq (:deferred sel)) (assoc :why (into {} (for [t (:deferred sel)] [t (program/process-path (:graph (:plan sel)) t)])))
-                               pp (merge (select-keys pp [:process :bounds :steps :build :missing]))))}])
+                               pp (merge (select-keys pp [:process :steps :build :missing]))))}])
            (let [proofs (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
                  ;; items of a run of a session's checkout: their test children read that checkout's files (test-child)
                  _ (when (and (:checkout m) (:held-plan @state)) (swap! state assoc-in [:held-plan :plan :checkout] (:checkout m)))
@@ -1792,7 +1808,7 @@
 
 (defn begin-run!
   "This agent begins task on its branch: the agent's record names it as its task (:seon.agent/task: the conversation finds the
-  messages it took by the agent, seon.ctx/turn-members, and @ctx holds the task), the task running as main holds it. Written as
+  messages it took by the agent, seon.ctx/placed-messages, and @ctx holds the task), the task running as main holds it. Written as
   the process starts (init!: an outside agent's branch is cut before root writes its start on main), or by the turn that begins a
   later task of the session; once, nothing written when the branch holds it. The task is running, as main holds it
   (its release, written on main after the branch was cut, read :held here: my.task/current and the

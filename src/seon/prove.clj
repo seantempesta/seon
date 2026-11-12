@@ -149,13 +149,35 @@
                    (update st :askers dissoc rid) left)]
     [st [{:op :asker-answered :asker rid :r r}]]))
 
+;; a fork's start (65 ms) and what its first test makes (a process test's root: ~20 s, then ~0.5 s a test) is paid once a batch,
+;; so the queue goes to the workers in shares, never one test a fork (measured 2026-11-12, docs/merging.md#the-test-service)
+(defn- batch-of
+  "The batch granted with queued item k (it, its state): k and, for a test item of no turn, other queued test items of the same
+  agent, mode and checkout that one of its askers waits on and whose needs are met, up to its share of them over the free workers. One pass that stops when full. A set of items. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map :any :map] [:set :any]]}
+  [st k it]
+  ;; a turn's item alone: a turn is answered at its first red, so nothing of it runs past that in a batch
+  (if (or (not= :test (:kind it :test)) (= :turn (:mode it)))
+    #{k}
+    (let [{:keys [agent mode checkout]} it
+          fits? (fn [o] (and (= :queued (:status o)) (= :test (:kind o :test)) (not (:alone? o))
+                             (= agent (:agent o)) (= mode (:mode o)) (= checkout (:checkout o)) (some (:waiters it) (:waiters o))
+                             (not-any? (:items st) (:needs o))))
+          queued (count (filter fits? (vals (:items st))))
+          share (long (Math/ceil (/ queued (double (max 1 (free-workers st))))))]
+      (loop [b #{k} [[k2 o] & more :as left] (seq (:items st))]
+        (cond (empty? left) b
+              (or (= k k2) (not (fits? o))) (recur b more)
+              (< (count b) share) (recur (conj b k2) more)
+              :else b)))))
+
 (defn- grant
   "While admission allows (a worker free under :workers; with :max-load, the load under it, read once a pass through
   machine-load and kept as :load, or nothing running: the first item is always granted, so the queue never stalls with
   nothing to wake it) and an item is queued: the most valuable queued item (a :turn asker's first, then
-  item-value), alone (no shards: a worker pulls one item, so none idles while another holds a list), asked of the agent
-  holding it as {:op :tests :id agent :mode m :names #{test} :items {test digest}} (a named test runs alone, at the digest
-  the agent's plan gave it: seon.agent/item-selection), or, an item of another :kind (a build, a process test, a check
+  the one whose nearest-done asker has the least measured work left, item-value breaking a tie), with its batch (batch-of: a share of the queue for one fork), asked of the agent
+  holding it as {:op :tests :id agent :mode m :names #{test} :items {test digest}} (each at the digest the agent's plan gave
+  it: seon.agent/item-selection), or, an item of another :kind (a build, a check
   step, a tree's build or seed), of root's effect owner as {:op :fx :kind :item :req {:kind :tree :checkout :name :digest
   :binary? :bound}}; an :alone? item (a step about the machine) only with nothing running, and nothing beside it; an item is not granted while an item it :needs (a set: its tree's build, seed) is queued or running;
   tagged
@@ -173,11 +195,20 @@
           ;; a step about the machine itself (:alone?, seon.proofs/machine-steps) runs with nothing beside it: none is granted
           ;; while one runs, and one is granted only with nothing running
           alone (some (fn [[_ b]] (some #(:alone? (get-in st [:items %])) b)) (:batches st))
-          [k it] (when (and (pos? (free-workers st)) (not alone))
+          free? (and (pos? (free-workers st)) (not alone))
+          ;; each asker's work left: the measured ms of its queued items, one pass (an item many wait on counts for each)
+          ;; with one asker every item ties, so the pass is made only when two or more wait
+          left (when (and free? (next (:askers st))) (reduce-kv (fn [m _ it] (if (= :queued (:status it)) (reduce #(update %1 %2 (fnil + 0) (:ms it 1)) m (:waiters it)) m))
+                                      {} (:items st)))
+          [k it] (when free?
                    (reduce-kv (fn [best k it]
                                 ;; an item that needs its tree's build or seed waits while that is queued or running (a red one ends it)
                                 (if (and (= :queued (:status it)) (not-any? (:items st) (:needs it)) (or (not (:alone? it)) (zero? running)))
-                                  (let [v (+ (if (and (seq turns) (some turns (:waiters it))) 1e12 0) (item-value it bid0))]
+                                  ;; a turn's first; then the item of the asker nearest done (shortest remaining work first: the least
+                                  ;; mean time to an answer over askers); its waiters and age only break a tie
+                                  (let [v (+ (if (and (seq turns) (some turns (:waiters it))) 1e12 0)
+                                             (if left (/ 1e6 (inc (double (reduce min Double/MAX_VALUE (keep left (:waiters it)))))) 0)
+                                             (* 1e-6 (item-value it bid0)))]
                                     (if (or (nil? best) (> v (nth best 2))) [k it v] best))
                                   best))
                               nil (:items st)))
@@ -198,14 +229,14 @@
         :else
         (let [outs (into outs (for [a (:held st)] {:op :prove-held :key a :held false}))
               st (dissoc st :held)
-              batch #{k}
+              batch (batch-of st k it)
               bid (inc (:bid st 0))
-              st (-> st (assoc :bid bid) (assoc-in [:batches bid] batch) (assoc-in [:items k :status] :running))
+              st (reduce #(assoc-in %1 [:items %2 :status] :running) (-> st (assoc :bid bid) (assoc-in [:batches bid] batch)) batch)
               [st m] (step/ask st [:prove :answers] [:batch (str bid)]
                                (if (= :test (:kind it :test))
                                  (cond-> {:op :tests :id (:agent it) :mode (:mode it :judge) :names (into #{} (map first) batch) :items (into {} batch)}
                                    (:checkout it) (assoc :checkout (:checkout it)))
-                                 ;; a build, a process test or a check step: root's effect owner runs it on the run's checkout
+                                 ;; a build, a seed or a check step: root's effect owner runs it on the run's checkout
                                  {:op :fx :kind :item :req {:kind (:kind it) :tree (:tree it) :checkout (:checkout it)
                                                             :name (if (#{:build :seed} (:kind it)) (:kind it) (first k)) :digest (second k)
                                                             :binary? (boolean (:binary? it)) :bound (:bound it)}}))]
@@ -413,7 +444,7 @@
   [st k r]
   (let [{:keys [waiters] :as run} (get-in st [:runs k])
         err? (contract/error? r)
-        ended? (= :seon.system/ended (:seon.error/type r))
+        ended? (#{:seon.system/ended :seon.prove/superseded} (:seon.error/type r))
         ;; a run's items name their own reds (run-answer: a step's among them); any other answer, by its failing reports
         r (if err? r (assoc r :key k :red (vec (sort-by str (distinct (concat (:red r) (keys (proofs/failures r))))))))
         ;; asked again, it ran nothing for that asker: each verdict reads as reused at its digest, with no measure to add
@@ -453,7 +484,8 @@
 
 (defn- request
   "Admit request m ({:rid :branch :t :digest :agent :names :mode}) of the api, keyed by its :digest (run-key); one with no
-  :rid (main's commit notice) is a run nobody waits on. Answers [st outputs]."
+  :rid (main's commit notice) is a run nobody waits on. A run in flight for the same slot at another digest is superseded first:
+  its waiters answered :seon.prove/superseded, its items no one else waits on dropped. Answers [st outputs]."
   {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
   [st {:keys [rid branch] :as m}]
   (let [rids (if rid #{rid} #{})
@@ -470,6 +502,18 @@
       (get-in st [:runs key]) [(update-in st [:runs key :waiters] into rids) []]
       ;; asked again after its run, nothing it reads changed
       (and done (= key (:key done))) [st (reply [] rids (:r done))]
+      ;; a run of this slot at another digest is superseded: its branch moved on, so what only it wanted leaves the queue
+      (some (fn [[k r]] (and (not= k key) (= (slot r) (slot req)))) (:runs st))
+      (let [[st outs] (reduce (fn [[st outs] [k r]]
+                                (if (and (not= k key) (= (slot r) (slot req)))
+                                  (let [st (-> st (drop-waits k (vec (get-in st [:askers k :left]))) (update :askers dissoc k))
+                                        [st o] (finish st k (contract/error :seon.prove/superseded #'seon.prove/request
+                                                                            (str "run " k " was superseded by " key ": its branch moved on") {:by key}))]
+                                    [st (into outs o)])
+                                  [st outs]))
+                              [st []] (sort-by first (:runs st)))
+            [st o2] (request st m)]
+        [st (into outs o2)])
       (:agent req) (plan! (assoc-in st [:runs key] (assoc req :waiters rids)) key)
       ;; main: a prove agent on the tests branch, forked from the fork server's main, plans it
       :else (let [st (assoc-in st [:runs key] (assoc req :waiters rids :stage :spawn))
@@ -497,8 +541,11 @@
         ;; second (:made) never stands for the first
         sk [[:seed tree (if stores? :stores :tree)] tree]]
     (cond-> (into {}
-                  (concat (for [[t d] (:process r) :let [b (get-in r [:bounds t])]]
-                            [[t d] (cond-> (assoc on :kind :process :binary? true) b (assoc :bound b) seed? (assoc :needs #{sk}))])
+                  ;; a process test runs as any test does, in a fork of the agent holding the run's branch (a batch of them shares
+                  ;; the one test root the first starts, ~20 s, then ~0.5 s a test), never a cold bin/test process (~10 s more each);
+                  ;; it needs the tree's seed: the binary and the process tests' store
+                  (concat (for [[t d] (:process r)]
+                            [[t d] (cond-> (assoc on :kind :test :agent (:agent run) :mode (:mode run) :ms (get-in r [:ms t])) seed? (assoc :needs #{sk}))])
                           (for [[s {:keys [digest binary? bound alone?]}] (:steps r)]
                             [[s digest] (cond-> (assoc on :kind :step :binary? (boolean binary?)) bound (assoc :bound bound) alone? (assoc :alone? true)
                                           seed? (assoc :needs #{sk}))])))
