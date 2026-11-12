@@ -164,7 +164,9 @@
     (apply d/datoms-diff r)
     r))
 
-(deftest ^{:seon.test/estimate {:ticks 130000000}} a-diff-of-two-commits-costs-the-nodes-that-differ
+;; estimate: the fixture's 10,000 datoms in transactions of 4,000 (~7k ticks a datom in a large transaction, not a
+;; 10-datom one's ~12k: ~75M), then three sizes of branch, transact and measured diffs (~10M). Measured 86M
+(deftest ^{:seon.test/estimate {:ticks 90000000}} a-diff-of-two-commits-costs-the-nodes-that-differ
   ;; See docs/storage.md#merges-read-what-changed (seon.ctx/moved's call: two values of one branch, :eavt, the whole range)
   (let [[a b] (diff-of 10) [gone added] (d/datoms-diff a b :eavt [])]
     (is (= [10 11] [(count gone) (count added)]) "ten values replaced, and the transaction's own datom"))
