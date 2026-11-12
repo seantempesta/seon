@@ -434,6 +434,8 @@
           st (cond-> st rid (deliver-rid o rid {:stopped true :agent agent}))]
       (let [st (-> st (update :agents dissoc agent) (update :agent-procs dissoc agent) (update ::inserting dissoc agent) (assoc ::update true)
                    (set-agent o agent {:status (or stop :dead) :ended-ms (System/currentTimeMillis) :running nil}))
+            ;; each kill! of it is answered now that its end is recorded
+            st (reduce (fn [st p] (reply! st o p (get-in st [:view :agents agent]))) (update st ::killers dissoc agent) (get-in st [::killers agent]))
             {:keys [p opts]} (get-in st [::respawn agent])
             st (update st ::respawn dissoc agent)]
         ;; a Back's old process is gone: the same agent's new one is forked now (its entry replaces the ended one's)
@@ -657,11 +659,16 @@
       :prove (let [[st rid] (pend st p :prove (:agent m))]
                (step/out! o [:prove :req] (assoc (select-keys m [:branch :t :digest :agent :proofs :names :mode :checkout :tree]) :rid rid))
                st)
-      :kill (cond-> (if (get-in st [:agents id])
-                      ;; :ended when root stops it because its run ended (the reconciler says so)
-                      (-> st (set-agent o id {:status (if (:ended m) :ended :killed)}) (to-agent o id {:op :kill}))
-                      st)
-              p (reply! o p {:killed id}))
+      ;; answered when its end is recorded (end-agent: its view entry, :status and :ended-ms), never before: a caller waits
+      ;; on that answer, not on an end event it may have missed; one already ended is answered its entry at once
+      :kill (cond
+              (get-in st [:agents id])
+              ;; :ended when root stops it because its run ended (the reconciler says so)
+              (cond-> (-> st (set-agent o id {:status (if (:ended m) :ended :killed)}) (to-agent o id {:op :kill}))
+                p (update-in [::killers id] (fnil conj []) p))
+              (nil? p) st
+              (get-in st [:view :agents id]) (reply! st o p (get-in st [:view :agents id]))
+              :else (reply! st o p (gone id (str "no agent " (name id)))))
       ;; an effect asked by root itself or a root proc (the reconciler's write-back): to its
       ;; kind's owner, answered by rid like the writer's answers
       :fx (let [owner (keyword "fx" (name (:kind m)))]
@@ -2231,8 +2238,12 @@
   [sys agent-id args]
   (let [r @(request! sys 'back! agent-id args)] (if (contract/error? r) r (:id r))))
 
-(defn kill! "SIGKILL the agent's process (through its agent proc). nil." {:malli/schema [:=> [:cat :seon.system/sys :seon.agent/id] :nil]}
-  [sys agent-id] (request! sys 'kill! agent-id nil) nil)
+(defn kill!
+  "SIGKILL the agent's process (through its agent proc): a promise of its view entry ({:status :ended-ms ..}), delivered once its
+  end is recorded, at once for an agent already ended; a wait for an agent's end derefs it, never an end event it may have
+  missed. See docs/processes.md#the-agent-process."
+  {:malli/schema [:=> [:cat :seon.system/sys :seon.agent/id] :seon.host/promise]}
+  [sys agent-id] (request! sys 'kill! agent-id nil))
 
 (defn stop!
   "Stop root by letting the flow drain: the api closes (later calls answer \"root
