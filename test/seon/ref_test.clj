@@ -405,6 +405,13 @@
     (is (nil? (:seon.ref/read-at (more "docs/flow.md#the-api-1"))) "a lead that is one sentence left nothing: no key")
     (is (nil? (:seon.ref/left (more "docs/flow.md#the-api-1"))))))
 
+;; docs/references.md#the-delimiter-picks-the-depth: a text word is a reference when it names something, read as written:
+;; a name's own trailing ! or ? is part of it (the plan of seon.ctx/a-require-at-the-repl-says-the-form-that-records-it named
+;; seon.repl/edit!, read as seon.repl/edit, which names nothing, so its agent's page showed none of its code, 2026-11-12)
+(deftest a-text-word-keeps-its-names-bang
+  (is (= '[seon.repl/edit! my.task/done? app.x/f]
+         (mapv :seon.ref/name (:seon.ref/citations (ref/parse nil "Use seon.repl/edit! here, or my.task/done? there, then app.x/f."))))))
+
 (deftest a-name-is-read-as-the-reader-reads-it
   ;; docs/references.md#cost: a span is read by its characters (seon.ref/qualified-name), not by the reader, which
   ;; allocates ~18 KB a call on every span of a page that holds a /. The two agree on a span of every shape the
@@ -430,3 +437,19 @@
   (is (= ["a *b"] (ref/emphasis "a *b")) "an opener with no closer is its text")
   (is (= ["snake_case and _x_"] (ref/emphasis "snake_case and _x_")) "names hold _")
   (is (= [] (ref/emphasis ""))))
+
+(deftest a-text-word-names-a-var-as-the-reader-reads-it
+  ;; docs/references.md#one-parse (root, 2026-11-12: a task citing seon.turn/work! was health's "cites nothing"): a bare word's name keeps
+  ;; the characters a Clojure name may end in (! ? and earmuffs), and only the punctuation no name ends in, or a pair of marks around it,
+  ;; is taken off
+  (let [named (fn [t] (mapv :seon.ref/name (:seon.ref/citations (ref/parse nil t))))]
+    (is (= ['seon.turn/work!] (named "It changes seon.turn/work! now.")) "a mutating function keeps its !")
+    (is (= ['seon.turn/work!] (named "It told seon.turn/work!'s caller.")) "and loses only a possessive")
+    (is (= ['seon.task/finished?] (named "It asks seon.task/finished? first.")) "a predicate keeps its ?")
+    (is (= ['seon.x/*dyn*] (named "It binds seon.x/*dyn* now.")) "a dynamic var keeps its earmuffs")
+    (is (= ['seon.x/*dyn*] (named "It binds `seon.x/*dyn*` now.")) "in a code span too")
+    (is (= [] (named "All of `seon.x/foo*` here.")) "while a glob names nothing")
+    (is (= ['seon.x/y] (named "It is *seon.x/y* that matters.")) "an emphasis around a name is a pair of marks, taken off")
+    (is (= ['seon.x/y] (named "See <seon.x/y> here.")) "as angle brackets around it are")
+    (is (= ['seon.turn/work] (named "It calls seon.turn/work.")) "a sentence's full stop is no part of a name")
+    (is (= ['seon.x/y] (named "(see seon.x/y), then")) "nor a parenthesis or comma")))

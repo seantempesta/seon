@@ -162,6 +162,39 @@
        :sizes divergence-sizes})
     (finally (release-stores!))))
 
+;; A stored index node's read: konserve's get-immutable of one :eavt child of a stored main, the read a
+;; Datahike node restore makes on a cache miss (datahike.index.persistent-set). See
+;; docs/cost.md#what-things-cost-here.
+(defn node-read-of
+  "konserve.core/get-immutable's arguments: on-disk-diverged-of's store holding n forms, and the address
+  of its stored main's first :eavt child node."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any :uuid]]}
+  [n]
+  (let [[_ base] (on-disk-diverged-of n)]
+    [(:store base) (first (remove nil? (seq (.-_addresses (.root ^org.replikativ.persistent_sorted_set.PersistentSortedSet (:eavt base))))))]))
+
+(deftest a-stored-node-reads-at-its-decode
+  ;; deps 2026-11-12: 86 KB / 9.3k ticks a read in the morning, 46.5 KB / 5.8k with get-immutable, 28.3 KB / 5.0k
+  ;; once a uuid holds its halves and no text, a keyword decodes from its bytes, uuid text and parse take no
+  ;; rest list or bignum step, a digest is one block and a foreign byte move copies once (Jolt, konserve, crypto)
+  (try
+    (cost/proof
+      {:of 'konserve.core/get-immutable :input 'seon.program-cost-test/node-read-of
+       :n "forms main holds (the node read is one :eavt child, a leaf or a 32-entry branch)"
+       :work (str "the store key (a SHA-512 of the address's encoding, a uuid and its 40-char text), one LMDB read and "
+                  "its value's slice (~1.3 KB), zstd's output (~1.8 KB), and the decode: a record per datom and per "
+                  "child address, an intern key per new keyword, the key and address vectors; no metadata, lock or revision")
+       :growth :constant
+       ;; the floor is ~12 KB / ~3k ticks (the work above at a 32-entry branch: 32 datoms, 32 addresses, 1.78 KB
+       ;; raw). This design's estimate adds what it is known to spend over that: the read's own wrapper and env
+       ;; (~8 KB), LMDB's blob and zstd's frame (~2.5 KB beyond their bytes) and the Jolt->Scheme call edges
+       ;; (~5 KB): ~28 KB / ~5k ticks for a branch, a leaf less. Measured 28.3 KB / 5.0k at a branch (100
+       ;; forms), 20.5 KB / 3.9k at a leaf, once jolt.ffi's byte moves copy once. The wrapper is the gap left.
+       :per-n {}
+       :fixed {:ticks 5000.0 :bytes 29000.0 :calls 0}
+       :sizes divergence-sizes})
+    (finally (release-stores!))))
+
 (defn on-disk-content-of
   "seon.merge/content-datoms' arguments given a diff, on on-disk-diverged-of's stores: [base head no data
   attributes, the whole :eavt diff between them], read here, before the measured call."
@@ -450,7 +483,9 @@
      ;; measured 2026-10-23 (n 1,000 -> 10,000): 13.3 KB and 1.4k ticks a step, 7 contracted calls; 17.9 KB
      ;; and 2.4k ticks before
      :per-n {:ticks 1400.0 :bytes 13300.0}
-     :fixed {:ticks 20000.0 :bytes 60000.0 :calls 7.0}
+     ;; and once a definition, its metadata read against the entity index for the facts a test's type is (def-facts:
+     ;; var-attributes, seon.db/owners, extends?): 4 more contracted calls, each instrumented at ~25k ticks (tests, 2026-11-12)
+     :fixed {:ticks 125000.0 :bytes 60000.0 :calls 11.0}
      :sizes [100 300 1000 10000]}))
 
 (defn literals-of
@@ -600,7 +635,9 @@
          :growth :constant
          ;; measured 2026-11-06 at 100, 300, 1,000 forms: 331k, 335k, 364k ticks; 940 KB, 960 KB, 1.04 MB; 83 calls. Replacing
          ;; each form's row on every text write: 762k, 923k, 1.60M ticks; 3.10, 4.06, 7.43 MB; 65 calls (red: over and steeper)
-         :fixed {:calls 102 :bytes 1000000 :ticks 340000} ; 83 until the write checked every datom (the owner, 2026-11-06); 102
+         ;; 105 since the write asks each touched entity's own required keys (seon.db: a test whose estimate went is a var again):
+         ;; one lookup for each of the 3 entities a definition touches (tests, 2026-11-12)
+         :fixed {:calls 105 :bytes 1000000 :ticks 340000} ; 83 until the write checked every datom (the owner, 2026-11-06); 102
          ;; since the check is a function, seon.db/checked, not a macro shaped to the count (the audit of 2026-11-09; the owner's
          ;; validation at transaction time, 2026-11-08). 380k ticks and 1.12 MB measured then, under the shared load of a full prove
          :sizes [30 100 300]})

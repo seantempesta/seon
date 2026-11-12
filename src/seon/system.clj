@@ -260,7 +260,9 @@
   the graph, with :answered, every proc that answered it. The ping's bound is :seon.config.check/ping-ms: a proc
   mid-step that long answers nothing and is missing from :answered (an agent in ::busy and not there is mid-step), never
   read as nil. See docs/clocks.md#time-decides-the-owners-exceptions."
-  {:malli/schema [:=> [:cat :seon.system/sys] :map]}
+  {:malli/schema [:=> [:cat :seon.system/sys] [:map [:root [:map [:seon.system/stall-armed {:optional true}] [:seon.system/busy {:optional true}]
+                                                               [:seon.system/lost {:optional true}]]]
+                                                   [:agents :map] [:answered [:vector :keyword]]]]}
   [sys]
   (let [states (flow/ping (:graph sys) :timeout-ms (cfg/value :seon.config.check/ping-ms))
         state #(::flow/state (get states %))]
@@ -419,7 +421,9 @@
                                 :stderr (some-> (agent/stderr-path (get-in st [:view :store :agents-dir]) agent) (lib/tail-bytes (cfg/value :seon.config.root/death-stderr-bytes)))
                                 :last-op (some-> (:running v) (select-keys [:form :since-ms]) (assoc :kind :eval))}))
         e (or died (ended agent (str "agent " (name agent) " ended")))]
-    (step/out! o :events (step/event {:type (or stop :dead) :agent agent}))
+    ;; a death names itself: its error (exit status when reaped, its stderr's tail, the eval it was in) goes with the event,
+    ;; so whoever waits on it (a test's with-agent before its hello) says why, never {:end :dead}
+    (step/out! o :events (step/event (cond-> {:type (or stop :dead) :agent agent} died (assoc :error died))))
     (let [st (cond
                (nil? died) (reduce (fn [st r] (deliver-rid st o r e)) (answer-spawn st o agent e) inflight)
                ;; the exit status is known (reaped first), or never will be (a clone, an

@@ -384,7 +384,7 @@
   (:leadless-section, :orphan-page), a form's refs and a var's form (:waived-proof, :stale-plan), a task's needs, outcome and
   proofs and its cites (:uncited-task, :stale-plan). What `caused-datoms` diffs for them. See docs/health.md#two-kinds-of-problem."
   [:seon.doc/lead :seon.doc/references :form/refs :form/keywords :var/form :seon.task/needs :seon.task/outcome :seon.task/proofs
-   :seon.cite/of :seon.cite/target :schema/key])
+   :seon.cite/of :seon.cite/target :schema/key :schema/form])
 
 (defn- section-at
   "{:e :names :read :reviewed :baseline :text} of the section addressed a on db, by entity seeks and no
@@ -436,6 +436,20 @@
            (derived-row ans s nsym (str v " is public and its docstring cites no docs/ section: cite the one that describes it")
                         {:kind :uncited-var :var v} {:var v})))))
 
+(defn unestimated-tests
+  "Each of the named vars (a set of symbols, the vars a branch changed) that is a test stating no estimate on its deftest
+  (no :seon.test/estimate fact on its var: docs/testing.md#test-types), as an :unestimated-test row: a new or changed test states what it should cost, worked from
+  what it must do, and runs under the cap until it does (docs/merging.md#a-tests-tick-budget). Closed by stating
+  ^{:seon.test/estimate {:ticks n}}. Cost: one seek per named var."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:set :symbol]] [:vector :seon.problems/row]]}
+  [db ans names]
+  (vec (for [v (sort names)
+             :let [e (pdb/eid db :var/name v) ent (when e (d/entity db e)) nsym (some-> (namespace v) symbol)]
+             :when (and ent (contains? (set (:var/meta ent)) :test) (nil? (:seon.test/estimate ent)))
+             :let [s (str "unestimated-test " v)]]
+         (derived-row ans s nsym (str v " states no estimate: state ^{:seon.test/estimate {:ticks n}} on its deftest, worked from what it must do")
+                      {:kind :unestimated-test :var v} {:var v}))))
+
 (defn long-forms
   "Each of the named vars (a set of symbols, the vars a branch changed), in source or in a test, whose
   form's text is longer than :seon.config.shrink/form-tokens (as the model reads it: seon.print.emit/chars-tokens), as a :long-form row with its tokens and the
@@ -452,6 +466,25 @@
                :let [n (emit/chars-tokens (count src)) s (str "long-form " v) nsym (some-> (namespace v) symbol)]]
            (derived-row ans s nsym (str v " is " n " tokens, over the bound of " bound ": split it by what it does")
                         {:kind :long-form :var v :tokens n :bound bound} {:var v :tokens n :bound bound})))))
+
+(defn refused-values
+  "Each stored datom of the attributes attrs whose value db's own entry for its attribute refuses, as a :refused-value row naming
+  the attribute, the entity and why: a value written before its entry tightened, held to the entry now (seon.db/invalid-datom, with
+  db's own schema changes, seon.program/schema-changes, as a write on db would be). Read only for the attributes a branch's
+  move changed the entry of (`caused-split`), so it costs the datoms of those attributes, never the store; never in a full health
+  read, which has no base to say what moved. Closed by fixing the value or loosening the entry. See
+  docs/health.md#a-stored-value-its-entry-refuses."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:set :qualified-keyword]] [:vector :seon.problems/row]]}
+  [db ans attrs]
+  (if (empty? attrs)
+    []
+    (let [k (program/schema-changes db)
+          own (when (seq k) {:forms k :registry (program/schema-registry k)})]
+      (vec (for [a (sort attrs) {:keys [e v]} (d/datoms db :aevt a)
+                 :let [err (pdb/invalid-datom db [[:db/add e a v]] own)] :when err
+                 :let [s (str "refused-value " a " " e)]]
+             (derived-row ans s (symbol (namespace a)) (str a " of entity " e " holds a value its entry refuses: " (:seon.error/message err))
+                          {:kind :refused-value :attribute a :entity e} {:attribute a :entity e}))))))
 
 (def ^:private enum-members
   "Every keyword an [:enum ...] of the process's registry (seon.contract/forms) lists: values, not keys, so `unschemed-keys` asks no
@@ -515,6 +548,55 @@
          (derived-row ans s nsym (str t " passes by a waiver for task " task (when multiple (format ", at %.2fx its bound" multiple)) ": fix the task, then delete the :overrun")
                       {:kind :waived-proof :test t :task task :n n :measured measured :multiple multiple}
                       {:test t :task task :n n :measured measured :multiple multiple})))))
+
+(defn- test-reach
+  "{name local?} of what test var t reaches through the test namespaces' own code, by the compiler's facts: its form's
+  :form/refs and, followed, those of each var they name that a namespace under test/ defines and that is none of stop (a src var,
+  the shared world's among them, is not entered); local? when a form of t's own namespace names it. Cost: one seek and one
+  form's refs a test-tree var reached. See docs/testing.md#test-types."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol [:set :qualified-symbol]] [:map-of :symbol :boolean]]}
+  [db t stop]
+  (let [nsym (namespace t)
+        test-var? (fn [v] (when-let [e (pdb/eid db :var/name v)] (some-> (d/entity db e) :var/ns :ns/file (str/starts-with? "test/"))))]
+    (loop [todo [t] seen #{t} out {}]
+      (if-let [v (peek todo)]
+        (let [refs (some-> (pdb/eid db :var/name v) (as-> e (d/entity db e)) :var/form :form/refs)
+              local? (= nsym (namespace v))
+              nxt (filterv #(and (qualified-symbol? %) (not (seen %)) (not (stop %)) (test-var? %)) refs)]
+          (recur (into (pop todo) nxt) (into seen nxt) (reduce (fn [m r] (update m r #(boolean (or % local?)))) out refs)))
+        out))))
+
+(defn undeclared-tests
+  "Each of the named vars (the vars a branch changed) that is a test and breaks its law, one :undeclared-test row a
+  lack (one stating no estimate is `unestimated-tests`'): its estimate is over its cap (:seon.config.proofs/test-ticks-cap, a system test's
+  asks-cap, a binary test's execs-cap); it reaches a running system (:seon.config.proofs/system-vars) and names no
+  :seon.test/root, or runs a command (exec-vars) and names no :seon.test/execs; or its namespace makes a store of its own
+  (own-store-vars). Read from the compiler's facts (`test-reach`); a test the branch did not change is not judged.
+  Closed by stating what it lacks on the deftest. See docs/testing.md#test-types."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:set :symbol]] [:vector :seon.problems/row]]}
+  [db ans names]
+  (let [c (delay (into {} (for [k [:test-ticks-cap :system-test-asks-cap :binary-test-execs-cap :system-vars :exec-vars :own-store-vars]]
+                            [k (config/value (keyword "seon.config.proofs" (name k)))])))]
+    (vec (for [v (sort names)
+               :let [e (pdb/eid db :var/name v) ent (when e (d/entity db e))]
+               :when (and ent (contains? (set (:var/meta ent)) :test))
+               :let [{:keys [test-ticks-cap system-test-asks-cap binary-test-execs-cap system-vars exec-vars own-store-vars]} @c
+                     {:keys [ticks asks execs] :as est} (:seon.test/estimate ent)
+                     root (:seon.test/root ent) cmds (:seon.test/execs ent)
+                     ;; a store is judged where the test's own namespace calls it (local?): the shared world's helpers make theirs
+                     reach (test-reach db v (into (set system-vars) exec-vars))
+                     hit (fn [vars] (first (sort (filter #(contains? reach %) vars))))
+                     lacks (cond-> []
+                             (and ticks (> ticks test-ticks-cap)) (conj [:ticks (str "estimates " ticks " ticks, over the cap of " test-ticks-cap)])
+                             (and root asks (> asks system-test-asks-cap)) (conj [:asks (str "estimates " asks " asks, over the cap of " system-test-asks-cap)])
+                             (and cmds execs (> execs binary-test-execs-cap)) (conj [:execs (str "estimates " execs " execs, over the cap of " binary-test-execs-cap)])
+                             (and (nil? root) (hit system-vars)) (conj [:root (str "reaches " (hit system-vars) " and names no :seon.test/root")])
+                             (and (nil? cmds) (hit exec-vars)) (conj [:execs-named (str "reaches " (hit exec-vars) " and names no :seon.test/execs")])
+                             (some #(get reach %) own-store-vars) (conj [:store (str "calls " (first (sort (filter #(get reach %) own-store-vars))) ", not the shared world (my.test/world, seon.test-store/test-db)")]))]
+               [lack text] lacks
+               :let [nsym (symbol (namespace v))]]
+           (derived-row ans (str "undeclared-test " v " " (name lack)) nsym (str v " " text)
+                        {:kind :undeclared-test :test v :lack lack} {:test v :lack lack})))))
 
 (def caused-classes
   "The derived classes a branch is judged on, as :seon.problems/class declares them (:seon.problems/caused): the content a branch
@@ -584,6 +666,8 @@
         linkage? (some by-attr [:seon.doc/address :seon.doc/references])
         form-cands (ents [:form/src :form/refs])
         ;; the forms whose keywords moved, and those naming a key whose entry the branch added or removed
+        ;; the stored attributes whose entry the branch changed: their datoms are held to the new entry
+        moved-attrs (into #{} (comp (keep #(:v (first (d/datoms head :eavt % :schema/key)))) (filter #(contains? (:schema head) %))) (ents [:schema/form]))
         key-cands (into (ents [:form/keywords])
                         (for [db [base head] {k :v} (by-attr :schema/key) {e :e} (d/datoms db :avet :form/keywords k)] e))
         task-cands (fn [db]
@@ -604,10 +688,13 @@
                          (map #(assoc % :class :stale-section) (stale-sections db ans {:names moved-vars :sections (eids state)}))
                          (map #(assoc % :class :uncited-var) (uncited-vars db ans moved-vars))
                          (map #(assoc % :class :long-form) (long-forms db ans moved-vars))
+                         (map #(assoc % :class :unestimated-test) (unestimated-tests db ans moved-vars))
+                         (map #(assoc % :class :undeclared-test) (undeclared-tests db ans moved-vars))
                          (map #(assoc % :class :leadless-section) (leadless-sections db ans led-cands))
                          (when linkage? (map #(assoc % :class :orphan-page) (orphan-pages db ans)))
                          (map #(assoc % :class :waived-proof) (waived-proofs db ans form-cands))
                          (map #(assoc % :class :unschemed-key) (unschemed-keys db ans key-cands))
+                         (map #(assoc % :class :refused-value) (refused-values db ans moved-attrs))
                          (map #(assoc % :class :uncited-task) (uncited-tasks db ans tr))
                          (map #(assoc % :class :stale-plan) (stale-plans db ans tr)))))
         forms-in (fn [db] (fn [fact] (set (keep #(:e (law-form-at db fact %)) (changed-forms fact)))))

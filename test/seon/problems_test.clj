@@ -164,6 +164,10 @@
       (is (re-find #"out of memory" (:stderr died)) "the last lines of its stderr")
       (is (<= (count (:stderr died)) 2048) "bounded")
       (is (= {:kind :eval :form "(work!)" :since-ms 5} (:last-op died))))
+    (testing "its :dead event carries the death, so a wait on it names it (a test's with-agent before the hello said {:end :dead})"
+      (let [ev (first (filter #(= :dead (:type %)) (:events o1)))]
+        (is (= :seon.agent/died (get-in ev [:error :seon.error/type])) (pr-str ev))
+        (is (re-find #"out of memory" (str (get-in ev [:error :stderr]))) "its stderr's tail with it")))
     (testing "the exit status, reaped later by the fork server, completes the recorded death"
       (is (= [] (writes o1)) "not yet: the exit status is not known")
       (let [[_ o2] (step st :from-fs {:ev :exit :pid 77 :status {:signal 9}})
@@ -614,7 +618,10 @@
                                                               1    ; seon.problems/unsynced-tasks' own contract (Optimization, 2026-11-10: a seek a declared task, no call)
                                                               6    ; caused-split's content-class readers on base and head, for the move's candidates only
                                                                    ; (Data model, 2026-11-12: nothing switched off; measured 58 -> 64)
-                                                              3)}  ; seon.problems/unschemed-keys: on base and head for the move's forms, and in the full read (data, 64 -> 67)
+                                                              3    ; seon.problems/unschemed-keys: on base and head for the move's forms, and in the full read (data, 64 -> 67)
+                                                              2    ; seon.problems/refused-values' contract on base and head (data, 67 -> 69)
+                                                              4)}  ; the test law's two classes (unestimated-tests, undeclared-tests), one reader each on
+                                                                   ; base and head (tests, 2026-11-12: 69 -> 73 with data's)
                :sizes [10 30 100]}))
 
 (deftest problems-cost-nothing-for-a-clean-program
@@ -979,7 +986,10 @@
                ;; 68 calls at 10: :long-form (seon.problems/long-forms) is a class the changed vars are asked, with its bound read once (seon.config/value) each form's chars set against the bound's (seon.print.emit/chars-per-token), a long one's tokens estimated;
                ;; the 7 more contracted calls, each instrumented (its output checked), are the ticks and bytes the fixed part grew by (measured: the
                ;; seek and text of a var cost ~8k ticks of it)
-               :fixed {:ticks 460000 :bytes 1800000 :calls 69}
+               ;; and 4: the test law's two classes (unestimated-tests, undeclared-tests), one reader each on base and head (tests,
+               ;; 2026-11-12: measured 69 -> 73); and 4 for data's two caused classes (unschemed-key, refused-value), one reader
+               ;; each on base and head, the same shape (measured 73 -> 77 once both met in one tree)
+               :fixed {:ticks 460000 :bytes 1800000 :calls 77}
                :sizes [10 30 100]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
@@ -1192,8 +1202,10 @@
                ;; 52: :long-form one more class to look up
                ;; 54: :stale-plan one more (its seon.db/eid and derived-row), 2026-11-10
                ;; 56: :unsynced one more (its seon.db/eid and derived-row), 2026-11-10
-               ;; 58: :unschemed-key one more (its reader's contract and its class's lookup)
-               :fixed {:ns 3000000 :bytes 4000000 :calls 58}
+               ;; 58: :unschemed-key one more (its seon.db/eid and derived-row: this input gives every declared class open rows)
+               ;; 60: :refused-value one more, the same two
+               ;; 64: :unestimated-test and :undeclared-test two more (each its seon.db/eid and derived-row)
+               :fixed {:ns 3000000 :bytes 4000000 :calls 64}
                :sizes [10 30 100]}))
 
 (deftest attention-survives-a-store-write
@@ -1477,6 +1489,31 @@
     (is (seq (waived (problems/caused-split with without) :closed)) "deleting it closes the row")
     (is (contains? seon.problems/caused-classes :waived-proof))))
 
+(defn- law-ns
+  "The world with namespace app.law-test of forms (strings, one a line)."
+  [& forms]
+  (t/with (world) (t/code 'app.law-test (apply str "(ns app.law-test (:require [clojure.test :refer [deftest is]] [seon.test-store :as ts] [datahike.api :as d]))\n"
+                                               (map #(str % "\n") forms)))))
+
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-changed-test-states-what-its-type-needs
+  ;; docs/testing.md#test-types: a test the branch added or changed that reaches a root (directly or through its namespace's
+  ;; helper) naming none, or calls a store of its own is a caused :undeclared-test, one row a lack (stating no estimate is
+  ;; :unestimated-test's); declared, none but an estimate over its cap; an unchanged undeclared test is not judged. Work: the world (cached), three imports of a
+  ;; six-form namespace (~5 M ticks each) and two caused-splits over the few vars they change.
+  (let [old "(deftest old (is true))"
+        base (law-ns old)
+        undeclared (law-ns old "(deftest t (ts/start-root! {}))" "(defn- go [] (ts/start-root! {}))" "(deftest h (go))" "(deftest s (d/create-database {}))")
+        declared (law-ns old "(deftest ^{:seon.test/estimate {:ticks 1000} :seon.test/root []} t (ts/start-root! {}))"
+                         "(deftest ^{:seon.test/estimate {:ticks 999999999999}} over (is true))")
+        lacks (fn [db] (set (for [{:keys [test lack]} (problems/undeclared-tests db {} '#{app.law-test/old app.law-test/t app.law-test/h app.law-test/s app.law-test/over})]
+                              [(symbol (name test)) lack])))
+        caused (fn [head] (filterv #(re-find #"app\.law-test" %) (:caused (problems/caused-split base head))))]
+    (is (= '#{[t :root] [h :root] [s :store]} (lacks undeclared))
+        "each lack its row, the helper's root reached through the namespace's own code")
+    (is (= '#{[over :ticks]} (lacks declared)) "declared: only the estimate over the ticks cap")
+    (is (= 6 (count (caused undeclared))) "caused, refusing done: those three and the three changed tests' :unestimated-test, never the unchanged old's")
+    (is (= 1 (count (caused declared))))))
+
 ;; docs/health.md#two-kinds-of-problem: a branch is judged on the content it makes, every class of it (the owner, 2026-11-12:
 ;; nothing switched off). For each content class a branch can make, the rows caused-split answers from what the branch moved are
 ;; the rows health reads in full on head and not on base
@@ -1498,7 +1535,7 @@
             :let [[caused full] (made base head c)]]
       (is (seq full) (str (name c) ": the branch made a row"))
       (is (= full caused) (str (name c) ": caused-split answers it, as the full reading does")))
-    (is (= (set (keys {:unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unschemed-key 1}))
+    (is (= (set (keys {:unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated-test 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1}))
            seon.problems/caused-classes)
         "the classes a branch is judged on are the content classes, as :seon.problems/class declares them")))
 
@@ -1519,6 +1556,15 @@
     (is (some #(str/includes? % ":seon.zz/new-key") (problems/caused base head)) "a branch that names a new key with no entry is caused it")
     (is (not-any? #(str/includes? % ":seon.zz/new-key") (problems/caused base (d/db-with head entry))) "and one that writes the entry too is not")))
 
+(deftest a-branch-that-tightens-an-entry-is-caused-the-stored-values-it-refuses
+  ;; docs/health.md#a-stored-value-its-entry-refuses: a value written before its attribute's entry tightened is held to the new entry
+  ;; when a branch changes that entry: the store's datoms of that attribute alone, each refused one a row
+  (let [base (d/db-with (world) [{:seon.agent/key "old" :seon.agent/boot "b" :seon.agent/started-ms 5}])
+        entry (fn [form] [{:schema/key :seon.agent/started-ms :schema/form form}])
+        caused-of (fn [head] (filter #(str/includes? % ":seon.agent/started-ms") (problems/caused base head)))]
+    (is (seq (caused-of (d/db-with base (entry "[:int {:min 10 :description \"Ms.\"}]")))) "an entry tightened under a stored value is caused it")
+    (is (empty? (caused-of (d/db-with base (entry "[:int {:min 0 :description \"Ms.\"}]")))) "one every stored value still fits is not")))
+
 (deftest a-branch-that-changes-what-its-plan-cites-is-shown-the-stale-plan-never-refused
   ;; docs/health.md#a-plan-that-went-stale: changing the code a plan cites is the work (an agent's own task cites what it
   ;; changes), so a stale plan is attention, as a stale section is; the e2e loop and swarm held every task at its cap when it refused
@@ -1530,3 +1576,25 @@
         split (problems/caused-split planned moved)]
     (is (= #{} (problems/caused planned moved)) "nothing refuses the branch's done")
     (is (some #(str/starts-with? % "app/plan cites app.calc/inc2") (:attention split)) "the agent is shown the plan its change made stale")))
+
+;; ---- a judged cost verdict reads as a :cost problem --------------------------------------
+
+;; Replaces the problems check step's claim, proved by running a cost proof through an agent, that a judged cost
+;; proof's verdict reads as a :cost row of health (docs/health.md): estimate one world (~10 M ticks, as
+;; seeded's) and two health reads of a db of one task, ~40 M ticks.
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-judged-cost-verdict-reads-as-a-cost-problem
+  (let [rows [{:n 1 :calls 10} {:n 10 :calls 100} {:n 100 :calls 2000}]
+        red {:ok? false :over [{:dim :calls :n 100 :ratio 2.0}] :steeper [] :under [] :unmeasured []}
+        green {:ok? true :over [] :steeper [] :under [] :unmeasured []}
+        db (d/db-with (world)
+                      [(ended "t/slow" {:seon.task/proofs #{'app.t/f-cost 'app.t/g-cost}
+                                        :seon.task/costs {'app.t/f-cost {:rows rows :verdict red}
+                                                          'app.t/g-cost {:rows rows :verdict green}}})])
+        cost (get-in (problems/health db) [:classes :cost :rows])
+        row (first cost)]
+    (is (= 1 (count cost)) "the red verdict is one row; the green one is none")
+    (is (= ["t/slow" 'app.t/f-cost red rows] ((juxt :task :test :verdict :rows) row)) "its task, test, verdict and rows")
+    (is (false? (get-in row [:verdict :ok?])))
+    (is (empty? (get-in (problems/health (d/db-with (world) [(ended "t/ok" {:seon.task/proofs #{'app.t/g-cost}
+                                                                            :seon.task/costs {'app.t/g-cost {:rows rows :verdict green}}})]))
+                        [:classes :cost :rows])) "a green verdict reads as no problem")))
