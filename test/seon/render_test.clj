@@ -428,6 +428,14 @@
 
 ;; ---- the page: every page is the walk of one entity ----
 
+(defn- root-works-for
+  "Root's session as seon.system/root-agent-tx writes it: its pattern its role's name and the person it works for, the starter of its own
+  task request/root (user u, a ref), whose sessions that person's pattern reads through the tasks they started."
+  [u]
+  [{:db/id "rt" :seon.task/id "request/root" :seon.task/ns 'request :seon.task/name "root" :seon.task/plan "p" :seon.task/kind :work
+    :seon.task/execution :running :seon.task/branch :task-b :seon.task/started-by u :seon.task/agent "root"}
+   {:db/id "root" :seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact {:seon.agent/task [{:seon.task/started-by :seon.db/user-fact}]}] :seon.agent/task "rt"}])
+
 (defn- started-tx
   "User u (a ref: a lookup or a tempid) started agents as (refs), each by a task of its own naming it, as seon.task/start-tx writes a
   person's request: a user is in no process tree, and its agents are read through its tasks (:seon.task/_started-by)."
@@ -1184,7 +1192,7 @@
   ;; page's own units: an agent the user started is on root's page twice (the list, root's sessions), so the user's walk names its elements
   ;; apart. Red before: agent-a3 twice, one unit overwriting the other in the view, a patch for one landing on the other
   (let [[main branch eid] (paged-dbs)
-        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact {:seon.agent/task [{:seon.task/started-by :seon.db/user-fact}]}]}])
+        main (d/db-with (signed-in main [eid]) (root-works-for [:seon.agent/key "user"]))
         st (root-state (branch-state main branch) main)
         [st1 _] (pass-view st :root)
         html (p/view-html st1 :root)
@@ -1198,7 +1206,7 @@
   ;; :wire marks, other qualified keys, attribute values that are no plain value), counted on the pages the test world draws (an agent's,
   ;; root's, the user's), pinned so a count only goes down: each later change moves a render's look to CSS and its count to none
   (let [[main branch eid] (paged-dbs)
-        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact {:seon.agent/task [{:seon.task/started-by :seon.db/user-fact}]}]}])
+        main (d/db-with (signed-in main [eid]) (root-works-for [:seon.agent/key "user"]))
         st (root-state (branch-state main branch) main)
         [st1 _] (pass-view st :root)
         [st2 _] (pass-view st1 [:chat :a3])
