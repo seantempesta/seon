@@ -610,10 +610,8 @@
   (let [{:keys [tree digests]} (edn/read-string (slurp (str out "/steps.edn")))
         f (io/file out "green")
         green (set (when (.isFile f) (map #(str/replace % #"^check-" "") (str/split (str/trim (slurp f)) #"\s+"))))
-        ;; a step bin/check ended past its bound (out/overran): a signal, no verdict, never a red (the owner, 2026-11-11: "The
-        ;; step bounds are signals not hard constraints"); not stored, so it runs again
-        overran (let [o (io/file out "overran")] (set (when (.isFile o) (str/split-lines (slurp o)))))
-        red (sort (remove (some-fn green overran) (keys digests)))
+        ;; a step bin/check ended past its bound is one of its reds (STEP-OVERRAN, the owner, 2026-11-12), as any step it failed
+        red (sort (remove green (keys digests)))
         built (let [b (io/file (config/checkout) "target/seon.tree")] (when (.isFile b) (str/trim (slurp b))))
         ;; a step that runs a seon.check mode ran on target/seon: kept only if built from the plan's tree;
         ;; laws and the lmdb steps ran no mode, so no binary's tree is theirs to compare
@@ -629,8 +627,7 @@
                                   (into {} (for [[k dg] digests :when (keep? k)] [k (cond-> {:step k :digest dg :pass 1 :fail 0 :error 0} (step-ms k) (assoc :ms (step-ms k)))])) {}))]
     (doseq [u unstored] (println "UNRECORDED" (:key u) (:message u)))
     (println (str "prove: " (count (filter green (keys digests))) " check steps green, " (count red) " red"
-                  (when (seq red) (str ": " (str/join " " red)))
-                  (when (seq overran) (str "; " (count overran) " past their bound (signals, not stored): " (str/join " " (sort overran))))))
+                  (when (seq red) (str ": " (str/join " " red)))))
     (if (and (empty? red) (empty? unstored)) 0 1)))
 
 (defn branch-health
