@@ -2426,6 +2426,17 @@
         [_ proved] (in-agent (fn [_] [write "(let [r (my.agent/prove)] {:proofs (:proofs r) :error (:error r)})"]) {:proofs #{t}})]
     (is (= {t :error} (:proofs (:value proved))) (pr-str proved))))
 
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 2}} a-test-waiting-on-a-subprocess-is-no-deadlock
+  ;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a test child ends a test as :seon.test/deadlock only when nothing can wake
+  ;; it. A test that waits on a subprocess (a git call, here sleep) is parked on the poller's wait for its exit, which will wake it:
+  ;; it runs to its end. Red before Jolt counted a fiber parked on poller I/O as idle (2026-11-12, the land at 21:55: tests that
+  ;; called git were ended as deadlocks in the standing system's test children). Estimate: one agent eval and one test child run
+  ;; of one test that waits about a second, the test process's ticks a few million
+  (let [t 'seon.problems-test/a-test-that-waits-on-a-subprocess
+        write "(do (in-ns 'seon.problems-test) (clojure.test/deftest a-test-that-waits-on-a-subprocess (clojure.test/is (zero? (:exit (clojure.java.shell/sh \"sleep\" \"1\")))))  (in-ns 'user) :ok)"
+        [_ proved] (in-agent (fn [_] [write "(let [r (my.agent/prove)] {:proofs (:proofs r) :error (:error r) :failures (mapv :message (:failures r))})"]) {:proofs #{t}})]
+    (is (= {t :pass} (:proofs (:value proved))) (pr-str proved))))
+
 ;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a test run's fold (seon.agent/test-run-step) answers once each child's two ends
 ;; are held, its link's end and its reaped exit, whichever comes first. Run here through the real plumbing but the fork: a
 ;; core.async.flow graph holding the fold proc, its resume forking each shard's child by fork-test-child, whose
