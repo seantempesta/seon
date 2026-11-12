@@ -268,8 +268,9 @@
                              ;; the derived classes a branch's content can make, which seon.problems/caused-split reads from what it moved
                              ;; and judges it on (seon.problems/caused-classes); the rest of :seon.problems/derived is the running system's state
                              :seon.problems/caused #{:unnamed-site :stale-section :uncited-var :long-form :leadless-section :orphan-page :waived-proof :uncited-task :stale-plan}
-                             ;; shown, never a reason to refuse done (root's ruling, 2026-10-23: every var edit stales the sections that cite it)
-                             :seon.problems/attention #{:stale-section :uncited-var :long-form}
+                             ;; shown, never a reason to refuse done (root's ruling, 2026-10-23: every var edit stales the sections that cite it;
+                             ;; and the plans that cite it, an agent's own task's among them)
+                             :seon.problems/attention #{:stale-section :uncited-var :long-form :stale-plan}
                              :seon.problems/areas [[:docs #{:stale-pin :stale-section :orphan-page :leadless-section :uncited-var}] [:tests #{:red :cost :waived-proof}]
                                                     [:laws #{:unnamed-site :long-form}] [:merges #{:merge :task-conflict :unrun :unsynced}] [:tasks #{:failed :uncited-task :stale-plan}]
                                                     [:agents #{:stalled :dead :error :waste}] [:errors #{:platform :eval :agent :effect}] [:health #{:problem-unlinked :stale-binary}]]

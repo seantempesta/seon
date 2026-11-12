@@ -48,7 +48,7 @@ A ready `:implement` task is an `:uncited-task` (`seon.problems/uncited-tasks`) 
 
 ## A plan that went stale
 
-A ready task whose own plan cites a var whose `:var/form` datom was written after its `:seon.task/plan` datom is a `:stale-plan` (`seon.problems/stale-plans`). It closes when the plan is written again after reading the var; when it all holds, add a line `Checked <date> against <var>: holds.`, since the same text is no new datom.
+A ready task whose own plan cites a var whose `:var/form` datom was written after its `:seon.task/plan` datom is a `:stale-plan` (`seon.problems/stale-plans`). A branch that makes one is shown it and never refused (`:seon.problems/attention`): changing the code a plan cites is the work, an agent's own task's plan included. It closes when the plan is written again after reading the var; when it all holds, add a line `Checked <date> against <var>: holds.`, since the same text is no new datom.
 
 ## A function that cites no section
 

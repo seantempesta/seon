@@ -2299,12 +2299,13 @@
   (ts/test-branch!
     (fn [_ conn]
       (d/transact conn (defn-facts 'demo/f "(defn f [x] x)"))
+      ;; the task is main's, as an agent's task is: its branch makes none
+      (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "whole" :seon.task/kind :whole :seon.task/plan "Demo."}]))
       (let [base (d/commit-id @conn)
             _ (d/transact conn (defn-facts 'demo/k "(defn k [] 2)"))
             main (d/commit-id @conn)
             ;; the merge view is a task that merges itself's, read from main's commit as the agent heard it
-            agent-on (fn [db] (d/db-with db [{:seon.task/id "demo/whole" :seon.task/kind :whole}
-                                             {:seon.agent/key "b1/a3" :seon.agent/base-commit base :seon.agent/main-program main :seon.agent/task {:seon.task/id "demo/whole"}}]))
+            agent-on (fn [db] (d/db-with db [{:seon.agent/key "b1/a3" :seon.agent/base-commit base :seon.agent/main-program main :seon.agent/task {:seon.task/id "demo/whole"}}]))
             ours (agent-on (d/db-with (d/commit-as-db conn base) (defn-facts 'demo/h "(defn- h [] 1)")))
             a (seon.db/eid ours :seon.agent/key "b1/a3")
             st (seon.ctx.status/status ours (:tree (seon.ctx/build (seon.db/index) ours a :b)) {})
