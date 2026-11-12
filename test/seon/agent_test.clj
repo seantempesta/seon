@@ -1380,15 +1380,16 @@
   (let [[_ _ held] (in-agent (fn [{:keys [task]}]
                              [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
                               "(seon.repl/eval-string \"(with-meta [1] {:seon.render/page :p})\" {\"ns\" \"user\" :origin :outside})"
-                              (str "(let [db (seon.agent/db)]"
-                                   " {:calls (mapv #(datahike.api/pull db '[*] %) (datahike.api/q '[:find [?m ...] :where [?m :seon.model-call/forms _]] db))"
-                                   "  :evals (mapv #(datahike.api/pull db '[*] %) (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/code _]] db))})")])
+                              ;; each call's and eval's attributes, read from its datoms in the agent: what the claim is about, never the whole entity
+                              (str "(let [db (seon.agent/db) attrs (fn [e] (set (map :a (datahike.api/datoms db :eavt e))))]"
+                                   " {:calls (mapv attrs (datahike.api/q '[:find [?m ...] :where [?m :seon.model-call/forms _]] db))"
+                                   "  :evals (mapv attrs (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/code _]] db))})")])
                            {:config {:seon.config.ai/script 'seon.fixtures/calls-one-throws}})
         {:keys [calls evals]} (:value held)]
     (is (seq calls) (str "a turn left its model call: " (pr-str held)))
     (is (seq evals) "and its evals")
-    (is (every? #(not-any? #{:seon.model-call/errors :seon.model-call/finish} (keys %)) calls) (str "no errors or finish on a call: " (pr-str calls)))
-    (is (not-any? :seon.eval/page evals) (str "no page on an eval: " (pr-str evals)))))
+    (is (every? #(not-any? #{:seon.model-call/errors :seon.model-call/finish} %) calls) (str "no errors or finish on a call: " (pr-str calls)))
+    (is (not-any? #(contains? % :seon.eval/page) evals) (str "no page on an eval: " (pr-str evals)))))
 
 ;; Estimate: 1 agent setup (5 requests and files ~200k each) + 2 requests at ~30k = ~300000.
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 300000 :asks 2}} a-call-after-an-error-answer-still-runs
@@ -1476,14 +1477,14 @@
   ;; the model is called each turn, with the error in what it is sent (the attached task is :whole, so the check runs)
   (let [[_ end msgs] (in-agent (fn [{:keys [task ns]}]
                                       ["(in-ns 'seon.ref) (clojure.core/defn scan [& _] (throw (ex-info \"Wrong number of args (6) passed to: fn\" {})))"
-                                       (str "(seon.turn/work! {:task " (pr-str task) " :max-turns 2})")
-                                       "(mapv :content (:requests @seon.agent/state))"])
+                                       (str "(select-keys (seon.turn/work! {:task " (pr-str task) " :max-turns 2}) [:outcome])")
+                                       ;; answered in the agent: whether a request sent the error (each request is a whole context)
+                                       "(boolean (some #(clojure.string/includes? (str %) \"Wrong number of args (6)\") (map :content (:requests @seon.agent/state))))"])
                                     {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
         end (:value end)]
     (is (not= :error (:outcome end)) (str "the broken parser never ended the work: " (pr-str end)))
     (is (= :cap (:outcome end)) (pr-str end))
-    (is (some #(str/includes? (str %) "Wrong number of args (6)") (:value msgs))
-        (str "the model was sent the error: " (pr-str (:value msgs))))))
+    (is (true? (:value msgs)) "the model was sent the error")))
 
 ;; Estimate: 1 agent setup (5 requests and files ~200k each) + 3 requests at ~30k = ~300000.
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 300000 :asks 3}} an-agent-record-the-branch-holds-for-a-dead-process-becomes-this-processs
