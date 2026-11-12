@@ -25,12 +25,29 @@ done
 # where a regular file holds it, what the dump added is copied to DIR/dump-PID.txt, so the evidence holds every process's
 # fibers whatever its stderr is (data's overran problems step kept samples but no dump, 2026-11-12)
 typeset -A ERR AT
-for k in $KIDS; do
+# the processes signalled are read again now, not from the first ps: a test child forked since (an agent's next fork) was
+# left out (runtime's overrun, 2026-11-13: the shard and its agent signalled, the stuck test child never). They are the tree
+# under PID and every member of each process group in it (a group's member re-parented away is still the run's), each group
+# verified first (its leader is itself under PID: this run started it; AGENTS.md section 8); this run's own group (the caller's,
+# bin/evidence's own) is never signalled whole: its members in the tree are signalled one by one
+OWN=$(ps -o pgid= -p $$ | tr -d ' ')
+ps -axo pid=,ppid=,pgid= > "$D/ps-signal.txt"
+TREE=($(awk -v r="$ROOTP" '{p[$1]=$2; o[NR]=$1} END{for(i in o){x=o[i]; while(x in p){if(x==r){print o[i]; break} x=p[x]}}}' "$D/ps-signal.txt"))
+GROUPS=($(for k in $TREE; do awk -v k=$k '$1==k{print $3}' "$D/ps-signal.txt"; done | sort -u))
+MEMBERS=($TREE)
+for g in $GROUPS; do
+  [[ $g == $OWN || $g == <0-1> ]] && continue
+  # verified: the group's leader is itself under PID (this run started it), never a group met by chance
+  (( ${TREE[(Ie)$g]} )) || continue
+  MEMBERS+=($(awk -v g=$g '$3==g{print $1}' "$D/ps-signal.txt"))
+done
+for k in ${(u)MEMBERS}; do
   c=$(ps -o command= -p $k 2>/dev/null)
   [[ $c == *seon* || $c == *jolt* ]] || continue
   [[ $c == *bin/* || $c == *held* || $c == *zsh* || $c == *perl* ]] && continue
   f=$(lsof -a -p $k -d 2 -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)
   [[ -f $f ]] && { ERR[$k]=$f; AT[$k]=$(stat -f %z "$f") }
+  print -r -- "$k $c" >> "$D/signalled.txt"
   kill -INFO $k 2>/dev/null
 done
 sleep 1

@@ -19,7 +19,7 @@
   ([dir ran failures] (fx/write-verdicts! dir {:id (str "run " (random-uuid)) :tree "t"} ran failures)))
 
 ;; See docs/health.md#a-flaky-test
-(deftest a-digest-written-green-and-red-by-two-writers-is-flaky
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-digest-written-green-and-red-by-two-writers-is-flaky
   (with-dir
    (fn [dir]
      (rec! dir {'a/t {:test 'a/t :digest "d-flip" :pass 1 :fail 0 :error 0}
@@ -38,7 +38,7 @@
 
 ;; docs/merging.md#verdicts-are-a-cache: the judge and the merge gate tell main's reds from a task's own by the cache at each
 ;; test's digest, whoever ran it (Data model's real task was closed on reds red without its change, 2026-11-11)
-(deftest reds-at-names-each-test-red-at-its-digest-and-no-other
+(deftest ^{:seon.test/estimate {:ticks 1000000}} reds-at-names-each-test-red-at-its-digest-and-no-other
   (with-dir
    (fn [dir]
      (rec! dir {'a/red {:test 'a/red :digest "d1" :pass 0 :fail 1 :error 0}
@@ -50,7 +50,7 @@
      (is (= {} (fx/reds-at dir {})) "nothing asked, nothing red"))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
-(deftest a-red-is-reused-with-its-failures
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-red-is-reused-with-its-failures
   (with-dir
    (fn [dir]
      (rec! dir {'a/r {:test 'a/r :digest "d-red" :pass 0 :fail 0 :error 1}} {'a/r [{:type :error :message "thrown"}]})
@@ -59,7 +59,7 @@
        (is (= ["thrown"] (map :message (:failures r))))))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
-(deftest flaky-and-unreported-results-write-nothing
+(deftest ^{:seon.test/estimate {:ticks 1000000}} flaky-and-unreported-results-write-nothing
   (with-dir
    (fn [dir]
      (is (= {:recorded 0}
@@ -69,7 +69,7 @@
      (is (= {} (fx/stored-results dir '{a/f "d1" a/u "d2"}))))))
 
 ;; See docs/failure-points.md
-(deftest a-corrupt-verdict-file-is-an-error-never-a-miss
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-corrupt-verdict-file-is-an-error-never-a-miss
   (with-dir
    (fn [dir]
      (rec! dir {'a/t {:test 'a/t :digest "dc" :pass 0 :fail 0 :error 1}} {'a/t [{:type :error :message "thrown"}]})
@@ -99,7 +99,7 @@
 ;; See docs/merging.md#verdicts-are-a-cache: past the bound the least recently used verdict goes, green or red (an LRU cache), and a
 ;; file beside the verdicts (full-run.edn, the last full run's record) is no verdict and stays. Red before: every .edn was counted
 ;; and the oldest went, the full run's record among them, and every landing since batch 87 said "full run: none recorded"
-(deftest past-capacity-the-least-recently-used-goes
+(deftest ^{:seon.test/estimate {:ticks 3000000}} past-capacity-the-least-recently-used-goes
   (with-dir
    (fn [dir]
      (let [red {'a/r {:test 'a/r :digest "old-red" :pass 0 :fail 1 :error 0}}
@@ -123,7 +123,7 @@
        (is (<= (bytes-in dir) cap) "and the cache is under its bound")))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
-(deftest under-capacity-nothing-goes
+(deftest ^{:seon.test/estimate {:ticks 3000000}} under-capacity-nothing-goes
   (with-dir
    (fn [dir]
      (doseq [i (range 5)]
@@ -135,7 +135,7 @@
        (is (= 6 (count (present dir ['a/t] (map #(str "u" %) (range 6))))))))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
-(deftest a-read-keeps-a-verdict
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-read-keeps-a-verdict
   (with-dir
    (fn [dir]
      (doseq [dg ["k1" "k2" "k3"]] (rec! dir {'a/t {:test 'a/t :digest dg :pass 1 :fail 0 :error 0}}))
@@ -174,7 +174,7 @@
 (defn- clean-costs! [] (sh/sh "sh" "-c" (str "rm -rf " (cfg/checkout) "/target/tmp/verdicts-cost-*")))
 
 ;; See docs/merging.md#verdicts-are-a-cache
-(deftest a-write-under-capacity-costs-nothing-of-the-cache
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-write-under-capacity-costs-nothing-of-the-cache
   (try (cost/proof {:of 'seon.fx/write-verdicts! :input 'seon.results-test/cache-write-under
                     :n "verdicts already in the cache"
                     :work "the one verdict written, its key's history read and rewritten, and the size file read and rewritten; no verdict already there is looked at"
@@ -187,7 +187,7 @@
        (finally (clean-costs!))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
-(deftest a-write-past-capacity-counts-the-cache-once
+(deftest ^{:seon.test/estimate {:ticks 50000000}} a-write-past-capacity-counts-the-cache-once
   (try (cost/proof {:of 'seon.fx/write-verdicts! :input 'seon.results-test/cache-write-over
                     :n "verdicts in the cache"
                     :work "one count of the verdict files by metadata, one removal of the least recently used, and the key's history"
@@ -199,7 +199,7 @@
        (finally (clean-costs!))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
-(deftest a-green-is-found-by-its-file-never-read
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-green-is-found-by-its-file-never-read
   ;; measured 2026-10-29 on one scripted turn (docs/machine.md#what-a-turn-costs): a turn's plan asked for every test's
   ;; verdict, and read each green's file (2,280 reads, 76.8 MB and 25.1 M ticks) for an answer its existence gives
   (try (cost/proof {:of 'seon.fx/stored-results :input 'seon.results-test/cache-read
@@ -214,7 +214,7 @@
        (finally (clean-costs!))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
-(deftest a-verdict-keeps-what-its-test-spent-per-function
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-verdict-keeps-what-its-test-spent-per-function
   (with-dir
    (fn [dir]
      (rec! dir {'a/t1 {:test 'a/t1 :digest "d1" :pass 1 :fail 0 :error 0 :fns (into [(fc 'a/f 10 1000 900 64)] (for [i (range 40)] (fc (symbol "a" (str "g" i)) 1 50 50 0)))}
@@ -241,7 +241,7 @@
        (is (= '{a/t 40} (fx/typical-ms dir '[a/t])) "its typical ms is its newest verdicts'")))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
-(deftest a-test-history-costs-one-file-and-is-made-again-when-gone
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-test-history-costs-one-file-and-is-made-again-when-gone
   (with-dir
    (fn [dir]
      (doseq [i (range 3)] (rec! dir {'a/t {:test 'a/t :digest (str "h" i) :pass 1 :fail 0 :error 0 :ms (* 10 (inc i)) :ticks 100}}))
@@ -254,7 +254,7 @@
        (.delete (java.io.File. (str dir "/a/t/.recent")))
        (is (= '{a/t 40} (held)) "the history gone, it is made again from the verdicts there are")))))
 
-(deftest a-write-past-capacity-leaves-room-for-the-next
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-write-past-capacity-leaves-room-for-the-next
   (with-dir
    (fn [dir]
      (doseq [i (range 20)] (rec! dir {'a/t {:test 'a/t :digest (str "r" i) :pass 1 :fail 0 :error 0}}))
@@ -266,7 +266,7 @@
        (is (<= after low) "the cache ends the eviction's percent under its bound")
        (is (= after ledger) "and the ledger holds the true size, so the next write counts nothing")))))
 
-(deftest a-tests-typical-ms-is-the-median-of-its-digests
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-tests-typical-ms-is-the-median-of-its-digests
   (with-dir
    (fn [dir]
      (rec! dir {'a/t {:test 'a/t :digest "ms-1" :pass 1 :fail 0 :error 0 :ms 40}})
@@ -281,7 +281,7 @@
    :verdict {:ok? false :over [{:dim :ticks :n 10 :ratio 9.0}] :steeper [] :under [] :unmeasured []}})
 
 ;; See docs/merging.md#verdicts-are-a-cache
-(deftest a-reused-red-cost-proof-keeps-its-verdict
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-reused-red-cost-proof-keeps-its-verdict
   ;; root via one-wait, 2026-10-27: a reused red cost proof lost its {:rows :verdict}, so the problems
   ;; cost class stayed empty and bin/check problems waited forever. The verdict is kept with the red
   ;; and comes back as its fresh run reported it
@@ -305,7 +305,7 @@
                          (for [i (range reds) j (range 3)] {:type :fail :var (str "#'a.r-test/t" i) :message (str "boom " j) :expected "1" :actual "2"})))})
 
 ;; See docs/merging.md#verdicts-are-a-cache
-(deftest a-tests-answer-costs-its-reds-not-its-tests
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-tests-answer-costs-its-reds-not-its-tests
   ;; root, 2026-10-28: an agent's :tests answer of about 3 MB in one frame (every test's reports)
   (let [size #(count (pr-str (proofs/answer % '#{a.g-test/t0})))]
     (testing "green tests past the proofs cost nothing: n and 2n answer the same bytes but for the counts' digits"
@@ -321,7 +321,7 @@
         (is (not (contains? a :reds-left)))))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
-(deftest a-tests-answer-keeps-an-error-that-names-no-test
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-tests-answer-keeps-an-error-that-names-no-test
   ;; scale, 2026-10-30: {:pass 1 :error 1 :reports []}: the answer kept the counts and dropped the
   ;; run's own error (it names no test, so no test was red), and no one could read why
   (let [e {:type :error :seon.error/type :seon.test/unreadable-line :message "a line the test process sent does not read"}
@@ -330,7 +330,7 @@
     (is (= [(:message e)] (proofs/test-run-errors a)))))
 
 ;; docs/merging.md#a-slow-test-runs-last: slow every time, since load only slows a run; a fast green brings a test back
-(deftest a-slow-test-is-slow-every-time
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-slow-test-is-slow-every-time
   (with-dir
    (fn [dir]
      (rec! dir {'a/t {:test 'a/t :digest "s-1" :pass 1 :fail 0 :error 0 :ms 9000}

@@ -9,7 +9,7 @@
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
-(deftest what-a-held-command-left-running-ends-with-it
+(deftest ^{:seon.test/estimate {:ticks 3000000}} what-a-held-command-left-running-ends-with-it
   ;; deepseek-run4, 2026-11-07: bin/system stop left about 26 of a gate's test processes running. CMD's group ends at CMD's end, so a
   ;; --drain holder is answered then, not when they would have finished. A token names the process this test started
   (let [token (str "held-left-" (random-uuid))
@@ -47,7 +47,7 @@
 ;; docs/clocks.md#time-decides-the-owners-exceptions: a step past its bound is ended after its evidence and FAILS, as a test past
 ;; its bound is an error (the owner, 2026-11-12: "A test killed for running too long is a bug and it should be recorded as an
 ;; error and fixed"): named with its CPU seconds and the load, no green stored. Red before: it was a signal and nothing failed
-(deftest a-step-past-its-bound-is-ended-with-its-evidence-and-fails
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-step-past-its-bound-is-ended-with-its-evidence-and-fails
   (let [sel (str (System/getProperty "java.io.tmpdir") "/step-bound-" (random-uuid))
         _ (clojure.java.shell/sh "mkdir" "-p" sel)
         _ (doseq [[f t] {"steps" "laws\n" "steps-binary" "" "step-bounds" "laws 1\n"}] (spit (str sel "/" f) t))
@@ -69,7 +69,7 @@
     (is (and out (.isDirectory (java.io.File. (str out "/stores/laws-runs")))) "the unit's own runs directory, kept with its failed store")
     (some->> out (clojure.java.shell/sh "rm" "-rf"))))
 
-(deftest steps-are-branches-of-one-store
+(deftest ^{:seon.test/estimate {:ticks 20000000}} steps-are-branches-of-one-store
   ;; a store on disk of this test's own, the last resort: what is proved is how bin/check
   ;; opens its LMDB store from separate roots and reopens it after a kill; removed at the end
   (let [path (str (seon.config/checkout) "/target/check-test-" (random-uuid))
@@ -115,7 +115,7 @@
 (defn- entries "The names in directory p (none when it does not exist)." [p]
   (set (map #(.getName %) (or (.listFiles (java.io.File. p)) []))))
 
-(deftest a-check-leaves-its-store-as-it-found-it
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-check-leaves-its-store-as-it-found-it
   ;; task seon.check/a-run-takes-a-branch-and-deletes-it: a check step run against a store
   ;; works on a branch of it (its main, check-<step>) and deletes what it made when it is
   ;; green; a test's branch of the test store is deleted by its fixture (seon.test-store/test-branch!);
@@ -145,7 +145,7 @@
           (is (= (disj in1 b1) (disj in2 b2)) "and nothing else changed")))
       (finally (seon.lib/remove-tree! path (str path "-agents") runs)))))
 
-(deftest the-probe-says-what-it-took
+(deftest ^{:seon.test/estimate {:ticks 200000}} the-probe-says-what-it-took
   ;; the system check awaits the probe's
   ;; own event for its third message, not a window
   (let [ev (a/chan 4)
@@ -156,7 +156,7 @@
     (is (= [[{:type :probe :tag "one" :got 1}] [{:type :probe :tag "one" :got 2}]]
            (map #(mapv (fn [e] (dissoc e :at-ms)) (:events %)) [o1 o2])))))
 
-(deftest every-test-root-starts-through-start-root!
+(deftest ^{:seon.test/estimate {:ticks 50000000}} every-test-root-starts-through-start-root!
   ;; read from the program of test/ (the
   ;; compiler's references, not a text search over files), no test var but the helper's one
   ;; launcher runs bin/system or `./seon root` through binary-sh, so every test root names its
@@ -178,7 +178,7 @@
     (is (seq files))
     (is (= #{'seon.test-store/root-sh} launchers))))
 
-(deftest a-starter-that-is-gone-leaves-no-fifo-after-the-next-starter
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-starter-that-is-gone-leaves-no-fifo-after-the-next-starter
   ;; task seon.check/a-killed-starter-leaves-no-fifo: a starter removes its own fifo when it ends
   ;; or is terminated; SIGKILL runs nothing, so the next starter reclaims it (bin/held --reclaim):
   ;; the fifo of a pid that is no process goes, a live pid's (this test process) and any file not
@@ -201,7 +201,7 @@
       (is (exists? other) "a file not named for a starter stays")
       (finally (seon.lib/remove-tree! dir)))))
 
-(deftest a-stop-ends-on-its-holders-end-and-a-gone-holder-answers-at-once
+(deftest ^{:seon.test/estimate {:ticks 15000000}} a-stop-ends-on-its-holders-end-and-a-gone-holder-answers-at-once
   ;; the first bin/update hung for 10 minutes in `bin/system stop`: it read a fifo it held open
   ;; read-write itself, so EOF could never come, and a holder that never wrote left it waiting for
   ;; ever. bin/held --end signals the holder and waits on the fifo the holder keeps open for its
@@ -238,7 +238,7 @@
 
 ;; ---- task seon.check/health-is-what-a-branch-caused ------------------------------------------
 
-(deftest a-failed-seed-says-failed
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-failed-seed-says-failed
   ;; a single mode's seed that fails (its store a regular file, which no store opens) prints why
   ;; and the mode's verdict line; before, `run seed 2000 > /dev/null || exit 1` exited 1 with nothing.
   ;; A store SEON_STORE names is the caller's (docs/checks.md#modes): keying the checks' own store once
@@ -255,7 +255,7 @@
       (is (= "not a store" (slurp path)) "and the store the caller named is never removed or seeded over")
       (finally (seon.lib/remove-tree! path)))))
 
-(deftest a-stale-binary-is-refused
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-stale-binary-is-refused
   ;; bin/check runs no binary built from another tree: run from a checkout of its own (this one's
   ;; bin/, a git repository of its own) whose target/seon.tree names another tree, a mode is
   ;; refused, naming both trees, before the binary runs (main's binary in a worktree whose config
@@ -284,7 +284,7 @@
                           (range 1 (inc n))))
      (symbol "app.check" (str "v" n))]))
 
-(deftest the-health-step-reads-the-task-files-relative-to-the-checkout
+(deftest ^{:seon.test/estimate {:ticks 300000}} the-health-step-reads-the-task-files-relative-to-the-checkout
   ;; test-runner/health!: the base's task files are read from the base's tree extracted elsewhere, so the step takes where the
   ;; tree keeps them, relative to it (an absolute one read no base task), and from the tree's layout
   ;; (:seon.config.source/tasks-dir), never this process's own task dir: bin/check points that at its run's own (SEON_TASKS), and
@@ -299,7 +299,7 @@
 ;; namespace this image has loaded under another target (across the rename of seon.system to seon.graph, seon.server's `c` names
 ;; one in each tree) is a retargeted alias, which Jolt refuses. This image has loaded seon.check-test, `contract` naming
 ;; seon.contract; a clone of this checkout's HEAD gets a base commit where that alias names seon.error, and a head restoring it
-(deftest the-health-step-reads-a-base-whose-alias-the-head-retargets
+(deftest ^{:seon.test/estimate {:ticks 100000000}} the-health-step-reads-a-base-whose-alias-the-head-retargets
   (let [co (str (seon.config/checkout))
         dir (str co "/target/tmp/health-rename-" (random-uuid))
         repo (str dir "/repo")
@@ -340,7 +340,7 @@
 ;; docs/references.md#task-references: a task's citation of nothing is refused at its write (owner, 2026-11-09); the health step loads
 ;; the tree's tasks through that one checked write, so a task citing a key no program holds is health's typed refusal, never a lookup
 ;; Datahike throws (batch 15: a plan citing :db/contentId in one backtick threw out of health before any row)
-(deftest a-task-citing-nothing-is-the-health-steps-typed-refusal
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-task-citing-nothing-is-the-health-steps-typed-refusal
   (let [dir (str (System/getProperty "java.io.tmpdir") "/health-cite-" (random-uuid))
         tasks (str dir "/" (#'test-runner/tasks-dir))
         _ (clojure.java.shell/sh "mkdir" "-p" tasks (str dir "/docs"))
@@ -351,14 +351,14 @@
     (is (= {:seon.error/type :seon.db/no-target :target [:schema/key :no.such/key] :by "zz/t"} (select-keys r [:seon.error/type :target :by])) (pr-str r))
     (is (str/includes? (str (:seon.error/message r)) "two backticks") "its message says what to write for a name that is no citation")))
 
-(deftest a-problem-the-base-had-is-not-the-branchs
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-problem-the-base-had-is-not-the-branchs
   (let [[base] (catch-db (ts/test-db) 1)
         h (test-runner/branch-health base base nil)]
     (is (pos? (get-in (seon.problems/health base) [:classes :unnamed-site :n])) "the base has an open problem")
     (is (= [] (:caused h)) "the branch changed nothing, so it caused none")
     (is (every? true? (vals (:checks h))) "and its health is green")))
 
-(deftest a-problem-the-branch-made-fails-it
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-problem-the-branch-made-fails-it
   (let [[base] (catch-db (ts/test-db) 1)
         [head v] (catch-db base 2)
         h (test-runner/branch-health base head nil)]
@@ -370,14 +370,14 @@
     (testing "a class no verdict judges (an attention class never fails a branch) is refused, never a green"
       (is (thrown? Exception (test-runner/branch-health base head [:stale-section]))))))
 
-(deftest a-class-the-health-step-does-not-read-is-refused
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-class-the-health-step-does-not-read-is-refused
   (let [[base] (catch-db (ts/test-db) 1)
         [head] (catch-db base 2)]
     ;; the running system's state is no branch's content: no verdict of caused-split judges it
     (doseq [c [:stalled :stale-pin :stale-binary :unsynced :problem-unlinked]]
       (is (thrown? Exception (test-runner/branch-health base head [c])) (str (name c) " is no verdict of caused-split")))))
 
-(deftest the-health-steps-checks-are-the-classes-caused-reads
+(deftest ^{:seon.test/estimate {:ticks 10000000}} the-health-steps-checks-are-the-classes-caused-reads
   (let [[base] (catch-db (ts/test-db) 1)
         attention? (:seon.problems/attention (contract/properties :seon.problems/class))]
     (is (= (into #{} (comp (remove attention?) (map #(keyword (str "no-" (name %))))) seon.problems/caused-classes)
@@ -386,7 +386,7 @@
       (is (every? seon.problems/caused-classes (map :class (:rows (seon.problems/caused-split base head))))
           "every class caused-split answers is one the health step judges"))))
 
-(deftest the-base-is-the-merge-base-or-the-previous-main
+(deftest ^{:seon.test/estimate {:ticks 10000000}} the-base-is-the-merge-base-or-the-previous-main
   ;; seon.fx/base-commit in a repository of its own: a branch is held to its merge base with main;
   ;; main's own commit to the previous main when clean, to itself when changed; a branch with no
   ;; commits of its own to its own start; main's first commit has none
@@ -410,7 +410,7 @@
           (is (= c (seon.fx/base-commit dir)) "main with an uncommitted change: main itself")))
       (finally (seon.lib/remove-tree! dir)))))
 
-(deftest the-tree-id-reads-what-changed-and-is-the-tree-hashed-whole
+(deftest ^{:seon.test/estimate {:ticks 100000000}} the-tree-id-reads-what-changed-and-is-the-tree-hashed-whole
   ;; task seon.fx/inputs-hash-only-what-changed: tree-id starts from the checkout's own index, whose stat cache
   ;; skips every file that did not move (0.2 s against 1.1 s on this repository), and answers the tree a fresh index
   ;; of HEAD plus `add -A` would: for a clean tree, an edit, a new file, a deleted file, a staged and an ignored one;
@@ -455,7 +455,7 @@
         (let [before (index-bytes)] (seon.fx/tree-id dir) (is (= before (index-bytes)) "tree-id leaves the repository's index as it was")))
       (finally (seon.lib/remove-tree! dir)))))
 
-(deftest a-commit-to-notes-moves-no-tree-id-and-one-to-src-does
+(deftest ^{:seon.test/estimate {:ticks 100000000}} a-commit-to-notes-moves-no-tree-id-and-one-to-src-does
   ;; task seon.fx/the-tree-id-is-what-is-read: claude_scratch/ is no input (every merge appends its log line
   ;; there), so a notes-only commit moves no digest and rebuilds nothing; a source commit does
   (let [dir (str (seon.config/checkout) "/target/runs/check-test-tree-" (random-uuid))
@@ -490,13 +490,13 @@
               (is (same) "and agree with a note written")))))
       (finally (seon.lib/remove-tree! dir)))))
 
-(deftest bin-tree-names-the-tree-tree-id-names
+(deftest ^{:seon.test/estimate {:ticks 10000000}} bin-tree-names-the-tree-tree-id-names
   ;; bin/check compares the binary's record (bin/build writes it through bin/tree) with bin/tree;
   ;; root decides whether its source's inputs are its binary's with seon.fx/tree-id: one tree
   (let [dir (seon.config/checkout)]
     (is (= (seon.fx/tree-id dir) (str/trim (:out (clojure.java.shell/sh (str dir "/bin/tree") dir)))))))
 
-(deftest a-stalled-test-is-named-an-overran-one-ended-and-the-run-goes-on
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-stalled-test-is-named-an-overran-one-ended-and-the-run-goes-on
   ;; root, 2026-10-26 (the owner: "the hangs are super bad especially if you don't notice"): a test
   ;; quiet past its own stall bound is named, not ended (bin/stalls, which bin/test runs beside its
   ;; shards); its bound is its line in the plan's stall bounds (k times its own last run), the floor
@@ -530,7 +530,7 @@
       (is (= ["parked 137" "1" "0" "evidence"] [parked no nd ev]) "the parked test past its end bound: its shard ended by SIGKILL, OVERRAN recorded once with its bound, its evidence beside the log")
       (finally (seon.lib/remove-tree! d)))))
 
-(deftest a-merges-verdict-is-its-exit-statuses-and-it-writes-its-line
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-merges-verdict-is-its-exit-statuses-and-it-writes-its-line
   ;; bin/prove --merge's verdict comes from prove's exit status alone (contracts and smoke are steps of
   ;; its run: task seon.proofs/the-merge-runs-no-step-twice), names each red from its log, and prints
   ;; its line for the merge commit's message (so a line cannot say green over a red exit; git keeps
@@ -555,7 +555,7 @@
       (finally (seon.lib/remove-tree! dir)))))
 
 ;; docs/checks.md#modes: the checks' seeded store is remade past its bound, as nothing in it is kept and its file and roster only grow
-(deftest a-seeded-store-past-its-bound-is-removed
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-seeded-store-past-its-bound-is-removed
   (let [dir (str (seon.config/checkout) "/target/tmp/seed-bound-" (random-uuid))]
     (.mkdirs (java.io.File. dir))
     (spit (str dir "/data.mdb") "0123456789")
@@ -568,7 +568,7 @@
       (finally (seon.lib/remove-tree! dir)))))
 
 
-(deftest a-feed-that-ends-unsettled-ends-the-wait-that-names-it
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-feed-that-ends-unsettled-ends-the-wait-that-names-it
   ;; docs/checks.md#modes (nothing hangs: docs/errors.md#nothing-crashes-and-nothing-hangs; a live producer that owes a mark is
   ;; seon.web/a-tabs-first-keyframe-settles-on-its-own): seon.check/idle waits on a feed only its reader thread fills. A stream that
   ;; sends bytes and then ends (or throws on read) without a settled mark answers the wait false, so
@@ -591,7 +591,7 @@
 ;; docs/processes.md#a-stop-reaps-every-child: one rule decides what a stop left running, for drain, lifecycle and orphan
 ;; (seon.check/ran-nothing-more?). Batch 46's lifecycle left {:pid 87561 :ppid 1 :stat "?NE" :command "(seon)"}: an orphan
 ;; exiting, which a rule counting only zombies read as running
-(deftest a-process-that-can-run-nothing-more-is-not-left-by-a-stop
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-process-that-can-run-nothing-more-is-not-left-by-a-stop
   (let [self 4242]
     (is (seon.check/ran-nothing-more? {:pid 87561 :ppid 1 :stat "?NE" :command "(seon)"} self) "an orphan exiting")
     (is (seon.check/ran-nothing-more? {:pid 9 :ppid 1 :stat "Z" :command "(seon)"} self) "an orphan zombie")
@@ -601,7 +601,7 @@
 
 ;; docs/processes.md#a-stop-reaps-every-child: batch 58b's lifecycle left {:pid 74564} with no ps row, under load: kill 0
 ;; found it, then ps listed it no more, so it had exited between the two reads, and the check counted it left
-(deftest a-pid-gone-between-two-reads-is-not-left-by-a-stop
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-pid-gone-between-two-reads-is-not-left-by-a-stop
   (let [self 4242]
     (is (not (seon.check/left? nil false self)) "no ps row and kill 0 finds it no more: it exited, not left")
     (is (seon.check/left? nil true self) "no ps row but still there when asked again: left")
