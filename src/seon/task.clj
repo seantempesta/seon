@@ -813,7 +813,7 @@
   when e is none of them (retracted, another kind, an agent root never started, or root
   before its first boot: (root db) is nil then, as on a store an earlier build left with
   a quiescent fact and no boot). One seek of e's identity per kind, then one pull (a probe pull first pulled twice: 56.8 MB
-  and 12.8M ticks over 539 tasks, against 42.8 MB and 8.9M, measured 2026-11-12)."
+  and 12.8M ticks over 539 tasks, against 42.8 MB and 8.9M)."
   {:malli/schema [:=> [:cat :seon.host/db :int]
                   [:maybe [:or [:tuple [:= :task] :seon.task/own] [:tuple [:= :agent] :seon.reconcile/agent] [:tuple [:= :root] :map]]]]}
   [db e]

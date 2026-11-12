@@ -207,7 +207,7 @@
   "registry with changes (key -> form) compiled in: each changed key and every form that names one, transitively, compiled
   again (a compiled schema keeps what it named compiled in), every other name read from registry as it is. A changed form
   that does not compile throws malli's ex-info, as registry-of does. Cost: the changed keys' dependents, not every form
-  (40 of 811 forms for :seon.task/kind: 253k ticks and 1.9 MB against 2.2M and 16.7 MB, measured 2026-11-12)."
+  (40 of 811 forms for :seon.task/kind: 253k ticks and 1.9 MB against 2.2M and 16.7 MB)."
   {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :seon.host/registry]}
   [changes]
   (let [affected (loop [todo (vec (keys changes)) seen #{}]
