@@ -603,7 +603,7 @@
                                                                                     [:closed [:vector [:map [:class :keyword] [:message :string]]]]]]
                   [:=> [:cat :seon.host/db :seon.host/db :seon.merge/changes [:sequential :seon.host/datom]] [:map [:caused [:vector :string]] [:attention [:vector :string]] [:rows [:vector [:map [:class :keyword] [:message :string]]]]
                                                                                     [:closed [:vector [:map [:class :keyword] [:message :string]]]]]]]}
-  ([base head] (caused-split base head (pm/delta-changes base head #{})))
+  ([base head] (caused-split base head (pm/delta-changes base head)))
   ([base head ch] (caused-split base head ch (caused-datoms base head)))
   ([base head ch moved]
   (let [{:keys [made closed]} (split-rows base head {} ch moved)
@@ -666,7 +666,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :int] [:vector :string]]}
   [db e]
   (let [ks (mapv (comp sedn/decode :v) (d/datoms db :eavt e :seon.task/changed))
-        now (pm/program-of db ks #{})]
+        now (pm/program-of db ks)]
     (source/changed-files db (into {} (for [[kind x :as k] ks]
                                         [k [nil (or (now k) (when (= :form kind) {:ns (symbol (first (str/split x #"/" 2)))}))]])))))
 
@@ -941,7 +941,7 @@
   {:malli/schema [:=> [:cat :seon.problems/report :seon.host/db :seon.host/db [:sequential :any]] :seon.problems/report]}
   [prev base head moved]
   (let [ans (answers head)
-        {:keys [made closed]} (split-rows base head ans (pm/delta-changes base head #{} moved) moved)
+        {:keys [made closed]} (split-rows base head ans (pm/delta-changes base head moved) moved)
         gone (into #{} (map :signature) closed)
         current (fn [row] (assoc row :answered-by (get-in ans (if (:signature row) [:signature (:signature row)] [:from (:judged row)]) [])))
         carried (fn [c] (into (into [] (comp (remove #(gone (:signature %))) (map current)) (get-in prev [:classes c :rows]))

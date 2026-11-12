@@ -1628,40 +1628,37 @@
      :sizes [30 100 300]}))
 
 (deftest a-branchs-own-nodes-follow-its-own-datoms
-  ;; docs/sharing.md#what-a-branchs-nodes-are: an index node's address is
-  ;; its content's hash, so a branch that takes main's changes by merge names main's nodes for them, and holds as its own
-  ;; only the nodes its own datoms are in. With random addresses every node a merge rewrote stayed the branch's own: 66 to
-  ;; 81 percent of a long-lived branch's nodes after 100 merges in the lab, against 6 to 9 with content addresses. A store
-  ;; on disk of its own, the last resort: a node has an address only once a durable store holds it; removed at the end.
-  ;; Its seed is 1000 datoms of the example program: at 550 (87 nodes) one node is 1.1% of the tree, so one more config
-  ;; key on main moved a B-tree split and turned it red, 9 of 87 against the tenth (batch 20, 2026-11-10); measured on
-  ;; that tree: 5 of 108 own at 1000, 4 of 158 at 2000, the bound five nodes clear, for about 1 s more than 550
+  ;; docs/sharing.md#what-a-branchs-nodes-are: a node's address is its content's hash, so a branch that takes main by the merge
+  ;; agents run (seon.merge/rebase) names main's nodes and owns only its own datoms' paths. A store on disk of its own (a node
+  ;; has an address only once stored), its seed 1000 datoms, so one node is about 1% of the tree
   (let [path (str (seon.config/checkout) "/target/db-test-nodes-" (random-uuid))
         {cfg :cfg main :conn} (pdb/open! :lmdb path 1000 :db)]
       (let [b (keyword (str "test-" (random-uuid)))
             _ (d/branch! main :db b)
-            br (pdb/connect (assoc cfg :branch b))
+            br (atom (pdb/connect (assoc cfg :branch b)))
             addrs (fn [db] (let [v (volatile! #{})] (org.replikativ.persistent-sorted-set/walk-addresses (:eavt db) (fn [a] (when a (vswap! v conj a)) true)) @v))
+            ;; the merge an agent runs (seon.agent/merge-main!): the branch rebased onto main's commit, its head moved once
             merge! (fn []
-                     (let [base (d/commit-as-db br (d/merge-base br b :db))
-                           r (seon.merge/delta-three-way base @br @main #{})]
-                       (d/merge-db br #{:db} (vec (seon.merge/merge-tx @br base @main (:apply r) #{})))))
-            private (fn [] (let [m (addrs @main) o (addrs @br)] [(count (remove m o)) (count o)]))]
+                     (let [mconn (pdb/connect (assoc cfg :branch :db))
+                           base (d/commit-as-db @br (d/merge-base @br b :db))
+                           r (seon.merge/rebase mconn base @@br @mconn b {} [])]
+                       (try (d/force-branch! (:db r) b #{(d/commit-id @mconn)} {:expected-current-commit (d/commit-id @@br)})
+                            (finally (dw/abandon-pending! mconn) (d/release mconn)))
+                       (d/release @br)
+                       (reset! br (pdb/connect (assoc cfg :branch b)))))
+            private (fn [] (let [m (addrs @main) o (addrs @@br)] [(count (remove m o)) (count o)]))]
         (try
           ;; main grows by a namespace a round, and the branch takes each by merge; then the branch writes one note
           (doseq [i (range 20)]
             (let [nsym (symbol (str "app.c" i))]
               (d/transact main (vec ((mt/code nsym (str "(ns " nsym ")\n(defn f [] " i ")\n")) @main)))
               (merge!)))
-          (d/transact br [{:note/agent :t :note/text "the branch's own"}])
+          (d/transact @br [{:note/agent :t :note/text "the branch's own"}])
           (let [[own total] (private)]
-            (is (:crypto-hash? (:config @br)) "the store's nodes are addressed by their content")
-            ;; the branch's own nodes are its one write's path and a few leaves, under a tenth of the tree (Sean, 2026-11-10; measured 9 of
-            ;; 156 on a seed of 2000, 5 of 85 on this one): persistent-sorted-set is a plain B-tree whose leaf cut depends on insertion order, and seon.merge/merge-tx inserts
-            ;; main's datoms in another order than main did, so a branch can own leaves holding only main's datoms (the literal 8 passed
-            ;; by luck). Random addresses kept 76 of 157 (48%) after the same 20 merges, red here; docs/sharing.md#what-a-branchs-nodes-are
+            (is (:crypto-hash? (:config @@br)) "the store's nodes are addressed by their content")
+            ;; its one write's path and a few leaves, under a tenth of the tree (Sean, 2026-11-10)
             (is (<= own (quot total 10)) (str own " of " total " nodes are the branch's own after 20 merges and one write of its own")))
-          (finally (d/release br) (d/release main) (seon.lib/remove-tree! path))))))
+          (finally (d/release @br) (d/release main) (seon.lib/remove-tree! path))))))
 
 (deftest a-branchs-own-entity-schema-is-the-one-its-writes-are-held-to
   ;; docs/storage.md#the-write-checks-every-entity-it-touches: the per-datom check read a branch's own schemas and the

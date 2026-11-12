@@ -103,7 +103,7 @@ One merge function takes different options for each case ([sharing](sharing.md#w
 - **Options:** which keys (a cherry-pick has no second parent), `-X theirs` or `-X ours`, and which data (task ``seon.merge/a-merge-takes-options``).
 - **A refused merge is a normal step:** main moved, the error says so, the agent merges main and tries again.
 
-An agent's first act is to merge, so a branch with no agent costs nothing. A conflict surfaces as unmerged entries, which the status and done rule read. "Behind" is a function of state, readable with no process. A schema change a merge brings is checked against the values the branch holds (``my.schema`` `usage-check`).
+An agent's first act is to merge, so a branch with no agent costs nothing. A conflict with main is computed (```seon.agent/main-conflicts```), which the status and done rule read. "Behind" is a function of state, readable with no process. A schema change a merge brings is checked against the values the branch holds (``my.schema`` `usage-check`).
 
 ## Messages
 

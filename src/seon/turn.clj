@@ -344,7 +344,7 @@
          ;; the main and merge base the read heard, decided as a model turn's are, before its request is drawn
          _ (when take? (when-let [tx (not-empty (main-base-tx))] (agent/transact! tx) (agent/commit!)))
          ;; the run's own max-turns, as a model turn's basis holds it (the agent's on main, else the config's: root passes them alike)
-         max-turns (or (:seon.agent/max-turns (d/entity (agent/db) [:seon.agent/key k]))
+         max-turns (or (some-> (agent/heard-main) (d/entity [:seon.agent/key k]) :seon.agent/max-turns)
                        (cfg/value :seon.config.agent/max-turns))
          ;; the turn a model would take now: every record before it is in the request
          ;; an observer's: the branch as it is, nothing committed for it
@@ -372,7 +372,7 @@
   {:malli/schema [:=> [:cat [:maybe :seon.task/id] [:maybe :string] :any :boolean] :nil]}
   [task message evals turn?]
   (let [n (when turn? (begin! task) (inc (agent/turn-now)))
-        ;; as a model's turn does (work!): main moved, its program comes in now, so an outside agent is on main's code too and a conflict is an unmerged entry it sees
+        ;; as a model's turn does (work!): main moved, its program comes in now, so an outside agent is on main's code too and a conflict is one its status names (seon.agent/main-conflicts)
         _ (when (and turn? (agent/main-moved? (:base @agent/state) (agent/heard-main))) (branch/merge-main!))
         [id basis] (when turn? (open-turn! task n 1 false nil))
         _ (when turn? (agent/transact! [{:seon.model-call/id id :seon.model-call/basis basis}]) (agent/commit!))
@@ -425,8 +425,8 @@
   (let [;; read before begin!, which starts the turn state anew when it has none yet
         stop (get-in @agent/state [:turn :stop])
         _ (begin! task)
-        ;; main taken now, as work! takes it at each start, so green work is never judged for being behind; a conflict is an
-        ;; unmerged entry, a reason the status says. Asked of main itself, never of what this process last heard of it (an
+        ;; main taken now, as work! takes it at each start, so green work is never judged for being behind; a conflict writes
+        ;; nothing and is a reason the status says. Asked of main itself, never of what this process last heard of it (an
         ;; outside agent's green task was judged behind 78 with that guard, 2026-11-11); a branch at main's head brings nothing
         _ (branch/merge-main!)
         _ (observe task)
@@ -448,11 +448,9 @@
         _ (swap! agent/state assoc :turn {} :requests nil)
         _ (agent/clear-end!)
         _ (begin! task)
-        ;; the agent's own budget (:seon.agent/max-turns on main, raised to extend it; root passes it) bounds the loop, and is
-        ;; the cap its page's turn line reads (seon.render.ui/agent-state)
+        ;; the run's budget, as root passed it (root writes the agent's :seon.agent/max-turns on main, seon.task/start-tx; the
+        ;; branch never writes the agent's record: one writer a key, so a merge of main has nothing of it to conflict on)
         max-turns (:max-turns arg)
-        _ (when-not (= max-turns (:seon.agent/max-turns (d/entity (agent/db) [:seon.agent/key (:key @agent/state)])))
-            (agent/transact! [{:seon.agent/key (:key @agent/state) :seon.agent/max-turns max-turns}]))
         t0-task (task/task (agent/db) task)
         merge? (task/merges-on? (agent/db) task)
         merge-cfg (r/merge-limits t0-task)]
@@ -480,7 +478,7 @@
                    (fn []
                      (try
                        ;; main moved since the last turn: merge it in now, so the agent works on main's program and
-                       ;; wiki as they are and a conflict is an unmerged entry it sees and resolves before it can
+                       ;; wiki as they are and a conflict is one its status names, which it settles before it can
                        ;; merge (the owner, 2026-10-30: "updates as often as we can")
                        (when (agent/main-moved? (:base @agent/state) (agent/heard-main)) (branch/merge-main!))
                        (let [obs (observe task)
@@ -493,7 +491,7 @@
                              ;; what the task references, as facts (its proofs, its plan's cites): never its plan re-parsed
                              ;; here, by a seon.ref/scan the agent may have broken (a broken scan would end the run :error)
                              hairy (when (and merge? (not (contract/error? s)))
-                                     (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :merge-turns (:merge-turns st)
+                                     (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :db (agent/db) :merge-turns (:merge-turns st)
                                                                 :refs (into (set (:proofs (:seon.task/accumulated (:task obs))))
                                                                             (keep #(get-in % [:seon.cite/target :var/name]))
                                                                             (task/task-cites (agent/db) task))})))]
@@ -503,7 +501,11 @@
                            ;; (a green run that ended behind main's newer merges was judged behind: swarm's s9)
                            (and (not no-status?) (empty? reasons))
                            (let [m (branch/merge-main!)]
-                             (if (and (empty? (:applied m)) (empty? (:conflicts m))) (ended st :green (unjudged-reason s) nil) [::next st]))
+                             (cond (and (empty? (:applied m)) (empty? (:seon.merge/conflicts m))) (ended st :green (unjudged-reason s) nil)
+                                   ;; main conflicts with the branch: the main it heard is recorded as a turn records it (main-base-tx), so the
+                                   ;; next status reads the conflicts (seon.agent/main-conflicts) and the agent resolves them in a turn
+                                   (seq (:seon.merge/conflicts m)) (do (agent/transact! (main-base-tx)) [::next st])
+                                   :else [::next st]))
                            ;; the agent's own fail! is its verdict, at the cap too; a wait on the last turn is
                            ;; the budget spent, so the run is :cap, never :waiting (its session parks either way)
                            (= :failed (:outcome stop)) (ended st :failed (:reason stop) nil)

@@ -1852,6 +1852,21 @@
   [html] (-> html (str/replace #"(?s)<pre[^>]*>.*?</pre>" " ") (str/replace #"(?s)<code[^>]*>.*?</code>" " ")
              (str/replace #"(?s)<span[^>]*seon-print-string[^>]*>.*?</span>" " ") (str/replace #"<[^>]+>" " ")))
 
+
+(deftest a-merge-conflict-shows-its-three-sides
+  ;; docs/agent.md#merging: a merge conflict is data (:seon.merge/data-conflict, computed by the one merge, never stored), drawn by its
+  ;; schema's render: which attribute of which entity, its base, each side's end (a removal said as such), and the form that settles it; the
+  ;; status the agent reads and the person's page draw it by that one render
+  (let [c {:seon.merge/entity 4242 :seon.merge/attribute :demo.note/text :seon.merge/base "draft" :seon.merge/ours "mine" :seon.merge/theirs :seon.merge/gone
+           :seon.merge/resolve '(my.branch/merge-main! {[4242 :demo.note/text] value})}
+        html (h/html (ui/status-hiccup {} {:proofs [] :unmerged [c]}))]
+    (is (str/includes? html ":demo.note/text") html)
+    (is (str/includes? html "4242") "the entity")
+    (is (every? #(str/includes? html %) ["base" "draft" "yours" "mine" "main's" "removed"]) html)
+    (is (str/includes? html "my.branch/merge-main!") "the form that settles it")
+    (is (not (str/includes? html "resolve!")) "never the old form")
+    (is (= #'ui/data-conflict (some-> (r/render-for (seon.db/index) :seon.merge/data-conflict :seon.render/hiccup) requiring-resolve)) "drawn by the render its schema declares")))
+
 (deftest a-person-reads-no-markup
   ;; docs/render.md#the-page: what a person reads is drawn, never the marks that describe it: no Markdown delimiter, no escaped quote of
   ;; a printed form, no printer's tree heading, outside code (the owner, on the session pages: "we still aren't rendering html")
@@ -2330,7 +2345,7 @@
             a (seon.db/eid ours :seon.agent/key "b1/a3")
             st (seon.ctx.status/status ours (:tree (seon.ctx/build (seon.db/index) ours a :b)) {})
             b (d/commit-as-db (:store ours) base)
-            ch (seon.merge/delta-changes b ours #{})]
+            ch (seon.merge/delta-changes b ours)]
         (is (not (contains? st :caused)) "nothing caused")
         (is (= (seon.merge/readiness b ours (d/commit-as-db (:store ours) main)) (:merge st))
             "the merge's readiness, as its own function answers it")

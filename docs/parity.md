@@ -40,7 +40,7 @@ Each v1 function of the agent's REPL.
 - `my.program/unmap-subject!` (refuses while a referrer remains) → plain `ns-unmap`, recorded on the branch (`seon.repl/unmapped`); a referrer fails where it loads: partial.
 - `my.web/fetch`, `search` → none (no `:web` effect): missing.
 - `my.fs/*`, `my.edit/*`, `my.shell/run!` and their policy → none; outside-world calls go through the effect owner (`my.fx/call`): missing.
-- `my.schema/register!`, `my.branch/merge-main!`, `unmerged`, `resolve!` → the same names: present.
+- `my.schema/register!`, `my.branch/merge-main!`, `unmerged` → the same names: present; `resolve!` is the resolutions of `merge-main!`.
 - an effect's receipt committed before its handler runs (`seon.effect`) → only the outcome, in the answer of the eval that asked: missing.
 
 ## Tasks, merges, tests

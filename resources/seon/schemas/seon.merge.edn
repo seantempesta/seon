@@ -1,7 +1,6 @@
 ;; The program merge's named schemas (session M1's proto.merge.edn).
-{:seon.merge/data-attrs [:or [:= :all] [:set :keyword]]
- ;; a definition (var, multimethod method, protocol extension, namespace), a form (the
- ;; unit main evaluates), or a datum of declared data
+{;; a definition (var, multimethod method, protocol extension, namespace), a form (the
+ ;; unit main evaluates), or a stated entity (a section, a schema entry, a config entry, a script)
  :seon.merge/program-key [:or [:tuple [:= :var] :qualified-symbol]
                    [:tuple [:= :method] :qualified-symbol :any]
                    [:tuple [:= :impl] :qualified-symbol :string]
@@ -10,9 +9,7 @@
                    [:tuple [:= :schema] :qualified-keyword]
                    [:tuple [:= :section] :string]
                    [:tuple [:= :config] :qualified-keyword]
-                   [:tuple [:= :script] :string]
-                   [:tuple [:= :datum] :int :keyword]
-                   [:tuple [:= :datum] :int :keyword :any]]
+                   [:tuple [:= :script] :string]]
  ;; a definition's key: what a form defines
  :seon.merge/def-key [:or [:tuple [:= :var] :qualified-symbol]
                       [:tuple [:= :method] :qualified-symbol :string]
@@ -48,5 +45,20 @@
  ;; a merge whose program, merged into main, leaves a reference naming nothing: each live form calling a definition it removes
  ;; (seon.merge/dangling, docs/merging.md#a-merge-leaves-no-name-unbound)
  :seon.merge/dangling [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/dangling]] [:dangling [:vector [:map [:ref :qualified-symbol] [:form :string]]]]]]
- :seon.merge/unmerged [:and :seon.error/base [:map [:seon.error/type [:enum :seon.merge/unmerged]]
-                                               [:unmerged [:vector :any]]]]}
+ ;; the one merge's conflict and refusals (seon.merge/conflicts, seon.merge/refusal; docs/agent.md#merging)
+ :seon.merge/entity [:int {:description "The entity a conflict is about: its entity id (a pull of it reads the rest)."}]
+ :seon.merge/attribute [:keyword {:description "The attribute a conflict is about."}]
+ :seon.merge/gone [:= {:description "A conflict's end where that side removed the value; as a resolution, it retracts it."} :seon.merge/gone]
+ :seon.merge/value [:any {:description "The member a conflict is about, only on an attribute of cardinality many: whether each side holds it."}]
+ :seon.merge/resolve [:any {:description "The form an agent evaluates to settle a conflict on a merge of main into its branch (seon.agent/resolving-form), its value the agent's to write."}]
+ :seon.merge/data-conflict [:map {:seon.render/hiccup seon.render.ui/data-conflict :description "One key both sides of a merge changed to different ends since their base: the entity and attribute (and member, for cardinality many), base's value when it held one, each side's end (a value, true for a member held, or :seon.merge/gone), and the form that settles it. See docs/agent.md#merging."}
+                            [:seon.merge/entity :seon.merge/entity] [:seon.merge/attribute :seon.merge/attribute] [:seon.merge/value {:optional true} :seon.merge/value]
+                            [:seon.merge/base {:optional true} :seon.merge/base] [:seon.merge/ours :seon.merge/ours] [:seon.merge/theirs :seon.merge/theirs]
+                            [:seon.merge/resolve {:optional true} :seon.merge/resolve]]
+ :seon.merge/conflicts [:vector {:min 1 :description "The conflicts a merge was refused for."} :seon.merge/data-conflict]
+ :seon.merge/refused [:and {:description "The receiving branch's write check's own error at the source transaction it refused, that transaction's id its :db/id."} :seon.error/base [:map [:db/id :int]]]
+ ;; a merge refused because the two sides' net changes conflict: the agent resolves them on a merge of main into its branch
+ :seon.merge/conflict-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/conflict-refused]] [:seon.merge/conflicts :seon.merge/conflicts]]]
+ ;; a merge refused because the receiving branch's write check refused one of the source's transactions replayed on it: it moved
+ ;; since the base, so the source merges it first and tries again
+ :seon.merge/replay-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/replay-refused]] [:seon.merge/refused :seon.merge/refused]]]}

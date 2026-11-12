@@ -299,15 +299,18 @@
                  (when-not (some #(and (ready (:agent %)) (= "calc/neg" (:task %))) (task/running (db sys)))
                    (recur ready))))
              (println :cancel-neg (select-keys (root/cancel! sys ["calc/neg"]) [:ok])))
-   :check "[(app.calc/sum-sq 3 4) (count (my.db/q '[:find ?e :where [?e :seon.model-call/id]]))]" :expect ["[25 0]"]
+   ;; main holds each merged task's model calls (the merge takes every non-conflicting datom): add, twice and sum-sq 1 each, square 2; neg's and the refines' stay off it
+   :check "[(app.calc/sum-sq 3 4) (count (my.db/q '[:find ?e :where [?e :seon.model-call/id]]))]" :expect ["[25 5]"]
    :ok (fn [{:keys [sys q d]}]
          (let [idx (r/index d)
                done? (every? #(r/done? idx %) ["calc/add-merge" "calc/twice-merge" "calc/square-merge" "calc/sum-sq-merge"])
                blocked (r/blocked-by idx "calc/abs")
                sq-db (:db @(c/branch-db sys (task/default-branch "calc/square")))
-               sq-turns (sort-by first (map (fn [[n e]] [n (str/join "\n\n" (keep :content (:messages (wire/render sq-db (:seon.model-call/basis (d/pull sq-db [:seon.model-call/basis] e))))))])
-                                            (d/q '[:find ?n ?e :where [?e :seon.model-call/n ?n] [?e :seon.model-call/origin :model]
-                                                   [?e :seon.model-call/basis _]] sq-db)))
+               ;; square's own calls, by its basis's task: the branch takes main's merged records (other tasks' calls) at its rebase
+               sq-turns (sort-by first (for [[n b] (d/q '[:find ?n ?b :where [?e :seon.model-call/n ?n] [?e :seon.model-call/origin :model]
+                                                          [?e :seon.model-call/basis ?b]] sq-db)
+                                             :when (= "calc/square" (:task b))]
+                                         [n (str/join "\n\n" (keep :content (:messages (wire/render sq-db b))))]))
                read-failure? (and (= 2 (count sq-turns))
                                   (str/includes? (second (second sq-turns)) "(= 9 (app.calc/square 3))")
                                   (str/includes? (second (second sq-turns)) "(= 9 0)"))]
