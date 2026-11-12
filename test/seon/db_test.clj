@@ -2,7 +2,7 @@
   "One store, many branches, as in production (owner, 2026-10-21): bin/test seeds one test
   store and each test takes a branch of it through one helper (seon.test-store/test-branch!)."
   (:require [seon.task :as task] [seon.vector] [seon.test-store :as ts] [my.test :as mt] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
-            [clojure.java.shell] [clojure.java.io] [clojure.walk] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
+            [clojure.java.shell] [clojure.java.io] [clojure.walk] [datahike.api :as d] [datahike.writer :as dw] [datahike.writing] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn] [seon.repl] [seon.print] [datahike.schema]
             [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost] [seon.lib :as lib] [seon.intr :as intr]
             [datahike.datom :as dd] [datahike.index.persistent-set :as psi] [seon.merge] [org.replikativ.persistent-sorted-set]
@@ -1800,3 +1800,28 @@
       (is (= :db/txInstant (:attribute (refused #(d/transact conn {:tx-data [{:seon.agent/key "t3"}] :tx-meta {:db/txInstant past}}))))
           "in tx-meta, through a connection's checked transact")
       (is (some? (:db-after (d/transact conn {:tx-data [{:seon.agent/key "t4"}]}))) "and a write that supplies none is the store's to stamp")))))
+
+(defn schema-meta-of
+  "datahike.writing/schema-meta-uuid's argument: the schema meta of a db holding Seon's schema and n attributes more
+  (what a commit that changed the schema keys and stores). See docs/forks.md#datahike."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
+  [n]
+  (let [db (pdb/speculate-db (ts/test-db) (mapv (fn [i] {:db/ident (keyword "app.sk" (str "a" i)) :db/valueType :db.type/long
+                                                        :db/cardinality :db.cardinality/one})
+                                               (range n)))]
+    [(select-keys db [:schema :rschema :system-entities :ident-ref-map :ref-ident-map])]))
+
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-schema-key-costs-its-bytes-not-a-walk
+  ;; See docs/forks.md#datahike. Task datahike.transaction/a-schema-transaction-costs-the-attributes-it-declares: every commit
+  ;; that changed the schema keyed the schema meta by hasch's walk, 5.5M ticks / 19 MB for Seon's ~900 entries (2026-11-13)
+  (cost/proof
+    {:of 'datahike.writing/schema-meta-uuid :input 'seon.db-test/schema-meta-of
+     :n "attributes declared beyond Seon's schema"
+     :work (str "a canonical form of the schema meta (its maps and sets sorted by key), its fasl bytes (~30 KB for Seon's "
+                "schema) and one SHA-256 of them: linear in the entries, one pass each")
+     :growth :linear
+     ;; estimate: ~900 entries at ~400 ticks each (a sort step, an encode, the hash's share) and ~1 KB of garbage each
+     :per-n {:ticks 400 :bytes 1000}
+     :fixed {:ticks 400000 :bytes 1000000}
+     :sizes [10 100 1000]}))
+
