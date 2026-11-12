@@ -3033,12 +3033,12 @@
    (let [db (d/db-with (sessions-db boot sessions)
                        [{:db/id "sean" :seon.agent/key "sean" :seon.user/name "sean"}
                         {:db/id "rt" :seon.task/id "request/root" :seon.task/ns 'request :seon.task/name "root" :seon.task/plan "p" :seon.task/kind :work
-                         :seon.task/execution :running :seon.task/branch :task-b :seon.task/started-by "sean"}
-                        {:seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact {:seon.agent/task [{:seon.task/started-by :seon.db/user-fact}]}]
+                         :seon.task/execution :running :seon.task/branch :task-b :seon.task/started-by "sean" :seon.task/agent "root"}
+                        {:db/id "root" :seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact {:seon.agent/task [{:seon.task/started-by :seon.db/user-fact}]}]
                          :seon.agent/task "rt"}])
          by (into {} (for [[k _ _ tid] sessions] [k tid]))]
      (d/db-with db (vec (mapcat (fn [k] (cond-> [{:seon.agent/key k :seon.agent/parent [:seon.agent/key "root"]}]
-                                          (by k) (conj {:seon.task/id (by k) :seon.task/started-by [:seon.agent/key "sean"]})))
+                                          (by k) (conj {:seon.task/id (by k) :seon.task/started-by [:seon.agent/key "sean"] :seon.task/agent [:seon.agent/key k]})))
                                 started))))))
 
 
