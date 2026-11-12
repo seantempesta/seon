@@ -2795,7 +2795,7 @@
 
 (deftest a-users-pull-holds-its-agents-to-the-depth-and-below-only-their-ids
   ;; docs/users.md#whats-on-screen: the user's pull is its schema's pattern (:seon.db/user-fact's, the agents it started read by :seon.agent/entry's):
-  ;; on a chain user -> a1 -> a2 -> ... deeper than :seon.config.render/agent-tree-depth, the entries go that many levels and the last holds
+  ;; on a chain user -> its task -> a1 -> a2 -> ... deeper than :seon.config.render/agent-tree-depth, the entries go that many levels and the last holds
   ;; only the ids of the ones below it, so it says how many there are and nothing is cut silently
   (let [n (seon.config/value :seon.config.render/agent-tree-depth)
         ks (mapv #(str "b1/a" %) (range 1 (+ n 3)))
@@ -2804,7 +2804,8 @@
                                                     (started-tx {:seon.agent/key "sean"} [{:seon.agent/key (first ks)}])
                                                     (for [[x y] (map vector ks (rest ks))] {:seon.agent/key x :seon.agent/_parent [[:seon.agent/key y]]}))))
         tree (seon.ctx/agent-ctx (seon.db/index) db (seon.db/eid db :seon.user/name "sean"))
-        levels (take-while some? (rest (iterate #(first (vals (:seon.agent/_parent %))) tree)))]
+        ;; the first level through the task the person started (a user is in no process tree), then the agents each forked
+        levels (take-while some? (iterate #(first (vals (:seon.agent/_parent %))) (:seon.task/agent (first (vals (:seon.task/_started-by tree))))))]
     (is (nil? (:seon.ctx/pattern (d/pull db [:seon.ctx/pattern] [:seon.user/name "sean"]))) "no pattern stored: its schema's")
     (is (= (subvec ks 0 n) (vec (keep :seon.agent/key levels))) "entries to the configured depth")
     (is (= (seon.db/eid db :seon.agent/key (nth ks n)) (:db/id (last levels))) "below the last, the next one's id")
@@ -2899,7 +2900,7 @@
         rows (fn [w] (apply str (map :html (filter #(= "#p-task" (:container %)) (seon.fixtures/page-units w)))))
         ;; read now: the walk is advanced in place
         rows-before (rows (:w kw))
-        db2 (d/db-with db1 [{:seon.agent/key "sean" :seon.agent/_parent [(:db/id (d/entity db1 [:seon.agent/key "b2/a1"]))]}])
+        db2 (d/db-with db1 (started-tx [:seon.agent/key "sean"] [(:db/id (d/entity db1 [:seon.agent/key "b2/a1"]))]))
         st' (#'p/user-walks st db2)]
     (is (not (str/includes? before "/agent/b2/a1")) "nothing started yet")
     (is (str/includes? (side (:w (get (:user-walks st') "sean"))) "/agent/b2/a1") "the agent it started is on the page, with no new draw")
@@ -2924,8 +2925,9 @@
 (deftest home-is-whoever-is-signed-in
   ;; docs/users.md#whats-on-screen: / is for whoever root's :seon.system/signed-in names (their focus, else root's page); with no one, a sign-in page
   (let [db0 (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a]])
-        db (d/db-with db0 [{:db/id "u" :seon.agent/key "sean" :seon.user/name "sean" :seon.agent/_parent [(:db/id (d/entity db0 [:seon.agent/key "b2/a1"]))]}
-                           {:seon.system/id :root :seon.system/signed-in "u"}])
+        db (d/db-with db0 (into [{:db/id "u" :seon.agent/key "sean" :seon.user/name "sean"}
+                                 {:seon.system/id :root :seon.system/signed-in "u"}]
+                                (started-tx "u" [(:db/id (d/entity db0 [:seon.agent/key "b2/a1"]))])))
         sean (:db/id (d/entity db [:seon.user/name "sean"]))]
     (is (some? sean) "a user signed in")
     (is (= (#'p/location db :root) (#'p/location db [:chat :home])) "home, with no focus, is root's page")
@@ -3190,7 +3192,7 @@
   (let [db (tree-db "b2" [["b2/a1" :a1 :idle "x/asks" :parked :t1]] [])
         st (root-state (branch-state db db) db)
         [st1 _] (pass-view st :root)
-        main' (d/db-with (:main-db st1) [{:seon.agent/key "sean" :seon.agent/_parent [[:seon.agent/key "b2/a1"]]}])
+        main' (d/db-with (:main-db st1) (started-tx [:seon.agent/key "sean"] [[:seon.agent/key "b2/a1"]]))
         st2 (#'p/advance-main st1 main')
         [st3 _] (pass-view st2 :root)]
     (try (is (not (str/includes? (p/view-html st1 :root) "href=\"/agent/b2/a1\"")) "before: not started by the person")
@@ -4285,8 +4287,9 @@
   ;; them, not a feed of every message. Step 3: each is the agent's entry (seon.render.ui/agent nested), its group a datum the page orders by
   (let [db (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a] ["b2/a2" :a2 :idle "x/asks" :parked :task-b]])
         started (mapv #(:db/id (d/entity db [:seon.agent/key %])) ["b2/a1" "b2/a2"])
-        db (d/db-with db [{:seon.agent/key "sean" :seon.user/name "sean" :seon.agent/_parent started}
-                          {:seon.task/id "x/asks" :seon.task/reason "Which of the two names should the function take?"}])
+        db (d/db-with db (into [{:db/id "sean" :seon.agent/key "sean" :seon.user/name "sean"}
+                          {:seon.task/id "x/asks" :seon.task/reason "Which of the two names should the function take?"}]
+                         (started-tx "sean" started)))
         units (user-units db "sean")
         entry (fn [k] (some #(when (= (r/key-id [(quote agent) k]) (:id %)) (:html %)) units))
         html (apply str (map :html (filter #(= "#p-task" (:container %)) units)))]
