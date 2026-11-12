@@ -6,6 +6,10 @@ The owner's standing rulings, one entry each: his words and date, and where the 
 
 The owner's rulings of this day, each with his words and where it is now stated.
 
+### Root is the first agent; a child agent is a Flow proc in its parent's graph
+
+Set with runtime, 2026-11-12: "Root is not special: it's the first agent; everyone descends from it." A child agent is a remote Flow proc in its parent's graph, linked at the fork; its results are values, and its end is `::flow/closed` and its exit event. Resources are made in a proc's init and released at its stop. The tree of agents is data (parent refs), and the fork server is root's template child, declared as an option. Errors travel only on Flow's error channel; stderr is a dead process's last words. One writer proc owns the store, and every agent's writes are messages to it. Each family of duplicated machinery (process links, tracking, endings, request and answer, waits on main, run loops, socket readers, writers) has one form. Being built: schedule items fork-one, one-ask, one-wait-on-main and one-writer.
+
 ### One branch and one worktree per session, never more
 
 "I was serious before about only one worktree per agent ... I will not allow us to create hundreds of tiny change branches all queued up to run the same tests over and over again for tiny bullshit. It's the same agent working on the same files it can build and debug several solutions in the same branch." Helpers work in their session's worktree; nothing branches per change, fix, helper, experiment, bisect or landing; a second branch needs his yes. Stated in [AGENTS.md §3](../AGENTS.md) and [sessions](sessions.md#helpers).
