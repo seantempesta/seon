@@ -1482,7 +1482,8 @@
   neither pull's nor :by, a :limit with no :reverse (a window is newest first), a join with no
   pattern, an entity schema with none or whose pattern reaches itself. An entity schema's name is read in the entity index ix (seon.db/index-of)."
   {:malli/schema [:function [:=> [:cat :map :any] :seon.ctx/spec] [:=> [:cat :map :any [:set :qualified-keyword]] :seon.ctx/spec]]}
-  ([ix p] (pattern ix p #{}))
+  ;; an entity schema's own pattern, here or as a join's schema name, is compiled once per index (seon.db's :specs); any other here
+  ([ix p] (if-let [s (get (:specs ix) p)] @s (pattern ix p #{})))
   ([ix p seen]
    (let [bad (fn [why clause] (throw (ex-info (str "pattern: " why) (contract/error :seon.ctx/invalid-pattern #'pattern why {:clause clause}))))
          reverse? #(str/starts-with? (name %) "_")
@@ -1511,8 +1512,9 @@
                                       ;; an entity schema's name: the pattern it declares
                                       (qualified-keyword? sub)
                                       (cond (seen sub) (bad (str sub "'s pattern reaches itself") clause)
-                                            :else (pattern ix (or (schema-property ix sub :seon.ctx/pattern) (bad (str sub " declares no pattern") clause))
-                                                           (conj seen sub)))
+                                            :else (let [declared (or (schema-property ix sub :seon.ctx/pattern) (bad (str sub " declares no pattern") clause))]
+                                                    ;; compiled once per index (seon.db's :specs), else here
+                                                    (if-let [s (get (:specs ix) declared)] @s (pattern ix declared (conj seen sub)))))
                                       :else (bad "a join's pattern is a vector, an entity schema's name, or a depth (a positive integer or a seon.config key naming one: the enclosing pattern again)" clause))
                                   ;; the key a member holds its link's transaction under is read-only there, as the pull's own keys are
                                   (:tx o) (update :ro (fnil conj #{}) (:tx o)))}
