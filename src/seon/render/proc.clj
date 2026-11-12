@@ -344,15 +344,13 @@
   its page says so, never a wait. See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:=> [:cat :map [:tuple [:= :debug] :any]] [:maybe :map]]}
   [st view]
+  (let [;; root's session is an agent with model turns as any agent's; its page also shows what the system reads (:context)
+        context (when-let [ctx (and (= :root (second view)) (:context st))] {:id "d-context" :input ctx :schema :seon.render/root-context})]
   (cond
-    (= :root (second view))
-    ;; root has no model turn: what it reads is the system's value printed, held each pass (:context)
-    (when-let [ctx (:context st)]
-      (ui/debug :root nil nil {:id "d-context" :input ctx :schema :seon.render/root-context}))
     (nil? (get-in st [:branches view :db]))
     (let [db (:main-db st) eid (when db (location db view))]
-      (when (or (get-in st [:branches view :error]) (and eid (nil? (:seon.agent/branch (d/entity db eid)))))
-        (ui/debug (focus (:main-db st) view) nil nil nil)))
+      (when (or context (get-in st [:branches view :error]) (and eid (nil? (:seon.agent/branch (d/entity db eid)))))
+        (ui/debug (if (= :root (second view)) :root (focus (:main-db st) view)) nil nil context)))
     :else
     (let [bdb (get-in st [:branches view :db])
           ;; in the order written: entity ids are issued so
@@ -366,14 +364,14 @@
           raw? (contains? opened "d-turn-raw")
           lb (peek bases)
           to-come? (ui/to-come? bdb lb)]
-      (ui/debug (focus (:main-db st) view)
+      (ui/debug (if (= :root (second view)) :root (focus (:main-db st) view))
                 (cond-> {:turns (mapv (fn [e {:seon.model-call/keys [basis tokens cache-hit-tokens]}]
                                                   (cond-> {:e e :turn (:turn basis) :origin (:origin basis)} tokens (assoc :tokens tokens) cache-hit-tokens (assoc :cached cache-hit-tokens)))
                                                 calls pulled) :at at :to-come? to-come?} gone (assoc :gone gone))
                 (when (seq calls)
                   {:id "d-turn" :input [at (when (= :latest at) (:max-tx bdb)) opened]
                    :draw (fn [_] [(ui/debug-turn {:unit "d-turn" :seon.render/index (program/index-of-db bdb)} (-> (ui/debug-input bdb at calls raw?) (assoc :view (ui/view-param view) :opened opened))) nil])})
-                nil))))
+                context)))))
 
 (def ^:private gone "The agent statuses of an ended process (:seon.agent/status)." (:seon.status/gone (contract/properties :seon.agent/status)))
 
