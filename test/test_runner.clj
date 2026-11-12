@@ -795,7 +795,11 @@
   {:malli/schema [:=> [:cat :seon.host/db] [:vector [:map [:test :qualified-symbol] [:ns :symbol] [:ticks [:maybe :int]]]]]}
   [db]
   (let [ts (vec (sort (d/q '[:find [?n ...] :where [?v :var/meta :test] [?v :var/name ?n] (not [?v :seon.test/estimate _])] db)))
-        ticks (fx/typical-ticks ts)]
+        ;; the repository's verdict cache (the main tree's target/results, bin/env's SEON_RESULTS_DIR), never the one this
+        ;; process was given: bin/check gives each of its runs a fresh private cache, and health as a prove's check step read
+        ;; no green there and wrote every tick nil (2026-11-13)
+        main (str/trim (:out (lib/sh "git" "-C" (str (config/checkout)) "rev-parse" "--path-format=absolute" "--git-common-dir")))
+        ticks (fx/typical-ticks (str (.getParent (io/file main)) "/target/results") ts)]
     (vec (sort-by (juxt #(- (or (:ticks %) -1)) (comp str :test))
                   (for [t ts] {:test t :ns (symbol (namespace t)) :ticks (get ticks t)})))))
 

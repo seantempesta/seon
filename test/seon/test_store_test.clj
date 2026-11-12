@@ -145,13 +145,31 @@
     (is (= (digest base) (digest (conj base (decl :app.task/zzz)))) "any other namespace too")
     (is (not= (digest base) (digest (conj base (decl :form/zzz)))) "a form's attribute: a new store")
     (is (not= (digest base) (digest (conj base (decl :var/zzz)))) "a var's too")
-    (is (= @ts/kept-program-digest (ts/program-store-key (digest base) (jolt.host/runtime-fingerprint) (#'ts/codec-pins (seon.config/checkout))))
-        "this process's: its schema's, its runtime's and its checkout's codec pins")
-    (is (not= (ts/program-store-key (digest base) "runtime-a" {}) (ts/program-store-key (digest base) "runtime-b" {}))
-        "another runtime: another store, never an old encoding read by a new pin")
-    (is (not= (ts/program-store-key (digest base) "r" {"reference-code/konserve" "a"}) (ts/program-store-key (digest base) "r" {"reference-code/konserve" "b"}))
+    (is (= @ts/kept-program-digest (ts/program-store-key (digest base) (#'ts/store-pins (seon.config/checkout))))
+        "this process's: its schema's and its checkout's pins of the code that encodes it")
+    (is (= 3 (count (#'ts/store-pins (seon.config/checkout)))) "Jolt's, konserve's and Datahike's")
+    (is (not= (ts/program-store-key (digest base) {"reference-code/jolt" "a"}) (ts/program-store-key (digest base) {"reference-code/jolt" "b"}))
+        "another Jolt pin: another store, never an old encoding read by a new pin")
+    (is (not= (ts/program-store-key (digest base) {"reference-code/konserve" "a"}) (ts/program-store-key (digest base) {"reference-code/konserve" "b"}))
         "another codec pin: another store")
     (is (re-matches #"[0-9a-f]{8}" @ts/kept-program-digest))))
+
+;; docs/merging.md#verdicts-are-a-cache: a store another process holds open is never removed, whatever the count kept: one
+;; removed under its writer failed it (NoSuchFileException under program-store-<key>/, seon.program-test, 2026-11-12). The
+;; holder is this test's own process, the file opened before the keeper runs and closed at the end. Cost: one lsof a store, ~30 ms.
+(deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/execs ["lsof"]} a-program-store-held-open-is-never-removed
+  (let [dir (str (seon.config/checkout) "/target/tmp/held-ps-" (random-uuid))
+        base (str dir "/ps")
+        mk (fn [k age] (let [f (java.io.File. (str base "-" k))] (.mkdirs f) (spit (str f "/data.mdb") "x")
+                         (.setLastModified f (- (System/currentTimeMillis) (* age 60000))) f))
+        there? (fn [k] (.isDirectory (java.io.File. (str base "-" k))))
+        _ (do (mk "aaaaaaaa" 40) (mk "bbbbbbbb" 30) (mk "cccccccc" 20))
+        holder (java.io.RandomAccessFile. (str base "-aaaaaaaa/data.mdb") "r")]
+    (try
+      (ts/shared-program-store! base "dddddddd")
+      (is (there? "aaaaaaaa") "the least recently used, but held open by a process: kept")
+      (is (and (there? "bbbbbbbb") (there? "cccccccc")) "and the others within the count")
+      (finally (.close holder) (seon.lib/remove-tree! dir)))))
 
 (deftest an-ask-is-one-line-each-way-on-a-socket-of-its-own
   ;; docs/testing.md#a-root-costs-what-it-boots: ask opens its socket in-process (bin/ask was a perl process a

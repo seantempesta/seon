@@ -61,30 +61,30 @@
 
 (defn program-store-key
   "The 8 hex digits a kept program store is named by: schema-digest (program-schema-digest: the program's attributes and the
-  store's layout), the runtime that writes and reads it (runtime, jolt.host/runtime-fingerprint: Jolt's sources, so a pin moves
-  it, a Seon tree does not) and pins, the library revisions whose code encodes what it stores (konserve's codec, Datahike's
-  nodes). A store one runtime wrote is never read by another: a new pin opened an old pin's store and its decode threw
-  (2026-11-12). See docs/merging.md#verdicts-are-a-cache."
-  {:malli/schema [:=> [:cat :string [:maybe :string] [:map-of :string :string]] :string]}
-  [schema-digest runtime pins]
-  (subs (clojure.string/replace (str (hasch/uuid [schema-digest runtime (into (sorted-map) pins)])) "-" "") 0 8))
+  store's layout) and pins, the revisions of the code that encodes what it stores (Jolt's runtime, konserve's codec, Datahike's
+  nodes), as the checkout's git index pins them. Not jolt.host/runtime-fingerprint, which a built binary bakes and the bin/test
+  runner computes from sources (\"dev-...\" against \"v0.8.23-...-tr\" at one pin): one checkout's agents and runner keyed apart,
+  and their stores, past the count kept, were removed under each other. A new pin is a new store. See
+  docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :string [:map-of :string :string]] :string]}
+  [schema-digest pins]
+  (subs (clojure.string/replace (str (hasch/uuid [schema-digest (into (sorted-map) pins)])) "-" "") 0 8))
 
-(defn- codec-pins
-  "{path revision} of the library checkouts whose code encodes a stored program (reference-code/konserve and datahike), as
-  checkout's git index pins them (seon.fx/read-source's :pins reads all of them so). Through seon.lib/sh, on a fiber: it runs
-  where a store is opened, and clojure.java.shell/sh's futures left two threads no proc declares (bin/check lifecycle's
-  :threads-declared)."
+(defn- store-pins
+  "{path revision} of the checkouts whose code encodes a stored program (reference-code/jolt, konserve and datahike), as checkout's
+  git index pins them (seon.fx/read-source's :pins reads all of them so). Through seon.lib/sh, on a fiber: it runs where a store
+  is opened, and clojure.java.shell/sh's futures left two threads no proc declares (bin/check lifecycle's :threads-declared)."
   {:malli/schema [:=> [:cat :string] [:map-of :string :string]]}
   [checkout]
   (into {} (for [[_ sha p] (re-seq #"(?m)^160000 ([0-9a-f]{40}) \d+\t(\S+)$"
-                                   (:out (seon.lib/sh "git" "-C" checkout "ls-files" "-s" "--" "reference-code/konserve" "reference-code/datahike")))]
+                                   (:out (seon.lib/sh "git" "-C" checkout "ls-files" "-s" "--" "reference-code/jolt" "reference-code/konserve" "reference-code/datahike")))]
              [p sha])))
 
 (def kept-program-digest
-  "The key of this process's kept program store, deref'd where a store is opened: its schema's program-schema-digest, its
-  runtime and its checkout's codec pins (program-store-key). A delay, so the one git read runs once, in a process that opens a
-  program store, never at this namespace's load in every root and test child that holds it."
-  (delay (program-store-key (program-schema-digest pdb/schema) (jolt.host/runtime-fingerprint) (codec-pins (seon.config/checkout)))))
+  "The key of this process's kept program store, deref'd where a store is opened: its schema's program-schema-digest and its
+  checkout's pins of the code that encodes it (program-store-key). A delay, so the one git read runs once, in a process that
+  opens a program store, never at this namespace's load in every root and test child that holds it."
+  (delay (program-store-key (program-schema-digest pdb/schema) (store-pins (seon.config/checkout)))))
 
 (def ^:private program-store-path
   "This process's store of kept program dbs, one branch per git tree (test-runner/program-db),
@@ -93,6 +93,14 @@
   (delay (let [path (str (seon.config/checkout) "/target/tmp/program-store-" (random-uuid))]
            (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (seon.lib/remove-tree! path))))
            path)))
+
+(defn- held-open?
+  "Does a process hold the LMDB store at path open (its data.mdb, lsof: one call, the store's file only)?"
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [path]
+  (let [f (str path "/data.mdb")]
+    (and (.isFile (java.io.File. f))
+         (not (clojure.string/blank? (:out (seon.lib/sh "lsof" "-t" "--" f)))))))
 
 (defn shared-program-store!
   "The path of the program store at base for key (program-store-key), base-<key>: the repository's, which checkouts at other
@@ -109,7 +117,10 @@
         others (for [n (some-> dir .list seq) :when (and (re-matches (re-pattern (str "\\Q" stem "\\E-[0-9a-f]{8}")) n) (not= n (.getName own)))]
                  (java.io.File. dir ^String n))]
     (when (.isDirectory own) (.setLastModified own (System/currentTimeMillis)))
-    (doseq [^java.io.File o (drop (dec (config/value :seon.config.proofs/program-stores-kept)) (sort-by #(- (.lastModified ^java.io.File %)) others))]
+    ;; never one a process holds open (its LMDB environment, data.mdb): removing it under that process failed its write
+    ;; (NoSuchFileException under program-store-<key>/, 2026-11-12), whatever the count
+    (doseq [^java.io.File o (drop (dec (config/value :seon.config.proofs/program-stores-kept)) (sort-by #(- (.lastModified ^java.io.File %)) others))
+            :when (not (held-open? (.getPath o)))]
       (seon.lib/remove-tree! (.getPath o)))
     path))
 
