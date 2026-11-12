@@ -408,7 +408,12 @@
         own (fn [t r] (if (contract/error? r)
                         [{:type :error :var (str "#'" t) :message (:seon.error/message r) :seon.error/type (:seon.error/type r)}]
                         (filterv #(= (str "#'" t) (:var %)) (:reports (:answer r)))))
-        reports (into (vec (:reused-reports base)) (mapcat (fn [[t r]] (own t r))) (sort-by (comp str key) results))
+        ;; and a batch's errors that name no test (a held pipe, a child that died before a test began), once a batch: its
+        ;; items share its answer, and its counts count them (a count with no report said nothing of why, 2026-11-12)
+        runs (into [] (comp (keep (fn [[_ r]] (when (map? (:answer r)) (:answer r)))) (distinct)
+                            (mapcat (fn [a] (remove #(proofs/test-symbol (:var %)) (:reports a)))))
+                   (sort-by (comp str key) results))
+        reports (-> (vec (:reused-reports base)) (into (mapcat (fn [[t r]] (own t r))) (sort-by (comp str key) results)) (into runs))
         ;; the reused reports' types, and each item's own counts (its answer keeps one pass report a test, its counts every assertion)
         counts (merge-with + (frequencies (map :type (:reused-reports base)))
                            (apply merge-with + {} (for [[_ r] results] (if (contract/error? r) {:error 1} (select-keys (:answer r) [:pass :fail :error])))))]

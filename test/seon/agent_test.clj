@@ -423,11 +423,18 @@
                 (lib/c-close w) (lib/c-close gr)
                 (try (agent/read-to-exit r pid)
                      (finally (lib/c-close r) (lib/c-close gw)))))]
-    (let [held (run false)]
-      (is (= {:line result :held? true} (dissoc held :status)) "the child's exit ends the read though a process it forked holds the pipe")
+    (let [held (run false)
+          answer (agent/test-run-answer (:line held) (:status held) true (:held-by held))
+          [rep] (filter :seon.error/type (:reports answer))]
+      (is (= {:line result :held? true} (dissoc held :status :held-by)) "the child's exit ends the read though a process it forked holds the pipe")
       (is (= {:exit 0} (:status held)) "and the child exited, not killed")
-      (is (= [:seon.test/pipe-held] (keep :seon.error/type (:reports (agent/test-run-answer (:line held) (:status held) true))))
-          "and the run's answer names the held pipe beside what the child wrote"))
+      ;; 2026-11-12: agent-checks' first prove read {:error 1} with no report saying why, and no holder named
+      (is (= 1 (count (:held-by held))) (str "the one process holding the pipe is named: " (pr-str (:held-by held))))
+      (is (= :seon.test/pipe-held (:seon.error/type rep)) "and the run's answer names the held pipe beside what the child wrote")
+      (is (str/includes? (:message rep) (first (:held-by held))) "naming its holder")
+      (is (str/includes? (:seon.print/code (my.agent/prove-summary {} (assoc answer :pass 2 :reports (into [{:type :pass :var "#'a-test/t"}] (:reports answer)))))
+                         "✗ the run: ")
+          "and the prove's line says the run's error, never a red with no reason"))
     (is (= {:line result :held? false} (dissoc (run true) :status)) "with FD_CLOFORK on its end, the child's exit is the pipe's end of file")))
 
 (deftest a-test-childs-read-lets-the-agents-other-fibers-run

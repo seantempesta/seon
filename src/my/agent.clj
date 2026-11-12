@@ -393,6 +393,8 @@
                   (zero? n) "nothing judged: no proof and no test this change reaches"
                   :else (str "green: " n " of " n " passed"))]
            (for [[t fs] (sort-by (comp str key) fails)] (failure t (first fs)))
+           ;; an error of the run that names no test (a held pipe, a fork that died before a test began): said, never a red with no reason
+           (for [m (proofs/test-run-errors r)] (str "✗ the run: " m))
            [(when (pos? (:reused r 0)) (str "reused " (:reused r) ": their last result still counts, because nothing they reach has changed"
                                             (let [held (filter :reused (:reports r)) reds (sort-by str (distinct (keep #(when (#{:fail :error} (:type %)) (proofs/test-symbol (:var %))) held)))]
                                               (when (seq reds) (str "; of them red: " (str/join ", " reds) ". (my.agent/prove '#{a-name}) runs one again")))))

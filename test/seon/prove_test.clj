@@ -735,3 +735,14 @@
     (is (= (seon.config/value :seon.config.machine/cores) (:workers st)) "the shipped max-workers: the machine's cores")
     (is (= (min 10 (:workers st)) (count (batches outs))) "ten items over that many workers, a share each"))
   (is (= {:workers 4} (prove/admission {:cores 4}))))
+
+(deftest a-batchs-error-that-names-no-test-reaches-its-answer
+  ;; docs/merging.md#the-test-service. Found 2026-11-12 (runtime's land): agent-checks' first prove answered {:error 1} with only
+  ;; its two :pass reports: run-answer kept an item's reports by its test var, so a held pipe's report (no var) was counted and dropped
+  (let [held {:type :error :seon.error/type :seon.test/pipe-held :message "the test process exited and another process still holds its pipe"}
+        answer (-> test-run-answer (assoc :error 1) (update :reports conj held))
+        [st outs] (feed (proc0) [(req 1 :main 5)])
+        [_ all] (run-through st outs answer)
+        r (:r (first (filter #(= :prove-answer (:op %)) all)))]
+    (is (= 1 (:error r)) "the error is counted")
+    (is (= [held] (filterv :seon.error/type (:reports r))) (str "and its report is in the answer, once: " (pr-str (:reports r))))))

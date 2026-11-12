@@ -1080,9 +1080,11 @@
   forked holds the write end): that line when it is the run's result; else the child died while
   running the test the line's {:seon.test/started var} names, and the run is one :error report on
   that test var with the status as :exit (none started: a run error naming the status). A held
-  pipe adds an :error report of its own (:seon.test/pipe-held)."
-  {:malli/schema [:=> [:cat [:maybe :string] :seon.lib/exit-status :boolean] :seon.test/result]}
-  [line status held?]
+  pipe adds an :error report of its own (:seon.test/pipe-held), naming the processes holding it (held-by, seon.sock/holders)."
+  {:malli/schema [:function [:=> [:cat [:maybe :string] :seon.lib/exit-status :boolean] :seon.test/result]
+                  [:=> [:cat [:maybe :string] :seon.lib/exit-status :boolean [:maybe [:vector :string]]] :seon.test/result]]}
+  ([line status held?] (test-run-answer line status held? nil))
+  ([line status held? held-by]
   (let [v (some-> line child-line) var (:seon.test/started v)
         res (cond (contains? v :pass) v
                   (contract/error? v) {:pass 0 :fail 0 :error 1 :reports [(assoc v :type :error :message (:seon.error/message v) :exit status)]}
@@ -1093,7 +1095,8 @@
     (cond-> res
       held? (-> (update :error inc)
                 (update :reports conj {:type :error :seon.error/type :seon.test/pipe-held
-                                       :message "the test process exited and a process it forked still holds its pipe (its end of file never came): what it wrote is the run"})))))
+                                       :message (str "the test process exited and another process still holds its pipe (its end of file never came): what it wrote is the run; held by "
+                                                     (if (seq held-by) (str/join ", " held-by) "no process lsof names"))}))))))
 
 (defn read-to-exit
   "The last line test child pid writes on fd r, read to the pipe's end of file or the child's
@@ -1106,8 +1109,8 @@
   still finds the pipe open means another process holds it; a read that ended on part of a line goes
   on. Each whole line is given to seen as it is read (the tests as they start, run-tests-forked). The
   child is reaped once, here. Answers {:line :held? :status}, :status its exit status (seon.lib/wait-status)."
-  {:malli/schema [:function [:=> [:cat :seon.lib/fd pos-int?] [:map [:line [:maybe :string]] [:held? :boolean] [:status :seon.lib/exit-status]]]
-                  [:=> [:cat :seon.lib/fd pos-int? :seon.host/fn] [:map [:line [:maybe :string]] [:held? :boolean] [:status :seon.lib/exit-status]]]]}
+  {:malli/schema [:function [:=> [:cat :seon.lib/fd pos-int?] [:map [:line [:maybe :string]] [:held? :boolean] [:status :seon.lib/exit-status] [:held-by {:optional true} [:vector :string]]]]
+                  [:=> [:cat :seon.lib/fd pos-int? :seon.host/fn] [:map [:line [:maybe :string]] [:held? :boolean] [:status :seon.lib/exit-status] [:held-by {:optional true} [:vector :string]]]]]}
   ([r pid] (read-to-exit r pid (fn [_] nil)))
   ([r pid seen]
   (let [exit (poller/exit-chan pid)
@@ -1131,8 +1134,8 @@
               (or (not @exited) (not @waited)) (recur line)
               ;; exited, and a read found nothing there: reaped, every fd the child held is closed, so read again
               (nil? @status) (do (reap!) (recur line))
-              ;; and still nothing there after the reap: another process holds the pipe
-              :else {:line line :held? true :status @status}))))))
+              ;; and still nothing there after the reap: another process holds the pipe, named (a held pipe named no one, 2026-11-12)
+              :else {:line line :held? true :status @status :held-by (sock/holders r)}))))))
 
 (defn named-tests
   "The test vars names names on db (each a deftest's var, :var/meta holds :test): a qualified name, that test; a
@@ -1276,7 +1279,7 @@
                   (seon.lib/remove-tree! (fx/run-dir pid))
                   (if (contract/error? read)
                     read
-                    (-> (select-keys @lines [:streamed :ended :fns :heap :measured]) (assoc :answer (test-run-answer (:line read) st (:held? read)) :pid pid :exit st)))))})))
+                    (-> (select-keys @lines [:streamed :ended :fns :heap :measured]) (assoc :answer (test-run-answer (:line read) st (:held? read) (:held-by read)) :pid pid :exit st)))))})))
 
 (defn- record-results!
   "Record a test run's results on this branch (task seon.proofs/test-results-are-a-few-facts, seon.proofs/result-tx: only what differs from the
