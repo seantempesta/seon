@@ -1252,20 +1252,23 @@
                                   (str "cannot fork the tests: " k " Chez threads active (a running future?)") {:active-threads k}))))))
 
 (defn- run-answered
-  "st with its run's answer put on its :answer, once: when the fold threw, that throw (::threw); else, once every
-  shard is done and no child is left, a shard's refused fork, or every shard's reports in order, counted, with their
-  functions' costs, heaps and measures, and the first shard's last child's pid and exit."
+  "st with its run's answer put on its :answer, once, as {::answer x ::run-dirs dirs}: dirs, the run directories of
+  the children it ended, which run-children! removes after it takes the answer (a fold's step answers and never
+  waits on a removal: an rm and an LMDB close are effects, not a step's work); x, when the fold threw, that throw
+  (::threw); else, once every shard is done and no child is left, a shard's refused fork, or every shard's reports in
+  order, counted, with their functions' costs, heaps and measures, and the first shard's last child's pid and exit."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
-  (let [shards (:shards st)]
+  (let [shards (:shards st)
+        put! (fn [x] (a/put! (:answer st) {::answer x ::run-dirs (:run-dirs st [])}))]
     (cond
       (:answered st) st
-      (:threw st) (do (a/put! (:answer st) {::threw (:threw st)}) (assoc st :answered true))
+      (:threw st) (do (put! {::threw (:threw st)}) (assoc st :answered true))
       (or (seq (:children st)) (not (every? #(or (:done %) (:error %)) shards))) st
       :else
       (let [reports (into [] (mapcat :reports) shards)
             counts (frequencies (map :type reports))]
-        (a/put! (:answer st)
+        (put!
                 (or (some :error shards)
                     {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
                      :reports reports :fns (into {} (map :fns) shards) :heap (into {} (map :heap) shards)
@@ -1274,7 +1277,7 @@
 
 (defn- child-ended
   "st once test child cpid has ended (its link closed and its exit reaped): its proc gone from the graph, its run
-  directory removed, what it said folded into its shard (test-run-answer: a death is the one :error on the test it
+  directory kept for removal after the answer (:run-dirs, run-answered), what it said folded into its shard (test-run-answer: a death is the one :error on the test it
   was running), and the rest of the shard's tests forked to a new child when a death left any and named what it cost:
   the death of one test never costs the run its other results. See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
   {:malli/schema [:=> [:cat :map :keyword] :map]}
@@ -1286,12 +1289,12 @@
         sh (get-in st [:shards shard])
         rest-todo (filterv #(not (done (str "#'" %))) (:todo sh))
         st (-> st (update :children dissoc cpid) (update :by-os dissoc os)
+               (update :run-dirs (fnil conj []) (fx/run-dir os))
                (assoc-in [:shards shard] (-> sh (update :reports #(-> % (into (:streamed acc)) (into (:reports ans))))
                                              (update :fns merge (:fns acc)) (update :heap merge (:heap acc)) (update :measured merge (:measured acc))
                                              (assoc :todo rest-todo :pid os :exit status))))]
     (flow/update! (:flow @state) (fn [cfg] (-> cfg (update :procs dissoc cpid) (update :conns #(filterv (fn [[[p]]] (not= cpid p)) %)))))
     (swap! state #(cond-> % (= os (:test-child %)) (dissoc :test-child)))
-    (lib/remove-tree! (fx/run-dir os))
     (if (and (seq rest-todo) (seq died) (or (seq (:ended acc)) (some :var died)))
       (fork-test-child st shard rest-todo)
       (assoc-in st [:shards shard :done] true))))
@@ -1305,7 +1308,8 @@
     (doseq [[_ c] (:children st)] (lib/kill! (:os c) (jolt.host/signal-number "KILL")))
     (flow/update! (:flow @state) (fn [cfg] (-> cfg (update :procs #(apply dissoc % cpids)) (update :conns #(filterv (fn [[[p]]] (not (cpids p))) %)))))
     (swap! state dissoc :test-child)
-    (run-answered (assoc st :threw e :children {} :by-os {}))))
+    (run-answered (-> st (update :run-dirs (fnil into []) (map (comp fx/run-dir :os) (vals (:children st))))
+                      (assoc :threw e :children {} :by-os {})))))
 
 (defn test-run-step
   "One test run's fold, a proc of the agent's own graph (run-tests-forked adds it, and removes it once it has answered):
@@ -1363,8 +1367,10 @@
     (flow/update! g (fn [cfg] (assoc-in cfg [:procs pid] {:proc (flow/process #'test-run-step)
                                                           :args {:answer answer :plan plan :ticks ticks :budgets budgets
                                                                  :shards (vec shards) :forked forked :say say}})))
-    (let [res (a/<!! answer)]
+    (let [{res ::answer dirs ::run-dirs} (a/<!! answer)]
       (flow/update! g (fn [cfg] (update cfg :procs dissoc pid)))
+      ;; the ended children's run directories, removed once the run has answered and its fold is gone
+      (when (seq dirs) (apply lib/remove-tree! dirs))
       res)))
 
 (defn- record-results!

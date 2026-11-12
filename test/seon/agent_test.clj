@@ -2436,8 +2436,11 @@
                          (a/close! out) (a/<!! sent) (remote/close! e)
                          [(a/<!! seen) (a/<!! seen)]))
         done (fn [{:keys [pid answer]}] (let [ans (a/poll! answer)] (flow/update! g #(update % :procs dissoc pid)) ans))
-        ;; the run's answer: n tests passed, its children's exit status held
-        answered (fn [r n] (let [ans (done r)] (is (and (= n (:pass ans) (:test ans)) (zero? (:error ans)) (= {:exit 0} (:exit ans))) (pr-str ans))))]
+        ;; the run's answer: n tests passed, its children's exit status held, and each ended child's run directory handed
+        ;; back with it for removal after the answer (run-children!), never removed inside the fold's step
+        answered (fn [r n] (let [{ans ::agent/answer dirs ::agent/run-dirs :as got} (done r)]
+                             (is (and (= n (:pass ans) (:test ans)) (zero? (:error ans)) (= {:exit 0} (:exit ans))) (pr-str got))
+                             (is (= n (count dirs)) (str "one run directory per ended child, handed back with the answer: " (pr-str dirs)))))]
     (try
       (swap! agent/state assoc :fixtures-warm true :dirty? false)
       (flow/resume g)
