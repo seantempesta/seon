@@ -171,28 +171,6 @@
       (is (= "a1" (:seon.agent/key (:seon.task/agent (d/entity db [:seon.task/id "demo/workouts-implement"]))))
           "a process of a later boot, on the session's agent"))))
 
-(deftest a-long-form-becomes-a-task-that-names-its-size-tests-and-ticks
-  ;; (docs/health.md#a-form-too-long): a function over the bound is a
-  ;; held task from its template, its proofs the tests reaching it, its plan naming its size and how to
-  ;; measure its cost; one under the bound is none, and a var whose task main holds is filed once
-  (let [bound (seon.config/value :seon.config.shrink/form-tokens)
-        db (t/with (t/world)
-                   (t/code 'app.long (str "(ns app.long)\n(defn big [] \"" (apply str (repeat (* 4 bound) \x)) "\")\n(defn small [] 1)\n"))
-                   (t/code 'app.long-test (str "(ns app.long-test (:require [clojure.test :refer [deftest is]] [app.long :as l]))\n(deftest big-is-text (is (string? (l/big))))\n"
-                                              "(deftest long-test (is (= \"" (apply str (repeat (* 4 bound) \y)) "\" (str \"\"))))\n")))
-        g (program/reach-indexed (program/reach-graph db nil) (second (seon.agent/test-inputs db)))
-        tx (my.root/findings-tx db g)
-        tk (first (filter #(= "app.long/shrink-big" (:seon.task/id %)) tx))]
-    (is (some? tk) "the long function's task")
-    (is (= #{'app.long-test/big-is-text} (set (:seon.task/proofs tk))) "its proofs: the tests reaching it")
-    (is (re-find #"`app.long/big` is \d+ tokens, over the bound of" (:seon.task/plan tk)) "its plan names its size and the bound")
-    (is (re-find #"my.agent/cost 'app.long/big" (:seon.task/plan tk)) "and how to measure its cost before it starts")
-    (is (= :held (:seon.task/execution tk)) "held until released")
-    (is (not-any? #(re-find #"shrink-small" (str (:seon.task/id %))) tx) "a function under the bound is no task")
-    (is (= #{'app.long-test/long-test} (set (:seon.task/proofs (first (filter #(= "app.long-test/shrink-long-test" (:seon.task/id %)) tx)))))
-        "a long test is its own proof (no test reaches a test)")
-    (is (= [] (filterv :seon.task/id (my.root/findings-tx (datahike.core/db-with db tx) g))) "filed once")))
-
 ;; docs/merging.md#a-slow-test-runs-last: its metric known ahead of time, itself its proof, filed once
 (deftest a-slow-test-becomes-a-task-that-names-what-it-measured
   (let [db (t/world)

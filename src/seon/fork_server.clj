@@ -38,14 +38,14 @@
 
 (defn- fork-carrying!
   "lib/fork! of a request whose socket came with it (SCM_RIGHTS), fd (taken from the request's frame when the step began,
-  so a step that throws before it forks can close it: server-step): the child closes this
-  server's descriptors and runs (child fd). open, a volatile holding fd, is cleared once fork! has
+  so a step that throws before it forks can close it: server-step): the child holds fd alone of this server's descriptors
+  (lib/fork!) and runs (child fd). open, a volatile holding fd, is cleared once fork! has
   closed it here (before refused or parent runs)."
   {:malli/schema [:=> [:cat :map :seon.lib/fd :seon.host/volatile :seon.host/fn :seon.host/fn :seon.host/fn] :any]}
   [st fd open child refused parent]
   (let [{:keys [conn]} st done (fn [f] (fn [x] (vreset! open nil) (f x)))]
     (lib/fork! {:fd fd :refused (done refused) :parent (done parent)
-                :child #(do (sock/close! (:fd conn)) (sock/close-pending-fds! conn) (child fd))})))
+                :child #(child fd)})))
 
 (defn graph-at-fork
   "Server state st with main's reach graph (built when the server starts) brought to :db, only
@@ -396,7 +396,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.db/cfg] :seon.fork-server/forked]}
   [db cfg]
   (let [[r s] (sock/socketpair)]
-    (lib/fork! {:fd s :child #(do (sock/close! r) (main db cfg s true))
+    (lib/fork! {:fd s :child #(main db cfg s true)
                 :refused #(throw (ex-info "the fork server cannot fork: root boots with more than one thread"
                                           {:seon.error/type ::not-single-threaded :active-threads %}))
                 :parent (fn [pid] {:pid pid :fd r})})))

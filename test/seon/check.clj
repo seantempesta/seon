@@ -425,6 +425,10 @@
   See docs/machine.md#builds-and-checks."
   [db] (seon.problems/stalled-agents db (seon.problems/answers db)))
 
+(defn- provoked?
+  "await-provoked's test of main db: its quiescence report is at or after t. It reads one fact, never main's problems report."
+  [t] #(some-> (seon.reconcile/quiescent %) :t (>= t)))
+
 (defn- await-provoked
   "Main at the reconciler's first quiet after main's t (p1 and p2 released at t, so judged by then: their red proof and
   cost verdict; the platform defect and the death came before): its quiescence report at or after t, or the quiet
@@ -433,8 +437,7 @@
   main's whole problems report ran it in main's writer at every commit while p1 and p2's proofs committed (batches 32
   and 38 overran on it). See docs/machine.md#builds-and-checks."
   [sys t]
-  (seon.system/await-db sys (str "the reconciler's quiet at or after t " t ", p1 and p2 judged")
-                      #(some-> (seon.reconcile/quiescent %) :t (>= t))))
+  (seon.system/await-db sys (str "the reconciler's quiet at or after t " t ", p1 and p2 judged") (provoked? t)))
 
 (defn problems-check
   "Provoke every class of problem through the paths agents and root use (:stall-ms 1000
@@ -1319,7 +1322,8 @@
    ;; started in a forked child made collections that copied ever larger continuations: 35 GB, Jolt's, filed).
    #(let [[r w] (sock/socketpair) [r2 w2] (sock/socketpair)
           daemon (fn [f] (doto (Thread. f) (.setDaemon true) (.start)))]
-      (lib/fork! {:child (fn []
+      (lib/fork! {:keep #{r w2}
+                  :child (fn []
                            (let [ran (volatile! false)
                                  _ (a/go (vreset! ran true) (sock/write-line! w2 "ran"))
                                  rd (sock/line-reader r)
@@ -1354,7 +1358,8 @@
           _ (java.util.Arrays/fill block (byte 7))
           [r w] (sock/socketpair)
           touch (fn [write?]
-                  (let [pid (lib/fork! {:child (fn []
+                  (let [pid (lib/fork! {:keep #{w}
+                                        :child (fn []
                                                  (let [f0 (lib/real-mb) m0 (:available-mb (lib/sysmem))
                                                        sum (volatile! 0)]
                                                    (doseq [i (range 0 (* mb 1024 1024) 16384)]
@@ -1373,7 +1378,7 @@
    ;; docs/failure-points.md#physics-who-may-run-threads: nothing runs in a child between the fork and its reset. Forced: the
    ;; smallest quantum, four always-ready fibers behind each fork (a root's procs are); in a child they are the parent's, and
    ;; one that runs there says "parent". 10 forks, then 10 through fork!'s double fork (the grandchild is nobody's child, so
-   ;; each says what ran in it by a line in a file; every grandchild holds w, so r's end of file is their exits)
+   ;; each says what ran in it by a line in a file; every grandchild is given w to hold (:keep), so r's end of file is their exits)
    #(let [me (lib/c-getpid)
           f (java.io.File/createTempFile "seon-fork-reset" ".txt")
           say (fn [w] (spit f (str w "\n") :append true))
@@ -1386,7 +1391,7 @@
       (spin)
       (let [forks (frequencies (for [_ (range 10)] (lib/fork! {:child #(lib/c-exit 0) :parent lib/wait-status :refused refused})))
             [r w] (sock/socketpair)]
-        (dotimes [_ 10] (lib/fork! {:double? true :child #(do (say "own") (lib/c-exit 0)) :parent identity :refused (fn [n] (say (str "refused " n)))}))
+        (dotimes [_ 10] (lib/fork! {:double? true :keep #{w} :child #(do (say "own") (lib/c-exit 0)) :parent identity :refused (fn [n] (say (str "refused " n)))}))
         ;; the ready fibers end here: nothing of this process is left spinning when it waits and answers
         (vreset! ready? false)
         (sock/close! w)
@@ -1409,9 +1414,10 @@
    #(let [[r w] (sock/socketpair)
           [hold _] (sock/socketpair)
           park (fn [_] (sock/recv! (sock/conn hold)))
-          mid (lib/fork! {:child (fn []
+          mid (lib/fork! {:keep #{w hold}
+                          :child (fn []
                                    (lib/end-with! (lib/c-getpid) false)
-                                   (lib/fork! {:child (fn [] (sock/write-line! w (str (lib/c-getpid))) (park nil))
+                                   (lib/fork! {:keep #{w hold} :child (fn [] (sock/write-line! w (str (lib/c-getpid))) (park nil))
                                                :refused park :parent park}))
                           :refused (fn [n] {:refused n}) :parent identity})
           rd (sock/line-reader r)
@@ -1432,10 +1438,11 @@
    #(let [[r w] (sock/socketpair)
           [hold _] (sock/socketpair)
           park (fn [_] (sock/recv! (sock/conn hold)))
-          anchor (lib/fork! {:child (fn [] (park nil)) :refused (fn [n] {:refused n}) :parent identity})
-          leader (lib/fork! {:child (fn []
+          anchor (lib/fork! {:keep #{hold} :child (fn [] (park nil)) :refused (fn [n] {:refused n}) :parent identity})
+          leader (lib/fork! {:keep #{w hold}
+                             :child (fn []
                                       (lib/c-setpgid 0 0)
-                                      (lib/fork! {:child (fn [] (sock/write-line! w (str (lib/c-getpid))) (park nil))
+                                      (lib/fork! {:keep #{w hold} :child (fn [] (sock/write-line! w (str (lib/c-getpid))) (park nil))
                                                   :refused park
                                                   :parent (fn [_] (lib/end-with! anchor false) (park nil))}))
                              :refused (fn [n] {:refused n}) :parent identity})

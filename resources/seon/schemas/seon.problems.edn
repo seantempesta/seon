@@ -39,6 +39,7 @@
  ;; a wait on main (seon.system/await-db) whose pred was false when the reconciler went quiet at
  ;; t: nothing in flight will make it true (an outside commit still may)
  :seon.system/quiet-before-true [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/quiet-before-true]] [:t :int] [:waits-on :string]]]
+ :seon.system/wait-threw [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/wait-threw]] [:t :int]]]
  ;; a request to an agent after it ended (root stopped it, or it died): not gone, it was
  :seon.system/ended [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/ended]] [:agent :keyword]]]
  :seon.agent/last-op [:map [:kind :keyword] [:form {:optional true} [:maybe :string]] [:since-ms {:optional true} [:maybe :int]]]

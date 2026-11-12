@@ -1021,6 +1021,14 @@
         ;; on its branch before it exited, read from the branch
         dead (fn [st e] (one (request (assoc-in st [:flights id :died] e) id :dead-read
                                       {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}})))
+        ;; only these are its agent's death (as :spawned reads them); any other typed error from its work or the judge is no
+        ;; death: the task is held with it as its reason (parked: its agent lives, and reads it at its next turn)
+        death? (fn [e] (contains? #{:seon.agent/died :seon.system/no-agent :seon.system/ended} (:seon.error/type e)))
+        errored (fn [st e] (if (death? e)
+                             (dead st e)
+                             (one (write st id :done (hold-tx (:db st) id (task/outcome-tx (:db st) id :running :parked
+                                                                                            {:seon.task/reason (:seon.error/message e) :seon.task/error e})
+                                                              (:seon.error/message e) {})))))
         ;; the writer refused to read or diff its branch: its agent is stopped and the task
         ;; ends with the reason as its error, not judged on facts nobody measured
         refused (fn [st e] (let [[st o1] (request st id :ignored {:op :kill :id agent :ended true})
@@ -1064,7 +1072,7 @@
                  (if-let [body (stage-boundary (:db st) id)]
                    (one (request st id :briefed {:op :message :id agent :from :root :body body}))
                    (work st id act agent)))
-      :briefed (if (contract/error? r) (dead st r) (work st id act agent))
+      :briefed (if (contract/error? r) (errored st r) (work st id act agent))
       ;; the turn loop answered: died (no live agent), or judge it from measured facts
       ;; work! that threw was answered by the agent's REPL (the process lives): its error
       ;; names the task's end when the loop wrote none
@@ -1075,14 +1083,14 @@
                 (and (= :wake (:op act)) (#{:seon.system/ended :seon.system/no-agent} (:seon.error/type r)))
                 (one (write st id :done (into (task/move-tx id :running :lost {:seon.task/reason (str "its parked process was gone: " (:seon.error/message r))})
                                               (ended-ms-tx (:db st) id now))))
-                (contract/error? r) (dead st r)
+                (contract/error? r) (errored st r)
                 :else
                 (if (= :diffed (after-work r (:seon.task/proofs (d/entity (:db st) [:seon.task/id id]))))
                   (one (request (assoc-in st [:flights id :results] {}) id :diffed {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}}))
                   (one (request (cond-> st (:ex r) (assoc-in [:flights id :worked-error] (:ex r)))
                                 id :tested {:op :judge :id agent}))))
       :tested (if (contract/error? r)
-                (dead st r)
+                (errored st r)
                 (one (request (-> st (assoc-in [:flights id :results] (proofs/results r))
                                   (assoc-in [:flights id :main-red] (:main-red r))
                                   (assoc-in [:flights id :deferred] (:deferred r))

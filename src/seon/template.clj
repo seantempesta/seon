@@ -203,22 +203,3 @@
                         "bin/test " var " is green under the bound, its claim unchanged, which brings it back into the run. "
                         "If its claim cannot be tested under the bound, say what its floor is and why.")})
 
-(defn finding
-  "The task a :long-form finding asks for: row's var split under
-  the bound, its behaviour unchanged, the tests reaching it its proofs; held, as every template's task
-  is, until root or the owner releases it. Its name is the var's, shrink-<name>, in the var's namespace,
-  one task a var. See docs/health.md#a-form-too-long."
-  {:malli/schema [:=> [:cat [:map [:var :qualified-symbol] [:tokens :int] [:bound :int]] [:set :qualified-symbol]]
-                  :seon.task/declaration]}
-  [{:keys [var tokens bound]} tests]
-  {:seon.task/ns (symbol (namespace var))
-   :seon.task/name (str "shrink-" (str/replace (name var) #"[^A-Za-z0-9-]+" "-"))
-   :seon.task/kind :work
-   :seon.task/proofs tests
-   :seon.task/plan (str "`" var "` is " tokens " tokens, over the bound of " bound " (:seon.config.shrink/form-tokens, "
-                        "its :long-form problem: docs/health.md#a-form-too-long). An agent reads a function whole, so a long one "
-                        "costs every reader its length. Split it by what it does into named functions, each under the bound "
-                        "and each with its contract and docstring, its behaviour unchanged: every caller sees the same results. "
-                        "First measure what it costs now, (my.agent/cost '" var "), and read the tests reaching it, "
-                        "(my.agent/tests-reaching '" var "). Done when its proofs (the tests reaching it) are green, it is "
-                        "under the bound (its :long-form row closed) and its cost per call is no more than before.")})

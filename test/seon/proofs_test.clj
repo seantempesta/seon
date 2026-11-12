@@ -752,3 +752,22 @@
     (is (= a (proofs/reuse-audit reused process "tree-a" 10)) "the same tree, the same ones")
     (is (not= a (proofs/reuse-audit reused process "tree-b" 10)) "another tree, others")
     (is (= [] (proofs/reuse-audit reused process "tree-a" 0)) "none at 0")))
+
+;; docs/source.md#tests-run-by-reach: a test is keyed by what its run read (recorded reads, ninja's depfiles): its verdict
+;; holds each read's digest, and it is reused while every one still has it, whatever else moved
+(deftest a-verdict-is-reused-while-everything-its-run-read-is-unchanged
+  (let [rd {'a/f "f1" 'a/g "g1" 'a/h "h1" [:schema :a/e] "e1" :seon.proofs/covers #{:var :schema :config}}
+        raw {:fns #{'a/f 'a/g} :entities #{:a/e :a/missing}}
+        k (seon.proofs/reads-key rd raw)
+        held {'a.b-test/t [{:digest "old" :pass 1 :fail 0 :error 0 :reads k}]}
+        static {'a.b-test/t "static" 'a.b-test/u "su"}]
+    (is (= {'a/f "f1" 'a/g "g1" [:schema :a/e] "e1" [:schema :a/missing] nil} k) "each read with its digest; a read of nothing is a miss")
+    (is (= {'a.b-test/t "old" 'a.b-test/u "su"} (seon.proofs/read-digests static rd held))
+        "nothing it read moved: looked up at its verdict's digest (a test with none at its static one)")
+    (is (= "old" (get (seon.proofs/read-digests static (assoc rd 'a/h "h2") held) 'a.b-test/t)) "a var it never called moved: still reused")
+    (is (= "static" (get (seon.proofs/read-digests static (assoc rd 'a/g "g2") held) 'a.b-test/t)) "a var it called moved: it runs")
+    (is (= "static" (get (seon.proofs/read-digests static (assoc rd [:schema :a/missing] "m1") held) 'a.b-test/t)) "a schema it missed now exists: it runs")
+    (is (= "static" (get (seon.proofs/read-digests static rd {'a.b-test/t [{:digest "old" :pass 1 :fail 0 :error 0}]}) 'a.b-test/t))
+        "a verdict with no record of its reads is never reused by them")
+    (is (= "static" (get (seon.proofs/read-digests static rd {'a.b-test/t [{:digest "old" :reads {'a/f "f1" [:file "x.md"] nil}}]}) 'a.b-test/t))
+        "a read of a kind the index does not hold whole (files, in an agent's plan) is never taken for a miss")))

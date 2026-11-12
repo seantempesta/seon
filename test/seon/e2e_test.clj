@@ -11,22 +11,26 @@
 
 
 (deftest await-quiet-ends-on-a-recorded-defect
-  (ts/test-branch! (fn [_ c] (let [sys {:conn c}
-        t (:max-tx @c)
-        start 0
-        waiting (future (await/await-quiet sys t))]
-    (d/transact c {:tx-data [{:seon.error/signature "0123456789abcdef" :seon.error/class :eval :seon.error/count 1 :seon.error/agents 1
-                              :seon.error/first-ms start :seon.error/last-ms start}]})
-    (is (not (realized? (do (d/transact c {:tx-data [{:note/text "work goes on" :note/agent :t}]}) waiting))) "an agent's eval error is no defect of the scenario")
-    (d/transact c {:tx-data [{:seon.error/signature "fedcba9876543210" :seon.error/class :platform :seon.error/count 1 :seon.error/agents 0
-                              :seon.error/first-ms start :seon.error/last-ms start :seon.error/message "seon.reconcile/reconciler-proc: boom"}]})
-    (let [r (deref waiting)]
-      (is (= :defect (:ended r)))
-      (is (= "seon.reconcile/reconciler-proc: boom" (get-in r [:problem :seon.error/message])) "the problem, as recorded"))
-    (testing "quiescence ends it as before"
-      (ts/test-branch! (fn [_ c] (let [t (:max-tx @c) waiting (future (await/await-quiet {:conn c} t))]
+  ;; what await-quiet answers, on each main it sees (seon.await/quiet-answer): the wait itself is seon.system/await-db's
+  ;; (seon.agent-test/a-wait-on-main-whose-test-throws-answers-the-throw-and-the-write-stands)
+  (ts/test-branch! (fn [_ c]
+    (let [t (:max-tx @c) start 0
+          answer #(await/quiet-answer t @c)]
+      (d/transact c {:tx-data [{:seon.error/signature "0123456789abcdef" :seon.error/class :eval :seon.error/count 1 :seon.error/agents 1
+                                :seon.error/first-ms start :seon.error/last-ms start}]})
+      (d/transact c {:tx-data [{:note/text "work goes on" :note/agent :t}]})
+      (is (nil? (answer)) "an agent's eval error is no defect of the scenario: it waits on")
+      (d/transact c {:tx-data [{:seon.error/signature "fedcba9876543210" :seon.error/class :platform :seon.error/count 1 :seon.error/agents 0
+                                :seon.error/first-ms start :seon.error/last-ms start :seon.error/message "seon.reconcile/reconciler-proc: boom"}]})
+      (let [r (answer)]
+        (is (= :defect (:ended r)))
+        (is (= "seon.reconcile/reconciler-proc: boom" (get-in r [:problem :seon.error/message])) "the problem, as recorded")))))
+  (testing "quiescence ends it as before"
+    (ts/test-branch! (fn [_ c]
+      (let [t (:max-tx @c)]
+        (is (nil? (await/quiet-answer t @c)))
         (d/transact c {:tx-data [{:seon.system/id :root :seon.system/quiescent {:t (inc t) :root-causes []}}]})
-        (is (= {:t (inc t) :root-causes []} (deref waiting)))))))))))
+        (is (= {:t (inc t) :root-causes []} (await/quiet-answer t @c))))))))
 
 ;; ---- the first real DeepSeek runs (task seon.e2e/the-scenarios-measure-real-agents) ----------
 

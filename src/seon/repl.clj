@@ -1483,7 +1483,10 @@
     (flow/resume g)
     (loop []
       (let [e (a/<!! error-chan) m (::flow/msg e)]
-        (sock/write-line! 2 (print/text (agent/error-map (::flow/ex e) 'seon.repl/serve!) (:part print/budgets)))
+        ;; the defect as data, never as text on stderr: noted in this agent's error fold (a :platform error: Seon's own code
+        ;; threw), which its next commit carries to root, whether or not the message had an asker; Flow's ::flow/error is the
+        ;; channel, stderr stays only a dead process's last words (docs/processes.md#a-child-holds-what-it-is-given)
+        (swap! agent/state update :errors err/note (agent/error-map (::flow/ex e) 'seon.repl/serve!) :platform nil (System/currentTimeMillis))
         ;; the answer first here: it reports a failure, not a write, and the failure may be the commit's
         (when-let [r (when (map? m) (defect-answer m (::flow/ex e)))] (agent/send! r))
         (when (= :repl (::flow/pid e)) (swap! agent/state assoc :busy false))

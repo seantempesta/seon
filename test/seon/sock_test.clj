@@ -78,7 +78,7 @@
     (lib/c-close a)))
 
 (deftest a-spawned-command-holds-no-socketpair-end
-  ;; task seon.agent/a-test-child-that-dies-says-why: a test child's pipe was read as held (:seon.test/pipe-held)
+  ;; docs/processes.md#a-child-holds-what-it-is-given: a test child's pipe was read as held
   ;; because a process other than the child kept its write end; both ends are close-on-exec (FD_CLOEXEC,
   ;; fcntl F_GETFD bit 1), so a command the process spawns while a pair is open holds neither, and a
   ;; child's exit is its peer's end of file
