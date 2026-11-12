@@ -1068,25 +1068,49 @@
                k (names (sedn/decode c))]
            [:db/add fe :form/keywords k]))))
 
+(declare file-readers)
+
+(defn file-reading-macros
+  "The names of db's macros whose defining form refers to one of seon.program/file-readers (slurp, file-seq, io/resource): a form
+  expanding one holds the analysis of what the macro read. One query of the program's facts, never a seek a reference. See
+  docs/source.md#indexing-a-tree."
+  {:malli/schema [:=> [:cat :seon.host/db] [:set :qualified-symbol]]}
+  [db]
+  (set (d/q '[:find [?mn ...] :in $ [?r ...]
+              :where [?mf :form/refs ?r] [?mf :form/defines ?m] [?m :var/meta :macro] [?m :var/name ?mn]]
+            db (vec file-readers))))
+
 (defn schema-dependents
   "The live forms of db whose form names one of keys (its contract or its code, :form/keywords: one AVET seek a key), or a
   schema that names one, and on (the binary's schema forms with db's changes): the forms to evaluate again against the changed
-  schemas, unchanged in text: a contract re-arms, and a value computed from a schema at load (a def of contract/properties)
-  takes the moved entry. A form's inputs include the schema entries it names. Nothing when keys is empty."
+  schemas, unchanged in text: a contract re-arms, and a value computed from a schema at load (a value def or a top-level call
+  of contract/properties) takes the moved entry; a function's body reads the registry when called, so a defn, defmethod or
+  macro is not taken, nor a form expanding a file-reading macro (file-reading-macros: it would read this process's checkout,
+  and the registry layers the branch's changes over the binary's value). A form's inputs include the schema entries it
+  names. Nothing when keys is empty."
   {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-keyword]] [:vector :map]]}
   [db keys]
   (if (empty? keys)
     []
     (let [naming (reduce (fn [m [k f]] (reduce #(update %1 %2 (fnil conj []) k) m (names f)))
                          {} (merge contract/forms (schema-changes db)))
-          reached (into keys (closure keys naming))]
+          reached (into keys (closure keys naming))
+          reading (delay (file-reading-macros db))]
       (mapv #(form-row db %)
             (distinct (for [k reached
                             dt (d/datoms db :avet :form/keywords k)
                             :let [fe (:e dt)]
-                            ;; every form naming one: a contract re-arms, and a def computed from the schema at load
-                            ;; (contract/properties of it) takes the moved entry; its text unchanged, it kept the old
-                            :when (live? db fe)]
+                            :let [x (d/entity db fe) ds (:form/defines x)]
+                            ;; a form that took the schema at load: a contract (re-armed), a value def or a top-level call
+                            ;; (contract/properties of it); a function's body reads the registry when called, so a defn,
+                            ;; a defmethod or a macro is not evaluated again for it
+                            :when (and (live? db fe)
+                                       (or (some :var/contract ds)
+                                           (every? #(and (:var/name %) (not (contains? (set (:var/meta %)) :arglists))) ds))
+                                       ;; nor one expanding a file-reading macro (seon.config/schema-forms): it would read this
+                                       ;; process's checkout; its value is the binary's, and the registry layers the branch's
+                                       ;; changes over it (schema-registry)
+                                       (not-any? @reading (:form/refs x)))]
                         fe))))))
 
 (defn ensure-ns!

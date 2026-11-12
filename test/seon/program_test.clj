@@ -1667,4 +1667,6 @@
   (let [src "(def classes (:app.sd/set (seon.contract/properties :app.sd/class)))"
         db (record (empty-db) 'app.pt-sd src)]
     (is (= [src] (mapv :src (program/schema-dependents db #{:app.sd/class})))
-        "a def naming the moved key is among what loads again")))
+        "a def naming the moved key is among what loads again")
+    (is (= [] (mapv :src (program/schema-dependents (record (empty-db) 'app.pt-sd "(defn f [] (seon.contract/properties :app.sd/class))") #{:app.sd/class})))
+        "a function's body reads the registry when called: not evaluated again for it")))
