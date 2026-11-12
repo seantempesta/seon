@@ -55,9 +55,9 @@ bridge() {
   print "bridge: $new entered main"
 }
 # the task names a text's Completes: lines give (stdin): after `Completes:`, anywhere in a line, one ns/name or a comma-separated
-# list of them; a line's other text names nothing. The one grammar every reader uses (seon.task-files-test/no-shipped-task-is-merged-work
+# list of them, a name ending at whitespace or a mark no name ends in (a sentence's . , ;); a line's other text names nothing. The one grammar every reader uses (seon.task-files-test/no-shipped-task-is-merged-work
 # reads the same; docs/merging.md#a-merge-says-what-it-completes states it).
-completes() { perl -ne 'while (/Completes:\s*([\w.\-]+\/[\w.!?*+<>=\-]+(?:\s*,\s*[\w.\-]+\/[\w.!?*+<>=\-]+)*)/g) { print "$_\n" for split /\s*,\s*/, $1 }' }
+completes() { perl -ne 'my $n = q{[\w.\-]+/[\w.!?*+<>=\-]*[\w!?*+<>=\-]}; while (/Completes:\s*($n(?:\s*,\s*$n)*)/g) { print "$_\n" for split /\s*,\s*/, $1 }' }
 # the tasks a landing drops with no Completes line naming them: each ns/name whose entry the tasks file held at old and not at
 # new, the message (a file) saying no `Completes: ns/name` for it. A dropped entry is completed work or an accident (context's
 # 76e1cb66ce dropped seon.task/design-writes-the-implement-steps-proofs by string surgery): the message says which. The store
@@ -66,16 +66,19 @@ dropped() {
   local old=$1 new=$2 msg=$3 f ns n
   # the landing's message and every commit message it brings: a branch's own commit may say it, and a title may hold it
   local -a done; done=(${(f)"$({ cat "$msg" 2>/dev/null; git log --format=%B "$old..$new"; } | completes)"})
+  # an entry whose name a tasks file still holds at new moved (a namespace renamed): it is not dropped
+  local -a anywhere; anywhere=(${(f)"$(git grep -h -o -E ':seon\.task/name "[^"]+"' "$new" -- resources/seon/tasks 2>/dev/null | sed -E 's/.*"(.*)"/\1/')"})
   for f in ${(f)"$(git diff --name-only "$old" "$new" -- resources/seon/tasks)"}; do
     ns=${${f:t}%.edn}
     local -a was now
     was=(${(f)"$(git show "$old:$f" 2>/dev/null | sed -nE 's/.*:seon\.task\/name "([^"]+)".*/\1/p')"})
     now=(${(f)"$(git show "$new:$f" 2>/dev/null | sed -nE 's/.*:seon\.task\/name "([^"]+)".*/\1/p')"})
-    for n in $was; do (( ${now[(Ie)$n]} )) || (( ${done[(Ie)$ns/$n]} )) || print "$ns/$n"; done
+    for n in $was; do (( ${now[(Ie)$n]} )) || (( ${done[(Ie)$ns/$n]} )) || (( ${anywhere[(Ie)$n]} )) || print "$ns/$n"; done
   done
 }
 MSG=
 [[ ${1:-} == --dropped ]] && { dropped "${@:2}"; exit }
+[[ ${1:-} == --completes ]] && { completes; exit }
 [[ ${1:-} == --bridge ]] && { MAIN=$(git rev-parse --path-format=absolute --git-common-dir)/..; MAIN=${MAIN:A}; bridge "${@:2}"; exit }
 [[ ${1:-} == -F ]] && { MSG=${2:A}; [[ -f $MSG ]] || fail "no message file $2"; shift 2 }
 (( $# == 0 )) || fail "unknown arguments: $*"

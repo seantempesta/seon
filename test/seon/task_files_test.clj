@@ -136,6 +136,28 @@
                                (str "and the tasks; cites of nothing: "
                                     (pr-str (dead-cites (:db-after (pdb/speculate db tasks-only)) decls)))))))
 
+(defn- completes-of
+  "The task names text's Completes: lines give, by bin/land's one grammar (its `completes`): after Completes:, anywhere in a line, one
+  ns/name or a comma-separated list, a name ending at whitespace or a mark no name ends in. See docs/merging.md#a-merge-says-what-it-completes."
+  [text]
+  (let [nm "[\\w.\\-]+/[\\w.!?*+<>=\\-]*[\\w!?*+<>=\\-]"]
+    (vec (for [m (re-seq (re-pattern (str "Completes:\\s*(" nm "(?:\\s*,\\s*" nm ")*)")) text) k (str/split (second m) #"\s*,\s*")] k))))
+
+(deftest a-completes-line-is-read-one-way
+  ;; docs/merging.md#a-merge-says-what-it-completes: bin/land and this namespace read Completes: lines by one grammar, each case a line
+  ;; a landing wrote (web's b458ac25e0 ended its name with a sentence's period; runtime's 4602c8252c a bulleted list)
+  (let [lines {"Completes: seon.render/roots-debug-page-shows-its-request. What allowed it" ["seon.render/roots-debug-page-shows-its-request"]
+               "- Completes: seon.agent/a-test-child-that-dies-says-why, seon.agent/a-held-pipe-names-its-holder-and-is-reported"
+               ["seon.agent/a-test-child-that-dies-says-why" "seon.agent/a-held-pipe-names-its-holder-and-is-reported"]
+               "Merge jolt/context: Completes: seon.ctx/the-record-is-one-reference-type" ["seon.ctx/the-record-is-one-reference-type"]
+               "Completes: seon.task/a-refine-reads-its-run (what is left of it is another)" ["seon.task/a-refine-reads-its-run"]
+               "Completes: a.b/c!, d.e/f?;" ["a.b/c!" "d.e/f?"]
+               "It completes nothing: no such line" []}
+        land (fn [line] (vec (remove str/blank? (str/split-lines (:out (sh/sh "zsh" (str (config/checkout) "/bin/land") "--completes" :in (str line "\n")))))))]
+    (doseq [[line want] lines]
+      (is (= want (completes-of line)) (str "this namespace reads " line))
+      (is (= want (land line)) (str "bin/land reads " line)))))
+
 (deftest no-shipped-task-is-merged-work
   ;; docs/merging.md#a-merge-says-what-it-completes: the merge
   ;; that completes a task's work says so in its message, a `Completes: ns/name` line, and removes its entry in
@@ -149,9 +171,7 @@
         merges (for [x (str/split (:out (sh/sh "git" "-C" root "log" "--first-parent" "--merges" "--format=%H%x1f%B%x1e" "main")) #"\x1e")
                      :let [[sha body] (str/split (str/trim x) #"\x1f" 2)] :when body] [sha body])
         bodies (map second merges)
-        ;; bin/land's one grammar (its `completes`): after Completes:, one ns/name or a comma-separated list of them
-        nm "[\\w.\\-]+/[\\w.!?*+<>=\\-]+"
-        named (fn [body] (for [m (re-seq (re-pattern (str "Completes:\\s*(" nm "(?:\\s*,\\s*" nm ")*)")) body) k (str/split (second m) #"\s*,\s*")] k))
+        named completes-of
         ;; the entries a merge's own tree holds, one git grep a merge that completes anything
         held-at (fn [sha] (set (for [l (str/split-lines (:out (sh/sh "git" "-C" root "grep" "-o" "-E" ":seon.task/name \"[^\"]+\"" sha "--" "resources/seon/tasks")))
                                      :let [[_ path n] (re-find #"^[^:]+:resources/seon/tasks/(.+)\.edn::seon.task/name \"([^\"]+)\"$" l)] :when n]
