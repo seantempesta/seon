@@ -51,7 +51,7 @@ Each v1 capability for tasks, merges and tests.
 - ``chain!``, ``:seon.task/next`` → `:needs` only: dropped.
 - step templates → `seon.template/request` by default; `seon.template/design-build` and `seon.template/stages` for experiments ([tasks](tasks.md#a-request-is-one-transaction)): present.
 - three-way program merge, conflicts as entries → `seon.merge`, `my.branch/merge-main!`: present.
-- many agents merging onto shared definitions (v1's swarm) → `bin/check swarm` (10 tasks over 5 shared vars, 8 running): present.
+- many agents merging onto shared definitions (v1's swarm) → `seon.reconcile-test/concurrent-merges-into-main-converge-whatever-the-order`, n tasks over 5 shared vars: present.
 - main wins a conflict → ours is kept: missing.
 - a changed function no test reaches refuses the branch → `seon.reconcile/done-explain` has no coverage reason: missing.
 - one done rule shared with merge → `seon.reconcile/done-explain` ([tasks](tasks.md#the-done-rule)): present.

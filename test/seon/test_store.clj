@@ -113,7 +113,10 @@
   {:malli/schema [:function [:=> [:cat] :string] [:=> [:cat :string] :string]]}
   ([] (process-store (seon.config/checkout)))
   ([checkout]
-   (let [path (str checkout "/target/runs/test-store-" pdb/schema-digest)]
+   ;; the path its maker recorded (make-process-store!), never one this process derives: a test child of the standing system's
+   ;; agent runs main's program and derived another schema digest than the checkout's seed made the store under (2026-11-12)
+   (let [rec (java.io.File. (str checkout "/target/process-store.path"))
+         path (if (.isFile rec) (clojure.string/trim (slurp rec)) (str checkout "/target/runs/test-store-" pdb/schema-digest))]
      (when-not (pdb/store? path)
        (throw (ex-info (str "no process store at " path ": bin/test makes it (its plan: make-process-store!) before any shard starts; run the test through bin/test, or as an agent through (my.agent/prove '#{its-name}), which runs it on the gate's checkout")
                        {:seon.error/type :seon.test-store/no-process-store :path path})))
@@ -122,13 +125,15 @@
 (defn make-process-store!
   "The process tests' store (process-store) of checkout, made when missing (the schema and no
   example program on :db, as a root's own store starts) and every one of another schema removed
-  (seon.db/kept-store!): bin/test's plan calls it before any shard starts, when a selected test runs
-  the binary. Answers its path."
+  (seon.db/kept-store!): bin/test's plan and the service's seed call it before any test runs the binary. Its path is
+  recorded in <checkout>/target/process-store.path, which process-store reads. Answers its path."
   {:malli/schema [:=> [:cat :string] :string]}
   [checkout]
   (let [path (pdb/kept-store! (str checkout "/target/runs/test-store"))]
     (.mkdirs (.getParentFile (java.io.File. ^String path)))
     (d/release (:conn (pdb/open! :lmdb path 0 :db)))
+    ;; its path recorded where every reader looks (process-store): whoever makes the store names it
+    (spit (str checkout "/target/process-store.path") path)
     path))
 
 (defn clone-process-store!
@@ -466,24 +471,33 @@
   {:malli/schema [:=> [:cat :string] :string]}
   [label] (str label "-" (seon.lib/c-getpid) "-" (random-uuid)))
 
-(defn reclaim!
-  "Remove what dead test processes made in checkout (named by mark-of, their pid gone): the merges branches of their shared
-  roots, those roots' mains in store and their runs directories, and the git worktrees their fixtures added. Run once a shard,
-  where it starts its shared root. 30 such branches and 8 fixture worktrees were left by killed shards (2026-11-12). Answers
-  {:branches :mains :worktrees}, the counts removed. See docs/testing.md#a-root-costs-what-it-boots."
-  {:malli/schema [:=> [:cat :string :string] :map]}
-  [checkout store]
+(defn reclaim-git!
+  "Remove what dead test processes made in checkout's git (named by mark-of, their pid gone): the merges branches of their
+  shared roots and the git worktrees their fixtures added. Answers {:branches :worktrees}, the counts removed. See
+  docs/testing.md#a-root-costs-what-it-boots."
+  {:malli/schema [:=> [:cat :string] :map]}
+  [checkout]
   (let [git (fn [& args] (:out (apply sh/sh "git" "-C" checkout args)))
         branches (filterv dead-pid? (clojure.string/split-lines (git "for-each-ref" "--format=%(refname:short)" "refs/heads/jolt/seon-merges-*-shard-*")))
         wts (filterv #(and (re-find #"/seon-[a-z-]+-\d+-[0-9a-f-]+/wt$" %) (dead-pid? %))
-                     (keep #(second (re-find #"^worktree (.*)$" %)) (clojure.string/split-lines (git "worktree" "list" "--porcelain"))))
+                     (keep #(second (re-find #"^worktree (.*)$" %)) (clojure.string/split-lines (git "worktree" "list" "--porcelain"))))]
+    (doseq [b branches] (git "branch" "-q" "-D" b))
+    (doseq [w wts] (git "worktree" "remove" "--force" w) (seon.lib/remove-tree! (.getParent (java.io.File. ^String w))))
+    {:branches (count branches) :worktrees (count wts)}))
+
+(defn reclaim!
+  "Remove what dead test processes made in checkout (named by mark-of, their pid gone): its git's (reclaim-git!), and their
+  shared roots' mains in store with their runs directories. Run once a shard, where it starts its shared root. 30 such
+  branches and 8 fixture worktrees were left by killed shards (2026-11-12). Answers {:branches :mains :worktrees}, the counts
+  removed. See docs/testing.md#a-root-costs-what-it-boots."
+  {:malli/schema [:=> [:cat :string :string] :map]}
+  [checkout store]
+  (let [g (reclaim-git! checkout)
         mains (let [conn (pdb/connect (pdb/store-cfg :lmdb store))]
                 (try (filterv #(and (re-matches #"shard-\d+-[0-9a-f-]{36}" %) (dead-pid? %)) (map name (d/branches conn)))
                      (finally (d/release conn))))]
-    (doseq [b branches] (git "branch" "-q" "-D" b))
-    (doseq [w wts] (git "worktree" "remove" "--force" w) (seon.lib/remove-tree! (.getParent (java.io.File. ^String w))))
     (doseq [m mains] (drop-main! store m) (seon.lib/remove-tree! (str checkout "/target/runs/" m "-runs")))
-    {:branches (count branches) :mains (count mains) :worktrees (count wts)}))
+    (assoc g :mains (count mains))))
 
 (defn- start-shared-root!
   "A root for this test process to share among its tests (shared-root!) on checkout with root
