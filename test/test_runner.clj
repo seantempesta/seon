@@ -260,6 +260,10 @@
         whole (if (seq names) (set (keep #(when-not (str/includes? % "/") (symbol %)) names)) nss)
         idx (into {} (filter #(or (whole (symbol (namespace (key %)))) (vars (key %)))) all)]
     {:graph g :inputs in
+     ;; the tests that reach a fixture (a var marked ^:seon.test/fixture, the test store), as their reach says: a shard
+     ;; holding one warms its fixtures before its first test, and one holding none pays nothing (seon.proofs/warm-fixtures!)
+     :fixture-tests (into #{} (mapcat #(program/tests-reaching g %))
+                          (d/q '[:find [?n ...] :where [?v :var/meta :seon.test/fixture] [?v :var/name ?n]] db))
      :rd (delay (reads-index-of root store tree g in))
      ;; whether the binary target/seon is (its build record, target/seon.program) runs this tree's program as a build of it would:
      ;; nil, or what differs that it bakes (seon.system/binary-current, the one rule; docs/source.md#the-binary-records-its-program)
@@ -346,14 +350,15 @@
   holds: every one of a full run, and the reuse audit's) for bin/test to run, one process each (bin/test
   removes the last run's first), and each measured test's stall bound and end bound as out/stall-bounds (\"<test> <stall ms>
   <end ms>\" lines, for bin/stalls). Answers the shard count."
-  [out tests digests tree mg jobs ms rerun]
+  [out tests digests tree mg jobs ms rerun fixture-tests]
   (let [sh (proofs/shards tests jobs ms)
         mg-ms (measured-ms (keys mg))
         floor (config/value :seon.config.agent/stall-ms) k (config/value :seon.config.proofs/stall-factor)
         e (config/value :seon.config.check/step-end-factor)
         dealt (deal-mg sh mg ms mg-ms)]
     (doseq [[i [ts m]] (map-indexed vector dealt)]
-      (write! (str out "/shard-" i ".edn") (sedn/encode {:tests ts :mg m :digests (select-keys digests ts) :tree tree :rerun (into (sorted-set) (filter (set ts)) rerun)})))
+      (write! (str out "/shard-" i ".edn") (sedn/encode {:tests ts :mg m :digests (select-keys digests ts) :tree tree :rerun (into (sorted-set) (filter (set ts)) rerun)
+                                                          :warm? (boolean (some fixture-tests ts))})))
     ;; each measured test's stall bound, k times its own last run, and its end bound, the step-end factor times the
     ;; same run floored at stall-ms, past which bin/stalls captures its evidence and ends its shard (OVERRAN:
     ;; docs/clocks.md#time-decides-the-owners-exceptions); a test with no record takes the floors, out/stall-ms
@@ -388,7 +393,7 @@
   (an edit during the run: what ran is not what the digests name): then its greens are taken back
   (seon.fx/forget-greens!) and nothing else is stored, and the run stays as reported. Then SHARD n green m red. Answers the exit status."
   [file]
-  (let [{:keys [tests digests tree mg rerun]} (edn/read-string (slurp file))
+  (let [{:keys [tests digests tree mg rerun warm?]} (edn/read-string (slurp file))
         ;; what each green read, keyed by the run's reads index (write-reads!): the functions it called, itself, its static reads
         {:keys [rd static]} (shard-reads file)
         with-reads (fn [x] (cond-> x rd (assoc :reads (proofs/reads-key rd {:fns (conj (into #{} (map :var) (:fns x)) (:test x))
@@ -397,6 +402,9 @@
     (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
     ;; armed as root arms them at boot, so a proof counts the same contracted calls here as in an agent's test child (docs/cost.md#counting-calls)
     (contract/instrument! contract/boot-nss)
+    ;; the fixtures its tests reach made before the first of them runs, so none pays the test store's seed (~65M ticks)
+    ;; inside its own budget; a shard of none that reaches one makes none
+    (when warm? (proofs/warm-fixtures!))
     (let [;; one writer for every verdict this shard stores
           run {:id (str "bin/test " tree " " (random-uuid)) :tree tree}
           ;; the greens this shard wrote as each ended (the cache's, so a run beside it reuses them at once), and the ones it reused
@@ -502,7 +510,8 @@
                   (fn [cand]
                     (let [r (read-results cand)]
                       (if (contract/error? r) (do (vreset! unread r) {}) r))))]
-    (cond-> (assoc p :binary-current (:binary-current reach) :waived (:waived reach) :static-reads (:static-reads reach) :rd (:rd reach))
+    (cond-> (assoc p :binary-current (:binary-current reach) :waived (:waived reach) :static-reads (:static-reads reach) :rd (:rd reach)
+                   :fixture-tests (:fixture-tests reach))
       @unread (assoc :unread @unread))))
 
 (defn build-text
@@ -532,7 +541,7 @@
         1)
   (let [dir (str "the verdict cache " (config/value :seon.config.proofs/results-dir))
         tests? (not= what "checks") checks? (not= what "tests")
-        {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky waived binary-current audit]} plan
+        {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky waived binary-current audit fixture-tests]} plan
         ;; the reuse audit's tests run beside the plan's (seon.proofs/plan-of's :audit), never a slow one: a slow test runs
         ;; last, once all else is green (docs/merging.md#a-slow-test-runs-last)
         audit (let [ms (measured-ms audit) bound (config/value :seon.config.proofs/slow-test-ms)]
@@ -575,7 +584,8 @@
                          ms
                          ;; run whatever the cache holds: every test of a full run (bin/test --all, which a rerun by name asks
                          ;; for too), and the reuse audit's greens, whose rerun is its point
-                         (if (true? all?) run-tests audit))
+                         (if (true? all?) run-tests audit)
+                         (or fixture-tests #{}))
         _ (write-reads! out plan (if no-test [] run-tests))
         ;; what runs and reaches the binary (a test that reaches binary-sh, a step that runs a seon.check
         ;; mode): bin/test builds target/seon only when this is not empty, bin/check seeds only for the steps

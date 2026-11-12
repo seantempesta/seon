@@ -1182,10 +1182,9 @@
   []
   (if (:fixtures-warm @state)
     0
-    (let [vs (for [n (all-ns) [_ v] (ns-interns n) :when (:seon.test/fixture (meta v))] v)]
-      (doseq [v vs] (force @v))
+    (let [n (proofs/warm-fixtures!)]
       (swap! state assoc :fixtures-warm true)
-      (count vs))))
+      n)))
 
 (defn- test-child-runs!
   "A test child's body (jolt.async.remote.flow/fork!'s child), end its end of the link to its run's fold proc
