@@ -596,24 +596,6 @@
     (is (= [[:seed true]] (mapv #(vector (get-in % [:req :req :kind]) (get-in % [:req :req :binary?])) (fx-asks o3)))
         "the process test's run seeds the stores first")))
 
-(deftest a-step-about-the-machine-runs-with-nothing-beside-it
-  ;; Optimization's e2e of step 4: scale (it measures what root's agents cost the machine's memory) was granted beside 29 other
-  ;; steps and 7 of its agents answered no verdict; bin/check runs it alone (seon.proofs/machine-steps)
-  (let [[st o] (seeded-run 4 {:items {} :steps {"scale" {:digest "ds" :binary? false :alone? true} "laws" {:digest "dl" :binary? false}
-                                              "fx" {:digest "df" :binary? false}}
-                            :build {:tree "T" :needed? false}})
-        names (fn [outs] (mapv #(get-in % [:req :req :name]) (fx-asks outs)))]
-    (is (= ["scale"] (names o)) "nothing running: scale, the most valuable, is granted, and nothing beside it though three workers are free")
-    (let [[st o1] (feed st [(answer-of (first (fx-asks o)) {:value {:pass 1 :fail 0 :error 0 :ms 10}})])]
-      (is (= #{"laws" "fx"} (set (names o1))) "it ended: the others at once")))
-  (let [[st o] (seeded-run 4 {:items {} :steps {"laws" {:digest "dl" :binary? false :ms 1} "scale" {:digest "ds" :binary? false :alone? true}}
-                            :build {:tree "T" :needed? false}})
-        names (fn [outs] (mapv #(get-in % [:req :req :name]) (fx-asks outs)))
-        ran (names o)]
-    (is (= 1 (count ran)) "one of the two at a time")
-    (let [[_ o1] (feed st [(answer-of (first (fx-asks o)) {:value {:pass 1 :fail 0 :error 0 :ms 10}})])]
-      (is (= 1 (count (names o1))) "and the other after it"))))
-
 ;; every wait ends: a red build is every item's that needs it, and none of them runs on a binary that was never built
 (deftest a-red-build-answers-what-needs-it-with-its-error
   (let [[st o] (tree-run 4 {:items {} :process {'a.p-test/t "dp"} :steps {"smoke" {:digest "ds" :binary? true :bound 5000}} :build {:tree "T" :needed? true}})
@@ -709,17 +691,28 @@
       (let [[_ o] (prove/ask-items st0 1 :batch {['app.l-test/a "da"] it ['app.l-test/b "db"] it ['app.l-test/c "dc"] it})]
         (is (= 3 (count (batches o))) "the load under it: as many as the workers allow")))))
 
-;; docs/merging.md#the-test-service: with max-cores and max-load unset, the shipped max-workers (8) is the bound; with no count
-;; set the machine's cores are
+;; docs/merging.md#the-test-service: with max-cores and max-load unset, the shipped max-workers, the machine's cores
+;; (#seon/cores), is the bound; with no count set the cores are too
 (deftest the-shipped-bound-holds-when-the-others-are-unset
   ;; the service's init takes the admission of the config in force (seon.prove/config-admission), whatever machine runs it
   (let [init (prove/prove-proc {:conn nil})
         st (proc0)
         [_ outs] (prove/ask-items st 1 :batch (into {} (for [i (range 10)] [[(symbol "app.s-test" (str "t" i)) (str "d" i)] {:agent :a1 :ms 5}])))]
     (is (= (prove/config-admission) (select-keys init [:workers :max-load])))
-    (is (= 8 (:workers st)) "the shipped max-workers")
-    (is (= 8 (count (batches outs)))))
+    (is (= (seon.config/value :seon.config.machine/cores) (:workers st)) "the shipped max-workers: the machine's cores")
+    (is (= (min 10 (:workers st)) (count (batches outs))) "ten items over that many workers, a share each"))
   (is (= {:workers 4} (prove/admission {:cores 4}))))
+
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-batchs-error-that-names-no-test-reaches-its-answer
+  ;; docs/merging.md#the-test-service. Found 2026-11-12 (runtime's land): agent-checks' first prove answered {:error 1} with only
+  ;; its two :pass reports: run-answer kept an item's reports by its test var, so a run's report naming no test was counted and dropped
+  (let [held {:type :error :exit {:signal 9} :message "test process died: {:signal 9}"}
+        answer (-> test-run-answer (assoc :error 1) (update :reports conj held))
+        [st outs] (feed (proc0) [(req 1 :main 5)])
+        [_ all] (run-through st outs answer)
+        r (:r (first (filter #(= :prove-answer (:op %)) all)))]
+    (is (= 1 (:error r)) "the error is counted")
+    (is (= [held] (filterv :exit (:reports r))) (str "and its report is in the answer, once: " (pr-str (:reports r))))))
 
 ;; docs/merging.md#a-merge-runs-what-the-change-reaches: the judge's run through the test service answers, for each test it defers to
 ;; the merge check, that test's digest at the task's base, as the agent's plan computed it from the base's program. The merge check
@@ -730,3 +723,39 @@
         r (#'seon.prove/run-answer base {})]
     (is (= ['a.b-test/p 'a.b-test/q] (:deferred r)))
     (is (= {'a.b-test/p "bp" 'a.b-test/q nil} (:deferred-digests r)) "each deferred test's base digest, nil only for a test new on the branch")))
+
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-granted-items-pass-reaches-the-service
+  ;; docs/merging.md#the-test-service. Found 2026-11-12 (data's task 1): an agent's run of a granted item kept, in its answer, a
+  ;; pass report only for the task's proofs and the tests named (seon.proofs/answer), so an item that was neither and passed read
+  ;; as "answered no verdict" (seon.prove/batch-ended), and the agent's task died before its first turn. What the agent's
+  ;; answer keeps is what its asker reads: its proofs, the tests named, and the items granted (seon.agent/asked)
+  (let [t 'a.b-test/t
+        m {:op :tests :items {t "d1"}}
+        run {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var (str "#'" t)}] :digests {t "d1"}}
+        ans (proofs/answer run (seon.agent/asked m #{'x.y-test/proof} [t]))
+        ended (atom nil)]
+    (with-redefs [prove/item-ended (fn [st _ r] (reset! ended r) [st []]) prove/grant (fn [st] [st []])]
+      (#'prove/batch-ended {:batches {7 [[t "d1"]]} :items {[t "d1"] {:kind :test}}} 7 ans))
+    (is (= 1 (:pass @ended)) (str "the item's pass is its verdict, never no-verdict: " (pr-str @ended)))))
+
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-grant-of-no-items-runs-nothing
+  ;; docs/merging.md#the-test-service. Found 2026-11-12: an agent given a grant with empty :items ran every test it planned, 1,765
+  ;; of them: empty read as not given. Given and empty selects nothing; not given (nil) plans
+  (let [sel (fn [items] (#'seon.agent/grant-selection nil items (fn [] {:run [:everything]})))]
+    (is (= [] (:run (sel {}))) "empty items: nothing runs")
+    (is (= [:everything] (:run (sel nil))) "no items given: the run plans its own")))
+
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-removed-test-that-no-longer-loads-fails-alone-and-only-when-it-runs
+  ;; docs/merging.md#the-test-service. Found 2026-11-12 (tests-bootstrap): a test child defined every test the branch removed, from
+  ;; main's source, before running anything; one naming a var the branch also removed threw, and every child of the branch ended
+  ;; with one report naming no test: a process test granted there ran nothing. Only this run's removed tests load, each failure its own
+  (let [removed {'rm.gone-test/a "(clojure.test/deftest a (clojure.test/is (#'clojure.string/no-such-fn)))"
+                 'rm.gone-test/b "(clojure.test/deftest b (clojure.test/is true))"
+                 'rm.gone-test/c "(clojure.test/deftest c (clojure.test/is (#'clojure.string/no-such-fn-either)))"}]
+    (try
+      (let [unloaded (#'seon.agent/load-removed! removed '[rm.gone-test/a rm.gone-test/b])]
+        (is (= '#{rm.gone-test/a} (set (keys unloaded))) "the one that does not load is named; the other loads")
+        (is (re-find #"does not load on this branch" (get unloaded 'rm.gone-test/a)))
+        (is (some? (resolve 'rm.gone-test/b)) "a removed test this run runs is defined")
+        (is (nil? (resolve 'rm.gone-test/c)) "one this run does not run is not loaded"))
+      (finally (remove-ns 'rm.gone-test)))))

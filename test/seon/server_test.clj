@@ -537,7 +537,7 @@
         (at/in-agent (fn [{:keys [agent ns]}]
                        [{:op :attach :task (str ns "/t")}
                         (str "(ns " ns "-test (:require [clojure.test :refer [deftest is]]))")
-                        "(deftest t (is (= 2 (inc 1))))"
+                        "(deftest ^{:seon.test/estimate {:ticks 100000}} t (is (= 2 (inc 1))))"
                         {:op :eval :agent "root" :code (str "(let [db @(:conn sys)] @(c/transact-main! sys ((my.test/code '" ns ".behind \"(ns " ns ".behind) (defn f \\\"One.\\\" {:malli/schema [:=> [:cat] :int]} [] 1)\") db)))")}
                         {:op :done :agent agent}
                         {:op :eval :agent "root" :code (str "(some-> (java.io.File. (str (seon.config/value :seon.config.proofs/results-dir) \"/" ns "-test\")) .list vec)")}])

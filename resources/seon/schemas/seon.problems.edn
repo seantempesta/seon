@@ -232,12 +232,14 @@
  ;; failing assertions per red test (at most 8 each, printed by seon.print under :part)
  :seon.problems/assertion [:map [:type [:enum :fail :error]] [:message {:optional true} [:maybe :string]] [:flaky {:optional true} :boolean]
                            [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]
-                           [:got {:optional true} [:maybe :string]] [:seon.error/type {:optional true} :qualified-keyword]]
+                           [:got {:optional true} [:maybe :string]] [:at {:optional true} [:vector :string]] [:seon.error/type {:optional true} :qualified-keyword]]
  ;; one clojure.test report as the test child keeps it (seon.agent/test-report)
  :seon.test/report [:map [:type :keyword] [:var {:optional true} [:maybe :string]] [:message {:optional true} [:maybe :string]]
                     [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]
                     ;; a failed (is (pred ...)): what (pred ...) evaluated to, without clojure.test's (not ...)
                     [:got {:optional true} :string]
+                    ;; an error's place: where it was thrown (seon.proofs/error-at)
+                    [:at {:optional true} [:vector :string]]
                     ;; a run stopped by its tick budget: the typed error, on the test that was running
                     [:seon.error/type {:optional true} :qualified-keyword] [:ticks {:optional true} :int] [:budget {:optional true} :int]
                     [:cost {:optional true} :seon.cost/report]]
@@ -267,15 +269,15 @@
                                                     :leadless-section "wiki sections with no lead" :uncited-task "tasks that cite no section"
                                                     :stale-plan "task plans that went stale" :uncited-var "functions that cite no section"
                                                     :problem-unlinked "problem classes with no wiki section" :long-form "forms too long" :waived-proof "proofs that pass by waiver"
-                                                    :unschemed-key "keys with no schema entry" :refused-value "stored values their entry refuses"}
-                             :seon.problems/derived #{:stalled :unnamed-site :stale-pin :stale-binary :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :waived-proof :unsynced :unschemed-key :refused-value}
+                                                    :unestimated-test "tests that state no estimate" :undeclared-test "tests that break their law" :unschemed-key "keys with no schema entry" :refused-value "stored values their entry refuses"}
+                             :seon.problems/derived #{:stalled :unnamed-site :stale-pin :stale-binary :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :waived-proof :unsynced :unestimated-test :undeclared-test :unschemed-key :refused-value}
                              ;; the derived classes a branch's content can make, which seon.problems/caused-split reads from what it moved
                              ;; and judges it on (seon.problems/caused-classes); the rest of :seon.problems/derived is the running system's state
-                             :seon.problems/caused #{:unnamed-site :stale-section :uncited-var :long-form :leadless-section :orphan-page :waived-proof :uncited-task :stale-plan :unschemed-key :refused-value}
+                             :seon.problems/caused #{:unnamed-site :stale-section :uncited-var :long-form :leadless-section :orphan-page :waived-proof :uncited-task :stale-plan :unestimated-test :undeclared-test :unschemed-key :refused-value}
                              ;; shown, never a reason to refuse done (root's ruling, 2026-10-23: every var edit stales the sections that cite it;
                              ;; and the plans that cite it, an agent's own task's among them)
                              :seon.problems/attention #{:stale-section :uncited-var :long-form :stale-plan}
-                             :seon.problems/areas [[:docs #{:stale-pin :stale-section :orphan-page :leadless-section :uncited-var}] [:tests #{:red :cost :waived-proof}]
+                             :seon.problems/areas [[:docs #{:stale-pin :stale-section :orphan-page :leadless-section :uncited-var}] [:tests #{:red :cost :waived-proof :unestimated-test :undeclared-test}]
                                                     [:laws #{:unnamed-site :long-form :unschemed-key :refused-value}] [:merges #{:merge :task-conflict :unrun :unsynced}] [:tasks #{:failed :uncited-task :stale-plan}]
                                                     [:agents #{:stalled :dead :error :waste}] [:errors #{:platform :eval :agent :effect}] [:health #{:problem-unlinked :stale-binary}]]
                              ;; each class's section of the wiki: what it is and how it is fixed. A class with open rows whose
@@ -288,9 +290,10 @@
                                                   :dead "docs/root.md#runs-and-judging" :failed "docs/tasks.md#a-refused-run-is-held-for-root"
                                                   :unnamed-site "docs/health.md#a-laws-unnamed-site" :unschemed-key "docs/health.md#a-key-with-no-schema" :refused-value "docs/health.md#a-stored-value-its-entry-refuses"
                                                   :stale-pin "docs/forks.md#branch-scheme" :stale-binary "docs/health.md#a-stale-binary" :stale-section "docs/health.md#a-stale-section"
-                                                  :orphan-page "docs/health.md#an-orphan-page" :leadless-section "docs/health.md#a-section-with-no-lead" :uncited-task "docs/health.md#a-task-that-cites-nothing" :stale-plan "docs/health.md#a-plan-that-went-stale" :uncited-var "docs/health.md#a-function-that-cites-no-section" :long-form "docs/health.md#a-form-too-long" :waived-proof "docs/health.md#a-proof-that-passes-by-waiver" :problem-unlinked "docs/health.md#a-problem-with-no-page"}}
+                                                  :orphan-page "docs/health.md#an-orphan-page" :leadless-section "docs/health.md#a-section-with-no-lead" :uncited-task "docs/health.md#a-task-that-cites-nothing" :stale-plan "docs/health.md#a-plan-that-went-stale" :uncited-var "docs/health.md#a-function-that-cites-no-section" :long-form "docs/health.md#a-form-too-long" :waived-proof "docs/health.md#a-proof-that-passes-by-waiver" :problem-unlinked "docs/health.md#a-problem-with-no-page"
+                                                  :unestimated-test "docs/merging.md#a-tests-tick-budget" :undeclared-test "docs/testing.md#test-types"}}
                        :stalled :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict :unnamed-site :stale-pin :stale-binary :unrun
-                       :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :waived-proof :unsynced :unschemed-key :refused-value]
+                       :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :waived-proof :unsynced :unestimated-test :undeclared-test :unschemed-key :refused-value]
  :seon.problems/row [:map {:seon.render/hiccup seon.render.ui/problem-row}
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]

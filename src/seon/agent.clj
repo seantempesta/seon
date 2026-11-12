@@ -728,6 +728,9 @@
       (and (= :fail (:type m)) (seq? (:actual m)) (= 'not (first (:actual m))))
       (assoc :got (print/text (second (:actual m)) (:part print/budgets)))
       (contract/valid? :seon.cost/report cost) (assoc :cost cost)
+      ;; an error's place: the first frames of where it was thrown, which #error's print leaves out (a spawn's ENOENT named
+      ;; no caller, 2026-11-12)
+      (instance? Throwable (:actual m)) (assoc :at (proofs/error-at (:actual m)))
       ;; a test past its tick budget (seon.proofs/run-tests!): the typed error and its counts
       (:seon.error/type m) (merge (select-keys m [:seon.error/type :ticks :budget]))
       ;; a test a typed throw ended (a deadlock, test-child-runs!): its type
@@ -840,6 +843,16 @@
       (seq files) (update :tree mix (vec files))
       (seq files) (update :config (fn [c] (reduce-kv (fn [c p text] (if-let [k (fx/env-class p)] (update c k mix [p text]) c)) c files))))))
 
+(defn base-at-reads
+  "Base's digests (base, {test digest} by reach) as a branch's selection compares them with the branch's: a test whose reach digest
+  is the branch's own (static) takes the digest its recorded reads gave it on the branch (reads, seon.proofs/read-digests), so a
+  branch changes only what its reach changed, never a test because some run recorded what it read. Without it, once a shard's
+  root moved its main past the tree a green recorded its reads at, every later judge selected those tests as the branch's. See
+  docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat [:map-of :any :string] [:map-of :any :string] [:map-of :any :string]] [:map-of :any :string]]}
+  [base static reads]
+  (into {} (for [[t d] base] [t (if (= d (static t)) (get reads t d) d)])))
+
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/graph-index) against base's (main at its merge base), the greens stored at
@@ -900,6 +913,8 @@
         point (let [[c t] (pdb/point db)] (str c " " t))
         mix #(-> (str % "\ndata " point) lib/digest)
         cd (update-vals idx #(cond-> (:digest %) (:data? %) mix))
+        ;; the digests by reach alone: what selection compares with base's, which take no recorded reads
+        static cd
         ;; recorded reads (seon.proofs/read-digests): a test at its newest green's digest while all it read is unchanged; the
         ;; reads index made once a commit of this branch and kept in the agent's state, never per ask
         held (let [h (fx/held-reads (vec (keys cd)))] (if (contract/error? h) {} h))
@@ -911,7 +926,8 @@
              cd)
         ;; base's digests take the same point for those tests, so selection still asks what the code changed: a proof over the
         ;; data is selected by its reach, and its verdict is kept and found at the data it read
-        bd (some-> b :index (as-> ix (into {} (for [[t {:keys [digest]}] ix] [t (cond-> digest (:data? (idx t)) mix)]))))
+        bd (some-> b :index (as-> ix (base-at-reads (into {} (for [[t {:keys [digest]}] ix] [t (cond-> digest (:data? (idx t)) mix)]))
+                                                    static cd)))
         ;; main's tests the branch removed: each judges from base's definition, loaded in the test
         ;; child, its namespace's ns form first when the branch removed the namespace too; one
         ;; that reaches a process of its own (base's index says) stays a process test
@@ -935,7 +951,13 @@
                   (update :selected into (keys removed))
                   (update :run into (keys removed))
                   (assoc :digests cd :base-digests bd :graph g :inputs in :removed removed
-                         :process (into (program/process-tests idx) removed-process)))
+                         :process (into (program/process-tests idx) removed-process)
+                         ;; what a green's run records it read beside the functions it called (seon.proofs/reads-key): each test's
+                         ;; reads besides code, and the digest of every read, the agent's one reads index a commit
+                         :static-reads (into {} (keep (fn [[t v]] (when (seq (:reads v)) [t (:reads v)]))) idx)
+                         :reads-rd (delay (let [at (pdb/point db)]
+                                            (or (when (= at (first (:reads-index @state))) (second (:reads-index @state)))
+                                                (let [rd (program/reads-index g in {})] (swap! state assoc :reads-index [at rd]) rd))))))
         unread (assoc :unread unread))))))
 
 (defn stored-results
@@ -990,28 +1012,32 @@
       (finally (when-not @answered (some-> (:test-child @state) (lib/kill! (jolt.host/signal-number "KILL")))))))))
 
 (defn- load-removed!
-  "In a test child, define each of main's tests the branch removed (test-plan's :removed, {test
-  src}) from base's source, in its own namespace (its ns form first when the branch removed
-  that too), so it runs as main holds it. nil."
-  {:malli/schema [:=> [:cat [:map-of :qualified-symbol :string]] :nil]}
-  [removed]
-  (doseq [[t src] removed]
-    (binding [*ns* (create-ns (symbol (namespace t)))] (load-string src)))
-  nil)
+  "In a test child, define each of main's tests the branch removed that this run runs (test-plan's :removed, {test src}, of
+  tests) from base's source, in its own namespace (its ns form first when the branch removed that too), so it runs as main
+  holds it. Answers {test message} of those whose source no longer loads on the branch (it names what the branch removed too):
+  each is that test's error, never the run's: one removed test naming a removed var once ended every child of a branch, before any
+  test ran."
+  {:malli/schema [:=> [:cat [:map-of :qualified-symbol :string] [:sequential :qualified-symbol]] [:map-of :qualified-symbol :string]]}
+  [removed tests]
+  (into {} (for [[t src] (select-keys removed tests)
+                 :let [e (try (binding [*ns* (create-ns (symbol (namespace t)))] (load-string src)) nil
+                              (catch Throwable e e))]
+                 :when e]
+             [t (str "main's " t " does not load on this branch, which removed it: " (ex-message e))])))
 
 (defn- run-tests-here
   "The tests a test-plan runs (var symbols), by the one runner (seon.proofs/run-tests!, nothing
   stored: the parent holds the greens), with the branch's schemas in effect (malli's dynamic
   registry bound to seon.program/schema-registry, as the agent's REPL binds it), each test
-  within its budget of engine ticks of work of its own (the runner's: ticks at most, budgets per test): answers report data. Each
+  within its budget of engine ticks of work of its own (the runner's: ten times its stated estimate, ticks at most): answers report data. Each
   test is told (put! v) as it starts ({:seon.test/started var}, which answers once the agent has heard it, so the agent
   names the test a death interrupted) and as it ends ({:seon.test/ended var :reports [...]}, its reports, so a
   death loses the test it interrupted and no other: run-tests-forked runs the rest in a new
   child); a test past its ticks is an :error report of the typed
   :seon.test/ticks-spent naming it; a test its namespace's throw kept from reporting is an
   :error report carrying that throw (the runner reports it). See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
-  {:malli/schema [:=> [:cat :seon.host/fn nat-int? [:maybe [:map-of :qualified-symbol pos-int?]] [:sequential :qualified-symbol]] :seon.test/result]}
-  [put! ticks budgets tests]
+  {:malli/schema [:=> [:cat :seon.host/fn nat-int? [:sequential :qualified-symbol]] :seon.test/result]}
+  [put! ticks tests]
   (let [reports (atom []) current (atom [])
         note! (fn [x]
                 (cond (:seon.test/started x) (put! {:seon.test/started (str "#'" (:seon.test/started x))})
@@ -1024,8 +1050,9 @@
                                     (swap! reports into @current)
                                     (reset! current []))
                       :else nil))
-        _ (binding [mr/*registry* (program/schema-registry (program/schema-changes (db)))]
-            (proofs/run-tests! tests (zipmap tests (repeat nil)) note! ticks budgets))
+        ;; the branch's registry as the REPL binds it: the one held (branch-schemas), never derived again here
+        _ (binding [mr/*registry* (:registry (branch-schemas))]
+            (proofs/run-tests! tests (zipmap tests (repeat nil)) note! ticks))
         reports @reports
         counts (frequencies (map :type reports))]
     {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
@@ -1169,8 +1196,8 @@
   so Jolt's deadlock check never fires here. A put commits when the value enters :out's buffer, not when it is written (jolt.async.remote): after each, the child
   yields to the end's writer, so a death right after a test's start still names it. See
   docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
-  {:malli/schema [:=> [:cat :map :map nat-int? [:maybe [:map-of :qualified-symbol pos-int?]] [:sequential :qualified-symbol]] :any]}
-  [end plan ticks budgets tests]
+  {:malli/schema [:=> [:cat :map :map nat-int? [:sequential :qualified-symbol]] :any]}
+  [end plan ticks tests]
   (let [{:keys [out fd]} end
         ;; the test in flight and the fiber running it, from its start to its end: what quiescence ends, once
         in-flight (atom nil)
@@ -1213,7 +1240,11 @@
         ;; the test's own working directory: what a test writes relative to it is this run's, removed
         ;; when the child has ended (docs/failure-points.md, a directory walk)
         (let [run-dir (fx/run-dir (lib/c-getpid))] (.mkdirs (java.io.File. ^String run-dir)) (lib/c-chdir run-dir))
-        (let [[res streamed?] (try [(do (load-removed! (:removed plan)) (run-tests-here put! ticks budgets tests)) true]
+        (let [[res streamed?] (try [(let [unloaded (load-removed! (:removed plan) tests)]
+                                       ;; a removed test that no longer loads ends as its own error, sent as a test's end
+                                       (doseq [[t msg] unloaded]
+                                         (put! {:seon.test/ended (str "#'" t) :reports [{:type :error :var (str "#'" t) :message msg}]}))
+                                       (run-tests-here put! ticks (vec (remove unloaded tests)))) true]
                                    (catch Throwable e [{:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]} false]))]
           ;; a run's reports went as its tests ended: its answer is its end and its counts; a run that threw
           ;; streamed none, so its answer keeps the throw's report (scale's agents read :error 2 and nothing else)
@@ -1235,8 +1266,8 @@
   (warm-fixtures!)
   (let [n (inc (:n st 0))
         cpid (keyword "seon.test" (str (name (:pid st)) "-child-" n))
-        {:keys [plan ticks budgets ends]} st
-        forked (rflow/fork! (:flow @state) cpid #(test-child-runs! % plan ticks budgets todo)
+        {:keys [plan ticks ends]} st
+        forked (rflow/fork! (:flow @state) cpid #(test-child-runs! % plan ticks todo)
                             {:in :seon.link/down :out :seon.link/up :pump :fiber :codec (child-codec cpid)
                              :conns [[[cpid :seon.link/up] [(:pid st) :seon.link/up]]]})]
     (if-let [os (:pid forked)]
@@ -1323,7 +1354,7 @@
        :ping-map-fn (fn [st] {:children (count (:children st))})})
   ([args]
    (let [ends (a/chan (cfg/value :seon.config.proofs/jobs))]
-     (-> (select-keys args [:answer :plan :ticks :budgets :forked :say])
+     (-> (select-keys args [:answer :plan :ticks :forked :say])
          (assoc :pid (::flow/pid args) :ends ends ::flow/in-ports {:seon.process/end ends} :children {} :by-os {}
                 :shards (mapv (fn [todo] {:todo todo :reports [] :fns {} :heap {} :measured {}}) (:shards args))))))
   ([st transition]
@@ -1359,13 +1390,13 @@
   (test-run-step) and removed once it has answered: its answer (run-answered's). The one blocking wait left here:
   run-tests-forked's callers take its answer as a value; one-ask makes it a message (the one-unit spec's law 4).
   See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
-  {:malli/schema [:=> [:cat :map nat-int? [:maybe [:map-of :qualified-symbol pos-int?]] [:sequential [:sequential :qualified-symbol]] :seon.host/fn :seon.host/fn] :any]}
-  [plan ticks budgets shards forked say]
+  {:malli/schema [:=> [:cat :map nat-int? [:sequential [:sequential :qualified-symbol]] :seon.host/fn :seon.host/fn] :any]}
+  [plan ticks shards forked say]
   (let [g (:flow @state)
         pid (keyword "seon.test" (str "run-" (:test-runs (swap! state update :test-runs (fnil inc 0)))))
         answer (a/promise-chan)]
     (flow/update! g (fn [cfg] (assoc-in cfg [:procs pid] {:proc (flow/process #'test-run-step)
-                                                          :args {:answer answer :plan plan :ticks ticks :budgets budgets
+                                                          :args {:answer answer :plan plan :ticks ticks
                                                                  :shards (vec shards) :forked forked :say say}})))
     (let [[res dirs] (a/<!! answer)]
       (flow/update! g (fn [cfg] (update cfg :procs dissoc pid)))
@@ -1471,10 +1502,13 @@
 
 (defn- held-plan
   "What this agent keeps of its plan of a run (run-plan's sel) for the items the test service grants it: every digest, and
-  of the plan only what running a test reads (:removed, :process, :base-digests), not its graph. See docs/merging.md#the-test-service."
+  of the plan only what running a test reads (:removed, :process, :base-digests, :static-reads and the reads index made, so
+  each green is keyed by what it read), not its graph. See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :map] :map]}
   [sel]
-  {:digests (:digests sel) :plan (select-keys (:plan sel) [:removed :process :base-digests])})
+  {:digests (:digests sel)
+   :plan (cond-> (select-keys (:plan sel) [:removed :process :base-digests :static-reads])
+           (:reads-rd (:plan sel)) (assoc :reads-rd (force (:reads-rd (:plan sel)))))})
 
 (defn- item-selection
   "The selection that runs items ({test digest}, the test service's grant) as held (held-plan, this agent's last plan of a
@@ -1486,6 +1520,17 @@
   (when (and held (seq items) (every? (fn [[t d]] (= d (get-in held [:digests t]))) items))
     (let [ts (vec (sort-by str (keys items)))]
       (assoc held :judge ts :selected ts :run ts :deferred [] :reused {} :reused-reports []))))
+
+(defn- grant-selection
+  "What a run selects: items given (the test service's grant, {test digest}) are what it runs, as held planned them
+  (item-selection), or, held gone or of another program, as planned again (plan: run-plan of their names); given and empty,
+  nothing (a grant of no items once ran every test, 1,765 of them); items not given (nil), a plan of its own. See
+  docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat [:maybe :map] [:maybe [:map-of :qualified-symbol :string]] :seon.host/fn] :map]}
+  [held items plan]
+  (cond (nil? items) (plan)
+        (empty? items) {:plan (:plan held) :judge [] :selected [] :run [] :deferred [] :reused {} :reused-reports [] :digests {}}
+        :else (or (item-selection held items) (plan))))
 
 (defn run-tests-forked
   "Fork this agent; the child runs what test-plan runs for proofs (the selected tests with no
@@ -1517,11 +1562,16 @@
   {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
                   [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
                   [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe [:map-of :qualified-symbol :string]]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]]}
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe [:map-of :qualified-symbol :string]]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe [:map-of :qualified-symbol :string]] [:maybe :string]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]]}
   ([ticks proofs mode] (run-tests-forked ticks proofs mode (fn [_] nil)))
   ([ticks proofs mode forked] (run-tests-forked ticks proofs mode forked nil))
   ([ticks proofs mode forked names] (run-tests-forked ticks proofs mode forked names nil))
-  ([ticks proofs mode forked names items]
+  ([ticks proofs mode forked names items] (run-tests-forked ticks proofs mode forked names items nil))
+  ;; checkout: the session's checkout whose files a run of its tree reads (seon.system/prove-tree!): its test children read it
+  ;; (test-child-runs!'s SEON_CHECKOUT), whichever plan the run takes; it rode on the held plan alone, so a run that planned again read
+  ;; the main tree's (its process tests found no process store there, 2026-11-12)
+  ([ticks proofs mode forked names items checkout]
   ;; an item the test service granted, at the digest this agent's plan of the run gave it: run as planned, nothing planned again
   ;; the runtime invariant (docs/merging.md#a-session-proves-through-root): this process runs its branch's program before a
   ;; test of it is judged; a definition it holds another form of is named, never judged (seon.program/program-differs)
@@ -1529,12 +1579,11 @@
     (contract/error :seon.agent/program-differs #'seon.agent/run-tests-forked
                     (str "this agent runs another program than its branch: " (str/join ", " (map :var differs)))
                     {:differs differs})
-  (let [{:keys [unread] :as sel} (or (item-selection (:held-plan @state) items) (run-plan proofs mode names))]
+  (let [{:keys [unread] :as sel} (cond-> (grant-selection (:held-plan @state) items #(run-plan proofs mode names))
+                                    checkout (assoc-in [:plan :checkout] checkout))]
   (if unread
     unread
   (let [{:keys [plan judge deferred selected run reused digests reused-reports]} sel
-        ;; each test's budget from its own green history, read once for the run (seon.fx/test-budgets)
-        budgets (fx/test-budgets (cfg/value :seon.config.proofs/results-dir) run ticks (cfg/value :seon.config.agent/test-ticks-floor) (cfg/value :seon.config.agent/test-ticks-factor))
         t0 (profile/now-ns)
         ;; every selected test green at its digest (a turn's run of the same tree, a session's): nothing to run, so no
         ;; child is forked. Else the tests are dealt by the one deal bin/test uses (proofs/shards, by each test's
@@ -1548,7 +1597,7 @@
                     ms (proofs/estimated-ms run (fx/typical-ms run) (:process plan))
                     ;; no more children than the work needs: each is worth at least what a fork and a child's start cost
                     n (-> (quot (reduce + (vals ms)) (cfg/value :seon.config.proofs/child-min-ms)) (max 1) (min (cfg/value :seon.config.proofs/jobs)))
-                    res (run-children! plan ticks budgets (proofs/shards run n ms) forked say)]
+                    res (run-children! plan ticks (proofs/shards run n ms) forked say)]
                 (cond (::threw res) (throw (::threw res))
                       (contract/error? res) res
                       :else (assoc res :ms (profile/ms-since t0))))))
@@ -1561,6 +1610,12 @@
       (-> res
         (as-> r (let [{:keys [ran failures]} (proofs/answer-ran (assoc r :digests digests))
                       ran (into {} (for [[t x] ran] [t (merge x (get-in r [:measured t]))]))
+                      ;; each green keyed by what it read: the functions it called, itself, its reads besides code (docs/source.md#tests-run-by-reach)
+                      ran (if-let [rd (some-> (:reads-rd plan) force)]
+                            (into {} (for [[t x] ran] [t (cond-> x (proofs/green? x)
+                                                           (assoc :reads (proofs/reads-key rd {:fns (conj (into #{} (map :var) (get-in r [:fns t])) t)
+                                                                                               :keys (get-in plan [:static-reads t])})))]))
+                            ran)
                       w (fx/write-verdicts! {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state) :agent (:id @state) :key (:key @state)} ran failures)]
                   ;; beside the cache, the same run's results as facts on this branch (the record shows them); an item the test service
                   ;; granted writes the cache only: its asker's answer writes the facts once (record-answer!)
@@ -1718,10 +1773,9 @@
 (defn process-plan
   "Of sel (run-plan's), what a run on a checkout runs beside its in-process items, each at the digest this branch gives it
   (docs/merging.md#the-test-service): :process {test digest}, the process tests it left (:deferred) that have one; :steps
-  {step {:digest :binary? :bound :alone?}}, the bin/check steps with no green at their digest as bin/prove plans them
-  (:alone?, a step of seon.proofs/machine-steps, runs with nothing beside it; seon.proofs/plan-of over this branch's reach graph and inputs, every step that reaches a process kept, the generative
-  check's keys left to the shards), :bound the step-end factor times the step's median measured ms floored at the stall
-  bound (a step never measured has none, as under bin/prove: it ends by its own waits' bounds, and that run measures it), :binary? seon.proofs/step-needs-binary?; a request naming tests or namespaces (names) runs only the
+  {step {:digest :binary? :bound}}, the bin/check steps with no green at their digest as bin/prove plans them
+  (seon.proofs/plan-of over this branch's reach graph and inputs, every step that reaches a process kept, the generative
+  check's keys left to the shards), :bound seon.proofs/step-bounds' (every step has one), :binary? seon.proofs/step-needs-binary?; a request naming tests or namespaces (names) runs only the
   steps it names among them (bin/prove --root PORT seon.config-test config), as the plain bin/prove NS runs none; :missing, the steps with no digest here (one naming a
   function the program lacks; health, keyed by a base tree no branch holds); :build {:tree :needed?}, needed when a process
   test or a binary step is among them; :deferred, what it left that is no process item. Or {:unread error}: the cache
@@ -1734,16 +1788,29 @@
                           (fn [cand] (let [r (fx/stored-results cand)] (if (contract/error? r) (do (vreset! unread r) {}) r))))
         process (into {} (for [t (:deferred sel) :let [d (get-in sel [:digests t])] :when (and d (contains? (:process plan) t))] [t d]))
         run (vec (cond->> (remove proofs/mg-key? (:run-steps p)) (seq names) (filter #(contains? names (symbol %)))))
-        ms (if (or (seq run) (seq process)) (fx/typical-ms (into run (keys process))) {})
-        k (cfg/value :seon.config.check/step-end-factor) floor (cfg/value :seon.config.agent/stall-ms)
-        ;; a process test's bound, as a step's: the factor times its median measured ms, floored; none when never measured
-        steps (into {} (for [s run] [s (cond-> {:digest (get (:steps p) s) :binary? (proofs/step-needs-binary? s) :bound nil}
-                                         (ms s) (assoc :bound (max floor (* k (ms s))))
-                                         (proofs/machine-steps s) (assoc :alone? true))]))]
+        ;; the generative contract keys with no green at their digest: items of the run too, as the shell's shards run them
+        ;; (a merge's verification proves them; leaving them out, a tree proved through the system proved less than the shell's)
+        mg (into {} (for [k (filter proofs/mg-key? (:run-steps p)) :when (not (seq names))] [k (get (:steps p) k)]))
+        ;; every step's bound (seon.proofs/step-bounds: one never measured takes the largest measured median), from every check
+        ;; step's median, read once when a step runs
+        bounds (if (seq run) (proofs/step-bounds run (fx/typical-ms (vec (keys proofs/check-steps)))) {})
+        steps (into {} (for [s run] [s {:digest (get (:steps p) s) :binary? (proofs/step-needs-binary? s) :bound (bounds s)}]))]
     (if-let [u @unread]
       {:unread u}
-      {:process process :steps steps :missing (vec (:missing p)) :deferred (vec (remove process (:deferred sel)))
+      {:process process :steps steps :mg mg :missing (vec (:missing p)) :deferred (vec (remove process (:deferred sel)))
        :build {:tree (:tree (:inputs plan)) :needed? (boolean (or (seq process) (some :binary? (vals steps))))}})))
+
+(defn asked
+  "The tests a :tests request m's asker reads a verdict of, so its answer keeps a pass report for each (seon.proofs/answer): the
+  task's proofs, the tests m names (a namespace's name, its tests among selected) and the items the test service granted (:items):
+  an item kept no pass and read as no verdict at the service (seon.prove/batch-ended). See
+  docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map [:set :qualified-symbol] [:maybe [:sequential :qualified-symbol]]] [:set :qualified-symbol]]}
+  [m proofs selected]
+  (let [names (set (:names m))]
+    (-> proofs
+        (into (filter #(or (names %) (names (symbol (namespace %))))) selected)
+        (into (keys (:items m))))))
 
 (defn handle!
   "One Seon platform request; answers the messages to send back (a vector). (REPL
@@ -1785,20 +1852,17 @@
                                                            ;; each deferred test's digest at the base, from the base's program (nil: new on the
                                                            ;; branch), which the merge check reads main's verdict at; the service's answer carries it
                                                            :deferred-digests (into {} (for [t (:deferred sel)] [t (get (:base-digests (:plan sel)) t)])))
-                               pp (merge (select-keys pp [:process :steps :build :missing]))))}])
+                               pp (merge (select-keys pp [:process :steps :mg :build :missing]))))}])
            (let [proofs (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
-                 ;; items of a run of a session's checkout: their test children read that checkout's files (test-child-runs!)
-                 _ (when (and (:checkout m) (:held-plan @state)) (swap! state assoc-in [:held-plan :plan :checkout] (:checkout m)))
                  r (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
                                      proofs
                                      (or (:mode m) :judge)
                                      #(send! {:op :tests-started :id (:id m) :pid %})
                                      (some-> (:names m) set)
-                                     (:items m))
-                 ;; a test its asker named is one it reads, as a proof is: seon.proofs/answer keeps its pass
-                 names (set (:names m))
-                 named (filter #(or (names %) (names (symbol (namespace %)))) (:selected r))]
-             [{:op :tests :id (:id m) :result (if (and (map? r) (not (contract/error? r))) (proofs/answer r (into proofs named)) r) :mem-mb (mem-mb)}]))
+                                     (:items m)
+                                     ;; items of a run of a session's checkout: their test children read that checkout's files
+                                     (:checkout m))]
+             [{:op :tests :id (:id m) :result (if (and (map? r) (not (contract/error? r))) (proofs/answer r (asked m proofs (:selected r))) r) :mem-mb (mem-mb)}]))
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
     :fx-reply (let [r (dissoc m :op :k)]
                 (swap! state update :inbox (fnil conj []) {:from :fx :k (:k m) :kind (fx-done! (:k m)) :body r})

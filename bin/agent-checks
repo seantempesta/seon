@@ -35,11 +35,8 @@ ev "redefine twice so its test fails" "(in-ns 'tests.inv.lab) (defn twice {:mall
 check i "tests.inv.lab/twice-doubles" "$(prove)"
 ev "narrow the registered entry so the contracted test fails" "(my.schema/register! :tests.inv.lab/amount [:int {:min 10}])" > /dev/null
 check ii "tests.inv.lab/amount-passes" "$(prove)"
-call eval agent=root intent="end the checks' agent: an attach resumes it in a new process" code="(seon.system/kill! sys :$A)" > /dev/null
-# the kill's end, read from root's view (an event: its status gone from :idle), never a sleep; bounded by the asks it makes
-for i in {1..60}; do
-  call eval agent=root intent="read the checks' agent's status" code="(get-in (seon.system/state sys) [:agents :$A :status])" | grep -q ":value :idle" || break
-done
+# the kill answers once the agent's end is recorded (seon.system/kill!), so the attach after it finds it ended: no poll
+call eval agent=root intent="end the checks' agent: an attach resumes it in a new process" code="@(seon.system/kill! sys :$A)" > /dev/null
 call attach task=$T > /dev/null
 R=$(prove)
 check iv-twice "tests.inv.lab/twice-doubles" "$R"

@@ -26,7 +26,7 @@ The point of a branch at transaction t is found by walking its lineage: ```datah
 
 ## Durability is continuous group commit
 
-A write is answered once the store has committed it, and one followed by an outside effect waits for the sync that covers it; no fixed collection point delays a commit (owner, 2026-10-21: "Why have an arbitrary 10ms collection point?"). The `durable` and `window` check steps prove it across a kill and a reopen ([checks](checks.md#modes)).
+A write is answered once the store has committed it, and one followed by an outside effect waits for the sync that covers it; no fixed collection point delays a commit (owner, 2026-10-21: "Why have an arbitrary 10ms collection point?"). The `window` check step proves it across a kill and a reopen ([checks](checks.md#modes)).
 
 ```seon.writer/writer-proc```, root's one writer, applies each step's batch (`datahike.writer/apply!` per write, then [main's content mark](#mains-content-mark) when it moved), commits it once (`commit-pending!`, unsynced) and only then answers, so any process reading main after an answer reads the write ([decisions](decisions.md#a-write-to-main-is-answered-after-the-store-holds-it-owner-2026-11-10)); a `:flush?` write is answered after the sync. A one-datom write is answered in about 8 ms at p50. Where root is the store's sole writer (`:seon.config.store/sole-writer?`), its main connection streams (```seon.db/open-main!```), so a deref is its own value rather than a read of the head. An op that throws after a batch it committed keeps that commit (```seon.procs-test/a-refused-op-keeps-the-batch-committed-before-it```).
 
