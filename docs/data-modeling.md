@@ -1,12 +1,12 @@
 # Data modeling
 
-Seon's data is Datahike entities: a thing is an entity with any number of attributes and values, things relate by refs, and every read is a seek in an index, so you design data by asking what will read it. Read this before adding an attribute, an entity or a query.
+Seon's data is Datahike entities: a thing is an entity with any number of attributes, things relate by refs, and every read is a seek in an index, so you design data by asking what will read it. Read this before adding an attribute, an entity or a query.
 
 ## A thing is its attributes
 
-An entity is an id and whatever attributes it holds, and that is what makes it what it is. Two entities of one kind need not hold the same attributes, and an attribute costs nothing on an entity that does not have it, so never fill one with a placeholder: its absence is the answer. An agent has turns, evals, messages and a task, because those facts are about it; it is just data.
+An entity is an id and whatever attributes it holds. Two entities of one kind need not hold the same attributes, and an absent attribute costs nothing, so never fill one with a placeholder: its absence is the answer.
 
-Say what a value is by its attribute's schema in `resources/seon/schemas/`, or at your REPL with ```my.schema/register!```:
+Declare a value by its attribute's schema in `resources/seon/schemas/`, or at your REPL with ```my.schema/register!```:
 
 | You want | Declare | Example |
 |---|---|---|
@@ -16,107 +16,101 @@ Say what a value is by its attribute's schema in `resources/seon/schemas/`, or a
 | Several values | `[:set ...]` | `:form/refs` |
 | A link to another entity | `:seon.db/ref` | `:seon.eval/agent` |
 | A value you will look things up by | `{:seon.db/index true}` | `:seon.message/from` |
-| A value that is a whole map or vector | `:seon.db/plain` ([plain data](storage.md#plain-data)) | `:seon.eval/response`, `:seon.result/value` |
+| A value that is a whole map or vector | `:seon.db/plain` ([plain data](storage.md#plain-data)) | `:seon.eval/response` |
 
 ## A schema is a set of keys written together
 
-An entity schema says which keys go together, and an entity holding any key it requires is that thing and must hold them all; every one it matches is asked of it, so an entity is as many things as its keys say (owner, 2026-11-08: "All sets of keys that match schemas are validated"; "we want accretion"). The write holds every entity it touches to them ([the write checks every entity it touches](storage.md#the-write-checks-every-entity-it-touches)), so one good definition catches the code and the data that disagree with it.
-- **Open maps.** Malli's maps are open: a key a schema does not list is any other thing's business, so adding an attribute never breaks an entity.
-- **Required only for keys always written together.** A key a writer ever writes alone is optional: a task's single config overrides, an agent's own turn budget on its branch, the branch a start writes only with a task. Making a key required is the one change that can break stored data, and the write shows which.
-- **A membership ref is never required.** Which record an entity belongs to (an eval's agent, a message's recipient) is a link that is retracted and made again while the entity stays ([link, do not partition](#things-relate-by-refs)).
-- **What exists before its file is not required to have one.** A schema registered at the REPL lives in the db before any sync writes it to disk.
-- **One definition.** A function's contract cites the attribute's schema (`:seon.agent/branch`), never restates its type (`[:seon.agent/branch :keyword]`); a second copy disagreed with the first and failed later, silently, in the reconciler (2026-11-08). The same holds for a whole map that lists other things' keys: each config key is its own schema, and a set of keys exists only where they must go together.
-- **What an entity is is read in an index a reader takes.** The forms say which attributes an entity schema names and which are identities; `seon.db/entity-index` derives that once from a set of forms (:entity-schemas, :identity-schemas, :schema-identities, :targets, :required-keys, :forms), and every reader (```seon.db/most-specific```, ```seon.db/parents```, ```seon.db/extends?```, ```seon.db/attributes-of```, ```seon.db/implied-pattern```, ```seon.db/reaching```, the renders and ctx) takes it first, as `ix`. The binary's is ```seon.db/index```; a branch's, built from the schema entries its db holds over the registry, is ```seon.db/index-of``` (and ```seon.program/index-of-db``` for a db): a schema an agent registered is recognized by its own index and unknown to the binary's. Nothing keeps one by a clock or a key: its holder keeps it until a schema entry moves (a walk's flush that moved a `:schema/*` datom, an agent's ```seon.agent/branch-schemas``` slot, a ctx patch), which builds it again. Building one costs the registry's size (about 1.8 MB, 0.9 ms), and reading a db's schema entries to know whether it changed costs the same, so no content-keyed cache saves anything.
+An entity schema says which keys go together: an entity holding any key it requires is that thing and must hold them all, and an entity is as many things as the schemas its keys match ([decisions](decisions.md)). The write holds every entity it touches to them ([the write checks every entity it touches](storage.md#the-write-checks-every-entity-it-touches)).
+- **Open maps.** A key a schema does not list is another thing's business, so adding an attribute never breaks an entity.
+- **Required only for keys always written together.** A key a writer ever writes alone is optional. Making a key required is the one change that can break stored data, and the write shows which.
+- **A membership ref is never required.** Which entity another belongs to (an eval's agent, a message's recipient) is a link retracted and made again while the entity stays.
+- **What exists before its file is not required to have one.** A schema registered at the REPL lives in the db before any write-back.
+- **One definition.** A function's contract cites the attribute's schema (`:seon.agent/branch`), never restates its type. A set of keys exists as a map schema only where they must go together.
+- **What an entity is is read from an index the reader takes.** ```seon.db/entity-index``` derives it once from a set of schema forms, and every reader (```seon.db/most-specific```, ```seon.db/parents```, ```seon.db/extends?```, ```seon.db/attributes-of```, ```seon.db/implied-pattern```, ```seon.db/reaching```, the renders and ctx) takes it as `ix`. The binary's is ```seon.db/index```; a branch's, built from the schema entries its db holds, is ```seon.db/index-of``` (```seon.program/index-of-db``` for a db), so a schema an agent registered is known to its own index only. Its holder builds it again when a schema entry moves; building one costs the registry's size (about 1 ms), so no cache keyed by content would save anything.
 - **Validate what is there.** A value is held to its attribute's schema at the write ([every datom](storage.md#the-write-checks-every-datom)); an entity schema adds only which keys come together.
 
 ## Things relate by refs
 
-A relationship is one ref, written on the many side, and read from either end. An eval names its agent (`:seon.eval/agent`), and the agent's evals are that ref read in reverse, ``{:seon.eval/_agent [...]}`` in a pull, the join's key the attribute itself (a pull's `:as` renames it, which Seon's patterns never do on a ref, so a path into `@ctx` names an attribute), so nothing on the agent needs updating when an eval is added. A many-to-many relationship is a set of refs on one side.
+A relationship is one ref, written on the many side and read from either end. An eval names its agent (`:seon.eval/agent`); the agent's evals are that ref read in reverse, ``{:seon.eval/_agent [...]}`` in a pull, so nothing on the agent changes when an eval is added. Seon's patterns never rename a ref with `:as`, so a path into `@ctx` names an attribute. A many-to-many relationship is a set of refs on one side.
 
-**A ref names what it points at, once, on its own schema** (owner, 2026-11-09: separate definitions, linked): `:seon.eval/agent [:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref]`, a set ref on its `:set` (`[:set {:seon.db/to [:seon.task/task-fact]} :seon.db/ref]`), several targets when it may point at several things (`:seon.cite/of`, a task or an agent). From that one fact every reader knows the links both ways: the entity index's `:targets` (```seon.db/entity-index```: what each ref points at), ```seon.db/reaching``` (the refs that point at a schema: an agent's evals, model calls, messages, cites and searches), and ```seon.db/implied-pattern```, the pull a schema implies, a schema already walked not followed again (Malli's `::walked-refs`), so no join loops. So "an agent" is its attributes and the refs that reach it, and no schema restates another's links. The hand-written joins of the agent's and the task's patterns are all implied (`seon.ctx-test/the-hand-written-joins-are-implied-by-the-refs`), and an agent pulled by them, with no `:as` and no `*`, validates against a Malli schema derived from the refs, every entry optional (`seon.ctx-test/an-agent-pulled-by-its-implied-joins-validates`). A target is a link, never what the ref's value is checked against, so a test's reach does not follow it (```seon.program/less-targets```).
+**A ref names what it points at, once, on its own schema:** `:seon.eval/agent [:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref]`, or on a set's `:set`, with several targets when it may point at several things. From that one fact every reader knows the links both ways: the entity index's `:targets`, ```seon.db/reaching``` (the refs that point at a schema) and ```seon.db/implied-pattern``` (the pull a schema implies, each schema walked once, so no join loops). No schema restates another's links (`seon.ctx-test/the-hand-written-joins-are-implied-by-the-refs`, `seon.ctx-test/an-agent-pulled-by-its-implied-joins-validates`). A target is a link, never what the ref's value is checked against, so a test's reach does not follow it (```seon.program/less-targets```).
 
-Reach for a new entity only when a thing has facts of its own that something reads, and has a life of its own. A number or a keyword on the records it describes is often all there is. A turn's records name its model call (`:seon.eval/call`; a message's turn is derived from when it was delivered, [users](users.md#messages)), an entity with facts of its own, so agent -> call -> its records is one pull ([turn](turn.md#the-turn-is-a-number)). Never group things under an entity only so they can be listed together: a value they share lists them.
-
-What happened before needs no entity either. A task's earlier states are read from the db's [history](storage.md#history), and an agent's work from its branch.
+Make a new entity only for a thing with facts of its own that something reads and a life of its own; a number or keyword on the entities it describes is often enough. Never group things under an entity only to list them: a value they share lists them. What happened before needs no entity: a task's earlier states are in the db's [history](storage.md#history), an agent's work on its branch.
 
 ## A ref or a value
 
-Before declaring a ref, ask what the fact means to whoever writes it: a statement about an entity that must exist, or an observation of a name. A statement is a ref: an eval belongs to an agent. An observation is a value: a form that mentions a function saw a name, and whether anything by that name exists is a separate question, so `:form/refs` holds symbols. A value survives what it names being deleted or renamed, and "names something with no entity" is one query. The tell for a name stored as a ref is machinery to survive a rename.
+A statement about an entity that must exist is a ref (an eval belongs to an agent); an observation of a name is a value (`:form/refs` holds the symbols a form mentions). A value survives what it names being deleted or renamed. The tell for a name stored as a ref is machinery to survive a rename.
 
-When something happened is its transaction's time: read a datom's `:tx` and that transaction's ``:db/txInstant`` (a pull asks it with `[attr :tx true]`, [ctx](ctx.md#the-pattern)), and order by `[:db/txInstant, tx id]`, never by an entity or transaction id alone: ids are unique across every branch, but a merge carries a branch's transactions with their own ids and times, so id order on a branch is not the order things were written there ([history](storage.md#history)).
+When something happened is its transaction's time: a datom's `:tx` and that transaction's ``:db/txInstant`` (a pull asks it with `[attr :tx true]`, [ctx](ctx.md#the-pattern)). Order by `[:db/txInstant, tx id]`, never by an id alone: a merge carries a branch's transactions with their own ids, so id order on a branch is not write order ([history](storage.md#history)).
 
 ## Absence and retraction
 
-An attribute with no value has no datom, so a stored nil and an empty set do not exist: clear a value by retracting it, and omit what is absent. This has a consequence: "found nothing" and "never looked" are the same bytes. If a reader must tell them apart, the looking is a fact of its own, a positive one naming what it read.
+An attribute with no value has no datom: there is no stored nil or empty set, so clear a value by retracting it. "Found nothing" and "never looked" are then the same bytes; a reader that must tell them apart needs the looking as a fact of its own.
 
-`[:db/retractEntity e]` retracts more than the entity. It also retracts every ref pointing at e, on the entities that hold them, and recursively what e owns through a component attribute. `[:db/retract e a]` and `[:db/retract e a v]` touch only those datoms. So to remove something from a list and keep it, retract the ref: a `swap!` on `@ctx` unlinks ([ctx](ctx.md#changing-it-swap)). A ref to a retracted entity is legal and reads as `{:db/id n}`, a link to nothing, and a join simply drops it, so check for that rather than trust it.
+`[:db/retractEntity e]` also retracts every ref pointing at e and what e owns through a component attribute; `[:db/retract e a]` touches only those datoms. To remove something from a list and keep it, retract the ref (a `swap!` on `@ctx` unlinks, [ctx](ctx.md#changing-it-swap)). A ref to a retracted entity reads as `{:db/id n}` and a join drops it.
 
 ## A read is a seek in an index
 
-Datahike keeps datoms sorted three ways, and each question has one read. Measured on the standing root at 4,273 vars, allocation of one read (commit 05f92cce57):
+Datahike keeps datoms sorted three ways, and each question has one read (allocation measured on the standing root at about 4,000 vars):
 
 | Question | Read | Index | Allocates |
 |---|---|---|---|
 | Which entity has this name | ```seon.db/eid``` or `(d/datoms db :avet :var/name n)` | AVET | 9.7 KB |
 | These attributes of this entity | `(d/pull db [:var/name :var/doc] e)` | EAVT | 32 KB |
 | Everything with this attribute | `(d/datoms db :aevt :var/doc)` | AEVT | the attribute's datoms |
-| The same as the first, by query | ``(d/q '[:find ?e :in $ ?n :where [?e :var/name ?n]] db n)`` | a plan, then AVET | 89 KB |
-| A value of an attribute with no index, by query | ``(d/q '[:find ?e :where [?e :var/doc "x"]] db)`` | every datom of the attribute | 2,775 KB |
+| The first, by query | ``(d/q '[:find ?e :in $ ?n :where [?e :var/name ?n]] db n)`` | a plan, then AVET | 89 KB |
+| A value of an unindexed attribute, by query | ``(d/q '[:find ?e :where [?e :var/doc "x"]] db)`` | every datom of the attribute | 2,775 KB |
 
-Use a query when you are joining facts across entities. When one attribute or one entity answers the question, use `d/datoms` or `d/pull`, and name the attributes you need instead of `*`: [small answers](agent.md#small-answers) has the forms.
+Use a query to join facts across entities; when one attribute or one entity answers, use `d/datoms` or `d/pull` and name the attributes instead of `*` ([small answers](agent.md#small-answers)).
 
 ## What you look up by value must be indexed
 
-AVET holds an attribute only if it is an identity, a ref or declared `{:seon.db/index true}`, and **a seek on any other attribute answers empty with no error**, which looks exactly like no data. So when you write `(d/datoms db :avet attr v)`, check the attribute's declaration first. `(d/schema db)` says: `:db/unique` or `:db/index`, or `:db/valueType :db.type/ref`. Adding the index later is safe, since an index added to a kept store reads the datoms it already holds (`seon.db-test/opening-a-kept-store-installs-the-attributes-it-lacks`).
+AVET holds an attribute only if it is an identity, a ref or declared `{:seon.db/index true}`, and a seek on any other attribute answers empty with no error. Check `(d/schema db)` for `:db/unique`, `:db/index` or `:db.type/ref` before a `(d/datoms db :avet attr v)`. An index added later reads the datoms a kept store already holds (`seon.db-test/opening-a-kept-store-installs-the-attributes-it-lacks`).
 
 ## What you read is what you depend on
 
-A render runs again when a datom touches what it read, so a narrow read costs less now and is drawn less often later ([what a read scanned](storage.md#what-a-read-scanned)). A seek by value is keyed by exactly that attribute and value, and only a datom with that value touches it. A pull is keyed by that entity's attributes. A scan of an attribute is touched by every write to that attribute anywhere.
-
-The same holds for `@ctx`: read the path you need, since walking ``(:seon.eval/_agent c)`` to find a few depends on every eval ([reactive renders](render.md#reactive-renders)). So look up the records of turn 7 by their number, and do not filter every eval to find them.
+A render runs again when a datom touches what it read, so a narrow read costs less now and later ([what a read scanned](storage.md#what-a-read-scanned)). A seek by value is touched only by that value; a pull by that entity's attributes; a scan of an attribute by every write to it. In `@ctx` read the path you need: walking ``(:seon.eval/_agent c)`` to find a few depends on every eval ([reactive renders](render.md#reactive-renders)).
 
 ## Work is progressive
 
-Everything here builds on what is already there, so a change costs what changed, and a cost that grows with the size of the session is a defect in the design, never a thing to optimize later. A transaction says which datoms moved, so one member joining a collection costs that member (```seon.ctx/window-moves```), and a render draws only what those datoms touch. If you are about to re-read, re-sort or re-print something whole because one piece of it changed, stop: there is a shape where you do not need to. A component reads what it draws and nothing around it; a function that rebuilds a whole list inside each of its members is quadratic however fast it looks at small sizes.
+A change costs what changed: a cost that grows with the size of the session is a defect in the design. A transaction says which datoms moved, so one member joining a collection costs that member (```seon.ctx/window-moves```), and a render draws only what those datoms touch. If you are about to re-read, re-sort or re-print something whole because one piece changed, find the shape where you need not.
 
-So derive nothing you can read, and store nothing you can derive: a value computed from the db at t is drawn by a render and kept by the walk's cache, which anything may evict ([derived data](#derived-data-is-a-cache-never-relied-on)). Never store a printed value: a value is stored as data, and only the [one printer](render.md#one-printer) makes text of it, for context.
+Derive nothing you can read, and store nothing you can derive ([derived data](#derived-data-is-a-cache-never-relied-on)). Never store a printed value: only the [one printer](render.md#one-printer) makes text of a value, for context.
 
 ## Derived data is a cache, never relied on
 
-A value derived from the db (a score, a selection, a render, a diff, a test's verdict) may be kept as a cache, keyed by its inputs (a digest, a db's t) and never by a clock; anything may evict it at any time, and its reader then regenerates it from the db as of t (owner, 2026-10-28: "Derived data may be cached with the understanding that it may be evicted at any time so the process must always have a way to generate the data from database time T."). A derived value that cannot be regenerated from the db at t is not a cache: it is a fact that belongs in the db, or a defect. Results are reused the same way, by the digest of their inputs: a test's by everything it reaches, a check step's by its build's source, a build's by its sources, so unchanged inputs are never computed again ([merging](merging.md#verdicts-are-a-cache)).
+A value derived from the db (a score, a selection, a render, a diff, a test's verdict) may be cached, keyed by its inputs (a digest, a db's t) and never by a clock; anything may evict it, and its reader regenerates it from the db as of t (owner, 2026-10-28: "Derived data may be cached with the understanding that it may be evicted at any time so the process must always have a way to generate the data from database time T."). A derived value that cannot be regenerated is a fact that belongs in the db, or a defect. Results are reused by the digest of their inputs the same way ([merging](merging.md#verdicts-are-a-cache)).
 
 ## Where each entity's facts live, and which pull reaches them
 
-One store holds many branches, and a pull reads the one db it is made on. So where a fact is written decides who can pull it. Read this before a fix that touches an attribute, a ref, a pattern clause or a fact a process keeps: say the pull form you want, and find here which db holds what it asks.
+A pull reads the one db it is made on, so where a fact is written decides who can pull it. Before a fix that touches an attribute, a ref or a pattern clause, write the pull you want and find here which db holds what it asks.
 
-| entity | its identity | written on the agent's own branch | written on main | reached by |
+| entity | identity | on the agent's own branch | on main | reached by |
 |---|---|---|---|---|
-| an agent | `:seon.agent/key` | by its start: its key, its task and, for an agent the system spawned, its turn budget (`max-turns`); by its turns: `turn`, `ns`, `test-error`, `main-commit`, `main-program`, `base-commit`; by its own `swap!`: `:seon.ctx/pattern`, `:seon.render/hiccup`, keys it registers; by its end: `outcome`, `reason`, `ended-turn` | by the system, what it observes: `status`, `branch`, `boot`, `started-ms`, who started it (`:seon.agent/agents`), the evals a person opened | its own pull (the top of `@ctx`); on main, the `:seon.agent/agents` join of whoever started it |
-| a task | `:seon.task/id` | what its agent edits: `plan`, `instructions`, `proofs`, carried to main when it merges | by the task files and the reconciler: its execution, `outcome`, `reason`, `reasons`, its commit, its error | `{:seon.agent/task ...}`; a task it needs, `:seon.task/needs`; any other, by citing it |
-| a model call | `:seon.model-call/id` | by the turn that made it | nothing until the branch merges | `{[:seon.model-call/_agent :tx :at] ...}` |
-| an eval and its result | `:seon.eval/id` (made from its model call and its place in the reply, ```seon.repl/eval-id```; the same code in a later turn is another eval) | by the REPL that ran it | nothing until the branch merges | `{[:seon.eval/_agent :tx :at] ...}`, and a call's `:seon.eval/_call` |
-| a message | `:seon.message/id` | at its delivery to the recipient's branch, a transaction of that branch | where it was sent | `{[:seon.message/_to :tx :at] ...}`: `:at` is when it reached this branch |
-| a cite | `:seon.cite/id` | by whoever cited (`my.agent/cite!`), or by a plan's text naming an address | a task file's plan | `{:seon.cite/_of ...}` of the agent and of its task |
-| a process | `:seon.process/id` | never | by the system: pid, when it forked and ended, a stall | not in an agent's own pull; on main by `:seon.process/_agent` |
-| the system | `:seon.system/id` | never | by the boot and each landing: what main was indexed from, the boot | root's page; not an agent's pull |
+| an agent | `:seon.agent/key` | its start: key, task, `max-turns` for a spawned agent; its turns: `turn`, `ns`, `test-error`, `main-commit`, `main-program`, `base-commit`; its `swap!`: `:seon.ctx/pattern`, `:seon.render/hiccup`, keys it registers; its end: `outcome`, `reason`, `ended-turn` | the system's observations: `status`, `branch`, `boot`, `started-ms`, `:seon.agent/agents`, the evals a person opened | its own pull (the top of `@ctx`); on main, `:seon.agent/agents` of whoever started it |
+| a task | `:seon.task/id` | what its agent edits: `plan`, `instructions`, `proofs`, carried to main by the merge | task files and the reconciler: execution, `outcome`, `reason`, `reasons`, commit, error | `{:seon.agent/task ...}`; `:seon.task/needs`; a cite |
+| a model call | `:seon.model-call/id` | the turn that made it | nothing until the merge | `{[:seon.model-call/_agent :tx :at] ...}` |
+| an eval | `:seon.eval/id` (```seon.repl/eval-id```, from its call and place in the reply) | the REPL that ran it | nothing until the merge | `{[:seon.eval/_agent :tx :at] ...}`, a call's `:seon.eval/_call` |
+| a message | `:seon.message/id` | its delivery, a transaction of the recipient's branch | where it was sent | `{[:seon.message/_to :tx :at] ...}`; `:at` is when it reached this branch |
+| a cite | `:seon.cite/id` | whoever cited (`my.agent/cite!`), or a plan naming an address | a task file's plan | `{:seon.cite/_of ...}` of the agent and its task |
+| a process | `:seon.process/id` | never | the system: pid, fork and end, a stall | on main, `:seon.process/_agent` |
+| the system | `:seon.system/id` | never | the boot and each landing | root's page |
 
-What follows from it:
-- **A fact main keeps about an agent is not in that agent's own pull.** Its pattern asks `status` and `branch`, and on its own branch they hold nothing. (An agent attached from outside, `seon_attach`, also lacks its `max-turns`, which a spawned one holds: the two starts do not write the same facts.) A render that needs one reads it where it lives, or the data is moved; it is never patched with a second pull written by hand.
-- **Nothing an agent did is on main until its branch merges.** A page of main cannot sum a running agent's calls or count its evals.
-- **A value computed from other facts is not in either column.** A status, a spend, a waste, the conflicts of a merge are computed where they are read ([derived data](#derived-data-is-a-cache-never-relied-on)), so no pull holds them: a render computes them from what the pull does hold.
-- **What a process keeps in its own state is in no db.** The test service's queue and an effect's counters are shown to a person from the process; a model's request never reads them, since a request is made again from a commit.
+What follows:
+- **A fact main keeps about an agent is not in that agent's own pull** (`status`, `branch`; an agent attached with `seon_attach` also lacks `max-turns`). A render that needs one reads it where it lives, never through a second hand-written pull.
+- **Nothing an agent did is on main until its branch merges.**
+- **A computed value (a status, a spend, a conflict) is in no db:** a render computes it from what the pull holds.
+- **A process's own state is in no db**: the test service's queue, an effect's counters.
 
-**What one attribute is** has two homes, and neither is the schema's properties. `(doc :the/attribute)` prints its schema form: `[:set ...]` is many values, a ref names what it points at (`:seon.db/to`). The db's own schema holds how it is stored: `(get (d/schema (my.db/db)) :the/attribute)` answers its `:db/cardinality` and `:db/valueType`. ```seon.contract/properties``` holds what a schema declares beside its shape (a render, a description), which is why a cardinality is not found there.
-
-The table says where; the living answer for one entity is `(my.db/pulled @ctx)` ([looking at what you pulled](agent.md#looking-at-what-you-pulled)), which lists every clause with what this db holds for it, and `(doc :an/attribute)` for one key's schema.
+`(doc :the/attribute)` prints an attribute's schema form; `(get (d/schema (my.db/db)) :the/attribute)` answers its `:db/cardinality` and `:db/valueType`; ```seon.contract/properties``` holds what a schema declares beside its shape (a render, a description). For one entity, `(my.db/pulled @ctx)` lists every clause with what this db holds for it ([looking at what you pulled](agent.md#looking-at-what-you-pulled)).
 
 ## Before you add something
 
-Four questions settle most new data, and each one can end with adding nothing.
+Four questions settle most new data, and each can end with adding nothing.
 
-1. **What question does it answer, and what reads it?** If nothing reads it, it is not stored. If the answer is already an attribute or a query away, use that.
-2. **Whose fact is it?** Put it on the entity it is about, and on the many side of a relationship.
+1. **What reads it?** If nothing does, it is not stored; if it is already an attribute or a query away, use that.
+2. **Whose fact is it?** Put it on the entity it is about, on the many side of a relationship.
 3. **How will it be found?** By name: an identity. By a shared value: `{:seon.db/index true}`. By its entity: nothing more.
 4. **Does a change cost what changed?** Write down what a new member costs, and prove it with a [cost proof](cost.md) if its input grows.
 
-The shape is ours to change: rename an attribute, add a ref, reverse its direction. The standing store is test data, so a change of shape needs no migration ([machine](machine.md#disk-stays-bounded)).
+The shape is ours to change: the standing store is test data, so a rename needs no migration ([machine](machine.md#disk-stays-bounded)).
