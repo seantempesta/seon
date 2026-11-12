@@ -33,7 +33,7 @@
     (d/release bc)
     r))
 
-(deftest a-three-way-costs-the-changes-not-the-program
+(deftest ^{:seon.test/estimate {:ticks 50000000}} a-three-way-costs-the-changes-not-the-program
   (cost/proof
       {:of 'seon.merge/delta-three-way :input 'seon.merge-cost-test/three-of
        :n "forms the branches hold"
@@ -81,7 +81,11 @@
     (d/release bc)
     r))
 
-(deftest a-merge-reads-the-data-attributes-from-the-index
+;; estimate: its fixtures (data-of 10, 30, 100) declare 140 attributes in three schema transactions, ~0.9M, 1.3M and 2.9M
+;; since a schema change's commit keys its schema by a hash of its bytes (it was ~6M fixed each), then three branches and four
+;; data transactions a size (~0.1M each) and the merges (<0.1M each): ~10M. Measured 47M: ~21M of it is data-of's first schema
+;; transaction costing 23.6M here and 2.9M elsewhere, filed: seon.merge/a-first-schema-transaction-costs-the-same-wherever-it-runs
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-merge-reads-the-data-attributes-from-the-index
   ;; task seon.merge/data-attrs-read-from-the-attribute-index: a merge of declared data (:all)
   ;; read which attributes are data from (d/schema db), which rebuilds the whole schema map on
   ;; every call, once per db per read; agents merge main at every green. Now whether an attribute
@@ -123,7 +127,9 @@
     r))
 
 (def ^:private diff-base
-  ;; a branch of the store holding 20,000 entities of two attributes (40,000 :eavt datoms), built once
+  ;; a branch of the store holding 5,000 entities of two attributes (10,000 :eavt datoms, 11,462 with the schema's), built once:
+  ;; its :eavt has three levels (root at level 2, 11 children), as at 20,000 (40 children), so two commits share stored
+  ;; subtrees as a large store's do; 20,000 cost ~4x the ticks for the same proof (deps, 2026-11-13)
   (delay (let [conn @store
                cfg (pdb/store-cfg :lmdb (get-in @conn [:config :store :path]))
                b (keyword (str "diff-" (random-uuid)))
@@ -131,7 +137,7 @@
                bc (pdb/connect (assoc cfg :branch b))]
            (d/transact bc {:tx-data [{:db/ident :app.diff/n :db/valueType :db.type/long :db/cardinality :db.cardinality/one}
                                      {:db/ident :app.diff/m :db/valueType :db.type/long :db/cardinality :db.cardinality/one}]})
-           (doseq [part (partition-all 2000 (range 20000))]
+           (doseq [part (partition-all 2000 (range 5000))]
              (d/transact bc {:tx-data (mapv (fn [i] {:app.diff/n i :app.diff/m i}) part)}))
            (let [es (vec (d/q '[:find [?e ...] :where [?e :app.diff/n _]] @bc))]
              (d/release bc)
@@ -158,13 +164,15 @@
     (apply d/datoms-diff r)
     r))
 
-(deftest a-diff-of-two-commits-costs-the-nodes-that-differ
+;; estimate: the fixture's 10,000 datoms in transactions of 4,000 (~7k ticks a datom in a large transaction, not a
+;; 10-datom one's ~12k: ~75M), then three sizes of branch, transact and measured diffs (~10M). Measured 86M
+(deftest ^{:seon.test/estimate {:ticks 90000000}} a-diff-of-two-commits-costs-the-nodes-that-differ
   ;; See docs/storage.md#merges-read-what-changed (seon.ctx/moved's call: two values of one branch, :eavt, the whole range)
   (let [[a b] (diff-of 10) [gone added] (d/datoms-diff a b :eavt [])]
     (is (= [10 11] [(count gone) (count added)]) "ten values replaced, and the transaction's own datom"))
   (cost/proof
     {:of 'datahike.api/datoms-diff :input 'seon.merge-cost-test/diff-of
-     :n "values replaced on entities spread over a 40,000-datom store, in one commit"
+     :n "values replaced on entities spread over a 10,000-datom store of three :eavt levels, in one commit"
      :work (str "the nodes that differ between the two values and nothing else: every child stored at an "
                 "address both hold is skipped unread, the children of each differing branch are compared by "
                 "one hashed lookup each and the differing leaves' datoms merged once; at most one root-to-leaf "
@@ -186,12 +194,12 @@
                     (let [path (get-in @@store [:config :store :path])]
                       (d/release @store) (seon.lib/remove-tree! path)))))))
 
-(deftest a-main-that-only-embedded-changes-no-key
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-main-that-only-embedded-changes-no-key
   (let [[base ours theirs das] (embedded-of 10)]
     (is (empty? (merge/touched-keys base [theirs] das)) "embeddings are no program content")
     (is (= {:theirs {} :apply [] :conflicts []} (select-keys (merge/delta-three-way base ours theirs das) [:theirs :apply :conflicts])) "so main changed nothing")))
 
-(deftest a-main-that-only-embedded-costs-nothing
+(deftest ^{:seon.test/estimate {:ticks 35000000}} a-main-that-only-embedded-costs-nothing
   ;; (its digest does not reach delta-three-way: a quoted name; this line moves it when the producer changes)
   ;; task seon.merge/touched-keys-are-what-the-program-changed: an entity whose only differing
   ;; datoms are a platform record's (seon.vector's embeddings) bears no changed key, so the

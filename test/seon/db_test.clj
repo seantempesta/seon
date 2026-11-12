@@ -2,7 +2,7 @@
   "One store, many branches, as in production (owner, 2026-10-21): bin/test seeds one test
   store and each test takes a branch of it through one helper (seon.test-store/test-branch!)."
   (:require [seon.task :as task] [seon.vector] [seon.test-store :as ts] [my.test :as mt] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
-            [clojure.java.shell] [clojure.java.io] [clojure.walk] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
+            [clojure.java.shell] [clojure.java.io] [clojure.walk] [datahike.api :as d] [datahike.writer :as dw] [datahike.writing] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn] [seon.repl] [seon.print] [datahike.schema]
             [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost] [seon.lib :as lib] [seon.intr :as intr]
             [datahike.datom :as dd] [datahike.index.persistent-set :as psi] [seon.merge] [org.replikativ.persistent-sorted-set]
@@ -1800,6 +1800,45 @@
       (is (= :db/txInstant (:attribute (refused #(d/transact conn {:tx-data [{:seon.agent/key "t3"}] :tx-meta {:db/txInstant past}}))))
           "in tx-meta, through a connection's checked transact")
       (is (some? (:db-after (d/transact conn {:tx-data [{:seon.agent/key "t4"}]}))) "and a write that supplies none is the store's to stamp")))))
+
+(defn schema-meta-of
+  "datahike.writing/schema-meta-uuid's argument: the schema meta of a db holding Seon's schema and n attributes more
+  (what a commit that changed the schema keys and stores). See docs/forks.md#datahike."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
+  [n]
+  (let [db (pdb/speculate-db (ts/test-db) (mapv (fn [i] {:db/ident (keyword "app.sk" (str "a" i)) :db/valueType :db.type/long
+                                                        :db/cardinality :db.cardinality/one})
+                                               (range n)))]
+    [(select-keys db [:schema :rschema :system-entities :ident-ref-map :ref-ident-map])]))
+
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-schema-key-costs-its-bytes-not-a-walk
+  ;; See docs/forks.md#datahike. Task datahike.transaction/a-schema-transaction-costs-the-attributes-it-declares: every commit
+  ;; that changed the schema keyed the schema meta by hasch's walk, 5.5M ticks / 19 MB for Seon's ~900 entries (2026-11-13)
+  (cost/proof
+    {:of 'datahike.writing/schema-meta-uuid :input 'seon.db-test/schema-meta-of
+     :n "attributes declared beyond Seon's schema"
+     :work (str "a canonical form of the schema meta (its maps and sets sorted by key), its fasl bytes (~30 KB for Seon's "
+                "schema) and one SHA-256 of them: linear in the entries, one pass each")
+     :growth :linear
+     ;; estimate: ~950 entries at ~400 ticks each (a sort step, an encode, the hash's share); bytes ~1.4 KB an entry: the
+     ;; canonical form ~1.1 KB (an attribute map as a sorted vector: its pair vectors and the sort's seqs), its fasl ~0.2 KB,
+     ;; the digest's copy. Measured 342k ticks / 1.31 MB at 10 (hasch: 5.5M / 19 MB)
+     ;; an added attribute is more than one entry: its schema map, its rschema memberships and both ident maps' entries,
+     ;; ~700 ticks and ~2.6 KB each (measured from 10 to 1,000 added: 685 ticks, 2.56 KB)
+     :per-n {:ticks 700 :bytes 2600}
+     :fixed {:ticks 400000 :bytes 1400000}
+     :sizes [10 100 1000]}))
+
+(deftest ^{:seon.test/estimate {:ticks 2000000}} equal-schemas-key-the-same-whatever-order-built-them
+  ;; See docs/forks.md#datahike: the schema meta's key is a hash of its bytes, so its maps and sets are put in one order
+  ;; first; a different schema keys differently
+  (let [k datahike.writing/schema-meta-uuid
+        a {:schema (array-map :x/a {:db/valueType :db.type/long} :x/b {:db/valueType :db.type/string}) :rschema {:db/index #{:x/a :x/b}}}
+        b {:schema (array-map :x/b {:db/valueType :db.type/string} :x/a {:db/valueType :db.type/long}) :rschema {:db/index #{:x/b :x/a}}}
+        c (assoc-in a [:schema :x/b :db/valueType] :db.type/long)]
+    (is (= (k a) (k b)) "the same schema in two orders")
+    (is (not= (k a) (k c)) "a different schema")))
+
 
 (deftest ^{:seon.test/estimate {:ticks 20000000}} an-identity-a-branch-can-make-again-takes-its-content-id
   ;; docs/storage.md (content ids): each identity a branch can mint as main does (a section, an error's signature, a judge's digest, a
