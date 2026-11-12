@@ -125,7 +125,9 @@
 
 (clojure.core/defn- pred {:malli/schema [:=> [:cat :qualified-keyword :seon.host/fn] [:tuple :qualified-keyword :seon.host/schema]]} [k p] [k (m/-simple-schema {:type k :pred p})])
 
-(def ^:private host-schemas
+(def host-schemas
+  "The host types, each a predicate defined in code under its :seon.host/* name (an atom, a promise, a db, a fn, a thread ...): the
+  registry's entries no schema file holds, which seon.problems/unschemed-keys counts as defined. See docs/checks.md#contracts-armed-at-definition."
   (into {} [(pred :seon.host/atom #(instance? clojure.lang.Atom %))
             (pred :seon.host/promise #(instance? clojure.lang.IBlockingDeref %))
             (pred :seon.host/deref #(instance? clojure.lang.IDeref %))
