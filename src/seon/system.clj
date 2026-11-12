@@ -538,6 +538,25 @@
         free? #(nil? (pdb/eid db :seon.task/id (task/task-id 'request %)))]
     (if (free? said) said (some #(let [n (str said "-" %)] (when (free? n) n)) (iterate inc 2)))))
 
+(defn- check-waits
+  "st with each wait on main (::waits, await-db's) checked on db, a commit of main: one whose pred holds is answered db, one
+  whose pred threw is answered the throw as its error, and one already answered (its quiet came first) is dropped; each such
+  wait leaves ::waits. The api's own step runs the preds, never the writer's commit. See docs/flow.md#the-step-fn-contract-every-proc-follows."
+  {:malli/schema [:=> [:cat :seon.system/api-state :seon.host/db] :seon.system/api-state]}
+  [st db]
+  (reduce-kv (fn [st k {:keys [pred p]}]
+               (let [r (if (realized? p)
+                         ::answered
+                         (try (when (pred db) db)
+                              (catch Throwable e
+                                (contract/error :seon.system/wait-threw #'seon.system/check-waits
+                                                (str "the wait's test threw on main at t " (:max-tx db) ": " (step/error-msg e))
+                                                {:t (:max-tx db)}))))]
+                 (cond (= ::answered r) (update st ::waits dissoc k)
+                       r (do (deliver p r) (update st ::waits dissoc k))
+                       :else st)))
+             st (::waits st)))
+
 (defn- ext-op {:malli/schema [:=> [:cat :seon.system/api-state :seon.host/volatile :seon.system/request] :seon.system/api-state]}
   [st o m]
   (let [{:keys [op p id]} m]
@@ -681,6 +700,8 @@
             (step/out! o :to-fs (assoc (:req m) :rid rid))
             st)
       :state (reply! st o p (:view st))
+      ;; a wait on main (await-db): checked now on main as it is, then as of every commit until it holds
+      :await (check-waits (assoc-in st [::waits (:k m)] {:pred (:pred m) :p p}) @(:conn st))
       :errors (reply! st o p (::errors st))
       ;; main's health (my.root/problems): the render proc's, kept by what each move of main changed
       ;; (seon.render.proc/health!), brought to (:db m) there and answered by rid at the fold's counts
@@ -942,6 +963,8 @@
       (reduce (fn [st aid] (let [[st rid] (step/pend st nil)] (to-agent st o aid {:op :drain :rid rid}))) st (keys (:agents st))))
     (= in :ext) (ext-op st o m)
     (nil? m) st
+    ;; a commit makes a db only for the waits open on it: with none, a commit costs the api nothing
+    (= in :main) (if (seq (::waits st)) (check-waits st (d/commit-as-db (:store @(:conn st)) (:commit m))) st)
     :else (back-op st o m)))
 
 (defn api-proc
@@ -954,7 +977,7 @@
   starts the flowing shutdown."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:graph "a promise of this graph" :system "a promise of the built system (seon.graph/build)"}
-       :ins {:from-writer "writer answers and stats" :from-fs "fork-server events"} :outs {:to-fs "fork-server requests" :to-reconciler "a wake per recipient of a committed message, {:agent key}"}
+       :ins {:from-writer "writer answers and stats" :from-fs "fork-server events" :main "main's commits, in order: each wait on main checked as of each"} :outs {:to-fs "fork-server requests" :to-reconciler "a wake per recipient of a committed message, {:agent key}"}
        :workload :io
        :ping-map-fn (fn [st] {:agents (count (:agents st)) :closing (boolean (:closing st))
                               ;; every ask it holds unanswered, rid -> [kind agent]: what a waiter waits on
@@ -971,12 +994,15 @@
                  ;; the stall check's timer: armed while an agent has an eval in flight (seon.step/timer)
                  ::stall-timer (step/timer)
                  ::errors {}
+                 ;; the waits on main (await-db), {k {:pred :p}}: each checked as of every commit until it holds
+                 ::waits {}
                  ::flow/in-ports {:ext (:ext args) :back (:back args)}
                  ::flow/out-ports {:to-writer (:to-writer args) :events (:events args)}))
   ([st tr]
    ;; the stop transition: nothing accepted is left unanswered
    (when (= tr ::flow/stop)
-     (doseq [[_ {:keys [p]}] (:pending st) :when (not (map? p))] (deliver p (gone nil "root stopped"))))
+     (doseq [[_ {:keys [p]}] (:pending st) :when (not (map? p))] (deliver p (gone nil "root stopped")))
+     (doseq [[_ {:keys [p]}] (::waits st)] (deliver p (gone nil "root stopped"))))
    st)
   ([st in m]
    (let [o (volatile! {})
@@ -1155,7 +1181,8 @@
   "Root's session, made at the boot of a main that has none (`root-agent-boot-tx`), an ordinary agent made the ordinary way: an agent
   entity keyed \"root\" (a reserved key, as the user's is its name), linked to root by :seon.agent/root, its pattern written once as
   its role's name ([:seon.db/agent-fact]: what the schema gains later reaches it with no write; its record holds the agents forked from
-  it, :seon.agent/_parent), its own render the stage (seon.render.ui/stage: the page a fresh system opens on), and the task request/root of the
+  it, :seon.agent/_parent) and one join, the person it works for: the starter of its own task (request/root's :seon.task/started-by, by
+  :seon.db/user-fact's pattern, which reads that person's sessions through the tasks they started), its own render the stage (seon.render.ui/stage: the page a fresh system opens on), and the task request/root of the
   chat template (seon.template/request-tx), parked, its agent that entity, so the first message's wake spawns it. The user started it
   (:seon.task/started-by); it is the first agent, with no :seon.agent/parent, and the agent of every person's request is its child
   (seon.task/forked-from): docs/users.md#who-started-whom). Root's own entity is untouched: an entity's id
@@ -1168,9 +1195,10 @@
       ;; started by the user: the user's tree holds root's session and what it launches (docs/users.md#who-started-whom); drawn as a
       ;; stage (seon.render.ui/stage, its own render, which a person turns back to the conversation): the page a fresh system opens on
       (let [user (task/sender (cfg/value :seon.config.root/user-name))]
-        (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.system/id :root] :seon.ctx/pattern [:seon.db/agent-fact]
-                :seon.render/hiccup 'seon.render.ui/stage}]
-              (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked :seon.task/started-by user}))))))
+        (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.system/id :root] :seon.ctx/pattern [:seon.db/agent-fact {:seon.agent/task [{:seon.task/started-by :seon.db/user-fact}]}]
+                :seon.render/hiccup 'seon.render.ui/stage :seon.agent/task "root-task"}]
+              ;; its task both ways, as start-tx links a request's agent: root's pattern reaches the person it works for through it
+              (conj (vec tx) {:db/id "root-task" :seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked :seon.task/started-by user}))))))
 
 (defn root-agent-boot-tx
   "At boot, root's session: made when main has none (`root-agent-tx`; the owner's ruling, root's agent is there from boot), else
@@ -1940,9 +1968,10 @@
   [sys work] (a/>!! (:judge sys) (assoc work :op :judge)) nil)
 
 (defn await-db
-  "Main's first db value (now or after a later commit) for which (pred db) holds: a watch on
-  main's connection runs pred once per commit. No deadline, no polling: what an outside caller
-  waiting on a fact parks on (the server's :done, a test). Named (what, a description), the
+  "Main's first db value (now or as of a later commit) for which (pred db) holds. The wait is the api's state, checked in the
+  api's own step on main now and as of every commit after it, in order (check-waits): never a watch run inside the writer's
+  commit. No deadline, no polling: what an outside caller waiting on a fact parks on (the server's :done, a test). A pred
+  that throws answers the throw, the typed :seon.system/wait-threw. Named (what, a description), the
   wait is on a fact the reconciler's work makes (a judge's verdict, its quiescence report),
   and it ends, too, when nothing in flight can make pred true: it asks the reconciler (on
   :judge, ask-edge: behind any judge handed it before) for its first quiet
@@ -1952,38 +1981,28 @@
   a caller waiting on outside input (a user's reply, another writer) asks again. A root that
   stopped answers :seon.system/no-agent (root stopped). So it answers a db or one of those errors. Unnamed, a fact another proc makes (the
   vector proc's embeddings, a problems report): only a commit ends it, since the reconciler's
-  quiet says nothing of that proc's work (task seon.system/a-wait-on-main-ends-when-nothing-can-make-it-true)."
-  {:malli/schema [:function [:=> [:cat [:map [:conn :seon.host/conn]] ifn?] :seon.host/db]
-                  [:=> [:cat [:map [:conn :seon.host/conn] [:judge {:optional true} :seon.host/chan]] [:maybe :string] ifn?]
-                   [:or :seon.host/db :seon.system/quiet-before-true :seon.system/no-agent]]]}
+  quiet says nothing of that proc's work (task seon.system/a-wait-on-main-ends-when-nothing-can-make-it-true).
+  See docs/flow.md#the-step-fn-contract-every-proc-follows."
+  {:malli/schema [:function [:=> [:cat :seon.system/sys ifn?] [:or :seon.host/db :seon.system/no-agent :seon.system/wait-threw]]
+                  [:=> [:cat :seon.system/sys [:maybe :string] ifn?]
+                   [:or :seon.host/db :seon.system/quiet-before-true :seon.system/no-agent :seon.system/wait-threw]]]}
   ([sys pred] (await-db sys nil pred))
   ([sys what pred]
   (let [stopped (gone nil "root stopped")
-        k (keyword "seon.system" (str "await-" (lib/unique-id)))
-        a (:wrapped-atom (:conn sys))
         p (promise)
-        ;; the watch first, then the value: a commit between reading main and adding the watch
-        ;; was seen by neither, and the wait went on until a later commit that never came (a
-        ;; 48-minute hang of seon.e2e-test/await-quiet-ends-on-a-recorded-defect under load). The order holds
-        ;; because the atom orders the two: a watch added and a value set are never both missed (Jolt's gate
-        ;; atomwatchorder, docs/forks.md#jolt; before it this very order could still miss on AArch64)
-        _ (add-watch a k (fn [_ _ _ db] (when (pred db) (deliver p db))))
-        db0 @(:conn sys)
-        _ (when what (step/ask-edge (:judge sys) {:op :quiet :after (:max-tx db0)} {:stopped true} p))]
-    ;; the watch goes whatever ends the wait (an interrupt of a caller whose client left, a pred
-    ;; that threw on the current value)
-    (try (when (pred db0) (deliver p db0))
-         (let [r @p]
-           (cond (:stopped r) stopped
-                 ;; quiet: main as it is now, which a commit racing the answer may have made true
-                 (:quiet r) (let [db @(:conn sys)]
-                              (if (pred db)
-                                db
-                                (contract/error :seon.system/quiet-before-true #'seon.system/await-db
-                                                (str "root went quiet at t " (:quiet r) " with this still false: " what)
-                                                {:t (:quiet r) :waits-on what})))
-                 :else r))
-         (finally (remove-watch a k))))))
+        ;; the wait is the api's state: checked on main now and as of every commit after, in the api's own step (check-waits)
+        _ (step/ask-edge (:ext sys) {:op :await :k (keyword "seon.system" (str "await-" (lib/unique-id))) :pred pred} stopped p)
+        _ (when what (step/ask-edge (:judge sys) {:op :quiet :after (:max-tx @(:conn sys))} {:stopped true} p))
+        r @p]
+    (cond (:stopped r) stopped
+          ;; quiet: main as it is now, which a commit racing the answer may have made true
+          (:quiet r) (let [db @(:conn sys)]
+                       (if (pred db)
+                         db
+                         (contract/error :seon.system/quiet-before-true #'seon.system/await-db
+                                         (str "root went quiet at t " (:quiet r) " with this still false: " what)
+                                         {:t (:quiet r) :waits-on what})))
+          :else r))))
 
 (defn defect
   "A root proc's defect (a :platform problem) whose record main wrote after t, or nil: a step

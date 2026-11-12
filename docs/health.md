@@ -60,7 +60,7 @@ Every key Seon names is one schema entry: each of Seon's own qualified keywords 
 
 ## A form too long
 
-A live form whose `:form/src` is longer than `:seon.config.shrink/form-tokens` tokens (`seon.print.emit/chars-tokens`) is a `:long-form` (`seon.problems/long-forms`), read only for the vars a branch changed and shown as attention. Each becomes a held task from ```seon.template/finding``` (split it by what it does, behaviour, tests and cost unchanged), written once a var by ```my.root/file-findings!```.
+A live form whose `:form/src` is longer than `:seon.config.shrink/form-tokens` tokens (`seon.print.emit/chars-tokens`) is a `:long-form` (`seon.problems/long-forms`), read only for the vars a branch changed and shown as attention.
 
 ## A proof that passes by waiver
 

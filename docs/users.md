@@ -30,7 +30,7 @@ Every part of Seon is the same few pieces, and what makes one part differ from a
 - **Between agents:** a message, or a request routed through root; never a write to another agent's branch.
 - **To and from the browser:** root's web proc writes html and Datastar patches on one compressed event stream per tab ([render](render.md#in-flight-output-streams)); a click posts to the web proc, which sends it on as a request.
 
-**Goes with the stages, each a special case:** root's render walks of pages (`root-walk`, `user-walk`, `branch-walk!`, the cold draw); root's session as a thing apart; `:seon.agent/root`; an opened eval written on main (`:seon.agent/opened`, ```seon.system/opened!```, ```seon.agent/untaken-facts```).
+**Goes with the stages, each a special case:** root's render walks of pages (`root-walk`, `user-walk`, `branch-walk`, the cold draw); root's session as a thing apart; `:seon.agent/root`; an opened eval written on main (`:seon.agent/opened`, ```seon.system/opened!```, ```seon.agent/untaken-facts```).
 
 ## The data model: schemas, refs and pulls
 

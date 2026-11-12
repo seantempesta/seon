@@ -56,14 +56,15 @@
 (defn- judge!
   "Root judges task nm's end on main db (`#'r/judge-tx`): end is what its agent wrote on its branch (nil: none), results root's
   own proof results, diff the writer's branch read (members over empty ones). The branch is main (or :branch) with :on-branch
-  (tx-data) and the end written on it; the flight's other members are options. Answers {:db main after the judging :outcome :tx}."
+  (tx-data) and the end written on it; the flight's other members are options. A run that worked by default: its diff changed one key
+  (:ours, else the done rule's :no-change) and it ended at its turn (:ended-turn, else it gets no refine). Answers {:db main after the judging :outcome :tx}."
   [db nm end & {:keys [results diff deferred run-problems worked-error turn ended-turn branch on-branch] :or {turn 1}}]
   (let [id (str "demo/" nm)
         branch (cond-> (or branch db) on-branch (d/db-with on-branch) end (ended nm end :turn turn :ended-turn ended-turn))
         {:keys [tx outcome]} (#'r/judge-tx (st-of db) {:act {:op :spawn :task id :env {:branch (task/default-branch id)}} :deferred deferred
                                                     :run-problems run-problems :worked-error worked-error}
                                         (or results {})
-                                        (merge {:db branch :base db :base-t (:max-tx db) :ours [] :uncontracted [] :unmerged [] :caused [] :theirs 0} diff))]
+                                        (merge {:db branch :base db :base-t (:max-tx db) :ours [[:var 'demo/worked]] :uncontracted [] :unmerged [] :caused [] :theirs 0} diff))]
     {:db (d/db-with db tx) :outcome outcome :tx tx}))
 
 (defn- judgment-of
@@ -640,6 +641,32 @@
       (is (= {:op :kill :id :a-a :ended true} (:req (first outs))) "its agent is stopped")
       (is (some #(= [:db/cas [:seon.task/id "demo/a"] :seon.task/outcome :running :closed] %) (get-in (second outs) [:req :req :tx-data]))
           "and its end judged from that one answer"))))
+
+(deftest a-typed-error-from-work-or-the-judge-holds-the-task-and-is-no-death
+  ;; docs/errors.md: an error flows to whoever can fix it. :briefed, :worked and :tested each took any typed error for the
+  ;; agent's death: data's agent "died" before turn 1 when its prove answered no verdict (tests, 2026-11-12). Only
+  ;; :seon.agent/died, :seon.system/no-agent and :seon.system/ended are deaths (as :spawned reads them); any other error holds
+  ;; the task with it as its reason, its agent left running, which reads it at its next turn. Red before: a :dead-read step
+  (let [db (db-of [(decl "a")] :extra (work "a" :running))
+        flight {:act {:op :spawn :task "demo/a" :env {:branch :demo/a}} :agent :a-a}
+        no-verdict (contract/error :seon.writer/refused 'seon.writer/refused "the run answered no verdict" {})
+        held (fn [step]
+               (let [[st outs] (#'r/advance (st-of db :flights {"demo/a" (assoc flight :step step)}) "demo/a" step no-verdict)
+                     tx (mapcat #(get-in % [:req :req :tx-data]) outs)]
+                 [(set (map (comp :op :req) outs))
+                  (some #(= [:db/cas [:seon.task/id "demo/a"] :seon.task/execution :running :held] %) tx)
+                  (:seon.task/failure (task/task (d/db-with db tx) "demo/a"))]))]
+    (doseq [step [:briefed :worked :tested]]
+      (let [[ops on-hold failure] (held step)]
+        (is (not (contains? ops :kill)) (str step ": its agent is not stopped"))
+        (is (not (some #(= :dead-read %) (map second (vals (:pending (first (#'r/advance (st-of db :flights {"demo/a" (assoc flight :step step)}) "demo/a" step no-verdict)))))))
+            (str step ": no death is read"))
+        (is on-hold (str step ": the task is held"))
+        (is (re-find #"no verdict" (str (:reason failure))) (str step ": with the error as its reason: " (pr-str failure)))))
+    (testing "a death is still a death"
+      (let [died (contract/error :seon.agent/died 'seon.system/end-agent "agent a-a died" {:agent :a-a})
+            [st _] (#'r/advance (st-of db :flights {"demo/a" (assoc flight :step :tested)}) "demo/a" :tested died)]
+        (is (some #(= :dead-read %) (map second (vals (:pending st)))) "it reads the agent's end")))))
 
 (deftest a-task-is-judged-with-how-far-behind-main-its-branch-was
   ;; the wiring of gap 7: the writer's :theirs reaches the judging as the done rule's :behind, and the reasons say so
@@ -1266,7 +1293,7 @@
               "the same verdict again: proof-red demo-test/add-test" :closed]
              ["its proof never run" "demo/add" (:db (judge! (told unknown) "add" {:outcome :red} :results {}))
               "the same verdict again: proof-unknown demo-test/add-test" :closed]
-             ["a dead agent" "demo/add" (d/db-with dead-db (#'r/dead-tx (st-of dead-db) "demo/add" died nil))
+             ["a dead agent" "demo/add" (d/db-with dead-db (#'r/dead-tx (st-of dead-db) "demo/add" died {:outcome :dead :ended-turn 3}))
               "its agent died: agent a-add died: exit 70" :dead]
              ["a merge conflict" "demo/add-merge"
               (let [db (mdb two-tasks :extra (concat (work "add" :done) (work "add-merge" :running)))]
@@ -1852,8 +1879,8 @@
     (is (= :work (:seon.task/kind r)) "a task like any: judged by its proofs")
     (is (= #{"demo/a"} (:seon.task/after r)) "after the task it refines: it starts when that one has ended")
     (is (empty? (:seon.task/needs r)) "it needs nothing: no result of the task is wanted")
-    (is (contains? (set (:seon.task/proofs r)) (t "a")) "the refined task's own proofs")
-    (is (contains? (set (:seon.task/proofs r)) 'seon.task-files-test/the-trees-task-files-and-pages-load-with-no-refusal) "and what it edits")
+    (is (= #{'seon.task-files-test/the-trees-task-files-and-pages-load-with-no-refusal} (set (:seon.task/proofs r)))
+        "proved by what it edits alone: it changes no code, so the task's red proofs could never pass on its branch (loop 2, 2026-11-12)")
     (is (not= (:seon.task/branch (task/task db1 "demo/a")) (:seon.task/branch r)) "on a branch of its own: a new agent works it")
     (is (= :running (:seon.task/execution r)) "released")
     (is (task/refine? db1 "demo/a-refine") "a refine by its cite of the section")
@@ -1893,3 +1920,26 @@
     (is (not (contains? (starts running) "demo/r")) "not while the task it is after runs")
     (is (contains? (starts capped) "demo/r") "a cap is an end: the task after it starts")
     (is (not (contains? (starts capped) "demo/n")) "a task that needs a's result still waits: a cap is no result")))
+
+(deftest a-refine-is-done-by-its-own-change-and-a-run-that-took-no-turn-gets-none
+  ;; docs/tasks.md#a-refine-curates-its-own-task (context's loops, 2026-11-12): loop 1's refine was done at turn 0 (its proofs the task's,
+  ;; green), loop 2's capped never able to pass (the task's, red), and data's run died before turn 1 and its refine capped with
+  ;; nothing to read. The done rule refuses a branch that changed nothing (:no-change, red first for every task); a refine proves
+  ;; what it edits; a run that took no turn gets no refine
+  (is (= [:no-change] (mapv :reason (r/done-explain {:proofs #{'p/a} :results {'p/a :pass} :main-green #{} :allowed-red #{} :uncontracted #{} :changed? false})))
+      "proofs green, nothing changed: proved nothing")
+  (is (= [] (r/done-explain {:proofs #{'p/a} :results {'p/a :pass} :main-green #{} :allowed-red #{} :uncontracted #{} :changed? true})) "green and changed: done")
+  (is (= [] (r/done-explain {:proofs #{'p/a} :results {'p/a :pass} :main-green #{} :allowed-red #{} :uncontracted #{}})) "not measured: the rule says nothing")
+  (is (= [] (r/done-explain {:kind :merge :proofs #{'p/a} :results {'p/a :pass} :main-green #{} :allowed-red #{} :uncontracted #{} :changed? false}))
+      "a merge task's work is the merge: its diff can be empty once main is in (swarm's merge steps)")
+  (let [db0 (with-refine-section (mdb [(decl "a")] :extra (work "a" :running)))]
+    (is (= :told (:outcome (judge! db0 "a" {:outcome :green} :results {(t "a") :pass} :diff {:ours []})))
+        "the judge refuses a green end whose branch changed nothing: told to its agent")
+    (is (some #(= :no-change (:reason %)) (:seon.task/reasons (task/task (:db (judge! db0 "a" {:outcome :green} :results {(t "a") :pass} :diff {:ours []})) "demo/a")))
+        "and says why")
+    (is (nil? (task/task (:db (judge! db0 "a" {:outcome :cap} :results {(t "a") :fail} :ended-turn 0)) "demo/a-refine"))
+        "a run that ended at turn 0 gets no refine")
+    (let [died (contract/error :seon.agent/died 'seon.system/api-proc "agent a-a died: exit 70" {:agent :a-a})]
+      (is (nil? (task/task (d/db-with db0 (#'r/dead-tx (st-of db0) "demo/a" died nil)) "demo/a-refine"))
+          "nor one that died before it wrote an end"))))
+
