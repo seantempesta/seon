@@ -2537,7 +2537,7 @@
   (let [;; the entry's own clauses: its join of the agents it started (asked to a depth, its key a vector with :seon.ctx/below) is asked here one level
         started? (fn [c] (and (map? c) (some #(= :seon.agent/agents (if (vector? %) (first %) %)) (keys c))))
         e (vec (remove started? (r/schema-property (seon.db/index) :seon.agent/entry :seon.ctx/pattern)))]
-    (#'ui/agent-entry db (d/pull db (into [:db/id] (conj e {:seon.agent/agents (into [:db/id] e)})) [:seon.agent/key key]))))
+    (#'ui/agent-entry db (seon.program/index-of-db db) (d/pull db (into [:db/id] (conj e {:seon.agent/agents (into [:db/id] e)})) [:seon.agent/key key]))))
 
 (deftest an-agents-entry-says-what-it-works-on
   ;; docs/users.md#whats-on-screen: an agent's entry (seon.render.ui/agent nested, wherever a page joins it): its task in words, how it
@@ -2614,6 +2614,24 @@
         (is (not (str/includes? side (str "href=\"/agent/" (last chain) "\""))) "the one below the depth: no entry")
         (is (str/includes? side "1 more it started, below") (str "beyond the pull's depth, counted: " side))
         (is (not (str/includes? (in units "#c-side") "more it started")) "and nothing below an agent that started none"))))
+
+;; See docs/render.md#the-page
+(deftest a-member-pulled-without-its-identity-is-a-path
+  ;; a join member pulled without its identity attribute is a path, never a unit: the members of its own joins are placed in its stead
+  ;; (a user's agents read through the tasks it started, {:seon.task/_started-by [{:seon.task/agent ...}]}); pulled with its identity it is one
+  (let [db (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a]])
+        db (d/db-with db [{:db/id "u" :seon.agent/key "sean" :seon.user/name "sean"}
+                          {:seon.task/id "seon.print/a-long-string" :seon.task/started-by "u" :seon.task/agent [:seon.agent/key "b2/a1"]}])
+        ix (seon.program/index-of-db db)
+        u (:db/id (d/entity db [:seon.agent/key "sean"]))
+        ;; as seon.ctx/build pulls: every level holds its :db/id
+        placed (fn [p] (let [c (d/pull db (into [:db/id] p) u)]
+                         (mapv #(let [m (seon.ratom/untracked %)] [(r/entity-schema ix m nil) (or (:seon.agent/key m) (:seon.task/id m))])
+                               (#'ui/tiles ix (seon.ratom/ref-view (seon.ratom/atom c) seon.ctx/changes) p))))]
+    (is (= [[:seon.db/agent-fact "b2/a1"]] (placed [{:seon.task/_started-by [:db/id {:seon.task/agent [:db/id :seon.agent/key :seon.agent/status]}]}]))
+        "the task, pulled without its id, is the path: its agent is placed")
+    (is (= [[:seon.task/task-fact "seon.print/a-long-string"]] (placed [{:seon.task/_started-by [:db/id :seon.task/id {:seon.task/agent [:db/id :seon.agent/key]}]}]))
+        "pulled with its id, the task is the unit")))
 
 (deftest an-entry-shows-the-last-exchange
   ;; docs/users.md#whats-on-screen: an agent's entry is titled by what the person typed and shows their newest message and its answer, never

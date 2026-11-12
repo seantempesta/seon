@@ -832,10 +832,9 @@
   "Walk w's components placed directly in a container of the root's output (an element with an id:
   its list), in order, [[sel k]]: its container's selector and its key; a list component (its var's
   :seon.render/list) is no
-  part: its output is its list, the components in it placed there; a component that drew nothing (with-id) is
-  placed nowhere. With sels, the element ids of some lists, those lists' alone, in sels' order. Read from what each component
-  places (`places`, kept by its revision), from the root down: the components, never their hiccup, so a flush that ran one leaf
-  pays the placed components, not the page (seon.render-cost-test/a-flush-places-what-moved). nested? true: each placed component's own components too, each in the element of
+  part: its output is its list, the components in it placed there; one that drew nothing (with-id) is placed nowhere. With sels,
+  those lists' alone, in sels' order. Read from what each component places (`places`, kept by its revision), from the root down,
+  never the hiccup (seon.render-cost-test/a-flush-places-what-moved). nested? true: each placed component's own components too, each in the element of
   its parent that holds it, at any depth (the page's units), each [sel k parent-k] (parent-k nil in a root list); false: the lists' own
   components (the model's parts, which nest their children themselves). See docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:function [:=> [:cat :map] [:vector [:tuple :string [:vector :any]]]]

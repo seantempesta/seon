@@ -835,6 +835,17 @@
        ;; the nearest way to look: every session, from the home page
        (when (= :seon.render/no-location (:seon.error/type e)) [:p [:a {:href "/root"} "◆ seon: every session on main"]])])
 
+(defn- keep-walks
+  "St holding the walks a page made or advanced (`agent-view`'s ::walks: the branch's and the users'), a branch walk it replaces
+  disposed. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :map [:maybe :map]] :map]}
+  [st {[b bw] :branch users :users}]
+  (let [old (get-in st [:branch-reads b :walk :w])]
+    (when (and bw old (not (identical? old (:w bw)))) (render/dispose-walk! old))
+    (cond-> st
+      bw (assoc-in [:branch-reads b :walk] bw)
+      (seq users) (update :user-walks merge users))))
+
 (defn- pass-view
   "One view rendered: [st' patch-message-or-nil]; a view whose entity main does not hold yet renders
   nothing. Its walk runs inside d/with-reads, and what it read is kept (reindex): one index for
@@ -846,14 +857,8 @@
   [st view-id]
   (let [held (get-in st [:views view-id])
         [out reads] (d/with-reads #(page-value st view-id))
-        ;; the walks the page made or advanced (`agent-view`): the branch's and the users', held in st from here
-        {[b bw] :branch users :users} (when (map? out) (::walks out))
+        st (keep-walks st (when (map? out) (::walks out)))
         out (cond-> out (map? out) (dissoc ::walks))
-        old (get-in st [:branch-reads b :walk :w])
-        _ (when (and bw old (not (identical? old (:w bw)))) (render/dispose-walk! old))
-        st (cond-> st
-             bw (assoc-in [:branch-reads b :walk] bw)
-             (seq users) (update :user-walks merge users))
         st (-> st (update-in [:counts :walked] (fnil inc 0)) (update :last-walked (fnil conj []) view-id) (update :dirty disj view-id))
         read-keys (d/reads-index reads)
         hold (fn [st v] (-> (reindex st view-id (:reads held) read-keys)
