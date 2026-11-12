@@ -24,6 +24,8 @@ A proof measures the function under test on the thread that calls it, and nothin
 
 Each size is one call (```seon.cost/measure```), less what measuring an empty call costs. Only a size whose one call is over its estimate is measured again (```seon.cost/run```): calls until `:seon.config.proofs/cost-settled` calls after the one that allocated the fewest bytes allocate no fewer, at most `:seon.config.proofs/cost-max-samples`, ticks and calls their least; the row keeps `:calls`, and one that does not settle is marked `:unsettled`. When every size passes but the curve does not, the sizes measured by one call are measured again this way and the curve judged on those (`seon.cost-test/a-curve-is-judged-on-warm-sizes`). Proofs: `seon.profile-test/a-threads-allocation-is-its-own`, `seon.cost-test/a-measure-takes-a-count-of-samples-never-a-time`.
 
+A measurement by hand is made in the built program, never a `-M` script (which compiles without the build's settings): `bin/deps-probe FILE` (its header is its manual) evaluates FILE in this checkout's root, test namespaces loadable.
+
 ## Counting calls
 
 ```seon.profile/counted``` wraps each armed function once more, counting every call exactly and timing one in 64. Counts are kept per epoch: ```seon.profile/begin!``` opens one and zeroes every count, ```seon.profile/calls``` is its total, ```seon.profile/touched``` the functions called since with exact `:calls` and estimated `:ms`, ```seon.profile/top``` the k costliest. An agent is one thread, so its counts are exact; root's procs run on several, so root's are approximate and never proof. `seon.profile/reads` records what ran since `reads-begin!`, which no nested epoch resets; a test's verdict holds both (`seon.profile/with-reads`).
