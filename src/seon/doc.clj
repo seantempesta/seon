@@ -478,12 +478,13 @@
                 (if-let [vs (seq (filter :var/name ds))]
                   (vec (for [v vs :let [n (:var/name v) kind (if (contains? (set (:var/meta v)) :test) :test :var)] :when (kinds kind)]
                          {:kind kind :name n}))
-                  ;; a form that defines no var (a defmethod, an extend: a method or an impl) is its namespace's, at the line
-                  ;; its file holds it on (seon.source/file-text, which (lines 'the.ns) reads), as an ns form's is
-                  (when-let [n (and (seq ds) (some-> (d/entity db e) :form/ns :ns/name))]
-                    (let [kind (if (str/ends-with? (str n) "-test") :test :var)
-                          t (source/file-text db n) i (str/index-of t (:form/src (d/entity db e)))]
-                      (when (and i (kinds kind)) [{:kind kind :name n :line0 (count (filter #{\newline} (subs t 0 i)))}])))))
+                  ;; a form that defines a method or an impl (a defmethod, an extend) and no var is its namespace's, at the line
+                  ;; its file holds it on (seon.source/file-text, which (lines 'the.ns) reads); an ns form's is ns-hit's
+                  (let [n (when (some #(or (:method/key %) (:impl/key %)) ds) (some-> (d/entity db e) :form/ns :ns/name))
+                        kind (if (str/ends-with? (str n) "-test") :test :var)
+                        t (when (and n (kinds kind)) (source/file-text db n))
+                        i (when t (str/index-of t (:form/src (d/entity db e))))]
+                    (if i [{:kind kind :name n :line0 (count (filter #{\newline} (subs t 0 i)))}] []))))
     :seon.doc/text (when (kinds :section) [{:kind :section :name (:seon.doc/address (d/entity db e))}])
     :seon.task/plan (when (kinds :task) [{:kind :task :name (:seon.task/id (d/entity db e))}])
     :schema/form (when (kinds :schema) [{:kind :schema :name (:schema/key (d/entity db e))}])))
