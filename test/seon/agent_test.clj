@@ -520,21 +520,23 @@
   other test it holds a digest of was green."
   [x] (str "(let [r " x "] (into {} (for [t (keys (:digests r))] [t (get (seon.proofs/results r) t :pass)])))"))
 
-(deftest an-agents-test-run-is-its-proofs-and-what-its-change-reaches
-  ;; the agent holds main's whole suite, and its
-  ;; test run (root's :tests request, the one the judge sends) selects what the done rule
-  ;; reads: the task's proofs and the tests reaching what its branch changed since the main
-  ;; it forked from. One redefined function (same behaviour, another form) reaches one test; its namespace's other tests
-  ;; and every other namespace's do not run
-  (let [proof 'seon.reader-test/text-without-a-fence-is-a-comment
-        reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
-        ;; the other test that reaches without-overrides (it reads the profile from the command line, 4a34eb9227)
-        also 'seon.config-test/the-profile-is-read-from-the-command-line
-        [_ run] (in-agent #(vector (str "(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent." (:agent %) ")")
-                           {:op :eval :agent "root" :code (statuses (str "@(seon.system/run-tests! sys :" (:agent %) ")"))})
-                          {:proofs #{proof}})]
-    (is (= {proof :pass reached :pass also :pass} (:value run))
-        "the proof and the tests reaching the change ran, green; nothing else ran")))
+(deftest ^{:seon.test/estimate {:ticks 20000000}} an-agents-test-run-is-its-proofs-and-what-its-change-reaches
+  ;; T1, in process on the world: seon.agent/test-plan of main and of a branch of it (two test plans of ~12 forms, ~5 M ticks each, the
+  ;; world's schema and index most of it). The selection a run reads is the task's proofs and the tests reaching what its
+  ;; branch changed since the main it forked from. One redefined function (same behaviour, another form) reaches the tests
+  ;; that call it; its namespace's other tests and every other namespace's do not. The tests are vars of this process too
+  ;; (seon.agent/judges? asks the process), loaded here as the agent loads its program
+  (let [proof 'pt.rc-other-test/other-is-one
+        calc "(ns pt.rc)\n(defn add [x y] (+ x y))\n(defn other [] 1)\n"
+        calc-test "(ns pt.rc-test (:require [clojure.test :refer [deftest is]] [pt.rc :as c]))\n(deftest adds (is (= 3 (c/add 1 2))))\n(deftest others (is (= 1 (c/other))))\n"
+        other-test "(ns pt.rc-other-test (:require [clojure.test :refer [deftest is]]))\n(deftest other-is-one (is (= 1 1)))\n(deftest other-too (is (= 1 1)))\n"
+        main (mt/with (mt/world) (mt/code 'pt.rc calc) (mt/code 'pt.rc-test calc-test) (mt/code 'pt.rc-other-test other-test))
+        branch (mt/with main (mt/code 'pt.rc "(ns pt.rc)\n(defn add [x y] (+ y x))\n(defn other [] 1)\n"))]
+    (try (doseq [t [calc-test other-test]] (binding [*ns* (create-ns 'user)] (load-string t)))
+         (let [plan (agent/test-plan branch main #{proof})]
+           (is (= '#{pt.rc-other-test/other-is-one pt.rc-test/adds} (set (:selected plan)))
+               "the proof and the test reaching the change; nothing else (not its namespace's other test, not another namespace's)"))
+         (finally (run! remove-ns '[pt.rc pt.rc-test pt.rc-other-test])))))
 
 (deftest a-plan-with-no-base-costs-what-a-plan-with-one-does
   ;; a plan that selects with no base (mode :main: the test service's run of main, and the tests that run as it
@@ -2280,14 +2282,17 @@
 ;; docs/merging.md#the-test-service: a tree proved as a merge (mode :main: every key with no green at its digest, as the shell's
 ;; bin/prove --merge plans it, seon.proofs/plan-of :merge) carries its generative-contract keys too, as items, where the run
 ;; dropped them (seon.agent/process-plan's (remove mg-key? ...)): a landing through the system proved less than the shell's
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 20000000 :asks 4}} a-merge-plan-carries-the-contract-keys
-  (let [_ '[seon.agent/handle! seon.agent/process-plan seon.proofs/plan-of seon.proofs/mg-key?]
-        k "mg/seon.ref/lead-sentence"
-        plan "(set (keys (:mg (:result (first (seon.agent/handle! {:op :tests :id :x :plan? true :process? true :mode :main}))))))"
-        [_ mg] (in-agent (fn [_] [(str "(do (in-ns 'seon.ref) (clojure.core/defn lead-sentence \"The first sentence of a section's lead paragraph, on one line.\""
-                                        " {:malli/schema [:=> [:cat :string] :string]} [lead] (identity (first-sentence (str/join \" \" (map str/trim (str/split-lines lead)))))) (in-ns 'user) :ok)")
-                                   plan]))]
-    (is (contains? (set (:value mg)) k) (str "a contract key with no green at its digest is an item of the merge: " (pr-str mg)))))
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-merge-plan-carries-the-contract-keys
+  ;; T1, in process on the world: seon.agent/process-plan of a plan of the world with one contracted function of a pure namespace added (a test
+  ;; plan, a few thousand forms' digests: ~5 M ticks; the check-step plan over it, ~5 M; stored-results reads of every candidate)
+  (let [db (mt/with (mt/world)
+             (mt/code 'seon.ref (str "(ns seon.ref (:require [clojure.string :as str]))\n"
+                                     "(defn first-sentence [s] s)\n"
+                                     "(defn lead-sentence \"The first sentence of a section's lead paragraph, on one line.\""
+                                     " {:malli/schema [:=> [:cat :string] :string]} [lead] (identity (first-sentence (str/join \" \" (map str/trim (str/split-lines lead))))))\n")))
+        plan (agent/test-plan db db #{})
+        mg (:mg (#'agent/process-plan {:plan plan :deferred []} nil))]
+    (is (contains? (set (keys mg)) "mg/seon.ref/lead-sentence") (str "a contract key with no green at its digest is an item of the merge: " (pr-str mg)))))
 
 ;; docs/merging.md#verdicts-are-a-cache: base and branch are digested by the same inputs, so a branch that changed nothing selects
 ;; nothing as changed. Red before: the inputs design added the private checks, the index class and a process test's config
