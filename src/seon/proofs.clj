@@ -514,7 +514,7 @@
   record, :keys the static reads its reach digest takes, seon.program/graph-index's :reads) with
   each read's digest in rd ({var digest, [:schema k] digest, [:config k] digest, [:file path] digest}: seon.program/read-digests
   of the program it ran): its verdict's :reads. A read rd holds nothing for is kept as nil, a miss: it moves when the thing
-  appears."
+  appears. See docs/source.md#tests-run-by-reach."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [rd {:keys [fns entities config files keys]}]
   (into {} (for [k (concat fns (map #(vector :schema %) entities) (map #(vector :config %) config) (map #(vector :file %) files) keys)]

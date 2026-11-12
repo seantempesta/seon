@@ -46,4 +46,4 @@
  {:seon.task/name "a-git-status-that-prints-nothing-says-why"
   :seon.task/plan "Seen twice on 2026-11-12, both under load in a seed (bin/system seed, seon.system/seed-program! -> seon.fx/inputs -> seon.fx/pin): `git status --porcelain=v2 --branch` exited 0 with empty output for a submodule (reference-code/zstd), whose status a moment later printed its header (detached, f8745da6ff). pin refuses it with a typed throw, so the seed fails and its run reports no tests. Not yet known: whether git printed nothing, or the output was lost between git and seon.fx/git! (lib/sh's pipes under load). Next cheapest observation: git! records the bytes it read and git's exit status beside each call that answers empty; if git's own stdout was non-empty, the loss is in lib/sh (runtime's), else git's. Proof, red first: a git! call whose child writes its output after a delay under a busy reader still answers that output."
   :seon.task/kind :work
-  :seon.task/proofs #{}}]
+  :seon.task/proofs #{seon.fx-test/a-git-call-that-answers-empty-says-why}}]
