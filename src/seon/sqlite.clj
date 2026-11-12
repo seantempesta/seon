@@ -254,6 +254,27 @@
     (select h :match (str "SELECT r.e, r.a, bm25(t) FROM t CROSS JOIN r ON r.id = t.rowid WHERE t MATCH ?1" (in-attrs attrs)) query
             (fn [st] [(c-column-int st 0) (c-column-int st 1) (- (c-column-double st 2))]))))
 
+(defn fts-ranked
+  "The rows of index ix holding a word of query (FTS5 syntax), of the attributes in attrs, whose score stands at least z-min
+  standard deviations above the mean over n texts (a text holding no word scores 0), best first: [[e a score mean m2]], score
+  the negated bm25, mean and m2 the first two moments over the n texts, from which the caller reads each hit's z. The moments,
+  the filter and the order are SQLite's (one statement over the match), so only the hits cross into the process: a query that
+  matches nearly every text costs its hits, never its matches. Call it inside `using`. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat [:map [:h :seon.ffi/address]] :string [:set :int] pos-int? :double] [:vector [:tuple :int :int :double :double :double]]]}
+  [{h :h} query attrs n z-min]
+  (let [z2 (* z-min z-min)
+        ;; z >= z-min, read without a square root (SQLite's math functions are optional): the sign of s - mu, then its square
+        keep (if (neg? z-min)
+               (str "(m.s - st.mu >= 0 OR (m.s - st.mu) * (m.s - st.mu) <= " z2 " * (st.m2 - st.mu * st.mu))")
+               (str "(m.s - st.mu >= 0 AND (m.s - st.mu) * (m.s - st.mu) >= " z2 " * (st.m2 - st.mu * st.mu))"))]
+    (with-row-calls
+     (select h :ranked
+            (str "WITH m AS MATERIALIZED (SELECT r.e e, r.a a, -bm25(t) s FROM t CROSS JOIN r ON r.id = t.rowid WHERE t MATCH ?1" (in-attrs attrs) "), "
+                 "st AS (SELECT sum(s) / " (double n) " mu, sum(s * s) / " (double n) " m2 FROM m) "
+                 "SELECT m.e, m.a, m.s, st.mu, st.m2 FROM m, st WHERE " keep " ORDER BY m.s DESC")
+            query
+            (fn [st] [(c-column-int st 0) (c-column-int st 1) (c-column-double st 2) (c-column-double st 3) (c-column-double st 4)])))))
+
 (defn fts-substring
   "The rows [[e a]] of index ix whose text holds string text of three characters or more anywhere (inside a term,
   across a separator), of the attributes attrs, unordered: the trigram table answers it, ignoring case (a superset
