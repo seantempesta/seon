@@ -263,7 +263,8 @@
      ;; the tests that reach a fixture (a var marked ^:seon.test/fixture, the test store), as their reach says: a shard
      ;; holding one warms its fixtures before its first test, and one holding none pays nothing (seon.proofs/warm-fixtures!)
      :fixture-tests (into #{} (mapcat #(program/tests-reaching g %))
-                          (d/q '[:find [?n ...] :where [?v :var/meta :seon.test/fixture] [?v :var/name ?n]] db))
+                          (d/q '[:find [?n ...] :in $ [?t ...] :where [?v :var/meta ?t] [?v :var/name ?n]] db
+                               [:seon.test/fixture :seon.test/shard-fixture]))
      :rd (delay (reads-index-of root store tree g in))
      ;; whether the binary target/seon is (its build record, target/seon.program) runs this tree's program as a build of it would:
      ;; nil, or what differs that it bakes (seon.system/binary-current, the one rule; docs/source.md#the-binary-records-its-program)
@@ -404,7 +405,7 @@
     (contract/instrument! contract/boot-nss)
     ;; the fixtures its tests reach made before the first of them runs, so none pays the test store's seed (~65M ticks)
     ;; inside its own budget; a shard of none that reaches one makes none
-    (when warm? (proofs/warm-fixtures!))
+    (when warm? (proofs/warm-fixtures! #{:seon.test/fixture :seon.test/shard-fixture}))
     (let [;; one writer for every verdict this shard stores
           run {:id (str "bin/test " tree " " (random-uuid)) :tree tree}
           ;; the greens this shard wrote as each ended (the cache's, so a run beside it reuses them at once), and the ones it reused
