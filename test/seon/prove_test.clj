@@ -562,7 +562,7 @@
   (let [[st o ask] (tree-run 4 {:items {} :process {'a.p-test/t "dp"} :build {:tree "T" :needed? true}})
         [b] (fx-asks o)]
     (is (true? (get-in ask [:req :process?])) "a checkout's run asks its agent for its process items")
-    (is (= [{:kind :build :tree "T" :checkout "/ck" :name :build :digest "T" :binary? false :bound nil}] (mapv #(get-in % [:req :req]) (fx-asks o)))
+    (is (= [{:kind :build :tree "T" :checkout "/ck" :name :build :digest "T" :binary? false :bound nil}] (mapv #(dissoc (get-in % [:req :req]) :seon.prove/batch) (fx-asks o)))
         "the build alone is granted, though three workers are free")
     (let [[st o1] (feed st [(answer-of b {:value {:pass 1 :fail 0 :error 0 :ms 900}})])
           [sd] (fx-asks o1)
@@ -674,21 +674,31 @@
 (deftest ^{:seon.test/estimate {:ticks 500000}} max-cores-is-a-share-of-the-cores
   (is (= 2 (five-asked (prove/admission {:max-cores 0.5 :cores 4}))) "half of four cores: two")
   (is (= 3 (five-asked (prove/admission {:max-cores 0.2 :max-workers 4 :cores 18}))) "a fifth of eighteen, under max-workers")
-  (is (= {:workers 1} (prove/admission {:max-cores 0.1 :cores 4})) "at least one"))
+  (is (= {:workers 1 :max-processes 6} (prove/admission {:max-cores 0.1 :cores 4})) "at least one"))
 
-;; docs/merging.md#the-test-service: an item that boots a root (a check step on the binary, a process test's batch, a build or
-;; seed) takes :root-weight workers, so the processes in flight stay near the cores: 18 such items at once were 51 roots at load
-;; 46 on 18 cores (2026-11-12). Five steps on six workers of weight three: two at once; five plain tests: five; and one step is
-;; granted with nothing running even where its weight exceeds the workers. T1, in process: three asks of a fresh service state.
-(deftest ^{:seon.test/estimate {:ticks 5000000}} an-item-that-boots-a-root-takes-its-weight-of-the-workers
-  (let [steps (into {} (for [i (range 5)] [[(str "step" i) (str "d" i)] {:kind :step :binary? true :tree "t" :checkout "/c" :ms 5}]))
-        tests (into {} (for [i (range 5)] [[(symbol "app.w-test" (str "t" i)) (str "d" i)] {:agent (keyword (str "a" i)) :ms 5}]))
-        granted (fn [adm items] (let [[_ outs] (prove/ask-items (merge (proc0) adm) 1 :batch items)] (count outs)))]
-    (is (= 2 (granted (prove/admission {:max-workers 6 :root-weight 3 :cores 18}) steps)) "six workers, three a step: two at once")
-    (is (= 5 (granted (prove/admission {:max-workers 6 :root-weight 3 :cores 18}) tests)) "a plain test takes one")
-    (is (= 1 (granted (prove/admission {:max-workers 2 :root-weight 3 :cores 18}) steps)) "nothing running: one, though it weighs more")
-    (is (prove/root-item? {:kind :test :process? true}) "a process test boots its test root")
-    (is (not (prove/root-item? {:kind :step :binary? false})) "a step off the binary boots none")))
+;; docs/merging.md#the-test-service: the service admits by the processes its running batches hold, read from the machine
+;; (seon.prove/held-processes, stubbed here), never a weight set in advance: an item fits while what runs holds and its class's
+;; peak stay under :max-processes, the cores and two. Measured red (2026-11-13): a run through the service peaked at 127
+;; processes, load 45.4 on 18 cores, with a weight of three an item; the items it ran held 3 to 8 each. T1, in process.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} admission-counts-the-processes-its-running-batches-hold
+  (let [steps (fn [pre n] (into {} (for [i (range n)] [[(str pre i) (str pre "d" i)] {:kind :step :binary? true :tree "t" :checkout "/c" :ms 5}])))
+        st0 (merge (proc0) (prove/admission {:cores 18}))
+        granted (fn [outs] (count (fx-asks outs)))
+        run (fn [reading n] (with-redefs [prove/held-processes (fn [] reading)]
+                              (let [[st o] (prove/ask-items st0 1 :batch (steps "a" 1))
+                                    [st o2] (prove/ask-items st 2 :batch (steps "b" n))]
+                                [st (granted o) (granted o2)])))]
+    (is (= 20 (:max-processes st0)) "the cores and two")
+    (let [[st one more] (run {(prove/batch-tag 1) 18} 3)]
+      (is (= 1 one) "nothing running: one, whatever it will hold")
+      (is (= 0 more) "it holds 18: a step measured at 18 does not fit under 20")
+      (is (= 18 (get-in st [:peaks [:step false true]])) "the reading is its class's peak"))
+    (let [[st _ more] (run {(prove/batch-tag 1) 3} 8)]
+      (is (= 5 more) "it holds 3, so a step counts 3: five more make 18, a sixth 21")
+      (is (= 3 (get-in st [:peaks [:step false true]]))))
+    (is (= 0 (nth (run nil 3) 2)) "no reading: nothing more while one runs")
+    (is (= 18 (count (batches (second (prove/ask-items st0 1 :batch (into {} (for [i (range 18)] [[(symbol "app.w-test" (str "t" i)) (str "d" i)] {:agent (keyword (str "a" i)) :ms 5}])))))))
+        "a plain test's batch is its child alone: eighteen, one a worker")))
 
 ;; docs/clocks.md#the-machines-load-admits-work: over max-load nothing more is granted while an item runs; with nothing
 ;; running one item is granted anyway, so the queue never stalls with nothing to wake it
@@ -716,10 +726,10 @@
   (let [init (prove/prove-proc {:conn nil})
         st (proc0)
         [_ outs] (prove/ask-items st 1 :batch (into {} (for [i (range 10)] [[(symbol "app.s-test" (str "t" i)) (str "d" i)] {:agent :a1 :ms 5}])))]
-    (is (= (prove/config-admission) (select-keys init [:workers :max-load :root-weight])))
+    (is (= (prove/config-admission) (select-keys init [:workers :max-load :max-processes])))
     (is (= (seon.config/value :seon.config.machine/cores) (:workers st)) "the shipped max-workers: the machine's cores")
     (is (= (min 10 (:workers st)) (count (batches outs))) "ten items over that many workers, a share each"))
-  (is (= {:workers 4} (prove/admission {:cores 4}))))
+  (is (= {:workers 4 :max-processes 6} (prove/admission {:cores 4}))))
 
 (deftest ^{:seon.test/estimate {:ticks 300000}} a-batchs-error-that-names-no-test-reaches-its-answer
   ;; docs/merging.md#the-test-service. Found 2026-11-12 (runtime's land): agent-checks' first prove answered {:error 1} with only

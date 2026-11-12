@@ -66,7 +66,7 @@ How much the test service runs at once is three optional keys, and any combinati
 - `:seon.config.proofs/max-cores`: a share of `:seon.config.machine/cores` in (0,1], rounded down, at least 1.
 - `:seon.config.proofs/max-load`: the 1-minute load average under which a further item is granted.
 
-The count is the least of the count keys set, else the core count. The load is read only in a step the service already takes, never on a timer ([the machine's load admits work](clocks.md#the-machines-load-admits-work)), and never blocks the first item. These are signals: they decide when an item starts, never a verdict. The shipped file sets `max-workers` only; set the others, or `:seon.config.machine/cores`, to the machine in `config/local.edn`.
+The count is the least of the count keys set, else the core count. Beside them, one bound is derived, never a key: the processes the running items hold stay under the cores and two (`:max-processes`, AGENTS.md §3a.7), counted from the machine by ```seon.prove/held-processes``` ([the test service](merging.md#the-test-service)). The load is read only in a step the service already takes, never on a timer ([the machine's load admits work](clocks.md#the-machines-load-admits-work)), and never blocks the first item. These are signals: they decide when an item starts, never a verdict. The shipped file sets `max-workers` only; set the others, or `:seon.config.machine/cores`, to the machine in `config/local.edn`.
 
 ## Constants
 
