@@ -534,7 +534,7 @@
   "Every attribute a task's end writes, defined once from what writes them: a judging's (judged-attrs), a hold's (held-attrs),
   and the outcome, reasons and agent beside them. What a superseded refine retracts (refine-tx), so no earlier end reads as its
   own; a released branch takes the hold's (onto-tx), the evidence its next agent answers. See docs/tasks.md#a-refine-curates-its-own-task."
-  (into (set judged-attrs) (concat held-attrs [:seon.task/outcome :seon.task/reasons :seon.task/agent])))
+  (into (set judged-attrs) (concat held-attrs [:seon.task/outcome :seon.task/reasons :seon.task/agent :seon.task/found-nothing])))
 
 (defn outcome-tx
   "The write that moves task id's outcome from `from` to `to` (Datahike's compare-and-swap: a racing observer, a
@@ -639,7 +639,7 @@
   my.task/update! writes them: a set member (:seon.task/proofs) its values added and retracted, a
   single member its new value. A value its member's schema does not admit (proofs that are no
   set of qualified symbols, a plan that is no string) is the update's contract error, writing nothing."
-  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause] :seon.host/fn [:sequential :any]]
+  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause :seon.task/found-nothing] :seon.host/fn [:sequential :any]]
                   [:or [:vector :any] :seon.task/invalid-member]]}
   [t member f args]
   (let [id [:seon.task/id (:seon.task/id t)]
@@ -1017,15 +1017,32 @@
   (boolean (some #(= refine-section (get-in % [:seon.cite/target :seon.doc/address])) (cites-of db (pdb/eid db :seon.task/id id)))))
 
 (def ^:private refine-proofs
-  "What every refine proves: the task files and the wiki's pages still load with no refusal,
-  which is what a refine edits (the checks of a docs-and-tasks change, AGENTS.md section 3)."
-  #{'seon.task-files-test/the-trees-task-files-and-pages-load-with-no-refusal})
+  "What every refine proves: the shipped task files are still whole tasks, what a refine's edit of a task reaches at its
+  write-back. Its done is its write (names-new-site?); this proof is green before it starts. A test of the tree, checked so
+  (seon.reconcile-test/a-refines-proofs-are-tests-the-tree-holds): the load test it named before was deleted, and every refine capped."
+  #{'seon.task-files-test/the-shipped-task-files-are-whole-tasks-that-merge-themselves})
+
+(defn names-new-site?
+  "Whether refine rid's work is done, read on db (its branch) against base (its merge base): the plan of the task it refines cites a
+  program function that plan did not cite at base, the change site its next run reads first, or the refine ended saying why it found
+  nothing (:seon.task/found-nothing). nil when rid is no refine. The done
+  rule's :no-change-site reads it (seon.reconcile/done-explain), taken alike by the agent's turn check (seon.ctx.status/status) and
+  root's judging (seon.reconcile/judge-tx). Cost: the task's cites, pulled on each db. See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.task/id] [:maybe :boolean]]}
+  [base db rid]
+  (when (refine? db rid)
+    (let [r (d/entity db (pdb/eid db :seon.task/id rid))
+          tid (some-> r :seon.task/after first :seon.task/id)
+          fns (fn [d] (into #{} (keep #(get-in % [:seon.cite/target :var/name])) (some->> (pdb/eid d :seon.task/id tid) (cites-of d))))]
+      ;; or its typed end: it found nothing to name, and says why (my.task/found-nothing!), never a site invented to pass
+      (boolean (or (:seon.task/found-nothing r) (seq (remove (fns base) (fns db))))))))
 
 (defn refine-decls
   "The refine of task t (a task map as db holds it: its id, ns, name, branch, proofs and agent) and its review, as declarations: a
   :work task on a branch of its own, :seon.task/after t (it starts when t has ended, whatever came of it), its plan citing t and
   `refine-section` (what makes it a refine), its proofs `refine-proofs` alone (it changes no code, so t's red proofs could never
-  pass on its branch), done once it changes something (seon.reconcile/done-explain's :no-change); and the review, its merge step (a :merge task
+  pass on its branch), done once the task it refines names a function its plan did not (names-new-site?, the done rule's
+  :no-change-site: its proof is green before it starts); and the review, its merge step (a :merge task
   that needs it on its branch), written held so that no model works it: a session attaches, reads the change and ends it with
   seon_done, which merges the refine or sends it back with why. See docs/tasks.md#a-refine-curates-its-own-task."
   {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id] [:seon.task/ns :symbol] [:seon.task/name :string]]] [:vector :seon.task/declaration]]}
@@ -1036,13 +1053,15 @@
     [{:seon.task/ns (:seon.task/ns t) :seon.task/name nm :seon.task/kind :work
       :seon.task/after #{(:seon.task/id t)}
       :seon.task/proofs refine-proofs
-      :seon.task/plan (str "Refine the task `" (:seon.task/id t) "`, which has just ended, as " refine-section " says: read the run that "
-                           "worked it (its agent " (:seon.task/agent t) " on branch " br "), folded by my.task/run, called ``(my.task/run \"" (:seon.task/id t) "\")``: each turn "
-                           "with what it read, the vars its final definitions used (the change site), and what it lost; then make the task "
-                           "better for whoever works it next: its plan (first what blocked the run, then what it learned and did not use), what it cites, "
-                           "and the wiki sections it pulled; and keep that run as an example, the turns worth learning from, by "
-                           "(seon.ctx.session/session-tx db key id) less the transactions of the turns that taught nothing, written with my.db/transact!. "
-                           "Change no code.")}
+      :seon.task/plan (str "Refine the task `" (:seon.task/id t) "`, which has just ended, as " refine-section " says. Your work is one "
+                           "write, and it is what makes you done: the plan of `" (:seon.task/id t) "` names, as ``ns/name`` each, the functions its next "
+                           "run must change or call (its change site), so that run reads them first. Until that plan cites a function it did not "
+                           "cite before, you are not done (:no-change-site). Find them in the run that worked it (its agent " (:seon.task/agent t)
+                           " on branch " br "), folded by my.task/run, called ``(my.task/run \"" (:seon.task/id t) "\")``: the vars it wrote "
+                           "and what they use (:final), and what each turn read (:turns): the functions its exploring turns kept reading are the "
+                           "site. Edit the plan where your pull holds the task (docs/tasks.md#an-agent-edits-a-task-its-pull-holds), first what "
+                           "blocked the run, then the site. Then stop: your proof is green already. If the run lacked nothing a plan could name, end with "
+                           "``(my.task/found-nothing! \"why\")`` instead, never a site invented to pass. Change no code.")}
      {:seon.task/ns (:seon.task/ns t) :seon.task/name (str nm "-review") :seon.task/kind :merge
       :seon.task/branch (default-branch rid) :seon.task/needs #{rid}
       :seon.task/plan (str "Review the refine `" rid "`: read what it changed (the task's plan, its cites, wiki sections, the example it kept). "
