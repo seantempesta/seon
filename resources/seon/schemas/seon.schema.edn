@@ -31,4 +31,9 @@
  :seon.schema/unstorable [:and :seon.error/base
                            [:map [:seon.error/type [:enum :seon.schema/unstorable]]
                             [:seon.schema/attribute :qualified-keyword] [:seon.schema/reason :seon.schema/reason]
-                            [:seon.schema/form :any]]]}
+                            [:seon.schema/form :any]]]
+ ;; keys-schemas sweep
+ :seon.schema/attribute [:qualified-keyword {:description "On an unstorable error, the attribute that has no Datahike declaration."}]
+ :seon.schema/form [:any {:description "On an unstorable error, the form (or part of it) that cannot be stored."}]
+ :seon.schema/nearest [:vector {:description "On an unknown-key error, the registered keys nearest the asked one, by Jolt's did-you-mean ranking."} :qualified-keyword]
+ :seon.schema/rearm-errors [:vector {:description "On a registration, the contracts reaching its key that did not compile again against it (seon.program/rearm!)."} :map]}
