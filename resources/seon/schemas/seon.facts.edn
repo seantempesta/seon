@@ -296,7 +296,7 @@
                                {:seon.agent/agents [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/turn :seon.agent/outcome :seon.agent/ended-turn :seon.agent/started-ms {:seon.agent/task [:seon.task/id :seon.task/plan :seon.task/outcome :seon.task/reason {:seon.task/started-by [:seon.user/name]}]} {:seon.agent/agents [:db/id]}]}
                                {:seon.agent/task :seon.task/task-fact}
                                {:seon.agent/system [:db/id]}
-                               {[:seon.model-call/_agent :tx :at] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated :seon.model-call/error :seon.model-call/forms :seon.model-call/basis {:seon.eval/_call [:db/id :seon.eval/call-id :seon.eval/agent]}]}
+                               {[:seon.model-call/_agent :tx :at] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated :seon.model-call/error :seon.model-call/forms :seon.model-call/basis {[:seon.eval/_call :tx :at] [:db/id :seon.eval/call-id :seon.eval/agent]}]}
                                {[:seon.eval/_agent :tx :at] [:seon.eval/id :seon.eval/agent {:seon.eval/by [:db/id :seon.agent/key :seon.system/id]} :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response :seon.eval/result :seon.eval/opened]}
                                {[:seon.message/_to :tx :at] [:seon.message/id {:seon.message/from [:seon.agent/key :seon.user/name :seon.system/id]} :seon.message/to :seon.message/body]}
                                {:seon.cite/_of :seon.cite/cite-fact}
@@ -448,7 +448,7 @@
                                 {:seon.task/needs [:seon.task/id :seon.task/ns :seon.task/plan :seon.task/execution :seon.task/kind :seon.task/instructions :seon.task/evidence :seon.task/failure :seon.task/cause :seon.task/outcome :seon.task/reason :seon.task/started-by {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {:seon.cite/_of :seon.cite/cite-fact}]}
                                 {:seon.cite/_of :seon.cite/cite-fact}
                                 {:seon.search/_of :seon.search/search-fact}
-                                {:seon.task/examples [:seon.agent/key :seon.agent/description {:seon.eval/_agent [:seon.eval/id :seon.eval/agent {:seon.eval/by [:db/id :seon.agent/key :seon.system/id]} :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response :seon.eval/result :seon.eval/opened]}]}] :seon.render/hiccup seon.render.ui/task-view}
+                                {:seon.task/examples [:seon.agent/key :seon.agent/description {[:seon.eval/_agent :tx :at] [:seon.eval/id :seon.eval/agent {:seon.eval/by [:db/id :seon.agent/key :seon.system/id]} :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response :seon.eval/result :seon.eval/opened]}]}] :seon.render/hiccup seon.render.ui/task-view}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                           [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind]
