@@ -426,6 +426,21 @@
            (derived-row ans s nsym (str v " is public and its docstring cites no docs/ section: cite the one that describes it")
                         {:kind :uncited-var :var v} {:var v})))))
 
+(defn unestimated-tests
+  "Each of the named vars (a set of symbols, the vars a branch changed) that is a test stating no estimate on its deftest
+  (seon.source/stated-estimate), as an :unestimated-test row: a new or changed test states what it should cost, worked from
+  what it must do, and runs under the cap until it does (docs/merging.md#a-tests-tick-budget). Closed by stating
+  ^{:seon.test/estimate {:ticks n}}. Cost: one seek per named var and its form's text for a test."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:set :symbol]] [:vector :seon.problems/row]]}
+  [db ans names]
+  (vec (for [v (sort names)
+             :let [e (pdb/eid db :var/name v) ent (when e (d/entity db e)) nsym (some-> (namespace v) symbol)
+                   src (some-> ent :var/form :form/src)]
+             :when (and ent src (contains? (set (:var/meta ent)) :test) (nil? (source/stated-estimate nsym src)))
+             :let [s (str "unestimated-test " v)]]
+         (derived-row ans s nsym (str v " states no estimate: state ^{:seon.test/estimate {:ticks n}} on its deftest, worked from what it must do")
+                      {:kind :unestimated-test :var v} {:var v}))))
+
 (defn long-forms
   "Each of the named vars (a set of symbols, the vars a branch changed), in source or in a test, whose
   form's text is longer than :seon.config.shrink/form-tokens (as the model reads it: seon.print.emit/chars-tokens), as a :long-form row with its tokens and the
@@ -473,7 +488,7 @@
 
 (def caused-classes
   "The derived classes `caused-split` reads: the only ones a branch is judged on (the health step refuses any other). An attention class among them never fails a branch."
-  #{:unnamed-site :stale-section :uncited-var :long-form})
+  #{:unnamed-site :stale-section :uncited-var :long-form :unestimated-test})
 
 (defn caused-datoms
   "The datoms that differ between base and head in the attributes `caused-split` reads (a section's, the var
@@ -530,6 +545,7 @@
                (concat (map #(assoc % :class :unnamed-site) (sites db state forms-of))
                        (map #(assoc % :class :stale-section) (stale-sections db ans {:names moved-vars :sections (eids state)}))
                        (map #(assoc % :class :uncited-var) (uncited-vars db ans moved-vars))
+                       (map #(assoc % :class :unestimated-test) (unestimated-tests db ans moved-vars))
                        (map #(assoc % :class :long-form) (long-forms db ans moved-vars))))
         forms-in (fn [db] (fn [fact] (set (keep #(:e (law-form-at db fact %)) (changed-forms fact)))))
         had (vec (rows base bs (forms-in base)))

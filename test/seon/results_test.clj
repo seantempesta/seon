@@ -222,7 +222,7 @@
 
 ;; See docs/merging.md#verdicts-are-a-cache
 ;; See docs/merging.md#verdicts-are-a-cache
-(deftest a-test-history-is-read-from-its-newest-verdicts
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-test-history-is-read-from-its-newest-verdicts
   (with-dir
    (fn [dir]
      (let [keep-n (cfg/value :seon.config.proofs/recent-verdicts)

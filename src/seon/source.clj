@@ -151,6 +151,15 @@
                          [(symbol (str ns) (name (second form))) (program/form-id ns src k)]))))
           (:forms (read-forms nsym text)))))
 
+(defn stated-estimate
+  "What the deftest whose form text is text (read in namespace nsym, as first-head reads it) states it should cost, its name's
+  ^{:seon.test/estimate {...}}, or nil when it states none or is no deftest. The test's own source, read as data: what a plan
+  and health read where the test's namespace is not loaded. See docs/merging.md#a-tests-tick-budget."
+  {:malli/schema [:=> [:cat :symbol :string] [:maybe :map]]}
+  [nsym text]
+  (let [f (first (reader/read-all text nsym))]
+    (when (and (seq? f) (symbol? (second f))) (:seon.test/estimate (meta (second f))))))
+
 (defn first-head
   "The name (a string) of the head of the form text (one form, as a recorded form's :form/src), read in namespace nsym, or nil when
   that form is not a list headed by a symbol: what kind of definition a recorded form's source is
