@@ -42,12 +42,14 @@ if [[ -f $LOCAL ]]; then
     case $line in
       *:seon.config.root/server-port*|*:seon.config.web/port*) ;;
       ";; This checkout's own config layer"*|";; under the command line's --config"*|";; "*"worktree-ports"*) ;;
-      *";; root's server (bin/system, bin/mcp)"|*";; the dashboard; bin/check and bin/test set"*) ;;
+      *";; root's server ("*|*";; the dashboard; bin/check and bin/test set"*) ;;
       *) [[ -n ${line//[[:space:]]/} ]] && others+=("$line") ;;
     esac
   done < "$LOCAL"
   (( ${#others} )) && for i in {1..${#others}}; do [[ ${others[i]} == *[^[:space:]]* && ${others[i]## } != ";;"* ]] && { others[i]=${others[i]/\{/}; break } done
   (( ${#others} )) && for i in {${#others}..1}; do [[ ${others[i]## } != ";;"* ]] && { others[i]=${others[i]%\}}; break } done
+  # a line left holding only the brace just taken is no entry
+  kept=(); for o in $others; do [[ $o == *[^[:space:]]* ]] && kept+=("$o"); done; others=($kept)
 fi
 mkdir -p "${LOCAL:h}"
 # each run writes its own file and renames it over the layer (one atomic rename): bin/build,
@@ -62,7 +64,8 @@ NEW=$LOCAL.new.$$
   print " ;; the dashboard; bin/check and bin/test set SEON_WEB_PORT=0, so their roots serve none"
   print -n " :seon.config.web/port #long #or [#env SEON_WEB_PORT $W]"
   for o in $others; do print; print -n "$o"; done
-  print "}"
+  # the map closes on a line of its own: a last kept line that is a comment would hold the brace
+  print; print "}"
 } > "$NEW"
 # written only when it changes (nothing changed, nothing done)
 if cmp -s "$NEW" "$LOCAL"; then rm -f "$NEW"; else mv "$NEW" "$LOCAL"; fi
