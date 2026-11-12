@@ -723,11 +723,11 @@
                                ;; what a start records of a session's agent (seon.task/start-tx): this boot now holds it
                                ;; named in main's facts as a start names it; an agent on a task has its branch from its start alone (`observed`), so this is that write
                                named (pdb/off-main (pdb/conn-main (:conn st)) branch)
-                               by (when task (:db/id (:seon.task/started-by (d/entity @(:conn st) [:seon.task/id task]))))
+                               by (when task (task/forked-from @(:conn st) task k))
                                started (cond-> {:seon.agent/key k :seon.agent/boot (:boot st) :seon.agent/started-ms (System/currentTimeMillis)
                                                 :seon.agent/max-turns (or (:seon.agent/max-turns e) (cfg/value :seon.config.agent/max-turns))}
                                          task (assoc :seon.agent/branch named)
-                                         ;; who started it, as seon.task/start-tx names it: kept once written
+                                         ;; the agent it is forked from (seon.task/forked-from, as start-tx names it): kept once written
                                          (and by (not (:seon.agent/parent e))) (assoc :seon.agent/parent by))]
                            (step/out! o :to-writer {:op :tx :branch :db :tx-data (cond-> [started] task (into (cons {:seon.task/id task :seon.task/branch named} (task/move-tx task (:seon.task/outcome (d/entity @(:conn st) [:seon.task/id task])) :parked {}))))
                                                     :dest {:agent-facts [id]}})
@@ -1154,11 +1154,11 @@
 (defn root-agent-tx
   "Root's session, made at the boot of a main that has none (`root-agent-boot-tx`), an ordinary agent made the ordinary way: an agent
   entity keyed \"root\" (a reserved key, as the user's is its name), linked to root by :seon.agent/root, its pattern written once as
-  its role's name and its one addition, a join to the users forked from it read by the user's own pattern ([:seon.db/agent-fact
-  {:seon.agent/_parent :seon.db/user-fact}]: what either schema gains later reaches it with no write), its own render the stage (seon.render.ui/stage: the page a fresh system opens on), and the task request/root of the
+  its role's name ([:seon.db/agent-fact]: what the schema gains later reaches it with no write; its record holds the agents forked from
+  it, :seon.agent/_parent), its own render the stage (seon.render.ui/stage: the page a fresh system opens on), and the task request/root of the
   chat template (seon.template/request-tx), parked, its agent that entity, so the first message's wake spawns it. The user started it
-  (:seon.task/started-by); it is the first agent, with no :seon.agent/parent, and each user's agent is its child (seon.task/boot-tx),
-  so the stage a fresh system opens on holds every user's tree: docs/users.md#who-started-whom). Root's own entity is untouched: an entity's id
+  (:seon.task/started-by); it is the first agent, with no :seon.agent/parent, and the agent of every person's request is its child
+  (seon.task/forked-from): docs/users.md#who-started-whom). Root's own entity is untouched: an entity's id
   derives from its identity, so it cannot take a key too. See docs/users.md#roots-agent."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
   [db]
@@ -1168,7 +1168,7 @@
       ;; started by the user: the user's tree holds root's session and what it launches (docs/users.md#who-started-whom); drawn as a
       ;; stage (seon.render.ui/stage, its own render, which a person turns back to the conversation): the page a fresh system opens on
       (let [user (task/sender (cfg/value :seon.config.root/user-name))]
-        (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.system/id :root] :seon.ctx/pattern [:seon.db/agent-fact {:seon.agent/_parent :seon.db/user-fact}]
+        (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.system/id :root] :seon.ctx/pattern [:seon.db/agent-fact]
                 :seon.render/hiccup 'seon.render.ui/stage}]
               (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked :seon.task/started-by user}))))))
 

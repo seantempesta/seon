@@ -1815,8 +1815,8 @@
         _ (let [v (get c :seon.message/_to)] (when (map? (ratom/untracked v)) (doall (keys v))))
         {:keys [exchanges waiting]} (if k (stage-exchanges db ix c k turn) {:exchanges [] :waiting []})
         now (peek exchanges)
-        ;; the sessions the users' trees hold (root's session pulls the users forked from it and what each started), itself aside
-        held (count (for [u (members (get c :seon.agent/_parent)) a (started-agents (get u :seon.agent/_parent))] a))]
+        ;; the sessions forked from root's session (the first agent's tree, its :seon.agent/_parent)
+        held (count (started-agents (get c :seon.agent/_parent)))]
     [:section (stage-now waiting now working? (if now (stage-values db ix c k now) []) held) (stage-folds exchanges (boolean (seq waiting)))]))
 
 (defn stage-list

@@ -1377,7 +1377,7 @@
 (defn expanded
   "Raw pattern p with each top-level clause that names an entity schema (in the entity index ix) spliced in its place by the pattern
   that schema declares (`schema-property`), itself expanded, and a clause the splice repeats once: [:seon.db/agent-fact
-  {:seon.agent/_parent :seon.db/user-fact}] is the agent schema's pattern and that join. A join asked more than once by the same key
+  {:seon.agent/parent :seon.db/agent-fact}] is the agent schema's pattern and that join. A join asked more than once by the same key
   (its :seon.ctx/below aside) is one join at the first clause that asked it, whose sub-pattern is all of theirs (a schema's name read as its
   declared pattern), expanded. What every reader of a raw pattern reads; the stored :seon.ctx/pattern stays raw. Throws
   :seon.ctx/invalid-pattern naming the clause when a schema it names declares no pattern, its pattern reaches itself (seen: the
