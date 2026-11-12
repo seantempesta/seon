@@ -41,7 +41,6 @@
 (def ^:private F-GETFD 1)
 (def ^:private FD-CLOEXEC 1)
 (def ^:private F-SETFD 2)
-(def ^:private FD-CLOFORK 2)
 (def ^:private MSG-DONTWAIT 0x80)
 (def ^:private MSG-PEEK 0x2)
 (def ^:private F-GETFL 3)
@@ -63,8 +62,8 @@
   dead peer answers EPIPE, not a signal) and FD_CLOEXEC on both ends: a command this process
   spawns (an exec) never holds them, so a forked child's write end closing is its peer's end of
   file (a test child's pipe read as held while a command spawned beside it kept its write end:
-  task seon.agent/a-test-child-that-dies-says-why). A fork without exec keeps them, as its own
-  fds decide (clofork!, run-tests-forked's fds)."
+  task seon.agent/a-test-child-that-dies-says-why). A fork without exec closes every one it is not given
+  (lib/fork!)."
   {:malli/schema [:=> [:cat] :seon.lib/pipe]}
   []
   (with-mem [sv 8]
@@ -73,11 +72,6 @@
       (doseq [fd [a b]] (set-int-opt! fd SO-NOSIGPIPE 1) (set-int-opt! fd SO-SNDBUF BUF) (set-int-opt! fd SO-RCVBUF BUF)
         (c-fcntl fd F-SETFD (bit-or FD-CLOEXEC (c-fcntl fd F-GETFD 0))))
       [a b])))
-
-(defn clofork!
-  "Close fd in every child this process forks from now on."
-  {:malli/schema [:=> [:cat :seon.lib/fd] :int]}
-  [fd] (c-fcntl fd F-SETFD (bit-or FD-CLOFORK (c-fcntl fd F-GETFD 0))))
 
 (defn signal-at-input!
   "fd raises SIGIO in this process when input arrives on it or its peer closes it (O_ASYNC,
@@ -208,12 +202,6 @@
           (cond (= :eof r) :eof
                 (and park? (= :again r)) (do (poller/wait-ready (:fd c) :read) (recur))
                 :else (recur)))))))
-
-(defn close-pending-fds!
-  "Close every descriptor received on c and not yet taken (a forked child does this: they
-  belong to its parent's later frames)."
-  {:malli/schema [:=> [:cat :seon.sock/conn] :any]}
-  [{:keys [fds]}] (run! lib/c-close @fds) (vreset! fds []))
 
 (defn take-fd!
   "The oldest descriptor received with a frame on c (the one its handler is owed)."

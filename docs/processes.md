@@ -18,7 +18,12 @@ A forked process gets its parent's compiled program and db values copy-on-write;
 - **Program and db values** are shared copy-on-write. Compiled code cannot be stored ([storage](storage.md)), so another commit's program is this one plus the forms it differs by (```seon.program/load-changes!```, ```seon.program/reach-update```).
 - **The LMDB env and Datahike connections** are not used across a fork: ```seon.db/after-fork!``` forgets them, and the child reconnects and remakes every db value it inherited by commit ([storage](storage.md#an-agents-reads-and-writes)).
 - **Threads**: only the calling thread survives; ```seon.lib/fork!``` refuses with more than one active.
+- **Descriptors**: a child holds what it is given and nothing else (see below).
 - **Cost**: a fork takes about 0.8 ms; an idle agent privately owns about 120 MB and an idle test child about 10 MB ([machine](machine.md#what-a-process-owns-in-memory)).
+
+### A child holds what it is given
+
+A forked child closes every stream descriptor (a socket, pipe or FIFO) but 0-2, its own `:fd` and the ones it is given to `:keep`, once, before its code runs (```seon.lib/fork!```, ProcessBuilder's rule). Files stay: a native library keeps its own (the LMDB build's lock), which ```seon.db/after-fork!``` forgets rather than closes. So a pipe's write end is held by the child it was made for alone, and the pipe's end of file is that child's end: an agent's test runs read their children to end of file (```seon.agent/read-to-exit```) however many run at once, and an agent, a clone or the fork server keeps none of its parent's sockets (```seon.lib-test/a-forked-child-holds-only-what-it-is-given```). An exec'd command holds neither end of a ```seon.sock/socketpair```, whose ends are FD_CLOEXEC.
 
 Tests need a program per git tree, not a fork: ```seon.proofs``` keeps one store per checkout holding a branch per tree id ([source](source.md#tests-run-by-reach)).
 

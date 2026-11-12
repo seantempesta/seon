@@ -1057,64 +1057,37 @@
           :else acc)))
 
 (defn test-run-answer
-  "The run, from the last line the test child wrote on its pipe before EOF or its exit (nil:
-  none), its exit status, and held? (the child exited and its pipe was still open: a process it
-  forked holds the write end): that line when it is the run's result; else the child died while
+  "The run, from the last line the test child wrote on its pipe before its end of file (nil:
+  none) and its exit status: that line when it is the run's result; else the child died while
   running the test the line's {:seon.test/started var} names, and the run is one :error report on
-  that test var with the status as :exit (none started: a run error naming the status). A held
-  pipe adds an :error report of its own (:seon.test/pipe-held)."
-  {:malli/schema [:=> [:cat [:maybe :string] :seon.lib/exit-status :boolean] :seon.test/result]}
-  [line status held?]
-  (let [v (some-> line child-line) var (:seon.test/started v)
-        res (cond (contains? v :pass) v
-                  (contract/error? v) {:pass 0 :fail 0 :error 1 :reports [(assoc v :type :error :message (:seon.error/message v) :exit status)]}
-                  :else {:pass 0 :fail 0 :error 1
-                         :reports [(cond-> {:type :error :exit status
-                                            :message (str "test process died: " status (when var (str " while " var " ran")))}
-                                     var (assoc :var var))]})]
-    (cond-> res
-      held? (-> (update :error inc)
-                (update :reports conj {:type :error :seon.error/type :seon.test/pipe-held
-                                       :message "the test process exited and a process it forked still holds its pipe (its end of file never came): what it wrote is the run"})))))
+  that test var with the status as :exit (none started: a run error naming the status)."
+  {:malli/schema [:=> [:cat [:maybe :string] :seon.lib/exit-status] :seon.test/result]}
+  [line status]
+  (let [v (some-> line child-line) var (:seon.test/started v)]
+    (cond (contains? v :pass) v
+          (contract/error? v) {:pass 0 :fail 0 :error 1 :reports [(assoc v :type :error :message (:seon.error/message v) :exit status)]}
+          :else {:pass 0 :fail 0 :error 1
+                 :reports [(cond-> {:type :error :exit status
+                                    :message (str "test process died: " status (when var (str " while " var " ran")))}
+                             var (assoc :var var))]})))
 
 (defn read-to-exit
-  "The last line test child pid writes on fd r, read to the pipe's end of file or the child's
-  exit, whichever comes first: the exit is a value on jolt.io-poller/exit-chan (kqueue's NOTE_EXIT,
-  a pidfd on Linux), the fact the fork server reaps by, so a process the child forked that holds
-  the write end cannot keep the run waiting. Parks in alts! over the exit and r's readiness (a
-  fiber's park). After the exit, what is left in the pipe is read: a read that found nothing there
-  (its wait called) reaps the child first (the exit event can come before the kernel has closed the
-  dying child's fds: scale read 1-4 of 100 agents' pipes as held), and a read after the reap that
-  still finds the pipe open means another process holds it; a read that ended on part of a line goes
-  on. Each whole line is given to seen as it is read (the tests as they start, run-tests-forked). The
-  child is reaped once, here. Answers {:line :held? :status}, :status its exit status (seon.lib/wait-status)."
-  {:malli/schema [:function [:=> [:cat :seon.lib/fd pos-int?] [:map [:line [:maybe :string]] [:held? :boolean] [:status :seon.lib/exit-status]]]
-                  [:=> [:cat :seon.lib/fd pos-int? :seon.host/fn] [:map [:line [:maybe :string]] [:held? :boolean] [:status :seon.lib/exit-status]]]]}
+  "The last line test child pid writes on fd r, read to the pipe's end of file, and the child's exit status. The child is the
+  one process holding the write end (lib/fork! gave it as the child's own, closed it here in the fork's step, and every process
+  the child forks closes it), so the end of file is the child's end. Parks on r's readiness, then on the exit
+  (jolt.io-poller/exit-chan) before it reaps (seon.lib/wait-status), so the agent's other fibers run while it waits. Each whole
+  line is given to seen as it is read (the tests as they start, run-tests-forked). Answers {:line :status}.
+  See docs/processes.md#a-child-holds-what-it-is-given."
+  {:malli/schema [:function [:=> [:cat :seon.lib/fd pos-int?] [:map [:line [:maybe :string]] [:status :seon.lib/exit-status]]]
+                  [:=> [:cat :seon.lib/fd pos-int? :seon.host/fn] [:map [:line [:maybe :string]] [:status :seon.lib/exit-status]]]]}
   ([r pid] (read-to-exit r pid (fn [_] nil)))
   ([r pid seen]
-  (let [exit (poller/exit-chan pid)
-        ready (volatile! nil)
-        exited (volatile! false) waited (volatile! false)
-        status (volatile! nil)
-        reap! (fn [] (or @status (vreset! status (lib/wait-status pid))))
-        ;; the readiness wait stays pending until r is read, so a wait the exit ended leaves none behind
-        wait (fn [] (vreset! waited true)
-               (when-not @exited
-                 (let [c (or @ready (vreset! ready (poller/ready-chan r :read)))
-                       [_ port] (a/alts!! [exit c])]
-                   (if (= port c) (vreset! ready nil) (vreset! exited true)))))
-        rd (sock/line-reader r wait)]
-    (loop [line nil]
-      (vreset! waited false)
-      (let [ls (rd)]
-        (cond (= ls :eof) {:line line :held? false :status (reap!)}
-              (seq ls) (do (run! seen ls) (recur (peek ls)))
-              ;; nothing there yet, or part of a line: read again
-              (or (not @exited) (not @waited)) (recur line)
-              ;; exited, and a read found nothing there: reaped, every fd the child held is closed, so read again
-              (nil? @status) (do (reap!) (recur line))
-              ;; and still nothing there after the reap: another process holds the pipe
-              :else {:line line :held? true :status @status}))))))
+   (let [rd (sock/line-reader r #(a/<!! (poller/ready-chan r :read)))]
+     (loop [line nil]
+       (let [ls (rd)]
+         (cond (= ls :eof) (do (a/<!! (poller/exit-chan pid)) {:line line :status (lib/wait-status pid)})
+               (seq ls) (do (run! seen ls) (recur (peek ls)))
+               :else (recur line)))))))
 
 (defn named-tests
   "The test vars names names on db (each a deftest's var, :var/meta holds :test): a qualified name, that test; a
@@ -1187,36 +1160,30 @@
       (count vs))))
 
 (defn- test-child
-  "Fork this agent to run tests in a child (run-tests-here; fds the run's atom of the pipe ends open here) and read it to its end: {:answer
+  "Fork this agent to run tests in a child (run-tests-here), its pipe's write end the child's own (lib/fork!'s :fd: closed here in
+  the fork's step, and the child holds nothing else of this agent's), and read it to its end of file: {:answer
   (test-run-answer: the child's final line, or the one :error report of the test it died in),
   :streamed (the reports of the tests that ended, in order), :ended (their vars, as strings),
   :pid, :exit}, or the fork's refused answer. forked is told the child's pid; each test as it starts goes
   to root (what this agent waits on, which a stall names) through say, the loop's send! or what
   hands the loop a message to send."
-  {:malli/schema [:=> [:cat :map nat-int? [:maybe [:map-of :qualified-symbol pos-int?]] [:sequential :qualified-symbol] :seon.host/fn :seon.host/fn :any] [:or :map :seon.test/fork-refused]]}
-  [plan ticks budgets tests forked say fds]
-  (let [[r w] (sock/socketpair)
-        lines (atom {:streamed [] :ended #{} :fns {} :heap {}})
-        ;; fds: the pipe ends open in this agent for the run's children (an atom, a set), each child closes every
-        ;; one but its own write end: a sibling's end held here would keep the agent's death from ending that sibling
-        _ (swap! fds conj r w)
+  {:malli/schema [:=> [:cat :map nat-int? [:maybe [:map-of :qualified-symbol pos-int?]] [:sequential :qualified-symbol] :seon.host/fn :seon.host/fn] [:or :map :seon.test/fork-refused]]}
+  [plan ticks budgets tests forked say]
+  (let [lines (atom {:streamed [] :ended #{} :fns {} :heap {}})
         ;; what ran ahead is committed first, so the child's db is a commit it can make again through its own env (own-store!)
         _ (when (:dirty? @state) (commit!))
         ;; the fixtures made here once, so this child and every later one inherits them
-        _ (warm-fixtures!)]
+        _ (warm-fixtures!)
+        [r w] (sock/socketpair)]
     (lib/fork!
-     {:refused (fn [n] (lib/c-close r) (lib/c-close w) (swap! fds disj r w)
+     {:fd w
+      :refused (fn [n] (lib/c-close r)
                  (contract/error :seon.test/fork-refused #'seon.agent/test-child
                                  (str "cannot fork the tests: " n " Chez threads active (a running future?)") {:active-threads n}))
       :child (fn []
-               (run! lib/c-close (disj @fds w))
-               ;; nothing this child forks (a test's own child, a root it starts) holds the
-               ;; write end, so its exit is the pipe's end of file
-               (sock/clofork! w)
                ;; the run ends with its agent (a test ends by its own budget): the agent's end of this socket
                ;; pair closing raises SIGIO here and ends the child, whatever the test is
-               ;; doing (the agent's own
-               ;; socket to root is FD_CLOFORK: not held here, so its handler is replaced)
+               ;; doing (the agent's own socket to root was closed at the fork, so its handler is replaced)
                (when-let [unwatched (sock/signal-at-input! w)]
                  (sock/write-line! w (sedn/encode {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (:seon.error/message unwatched)}]}))
                  (lib/c-exit 0))
@@ -1248,17 +1215,16 @@
                  ;; streamed none, so its line keeps the throw's report (scale's agents read :error 2 and nothing else)
                  (sock/write-line! w (sedn/encode (cond-> res streamed? (assoc :reports []))))))
       :parent (fn [pid]
-                (lib/c-close w) (swap! fds disj w)
                 (forked pid)
                 (swap! state assoc :test-child pid)
                 (let [read (read-to-exit r pid #(when-let [t (:start (swap! lines take-line %))] (say {:op :testing :test t})))
                       st (:status read)]
                   (swap! state dissoc :test-child)
-                  (lib/c-close r) (swap! fds disj r)
+                  (lib/c-close r)
                   (seon.lib/remove-tree! (fx/run-dir pid))
                   (if (contract/error? read)
                     read
-                    (-> (select-keys @lines [:streamed :ended :fns :heap :measured]) (assoc :answer (test-run-answer (:line read) st (:held? read)) :pid pid :exit st)))))})))
+                    (-> (select-keys @lines [:streamed :ended :fns :heap :measured]) (assoc :answer (test-run-answer (:line read) st) :pid pid :exit st)))))})))
 
 (defn- record-results!
   "Record a test run's results on this branch (task seon.proofs/test-results-are-a-few-facts, seon.proofs/result-tx: only what differs from the
@@ -1427,9 +1393,9 @@
         ;; nothing to run, so no child is forked
         ;; one child's run of todo: a child that dies loses the test it was running (its :error stays) and the
         ;; rest of its todo run in a new child: the death of one test never costs the run its other results
-        run-child (fn [todo say fds]
+        run-child (fn [todo say]
               (loop [todo todo reports [] fns {} heap {} measured {}]
-                (let [c (test-child plan ticks budgets todo forked say fds)]
+                (let [c (test-child plan ticks budgets todo forked say)]
                   (if (contract/error? c)
                     c
                     (let [died (filter :exit (:reports (:answer c)))
@@ -1453,8 +1419,7 @@
                     ms (proofs/estimated-ms run (fx/typical-ms run) (:process plan))
                     ;; no more children than the work needs: each is worth at least what a fork and a child's start cost
                     n (-> (quot (reduce + (vals ms)) (cfg/value :seon.config.proofs/child-min-ms)) (max 1) (min (cfg/value :seon.config.proofs/jobs)))
-                    fds (atom #{})
-                    fibers (mapv #(let [g (a/io-thread (run-child % say fds))] [g (a/go-monitor g)])
+                    fibers (mapv #(let [g (a/io-thread (run-child % say))] [g (a/go-monitor g)])
                                  (proofs/shards run n ms))
                     ;; all are taken before a throw is raised, so no child outlives the run
                     cs (mapv (fn [[g died]] (or (a/<!! g) {::threw (a/<!! died)})) fibers)]
@@ -1782,8 +1747,7 @@
            :parent (fn [_] (send! {:op :cloned :k k :clone (:agent m)}))
            :child (fn []
                     (let [parent (:id @state)]
-                      ;; the parent's socket closed on fork (FD_CLOFORK); this clone's came with the request
-                      (sock/clofork! fd)
+                      ;; the parent's socket was closed at the fork (lib/fork!); this clone's came with the request
                       ;; the clone opens the store itself, on its own branch, and reads through it alone (own-store!)
                       (stderr-to-file! (stderr-path (pdb/agents-dir (:cfg r)) (:agent m)))
                       (let [store-conn (own-store! (:cfg r) (:branch m))]
@@ -1863,9 +1827,6 @@
   (let [inherited (lib/generation-bytes)
         marks (volatile! (conj (vec marks0) [:child-init (profile/now-ns) (profile/alloc-bytes)]))
         mark! (fn [k] (vswap! marks conj [k (profile/now-ns) (profile/alloc-bytes)]))]
-  ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
-  ;; end means this process is gone
-  (sock/clofork! fd)
   (stderr-to-file! (stderr-path (pdb/agents-dir cfg) id))
   (mark! :setup)
   ;; this agent owns its branch's writes: it opens the store itself (seon.db/after-fork!)
