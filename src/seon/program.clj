@@ -2195,6 +2195,18 @@
   (into {} (for [v vars :let [ids (called-closure g v)] :when (seq ids)]
              [v (lib/digest (str/join " " (sort (keep own ids))))])))
 
+(defn reads-index
+  "The digest of every input a test's run can read, keyed as seon.proofs/reads-key keys its record: each var by var-digests,
+  [:schema k] each schema entry's own digest, [:config k] each config value inputs' :config holds, [:file path] each
+  file's git blob id (blobs, {path blob}: seon.fx/blob-ids of the tree). One map a program and tree, read by every test's
+  reuse check. See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat :map :seon.program/inputs [:map-of :string :string]] :map]}
+  [{:keys [defs schemas own] :as g} inputs blobs]
+  (merge (var-digests g (vec (keys defs)))
+         (into {} (for [k (keys schemas) :let [d (get own (str "schema " k))] :when d] [[:schema k] d]))
+         (into {} (for [[k v] (:config inputs)] [[:config k] v]))
+         (into {} (for [[p b] blobs] [[:file p] b]))))
+
 (defn index-of
   "{test {:digest :process? :binary?}} the graph g holds (reach-indexed): graph-index's of its tests, or {} when it holds none. See docs/source.md#tests-run-by-reach."
   {:malli/schema [:=> [:cat :map] :map]}

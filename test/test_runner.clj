@@ -246,12 +246,16 @@
         whole (if (seq names) (set (keep #(when-not (str/includes? % "/") (symbol %)) names)) nss)
         idx (into {} (filter #(or (whole (symbol (namespace (key %)))) (vars (key %)))) all)]
     {:graph g :inputs in
+     :rd (delay (seon.program/reads-index g in (fx/blob-ids root tree)))
      ;; whether the binary target/seon is (its build record, target/seon.program) runs this tree's program as a build of it would:
      ;; nil, or what differs that it bakes (seon.system/binary-current, the one rule; docs/source.md#the-binary-records-its-program)
      :binary-current (seon.system/binary-current db (seon.program/binary-program) tree g)
      :no-test (vec (sort-by str (concat (remove (set (map (comp symbol namespace key) all)) nss)
                                         (remove all vars))))
      :digests (update-vals idx :digest)
+     ;; recorded reads (seon.proofs/read-digests): the tests' newest greens that recorded what they read, and, when any did,
+     ;; the digest of everything a run can read on this tree; an unreadable record only makes its test run
+     :held (let [h (fx/held-reads (vec (keys idx)))] (if (:seon.error/type h) {} h))
      ;; the proofs of this tree that pass by a waiver (an :overrun in the form), counted on the db the plan reads
      :waived (count (problems/waived-proofs db {}))
      :process (set (keep (fn [[t v]] (when (:process? v) t)) idx))
