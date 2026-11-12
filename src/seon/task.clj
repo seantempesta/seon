@@ -30,13 +30,13 @@
 (defn request-sentence
   "A person's request text as its first sentence, as written: up to a . ! or ? before a space or the end (a dot inside a name,
   demo.math/half, is part of it), else the first line. What a request task is named by (`request-words`) and titled by. See
-  docs/users.md#roots-session."
+  docs/users.md#roots-agent."
   {:malli/schema [:=> [:cat :string] :string]}
   [text] (str/trim (re-find #"(?:[^.!?\n]|[.!?](?=[^\s.!?]))*" (str/triml text))))
 
 (defn request-words
   "The name a request's text gives its task: its first sentence's words (`request-sentence`), lower case, joined by -; \"work\" for none.
-  seon.system/request-name numbers it when the name is taken. See docs/users.md#roots-session."
+  seon.system/request-name numbers it when the name is taken. See docs/users.md#roots-agent."
   {:malli/schema [:=> [:cat :string] :string]}
   [text] (str/join "-" (or (seq (re-seq #"[a-z0-9]+" (str/lower-case (request-sentence text)))) ["work"])))
 
@@ -64,6 +64,27 @@
   [db id]
   (let [t (d/pull db [:seon.task/id :seon.task/branch {:seon.task/_needs [:seon.task/id :seon.task/branch]}] [:seon.task/id id])]
     (merges? (assoc t :seon.task/id id) (vec (:seon.task/_needs t)))))
+
+(defn merge-step?
+  "Whether task t is the merge step of a task it needs, by data, never its kind: when one of needs, the tasks t needs (each
+  {:seon.task/id :seon.task/branch}, a branch its own, else `default-branch` of its id), is on t's own branch, and none of needers,
+  the tasks that need t, is (`merges?`): the last task on its branch, after another. `merges?` says a task merges its branch; this
+  says the branch holds another task's work. A task between two on its branch (a staged request's implement, after its design and
+  before its merge) is neither: it leaves the merge to the one that follows. See docs/merging.md#a-branch-lands-with-binland."
+  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:sequential [:map [:seon.task/id :seon.task/id]]]
+                       [:sequential [:map [:seon.task/id :seon.task/id]]]] :boolean]}
+  [t needs needers]
+  (let [br (fn [x] (or (:seon.task/branch x) (default-branch (:seon.task/id x))))]
+    (boolean (and (merges? t needers) (some #(= (br %) (br t)) needs)))))
+
+(defn merge-step-on?
+  "`merge-step?` of task id as db holds it: its branch, the tasks it needs and the tasks that need it, one pull. See
+  docs/merging.md#a-branch-lands-with-binland."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] :boolean]}
+  [db id]
+  (let [t (d/pull db [:seon.task/id :seon.task/branch {:seon.task/needs [:seon.task/id :seon.task/branch]}
+                      {:seon.task/_needs [:seon.task/id :seon.task/branch]}] [:seon.task/id id])]
+    (merge-step? (assoc t :seon.task/id id) (vec (:seon.task/needs t)) (vec (:seon.task/_needs t)))))
 
 (defn default-branch
   "The branch a task's runs check out when it names none: task-<ns>-<name>."
@@ -127,13 +148,14 @@
 
 (defn task-cites
   "What task id's page draws of what it cites, read on db: its own cites, then each need's (one level, a
-  merge task's left out, as the task-fact's :needs join holds them), each target once at the strongest depth
+  merge step's left out, as the task-fact's :needs join holds them), each target once at the strongest depth
   it is cited at, in that order. What a reader that is no draw takes (my.task/data, the turn's waste log);
   the page reads the same from @ctx. See docs/references.md#task-references."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:vector :map]]}
   [db id]
   (let [e (pdb/eid db :seon.task/id id)
-        needs (when e (sort-by :seon.task/id (remove #(= :merge (:seon.task/kind %)) (map #(d/pull db [:db/id :seon.task/id :seon.task/kind] (:v %)) (d/datoms db :eavt e :seon.task/needs)))))
+        pull-need #(d/pull db [:db/id :seon.task/id :seon.task/branch {:seon.task/needs [:seon.task/id :seon.task/branch]} {:seon.task/_needs [:seon.task/id :seon.task/branch]}] (:v %))
+        needs (when e (sort-by :seon.task/id (remove #(merge-step? % (vec (:seon.task/needs %)) (vec (:seon.task/_needs %))) (map pull-need (d/datoms db :eavt e :seon.task/needs)))))
         cs (concat (cites-of db e) (mapcat #(cites-of db (:db/id %)) needs))
         target #(get-in % [:seon.cite/target :db/id])
         by (group-by target cs)]
@@ -247,13 +269,15 @@
   {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.task/id] [:vector :map]] [:vector :map]]}
   [db' ids decls]
   (let [graph (zipmap ids (map #(set (:seon.task/needs %)) decls))
-        tasks (mapv (fn [id {:seon.task/keys [config needs evidence] :as decl}]
-                      (cond-> (-> decl (dissoc :seon.task/config :seon.task/needs :seon.task/evidence)
+        ref-of #(if (graph %) % [:seon.task/id %])
+        tasks (mapv (fn [id {:seon.task/keys [config needs after evidence] :as decl}]
+                      (cond-> (-> decl (dissoc :seon.task/config :seon.task/needs :seon.task/after :seon.task/evidence)
                                   (assoc :db/id id :seon.task/id id :seon.task/execution :held)
                                   (update :seon.task/branch #(or % (default-branch id)))
                                   ;; a declaration that names no kind is work: the task holds it (:seon.task/task-fact requires it)
                                   (update :seon.task/kind #(or % :work)))
-                        (seq needs) (assoc :seon.task/needs (mapv #(if (graph %) % [:seon.task/id %]) needs))
+                        (seq needs) (assoc :seon.task/needs (mapv ref-of needs))
+                        (seq after) (assoc :seon.task/after (mapv ref-of after))
                         evidence (assoc :seon.task/evidence evidence)
                         (seq config) (merge config)))
                     ids decls)]
@@ -342,7 +366,7 @@
   {:malli/schema [:=> [:cat [:maybe [:sequential :any]]] [:maybe :any]]}
   [ps] (some->> (seq (filter :seon.process/forked-ms ps)) (apply max-key :seon.process/forked-ms)))
 
-(defn session-key
+(defn agent-key
   "The agent key of task id's session on db, or nil when none of its chain has had an agent: the
   session is id and the tasks on its branch it needs, transitively (a request's stages, a work
   task and its merge: design agent-loop section 1a), and its agent is the newest started among
@@ -359,8 +383,7 @@
                     (recur seen (rest todo))
                     (recur (conj seen (:db/id e)) (into (rest todo) (filter #(= br (:seon.task/branch %)) (:seon.task/needs e)))))
                   seen))
-        ;; only an agent on the task's branch: a session is one branch, so a run on a new branch (a refined task run again,
-        ;; seon.task/again-tx) is a new agent, while a go back moves the agent and the task to its branch together (seon.system)
+        ;; only an agent on the task's branch: a session is one branch, so a run on a new branch is a new agent, while a go back moves the agent and the task to its branch together (seon.system)
         on (or br (default-branch id))
         newest (->> chain
                     (keep #(:seon.task/agent (d/entity db %)))
@@ -510,7 +533,7 @@
 
 (defn start-tx
   "Agent `agent` (its id; nil: root refused the spawn, and no agent exists) begins task id in root's boot, its turn budget raised by raise (a wake's allowance) turns: the task's
-  outcome :running from what it was, naming the agent (its id's name is its key, so a session's agent that continues keeps it, seon.task/session-key), the judged attributes cleared; the agent's entity (key, task, branch and the rest of its environment,
+  outcome :running from what it was, naming the agent (its id's name is its key, so a session's agent that continues keeps it, seon.task/agent-key), the judged attributes cleared; the agent's entity (key, task, branch and the rest of its environment,
   its boot and when it started, and who started the task now holding it, :seon.agent/agents), its turn budget set when it is new (a raised budget stays, docs/turn.md#the-cap) and raised by raise in the same write.
   A refused spawn is the task's outcome :refused with root's reason and error, and no agent."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int] [:vector :any]]
@@ -620,7 +643,20 @@
 
 ;; ---- the reader ------------------------------------------------------------------
 
-(def ^:private task-pull '[* {:seon.task/needs [:seon.task/id]} {:seon.task/agent [:seon.agent/key]}])
+(def ^:private stated-attributes
+  "The task attributes a declaration states (its members, config flattened), as stored."
+  [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
+   :seon.task/kind :seon.task/evidence :seon.task/examples
+   :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
+
+(def ^:private task-pull
+  "What a reader of a task pulls: the task schema's own attributes as the binary's entity index names them and the config keys a
+  declaration states on the task (`stated-attributes`: its max-turns, which a raised budget writes, belongs to the config's schema),
+  but the declaration its file stated (:seon.task/declared, which only load-tx compares), and its needs, the tasks it is after and its agent by their identities.
+  A named pull, as every pattern is: the shape the reader needs and nothing more. See docs/ctx.md#the-pattern."
+  (into (vec (remove #{:seon.task/declared :seon.task/needs :seon.task/after :seon.task/agent}
+                     (distinct (concat (pdb/attributes-of (pdb/index) :seon.task/task-fact) stated-attributes))))
+        [{:seon.task/needs [:seon.task/id]} {:seon.task/after [:seon.task/id]} {:seon.task/agent [:seon.agent/key]}]))
 
 (defn- task-value
   "A pulled task's own members (needs as a set of ids, proofs and references sets), without
@@ -629,11 +665,12 @@
   {:malli/schema [:=> [:cat :seon.task/pulled] :seon.task/own]}
   [t]
   (cond-> (-> t
-              (dissoc :db/id :seon.task/declared)
+              (dissoc :db/id)
               (update :seon.task/needs #(set (map :seon.task/id %)))
               (update :seon.task/proofs set)
               (update :seon.task/kind #(or % :work)))
     (:seon.task/agent t) (update :seon.task/agent :seon.agent/key)
+    (:seon.task/after t) (update :seon.task/after #(set (map :seon.task/id %)))
     ;; a pull answers a card-many attribute as a vector; these are sets on the task's schema
     (:seon.task/changed t) (update :seon.task/changed set)
     (:seon.task/unmerged t) (update :seon.task/unmerged set)))
@@ -733,6 +770,8 @@
 
 (def failed "Outcomes of a death (its agent died or was lost)." (:seon.status/failed (contract/properties :seon.task/outcome)))
 
+(def ended "Outcomes that end a run, whatever came of it: finished, failed, held after a judging (closed) or out of turns (cap); what a task :seon.task/after waits for (docs/tasks.md#a-refine-curates-its-own-task)." (:seon.status/ended (contract/properties :seon.task/outcome)))
+
 (defn done?
   "Has task entity te finished (finished: done or merged)? One datom read; the reconciler's index
   answers the same from its own facts (seon.reconcile/task-state)."
@@ -790,15 +829,16 @@
   [:task own-value] (no accumulation), [:agent agent-value], [:root (root db)], or nil
   when e is none of them (retracted, another kind, an agent root never started, or root
   before its first boot: (root db) is nil then, as on a store an earlier build left with
-  a quiescent fact and no boot). One pull of e."
+  a quiescent fact and no boot). One seek of e's identity per kind, then one pull (a probe pull first pulled twice: 56.8 MB
+  and 12.8M ticks over 539 tasks, against 42.8 MB and 8.9M)."
   {:malli/schema [:=> [:cat :seon.host/db :int]
                   [:maybe [:or [:tuple [:= :task] :seon.task/own] [:tuple [:= :agent] :seon.reconcile/agent] [:tuple [:= :root] :map]]]]}
   [db e]
-  (let [k (d/pull db [:seon.task/id :seon.agent/boot :seon.system/id] e)]
-    (cond (:seon.task/id k) [:task (task-value (d/pull db task-pull e))]
+  (let [has? (fn [a] (some? (first (d/datoms db :eavt e a))))]
+    (cond (has? :seon.task/id) [:task (task-value (d/pull db task-pull e))]
           ;; an agent its start recorded: a branch's record of its own agent, with no boot, is none
-          (:seon.agent/boot k) [:agent (indexed-agent db e)]
-          (:seon.system/id k) (some->> (root db) (vector :root)))))
+          (has? :seon.agent/boot) [:agent (indexed-agent db e)]
+          (has? :seon.system/id) (some->> (root db) (vector :root)))))
 
 (defn tasks-of-agent
   "The task entities db names agent entity e as their agent (:seon.task/agent): the tasks whose state an agent's boot moves.
@@ -823,12 +863,6 @@
 ;; retracts what it dropped; an entry no file declares any more is cancelled and forgets its
 ;; declaration, so declaring it again revives it. Execution is root's (my.root/run!), except
 ;; that revival.
-
-(def ^:private stated-attributes
-  "The task attributes a declaration states (its members, config flattened), as stored."
-  [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
-   :seon.task/kind :seon.task/evidence :seon.task/examples
-   :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
 
 (defn- file-refused
   {:malli/schema [:=> [:cat :symbol :string] :map]}
@@ -931,24 +965,35 @@
   [db id]
   (boolean (some #(= refine-section (get-in % [:seon.cite/target :seon.doc/address])) (cites-of db (pdb/eid db :seon.task/id id)))))
 
-(defn refine-decl
-  "The refine of task t (a task map as db holds it, its id, ns, name and branch): a :design task on t's branch that cites t (its
-  plan names it) and needs nothing, since it is wanted whatever t's outcome (a need waits for a finish), so the agent that worked t
-  continues on it (its conversation is on that branch) and is judged by what it changed of t's plan, its plan citing
-  `refine-section` (what makes it a refine). See docs/tasks.md#a-refine-curates-its-own-task."
-  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id] [:seon.task/ns :symbol] [:seon.task/name :string]]] :seon.task/declaration]}
-  [t]
-  {:seon.task/ns (:seon.task/ns t) :seon.task/name (str (:seon.task/name t) "-refine") :seon.task/kind :design
-   :seon.task/branch (or (:seon.task/branch t) (default-branch (:seon.task/id t)))
-   :seon.task/plan (str "Refine the task `" (:seon.task/id t) "` you just worked, as " refine-section " says: make its plan, what it "
-                        "cites and the wiki sections you pulled better for whoever works it next, from your own turns: first what blocked the run, then what "
-                        "it learned and did not use. Change no code.")})
+(def ^:private refine-proofs
+  "What every refine proves, beside the refined task's own proofs: the task files and the wiki's pages still load with no refusal,
+  which is what a refine edits (the checks of a docs-and-tasks change, AGENTS.md section 3)."
+  #{'seon.task-files-test/the-trees-task-files-and-pages-load-with-no-refusal})
 
-(defn- cited-tasks
-  "The ids of the tasks task e's plan cites (its cites whose target is a task), on db."
-  {:malli/schema [:=> [:cat :seon.host/db :int] [:vector :seon.task/id]]}
-  [db e]
-  (vec (sort (d/q '[:find [?id ...] :in $ ?r :where [?c :seon.cite/of ?r] [?c :seon.cite/target ?w] [?w :seon.task/id ?id]] db e))))
+(defn refine-decls
+  "The refine of task t (a task map as db holds it: its id, ns, name, branch, proofs and agent) and its review, as declarations: a
+  :work task on a branch of its own, :seon.task/after t (it starts when t has ended, whatever came of it), its plan citing t and
+  `refine-section` (what makes it a refine), its proofs t's own and `refine-proofs`; and the review, its merge step (a :merge task
+  that needs it on its branch), written held so that no model works it: a session attaches, reads the change and ends it with
+  seon_done, which merges the refine or sends it back with why. See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id] [:seon.task/ns :symbol] [:seon.task/name :string]]] [:vector :seon.task/declaration]]}
+  [t]
+  (let [nm (str (:seon.task/name t) "-refine")
+        rid (task-id (:seon.task/ns t) nm)
+        br (or (:seon.task/branch t) (default-branch (:seon.task/id t)))]
+    [{:seon.task/ns (:seon.task/ns t) :seon.task/name nm :seon.task/kind :work
+      :seon.task/after #{(:seon.task/id t)}
+      :seon.task/proofs (into refine-proofs (:seon.task/proofs t))
+      :seon.task/plan (str "Refine the task `" (:seon.task/id t) "`, which has just ended, as " refine-section " says: read the run that "
+                           "worked it (its agent " (:seon.task/agent t) " on branch " br ", read with (my.db/at {:branch " br "})), then make the task "
+                           "better for whoever works it next: its plan (first what blocked the run, then what it learned and did not use), what it cites, "
+                           "and the wiki sections it pulled; and keep that run as an example, the turns worth learning from, by "
+                           "(seon.ctx.session/session-tx db key id) less the transactions of the turns that taught nothing, written with my.db/transact!. "
+                           "Change no code.")}
+     {:seon.task/ns (:seon.task/ns t) :seon.task/name (str nm "-review") :seon.task/kind :merge
+      :seon.task/branch (default-branch rid) :seon.task/needs #{rid}
+      :seon.task/plan (str "Review the refine `" rid "`: read what it changed (the task's plan, its cites, wiki sections, the example it kept). "
+                           "End it with seon_done to merge it, or with the reason to send it back.")}]))
 
 (defn- citing-tasks
   "The ids of the tasks whose plans cite task e, on db."
@@ -956,46 +1001,25 @@
   [db e]
   (vec (sort (d/q '[:find [?id ...] :in $ ?w :where [?c :seon.cite/target ?w] [?c :seon.cite/of ?r] [?r :seon.task/id ?id]] db e))))
 
-(defn refine-tx
-  "Task id's refine written on db when id just ended (it holds or finished the task) and it is no refine itself, no refine of it
-  exists (a task that cites it and `refine-section`), and it continues no other task's branch (it needs no task on its own branch:
-  a merge task made by seon.template/with-merge needs its work there, and the head of the branch is the plan worth curating);
-  else nil. One refine a task, so a refine and the rerun it may start never loop by themselves. A task that ended not done gets
-  its refine released (the chain: work, refine, rerun from main); one that finished gets it as :seon.config.agent/refine-finished
-  says (none by default: a held task reads as work not done everywhere, so an offer is no task until asked). A task at its cap is
-  waiting, not ended, and its judgment asks none (seon.reconcile's done step). See docs/tasks.md#a-refine-curates-its-own-task."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :boolean] [:maybe [:vector :any]]]}
-  [db id finished?]
-  (let [t (task db id)
-        br (or (:seon.task/branch t) (default-branch id))
-        refined? (some #(refine? db %) (citing-tasks db (pdb/eid db :seon.task/id id)))
-        continues? (some #(= br (or (:seon.task/branch %) (default-branch (:seon.task/id %))))
-                         (:seon.task/needs (d/pull db [{:seon.task/needs [:seon.task/id :seon.task/branch]}] [:seon.task/id id])))]
-    (when-let [ex (and t (:seon.task/ns t) (not (refine? db id)) (not refined?) (not continues?)
-                       (if finished? (#{:held :running} (cfg/value :seon.config.agent/refine-finished {:task t})) :running))]
-      (let [tx (create-tx db [(refine-decl t)])]
-        (when (vector? tx)
-          (into tx (execution-tx [(task-id (:seon.task/ns t) (str (:seon.task/name t) "-refine"))] ex)))))))
+(defn continues-branch?
+  "Whether task id on db continues another task's branch: it needs a task on its own branch (a merge step, whose work task is the
+  head of the branch worth curating). Such a task gets no refine of its own. See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] :boolean]}
+  [db id]
+  (let [br (or (:seon.task/branch (task db id)) (default-branch id))]
+    (boolean (some #(= br (or (:seon.task/branch %) (default-branch (:seon.task/id %))))
+                   (:seon.task/needs (d/pull db [{:seon.task/needs [:seon.task/id :seon.task/branch]}] [:seon.task/id id]))))))
 
-(defn again-tx
-  "Refine id's end on main, as its carried facts (seon.task/carry-tx's :tx) leave it: each task it cites on its own branch whose
-  work ended NOT done (its outcome neither finished nor judged, nor running or waiting: capped, red, closed, dead; held for root or
-  not) and whose plan the refine changed runs again, fresh from main: a new branch, released (a compare-and-swap from the execution
-  it has) with root's last reasons retracted, so a fresh agent works the refined plan. A refine that changed no plan, a task that
-  finished or still runs, a cancelled one, and a task that is no refine's start no run. The new branch is named by main's t, as a go
-  back names one (seon.system/back-point). See docs/tasks.md#a-refine-curates-its-own-task."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id [:sequential :any]] [:vector :any]]}
-  [main id carried]
-  (if-not (refine? main id)
-    []
-    (let [br (:seon.task/branch (task main id))
-          planned (set (for [x carried :when (and (vector? x) (= :db/add (first x)) (= :seon.task/plan (nth x 2 nil)))] (second (second x))))]
-      (vec (for [w (cited-tasks main (pdb/eid main :seon.task/id id))
-                 :let [t (task main w) wb (or (:seon.task/branch t) (default-branch w))
-                       ex (:seon.task/execution t) oc (:seon.task/outcome (d/entity main [:seon.task/id w]))]
-                 :when (and (planned w) (= br wb) (#{:held :running} ex)
-                            (not (or (finished oc) (judged oc) (#{:running :parked :told} oc) (nil? oc))))
-                 x (concat (env-tx w {:branch (keyword (namespace wb) (str (name wb) "-again-" (:max-tx main)))})
-                           [[:db/cas [:seon.task/id w] :seon.task/execution ex :running]
-                            [:db.fn/retractAttribute [:seon.task/id w] :seon.task/reasons]])]
-             x)))))
+(defn refine-tx
+  "Task id's refine and its review (`refine-decls`), written on db when id has just ended: the refine released, the review held
+  for a session. None when id is a refine itself, when a refine of it exists (a task citing it and `refine-section`), or when it
+  continues another task's branch (it needs a task on its own branch: a merge step, whose work task has its own refine), so a
+  refine and its review never loop. See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe [:vector :any]]]}
+  [db id]
+  (let [t (task db id)
+        refined? (some #(refine? db %) (citing-tasks db (pdb/eid db :seon.task/id id)))]
+    (when (and t (:seon.task/ns t) (not (refine? db id)) (not refined?) (not (continues-branch? db id)))
+      (let [tx (create-tx db (refine-decls t))]
+        (when (vector? tx)
+          (into tx (execution-tx [(task-id (:seon.task/ns t) (str (:seon.task/name t) "-refine"))] :running)))))))

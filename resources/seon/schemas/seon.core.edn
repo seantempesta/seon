@@ -88,7 +88,10 @@
                            ;; :not-found: at each candidate, the line where old stops matching (seon.repl/differs)
                            [:seon.repl/differs {:optional true} [:vector :map]]
                            ;; :not-found on a namespace (its place is its ns form): the definitions whose recorded source holds the old text (seon.repl/ns-not-found)
-                           [:seon.repl/held-by {:optional true} [:vector :qualified-symbol]]]]
+                           [:seon.repl/held-by {:optional true} :seon.repl/held-by]]]
+ :seon.repl/held-by [:vector {:description "The definitions of a namespace whose recorded source holds an edit's old text, which its ns form, the namespace's place, does not (seon.repl/ns-not-found)."} :qualified-symbol]
+ :seon.repl/said [:string {:description "The sentence an edit's refusal ends with when its namespace's ns form lacks the old text: the edit on the definition that holds it, or how a new definition is made (seon.repl/ns-not-found)."}]
+ :seon.repl/program-def [:vector {:description "The vars an eval made new in a program namespace: said beside its answer as program on the branch (seon.repl's :program-def finding)."} :symbol]
  ;; where a text is and what it holds, plain data any function working on text takes (docs/agent.md#changing-a-file): at, a var or a path or a doc's address
  :seon.text/at [:or :qualified-symbol :string]
  :seon.text/text :string
@@ -139,7 +142,7 @@
  :seon.graph/decl [:map [:procs [:map-of :keyword [:map [:proc :qualified-symbol] [:args {:optional true} :map] [:chan-opts {:optional true} :map]]]]
                     [:fx {:optional true} [:map-of :keyword :map]] [:conns [:vector [:tuple [:tuple :keyword :keyword] [:tuple :keyword :keyword]]]]]
  :seon.system/spawn-opts [:maybe [:map [:branch {:optional true} :seon.db/branch] [:task {:optional true} [:maybe :string]] [:run {:optional true} [:maybe :string]]
-                                     ;; the session's agent the process continues (seon.task/session-key)
+                                     ;; the session's agent the process continues (seon.task/agent-key)
                                      [:key {:optional true} :string]
                                      ;; evals run on its REPL queue before anything else, intent and code each, recorded as evals any
                                      ;; reader reads (docs/turn.md#an-eval-can-be-inserted)

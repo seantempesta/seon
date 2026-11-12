@@ -47,7 +47,7 @@ What the audit holds a branch to:
 - **Every change earns its place.** A new namespace, config key, attribute, proc, route or second way to do something waits for the gate's four questions (AGENTS §3) with its evidence.
 - **No regression without a named reason** and who follows it up; a cost bound moves only with the owner's yes.
 - **Measured before and after** on the same input; a perf claim is checked independently.
-- **What a new design replaces goes with it**: tasks, wiki text and pointers, in the same change. Code with no caller is cut only with the owner's go.
+- **What a new design replaces goes with it**: tasks, wiki text and pointers, in the same change. Code with no caller is cut. "No caller" is shown by `seon.main-test/every-name-a-form-uses-is-a-var` green after the cut (the compiler's own facts, aliases included, about 1.4 s), never by a grep: a grep for `ns/name` missed `r/done?` and hung the system tests on 2026-11-12.
 
 A branch that grows `src` or adds a mechanism is also reviewed against the laws: a guard ([failure points](failure-points.md)), a fake default ([errors](errors.md#unknown-is-never-a-default)), a clock deciding ([clocks](clocks.md#if-nothing-has-changed-we-do-nothing)), a second mechanism, a fix at the reader, a test that cannot fail ([testing](testing.md#a-proof-is-focused)). Each finding carries file:line and its fix; the proof reported is the run after the fixes.
 

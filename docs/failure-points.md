@@ -50,7 +50,7 @@ The failure points whose edge catches, each with the variant it declares and who
 | An agent registers a schema form that does not compile or cannot be stored | `my.schema/judged` | `:seon.schema/registration-refused` (`:invalid` or `:unstorable`) | the agent's `register!` answer; nothing written |
 | Text written by a model, a plan or an agent does not read as Clojure (edamame throws a bare IllegalArgumentException for some, such as `a^`) | `seon.reader/read-text` | `nil` | `seon.ref/parse`, `seon.reader/forgive`, `seon.learn/waste` |
 | A task file does not read as one EDN vector | `seon.task/file-declarations` | ``:seon.task/refused`` (naming the file) | `seon.task/load-tx` answers it; `my.root/load-tasks!` writes nothing |
-| An example session file is missing or malformed | `my.root/example-txs` | `:seon.system/example-refused` (`:path`) | `my.root/load-example!` writes nothing ([tasks](tasks.md#a-task-names-example-sessions)) |
+| An example session file is missing or malformed | `my.root/example-txs` | `:seon.system/example-refused` (`:path`) | `my.root/load-example!` writes nothing ([tasks](tasks.md#a-task-names-examples)) |
 | A branch's config entries do not read or validate | `seon.config/of-entries` | `:seon.config/refused` naming each key | the transaction is refused (`seon.program/config-refused`); an import keeps main's (`seon.system/unimportable`); a merge leaving them so is a load error |
 | A config file's text does not read or validate before a write | `seon.config/text-refusal` | its message | `seon.fx/unreadable`'s callers refuse the commit or edit |
 | A `--set :ns/key=edn` does not read | `seon.config/parse-set` | `:seon.config/refused` (thrown) | the process exits before any mode runs |

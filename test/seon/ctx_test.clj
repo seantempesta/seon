@@ -307,6 +307,14 @@
     (doseq [[s p] ps]
       (is (= [] (vec (pattern-faults s p))) (str s ": every join keyed by its attribute, no *, each ref join one its refs imply, each history join asking :tx")))))
 
+;; docs/ctx.md#the-pattern: an entity schema's pattern is compiled once per entity index (its :specs), so a cold read of an entity
+;; (seon.ctx/build: each cite on a page, each eval's tree) compiles none again; a pattern no schema declares is compiled at its call
+(deftest a-schemas-pattern-is-compiled-once-per-index
+  (let [ix (pdb/index) p (render/schema-property ix :seon.db/agent-fact :seon.ctx/pattern)]
+    (is (identical? (render/pattern ix p) (render/pattern ix p)) "the agent schema's pattern: one compiled spec, held by the index")
+    (is (= (render/pattern ix p) (render/pattern ix p #{})) "and the same spec a compile at the call makes")
+    (is (not (identical? (render/pattern ix [:seon.agent/key]) (render/pattern ix [:seon.agent/key]))) "a pattern no schema declares is compiled at its call")))
+
 ;; docs/ctx.md#the-pattern: a pattern's :tx names the key a transaction is held under, the transaction entity whole (:db/id,
 ;; :db/txInstant, :seon.tx/branch), so what an agent does with it is a short clojure.core form (owner, 2026-11-11: "I want this to work
 ;; easily with clojure to sort and filter things"): on a join, each member's link's transaction ({[:seon.message/_to :tx :at] ...});
@@ -442,7 +450,10 @@
     (loop [db (seeded 30 small-window-pattern) c (ctx/build (seon.db/index) db (aid db) :b) i 0 bad [] unshared [] checked 0]
       (if (= i 70)
         (do (is (empty? bad) (str "the change after which the patch and a build differ: " (first bad)))
-            (is (< 500 checked) (str "the sharing check reads the paths no change touched: " checked))
+            ;; checked counts, over the 70 changes, each path of the record that the change did not touch and whose value was compared, old
+            ;; record against new, for being the same object: 978 on this seed (it was over 1,000 while a cite held its section's text
+            ;; and its function's source, which jolt/citepull took out of the record). The floor says the check read most of them, not none
+            (is (< 900 checked) (str "the sharing check reads the paths no change touched: " checked))
             (is (empty? unshared) (str "a path no change touched that is a new object: " (first unshared))))
         (let [tx (change db i r) rep (d/with db tx) db' (:db-after rep) c' (ctx/patch c db' (:tx-data rep) :b)
               b (ctx/build (seon.db/index) db' (aid db') :b)
@@ -917,8 +928,8 @@
           db (:db-after (d/with db [{:seon.agent/key k :lab.ctx/steps ["read the plan" "write the test" "read the plan"]}]))
           tree (:tree (ctx/build (seon.db/index) db (aid db) :b))
           c (with-meta tree {:seon.render/schema :seon.ctx/ctx})
-          as-agent (fn [f] (try (enter-agent! {:db db}) (binding [ctx/*installing* true] (reset! ctx/ctx c)) (f)
-                                (finally (binding [ctx/*installing* true] (reset! ctx/ctx nil)) (end-agent!))))
+          as-agent (fn [f] (try (enter-agent! {:db db}) (ctx/install! {:tree c}) (f)
+                                (finally (ctx/install! nil) (end-agent!))))
           rec (as-agent #(seon.repl/record-details "@ctx" {:handle 'result/e9 :value c} {}))
           drawn (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (end-agent!)))
           ;; the keys it added, one component (ctx-keys) holding each key's own, each a unit of its own inside it
@@ -1141,14 +1152,16 @@
 ;; listing was 239,943 characters with every section's references and citers
 (deftest doc-reads-a-local-and-a-page-lists-its-sections-without-their-edges
   (let [db (my.test/with (my.test/world) (my.test/page "docs/small.md" "# Small\n\nThe lead of small, citing app.calc/add.\n\n## Below\n\nThe text below, citing app.calc/total.\n"))]
-    (with-redefs [seon.agent/db (fn [] db)]
+    (try
+      (enter-agent! {:db db})
       (let [printed (with-out-str (let [a "docs/small.md#small"] (my.agent/doc a)))
             listing (my.agent/doc-of "docs/small.md")]
         (is (clojure.string/includes? printed "The lead of small") "a let-bound address is read as a literal is")
         (is (clojure.string/includes? printed "docs/small.md#below") "and names the section below")
         (is (not (clojure.string/includes? printed "The text below")) "without its text")
         (is (= ["docs/small.md#small" "docs/small.md#below"] (mapv :seon.ref/address listing)) "a page lists its sections")
-        (is (not-any? #(or (:seon.ref/references %) (:seon.ref/cited-by %)) listing) "each without its edges")))))
+        (is (not-any? #(or (:seon.ref/references %) (:seon.ref/cited-by %)) listing) "each without its edges"))
+      (finally (end-agent!)))))
 
 ;; docs/references.md#an-entity-cites: a cite holds its target by identity, and of a cited task also what an agent may edit there
 ;; (its plan, instructions, proofs and cause: the task content a run's end carries to main), so a task that curates another
@@ -1596,9 +1609,9 @@
         tree (:tree (ctx/build (seon.db/index) db (aid db) :b))
         c (with-meta tree {:seon.render/schema :seon.ctx/ctx :seon.render/basis {:t (:t tree) :branch :b}})
         rec (fn [v] (try (enter-agent! {:db db :key k :branch :b})
-                         (binding [ctx/*installing* true] (reset! ctx/ctx c))
+                         (ctx/install! {:tree c})
                          (seon.repl/record-details "x" {:handle 'result/e9 :value v} {})
-                         (finally (binding [ctx/*installing* true] (reset! ctx/ctx nil)) (end-agent!))))
+                         (finally (ctx/install! nil) (end-agent!))))
         text (fn [r] (try (enter-agent! {:db db :key k :branch :b})
                           (:content (first (seon.fixtures/eval-messages {:db db} (assoc r :seon.eval/id "e9" :seon.eval/by {:seon.agent/key "a1"}))))
                           (finally (end-agent!))))
@@ -1746,9 +1759,9 @@
     (is (= "lab/ctx" (:seon.task/id task)) "and its pull still holds its task")))
 
 (deftest a-depth-join-asks-its-below-option-under-its-last-level
-  ;; docs/ctx.md#the-pattern: a depth join's :below option is what it asks below its last level (seon.render's again): entries to the
-  ;; depth, and below the last of them only what :below asks, here their ids, so an entry says how many are below it and nothing is cut
-  ;; silently. A :below on a join that is no depth is refused, as is a plain join added beside a depth of the same key
+  ;; docs/ctx.md#the-pattern: a depth join's :seon.ctx/below option is what it asks below its last level (seon.render's again): entries to the
+  ;; depth, and below the last of them only what :seon.ctx/below asks, here their ids, so an entry says how many are below it and nothing is cut
+  ;; silently. A :seon.ctx/below on a join that is no depth is refused, as is a plain join added beside a depth of the same key
   (let [ks ["depth/a" "depth/b" "depth/c" "depth/d" "depth/e"]
         db (:db-after (d/with (ts/test-db) (into (mapv (fn [x] {:seon.agent/key x :seon.agent/turn 1}) ks)
                                                  (for [[x y] (map vector ks (rest ks))] {:seon.agent/key x :seon.agent/agents #{{:seon.agent/key y}}}))))
@@ -1757,21 +1770,21 @@
         tree (fn [p] (:tree (ctx/build ix db (pdb/eid db :seon.agent/key "depth/a") :b p)))
         refused (fn [p] (str (try (render/pattern ix p) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))))
         n (seon.config/value :seon.config.render/agent-tree-depth)]
-    (let [t (tree [:seon.agent/key {[:seon.agent/agents :below [:db/id]] 2}])
+    (let [t (tree [:seon.agent/key {[:seon.agent/agents :seon.ctx/below [:db/id]] 2}])
           last-full (down t)]
       (is (= ["depth/a" "depth/b"] (mapv :seon.agent/key [t last-full])) "entries to the depth: the entity and one level more")
       (is (= (pdb/eid db :seon.agent/key "depth/c") (:db/id (down last-full))) "the last full level holds the ids below it")
       (is (nil? (:seon.agent/key (down last-full))) "and nothing else of them"))
     (is (= (render/pattern ix [:seon.agent/key {:seon.agent/agents [:seon.agent/key {:seon.agent/agents [:db/id]}]}])
-           (render/pattern ix [:seon.agent/key {[:seon.agent/agents :below [:db/id]] 2}]))
-        "the joins written out, each asked by its key without :below")
-    (let [t (tree [:seon.agent/key {[:seon.agent/agents :below [:db/id]] :seon.config.render/agent-tree-depth}])
+           (render/pattern ix [:seon.agent/key {[:seon.agent/agents :seon.ctx/below [:db/id]] 2}]))
+        "the joins written out, each asked by its key without :seon.ctx/below")
+    (let [t (tree [:seon.agent/key {[:seon.agent/agents :seon.ctx/below [:db/id]] :seon.config.render/agent-tree-depth}])
           levels (take-while some? (iterate down t))]
       (is (= (subvec ks 0 n) (vec (keep :seon.agent/key levels))) "a config key's value, the same way")
       (is (nil? (:seon.agent/key (last levels))) "below the last, ids alone"))
-    (is (str/includes? (refused [:seon.agent/key {[:seon.agent/agents :below [:db/id]] [:seon.agent/key]}]) "it takes a depth")
-        "a :below on a join that is no depth: refused, never ignored")
-    (is (str/includes? (refused [:seon.agent/key {[:seon.agent/agents :below [:db/id]] 2} {:seon.agent/agents [:seon.agent/status]}])
+    (is (str/includes? (refused [:seon.agent/key {[:seon.agent/agents :seon.ctx/below [:db/id]] [:seon.agent/key]}]) "it takes a depth")
+        "a :seon.ctx/below on a join that is no depth: refused, never ignored")
+    (is (str/includes? (refused [:seon.agent/key {[:seon.agent/agents :seon.ctx/below [:db/id]] 2} {:seon.agent/agents [:seon.agent/status]}])
                        "asked twice and one of them is a depth")
         "a plain join added beside a depth of the same key: refused, saying why")))
 
@@ -1833,3 +1846,34 @@
         (is (= 10 (count (:evals (:tree c')))))
         (is (every? :at (vals (:evals (:tree c')))))
         (is (= c' (build db')) "as a build holds it")))))
+
+(deftest a-swap-and-a-patch-interleaved-give-one-history
+  ;; docs/ctx.md#changing-it-swap (the owner, 2026-11-12: fences, guards and locks are likely bugs): ctx is one reference
+  ;; type with one writer path, no validator, no flag; the agent's swap! and another hand's transaction on the branch reach
+  ;; the record the same way, as the patch of each report, in order
+  (let [st {:db (seeded 3) :key k :branch :b :mode :test :schema-registry {:key {} :registry {} :index (seon.db/index)}}
+        plan [:task :seon.task/plan]
+        told (atom [])]
+    (try
+      (enter-agent! st)
+      (add-watch ctx/ctx ::told (fn [_ _ o n] (swap! told conj (get-in n plan))))
+      (let [r1 (swap! ctx/ctx assoc-in plan "A.")
+            ;; another hand's transaction on the branch: the system's, not a swap!
+            _ (seon.agent/transact! [[:db/add (:db/id (:task @ctx/ctx)) :seon.task/plan "B."]])
+            r2 @ctx/ctx
+            refused (try (swap! ctx/ctx assoc :t 0) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))
+            r3 @ctx/ctx
+            stale (compare-and-set! ctx/ctx r1 (assoc-in r1 plan "C."))
+            fresh (compare-and-set! ctx/ctx r3 (assoc-in r3 plan "D."))]
+        (is (not (instance? clojure.lang.Atom ctx/ctx)) "one reference type, no atom with a validator beside it")
+        (is (nil? (get-validator ctx/ctx)) "no validator: write! is the one writer path")
+        (is (= "A." (get-in r1 plan)) "swap! answers the record after its own report's patch")
+        (is (= "B." (get-in r2 plan)) "another hand's transaction patches the record the same way")
+        (is (< (:t r1) (:t r2)) "in order: a later report's patch lands after an earlier one's")
+        (is (= :seon.ctx/basis (:seon.error/type refused)) "a refused swap! answers its typed error")
+        (is (identical? r2 r3) "and leaves the record as it was")
+        (is (false? stale) "compare-and-set! on an older record writes nothing")
+        (is (true? fresh) "and on the current one writes, by the same path")
+        (is (= "D." (get-in @ctx/ctx plan)))
+        (is (= ["A." "B." "D."] @told) "watches are told each patch, in order, and nothing for a refused write"))
+      (finally (remove-watch ctx/ctx ::told) (end-agent!)))))

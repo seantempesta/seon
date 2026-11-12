@@ -10,6 +10,10 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 Asked whether to delete `seon.render.ui/more`, the web's /more route and the `:more` ops, which no page used: "Yes". A list holds a window and says how many it left out ([ctx](ctx.md#the-pattern)).
 
+### Design to the lower bound
+
+"I want to make sure all agents have shared rules going forward and are being methodical and questioning how long things should take if they were optimal in a math sense. We are never to design systems that are so inefficient again." Stated in [AGENTS.md §3a](../AGENTS.md) and [cost](cost.md#what-things-cost-here).
+
 ### AGENTS.md is not an append log
 
 "I do not want a long append log of instructions that won't be evergreen." Stated in [sessions](sessions.md#the-way-improves).
@@ -44,7 +48,7 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 ### Tasks chain by needs
 
-"make sure we aren't hard coding in "example" or whatever when they get turned into openai-compat formats." Stated in [the plan](plan.md#the-plan), part 2, and [tasks](tasks.md#a-task-names-example-sessions).
+"make sure we aren't hard coding in "example" or whatever when they get turned into openai-compat formats." Stated in [the plan](plan.md#the-plan), part 2, and [tasks](tasks.md#a-task-names-examples).
 
 ### The data model is worked through live
 

@@ -233,7 +233,7 @@
         ;; its hello answers the spawn, whatever a request sent before it made its status
         (:ready m) (answer-spawn o id (cond-> {:id id} swp (assoc :started-without-program swp)
                                                               ;; the sections its config cites and its store lacks, by address
-                                                              (seq (:missing-cites m)) (assoc :missing-cites (vec (:missing-cites m)))
+                                                              (seq (:seon.agent/missing-cites m)) (assoc :seon.agent/missing-cites (vec (:seon.agent/missing-cites m)))
                                                               (get-in st [::restored id]) (assoc :not-restored not-restored)))
         ;; and it is the agent's first fact: a message from Seon (the system entity) to it, in its conversation as any message is, written
         ;; as a plain write (it wakes nothing): the agent's page and context show it from the pull they already make
@@ -435,7 +435,7 @@
       (let [st (-> st (update :agents dissoc agent) (update :agent-procs dissoc agent) (update ::inserting dissoc agent) (assoc ::update true)
                    (set-agent o agent {:status (or stop :dead) :ended-ms (System/currentTimeMillis) :running nil}))
             ;; each kill! of it is answered now that its end is recorded
-            st (reduce (fn [st p] (reply! st o p (get-in st [:view :agents agent]))) (update st ::killers dissoc agent) (get-in st [::killers agent]))
+            st (reduce (fn [st p] (reply! st o p (select-keys (get-in st [:view :agents agent]) [:status :ended-ms]))) (update st ::killers dissoc agent) (get-in st [::killers agent]))
             {:keys [p opts]} (get-in st [::respawn agent])
             st (update st ::respawn dissoc agent)]
         ;; a Back's old process is gone: the same agent's new one is forked now (its entry replaces the ended one's)
@@ -531,7 +531,7 @@
 (defn request-name
   "The name of the request task text asks for on db: its first sentence's words (a sentence ends at a . ! or ? before a space or
   the end, so a dot inside a name, demo.math/double, is part of it), else \"work\"; words asked before take the next number, 2, 3, ...
-  See docs/users.md#roots-session."
+  See docs/users.md#roots-agent."
   {:malli/schema [:=> [:cat :seon.host/db :string] :string]}
   [db text]
   (let [said (task/request-words text)
@@ -625,7 +625,7 @@
       ;; (seon.task/message-tx), synced before it is answered, so what follows (the turn that delivers it) finds it in the
       ;; store; the agent's turn reads it from main and writes the same entity on its branch (seon.turn/deliver!,
       ;; seon.agent/undelivered). No frame carries it: delivery is the fact. Its writer's answer wakes the agent (back-op)
-      ;; root's session (key "root") is made at boot (root-session-boot-tx), so a message to root names it as any agent's does
+      ;; root's session (key "root") is made at boot (root-agent-boot-tx), so a message to root names it as any agent's does
       :message (if-let [k (agent-key-of st id)]
                  ;; who sends it: the sender the caller names (root's own, :root, as the reconciler's stage boundary sends; an agent's), else
                  ;; the signed-in person (the page's message!, which names none); a person's with no one signed in is refused
@@ -667,7 +667,7 @@
               (cond-> (-> st (set-agent o id {:status (if (:ended m) :ended :killed)}) (to-agent o id {:op :kill}))
                 p (update-in [::killers id] (fnil conj []) p))
               (nil? p) st
-              (get-in st [:view :agents id]) (reply! st o p (get-in st [:view :agents id]))
+              (get-in st [:view :agents id]) (reply! st o p (select-keys (get-in st [:view :agents id]) [:status :ended-ms]))
               :else (reply! st o p (gone id (str "no agent " (name id)))))
       ;; an effect asked by root itself or a root proc (the reconciler's write-back): to its
       ;; kind's owner, answered by rid like the writer's answers
@@ -1140,17 +1140,17 @@
    (doc/load-dir-tx db checkout (cfg/value :seon.config.root/wiki-dirs) baseline)))
 
 (def ^:private root-session-plan
-  "What root's session is for, its task's plan: what educates it, beside the docs it cites. See docs/users.md#roots-session."
-  "You are root's session: the person talks to Seon through you. Answer the person yourself when you can. When they want work done, look first for a session already on it: (my.user/sessions) lists every session on main and how each stands; if one is on it, move their view to it with (my.user/focus! \"<its key>\") and tell them what it is doing. More: docs/users.md#roots-session")
+  "What root's session is for, its task's plan: what educates it, beside the docs it cites. See docs/users.md#roots-agent."
+  "You are root's session: the person talks to Seon through you. Answer the person yourself when you can. When they want work done, look first for a session already on it: (my.user/agents) lists every session on main and how each stands; if one is on it, move their view to it with (my.user/focus! \"<its key>\") and tell them what it is doing. More: docs/users.md#roots-agent")
 
-(defn root-session-tx
-  "Root's session, made at the boot of a main that has none (`root-session-boot-tx`), an ordinary agent made the ordinary way: an agent
+(defn root-agent-tx
+  "Root's session, made at the boot of a main that has none (`root-agent-boot-tx`), an ordinary agent made the ordinary way: an agent
   entity keyed \"root\" (a reserved key, as the user's is its name), linked to root by :seon.agent/root, its pattern written once as
   its role's name and its one addition, a join to whoever started it read by the user's own pattern ([:seon.db/agent-fact
   {:seon.agent/_agents :seon.db/user-fact}]: what either schema gains later reaches it with no write), its own render the stage (seon.render.ui/stage: the page a fresh system opens on), and the task request/root of the
   chat template (seon.template/request-tx), parked, its agent that entity, so the first message's wake spawns it. The user started it
   (:seon.task/started-by, the user's :seon.agent/agents: docs/users.md#who-started-whom). Root's own entity is untouched: an entity's id
-  derives from its identity, so it cannot take a key too. See docs/users.md#roots-session."
+  derives from its identity, so it cannot take a key too. See docs/users.md#roots-agent."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
   [db]
   (let [tx (tpl/request-tx db (tpl/from (tpl/templates :user) {:seon.task/ns 'request :seon.task/name "root" :seon.task/plan root-session-plan}))]
@@ -1164,12 +1164,12 @@
                (assoc user :seon.agent/agents "root-session")]
               (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked :seon.task/started-by user}))))))
 
-(defn root-session-boot-tx
-  "At boot, root's session: made when main has none (`root-session-tx`; the owner's ruling, root's agent is there from boot), else
+(defn root-agent-boot-tx
+  "At boot, root's session: made when main has none (`root-agent-tx`; the owner's ruling, root's agent is there from boot), else
   nothing: its pattern names its role's, so an edit of the agent's or the user's pattern reaches it with no write. See
-  docs/users.md#roots-session."
+  docs/users.md#roots-agent."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
-  [db] (if (pdb/eid db :seon.agent/key "root") [] (root-session-tx db)))
+  [db] (if (pdb/eid db :seon.agent/key "root") [] (root-agent-tx db)))
 
 (defn import-tree!
   "Main's program on conn brought to the source tree {:root :dirs}, only what it changed since root's :seon.system/source fact
@@ -1762,7 +1762,7 @@
     (let [prev (previous-end db)
           held (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))
           r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot (cfg/value :seon.config.root/user-name)) (into (task/earlier-agents-tx db)) (into (task/config-tx config in-force-sources))
-                                                                                  (into (root-session-boot-tx db)))
+                                                                                  (into (root-agent-boot-tx db)))
                                                                          prev (conj {:seon.system/id :root :seon.system/previous-end prev})
                                                                          ;; the program the binary was built from beside main's: one program, or seon.problems/stale-binary's row
                                                                          held (conj {:seon.system/id :root :seon.system/source (booted-source held boot (program/binary-program) digest (fx/config-input cfg/config (cfg/checkout)) stale
@@ -2238,7 +2238,7 @@
   (let [r @(request! sys 'back! agent-id args)] (if (contract/error? r) r (:id r))))
 
 (defn kill!
-  "SIGKILL the agent's process (through its agent proc): a promise of its view entry ({:status :ended-ms ..}), delivered once its
+  "SIGKILL the agent's process (through its agent proc): a promise of its end, {:status :ended-ms} (those keys of its view entry: what it answers, so two kills answer alike whatever the entry gains after, such as its :exit), delivered once its
   end is recorded, at once for an agent already ended; a wait for an agent's end derefs it, never an end event it may have
   missed. See docs/processes.md#the-agent-process."
   {:malli/schema [:=> [:cat :seon.system/sys :seon.agent/id] :seon.host/promise]}
