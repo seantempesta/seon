@@ -16,7 +16,7 @@
   transaction, or refused with why (write!)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.render :as render] [seon.agent :as agent] [seon.program :as program]
-            [seon.config :as cfg] [seon.db :as pdb] [datahike.api :as d] [datahike.db.interface :as dbi] [clojure.string :as str] [malli.core :as m] [malli.error :as me] [malli.registry :as mr]
+            [seon.config :as cfg] [seon.db :as pdb] [datahike.api :as d] [datahike.db.interface :as dbi] [datahike.db.utils :as dbu] [clojure.string :as str] [malli.core :as m] [malli.error :as me] [malli.registry :as mr]
             [seon.lib :as lib] [seon.print :as print] [seon.ref :as ref] [seon.doc :as doc] [seon.ratom :as ratom]))
 
 ;; ---- the pattern: what ctx holds (docs/ctx.md#the-pattern) ---------------------------------
@@ -653,14 +653,27 @@
   "Why pattern p may not be entity e's (in the entity index ix): each clause its role requires (its schema's :seon.ctx/required,
   {attribute reason}: a join's attribute, or a plain one) that p no longer asks, as an :invalid entry naming it and what it is; []
   when it keeps them all. A clause is asked as a keyword, as [attribute & options] or as a join's key, in p `expanded` (a schema's
-  name keeps what that schema's pattern asks). A pattern is added to, never replaced. See docs/ctx.md#changing-it-swap."
+  name keeps what that schema's pattern asks). A required join is kept with the transaction its role asks of each member's link
+  (its key's :tx option): what orders a conversation is read from it, so a pattern that asks the join without it is refused too.
+  A pattern is added to, never replaced. See docs/ctx.md#changing-it-swap."
   {:malli/schema [:=> [:cat :map :map [:sequential :any]] [:vector :map]]}
   [ix e p]
-  (let [required (render/schema-property ix (render/entity-schema ix e nil) :seon.ctx/required)
+  (let [s (render/entity-schema ix e nil)
+        required (render/schema-property ix s :seon.ctx/required)
         attr (fn [k] (if (vector? k) (first k) k))
-        asked (into #{} (mapcat (fn [x] (if (map? x) (map attr (keys x)) [(attr x)]))) (render/expanded ix p))]
-    (vec (for [[k what] required :when (not (asked k))]
-           {:path [:seon.ctx/pattern] :why (str "your pattern must keep " k " (" what "): add to the pattern, never replace it")}))))
+        tx (fn [k] (when (vector? k) (some (fn [[o v]] (when (= :tx o) v)) (partition 2 (rest k)))))
+        ;; {attribute #{the :tx each clause asks it with, nil for none}} of a pattern's top-level clauses
+        clauses (fn [p] (reduce (fn [m k] (update m (attr k) (fnil conj #{}) (tx k))) {}
+                                (mapcat (fn [x] (if (map? x) (keys x) [x])) (render/expanded ix p))))
+        asked (clauses p)
+        role (clauses (or (render/schema-property ix s :seon.ctx/pattern) []))]
+    (vec (for [[k what] required
+               :let [want (first (remove nil? (role k)))]
+               :when (or (not (contains? asked k)) (and want (not (contains? (asked k) want))))]
+           {:path [:seon.ctx/pattern]
+            :why (if (contains? asked k)
+                   (str "your pattern must ask " k " with :tx " want " (" what ", each with the transaction that joined it): add to the pattern, never replace it")
+                   (str "your pattern must keep " k " (" what "): add to the pattern, never replace it"))}))))
 
 (defn write!
   "A swap! of the record to nv, written: its change from the record (edits) as one transaction,
@@ -933,44 +946,72 @@
     (if (:unresolved r) {:unresolved v :problem (:unresolved ref/problem-messages)} (let [secs (doc/citing-sections db v)]
                                                 (cond-> (assoc r :callers (doc/callers db v)) (seq secs) (assoc :sections secs))))))
 
-(defn first-delivered
-  "A message's order in its turn, [db a e]: the transaction that put agent a's ref on message e, one seek (its tx on the branch, when it was delivered). See docs/ctx.md#the-pattern."
-  {:malli/schema [:=> [:cat [:tuple :seon.host/db :int :int]] :int]}
-  [[db a e]] (or (:tx (first (d/datoms db :eavt e :seon.message/to a))) 0))
-
 (defn call-of
   "The model call of turn n of the agent with key k on db, or nil: one seek by its id. See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :seon.host/db nat-int? :string] [:maybe :int]]}
   [db n k] (pdb/eid db :seon.model-call/id (lib/call-id k n)))
 
 (defn placed-messages
-  "Where the messages agent record c holds were read, as db has them: {n [[m id] ...]} for each turn n that read some, in the order they were delivered, and :pending for those delivered after the last turn's edge, which the turn now opening takes. A message is on the
-  branch as the entity that was delivered (docs/users.md#messages) and belongs to no call by a fact of its own: the turn that read it is the first whose edge, the :t of its basis (seon.turn/basis!, the commit its request is made from, which holds everything the turn was delivered), is at or after
-  the transaction that put the agent's ref on it, so one delivered after a turn's basis, mid-turn, reads at the next turn; a turn with no basis (an example session's) is edged by the transaction that made its call. Turn 0, the records before the first turn, reads none: what was
-  delivered before turn 1 is its. One range of the index for the agent's messages, a bisection of the turns' edges for each. Read as a list does (seon.render.ui/conversation-list), once for every turn, so a turn runs again for its own messages alone. O(m log c) for m messages to the agent and c turns,
-  and a seek for a turn that holds no basis. See docs/turn.md#the-turn-is-a-number."
-  {:malli/schema [:=> [:cat :seon.host/db :map] [:map-of [:or :int [:= :pending]] [:vector :any]]]}
-  [db c]
+  "Where the members of agent record c's history were read: {n [[k e] ...]} for each turn n that read some, each member by its path in c
+  (k the join that holds it, e its entity id), in the order they were linked, and :pending for those linked after the last turn's edge, which
+  the turn now opening takes. Read from the pull alone, no join named: a join is a key of c whose value is a map of member maps holding
+  :at, the transaction that linked each, which the pattern asks ({[:ns/_attr :tx :at] ..}: docs/ctx.md#the-pattern), whose target is
+  history (seon.render/history?, the entity index ix's :history-schemas), read from its attribute: a reverse join's members are of the
+  schema that owns the attribute, a forward join's of its targets (a join of cites or started agents asked with :at is no conversation).
+  A join is recognized by its key being its attribute, so one an agent's own pattern renames (:as) is no conversation: a schema's pattern
+  never renames one (seon.ctx-test/a-pattern-joins-refs-by-their-attribute).
+  The joins whose
+  members carry a turn number (:seon.model-call/n) make the turns; a turn's edge is the :t of its basis (seon.turn/basis!, the commit its
+  request is made from), else, for a turn with no basis (an example session's), the transaction that linked its call; so one linked after a
+  turn's basis, mid-turn, reads at the next turn. Every other join's members are placed against those edges by their link (a message by
+  its delivery: docs/users.md#messages), but a member that refs a turn-maker's member (an eval's :seon.eval/call), which is read under it
+  (`turn-evals`). Turn 0, the record's opening, takes what was linked before turn 1. One sort of the placed members and one pass with the
+  turns. See docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat :map :map] [:map-of [:or :int [:= :pending]] [:vector [:tuple :keyword :int]]]]}
+  [ix c]
   (let [plain (ratom/untracked c)
-        held (:seon.message/_to plain)
-        calls (:seon.model-call/_agent plain)
-        ;; the messages as [transaction entity], in the order they were delivered
-        ms (->> (d/datoms db :avet :seon.message/to (:db/id c)) (mapv (fn [dt] [(nth dt 3) (nth dt 0)])) sort vec)
-        ;; the turns in order, one pass with the messages: each turn takes those delivered at or before its edge, no edge before an earlier one's. The record holds its calls newest first, so its reverse is turn order; one that is not is sorted and passed again
-        ;; strict? false: entries sorted by number, where two calls of one number are one turn's (an answer's call beside its turn's)
+        ;; the joins whose target is history, read from the attribute (two map reads a join, no member looked at): a reverse join's
+        ;; members are of the schema owning the attribute, a forward join's of its targets
+        history? (fn [k] (some #(contains? (:history-schemas ix) %) (if (dbu/reverse-ref? k) [(get (:entity-schemas ix) (dbu/reverse-ref k))] (get (:targets ix) k))))
+        joins (for [[k v] plain :when (and (keyword? k) (map? v) (seq v) (history? k))] [k v])
+        ;; those whose members carry a turn number make the turns; each other is placed against them
+        maker? (fn [[_ v]] (some :seon.model-call/n (vals v)))
+        makers (filter maker? joins)
+        placed-joins (remove maker? joins)
+        ;; the turns' calls: one join's map as the record holds it (newest first, sorted, its order read below), else all of them merged
+        calls (when (seq makers) (reduce into (map second makers)))
+        cids (set (keys calls))
+        ;; a member read under a turn-maker's member: an attribute of it refs one (an eval's :seon.eval/call {:db/id cid})
+        under? (fn [m] (some (fn [[_ x]] (and (map? x) (contains? cids (:db/id x)))) m))
+        ;; the placed members as [transaction path instant], in the order they were linked: by the transaction's time (owner, 2026-11-11: time
+        ;; orders, not transaction ids), each's transaction from the pull; a turn's edge is a point on the branch, its basis's t, which a
+        ;; member's transaction is at or before. A member the pull holds nothing of but its id and link is none
+        ms (->> (for [[k v] placed-joins [e m] v :let [at (:at m)] :when (and at (seq (dissoc m :db/id :at)) (not (under? m)))]
+                  [(:db/id at) [k e] (:db/txInstant at)])
+                (sort-by (fn [[tx _ inst]] [inst tx])) vec)
+        ;; what is placed, read tracked with no member read: c's key set (a join first linked, the first message to an agent) and the key set
+        ;; of each join holding a placed member (a member linked); a member linked places again a render that asked (a turn's call moves
+        ;; :seon.agent/turn, which its readers read). Only those joins: a view of a join is a contracted call, and one whose members are all
+        ;; read under a turn's call (the evals) places nothing here
+        _ (count c)
+        _ (doseq [k (distinct (map (comp first second) ms))] (count (get c k)))
+        ;; a turn's edge: its basis's t, else the transaction that made its call
+        edge (fn [call] (or (:t (:seon.model-call/basis call)) (:db/id (:at call)) 0))
+        ;; the turns in order, one pass with the members: each turn takes those linked at or before its edge, no edge before an earlier one's. The record holds its calls newest first, so its reverse is turn order; one that is not (a window by position) is sorted by number
+        ;; strict? false: entries sorted by number (calls held by position); a number is one call (seon.turn writes one per turn, id <key>/<n>)
+        take-to (fn [out k at] (assoc! out at (conj (get out at []) (nth (nth ms k) 1))))
         place (fn [entries strict?]
                 (loop [es (seq entries) i 0 mx 0 prev 0 out (transient {})]
                   (if-let [entry (first es)]
-                    (let [cid (key entry) call (val entry) n (:seon.model-call/n call)]
+                    (let [call (val entry) n (:seon.model-call/n call)]
                       (if (and n (pos? n) (not= :outside (:seon.model-call/origin call)))
-                        (let [mx (max mx (or (:t (:seon.model-call/basis call))
-                                             (:tx (first (d/datoms db :eavt cid :seon.model-call/id)))))
+                        (let [mx (max mx (edge call))
                               j (loop [j i] (if (and (< j (count ms)) (<= (nth (nth ms j) 0) mx)) (recur (inc j)) j))]
                           (if (or (> n prev) (and (not strict?) (= n prev)))
-                            (recur (rest es) j mx n (if (= i j) out (reduce (fn [out k] (if-let [id (get-in held [(nth (nth ms k) 1) :seon.message/id])] (assoc! out n (conj (get out n []) [(nth (nth ms k) 1) id])) out)) out (range i j))))
+                            (recur (rest es) j mx n (if (= i j) out (reduce (fn [out k] (take-to out k n)) out (range i j))))
                             ::unordered))
                         (recur (rest es) i mx prev out)))
-                    (persistent! (reduce (fn [out k] (if-let [id (get-in held [(nth (nth ms k) 1) :seon.message/id])] (assoc! out :pending (conj (get out :pending []) [(nth (nth ms k) 1) id])) out)) out (range i (count ms)))))))
+                    (persistent! (reduce (fn [out k] (take-to out k :pending)) out (range i (count ms)))))))
         placed (if (and (sorted? calls) (not (:seon.ctx/by-position (meta calls)))) (place (rseq calls) true) ::unordered)]
     (if (= ::unordered placed) (place (sort-by #(:seon.model-call/n (val %)) calls) false) placed)))
 
@@ -985,14 +1026,6 @@
   (let [plain (ratom/untracked c)]
     (sort-by (fn [[e]] [(if (get-in plain [:seon.eval/_agent e :seon.eval/call-id]) 0 1) e]) (keep (fn [e] (when-let [id (or (get-in plain [:seon.eval/_agent e :seon.eval/id]) (get-in c [:seon.eval/_agent e :seon.eval/id]))] [e id]))
                          (when (seq (get-in c [:seon.model-call/_agent cid :seon.eval/_call])) (keys (get-in plain [:seon.model-call/_agent cid :seon.eval/_call])))))))
-
-(defn turn-members
-  "What model call cid of agent record c holds that c holds too, in the order of the turn: {:messages [[m id]] :evals [[e id]]}: its messages as they were delivered (`placed-messages`: derived from when each was delivered, no fact names the turn) and its evals as they ran
-  (`turn-evals`), each with its own id. For a read of one turn, a replay or an example's; the page places every turn's at once. O(m log c) and the turn's evals. See docs/turn.md#the-turn-is-a-number."
-  {:malli/schema [:=> [:cat :seon.host/db :map :int] [:map [:messages [:sequential [:tuple :int :string]]] [:evals [:sequential [:tuple :int :string]]]]]}
-  [db c cid]
-  {:messages (get (placed-messages db c) (get-in (ratom/untracked c) [:seon.model-call/_agent cid :seon.model-call/n]) [])
-   :evals (turn-evals c cid)})
 
 (defn turns
   "The model calls of agent record c that are its turns, in order: [n eid]; a context read (origin :outside) is no turn. See docs/turn.md#the-turn-is-a-number."

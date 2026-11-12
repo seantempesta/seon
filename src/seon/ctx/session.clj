@@ -7,6 +7,7 @@
             [seon.task :as task] [seon.lib :as lib]
             [seon.db :as pdb]
             [seon.ratom :as ratom]
+            [seon.render :as render]
             [seon.ctx :as ctx]))
 
 (defn examples-of
@@ -104,14 +105,23 @@
       (cond-> (:seon.eval/code m) (->> (example-record ek)))))
 
 (defn- session-records
-  "The conversation of agent record c on db, [record kind] in its order (turn by turn: its messages, its reply, its evals). A record keeps the turn it names as :turn. See docs/tasks.md#a-task-names-example-sessions."
-  {:malli/schema [:=> [:cat :map :seon.host/db] [:vector [:tuple :map :qualified-keyword]]]}
-  [c db]
-  (let [placed (ctx/placed-messages db c)]
+  "The conversation of agent record c on db, [record kind] in its order (turn by turn: the members it took, its reply, its evals). A record keeps the turn it names as :turn.
+  A member the turn took (seon.ctx/placed-messages: a message, or any other history join's member) is recorded as the entity it is: its own
+  attributes less :db/id and :at, its kind its entity schema as the entity index ix reads it (seon.render/entity-schema), so one of a kind an
+  example does not hold is `session-tx`'s refusal naming it, never a message. See docs/tasks.md#a-task-names-example-sessions."
+  {:malli/schema [:=> [:cat :map :map :seon.host/db] [:vector [:tuple :map [:maybe :qualified-keyword]]]]}
+  [ix c db]
+  (let [placed (ctx/placed-messages ix c)]
    (vec (for [[n cid] (ctx/turns c)
-             :let [messages (get placed n) evals (ctx/turn-evals c cid)
+             :let [members (get placed n) evals (ctx/turn-evals c cid)
                    call (get-in c [:seon.model-call/_agent cid])]
-             r (concat (for [[m] messages] [(assoc (select-keys (get-in c [:seon.message/_to m]) [:seon.message/id :seon.message/from :seon.message/body]) :turn n) :seon.message/fact])
+             r (concat (for [p members :let [m (get-in c p) s (render/entity-schema ix m nil)]
+                             ;; a placed eval is one no turn's call holds (placed-messages reads an eval that refs its call under it), so
+                             ;; the harness's (seon.repl/record-tx names no call for the loop's own eval or a context read): an example keeps
+                             ;; the model's evals, never the harness's. Read by its schema: every placed member refs no turn's call, so that
+                             ;; ref cannot tell it apart
+                             :when (not= :seon.db/eval-fact s)]
+                         [(assoc (dissoc m :db/id :at) :turn n) s])
                        (when (= :model (:seon.model-call/origin call))
                          [[(select-keys call [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated]) :seon.model-call/fact]])
                        (for [[e] evals :let [ev (get-in c [:seon.eval/_agent e]) whole (pdb/response-of db ev)]]
@@ -152,7 +162,7 @@
                                   (as-> v' (ctx/revalued nil v' {:seon.value/gone {:type "the agent's record at a basis a copy cannot rebuild"}})))
                               k]
                              [v k]))
-        rs (when a (map cannot (remove (fn [[v k]] (and (= :seon.db/eval-fact k) (not (:seon.eval/call-id v)))) (session-records (ctx/agent-ctx (program/index-of-db db) db a) db))))
+        rs (when a (map cannot (remove (fn [[v k]] (and (= :seon.db/eval-fact k) (not (:seon.eval/call-id v)))) (let [ix (program/index-of-db db)] (session-records ix (ctx/agent-ctx ix db a) db)))))
         unknown (first (remove #(session-kinds (second %)) rs))]
     (cond (nil? a) (refuse (str "no agent is keyed \"" key "\""))
           (nil? request) (refuse (str "agent \"" key "\" has no request to show: its task has no plan and it has no description"))
