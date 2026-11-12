@@ -741,3 +741,17 @@
         r (#'seon.prove/run-answer base {})]
     (is (= ['a.b-test/p 'a.b-test/q] (:deferred r)))
     (is (= {'a.b-test/p "bp" 'a.b-test/q nil} (:deferred-digests r)) "each deferred test's base digest, nil only for a test new on the branch")))
+
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-granted-items-pass-reaches-the-service
+  ;; docs/merging.md#the-test-service. Found 2026-11-12 (data's task 1): an agent's run of a granted item kept, in its answer, a
+  ;; pass report only for the task's proofs and the tests named (seon.proofs/answer), so an item that was neither and passed read
+  ;; as "answered no verdict" (seon.prove/batch-ended), and the agent's task died before its first turn. What the agent's
+  ;; answer keeps is what its asker reads: its proofs, the tests named, and the items granted (seon.agent/asked)
+  (let [t 'a.b-test/t
+        m {:op :tests :items {t "d1"}}
+        run {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var (str "#'" t)}] :digests {t "d1"}}
+        ans (proofs/answer run (seon.agent/asked m #{'x.y-test/proof} [t]))
+        ended (atom nil)]
+    (with-redefs [prove/item-ended (fn [st _ r] (reset! ended r) [st []]) prove/grant (fn [st] [st []])]
+      (#'prove/batch-ended {:batches {7 [[t "d1"]]} :items {[t "d1"] {:kind :test}}} 7 ans))
+    (is (= 1 (:pass @ended)) (str "the item's pass is its verdict, never no-verdict: " (pr-str @ended)))))

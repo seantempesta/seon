@@ -1688,6 +1688,18 @@
       {:process process :steps steps :mg mg :missing (vec (:missing p)) :deferred (vec (remove process (:deferred sel)))
        :build {:tree (:tree (:inputs plan)) :needed? (boolean (or (seq process) (some :binary? (vals steps))))}})))
 
+(defn asked
+  "The tests a :tests request m's asker reads a verdict of, so its answer keeps a pass report for each (seon.proofs/answer): the
+  task's proofs, the tests m names (a namespace's name, its tests among selected) and the items the test service granted (:items):
+  an item kept no pass and read as no verdict at the service (seon.prove/batch-ended), 2026-11-12. See
+  docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map [:set :qualified-symbol] [:maybe [:sequential :qualified-symbol]]] [:set :qualified-symbol]]}
+  [m proofs selected]
+  (let [names (set (:names m))]
+    (-> proofs
+        (into (filter #(or (names %) (names (symbol (namespace %))))) selected)
+        (into (keys (:items m))))))
+
 (defn handle!
   "One Seon platform request; answers the messages to send back (a vector). (REPL
   requests are nREPL's: seon.repl.)"
@@ -1737,11 +1749,8 @@
                                      (or (:mode m) :judge)
                                      #(send! {:op :tests-started :id (:id m) :pid %})
                                      (some-> (:names m) set)
-                                     (:items m))
-                 ;; a test its asker named is one it reads, as a proof is: seon.proofs/answer keeps its pass
-                 names (set (:names m))
-                 named (filter #(or (names %) (names (symbol (namespace %)))) (:selected r))]
-             [{:op :tests :id (:id m) :result (if (and (map? r) (not (contract/error? r))) (proofs/answer r (into proofs named)) r) :mem-mb (mem-mb)}]))
+                                     (:items m))]
+             [{:op :tests :id (:id m) :result (if (and (map? r) (not (contract/error? r))) (proofs/answer r (asked m proofs (:selected r))) r) :mem-mb (mem-mb)}]))
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
     :fx-reply (let [r (dissoc m :op :k)]
                 (swap! state update :inbox (fnil conj []) {:from :fx :k (:k m) :kind (fx-done! (:k m)) :body r})
