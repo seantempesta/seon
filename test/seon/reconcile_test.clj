@@ -641,6 +641,32 @@
       (is (some #(= [:db/cas [:seon.task/id "demo/a"] :seon.task/outcome :running :closed] %) (get-in (second outs) [:req :req :tx-data]))
           "and its end judged from that one answer"))))
 
+(deftest a-typed-error-from-work-or-the-judge-holds-the-task-and-is-no-death
+  ;; docs/errors.md: an error flows to whoever can fix it. :briefed, :worked and :tested each took any typed error for the
+  ;; agent's death: data's agent "died" before turn 1 when its prove answered no verdict (tests, 2026-11-12). Only
+  ;; :seon.agent/died, :seon.system/no-agent and :seon.system/ended are deaths (as :spawned reads them); any other error holds
+  ;; the task with it as its reason, its agent left running, which reads it at its next turn. Red before: a :dead-read step
+  (let [db (db-of [(decl "a")] :extra (work "a" :running))
+        flight {:act {:op :spawn :task "demo/a" :env {:branch :demo/a}} :agent :a-a}
+        no-verdict (contract/error :seon.writer/refused 'seon.writer/refused "the run answered no verdict" {})
+        held (fn [step]
+               (let [[st outs] (#'r/advance (st-of db :flights {"demo/a" (assoc flight :step step)}) "demo/a" step no-verdict)
+                     tx (mapcat #(get-in % [:req :req :tx-data]) outs)]
+                 [(set (map (comp :op :req) outs))
+                  (some #(= [:db/cas [:seon.task/id "demo/a"] :seon.task/execution :running :held] %) tx)
+                  (:seon.task/failure (task/task (d/db-with db tx) "demo/a"))]))]
+    (doseq [step [:briefed :worked :tested]]
+      (let [[ops on-hold failure] (held step)]
+        (is (not (contains? ops :kill)) (str step ": its agent is not stopped"))
+        (is (not (some #(= :dead-read %) (map second (vals (:pending (first (#'r/advance (st-of db :flights {"demo/a" (assoc flight :step step)}) "demo/a" step no-verdict)))))))
+            (str step ": no death is read"))
+        (is on-hold (str step ": the task is held"))
+        (is (re-find #"no verdict" (str (:reason failure))) (str step ": with the error as its reason: " (pr-str failure)))))
+    (testing "a death is still a death"
+      (let [died (contract/error :seon.agent/died 'seon.system/end-agent "agent a-a died" {:agent :a-a})
+            [st _] (#'r/advance (st-of db :flights {"demo/a" (assoc flight :step :tested)}) "demo/a" :tested died)]
+        (is (some #(= :dead-read %) (map second (vals (:pending st)))) "it reads the agent's end")))))
+
 (deftest a-task-is-judged-with-how-far-behind-main-its-branch-was
   ;; the wiring of gap 7: the writer's :theirs reaches the judging as the done rule's :behind, and the reasons say so
   (let [db (db-of [(decl "a")] :extra (work "a" :running))

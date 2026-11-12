@@ -616,29 +616,20 @@
 ;; the report is read once, after (my.root/problems, the render proc's kept health). Cost in reads of the whole report
 ;; over n commits that do not satisfy the wait: n + 2 before (12 for 10), none now
 (deftest the-problems-steps-waits-read-no-whole-report-per-commit
+  ;; the problems step's waits run their tests on main at every commit (seon.system/await-db, in the api's step): each reads
+  ;; one class or one fact, never the whole problems report (batches 32 and 38 overran on a test that did). Each test is run
+  ;; here on n commits, as the api runs it
   (ts/test-branch! (fn [_ conn]
     (let [reads (atom 0) n 10
-          commit! #(d/transact conn {:tx-data []})
-          judge (a/chan 1)
-          sys {:conn conn :judge judge}
-          counted (fn [f] (fn [& xs] (swap! reads inc) (apply f xs)))]
+          counted (fn [f] (fn [& xs] (swap! reads inc) (apply f xs)))
+          dbs (vec (for [_ (range n)] (:db-after (d/transact conn {:tx-data []}))))]
       (with-redefs [seon.problems/report (counted seon.problems/report)
                     seon.problems/health (counted seon.problems/health)]
-        (testing "the stall's wait: n commits with no stall, then the eval's answer ends it"
-          (let [answered (promise)
-                w (future (seon.system/await-db sys #(or (seq (#'seon.check/stalled-rows %)) (realized? answered))))]
-            (dotimes [_ n] (commit!))
-            (deliver answered true)
-            (commit!)
-            (is (:max-tx @w))
-            (is (= 0 @reads) (str @reads " reads of the whole report for " n " commits"))))
+        (testing "the stall's wait"
+          (is (every? (comp empty? #'seon.check/stalled-rows) dbs) "no stall on these commits")
+          (is (= 0 @reads) (str @reads " reads of the whole report for " n " commits")))
         (reset! reads 0)
-        (testing "the last wait: n commits while p1 and p2 run, then the reconciler's quiet ends it"
-          (let [t (:max-tx @conn)
-                w (future (#'seon.check/await-provoked sys t))
-                ask (a/<!! judge)]
-            (is (= :quiet (:op ask)))
-            (dotimes [_ n] (commit!))
-            (deliver (:p ask) {:quiet t})
-            @w
+        (testing "the last wait, p1 and p2's quiet"
+          (let [t (inc (:max-tx (peek dbs)))]
+            (is (not-any? (#'seon.check/provoked? t) dbs) "no quiet at or after t yet")
             (is (= 0 @reads) (str @reads " reads of the whole report for " n " commits")))))))))
