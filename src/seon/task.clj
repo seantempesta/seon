@@ -105,6 +105,20 @@
   {:malli/schema [:=> [:cat [:vector :string]] [:vector :seon.ref/citation]]}
   [texts] (into [] (mapcat #(:seon.ref/citations (ref/parse nil %))) texts))
 
+(defn reader-digest
+  "The digest of the code that reads a task's cites (seon.task/text-citations and every program var its form reaches, by
+  :form/refs, each by its form's :form/code) on db: what a task's :seon.task/cites-digest holds, so a change to the citation reader
+  reads every task's cites again (load-tx), and nothing else does: a changed text is read again by its declaration's compare. Cost: a seek a reached form. See docs/data-modeling.md#derived-data-is-a-cache-never-relied-on."
+  {:malli/schema [:=> [:cat :seon.host/db] :string]}
+  [db]
+  (let [form-of (fn [v] (some-> (pdb/eid db :var/name v) (->> (d/entity db)) :var/form :db/id))]
+    (loop [todo (vec (keep form-of ['seon.task/text-citations])) seen #{}]
+      (if-let [f (peek todo)]
+        (if (seen f)
+          (recur (pop todo) seen)
+          (recur (into (pop todo) (keep (comp form-of :v)) (d/datoms db :eavt f :form/refs)) (conj seen f)))
+        (lib/digest (str/join " " (sort (keep #(:v (first (d/datoms db :eavt % :form/code))) seen))))))))
+
 (defn- text-citations
   "What a declaration's text cites, read on db: its plan and instructions parsed once (seon.ref/parse),
   each target once at its strongest depth (seon.ref/cited), those db keeps as references (seon.ref/kept: a
@@ -936,7 +950,13 @@
           removed (vec (for [[id _] stored :when (and (not (decls id)) (owners (:seon.task/ns (all id))))] id))
           graph (merge (into {} (for [[id t] all] [id (:seon.task/needs t)]))
                        (into {} (for [[id d] decls] [id (set (:seon.task/needs d))])))
-          declared (fn [id d] {:seon.task/id id :seon.task/declared (sedn/encode d)})]
+          rd (reader-digest db)
+          ;; the entries whose text is unchanged but whose cites were read by other code: read again
+          ;; (its text unchanged, only the reader can have moved: one seek a task, a string compared)
+          reread (vec (for [[id d] decls :when (and (all id) (= d (some-> (stored id) sedn/decode))
+                                                    (not= rd (:v (first (d/datoms db :eavt (pdb/eid db :seon.task/id id) :seon.task/cites-digest)))))]
+                        [id d]))
+          declared (fn [id d] {:seon.task/id id :seon.task/declared (sedn/encode d) :seon.task/cites-digest rd})]
       (if-let [p (needs-problem graph graph)]
         (file-refused (first owners) p)
         (let [new-ids (mapv #(task-id (:seon.task/ns %) (:seon.task/name %)) new)
@@ -958,13 +978,18 @@
                                         (update :seon.task/branch #(or % (default-branch id)))
                                         (assoc :seon.task/needs (into #{} (map #(or (pdb/eid db :seon.task/id %) %)) (:seon.task/needs d))))]
                            (cond-> (-> (entity-tx db (pdb/eid db :seon.task/id id) (conj stated-attributes :seon.task/needs) want)
-                                       (conj [:db/add [:seon.task/id id] :seon.task/declared (sedn/encode d)])
+                                       (conj [:db/add [:seon.task/id id] :seon.task/declared (sedn/encode d)]
+                                             [:db/add [:seon.task/id id] :seon.task/cites-digest rd])
                                        ;; what its text cites now
                                        (into (cites-tx db' [:seon.task/id id] id (text-citations db' d))))
                              ;; declared again after its removal: revived
                              (and (nil? (stored id)) (= :cancelled (:seon.task/execution (all id))))
                              (conj [:db/add [:seon.task/id id] :seon.task/execution :held]))))
                        changed)
+               ;; what an unchanged text cites, read by the reader that is current, kept by the new digest
+               (mapcat (fn [[id d]] (conj (cites-tx db [:seon.task/id id] id (text-citations db d))
+                                          [:db/add [:seon.task/id id] :seon.task/cites-digest rd]))
+                       reread)
                (mapcat (fn [id] [[:db/add [:seon.task/id id] :seon.task/execution :cancelled]
                                  [:db/retract [:seon.task/id id] :seon.task/declared (stored id)]])
                        removed))))))))

@@ -127,7 +127,7 @@ The landing message states the net `src` lines (`bin/laws growth`, which also li
 
 ## A merge says what it completes
 
-A merge that completes a task's work says so, one line a task, `Completes: ns/name`, and removes that task's entry from `resources/seon/tasks/` in the same commit. `seon.task-files-test/no-shipped-task-is-merged-work` reads those lines on main's first-parent merges and is red on any that names an entry still in the files; `bin/land` refuses such a message before proving. Nothing else in a message counts. The reverse holds at the landing: an entry the landing drops lands only with a `Completes:` line naming it, in its message or a commit it brings (```bin/land```'s `dropped`, run on any two commits by `bin/land --dropped OLD NEW MSGFILE`): the store cannot tell completed work from an entry lost by an edit, since a session's completion writes no outcome.
+A merge that completes a task's work says so, `Completes: ns/name` (one name, or a comma-separated list of them, anywhere in a line, read by ```bin/land```'s one parser, `completes`), and removes that task's entry from `resources/seon/tasks/` in the same commit. `seon.task-files-test/no-shipped-task-is-merged-work` reads those lines on main's first-parent merges and is red on any that names an entry still in the files; `bin/land` refuses such a message before proving. Nothing else in a message counts. The reverse holds at the landing: an entry the landing drops lands only with a `Completes:` line naming it, in its message or a commit it brings (```bin/land```'s `dropped`, run on any two commits by `bin/land --dropped OLD NEW MSGFILE`): the store cannot tell completed work from an entry lost by an edit, since a session's completion writes no outcome.
 
 ## Conflicts and pins
 
