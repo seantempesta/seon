@@ -107,12 +107,11 @@
         end! (fn []
                (let [agent @made]
                  (seon.lib/remove-tree! tasks)
-                 (cond (:port root) (eval-root (str "(let [ev (c/events sys) a " (when agent (str ":" agent)) "]"
+                 ;; its end awaited as the fact kill! answers once it is recorded (at once for one already ended), never an end
+                 ;; event, which a teardown could miss and wait on forever (Context's 300 s shard, 2026-11-12)
+                 (cond (:port root) (eval-root (str "(let [a " (when agent (str ":" agent)) "]"
                                                     " (when-let [v (resolve 'ready-ev)] (clojure.core.async/untap (:events-mult sys) @v))"
-                                                    " (when (and a (not (:ended-ms (get (:agents (c/state sys)) a))))"
-                                                    "   (c/kill! sys a)"
-                                                    "   (loop [] (let [e (clojure.core.async/<!! ev)] (when-not (and (#{:ended :dead :killed} (:type e)) (= a (:agent e))) (recur)))))"
-                                                    " (clojure.core.async/untap (:events-mult sys) ev)"
+                                                    " (when a @(c/kill! sys a))"
                                                     ;; its tasks cancelled: a run left :running keeps the reconciler from
                                                     ;; ever being quiet, and a later test's await-quiet waits on it
                                                     " (my.root/cancel! sys (filterv #(clojure.string/starts-with? % \"" tns "/\")"
@@ -197,7 +196,7 @@
        "                          (#{:dead :ended :killed} (:type e)) (:type e)"
        "                          :else (recur))))]"
        "   (clojure.core.async/untap (:events-mult sys) ev)"
-       "   (when-not (:ended-ms (get (:agents (c/state sys)) ag)) (c/kill! sys ag))"
+       "   @(c/kill! sys ag)"
        "   r))"))
 
 (defn- root-ended
@@ -1701,10 +1700,10 @@
     (agent/commit!)))
 
 (defn- read-at
-  "The ids of the messages the running agent's turn n reads, as its record holds them (seon.ctx/turn-members) on its branch's db."
+  "The ids of the messages the running agent's turn n reads, as its record holds them (seon.ctx/placed-messages) on its branch's db."
   [n]
   (let [db (agent/db) k (:key @agent/state) c (seon.ctx/agent-ctx (seon.db/index) db (pdb/eid db :seon.agent/key k))]
-    (mapv second (:messages (seon.ctx/turn-members db c (seon.ctx/call-of db n k))))))
+    (mapv #(get-in c (conj % :seon.message/id)) (get (seon.ctx/placed-messages (seon.db/index) c) n []))))
 
 (deftest a-message-taken-by-one-agent-is-still-owed-to-the-other
   ;; docs/users.md#messages (owner, 2026-11-09: the message on the agent's branch is the proof of delivery): a's taking it writes a's branch alone
@@ -2134,7 +2133,7 @@
   (str "(let [bid (keyword (:seon.agent/key " (agent-code w) "))"
        "      bkey " (str "(:seon.agent/key " (agent-code w) ")")
        "      body (str \"msg-\" (random-uuid))"
-       "      end! (fn [] (c/kill! sys bid) (loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (#{:ended :dead :killed} (:type e)) (= bid (:agent e))) :gone (recur)))))"
+       "      end! (fn [] @(c/kill! sys bid) :gone)"
        "      send! (fn [] @(c/submit! sys :" a " (str \"(my.agent/send-message [\" (pr-str bid) \"] \" (pr-str body) \")\") {:origin :outside}))]"
        "  (if " before-send? " (do (end!) (send!)) (do (send!) (end!)))"
        "  {:body body :b bid :bkey bkey :sender " (pr-str a)
@@ -2687,7 +2686,7 @@
                                              "   :turn (:seon.agent/turn (datahike.api/entity db [:seon.agent/key (:key @seon.agent/state)]))"
                                              "   :eval-turns (set (datahike.api/q '[:find ?by ?t :where [?e :seon.eval/by ?be] [?be :seon.agent/key ?by] [?e :seon.eval/call ?c] [?c :seon.model-call/n ?t]] db))"
                                              "   :loop-eval-turns (vec (datahike.api/q '[:find [?t ...] :where (not-join [?e] [?e :seon.eval/by ?s] [?s :seon.system/id :root]) [(missing? $ ?e :seon.eval/call-id)] [?e :seon.eval/turn ?t]] db))"
-                                             "   :message-turns (let [c @seon.ctx/ctx] (vec (for [[n cid] (seon.ctx/turns c) :when (seq (:messages (seon.ctx/turn-members db c cid)))] n)))"
+                                             "   :message-turns (let [c @seon.ctx/ctx] (vec (for [[n cid] (seon.ctx/turns c) :when (seq (get (seon.ctx/placed-messages (seon.db/index) c) n))] n)))"
                                              "   :call-ids (vec (datahike.api/q '[:find [?id ...] :where [?m :seon.model-call/id ?id]] db))"
                                              "   :committed (msgs (datahike.api/commit-as-db db (get-in m [:seon.model-call/basis :commit])))"
                                              "   :intent (mapv #(datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.eval/id ?i] [?e :seon.eval/intent ?r]] db %) (map first evals))})")
@@ -3006,7 +3005,7 @@
   ;; queue before anything else, each recorded as any eval is, by whoever asked, at turn 0 and with no call id. One that
   ;; throws is recorded with its error and the rest run, as a reply's calls do (owner, 2026-11-08). A reader of the
   ;; conversation then sees them in order and, in the request, as calls of their own.
-  (let [read (str "(let [c @seon.ctx/ctx db (seon.agent/db) es (map #(get-in c [:seon.eval/_agent (first %)]) (:evals (seon.ctx/turn-members db c (second (first (seon.ctx/turns c))))))] "
+  (let [read (str "(let [c @seon.ctx/ctx db (seon.agent/db) es (map #(get-in c [:seon.eval/_agent (first %)]) (seon.ctx/turn-evals c (second (first (seon.ctx/turns c)))))] "
                   "{:turn (seon.agent/turn-now) "
                   " :records (mapv (fn [v] [(seon.task/sender-name (:seon.eval/by v)) (:seon.eval/intent v) (:seon.eval/call-id v) (some? (:ex (seon.db/response-of db v))) (:value (seon.db/response-of db v))]) es) "
                   " :roles (mapv :role (drop 2 (:messages (seon.ctx.wire/render db {:agent (:key @seon.agent/state) :commit (datahike.api/commit-id db) :task \"x\" :turn 1 :max-turns 1 :origin :outside} {:walk (seon.repl/page-walk)}))))})")
