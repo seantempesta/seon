@@ -30,6 +30,11 @@
   "What transaction tx makes its entities cite: each cite entity it writes, {target depth}."
   [tx] (into {} (for [m tx :when (and (map? m) (:seon.cite/id m))] [(target-of m) (:seon.cite/depth m)])))
 
+(defn- released
+  "db with task id released by the person, as my.root/run! writes it: its :seon.task/started-by, which its agent's start names
+  its parent (seon.task/start-tx)."
+  [db id] (d/db-with db [{:seon.task/id id :seon.task/started-by {:seon.agent/key "sean"}}]))
+
 (defn- refusal
   "The typed error the checked write of tx on db answers (seon.db/with), or nil when it is written."
   [db tx] (try (pdb/with db tx) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))
@@ -139,7 +144,7 @@
   ;; :seon.config.agent/cites written on a new agent's record (seon.task/agent-cites-tx, at its first start: seon.agent/begin-run!), never
   ;; read as a default at draw time: each address a section of the wiki, at its ?depth
   (let [db (d/db-with (db-with-program) (for [a (seon.config/value :seon.config.agent/cites)] {:seon.doc/address a :seon.doc/heading a}))
-        db (d/db-with db (task/create-tx db [(decl "Do.")]))
+        db (released (d/db-with db (task/create-tx db [(decl "Do.")])) "demo/t")
         tx (into (task/start-tx db "demo/t" "b1" :a1 {:branch :b :model nil :max-turns 4} 0) (task/agent-cites-tx db "a1" "a1"))
         db (pdb/db-with db tx)]
     (is (= (count (seon.config/value :seon.config.agent/cites)) (count (filter :seon.cite/id tx))) "one per address the config names")
@@ -154,7 +159,7 @@
   (let [held (vec (seon.config/value :seon.config.agent/cites)) gone "docs/nowhere.md#never-written"
         base (d/db-with (db-with-program) (for [a held] {:seon.doc/address a :seon.doc/heading a}))
         ;; the task's own set names one address the store holds no section for, between two it holds
-        db (d/db-with base (task/create-tx base [(assoc (decl "Do.") :seon.task/config {:seon.config.agent/cites [(first held) gone (second held)]})]))
+        db (released (d/db-with base (task/create-tx base [(assoc (decl "Do.") :seon.task/config {:seon.config.agent/cites [(first held) gone (second held)]})])) "demo/t")
         db (pdb/db-with db (task/start-tx db "demo/t" "b1" :a1 {:branch :b :model nil :max-turns 4} 0))
         tx (task/agent-cites-tx db [:seon.agent/key "a1"] "a1")
         db' (pdb/db-with db tx)]
@@ -168,7 +173,7 @@
   (let [own ["docs/testing.md#testing-in-the-world"]
         base (d/db-with (db-with-program) (for [a (seon.config/value :seon.config.agent/cites)] {:seon.doc/address a :seon.doc/heading a}))
         cited (fn [config]
-                (let [db (d/db-with base (task/create-tx base [(cond-> (decl "Do.") config (assoc :seon.task/config config))]))
+                (let [db (released (d/db-with base (task/create-tx base [(cond-> (decl "Do.") config (assoc :seon.task/config config))])) "demo/t")
                       db (pdb/db-with db (task/start-tx db "demo/t" "b1" :a1 {:branch :b :model nil :max-turns 4} 0))
                       db (pdb/db-with db (task/agent-cites-tx db [:seon.agent/key "a1"] "a1"))]
                   (mapv task/cited-name (task/cites-of db (pdb/eid db :seon.agent/key "a1")))))]
@@ -276,7 +281,8 @@
      (let [main (:branch cfg) b (keyword (str (name main) "-a3"))
            k "a3"]
        (d/transact conn [{:seon.system/id :root :seon.system/boot "b1"}])
-       (d/transact conn [{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :task-demo-f :seon.task/kind :work}])
+       (d/transact conn [{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :task-demo-f :seon.task/kind :work
+                          :seon.task/started-by {:seon.agent/key "owner"}}])
        (d/transact conn (task/agent-tx :a3 {:status :idle :pid 77 :running {:form "(f 2)"}}))
        (d/branch! conn main b)
        (let [bc (pdb/connect (assoc cfg :branch b))]
@@ -380,17 +386,29 @@
     (is (= [] (task/undelivered main main "a")) "inherited at the fork: delivered")
     (is (= [] (task/undelivered main removed "a")) "removed after, it stays delivered")))
 
-(deftest a-started-agent-is-linked-to-who-started-it
-  ;; docs/users.md#what-each-thing-is: a task names who started it; its agent, when it starts, is in that one's :seon.agent/agents, a user or an agent alike
-  (let [db (d/db-with (ts/test-db) (into [{:seon.system/id :root :seon.system/boot "b1"} {:seon.agent/key "sean" :seon.user/name "sean"}]
+(deftest a-started-agent-names-who-started-it-its-parent
+  ;; docs/users.md#what-each-thing-is: a task names who started it; its agent, when it starts, names that one its :seon.agent/parent,
+  ;; a user or an agent alike, in the write that makes it; the agents one started are its :seon.agent/_parent
+  (let [db (d/db-with (ts/test-db) (into [{:seon.system/id :root :seon.system/boot "b1"} {:seon.agent/key "sean" :seon.user/name "sean"} {:seon.agent/key "lead"}]
                                          (task/create-tx (ts/test-db) [{:seon.task/ns 'demo :seon.task/name "a" :seon.task/plan "A." :seon.task/kind :work}])))
         db (d/db-with db [{:seon.task/id "demo/a" :seon.task/started-by [:seon.agent/key "sean"]}])
-        started (d/db-with db (task/start-tx db "demo/a" "b1" :a1 {:branch :task-demo-a :model nil :max-turns 40} 1000))
-        agents (fn [db] (set (map :seon.agent/key (:seon.agent/agents (d/entity db [:seon.user/name "sean"])))))]
+        env {:branch :task-demo-a :model nil :max-turns 40}
+        started (d/db-with db (task/start-tx db "demo/a" "b1" :a1 env 1000))
+        agents (fn [db] (set (map :seon.agent/key (:seon.agent/_parent (d/entity db [:seon.user/name "sean"])))))
+        parent (fn [db k] (:seon.agent/key (:seon.agent/parent (d/entity db [:seon.agent/key k]))))]
     (is (= #{} (agents db)) "no agent yet")
     (is (= #{"a1"} (agents started)) "its agent, once it starts")
+    (is (= "sean" (parent started "a1")) "the child names its parent")
+    (is (nil? (refusal db (task/start-tx db "demo/a" "b1" :a1 env 1000))) "and the write that makes it passes the one path")
+    (let [again (d/db-with started [{:seon.task/id "demo/a" :seon.task/started-by [:seon.agent/key "lead"]}])]
+      (is (= "sean" (parent (d/db-with again (task/start-tx again "demo/a" "b1" :a1 env 2000)) "a1")) "an agent that continues keeps the parent it was made with"))
     (let [none (d/db-with db [[:db/retract [:seon.task/id "demo/a"] :seon.task/started-by [:seon.agent/key "sean"]]])]
-      (is (= #{} (agents (d/db-with none (task/start-tx none "demo/a" "b1" :a1 {:branch :task-demo-a :model nil :max-turns 40} 1000)))) "a task nobody started links nothing"))))
+      (is (nil? (parent (d/db-with none (task/start-tx none "demo/a" "b1" :a1 env 1000)) "a1")) "a task nobody started gives its agent no parent, never an invented one"))
+    (testing "a refine is started by the agent whose run it refines: its agent is that one's child"
+      (let [ended (d/db-with started [{:seon.task/id "demo/a" :seon.task/outcome :merged}])
+            r (d/db-with ended (task/refine-tx ended "demo/a"))]
+        (is (= "a1" (:seon.agent/key (:seon.task/started-by (d/entity r [:seon.task/id "demo/a-refine"])))))
+        (is (= "a1" (parent (d/db-with r (task/start-tx r "demo/a-refine" "b1" :a2 {:branch :task-demo-a-refine :model nil :max-turns 40} 3000)) "a2")))))))
 
 
 ;; docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08 (docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08)

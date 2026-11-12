@@ -49,7 +49,7 @@
   on past a turn cap, raise the agent's :seon.agent/max-turns first (docs/turn.md#the-cap). Answers the writer's answer (or
   {:ok true :changed 0} when none is held) with :not-held when any. Who released it is its starter (:seon.task/started-by): root's REPL
   evaluates as the user (seon.server's root eval records its evals by the user), so the user, and its agent is in the user's tree
-  (:seon.agent/agents, seon.task/start-tx). See docs/users.md#who-started-whom."
+  (:seon.agent/_parent, seon.task/start-tx). See docs/users.md#who-started-whom."
   {:malli/schema [:=> [:cat :seon.system/sys [:sequential :seon.task/id]] :map]}
   [sys ids]
   (let [db @(:conn sys)

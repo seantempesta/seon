@@ -278,7 +278,7 @@
 (defn- pattern-faults
   "The faults in pattern p of entity schema s, at any depth, as [schema thing what]: a `*`, an :as on a join whose attribute (or
   forward attribute, for a reverse one) names its target (:seon.db/to), a ref join its schema's implied pattern does not hold
-  (:seon.agent/agents is the one the implied pattern skips, as it targets its own schema), a join to a history schema (seon.render/history?:
+  (:seon.agent/_parent is the one the implied pattern skips, as it targets its own schema), a join to a history schema (seon.render/history?:
   the conversation's, placed by when each member was linked) that asks no :tx (docs/ctx.md#the-pattern). A join's own pattern is read as its
   target schema's: the owner of a reverse attribute, the one a :by names, else the first its attribute targets."
   {:malli/schema [:=> [:cat [:maybe [:or :qualified-keyword [:vector :qualified-keyword]]] [:vector :any]] [:sequential :any]]}
@@ -294,7 +294,7 @@
                   :let [[a & opts] (if (vector? k) k [k]) o (apply hash-map opts) fwd (if (reverse? a) (forward a) a)
                         target (cond (reverse? a) ((:entity-schemas (pdb/index)) fwd) (:by o) ((:entity-schemas (pdb/index)) (:by o)) :else (let [ts ((:targets (pdb/index)) fwd)] (if (next ts) (vec ts) (first ts))))]
                   fault (concat (when (and ((:targets (pdb/index)) fwd) (:as o)) [[s a :as]])
-                                (when (and ((:targets (pdb/index)) fwd) (not (:by o)) implied (not (implied a)) (not= :seon.agent/agents a)) [[s a :not-implied]])
+                                (when (and ((:targets (pdb/index)) fwd) (not (:by o)) implied (not (implied a)) (not= :seon.agent/_parent a)) [[s a :not-implied]])
                                 (when (and (not (:tx o)) (some #(render/history? (pdb/index) %) (if (sequential? target) target [target]))) [[s a :no-tx]])
                                 (when (vector? sub) (pattern-faults target sub)))]
               fault))))
@@ -1739,7 +1739,7 @@
     (is (= [{:seon.agent/task [:a :b] :seon.agent/key2 [:c]} :seon.agent/key]
            (render/expanded (seon.db/index) [{:seon.agent/task [:a] :seon.agent/key2 [:c]} :seon.agent/key {:seon.agent/task [:b :a]}]))
         "merged at the first clause that asked it, key by key, each clause once")
-    (is (str/includes? (str (try (render/expanded (seon.db/index) [{:seon.agent/agents 3} {:seon.agent/agents 2}]) nil
+    (is (str/includes? (str (try (render/expanded (seon.db/index) [{:seon.agent/_parent 3} {:seon.agent/_parent 2}]) nil
                                  (catch clojure.lang.ExceptionInfo e (ex-data e))))
                        "asked twice and one of them is a depth")
         "a join asked twice where one is a depth is refused, never guessed")))
@@ -1764,27 +1764,27 @@
   ;; silently. A :seon.ctx/below on a join that is no depth is refused, as is a plain join added beside a depth of the same key
   (let [ks ["depth/a" "depth/b" "depth/c" "depth/d" "depth/e"]
         db (:db-after (d/with (ts/test-db) (into (mapv (fn [x] {:seon.agent/key x :seon.agent/turn 1}) ks)
-                                                 (for [[x y] (map vector ks (rest ks))] {:seon.agent/key x :seon.agent/agents #{{:seon.agent/key y}}}))))
+                                                 (for [[x y] (map vector ks (rest ks))] {:seon.agent/key x :seon.agent/_parent #{{:seon.agent/key y}}}))))
         ix (seon.db/index)
-        down #(first (vals (:seon.agent/agents %)))
+        down #(first (vals (:seon.agent/_parent %)))
         tree (fn [p] (:tree (ctx/build ix db (pdb/eid db :seon.agent/key "depth/a") :b p)))
         refused (fn [p] (str (try (render/pattern ix p) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))))
         n (seon.config/value :seon.config.render/agent-tree-depth)]
-    (let [t (tree [:seon.agent/key {[:seon.agent/agents :seon.ctx/below [:db/id]] 2}])
+    (let [t (tree [:seon.agent/key {[:seon.agent/_parent :seon.ctx/below [:db/id]] 2}])
           last-full (down t)]
       (is (= ["depth/a" "depth/b"] (mapv :seon.agent/key [t last-full])) "entries to the depth: the entity and one level more")
       (is (= (pdb/eid db :seon.agent/key "depth/c") (:db/id (down last-full))) "the last full level holds the ids below it")
       (is (nil? (:seon.agent/key (down last-full))) "and nothing else of them"))
-    (is (= (render/pattern ix [:seon.agent/key {:seon.agent/agents [:seon.agent/key {:seon.agent/agents [:db/id]}]}])
-           (render/pattern ix [:seon.agent/key {[:seon.agent/agents :seon.ctx/below [:db/id]] 2}]))
+    (is (= (render/pattern ix [:seon.agent/key {:seon.agent/_parent [:seon.agent/key {:seon.agent/_parent [:db/id]}]}])
+           (render/pattern ix [:seon.agent/key {[:seon.agent/_parent :seon.ctx/below [:db/id]] 2}]))
         "the joins written out, each asked by its key without :seon.ctx/below")
-    (let [t (tree [:seon.agent/key {[:seon.agent/agents :seon.ctx/below [:db/id]] :seon.config.render/agent-tree-depth}])
+    (let [t (tree [:seon.agent/key {[:seon.agent/_parent :seon.ctx/below [:db/id]] :seon.config.render/agent-tree-depth}])
           levels (take-while some? (iterate down t))]
       (is (= (subvec ks 0 n) (vec (keep :seon.agent/key levels))) "a config key's value, the same way")
       (is (nil? (:seon.agent/key (last levels))) "below the last, ids alone"))
-    (is (str/includes? (refused [:seon.agent/key {[:seon.agent/agents :seon.ctx/below [:db/id]] [:seon.agent/key]}]) "it takes a depth")
+    (is (str/includes? (refused [:seon.agent/key {[:seon.agent/_parent :seon.ctx/below [:db/id]] [:seon.agent/key]}]) "it takes a depth")
         "a :seon.ctx/below on a join that is no depth: refused, never ignored")
-    (is (str/includes? (refused [:seon.agent/key {[:seon.agent/agents :seon.ctx/below [:db/id]] 2} {:seon.agent/agents [:seon.agent/status]}])
+    (is (str/includes? (refused [:seon.agent/key {[:seon.agent/_parent :seon.ctx/below [:db/id]] 2} {:seon.agent/_parent [:seon.agent/status]}])
                        "asked twice and one of them is a depth")
         "a plain join added beside a depth of the same key: refused, saying why")))
 
@@ -1793,17 +1793,17 @@
   ;; again under the join, one less each level, the join not asked at 0 (seon.render/pattern writes it out as ordinary joins)
   (let [ks ["depth/a" "depth/b" "depth/c" "depth/d" "depth/e"]
         db (:db-after (d/with (ts/test-db) (into (mapv (fn [x] {:seon.agent/key x :seon.agent/turn 1}) ks)
-                                                 (for [[x y] (map vector ks (rest ks))] {:seon.agent/key x :seon.agent/agents #{{:seon.agent/key y}}}))))
+                                                 (for [[x y] (map vector ks (rest ks))] {:seon.agent/key x :seon.agent/_parent #{{:seon.agent/key y}}}))))
         reached (fn [p] (let [t (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "depth/a") :b p))]
-                          (->> t (iterate #(first (vals (:seon.agent/agents %)))) (take-while some?) (mapv :seon.agent/key))))
+                          (->> t (iterate #(first (vals (:seon.agent/_parent %)))) (take-while some?) (mapv :seon.agent/key))))
         n (seon.config/value :seon.config.render/agent-tree-depth)]
     (is (< n (count ks)) "the chain is deeper than the configured depth, so the cut is seen")
-    (is (= ["depth/a" "depth/b" "depth/c"] (reached [:seon.agent/key :seon.agent/status {:seon.agent/agents 2}])) "two levels, and not a third")
-    (is (= (render/pattern (seon.db/index) [:seon.agent/key {:seon.agent/agents [:seon.agent/key {:seon.agent/agents [:seon.agent/key]}]}])
-           (render/pattern (seon.db/index) [:seon.agent/key {:seon.agent/agents 2}]))
+    (is (= ["depth/a" "depth/b" "depth/c"] (reached [:seon.agent/key :seon.agent/status {:seon.agent/_parent 2}])) "two levels, and not a third")
+    (is (= (render/pattern (seon.db/index) [:seon.agent/key {:seon.agent/_parent [:seon.agent/key {:seon.agent/_parent [:seon.agent/key]}]}])
+           (render/pattern (seon.db/index) [:seon.agent/key {:seon.agent/_parent 2}]))
         "the same spec as the joins written out")
-    (is (= (subvec ks 0 (inc n)) (reached [:seon.agent/key {:seon.agent/agents :seon.config.render/agent-tree-depth}])) "a config key's value")
-    (is (= :seon.ctx/invalid-pattern (:seon.error/type (try (render/pattern (seon.db/index) [:seon.agent/key {:seon.agent/agents 0}])
+    (is (= (subvec ks 0 (inc n)) (reached [:seon.agent/key {:seon.agent/_parent :seon.config.render/agent-tree-depth}])) "a config key's value")
+    (is (= :seon.ctx/invalid-pattern (:seon.error/type (try (render/pattern (seon.db/index) [:seon.agent/key {:seon.agent/_parent 0}])
                                                             (catch clojure.lang.ExceptionInfo e (ex-data e)))))
         "a depth below 1 is refused")))
 
