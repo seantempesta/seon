@@ -101,15 +101,14 @@
 
 (defn- verdict-line
   "One item's verdict as bin/prove --root prints it as it lands (seon.prove's :prove-verdict): PASS with its whole ms, RED with
-  each failure, NO-VERDICT with why, SIGNAL for a step past its bound (no verdict, never red); a test or step by its name, the
+  each failure, NO-VERDICT with why; a test or step by its name, the
   tree's build or seed by its kind and tree. See docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :map] :string]}
-  [{:keys [test kind digest status ms failures signal]}]
+  [{:keys [test kind digest status ms failures]}]
   (let [what (if (#{:build :seed} kind) (str (name kind) " of tree " digest) (str test))
         ms (when ms (str " " (long ms) " ms"))]
     (case status
       :pass (str "PASS " what ms)
-      :signal (str "SIGNAL " what ": " (some-> signal name) ms)
       :no-verdict (str "NO-VERDICT " what ": " (clojure.string/join "; " (map :seon.error/message failures)))
       (clojure.string/join "\n  " (cons (str "RED " what " (" (name status) ")") (map shown failures))))))
 

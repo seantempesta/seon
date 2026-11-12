@@ -422,15 +422,18 @@
 
 (defn text-refusal
   "Why text can't be the shipped config on this process's branch, as a boot reads it with no profile, or nil: its message names each key. What a write of the file checks first (seon.fx/unreadable). See docs/source.md#a-program-file."
-  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
-  [text]
+  {:malli/schema [:function [:=> [:cat :string] [:maybe :string]] [:=> [:cat :string [:maybe [:map-of :qualified-keyword :any]]] [:maybe :string]]]}
+  ([text] (text-refusal text nil))
+  ;; changes: schema entries the same change states ({k form}, a branch's schema files read with it), so a config key and its
+  ;; schema changed together are checked against each other, never against this process's schema alone
+  ([text changes]
   ;; docs/failure-points.md: text that aero can't read, or a map that doesn't validate, is this answer
   (try
     (layered [[shipped-file (read-layer (java.io.StringReader. text) :default (checkout))]
               ["no --profile" {:seon.config.root/profile :default}]]
-             (:schema @held))
+             (if (seq changes) (schema-of changes) (:schema @held)))
     nil
-    (catch Throwable e (ex-message e))))
+    (catch Throwable e (ex-message e)))))
 
 ;; ---- reading a setting: the one resolver ------------------------------------------------------
 ;; Owner: settings are per model, per provider and per task; "a principle and not just

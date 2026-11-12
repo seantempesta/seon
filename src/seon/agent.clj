@@ -1696,7 +1696,10 @@
                                       :ms (let [ts (into (:run sel) (keys (:process pp)))] (proofs/estimated-ms ts (fx/typical-ms ts) (:process (:plan sel))))
                                       :at-judge (count (:judge sel)) :reused-reports (:reused-reports sel)
                                       :digests (select-keys (:digests sel) (filter (:reused sel) (:selected sel)))}
-                               (seq (:deferred sel)) (assoc :why (into {} (for [t (:deferred sel)] [t (program/process-path (:graph (:plan sel)) t)])))
+                               (seq (:deferred sel)) (assoc :why (into {} (for [t (:deferred sel)] [t (program/process-path (:graph (:plan sel)) t)]))
+                                                           ;; each deferred test's digest at the base, from the base's program (nil: new on the
+                                                           ;; branch), which the merge check reads main's verdict at; the service's answer carries it
+                                                           :deferred-digests (into {} (for [t (:deferred sel)] [t (get (:base-digests (:plan sel)) t)])))
                                pp (merge (select-keys pp [:process :steps :build :missing]))))}])
            (let [proofs (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
                  ;; items of a run of a session's checkout: their test children read that checkout's files (test-child)
