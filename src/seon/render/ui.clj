@@ -1993,9 +1993,11 @@
   [{ix :seon.render/index} c]
   [:div {:id "p-task"}
    ;; what its pull joins, each by its own render, in the pull's order: its task first, as the agent's pattern joins it first
-   (seq (own-tiles ix c))
-   ;; the person it works for, with their sessions, where its pull holds them so (root's session's pattern, `person-of`)
-   (person-of c)
+   ;; the person it works for, with their sessions, where its pull holds them so (root's session's pattern, `person-of`): a session the
+   ;; person's entry draws is not drawn again among its own tiles, so each is on the page once, under who started it
+   (let [u (person-of c)
+         under (into #{} (map #(:db/id (ratom/untracked %))) (when u (started-agents ix u)))]
+     (seq (cond-> (vec (remove #(under (:db/id (ratom/untracked %))) (own-tiles ix c))) u (conj u))))
    [#'eval-tiles {} c]
    ;; then the agent's own state, from its own attributes
    (when (:seon.agent/task c) [#'status {:at [:seon.agent/task :proved]}])

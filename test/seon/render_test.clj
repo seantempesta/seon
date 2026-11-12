@@ -776,7 +776,10 @@
                  "message-m-1" "model-call-view-b8ce12ca44ca5601" "p-agent-head" "p-caption" "p-head" "p-input" "p-rules" "p-task" "p-tiles" "page-rules" "status"
                  "step-back-a3-e1" "step-back-a3-e2" "step-back-a3-e3" "step-edit-a3-e1" "step-edit-a3-e2" "step-edit-a3-e3" "steps-1" "system-message" "task-view-demo_2Ff"
                  "turn" "u-agent-a3" "u-root-side"}
-        root0 #{"agent-a3" "agent-state" "agent-user" "app" "c-rows" "c-side" "eval-output-root-1" "eval-root-1" "evaluation-root-1" "p-agent-head" "p-caption" "p-head"
+        ;; 2026-11-12: root's session names its task (request/root, as any request's agent does), so its page draws it as an agent's does:
+        ;; the task, its cite, how it stands, its turn and the chat's ask
+        root0 #{"chat-ask" "cite-request_2Froot_20docs_2Fagent_2Emd_23working-for-a-person" "status" "task-view-request_2Froot" "turn"
+                "agent-a3" "agent-state" "agent-user" "app" "c-rows" "c-side" "eval-output-root-1" "eval-root-1" "evaluation-root-1" "p-agent-head" "p-caption" "p-head"
                 "p-input" "p-rules" "p-task" "p-tiles" "page-rules" "problems-tile" "process-tile" "root-evals" "root-head" "stage-as" "stage-front" "system-message"
                 "u-agent-a3" "u-root-side"}
         ;; what the frame's page-chrome drew by hand is now the layout's: its root (the page), its columns and the frame's slot for it

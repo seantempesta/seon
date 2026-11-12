@@ -1170,8 +1170,9 @@
       ;; stage (seon.render.ui/stage, its own render, which a person turns back to the conversation): the page a fresh system opens on
       (let [user (task/sender (cfg/value :seon.config.root/user-name))]
         (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.system/id :root] :seon.ctx/pattern [:seon.db/agent-fact {:seon.agent/task [{:seon.task/started-by :seon.db/user-fact}]}]
-                :seon.render/hiccup 'seon.render.ui/stage}]
-              (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked :seon.task/started-by user}))))))
+                :seon.render/hiccup 'seon.render.ui/stage :seon.agent/task "root-task"}]
+              ;; its task both ways, as start-tx links a request's agent: root's pattern reaches the person it works for through it
+              (conj (vec tx) {:db/id "root-task" :seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked :seon.task/started-by user}))))))
 
 (defn root-agent-boot-tx
   "At boot, root's session: made when main has none (`root-agent-tx`; the owner's ruling, root's agent is there from boot), else
