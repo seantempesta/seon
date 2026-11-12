@@ -569,8 +569,8 @@
                                (throw e))))]
               (if (:seon.error/type cid)
                 (assoc cid :ok false :applied [] :t (:max-tx head))
-                ;; the old connection goes first: a connect while it is held is the same connection, and its writer's db is from before
-                ;; the move, so the next write would apply onto that and drop what the rebase brought
+                ;; force-branch! moved the held connection to the new head with it (docs/storage.md#a-moved-head-moves-its-live-connection);
+                ;; this process connects anew for its new config
                 (let [_ (d/release (:store-conn @state))
                       conn (pdb/connect (assoc (:cfg @state) :branch b))
                       db @conn
