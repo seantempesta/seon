@@ -191,17 +191,19 @@
   "The render function v takes, as the entity index ix reads schemas: its own override (a symbol), else its schema's declared one (opts :schema, else seon.render/schema-of: one metadata read or one map lookup
   per key, never a validation), else nil (the printer). nil also when v's own key holds an
   already rendered result."
-  {:malli/schema [:=> [:cat :map :any [:maybe :qualified-keyword]] [:maybe :seon.host/fn]]}
+  {:malli/schema [:=> [:cat :map :any [:maybe :qualified-keyword]] [:maybe :seon.host/var]]}
   [ix v hint]
+  ;; the var, never its fn: a call of it placed in hiccup ([var opts v], `nested`) is a component the walk gives what its contract asks
+  ;; (`inputs-in` reads a var's), where a fn's call ran with only the opts it was written with (seon.render.ui/searched, no db, threw)
   (let [own (own-key v :seon.render/hiccup)]
     (if (symbol? own)
       ;; a value's own says what it was drawn by where it was made: an agent's definition no other process holds, drawn as the data it is there (nil, the printer)
-      (some-> (when-let [n (some-> (namespace own) symbol find-ns)] (ns-resolve n (symbol (name own)))) deref)
+      (when-let [n (some-> (namespace own) symbol find-ns)] (ns-resolve n (symbol (name own))))
       (when-let [sym (when (nil? own) (declared ix (schema-of ix v hint)))]
         ;; a render that reads the walk's ctx (an entity's page: an agent's, root's) renders the entity a walk is rooted on, not a value
         ;; an eval answered (a pulled agent, an entity: only a map with its :db/id is asked, so a plain value costs no lookup): that value
         ;; prints as the data it is
-        (let [f (requiring-resolve sym)] (when-not (and (map? v) (:db/id v) (contains? (inputs f) :seon.ctx/ctx)) @f))))))
+        (let [f (requiring-resolve sym)] (when-not (and (map? v) (:db/id v) (contains? (inputs f) :seon.ctx/ctx)) f))))))
 
 (defn declared-var
   "The var of the render schema k declares (its nearest parent's), or nil: a layout the walk draws
@@ -249,7 +251,9 @@
   (print-hiccup); a value's own key holding hiccup answers that hiccup. opts' :seon.render/index is the entity index its
   schemas are read in (seon.db/index-of), required: a walk's own, filled by `render!` and `emit`, passed on to the render it
   calls. Inside a walk, one render calling another is the interim stage 2a of docs/users.md removes."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.render/index :map]]] :any] :any]}
+  ;; it asks the db (optional): placed in a walk it is a component, so a nested value's render inside its output (`nested`) passes emit
+  ;; and is given what its own contract asks (seon.render.ui/searched: the db)
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.render/index :map] [:seon.db/db {:optional true} :seon.host/db]]] :any] :any]}
   [opts v]
   (let [own (own-key v :seon.render/hiccup) ix (:seon.render/index opts)]
     (if (and (some? own) (not (symbol? own)))
@@ -346,7 +350,7 @@
   ([src db-fn root] (assoc (walker src db-fn root (program/index-of-db (db-fn))) :own-index? true))
   ([src db-fn root ix]
   {:src src :db db-fn :root root :index (volatile! ix) :own-index? false :cache (volatile! {}) :queue (volatile! #{}) :mounts (volatile! 0)
-   :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{}) :readers (volatile! {}) :forms (volatile! {}) :drawn (ratom/atom {}) :watched (volatile! #{}) :inputs (volatile! {}) :tree-readers (volatile! nil) :gone (volatile! #{}) :skipped (volatile! #{}) :defects (volatile! [])}))
+   :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{}) :readers (volatile! {}) :forms (volatile! {}) :drawn (ratom/atom {}) :watched (volatile! #{}) :inputs (volatile! {}) :tree-readers (volatile! nil) :drawn-fns (volatile! {}) :gone (volatile! #{}) :skipped (volatile! #{}) :defects (volatile! [])}))
 
 (defn- led!
   "Count k (:hit, :miss, :same) for render var f in w's ledger, with the ticks and bytes a run took."
@@ -520,8 +524,12 @@
                 (contains? ks :seon.ctx/ctx) (assoc :seon.ctx/ctx (if (:once w) @(:ref (:src w)) (ratom/fresh nil (ratom/ref-view (:ref (:src w)) (:changes (:src w))))))
                 db? (assoc :seon.db/db ((:db w)))
                 true (assoc :seon.render/index @(:index w))
-                (contains? ks :seon.render/drawn) (assoc :seon.render/drawn (:drawn w)))
+                (contains? ks :seon.render/drawn) (assoc :seon.render/drawn (if (:pure w) (ratom/atom @(:drawn-fns w)) (:drawn w))))
             ;; a render drawn for the first time in this walk: watched, so its redefinition draws it again
+            ;; a walk kept as a value: the render drawn, kept as a value (:drawn-fns); one new to it queues the readers of what was drawn (`walk`)
+            _ (when (and (:pure w) (var? f) (not (identical? (get @(:drawn-fns w) f) (var-get f))))
+                (vswap! (:drawn-fns w) assoc f (var-get f))
+                (vswap! (:drawn-moved w) (fnil conj #{}) f))
             _ (when (and (var? f) (not (:pure w)) (not (contains? @(:watched w) f)))
                 (vswap! (:watched w) conj f)
                 (swap! (:drawn w) assoc f (var-get f))
@@ -625,7 +633,7 @@
         ;; merged: its written html (placed-units) stays while its revision does
         (vswap! (:cache w) update k merge {:f f :opts opts :args args :rx rx :out (if same? (:out prev) out) :children children
                                     :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0))) :kept @kept :outs @outs
-                                    :reads read-keys :fv (when (var? f) (var-get f)) :tree-reads @tree-reads})
+                                    :reads read-keys :fv (when (var? f) (var-get f)) :tree-reads @tree-reads :drawn? (contains? ks :seon.render/drawn)})
         ;; a walk kept as a value: who read what of the tree, as it reads its db (`walk`)
         (when (:pure w)
           (let [was (or (:tree-reads prev) #{}) now (or @tree-reads #{})]
@@ -1285,7 +1293,7 @@
   "The parts of a walker a walk kept as a value (`walk`) carries from one call to the next: each component's entry, who read
   what, the components that read the db, the root's key, the mount counter and each render var's inputs. The rest are made anew.
   See docs/render.md#a-page-is-a-kept-walk."
-  [:cache :readers :db-keys :out :mounts :inputs :tree-readers])
+  [:cache :readers :db-keys :out :mounts :inputs :tree-readers :forms :drawn-fns])
 
 (defn- queue-what-moved!
   "Walk w holding prev's parts (`walk`), each component queued that what moved since reaches: who read a tree path under one the
@@ -1301,6 +1309,26 @@
       (doseq [rk ks] (vswap! (:queue w) into (get @(:readers w) rk #{})))))
   nil)
 
+(defn- walk-answer
+  "What `walk` answers of walk w after its draw: the next prev (its kept parts), :answers for each output but the hiccup (last time's
+  when nothing ran), and, asked, :hiccup (`resolved`) and :units (`placed-units`), read while w's cells are live. See
+  docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat [:maybe :map] :map :map :boolean :map] :map]}
+  [prev w env warm? {:keys [tree index root outputs resolve units]}]
+  (let [ran @(:ran env)]
+    (into (cond-> {:tree tree :index index :root root :ran ran :defects @(:defects w) :ledger @(:ledger w)
+           ;; nothing ran: every answer is last time's
+           :answers (if (and warm? (empty? ran))
+                      (:answers prev)
+                      (into {} (for [o outputs :when (not= o :seon.render/hiccup)] [o (answer-sources w o)])))}
+           ;; the page as hiccup, each placed component's output in its place (`resolved`), when the hiccup is asked; last time's when nothing ran
+           resolve (assoc :hiccup (if (and warm? (empty? ran) (contains? prev :hiccup)) (:hiccup prev) (resolved w @(:out w) false)))
+           ;; the page as the render proc lays it out (`placed-units`), read while its cells are live, so each component's placements and
+           ;; html stay kept on its entry for the next call
+           units (assoc :units (placed-units w)))
+          (map (fn [p] [p @(get w p)]))
+          kept-parts)))
+
 (defn walk
   "Tree (seon.ctx/build's :tree) drawn by root render var root on db, kept as a value: prev is what the last call answered (nil, or
   opts :moved nil: drawn cold), :moved the datoms since prev's db. A component is reused when its arguments are the same (a view by
@@ -1310,13 +1338,13 @@
   docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat [:maybe :map] [:map [:db :seon.host/db] [:tree :any] [:root :any] [:index :map] [:outputs [:set :keyword]]
                                             [:changes :seon.host/fn] [:moved {:optional true} [:maybe [:sequential :any]]]
-                                            [:model-only {:optional true} :boolean] [:resolve {:optional true} :boolean]]]
+                                            [:model-only {:optional true} :boolean] [:resolve {:optional true} :boolean] [:units {:optional true} :boolean]]]
                   [:map [:answers :map] [:ran :map] [:defects [:vector :map]] [:tree :any] [:index :map] [:root :any]]]}
-  [prev {:keys [db tree root index outputs changes moved model-only resolve]}]
+  [prev {:keys [db tree root index outputs changes moved model-only resolve units]}]
   (let [r (ratom/atom tree)
         warm? (and (some? prev) (some? moved) (identical? index (:index prev)) (= root (:root prev)))
         w (assoc (walker {:ref r :changes changes} (constantly db) [root {} (ratom/ref-view r changes)] index)
-                 :pure true :outputs outputs :model-only (boolean model-only))
+                 :pure true :outputs outputs :model-only (boolean model-only) :drawn-moved (volatile! nil))
         env {:children (volatile! []) :ran (volatile! {})}]
     (when warm? (queue-what-moved! w prev tree changes moved))
     ;; the root drawn (a hit when nothing it holds moved), then each queued component it holds that its draw did not reach
@@ -1324,18 +1352,13 @@
           held? (fn held? [c] (or (= k c) (some held? (:parents (get @(:cache w) c)))))]
       (vreset! (:out w) k)
       (run-queued! w env held?)
+      ;; a render drawn for the first time: the components that read what was drawn (the page's rules) draw again
+      (when (seq @(:drawn-moved w))
+        (vswap! (:queue w) into (keep (fn [[ck c]] (when (:drawn? c) ck))) @(:cache w))
+        (run-queued! w env held?))
       (doseq [c @(:gone w) :when (empty? (:parents (get @(:cache w) c)))] (unmount! w c))
       (vreset! (:gone w) #{}))
-    (let [ran @(:ran env)]
-      (into (cond-> {:tree tree :index index :root root :ran ran :defects @(:defects w) :ledger @(:ledger w)
-             ;; nothing ran: every answer is last time's
-             :answers (if (and warm? (empty? ran))
-                        (:answers prev)
-                        (into {} (for [o outputs :when (not= o :seon.render/hiccup)] [o (answer-sources w o)])))}
-             ;; the page as hiccup, each placed component's output in its place (`resolved`), when the hiccup is asked; last time's when nothing ran
-             resolve (assoc :hiccup (if (and warm? (empty? ran) (contains? prev :hiccup)) (:hiccup prev) (resolved w @(:out w) false))))
-            (map (fn [p] [p @(get w p)]))
-            kept-parts))))
+    (walk-answer prev w env warm? {:tree tree :index index :root root :outputs outputs :resolve resolve :units units})))
 
 (defn dispose-walk!
   "Every component of walk w disposed, and the render vars it watched and the inputs it kept (inputs-in) let go:

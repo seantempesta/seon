@@ -647,7 +647,8 @@
                :growth :constant
                ;; measured 2026-11-12 on jolt/web by the test runner: 17 calls, 19.0 KB, 3.5k ticks at every size; 18 and 20.2 KB once the
                ;; queueing of what moved became its own function (walk's form was over the token bound)
-               :fixed {:calls 18 :bytes 21000}
+               ;; 19 and 23.3 KB once walk's answer is its own function and the page's drawn renders are two kept cells (the render proc's page walks, step 1)
+               :fixed {:calls 19 :bytes 24000}
                :sizes [10 20 40]}))
 
 (defn newest-pair-of
