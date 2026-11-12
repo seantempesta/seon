@@ -1381,10 +1381,11 @@
   "Whether entity schema s (in the entity index ix) is the conversation's: it declares :seon.render/openai-compat (the model reads its
   entities as its native messages) and no :seon.ctx/pattern of its own (eval, message, model call). An agent declares a model render
   and a pattern of its own: it has a page, and is drawn nested by its render's nested form, never as history. Read from the schemas'
-  data, never a list of names nor a render's signature (Point's ruling for the owner, docs/decisions.md). See docs/render.md#the-page."
+  data, never a list of names nor a render's signature (Point's ruling for the owner, docs/decisions.md). The index holds the answer, derived
+  where it is built from the properties it reads (seon.db's entity index, :history-schemas), so a reader asks it with no call. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword]] :boolean]}
   [ix s]
-  (boolean (and s (render-for ix s :seon.render/openai-compat) (nil? (schema-property ix s :seon.ctx/pattern)))))
+  (contains? (:history-schemas ix) s))
 
 (defn page-pattern
   "Pattern p as a page's parts read it: p without the joins whose target schema is history (`history?`: the conversation, which the

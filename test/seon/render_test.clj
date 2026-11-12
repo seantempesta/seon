@@ -4012,7 +4012,7 @@
 
 (def ^:private called (atom 0))
 
-(defn planted-fn
+(defn a-function-a-value-names
   "A system function an agent's value names: counts each call, so a test sees whether drawing a value called it."
   {:malli/schema [:=> [:cat [:* :any]] :any]}
   [& _] (swap! called inc) [:p "CALLED"])
@@ -4022,7 +4022,7 @@
   ;; calls only a var or a fn at a vector's head: a value naming a system function is drawn as data and calls nothing
   (let [[_ branch _] (paged-dbs)
         k "a3"
-        v [:section [:p "kept"] ['seon.render-test/planted-fn {} "x"]]
+        v [:section [:p "kept"] ['seon.render-test/a-function-a-value-names {} "x"]]
         db (d/db-with branch (seon.repl/record-tx {:seon.agent/key k} "h2" (seon.task/sender "a3")
                                                   {:seon.eval/code "(my-render)" :seon.eval/schema :seon.render/hiccup-value
                                                    :seon.eval/call (seon.task/call-ref k 1) :seon.eval/response {:handle 'result/h2 :value v}}))
@@ -4598,7 +4598,7 @@
 ;; @theme); the theme sets --font-sans to the mono face for the page's chrome on purpose, so Markdown prose is drawn by .seon-md's own rule,
 ;; never by a font utility (jolt/readable put font-sans on it, which drew it mono)
 (deftest prose-reads-in-the-text-face
-  (let [css (slurp "resources/public/css/input.css")
+  (let [css (slurp (clojure.java.io/file (seon.config/checkout) "resources/public/css/input.css"))
         md (h/html (ui/markdown "A sentence with `code`."))]
     (is (re-find #"\.seon-md \{ font-family: var\(--font-text\); \}" css) "the Markdown block's face is the text face")
     (is (re-find #"--font-sans: var\(--font-mono\)" css) "the chrome's face stays mono, which is why no font utility reaches prose")
@@ -4611,3 +4611,98 @@
   ;; face, as Markdown prose does; its code stays mono. A rule on the cite component's own style, page-only: nothing the model reads moves
   (let [rs (into {} (r/rules {#'ui/cite nil}))]
     (is (str/includes? (get rs 'seon.render.ui/cite "") ".cite > p { font-family: var(--font-text); }") (pr-str (get rs 'seon.render.ui/cite)))))
+
+(defn note-html
+  "The html render of the registered-schema world's note (:lab.note/note-fact, seon.render-test/a-joined-entity-of-a-registered-schema-reaches-the-page-and-the-request),
+  an agent's own defn: its text behind a marker."
+  {:malli/schema [:=> [:cat :map :map] :any]}
+  [_ e] [:p (str "NOTE-HTML " (:lab.note/text e))])
+
+(defn note-msgs
+  "The model render of the registered-schema world's note: one user message, its text behind a marker of its own."
+  {:malli/schema [:=> [:cat :map :map] [:vector :seon.model/message]]}
+  [_ e] [{:role "user" :content (str "NOTE-MODEL " (:lab.note/text e))}])
+
+(defn- registered-schema-world
+  "The registered-schema world (docs/render.md#the-page): on a test db, as an agent would make it, a schema with both renders
+  (:lab.note/note-fact, drawn by note-html and note-msgs; with history? false the html render alone, so no history),
+  joined by the agent's own :seon.ctx/pattern, one note for agent lab/a1, and tx-data more written after it. Answers {:c the agent's
+  pull :ix :page html :rows the conversation's html (c-rows) :msgs the request's messages, printed}."
+  ([] (registered-schema-world {}))
+  ([{:keys [history? more] :or {history? true}}]
+  (let [reg (fn [db k form] (let [r (my.schema/registration db k form false)]
+                              (when (seon.contract/error? r) (is false (str k " registers: " (pr-str r))))
+                              (d/db-with db (:tx r))))
+        db (-> (ts/test-db)
+               (reg :lab.note/id [:and {:seon.db/identity true} :string])
+               (reg :lab.note/text :string)
+               (reg :lab.note/agent [:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref])
+               (reg :lab.note/note-fact [:map (cond-> {:seon.db/attributes true :seon.render/hiccup 'seon.render-test/note-html}
+                                                   history? (assoc :seon.render/openai-compat 'seon.render-test/note-msgs))
+                                            [:lab.note/id :lab.note/id] [:lab.note/text :lab.note/text] [:lab.note/agent :lab.note/agent]]))
+        pattern (conj (r/schema-property (seon.db/index) :seon.db/agent-fact :seon.ctx/pattern) {[:lab.note/_agent :tx :at] [:db/id :lab.note/id :lab.note/text]})
+        db (d/db-with db [{:seon.agent/key "lab/a1" :seon.ctx/pattern pattern}])
+        db (d/db-with db [{:lab.note/id "n1" :lab.note/text "the note" :lab.note/agent [:seon.agent/key "lab/a1"]}])
+        db (reduce d/db-with db more)
+        db (d/db-with db (seon.doc/load-tx db "docs" {seon.doc/system-page "# A stub of the system prompt\n\nBe brief."}))
+        ix (seon.program/index-of-db db)
+        c (:tree (seon.ctx/build ix db (seon.db/eid db :seon.agent/key "lab/a1") :b))
+        w (draw c seon.ctx/changes db #'ui/agent {:index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
+    (try {:c c :ix ix :page (apply str (map :html (seon.fixtures/page-units w))) :msgs (pr-str (:messages (seon.ctx.wire/request w))) :parts (:parts (seon.ctx.wire/request w))
+          ;; the conversation as the page shows it: the units its list holds (container #c-rows, seon.render.ui/conversation-list)
+          :rows (apply str (keep #(when (= "#c-rows" (:container %)) (:html %)) (seon.fixtures/page-units w)))}
+         (finally (r/dispose-walk! w))))))
+
+(deftest a-joined-entity-of-a-registered-schema-reaches-the-page
+  ;; docs/render.md#the-page: what an agent's pull joins reaches the page by its schema's html render, no code naming it.
+  ;; Registered as data, as an agent would (registered-schema-world): its schema is history (seon.render/history?), so the conversation places it (seon.ctx/placed-messages)
+  (let [{:keys [c ix page]} (registered-schema-world)]
+    (is (= ["the note"] (map :lab.note/text (vals (:lab.note/_agent c)))) "the agent's pull holds the note it joins")
+    (is (= :lab.note/note-fact (r/entity-schema ix (first (vals (:lab.note/_agent c))) nil)) "the note is its registered schema's entity")
+    (is (str/includes? page "NOTE-HTML the note") "the note's html render draws it on the agent's page")))
+
+(deftest a-joined-entity-of-a-registered-schema-reaches-the-request
+  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: what an agent's pull joins reaches the model's request by its schema's
+  ;; renders, no code naming it (registered-schema-world): by its model render where it is history, by its html inside the page eval
+  ;; (my.render/page) where it is a part
+  (let [{:keys [msgs]} (registered-schema-world)]
+    (when-not (is (or (str/includes? msgs "NOTE-MODEL the note") (str/includes? msgs "NOTE-HTML the note"))
+                  "the note reaches the request's messages, as history or in the page")
+      (println "the request's messages:" msgs))))
+
+
+(deftest a-placed-history-member-is-labelled-by-its-schema
+  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: the debug page labels each message the model was sent by what answered
+  ;; it (seon.ctx.wire/part-ref); a member the conversation placed that is no message, eval or reply (the note) is labelled by its
+  ;; entity schema and id, never as the session's opening
+  (let [{:keys [parts]} (registered-schema-world)
+        refs (map first parts)]
+    (is (some #(= :lab.note/note-fact (first %)) refs) (str "the note's part is labelled by its schema: " (pr-str refs)))
+    (is (not-any? #(and (= :session (first %)) (nil? (second %))) refs) "no part labelled as a session with no key")))
+
+(deftest a-join-whose-target-is-no-history-is-no-conversation
+  ;; docs/turn.md#the-turn-is-a-number: the conversation is the joins whose target is history (seon.render/history?, Data model's
+  ;; ruling): an agent's own pattern asking a join with :tx :at whose schema has no model render (a cite, a started agent, here a
+  ;; registered-schema note drawn for html alone) puts none of its members in the conversation
+  (let [{:keys [c rows page msgs]} (registered-schema-world {:history? false})]
+    (is (= ["the note"] (map :lab.note/text (vals (:lab.note/_agent c)))) "the pull holds the note, with its link's :at")
+    (is (some :at (vals (:lab.note/_agent c))))
+    (is (str/includes? rows "system message") "the conversation is drawn")
+    (is (not (str/includes? rows "NOTE-HTML")) "no member of it is placed in the conversation")
+    (is (str/includes? page "NOTE-HTML the note") "the page draws it as a part")
+    (is (not (str/includes? msgs "the note")) "nor read by the model")))
+
+(deftest an-eval-by-another-hand-reaches-the-request-only-as-the-systems-with-an-intent
+  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: an eval no call holds is placed (seon.ctx/placed-messages) and the
+  ;; page shows it; the model reads one by another than the agent only when it is the system's and holds an intent (seon.ctx.wire's
+  ;; turn-entities, Context and Data model 2026-11-11): the system's own work (seon.turn/work!, no intent) and another agent's stay out
+  (let [ev (fn [id by code intent] (cond-> {:seon.eval/id id :seon.eval/agent [:seon.agent/key "lab/a1"] :seon.eval/by by :seon.eval/code code
+                                            :seon.eval/response {:handle (symbol "result" id) :value 1}}
+                                     intent (assoc :seon.eval/intent intent)))
+        {:keys [page msgs]} (registered-schema-world {:more [[(ev "e-work" {:seon.system/id :root} "(+ 100 1)" nil)]
+                                                   [(ev "e-said" {:seon.system/id :root} "(+ 200 2)" "Read the plan.")]
+                                                   [(ev "e-other" {:seon.agent/key "lab/b1"} "(+ 300 3)" nil)]]})]
+    (doseq [code ["(+ 100 1)" "(+ 200 2)" "(+ 300 3)"]] (is (str/includes? page code) (str "the page shows " code)))
+    (is (str/includes? msgs "(+ 200 2)") "the system's eval with an intent reaches the request")
+    (is (not (str/includes? msgs "(+ 100 1)")) "the system's work with no intent does not")
+    (is (not (str/includes? msgs "(+ 300 3)")) "nor another agent's")))
