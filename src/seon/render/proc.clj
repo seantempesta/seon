@@ -494,8 +494,9 @@
 
 (defn- user-walks
   "St with each user's kept walk advanced to main db, and the views that show one dirty, as root's own is (`root-walk`): the components the move reached are drawn, nothing else. See docs/render.md#a-page-is-a-kept-walk."
-  {:malli/schema [:=> [:cat :map :seon.host/db [:maybe :map]] :map]}
-  [st db known]
+  {:malli/schema [:function [:=> [:cat :map :seon.host/db] :map] [:=> [:cat :map :seon.host/db [:maybe :map]] :map]]}
+  ([st db] (user-walks st db nil))
+  ([st db known]
   (let [cell (or (:user-walks st) (volatile! {}))
         ;; the signed-in user's agents list is every page's (`user-sides`): its change redraws every view
         signed (some-> db (d/entity [:seon.system/id :root]) :seon.system/signed-in :seon.user/name)
@@ -507,7 +508,7 @@
       (seq @cell) (update :dirty (fnil into #{})
                           ;; the views of the agents these walks draw (each branchless: a user, root's session): their pages moved with main
                           (filter (fn [v] (let [x (if (vector? v) (second v) v)]
-                                            (when (keyword? x) (some->> (location db x) (d/entity db) :seon.agent/key (contains? @cell))))) (keys (:views st)))))))
+                                            (when (keyword? x) (some->> (location db x) (d/entity db) :seon.agent/key (contains? @cell))))) (keys (:views st))))))))
 
 (defn- user-sides
   "The agents list every page shows: the signed-in user's (root's :seon.system/signed-in), as that user's kept walk drew it (seon.render.ui/agents-list,
