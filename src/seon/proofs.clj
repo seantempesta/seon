@@ -532,11 +532,14 @@
   so no test pays it inside its own budget: an agent before its first test fork (its forks inherit it made), a bin/test shard
   before its first test when one of its tests reaches a fixture (test-runner/shard!). Answers how many it forced. See
   docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
-  {:malli/schema [:=> [:cat] nat-int?]}
-  []
-  (let [vs (for [n (all-ns) [_ v] (ns-interns n) :when (:seon.test/fixture (meta v))] v)]
-    (doseq [v vs] (force @v))
-    (count vs)))
+  {:malli/schema [:function [:=> [:cat] nat-int?] [:=> [:cat [:set :keyword]] nat-int?]]}
+  ([] (warm-fixtures! #{:seon.test/fixture}))
+  ([types]
+   ;; types: the fixture types to force: an agent the store's (:seon.test/fixture), a shard also its shared root's
+   ;; (:seon.test/shard-fixture), never booted inside an agent
+   (let [vs (for [n (all-ns) [_ v] (ns-interns n) :when (some #(get (meta v) %) types)] v)]
+     (doseq [v vs] (force @v))
+     (count vs))))
 
 (defn reads-reusable
   "The tests of index (graph-index's: {test {:process? ...}}) whose green may be reused by what it recorded it read: every one
