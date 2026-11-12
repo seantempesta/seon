@@ -476,12 +476,12 @@
 ;;; --- an eval's parts ---------------------------------------------------------------
 
 (defn- cost-line
-  "What an evaluation cost, as recorded when it ran, in the one wording (`seon.print/cost-text`), its result's cost to the context
+  "What an evaluation cost, as recorded when it ran, in the one wording (`seon.print.emit/cost-text`), its result's cost to the context
   among it; one not recorded is left out, never shown as 0, and an eval never run says so."
   {:malli/schema [:=> [:cat :map] :any]}
   [r]
   [:span {:class "tabular-nums text-text-400"}
-   (if (some r [:ms :ticks :bytes]) (print/cost-text (select-keys r [:ms :ticks :bytes])) "not run")])
+   (if (some r [:ms :ticks :bytes]) (emit/cost-text (select-keys r [:ms :ticks :bytes])) "not run")])
 
 (defn sender
   "Who sent a message or ran an eval, from the entity the pull joins as its :seon.message/from or :seon.eval/by, as a person reads it: an
@@ -1410,7 +1410,7 @@
         ;; who ran it: the agent's own turn, or the sender who did (`ran-by`)
         (ran-by e)
         (when ms [:span {:class "seon-ms"} (emit/ms-text ms)])
-        [:span (print/tokens-text (+ (render/tokens-of ix (:seon.eval/code e)) (render/tokens-of ix (:seon.eval/response e))))]
+        [:span (emit/tokens-text (+ (render/tokens-of ix (:seon.eval/code e)) (render/tokens-of ix (:seon.eval/response e))))]
         [:code {:class "seon-handle"} (str handle)]]
        ;; each by the one render under the value's budget; a cut reads the rest through its key of the handle
        (for [[label k s] printed]
@@ -2406,7 +2406,7 @@
        [:span {:class "seon-note"} (str id " · sent to the model")]
        (if long?
          [:details (cond-> (toggle unit) opened? (assoc :open true))
-          [:summary {:class "cursor-pointer text-text-300"} (str (print/tokens-text tokens) " read whole: open to read it")]
+          [:summary {:class "cursor-pointer text-text-300"} (str (emit/tokens-text tokens) " read whole: open to read it")]
           (when opened? pre)]
          pre)]
       [:div {:class "flex min-w-0 flex-col gap-1"}
@@ -2546,7 +2546,7 @@
                                      (if truncated? [:span shown " " [:span {:class "seon-print-elision"} (emit/cut-words omitted lines nil)]] shown))]
                   (when new? [:span {:class "shrink-0 text-2xs text-signal"} "new"])
                   (when example [:span {:class "shrink-0 text-2xs text-info"} (str "example session " example)])
-                  [:span {:class (str "ml-auto shrink-0 tabular-nums " (size-class (get sizes i)))} (print/tokens-text (get sizes i))]]
+                  [:span {:class (str "ml-auto shrink-0 tabular-nums " (size-class (get sizes i)))} (emit/tokens-text (get sizes i))]]
                  (when open?
                    [:div {:class "mt-1 flex min-w-0 flex-col gap-2"}
                     (when (seq rs) [:span {:class "seon-note"} (str/join " · " (map source rs))])
@@ -2565,7 +2565,7 @@
       [:b {:class "text-signal"} (if to-come? (str "turn " turn ", to come: what it would send now") (str "turn " turn))]
       [:span {:class "text-text-400"} agent]
       [:span {:class (str "tabular-nums " (request-class (or tokens est)))}
-       (if tokens (str (group3 tokens) " tokens") (print/tokens-text est))]
+       (if tokens (str (group3 tokens) " tokens") (emit/tokens-text est))]
       (when (and prompt (pos? prompt))
         [:span {:class "tabular-nums text-text-400"} (str (group3 cache-hit-tokens) " of " (group3 prompt) " prompt tokens from cache (" (long (* 100 (/ cache-hit-tokens prompt))) "%)")])
       [:span {:class "muted"} (str (count ms) " messages · " (count (filter true? new)) " new")]

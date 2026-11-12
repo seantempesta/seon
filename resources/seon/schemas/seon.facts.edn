@@ -393,7 +393,8 @@
  :seon.task/plan :seon.db/text
  :seon.task/instructions :seon.db/text
  :seon.task/proofs [:set {:description "The tests that say this task is done. A proof is a clojure.test deftest in the test namespace of what it proves, built on a small test world, never the live db: (my.test/world). Register one with (my.task/update! :seon.task/proofs conj (quote ns-test/name)). (prove) runs your proofs and every test your change reaches, and records the verdicts; clojure.test/run-test-var records nothing."} :qualified-symbol]
- :seon.task/needs [:set {:seon.db/to [:seon.task/task-fact] :description "The tasks that this task needs."} :seon.db/ref]
+ :seon.task/needs [:set {:seon.db/to [:seon.task/task-fact] :description "The tasks that this task needs: it starts on their result, once each has merged or is done."} :seon.db/ref]
+ :seon.task/after [:set {:seon.db/to [:seon.task/task-fact] :description "The tasks whose end this task waits for, whatever their outcome (a refine is after the task it refines); it starts once each has ended (:seon.status/ended)."} :seon.db/ref]
  ;; the example sessions its agent reads before its own (seon.ctx.wire/request): agents keyed "example/<id>"
  ;; (seon.ctx.session/session-tx), drawn by the renders that draw its own session
  :seon.task/examples [:set {:seon.db/to [:seon.db/agent-fact] :description "The example sessions its agent reads before its own: refs to agents keyed \"example/<id>\", finished sessions of other tasks, which the model reads as messages (seon.ctx.wire/request) and the page draws with seon.render.ui/examples. See docs/tasks.md#a-task-names-examples."} :seon.db/ref]
@@ -453,6 +454,7 @@
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                           [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind]
                           [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/needs {:optional true} :seon.task/needs]
+                          [:seon.task/after {:optional true} :seon.task/after]
                           [:seon.task/examples {:optional true} :seon.task/examples]
                           [:seon.task/instructions {:optional true} :seon.task/instructions]
                           [:seon.task/model {:optional true} :seon.task/model]
@@ -481,7 +483,7 @@
  ;; merge; :gate, a merge whose process tests are to run first; :merged, in main; :behind, a merge main moved under; :dead, its
  ;; agent died; :lost, its process was gone; :killed, stopped for a cancel, a hold or a changed environment; :refused, root refused
  ;; the spawn; :closed, judged when its task was no longer running, or held for root
- :seon.task/outcome [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ready :gate} :seon.status/failed #{:dead :lost} :description "How the task's work stands or ended."}
+ :seon.task/outcome [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ready :gate} :seon.status/failed #{:dead :lost} :seon.status/ended #{:done :merged :dead :lost :closed :cap} :description "How the task's work stands or ended."}
                      [:enum :running :parked :told :cap :done :ready :gate :merged :behind :dead :lost :killed :refused :closed]]
  ;; why it stands so: the agent's own words, or root's (the death, a refused start)
  ;; the branch of the agent that launched this task (my.task/launch!), told how it ends (seon.reconcile/tell-tx)
