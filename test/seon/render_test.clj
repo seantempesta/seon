@@ -87,7 +87,8 @@
           "none takes its value first")))
   (testing "a nested value's render is a call [f opts v], which the writer expands"
     (let [out (r/print-hiccup {:seon.render/index (seon.db/index)} {:k {:seon.model-call/id "b1/a1/1" :seon.model-call/n 1}})
-          call (some #(when (and (vector? %) (not (keyword? (first %))) (fn? (first %))) %) (tree-seq coll? seq out))]
+          ;; its head the render's var (seon.render/render-of), so a walk gives it what its contract asks
+          call (some #(when (and (vector? %) (var? (first %))) %) (tree-seq coll? seq out))]
       (is (= {:as :inline} (dissoc (second call) :seon.render/index)) "opts second")
       (is (= "b1/a1/1" (:seon.model-call/id (nth call 2))) "the value its child"))
     (is (str/includes? (h/html [:div [r/hiccup {:schema :seon.task/task :seon.render/index (seon.db/index)} task]]) "task · calc/add") "[f opts v] in hiccup")))
@@ -3562,6 +3563,26 @@
            (is (str/includes? html "the plain call broke") "what threw is on the page")
            (is (not (str/includes? html "<span class=\"err\">")) "by the error's render, not a bare span"))
          (is (= [:seon.render/component-defect] (map :seon.error/type (r/take-defects! w))) "recorded as a component's defect")
+         (finally (r/dispose-walk! w)))))
+
+(defn- nested-search-layout
+  "A layout printing a value that holds a search (its schema's render, seon.render.ui/searched, asks the db) inside it, as an eval's
+  value holds one."
+  {:malli/schema [:=> [:cat :seon.render/opts] :any]}
+  [{ix :seon.render/index}]
+  [:div [:div {:id "parts"} [#'r/hiccup {:seon.render/index ix} {:found {:seon.search/id "s-nested" :seon.search/query "render walk" :seon.search/k 2}}]]])
+
+;; See docs/render.md#one-rendering-system-drawn-from-the-data
+(deftest ^{:seon.test/estimate {:ticks 15000000}} a-nested-value-whose-render-asks-the-db-draws-with-it
+  ;; estimate: a two-component walk (~0.5M), one search of the test db's few texts (~5M), its html (~1M); the db built once (~5M)
+  ;; a value printed inside another draws by its schema's render as a component of the walk, given what that render's contract asks
+  ;; (:seon.db/db): seon.render.ui/searched ran as a plain call without it and threw (web's 23:30 land)
+  (let [db (ts/test-db)
+        w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly db) [#'nested-search-layout {}] (seon.db/index))]
+    (try (r/flush! w nil)
+         (let [html (apply str (map :html (r/placed-units w)))]
+           (is (str/includes? html "searched") (str "the search drawn by its render: " html)))
+         (is (= [] (r/take-defects! w)) "no render threw")
          (finally (r/dispose-walk! w)))))
 
 (deftest a-component-that-throws-is-a-problem-health-reads

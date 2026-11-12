@@ -191,17 +191,19 @@
   "The render function v takes, as the entity index ix reads schemas: its own override (a symbol), else its schema's declared one (opts :schema, else seon.render/schema-of: one metadata read or one map lookup
   per key, never a validation), else nil (the printer). nil also when v's own key holds an
   already rendered result."
-  {:malli/schema [:=> [:cat :map :any [:maybe :qualified-keyword]] [:maybe :seon.host/fn]]}
+  {:malli/schema [:=> [:cat :map :any [:maybe :qualified-keyword]] [:maybe :seon.host/var]]}
   [ix v hint]
+  ;; the var, never its fn: a call of it placed in hiccup ([var opts v], `nested`) is a component the walk gives what its contract asks
+  ;; (`inputs-in` reads a var's), where a fn's call ran with only the opts it was written with (seon.render.ui/searched, no db, threw)
   (let [own (own-key v :seon.render/hiccup)]
     (if (symbol? own)
       ;; a value's own says what it was drawn by where it was made: an agent's definition no other process holds, drawn as the data it is there (nil, the printer)
-      (some-> (when-let [n (some-> (namespace own) symbol find-ns)] (ns-resolve n (symbol (name own)))) deref)
+      (when-let [n (some-> (namespace own) symbol find-ns)] (ns-resolve n (symbol (name own))))
       (when-let [sym (when (nil? own) (declared ix (schema-of ix v hint)))]
         ;; a render that reads the walk's ctx (an entity's page: an agent's, root's) renders the entity a walk is rooted on, not a value
         ;; an eval answered (a pulled agent, an entity: only a map with its :db/id is asked, so a plain value costs no lookup): that value
         ;; prints as the data it is
-        (let [f (requiring-resolve sym)] (when-not (and (map? v) (:db/id v) (contains? (inputs f) :seon.ctx/ctx)) @f))))))
+        (let [f (requiring-resolve sym)] (when-not (and (map? v) (:db/id v) (contains? (inputs f) :seon.ctx/ctx)) f))))))
 
 (defn declared-var
   "The var of the render schema k declares (its nearest parent's), or nil: a layout the walk draws
@@ -249,7 +251,9 @@
   (print-hiccup); a value's own key holding hiccup answers that hiccup. opts' :seon.render/index is the entity index its
   schemas are read in (seon.db/index-of), required: a walk's own, filled by `render!` and `emit`, passed on to the render it
   calls. Inside a walk, one render calling another is the interim stage 2a of docs/users.md removes."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.render/index :map]]] :any] :any]}
+  ;; it asks the db (optional): placed in a walk it is a component, so a nested value's render inside its output (`nested`) passes emit
+  ;; and is given what its own contract asks (seon.render.ui/searched: the db)
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.render/index :map] [:seon.db/db {:optional true} :seon.host/db]]] :any] :any]}
   [opts v]
   (let [own (own-key v :seon.render/hiccup) ix (:seon.render/index opts)]
     (if (and (some? own) (not (symbol? own)))
