@@ -104,7 +104,7 @@
 
 (defn run
   "(thunk) under its own token, stopped by root's SIGUSR1, once it has run ticks engine ticks, or
-  once it has allocated bytes (nil: no budget of that kind). Throws ex-info {:interrupted true} when
+  once it has allocated bytes (nil: no budget of that kind). Throws a java.lang.ThreadDeath (an Error: every (catch Exception e) lets it pass) when
   root stopped it, or the typed :seon.repl/ticks-spent {:ticks n} or :seon.repl/bytes-spent {:bytes
   n} when a budget ran out."
   {:malli/schema [:function [:=> [:cat [:maybe pos-int?] :seon.host/fn] :any]
@@ -113,7 +113,7 @@
   ([ticks bytes thunk]
   ;; an enclosing eval already stopped, or root's interrupt is pending: this one does not start
   (when (or @pending (some #(deref (:cause %)) @stack))
-    (throw (ex-info "interrupted by root" {:interrupted true})))
+    (throw (ThreadDeath.)))
   (let [tok (jolt.host/make-interrupt)
         e {:token tok :cause (volatile! nil) :thread (Thread/currentThread)}]
     (swap! stack conj e)
@@ -136,7 +136,7 @@
                                                {:ticks (:jolt/ticks-spent d) :budget ticks})))
                ;; root's interrupt, whichever way it ended the form: the escape, or a
                ;; blocked wait thrown out by the thread's interrupt flag
-               (or (:jolt/interrupted d) (= :interrupted @(:cause e))) (throw (ex-info "interrupted by root" {:interrupted true}))
+               (or (:jolt/interrupted d) (= :interrupted @(:cause e))) (throw (ThreadDeath.))
                :else (throw ex))))
          (finally
            (swap! stack (fn [s] (doall (remove #(identical? % e) s))))

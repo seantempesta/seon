@@ -156,8 +156,8 @@
 
 (defn same-origin?
   "Whether a request is the dashboard's own page's: true unless its Origin header is present and
-  is not this dashboard's (scheme, host and port are `http://127.0.0.1:<:seon.config.web/port>`,
-  as the listener binds), or its Sec-Fetch-Site says cross-site. A browser always names one of the
+  is not the address the request was sent to (`http://` and its Host, which must be 127.0.0.1 at whatever port the listener
+  bound: no port is read from config), or its Sec-Fetch-Site says cross-site. A browser always names one of the
   two on a cross-origin POST; a client that sends neither (nc, a test, an older client) is not a
   page of another origin and is served as before. See
   docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data."
@@ -165,10 +165,13 @@
   [req]
   (let [h (:headers req)
         origin (some-> (get h "origin") str/lower-case str/trim not-empty)
-        site (some-> (get h "sec-fetch-site") str/lower-case str/trim)]
+        site (some-> (get h "sec-fetch-site") str/lower-case str/trim)
+        ;; where the request was sent: this listener's own address, whatever port it bound (one the kernel picked included)
+        host (some-> (get h "host") str/lower-case str/trim)]
     (and (not= "cross-site" site)
          (or (nil? origin)
-             (= origin (str "http://127.0.0.1:" (config/value :seon.config.web/port)))))))
+             ;; its own page is the origin it was sent to, on 127.0.0.1: a name rebound to it is another host
+             (and (some? host) (str/starts-with? host "127.0.0.1:") (= origin (str "http://" host)))))))
 
 (defn feed-encoding
   "The Content-Encoding a tab's feed is sent with, for a request whose Accept-Encoding header is accept:
@@ -486,7 +489,7 @@
 
 (defn web-proc
   "Root's web proc (see the namespace doc). Args :port (127.0.0.1 only; system.edn binds
-  :seon.config.web/port; 0: no listener). A listener that cannot bind is data in
+  :seon.config.web/port; 0: no listener; -1: a port the kernel assigns, named in its ping). A listener that cannot bind is data in
   its ping (:listening false :error), never a failed boot."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:port "the port on 127.0.0.1 (0: none)"}
@@ -507,8 +510,9 @@
          ;; in-port: init has no outputs), never a ping (DECISIONS, If nothing has changed,
          ;; we do nothing; no clock or timer decides (three exceptions))
          _ (a/put! http {:op :listener})]
-     (if (and port (pos? port))
-       (let [server (try (adapter/run-server (handler http) {:port port :host "127.0.0.1" :strategy :fibers
+     ;; -1: the kernel's port, named in its ping
+     (if (and port (or (pos? port) (= -1 port)))
+       (let [server (try (adapter/run-server (handler http) {:port (max port 0) :host "127.0.0.1" :strategy :fibers
                                                              :keep-alive-timeout-ms 600000 :write-timeout-ms 60000})
                          (catch Throwable e (contract/error :seon.web/unbound #'seon.web/web-proc (step/error-msg e) {:port port})))]
          (if (contract/error? server)

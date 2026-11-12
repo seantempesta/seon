@@ -649,7 +649,8 @@
            sym (:jolt.error/symbol jd)
            unresolved? (and sym (= :analyze/unresolved-symbol (:jolt.error/kind jd)))
            no-schema (no-such-schema d)
-           m (cond no-schema (:message no-schema) unresolved? (unresolved-message sym) :else (step/error-msg e))
+           ;; root's interrupt is a ThreadDeath with no message, as on the JVM (seon.intr/run): what stopped it is said here
+           m (cond (instance? ThreadDeath e) "interrupted by root" no-schema (:message no-schema) unresolved? (unresolved-message sym) :else (step/error-msg e))
            ;; a REPL name in a definition: the program resolves as written, so the definition calls it qualified
            repl (when unresolved? (repl-name (symbol sym)))
            causes (mapv #(str (type %) ": " (ex-message %)) (take-while some? (rest (iterate ex-cause e))))]

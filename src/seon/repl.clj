@@ -226,7 +226,7 @@
                                   ;; a move into a namespace whose own vars hide a helper says so, once, as it moves
                                   (not= ns ns') (merge (some->> (shadowed ns') (hash-map :shadowed)))))
                          [ns' :ok])
-                     (do (reply (let [m (merge common {:tag :err "status" (if (:interrupted (ex-data v)) ["interrupted"] ["eval-error"])})]
+                     (do (reply (let [m (merge common {:tag :err "status" (if (instance? ThreadDeath v) ["interrupted"] ["eval-error"])})]
                                  (assoc m :repl/ex (error-data v m))))
                          [ns :err])))))
         ;; code's forms in order, from ns: [ns' how], how :eof, :read (a read error) or :err; each
@@ -235,7 +235,7 @@
                  (let [r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. code))
                        starts (delay (reader/line-starts code))]
                    (loop [ns ns prev 0 k 0]
-                     (let [form (try (binding [*ns* ns] (read {:eof ::eof} r)) (catch Throwable e e))
+                     (let [form (try (binding [*ns* ns] (read {:eof ::eof} r)) (catch ThreadDeath e (throw e)) (catch Throwable e e))
                            ;; where the reader stopped after the form (an eval never moves it), its text and the comments before it
                            end (when-not (or (= ::eof form) (instance? Throwable form))
                                  (+ (@starts (dec (.getLineNumber r))) (dec (.getColumnNumber r))))
@@ -779,6 +779,7 @@
                                                       (not (or (= :context (:origin req)) (:id req) (and working? (not (:call-id req)) (not (#{:ui :outside :insert} (:origin req))))))
                                                       (assoc :seon.eval/call (task/call-ref (:key @agent/state) (agent/turn-now))))))))
            (assoc r :record id)
+           (catch ThreadDeath e (throw e))
            (catch Throwable e
              (assoc r :unrecorded (contract/error :seon.agent/unrecorded #'record! (str "the branch refused this eval's record: " (ex-message e)) {}))))
       r)))

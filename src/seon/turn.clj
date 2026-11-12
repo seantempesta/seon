@@ -85,8 +85,8 @@
   {:malli/schema [:=> [:cat] [:or :map :seon.error/base]]}
   [] (try (or (render/kept-of (repl/page-walk) '[seon.render.ui/status])
               (status/status (agent/db) @ctx/ctx {}))
-          (catch Throwable e
-            (when (:interrupted (ex-data e)) (throw e))
+          ;; root's interrupt (a ThreadDeath, seon.intr) passes: it is no status error
+          (catch Exception e
             (agent/error-map e 'seon.turn/status-now))))
 
 (defn agent-usage
@@ -521,10 +521,9 @@
                            ;; its status threw (the agent's program broke it): the agent reads why, this turn
                            no-status? (next-of (act! (turn-error! st s) obs s model))
                            :else (next-of (act! st obs s model))))
-                       (catch Throwable e
-                         (if (:interrupted (ex-data e))
-                           (throw e)
-                           ;; the second in a row with no model turn between ends its work with that error: a turn
+                       ;; root's interrupt (a ThreadDeath, seon.intr) passes: it ends the work, never a turn's error
+                       (catch Exception e
+                         ;; the second in a row with no model turn between ends its work with that error: a turn
                            ;; whose model call answered before it threw was the agent's turn, so the count starts again
                            (let [called? (not (identical? asked (:requests @agent/state)))
                                  st' (cond-> (-> (turn-error! st (agent/error-map e 'seon.turn/work!)) (update :turn inc) (update :thrown (fnil inc 0)))
@@ -532,7 +531,7 @@
                              ;; a turn that threw counts against the cap, which the next turn checks
                              (if (< 1 (:threw st'))
                                (ended st' :error (str "two turns in a row threw: " (:seon.error/message (:error st'))) (:error st'))
-                               [::next st'])))))))]
+                               [::next st']))))))]
         (case (first step)
           ::next (recur (second step))
           ::end (let [[_ st outcome reason err] step] (end! st outcome reason err)))))))
