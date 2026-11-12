@@ -708,8 +708,11 @@
         candidates (when indexed?
                      (group-by second (map (fn [[e a]] [e (index-attrs a)]) (with-index db #(sqlite/fts-substring % pattern numbers)))))]
     (->> (for [a (distinct (keep text-attrs kinds))
-               e (if indexed? (distinct (map first (get candidates a))) (map :e (d/datoms db :aevt a)))
-               :let [v (:v (first (d/datoms db :eavt e a)))]
+               ;; each text with its entity: a candidate's by one seek, every text off the attribute's own datoms (a text is
+               ;; cardinality one, so its :aevt datom holds it: a seek of :eavt again cost 120 KB a text on main)
+               [e v] (if indexed?
+                       (for [e (distinct (map first (get candidates a)))] [e (:v (first (d/datoms db :eavt e a)))])
+                       (map (juxt :e :v) (d/datoms db :aevt a)))
                :when (and v (re-find re v))
                h (or (seq (named-hits db e a kinds)) (ns-hit db e a kinds))
                :when (or (nil? ns) (named-under? (str (:name h)) ns))

@@ -548,6 +548,20 @@
     (is (= "  [k] :needle-ns)" (nth (clojure.string/split-lines (seon.source/file-text db 'app.gm)) 3)) "the line (lines 'app.gm) reads there")
     (is (= ["app.gm:3"] (map :at (doc/grep db "defmethod place :ns" #{:var} nil))) "its first line too")))
 
+;; docs/vector.md#search: a regex has no trigram to ask the index for, so grep reads every text of the kinds asked, once, off
+;; the attribute's own datoms. Estimate (2026-11-12, main: 8191 texts, 7.7 M chars): the :aevt scan 1.4 M ticks and 7 MB,
+;; the regex 16 M ticks, so about 2 k ticks and 1 KB a text; budget 4 k and 4 KB. Measured before: 82 KB a text (a seek
+;; of :eavt for each text the scan already held, 120 KB each)
+(deftest a-regex-grep-costs-the-texts-it-reads
+  (let [db (mt/with (mt/world) (mt/code 'app.rg (apply str "(ns app.rg)\n" (for [i (range 200)] (str "(defn f" i "\n  \"Adds " i ".\"\n  [x] (+ x " i "))\n")))))
+        kinds #{:var :test :section :task :schema}
+        n (count (for [a [:schema/form :seon.task/plan :seon.doc/text :form/src] dt (d/datoms db :aevt a)] dt))
+        {:keys [ticks bytes value]} (mt/cost #(doc/grep db #"defn f1[0-9]\b" kinds nil))]
+    (is (< 100 n) "the world holds texts to read")
+    (is (seq value) "and the regex finds some")
+    (is (< bytes (* 4096 n)) (str bytes " bytes for " n " texts"))
+    (is (< ticks (* 4000 n)) (str ticks " ticks for " n " texts"))))
+
 ;; docs/vector.md#search: two readers of the text index on two db values (an agent's and main's) each get their answer.
 ;; text-index keeps one index; a reader on another db value builds its own and retires the other's, and with-index retried
 ;; while its index was retired under it: two readers could retire each other's for good (Deep fixes' reading of the 03:04
