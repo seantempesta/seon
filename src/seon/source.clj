@@ -405,14 +405,17 @@
   the macro read: file-reading-expansions). See docs/source.md#main-s-program-follows-the-tree."
   {:malli/schema [:=> [:cat :seon.host/db :symbol] :seon.host/fn]}
   [db nsym]
-  (let [db-ns-src (some-> (pdb/eid db :ns/name nsym) (->> (d/entity db)) :ns/form :form/src)
+  (let [ne (pdb/eid db :ns/name nsym)
+        db-ns-src (some-> ne (->> (d/entity db)) :ns/form :form/src)
+        ;; {form id, its entity} of the namespace's forms: one scan, never a seek a form
+        by-id (delay (into {} (for [dt (when ne (d/datoms db :avet :form/ns ne)) :let [x (d/entity db (:e dt))]] [(:form/id x) (:e dt)])))
         ;; is var v a macro whose expansion reads files (file-reading-expansions' rule): a few seeks, asked only of a held form's refs
         reading (fn [v] (let [m (some->> (pdb/eid db :var/name v) (d/entity db))]
                           (and m (contains? (set (:var/meta m)) :macro) (some program/file-readers (:form/refs (:var/form m))))))]
     (fn [n src k ns-src form]
       (when (and db-ns-src (= ns-src db-ns-src) (not= src ns-src)
                  (not (and (seq? form) (#{'defmacro 'ns} (first form)))))
-        (when-let [fe (pdb/eid db :form/id (program/form-id n src k))]
+        (when-let [fe (and (= n nsym) (get @by-id (program/form-id n src k)))]
           (when (and (program/live? db fe) (not-any? reading (:form/refs (d/entity db fe))))
             (let [x (d/entity db fe)]
               {:id (:form/id x) :seon.source/held? true :inline-defs (vec (:form/inline-defs x))
