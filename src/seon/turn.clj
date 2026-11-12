@@ -463,6 +463,9 @@
     ;; the branch's db, its base and this process hold one program (its tests' digests are the
     ;; program it runs); a branch at main's head brings nothing
     (branch/merge-main!)
+    ;; the main and merge base this run heard, on the agent before its first check: its status measures the branch's change from
+    ;; that base (seon.reconcile/changed?), so a branch at main's head that merged nothing is unchanged at turn 0, never unmeasured
+    (when-let [tx (not-empty (main-base-tx))] (agent/transact! tx) (agent/commit!))
     (loop [st {:turn 0 :merge-turns 0 :t0 (profile/now-ns) :merge-step? (task/merge-step-on? (agent/db) task)
                :max-turns max-turns :merge? merge?}]
       ;; each turn under the branch's schemas as they are now (repl/with-branch-schemas): work! is one eval,
