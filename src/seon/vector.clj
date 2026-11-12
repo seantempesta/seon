@@ -126,23 +126,6 @@
             nil (d/datoms db :aevt :seon.vector/of))
     [(persistent! @rows) (persistent! @es)]))
 
-;; derived data (docs/data-modeling.md#derived-data-is-a-cache-never-relied-on): [the db value's [:hash :max-tx], {[of self]
-;; [rows es]}], the coarse rows of one db value and their :of filter, built once a value and replaced by the next value's, keyed as
-;; seon.doc/text-index keys its index; a value read again (a page's search asks three times, one attribute each) reads no row again
-(defonce ^:private kept-rows (atom nil))
-
-(defn- rows-of
-  "The coarse rows of db for near (`coarse-rows`), of the entities holding attribute of (all when nil) but self, kept for db's value
-  (kept-rows): built at the first ask of a value, then read. [rows es]."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe :qualified-keyword] [:maybe :int]] [:tuple :any :any]]}
-  [db of self]
-  (let [at [(:hash db) (:max-tx db)] k [of self] [held m] @kept-rows]
-    (or (when (= held at) (get m k))
-        (let [keep? (if of (into #{} (map :e) (d/datoms db :aevt of)) any?)
-              r (coarse-rows db keep? self)]
-          (swap! kept-rows (fn [[h m]] (if (= h at) [h (assoc m k r)] [at {k r}])))
-          r))))
-
 (defn near
   "The k entities of db nearest q, [[e score] ...] best first, score the cosine: a Datalog
   function, [(seon.vector/near $ ?q 10) [[?e ?score]]]. q is an entity with a vector (the k
@@ -160,7 +143,8 @@
   ([db q k {:keys [of shortlist fine-dims]}]
    (let [self (when (int? q) q)
          qv (if self (vector-of db self) q)
-         [rows rowe] (rows-of db of self)]
+         keep? (if of (into #{} (map :e) (d/datoms db :aevt of)) any?)
+         [rows rowe] (coarse-rows db keep? self)]
      (if (or (empty? rows) (empty? qv) (zero? k))
        []
        (let [n (count rows) w (count (:v (first rows))) cd (- w 4) dims (count qv)
