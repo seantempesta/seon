@@ -524,3 +524,74 @@
     (is (true? (:seon.system/errors-dirty st2)) "recorded as a problem, no throw")
     (is (= st (#'seon.system/answer-taken st o :writer {:dest {:agent-facts [:a1]} :r r} r))
         "an answer that was already an error is not taken back through its :dest")))
+
+;; task seon.system/an-update-keeps-running-agents (docs/source.md#a-landing-enters-main-as-data): a landing that changes one
+;; form root runs (seon.system/held-inputs's docstring, a var of seon.program/root-reach) enters a running root's main through
+;; bin/land's bridge, whose commit loads the form into root in place (seon.writer's main-commit, seon.program/load-changes!), and
+;; bin/update's ask, my.root/landed!, keeps the system running: the agent running before it is the same process and answers its
+;; next eval, root runs the landed form, and its source fact is at the landed tree under the same boot. Red before: restart-for
+;; restarted for any form of root-reach the binary lacks, ending every agent (2026-11-12, context's paid agent :dead).
+;; The landed tree is the seeded main's tree with that one change, made in a git index of its own (the repository's refs
+;; untouched), so binary-current diffs two trees of this repository as bin/update's ask does.
+;; Estimate, test process: two dozen git and bin/ calls and six socket asks, a few million ticks (the estimate below); its
+;; root: one boot (~11 s, docs/cost.md), one agent forked (<2 s), the bridge's commit and one form's load (tens of ms), and
+;; landed!'s binary-current over the whole reach graph (~1.4 s, ~300M ticks, measured on the standing root); about 15 s wall.
+(deftest ^{:seon.test/estimate {:ticks 20000000} :seon.test/root [] :seon.test/execs ["git" "bin/land" "bin/tree"]} an-update-keeps-running-agents
+  (let [checkout (config/checkout)
+        path (test-store)
+        main (str "root-test-update-" (random-uuid))
+        runs (str checkout "/target/runs/" main "-runs")
+        root (ts/start-root! {:store path :main main :runs runs})
+        at-root (fn [code] (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code code}))))
+        in (fn [ag code] (:value (at-root (str "@(c/submit! sys " ag " " (pr-str code) " {:origin :outside})"))))
+        git (fn [env & args] (let [r (apply sh/sh (concat ["env" "GIT_CONFIG_GLOBAL=/dev/null" "GIT_CONFIG_NOSYSTEM=1"
+                                                           "GIT_AUTHOR_NAME=seon-test" "GIT_AUTHOR_EMAIL=seon-test@localhost"
+                                                           "GIT_COMMITTER_NAME=seon-test" "GIT_COMMITTER_EMAIL=seon-test@localhost"]
+                                                          (for [[k v] env] (str k "=" v)) ["git" "-C" checkout] args))]
+                               (assert (zero? (:exit r)) (str "git " (str/join " " args) ": " (:err r)))
+                               (str/trim (:out r))))
+        file "src/seon/system.clj"
+        marker "Landed in place by an update."
+        doc "(:doc (meta #'seon.system/held-inputs))"
+        ag (at-root "(seon.system/spawn! sys {})")]
+    (try
+      (is (:port root) (:log root))
+      (is (keyword? ag) (str "an agent runs: " (pr-str ag)))
+      (let [held (at-root "(:seon.system/source (datahike.api/pull @(:conn sys) [:seon.system/source] [:seon.system/id :root]))")
+            t0 (:tree held)
+            ;; the landed tree: t0 with held-inputs's docstring changed, written by an index of its own
+            idx (str checkout "/target/tmp/update-keeps-" (random-uuid) ".index")
+            _ (.mkdirs (java.io.File. (str checkout "/target/tmp")))
+            text (git {} "cat-file" "blob" (str t0 ":" file))
+            changed (str/replace-first text "(defn held-inputs\n  \"" (str "(defn held-inputs\n  \"" marker " "))
+            blob (str/trim (:out (sh/sh "git" "-C" checkout "hash-object" "-w" "--stdin" :in changed)))
+            t1 (do (git {"GIT_INDEX_FILE" idx} "read-tree" t0)
+                   (git {"GIT_INDEX_FILE" idx} "update-index" "--cacheinfo" (str "100644," blob "," file))
+                   (let [t (git {"GIT_INDEX_FILE" idx} "write-tree")] (.delete (java.io.File. idx)) t))
+            ;; the landing as git holds it: two commits no ref names, OLD at the seeded tree and NEW at the landed one
+            old (git {} "commit-tree" t0 "-m" "seeded")
+            new (git {} "commit-tree" t1 "-p" old "-m" "landed")
+            tree (str/trim (:out (sh/sh (str checkout "/bin/tree") checkout new)))
+            pid-before (in ag "(seon.lib/c-getpid)")
+            root-pid (at-root "(seon.lib/c-getpid)")
+            boot (at-root "(:boot sys)")]
+        (is (not= text changed) "the change is made")
+        (is (= t1 tree) "bin/tree names the landed commit's tree as git wrote it")
+        (is (pos-int? pid-before) "the agent answers before the landing")
+        (is (not (str/starts-with? (str (at-root doc)) marker)) "root runs the seeded form")
+        ;; bin/update writes the inputs of the files now (bin/system inputs: seon.fx/inputs) where root reads them
+        (spit (str runs "/root-inputs.edn") (seon.edn/encode (seon.fx/inputs checkout config/config checkout t1)))
+        (let [bridged (sh/sh (str checkout "/bin/land") "--bridge" checkout old new (str (:port root)))]
+          (is (str/includes? (:out bridged) "entered main") (str "the bridge: " (:out bridged) (:err bridged))))
+        (is (str/starts-with? (str (at-root doc)) marker) "the bridge's commit loaded the landed form into root")
+        (is (some #{'seon.system/held-inputs} (:reaches (at-root "(seon.system/stale-binary @(:conn sys))")))
+            "what the binary lacks is a form root runs: the case restart-for once restarted for")
+        (let [kept (at-root (str "(my.root/landed! sys " (pr-str tree) ")"))]
+          (is (= {:kept boot :tree tree} kept) (str "landed! keeps the system running: " (pr-str kept))))
+        (is (= [tree boot] ((juxt :tree :boot) (at-root "(:seon.system/source (datahike.api/pull @(:conn sys) [:seon.system/source] [:seon.system/id :root]))")))
+            "main's source fact is at the landed tree, under the same boot")
+        (is (= root-pid (at-root "(seon.lib/c-getpid)")) "root is the same process")
+        (is (= pid-before (in ag "(seon.lib/c-getpid)")) "the agent is the same process, and answers its eval after the landing"))
+      (finally
+        (when (keyword? ag) (at-root (str "(seon.system/kill! sys " (pr-str ag) ")")))
+        (ts/stop-root! root) (ts/drop-main! path main) (seon.lib/remove-tree! runs)))))
