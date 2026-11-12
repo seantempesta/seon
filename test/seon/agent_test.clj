@@ -704,20 +704,29 @@
       (is (nil? (:seon.test/failures branch)) "no failures while green"))
     (is (true? (:value again)) "a run that changes nothing writes no datoms")))
 
-(deftest a-green-that-is-no-proof-writes-no-fact
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-green-that-is-no-proof-writes-no-fact
   ;; docs/sharing.md#what-a-branchs-nodes-are: a green that is no proof of the task is read by nothing
   ;; on this branch (seon.reconcile/done-explain reads proofs and reds), and its facts on its var rewrite a leaf
-  ;; among the program's. A red is held, and stays held when it goes green, so it never reads as still red. The red is asked by
-  ;; name: a run is answered at its first red (docs/merging.md#the-test-service), so which other test ended before it is no claim
-  (let [facts "(into {} (for [t '[green-test/proof green-test/other green-test/turned]] [t (:seon.test/status (datahike.api/pull (seon.agent/db) [:seon.test/status] [:var/name t]))]))"
-        [_ _ first-facts _ _ second-facts]
-        (in-agent ["(ns green-test (:require [clojure.test :refer [deftest is]])) (deftest proof (is (= 1 1))) (deftest other (is (= 1 1))) (deftest turned (is (= 1 2)))"
-                   "(select-keys (my.agent/prove 'green-test/turned) [:results])" facts
-                   "(deftest turned (is (= 1 1)))"
-                   "(select-keys (my.agent/prove) [:results])" facts]
-                  {:proofs #{'green-test/proof}})]
-    (is (= '{green-test/proof nil green-test/other nil green-test/turned :red} (:value first-facts)) (pr-str first-facts))
-    (is (= '{green-test/proof :green green-test/other nil green-test/turned :green} (:value second-facts)) (pr-str second-facts))))
+  ;; among the program's. A red is held, and stays held when it goes green, so it never reads as still red.
+  ;; T1: the agent's record-results! is seon.proofs/facts-worth-keeping then seon.proofs/result-tx, both pure on the
+  ;; entities the branch holds; two runs of three tests (a proof, another, one that turns red then green), a few calls each
+  (let [digests '{green-test/proof "p" green-test/other "o" green-test/turned "t2"}
+        green {:digest "x" :pass 1 :fail 0 :error 0}
+        red {:digest "t" :pass 0 :fail 1 :error 0}
+        proofs '#{green-test/proof}
+        record (fn [held ran failures]
+                 ;; what the branch then holds: {test status}, record-results!'s steps on held ({test entity})
+                 (let [kept (proofs/facts-worth-keeping held proofs ran)
+                       tx (proofs/result-tx held kept failures {} digests)]
+                   (into {} (for [m tx :when (map? m)] [(:var/name m) (:seon.test/status m)]))))
+        ;; the run that asks the red by name: the proof and the other are not run
+        first-facts (record {} {'green-test/turned red} {'green-test/turned [{:type :fail :message "no"}]})
+        ;; the branch holds the red; the deftest redefined (a new digest), the run of everything turns it green
+        second-facts (record {'green-test/turned {:seon.test/digest "t" :seon.test/status :red}}
+                             {'green-test/proof (assoc green :digest "p") 'green-test/other (assoc green :digest "o") 'green-test/turned (assoc green :digest "t2")}
+                             {})]
+    (is (= '{green-test/turned :red} first-facts) (pr-str first-facts))
+    (is (= '{green-test/proof :green green-test/turned :green} second-facts) (pr-str second-facts))))
 
 (deftest a-proof-over-the-branchs-data-is-keyed-by-its-data-too
   ;; Context's trial finding 14: an agent's proof over its branch's data (lab.proofs/the-tasks-i-cite-differ-from-my-base) ran

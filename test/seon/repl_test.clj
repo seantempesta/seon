@@ -805,14 +805,21 @@
     (is (= :my.agent/no-var (:seon.error/type (:value ns-typo))) (str "a bare name that is no namespace says so, nearest namespaces named: " (pr-str ns-typo)))
     (is (= '[demo-test/t seon.task-test/no-such-test] (:value unmatched)) (str "a prove naming no test says which: " (pr-str unmatched)))))
 
-(deftest grep-refuses-what-it-does-not-take
+(deftest ^{:seon.test/estimate {:ticks 100000000}} grep-refuses-what-it-does-not-take
   ;; docs/vector.md#search: an option grep does not take, ignored, reads as what it asked for, and so does []
   ;; for a string holding a regex's | ( ^. grep's options are a closed map, and a string with a regex's
   ;; operators that matches nothing is [] shown with its regex form, a value, so the reply's next call runs
-  (let [[kinds piped regex quoted] (at/in-agent ["(try (my.agent/grep \"accumulate\" {:kinds #{:var}}) (catch Exception e (:seon.error/message (ex-data e))))"
-                                                 "(my.agent/grep \"defn (accumulate|tasks)\" {:ns \"seon.task\"})"
-                                                 "(count (my.agent/grep #\"defn (accumulate|tasks)\" {:ns \"seon.task\"}))"
-                                                 "(my.agent/grep \"(\\\"no such\\\")\")"])]
+  ;; T1: grep reads the agent's db (agent/state :db), here the test store's seed (its ids come from a store) with seon.task's accumulate and tasks as code, evaluated
+  ;; in this process by repl/eval-string as the agent's REPL does; 4 evals, a grep each; the one cost is the text index built once over the seed (~70 M ticks measured, ~2,000 datoms)
+  (let [db (my.test/with (ts/test-db) (my.test/code 'seon.task "(ns seon.task)\n(defn accumulate [x] x)\n(defn tasks [] 1)"))
+        old @agent/state
+        ev (fn [code] (try (reset! agent/state {:mode :test :db db :n 0 :ns (create-ns 'seon.repl-test.scratch)})
+                           (repl/eval-string code {})
+                           (finally (reset! agent/state old))))
+        [kinds piped regex quoted] (map ev ["(try (my.agent/grep \"accumulate\" {:kinds #{:var}}) (catch Exception e (:seon.error/message (ex-data e))))"
+                                            "(my.agent/grep \"defn (accumulate|tasks)\" {:ns \"seon.task\"})"
+                                            "(count (my.agent/grep #\"defn (accumulate|tasks)\" {:ns \"seon.task\"}))"
+                                            "(my.agent/grep \"(\\\"no such\\\")\")"])]
     (is (re-find #":kinds.*does not admit.*:in" (str (:value kinds))) (str "an option grep does not take is refused, the ones it takes named: " (pr-str kinds)))
     (is (= [] (:value piped)) (str "a value, no error, so a reply's later calls run: " (pr-str piped)))
     (is (str/includes? (str (:text piped)) "(my.agent/grep #\"defn (accumulate|tasks)\" {:ns \"seon.task\"})") (str "it shows the regex form, its options kept: " (pr-str piped)))
