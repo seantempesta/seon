@@ -32,9 +32,12 @@
                      (cond-> {:var/name n :var/ns (cond-> {:ns/name nsym} nd (assoc :ns/doc nd))}
                        (:doc (meta v)) (assoc :var/doc (:doc (meta v))))))))))
 
-(def ^:private store
+(def ^:private ^:seon.test/fixture store
   "The test store's config, made and seeded with about 2,000 datoms on first use, what every agent and template cites
-  (standing-targets-tx) and a stub of the system prompt."
+  (standing-targets-tx) and a stub of the system prompt. A fixture: an agent forces it once before its first test fork
+  (seon.agent/warm-fixtures!), so every fork inherits it seeded (one seeding a fork cost 65M ticks, 1 to 3 s, each in-process
+  test item); never at load, where a binary that loads test namespaces would start its fibers before its main carrier. See
+  docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
   (delay (let [cfg (pdb/made-cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write
                                    :writer pdb/writer-cfg})]
            (d/create-database cfg)

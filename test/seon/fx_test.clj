@@ -597,21 +597,18 @@
       (finally (seon.lib/remove-tree! dir)))))
 
 (deftest a-sessions-item-runs-on-its-checkout-once
-  ;; docs/merging.md#a-session-proves-through-root (Flow step 4, with Tests): the :item effect runs one item seon.prove granted
-  ;; on the session's checkout, and its verdict is the cache's by digest: an item runs (a test as a shard of one, bin/test --shard,
-  ;; its green stored by the runner; one needing no binary, so this tree's own build is not the subject),
-  ;; the same item asked again is answered from the cache with no process started, and a checkout whose files are no longer
-  ;; the item's tree is refused. Red before: an asked-again item started its runner again only to reuse the green (2.3 s a test)
+  ;; docs/merging.md#a-session-proves-through-root: the :item effect runs one item seon.prove granted (a check step) on the
+  ;; session's checkout, and its verdict is the cache's by digest: an item green at its digest is answered from the cache with no
+  ;; process started, and a checkout whose files are no longer the item's tree is refused. Red before: an asked-again item
+  ;; started its runner again only to reuse the green (2.3 s a test)
   (let [co (str (cfg/checkout)) tree (fx/tree-id co)
-        ;; a digest of this run's own, so its first ask has no green to reuse
+        ;; a digest of this run's own, green in the cache, so no other run's verdict is read
         dg (subs (str (random-uuid)) 0 16)
-        item {:kind :process :tree tree :checkout co :name 'seon.fx-test/a-read-of-named-paths-reads-only-those-files :digest dg :binary? false}
-        one (fx/run-item {:req item})
+        _ (fx/write-verdicts! {:id "a-sessions-item-runs-on-its-checkout-once" :tree tree} {"laws" {:step "laws" :digest dg :pass 1 :fail 0 :error 0 :ms 1}} {})
+        item {:kind :step :tree tree :checkout co :name "laws" :digest dg :binary? false}
         two (fx/run-item {:req item})
         moved (fx/run-item {:req (assoc item :tree "0000000000000000000000000000000000000000")})]
-    (is (= 1 (get-in one [:value :pass])) (pr-str one))
-    (is (not (get-in one [:value :reused])) "the first ask ran the test")
-    (is (= {:pass 1 :reused true} (select-keys (:value two) [:pass :reused])) (str "asked again, the cache answers: " (pr-str two)))
+    (is (= {:pass 1 :reused true} (select-keys (:value two) [:pass :reused])) (str "green at its digest, the cache answers: " (pr-str two)))
     (is (and (contract/error? moved) (:tree-moved moved)) (pr-str moved))))
 
 ;; docs/merging.md#a-session-proves-through-root: an item's command past its bound is ended whole (bin/bounded): its evidence kept,
@@ -638,35 +635,6 @@
       (is (not (alive? (+ 2 n))) "what it left in its group is ended as it ends")
       (finally (seon.lib/remove-tree! dir)))))
 
-;; a test that hangs only when its fixture asks it to: run as a test-service item (its program store is an item's clone,
-;; seon.fx/run-item's target/prove/items/...), it reads the fifo target/prove/hang.fifo of its checkout when one is there, which with
-;; no writer never ends (a-process-item-past-its-bound-is-a-signal-and-nothing-of-it-runs-on makes it); run any other way, a shard of
-;; a prove beside that test included, it passes at once (a shard beside it read the fifo and hung 300 s, 2026-11-11)
-(deftest a-test-that-hangs-while-its-fifo-is-there
-  (let [f (java.io.File. (str (cfg/checkout) "/target/prove/hang.fifo"))
-        item? (clojure.string/includes? (str (cfg/value :seon.config.proofs/program-store)) "/target/prove/items/")]
-    (is (or (not item?) (not (.exists f)) (string? (slurp f))))))
-
-;; docs/merging.md#a-session-proves-through-root: a process item past its bound is ended whole and answers the signal a step past
-;; its bound does, :overran with no verdict, never a red and never a worker held (f1 sets :bound, f2 honors it). The item is a test
-;; that hangs (a-test-that-hangs-while-its-fifo-is-there, its fifo made here). Red before: the bound was not read, and the item held
-;; its worker until the fifo went
-(deftest a-process-item-past-its-bound-is-a-signal-and-nothing-of-it-runs-on
-  (let [co (str (cfg/checkout)) tree (fx/tree-id co)
-        dg (subs (str (random-uuid)) 0 16)
-        fifo (str co "/target/prove/hang.fifo")
-        t 'seon.fx-test/a-test-that-hangs-while-its-fifo-is-there]
-    (.mkdirs (java.io.File. (str co "/target/prove")))
-    (seon.lib/sh "mkfifo" fifo)
-    (try
-      (let [;; 3 s: past the shard's start, so the test is running (hung) when it is reached
-            r (fx/run-item {:req {:kind :process :tree tree :checkout co :name t :digest dg :binary? false :bound 3000}})
-            ev (str co "/target/prove/items/process-" dg "/evidence")]
-        (is (= :overran (get-in r [:value :signal])) (pr-str r))
-        (is (nil? (get-in r [:value :pass])) "no verdict")
-        (is (.isFile (java.io.File. (str ev "/ps.txt"))) "its evidence was kept")
-        (is (not (proofs/green? (get (fx/stored-results {t dg}) dg))) "nothing stored at its digest"))
-      (finally (.delete (java.io.File. fifo))))))
 ;; docs/merging.md#a-merge-runs-what-the-change-reaches: the fallback route of a branch's run: a checkout of its commit, the tree's
 ;; own binary built there (bin/build seon: current already when the tree is the running one's, so here it is a check), and the
 ;; named tests run by that checkout's runner, never proved by root's program. Red before: :built? was not read, the run went to
