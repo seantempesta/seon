@@ -109,7 +109,7 @@ Each checkout runs its own system: `bin/system start | status | stop`, on the ch
 - **the plan:** what is in flight and THE PLAN;
 - **git:** history, and every number a merge measured.
 
-Every function, schema entry and deftest cites the wiki section of its mechanism by its address (`docs/<topic>.md#<anchor>`) and never restates it ([references](docs/references.md#the-delimiter-picks-the-depth)). A section links to code and never copies it. A merge updates its section in the same commit, and a section is written once it is true.
+Every function, schema entry and deftest cites the wiki section of its mechanism by its address (``docs/<topic>.md#<anchor>``) and never restates it ([references](docs/references.md#the-delimiter-picks-the-depth)). A section links to code and never copies it. A merge updates its section in the same commit, and a section is written once it is true.
 
 ## 7a. Words
 
