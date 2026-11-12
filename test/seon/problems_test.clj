@@ -1508,11 +1508,12 @@
         src-ns [{:db/id "ns" :ns/name 'seon.zz :ns/file "src/seon/zz.clj"} {:db/id "tns" :ns/name 'seon.zz-test :ns/file "test/seon/zz_test.clj"}]
         base (d/db-with db0 src-ns)
         form (fn [id ns ks] [{:db/id id :form/id (str "f-" id) :form/src "(def k :seon.zz/new-key)" :form/ns [:ns/name ns] :form/keywords ks}])
-        head (d/db-with base (concat (form "a" 'seon.zz #{:seon.zz/new-key :seon.zz/_reverse}) (form "t" 'seon.zz-test #{:seon.zz/only-in-a-test})))
+        head (d/db-with base (concat (form "a" 'seon.zz #{:seon.zz/new-key :seon.zz/_reverse :seon.host/fn}) (form "t" 'seon.zz-test #{:seon.zz/only-in-a-test})))
         keys-of (fn [db] (set (map :key (problems/unschemed-keys db {}))))
         entry [{:schema/key :seon.zz/new-key :schema/form "[:int {:description \"A key.\"}]"}]]
     (is (contains? (keys-of head) :seon.zz/new-key) "a key a source form names with no entry is a row")
     (is (not (contains? (keys-of head) :seon.zz/_reverse)) "a reverse ref is no key")
+    (is (not (contains? (keys-of head) :seon.host/fn)) "a host type is its own entry (seon.contract/host-schemas)")
     (is (not (contains? (keys-of head) :seon.zz/only-in-a-test)) "a test's keyword is not src's")
     (is (not (contains? (keys-of (d/db-with head entry)) :seon.zz/new-key)) "its entry closes it")
     (is (some #(str/includes? % ":seon.zz/new-key") (problems/caused base head)) "a branch that names a new key with no entry is caused it")

@@ -462,7 +462,8 @@
   "Each of Seon's own qualified keywords (a seon or my namespace) that a source form names (:form/keywords of a form whose namespace's
   file is under src/) and that no schema entry on db defines (:schema/key), as an :unschemed-key row naming the key and the forms that
   name it: every key is one schema entry (the owner, 2026-11-12: \"proper schemas for all fully namespaced keywords\"). A reverse
-  ref (its name starting with _) and an enum's value are not keys. Closed by writing the key's entry, or by naming a key that has one.
+  ref (its name starting with _) and an enum's value are not keys; a host type (seon.contract/host-schemas, a predicate defined in
+  code) is its entry. Closed by writing the key's entry, or by naming a key that has one.
   only, a set of form entities (a branch's candidates, `split-rows`), reads the keywords of those forms alone. Cost: the :form/keywords
   datoms read (all, or only's), one :schema/key seek per distinct key. See docs/health.md#a-key-with-no-schema."
   {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]] [:=> [:cat :seon.host/db :map [:maybe [:set :int]]] [:vector :seon.problems/row]]]}
@@ -477,7 +478,7 @@
                             (update m v (fnil conj (sorted-set)) e) m))
                         {} named)]
      (vec (for [[k es] (sort-by (comp str key) by-key)
-                :when (empty? (d/datoms db :avet :schema/key k))
+                :when (and (empty? (d/datoms db :avet :schema/key k)) (not (contains? contract/host-schemas k)))
                 :let [nsym (symbol (namespace k)) s (str "unschemed-key " k)
                       vars (vec (sort (keep #(some-> (first (d/datoms db :eavt % :form/defines)) :v (->> (d/entity db)) :var/name) es)))]]
             (derived-row ans s nsym (str k " is named in src (" (str/join ", " (take 3 vars)) ") and no schema entry defines it: write its entry, with a :description")
