@@ -760,23 +760,27 @@
   [db s kinds z-min]
   (let [ws (words s)
         numbers (attr-numbers kinds)
-        ;; the moments, the z filter and the order are SQLite's (seon.sqlite/fts-ranked): only the hits cross
-        rows (when (and (seq ws) (seq numbers))
-               (with-index db (fn [ix] (let [n (reduce + (map #(get (sqlite/counts ix) % 0) numbers))]
-                                         (when (pos? n) (sqlite/fts-ranked ix (match-query ws) numbers n (double z-min)))))))
-        [_ _ _ mu m2] (first rows)
-        sd (when mu (Math/sqrt (max 0.0 (- m2 (* mu mu)))))]
-    (if (or (empty? rows) (zero? sd))
+        [n rows] (when (and (seq ws) (seq numbers))
+                   (with-index db (fn [ix] [(reduce + (map #(get (sqlite/counts ix) % 0) numbers))
+                                            (sqlite/fts-match ix (match-query ws) numbers)])))]
+    (if (or (empty? ws) (zero? (or n 0)))
       []
-      (let [hits (for [[e a score] rows :let [a (index-attrs a) z (/ (- score mu) sd)]
-                       h (named-hits db e a kinds)]
-                   ;; where its text is, [e a]: its line is read for the hits a caller shows (`line-of`), never for every hit
-                   (assoc h :z z :bm25 score :in [e a]))]
-        ;; each sort key made once, never in the comparator
-        (->> (vec hits) (map-indexed (fn [i h] [(- (:z h)) (str (:name h)) i h])) (sort-by pop) (map peek)
-             (reduce (fn [[seen out :as acc] h] (let [k ((juxt :kind :name) h)] (if (seen k) acc [(conj seen k) (conj out h)])))
-                     [#{} []])
-             second)))))
+      (let [scored (for [[e a score] rows] {:e e :a (index-attrs a) :score score})
+            sum (reduce + (map :score scored))
+            sumsq (reduce + (map #(* (:score %) (:score %)) scored))
+            mean (/ sum n)
+            sd (Math/sqrt (max 0.0 (- (/ sumsq n) (* mean mean))))]
+        (if (zero? sd)
+          []
+          (let [hits (for [d scored :let [z (/ (- (:score d) mean) sd)] :when (>= z z-min)
+                           h (named-hits db (:e d) (:a d) kinds)]
+                       ;; where its text is, [e a]: its line is read for the hits a caller shows (`line-of`), never for every hit
+                       (assoc h :z z :bm25 (:score d) :in [(:e d) (:a d)]))]
+            ;; each sort key made once, never in the comparator
+            (->> (vec hits) (map-indexed (fn [i h] [(- (:z h)) (str (:name h)) i h])) (sort-by pop) (map peek)
+                 (reduce (fn [[seen out :as acc] h] (let [k ((juxt :kind :name) h)] (if (seen k) acc [(conj seen k) (conj out h)])))
+                         [#{} []])
+                 second)))))))
 
 (defn resolve-ref
   "Var sym as its citation's depth shows it (docs/references.md#resolving-and-showing):

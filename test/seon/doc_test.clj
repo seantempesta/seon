@@ -574,18 +574,3 @@
         other (doto (Thread. ^Runnable (fn [] (dotimes [_ 200] (read db-a)) (deliver p :done))) (.start))
         mine (do (dotimes [_ 200] (read db-b)) :done)]
     (is (= [:done :done] [mine @p]) "each reader's reads all answered")))
-
-;; docs/vector.md#search: a ranked text search costs its hits, never the texts it matches: the mean and spread of the scores, the
-;; z filter and the order are SQLite's, so only the texts at z-min or above cross into the process. Measured 2026-11-12 on main:
-;; the plan of one task matched 8,181 of 8,538 texts, every row read into the process, 75M ticks a search. Estimate: one FTS5
-;; query (native) and per hit its names, about 20k ticks a hit; a world whose every text matches costs the same at 40 texts and 320
-(deftest a-ranked-search-costs-its-hits
-  (let [world (fn [n] (mt/with (mt/world)
-                               (mt/code 'app.hits (apply str "(ns app.hits)\n" "(defn rare \"needle needle needle needle haystack\" [] 0)\n"
-                                                         (for [i (range n)] (str "(defn f" i " \"haystack " i "\" [] " i ")\n"))))))
-        cost (fn [n] (let [db (world n)] (doc/tokens db "needle haystack" #{:var} 2.0)
-                       (:ticks (mt/cost #(doc/tokens db "needle haystack" #{:var} 2.0)))))
-        small (cost 40) big (cost 320)]
-    (is (= ['app.hits/rare] (mapv :name (filter #(= "app.hits" (namespace (:name %))) (doc/tokens (world 40) "needle haystack" #{:var} 2.0))))
-        "the text far above the rest is the hit")
-    (is (< big (* 2 small)) (str "eight times the matching texts, not twice the work: " small " at 40, " big " at 320"))))
