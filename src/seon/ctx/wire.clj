@@ -99,16 +99,19 @@
   "The ref and turn of message m the agent's model output holds, from src, the component whose own answer held it
   (seon.render/answer-sources: {:f :args}): an eval [:eval id] in its reply's turn, a message [:message id] in its call's, a
   reply [:reply id] in its own, a turn's page message [:page n] in turn n, an example session [:example key], and the agent's
-  own: its system message [:section addresses], what opens its session [:session key]; turn-of, each message id to the turn that
-  read it (seon.ctx/placed-messages). What the debug page labels each message by. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
-  {:malli/schema [:=> [:cat :seon.host/db :map :map :map] [:tuple [:vector :any] [:maybe :int]]]}
-  [db turn-of {:keys [f args]} m]
+  own: its system message [:section addresses], what opens its session [:session key]; any other member the conversation placed
+  [schema id] by its entity schema in the entity index ix (seon.render/entity-schema: an entity of a schema the agent registered is labelled as what it is, never as
+  the session); turn-of, each placed member's entity id to the turn that read it (seon.ctx/placed-messages). What the debug page labels each message by. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
+  {:malli/schema [:=> [:cat :map :seon.host/db :map :map :map] [:tuple [:vector :any] [:maybe :int]]]}
+  [ix db turn-of {:keys [f args]} m]
   (let [x (some-> (first args) ratom/realize)]
     (cond (= f #'page-diff-msgs) [[:page (nth args 3)] (nth args 3)]
           (= f #'example-msgs) [[:example (first args)] nil]
           (:seon.eval/id x) [[:eval (:seon.eval/id x)] (reply-of db x)]
-          (:seon.message/id x) [[:message (:seon.message/id x)] (turn-of (:seon.message/id x))]
+          (:seon.message/id x) [[:message (:seon.message/id x)] (turn-of (:db/id x))]
           (:seon.model-call/id x) [[:reply (:seon.model-call/id x)] (:seon.model-call/n x)]
+          ;; any other entity the output placed, not the agent itself (whose opening is :session): by what it is, its turn when one read it
+          (and (:db/id x) (nil? (:seon.agent/key x))) [[(render/entity-schema ix x nil) (:db/id x)] (turn-of (:db/id x))]
           (= "system" (:role m)) [[:section (vec (sort (keys (:seon.agent/system x))))] nil]
           :else [[:session (:seon.agent/key x)] nil])))
 
@@ -122,9 +125,9 @@
   [w]
   (let [db ((:db w))
         c @(:ref (:src w))
-        turn-of (into {} (for [[n ms] (when (:db/id c) (ctx/placed-messages db c)) :when (int? n) [_ id] ms] [id n]))
+        turn-of (into {} (for [[n ps] (when (:db/id c) (ctx/placed-messages @(:index w) c)) :when (int? n) p ps] [(peek p) n]))
         ps (reduce (fn [acc [m src]]
-                     (let [[ref n] (part-ref db turn-of src m) [r0 ms n0] (peek acc)]
+                     (let [[ref n] (part-ref @(:index w) db turn-of src m) [r0 ms n0] (peek acc)]
                        (if (and (seq acc) (= ref r0)) (conj (pop acc) [r0 (conj ms m) n0]) (conj acc [ref [m] n]))))
                    [] (render/answer-sources w :seon.render/openai-compat))
         ms (into [] (mapcat second) ps)]
@@ -553,15 +556,22 @@
 
 (defn- turn-entities
   "Agent record c's turns as the entities the model reads, ordered from its pull: its model calls by number, each turn's
-  messages as it read them (seon.ctx/placed-messages: those delivered by its basis, so one delivered mid-turn reads at the next
-  turn), its page message between the basis of the call before that holds one and its own (`page-diff-msgs`, a placed call
+  messages and the other members of its history as it read them (seon.ctx/placed-messages: those linked by its basis, so one linked
+  mid-turn reads at the next turn, each by its path in c), its page message between the basis of the call before that holds one and its own (`page-diff-msgs`, a placed call
   whose parts come from one walk along the bases, drawn when a pair first asks: `pages-from`),
   the call, then its evals in the one order a turn's are read in (seon.ctx/turn-evals: the model's, then other hands'); a member c no longer holds (unlinked by a swap!) is
-  none. See docs/turn.md#the-turn-is-a-number."
-  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
-  [db c]
-  (let [evals (:seon.eval/_agent c) msgs (:seon.message/_to c)
-        placed (ctx/placed-messages db c)
+  none. The model reads of an eval no call holds by another hand than the agent's only one by the system with an intent (`model-reads?`).
+  See docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat :seon.host/db :map :map] [:vector :any]]}
+  [db ix c]
+  (let [evals (:seon.eval/_agent c)
+        placed (ctx/placed-messages ix c)
+        ;; what the model reads of the placed members (the page shows them all): an eval by another than the agent itself only when it is the
+        ;; system's (its :seon.eval/by the system entity, :seon.system/id) and holds an intent; a person's or another agent's eval, and the
+        ;; system's own work (seon.turn/work!, no intent), stay out (Context and Data model, 2026-11-11)
+        ;; read untracked, member by its path: who made an eval and its intent are written with it, once
+        plain (ratom/untracked c)
+        model-reads? (fn [p] (let [m (get-in plain p) by (:seon.eval/by m)] (or (nil? by) (= (:db/id by) (:db/id plain)) (and (:seon.system/id by) (not (str/blank? (:seon.eval/intent m)))))))
         ;; the newest call's basis is written after the commit it names (seon.turn/open-turn!), so read at that commit it holds none:
         ;; there the point is db's own (the basis it will name), so a request made again at its basis holds its page message; a pull
         ;; that leaves bases out (a smaller pattern) shows no page
@@ -589,7 +599,8 @@
                      ;; the task a call served, from its basis (the newest, written after its commit, serves the agent's task now)
                      task-of (fn [x] (or (:task (ratom/realize (:seon.model-call/basis x))) (when (= newest (:seon.model-call/n x)) (ratom/realize (get-in c [:seon.agent/task :seon.task/id])))))
                      t0 (some-> before task-of) t1 (task-of call)
-                     ms (keep (fn [[m _]] (get msgs m)) (get placed n))
+                     ;; the members of its history it took, each by its path in c (a message, or any history join's member)
+                     ms (keep #(get-in c %) (filter model-reads? (get placed n)))
                      ;; its evals in the one order a turn's are read in (seon.ctx/turn-evals: the model's, then other hands')
                      es (map first (ctx/turn-evals c (:db/id call)))
                      model? #(:seon.eval/call-id (get evals %))]
@@ -601,7 +612,7 @@
                          (map evals es))]
            x))
           ;; those delivered after the last turn's edge, which the turn now opening takes (:pending): never lost before that turn's call exists
-          (concat (keep (fn [[m _]] (get msgs m)) (get placed :pending))
+          (concat (keep #(get-in c %) (filter model-reads? (get placed :pending)))
                   (opening-page (:db/id c) here (last (keep basis-of cs)) (empty? cs) newest)))))
 
 (defn example-session-msgs
@@ -609,10 +620,10 @@
   that opens it (seon.ctx.session/example-open), its turns' entities placed (`turn-entities`), each rendered by its own
   :seon.render/openai-compat in the walk, and the message that closes it. A call's answer stands for the agent's own model render, so an
   example writes no session opening of its own. See docs/tasks.md#a-task-names-example-sessions."
-  {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :map] [:vector :any]]}
-  [{db :seon.db/db} a]
+  {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db] [:seon.render/index :map]] :map] [:vector :any]]}
+  [{db :seon.db/db ix :seon.render/index} a]
   (-> [{:role "user" :content (session/example-open (ratom/realize (:seon.agent/key a)) (ratom/realize (:seon.agent/description a)))}]
-      (into (turn-entities db a))
+      (into (turn-entities db ix a))
       (conj {:role "user" :content "</session>"})))
 
 (defn example-msgs
@@ -632,11 +643,11 @@
   "An agent (:seon.db/agent-fact) as the model reads it: its system message (`agent-system-text`: the doc sections
   :seon.agent/system names, else the system prompt; a placed example is answered by its own call, so it has none), each example session its task names as a placed call of `example-msgs`, what opens its own session, then its turns'
   entities (`turn-entities`). The task is read in the page parts alone, never here. See docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
-  {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :map] [:vector :any]]}
-  [{db :seon.db/db} a]
+  {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db] [:seon.render/index :map]] :map] [:vector :any]]}
+  [{db :seon.db/db ix :seon.render/index} a]
   (let [k (:seon.agent/key a)]
     ;; no prompt on db: no system message, so the request is refused by its own check (a typed error), not thrown inside the render
     (-> (if-let [t (agent-system-text db a)] [{:role "system" :content t}] [])
         (into (map (fn [ek] [#'example-msgs {} ek])) (session/session-examples db a))
         (into (when k [{:role "user" :content (session/session-open k)}]))
-        (into (turn-entities db a)))))
+        (into (turn-entities db ix a)))))
