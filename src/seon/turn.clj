@@ -344,7 +344,7 @@
          ;; the main and merge base the read heard, decided as a model turn's are, before its request is drawn
          _ (when take? (when-let [tx (not-empty (main-base-tx))] (agent/transact! tx) (agent/commit!)))
          ;; the run's own max-turns, as a model turn's basis holds it (the agent's on main, else the config's: root passes them alike)
-         max-turns (or (:seon.agent/max-turns (d/entity (agent/db) [:seon.agent/key k]))
+         max-turns (or (some-> (agent/heard-main) (d/entity [:seon.agent/key k]) :seon.agent/max-turns)
                        (cfg/value :seon.config.agent/max-turns))
          ;; the turn a model would take now: every record before it is in the request
          ;; an observer's: the branch as it is, nothing committed for it
