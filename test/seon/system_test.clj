@@ -536,7 +536,7 @@
 ;; Estimate, test process: two dozen git and bin/ calls and six socket asks, a few million ticks (the estimate below); its
 ;; root: one boot (~11 s, docs/cost.md), one agent forked (<2 s), the bridge's commit and one form's load (tens of ms), and
 ;; landed!'s binary-current over the whole reach graph (~1.4 s, ~300M ticks, measured on the standing root); about 15 s wall.
-(deftest ^{:seon.test/estimate {:ticks 20000000}} an-update-keeps-running-agents
+(deftest ^{:seon.test/estimate {:ticks 20000000} :seon.test/root [] :seon.test/execs ["git" "bin/land" "bin/tree"]} an-update-keeps-running-agents
   (let [checkout (config/checkout)
         path (test-store)
         main (str "root-test-update-" (random-uuid))

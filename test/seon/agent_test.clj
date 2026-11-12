@@ -403,7 +403,7 @@
     (is (= {:pass 1 :fail 0 :error 0} result) (str "and the run answered green once let go: " (pr-str result)))))
 
 ;; See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent
-(deftest a-test-child-is-a-proc-of-the-agents-graph
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 2}} a-test-child-is-a-proc-of-the-agents-graph
   ;; the one-unit spec, fork-one step 2: a test child is forked by jolt.async.remote.flow/fork! as a proc of the agent's own
   ;; Flow graph, its values folded by a proc of that graph, never read from a hand-made pipe. The graph's procs are read
   ;; when the child's pid is told (forked: the child is running) and after the run: the child and its run's fold are
@@ -416,7 +416,7 @@
         v (some-> (:value r) clojure.edn/read-string)]
     (is (= {:pass 1 :added 2 :after true} v) (str "the child and its fold were procs while it ran, gone after: " (pr-str r)))))
 
-(deftest a-test-childs-run-ends-at-its-exit-though-it-forked-a-grandchild
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 40000000 :asks 2}} a-test-childs-run-ends-at-its-exit-though-it-forked-a-grandchild
   ;; agent a3 waited 3.5 h on main (2026-10-26) for its test child's end, which never came: root's :tests in flight,
   ;; the agent at 0% CPU. A process the test child forked held the child's end of its link past the child's exit. A
   ;; forked child holds only what it is given (docs/processes.md#a-child-holds-what-it-is-given), so the grandchild
@@ -2970,7 +2970,7 @@
     (is (= (inc (:value before)) (:value after)) "the drawing recorded no eval: only the count before it is new")
     (is (= :seon.system/no-agent (:seon.error/type (:value gone))) (pr-str gone))))
 
-(deftest a-value-that-does-not-read-ends-its-test-and-the-run-goes-on
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-value-that-does-not-read-ends-its-test-and-the-run-goes-on
   ;; task seon.agent/a-test-childs-line-always-reads (root, 2026-10-27): a report holding a value
   ;; that prints as no EDN (an exception's #error {, a var's #'v) killed its agent with exit 70. Read through the
   ;; link's codec (seon.agent/child-codec) it is that test's :error, once, and the next test's values are taken as before
@@ -2989,7 +2989,7 @@
     (is (= :seon.test/unreadable-line (:seon.error/type (first errors))))
     (is (= #{"#'app.t/a" "#'app.t/c"} (:ended acc)) "the tests around it are taken as before")))
 
-(deftest a-tests-ended-value-keeps-the-live-heap-it-left
+(deftest ^{:seon.test/estimate {:ticks 50000}} a-tests-ended-value-keeps-the-live-heap-it-left
   ;; docs/cost.md#what-a-test-run-measures (root, 2026-10-28): 23 of 191 tests of a forked run ran
   ;; out of memory at the agent's heap ceiling with no stack; the heap each test leaves, after a
   ;; collection, is on its ended value and kept per test, so the one that holds memory is named

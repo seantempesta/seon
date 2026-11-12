@@ -1300,7 +1300,7 @@
     (is (= true (get-in (first (step #'root/api-proc st2 :back {:ev :standby :gen 4 :pid 9})) [:view :fork-server :standby]))
         "the next standby made: the view shows it has one again")))
 
-(deftest a-forking-process-holds-only-io-procs
+(deftest ^{:seon.test/estimate {:ticks 50000}} a-forking-process-holds-only-io-procs
   ;; the one-unit spec's law 1 (docs/processes.md#what-a-fork-inherits): a process that forks holds only :workload :io procs,
   ;; so its procs run as fibers and a fork finds one active thread. An agent forks its own children: every step of its graph
   ;; (seon.repl/agent-steps, what serve! builds from) is :io. Blocking foreign work (:mixed: the writer, the flusher, fx workers,
