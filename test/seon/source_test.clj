@@ -97,6 +97,22 @@
     (is (= "(defn f3 [] 33)" (:form/src (:var/form (d/entity after [:var/name 'app.oe/f3])))) "the edit is the var's form")
     (is (= "(defn f5 [] 5)" (:form/src (:var/form (d/entity after [:var/name 'app.oe/f5])))) "and the others are as they were")))
 
+(deftest a-held-form-is-checked-against-the-file-reading-macros-not-a-seek-a-reference
+  ;; docs/source.md#a-boot-catches-up-with-its-checkout: whether a held form expands a macro that reads files is asked of the program's
+  ;; file-reading macros, found once a refresh (file-reading-macros), never by seeking each reference's var: a one-form edit of
+  ;; seon.system (126 forms, 2,573 references) sought 2,573 vars, 19 of its 80 MB (2026-11-12). Estimate: no :var/name seek a
+  ;; reference; the analysis of the ns form and the edited form seeks what those two name (under 126, the file's forms)
+  (let [db (test-runner/program)
+        text (source/file-text db 'seon.system)
+        edited (str/replace-first text "(defn catch-up\n  \"What brings" "(defn catch-up\n  \"(edited) What brings")
+        n (atom 0)
+        eid pdb/eid
+        tx (with-redefs [pdb/eid (fn [db a v] (when (= :var/name a) (swap! n inc)) (eid db a v))]
+             (source/refresh-tx db {"src/seon/system.clj" edited}))]
+    (is (not= text edited) "the edit is made")
+    (is (str/includes? (pr-str tx) "(edited) What brings") "the edited form is written")
+    (is (< @n 126) (str @n " :var/name seeks for a one-form edit of a 126-form file"))))
+
 (deftest a-form-taken-from-the-store-is-declared-for-the-forms-after-it
   ;; docs/source.md#a-boot-catches-up-with-its-checkout: a form the store holds whole is not analyzed again, but a later form that
   ;; calls it is, in a process that never loaded the namespace (bin/test --health's): the held form's var must be declared

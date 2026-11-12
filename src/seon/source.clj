@@ -400,6 +400,16 @@
           (when-let [e (d/entity db [:var/name (symbol vns vname)])]
             (if (contains? (set (:var/meta e)) :private) :private :public)))))))
 
+(defn file-reading-macros
+  "The names of db's macros whose defining form refers to one of seon.program/file-readers (slurp, file-seq, io/resource): a form
+  expanding one holds the analysis of what the macro read. One query of the program's facts, never a seek a reference. See
+  docs/source.md#indexing-a-tree."
+  {:malli/schema [:=> [:cat :seon.host/db] [:set :qualified-symbol]]}
+  [db]
+  (set (d/q '[:find [?mn ...] :in $ [?r ...]
+              :where [?mf :form/refs ?r] [?mf :form/defines ?m] [?m :var/meta :macro] [?m :var/name ?mn]]
+            db (vec program/file-readers))))
+
 (defn- held-form
   "For namespace nsym on db, the answer accounts takes for a form it holds whole: (fn [n src k ns-src form]) gives the account
   of the live form db holds at that namespace, text and occurrence (its id), built from db's facts (what read-interface and
@@ -413,15 +423,14 @@
         db-ns-src (some-> ne (->> (d/entity db)) :ns/form :form/src)
         ;; {form id, its entity} of the namespace's forms: one scan, never a seek a form
         by-id (delay (into {} (for [dt (when ne (d/datoms db :avet :form/ns ne)) :let [x (d/entity db (:e dt))]] [(:form/id x) (:e dt)])))
-        ;; is var v a macro whose expansion reads files (file-reading-expansions' rule): a few seeks, asked only of a held form's refs
-        reading (fn [v] (let [m (some->> (pdb/eid db :var/name v) (d/entity db))]
-                          (and m (contains? (set (:var/meta m)) :macro) (some program/file-readers (:form/refs (:var/form m))))))]
+        ;; the macros whose expansion reads files (file-reading-expansions' rule): one query, asked once, a held form's refs looked up in it
+        reading (delay (file-reading-macros db))]
     (fn [n src k ns-src form]
       (when (and db-ns-src (= ns-src db-ns-src) (not= src ns-src)
                  ;; a macro (a later form's analysis expands it) and a form that defines a class are always analyzed
                  (not (and (seq? form) (#{'defmacro 'ns 'defrecord 'deftype 'defprotocol 'definterface} (first form)))))
         (when-let [fe (and (= n nsym) (get @by-id (program/form-id n src k)))]
-          (when (and (program/live? db fe) (not-any? reading (:form/refs (d/entity db fe))))
+          (when (and (program/live? db fe) (not-any? @reading (:form/refs (d/entity db fe))))
             (let [x (d/entity db fe)]
               {:id (:form/id x) :seon.source/held? true :inline-defs (vec (:form/inline-defs x))
                :defs (vec (for [d (:form/defines x) :when (and (:var/name d) (= fe (:db/id (:var/form d))))]
@@ -634,10 +643,9 @@
   Derived from the program's facts, never listed. See docs/source.md#indexing-a-tree."
   {:malli/schema [:=> [:cat :seon.host/db] [:map-of :string :symbol]]}
   [db]
-  (into {} (d/q '[:find ?file ?nsn :in $ [?r ...]
-                  :where [?mf :form/refs ?r] [?mf :form/defines ?m] [?m :var/meta :macro] [?m :var/name ?mn]
-                  [?f :form/refs ?mn] [?f :form/ns ?ns] [?ns :ns/file ?file] [?ns :ns/name ?nsn]]
-                db (vec program/file-readers))))
+  (into {} (d/q '[:find ?file ?nsn :in $ [?mn ...]
+                  :where [?f :form/refs ?mn] [?f :form/ns ?ns] [?ns :ns/file ?file] [?ns :ns/name ?nsn]]
+                db (vec (file-reading-macros db)))))
 
 (defn refresh-tx
   "The facts that bring db's program up to date with the files that changed ({relative path
