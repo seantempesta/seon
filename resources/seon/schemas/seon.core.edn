@@ -260,7 +260,8 @@
  :seon.test/started [:string {:description "On a test run's line, the test (as #'ns/name) that has just started."}]
  :seon.test/ended [:string {:description "On a test run's line, the test (as #'ns/name) that has just ended, beside its reports and measures."}]
  :seon.test/output [:string {:description "On a test run's note, what the run printed, kept when it threw or a test was not green."}]
- :seon.test/fixture [:boolean {:description "On a var's metadata, true when it is a delay a test realizes on first use, forced once in an agent before its tests run."}]
+ :seon.test/fixture [:boolean {:description "On a var's metadata, true when it is a delay a test realizes on first use (the test store), forced once before tests run: in an agent before its first test fork, in a bin/test shard whose tests reach it."}]
+ :seon.test/shard-fixture [:boolean {:description "On a var's metadata, true when it is a delay a test realizes on first use that only a bin/test shard makes before its tests (the shard's shared test root), never an agent: one forced in an agent would boot a test root inside it."}]
  :seon.test/pipe-held [:map {:description "The report a test run adds when its process ended and a process it forked still holds its pipe."} [:type [:= :error]] [:seon.error/type [:= :seon.test/pipe-held]] [:message :string]]
  ;; the file classes of a checkout (seon.fx/env-class): each a key of a program's :config (keys-schemas sweep; docs/source.md#tests-run-by-reach)
  :seon.env/bin [:string {:description "A file class of the checkout (bin/ and the checkout's root files git and the scripts read): as a key of a program's :config, the digest of its files that a test whose reach reads the class takes as input."}]

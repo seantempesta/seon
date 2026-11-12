@@ -98,7 +98,8 @@
         args (into (cond-> ["--set" (str ":seon.config.source/root=" (pr-str checkout))]
                      dirs (into ["--set" (str ":seon.config.source/dirs=" (pr-str dirs))]))
                    (mapcat (fn [x] ["--set" x])) sets)
-        root (ts/shared-root! args)
+        ;; the shard's shared root for the default arguments is a shard fixture, started before the shard's first test
+        root (if (= args (ts/default-root-args)) @ts/shared-root-default (ts/shared-root! args))
         ask (fn [m] (ts/ask root m))
         eval-root (fn [code] (ask {:op :eval :agent "root" :code code}))
         made (volatile! nil)

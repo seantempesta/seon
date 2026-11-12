@@ -587,3 +587,14 @@
         ;; a start that is not run unless it is the one put: two callers at once share one root
         d (delay (start-shared-root! (first k) (second k)))]
     @(or (.putIfAbsent ^java.util.concurrent.ConcurrentHashMap shared-roots k d) d)))
+
+(defn default-root-args
+  "The root arguments an in-agent test's shared root takes when it names no dirs or settings: this checkout as its source root."
+  {:malli/schema [:=> [:cat] [:vector :string]]}
+  [] ["--set" (str ":seon.config.source/root=" (pr-str (seon.config/checkout)))])
+
+(def ^:seon.test/shard-fixture shared-root-default
+  "The shard's shared root for default-root-args, a shard fixture: a bin/test shard whose tests reach it starts it before its
+  first test (seon.proofs/warm-fixtures!), so no test pays the root's start inside its own budget; an agent never forces it (a
+  test root booted inside an agent). See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
+  (delay (shared-root! (default-root-args))))
