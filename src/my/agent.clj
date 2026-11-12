@@ -39,9 +39,9 @@
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.walk] [datahike.core] [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.ctx.search :as search] [seon.ctx.wire :as wire] [seon.ref :as ref] [seon.doc :as doc] [seon.source :as source]
+  (:require [seon.print.emit :as emit] [clojure.walk] [datahike.core] [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.ctx.search :as search] [seon.ctx.wire :as wire] [seon.ref :as ref] [seon.doc :as doc] [seon.source :as source]
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.fx :as fx] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
-            [seon.db :as pdb] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.problems :as problems] [seon.render.ui :as ui] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
+            [seon.db :as pdb] [seon.print :as print] [seon.render :as render] [seon.problems :as problems] [seon.render.ui :as ui] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "An earlier eval's response (its live value under :value), by handle (:a3f9c1d2)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
@@ -511,7 +511,7 @@
   (wc (grep \"plan\")) before reading it whole."
   {:malli/schema [:=> [:cat :any] nat-int?]}
   [x] (let [ix (agent/branch-index) v (if-let [r (render/model ix x)] (:value r) x)]
-        (select/chars-tokens (count (if (string? v) v (:text (print/print-value v {:budget Integer/MAX_VALUE :render #(render/model ix %)})))))))
+        (emit/chars-tokens (count (if (string? v) v (:text (print/print-value v {:budget Integer/MAX_VALUE :render #(render/model ix %)})))))))
 
 (defn describe
   "What value v holds, without showing it: a vector of entries, one a path, {:path [...] :holds x}, where :holds is the value when it

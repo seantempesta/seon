@@ -142,7 +142,7 @@ The turn line is the heading of ```seon.render.ui/turn```, `You're in seon.progr
 
 ### Cost is shown one way
 
-Wherever work is shown it is one line from ```seon.print/cost-text``` (```seon.print.emit/cost-text```): `5.2 ms · 873k ticks · 4.1 MB · ~1.2k tok`. An eval's text carries it last, `:cost "..."` (```seon.print/response-text```), `"not run"` when none was recorded; the numbers stay data (`:ms :ticks :bytes`). Every origin goes through `seon.repl/eval-string`, so every eval carries a cost, a thrown one too (`seon.repl-test/every-eval-carries-its-cost-whatever-asked-it-and-whether-it-threw`).
+Wherever work is shown it is one line from ```seon.print.emit/cost-text```: `5.2 ms · 873k ticks · 4.1 MB · ~1.2k tok`. An eval's text carries it last, `:cost "..."` (```seon.print/response-text```), `"not run"` when none was recorded; the numbers stay data (`:ms :ticks :bytes`). Every origin goes through `seon.repl/eval-string`, so every eval carries a cost, a thrown one too (`seon.repl-test/every-eval-carries-its-cost-whatever-asked-it-and-whether-it-threw`).
 
 ### A search is a part
 
