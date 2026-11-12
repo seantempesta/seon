@@ -42,12 +42,13 @@
     (is (= (select-keys fresh [:live :schemas]) (select-keys (:graph moved) [:live :schemas])) "the graph is the new program's")
     (is (not (:graph-moved moved)) "and the flag is cleared")))
 
-;; Estimate: sizes 10+100+1000 = 1,110 forms: branch-of 111M + reach-graph 41k a form = 45M; 3 key lookups; over :seon.config.proofs/test-ticks-cap: ~200M ticks.
-(deftest ^{:seon.test/estimate {:ticks 200000000}} a-fork-on-an-unmoved-program-costs-nothing-of-the-program
+;; Estimate: sizes 10+30+100 = 140 forms: branch-of 14M + reach-graph 41k a form = 6M; 3 key lookups: ~20M ticks. A 10x spread
+;; shows :constant (1000 forms cost 90% of the test for no more of the claim: cut 2026-11-13, it was over the 1e8 cap)
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-fork-on-an-unmoved-program-costs-nothing-of-the-program
   (cost/proof
     {:of 'seon.fork-server/graph-at-fork :input 'seon.fork-server-cost-test/spawned-of
      :n "forms in main's program"
      :work "a key lookup: no commit since moved the program, so the graph is the one held (reach-update, which reads every live form, is not called)"
      :growth :constant
      :fixed {:calls 1 :bytes 2000}
-     :sizes [10 100 1000]}))
+     :sizes [10 30 100]}))

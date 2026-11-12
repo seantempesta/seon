@@ -322,8 +322,10 @@
         g (program/reach-graph db nil)]
     [g (d/db-with db (program/record-tx db (acct (dec n) "(dec x)")))]))
 
-;; Estimate: sizes 100+300+1000 = 1,400 forms: branch-of 140M + reach-graph 41k a form = 57M + 3 reach-updates (0.35M + 850 a form) = 2M; over :seon.config.proofs/test-ticks-cap: ~200M ticks.
-(deftest ^{:seon.test/estimate {:ticks 200000000}} a-change-re-folds-only-what-reaches-it
+;; Estimate: sizes 10+30+100 = 140 forms x ~300k (a form through branch-of and the reach graph, measured at 430 forms: 130M) = 42M
+;; + 3 reach-updates (0.35M + 850 a form) = 1M: ~40M ticks. A 10x spread tells linear from quadratic (seon.cost/steeper-by 0.3);
+;; 1,400 forms were over the 1e8 cap (cut 2026-11-13)
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-change-re-folds-only-what-reaches-it
   ;; task seon.program/reach-index-reads-each-attribute-once: the proof's digest does not reach reach-update (named by a quoted symbol)
   (cost/proof
     {:of 'seon.program/reach-update :input 'seon.program-cost-test/changed-top
@@ -346,7 +348,7 @@
      ;; from 100: at [30 100 300] the increment at 100 was 35k ticks on 373k at 30, so a few thousand ticks
      ;; of what the shard ran before read n^1.52 against the n^1.53 allowed (owner, 2026-11-01: fix the sizes;
      ;; task seon.cost/a-growth-fit-holds-whatever-ran-before)
-     :sizes [100 300 1000]}))
+     :sizes [10 30 100]}))
 
 (defn indexed-top
   "reach-indexed's and reach-update's arguments: the graph of a branch holding n forms (app.pc/f0..fn-1, each
@@ -558,8 +560,9 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db]]}
   [n] [(first (branch-of n))])
 
-;; Estimate: sizes 100+300+1000 = 1,400 forms x 100k setup = 140M (rounds to 1e8, the cap; 3 digests are ~0.3M): ~100M ticks.
-(deftest ^{:seon.test/estimate {:ticks 100000000}} the-program-digest-is-one-read-of-the-program
+;; Estimate: sizes 30+100+300 = 430 forms x 100k setup = 43M (3 digests are ~0.3M): ~40M ticks. A 10x spread tells linear from
+;; quadratic; 1000 forms were 70% of the test (cut 2026-11-13: its 140M was over the 1e8 cap)
+(deftest ^{:seon.test/estimate {:ticks 40000000}} the-program-digest-is-one-read-of-the-program
   (cost/proof
     {:of 'seon.program/program-digest :input 'seon.program-cost-test/digested-of
      :n "forms the db holds"
@@ -571,7 +574,7 @@
      :per-n {:ticks 235.0 :bytes 1160.0}
      :fixed {:ticks 93000.0 :bytes 465000.0}
      ;; past 70 forms: ticks step down about 11k between 60 and 70 at one per-form slope either side, the test db's index layout
-     :sizes [100 300 1000]}))
+     :sizes [30 100 300]}))
 
 (defn meaning-input
   "The cost proof's input at n: a db of n vars each with a docstring, and tx-data redefining each with another."
