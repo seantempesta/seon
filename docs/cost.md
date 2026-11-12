@@ -9,6 +9,7 @@ A cost proof (`seon.cost/proof`) states what a function's work should cost as it
 The constants a lower bound is worked from (AGENTS.md §3a), measured on 2026-11-12 on the build machine. Each is a fact to estimate with, or a target where today's number is a bug.
 - A fork of a running agent costs about 65 ms; one in-process test in a warm fork is about 21 ms, and the median test is about 10 ms of work.
 - A transaction of about 10 datoms should cost about 50k ticks and 60 KB; an AVET seek costs microseconds; a tick is about 3 to 10 ns.
+- A stored index node's read on a cache miss (konserve's `get-immutable`, a 32-entry branch) costs 33 KB and 5.4k ticks, against a floor of about 12 KB and 3k (`seon.program-cost-test/a-stored-node-reads-at-its-decode`).
 - Reading source should allocate at most 20 bytes a character, against 56 today.
 - A system's first agent should be ready in under 2 s, against 16 s today; a system boot is 10.7 s today, which is a cost to remove, not a constant to plan with.
 - The whole suite should run in under 60 s of wall time, and a typical change's minimal set in seconds.
