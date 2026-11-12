@@ -267,6 +267,9 @@
      :no-test (vec (sort-by str (concat (remove (set (map (comp symbol namespace key) all)) nss)
                                         (remove all vars))))
      :digests (update-vals idx :digest)
+     ;; each test's reads besides code (config keys, the tree, a root, the binary: graph-index's :reads), what its recorded
+     ;; :reads holds beside the functions it called, so a reuse is sound until those reads are recorded as they happen
+     :static-reads (into {} (keep (fn [[t v]] (when (seq (:reads v)) [t (:reads v)]))) idx)
      ;; recorded reads (seon.proofs/read-digests): the tests' newest greens that recorded what they read, and, when any did,
      ;; the digest of everything a run can read on this tree; an unreadable record only makes its test run
      :held (let [h (fx/held-reads (vec (keys idx)))] (if (:seon.error/type h) {} h))
@@ -355,6 +358,24 @@
     (write! (str out "/stall-bounds") (apply str (for [[t m] (sort-by key ms)] (str t " " (max floor (* k m)) " " (* e (max floor m)) "\n"))))
     (count dealt)))
 
+(defn- write-reads!
+  "The run's reads, for its shards to key each green by what it read (seon.proofs/reads-key): out/reads-index.fasl, the digest
+  of every read on the planned tree (plan's :rd, seon.program/reads-index, kept per tree in the program store), and
+  out/static-reads.edn, each test's reads besides code (plan's :static-reads). Written only when tests run. See
+  docs/source.md#tests-run-by-reach."
+  [out plan run-tests]
+  (when (seq run-tests)
+    (java.nio.file.Files/write (.toPath (io/file out "reads-index.fasl")) ^bytes (fasl/serialize @(:rd plan)) (make-array java.nio.file.OpenOption 0))
+    (write! (str out "/static-reads.edn") (sedn/encode (select-keys (:static-reads plan) run-tests)))))
+
+(defn- shard-reads
+  "{:rd :static} of the run whose shard file is file (write-reads!: beside it), or nil when the run wrote none."
+  [file]
+  (let [d (.getParentFile (io/file file)) f (io/file d "reads-index.fasl") st (io/file d "static-reads.edn")]
+    (when (.isFile f)
+      {:rd (fasl/deserialize {} (java.nio.file.Files/readAllBytes (.toPath f)))
+       :static (if (.isFile st) (edn/read-string (slurp st)) {})})))
+
 (defn- shard!
   "One shard bin/test runs (out/shard-<i>.edn): its namespaces required, its tests run
   (seon.proofs/run-tests!), each test named as it starts (started) and as it ends (ended), each
@@ -366,6 +387,10 @@
   (seon.fx/forget-greens!) and nothing else is stored, and the run stays as reported. Then SHARD n green m red. Answers the exit status."
   [file]
   (let [{:keys [tests digests tree mg rerun]} (edn/read-string (slurp file))
+        ;; what each green read, keyed by the run's reads index (write-reads!): the functions it called, itself, its static reads
+        {:keys [rd static]} (shard-reads file)
+        with-reads (fn [x] (cond-> x rd (assoc :reads (proofs/reads-key rd {:fns (conj (into #{} (map :var) (:fns x)) (:test x))
+                                                                              :keys (get static (:test x))}))))
         t0 (profile/now-ns)]
     (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
     ;; armed as root arms them at boot, so a proof counts the same contracted calls here as in an agent's test child (docs/cost.md#counting-calls)
@@ -397,7 +422,7 @@
                                                          (when (proofs/green? x)
                                                            (let [own (filterv #(= (:var %) (str "#'" (:test x))) @reports)
                                                                  c ((proofs/costs {:reports own}) (:test x))]
-                                                             (doseq [u (record-run! run {(:test x) (cond-> x c (assoc :cost c))} {})]
+                                                             (doseq [u (record-run! run {(:test x) (with-reads (cond-> x c (assoc :cost c)))} {})]
                                                                (println "UNRECORDED" (:key u) (:message u)))
                                                              (vswap! written assoc (:test x) (:digest x))))
                                                          (when-not (proofs/green? x) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))))
@@ -474,7 +499,8 @@
                   (fn [cand]
                     (let [r (read-results cand)]
                       (if (contract/error? r) (do (vreset! unread r) {}) r))))]
-    (cond-> (assoc p :binary-current (:binary-current reach) :waived (:waived reach)) @unread (assoc :unread @unread))))
+    (cond-> (assoc p :binary-current (:binary-current reach) :waived (:waived reach) :static-reads (:static-reads reach) :rd (:rd reach))
+      @unread (assoc :unread @unread))))
 
 (defn build-text
   "out/build's text, what bin/test builds target/seon for: when a selected key reaches the binary (bin-keys) and the binary is
@@ -547,6 +573,7 @@
                          ;; run whatever the cache holds: every test of a full run (bin/test --all, which a rerun by name asks
                          ;; for too), and the reuse audit's greens, whose rerun is its point
                          (if (true? all?) run-tests audit))
+        _ (write-reads! out plan (if no-test [] run-tests))
         ;; what runs and reaches the binary (a test that reaches binary-sh, a step that runs a seon.check
         ;; mode): bin/test builds target/seon only when this is not empty, bin/check seeds only for the steps
         step-bin (filterv proofs/step-needs-binary? run-steps)
