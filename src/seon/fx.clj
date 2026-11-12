@@ -408,9 +408,13 @@
   the same, and builds it)."
   {:malli/schema [:=> [:cat :string] :string]}
   [dir]
-  (let [status (str/split-lines (git! {} dir ["status" "--porcelain=v2" "--branch" "-uall" "--ignore-submodules=all"] nil))
-        head (second (re-find #"^# branch\.oid (\S+)" (first (filter #(str/starts-with? % "# branch.oid ") status))))
-        _ (when (or (nil? head) (= "(initial)" head)) (throw (ex-info (str "pin " dir ": it has no commit") {:dir dir})))]
+  (let [out (git! {} dir ["status" "--porcelain=v2" "--branch" "-uall" "--ignore-submodules=all"] nil)
+        status (str/split-lines out)
+        ;; git's header line, when it printed one: a status that exits 0 with none (an empty output, seen once under load in a
+        ;; seed, 2026-11-12) is said with what git printed, never a NullPointerException in the parse
+        head (some->> (first (filter #(str/starts-with? % "# branch.oid ") status)) (re-find #"^# branch\.oid (\S+)") second)
+        _ (when (nil? head) (throw (ex-info (str "pin " dir ": git status printed no branch header, only: " (if (str/blank? out) "nothing" (str/trim out))) {:dir dir})))
+        _ (when (= "(initial)" head) (throw (ex-info (str "pin " dir ": it has no commit") {:dir dir})))]
     (if (every? #(str/starts-with? % "# ") status)
       head
       (str head "+" (tree-id dir [])))))
@@ -1271,10 +1275,10 @@
 (defn run-item
   "The :item effect: one item of a session's prove that the test service (seon.prove) granted, run on the session's
   checkout at tree, niced: :build is bin/build seon there; :seed brings the checkout's program store to the tree and, :binary?,
-  seeds its check store fresh, once a tree (each binary step takes a clone of it, as bin/check's steps do); :step is one check step (bin/check --steps, then bin/test --store-steps, which
-  stores it green at its digest). Its answer {:value {:pass :fail :error :failures :ms}}, the verdict read back from the
-  cache by its digest, so an item asked again is reused there; a step bin/check ended past its bound (its DIR/overran) is
-  :signal :overran, never a verdict. A checkout whose files are no longer tree is refused (:seon.fx/io-error, :tree-moved): a verdict would be
+  seeds its check store fresh, once a tree (each binary step takes a clone of it, as bin/check's steps do); :step is one check
+  step (bin/check --steps, then bin/test --store-steps, which stores it green at its digest; past its bound bin/check fails
+  it). Its answer {:value {:pass :fail :error :failures :ms}}, the verdict read back from the cache by its digest, so an
+  item asked again is reused there. A checkout whose files are no longer tree is refused (:seon.fx/io-error, :tree-moved): a verdict would be
   stored under a digest of files that are not there. A green already stored is answered at once, :reused, with no process
   started. See docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :map] :map]}
@@ -1332,12 +1336,7 @@
             _ (when pstore (doseq [^java.io.File d (some-> (java.io.File. ^String dir) .listFiles seq)
                                    :when (str/starts-with? (.getName d) "program-store")]
                              (lib/remove-tree! (.getPath d))))
-            v (when (map? stored) (get stored digest))
-            ;; bin/check's own judgement of the step's bound, a signal it writes (DIR/overran): this measures nothing itself
-            overran? (case kind
-                       :step (let [f (java.io.File. (str dir "/overran"))]
-                               (and (.isFile f) (contains? (set (str/split-lines (slurp f))) name)))
-                       false)]
+            v (when (map? stored) (get stored digest))]
         (cond
           (contract/error? stored) stored
           (= :build kind) (if (zero? (:exit r))
@@ -1346,9 +1345,6 @@
           (= :seed kind) (if (and (zero? (:exit r)) (or (not (:binary? req)) (.isFile (java.io.File. (str store "/data.mdb")))))
                            {:value {:pass 1 :fail 0 :error 0 :failures [] :ms ms}}
                            (error #'seon.fx/run-item :seon.fx/io-error (str "the seed of " store " failed (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log) {:path checkout}))
-          ;; a step that ended red with no verdict stored, over its bound: the overrun is a signal, its verdict none
-          (and overran? (not (proofs/green? v)))
-          {:value {:signal :overran :ms ms}}
           v {:value (assoc (select-keys v [:pass :fail :error :failures]) :ms ms)}
           (= :step kind) {:value {:pass 0 :fail 1 :error 0 :failures [{:type :fail :message (str "bin/check --steps " name ": " (runner-end (str (:out r) (:err r))))}] :ms ms}}
           :else (error #'seon.fx/run-item :seon.fx/io-error (str "the shard stored no verdict for " name " (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log)

@@ -985,15 +985,15 @@
   [] @built)
 
 (defn- held?
-  "Does this process already hold form row f compiled: the binary was built from its text (its id among the binary's forms,
-  binary-program: a form imported from a file the checkout changed since is main's, never the binary's, though its vars are
+  "Does this process already hold form row f compiled: the binary was built from its text (its id among forms, the binary's
+  forms as binary-program records them, which a caller passes: a form imported from a file the checkout changed since is main's, never the binary's, though its vars are
   bound), in a namespace it holds, every var it defines bound there? The binary's record holds test/'s forms too, which no
   binary compiles: one is held once its namespace is loaded. A form imported into a namespace loaded earlier (a test namespace
   loaded at boot, then a re-import adding a deftest) defines a var this process does not hold yet: it is loaded, never read
   as an unmap (seon.stage/stage-tx). With no record, nothing is held. See docs/source.md#the-binary-records-its-program."
-  {:malli/schema [:=> [:cat :seon.host/db :map] :boolean]}
-  [db f]
-  (boolean (and (contains? (:forms (binary-program)) (:id f))
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe [:set :string]] :map] :boolean]}
+  [db forms f]
+  (boolean (and (contains? forms (:id f))
                 (when-let [n (find-ns (:ns f))]
                   (every? (fn [[k s]] (or (not= :var k) (some-> (process-var db s (ns-interns n)) bound?)))
                           (:defines f))))))
@@ -1275,14 +1275,16 @@
   unevaluated: root imports test/ as facts and runs no deftest; the fork server loads them for
   every agent and test child, each namespace read from its file whole where main holds it as the
   file is (required!), the rest form by form
-  (docs/source.md#a-process-holds-the-tests-only-when-it-runs-them).
+  (docs/source.md#a-process-holds-the-tests-only-when-it-runs-them). :forms, the binary's form ids (held?), is the running
+  binary's record by default (binary-program); a test passes the set it means.
   Answers {:loaded n :errors [...]}."
   {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.program/load-report]
-                  [:=> [:cat :seon.host/db [:map [:tests? {:optional true} :boolean]]] :seon.program/load-report]]}
+                  [:=> [:cat :seon.host/db [:map [:tests? {:optional true} :boolean] [:forms {:optional true} [:maybe [:set :string]]]]] :seon.program/load-report]]}
   ([db] (load-all! db {}))
-  ([db {:keys [tests?] :or {tests? true}}]
+  ([db {:keys [tests?] :or {tests? true} :as opts}]
    (let [lf (live-forms db)
-         forms (loadable db (filterv #(not (held? db %)) lf) tests?)
+         binary (if (contains? opts :forms) (:forms opts) (:forms (binary-program)))
+         forms (loadable db (filterv #(not (held? db binary %)) lf) tests?)
          [required errs] (if tests? (required! db forms lf) [#{} []])]
      {:loaded (count forms)
       :errors (into errs (load! db (filterv #(not (required (:ns %))) forms) (set (keys (schema-changes db))) tests?))})))
@@ -1359,14 +1361,17 @@
   (loaded), or, for a var it never loaded, whose form is not the binary's (held?), as {:var :form (db-to's) :loaded (this
   process's, nil when none)}; [] when the process runs db-to's program
   there. The oracle a run asks before its first item (the runtime invariant: a process runs its branch's program). Costs
-  the diff, never the program. See docs/merging.md#a-session-proves-through-root."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :map]]}
-  [db-from db-to]
-  (let [now @loaded]
-    (vec (for [f (:load (diff-plan db-from db-to)) [k s] (:defines f)
-               ;; a var this process never loaded runs the binary's form: the changed form is held when it is that one (held?)
-               :when (and (= :var k) (not= (:id f) (get now s)) (not (and (nil? (get now s)) (held? db-to f))))]
-           {:var s :form (:id f) :loaded (get now s)}))))
+  the diff, never the program. forms, the binary's form ids, is the running binary's record by default (binary-program).
+  See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db] [:vector :map]]
+                  [:=> [:cat :seon.host/db :seon.host/db [:maybe [:set :string]]] [:vector :map]]]}
+  ([db-from db-to] (program-differs db-from db-to (:forms (binary-program))))
+  ([db-from db-to forms]
+   (let [now @loaded]
+     (vec (for [f (:load (diff-plan db-from db-to)) [k s] (:defines f)
+                ;; a var this process never loaded runs the binary's form: the changed form is held when it is that one (held?)
+                :when (and (= :var k) (not= (:id f) (get now s)) (not (and (nil? (get now s)) (held? db-to forms f))))]
+            {:var s :form (:id f) :loaded (get now s)})))))
 
 (defn reload-dependents!
   "Load again, in this process, the live forms of db that expanded a macro the forms ids (form ids, just recorded) define,
@@ -1401,12 +1406,14 @@
   they leave pointing to no form is removed, and each live form they assert (but the
   binary's own) is loaded, with what it reaches (load!: where a changed macro expanded, and
   the contracts a changed schema entry reaches), and when they touch a config entry the config is held again (hold-config!: no op else reads it). With {:tests? false} (root's) the test
-  namespaces' forms are left unevaluated (load-all!). Answers the error maps (empty when all loaded)."
+  namespaces' forms are left unevaluated (load-all!), and :forms is the binary's form ids (load-all!'s). Answers the error maps
+  (empty when all loaded)."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:sequential :seon.db/op]] [:vector :seon.program/error]]
-                  [:=> [:cat :seon.host/db [:sequential :seon.db/op] [:map [:tests? {:optional true} :boolean]]] [:vector :seon.program/error]]]}
+                  [:=> [:cat :seon.host/db [:sequential :seon.db/op] [:map [:tests? {:optional true} :boolean] [:forms {:optional true} [:maybe [:set :string]]]]] [:vector :seon.program/error]]]}
   ([db ops] (load-changes! db ops {}))
-  ([db ops {:keys [tests?] :or {tests? true}}]
-  (let [ptr (set (vals pointer))
+  ([db ops {:keys [tests?] :or {tests? true} :as opts}]
+  (let [binary (if (contains? opts :forms) (:forms opts) (:forms (binary-program)))
+        ptr (set (vals pointer))
         added (set (for [[op e a] ops :when (and (= op :db/add) (ptr a))] e))
         ;; a definition these ops moved to another form: what this process bound is the old form, so being bound says nothing (held?)
         replaced (set (for [[op e a] ops :when (and (= op :db/retract) (ptr a) (added e))] e))]
@@ -1418,7 +1425,7 @@
     (into (vec (load! db (vec (for [[op e a] ops
                                     :when (and (= op :db/add) (= a :form/src) (live? db e))
                                     :let [f (form-row db e)]
-                                    :when (or (not (held? db f)) (some #(replaced (:v %)) (d/datoms db :eavt e :form/defines)))]
+                                    :when (or (not (held? db binary f)) (some #(replaced (:v %)) (d/datoms db :eavt e :form/defines)))]
                                 f))
                       (set (for [[op e a] ops :when (and (= op :db/add) (= a :schema/form))
                                  :when (schema-value db e)]

@@ -137,18 +137,21 @@
         loaded #(get @@#'seon.program/loaded 'my.fx/send)
         before (loaded)
         base (empty-db)
-        on (fn [text] (d/db-with base (source/import-tx base {"src/my/fx.clj" text})))]
+        on (fn [text] (d/db-with base (source/import-tx base {"src/my/fx.clj" text})))
+        ;; the binary's forms, as a build of the real file records them (seon.system/built-program's :forms): passed, so the test
+        ;; reads no record of a build
+        binary (into #{} (comp (filter #(= 'my.fx (:ns %))) (map :id)) (program/live-forms (on real)))]
     (is (not= real edited) "the edit changes the form's text, and its code not at all")
     (try
       (let [db (on real)]
-        (is (= [] (program/program-differs base db)) "the binary's own text: this process holds it, nothing differs")
-        (is (= (count (program/live-forms base)) (:loaded (program/load-all! db))) "and none of it loads"))
+        (is (= [] (program/program-differs base db binary)) "the binary's own text: this process holds it, nothing differs")
+        (is (= (count (program/live-forms base)) (:loaded (program/load-all! db {:forms binary}))) "and none of it loads"))
       (let [db (on edited)
             id (:form/id (:var/form (d/entity db [:var/name 'my.fx/send])))]
-        (is (= ['my.fx/send] (mapv :var (program/program-differs base db))) "main's text of send is not the binary's")
-        (is (= (inc (count (program/live-forms base))) (:loaded (program/load-all! db))) "the fork server's load takes it, and only it")
+        (is (= ['my.fx/send] (mapv :var (program/program-differs base db binary))) "main's text of send is not the binary's")
+        (is (= (inc (count (program/live-forms base))) (:loaded (program/load-all! db {:forms binary}))) "the fork server's load takes it, and only it")
         (is (= id (loaded)) "this process now runs main's form")
-        (is (= [] (program/program-differs base db)) "and nothing differs"))
+        (is (= [] (program/program-differs base db binary)) "and nothing differs"))
       (finally (swap! @#'seon.program/loaded #(if before (assoc % 'my.fx/send before) (dissoc % 'my.fx/send)))))))
 
 (deftest root-loads-the-program-and-leaves-test-namespaces-unevaluated
@@ -613,16 +616,15 @@
   (let [main (main-with-file)
         branch (pt/record main 'app.pt-src "(defn twice [x] (* 2 x))")]
     ;; the process holds the imported namespace, as a binary built from that source does: every var it defines bound, and
-    ;; its forms among the binary's (seon.program/binary-program, the build's record)
+    ;; its forms among the binary's (load-all!'s :forms, the build's record by default)
     (hold! 'app.pt-src pt-text)
     (let [add0 @(resolve 'app.pt-src/add)
-          built (assoc (program/binary-program) :forms (into (set (:forms (program/binary-program))) (comp (filter #(= 'app.pt-src (:ns %))) (map :id)) (program/live-forms main)))]
-      (with-redefs [program/binary-program (fn [] built)]
-        (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! main))
-            "main's imported text whose namespace this process holds is the binary's: never evaluated (the example program is)")
-        (is (= [] (program/load-diff! main branch)))
-        (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
-        (is (identical? add0 @(resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again")))))
+          binary (into #{} (comp (filter #(= 'app.pt-src (:ns %))) (map :id)) (program/live-forms main))]
+      (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! main {:forms binary}))
+          "main's imported text whose namespace this process holds is the binary's: never evaluated (the example program is)")
+      (is (= [] (program/load-diff! main branch)))
+      (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
+      (is (identical? add0 @(resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again"))))
 
 (deftest an-agent-runs-its-branchs-change-to-imported-source-imported-too
   ;; Context's first bin/prove --root (2026-11-11) judged main's code: a tree branch's catch-up imports the checkout's changed
