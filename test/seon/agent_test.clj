@@ -1012,7 +1012,8 @@
                                                         " " (src k "(defn h [] 2)"))
                                                    (str "[:ready (:boot sys) [(name ag) (:text @(seon.system/submit! sys ag \"(:key @seon.agent/state)\"))]"
                                                         " (:text @(seon.system/submit! sys ag \"[(" g "/g) (" k "/h)]\"))]"))}]))
-                      (merging))
+                      ;; the default root (plans/tests-merge-root.md): its two namespaces of its own names on main, as every test's facts are
+                      {})
         [status boot [id text] gained] (:value r)]
     (is (= :ready status) (pr-str r))
     (is (str/includes? (str text) (str "\"" id "\"")) (str "it records under its own key, the name of its id, whatever boot the branch is from: " text))
