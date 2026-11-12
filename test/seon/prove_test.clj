@@ -672,6 +672,20 @@
   (is (= 3 (five-asked (prove/admission {:max-cores 0.2 :max-workers 4 :cores 18}))) "a fifth of eighteen, under max-workers")
   (is (= {:workers 1} (prove/admission {:max-cores 0.1 :cores 4})) "at least one"))
 
+;; docs/merging.md#the-test-service: an item that boots a root (a check step on the binary, a process test's batch, a build or
+;; seed) takes :root-weight workers, so the processes in flight stay near the cores: 18 such items at once were 51 roots at load
+;; 46 on 18 cores (2026-11-12). Five steps on six workers of weight three: two at once; five plain tests: five; and one step is
+;; granted with nothing running even where its weight exceeds the workers. T1, in process: three asks of a fresh service state.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} an-item-that-boots-a-root-takes-its-weight-of-the-workers
+  (let [steps (into {} (for [i (range 5)] [[(str "step" i) (str "d" i)] {:kind :step :binary? true :tree "t" :checkout "/c" :ms 5}]))
+        tests (into {} (for [i (range 5)] [[(symbol "app.w-test" (str "t" i)) (str "d" i)] {:agent (keyword (str "a" i)) :ms 5}]))
+        granted (fn [adm items] (let [[_ outs] (prove/ask-items (merge (proc0) adm) 1 :batch items)] (count outs)))]
+    (is (= 2 (granted (prove/admission {:max-workers 6 :root-weight 3 :cores 18}) steps)) "six workers, three a step: two at once")
+    (is (= 5 (granted (prove/admission {:max-workers 6 :root-weight 3 :cores 18}) tests)) "a plain test takes one")
+    (is (= 1 (granted (prove/admission {:max-workers 2 :root-weight 3 :cores 18}) steps)) "nothing running: one, though it weighs more")
+    (is (prove/root-item? {:kind :test :process? true}) "a process test boots its test root")
+    (is (not (prove/root-item? {:kind :step :binary? false})) "a step off the binary boots none")))
+
 ;; docs/clocks.md#the-machines-load-admits-work: over max-load nothing more is granted while an item runs; with nothing
 ;; running one item is granted anyway, so the queue never stalls with nothing to wake it
 (deftest max-load-admits-only-under-it-but-never-stalls
@@ -698,7 +712,7 @@
   (let [init (prove/prove-proc {:conn nil})
         st (proc0)
         [_ outs] (prove/ask-items st 1 :batch (into {} (for [i (range 10)] [[(symbol "app.s-test" (str "t" i)) (str "d" i)] {:agent :a1 :ms 5}])))]
-    (is (= (prove/config-admission) (select-keys init [:workers :max-load])))
+    (is (= (prove/config-admission) (select-keys init [:workers :max-load :root-weight])))
     (is (= (seon.config/value :seon.config.machine/cores) (:workers st)) "the shipped max-workers: the machine's cores")
     (is (= (min 10 (:workers st)) (count (batches outs))) "ten items over that many workers, a share each"))
   (is (= {:workers 4} (prove/admission {:cores 4}))))

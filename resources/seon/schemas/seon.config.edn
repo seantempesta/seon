@@ -101,6 +101,8 @@
   [:seon.config.source/tests-dir {:optional true} :seon.config.source/tests-dir]
   [:seon.config.proofs/jobs {:optional true} :seon.config.proofs/jobs]
   [:seon.config.proofs/max-workers {:optional true} :seon.config.proofs/max-workers]
+  [:seon.config.proofs/root-item-workers {:optional true} :seon.config.proofs/root-item-workers]
+  [:seon.config.proofs/program-stores-kept {:optional true} :seon.config.proofs/program-stores-kept]
   [:seon.config.proofs/max-cores {:optional true} :seon.config.proofs/max-cores]
   [:seon.config.proofs/max-load {:optional true} :seon.config.proofs/max-load]
   [:seon.config.proofs/child-min-ms {:optional true} :seon.config.proofs/child-min-ms]

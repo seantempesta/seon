@@ -113,6 +113,14 @@
 (def ^:private store
   (delay (:conn (pdb/open! :lmdb (str (seon.config/checkout) "/target/vector-cost-" (random-uuid)) 0 :db))))
 
+;; the store is every test's of this namespace that rounds on it (round-of, owed-of), so it is released and removed once they
+;; have all run, never by one of them: a test that released it in its own finally ended the next one in its process
+;; ("Connection has been released", a-backlog-is-caught-up-by-seeks-not-scans after a-commit-is-embedded-for-what-it-changed)
+(clojure.test/use-fixtures :once
+  (fn [f] (try (f) (finally (when (realized? store)
+                              (let [path (get-in @@store [:config :store :path])]
+                                (d/release @store) (seon.lib/remove-tree! path)))))))
+
 (defn round-of
   "seon.vector/vectors-proc's arguments for main's notice of a commit that wrote one form, with n
   forms in the store, every one due (a vector of another text's transaction), and the proc caught up
@@ -187,6 +195,4 @@
        :per-n {:ticks 70.0 :bytes 150.0}
        :fixed {:ticks 310000.0 :bytes 1000000.0 :calls 15}
        :sizes [30 100 300]})
-    (finally (when (realized? store)
-               (let [path (get-in @@store [:config :store :path])]
-                 (d/release @store) (seon.lib/remove-tree! path))))))
+    (finally nil)))
