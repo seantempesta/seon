@@ -4787,7 +4787,11 @@
     (is (str/includes? rows "system message") "the conversation is drawn")
     (is (not (str/includes? rows "NOTE-HTML")) "no member of it is placed in the conversation")
     (is (str/includes? page "NOTE-HTML the note") "the page draws it as a part")
-    (is (not (str/includes? msgs "the note")) "nor read by the model")))
+    ;; the model reads it as the page shows it (its page message), never as a member of the conversation; before seon.ctx.wire/db-at
+    ;; read a point that is db's own as db, this world's first page was drawn at the parent commit, where the agent was not yet, and
+    ;; held nothing at all
+    (let [holding (for [[ref ms] (:parts (registered-schema-world {:history? false})) :when (str/includes? (pr-str ms) "the note")] (first ref))]
+      (is (= [:page] (distinct holding)) (str "nor read by the model as a conversation member: " (pr-str holding))))))
 
 (deftest an-eval-by-another-hand-reaches-the-request-only-as-the-systems-with-an-intent
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: an eval no call holds is placed (seon.ctx/placed-messages) and the
