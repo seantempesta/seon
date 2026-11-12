@@ -187,7 +187,7 @@
  ;; ---- recorded errors: one entity per signature (main), counted across agents ----
  ;; who observed it: a root proc's defect, an agent's eval, an agent's death or stall, an effect's outcome
  :seon.error/class [:enum :platform :eval :agent :effect]
- :seon.error/signature [:and {:seon.db/identity true} [:string {:min 16 :max 16}]]
+ :seon.error/signature [:and {:seon.db/identity true :seon.db/content-id true} [:string {:min 16 :max 16}]]
  :seon.error/count :int
  :seon.error/agents :int
  :seon.error/first-ms :int
