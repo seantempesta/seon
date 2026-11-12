@@ -564,7 +564,7 @@ Owner, 2026-11-07: "Fences are always signs a design is off. What do we need to 
 
 ### Lazy, and dead branches cost nothing
 
-Owner, 2026-11-07: "In general I want hte system to run lazily and only realize and do work that needs to be done at the time it is needed." "The next time an agent is running on their branch the first thing they do is merge. So we only deal iwth it if theres an active agent running and dead branches don't require any merging." Stated in: [users](users.md#lazy).
+Owner, 2026-11-07: "In general I want hte system to run lazily and only realize and do work that needs to be done at the time it is needed." "The next time an agent is running on their branch the first thing they do is merge. So we only deal iwth it if theres an active agent running and dead branches don't require any merging." Stated in: [users](users.md#the-merges).
 
 ### Git's words
 
