@@ -383,8 +383,8 @@
   "The attributes the content classes a branch can make are read through, beside a section's: a section's lead and links
   (:leadless-section, :orphan-page), a form's refs and a var's form (:waived-proof, :stale-plan), a task's needs, outcome and
   proofs and its cites (:uncited-task, :stale-plan). What `caused-datoms` diffs for them. See docs/health.md#two-kinds-of-problem."
-  [:seon.doc/lead :seon.doc/references :form/refs :var/form :seon.task/needs :seon.task/outcome :seon.task/proofs
-   :seon.cite/of :seon.cite/target])
+  [:seon.doc/lead :seon.doc/references :form/refs :form/keywords :var/form :seon.task/needs :seon.task/outcome :seon.task/proofs
+   :seon.cite/of :seon.cite/target :schema/key])
 
 (defn- section-at
   "{:e :names :read :reviewed :baseline :text} of the section addressed a on db, by entity seeks and no
@@ -452,6 +452,36 @@
                :let [n (emit/chars-tokens (count src)) s (str "long-form " v) nsym (some-> (namespace v) symbol)]]
            (derived-row ans s nsym (str v " is " n " tokens, over the bound of " bound ": split it by what it does")
                         {:kind :long-form :var v :tokens n :bound bound} {:var v :tokens n :bound bound})))))
+
+(def ^:private enum-members
+  "Every keyword an [:enum ...] of the process's registry (seon.contract/forms) lists: values, not keys, so `unschemed-keys` asks no
+  entry of them. Read once a process, as the registry is."
+  (delay (into #{} (for [f (vals contract/forms) x (tree-seq coll? seq f) :when (and (vector? x) (= :enum (first x))) k (rest x) :when (keyword? k)] k))))
+
+(defn unschemed-keys
+  "Each of Seon's own qualified keywords (a seon or my namespace) that a source form names (:form/keywords of a form whose namespace's
+  file is under src/) and that no schema entry on db defines (:schema/key), as an :unschemed-key row naming the key and the forms that
+  name it: every key is one schema entry (the owner, 2026-11-12: \"proper schemas for all fully namespaced keywords\"). A reverse
+  ref (its name starting with _) and an enum's value are not keys. Closed by writing the key's entry, or by naming a key that has one.
+  only, a set of form entities (a branch's candidates, `split-rows`), reads the keywords of those forms alone. Cost: the :form/keywords
+  datoms read (all, or only's), one :schema/key seek per distinct key. See docs/health.md#a-key-with-no-schema."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]] [:=> [:cat :seon.host/db :map [:maybe [:set :int]]] [:vector :seon.problems/row]]]}
+  ([db ans] (unschemed-keys db ans nil))
+  ([db ans only]
+   (let [src? (memoize (fn [ns-e] (some-> (:v (first (d/datoms db :eavt ns-e :ns/file))) (str/starts-with? "src/"))))
+         ours? (fn [k] (let [n (namespace k)] (or (str/starts-with? n "seon") (str/starts-with? n "my."))))
+         named (if only (mapcat #(d/datoms db :eavt % :form/keywords) only) (d/datoms db :aevt :form/keywords))
+         by-key (reduce (fn [m {:keys [e v]}]
+                          (if (and (ours? v) (not (str/starts-with? (name v) "_")) (not (@enum-members v))
+                                   (some-> (:v (first (d/datoms db :eavt e :form/ns))) src?))
+                            (update m v (fnil conj (sorted-set)) e) m))
+                        {} named)]
+     (vec (for [[k es] (sort-by (comp str key) by-key)
+                :when (empty? (d/datoms db :avet :schema/key k))
+                :let [nsym (symbol (namespace k)) s (str "unschemed-key " k)
+                      vars (vec (sort (keep #(some-> (first (d/datoms db :eavt % :form/defines)) :v (->> (d/entity db)) :var/name) es)))]]
+            (derived-row ans s nsym (str k " is named in src (" (str/join ", " (take 3 vars)) ") and no schema entry defines it: write its entry, with a :description")
+                         {:kind :unschemed-key :key k :vars vars} {:key k :vars vars}))))))
 
 (defn waived-proofs
   "Each cost proof of a test form of the program that carries an `:overrun` (a waiver: seon.cost/proof), as a
@@ -551,6 +581,9 @@
         led-cands (ents [:seon.doc/address :seon.doc/lead])
         linkage? (some by-attr [:seon.doc/address :seon.doc/references])
         form-cands (ents [:form/src :form/refs])
+        ;; the forms whose keywords moved, and those naming a key whose entry the branch added or removed
+        key-cands (into (ents [:form/keywords])
+                        (for [db [base head] {k :v} (by-attr :schema/key) {e :e} (d/datoms db :avet :form/keywords k)] e))
         task-cands (fn [db]
                      (let [tasks (fn [es] (filter #(seq (d/datoms db :eavt % :seon.task/id)) es))
                            of-cite (fn [c] (:v (first (d/datoms db :eavt c :seon.cite/of))))
@@ -572,6 +605,7 @@
                          (map #(assoc % :class :leadless-section) (leadless-sections db ans led-cands))
                          (when linkage? (map #(assoc % :class :orphan-page) (orphan-pages db ans)))
                          (map #(assoc % :class :waived-proof) (waived-proofs db ans form-cands))
+                         (map #(assoc % :class :unschemed-key) (unschemed-keys db ans key-cands))
                          (map #(assoc % :class :uncited-task) (uncited-tasks db ans tr))
                          (map #(assoc % :class :stale-plan) (stale-plans db ans tr)))))
         forms-in (fn [db] (fn [fact] (set (keep #(:e (law-form-at db fact %)) (changed-forms fact)))))
@@ -902,7 +936,7 @@
    :leadless-section (leadless-sections db ans)
    ;; the tasks' readiness and cites read once for the two classes that judge them
    :uncited-task (uncited-tasks db ans tr) :stale-plan (stale-plans db ans tr) :unsynced (unsynced-tasks db ans tr)
-   :waived-proof (waived-proofs db ans)}))
+   :waived-proof (waived-proofs db ans) :unschemed-key (unschemed-keys db ans)}))
 
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the
