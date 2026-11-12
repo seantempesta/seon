@@ -493,7 +493,7 @@
                              ;; what the task references, as facts (its proofs, its plan's cites): never its plan re-parsed
                              ;; here, by a seon.ref/scan the agent may have broken (a broken scan would end the run :error)
                              hairy (when (and merge? (not (contract/error? s)))
-                                     (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :merge-turns (:merge-turns st)
+                                     (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :db (agent/db) :merge-turns (:merge-turns st)
                                                                 :refs (into (set (:proofs (:seon.task/accumulated (:task obs))))
                                                                             (keep #(get-in % [:seon.cite/target :var/name]))
                                                                             (task/task-cites (agent/db) task))})))]

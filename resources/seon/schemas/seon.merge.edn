@@ -48,6 +48,7 @@
  ;; the one merge's conflict and refusals (seon.merge/conflicts, seon.merge/refusal; docs/agent.md#merging)
  :seon.merge/entity [:int {:description "The entity a conflict is about: its entity id (a pull of it reads the rest)."}]
  :seon.merge/attribute [:keyword {:description "The attribute a conflict is about."}]
+ :seon.merge/gone [:= {:description "A conflict's end where that side removed the value; as a resolution, it retracts it."} :seon.merge/gone]
  :seon.merge/value [:any {:description "The member a conflict is about, only on an attribute of cardinality many: whether each side holds it."}]
  :seon.merge/resolve [:any {:description "The form an agent evaluates to settle a conflict on a merge of main into its branch (seon.agent/resolving-form), its value the agent's to write."}]
  :seon.merge/data-conflict [:map {:seon.render/hiccup seon.render.ui/data-conflict :description "One key both sides of a merge changed to different ends since their base: the entity and attribute (and member, for cardinality many), base's value when it held one, each side's end (a value, true for a member held, or :seon.merge/gone), and the form that settles it. See docs/agent.md#merging."}

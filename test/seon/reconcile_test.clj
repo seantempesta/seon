@@ -1397,19 +1397,23 @@
            (r/root-causes (r/index db))))))
 
 (deftest hairy-rule
-  ;; refs: the task's proofs and the names its plan's cites hold (the facts its write derived, never its text re-parsed)
-  (let [refs '#{app/g app/f app.proofs/a-test}
-        c (fn [k sides] (into {:key [:var k]} (for [s sides] [s {:src "x"}])))
-        merge-cfg {:max-conflicts 3 :max-merge-turns 2}]
+  ;; refs: the task's proofs and the names its plan's cites hold (the facts its write derived, never its text re-parsed);
+  ;; a conflict is a :seon.merge/data-conflict, and main deleted a var when main's end (:theirs) is gone on a var's entity
+  (let [sch "{:malli/schema [:=> [:cat] :int]}"
+        db (ts/test-db)
+        db (d/db-with db (source/refresh-tx db {"src/app/m.clj" (str "(ns app.m)\n" (apply str (for [n '[f g h i j z]] (str "(defn " n " " sch " [] 1)\n"))))}))
+        e (fn [n] (:db/id (d/entity db [:var/name (symbol "app.m" (name n))])))
+        refs '#{app.m/g app.m/f app.proofs/a-test}
+        c (fn [n theirs] {:seon.merge/entity (e n) :seon.merge/attribute :var/form :seon.merge/base 1 :seon.merge/ours 2 :seon.merge/theirs theirs})
+        merge-cfg {:max-conflicts 3 :max-merge-turns 2 :db db}]
     (are [conflicts merge-turns rule] (= rule (:rule (r/hairy (merge merge-cfg {:conflicts conflicts :refs refs :merge-turns merge-turns}))))
       [] 0 nil
-      [(c 'app/f [:base :ours :theirs])] 0 nil
-      [(c 'app/f [:base :ours :theirs]) (c 'app/h [:base :ours :theirs]) (c 'app/i [:ours :theirs])] 0 nil
-      [(c 'app/f [:base :ours :theirs]) (c 'app/h [:base :ours :theirs]) (c 'app/i [:ours :theirs]) (c 'app/j [:ours :theirs])] 0 :too-many-conflicts
-      [(c 'app/g [:base :ours])] 0 :deleted-by-them-referenced
-      [(c 'app/z [:base :ours])] 0 nil
-      [(c 'app.proofs/a-test [:base :ours])] 0 :deleted-by-them-referenced
-      [(c 'app/f [:base :ours :theirs])] 3 :merge-turns)))
+      [(c 'f 3)] 0 nil
+      [(c 'f 3) (c 'h 3) (c 'i 3)] 0 nil
+      [(c 'f 3) (c 'h 3) (c 'i 3) (c 'j 3)] 0 :too-many-conflicts
+      [(c 'g :seon.merge/gone)] 0 :deleted-by-them-referenced
+      [(c 'z :seon.merge/gone)] 0 nil
+      [(c 'f 3)] 3 :merge-turns)))
 
 (deftest quiescence-is-reported-when-nothing-can-move
   (ts/test-branch! (fn [_ conn]

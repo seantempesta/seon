@@ -273,9 +273,9 @@
         also-on-main (when (and base (some (fn [[_ st]] (= :fail st)) results))
                        (vec (sort-by str (keep (fn [[t {st :status}]] (when (and (= :fail st) (= :fail (get results t))) t)) (verdicts base (set proofs))))))
         input (cond-> (if claims
-                        (r/done-input claims tid results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) nil plan-before (set deferred))
+                        (r/done-input claims tid results (set gaps) (mapv #(sedn/encode (pm/conflict-key %)) unmerged) nil plan-before (set deferred))
                         (cond-> {:proofs (set proofs) :kind kind :results results :main-green #{} :allowed-red #{}
-                                 :uncontracted (set gaps) :unmerged (mapv #(sedn/encode (:key %)) unmerged) :deferred (set deferred)}
+                                 :uncontracted (set gaps) :unmerged (mapv #(sedn/encode (pm/conflict-key %)) unmerged) :deferred (set deferred)}
                           (= :design kind) (assoc :plan plan)
                           (and (= :design kind) plan-before) (assoc :plan-before plan-before)))
                 (seq (:caused split)) (assoc :caused (set (:caused split))))
