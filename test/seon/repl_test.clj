@@ -1475,3 +1475,18 @@
                   (finally (reset! agent/state old))))]
     (is (= [true true true false] (mapv #(contains? % :ticks) rs)) (str "each form's reply its own cost (a do's forms each their own), the done none: " (pr-str rs)))
     (is (= 3 (:repl/value (first rs))))))
+
+;; docs/agent.md#small-answers: a multimethod's source is its defmulti and each of its methods as this branch records them, in file
+;; order: (source seon.repl/place) showed the defmulti alone, and an agent spent nine turns reaching (defmethod place :ns ...) by
+;; get-method, grep and file lines (real-task loop, 2026-11-12)
+(deftest a-multimethods-source-holds-its-methods
+  (let [text "(ns app.mm)\n(defmulti kind (fn [x] (:k x)))\n\n(defmethod kind :a\n  [x] :was-a)\n\n(defmethod kind :b\n  [x] :was-b)\n"
+        db (my.test/with (my.test/world) (my.test/code 'app.mm text))
+        old @agent/state]
+    (try (load-string text)
+         (reset! agent/state {:db db :n 0 :ns (the-ns 'user)})
+         (let [src (my.agent/source-fn 'app.mm/kind)]
+           (is (str/includes? src "(defmulti kind") src)
+           (is (str/includes? src "(defmethod kind :a\n  [x] :was-a)") (str "each method, whole: " src))
+           (is (< (str/index-of src ":was-a") (str/index-of src ":was-b")) "in file order"))
+         (finally (reset! agent/state old) (remove-ns 'app.mm)))))
