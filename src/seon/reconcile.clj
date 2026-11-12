@@ -670,6 +670,11 @@
 
 ;; ---- queries, over one index (list it once: (index db)) -----------------------------
 
+(defn done?
+  "Is task id done (merged into its target, or accepted on its branch)?"
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}
+  [idx id] (idx-done? idx id))
+
 (defn blocked-by
   "The needs of task id that are not done."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:set :seon.task/id]]}
