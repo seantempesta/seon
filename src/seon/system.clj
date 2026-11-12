@@ -1155,7 +1155,8 @@
   "Root's session, made at the boot of a main that has none (`root-agent-boot-tx`), an ordinary agent made the ordinary way: an agent
   entity keyed \"root\" (a reserved key, as the user's is its name), linked to root by :seon.agent/root, its pattern written once as
   its role's name ([:seon.db/agent-fact]: what the schema gains later reaches it with no write; its record holds the agents forked from
-  it, :seon.agent/_parent), its own render the stage (seon.render.ui/stage: the page a fresh system opens on), and the task request/root of the
+  it, :seon.agent/_parent) and one join, the person it works for: the starter of its own task (request/root's :seon.task/started-by, by
+  :seon.db/user-fact's pattern, which reads that person's sessions through the tasks they started), its own render the stage (seon.render.ui/stage: the page a fresh system opens on), and the task request/root of the
   chat template (seon.template/request-tx), parked, its agent that entity, so the first message's wake spawns it. The user started it
   (:seon.task/started-by); it is the first agent, with no :seon.agent/parent, and the agent of every person's request is its child
   (seon.task/forked-from): docs/users.md#who-started-whom). Root's own entity is untouched: an entity's id
@@ -1168,7 +1169,7 @@
       ;; started by the user: the user's tree holds root's session and what it launches (docs/users.md#who-started-whom); drawn as a
       ;; stage (seon.render.ui/stage, its own render, which a person turns back to the conversation): the page a fresh system opens on
       (let [user (task/sender (cfg/value :seon.config.root/user-name))]
-        (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.system/id :root] :seon.ctx/pattern [:seon.db/agent-fact]
+        (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.system/id :root] :seon.ctx/pattern [:seon.db/agent-fact {:seon.agent/task [{:seon.task/started-by :seon.db/user-fact}]}]
                 :seon.render/hiccup 'seon.render.ui/stage}]
               (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked :seon.task/started-by user}))))))
 

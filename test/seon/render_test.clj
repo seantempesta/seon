@@ -1184,7 +1184,7 @@
   ;; page's own units: an agent the user started is on root's page twice (the list, root's sessions), so the user's walk names its elements
   ;; apart. Red before: agent-a3 twice, one unit overwriting the other in the view, a patch for one landing on the other
   (let [[main branch eid] (paged-dbs)
-        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact]}])
+        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact {:seon.agent/task [{:seon.task/started-by :seon.db/user-fact}]}]}])
         st (root-state (branch-state main branch) main)
         [st1 _] (pass-view st :root)
         html (p/view-html st1 :root)
@@ -1198,7 +1198,7 @@
   ;; :wire marks, other qualified keys, attribute values that are no plain value), counted on the pages the test world draws (an agent's,
   ;; root's, the user's), pinned so a count only goes down: each later change moves a render's look to CSS and its count to none
   (let [[main branch eid] (paged-dbs)
-        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact]}])
+        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact {:seon.agent/task [{:seon.task/started-by :seon.db/user-fact}]}]}])
         st (root-state (branch-state main branch) main)
         [st1 _] (pass-view st :root)
         [st2 _] (pass-view st1 [:chat :a3])
@@ -2768,7 +2768,7 @@
   ;; docs/users.md#roots-agent: the user stores no pattern (its pull is its schema's) and root's session stores its role's name and its one
   ;; join, written once when it is made; a second boot writes no pattern datom (a whole pattern written by code at boot was a stored copy
   ;; that went stale)
-  (let [two [:seon.db/agent-fact]
+  (let [two [:seon.db/agent-fact {:seon.agent/task [{:seon.task/started-by :seon.db/user-fact}]}]
         db (booted)
         stored (fn [d] (set (map (juxt :e :v) (d/datoms d :aevt :seon.ctx/pattern))))]
     (is (nil? (:seon.ctx/pattern (d/pull db [:seon.ctx/pattern] [:seon.user/name "sean"]))) "the user holds no pattern")
@@ -2791,7 +2791,7 @@
         after (seon.ctx/agent-ctx (seon.db/index-of {:forms forms}) db a)]
     (is (nil? (:seon.agent/holder before)) "the role's pattern does not ask it")
     (is (= "a clause the role gained" (:seon.agent/holder after)) "once the role's pattern asks it, root's session's pull holds it")
-    (is (= [:seon.db/agent-fact] (:seon.ctx/pattern (d/pull db [:seon.ctx/pattern] a))) "with nothing written")))
+    (is (= [:seon.db/agent-fact {:seon.agent/task [{:seon.task/started-by :seon.db/user-fact}]}] (:seon.ctx/pattern (d/pull db [:seon.ctx/pattern] a))) "with nothing written")))
 
 (deftest a-users-pull-holds-its-agents-to-the-depth-and-below-only-their-ids
   ;; docs/users.md#whats-on-screen: the user's pull is its schema's pattern (:seon.db/user-fact's, the agents it started read by :seon.agent/entry's):
@@ -3029,9 +3029,13 @@
   start-tx): those of started (default: every session listed), which root's page reads through its session's pull."
   ([boot sessions] (tree-db boot sessions (map first sessions)))
   ([boot sessions started]
+   ;; root's session works for the starter of its own task (request/root, started by the person), as seon.system/root-agent-tx writes it
    (let [db (d/db-with (sessions-db boot sessions)
-                       [{:seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact]}
-                        {:seon.agent/key "sean" :seon.user/name "sean"}])
+                       [{:db/id "sean" :seon.agent/key "sean" :seon.user/name "sean"}
+                        {:db/id "rt" :seon.task/id "request/root" :seon.task/ns 'request :seon.task/name "root" :seon.task/plan "p" :seon.task/kind :work
+                         :seon.task/execution :running :seon.task/branch :task-b :seon.task/started-by "sean"}
+                        {:seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact {:seon.agent/task [{:seon.task/started-by :seon.db/user-fact}]}]
+                         :seon.agent/task "rt"}])
          by (into {} (for [[k _ _ tid] sessions] [k tid]))]
      (d/db-with db (vec (mapcat (fn [k] (cond-> [{:seon.agent/key k :seon.agent/parent [:seon.agent/key "root"]}]
                                           (by k) (conj {:seon.task/id (by k) :seon.task/started-by [:seon.agent/key "sean"]})))
