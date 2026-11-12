@@ -2766,8 +2766,8 @@
                                 {:seon.agent/key "b1/a2" :seon.agent/task [:seon.task/id "request/greet"] :seon.agent/status :waiting}
                                 {:seon.agent/key "user" :seon.agent/agents [[:seon.agent/key "b1/a2"]]}])
         as (fn [k] (let [c (seon.ctx/agent-ctx (seon.db/index) db (:db/id (d/entity db [:seon.agent/key k])))]
-                     (try (binding [seon.ctx/*installing* true] (reset! seon.ctx/ctx c)) (my.user/sessions)
-                          (finally (binding [seon.ctx/*installing* true] (reset! seon.ctx/ctx nil))))))
+                     (try (seon.ctx/install! {:tree c}) (my.user/sessions)
+                          (finally (seon.ctx/install! nil)))))
         listed (as "root")]
     (is (some #(= {:key "b1/a2" :status :waiting :task "request/greet" :outcome :parked} %) listed) (pr-str listed))
     (is (= (sort (map :key listed)) (map :key listed)) "by key")

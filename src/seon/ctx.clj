@@ -493,8 +493,8 @@
           (fresh)
           {:tree (with-environment tree db branch) :ix r})))))))
 
-;; the record and its index, beside the atom: the agent is one thread, and its state's watch runs
-;; on it, so each patch follows the one before
+;; the record, its index and the one object @ctx answers ({:tree :ix :value}): the agent is one fiber, and the
+;; watch on its state runs on it, so each patch follows the one before
 (defonce ^:private held (volatile! nil))
 
 (defn record
@@ -645,10 +645,6 @@
 (defn- strip "x without its :db/ids, at every depth." {:malli/schema [:=> [:cat :any] :any]}
   [x] (cond (map? x) (into {} (for [[k v] (dissoc x :db/id)] [k (strip v)])) (set? x) (into #{} (map strip) x) :else x))
 
-(def ^:dynamic *installing* "True while the record installs its own value: no write." false)
-(def ^:dynamic *writing* "True while a swap!'s transaction is applied: its patch waits for the swap! to end (pending)." false)
-(defonce ^:private pending (volatile! nil))
-
 (defn- lost-required
   "Why pattern p may not be entity e's (in the entity index ix): each clause its role requires (its schema's :seon.ctx/required,
   {attribute reason}: a join's attribute, or a plain one) that p no longer asks, as an :invalid entry naming it and what it is; []
@@ -679,7 +675,7 @@
   "A swap! of the record to nv, written: its change from the record (edits) as one transaction,
   every value checked by its schema, of the record's basis (nv's :t :branch :commit are the
   record's), and the db, given it, holding what nv says at every path it writes (one d/with); then
-  applied (seon.agent/transact!), and the record as the db holds it installed when the swap! ends.
+  applied (seon.agent/transact!), whose report on-state patches into the record.
   An edit of an entity is by its :db/id, wherever in the tree it was made: an entity sits at every
   path the pattern pulls it, and an edit at any of them writes it (the record then holds the edit at
   each). Two different edits of one entity in one swap! are refused, as conflicting writes are; the
@@ -701,10 +697,10 @@
         (throw (ex-info "ctx: refused by the schemas, nothing written" (contract/error :seon.ctx/invalid #'write! "refused by the schemas, nothing written: each path and why" {:invalid (vec lost)})))))
     (let [{:keys [tx invalid paths named]} (edits (:index (:ix c)) db (get-in c [:ix :spec []] {:joins []}) cur nv (:db/id cur) [] {:tx [] :invalid [] :paths [] :named {}})]
       (cond
-        ;; nothing to write: the record stays the db's (the swap!'s map gives way to it as it ends)
+        ;; nothing to write: the record stays the db's
         (empty? tx) (if (seq invalid)
                       (throw (ex-info "ctx: refused by the schemas, nothing written" (contract/error :seon.ctx/invalid #'write! "refused by the schemas, nothing written: each path and why" {:invalid invalid})))
-                      (do (vreset! pending c) true))
+                      true)
         (seq invalid) (throw (ex-info "ctx: refused by the schemas, nothing written" (contract/error :seon.ctx/invalid #'write! "refused by the schemas, nothing written: each path and why" {:invalid invalid})))
         :else
         (let [rep (pdb/speculate db tx)
@@ -722,20 +718,50 @@
           (when (seq unheld)
             (throw (ex-info "ctx: the db would not hold what the swap! says, nothing written"
                             (contract/error :seon.ctx/not-held #'write! "the db would not hold what the swap! says at these paths (it would hold :held), nothing written" {:paths unheld :held (mapv #(get-in held' %) unheld)}))))
-          (binding [*writing* true] (agent/transact! tx))
+          (agent/transact! tx)
           true)))))
 
-;; ---- the atom ----------------------------------------------------------------------------
+;; ---- the reference ------------------------------------------------------------------------
 
-(defonce ^{:doc "The agent's record as a map: (deref ctx), changed with swap! like any atom (write!: one checked transaction on the branch, or the error that refuses it)."} ctx (atom nil))
+(defn- put!
+  "A swap! or reset! of the record to nv: write! makes it one checked transaction on the branch, and its report's patch
+  (on-state) is the record after it; answers that record, or throws the error that refused it, the record unchanged."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [nv] (write! nv) (:value @held))
 
+;; The agent's record as one reference type, as Reagent's RAtom is one: deref answers the record held for the branch's db,
+;; swap! and reset! write it through one path (put!), and watches are told of each patch (the render walk's, seon.ratom).
+;; No validator: a write is checked by write!, the one writer path. See docs/ctx.md#changing-it-swap.
+(deftype Record [^:volatile-mutable watches]
+  clojure.lang.IDeref
+  (deref [_] (:value @held))
+  clojure.lang.IAtom
+  (swap [_ f] (put! (f (:value @held))))
+  (swap [_ f x] (put! (f (:value @held) x)))
+  (swap [_ f x y] (put! (f (:value @held) x y)))
+  (swap [_ f x y args] (put! (apply f (:value @held) x y args)))
+  (compareAndSet [_ o n] (if (identical? o (:value @held)) (do (put! n) true) false))
+  (reset [_ nv] (put! nv))
+  clojure.lang.IRef
+  (setValidator [_ _] (throw (ex-info "ctx: no validator, a write is checked by write!" (contract/error :seon.ctx/no-validator #'write! "ctx takes no validator: every write is checked by write!" {}))))
+  (getValidator [_] nil)
+  (getWatches [_] watches)
+  (addWatch [this k f] (set! watches (assoc watches k f)) this)
+  (removeWatch [this k] (set! watches (dissoc watches k)) this))
 
-(defn- install!
-  "c as the atom's value: the tree, marked as ctx for its renders; the index held beside it. The one object
-  the atom holds until the next install is what an eval of `@ctx` records the basis of (identical to it, with
-  its :t and :branch: seon.repl/record-details); a map made of it is not."
-  {:malli/schema [:=> [:cat [:map [:tree :map] [:ix :seon.ctx/ix]]] :nil]}
-  [c] (vreset! held c) (binding [*installing* true] (reset! ctx (with-meta (:tree c) {:seon.render/schema :seon.ctx/ctx}))) nil)
+(defonce ^{:doc "The agent's record as a map: (deref ctx), changed with swap! like any atom (write!: one checked transaction on the branch, or the error that refuses it)."} ctx (->Record {}))
+
+(defn install!
+  "c, a built record {:tree :ix} (or {:tree t} alone, read and never written), as ctx's value, or nil for none: its tree, marked
+  as ctx for its renders, is the one object @ctx answers until the next install, what an eval of `@ctx` records the basis of
+  (identical to it: seon.repl/record-details); a map made of it is not. ctx's watches are told, old and new."
+  {:malli/schema [:=> [:cat [:maybe [:map [:tree :map]]]] :nil]}
+  [c]
+  (let [old (:value @held)
+        v (when c (vary-meta (:tree c) #(merge % {:seon.render/schema :seon.ctx/ctx})))]
+    (vreset! held (when c (assoc c :value v)))
+    (doseq [[k f] (.getWatches ctx)] (f k ctx old v))
+    nil))
 
 (defn moved
   "The datoms db moved by from a to b: the last transaction's when b is its db (agent/transact!
@@ -887,7 +913,8 @@
   a commit of what was applied (one t, one branch) moves only its :commit. What the agent heard of
   main and its merge base is no part of it: its turn writes them as facts (:seon.agent/main-commit,
   :seon.agent/base-commit), as its eval's record writes where its REPL is (:seon.agent/ns), so a cold build and a replay
-  hold what the live record holds."
+  hold what the live record holds. A watch is the order: seon.agent/state changes only on the agent's one fiber, so each
+  report's patch lands after the one before it, a swap!'s own included."
   {:malli/schema [:=> [:cat :any :any :any :any] :any]}
   [_ _ o n]
   (let [a (:db o) b (:db n)
@@ -904,14 +931,9 @@
       :else (let [ds (moved a b (:tx n))
                   _ (vswap! moved-since #(if (= :all %) % (into % ds)))
                   c (patch @held b ds (:branch n) (:index (:schema-registry n)))]
-              ;; a swap!'s own transaction: installed when the swap! ends (the atom is mid-swap)
-              (if *writing* (do (vreset! held c) (vreset! pending c)) (install! c))))))
+              (install! c)))))
 
 (add-watch agent/state ::ctx on-state)
-;; nil only while there is no record yet (as the validator is set, before an agent's db)
-(set-validator! ctx (fn [nv] (or *installing* (and (nil? nv) (nil? @held)) (write! nv))))
-;; a swap! written: the record as the db holds it (its new entities' ids) replaces the swap!'s map
-(add-watch ctx ::written (fn [_ _ _ _] (when-let [c @pending] (vreset! pending nil) (install! c))))
 
 ;; ---- reads of the record --------------------------------------------------------------
 
