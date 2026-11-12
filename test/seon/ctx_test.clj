@@ -951,6 +951,10 @@
               top (mapcat (fn [sel] (filter #(and (nil? (:parent %)) (= sel (:container %))) shown)) ["#p-task" "#c-rows"])
               by (into {} (map (juxt :id identity)) shown)
               root-of (fn root-of [u] (if-let [p (by (:parent u))] (root-of p) u))]
+          ;; the model reads the page with its presentation taken out (seon.ctx.wire/presentation-free), the data it shows whole: named
+          ;; here so the test reaches it (renders reached through schema data are not in static reach, a gap tests is closing; a
+          ;; map entry there was rebuilt as an element and threw, red in context's land 2026-11-12)
+          (is (str/includes? (pr-str (#'seon.ctx.wire/presentation-free (vec (vals page)))) "write the test") "the model's page holds the steps")
           (is (= (remove #{"agent-state" "chat-ask" "chat-end" "page-rules"} (map :id top)) (keys page)) "every component placed in a list, the conversation's too, in order: nothing left out but what is the person's alone, which the model is sent none of")
           (doseq [u shown :when (:parent u) :let [r (second (re-find #"data-render=\"([^\"]+)\"" (:html u)))]]
             (is (some #(and (vector? %) (= (symbol r) (first %))) (tree-seq coll? seq (get page (:id (root-of u)))))
