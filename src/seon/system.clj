@@ -1302,9 +1302,12 @@
               task? #(and (str/ends-with? % ".edn") (str/starts-with? % (str tasks-dir "/")))
               task-texts (into {} (for [[p t] (:value r) :when (task? p)] [(subs p (inc (count tasks-dir))) (or t "[]")]))
               refused (when (seq task-texts) (let [x (task/load-tx db (tasks-of task-texts))] (when (contract/error? x) (:seon.error/message x))))
-              skipped (vec (for [[p t] (:value r)
+              ;; the schema entries the changed schema files state, so the config file is checked against the branch's own schema
+          schema-changes (into {} (for [[p t] (:value r) :when (and t (str/starts-with? p "resources/seon/schemas/") (str/ends-with? p ".edn"))
+                                        :let [m (sedn/decode t)] :when (map? m)] m))
+          skipped (vec (for [[p t] (:value r)
                                  :let [why (cond (unsynced p) (str "merged task " (unsynced p) " changed it and main holds it unsynced: (my.root/sync! sys [\"" (unsynced p) "\"]), then start again")
-                                                 (and t (fx/unreadable p t)) (fx/unreadable p t)
+                                                 (and t (fx/unreadable p t schema-changes)) (fx/unreadable p t schema-changes)
                                                  (and refused (task? p)) (str "the task files are refused: " refused))]
                                  :when why]
                              {:path p :reason why}))
