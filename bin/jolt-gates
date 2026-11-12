@@ -16,6 +16,11 @@ PIN=$(git -C "$J" rev-parse HEAD) || exit 1
 mkdir -p "$T/logs" "$T/tmp" "$T/home"
 [[ -d $T/work/.git ]] || git clone -q "$J" "$T/work" || { echo "JOLT GATES FAILED (cannot clone $J)"; exit 1 }
 git -C "$T/work" fetch -q "$J" "$PIN" && git -C "$T/work" checkout -q --detach "$PIN" || { echo "JOLT GATES FAILED (cannot check out $PIN)"; exit 1 }
+# The clone's vendored libraries first: Jolt's Makefile fetches them (its `deps` target, git
+# submodule in the clone, never in a worktree) only before the gates its JOLT-TARGETS-NEEDING-DEPS
+# names, and a gate run from source that is not there (siginfodump) found vendor/irregex empty.
+( cd "$T/work" && HOME=$T/home JOLT_CHEZ=$C nice -n 15 make CHEZ=$C deps ) > "$T/logs/deps.out" 2>&1 < /dev/null \
+  || { echo "JOLT GATES FAILED (the clone's vendored libraries: $T/logs/deps.out)"; exit 1 }
 if (( $# )); then gates=("$@"); else gates=(${(f)"$(grep -v '^#' "$ROOT/test/forks/jolt-gates.txt")"}); fi
 known=(${(f)"$(grep -v '^#' "$ROOT/test/forks/jolt-gates-red.txt" | cut -d' ' -f1)"})
 : > "$T/verdicts.tsv"; red=()
