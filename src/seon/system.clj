@@ -1154,11 +1154,11 @@
 (defn root-agent-tx
   "Root's session, made at the boot of a main that has none (`root-agent-boot-tx`), an ordinary agent made the ordinary way: an agent
   entity keyed \"root\" (a reserved key, as the user's is its name), linked to root by :seon.agent/root, its pattern written once as
-  its role's name and its one addition, a join to whoever started it read by the user's own pattern ([:seon.db/agent-fact
-  {:seon.agent/parent :seon.db/user-fact}]: what either schema gains later reaches it with no write), its own render the stage (seon.render.ui/stage: the page a fresh system opens on), and the task request/root of the
+  its role's name and its one addition, a join to the users forked from it read by the user's own pattern ([:seon.db/agent-fact
+  {:seon.agent/_parent :seon.db/user-fact}]: what either schema gains later reaches it with no write), its own render the stage (seon.render.ui/stage: the page a fresh system opens on), and the task request/root of the
   chat template (seon.template/request-tx), parked, its agent that entity, so the first message's wake spawns it. The user started it
-  (:seon.task/started-by) and is its :seon.agent/parent from the write that makes it, so the stage a fresh system opens on holds the user's
-  tree: docs/users.md#who-started-whom). Root's own entity is untouched: an entity's id
+  (:seon.task/started-by); it is the first agent, with no :seon.agent/parent, and each user's agent is its child (seon.task/boot-tx),
+  so the stage a fresh system opens on holds every user's tree: docs/users.md#who-started-whom). Root's own entity is untouched: an entity's id
   derives from its identity, so it cannot take a key too. See docs/users.md#roots-agent."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
   [db]
@@ -1168,8 +1168,8 @@
       ;; started by the user: the user's tree holds root's session and what it launches (docs/users.md#who-started-whom); drawn as a
       ;; stage (seon.render.ui/stage, its own render, which a person turns back to the conversation): the page a fresh system opens on
       (let [user (task/sender (cfg/value :seon.config.root/user-name))]
-        (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.system/id :root] :seon.ctx/pattern [:seon.db/agent-fact {:seon.agent/parent :seon.db/user-fact}]
-                :seon.agent/parent user :seon.render/hiccup 'seon.render.ui/stage}]
+        (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.system/id :root] :seon.ctx/pattern [:seon.db/agent-fact {:seon.agent/_parent :seon.db/user-fact}]
+                :seon.render/hiccup 'seon.render.ui/stage}]
               (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked :seon.task/started-by user}))))))
 
 (defn root-agent-boot-tx

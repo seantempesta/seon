@@ -442,10 +442,11 @@
   "Root's boot: its id for this process lifetime (the config in force, max-running among its keys, is written with it,
   config-tx), and the user, name, an agent with no process, one entity across boots (:seon.user/name, its lookup ref): the evals and messages it
   makes name it (:seon.eval/by its id), and root's page lists it with its agents; until there is a login, it is who is signed in (:seon.system/signed-in). The user
-  stores no pattern: its pull is its schema's (:seon.db/user-fact's :seon.ctx/pattern). See docs/users.md#what-each-thing-is."
+  stores no pattern: its pull is its schema's (:seon.db/user-fact's :seon.ctx/pattern). Its parent is root's agent (key \"root\", an upsert by key, so
+  it holds in the boot that makes that agent): root is the first agent and every agent descends from it. See docs/users.md#what-each-thing-is."
   {:malli/schema [:=> [:cat :string :string] [:vector :any]]}
   [boot name]
-  (into [{:db/id "user" :seon.agent/key name :seon.user/name name}
+  (into [{:db/id "user" :seon.agent/key name :seon.user/name name :seon.agent/parent {:seon.agent/key "root"}}
          {:seon.system/id :root :seon.system/boot boot :seon.system/signed-in "user"}]
         (agent-tx (keyword name) {})))
 
