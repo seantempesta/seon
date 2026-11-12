@@ -44,3 +44,17 @@
         (pr-str rows))
     (is (= {'grep {:forms 1 :turns 1} 'my.agent/source-fn {:forms 1 :turns 1} 'seon.ctx.status/status {:forms 1 :turns 1} :template {:forms 1 :turns 1}}
            (learn/summary rows)))))
+
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-run-folds-what-each-turn-read
+  ;; docs/tasks.md#a-refine-curates-its-own-task: a refine reads the run it refines in one call. The loop task's refine (2026-11-13) spent
+  ;; 24 of its 40 turns writing queries over the eval records to read its run, and never wrote the plan. Estimate: a 3-turn run-db, one
+  ;; pull an eval, as turns-of
+  (let [db (run-db [[["(source seon.repl/place)" {:value nil :out "(defn place [n] n)"}]]
+                    [["(grep \"nothing here\")" {:value []}]]
+                    [["(defn f [] (seon.repl/place 'x))" {:value 'app.x/f}]]])
+        r (learn/run db k)]
+    (is (= [{:n 1 :reads #{'seon.repl/place}} {:n 2 :reads #{}} {:n 3 :reads #{'seon.repl/place}}] (:turns r)) "each turn with what it read")
+    (is (= #{'seon.repl/place} (:final r)) "the vars its final definitions used: the change site")
+    (is (= [{:turn 1 :rule :missing :producer :template} {:turn 2 :rule :empty :producer 'grep}] (mapv #(select-keys % [:turn :rule :producer]) (:waste r)))
+        "and what was lost: turn 1 read the change site nothing had shown it (:missing), turn 2 a look-up that answered nothing")
+    (is (= {:template {:forms 1 :turns 1} 'grep {:forms 1 :turns 1}} (:summary r)))))

@@ -102,3 +102,18 @@
   (let [items (for [t turns it (:items t) :when (and (nil? (:error it)) (str/starts-with? (str/triml (or (:form it) "")) "(def"))] it)
         as (aliases (map :form items))]
     (into #{} (mapcat #(:targets (form-reads (:form %) as))) items)))
+
+(defn run
+  "Agent k's run on db (its branch), folded for a reader that improves its task: each turn with what its forms read (form-reads'
+  qualified symbols), the vars its final definitions used (final-symbols: the change site), and the waste rows and their summary
+  (waste, summary). The one read a refine and root's report take (my.task/run, my.root/run-losses). O(the run's evals), as turns-of.
+  See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat :any :string] [:map [:turns [:vector [:map [:n :int] [:reads [:set :symbol]]]]] [:final [:set :symbol]]
+                                         [:waste [:vector :map]] [:summary :map]]]}
+  [db k]
+  (let [turns (turns-of db k {})
+        as (aliases (for [t turns it (:items t)] (:form it)))
+        final (final-symbols turns)
+        rows (waste turns final)]
+    {:turns (mapv (fn [{:keys [n items]}] {:n n :reads (into #{} (mapcat #(:targets (form-reads (or (:form %) "") as))) items)}) turns)
+     :final final :waste rows :summary (summary rows)}))
