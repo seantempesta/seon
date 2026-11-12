@@ -1631,8 +1631,8 @@
   there are below, never a silent cut. Its group (`where-stands`) orders it, those that need the person first (CSS order). Drawn from the
   view alone: the joining pattern pulls what it reads (:seon.agent/entry's pattern). For the page alone (:wire/for \"page\"). See
   docs/users.md#whats-on-screen."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :any] :any]}
-  [db c]
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map :any] :any]}
+  [db ix c]
   (let [a (into {} (for [k [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/turn :seon.agent/outcome :seon.agent/ended-turn]
                          :let [v (ratom/realize (get c k))] :when (some? v)] [k v]))
         t (ratom/realize (get c :seon.agent/task))
@@ -1642,10 +1642,7 @@
         {:keys [asked reply]} (if db (last-exchange db (:db/id (ratom/untracked c)) t) {:reply (:seon.task/reason t)})
         reply (or reply (when-not asked (:reason stands)))
         ;; the agents it started, as its parent's pull holds them: entries where they were pulled, ids alone where the pull stopped
-        as (get c :seon.agent/_parent)
-        ;; who it started, read tracked (the join's key set): one added or gone draws the entry again
-        _ (when (map? (ratom/untracked as)) (doall (keys as)))
-        kids (members as)
+        kids (started-agents ix c)
         [shown below] ((juxt filter remove) #(some? (:seon.agent/key (ratom/untracked %))) kids)]
     [:section {:wire/for "page" :data-standing (name (where-stands stands))}
      [:a {:href (str "/agent/" (agent-address a)) :title (str/join " · " (remove nil? [(:seon.agent/key a) (:text stands) (:seon.task/id t)]))}
@@ -1719,10 +1716,8 @@
          [:span {:class "shrink-0 text-2xs muted"} "the person Seon works for"]]]
        ;; the agents it started, each by its own entry (root's session is the page itself, not listed)
        ;; who it started, read tracked by the join's key set: one added draws the entry again (read untracked, a live root's page never placed it)
-       (let [as (get c :seon.agent/_parent)]
-         (when (map? (ratom/untracked as)) (doall (keys as)))
-         (when-let [kids (seq (started-agents as))] (into [:div {:class "started"}] kids)))]
-      (agent-entry (:seon.db/db opts) c))
+       (when-let [kids (seq (started-agents (:seon.render/index opts) c))] (into [:div {:class "started"}] kids))]
+      (agent-entry (:seon.db/db opts) (:seon.render/index opts) c))
     ;; it names a render of its own this process has none of: drawn by this, its schema's, the reason said where its own would be
     (agent-page c (when-let [r (some-> (get c :seon.render/hiccup) ratom/realize)] (when-not (resolve r) [#'unresolved-list {:wire/for "page"}])))))
 
@@ -1815,8 +1810,8 @@
         _ (let [v (get c :seon.message/_to)] (when (map? (ratom/untracked v)) (doall (keys v))))
         {:keys [exchanges waiting]} (if k (stage-exchanges db ix c k turn) {:exchanges [] :waiting []})
         now (peek exchanges)
-        ;; the sessions the person's tree holds (root's session pulls who started it, the user, and what they started), itself aside
-        held (count (for [u (members (get c :seon.agent/parent)) a (started-agents (get u :seon.agent/_parent))] a))]
+        ;; the sessions forked from root's session (the first agent's tree, its :seon.agent/_parent)
+        held (count (started-agents ix c))]
     [:section (stage-now waiting now working? (if now (stage-values db ix c k now) []) held) (stage-folds exchanges (boolean (seq waiting)))]))
 
 (defn stage-list
@@ -1930,21 +1925,36 @@
     [(if (vector? k) (let [[a & o] k] (or (:as (apply hash-map o)) a)) k) sub]))
 
 (defn- members
-  "The pulled entities join value v holds, as views: v itself when it is one entity, else each member of a join held as a map."
-  {:malli/schema [:=> [:cat :any] [:sequential :any]]}
-  [v]
-  (let [u (ratom/untracked v)]
-    (cond (and (map? u) (:db/id u)) [v]
-          (map? u) (for [k (keys u) :let [m (get u k)] :when (and (map? m) (:db/id m))] (get v k))
+  "The pulled entities join value v holds, as views: v itself when it is one entity, else each member of a join held as a map. A
+  member pulled without any identity attribute (an entity schema's, in the entity index ix: :identity-schemas) that holds a join is a
+  path, never a unit: the members of its own joins stand in its place, so a list read through another entity ({:seon.task/_started-by
+  [{:seon.task/agent ...}]}: a user's agents through the tasks it started) holds the agents. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :map :any] [:sequential :any]]}
+  [ix v]
+  (let [u (ratom/untracked v)
+        ids (:identity-schemas ix)
+        ;; an entity, or, pulled without its identity, what its joins hold
+        joins (fn [m] (filter #(let [y (get m %)] (or (map? y) (sequential? y))) (keys m)))
+        ;; one held as its id alone (the pull's depth stopped there) stays itself, as does one with no join to pass through
+        place (fn [x m] (let [js (when-not (some ids (keys m)) (seq (joins m)))]
+                          (if js (mapcat #(members ix (get x %)) js) [x])))]
+    (cond (and (map? u) (:db/id u)) (place v u)
+          (map? u) (mapcat (fn [k] (let [m (get u k)] (when (and (map? m) (:db/id m)) (place (get v k) m)))) (keys u))
           ;; a join as d/pull answers it, a vector of its members
-          (sequential? u) (for [i (range (count u)) :let [m (nth u i)] :when (and (map? m) (:db/id m))] (get v i))
+          (sequential? u) (mapcat (fn [i] (let [m (nth u i)] (when (and (map? m) (:db/id m)) (place (get v i) m)))) (range (count u)))
           :else [])))
 
 (defn- started-agents
-  "The agents join value v holds (`members`), root's session left out: root's own line (`root-side`) is its entry in the agents list, and
-  the page it is on needs no entry of itself. Its key is the reserved one root's page names (seon.render.proc/location). See docs/users.md#roots-agent."
-  {:malli/schema [:=> [:cat :any] [:sequential :any]]}
-  [v] (remove #(= "root" (:seon.agent/key (ratom/untracked %))) (members v)))
+  "The agents entity view c started, as its pull holds them: the agents forked from it (:seon.agent/_parent, an agent's) and, for a person,
+  the agents of the tasks it started (:seon.task/_started-by, each task a path, `members`), root's session left out: root's own line
+  (`root-side`) is its entry in the agents list, and the page it is on needs no entry of itself. Each join is read tracked by its key set,
+  so one added or gone draws its reader again. Its key is the reserved one root's page names (seon.render.proc/location). See
+  docs/users.md#roots-agent."
+  {:malli/schema [:=> [:cat :map :any] [:sequential :any]]}
+  [ix c]
+  (remove #(= "root" (:seon.agent/key (ratom/untracked %)))
+          (mapcat (fn [k] (let [v (get c k)] (when (map? (ratom/untracked v)) (doall (keys v))) (members ix v)))
+                  [:seon.agent/_parent :seon.task/_started-by])))
 
 (defn tiles
   "The tiles entity c's pull joins, read by pattern p: each entity its joins hold that is a tile (`tile?`), in the pattern's order, as
@@ -1954,13 +1964,22 @@
   {:malli/schema [:=> [:cat :map :any [:sequential :any]] [:vector :any]]}
   [ix c p]
   ;; each join's members read tracked by their key set (one added or gone places the tiles again); each tile is its own component
-  (vec (for [[k _] (pattern-joins p) :let [v (get c k) _ (when (map? (ratom/untracked v)) (doall (keys v)))] m (members v) :when (tile? ix (ratom/untracked m))] m)))
+  (vec (for [[k _] (pattern-joins p) :let [v (get c k) _ (when (map? (ratom/untracked v)) (doall (keys v)))] m (members ix v) :when (tile? ix (ratom/untracked m))] m)))
 
 (defn- own-tiles
   "Entity view e's own tiles: `tiles` by its own pattern less its conversation (seon.render/page-pattern of seon.render/entity-pattern),
   the one call a page's top and a tile's inside make; nothing outside a walk (no entity index in opts)."
   {:malli/schema [:=> [:cat [:maybe :map] :any] [:vector :any]]}
   [ix e] (if ix (tiles ix e (render/page-pattern ix (or (render/entity-pattern ix (ratom/untracked e)) []))) []))
+
+(defn- person-of
+  "The person agent view c works for, as an entry the walk draws by its schema's render (seon.render.ui/agent nested): the starter of its
+  own task, only where c's pull holds that person's sessions (:seon.task/_started-by, root's session's pattern joins it so); else nil, so
+  the pull decides where a person is drawn. See docs/users.md#roots-agent."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [c]
+  (let [u (get-in c [:seon.agent/task :seon.task/started-by])]
+    (when (and (map? (ratom/untracked u)) (contains? (ratom/untracked u) :seon.task/_started-by)) u)))
 
 (defn agent-parts
   "Agent pull c's page parts, all of its page but its conversation (p-task, read by the model as parts: seon.render/page-lists): the
@@ -1974,7 +1993,11 @@
   [{ix :seon.render/index} c]
   [:div {:id "p-task"}
    ;; what its pull joins, each by its own render, in the pull's order: its task first, as the agent's pattern joins it first
-   (seq (own-tiles ix c))
+   ;; the person it works for, with their sessions, where its pull holds them so (root's session's pattern, `person-of`): a session the
+   ;; person's entry draws is not drawn again among its own tiles, so each is on the page once, under who started it
+   (let [u (person-of c)
+         under (into #{} (map #(:db/id (ratom/untracked %))) (when u (started-agents ix u)))]
+     (seq (cond-> (vec (remove #(under (:db/id (ratom/untracked %))) (own-tiles ix c))) u (conj u))))
    [#'eval-tiles {} c]
    ;; then the agent's own state, from its own attributes
    (when (:seon.agent/task c) [#'status {:at [:seon.agent/task :proved]}])
@@ -2327,11 +2350,8 @@
   docs/users.md#whats-on-screen."
   {:seon.render/style "#c-side > section { padding: 0.125rem 0.25rem; } #c-side .said { display: none; } #c-side .started { margin-left: 0.75rem; padding-left: 0.5rem; border-left: 1px solid var(--color-base-800); }"
    :seon.render/list "c-side" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
-  (let [as (get c :seon.agent/_parent)]
-    ;; who is in it, read tracked (its key set): a member added or gone draws the list again; each entry is its own component
-    (doall (keys as))
-    [:ol {:id "c-side"} [#'root-side {}] (seq (started-agents as))]))
+  [{c :seon.ctx/ctx ix :seon.render/index}]
+  [:ol {:id "c-side"} [#'root-side {}] (seq (started-agents ix c))])
 
 (defn root
   "The system entity (the declared html render of :seon.system/root-fact), on the system's own walk (seon.render.proc's root walk, which holds

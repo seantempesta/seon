@@ -57,15 +57,15 @@
 ;; root's server, read-only): root's stall check (::stall-armed ::busy ::lost), each agent proc's (:inflight :fx-out :stall-seen
 ;; :last-frame-ms), and which procs answered the ping, so a proc mid-step is seen missing, never read as nil
 (deftest roots-session-and-what-root-releases-are-the-users
-  ;; docs/users.md#who-started-whom (owner, 2026-11-11: one open graph of agents): the agents are one tree rooted at the user.
-  ;; Root's session is started by the user (seon.system/root-agent-tx), and a task released at root's REPL is started by its
-  ;; evaluator, the user (my.root/run!), so its agent joins the user's :seon.agent/_parent at its start. Red before: neither
+  ;; docs/users.md#who-started-whom (owner, 2026-11-12: "Root is not special: it's the first agent; everyone descends from it"): root's
+  ;; session is the first agent, with no parent, its task started by the user (seon.system/root-agent-tx); a task released at root's REPL
+  ;; is started by its evaluator, the user (my.root/run!), so its agent joins the user's :seon.agent/_parent at its start. Red before: neither
   ;; wrote a starter, and those agents were reached only through :seon.agent/root
   (let [user (seon.config/value :seon.config.root/user-name)
         db0 (d/db-with (ts/test-db) [{:seon.system/id :root}])
         db (d/db-with db0 (root/root-agent-tx db0))]
     (is (= user (get-in (d/entity db [:seon.task/id "request/root"]) [:seon.task/started-by :seon.agent/key])) "root's session's task was started by the user")
-    (is (some #{"root"} (map :seon.agent/key (:seon.agent/_parent (d/entity db [:seon.agent/key user])))) "and the user's tree holds root's session"))
+    (is (nil? (:seon.agent/parent (d/entity db [:seon.agent/key "root"]))) "and root's session is the first agent: it has no parent"))
   (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
         ns (str "started" (seon.lib/unique-id))
         resp (:response (ts/ask root {:op :eval :agent "root"

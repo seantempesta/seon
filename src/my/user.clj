@@ -22,7 +22,7 @@
 
 (defn agents
   "Every session as this agent's record holds them, at the point its turn heard main: each {:key :status :task :outcome}, by key.
-  Read from the record's join to whoever started it (root's session's pattern, [:seon.db/agent-fact {:seon.agent/parent :seon.db/user-fact}]: the user's tree), the agents
+  Read from the record's join to the agents forked from it (root's session is the first agent: its :seon.agent/_parent is the tree), the agents
   it started and, under each, the ones it started, to :seon.config.render/agent-tree-depth levels: when the pull stopped short of some, a last entry
   {:more n :depth :seon.config.render/agent-tree-depth} says how many it left out, so the answer never cuts silently; it reads no db. An agent
   whose pattern holds no such join has none. What root's session asks when it looks for a session already on a person's request (its page's
@@ -30,8 +30,7 @@
   {:malli/schema [:=> [:cat] [:vector [:or [:map [:key :string] [:status {:optional true} :any] [:task {:optional true} [:maybe :string]] [:outcome {:optional true} :any]]
                                          [:map [:more pos-int?] [:depth :qualified-keyword]]]]]}
   []
-  (let [[as n] (reduce (fn [[ks n] u] (let [[ks2 n2] (below (:seon.agent/_parent u))] [(into ks ks2) (+ n n2)]))
-                       [[] 0] (started (ratom/realize (get @ctx/ctx :seon.agent/parent))))
+  (let [[as n] (below (ratom/realize (get @ctx/ctx :seon.agent/_parent)))
         listed (->> as
                     (keep (fn [a] (when-let [k (:seon.agent/key a)]
                                     {:key k :status (:seon.agent/status a) :task (get-in a [:seon.agent/task :seon.task/id]) :outcome (get-in a [:seon.agent/task :seon.task/outcome])})))
