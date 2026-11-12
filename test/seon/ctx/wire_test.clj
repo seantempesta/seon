@@ -2492,3 +2492,10 @@
             (is (and (str/includes? said "Reply 1.") (str/includes? said "Reply 2.")) "the other parts are still there")
             (is (= [:seon.render/component-defect] (map :seon.error/type (render/take-defects! w))) "one defect, recorded once"))
           (finally (render/dispose-walk! w)))))))
+
+;; docs/render.md#style: presentation goes from the page the model reads, and a map the page shows as data keeps its entries:
+;; a map entry [:k {...}] is a vector headed by a keyword with a map second, and was rebuilt as an element, which its map
+;; could not take back (seon.ctx-test/an-agent-adds-a-datum-and-its-render, red in context's land, 2026-11-12)
+(deftest presentation-leaves-a-maps-entries
+  (is (= [:div [:pre {:task {:plan "p"} :opts {} :n 1}]]
+         (#'wire/presentation-free [:div {:class "x"} [:pre {:class "y" :data-n 1} {:task {:plan "p"} :opts {} :n 1}]]))))
