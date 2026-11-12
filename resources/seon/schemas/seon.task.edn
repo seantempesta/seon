@@ -144,7 +144,7 @@
                                                     :unmerged "unmerged entries" :no-design "plan unchanged since the run began" :open-problem "problems to clear"
                                                     :behind "judged before main moved"}}
                          :open :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem :behind]
- :seon.reconcile/not-done [:map {:closed true}
+ :seon.reconcile/not-done [:map {:closed true :description "One reason a judged task is not done, as its :seon.task/reasons holds them: the reason, and what it is about (the test or var, the key of an unmerged entry, how many transactions main moved). See docs/tasks.md#the-done-rule."}
                           [:reason :seon.reconcile/reason]
                           [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string] [:behind {:optional true} pos-int?]]
  :seon.reconcile/action [:multi {:dispatch :op}

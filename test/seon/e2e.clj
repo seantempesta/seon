@@ -34,10 +34,10 @@
 
 (defn agents-reused
   "Agent keys that serve tasks of more than one branch (must be empty): a session's tasks (a
-  task and the tasks on its branch it needs, a work task and its merge: seon.task/session-key)
+  task and the tasks on its branch it needs, a work task and its merge: seon.task/agent-key)
   continue its one agent, and no agent serves two sessions. The branch stands for the session (a
   session is one branch): two sessions on one branch with no :needs between them sharing an agent
-  pass unseen. session-key cannot judge it, since it answers the agent this check asks about."
+  pass unseen. agent-key cannot judge it, since it answers the agent this check asks about."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :string]]}
   [d] (vec (for [[k ts] (group-by :seon.task/agent (vals (task/tasks d)))
                  :when (and k (< 1 (count (distinct (map :seon.task/branch ts)))))]
@@ -46,7 +46,7 @@
 (defn- branch-db-of
   "A function from an agent key to the db of its branch on sys: an agent's turns and model calls are written there (main holds its
   start and its end, as the task's outcome), d being main; an agent no root has started yet (root's session at boot,
-  docs/users.md#roots-session) has no branch and has written nothing, so its records are main's."
+  docs/users.md#roots-agent) has no branch and has written nothing, so its records are main's."
   {:malli/schema [:=> [:cat :seon.system/sys :seon.host/db] fn?]}
   [sys d]
   (fn [k] (if-let [b (:seon.agent/branch (d/entity d [:seon.agent/key k]))] (:db @(c/branch-db sys b)) d)))
@@ -215,9 +215,9 @@
   [d id] (or (task/refine? d id) (some #(task/refine? d %) (:seon.task/needs (task/task d id)))))
 
 (defn- work-summaries
-  "server/task-summaries of d less root's own session's task (its session is the agent keyed \"root\", seon.system/root-session-boot-tx: made at
+  "server/task-summaries of d less root's own session's task (its session is the agent keyed \"root\", seon.system/root-agent-boot-tx: made at
   every boot, parked until a message, never done) and less the refines and reviews its ends wrote: the work a scenario released."
-  [d] (into {} (remove (fn [[id _]] (or (= "root" (task/session-key d id)) (refine-or-review? d id)))) (server/task-summaries d)))
+  [d] (into {} (remove (fn [[id _]] (or (= "root" (task/agent-key d id)) (refine-or-review? d id)))) (server/task-summaries d)))
 
 (defn- refines
   "Each ended task of the scenario's work, with the refines after it and each one's review: every end has exactly one refine, its review

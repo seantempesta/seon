@@ -615,11 +615,11 @@
           (concat (keep #(get-in c %) (filter model-reads? (get placed :pending)))
                   (opening-page (:db/id c) here (last (keep basis-of cs)) (empty? cs) newest)))))
 
-(defn example-session-msgs
+(defn example-agent-msgs
   "An example session's agent (its root view in a render-pull of it) as the model reads it, a model output's call: the message
   that opens it (seon.ctx.session/example-open), its turns' entities placed (`turn-entities`), each rendered by its own
   :seon.render/openai-compat in the walk, and the message that closes it. A call's answer stands for the agent's own model render, so an
-  example writes no session opening of its own. See docs/tasks.md#a-task-names-example-sessions."
+  example writes no session opening of its own. See docs/tasks.md#a-task-names-examples."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db] [:seon.render/index :map]] :map] [:vector :any]]}
   [{db :seon.db/db ix :seon.render/index} a]
   (-> [{:role "user" :content (session/example-open (ratom/realize (:seon.agent/key a)) (ratom/realize (:seon.agent/description a)))}]
@@ -629,15 +629,15 @@
 (defn example-msgs
   "Example session ek as the model reads it, placed by the agent's model render as [#'example-msgs {} ek] (the walk keeps it as
   a component keyed by the example, a past point that never changes): its agent pulled as of its last t and rendered in one
-  pass for the model (seon.render/render-pull, its root `example-session-msgs` as a model output's call), so each of its
-  entities is rendered by its own :seon.render/openai-compat inside a walk. See docs/tasks.md#a-task-names-example-sessions."
+  pass for the model (seon.render/render-pull, its root `example-agent-msgs` as a model output's call), so each of its
+  entities is rendered by its own :seon.render/openai-compat inside a walk. See docs/tasks.md#a-task-names-examples."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :string] [:vector :seon.model/message]]}
   [{db :seon.db/db} ek]
   (let [dbt (d/as-of db (session/example-t db ek))
         ix (program/index-of-db dbt)
         branch (get-in (or (:origin-db dbt) dbt) [:config :branch])
         pull (:tree (ctx/build ix dbt (pdb/eid dbt :seon.agent/key ek) branch))]
-    (:messages (render/render-pull pull dbt #'example-session-msgs ix #{:seon.render/openai-compat} {:seon.render/as :seon.render/openai-compat :seon.render/changes ctx/changes}))))
+    (:messages (render/render-pull pull dbt #'example-agent-msgs ix #{:seon.render/openai-compat} {:seon.render/as :seon.render/openai-compat :seon.render/changes ctx/changes}))))
 
 (defn agent-msgs
   "An agent (:seon.db/agent-fact) as the model reads it: its system message (`agent-system-text`: the doc sections

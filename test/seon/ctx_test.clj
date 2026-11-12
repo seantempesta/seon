@@ -450,7 +450,10 @@
     (loop [db (seeded 30 small-window-pattern) c (ctx/build (seon.db/index) db (aid db) :b) i 0 bad [] unshared [] checked 0]
       (if (= i 70)
         (do (is (empty? bad) (str "the change after which the patch and a build differ: " (first bad)))
-            (is (< 500 checked) (str "the sharing check reads the paths no change touched: " checked))
+            ;; checked counts, over the 70 changes, each path of the record that the change did not touch and whose value was compared, old
+            ;; record against new, for being the same object: 978 on this seed (it was over 1,000 while a cite held its section's text
+            ;; and its function's source, which jolt/citepull took out of the record). The floor says the check read most of them, not none
+            (is (< 900 checked) (str "the sharing check reads the paths no change touched: " checked))
             (is (empty? unshared) (str "a path no change touched that is a new object: " (first unshared))))
         (let [tx (change db i r) rep (d/with db tx) db' (:db-after rep) c' (ctx/patch c db' (:tx-data rep) :b)
               b (ctx/build (seon.db/index) db' (aid db') :b)
@@ -1149,14 +1152,16 @@
 ;; listing was 239,943 characters with every section's references and citers
 (deftest doc-reads-a-local-and-a-page-lists-its-sections-without-their-edges
   (let [db (my.test/with (my.test/world) (my.test/page "docs/small.md" "# Small\n\nThe lead of small, citing app.calc/add.\n\n## Below\n\nThe text below, citing app.calc/total.\n"))]
-    (with-redefs [seon.agent/db (fn [] db)]
+    (try
+      (enter-agent! {:db db})
       (let [printed (with-out-str (let [a "docs/small.md#small"] (my.agent/doc a)))
             listing (my.agent/doc-of "docs/small.md")]
         (is (clojure.string/includes? printed "The lead of small") "a let-bound address is read as a literal is")
         (is (clojure.string/includes? printed "docs/small.md#below") "and names the section below")
         (is (not (clojure.string/includes? printed "The text below")) "without its text")
         (is (= ["docs/small.md#small" "docs/small.md#below"] (mapv :seon.ref/address listing)) "a page lists its sections")
-        (is (not-any? #(or (:seon.ref/references %) (:seon.ref/cited-by %)) listing) "each without its edges")))))
+        (is (not-any? #(or (:seon.ref/references %) (:seon.ref/cited-by %)) listing) "each without its edges"))
+      (finally (end-agent!)))))
 
 ;; docs/references.md#an-entity-cites: a cite holds its target by identity, and of a cited task also what an agent may edit there
 ;; (its plan, instructions, proofs and cause: the task content a run's end carries to main), so a task that curates another
@@ -1754,9 +1759,9 @@
     (is (= "lab/ctx" (:seon.task/id task)) "and its pull still holds its task")))
 
 (deftest a-depth-join-asks-its-below-option-under-its-last-level
-  ;; docs/ctx.md#the-pattern: a depth join's :below option is what it asks below its last level (seon.render's again): entries to the
-  ;; depth, and below the last of them only what :below asks, here their ids, so an entry says how many are below it and nothing is cut
-  ;; silently. A :below on a join that is no depth is refused, as is a plain join added beside a depth of the same key
+  ;; docs/ctx.md#the-pattern: a depth join's :seon.ctx/below option is what it asks below its last level (seon.render's again): entries to the
+  ;; depth, and below the last of them only what :seon.ctx/below asks, here their ids, so an entry says how many are below it and nothing is cut
+  ;; silently. A :seon.ctx/below on a join that is no depth is refused, as is a plain join added beside a depth of the same key
   (let [ks ["depth/a" "depth/b" "depth/c" "depth/d" "depth/e"]
         db (:db-after (d/with (ts/test-db) (into (mapv (fn [x] {:seon.agent/key x :seon.agent/turn 1}) ks)
                                                  (for [[x y] (map vector ks (rest ks))] {:seon.agent/key x :seon.agent/agents #{{:seon.agent/key y}}}))))
@@ -1765,21 +1770,21 @@
         tree (fn [p] (:tree (ctx/build ix db (pdb/eid db :seon.agent/key "depth/a") :b p)))
         refused (fn [p] (str (try (render/pattern ix p) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))))
         n (seon.config/value :seon.config.render/agent-tree-depth)]
-    (let [t (tree [:seon.agent/key {[:seon.agent/agents :below [:db/id]] 2}])
+    (let [t (tree [:seon.agent/key {[:seon.agent/agents :seon.ctx/below [:db/id]] 2}])
           last-full (down t)]
       (is (= ["depth/a" "depth/b"] (mapv :seon.agent/key [t last-full])) "entries to the depth: the entity and one level more")
       (is (= (pdb/eid db :seon.agent/key "depth/c") (:db/id (down last-full))) "the last full level holds the ids below it")
       (is (nil? (:seon.agent/key (down last-full))) "and nothing else of them"))
     (is (= (render/pattern ix [:seon.agent/key {:seon.agent/agents [:seon.agent/key {:seon.agent/agents [:db/id]}]}])
-           (render/pattern ix [:seon.agent/key {[:seon.agent/agents :below [:db/id]] 2}]))
-        "the joins written out, each asked by its key without :below")
-    (let [t (tree [:seon.agent/key {[:seon.agent/agents :below [:db/id]] :seon.config.render/agent-tree-depth}])
+           (render/pattern ix [:seon.agent/key {[:seon.agent/agents :seon.ctx/below [:db/id]] 2}]))
+        "the joins written out, each asked by its key without :seon.ctx/below")
+    (let [t (tree [:seon.agent/key {[:seon.agent/agents :seon.ctx/below [:db/id]] :seon.config.render/agent-tree-depth}])
           levels (take-while some? (iterate down t))]
       (is (= (subvec ks 0 n) (vec (keep :seon.agent/key levels))) "a config key's value, the same way")
       (is (nil? (:seon.agent/key (last levels))) "below the last, ids alone"))
-    (is (str/includes? (refused [:seon.agent/key {[:seon.agent/agents :below [:db/id]] [:seon.agent/key]}]) "it takes a depth")
-        "a :below on a join that is no depth: refused, never ignored")
-    (is (str/includes? (refused [:seon.agent/key {[:seon.agent/agents :below [:db/id]] 2} {:seon.agent/agents [:seon.agent/status]}])
+    (is (str/includes? (refused [:seon.agent/key {[:seon.agent/agents :seon.ctx/below [:db/id]] [:seon.agent/key]}]) "it takes a depth")
+        "a :seon.ctx/below on a join that is no depth: refused, never ignored")
+    (is (str/includes? (refused [:seon.agent/key {[:seon.agent/agents :seon.ctx/below [:db/id]] 2} {:seon.agent/agents [:seon.agent/status]}])
                        "asked twice and one of them is a depth")
         "a plain join added beside a depth of the same key: refused, saying why")))
 

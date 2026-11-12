@@ -197,6 +197,40 @@
   [k] (let [form (get forms k)] (vec (drop (if (map? (second form)) 2 1) form))))
 (def registry (registry-of forms))
 
+(def ^:private dependents
+  "Each named form's key -> the keys of the forms that name it directly (a qualified keyword anywhere in their form): what
+  registry-with recompiles when a key changes. Read from forms once, as registry is compiled once."
+  (let [names (fn [f] (into #{} (filter qualified-keyword?) (tree-seq coll? seq f)))]
+    (reduce-kv (fn [m k f] (reduce #(update %1 %2 (fnil conj #{}) k) m (disj (names f) k))) {} forms)))
+
+(clojure.core/defn registry-with
+  "registry with changes (key -> form) compiled in: each changed key and every form that names one, transitively, compiled
+  again (a compiled schema keeps what it named compiled in), every other name read from registry as it is. A changed form
+  that does not compile throws malli's ex-info, as registry-of does. Cost: the changed keys' dependents, not every form
+  (40 of 811 forms for :seon.task/kind: 253k ticks and 1.9 MB against 2.2M and 16.7 MB)."
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :seon.host/registry]}
+  [changes]
+  (let [affected (loop [todo (vec (keys changes)) seen #{}]
+                   (if-let [k (peek todo)]
+                     (if (seen k) (recur (pop todo) seen) (recur (into (pop todo) (get dependents k)) (conj seen k)))
+                     seen))
+        merged (merge forms changes)
+        compiled (volatile! {})
+        reg (volatile! nil)
+        lazy (reify mr/Registry
+               (-schema [_ k]
+                 (if (affected k)
+                   (or (get @compiled k)
+                       (when-let [form (get merged k)]
+                         (let [s (m/schema form {:registry @reg})]
+                           (vswap! compiled assoc k s)
+                           s)))
+                   (mr/-schema registry k)))
+               (-schemas [_] @compiled))]
+    (vreset! reg (mr/composite-registry lazy registry))
+    (doseq [k affected] (mr/-schema lazy k))
+    (mr/composite-registry (mr/simple-registry @compiled) registry)))
+
 (def options
   "What every contract compiles against: the built registry, under malli's dynamic registry,
   so an evaluation that binds malli.registry/*registry* (an agent's REPL, to its branch's

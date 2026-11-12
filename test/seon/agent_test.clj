@@ -2828,6 +2828,24 @@
     (is (= ["docs/agent.md#working-a-task" "docs/agent.md#merging" "docs/data-modeling.md#data-modeling" "docs/agent.md#the-agent"] (:value gone))
         (str "a default it uncites is gone from its own: " (pr-str gone)))))
 
+;; docs/references.md#an-entity-cites: an agent whose task's config cites a section its store does not hold starts and works, citing the rest;
+;; root holds the missing address for it (its status, and a :seon.agent/cite-missing problem naming it), and its own cites leave it out
+(deftest an-agent-whose-store-lacks-a-cited-section-starts-and-says-which
+  (let [gone "docs/none.md#not-there" held "docs/agent.md#merging"
+        problem-code (str "(->> (get-in (my.root/problems sys) [:classes :agent :rows]) (filter #(= :seon.agent/cite-missing (:type %)))"
+                          " (mapv (juxt :last-agent #(get-in % [:example :seon.doc/address]))))")
+        [names mine sum status problems]
+        (in-agent (fn [names]
+                    [(fn [_] names)
+                     "(#'my.agent/own-cites)" "(+ 1 2)"
+                     {:op :eval :agent "root" :code (str "(:seon.agent/missing-cites (get (:agents (c/state sys)) :" (:agent names) "))")}
+                     {:op :eval :agent "root" :code problem-code}])
+                  {:config {:seon.config.agent/cites [gone held]}})]
+    (is (= 3 (:value sum)) "the agent started and answers an eval")
+    (is (= [held] (mapv :cites (:value mine))) (str "its own cites hold the section the store has, and not the one it lacks: " (pr-str (:value mine))))
+    (is (= [gone] (:value status)) "root holds the missing address on the agent's status")
+    (is (= [[(keyword (:agent (:value names))) gone]] (:value problems)) "and a :seon.agent/cite-missing problem of that agent names it")))
+
 ;; See docs/merging.md#main-moved-is-said-at-every-eval
 (deftest main-moved-is-said-at-every-eval
   ;; the owner (root, 2026-10-28): "we are supposed to be telling the agent always at every eval reply

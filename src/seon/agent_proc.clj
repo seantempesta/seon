@@ -160,7 +160,7 @@
                  (step/out! o :to-api (status st (cond-> {:forked-ms (lib/r2 (:start-ms m)) :mem-mb (:mem-mb m) :t (:t m) :ready true :phases (:phases m)}
                                               (:cloned-from m) (assoc :pid (:pid m))
                                               (seq (:load-errors m)) (assoc :load-errors (:load-errors m))
-                                              (seq (:missing-cites m)) (assoc :missing-cites (:missing-cites m)))))
+                                              (seq (:seon.agent/missing-cites m)) (assoc :seon.agent/missing-cites (:seon.agent/missing-cites m)))))
                  ;; root's interrupt cannot reach it (its SIGUSR1 handler never ran: a process not
                  ;; forked from a main thread): a recorded problem, to whoever can act on it
                  (when (false? (:interrupt-ok m))
@@ -176,12 +176,12 @@
                                                                 (cond-> {:ns ns} form (assoc :form form)))}))
                  ;; a section its config cites that its store does not hold: the agent runs citing the rest, and each missing address is a
                  ;; recorded problem of this agent, with the one thing not to do about it
-                 (doseq [a (:missing-cites m)]
+                 (doseq [a (:seon.agent/missing-cites m)]
                    (step/out! o :to-api {:op :problem :class :agent :agent id
                                          :error (contract/error :seon.agent/cite-missing #'seon.agent-proc/agent-frame
                                                                 (str "the store lacks section " a ", which this agent's config cites: it was made without that cite. "
                                                                      "The store is older than its wiki; a reindexing start (bin/system start --reindex) erases the store")
-                                                                {:address a})}))
+                                                                {:seon.doc/address a})}))
                  ;; its socket to root cannot raise SIGIO: it ends with root only when it next reads
                  (when-let [e (:unwatched m)] (step/out! o :to-api {:op :problem :class :agent :agent id :error e}))
                  (when-let [x (:misaligned m)]
