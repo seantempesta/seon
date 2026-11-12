@@ -429,6 +429,12 @@
   "await-provoked's test of main db: its quiescence report is at or after t. It reads one fact, never main's problems report."
   [t] #(some-> (seon.reconcile/quiescent %) :t (>= t)))
 
+(defn- platform-defect?
+  "Does main hold the api's platform defect as a recorded error (:seon.error/class :platform, type :seon.system/proc-defect):
+  the api folds its throw into its errors and flushes them to main, a path the reconciler's quiet says nothing about. One
+  class's facts, never the whole report (a wait on main runs it at every commit). See docs/machine.md#builds-and-checks."
+  [db] (some? (d/q '[:find ?e . :where [?e :seon.error/type :seon.system/proc-defect] [?e :seon.error/class :platform]] db)))
+
 (defn- await-provoked
   "Main at the reconciler's first quiet after main's t (p1 and p2 released at t, so judged by then: their red proof and
   cost verdict; the platform defect and the death came before): its quiescence report at or after t, or the quiet
@@ -476,6 +482,10 @@
         _ (out! "PROBLEMS WAIT the stall closed on main")
         after (seon.system/await-db sys #(empty? (stalled-rows %)))
         _ (a/>!! (:back sys) {:op :writer :tx-count 1 :batch-ms 1 :n-tx "not a number" :commits 1})
+        ;; its own fact, as the stall's: the api's defect reaches main through its fold and flush, which the reconciler's quiet
+        ;; (await-provoked) does not wait on; read before it under load, :platform failed a landing (runtime's, 2026-11-12)
+        _ (out! "PROBLEMS WAIT the api's platform defect on main")
+        platform (seon.system/await-db sys "the api's platform defect on main" platform-defect?)
         r3 @(c/submit! sys b "(spit \"/dev/stderr\" \"D2 boom: the agent writes its last words\\n\" :append true) (seon.lib/c-exit 3)")
         _ (doseq [tx (seon.fixtures/program-txs @(:conn sys) problem-specs)] @(c/transact-main! sys tx))
         ds (mapv #(assoc % :seon.task/config {:seon.config.agent/max-turns 1})
@@ -502,7 +512,7 @@
                 :ms (- (System/currentTimeMillis) t0)}
        :checks {:eval (every? (types :eval) [:seon.agent/eval-error :seon.instrument/contract-error])
                 :effect (contains? (types :effect) :seon.fx/io-error)
-                :platform (contains? (types :platform) :seon.system/proc-defect)
+                :platform (and (not (contract/error? platform)) (contains? (types :platform) :seon.system/proc-defect))
                 :stalled (and (= a (:agent stall)) (clojure.string/includes? (str (:message stall)) "problems-stall-") (not (contract/error? after)))
                 :died (and died (= {:exit 3} (get-in died [:example :exit])) (re-find #"D2 boom" (str (get-in died [:example :stderr]))))
                 :red (and red (seq (:assertions red)) (= ['app.proofs/p1-test] (:proofs red)))
