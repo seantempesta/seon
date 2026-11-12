@@ -561,15 +561,22 @@
   it (its requires and aliases), then each definition, privates included, a line each in file
   order (seon.doc/namespace-source), which clojure.repl's does not (pipeline 1's F4: a design
   that asked (source ns) saw the ns form alone, took it for all that was recorded, and spent five
-  turns finding the namespace's private functions). sym is a symbol or the var (named)."
+  turns finding the namespace's private functions). A multimethod's is its defmulti, then each method this branch records, whole,
+  in file order: (source seon.repl/place) showed the defmulti alone, and an agent spent nine turns reaching one of its methods. sym is a symbol or the var (named)."
   {:malli/schema [:=> [:cat [:or :symbol :seon.host/var]] [:maybe :string]]}
   [sym]
   ;; a name that resolves to a class (java.lang.String) or to anything but a var has no recorded source
   (if-let [v (let [r (if (var? sym) sym (resolve sym))] (when (var? r) r))]
-    (or (:source (meta v))
-        ;; the branch's record, where there is a branch (a process with no agent's db, a test run's, reads the file)
-        (some-> (:db @agent/state) (doc/source-of (named v)))
-        (file-source v))
+    (let [s (or (:source (meta v))
+                ;; the branch's record, where there is a branch (a process with no agent's db, a test run's, reads the file)
+                (some-> (:db @agent/state) (doc/source-of (named v)))
+                (file-source v))
+          db (:db @agent/state)
+          ;; its methods' forms on the branch (:method/multi), in the order the file holds them (:form/order)
+          methods (when (and s db (bound? v) (instance? clojure.lang.MultiFn @v))
+                    (->> (d/q '[:find ?o ?src :in $ ?m :where [?me :method/multi ?m] [?f :form/defines ?me] [?f :form/src ?src] [?f :form/order ?o]] db (named v))
+                         (sort-by first) (map second)))]
+      (if (seq methods) (clojure.string/join "\n\n" (cons s methods)) s))
     (when-not (namespace sym)
       ;; the branch's record is the answer: a namespace it does not record has no ns form or privates to list
       (some-> (:db @agent/state) (doc/namespace-source sym)))))

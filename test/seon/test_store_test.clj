@@ -11,10 +11,9 @@
   ;; before its first fork, so a fork's test-db reads the seeded store; the second call forces nothing
   (with-redefs [seon.agent/state (atom {})]
     (let [n (#'seon.agent/warm-fixtures!)
-          m (volatile! nil)]
-      (seon.profile/measure! #(ts/test-db) #(vreset! m %))
+          m (seon.profile/measure! #(ts/test-db))]
       (is (pos? n) "the test store is among the fixtures it forced")
-      (is (< (:ticks @m) 5000000) (str "test-db after the agent's warm reads the seeded store: " (:ticks @m) " ticks"))
+      (is (< (:ticks m) 5000000) (str "test-db after the agent's warm reads the seeded store: " (:ticks m) " ticks"))
       (is (zero? (#'seon.agent/warm-fixtures!)) "once an agent"))))
 
 (deftest the-process-store-is-made-before-any-shard

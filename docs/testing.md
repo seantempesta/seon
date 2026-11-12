@@ -25,6 +25,7 @@ A test runs on **the world**, a small db shaped like production, plus what the t
    - `(t/without 'app.calc/inc2)`: the world without that var and its form;
    - plain tx-data, or `(fn [db] tx-data)`.
 4. **```my.test/cost```**: `{:ticks :bytes :ms :value}` of a thunk, to look at a cost at the REPL. A claim about how work grows is a **cost proof**, `seon.cost/proof` at small `:sizes` ([cost](cost.md)), never a ratio of two readings.
+5. **```my.test/eval-in```**: code asked of the REPL in this process. Given a world (`{:db (my.test/with (my.test/world) ...)}`), as an agent's test fork on it: its forms are recorded and noted as an agent's are, on the world's value, so a REPL finding is proved here, never as an in-agent process test your fork can't run (`seon.repl-test/a-require-at-the-repl-is-no-program-in-this-process`).
 
 Every test runs under a budget of engine ticks and is red past it ([tick budget](merging.md#a-tests-tick-budget)); a world test costs a few million. Run what your change reaches with `(my.agent/prove)`; it gives each test's verdict and cost.
 

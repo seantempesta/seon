@@ -515,7 +515,7 @@
         walk (fn [outs] (cond-> (seon.render/walker {:ref src :changes seon.ctx/changes} (constantly db) [#'seon.render.ui/agent {} (seon.ratom/ref-view src seon.ctx/changes)])
                           outs (assoc :outputs outs)))
         w (walk nil)
-        prints (fn [f] (seon.profile/measure! f (fn [_])) (or (some (fn [x] (when (= 'seon.print/record-text (:var x)) (:calls x))) (seon.profile/touched)) 0))]
+        prints (fn [f] (seon.profile/measure! f) (or (some (fn [x] (when (= 'seon.print/record-text (:var x)) (:calls x))) (seon.profile/touched)) 0))]
     (try
       (clojure.test/is (zero? (prints #(do (seon.render/flush! w nil) (seon.render/placed-units w)))) "a page drawn and written prints none")
       (finally (seon.render/dispose-walk! w)))
