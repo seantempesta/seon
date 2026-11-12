@@ -357,6 +357,25 @@
         (disj :ns :name :file :line :column :end-line :end-column :doc)
         (#(apply disj % contract/instrument-keys)))))
 
+(defn- var-attributes
+  "Of keys, the attributes a schema extending a var's (:seon.db/var-fact) owns, as the entity index says (`seon.db/owners`):
+  the metadata that makes a var a more specific thing (a test). See docs/testing.md#test-kinds."
+  {:malli/schema [:=> [:cat [:sequential :any]] [:sequential :qualified-keyword]]}
+  [ks]
+  (let [ix (pdb/index)]
+    (for [[a s] (pdb/owners ix (filter qualified-keyword? ks)) :when (and (not= s :seon.db/var-fact) (pdb/extends? ix s :seon.db/var-fact))] a)))
+
+(defn- def-facts
+  "A defined var's metadata keys that are `var-attributes`, each with its value (the live var's when it is plain data, else
+  as written): its facts on the var entity. See docs/testing.md#test-kinds."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/var] :map] [:map-of :qualified-keyword :any]]}
+  [v d]
+  (let [m (merge (:meta d) (some-> v meta))]
+    (into {} (for [a (var-attributes (keys m))
+                   :let [x (let [live (some-> v meta (get a))] (if (and (some? live) (edn-value? live)) live (unquote-form (get (:meta d) a))))]
+                   :when (some? x)]
+               [a x]))))
+
 (defn- macro-uses
   "The macros form (as read) calls in namespace nsx: each list in it whose head resolves
   there to a macro var. The IR is the expansion, which names no macro, and a
@@ -464,8 +483,10 @@
         defs (vec (for [d (:defs a)
                         :let [v (find-var (:var d))
                               multi? (contains? (:multis a) (:var d))]
-                        :when (and (not (and (:declare? d) (not multi?))) (set? d))]
+                        :when (and (not (and (:declare? d) (not multi?))) (set? d))
+                        :let [facts (def-facts v d)]]
                     (cond-> {:var (:var d) :meta (def-meta v d)}
+                      (seq facts) (assoc :facts facts)
                       (contract-text v d) (assoc :contract (contract-text v d))
                       ;; the form's own docstring first: a file read without running (another tree's) holds its
                       ;; text's, whatever the image's var says (seon.program-test/a-file-analyzed-keeps-its-own-docstring)
@@ -583,15 +604,18 @@
         (for [[a k] form-sets :let [v (get row k)] :when (seq v)] [a (vec v)])))
 
 (defn def-tx
-  "tx-data making definition k point at the form content names (content {:form :meta
+  "tx-data making definition k point at the form content names (content {:form :meta :facts
   :contract :doc :file}), retracting what it held that content does not, or, for nil
-  content, retracting what it held. e: its entity on db (def-eid), or nil."
+  content, retracting what it held. e: its entity on db (def-eid), or nil. A var's :facts are its metadata
+  that are attributes, asserted as they are (docs/testing.md#test-kinds)."
   {:malli/schema [:=> [:cat :seon.host/db :any [:maybe :int] [:maybe :map]] :seon.db/tx-data]}
   [db k e content]
   (let [x (when e (d/entity db e))
-        attrs (case (first k) :var [:var/form :var/contract :var/doc] :ns [:ns/form :ns/file :ns/doc] [(pointer (first k))])
+        ;; the attributes its metadata asserted before: its kept keys an entity schema owns
+        facts (when (= :var (first k)) (var-attributes (vec (:var/meta x))))
+        attrs (case (first k) :var (into [:var/form :var/contract :var/doc] facts) :ns [:ns/form :ns/file :ns/doc] [(pointer (first k))])
         now (when content
-              (cond-> {(pointer (first k)) (form-tid (:form content))}
+              (cond-> (merge {(pointer (first k)) (form-tid (:form content))} (:facts content))
                 (seq (:meta content)) (assoc :var/meta (set (:meta content)))
                 (:contract content) (assoc :var/contract (:contract content))
                 (:doc content) (assoc (if (= :ns (first k)) :ns/doc :var/doc) (:doc content))
@@ -671,7 +695,7 @@
            (for [n (into #{ns} (map #(symbol (namespace (:var %)))) defs)] {:db/id (ns-tid n) :ns/name n})
            [(form-tx id (assoc acct :order order :lead lead :defines dkeys) eids)]
            (map #(def-ref [:var %] (eids [:var %])) declares)
-           (mapcat (fn [{v :var :keys [meta contract doc]}] (def-tx db [:var v] (eids [:var v]) {:form id :meta meta :contract contract :doc doc})) defs)
+           (mapcat (fn [{v :var :keys [meta facts contract doc]}] (def-tx db [:var v] (eids [:var v]) {:form id :meta meta :facts facts :contract contract :doc doc})) defs)
            (mapcat #(def-tx db % (eids %) {:form id}) (filter (comp #{:method :impl} first) dkeys))
            (when ns-form? [(cond-> {:db/id (ns-tid ns) :ns/form (form-tid id)} (:ns-doc acct) (assoc :ns/doc (:ns-doc acct)))])
            ;; an ns form that no longer holds one: the docstring goes with it

@@ -130,6 +130,10 @@
  :seon.program/meaning-change [:map [:var :qualified-symbol] [:was [:map-of :keyword :string]] [:now [:map-of :keyword :string]]
                                [:cited-by [:vector [:map [:section :string] [:read :any]]]]]
  :seon.test/result [:map [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]
+ ;; what a test should cost, stated on its deftest (^{:seon.test/estimate {:ticks n}}) from what it must do, never from its last
+ ;; run; written on its var as a fact (seon.program/def-facts), so the test is a :seon.test/test (docs/testing.md#test-kinds)
+ :seon.test/estimate [:map {:description "What a test should cost, worked from first principles: :ticks of its own work, and the bytes, a system's asks and the binary's execs it makes. See docs/testing.md#test-kinds."}
+                      [:ticks pos-int?] [:bytes {:optional true} pos-int?] [:asks {:optional true} nat-int?] [:execs {:optional true} nat-int?]]
  ;; root's API
  :seon.system/sys [:map [:graph :any] [:ext :seon.host/chan] [:conn :seon.host/conn]]
  :seon.system/api-state [:map [:agents :map] [:pending :map] [:rid :int] [:boot :string]]

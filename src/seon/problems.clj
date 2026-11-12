@@ -471,10 +471,59 @@
                       {:kind :waived-proof :test t :task task :n n :measured measured :multiple multiple}
                       {:test t :task task :n n :measured measured :multiple multiple}))))
 
+(defn- test-reach
+  "{name local?} of what test var t reaches through the test namespaces' own code, by the compiler's facts: its form's
+  :form/refs and, followed, those of each var they name that a namespace under test/ defines and that is none of stop (a src var,
+  the shared world's among them, is not entered); local? when a form of t's own namespace names it. Cost: one seek and one
+  form's refs a test-tree var reached. See docs/testing.md#test-kinds."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol [:set :qualified-symbol]] [:map-of :symbol :boolean]]}
+  [db t stop]
+  (let [nsym (namespace t)
+        test-var? (fn [v] (when-let [e (pdb/eid db :var/name v)] (some-> (d/entity db e) :var/ns :ns/file (str/starts-with? "test/"))))]
+    (loop [todo [t] seen #{t} out {}]
+      (if-let [v (peek todo)]
+        (let [refs (some-> (pdb/eid db :var/name v) (as-> e (d/entity db e)) :var/form :form/refs)
+              local? (= nsym (namespace v))
+              nxt (filterv #(and (qualified-symbol? %) (not (seen %)) (not (stop %)) (test-var? %)) refs)]
+          (recur (into (pop todo) nxt) (into seen nxt) (reduce (fn [m r] (update m r #(boolean (or % local?)))) out refs)))
+        out))))
+
+(defn undeclared-tests
+  "Each of the named vars (the vars a branch changed) that is a test and breaks its law, one :undeclared-test row a
+  lack: it states no :seon.test/estimate, or one over its cap (:seon.config.proofs/test-ticks-cap, a system test's
+  asks-cap, a binary test's execs-cap); it reaches a running system (:seon.config.proofs/system-vars) and names no
+  :seon.test/root, or runs a command (exec-vars) and names no :seon.test/execs; or its namespace makes a store of its own
+  (own-store-vars). Read from the compiler's facts (`test-reach`); a test the branch did not change is not judged.
+  Closed by stating what it lacks on the deftest. See docs/testing.md#test-kinds."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:set :symbol]] [:vector :seon.problems/row]]}
+  [db ans names]
+  (let [c (delay (into {} (for [k [:test-ticks-cap :system-test-asks-cap :binary-test-execs-cap :system-vars :exec-vars :own-store-vars]]
+                            [k (config/value (keyword "seon.config.proofs" (name k)))])))]
+    (vec (for [v (sort names)
+               :let [e (pdb/eid db :var/name v) ent (when e (d/entity db e))]
+               :when (and ent (contains? (set (:var/meta ent)) :test))
+               :let [{:keys [test-ticks-cap system-test-asks-cap binary-test-execs-cap system-vars exec-vars own-store-vars]} @c
+                     {:keys [ticks asks execs] :as est} (:seon.test/estimate ent)
+                     root (:seon.test/root ent) cmds (:seon.test/execs ent)
+                     ;; a store is judged where the test's own namespace calls it (local?): the shared world's helpers make theirs
+                     reach (test-reach db v (into (set system-vars) exec-vars))
+                     hit (fn [vars] (first (sort (filter #(contains? reach %) vars))))
+                     lacks (cond-> []
+                             (nil? est) (conj [:estimate "states no :seon.test/estimate"])
+                             (and ticks (> ticks test-ticks-cap)) (conj [:ticks (str "estimates " ticks " ticks, over the cap of " test-ticks-cap)])
+                             (and root asks (> asks system-test-asks-cap)) (conj [:asks (str "estimates " asks " asks, over the cap of " system-test-asks-cap)])
+                             (and cmds execs (> execs binary-test-execs-cap)) (conj [:execs (str "estimates " execs " execs, over the cap of " binary-test-execs-cap)])
+                             (and (nil? root) (hit system-vars)) (conj [:root (str "reaches " (hit system-vars) " and names no :seon.test/root")])
+                             (and (nil? cmds) (hit exec-vars)) (conj [:execs-named (str "reaches " (hit exec-vars) " and names no :seon.test/execs")])
+                             (some #(get reach %) own-store-vars) (conj [:store (str "calls " (first (sort (filter #(get reach %) own-store-vars))) ", not the shared world (my.test/world, seon.test-store/test-db)")]))]
+               [lack text] lacks
+               :let [nsym (symbol (namespace v))]]
+           (derived-row ans (str "undeclared-test " v " " (name lack)) nsym (str v " " text)
+                        {:kind :undeclared-test :test v :lack lack} {:test v :lack lack})))))
+
 (def caused-classes
   "The derived classes `caused-split` reads: the only ones a branch is judged on (the health step refuses any other). An attention class among them never fails a branch."
-  #{:unnamed-site :stale-section :uncited-var :long-form})
-
+  #{:unnamed-site :stale-section :uncited-var :long-form :undeclared-test})
 (defn caused-datoms
   "The datoms that differ between base and head in the attributes `caused-split` reads (a section's, the var
   names, the task ids and plans, the catches and text of forms), one datahike.api/datoms-diff range each: what
@@ -530,7 +579,8 @@
                (concat (map #(assoc % :class :unnamed-site) (sites db state forms-of))
                        (map #(assoc % :class :stale-section) (stale-sections db ans {:names moved-vars :sections (eids state)}))
                        (map #(assoc % :class :uncited-var) (uncited-vars db ans moved-vars))
-                       (map #(assoc % :class :long-form) (long-forms db ans moved-vars))))
+                       (map #(assoc % :class :long-form) (long-forms db ans moved-vars))
+                       (map #(assoc % :class :undeclared-test) (undeclared-tests db ans moved-vars))))
         forms-in (fn [db] (fn [fact] (set (keep #(:e (law-form-at db fact %)) (changed-forms fact)))))
         had (vec (rows base bs (forms-in base)))
         has (vec (rows head hs (forms-in head)))

@@ -1183,7 +1183,8 @@
                ;; 52: :long-form one more class to look up
                ;; 54: :stale-plan one more (its seon.db/eid and derived-row), 2026-11-10
                ;; 56: :unsynced one more (its seon.db/eid and derived-row), 2026-11-10
-               :fixed {:ns 3000000 :bytes 4000000 :calls 56}
+               ;; 58: :undeclared-test one more (its seon.db/eid and derived-row)
+               :fixed {:ns 3000000 :bytes 4000000 :calls 58}
                :sizes [10 30 100]}))
 
 (deftest attention-survives-a-store-write
@@ -1470,3 +1471,28 @@
     (testing "deleting one"
       (is (not (mentions? (problems/caused-split with without))) "causes nothing and closes nothing"))
     (is (not (contains? seon.problems/caused-classes :waived-proof)))))
+
+(defn- law-ns
+  "The world with namespace app.law-test of forms (strings, one a line)."
+  [& forms]
+  (t/with (world) (t/code 'app.law-test (apply str "(ns app.law-test (:require [clojure.test :refer [deftest is]] [seon.test-store :as ts] [datahike.api :as d]))\n"
+                                               (map #(str % "\n") forms)))))
+
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-changed-test-states-what-its-kind-needs
+  ;; docs/testing.md#test-kinds: a test the branch added or changed that states no estimate, reaches a root (directly or through
+  ;; its namespace's helper) naming none, or calls a store of its own is a caused :undeclared-test, one row a lack; declared, none
+  ;; but an estimate over its cap; an unchanged undeclared test is not judged. Work: the world (cached), three imports of a
+  ;; six-form namespace (~5 M ticks each) and two caused-splits over the few vars they change.
+  (let [old "(deftest old (is true))"
+        base (law-ns old)
+        undeclared (law-ns old "(deftest t (ts/start-root! {}))" "(defn- go [] (ts/start-root! {}))" "(deftest h (go))" "(deftest s (d/create-database {}))")
+        declared (law-ns old "(deftest ^{:seon.test/estimate {:ticks 1000} :seon.test/root []} t (ts/start-root! {}))"
+                         "(deftest ^{:seon.test/estimate {:ticks 999999999999}} over (is true))")
+        lacks (fn [db] (set (for [{:keys [test lack]} (problems/undeclared-tests db {} '#{app.law-test/old app.law-test/t app.law-test/h app.law-test/s app.law-test/over})]
+                              [(symbol (name test)) lack])))
+        caused (fn [head] (filterv #(re-find #"app\.law-test" %) (:caused (problems/caused-split base head))))]
+    (is (= '#{[t :estimate] [t :root] [h :estimate] [h :root] [s :estimate] [s :store] [old :estimate]} (lacks undeclared))
+        "each lack its row, the helper's root reached through the namespace's own code")
+    (is (= '#{[over :ticks] [old :estimate]} (lacks declared)) "declared: only the estimate over the ticks cap (and old, asked for here by name)")
+    (is (= 6 (count (caused undeclared))) "caused, refusing done: the changed tests' rows, never the unchanged old's")
+    (is (= 1 (count (caused declared))))))
