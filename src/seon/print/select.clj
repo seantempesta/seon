@@ -12,25 +12,17 @@
 
 ;;; Tokens (Seon's `seon.ai.tokens`, shipped prior): the one sizer.
 
-(def ^:private chars-per-token (config/value :seon.config.ai/chars-per-token-prior))
-
-(defn chars-tokens
-  "Estimated tokens of n characters: the one sizer's rule (`estimate` is it over a text's length),
-  seon.print.emit/chars-tokens."
-  {:malli/schema [:=> [:cat nat-int?] :int]}
-  [n] (emit/chars-tokens n))
-
 (defn estimate
   "Estimated tokens of `text`."
   {:malli/schema [:=> [:cat :string] :int]}
   [text]
-  (chars-tokens (count text)))
+  (emit/chars-tokens (count text)))
 
 (defn estimate-chars
   "Characters a token budget holds."
   {:malli/schema [:=> [:cat :int] :int]}
   [tokens]
-  (long (Math/floor (* tokens chars-per-token))))
+  (long (Math/floor (* tokens emit/chars-per-token))))
 
 ;;; Allocation config keys (the config's `:seon.config.render.agent/*`, ported from Seon's).
 

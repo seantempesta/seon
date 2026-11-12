@@ -36,6 +36,7 @@
                          [:seon.task/instructions {:optional true} :seon.task/instructions]
                          [:seon.task/proofs {:optional true} :seon.task/proofs]
                          [:seon.task/needs {:optional true} :seon.task/need-ids]
+                         [:seon.task/after {:optional true} :seon.task/need-ids]
                          [:seon.task/examples {:optional true} :seon.task/examples]
                          [:seon.task/branch {:optional true} :seon.task/branch]
                          [:seon.task/model {:optional true} :seon.task/model]
@@ -49,6 +50,7 @@
                  [:seon.task/plan :seon.task/plan] [:seon.task/execution [:enum :held :running :cancelled]]
                  [:seon.task/branch :seon.task/branch] [:seon.task/proofs :seon.task/proofs]
                  [:seon.task/needs :seon.task/need-ids]
+                 [:seon.task/after {:optional true} :seon.task/need-ids]
                  [:seon.task/instructions {:optional true} :seon.task/instructions]
                  [:seon.task/model {:optional true} :seon.task/model]
                  [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
@@ -104,11 +106,10 @@
  ;; reconciler takes the index, so a check of its entries would cost tasks on every call and
  ;; tasks x tasks a listing; each entry is checked once, where it enters (put-task's
  ;; :seon.task/own, put-run's :seon.run/run, the ids of derive-needs and refresh-ready)
- :seon.reconcile/index [:map {:gen/elements [{:root nil :tasks {} :keys {} :needed-by {} :by-branch {} :acc {} :depth {} :claims {}
+ :seon.reconcile/index [:map {:gen/elements [{:root nil :tasks {} :keys {} :needed-by {} :acc {} :depth {} :claims {}
                                               :agents {} :done {} :ready #{} :ready-key {}
                                               :live #{} :reap #{} :kill {} :judge #{} :merging #{} :woken #{} :late #{}}]}
-                        ;; :by-branch, each branch's task ids (seon.reconcile/holder-of reads a branch's session from it)
-                        [:root [:maybe :map]] [:tasks :map] [:keys :map] [:needed-by :map] [:by-branch :map]
+                        [:root [:maybe :map]] [:tasks :map] [:keys :map] [:needed-by :map]
                         [:acc :map] [:depth :map] [:claims :map]
                         [:agents :map] [:done :map]
                         [:ready set?] [:ready-key :map]
@@ -143,7 +144,7 @@
                                                     :unmerged "unmerged entries" :no-design "plan unchanged since the run began" :open-problem "problems to clear"
                                                     :behind "judged before main moved"}}
                          :open :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem :behind]
- :seon.reconcile/not-done [:map {:closed true}
+ :seon.reconcile/not-done [:map {:closed true :description "One reason a judged task is not done, as its :seon.task/reasons holds them: the reason, and what it is about (the test or var, the key of an unmerged entry, how many transactions main moved). See docs/tasks.md#the-done-rule."}
                           [:reason :seon.reconcile/reason]
                           [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string] [:behind {:optional true} pos-int?]]
  :seon.reconcile/action [:multi {:dispatch :op}

@@ -342,11 +342,6 @@
   {:malli/schema [:=> [:cat :any :any :any :any] :any]}
   [this sender old new] (-handle-change this sender old new))
 
-(defn- source-of
-  "The source a capture entry names: a reactive object, or a view read's {:ref :changes}."
-  {:malli/schema [:=> [:cat :any] :any]}
-  [d] (if (vector? d) (first d) d))
-
 (deftype Reaction [^:volatile-mutable f ^:volatile-mutable state ^:volatile-mutable dirty? ^:volatile-mutable nocache?
                    ^:volatile-mutable watching ^:volatile-mutable watches ^:volatile-mutable auto-run
                    ^:volatile-mutable caught ^:volatile-mutable captured ^:volatile-mutable last-captured

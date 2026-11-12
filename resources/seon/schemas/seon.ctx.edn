@@ -33,6 +33,10 @@
  ;; a pattern the walk cannot read (seon.ctx/spec): no vector, an option neither pull's nor :by, a
  ;; join naming no attribute or with no pattern; the clause it stopped at
  :seon.ctx/invalid-pattern [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/invalid-pattern]] [:clause :any]]]
+ ;; metadata on the value of a join a :limit windows (seon.ctx/join writes it; seon.print.emit reads it to say how many more there are)
+ :seon.ctx/count [:int {:min 0 :description "How many members a windowed join has in the db, as metadata on the value the context holds for it, which holds only the window: (:seon.ctx/count (meta (:seon.eval/_agent @ctx))). Absent when no :limit made the value. See docs/ctx.md#the-pattern."}]
+ ;; a join's option in a pull pattern, [:attribute :seon.ctx/below pattern] (seon.render/again reads it)
+ :seon.ctx/below [:sequential {:description "A join's option in a pull pattern: what a join asked to a depth asks below its last level, in place of asking itself again. Read by seon.render/again. See docs/ctx.md#the-pattern."} :any]
  ;; a record whose identity attributes name entity schemas none of which extends the others (seon.render/entity-schema):
  ;; no one schema names it, so no pattern, render or layout does; the schemas it named
  :seon.render/no-one-schema [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-one-schema]] [:schemas [:vector :qualified-keyword]]]]
@@ -43,7 +47,7 @@
  ;; each with its own pattern under :sub
  :seon.ctx/spec [:map [:star? :boolean] [:attrs [:set :keyword]] [:txs {:optional true} [:map-of :keyword :keyword]] [:ro {:optional true} [:set :keyword]]
                  [:joins [:vector [:map [:attr :qualified-keyword] [:key :keyword] [:rev? :boolean] [:by [:maybe :qualified-keyword]]
-                                   [:reverse? :boolean] [:limit [:maybe nat-int?]] [:tx {:optional true} :keyword] [:sub :map]]]]]
+                                   [:reverse? :boolean] [:limit [:maybe [:or nat-int? :qualified-keyword]]] [:tx {:optional true} :keyword] [:sub :map]]]]]
  ;; the walk's state beside a record's map (seon.ctx/node): every path each entity sits at (:at {e #{path}}, an entity
  ;; built whole at each, as d/pull holds it), each path's pattern (:spec {path spec}: two paths can pull one entity by
  ;; different sub-patterns), what each join [e key] watches ([attribute value] keys, :watch) and its reverse (:watching);

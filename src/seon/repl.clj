@@ -492,7 +492,7 @@
                          redefined (assoc :redefined redefined)
                          ;; a var new in a program namespace may be a look, not a change: said where it lands, whatever form made it
                          ;; (loop 2: a def, eight turns; Data model's tasks: a scratch defn and a macro, unnoticed)
-                         (seq made) (assoc :program-def made)
+                         (seq made) (assoc :seon.repl/program-def made)
                          (seq (program/unknown-refs acct)) (assoc :unknown-vars (program/unknown-refs acct))))
                      (cond-> m
                        l (assoc :repl/defined (program/set-vars l))
@@ -625,8 +625,8 @@
                    ;; a def beside calls (wrap-record): it stays this eval, not program
                    (some :not-program fs)
                    (conj {:seon.repl/finding :not-program :seon.repl/fix (some :not-program fs)})
-                   (some :program-def fs)
-                   (conj {:seon.repl/finding :program-def :vars (vec (mapcat :program-def fs))
+                   (some :seon.repl/program-def fs)
+                   (conj {:seon.repl/finding :program-def :vars (vec (mapcat :seon.repl/program-def fs))
                           :seon.repl/fix "New on your branch, so it merges with your task. If you only meant to try something, take it back with (ns-unmap 'the.ns 'the-name) and define such things in your own namespace."})
                    (some :unknown-vars fs)
                    (conj {:seon.repl/finding :unknown-var :unknown (vec (distinct (mapcat :unknown-vars fs)))
@@ -1035,10 +1035,10 @@
   ([p new] (held-file-write p new :config)))
 
 (defn- ns-not-found
-  "What an edit of namespace nsym adds when old is not in its ns form, its place: :held-by, the vars whose recorded source holds
-  old once, and :said, the sentence the refusal ends with: the edit on the one that holds it (the name left to pick when several do), or, held by no definition, that a new definition is evaluated in its namespace, there being no place in a file
+  "What an edit of namespace nsym adds when old is not in its ns form, its place: :seon.repl/held-by, the vars whose recorded source holds
+  old once, and :seon.repl/said, the sentence the refusal ends with: the edit on the one that holds it (the name left to pick when several do), or, held by no definition, that a new definition is evaluated in its namespace, there being no place in a file
   to insert one (an agent that found neither spent its turns on line windows and a shell write). See docs/agent.md#changing-a-definition."
-  {:malli/schema [:=> [:cat :seon.host/db :symbol :string] [:map [:held-by [:vector :qualified-symbol]] [:said :string]]]}
+  {:malli/schema [:=> [:cat :seon.host/db :symbol :string] [:map :seon.repl/held-by :seon.repl/said]]}
   [db nsym old]
   (let [ne (pdb/eid db :ns/name nsym)
         holders (when ne
@@ -1047,8 +1047,8 @@
                               :when (and src (program/live? db e) (= 1 (count (offsets src old))))
                               v (keep (fn [dv] (:var/name (d/entity db (:v dv)))) (d/datoms db :eavt e :form/defines))]
                           v)))]
-    {:held-by (vec holders)
-     :said (cond
+    {:seon.repl/held-by (vec holders)
+     :seon.repl/said (cond
              (= 1 (count holders))
              (str ": its place is its ns form, and the text is in " (first holders)
                   ", so edit it there, with the same old and new: (seon.repl/edit! '" (first holders) " old new)")
@@ -1103,11 +1103,11 @@
                                                                                  (cond d (str ": at line " (:line d) " old has " (pr-str (:old d)) " and the source " (pr-str (:source d))
                                                                                               (when-let [[a b] (:indent d)] (str " (" a " leading spaces, the source " b ")")))
                                                                                        ;; a namespace's place is its ns form: say where the text is, or how a new definition is made
-                                                                                       in-ns (:said in-ns)
+                                                                                       in-ns (:seon.repl/said in-ns)
                                                                                        :else "; read it as it stands"))
                                                                  cands)
                                                    (seq diffs) (assoc :seon.repl/differs diffs)
-                                                   (seq (:held-by in-ns)) (assoc :seon.repl/held-by (:held-by in-ns)))})
+                                                   (seq (:seon.repl/held-by in-ns)) (assoc :seon.repl/held-by (:seon.repl/held-by in-ns)))})
                          (next at) {:refused (refuse :ambiguous (str (which k) "the old text occurs " (count at) " times: give more of it, so it is one") (lines-at at))}
                          :else {:at (first at) :old old :new new})))
              cs (map-indexed check changes)
@@ -1510,7 +1510,7 @@
       (let [missing (seon.task/agent-cites-missing (agent/db) (:key @agent/state))]
         (agent/hello! t-req-ns (cond-> {:interrupt-ok (:interrupt-ok @agent/state)}
                                   (seq (:load-errors @agent/state)) (assoc :load-errors (:load-errors @agent/state))
-                                  (seq missing) (assoc :missing-cites missing)
+                                  (seq missing) (assoc :seon.agent/missing-cites missing)
                                   (:misaligned @agent/state) (assoc :misaligned (:misaligned @agent/state))
                                   (:unwatched @agent/state) (assoc :unwatched (:unwatched @agent/state)))))
       (serve!))))

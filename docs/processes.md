@@ -57,7 +57,7 @@ An agent has a real REPL, and Clojure's semantics are the interface: the system 
 
 ## A parked process
 
-An agent that ends waiting or at its cap keeps its process, parked on its task, and the next message to the agent wakes that same process: the same agent, no fork.
+An agent that ends waiting keeps its process, parked on its task, and the next message to the agent wakes that same process: the same agent, no fork. One at its cap has ended ([the cap](turn.md#the-cap)).
 
 At the agent's end (`seon.reconcile/judge-tx`) a work task whose agent ended on a park outcome (`seon.reconcile/park-outcomes`: a reply with no eval, or its turn budget spent) keeps its process and is stored `:parked` (`:cap` for the budget); an end that parks on a task with no proofs runs no tests (```seon.reconcile/after-work```). An end the done rule refuses stands `:told` and its `:verdict` is a message to the agent ([turn](turn.md#what-a-turn-merges-from-main)). What readies a parked, told or capped task is a wake, never a count: when the writer commits a message the api puts `{:agent key}` on the reconciler's `:wake` port for each recipient (`resources/seon/system.edn`), and the reconciler holds it (`seon.reconcile/wake`; a wake for a running agent is held until it waits). The next start is a `:wake` on the parked process when it is of this boot, else a `:spawn`, and raises `:seon.agent/max-turns` by `:seon.config.agent/wake-turns` ([the cap](turn.md#the-cap)). At boot the first listing wakes each waiting agent owed a message, once (`seon.reconcile/boot-wakes`).
 

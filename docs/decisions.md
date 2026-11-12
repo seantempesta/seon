@@ -48,7 +48,7 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 ### Tasks chain by needs
 
-"make sure we aren't hard coding in "example" or whatever when they get turned into openai-compat formats." Stated in [the plan](plan.md#the-plan), part 2, and [tasks](tasks.md#a-task-names-example-sessions).
+"make sure we aren't hard coding in "example" or whatever when they get turned into openai-compat formats." Stated in [the plan](plan.md#the-plan), part 2, and [tasks](tasks.md#a-task-names-examples).
 
 ### The data model is worked through live
 

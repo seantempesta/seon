@@ -9,7 +9,7 @@ A request becomes its whole linked task set in one transaction on main, released
 - **Where requests come from.** A sentence in a user's request box is one (```seon.system/ask!```), its words its name and plan, from the `:user` template ([working for a person](agent.md#working-for-a-person)). An agent starts another task with ```my.task/launch!```; the task keeps `:seon.task/started-by`, and every end of its work tells that agent (```seon.reconcile/tell-tx```).
 - **Templates.** A template is a map of the attributes it sets (```seon.template/templates```); making a task merges one onto what was asked (```seon.template/from```).
 - **The default** (`my.root/request!` with ```seon.template/request```) is one `:whole` task on its own branch: one agent reproduces the problem, writes the red proof, makes it green, merges main at each green, and its branch merges into main as a merge task's does (```seon.task/merges?```) ([decisions](decisions.md#a-request-is-one-whole-task-for-now)).
-- **Experiment templates**, passed to `my.root/request!`: ```seon.template/design-build``` (a `:work` task then `<name>-merge`, one session, ```seon.task/session-key```) and ```seon.template/stages``` (`:design`, then `<name>-implement`, then `<name>-merge`, each needing the one before). All check out design's branch; proofs reach later steps along `:needs` (```seon.task/accumulate```). ```seon.template/with-merge``` adds each work task's merge task and default branch (```seon.task/default-branch```) for these only.
+- **Experiment templates**, passed to `my.root/request!`: ```seon.template/design-build``` (a `:work` task then `<name>-merge`, one session, ```seon.task/agent-key```) and ```seon.template/stages``` (`:design`, then `<name>-implement`, then `<name>-merge`, each needing the one before). All check out design's branch; proofs reach later steps along `:needs` (```seon.task/accumulate```). ```seon.template/with-merge``` adds each work task's merge task and default branch (```seon.task/default-branch```) for these only.
 - **The one transaction** is ```seon.template/request-tx```: ```seon.task/create-tx``` of the set, then ```seon.task/execution-tx``` releasing it, written by one `seon.system/transact-main!`. The reconciler reads only committed main, so no agent sees part of a set.
 - **Process tests gate a merge.** A merge whose change reaches process tests (```seon.program/process-tests```, kept as `:seon.task/deferred`) is gated by the reconciler's `:gate`, which runs them over a worktree of the merged head (```seon.fx/run-tests```, ```seon.system/prove-tree!```) and keeps `:seon.task/deferred-results`; a red refuses it unless main is red there too ([merging](merging.md#a-merge-runs-what-the-change-reaches)). An agent's turn and root's judge run only in-process tests.
 
@@ -29,29 +29,24 @@ A task file is one EDN vector of declarations named by its owning namespace, and
 
 ```seon.system/task-files``` reads the files under `:seon.config.root/tasks-dir` as `{owning-ns declarations-or-error}`; ```seon.task/file-declarations``` refuses text that is not exactly one vector with `:seon.task/refused`, as data. ```my.root/load-tasks!``` reconciles them into main through ```seon.task/load-tx```: new entries created held, changed ones updated (```seon.task/entity-tx``` makes the entity state exactly its declaration), removed ones cancelled, unchanged ones untouched. A good read writes root's `:seon.system/tasks`; a refused one answers its error. Nothing loaded runs until `my.root/run!`. A seed loads the files, then a person's re-index or a landing ([source](source.md#indexing-a-tree)). A file's declaration is one `:whole` task that merges itself.
 
-## A task names example sessions
+## A task names examples
 
 `:seon.task/examples` is a set of refs to agents keyed `example/<id>` (`[:seon.agent/key "example/<id>"]`), finished sessions of other tasks that the agent reads before its own work.
 
-An example is an ended agent holding a copy of the session it was made from: ```seon.ctx.session/session-tx``` rewrites each id and call id to a digest of `example/<id>` and the original, so no example collides with a live agent, and ```my.root/load-example!``` transacts it onto main once. It is a copy because a session's data lives on its branch and its ids would collide. Refusals are `:seon.system/example-refused` and `:seon.ctx/session-refused`, as data. The task's pattern joins the examples, so ctx holds them: folded for the person, as messages for the model (```seon.ctx.session/examples-of```, ```seon.render.ui/example-session```, [render](render.md#the-models-context-a-cached-prefix-then-the-turn)). An example has no branch, so its page is `/agent/main/example-<id>` (```seon.render.proc/location```). A task naming none reads what it always did (```seon.ctx.wire-test/a-task-with-no-examples-reads-what-it-read-before```).
+An example is an ended agent holding a copy of the session it was made from: ```seon.ctx.session/session-tx``` rewrites each id and call id to a digest of `example/<id>` and the original, so no example collides with a live agent, and ```my.root/load-example!``` transacts it onto main once. It is a copy because a session's data lives on its branch and its ids would collide. Refusals are `:seon.system/example-refused` and `:seon.ctx/session-refused`, as data. The task's pattern joins the examples, so ctx holds them: folded for the person, as messages for the model (```seon.ctx.session/examples-of```, ```seon.render.ui/example```, [render](render.md#the-models-context-a-cached-prefix-then-the-turn)). An example has no branch, so its page is `/agent/main/example-<id>` (```seon.render.proc/location```). A task naming none reads what it always did (```seon.ctx.wire-test/a-task-with-no-examples-reads-what-it-read-before```).
 
 ## A refine curates its own task
 
-A refine is a task on the same branch that cites the task you just finished, worked by you, continued: your conversation goes on, and the cited task is shown inside the new one. It needs nothing, so it runs whatever that task's outcome.
+A refine is an ordinary task: every end writes one (```seon.task/refine-tx```), done, red, held, dead or out of turns, `:seon.task/after` the task it refines, so it starts once that task has ended, on a branch of its own with a new agent (`seon.reconcile-test/every-end-gets-a-refine-after-it-and-its-review`). Its plan cites the task and this section (what makes it a refine); its proofs are the task's own and the check that task files and pages still load. One refine per task; a refine and a merge step get none.
 
-- Every end that leaves a task not done gets one (```seon.task/refine-tx```), except a task continuing another's branch (a merge task). After red, closed or dead it runs at once. A task at its cap is waiting, not ended, so it gets none until asked.
-- After a finished task, `:seon.config.agent/refine-finished` decides (`:none` by default), since each refine is one more paid run.
-- One refine per task, so a refine and the rerun it starts never loop.
+It reads the run that worked the task on that task's branch (``(my.db/at {:branch b})``), then changes only:
 
-It asks one thing: make the task better for whoever works it next. Read back through your turns for where one was spent that the task could have saved (a search, a failed form, a section you did not need), then change only:
+- **Its plan:** first what blocked the run, then what it learned and did not use, with the forms that mattered: one `swap!` at the cited task's path ([an agent edits a task its pull holds](#an-agent-edits-a-task-its-pull-holds)).
+- **What it cites:** name the section or function the run had to find; remove names it never used.
+- **The wiki sections it pulled,** where one was wrong or lacking ([changing a doc](agent.md#changing-a-doc)).
+- **The run as an example:** ```seon.ctx.session/session-tx``` of the run's agent, less the turns that taught nothing, written with ``my.db/transact!`` and named on the task's `:seon.task/examples`.
 
-- **Its plan:** what to do, in the order that worked, with the forms that mattered: one `swap!` at `[:seon.agent/task :seon.cite/_of e :seon.cite/target :seon.task/plan]`, `e` the cite whose target is a task ([an agent edits a task its pull holds](#an-agent-edits-a-task-its-pull-holds)).
-- **What it cites:** name the section or function you had to find; remove names you never used.
-- **The wiki sections you pulled,** where one was wrong or lacking ([changing a doc](agent.md#changing-a-doc)).
-
-Do not change the work, its tests or its proofs. End with a reply naming each change and the turn it would have saved, or saying you found nothing.
-
-How it is judged: when the refined task did not merge, a changed plan releases it again fresh from main, with a new branch and agent, its turns set beside yours (```seon.task/again-tx```, `seon.reconcile-test/a-refined-plan-starts-one-fresh-run-from-main`). An unchanged plan starts nothing; a merged task is not rerun.
+It changes no code, and ends with a reply naming each change and the turn it would have saved, or saying it found nothing. Its review is its merge step, a `:merge` task needing it, written held: a session attaches, reads the change and ends it with `seon_done`, which merges it or sends it back.
 
 ## An agent edits a task its pull holds
 
