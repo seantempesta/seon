@@ -22,6 +22,8 @@
  ;; a store that keeps no history (:seon.config.store/keep-history? false, fixed when it is made): d/history and d/as-of throw on it, so
  ;; seon.db/history and at answer this, never an empty history (docs/storage.md#history)
  :seon.db/no-history [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/no-history]]]]
+ ;; compacting the store failed (seon.db/compact-if-due!): the copy is removed and the store left as it was; :path is the store
+ :seon.db/compact-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/compact-failed]] [:path :string]]]
  ;; what seon.db/history or at was asked to read and the store does not hold: an :entity, :branch, :commit or :t (a t this branch never
  ;; had: t ids are unique across the store, so another branch's t is none of this one's)
  :seon.db/unresolved [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/unresolved]] [:kind [:enum :entity :branch :commit :t]] [:value :any]]]
@@ -265,8 +267,12 @@
                                                     :problem-unlinked "problem classes with no wiki section" :long-form "forms too long" :waived-proof "proofs that pass by waiver"
                                                     :unestimated-test "tests that state no estimate" :undeclared-test "tests that break their law"}
                              :seon.problems/derived #{:stalled :unnamed-site :stale-pin :stale-binary :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :waived-proof :unsynced :unestimated-test :undeclared-test}
-                             ;; shown, never a reason to refuse done (root's ruling, 2026-10-23: every var edit stales the sections that cite it)
-                             :seon.problems/attention #{:stale-section :uncited-var :long-form}
+                             ;; the derived classes a branch's content can make, which seon.problems/caused-split reads from what it moved
+                             ;; and judges it on (seon.problems/caused-classes); the rest of :seon.problems/derived is the running system's state
+                             :seon.problems/caused #{:unnamed-site :stale-section :uncited-var :long-form :leadless-section :orphan-page :waived-proof :uncited-task :stale-plan :unestimated-test :undeclared-test}
+                             ;; shown, never a reason to refuse done (root's ruling, 2026-10-23: every var edit stales the sections that cite it;
+                             ;; and the plans that cite it, an agent's own task's among them)
+                             :seon.problems/attention #{:stale-section :uncited-var :long-form :stale-plan}
                              :seon.problems/areas [[:docs #{:stale-pin :stale-section :orphan-page :leadless-section :uncited-var}] [:tests #{:red :cost :waived-proof :unestimated-test :undeclared-test}]
                                                     [:laws #{:unnamed-site :long-form}] [:merges #{:merge :task-conflict :unrun :unsynced}] [:tasks #{:failed :uncited-task :stale-plan}]
                                                     [:agents #{:stalled :dead :error :waste}] [:errors #{:platform :eval :agent :effect}] [:health #{:problem-unlinked :stale-binary}]]

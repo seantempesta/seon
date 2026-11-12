@@ -6,7 +6,7 @@ Health is the set of open problems: a value computed when something reads it (`s
 
 A **recorded** problem is one only an effect can observe, reported by transacting it: an error recorded once per signature (`seon.error`), a task's red proof, cost verdict, death, conflict, unmerged entry, deferred test or waste written at its end ([`seon.problems/ended-classes`](reconcile.md#a-task-holds-how-its-work-ended)), and a task held for root (`:failed`). `seon.problems/report` reads them at a cost that follows the problems, never the program. A task's problems close when it is done or root cancels it. A recorded error closes, with nothing written, once its subject (`:seon.error/subject`: a var, a section, or an attribute only a live proc writes) has a fact written after its last occurrence (`seon.problems/closed?`): a refused build names root's `:seon.system/generation` (```seon.error/asked-tx```), so the next build's outcome closes it. A subject's fact is the producer's latest outcome, written on success and failure, never a counter. An error with no subject stays open until someone reads it.
 
-A **derived** problem is something the program's facts make true now: a read over facts the loaders already write, open exactly while it is true, closed by fixing the fact. `my.root/problems` answers health for root's main with the api's fold of repeats not yet written.
+A **derived** problem is something the program's facts make true now: a read over facts the loaders already write, open exactly while it is true, closed by fixing the fact. A branch is judged on every derived class its content can make (`:seon.problems/caused` on `:seon.problems/class`, ```seon.problems/caused-classes```), each read by `seon.problems/caused-split` from the datoms the branch moved; the rest (a stalled agent, a stale pin or binary, an unsynced task, a problem with no section) are the running system's state, and no branch causes them. `my.root/problems` answers health for root's main with the api's fold of repeats not yet written.
 
 A dead citation is no class: a citation of nothing is refused at its write ([references](references.md#task-references), [the wiki in the store](references.md#the-wiki-in-the-store)).
 
@@ -48,7 +48,7 @@ A ready `:implement` task is an `:uncited-task` (`seon.problems/uncited-tasks`) 
 
 ## A plan that went stale
 
-A ready task whose own plan cites a var whose `:var/form` datom was written after its `:seon.task/plan` datom is a `:stale-plan` (`seon.problems/stale-plans`). It closes when the plan is written again after reading the var; when it all holds, add a line `Checked <date> against <var>: holds.`, since the same text is no new datom.
+A ready task whose own plan cites a var whose `:var/form` datom was written after its `:seon.task/plan` datom is a `:stale-plan` (`seon.problems/stale-plans`). A branch that makes one is shown it and never refused (`:seon.problems/attention`): changing the code a plan cites is the work, an agent's own task's plan included. It closes when the plan is written again after reading the var; when it all holds, add a line `Checked <date> against <var>: holds.`, since the same text is no new datom.
 
 ## A function that cites no section
 
@@ -60,7 +60,7 @@ A live form whose `:form/src` is longer than `:seon.config.shrink/form-tokens` t
 
 ## A proof that passes by waiver
 
-A cost proof green because of an `:overrun` ([cost](cost.md#an-accepted-overrun-and-its-ratchet)) is a `:waived-proof` (`seon.problems/waived-proofs`): the test, the task, the size, the recorded numbers and their multiple of the proof's own bound in the worst counted dimension (`seon.cost/expected`, `seon.cost/row-ratio`; nothing measured). The proofs are the test forms referencing `seon.cost/proof`, and the `:overrun` is read from the form. A listing, never a refusal; it closes when the `:overrun` is deleted. `bin/prove` ends with `prove: N proofs pass by waiver`.
+A cost proof green because of an `:overrun` ([cost](cost.md#an-accepted-overrun-and-its-ratchet)) is a `:waived-proof` (`seon.problems/waived-proofs`): the test, the task, the size, the recorded numbers and their multiple of the proof's own bound in the worst counted dimension (`seon.cost/expected`, `seon.cost/row-ratio`; nothing measured). The proofs are the test forms referencing `seon.cost/proof`, and the `:overrun` is read from the form. A branch that adds an `:overrun` is caused the row, and one that deletes it closes it. `bin/prove` ends with `prove: N proofs pass by waiver`.
 
 ## A problem with no page
 

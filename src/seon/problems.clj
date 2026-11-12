@@ -340,14 +340,17 @@
   "Each section of the wiki whose first block is not a paragraph, so it has no lead, as a :leadless-section
   row: its summary is its heading alone and its embedding has no sentence saying what it is about
   (docs/README.md asks each section for a leading sentence that stands alone). Open until the section
-  is given one. Cost: the section addresses and the lead datoms, once."
-  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
-  [db ans]
-  (let [led (into #{} (map :e) (d/datoms db :aevt :seon.doc/lead))]
-    (vec (for [{:keys [e v]} (sort-by :v (d/datoms db :aevt :seon.doc/address)) :when (not (led e))
+  is given one. only, a set of section entities, reads those alone (a branch's candidates, `split-rows`). Cost: the section addresses and the lead datoms once, or
+  with only, two seeks a section."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]] [:=> [:cat :seon.host/db :map [:maybe [:set :int]]] [:vector :seon.problems/row]]]}
+  ([db ans] (leadless-sections db ans nil))
+  ([db ans only]
+  (let [led (if only (fn [e] (seq (d/datoms db :eavt e :seon.doc/lead))) (into #{} (map :e) (d/datoms db :aevt :seon.doc/lead)))]
+    (vec (for [{:keys [e v]} (sort-by :v (if only (keep #(first (d/datoms db :eavt % :seon.doc/address)) only) (d/datoms db :aevt :seon.doc/address)))
+               :when (not (led e))
                :let [s (str "leadless-section " v)]]
            (derived-row ans s 'seon.doc (str v " has no lead: its first block is not a paragraph that says what the section is about")
-                        {:kind :leadless-section :section v} {:section v})))))
+                        {:kind :leadless-section :section v} {:section v}))))))
 
 (defn problem-unlinked
   "Each class of classes ({class {:rows ...}}) with an open row whose wiki section (:seon.problems/docs)
@@ -375,6 +378,13 @@
   "The attributes `section-at` reads of a section: what a stale-section row of it depends on (docs/health.md#a-stale-section)."
   [:seon.doc/address :seon.doc/names :seon.doc/read :seon.doc/reviewed
    :seon.doc/baseline-unread :seon.doc/text])
+
+(def ^:private content-attrs
+  "The attributes the content classes a branch can make are read through, beside a section's: a section's lead and links
+  (:leadless-section, :orphan-page), a form's refs and a var's form (:waived-proof, :stale-plan), a task's needs, outcome and
+  proofs and its cites (:uncited-task, :stale-plan). What `caused-datoms` diffs for them. See docs/health.md#two-kinds-of-problem."
+  [:seon.doc/lead :seon.doc/references :form/refs :var/form :seon.task/needs :seon.task/outcome :seon.task/proofs
+   :seon.cite/of :seon.cite/target])
 
 (defn- section-at
   "{:e :names :read :reviewed :baseline :text} of the section addressed a on db, by entity seeks and no
@@ -464,10 +474,13 @@
   arithmetic of a verdict: seon.cost/expected, seon.cost/row-ratio; nil when the record states no size or the
   estimate is not literal). Found by the forms that reference seon.cost/proof (one :form/refs seek), the
   `:overrun` map read out of the form by the reader. Closed when the proof's `:overrun` is deleted. Cost: the forms that call
-  seon.cost/proof, each read once. See docs/health.md#a-proof-that-passes-by-waiver."
-  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
-  [db ans]
+  seon.cost/proof, each read once; with only, a set of form entities (a branch's candidates, `split-rows`), those of them
+  alone. See docs/health.md#a-proof-that-passes-by-waiver."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]] [:=> [:cat :seon.host/db :map [:maybe [:set :int]]] [:vector :seon.problems/row]]]}
+  ([db ans] (waived-proofs db ans nil))
+  ([db ans only]
   (vec (for [{:keys [e]} (d/datoms db :avet :form/refs 'seon.cost/proof)
+             :when (or (nil? only) (only e))
              :let [f (d/entity db e) nsym (:ns/name (:form/ns f))]
              v (:form/defines f) :when (contains? (set (:var/meta v)) :test)
              :let [t (:var/name v)
@@ -483,7 +496,7 @@
                    s (str "waived-proof " t " " i)]]
          (derived-row ans s nsym (str t " passes by a waiver for task " task (when multiple (format ", at %.2fx its bound" multiple)) ": fix the task, then delete the :overrun")
                       {:kind :waived-proof :test t :task task :n n :measured measured :multiple multiple}
-                      {:test t :task task :n n :measured measured :multiple multiple}))))
+                      {:test t :task task :n n :measured measured :multiple multiple})))))
 
 (defn- test-reach
   "{name local?} of what test var t reaches through the test namespaces' own code, by the compiler's facts: its form's
@@ -535,18 +548,23 @@
                         {:kind :undeclared-test :test v :lack lack} {:test v :lack lack})))))
 
 (def caused-classes
-  "The derived classes `caused-split` reads: the only ones a branch is judged on (the health step refuses any other). An attention class among them never fails a branch."
-  #{:unnamed-site :stale-section :uncited-var :long-form :unestimated-test :undeclared-test})
+  "The derived classes a branch is judged on, as :seon.problems/class declares them (:seon.problems/caused): the content a branch
+  makes, each read by `caused-split` from what the branch moved; an attention class among them never fails a branch. The other
+  derived classes (a stalled agent, a stale pin or binary, an unsynced task, a problem that points nowhere) are the running
+  system's state, never a branch's content, so no branch causes them. See docs/health.md#two-kinds-of-problem."
+  (:seon.problems/caused (contract/properties :seon.problems/class)))
 
 (defn caused-datoms
   "The datoms that differ between base and head in the attributes `caused-split` reads (a section's, the var
-  names, the task ids and plans, the catches and text of forms), one datahike.api/datoms-diff range each: what
+  names, the task ids and plans, the catches and text of forms, and `content-attrs`), one datahike.api/datoms-diff range each: what
   its 2- and 3-arity read when they are given none. A caller that read the whole :eavt diff already passes
   that instead (docs/cost.md#a-diff-per-attribute-costs-a-descent-each)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.host/datom]]}
   [base head]
   (into [] (mapcat (fn [a] (apply concat (d/datoms-diff base head :aevt [a]))))
-        (concat section-attrs [:var/name :seon.task/id :seon.task/plan :form/src] (map :fact laws))))
+        (distinct (concat section-attrs content-attrs [:var/name :seon.task/id :seon.task/plan :form/src] (map :fact laws)))))
+
+(declare task-reads uncited-tasks stale-plans)
 
 (defn- split-rows
   "{:made :closed} of the derived rows (`caused-classes`, with ans's answers) the branch at head has
@@ -589,13 +607,38 @@
                                         id))))
         ;; the stale sections the branch's change can have made: those citing a var it changed, and the sections that differ
         moved-vars (pm/changed-vars ch)
+        ;; the content classes a branch can make, each read for what the move touched: the sections whose address or lead moved;
+        ;; every page when an address or a link moved (which page is linked is the whole wiki's); the forms whose text or refs
+        ;; moved; the tasks whose own datoms moved, those a moved cite is of, those citing a var whose form moved, those needing a
+        ;; task whose outcome moved, and those naming a proof a moved form defines
+        led-cands (ents [:seon.doc/address :seon.doc/lead])
+        linkage? (some by-attr [:seon.doc/address :seon.doc/references])
+        form-cands (ents [:form/src :form/refs])
+        task-cands (fn [db]
+                     (let [tasks (fn [es] (filter #(seq (d/datoms db :eavt % :seon.task/id)) es))
+                           of-cite (fn [c] (:v (first (d/datoms db :eavt c :seon.cite/of))))
+                           var-es (into (ents [:var/form]) (keep #(:v (first (d/datoms db :eavt % :form/defines)))) (ents [:form/src]))
+                           defined (into #{} (keep #(:v (first (d/datoms db :eavt % :var/name)))) var-es)]
+                       (-> #{}
+                           (into (tasks (map :e moved)))
+                           (into (keep of-cite) (ents [:seon.cite/of :seon.cite/target]))
+                           (into (comp (mapcat #(d/datoms db :avet :seon.cite/target %)) (keep (comp of-cite :e))) var-es)
+                           (into (comp (mapcat #(d/datoms db :avet :seon.task/needs %)) (map :e)) (map :e (by-attr :seon.task/outcome)))
+                           (cond-> (seq defined) (into (comp (filter #(defined (:v %))) (map :e)) (d/datoms db :aevt :seon.task/proofs))))))
+        task-only (into (task-cands base) (task-cands head))
         rows (fn [db state forms-of]
-               (concat (map #(assoc % :class :unnamed-site) (sites db state forms-of))
-                       (map #(assoc % :class :stale-section) (stale-sections db ans {:names moved-vars :sections (eids state)}))
-                       (map #(assoc % :class :uncited-var) (uncited-vars db ans moved-vars))
-                       (map #(assoc % :class :unestimated-test) (unestimated-tests db ans moved-vars))
-                       (map #(assoc % :class :long-form) (long-forms db ans moved-vars))
-                       (map #(assoc % :class :undeclared-test) (undeclared-tests db ans moved-vars))))
+               (let [tr (task-reads db task-only)]
+                 (concat (map #(assoc % :class :unnamed-site) (sites db state forms-of))
+                         (map #(assoc % :class :stale-section) (stale-sections db ans {:names moved-vars :sections (eids state)}))
+                         (map #(assoc % :class :uncited-var) (uncited-vars db ans moved-vars))
+                         (map #(assoc % :class :long-form) (long-forms db ans moved-vars))
+                         (map #(assoc % :class :unestimated-test) (unestimated-tests db ans moved-vars))
+                         (map #(assoc % :class :undeclared-test) (undeclared-tests db ans moved-vars))
+                         (map #(assoc % :class :leadless-section) (leadless-sections db ans led-cands))
+                         (when linkage? (map #(assoc % :class :orphan-page) (orphan-pages db ans)))
+                         (map #(assoc % :class :waived-proof) (waived-proofs db ans form-cands))
+                         (map #(assoc % :class :uncited-task) (uncited-tasks db ans tr))
+                         (map #(assoc % :class :stale-plan) (stale-plans db ans tr)))))
         forms-in (fn [db] (fn [fact] (set (keep #(:e (law-form-at db fact %)) (changed-forms fact)))))
         had (vec (rows base bs (forms-in base)))
         has (vec (rows head hs (forms-in head)))
@@ -665,16 +708,22 @@
 (defn- task-reads
   "The one reading of which tasks are ready and what they cite, on db: {:ready? :cited}, `ready?` a function of a task
   entity (not done, every task it needs done; every task's outcome read once, so readiness is a lookup) and `cited`
-  one of a task entity giving the var names its cites target. What `uncited-tasks` and `stale-plans` share.
-  See docs/health.md#a-task-that-cites-nothing."
-  {:malli/schema [:=> [:cat :seon.host/db] :map]}
-  [db]
-  (let [done (into #{} (comp (filter #(task/finished (:v %))) (map :e)) (d/datoms db :aevt :seon.task/outcome))]
-    {:ready? (fn [e] (and (not (done e)) (every? #(done (:v %)) (d/datoms db :eavt e :seon.task/needs))))
-     :cited (fn [e] (into [] (comp (map #(:var/name (:seon.cite/target (d/entity db (:e %))))) (filter qualified-symbol?)) (d/datoms db :avet :seon.cite/of e)))
-     ;; the merged tasks main's files still declare (`unsynced-tasks`): unsynced?'s rule over the declared tasks, which the task
-     ;; files bound (never every task that ever merged), with no contracted call a task
-     :unsynced (into [] (comp (map :e) (filter #(= :merged (:v (first (d/datoms db :eavt % :seon.task/outcome)))))) (d/datoms db :aevt :seon.task/declared))}))
+  one of a task entity giving the var names its cites target. What `uncited-tasks` and `stale-plans` share. With only, a set
+  of task entities (a branch's candidates, `split-rows`), the readers judge those alone and a task's outcome is a seek, so
+  nothing reads every task. See docs/health.md#a-task-that-cites-nothing."
+  {:malli/schema [:function [:=> [:cat :seon.host/db] :map] [:=> [:cat :seon.host/db [:maybe [:set :int]]] :map]]}
+  ([db] (task-reads db nil))
+  ([db only]
+  (let [done (if only
+               (fn [e] (boolean (some-> (first (d/datoms db :eavt e :seon.task/outcome)) :v task/finished)))
+               (into #{} (comp (filter #(task/finished (:v %))) (map :e)) (d/datoms db :aevt :seon.task/outcome)))]
+    (cond-> {:ready? (fn [e] (and (not (done e)) (every? #(done (:v %)) (d/datoms db :eavt e :seon.task/needs))))
+             :cited (fn [e] (into [] (comp (map #(:var/name (:seon.cite/target (d/entity db (:e %))))) (filter qualified-symbol?)) (d/datoms db :avet :seon.cite/of e)))
+             ;; the tasks the readers judge: every task, or only's
+             :tasks (if only (keep #(first (d/datoms db :eavt % :seon.task/id)) only) (d/datoms db :aevt :seon.task/id))}
+      ;; the merged tasks main's files still declare (`unsynced-tasks`): unsynced?'s rule over the declared tasks, which the task
+      ;; files bound (never every task that ever merged), with no contracted call a task
+      (nil? only) (assoc :unsynced (into [] (comp (map :e) (filter #(= :merged (:v (first (d/datoms db :eavt % :seon.task/outcome)))))) (d/datoms db :aevt :seon.task/declared)))))))
 
 (defn changed-paths
   "The files task entity e's merged changes touch (its :seon.task/changed keys), as db holds them now: seon.source/changed-files
@@ -714,14 +763,14 @@
   walk of each ready task's needs."
   {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]] [:=> [:cat :seon.host/db :map :map] [:vector :seon.problems/row]]]}
   ([db ans] (uncited-tasks db ans (task-reads db)))
-  ([db ans {:keys [ready?]}]
+  ([db ans {:keys [ready? tasks]}]
   (let [chain (fn chain [seen e]
                 (if (seen e) seen
                     (reduce chain (conj seen e) (map :v (d/datoms db :eavt e :seon.task/needs)))))
         vals-of (fn [es a] (into #{} (mapcat #(map :v (d/datoms db :eavt % a))) es))
         placeholder? (fn [sym] (some-> (pdb/eid db :var/name sym) (->> (d/entity db)) :var/form :form/src
                                       (str/includes? task/placeholder-assertion)))]
-    (vec (for [{:keys [e v]} (sort-by :v (d/datoms db :aevt :seon.task/id))
+    (vec (for [{:keys [e v]} (sort-by :v tasks)
                :when (ready? e)
                :let [es (chain #{} e)
                      proofs (vals-of es :seon.task/proofs)
@@ -755,8 +804,8 @@
   (`other-derived`). See docs/health.md#a-plan-that-went-stale."
   {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]] [:=> [:cat :seon.host/db :map :map] [:vector :seon.problems/row]]]}
   ([db ans] (stale-plans db ans (task-reads db)))
-  ([db ans {:keys [ready? cited]}]
-    (vec (for [{:keys [e v]} (sort-by :v (d/datoms db :aevt :seon.task/id))
+  ([db ans {:keys [ready? cited tasks]}]
+    (vec (for [{:keys [e v]} (sort-by :v tasks)
                :when (ready? e)
                :let [plan-tx (:tx (first (d/datoms db :eavt e :seon.task/plan)))]
                :when plan-tx

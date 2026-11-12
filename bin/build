@@ -276,13 +276,17 @@ build_embed() {
 # between builds, so a build indexes what the tree changed), and the tree's inputs (seon.system/built-program), into
 # target/seon.program: a root resumes its main reading no source, and compares main's
 # program with this one (docs/source.md#the-binary-records-its-program)
-# record_program [BINARY]: by BINARY (default seon, the one in place; a rebuild passes seon.new before it moves in), the
-# record written beside the old and moved over it, so a reader never sees it absent or half written
+# record_program [BINARY]: by BINARY (default seon, the one in place; a rebuild passes seon.<run>.new before it moves in), the
+# record written beside the old (seon.program.<run>.new) and moved over it, so a reader never sees it absent or half written.
+# For the binary in place it moves at once; a rebuild's record moves in with its binary (build_seon)
 record_program() {
   local bin=${1:-seon}
-  ( cd "$T" && SEON_CHECKOUT=$ROOT HOME=$T/home nice -n 15 "./$bin" built-program "$T/seon.index" --profile scripted ) > "$T/built-program.log" 2>&1 &&
-    tail -1 "$T/built-program.log" > "$T/seon.program.new" && mv -f "$T/seon.program.new" "$T/seon.program" ||
-    { rm -f "$T/seon.program.new"; tail -5 "$T/built-program.log" >&2; die "recording the program target/seon was built from failed; see target/built-program.log"; }
+  local id=${ID:-$$}
+  ( cd "$T" && SEON_CHECKOUT=$ROOT HOME=$T/home nice -n 15 "./$bin" built-program "$T/seon.index" --profile scripted ) > "$T/built-program.$id.log" 2>&1 &&
+    tail -1 "$T/built-program.$id.log" > "$T/seon.program.$id.new" &&
+    { [ "$bin" != seon ] || mv -f "$T/seon.program.$id.new" "$T/seon.program"; } &&
+    mv -f "$T/built-program.$id.log" "$T/built-program.log" ||
+    { rm -f "$T/seon.program.$id.new"; tail -5 "$T/built-program.$id.log" >&2; die "recording the program target/seon was built from failed; see target/built-program.$id.log"; }
   say "seon: recorded the program it was built from (target/seon.program)"
 }
 
@@ -304,6 +308,9 @@ build_seon() {
   # built, so bin/check runs no binary built from another
   tree_key; key=$KEY
   tree=${TREE:-}
+  # each build's own files are named by its run (the tree it builds and its pid): two builds at once in one checkout (two
+  # landings' updates, or a test's build beside them) share no temporary file, and one whose tree the checkout no longer holds moves nothing in
+  ID=${tree:-tree}.$$
   if [ -n "$key" ] && fresh seon "$key" && [ -x "$T/seon" ] && [ "$(cat "$T/seon.tree" 2>/dev/null)" = "$tree" ]; then
     [ -s "$T/seon.program" ] || record_program
     say "seon up to date (tree $tree)"; return
@@ -311,18 +318,28 @@ build_seon() {
   # built and recorded beside the binary in place (seon.new), then moved over it: a test or a root reading target/seon,
   # seon.tree or seon.program while this runs reads the old ones whole, never a window with none (a shard read seon.program
   # in that window: "bin/build recorded the tree it was built from: nil", batch 4, 2026-11-10)
-  rm -f "$T/seon.new"
+  rm -f "$T/seon.$ID.new"
   # the program's main: seon.main serves root and ports, and loads the check driver
   # (seon.check, in test/, outside src) from the checkout's
   # source for every other mode, so the release binary holds only the program
   say "seon: jolt build -m seon.main -> target/seon"
   ( cd "$ROOT"
-    HOME=$T/home JOLT_PWD=$ROOT "$JOLT" build -m seon.main -o "$T/seon.new" ) > "$T/seon-build.log" 2>&1 ||
-    { tail -30 "$T/seon-build.log" >&2; die "seon build failed; see target/seon-build.log"; }
-  record_program seon.new
-  mv -f "$T/seon.new" "$T/seon"
-  [ -n "$tree" ] && { echo "$tree" > "$T/seon.tree.new" && mv -f "$T/seon.tree.new" "$T/seon.tree"; }
-  [ -z "$key" ] || { echo "$key" > "$T/seon.stamp.new" && mv -f "$T/seon.stamp.new" "$T/seon.stamp"; }
+    HOME=$T/home JOLT_PWD=$ROOT "$JOLT" build -m seon.main -o "$T/seon.$ID.new" ) > "$T/seon-build.$ID.log" 2>&1 ||
+    { tail -30 "$T/seon-build.$ID.log" >&2; rm -rf "$T/seon.$ID.new" "$T/seon.$ID.new.build"; die "seon build failed; see target/seon-build.$ID.log"; }
+  # jolt's intermediate files for this output (flat.ss, boot data, main.c): this run's alone, 386 MB, removed once it is built
+  rm -rf "$T/seon.$ID.new.build" "$T/seon.new.build"
+  mv -f "$T/seon-build.$ID.log" "$T/seon-build.log"
+  record_program "seon.$ID.new"
+  # a newer tree reached this checkout while it built (a later landing's update): that build moves its own in; this one is
+  # left out. Asked after the record, so nothing that takes time lies between this answer and the moves below; an older
+  # build that still moves in after a newer one is caught by bin/update, which builds again until the binary is its tree's
+  if [ -n "$tree" ] && [ "$("$ROOT/bin/tree" "$ROOT")" != "$tree" ]; then
+    rm -f "$T/seon.$ID.new" "$T/seon.program.$ID.new"; say "seon: built tree $tree, but the checkout holds a newer one now: left out (SUPERSEDED)"; return
+  fi
+  mv -f "$T/seon.program.$ID.new" "$T/seon.program"
+  mv -f "$T/seon.$ID.new" "$T/seon"
+  [ -n "$tree" ] && { echo "$tree" > "$T/seon.tree.$ID.new" && mv -f "$T/seon.tree.$ID.new" "$T/seon.tree"; }
+  [ -z "$key" ] || { echo "$key" > "$T/seon.stamp.$ID.new" && mv -f "$T/seon.stamp.$ID.new" "$T/seon.stamp"; }
   say "seon: built target/seon (tree ${tree:-unknown})"
   # this binary's compile cache warmed with the test namespaces, here at the build, so no agent compiles them at its first fork (seon.check/warm-tests)
   ( cd "$T" && SEON_CHECKOUT=$ROOT HOME=$T/home nice -n 15 ./seon warm-tests --profile scripted ) > "$T/warm-tests.log" 2>&1 ||
