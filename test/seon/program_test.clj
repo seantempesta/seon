@@ -20,7 +20,10 @@
             [test-runner :as runner] [clojure.string :as str] [seon.config :as cfg]
             [jolt.analyzer]))
 
-(defn- empty-db [] (ts/test-db))
+(defn- empty-db
+  "A db with the schema and nothing else: what a test that records its own forms judges against (the test store's seed holds the
+  example program, ~360 forms, which every seon.merge/program read walks: ~6.5M ticks a read; a test that needs it calls ts/test-db)."
+  [] (pdb/empty-db false))
 
 (defn- ns-form? [form nsx]
   (boolean (and (seq? form) (symbol? (first form)) (= #'clojure.core/ns (ns-resolve nsx (first form))))))
@@ -470,7 +473,7 @@
 
 ;; Estimate: 2 records 0.6M; 3 pm/program reads 0.9M; 1 three-way 0.2M; 2 pm/mutations 0.3M. Estimated 2,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-program-calling-alter-var-root-is-refused-naming-it
-  (let [base (pdb/empty-db false)
+  (let [base (empty-db)
         branch (record base 'app.pt-mut "(defn fine [m] (assoc m :intern 1))"
                        'app.pt-mut "(defn sneaky [] (alter-var-root #'app.pt-mut/fine (constantly 3)))")
         r (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program base #{}))]
@@ -483,7 +486,7 @@
 
 ;; Estimate: 2 records 0.6M; 6 pm/program reads of the small program x 0.3M = 1.8M; 2 three-ways 0.4M; 2 pm/mutations 0.2M. Estimated 3,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-def-inside-a-fn-body-is-refused
-  (let [base (pdb/empty-db false)
+  (let [base (empty-db)
         branch (record base 'app.pt-inl "(defn setup! [] (def config {:a 1}))")
         r (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program base #{}))]
     (is (= [{:ns 'app.pt-inl :defines '[[:var app.pt-inl/setup!]] :inline-def 'app.pt-inl/config}]
@@ -1406,12 +1409,12 @@
     (is (= (:env (inputs cfg here)) (:env (inputs (assoc cfg :seon.config.ai/model "b") here)))
         "any other key is only the input of the tests that read it (a-test-digest-takes-only-the-config-keys-it-reads)")))
 
-;; Estimate: test-db + 2 db-withs 0.2M; doc load-tx of one page 0.3M; 7 meaning-changes (a pull and a query each) x 0.1M = 0.7M. Estimated 1,000,000 ticks, worked from the work, never from a run.
+;; Estimate: an empty db + 2 db-withs 0.2M; doc load-tx of one page 0.3M; 7 meaning-changes (a pull and a query each) x 0.1M = 0.7M. Estimated 1,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 1000000}} an-eval-that-changes-a-contract-or-docstring-says-so
   ;; owner, 2026-10-25 (DECISIONS: a change to a schema is an explicit fact the eval shows): what an
   ;; eval's definitions change of an existing var's contract or docstring, read from its own tx-data,
   ;; with the wiki sections citing the var and the form that reads each
-  (let [db0 (ts/test-db)
+  (let [db0 (empty-db)
         db (d/db-with db0 [{:db/id "f" :var/name 'app/f :var/doc "Old words." :var/contract "[:=> [:cat] :int]"}
                            {:db/id "g" :var/name 'app/g :var/doc "Kept."}])
         db (d/db-with db (seon.doc/load-tx db "docs" {"docs/a.md" "# A\n\nIt reads `app/f`.\n"}))
