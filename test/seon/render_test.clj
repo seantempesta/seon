@@ -4583,7 +4583,7 @@
 ;; @theme); the theme sets --font-sans to the mono face for the page's chrome on purpose, so Markdown prose is drawn by .seon-md's own rule,
 ;; never by a font utility (jolt/readable put font-sans on it, which drew it mono)
 (deftest prose-reads-in-the-text-face
-  (let [css (slurp "resources/public/css/input.css")
+  (let [css (slurp (clojure.java.io/file (seon.config/checkout) "resources/public/css/input.css"))
         md (h/html (ui/markdown "A sentence with `code`."))]
     (is (re-find #"\.seon-md \{ font-family: var\(--font-text\); \}" css) "the Markdown block's face is the text face")
     (is (re-find #"--font-sans: var\(--font-mono\)" css) "the chrome's face stays mono, which is why no font utility reaches prose")
