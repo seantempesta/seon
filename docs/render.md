@@ -340,6 +340,7 @@ Text for the wire, storage, a digest, a file, a URL, a command line or code to e
 - `seon.edn/encode`: EDN for storage and the wire, whole.
 - `seon.program/form-ids`: a form's code digest text, under `seon.edn/encode`'s bindings ([source](source.md#what-a-test-takes-of-a-forms-text)).
 - `seon.render.ui/table-cells`: telling a Markdown table's rule row from its rows; a cut of data, not output.
+- `my.agent/help-nearest`: a doc miss's nearest addresses, the best `:seon.config.render/search` of them as a search's hits are; a cut of data, not output.
 - `seon.render/result-text`: the EDN envelope of a user message around a response already printed.
 - `seon.ctx.search/search`: the call in its last hit's `:more`, code to evaluate.
 - `seon.ctx.wire/describe-msgs`: the path in the call it generates, code to evaluate.

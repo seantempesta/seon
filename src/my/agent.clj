@@ -601,21 +601,20 @@
                   (str "Source not found for " x# ": source reads a name or a var"))))))
 
 (defn- help-nearest
-  "What a help address that is no section may have meant: the help page's sections and the pages
-  whose address holds a word of it (four letters or more), the sections whose text the search finds
-  for it (`search`: \"schema\" named no address, though the help page says how a schema changes), then the nearest by Jolt's did-you-mean ranking (as no-var): a few
-  addresses, never the page ((doc \"docs/agent.md\") lists its sections). See docs/references.md#a-section-read-at-a-depth-with-its-edges."
+  "What a help address that is no section may have meant, read from the sections' addresses alone: the pages, then the
+  sections, whose address holds a word of it (four letters or more), then the nearest of the help page's sections and the
+  pages by Jolt's did-you-mean ranking (as no-var); at most :seon.config.render/search of them. A search by meaning is the
+  agent's to ask. See docs/references.md#a-section-read-at-a-depth-with-its-edges."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :string]]}
   [db address]
-  (let [sections (doc/page db wire/help-page :summary)
-        addresses (mapv :seon.ref/address sections)
-        pages (doc/page-paths db)
+  (let [all (sort (map :v (d/datoms db :aevt :seon.doc/address)))
+        pages (distinct (keep #(some->> (str/index-of % "#") (subs % 0)) all))
+        help (filter #(str/starts-with? % (str wire/help-page "#")) all)
         words (re-seq #"[a-z0-9]{4,}" (str/lower-case address))
-        holds? (fn [s] (some #(str/includes? (str/lower-case s) %) words))
-        ranked (jolt.analyzer/suggestions-for address (concat addresses pages))]
-    (vec (distinct (concat (filter holds? pages) (filter holds? addresses)
-                           (keep #(when (= :section (:kind %)) (:name %)) (search address {:kinds #{:section} :k 3}))
-                           ranked)))))
+        holds? (fn [s] (some #(str/includes? (str/lower-case s) %) words))]
+    (vec (take (cfg/value :seon.config.render/search)
+               (distinct (concat (filter holds? pages) (filter holds? all)
+                                 (jolt.analyzer/suggestions-for address (concat help pages))))))))
 
 (defn- cited
   "Name n as a cite of it on the agent's page shows it, on demand: a cite of n's target (seon.ref/target) at doc depth made on
