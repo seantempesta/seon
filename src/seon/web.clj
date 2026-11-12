@@ -221,7 +221,6 @@
           ;; a user's page: an agent found by its :seon.user/name, by the same walk (seon.render.proc/session-of)
           (and (= m :get) (str/starts-with? uri "/user/")) (html-response (ask! ch {:op :page :view (view-of (java.net.URLDecoder/decode (str/replace (subs uri 6) "+" "%2B") "UTF-8"))}))
           ;; a page's list end scrolled into view: its next rows
-          (and (= m :post) (= uri "/more")) (do (a/>!! ch {:op :more :view (view-of (get q "view"))}) {:status 204 :headers {}})
           ;; a row's <details> toggled (the debug page): its unit renders its whole content while open
           ;; a cut opened (unit "row/form"): its form must read as EDN, or the render proc never sees it
           (and (= m :post) (= uri "/open"))
@@ -434,7 +433,6 @@
              (let [[st k] (step/pend st [(:p m) :text])]
                (step/out! o :to-render {:op ({:context :context :render-stats :stats} (:op m)) :k k})
                st)
-    :more (do (step/out! o :to-render {:op :more :view (:view m)}) st)
     :toggle (do (step/out! o :to-render (select-keys m [:op :view :unit :open])) st)
     :at (do (step/out! o :to-render (select-keys m [:op :view :turn])) st)
     :stats (do (deliver (:p m) (stats st)) st)
