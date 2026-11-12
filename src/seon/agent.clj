@@ -1825,12 +1825,13 @@
 
 (defn begin-run!
   "This agent begins task on its branch: the agent's record names it as its task (:seon.agent/task: the conversation finds the
-  messages it took by the agent, seon.ctx/placed-messages, and @ctx holds the task). Written as
+  messages it took by the agent, seon.ctx/placed-messages, and @ctx holds the task), the task running as main holds it. Written as
   the process starts (init!: an outside agent's branch is cut before root writes its start on main), or by the turn that begins a
-  later task of the session; once, nothing written when the branch holds it. When main moved since the branch's base, or the
-  branch lacks the task (a fork's: its branch is cut from another task's), main is merged down first (merge-main!): the task is
-  main's entity, never made twice, and its execution main's (its release, written on main after the branch was cut, read
-  :running here, not :held). The agent's first task on its branch (its entity there with no task yet) is
+  later task of the session; once, nothing written when the branch holds it. The task is running, as main holds it
+  (its release, written on main after the branch was cut, read :held here: my.task/current and the
+  page's task said held); a task's execution is no content a merge carries (seon.merge/carried-platform-attrs).
+  A task the branch lacks (a fork's: its branch is cut from another task's) is written as main
+  declares it first (seon.task/create-tx). The agent's first task on its branch (its entity there with no task yet) is
   where the agent is made: it is written with what every agent cites (seon.task/agent-cites-tx), on its branch, so
   its record holds them and its own cite! and uncite! change them, and a merge of main never brings one back."
   {:malli/schema [:=> [:cat :seon.task/id] :any]}
@@ -1843,27 +1844,27 @@
 
 (defn begin-run-tx
   "The write that makes task this agent's on db, its branch (begin-run-tx!'s second, and what
-  the fork server applies to warm what an agent's start reads: seon.fork-server/warm-start): the agent (key k), its task and
-  what it reads as its system message (seon.doc/system-page). The task's execution is root's to write, on main, and the branch
-  reads it there: one writer a key."
+  the fork server applies to warm what an agent's start reads: seon.fork-server/warm-start): the task
+  running, naming the agent (key k), its task and what it reads as its system message (seon.doc/system-page)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :string] :seon.db/tx-data]}
   [db task k]
-  [;; the agent's task, which its record pulls (the agent is the unit, docs/ctx.md#the-pattern)
+  [{:seon.task/id task :seon.task/execution :running}
+   ;; the agent's task, which its record pulls (the agent is the unit, docs/ctx.md#the-pattern)
    ;; what it reads as its system message: the system prompt's page, its top section and all below (seon.ctx.wire/agent-system-text)
    (let [sys (ref/page-top db doc/system-page)]
      (cond-> {:db/id k :seon.agent/key k :seon.agent/task {:seon.task/id task}} sys (assoc :seon.agent/system [sys])))])
 
 (defn- begin-run-tx!
-  "Task begun on this agent's branch (begin-run!'s write): main merged down first when the branch lacks the task, so the
-  task is main's entity, then begin-run-tx; a refused merge is the answer. See docs/agent.md#merging."
+  "Task written on this agent's branch (begin-run!'s write): the task as main declares it when the
+  branch lacks it, then begin-run-tx."
   {:malli/schema [:=> [:cat :seon.task/id] :any]}
   [task]
-  ;; what main holds of the task (the task itself when the branch lacks it, its execution) is main's: taken by the merge down,
-  ;; so its entity on the branch is main's own, never made twice, and the branch writes none of it
-  (let [r (when (or (not (d/entity (db) [:seon.task/id task])) (main-moved? (:base @state) (heard-main))) (merge-main! {}))]
-    (if (and r (not (:ok r)))
-      r
-      (transact! (begin-run-tx (db) task (:key @state))))))
+  (when-not (d/entity (db) [:seon.task/id task])
+    (let [t (task/task (heard-main) task)]
+      (transact! (task/create-tx (db) [(-> (select-keys t [:seon.task/ns :seon.task/name :seon.task/plan :seon.task/instructions :seon.task/proofs
+                                                           :seon.task/needs :seon.task/branch :seon.task/model :seon.task/kind])
+                                           (update :seon.task/ns symbol))]))))
+  (transact! (begin-run-tx (db) task (:key @state))))
 
 (defn init!
   "Make this process the agent: its socket (fd), its namespace, its state map, its
