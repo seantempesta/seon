@@ -253,25 +253,21 @@
     ;; test at load, before any proc runs, not a read of git
     (is (= #{'seon.fx/git-run 'seon.fx/checked-out? 'seon.config/reader} readers))))
 
-(deftest every-shell-runs-through-lib-sh
+(deftest ^{:seon.test/estimate {:ticks 10000000}} every-shell-runs-through-lib-sh
   ;; task seon.system/a-boot-runs-no-shell-of-its-own: clojure.java.shell/sh called off a fiber copies a child's pipes on
   ;; futures, threads of Clojure's send-off pool that root does not declare (seon.server-test/a-done-shells-on-no-thread-of-roots);
-  ;; seon.lib/sh runs it on a fiber, and no other src form names it (docs/machine.md#processes). src's forms read as data
-  ;; from the compiler's facts
-  (let [db (runner/program)
-        forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
-                     [(clojure.string/starts-with? ?file "src/")]] db)
-        read-in (fn [nsn src] (require nsn)
-                  (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))
-        ;; a quoted name is data (seon.program/env-class-readers' key), not a call
-        names-sh? (fn [nsn f] (some #(and (symbol? %) (= #'clojure.java.shell/sh (ns-resolve (the-ns nsn) %)))
-                                    (tree-seq #(and (coll? %) (not (and (seq? %) (= 'quote (first %))))) seq f)))
-        callers (into (sorted-set)
-                      (for [[nsn src] forms :let [f (read-in nsn src)] :when (names-sh? nsn f)]
-                        (if (and (seq? f) (symbol? (second f))) (symbol (str nsn) (name (second f))) nsn)))]
-    (is (names-sh? 'seon.lib '(defn x [] (clojure.java.shell/sh "true"))) "a call naming it is seen")
-    (is (not (names-sh? 'seon.lib '(def x '{clojure.java.shell/sh :bin}))) "a quoted name is not")
-    (is (= #{'seon.lib/sh} callers))))
+  ;; seon.lib/sh runs it on a fiber, and no other src form names it (docs/machine.md#processes). Read from the compiler's facts
+  ;; (:form/refs: what a form names, a quoted name being data and no reference), an index seek: reading every src form as data
+  ;; was ~150M ticks of the test's own
+  (let [callers-in (fn [db] (set (d/q '[:find [?v ...] :where [?f :form/refs clojure.java.shell/sh] [?f :form/ns ?ns] [?ns :ns/file ?file]
+                                         [(clojure.string/starts-with? ?file "src/")] [?f :form/defines ?d] [?d :var/name ?v]] db)))
+        probe (my.test/with (my.test/world)
+                (my.test/code 'app.shq (str "(ns app.shq (:require [clojure.java.shell]))\n"
+                                            "(def quoted '{clojure.java.shell/sh :bin})\n"
+                                            "(defn calls [] (clojure.java.shell/sh \"true\"))\n")))]
+    (is (= #{'app.shq/calls} (set (d/q '[:find [?v ...] :where [?f :form/refs clojure.java.shell/sh] [?f :form/defines ?d] [?d :var/name ?v]] probe)))
+        "a call naming it is a reference; a quoted name is not")
+    (is (= #{'seon.lib/sh} (callers-in (runner/program))))))
 
 ;; docs/merging.md#a-session-proves-through-root: bin/prove --root prints every kind of item as it lands, the tree's build and
 ;; seed by their kind
