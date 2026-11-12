@@ -6,7 +6,8 @@
   it needs with them. See docs/testing.md#testing-in-the-world."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [datahike.core] [datahike.api :as d] [seon.db :as pdb]
-            [seon.source :as source] [seon.doc :as doc] [seon.task :as task] [seon.profile :as profile]))
+            [seon.source :as source] [seon.doc :as doc] [seon.task :as task] [seon.profile :as profile]
+            [seon.agent :as agent] [seon.repl :as repl]))
 
 (defn with
   "db with each fixture applied, in order: a fixture is tx-data, or a function of the db answering
@@ -103,13 +104,11 @@
   ([code] (eval-in code 'seon.repl-test.scratch {}))
   ([code nsym] (eval-in code nsym {}))
   ([code nsym {:keys [db]}]
-   (let [state @(requiring-resolve 'seon.agent/state)
-         eval-string (requiring-resolve 'seon.repl/eval-string)
-         old @state]
-     (try (reset! state (cond-> {:n 0 :ns (create-ns nsym)}
-                          db (assoc :mode :test :db db :key "test-agent" :seon.repl/as-agent true)))
-          (eval-string code {})
-          (finally (reset! state old))))))
+   (let [old @agent/state]
+     (try (reset! agent/state (cond-> {:n 0 :ns (create-ns nsym)}
+                                db (assoc :mode :test :db db :key "test-agent" :seon.repl/as-agent true)))
+          (repl/eval-string code {})
+          (finally (reset! agent/state old))))))
 
 (defn cost
   "The work (thunk) does: {:ticks :bytes :ms :value}, the engine ticks and bytes the test thread

@@ -562,8 +562,7 @@
   order (seon.doc/namespace-source), which clojure.repl's does not (pipeline 1's F4: a design
   that asked (source ns) saw the ns form alone, took it for all that was recorded, and spent five
   turns finding the namespace's private functions). A multimethod's is its defmulti, then each method this branch records, whole,
-  in file order: (source seon.repl/place) showed the defmulti alone, and an agent spent nine turns reaching one of its methods
-  (2026-11-12's loop). sym is a symbol or the var (named)."
+  in file order: (source seon.repl/place) showed the defmulti alone, and an agent spent nine turns reaching one of its methods. sym is a symbol or the var (named)."
   {:malli/schema [:=> [:cat [:or :symbol :seon.host/var]] [:maybe :string]]}
   [sym]
   ;; a name that resolves to a class (java.lang.String) or to anything but a var has no recorded source
