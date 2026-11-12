@@ -2514,3 +2514,16 @@
     (is (contains? (at db2 p1) "pt-a1") "a past point holds what was written by its t")
     (is (not (contains? (at db2 p1) "pt-a2")) "and nothing after it")
     (is (contains? (at db2 p2) "pt-a2") "the db's own point is the db")))
+
+;; docs/render.md#how-the-work-stands: an unwritten proof's example is the shortest test that calls what its task cites, where its
+;; namespace has one (the T3 rerun drew whole components where its task needed one tile; the 2026-11-12 loop spent twelve turns
+;; finding how a REPL test evals in-process, which the tests calling the cited seon.repl/edit! show), else the shortest as before
+(deftest a-proofs-example-calls-what-its-task-cites
+  (let [db (t/with (t/world)
+                   (t/code 'app.ex "(ns app.ex)\n(defn tile [] 1)\n(defn other [] 2)")
+                   (t/code 'app.ex-test (str "(ns app.ex-test (:require [clojure.test :refer [deftest is]] [app.ex :as ex]))\n"
+                                             "(deftest short-test (is (= 2 (ex/other))))\n"
+                                             "(deftest the-tile-is-drawn-whole-and-right (is (= 1 (ex/tile))))")))]
+    (is (str/includes? (:example (status/test-shape db 'app.ex-test/new-proof #{'app.ex/tile})) "ex/tile") "the test that calls the cited var")
+    (is (str/includes? (:example (status/test-shape db 'app.ex-test/new-proof #{'app.ex/nothing})) "short-test") "none calls it: the shortest, as before")
+    (is (= (status/test-shape db 'app.ex-test/new-proof) (status/test-shape db 'app.ex-test/new-proof #{})) "no cites: as before")))

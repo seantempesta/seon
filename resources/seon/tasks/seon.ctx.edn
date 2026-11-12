@@ -48,14 +48,6 @@ Proofs: two agents with different data read different context with no code chang
 3. seon.ctx's write! refuses an edit of a var through swap! by checking :var/name in code; instead a property on the var's and form's entity schemas says the entity is changed by its definition, and the edit walk reads it."
   :seon.task/proofs #{}
   :seon.task/kind :work}
- {:seon.task/name "a-proofs-example-is-the-nearest-test-of-what-it-changes"
-  :seon.task/plan "What exists: the status shows an unwritten proof its namespace's shortest test that uses a helper (seon.ctx.status/test-shape), whatever the task changes. In the T3 rerun (seon.render/the-root-tile-counts-the-program-it-loaded, 2026-11-10) the example drew whole page components (eval-html) where the task needed one tile rendered with a plain ctx ({:seon.ctx/ctx {:process value}}), which the agent found by trying.
-
-The change: the example is the shortest test that calls a function the task cites (seon.program's callers of each cited var, tests only), else today's choice; one lookup per cited var.
-
-Proof: an unwritten proof of a task citing seon.render.ui/process-tile shows as its example a test that calls process-tile."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.ctx-test/unwritten-proof-task-citing-seon-render-ui-process}}
  {:seon.task/name "an-edit-says-when-it-repaired-the-forms"
   :seon.task/plan "What exists: seon.repl/edit! reads the new text with the forgiving reader (seon.reader/forgive), which inserts or drops delimiters, and says so only in the answer's :repaired key. In the T3 rerun the agent spent an eval re-reading its edit to see what the repair did.
 
