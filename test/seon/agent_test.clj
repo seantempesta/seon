@@ -138,8 +138,9 @@
                (nil? agent) {::attach-made-no-agent attach}
                ;; its hello, or its end (refused, died) first: an agent that ended answers the test with that end, never a wait
                ;; for a hello that cannot come until the test's bound (Optimization's reading of batch 90, 2026-11-12)
-               :else (let [came (value-of (:response (eval-root (str "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (#{:ready :ended :dead :killed} (:type e)) (= :" agent " (:agent e))) (:type e) (recur))))"))))]
-                       (if (= :ready came)
+               :else (let [came (value-of (:response (eval-root (str "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (#{:ready :ended :dead :killed} (:type e)) (= :" agent " (:agent e))) (select-keys e [:type :error]) (recur))))"))))]
+                       ;; the end whole, its died error with it (exit, stderr's tail): a death before the hello is named
+                       (if (= :ready (:type came))
                          (f {:names names :ask ask :eval-root eval-root :root root})
                          {::agent-ended-before-ready {:agent agent :end came}}))))
           (finally (vreset! stopped (end!))))]

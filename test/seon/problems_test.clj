@@ -164,6 +164,10 @@
       (is (re-find #"out of memory" (:stderr died)) "the last lines of its stderr")
       (is (<= (count (:stderr died)) 2048) "bounded")
       (is (= {:kind :eval :form "(work!)" :since-ms 5} (:last-op died))))
+    (testing "its :dead event carries the death, so a wait on it names it (a test's with-agent before the hello said {:end :dead})"
+      (let [ev (first (filter #(= :dead (:type %)) (:events o1)))]
+        (is (= :seon.agent/died (get-in ev [:error :seon.error/type])) (pr-str ev))
+        (is (re-find #"out of memory" (str (get-in ev [:error :stderr]))) "its stderr's tail with it")))
     (testing "the exit status, reaped later by the fork server, completes the recorded death"
       (is (= [] (writes o1)) "not yet: the exit status is not known")
       (let [[_ o2] (step st :from-fs {:ev :exit :pid 77 :status {:signal 9}})
