@@ -57,6 +57,10 @@ case ${1:-} in
   *) WHAT=tests OWN=1 OUT=$ROOT/target/prove/$(date +%Y%m%dT%H%M%S)-$$; echo "test: run ${OUT:t}, logs in $OUT" ;;
 esac
 mkdir -p "$OUT"; rm -f $OUT/shard-*(N)
+# every Jolt process of this run (its shards, their roots, agents and test children) writes a fiber dump asked by kill -INFO
+# also to $OUT/dumps/dump-<pid>.txt (Jolt reads JOLT_DUMP_DIR at the signal; plans: tests-overrun-dumps): a test child's stderr
+# is a pipe, so its dump was lost (bin/evidence copies only from a file)
+export JOLT_DUMP_DIR=$OUT/dumps; mkdir -p "$JOLT_DUMP_DIR"
 # this run's shards (:seon.config.proofs/jobs, at most; the plan deals what the work is worth, seon.proofs/worth-shards) are
 # as many as the machine's free memory holds (seon.proofs/memory-jobs: each shard's footprint, :seon.config.proofs/shard-mb,
 # above a floor kept free, :seon.config.proofs/free-floor-mb), never fewer for the load average: load counts other sessions'
