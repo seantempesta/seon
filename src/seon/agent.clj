@@ -1175,7 +1175,7 @@
 (defn- warm-fixtures!
   "Force, once in this agent, every loaded var marked ^:seon.test/fixture (a delay a test realizes on first use: the test store),
   so each test child forked after inherits it made: realized in the child, it was made again each fork (65M ticks, 1 to 3 s a
-  test item, 2026-11-12) and dropped with it. Never at load: a binary loads the test namespaces before its main carrier. Answers
+  test item) and dropped with it. Never at load: a binary loads the test namespaces before its main carrier. Answers
   how many it forced. See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
   {:malli/schema [:=> [:cat] nat-int?]}
   []

@@ -690,7 +690,9 @@
  ;; Unit: boolean. On (2026-11-12): main is proved at each commit that moves its program, only what moved, so every branch reuses
  ;; main's greens. It was off for a child that died running 344 tests (2026-10-27); 1,200 in one child ran clean on 2026-11-12,
  ;; and a death now costs only its test (seon.agent/run-tests-forked reruns the rest in a new child).
- :seon.config.proofs/prove-main-on-commit true
+ ;; Only the standing system proves main: a scripted root (every test root and check root) never does, or each would fork its
+ ;; own prove agents in the background of the test it serves.
+ :seon.config.proofs/prove-main-on-commit #profile {:default true :scripted false}
  ;; How many times its own last recorded run (ms) a test bin/test runs may be quiet before it is named
  ;; STALLED (bin/stalls): a test with no record, or a bound under :seon.config.agent/stall-ms, takes
  ;; that key. Provenance: at a flat 30 s, 21 healthy process tests were named STALLED in one run (each
