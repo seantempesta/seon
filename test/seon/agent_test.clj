@@ -1062,7 +1062,7 @@
         results (try (remove-ns 'app.calc-test) (remove-ns 'app.calc)
                      ;; the branch's program, then main's removed test as the test child defines it
                      (binding [*ns* (create-ns 'app.calc)] (refer-clojure) (load-string "(defn add [x y] (- x y))"))
-                     (#'agent/load-removed! (:removed plan))
+                     (#'agent/load-removed! (:removed plan) [main-test])
                      (proofs/run-tests! [main-test] {main-test nil}
                                         (fn [x] (when-let [m (:seon.test/report x)] (swap! ran conj {:type (:type m) :var (str "#'" (:test x))}))))
                      (proofs/results {:reports @ran})

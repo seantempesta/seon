@@ -327,7 +327,7 @@
   (cond (or (str/ends-with? task "-implement") (str/ends-with? task "-merge")) (calls "Wait for a message." "(my.turn/wait)")
         (zero? turn) (calls "Write the proof, red, and say what implement changes."
                             "(in-ns 'app.stages-test)"
-                            "(clojure.test/deftest t (clojure.test/is (= 1 2)))"
+                            "(clojure.test/deftest ^{:seon.test/estimate {:ticks 100000}} t (clojure.test/is (= 1 2)))"
                             "(my.task/update! :seon.task/proofs conj 'app.stages-test/t)"
                             "(my.task/update! :seon.task/plan str \" Implement makes app.stages-test/t pass.\")")
         :else (says "The proof is written and red, and the plan says what implement changes.")))
@@ -347,7 +347,7 @@
   (if (zero? turn)
     (calls "Write the proof, and register it."
            "(in-ns 'app.whole-test)"
-           "(clojure.test/deftest t (clojure.test/is (= 1 1)))"
+           "(clojure.test/deftest ^{:seon.test/estimate {:ticks 100000}} t (clojure.test/is (= 1 1)))"
            "(my.task/update! :seon.task/proofs conj 'app.whole-test/t)")
     (says "The proof passes.")))
 
@@ -361,7 +361,7 @@
   (if (zero? turn)
     (calls "Write the proof, register it, and change offsets."
            "(in-ns 'app.stray-test)"
-           "(clojure.test/deftest t (clojure.test/is (= 1 1)))"
+           "(clojure.test/deftest ^{:seon.test/estimate {:ticks 100000}} t (clojure.test/is (= 1 1)))"
            "(my.task/update! :seon.task/proofs conj 'app.stray-test/t)"
            "(in-ns 'seon.repl) (seon.contract/defn- offsets \"Finds nothing.\" {:malli/schema [:=> [:cat :string :string] [:vector nat-int?]]} [text s] [])")
     (says "The proof passes.")))
@@ -374,7 +374,7 @@
   (if (zero? turn)
     (calls "Write the proof, red, and register it."
            "(in-ns 'app.whole-test)"
-           "(clojure.test/deftest t (clojure.test/is (= 1 2)))"
+           "(clojure.test/deftest ^{:seon.test/estimate {:ticks 100000}} t (clojure.test/is (= 1 2)))"
            "(my.task/update! :seon.task/proofs conj 'app.whole-test/t)")
     (calls "Wait for a message." "(my.turn/wait)")))
 

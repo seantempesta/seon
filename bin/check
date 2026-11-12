@@ -199,7 +199,8 @@ bounded() {
   local name=$1 bound= W=; shift
   [[ -n $SEL && -s $SEL/step-bounds ]] && bound=$(awk -v k="$name" '$1 == k { print $2 }' "$SEL/step-bounds")
   rm -f "$OUT/$name.overran"
-  ( UNIT=$name; "$@" ) & local up=$!
+  # timed whole (NAME.unit-time, zsh's time): an overran unit's wall and CPU seconds are kept, as a finished step's are
+  { time ( UNIT=$name; "$@" ) } 2> "$OUT/$name.unit-time" & local up=$!
   if [[ -n $bound ]]; then
     ( trap 'kill $S 2>/dev/null; exit 0' TERM; sleep $(( bound / 1000.0 )) 7>&- 3>&- & S=$!; wait $S || exit 0
       "$ROOT/bin/evidence" "$OUT/$name-overran" $up "$(cat "${SEON_STORE:-/nonexistent}/root.port" 2>/dev/null)" > /dev/null 2>&1
@@ -209,8 +210,12 @@ bounded() {
   wait $up
   [[ -n $W ]] && { kill $W 2>/dev/null; wait $W 2>/dev/null }
   if [[ -e $OUT/$name.overran ]]; then
-    # its store is kept, as any failed step's; the load says whether it waited on the machine
-    local msg="STEP-OVERRAN, ran past its bound of $(<$OUT/$name.overran) ms (:seon.config.check/step-end-factor times its median; load $(sysctl -n vm.loadavg | awk '{print $3}')); evidence in $OUT/$name-overran"
+    # its store is kept, as any failed step's; its CPU seconds (user + sys) beside its wall bound and the load say whether it
+    # was working or waiting on the machine; its time is kept for its verdict, as a green step's is
+    local cpu=$(awk '{for (i = 1; i < NF; i++) { if ($i == "user") u = $(i+1); if ($i == "sys") y = $(i+1) }} END {sub(/s$/, "", u); sub(/s$/, "", y); printf "%.1f", u + y}' "$OUT/$name.unit-time" 2>/dev/null)
+    local r=$(sed -n 's/^real \([0-9.]*\).*/\1/p' "$OUT/$name.unit-time" | head -1)
+    [[ -n $SEL && -n $r ]] && printf "%s %.0f\n" "$name" $(( r * 1000 )) >> "$SEL/step-ms"
+    local msg="STEP-OVERRAN, ran past its bound of $(<$OUT/$name.overran) ms (:seon.config.check/step-end-factor times its median; CPU ${cpu:-?} s, load $(sysctl -n vm.loadavg | awk '{print $3}')); evidence in $OUT/$name-overran"
     echo "FAILED $name: $msg"
     failed "$name: $msg"
   fi
