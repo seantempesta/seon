@@ -59,9 +59,32 @@
   [decls]
   (subs (clojure.string/replace (str (hasch/uuid [(filterv #(some-> (:db/ident %) namespace program/attr-namespaces) decls) pdb/layout])) "-" "") 0 8))
 
+(defn program-store-key
+  "The 8 hex digits a kept program store is named by: schema-digest (program-schema-digest: the program's attributes and the
+  store's layout), the runtime that writes and reads it (runtime, jolt.host/runtime-fingerprint: Jolt's sources, so a pin moves
+  it, a Seon tree does not) and pins, the library revisions whose code encodes what it stores (konserve's codec, Datahike's
+  nodes). A store one runtime wrote is never read by another: a new pin opened an old pin's store and its decode threw
+  (2026-11-12). See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :string [:maybe :string] [:map-of :string :string]] :string]}
+  [schema-digest runtime pins]
+  (subs (clojure.string/replace (str (hasch/uuid [schema-digest runtime (into (sorted-map) pins)])) "-" "") 0 8))
+
+(defn- codec-pins
+  "{path revision} of the library checkouts whose code encodes a stored program (reference-code/konserve and datahike), as
+  checkout's git index pins them (seon.fx/read-source's :pins reads all of them so). Through seon.lib/sh, on a fiber: it runs
+  where a store is opened, and clojure.java.shell/sh's futures left two threads no proc declares (bin/check lifecycle's
+  :threads-declared)."
+  {:malli/schema [:=> [:cat :string] [:map-of :string :string]]}
+  [checkout]
+  (into {} (for [[_ sha p] (re-seq #"(?m)^160000 ([0-9a-f]{40}) \d+\t(\S+)$"
+                                   (:out (seon.lib/sh "git" "-C" checkout "ls-files" "-s" "--" "reference-code/konserve" "reference-code/datahike")))]
+             [p sha])))
+
 (def kept-program-digest
-  "program-schema-digest of this process's schema."
-  (program-schema-digest pdb/schema))
+  "The key of this process's kept program store, deref'd where a store is opened: its schema's program-schema-digest, its
+  runtime and its checkout's codec pins (program-store-key). A delay, so the one git read runs once, in a process that opens a
+  program store, never at this namespace's load in every root and test child that holds it."
+  (delay (program-store-key (program-schema-digest pdb/schema) (jolt.host/runtime-fingerprint) (codec-pins (seon.config/checkout)))))
 
 (def ^:private program-store-path
   "This process's store of kept program dbs, one branch per git tree (test-runner/program-db),
@@ -79,7 +102,7 @@
   imports another tree takes program-store, a store of its process's own: its branches are scratch, and
   never the plan's to choose a nearest tree from. docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat] :string]}
-  [] (pdb/kept-store! (config/value :seon.config.proofs/program-store) kept-program-digest))
+  [] (pdb/kept-store! (config/value :seon.config.proofs/program-store) @kept-program-digest))
 
 (defn reach-index
   "{key {:digest :process? :binary?}} of db's tests under inputs (or of each key of roots, {key [var ...]}):

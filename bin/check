@@ -205,14 +205,17 @@ bounded() {
     ( trap 'kill $S 2>/dev/null; exit 0' TERM; sleep $(( bound / 1000.0 )) 7>&- 3>&- & S=$!; wait $S || exit 0
       "$ROOT/bin/evidence" "$OUT/$name-overran" $up "$(cat "${SEON_STORE:-/nonexistent}/root.port" 2>/dev/null)" > /dev/null 2>&1
       print -r -- "$bound" > "$OUT/$name.overran"
+      # the CPU seconds of every process under the unit, read before they are ended: a killed child is never reaped, so
+      # the unit's own `time` never counts it (an overran unit showed CPU 0.0 s while its root booted, 2026-11-12)
+      ps -axo pid=,ppid=,time= | awk -v r=$up '{ p[$1] = $2; t[$1] = $3 } END { for (x in p) { y = p[x]; while (y != "") { if (y == r) { n = split(t[x], a, ":"); s += (n == 3 ? a[1] * 3600 + a[2] * 60 + a[3] : a[1] * 60 + a[2]); break } y = p[y] } } printf "%.1f", s }' > "$OUT/$name.cpu"
       "$ROOT/bin/end-tree" $up ) 7>&- 3>&- & W=$!
   fi
   wait $up
   [[ -n $W ]] && { kill $W 2>/dev/null; wait $W 2>/dev/null }
   if [[ -e $OUT/$name.overran ]]; then
-    # its store is kept, as any failed step's; its CPU seconds (user + sys) beside its wall bound and the load say whether it
+    # its store is kept, as any failed step's; its processes' CPU seconds at its end beside its wall bound and the load say whether it
     # was working or waiting on the machine; its time is kept for its verdict, as a green step's is
-    local cpu=$(awk '{for (i = 1; i < NF; i++) { if ($i == "user") u = $(i+1); if ($i == "sys") y = $(i+1) }} END {sub(/s$/, "", u); sub(/s$/, "", y); printf "%.1f", u + y}' "$OUT/$name.unit-time" 2>/dev/null)
+    local cpu=$(<"$OUT/$name.cpu" 2>/dev/null)
     local r=$(sed -n 's/^real \([0-9.]*\).*/\1/p' "$OUT/$name.unit-time" | head -1)
     [[ -n $SEL && -n $r ]] && printf "%s %.0f\n" "$name" $(( r * 1000 )) >> "$SEL/step-ms"
     local msg="STEP-OVERRAN, ran past its bound of $(<$OUT/$name.overran) ms (:seon.config.check/step-end-factor times its median; CPU ${cpu:-?} s, load $(sysctl -n vm.loadavg | awk '{print $3}')); evidence in $OUT/$name-overran"
@@ -365,12 +368,16 @@ unit() {
   # a unit this run does not select takes no store and shows nothing
   [[ -n $SEL && " $ONLY " != *" $1 "* ]] && return 0
   export SEON_STORE=$OUT/stores/$1
+  # and its runs directory (root-inputs.edn, merge-tests, stalls, generations): the unit's root is a test's, never the
+  # checkout's runs/, where the checkout's own system may be running (a step run by a system started in the checkout it
+  # proves waited until its bound, 2026-11-12: design notes, worktree-system-step-hang)
+  export SEON_RUNS=$OUT/stores/$1-runs; mkdir -p "$SEON_RUNS"
   # a unit that cannot take its copy of the seeded store fails here, loudly: it never runs on a store its own root seeded
   (( NEEDS )) && { mkdir -p "$SEON_STORE" && cp -c "$STORE/data.mdb" "$SEON_STORE/data.mdb" || { failed "$1 (no copy of the seeded store $STORE)"; print "FAILED $1: no copy of the seeded store $STORE"; return 1 } }
   bounded $1 u-$1 > "$OUT/$1.shown" 2>&1
   # a failed step's store stays to be read: failed's lines are "NAME: why", "NAME (why)" or "NAME-i ..." (it wanted "NAME " or
   # "NAME-" alone, so every red step's store was removed: Deep fixes, 2026-11-12)
-  grep -q "^$1[ :-]" "$OUT/failed" || "$ROOT/bin/remove-tree" "$SEON_STORE"
+  grep -q "^$1[ :-]" "$OUT/failed" || { "$ROOT/bin/remove-tree" "$SEON_STORE"; "$ROOT/bin/remove-tree" "$SEON_RUNS" }
   cat "$OUT/$1.shown"
 }
 mkfifo "$OUT/pool"; exec 3<>"$OUT/pool"; rm "$OUT/pool"

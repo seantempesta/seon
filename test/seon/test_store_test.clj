@@ -135,7 +135,7 @@
     (is (not-any? #(re-find (re-pattern (str "task-" (:ns @first-names) "-")) %) branches)
         (str "the first test's branches are gone: " branches))))
 
-(deftest the-program-store-is-named-by-the-programs-own-schema
+(deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/execs ["git"]} the-program-store-is-named-by-the-programs-own-schema
   ;; task seon.test-store/the-kept-program-store-survives-unrelated-schema-changes: every schema change named the
   ;; store anew, and the next plan imported the whole program (18-28 s, 3-4 G ticks)
   (let [decl (fn [k] {:db/ident k :db/valueType :db.type/string :db/cardinality :db.cardinality/one})
@@ -145,8 +145,13 @@
     (is (= (digest base) (digest (conj base (decl :app.task/zzz)))) "any other namespace too")
     (is (not= (digest base) (digest (conj base (decl :form/zzz)))) "a form's attribute: a new store")
     (is (not= (digest base) (digest (conj base (decl :var/zzz)))) "a var's too")
-    (is (= ts/kept-program-digest (digest base)) "this process's")
-    (is (re-matches #"[0-9a-f]{8}" ts/kept-program-digest))))
+    (is (= @ts/kept-program-digest (ts/program-store-key (digest base) (jolt.host/runtime-fingerprint) (#'ts/codec-pins (seon.config/checkout))))
+        "this process's: its schema's, its runtime's and its checkout's codec pins")
+    (is (not= (ts/program-store-key (digest base) "runtime-a" {}) (ts/program-store-key (digest base) "runtime-b" {}))
+        "another runtime: another store, never an old encoding read by a new pin")
+    (is (not= (ts/program-store-key (digest base) "r" {"reference-code/konserve" "a"}) (ts/program-store-key (digest base) "r" {"reference-code/konserve" "b"}))
+        "another codec pin: another store")
+    (is (re-matches #"[0-9a-f]{8}" @ts/kept-program-digest))))
 
 (deftest an-ask-is-one-line-each-way-on-a-socket-of-its-own
   ;; docs/testing.md#a-root-costs-what-it-boots: ask opens its socket in-process (bin/ask was a perl process a
