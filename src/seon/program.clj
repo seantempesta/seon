@@ -1073,11 +1073,12 @@
 (defn file-reading-macros
   "The names of db's macros whose defining form refers to one of seon.program/file-readers (slurp, file-seq, io/resource): a form
   expanding one holds the analysis of what the macro read. One query of the program's facts, never a seek a reference. See
-  docs/source.md#indexing-a-tree."
+  docs/source.md#indexing-a-tree. It starts at the program's macros (a seek of :var/meta) and reads each one's live form, not at
+  the forms naming a file reader: those are ~100 against ~20 macros, each read in scattered leaves (7.9M ticks cold, 2.75M now)."
   {:malli/schema [:=> [:cat :seon.host/db] [:set :qualified-symbol]]}
   [db]
   (set (d/q '[:find [?mn ...] :in $ [?r ...]
-              :where [?mf :form/refs ?r] [?mf :form/defines ?m] [?m :var/meta :macro] [?m :var/name ?mn]]
+              :where [?m :var/meta :macro] [?m :var/form ?mf] [?mf :form/refs ?r] [?m :var/name ?mn]]
             db (vec file-readers))))
 
 (defn schema-dependents
