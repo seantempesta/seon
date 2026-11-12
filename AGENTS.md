@@ -130,6 +130,7 @@ Name things with Clojure's, its libraries', Jolt's and git's words: entity, attr
 
 - Fanning out, and building infrastructure instead of the product.
 - A number accepted without an estimate to hold it against: a test spending 8,000 times what it should, a suite rerun 52 times a day.
+- Switching a mechanism off, or routing around it, because it has a bug: a forked test child that died was answered by turning forks off, and every test ran as a cold process after that. A bug is fixed at its cause; nothing is switched off for it.
 - Batching tips, or calling a hand-picked set of tests a prove.
 - A rule added after every incident, instead of the cause fixed and the old text deleted.
 - A parallel system, or a mechanism built twice.
