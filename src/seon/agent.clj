@@ -898,6 +898,15 @@
         point (let [[c t] (pdb/point db)] (str c " " t))
         mix #(-> (str % "\ndata " point) lib/digest)
         cd (update-vals idx #(cond-> (:digest %) (:data? %) mix))
+        ;; recorded reads (seon.proofs/read-digests): a test at its newest green's digest while all it read is unchanged; the
+        ;; reads index made once a commit of this branch and kept in the agent's state, never per ask
+        held (let [h (fx/held-reads (vec (keys cd)))] (if (contract/error? h) {} h))
+        cd (if (seq held)
+             (let [at (pdb/point db)
+                   rd (or (when (= at (first (:reads-index @state))) (second (:reads-index @state)))
+                          (let [rd (program/reads-index g in {})] (swap! state assoc :reads-index [at rd]) rd))]
+               (proofs/read-digests cd rd held))
+             cd)
         ;; base's digests take the same point for those tests, so selection still asks what the code changed: a proof over the
         ;; data is selected by its reach, and its verdict is kept and found at the data it read
         bd (some-> b :index (as-> ix (into {} (for [[t {:keys [digest]}] ix] [t (cond-> digest (:data? (idx t)) mix)]))))
