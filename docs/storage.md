@@ -185,6 +185,10 @@ Proof: `datahike.test.run-ahead-test` ([forks](forks.md#datahike)).
 
 A deref of a connection whose writer does not stream reads the branch's head from the store and builds a db value from it every time (about 59k ticks, against 24 for a held value), so a process sees other processes' commits. A run-ahead's shown value is answered without it. A `:sync` writer with `{:writer {:backend :sync :streaming? true}}` derefs to the value it holds; root's main connection streams this way when root is the store's sole writer (```seon.db/open-main!```).
 
+## A moved head moves its live connection
+
+Datahike's `force-branch!` moves this process's live `:sync` connection to that branch with it: the connection's value becomes the new head and its writer's next commit is built on it, so a write after the move keeps what the move brought. Run-ahead writes pending on that connection refuse the move first. A connection in another process is not told; its writer must not share the branch ([who writes a branch](#who-writes-a-branch)). Datahike's `datahike.connector/follow-head!`; test `datahike.test.force-branch-live-conn-test`.
+
 ## A commit the store refuses
 
 A commit can throw on a value its writes hold (a value hasch or the codec cannot encode), and that must leave the agent alive, so the commit is the edge ([failure points](failure-points.md)): `seon.agent/commit!` catches the throw, drops the writes applied since the last good commit (`datahike.writer/abandon-pending!`), resets the agent's `:db` to the committed value (`seon.ctx` patches `@ctx` by the difference) and answers `:seon.agent/commit-refused`. The agent hears it beside its next eval's answer and as a message from seon: what its code wrote did not stay, the definitions it evaluated are still in the process (`seon.agent-test/a-commit-the-store-refuses-leaves-the-agent-alive`; a ratio inside a large value, `seon.db-test/a-large-value-holding-ratios-commits-and-reads-back`).

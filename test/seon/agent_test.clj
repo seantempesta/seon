@@ -402,34 +402,48 @@
     (is (= 42 (ts/value-of (ts/value-of (:response answered)))) (str "the agent answered while its test held: " (pr-str answered)))
     (is (= {:pass 1 :fail 0 :error 0} result) (str "and the run answered green once let go: " (pr-str result)))))
 
-(deftest a-test-childs-run-ends-at-its-exit-though-a-grandchild-holds-its-pipe
+(deftest a-test-childs-run-ends-at-its-exit-though-it-forked-a-grandchild
   ;; agent a3 waited 3.5 h on main (2026-10-26) reading its test child's pipe to an end of file
-  ;; that never came: root's :tests in flight, the agent at 0% CPU. A process the test child forks
-  ;; holds the write end past the child's exit. The read ends at the end of file or the child's
-  ;; exit, whichever comes first, and the child marks its end FD_CLOFORK so nothing it forks holds it.
-  ;; The grandchild here waits on a pipe of its own, which the test closes after the read. A
+  ;; that never came: root's :tests in flight, the agent at 0% CPU. A process the test child forked
+  ;; held the write end past the child's exit. A forked child holds only what it is given
+  ;; (docs/processes.md#a-child-holds-what-it-is-given), so the grandchild here, given a pipe of its own
+  ;; to wait on, holds no copy of the child's, and the child's exit is the read's end of file. A
   ;; regression waits for ever (no clock may end it): a hang is this test's red. The result line,
-  ;; longer than the reader's 1 MB read, is read whole after the exit
+  ;; longer than the reader's 1 MB read, is read whole
   (let [result (pr-str {:pass 1 :fail 0 :error 0 :reports [] :pad (apply str (repeat 1200000 "x"))})
-        run (fn [clofork?]
-              (let [[r w] (sock/socketpair)
-                    [gr gw] (sock/socketpair)
-                    pid (lib/fork! {:refused (fn [n] {:refused n}) :parent identity
-                                    :child (fn []
-                                             (lib/c-close r) (lib/c-close gw)
-                                             (when clofork? (sock/clofork! w))
-                                             (lib/fork! {:refused (fn [_] nil) :parent (fn [_] nil)
-                                                         :child (fn [] (let [rd (sock/line-reader gr)] (loop [] (when-not (= :eof (rd)) (recur)))))})
-                                             (sock/write-line! w result))})]
-                (lib/c-close w) (lib/c-close gr)
-                (try (agent/read-to-exit r pid)
-                     (finally (lib/c-close r) (lib/c-close gw)))))]
-    (let [held (run false)]
-      (is (= {:line result :held? true} (dissoc held :status)) "the child's exit ends the read though a process it forked holds the pipe")
-      (is (= {:exit 0} (:status held)) "and the child exited, not killed")
-      (is (= [:seon.test/pipe-held] (keep :seon.error/type (:reports (agent/test-run-answer (:line held) (:status held) true))))
-          "and the run's answer names the held pipe beside what the child wrote"))
-    (is (= {:line result :held? false} (dissoc (run true) :status)) "with FD_CLOFORK on its end, the child's exit is the pipe's end of file")))
+        [r w] (sock/socketpair)
+        [gr gw] (sock/socketpair)
+        pid (lib/fork! {:fd w :keep #{gr} :refused (fn [n] {:refused n}) :parent identity
+                        :child (fn []
+                                 (lib/fork! {:keep #{gr} :refused (fn [_] nil) :parent (fn [_] nil)
+                                             :child (fn [] (let [rd (sock/line-reader gr)] (loop [] (when-not (= :eof (rd)) (recur)))))})
+                                 (sock/write-line! w result))})]
+    (lib/c-close gr)
+    (let [read (try (agent/read-to-exit r pid)
+                    (finally (lib/c-close r) (lib/c-close gw)))]
+      (is (= {:line result :status {:exit 0}} read) "the child's exit is the end of file, its grandchild still waiting"))))
+
+(deftest two-test-runs-at-once-each-read-their-child-to-its-end
+  ;; docs/processes.md#a-child-holds-what-it-is-given: an agent runs the test service's items at once, each a run of its own
+  ;; (seon.repl/serve-item!); a child of one run kept the other run's pipe end, so that run's end of file waited on the
+  ;; other child and it answered a :pipe-held error with no report (bin/check agent-checks, 2026-11-12). Here run a's test
+  ;; parks on a fifo until run b's test has run and opened it, so a's child is alive the whole time b's pipe is; each run
+  ;; answers its own test, green, and nothing else. A regression waits for ever on b's end of file (no clock may end it)
+  (let [fifo (str (seon.config/checkout) "/target/runs/two-runs-" (random-uuid))
+        _ (clojure.java.shell/sh "mkfifo" fifo)
+        nss ["(ns app.twa-test (:require [clojure.test :refer [deftest is]])) (deftest waits (is (= \"b ran\" (slurp " (pr-str fifo) "))))"
+             "(ns app.twb-test (:require [clojure.test :refer [deftest is]])) (deftest runs (spit " (pr-str fifo) " \"b ran\") (is (= 1 1)))"]
+        run "(let [go (fn [n] (clojure.core.async/io-thread (seon.agent/run-tests-forked 100000000 #{} :main (fn [_] nil) #{n})))
+                   a (go 'app.twa-test) b (go 'app.twb-test)
+                   pick (fn [r] (select-keys r [:pass :fail :error :reports]))]
+               (pr-str {:a (pick (clojure.core.async/<!! a)) :b (pick (clojure.core.async/<!! b))}))"
+        [_ _ two] (in-agent [(apply str nss) "nil" run])
+        v (some-> (:value two) clojure.edn/read-string)]
+    (.delete (java.io.File. fifo))
+    (is (= {:a {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var "#'app.twa-test/waits"}]}
+            :b {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var "#'app.twb-test/runs"}]}}
+           (some-> v (update-vals #(update % :reports (partial mapv (fn [x] (select-keys x [:type :var])))))))
+        (pr-str two))))
 
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-run-error-that-names-no-test-is-said-in-the-proves-line
   ;; 2026-11-12: agent-checks' first prove read {:error 1} and printed no reason: a run's report naming no test (a child that
@@ -451,9 +465,8 @@
   (let [reader (fn []
                  (let [[r w] (sock/socketpair)
                        [gr gw] (sock/socketpair)
-                       pid (lib/fork! {:refused (fn [n] {:refused n}) :parent identity
+                       pid (lib/fork! {:keep #{w gr} :refused (fn [n] {:refused n}) :parent identity
                                        :child (fn []
-                                                (lib/c-close r) (lib/c-close gw)
                                                 (sock/write-line! w "1")
                                                 (let [rd (sock/line-reader gr)] (loop [] (when (= [] (rd)) (recur))))
                                                 (sock/write-line! w "2"))})
@@ -461,7 +474,7 @@
                        sent (promise)
                        res (agent/read-to-exit r pid #(when (= "1" %)
                                                         (clojure.core.async/go (deliver sent (sock/write-line! gw "go")))))]
-                   (lib/c-exit (if (and (= {:line "2" :held? false} (dissoc res :status)) (= true @sent) (= {:exit 0} (:status res))) 0 3))))
+                   (lib/c-exit (if (and (= {:line "2"} (dissoc res :status)) (= true @sent) (= {:exit 0} (:status res))) 0 3))))
         pid (lib/fork! {:refused (fn [n] {:refused n}) :parent identity
                         :child (fn [] (jolt.host/main-carrier-run! reader))})]
     (is (= {:exit 0} (lib/wait-status pid))
@@ -1447,33 +1460,41 @@
   ;; the agent redefines, at its REPL as an agent changes the platform, a function its REPL proc calls
   ;; after each eval: seon.agent/on-the-wire, which makes the reply) answers that request with the one error
   ;; map, and the agent goes on: it repairs the function at its REPL and works on, the same process
-  (let [[_ pid broken repaired after pid'] (in-agent (fn [_]
+  (let [[_ pid broken repaired after pid' on-main] (in-agent (fn [_]
                                                ["(def p0 (seon.lib/c-getpid))"
                                                 "p0"
                                                 "(in-ns 'seon.agent) (clojure.core/defn on-the-wire [_] (throw (ex-info \"boom: the loop's own function\" {:x 1})))"
                                                 "(in-ns 'seon.agent) (clojure.core/defn on-the-wire [r] (dissoc r :value))"
                                                 "(+ 20 22)"
-                                                "(seon.lib/c-getpid)"]))]
+                                                "(seon.lib/c-getpid)"
+                                                ;; the defect reaches root as data (its :platform problem on main), never only as text on
+                                                ;; the agent's stderr: named, so it ends at root's quiet if it never comes
+                                                {:op :eval :agent "root"
+                                                 :code (str "(let [db (seon.system/await-db sys \"the agent's defect on main\""
+                                                            " #(seq (datahike.api/q '[:find ?e :where [?e :seon.error/class :platform] [?e :seon.error/message ?m]"
+                                                            " [(clojure.string/includes? ?m \"boom: the loop\")]] %)))]"
+                                                            " (if (seon.contract/error? db) (:seon.error/type db) :on-main))")}]))]
     (is (= "boom: the loop's own function" (get-in broken [:ex :seon.error/message])) (str "the request is answered with its error: " (pr-str broken)))
     (is (= 'seon.repl/serve! (get-in broken [:ex :seon.error/operation])) "named by the boundary it reached")
     (is (some? repaired) (str "the repair is answered: " (pr-str repaired)))
     (is (= 42 (:value after)) (str "and the agent works on: " (pr-str after)))
-    (is (= (:value pid) (:value pid')) "in the same process")))
+    (is (= (:value pid) (:value pid')) "in the same process")
+    (is (re-find #":on-main" (pr-str on-main)) (str "and the defect is on main as a :platform problem: " (pr-str on-main)))))
 
 (defn- started "The line the child writes as test var v starts." {:malli/schema [:=> [:cat :string] :string]}
   [v] (pr-str {:seon.test/started v}))
 
 (deftest a-killed-test-run-names-the-test-that-was-running
   (testing "a child killed while running app-test/slow: that test has no verdict (proofs/results), and its death is named with how the child ended"
-    (let [run (agent/test-run-answer (started "#'app-test/slow") {:signal 9} false)]
+    (let [run (agent/test-run-answer (started "#'app-test/slow") {:signal 9})]
       (is (= {} (proofs/results run)) "a death is no verdict")
       (is (= [] (proofs/test-run-errors run)) "the death is the running test's, not an anonymous run error")
       (is (= ["#'app-test/slow" {:signal 9}] ((juxt :var :exit) (first (:reports run)))))))
   (testing "a child that wrote its result last: the result"
     (let [res {:pass 1 :fail 0 :error 0 :test 1 :reports [{:type :pass :var "#'app-test/fast" :message nil}]}]
-      (is (= res (agent/test-run-answer (pr-str res) {:exit 0} false)))))
+      (is (= res (agent/test-run-answer (pr-str res) {:exit 0})))))
   (testing "a child that died before any test started: one run error naming its exit"
-    (let [run (agent/test-run-answer nil {:exit 1} false)]
+    (let [run (agent/test-run-answer nil {:exit 1})]
       (is (= {} (proofs/results run)))
       (is (= 1 (count (proofs/test-run-errors run)))))))
 
@@ -2122,6 +2143,36 @@
     (is (str/includes? plan "Build the thing") "its plan what was asked")
     (is (string? started-by) "and who to tell how it ends")
     (is (re-find #"no template" (str (:seon.error/message (:value b)))) "a template that isn't one says so")))
+
+(deftest a-redefinition-in-an-agent-reaches-a-caller-compiled-into-the-binary
+  ;; docs/source.md#the-binary-records-its-program: an agent runs main's program compiled into the binary, and a form it
+  ;; evaluates is its branch's program, so a redefinition reaches the code main's binary compiled, its direct-linked calls
+  ;; included (Jolt writes a redefinition through to its direct-linked sites). Written green: the property holds on the
+  ;; release build today (an agent's redefinition of seon.lib/r2 reached the compiled seon.agent/mem-mb, 2026-11-12); this
+  ;; keeps it from regressing if Jolt's build changes. seon.fx/unreadable, compiled, compares its path with
+  ;; seon.config/shipped-file: redefined, the same call takes the config's branch
+  (let [[before _ after] (in-agent ["(seon.fx/unreadable \"zz.edn\" \"{:a 1}\")"
+                                    "(in-ns 'seon.config) (def shipped-file \"zz.edn\")"
+                                    "(seon.fx/unreadable \"zz.edn\" \"{:a 1}\")"])]
+    (is (nil? (:value before)) (str "before: the EDN reads " (pr-str before)))
+    (is (re-find #"the config does not satisfy" (str (:value after))) (str "after: the compiled caller took the redefined value " (pr-str after)))))
+
+(deftest a-wait-on-main-whose-test-throws-answers-the-throw-and-the-write-stands
+  ;; docs/flow.md#the-step-fn-contract-every-proc-follows: a wait on main (seon.system/await-db) is the api's state, checked on each
+  ;; commit as of that commit, never a watch run inside the writer's commit. A watch's pred that threw went into the writer's
+  ;; reset! inside commit-batch: the stored commit was taken for a failed one (refused, then retried), and the wait was never
+  ;; answered (bin/check problems overran at its wait on the stall, web's land and runtime's, 2026-11-12). Red before: the
+  ;; write answered refused (and the wait never ends: a hang is this test's red)
+  (with-agent {}
+    (fn [{:keys [eval-root]}]
+      (let [ev (comp root-value eval-root)
+            text (str "await-throws-" (random-uuid))
+            r (ev (str "(let [p (future (seon.system/await-db sys (fn [db] (when (datahike.api/q '[:find ?e . :in $ ?t :where [?e :note/text ?t]] db " (pr-str text) ")"
+                       "                                                  (throw (ex-info \"the wait's test threw\" {}))))))"
+                       "      w @(seon.system/transact-main! sys [{:note/text " (pr-str text) " :note/agent :t}])]"
+                       "  (if (:ok w) [:written (:seon.error/message @p)] [:refused w]))"))]
+        (is (= [:written] (take 1 r)) (str "the write stands: " (pr-str r)))
+        (is (re-find #"the wait's test threw" (str (second r))) (str "and the wait answers the throw: " (pr-str r)))))))
 
 (def ^:private not-running
   "Root-REPL code: a function true of the outcomes a task's work stands at once its agent's end is judged and it waits on nothing of
@@ -2849,7 +2900,7 @@
     (is (= "#'app.t/b" (:var (first errors))) "on the test that was running")
     (is (= :seon.test/unreadable-line (:seon.error/type (first errors))))
     (is (= #{"#'app.t/a" "#'app.t/c"} (:ended acc)) "the tests around it are taken as before")
-    (is (= :error (get-in (agent/test-run-answer (enc {:a #'clojure.core/inc}) {:exit 0} false) [:reports 0 :type]))
+    (is (= :error (get-in (agent/test-run-answer (enc {:a #'clojure.core/inc}) {:exit 0}) [:reports 0 :type]))
         "a last line that does not read is the run's :error, not the agent's death")))
 
 (deftest a-tests-ended-line-keeps-the-live-heap-it-left

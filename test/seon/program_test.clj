@@ -814,7 +814,8 @@
     (let [r (update-vals (program/graph-index g (assoc-in in [:config :seon.env/schemas] "s") nil) :reads)]
       (is (contains? (r 'app.fc-test/starts-a-process) [:root]) "a test starting processes reads what the system runs")
       (is (contains? (r 'app.fc-test/reads-schemas) [:config :seon.env/schemas]) "and one reaching the schema reader, the schema class")
-      (is (not (contains? (r 'app.fc-test/pure) [:root])) "a pure test reads neither"))
+      (is (not (contains? (r 'app.fc-test/pure) [:root])) "a pure test reads neither")
+      (is (every? #(contains? % [:env]) (vals r)) "and every test reads :env, the runtime's pins among it"))
     (is (not (schemas 'boots-a-root)) "a test reaching src's use of the registry does not: 1,426 of 1,469 tests do")
     (doseq [[c m] [[:bin bin] [:web web] [:system system] [:deps deps]]]
       (is (m 'starts-a-process) (str "a test starting processes takes the " c " class"))

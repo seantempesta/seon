@@ -572,4 +572,6 @@
    ;; in a shard the pull rows moved with what the shard ran before (pull-attr 1870 to 2774 ticks, 7488 and 8560 B), and the
    ;; old rows held the cold first call; re-measured that way the two pulls read 24% fewer ticks, every other row within 1.25x
    :db/pull {:ticks 4150.87 :ns 12041.7 :bytes 19575.47 :what "d/pull of one attribute of an entity, by entity id (per pull)"}
-   :db/pull-attr {:ticks 1975.93 :ns 5387.5 :bytes 6768.0 :what "each attribute of a d/pull beyond its first (per attribute)"}})
+   ;; 2026-11-12 (Datahike 4f1860de, jolt/deps): a pull of named attributes reads the entity's :eavt range once, so a
+   ;; further attribute is a filter over datoms already read: 1,976 -> 592 ticks, 6,768 -> 4,112 B (fresh process)
+   :db/pull-attr {:ticks 591.9 :ns 2402.8 :bytes 4112.0 :what "each attribute of a d/pull beyond its first (per attribute)"}})

@@ -258,8 +258,9 @@
  :seon.agent/system [:set {:seon.db/to [:seon.doc/fact] :description "The doc sections that make up the agent's system message, when it names its own. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."} :seon.db/ref]
  ;; a person's name, a lookup ref, and its presence is what makes an agent a user: a location /user/<name> reads it (docs/users.md#what-each-thing-is)
  :seon.user/name [:and {:seon.db/identity true} :string]
- ;; the agents this one started, a user or an agent alike (docs/users.md#what-each-thing-is)
- :seon.agent/agents [:set {:seon.db/to [:seon.db/agent-fact] :description "The agents this one started. See docs/users.md#what-each-thing-is."} :seon.db/ref]
+ ;; who started this agent, a user or an agent: one ref on the child, written with the agent (seon.task/start-tx), so a fork is a
+ ;; parent and a child from its first datom; the agents one started are the reverse, :seon.agent/_parent (docs/users.md#what-each-thing-is)
+ :seon.agent/parent [:and {:seon.db/to [:seon.db/agent-fact] :description "The agent that started this one, a user or an agent; the agents an agent started are its :seon.agent/_parent. See docs/users.md#what-each-thing-is."} :seon.db/ref]
  ;; the ids of its evals a reader of its page opened (seon.system/opened!), on main; its turn writes each
  ;; on its branch as the eval's :seon.eval/opened (seon.agent/untaken-facts)
  :seon.agent/opened [:set {:description "The ids of its evals that a reader of its page opened, kept on main."} :string]
@@ -302,7 +303,7 @@
                                :seon.agent/main-program
                                :seon.agent/base-commit
                                :seon.agent/ns
-                               {:seon.agent/agents [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/turn :seon.agent/outcome :seon.agent/ended-turn :seon.agent/started-ms {:seon.agent/task [:seon.task/id :seon.task/plan :seon.task/outcome :seon.task/reason {:seon.task/started-by [:seon.user/name]}]} {:seon.agent/agents [:db/id]}]}
+                               {:seon.agent/_parent [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/turn :seon.agent/outcome :seon.agent/ended-turn :seon.agent/started-ms {:seon.agent/task [:seon.task/id :seon.task/plan :seon.task/outcome :seon.task/reason {:seon.task/started-by [:seon.user/name]}]} {:seon.agent/_parent [:db/id]}]}
                                {:seon.agent/task :seon.task/task-fact}
                                {:seon.agent/system [:db/id]}
                                {[:seon.model-call/_agent :tx :at] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated :seon.model-call/error :seon.model-call/forms :seon.model-call/basis {[:seon.eval/_call :tx :at] [:db/id :seon.eval/call-id :seon.eval/agent]}]}
@@ -310,7 +311,7 @@
                                {[:seon.message/_to :tx :at] [:seon.message/id {:seon.message/from [:seon.agent/key :seon.user/name :seon.system/id]} :seon.message/to :seon.message/body]}
                                {:seon.cite/_of :seon.cite/cite-fact}
                                {:seon.search/_of :seon.search/search-fact}] :seon.render/hiccup seon.render.ui/agent :seon.render/openai-compat seon.ctx.wire/agent-msgs}
-                       [:seon.agent/key :seon.agent/key] [:seon.agent/agents {:optional true} :seon.agent/agents] [:seon.agent/system {:optional true} :seon.agent/system]
+                       [:seon.agent/key :seon.agent/key] [:seon.agent/parent {:optional true} :seon.agent/parent] [:seon.agent/system {:optional true} :seon.agent/system]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status]
                        [:seon.agent/description {:optional true} :seon.agent/description]
@@ -338,8 +339,8 @@
  ;; process's status, its branch and turns, when it started, its name when it is a user, its task; the agents it started again, to
  ;; :seon.config.render/agent-tree-depth levels (a depth join), and below the last only their ids (its :seon.ctx/below option), so an entry says how
  ;; many are below it (docs/ctx.md#the-pattern)
- :seon.agent/entry [:map {:description "What an agent's entry reads where a user's pull joins the agents it started, to the configured depth (a depth join), and below the last level their ids alone (its :seon.ctx/below option). See docs/users.md#whats-on-screen." :seon.ctx/pattern [:seon.agent/key :seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/turn :seon.agent/outcome :seon.agent/ended-turn :seon.agent/started-ms {:seon.agent/task [:seon.task/id :seon.task/plan :seon.task/outcome :seon.task/reason {:seon.task/started-by [:seon.user/name]}]} {[:seon.agent/agents :seon.ctx/below [:db/id]] :seon.config.render/agent-tree-depth}]}]
- :seon.db/user-fact [:and {:seon.db/attributes true :seon.ctx/required {:seon.agent/agents "the sessions you started"} :seon.render/hiccup seon.render.ui/agent :seon.ctx/pattern [:seon.agent/key :seon.user/name :seon.render/hiccup {:seon.agent/agents :seon.agent/entry}]} :seon.db/agent-fact [:map [:seon.user/name :seon.user/name] [:seon.user/focus {:optional true} :seon.user/focus]]]
+ :seon.agent/entry [:map {:description "What an agent's entry reads where a user's pull joins the agents it started, to the configured depth (a depth join), and below the last level their ids alone (its :seon.ctx/below option). See docs/users.md#whats-on-screen." :seon.ctx/pattern [:seon.agent/key :seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/turn :seon.agent/outcome :seon.agent/ended-turn :seon.agent/started-ms {:seon.agent/task [:seon.task/id :seon.task/plan :seon.task/outcome :seon.task/reason {:seon.task/started-by [:seon.user/name]}]} {[:seon.agent/_parent :seon.ctx/below [:db/id]] :seon.config.render/agent-tree-depth}]}]
+ :seon.db/user-fact [:and {:seon.db/attributes true :seon.ctx/required {:seon.agent/_parent "the sessions you started"} :seon.render/hiccup seon.render.ui/agent :seon.ctx/pattern [:seon.agent/key :seon.user/name :seon.render/hiccup {:seon.agent/_parent :seon.agent/entry}]} :seon.db/agent-fact [:map [:seon.user/name :seon.user/name] [:seon.user/focus {:optional true} :seon.user/focus]]]
  ;; ---- a citation: what an entity cites, an entity of its own (docs/references.md#an-entity-cites) ----
  ;; its content id, "<of> <target>": the citing entity's identity value (a task's :seon.task/id, an agent's
  ;; :seon.agent/key) and its target's (seon.ref/target-value: an address, a name, an id, a key or a path)
@@ -496,7 +497,7 @@
                      [:enum :running :parked :told :cap :done :ready :gate :merged :behind :dead :lost :killed :refused :closed]]
  ;; why it stands so: the agent's own words, or root's (the death, a refused start)
  ;; the branch of the agent that launched this task (my.task/launch!), told how it ends (seon.reconcile/tell-tx)
- ;; who started it, a user or an agent: its agent, when it starts, is in that one's :seon.agent/agents (seon.task/start-tx; docs/users.md#what-each-thing-is)
+ ;; who started it, a user or an agent: its agent, when it starts, names that one its :seon.agent/parent (seon.task/start-tx; docs/users.md#what-each-thing-is)
  :seon.task/started-by [:and {:seon.db/to [:seon.db/agent-fact] :description "Who started the task, a user or an agent. See docs/users.md#what-each-thing-is."} :seon.db/ref]
  :seon.task/reason [:string {:description "Why the task stands as its outcome says: the agent's own words, or root's."}]
  :seon.task/reasons [:vector {:description "What the done rule said was not done when the task was last judged, each reason a map with what it is about (a proof's name, a problem's key, how far behind main). The same reasons twice in a row hold the task; they are retracted when a person continues it. See docs/tasks.md#the-done-rule."}
