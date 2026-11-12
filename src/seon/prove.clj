@@ -110,7 +110,8 @@
 
 (defn batch-tag
   "The value of SEON_PROVE_BATCH in every process batch bid starts: this service's process and the batch, so a reading of the
-  machine's processes (held-processes) names the batch each belongs to, a root a process test detaches among them."
+  machine's processes (held-processes) names the batch each belongs to, a root a process test detaches among them. See
+  docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :int] :string]}
   [bid] (str (lib/c-getpid) "-" bid))
 
@@ -132,7 +133,8 @@
   [it] [(:kind it :test) (boolean (:process? it)) (boolean (:binary? it))])
 
 (def ^:private plain
-  "The class of a test that reaches no process (seon.program/process-path): its batch is its test child alone."
+  "The class of a test that reaches no process (seon.program/process-path): its batch is its test child alone. See
+  docs/merging.md#the-test-service."
   [:test false false])
 
 (defn- expected
@@ -248,7 +250,7 @@
   Answers [st outputs]."
   {:malli/schema [:=> [:cat :map] [:tuple :map [:vector :map]]]}
   [st]
-  (loop [st st outs [] ld nil held ::unread fresh #{}]
+  (loop [st st outs [] ld nil held nil read? false fresh #{}]
     ;; the most valuable queued item, by one reduce over the items (no seq of them: a lazy filter and apply max-key
     ;; allocated 1.5 KB an item queued, each grant)
     (let [bid0 (:bid st 0)
@@ -259,9 +261,12 @@
           ;; the processes the running batches hold, read once a pass and only while one runs (held-processes): what decides
           ;; whether one more fits under :max-processes; each reading is kept as its classes' peaks (measured)
           ;; plain tests alone (each batch its child) need no reading: they hold what they count
-          held (cond (not (and free? (pos? running) (= ::unread held) (some #(= :queued (:status %)) (vals (:items st))))) held
+          ;; (held: nil unread, or ps answered none, and then nothing more is granted while one runs)
+          reading? (and free? (pos? running) (not read?) (some #(= :queued (:status %)) (vals (:items st))))
+          held (cond (not reading?) held
                      (every? #(= plain (item-class %)) (vals (:items st))) {}
-                     :else (or (held-processes) ::unknown))
+                     :else (held-processes))
+          read? (or read? reading?)
           st (if (and (map? held) (empty? fresh)) (measured st held fresh) st)
           flight (when (map? held) (in-flight st held))
           ;; each asker's work left: the measured ms of its queued items, one pass (an item many wait on counts for each)
@@ -312,7 +317,7 @@
                                  {:op :fx :kind :item :req {:kind (:kind it) :tree (:tree it) :checkout (:checkout it)
                                                             :name (if (#{:build :seed} (:kind it)) (:kind it) (first k)) :digest (second k)
                                                             :binary? (boolean (:binary? it)) :bound (:bound it) :seon.prove/batch (batch-tag bid)}}))]
-          (recur st (conj outs m) ld held (conj fresh bid)))))))
+          (recur st (conj outs m) ld held read? (conj fresh bid)))))))
 
 (defn- item-ended
   "Item k ended with result r ({:pass :fail :error} counts, its :failures; an error: its batch died): each asker waiting on
