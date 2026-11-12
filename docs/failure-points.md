@@ -80,6 +80,7 @@ An eval's record is plain data: a value in it that is not (a library's record in
 | the agent process's loop | `seon.repl/serve!` | Flow's error channel: the cause on stderr, the request answered with the error map (`seon.repl/defect-answer`), and the agent goes on so it can repair what it broke |
 | a test run in an agent's test child | `seon.agent/run-tests-forked` | an `:error` report |
 | A test in an agent's test child waits on what nothing can deliver | ```seon.agent/test-child-runs!``` (``jolt.host/on-quiescent!``) | `:seon.test/deadlock` `{:test :dump}` thrown into the test's fiber, once: that test is `:error`, and its report and the run's answer reach the agent |
+| a defect in a test run's fold (a throw in its resume or its step) | ```seon.agent/test-run-step``` (```seon.agent/fold-threw```) | every live child killed and its proc removed; the throw is the run's answer, raised by ```seon.agent/run-tests-forked``` as the run's own: the run ends, never hangs |
 | a value the test child sends that does not read as EDN | ```seon.agent/child-codec``` | `:seon.test/unreadable-line` with the value's head; the test it was about ends `:error` once and the fold goes on. The producer sends only what crosses EDN (```seon.agent/test-report```) |
 | a namespace's tests in a proof run (a fixture that throws, or past its tick budget) | `seon.proofs/run-tests!` | each unreported test an `:error` result, never stored |
 | an effect worker performing a request | `seon.fx/worker-proc` | `:seon.fx/defect` as the outcome: the asker is always answered |

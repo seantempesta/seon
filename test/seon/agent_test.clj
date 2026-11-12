@@ -2438,7 +2438,7 @@
         done (fn [{:keys [pid answer]}] (let [ans (a/poll! answer)] (flow/update! g #(update % :procs dissoc pid)) ans))
         ;; the run's answer: n tests passed, its children's exit status held, and each ended child's run directory handed
         ;; back with it for removal after the answer (run-children!), never removed inside the fold's step
-        answered (fn [r n] (let [{ans ::agent/answer dirs ::agent/run-dirs :as got} (done r)]
+        answered (fn [r n] (let [[ans dirs :as got] (done r)]
                              (is (and (= n (:pass ans) (:test ans)) (zero? (:error ans)) (= {:exit 0} (:exit ans))) (pr-str got))
                              (is (= n (count dirs)) (str "one run directory per ended child, handed back with the answer: " (pr-str dirs)))))]
     (try

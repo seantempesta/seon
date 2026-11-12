@@ -1252,7 +1252,7 @@
                                   (str "cannot fork the tests: " k " Chez threads active (a running future?)") {:active-threads k}))))))
 
 (defn- run-answered
-  "st with its run's answer put on its :answer, once, as {::answer x ::run-dirs dirs}: dirs, the run directories of
+  "st with its run's answer put on its :answer, once, as [x dirs]: dirs, the run directories of
   the children it ended, which run-children! removes after it takes the answer (a fold's step answers and never
   waits on a removal: an rm and an LMDB close are effects, not a step's work); x, when the fold threw, that throw
   (::threw); else, once every shard is done and no child is left, a shard's refused fork, or every shard's reports in
@@ -1260,7 +1260,7 @@
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
   (let [shards (:shards st)
-        put! (fn [x] (a/put! (:answer st) {::answer x ::run-dirs (:run-dirs st [])}))]
+        put! (fn [x] (a/put! (:answer st) [x (:run-dirs st [])]))]
     (cond
       (:answered st) st
       (:threw st) (do (put! {::threw (:threw st)}) (assoc st :answered true))
@@ -1367,7 +1367,7 @@
     (flow/update! g (fn [cfg] (assoc-in cfg [:procs pid] {:proc (flow/process #'test-run-step)
                                                           :args {:answer answer :plan plan :ticks ticks :budgets budgets
                                                                  :shards (vec shards) :forked forked :say say}})))
-    (let [{res ::answer dirs ::run-dirs} (a/<!! answer)]
+    (let [[res dirs] (a/<!! answer)]
       (flow/update! g (fn [cfg] (update cfg :procs dissoc pid)))
       ;; the ended children's run directories, removed once the run has answered and its fold is gone
       (when (seq dirs) (apply lib/remove-tree! dirs))
