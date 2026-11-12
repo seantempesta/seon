@@ -165,9 +165,10 @@
   agent-step, the turn loop), as load-string stops; then done. A top-level (do ...) is its
   forms, each read and evaluated as a top-level form, as Clojure's compiler unrolls it, so a
   definition inside it is program (docs/prompt.md); so is a top-level (load-file \"path\") of an
-  existing file, as its file's forms (docs/agent.md#the-repl)."
-  {:malli/schema [:=> [:cat :seon.wire/msg] :any]}
-  [{:keys [reply] :as req}]
+  existing file, as its file's forms (docs/agent.md#the-repl). Answers each reply in order, as its :reply made it (the
+  middleware's chain, around-reply; identity when none), \"done\" last: values threaded through the loops that make them."
+  {:malli/schema [:=> [:cat :seon.wire/msg] [:vector :map]]}
+  [{:keys [reply] :or {reply identity} :as req}]
   (let [eval-fn (:repl/eval-fn req eval)
         ;; the form's budget of work (engine ticks): the request's, else the config key for an
         ;; agent's model and an outside agent; root's own platform requests run unbounded
@@ -190,13 +191,14 @@
                   (and (seq? form) (= 'load-file (first form)) (= 2 (count form)) (string? (second form))
                        (.isFile (java.io.File. ^String (second form))))
                   ;; the file's end is this form's: the request's next form runs after it
-                  (let [[ns' how] (forms! (slurp (second form)) ns top)] [ns' (if (= :eof how) :ok how)])
+                  (let [[ns' how rs] (forms! (slurp (second form)) ns top)] [ns' (if (= :eof how) :ok how) rs])
 
                   (do-parts form src ns)
                   (let [parts (do-parts form src ns)]
-                   (loop [ns ns forms (next form) [[t l] & more] parts lead lead]
-                    (let [[ns' how] (exec! (first forms) t (not-empty (apply str (interpose "\n" (keep identity [lead l])))) ns top)]
-                      (if (and (= :ok how) more) (recur ns' (next forms) more nil) [ns' how]))))
+                   (loop [ns ns forms (next form) [[t l] & more] parts lead lead acc []]
+                    (let [[ns' how rs] (exec! (first forms) t (not-empty (apply str (interpose "\n" (keep identity [lead l])))) ns top)
+                          acc (into acc rs)]
+                      (if (and (= :ok how) more) (recur ns' (next forms) more nil acc) [ns' how acc]))))
 
                   :else
                  (let [n (dec (:n (swap! agent/state update :n (fnil inc 0))))
@@ -209,32 +211,35 @@
                        ;; *1 *2 *3 *e as clojure.main/repl keeps them; clojure.test reports to
                        ;; *test-out*, bound to the form's output as nREPL does
                        {v1 :v1 v2 :v2 v3 :v3 e1 :e} (:repl-vars @agent/state)
-                       [tag v ns'] (try (binding [*ns* ns *out* sout *err* serr clojure.test/*test-out* sout *1 v1 *2 v2 *3 v3 *e e1
-                                                         ;; the REPL's names in every namespace (seon.agent/repl-name), but for a
-                                                         ;; definition of the program, which resolves as written
-                                                         jolt.host/*resolve-unresolved* (when-not (defines-program? form ns) agent/repl-name)]
-                                                (let [v (intr/run ticks alloc #(eval-fn form))] [:ret v *ns*]))
-                                              (catch Throwable e [:err e ns]))
+                       ;; the eval fn answers the form as a value, {:repl/value v} or {:repl/thrown e} (seon.repl/wrap-cost's, where it ran,
+                       ;; so its trace is its own), with what each middleware adds for its reply (seon.repl/middleware), which the reply carries
+                       [tag v ns' adds] (try (binding [*ns* ns *out* sout *err* serr clojure.test/*test-out* sout *1 v1 *2 v2 *3 v3 *e e1
+                                                              ;; the REPL's names in every namespace (seon.agent/repl-name), but for a
+                                                              ;; definition of the program, which resolves as written
+                                                              jolt.host/*resolve-unresolved* (when-not (defines-program? form ns) agent/repl-name)]
+                                                      (let [a (intr/run ticks alloc #(eval-fn form))]
+                                                        (if (contains? a :repl/thrown)
+                                                          [:err (:repl/thrown a) ns (dissoc a :repl/thrown)]
+                                                          [:ret (:repl/value a) *ns* (dissoc a :repl/value)])))
+                                                    (catch Throwable e [:err e ns nil]))
                        ;; the form as the wire carries it, whole: its own text, else its EDN (a symbol, a number)
-                       common (cond-> {:id n :out (not-empty (str out)) :err-out (not-empty (str err)) :form (or src (sedn/encode form)) :repl/form form
-                                       :repl/src src :top top}
+                       common (cond-> (merge adds {:id n :out (not-empty (str out)) :err-out (not-empty (str err)) :form (or src (sedn/encode form)) :repl/form form
+                                                   :repl/src src :top top})
                                 lead (assoc :lead lead))]
                    (swap! agent/state assoc :repl-vars (if (= tag :ret) {:v1 v :v2 v1 :v3 v2 :e e1} {:v1 v1 :v2 v2 :v3 v3 :e (error-kept v)}))
                    (when (= tag :ret) (keep-source! v (:repl/src common)))
                    (if (= tag :ret)
-                     (do (reply (cond-> (merge common {:repl/value v :tag :ret})
-                                  ;; a move into a namespace whose own vars hide a helper says so, once, as it moves
-                                  (not= ns ns') (merge (some->> (shadowed ns') (hash-map :shadowed)))))
-                         [ns' :ok])
-                     (do (reply (let [m (merge common {:tag :err "status" (if (:interrupted (ex-data v)) ["interrupted"] ["eval-error"])})]
-                                 (assoc m :repl/ex (error-data v m))))
-                         [ns :err])))))
+                     [ns' :ok [(reply (cond-> (merge common {:repl/value v :tag :ret})
+                                        ;; a move into a namespace whose own vars hide a helper says so, once, as it moves
+                                        (not= ns ns') (merge (some->> (shadowed ns') (hash-map :shadowed)))))]]
+                     [ns :err [(reply (let [m (merge common {:tag :err "status" (if (:interrupted (ex-data v)) ["interrupted"] ["eval-error"])})]
+                                        (assoc m :repl/ex (error-data v m))))]]))))
         ;; code's forms in order, from ns: [ns' how], how :eof, :read (a read error) or :err; each
         ;; answer names its top-level form (:top, its place in the code; a top-level do's forms its own)
         (forms! [code ns top]
                  (let [r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. code))
                        starts (delay (reader/line-starts code))]
-                   (loop [ns ns prev 0 k 0]
+                   (loop [ns ns prev 0 k 0 acc []]
                      (let [form (try (binding [*ns* ns] (read {:eof ::eof} r)) (catch Throwable e e))
                            ;; where the reader stopped after the form (an eval never moves it), its text and the comments before it
                            end (when-not (or (= ::eof form) (instance? Throwable form))
@@ -242,29 +247,28 @@
                            src (when end (form-src code @starts form end))
                            lead (when end (reader/lead code prev end))]
                        (cond
-                         (= ::eof form) [ns :eof]
+                         (= ::eof form) [ns :eof acc]
 
                          (instance? Throwable form)
                          (let [n (:n (swap! agent/state update :n (fnil inc 0)))]
-                           (reply (let [m {:tag :err "status" ["eval-error"] :repl/phase :read :id (dec n)}]
-                                   (assoc m :repl/ex (error-data form m))))
-                           [ns :read])
+                           [ns :read (conj acc (reply (let [m {:tag :err "status" ["eval-error"] :repl/phase :read :id (dec n)}]
+                                                        (assoc m :repl/ex (error-data form m)))))])
 
                          :else
-                         (let [[ns' how] (exec! form src lead ns (or top k))]
-                           (if (= :ok how) (recur ns' end (inc k)) [ns' how])))))))
+                         (let [[ns' how rs] (exec! form src lead ns (or top k)) acc (into acc rs)]
+                           (if (= :ok how) (recur ns' end (inc k) acc) [ns' how acc])))))))
 ]
       (let [start (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state))
-            [ns how] (forms! (get req "code") start nil)]
+            [ns how rs] (forms! (get req "code") start nil)]
     ;; a read error leaves the agent's namespace as it was, and so does an eval that did not move it: one run inside it may have (an outside agent's reply)
     (when (and (not= :read how) (or (not= ns start) (and (get req "ns") (not (:within req)))))
       (swap! agent/state assoc :ns ns))
-    (reply {"status" ["done"]})))))
+    (conj rs (reply {"status" ["done"]}))))))
 
 ;; ---- middleware -------------------------------------------------------------------
 
 (defn- around-reply {:malli/schema [:=> [:cat :seon.wire/msg :seon.host/fn] :seon.wire/msg]}
-  [req f] (assoc req :reply (let [r (:reply req)] (fn [m] (r (f m))))))
+  [req f] (assoc req :reply (let [r (:reply req identity)] (fn [m] (r (f m))))))
 
 (defn- var-of
   "The var a qualified symbol names, nil when its namespace is not loaded or it has no such var."
@@ -360,16 +364,16 @@
 
 
 (defn- undo-definition!
-  "A definition that broke Seon's recording of it (the agent named a var of Seon's own that the recording itself calls, seon.program/form-of with another arity): its vars put back as they were before the form ran (l, the form's :before), since otherwise every later write of this agent throws and it can't be told, and that said as the eval's error. The eval path's entrant boundary (docs/failure-points.md); what the recording did not reach is the turn's (seon.turn/turn-error!). Throws."
-  {:malli/schema [:=> [:cat :map :any] :any]}
+  "A definition that broke Seon's recording of it (the agent named a var of Seon's own that the recording itself calls, seon.program/form-of with another arity): its vars put back as they were before the form ran (l, the form's :before), since otherwise every later write of this agent throws and it can't be told, and that said as the eval's error: answered as the error map its form's reply carries (wrap-record), so no throw crosses the reply chain and the
+  request's answers stay values. What the recording did not reach is the turn's (seon.turn/turn-error!)."
+  {:malli/schema [:=> [:cat :map :any] :seon.error/base]}
   [l e]
   (let [vars (vec (keys (:before l)))]
     (doseq [[s old] (:before l) :let [v (find-var s)] :when (and v (not (keyword? old)))]
       (alter-var-root v (constantly old)))
-    (throw (ex-info "definition undone"
-                    (contract/error :seon.repl/definition-undone #'undo-definition!
-                                    (str "your definition of " (clojure.string/join ", " vars) " was undone: Seon's own code calls that var, and recording your definition threw with it in place: " (ex-message e) ". Use a name of your own.")
-                                    {:vars vars})))))
+    (contract/error :seon.repl/definition-undone #'undo-definition!
+                    (str "your definition of " (clojure.string/join ", " vars) " was undone: Seon's own code calls that var, and recording your definition threw with it in place: " (ex-message e) ". Use a name of your own.")
+                    {:vars vars})))
 
 (defn wrap-cost
   "Per-form wall ms, allocated bytes, engine ticks (the work it did, the exact measure:
@@ -384,21 +388,21 @@
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
-    (let [last (volatile! nil)
-          ef (:repl/eval-fn req eval)]
+    (let [ef (:repl/eval-fn req eval)]
       (h (-> req
+             ;; the innermost eval fn, around the eval itself: the form's answer as a value, {:repl/value v} or {:repl/thrown e} (what
+             ;; eval-code reads; caught where it ran, its trace its own), its cost on it under ::cost, which the form's reply carries here
              (assoc :repl/eval-fn (fn [form]
-                                    (profile/measure! #(ef form)
-                                                      (fn [{:keys [ticks bytes wall-ns]}]
-                                                        (let [fns (profile/touched)]
-                                                          (agent/note-costs! fns)
-                                                          (vreset! last {:ms (/ (quot wall-ns 1000) 1000.0) :alloc-bytes bytes :ticks ticks
-                                                                         :fns (profile/top fns (cfg/value :seon.config.agent/form-top-fns))}))))))
+                                    (let [{:keys [ticks bytes wall-ns value thrown] :as m} (profile/measure! #(ef form))
+                                          fns (profile/touched)]
+                                      (agent/note-costs! fns)
+                                      (assoc (if (contains? m :thrown) {:repl/thrown thrown} {:repl/value value})
+                                             ::cost {:ms (/ (quot wall-ns 1000) 1000.0) :alloc-bytes bytes :ticks ticks
+                                                     :fns (profile/top fns (cfg/value :seon.config.agent/form-top-fns))}))))
              (around-reply (fn [m]
-                             (if-let [{:keys [fns] :as c} (when (or (contains? m :repl/value) (contains? m :repl/ex)) @last)]
-                               (do (vreset! last nil)
-                                   (cond-> (merge m (dissoc c :fns))
-                                     (seq fns) (assoc :fns fns)))
+                             (if-let [{:keys [fns] :as c} (::cost m)]
+                               (cond-> (merge (dissoc m ::cost) (dissoc c :fns))
+                                 (seq fns) (assoc :fns fns))
                                m))))))))
 
 (defn- ns-form?
@@ -438,20 +442,22 @@
   {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
   [h]
   (fn [req]
-    (let [last (volatile! nil)
-          ef (:repl/eval-fn req eval)]
+    (let [ef (:repl/eval-fn req eval)]
       (h (-> req
+             ;; the form's compiler account on its answer under ::record (wrap-cost's eval fn, inside, answers the form as a value),
+             ;; which the form's reply reads here
              (assoc :repl/eval-fn
                     (fn [form]
+                      ;; the analyzer's units come out through its tap, a callback (jolt.analyzer/*unit-tap*, seon.program/tap): its one cell
                       (let [acc (volatile! {:nodes [] :before {}})
                             ns0 *ns*
-                            nsf? (ns-form? form ns0)]
-                        (vreset! last nil)
-                        (try (binding [jolt.analyzer/*unit-tap* (program/tap acc)] (ef form))
-                             (finally (vreset! last (assoc @acc :ns (ns-name ns0) :ns-form? nsf? :ns-after (ns-name *ns*))))))))
+                            nsf? (ns-form? form ns0)
+                            a (binding [jolt.analyzer/*unit-tap* (program/tap acc)] (ef form))]
+                        (assoc a ::record (assoc @acc :ns (ns-name ns0) :ns-form? nsf? :ns-after (ns-name *ns*))))))
              (around-reply
                (fn [m]
-                 (let [l (when (or (contains? m :repl/value) (contains? m :repl/ex)) @last)
+                 (let [l (::record m)
+                       m (dissoc m ::record)
                        ;; Clojure's ns puts the name's metadata on the namespace; Jolt's drops it
                        ;; (jolt/ns-meta is the fix at its cause)
                        md (when (:ns-form? l) (not-empty (dissoc (meta (second (:repl/form m))) :line :column)))
@@ -465,7 +471,6 @@
                        ;; a def beside calls stays this eval (seon.program/definition-form?), and says so
                        nested? (and acct (not (program/definition-form? (:repl/form m) (the-ns (:ns l)))))
                        acct (when-not nested? acct)]
-                   (when l (vreset! last nil))
                    ;; a var the form unmapped is no longer program on this branch: its definition retracted
                    (let [gone (when (and l (= :agent (:mode @agent/state)) contract/record? (contains? m :repl/value))
                                 (not-empty (unmapped (agent/db) (:repl/form m) (the-ns (:ns l)))))
@@ -474,12 +479,16 @@
                    (if acct
                      (let [;; the vars this form makes that the branch did not hold before it (read before its transaction)
                            made (vec (remove #(pdb/eid (agent/db) :var/name %) (map :var (:defs acct))))
-                           [tx redefined] (try
-                                            (let [tx (when contract/record? (program/record-tx (agent/db) acct))]
-                                              ;; what this form's own transaction changes of an existing var's contract or
-                                              ;; docstring, read before it is applied (a form that defines nothing reads nothing)
-                                              [tx (when tx (program/meaning-changes (agent/db) tx))])
-                                            (catch Throwable e (undo-definition! l e)))]
+                           [tx redefined undone] (try
+                                                   (let [tx (when contract/record? (program/record-tx (agent/db) acct))]
+                                                     ;; what this form's own transaction changes of an existing var's contract or
+                                                     ;; docstring, read before it is applied (a form that defines nothing reads nothing)
+                                                     [tx (when tx (program/meaning-changes (agent/db) tx))])
+                                                   (catch Throwable e [nil nil (undo-definition! l e)]))]
+                      (if undone
+                       ;; its definition undone: the form's reply is that error, as an eval's error is
+                       (-> m (dissoc :repl/value) (assoc :tag :err "status" ["eval-error"] :repl/ex undone))
+                       (do
                        ;; a namespace made at this REPL takes its file by its name with its first form, on the branch, so it merges as any other's and reaches disk
                        (when tx (agent/transact! (cond-> tx (nil? (source/ns-file (agent/db) (:ns acct))) (conj {:ns/name (:ns acct) :ns/file (source/namespace-path (:ns acct))})))
                              ;; this process now runs this form for the vars it defines (seon.program/program-differs reads it)
@@ -494,7 +503,7 @@
                          ;; a var new in a program namespace may be a look, not a change: said where it lands, whatever form made it
                          ;; (loop 2: a def, eight turns; Data model's tasks: a scratch defn and a macro, unnoticed)
                          (seq made) (assoc :seon.repl/program-def made)
-                         (seq (program/unknown-refs acct)) (assoc :unknown-vars (program/unknown-refs acct))))
+                         (seq (program/unknown-refs acct)) (assoc :unknown-vars (program/unknown-refs acct))))))
                      (cond-> m
                        l (assoc :repl/defined (program/set-vars l))
                        (or nested? (and l (= :agent (:mode @agent/state)) (program/calls-eval? l)))
@@ -812,8 +821,7 @@
   {:malli/schema [:function [:=> [:cat :string] :seon.repl/answer] [:=> [:cat :string :map] :seon.repl/answer]]}
   ([code] (eval-string code {:origin :model}))
   ([code req]
-   (let [answers (volatile! [])
-         req (issued req)
+   (let [req (issued req)
          id (:eval-id req)
          ;; the writes its forms make and its record name it (seon.agent/transact!'s tx-meta); an
          ;; eval inside it (a context read's) names its own, then this one's again
@@ -827,22 +835,22 @@
                 ;; realized is the error; text only for a reader who is not a model (whose message is printed at its request)
                 ;; its forms left the agent no db (a test's cleanup, run at this REPL): the agent goes on as it was, its walk made
                 ;; again, and ctx rebuilt by the state's watch (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
-                answered (fn [] (when (and (:db before) (nil? (:db @agent/state))) (reset! agent/state (dissoc before :walk)))
-                               (let [[r rec] (handled id code (cond-> (repaired (response @answers) req)
+                answered (fn [answers] (when (and (:db before) (nil? (:db @agent/state))) (reset! agent/state (dissoc before :walk)))
+                               (let [[r rec] (handled id code (cond-> (repaired (response answers) req)
                                                                 (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))) req)]
                                   [r rec (when-not (#{:model :insert} (:origin req)) (text-of rec))]))
-                [r rec text] (try ((handler) (assoc req "code" code :reply #(vswap! answers conj %)))
-                              (answered)
-                              (catch Throwable e
-                                (let [em (agent/error-map e)]
-                                  (vswap! answers conj {:tag :err :err em})
-                                  (answered))))]
+                ;; the handler answers its replies in order (eval-code's); a defect past every form's own edge (a middleware's, the
+                ;; printer's as it makes a value plain) is the request's error, beside the replies it has
+                answers (try ((handler) (assoc req "code" code))
+                             (catch Throwable e [{:tag :err :err (agent/error-map e)}]))
+                [r rec text] (try (answered answers)
+                                  (catch Throwable e (answered (conj answers {:tag :err :err (agent/error-map e)}))))]
             (swap! agent/state assoc-in [:results (keyword (name (:handle r)))] r)
             ;; the handle a printed cut reads through, as the REPL's *1 is read
             (intern (create-ns 'result) (symbol (name (:handle r))) r)
             ;; how main differs from the branch, said with the answer an outside agent's seon_eval gets, and never recorded
             ;; (seon.agent/main-difference): computed at t, so the agent is never surprised at done
-            (let [fns (when (some :fns @answers) (into [] (mapcat :fns) @answers))
+            (let [fns (when (some :fns answers) (into [] (mapcat :fns) answers))
                   res (record! (cond-> r text (assoc :text text) fns (assoc :fns fns))
                                (cond-> rec fns (assoc :seon.eval/fns fns))
                                code req)

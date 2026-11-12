@@ -95,6 +95,6 @@
   :seon.config.agent/test-ticks). Example: (:ticks (my.test/cost #(app.calc/total (range 100)))) See docs/testing.md#testing-in-the-world."
   {:malli/schema [:=> [:cat :seon.host/fn] :map]}
   [thunk]
-  (let [v (volatile! nil) r (volatile! nil)]
-    (profile/measure! #(vreset! r (thunk)) (fn [d] (vreset! v d)))
-    {:ticks (:ticks @v) :bytes (:bytes @v) :ms (:ms @v) :value @r}))
+  (let [m (profile/measure! thunk)]
+    (when-let [e (:thrown m)] (throw e))
+    {:ticks (:ticks m) :bytes (:bytes m) :ms (:ms m) :value (:value m)}))

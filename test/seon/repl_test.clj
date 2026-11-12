@@ -1282,10 +1282,9 @@
 
 (clojure.test/deftest an-evals-answer-has-one-error-render
   ;; docs/errors.md: an error is said once, by the one error map; a reply carries no printed copy under any key, and what the form wrote to *err* stays its own stream
-  (let [replies (fn [code] (let [got (volatile! []) old @agent/state]
+  (let [replies (fn [code] (let [old @agent/state]
                              (try (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
-                                  ((repl/handler) {"code" code :reply #(vswap! got conj %)})
-                                  @got
+                                  ((repl/handler) {"code" code})
                                   (finally (reset! agent/state old)))))
         said-outside (fn [rs msg] (for [r rs [k v] (dissoc r :repl/ex) :when (and (string? v) (str/includes? v msg))] k))
         ran (replies "(/ 1 0)")
@@ -1463,22 +1462,25 @@
           "an asker that works no task loses nothing")))
 
 ;; docs/flow.md#the-step-fn-contract-every-proc-follows (AGENTS.md section 3 step 4): a value made by one eval is threaded
-;; through the calls that make it, never a cell: code's forms and a top-level form's own read each other by letfn. A form's
-;; cost and compiler account still cross its throw in a cell (wrap-cost's, wrap-record's last): on Jolt a trace is the
-;; catcher's, so only the entrant boundary (eval-code's try) may catch, until Jolt keeps a trace from its throw
+;; through the calls that make it, never a cell: code's forms read each other by letfn; a form's cost (seon.profile/measure!'s
+;; answer) and its compiler account ride its eval fn's answer to its reply; each reply is the value its middleware made of it, and
+;; the handler answers them in order. The one cell left is the analyzer's unit tap (jolt.analyzer/*unit-tap*, a callback:
+;; seon.program/tap). A trace is its throw's on Jolt (7ecffdff), so the eval is caught where it ran (wrap-cost)
 (deftest the-eval-path-threads-its-values
-  (is (= 0 (count (re-seq #"\(volatile! " (clojure.repl/source-fn 'seon.repl/eval-code)))) "code's forms by letfn")
-  (let [rs (let [got (volatile! []) old @agent/state]
-             (try (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
-                  ((repl/handler) {"code" "(+ 1 2) (do (load-string \"(def x 1)\") (/ 1 0))" :reply #(vswap! got conj %)})
-                  @got
-                  (finally (reset! agent/state old))))]
+  (let [cells (fn [v] (count (re-seq #"\(volatile! " (clojure.repl/source-fn v))))]
+    (is (= 0 (cells 'seon.repl/eval-code)) "code's forms by letfn")
+    (is (= 0 (cells 'seon.repl/wrap-cost)) "a form's cost on its eval fn's answer")
+    (is (= 1 (cells 'seon.repl/wrap-record)) "its account too: the analyzer's tap alone")
+    ;; eval-string's two cells left are the stream's sent counters, a running stream's state (its proc's, task atoms-context)
+    (is (not (re-find #"answers \(volatile!" (clojure.repl/source-fn 'seon.repl/eval-string))) "the replies are the handler's answer"))
+  (let [old @agent/state
+        rs (try (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
+                ((repl/handler) {"code" "(+ 1 2) (do (load-string \"(def x 1)\") (/ 1 0))"})
+                (finally (reset! agent/state old)))]
     (is (= [true true true false] (mapv #(contains? % :ticks) rs)) (str "each form's reply its own cost (a do's forms each their own), the done none: " (pr-str rs)))
-    (is (= 3 (:repl/value (first rs))))))
+    (is (= 3 (:repl/value (first rs))))
+    (is (some :repl/ex rs) "the error is a reply, its form's")))
 
-;; docs/agent.md#small-answers: a multimethod's source is its defmulti and each of its methods as this branch records them, in file
-;; order: (source seon.repl/place) showed the defmulti alone, and an agent spent nine turns reaching (defmethod place :ns ...) by
-;; get-method, grep and file lines (real-task loop, 2026-11-12)
 (deftest a-multimethods-source-holds-its-methods
   (let [text "(ns app.mm)\n(defmulti kind (fn [x] (:k x)))\n\n(defmethod kind :a\n  [x] :was-a)\n\n(defmethod kind :b\n  [x] :was-b)\n"
         db (my.test/with (my.test/world) (my.test/code 'app.mm text))

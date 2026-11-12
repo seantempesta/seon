@@ -422,9 +422,8 @@
   (let [[reads]
         (at/in-agent (fn [{:keys []}]
                        [(str "(let [t (:task @seon.agent/state)"
-                             " m (fn [] (let [v (volatile! nil)]"
-                             "           (seon.profile/measure! #(count (seon.turn/context-block t true)) (fn [d] (vreset! v d)))"
-                             "           {:ticks (:ticks @v) :bytes (:bytes @v)"
+                             " m (fn [] (let [v (seon.profile/measure! #(count (seon.turn/context-block t true)))]"
+                             "           {:ticks (:ticks v) :bytes (:bytes v)"
                              "            :main (let [_ (seon.repl/page-walk) db (seon.agent/db)] (:seon.agent/main-commit (datahike.api/entity db (seon.db/eid db :seon.agent/key (:key @seon.agent/state)))))"
                              "            :pages (some (fn [f] (when (= 'seon.render/draw (:var f)) (:calls f))) (seon.profile/touched))}))]"
                              "  {:reads (vec (repeatedly 9 m))"
