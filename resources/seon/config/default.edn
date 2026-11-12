@@ -614,25 +614,17 @@
  ;; growing with the digests it has had. Provenance: all of them cost 30.6 s across 1,708 tests, the newest 5 cost 4.4 s, and the same 1,524
  ;; tests got a time (2026-11-06, commit message). At the bound: older verdicts are not read.
  :seon.config.proofs/recent-verdicts 5
- ;; Unit: processes. A proof run's selected tests (bin/prove, bin/test) are dealt, a namespace (with
- ;; its fixtures) at a time, into this many shards, each a runner process of its own that bin/test
- ;; starts at once (seon.proofs/shards), its greens stored by digest when it has run. Provenance:
- ;; worktree session PROVE 2026-10-22 on the 16 GB M1 target (docs/machine.md#the-target-a-16-gb-macbook-m1): 4 keeps the machine
- ;; responsive beside a standing root and other worktree sessions (measured in docs/merging.md#a-merge-runs-what-the-change-reaches).
- ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected. bin/check
- ;; runs this many steps at once too, and mg-check in this many shards (pure-tests 2026-10-23).
- ;; bin/test sets SEON_PROOF_JOBS: one shard, two when 12 cores are free (owner, 2026-11-08: "Why are we doing so
- ;; much sharding?"): each shard loads every test namespace and boots a shared root per test group, so three sessions'
- ;; four-shard runs at once took load to 40 on 18 cores.
- :seon.config.proofs/jobs #long #or [#env SEON_PROOF_JOBS 4]
+ ;; Unit: shards. How many runner processes bin/test starts at once (seon.proofs/shards), and how many steps bin/check
+ ;; runs at once: the machine's cores (#seon/cores), so no one passes a count (owner, 2026-11-12: "Remove all restricting").
+ ;; SEON_PROOF_JOBS is bin/test's own hand-off to its child steps. At the bound: a run never has more shards.
+ :seon.config.proofs/jobs #long #or [#env SEON_PROOF_JOBS #seon/cores nil]
  ;; The test service's admission (seon.prove/admission, docs/merging.md#the-test-service): three optional bounds, any
  ;; combination (the owner: "a fixed max number and a load max and core max ... any combination has a solution"). An unset
  ;; key binds nothing; with neither count set, the machine's cores (:seon.config.machine/cores) bound the items at once.
- ;; Unit: items. The most items (a test child, a process test, a check step, a build or seed) running at once on this
- ;; machine. Provenance: 2026-11-11, a forked test child is 16-35 MB of its own and about a core while it runs (fork + one
- ;; test + exit: ~10 ms); 18 cores, half kept for the roots and agents the tests drive: 8. At the bound: an item waits in
- ;; the queue for a running one to end. Set it to the machine (config/local.edn), as the owner asked: configurable.
- :seon.config.proofs/max-workers 8
+ ;; Unit: items. The most items (a batch of tests in one fork, a check step, a build or seed) running at once on this
+ ;; machine: its cores (#seon/cores; a forked test child is 16-35 MB of its own and about a core while it runs). At the
+ ;; bound: an item waits in the queue for a running one to end.
+ :seon.config.proofs/max-workers #seon/cores nil
  ;; Unit: a share of :seon.config.machine/cores in (0,1] (rounded down, at least 1); a count of items is max-workers. Unset:
  ;; no core bound. At the bound: as max-workers; the least of the two set holds.
  ;; :seon.config.proofs/max-cores 0.5
