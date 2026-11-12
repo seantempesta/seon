@@ -1265,20 +1265,30 @@
 
 (def ^:private kept-parts
   "The parts of a walker a walk kept as a value (`walk`) carries from one call to the next: each component's entry, who read
-  what, the components that read the db, the root's key, the mount counter and each render var's inputs. The rest are made anew."
+  what, the components that read the db, the root's key, the mount counter and each render var's inputs. The rest are made anew.
+  See docs/render.md#a-page-is-a-kept-walk."
   [:cache :readers :db-keys :out :mounts :inputs :tree-readers])
 
+(defn- queue-what-moved!
+  "Walk w holding prev's parts (`walk`), each component queued that what moved since reaches: who read a tree path under one the
+  tree's diff names, the renders a moved definition reaches, and who read a datom that moved. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :map :map :any :seon.host/fn [:sequential :any]] :nil]}
+  [w prev tree changes moved]
+  (doseq [p kept-parts] (vreset! (get w p) (get prev p)))
+  (when-not (identical? tree (:tree prev)) (vswap! (:queue w) into (ratom/reached @(:tree-readers w) (changes (:tree prev) tree))))
+  (when (some #(= :var/form (:a %)) moved) (queue-moved-renders! w moved))
+  (let [ks (into #{} (mapcat reads/datom-keys) moved)]
+    (if (contains? ks :all)
+      (vswap! (:queue w) into @(:db-keys w))
+      (doseq [rk ks] (vswap! (:queue w) into (get @(:readers w) rk #{})))))
+  nil)
+
 (defn walk
-  "Tree (a ctx value, seon.ctx/build's :tree) drawn by root render var root on db, kept as a value: prev, what this call answered
-  last time (nil: drawn cold), and opts :moved, the datoms between prev's db and db (seon.ctx/moved; nil: drawn cold). Each
-  component of prev is reused when its arguments are = to last time's, its render is the same fn, none of the datoms it read
-  moved and none of the paths of the tree it read are under one the tree's diff (opts :changes, seon.ctx/changes, of last time's
-  tree and this one) names; every other runs. No reaction,
-  watch or lock: the owner of the walk (an agent's process, the render proc) holds the value and hands it back. opts :index the
-  entity index (seon.db/index-of; another index than prev's draws cold), :outputs the outputs asked (:seon.render/openai-compat
-  for the model's messages), :model-only true for a reader that is the model.
-  Answers the next prev: :answers {output [[value source] ...]} (`answer-sources`) for each output but the hiccup, :ran {key
-  :miss|:same} of what ran, :defects the components that threw, :ledger by render var, and the parts it keeps. See
+  "Tree (seon.ctx/build's :tree) drawn by root render var root on db, kept as a value: prev is what the last call answered (nil, or
+  opts :moved nil: drawn cold), :moved the datoms since prev's db. A component is reused when its arguments are the same (a view by
+  its path), its render the same fn, and nothing it read moved (`queue-what-moved!`). No reaction, watch or lock: its owner holds
+  the value. opts :index, :outputs, :changes (the tree's diff, seon.ctx/changes), :model-only. Answers the next prev: :answers
+  {output [[value source] ...]} for each output but the hiccup, :ran, :defects, :ledger and the parts it keeps. See
   docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat [:maybe :map] [:map [:db :seon.host/db] [:tree :any] [:root :any] [:index :map] [:outputs [:set :keyword]]
                                             [:changes :seon.host/fn] [:moved {:optional true} [:maybe [:sequential :any]]]
@@ -1290,15 +1300,7 @@
         w (assoc (walker {:ref r :changes changes} (constantly db) [root {} (ratom/ref-view r changes)] index)
                  :pure true :outputs outputs :model-only (boolean model-only))
         env {:children (volatile! []) :ran (volatile! {})}]
-    (when warm?
-      (doseq [p kept-parts] (vreset! (get w p) (get prev p)))
-      ;; what moved under it queued: a component reading the whole tree when the tree moved, a definition's renders, who read a datom that moved
-      (when-not (identical? tree (:tree prev)) (vswap! (:queue w) into (ratom/reached @(:tree-readers w) (changes (:tree prev) tree))))
-      (when (some #(= :var/form (:a %)) moved) (queue-moved-renders! w moved))
-      (let [ks (into #{} (mapcat reads/datom-keys) moved)]
-        (if (contains? ks :all)
-          (vswap! (:queue w) into @(:db-keys w))
-          (doseq [rk ks] (vswap! (:queue w) into (get @(:readers w) rk #{}))))))
+    (when warm? (queue-what-moved! w prev tree changes moved))
     ;; the root drawn (a hit when nothing it holds moved), then each queued component it holds that its draw did not reach
     (let [[f opts & children] (:root w) [_ k] (render! w f (or opts {}) (vec children) env)
           held? (fn held? [c] (or (= k c) (some held? (:parents (get @(:cache w) c)))))]

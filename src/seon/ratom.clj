@@ -85,7 +85,7 @@
 (defn reads-of
   "(f) run in no reaction, answering [its value, the reads it made through views of reference ref: #{[path kind]}]: what a walk
   kept as a value (seon.render/walk) keeps of a component's run, matched against the tree's next diff (`reached`). Its reads of
-  anything else are not kept."
+  anything else are not kept. See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :any :seon.host/fn] [:tuple :any [:set [:tuple [:vector :any] :keyword]]]]}
   [ref f]
   (let [cap (volatile! nil)
