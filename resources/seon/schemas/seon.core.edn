@@ -234,4 +234,15 @@
  :seon.test/ended [:string {:description "On a test run's line, the test (as #'ns/name) that has just ended, beside its reports and measures."}]
  :seon.test/output [:string {:description "On a test run's note, what the run printed, kept when it threw or a test was not green."}]
  :seon.test/fixture [:boolean {:description "On a var's metadata, true when it is a delay a test realizes on first use, forced once in an agent before its tests run."}]
- :seon.test/pipe-held [:map {:description "The report a test run adds when its process ended and a process it forked still holds its pipe."} [:type [:= :error]] [:seon.error/type [:= :seon.test/pipe-held]] [:message :string]]}
+ :seon.test/pipe-held [:map {:description "The report a test run adds when its process ended and a process it forked still holds its pipe."} [:type [:= :error]] [:seon.error/type [:= :seon.test/pipe-held]] [:message :string]]
+ ;; the file classes of a checkout (seon.fx/env-class): each a key of a program's :config (keys-schemas sweep; docs/source.md#tests-run-by-reach)
+ :seon.env/bin [:string {:description "A file class of the checkout (bin/ and the checkout's root files git and the scripts read): as a key of a program's :config, the digest of its files that a test whose reach reads the class takes as input."}]
+ :seon.env/data [:string {:description "A file class of the checkout (a reader of an agent's own branch with no db handed in): as a key of a program's :config, the digest of its files that a test whose reach reads the class takes as input."}]
+ :seon.env/deps [:string {:description "A file class of the checkout (deps.edn): as a key of a program's :config, the digest of its files that a test whose reach reads the class takes as input."}]
+ :seon.env/docs [:string {:description "A file class of the checkout (docs/ and the root .md files): as a key of a program's :config, the digest of its files that a test whose reach reads the class takes as input."}]
+ :seon.env/index [:string {:description "A file class of the checkout (the code of the index roots a process test's reach takes): as a key of a program's :config, the digest of its files that a test whose reach reads the class takes as input."}]
+ :seon.env/schemas [:string {:description "A file class of the checkout (resources/seon/schemas): as a key of a program's :config, the digest of its files that a test whose reach reads the class takes as input."}]
+ :seon.env/src [:string {:description "A file class of the checkout (the program's text: src/ and test/ (.clj)): as a key of a program's :config, the digest of its files that a test whose reach reads the class takes as input."}]
+ :seon.env/system [:string {:description "A file class of the checkout (resources/seon/system.edn): as a key of a program's :config, the digest of its files that a test whose reach reads the class takes as input."}]
+ :seon.env/tasks [:string {:description "A file class of the checkout (resources/seon/tasks): as a key of a program's :config, the digest of its files that a test whose reach reads the class takes as input."}]
+ :seon.env/web [:string {:description "A file class of the checkout (web/ and resources/public): as a key of a program's :config, the digest of its files that a test whose reach reads the class takes as input."}]}
