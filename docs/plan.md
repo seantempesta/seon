@@ -17,6 +17,58 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 **Measured as** turns to green and tasks merged. **Held to:** nothing crashes or hangs (every failure is data to the agent); everything shown is derived from the db at t; one mechanism per job; every change earns its place; a v1 capability is present or dropped on purpose ([parity](parity.md)).
 
+## The overhaul (proposed 2026-11-12, waiting for the owner's approval)
+
+The owner, 2026-11-12: "we are mostly our own worst enemy in terms of processes. I want that overhauled ... documenting everything that needs to happen ... scheduling it and holding to it." Ranked by how much of all development each item blocks. Every item is a row of the schedule (Point's `schedule/schedule.json`), with an owner, an estimate, a bound and a check that proves it done. The measured numbers come from 2026-11-12.
+
+**Process: the worst of it**
+1. **Tests that rerun everything, slowly.** A prove ran 10 to 20 min. Each test ran about 52 times a day. A docs edit reran about 280 process tests. 64% of the suite's wall time was spent waiting on boots and forks.
+   - Already landed (`ee16279d99`): process tests run in forks, and fixtures are made once.
+   - Still to come:
+     - `jolt/tests` takes every request through the `:prove` service, with workers set from the cores;
+     - recorded reads: a change reruns only the tests whose reads moved (about 8x fewer, simulated);
+     - one test system per program, and a test system's agent ready in under 2 s (16 s today);
+     - the check steps run as forks;
+     - the shell path is deleted.
+   - **Target:** the minimal set in seconds; the whole suite in under 60 s.
+   - **Why first:** every change by every session and every agent waits on it.
+2. **Point is the landing queue.** Every branch waits for one session to read, merge, prove and land it. Today that cost hours, five changes of plan, and two oversubscriptions of the machine.
+   - **Proposal:** once item 1's service lands, each session runs `bin/land` on its own branch whenever it is green. `bin/land` already proves the merged tree, moves main atomically and updates the system.
+   - Point reads each landed diff within the hour, and files a fix when it finds a problem.
+3. **Resources and order decided by hand.** Shard counts, prove caps, holds, GOs, stops and restarts all came from Point.
+   - The service owns workers and order: the asker nearest done goes first, and the critical path is a priority, not a person.
+   - The data schedule wakes Point at a bound, so nothing sits.
+4. **Estimates that bind nothing.** The test budget floor was 4e9 ticks, about 8,000x a typical test, and runs went 10 to 1,000 times over without anyone stopping.
+   - Every item and every test states an estimate, and 10x over stops the work.
+   - In code: Tests' estimate tips (the floor and the ratchet deleted, each test's budget its estimate).
+   - In process: schedule bounds, and `measured.tsv` checks for the cost items.
+5. **Switched-off mechanisms and workarounds.** Forks were turned off for a bug; overruns were stored as "signals" with no verdict; a check sampled tests at random.
+   - **Rule:** a bug is fixed at its cause, and nothing is switched off for it.
+   - **Sweep:** every config boolean or sample that disables a mechanism. Owner: Tests and Optimization.
+6. **Knowledge that rots.** 257k words of docs, 583k words of mail, 34 wrong memory notes, and task plans built on the shell path.
+   - Cut today: docs to 106k words, AGENTS.md rewritten, memory fixed.
+   - Still to do: about 11 task plans and 10 doc sentences built on the shell path (owners Tests and Optimization). Each session rewrites its own notes at every compaction.
+
+**The core system, by measured cost: each is 10 to 90 times what it should be (`evidence/hotspots-2026-11-12.md`)**
+7. **Starting a system or an agent:** 10.7 s to boot a system, 16 s until an agent is ready (Tests and Optimization).
+8. **Datahike's writes and connections**, `seed!`, `connect`, `checked`: 15% of the suite's ticks, 11 to 40x (Deep fixes).
+9. **Recomputing the whole when one part changed:**
+   - the schema registry (80x) and task pulls that fetch every attribute (25x bytes), both Data model;
+   - a source import that re-analyzes every form, and whole-file rewrite-clj parses (20 to 90x), Optimization;
+   - `ctx/moved` and the merge's diffs without shared nodes (15 to 20x), Context and Data model.
+10. **Jolt:** about 56 bytes allocated per character read, eval allocation 10x per form, and a build cache that writes on every hit (fseventsd at 100%); Deep fixes, in the next pin.
+
+**The product: the measure of all of it**
+11. **The real-task loop as the standing canary.** Data model's and Context's real tasks run on the standing system continuously, and turns to green and tasks merged per day are reported. Only about 2 tasks have merged end to end since 11-09, and both of today's causes were the test system.
+
+**Order:**
+- Items 1 and 3 first, in flight now (Tests and Optimization).
+- Item 2 the day item 1 lands.
+- Items 4 to 6 alongside them, each by its owner.
+- Items 7 to 10 by measured share, each session in its own one branch.
+- Item 11 as soon as Optimization's base-digest and overrun fixes land.
+- Code shrink (about 1,100 lines, `evidence/src-cuts-2026-11-12.md`) rides along in each session's branch.
+
 ## Now
 
 **The constraint (owner, 2026-11-10): the pull → ratom → render path does not change; the work is the data on entities and the renders.** Six sessions each own an area ([sessions](sessions.md#sessions-own-their-areas)): Context, Web, Optimization, Tests, Deep fixes and the Data model, which owns no code: it is in charge of every change to schemas and pull patterns and reviews every attribute, ref, pattern and render input before it is built. One managing session keeps the landing order. A tip is proved whole by its own session and lands alone, by the managing session with `bin/land`, which reuses that prove ([a tip arrives proved whole](sessions.md#the-managing-session)); a small batch lands proved once ([merging](merging.md#the-managing-session-lands-a-batch)). Plain `bin/prove` still runs in the session's own shell, so no more than two proves run at once on this machine ([machine](machine.md#builds-and-checks)); `bin/prove --root PORT` asks the system ([a session proves through the system](merging.md#a-session-proves-through-root)). Every session and agent checks its whole work before handing it over (owner, 2026-11-10: "make the entire suite run very fast so every agent can fully check their work").
