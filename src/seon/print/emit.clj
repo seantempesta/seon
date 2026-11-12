@@ -236,8 +236,8 @@
 
 (defn- text-op
   {:malli/schema [:function [:=> [:cat :keyword :string] :seon.print/op] [:=> [:cat :keyword :string :any] :seon.print/op]]}
-  ([css text] {:op :text :text text :seon.print/class css})
-  ([css text hiccup] {:op :text :text text :seon.print/class css :seon.print/hiccup hiccup}))
+  ([css text] {:op :text :text text :seon.print/face css})
+  ([css text hiccup] {:op :text :text text :seon.print/face css :seon.print/hiccup hiccup}))
 
 (def ^:private comma (text-op :seon.print/separator ","))
 
@@ -288,17 +288,17 @@
   (let [value (:seon.print/value node)]
     (case (:seon.print/face node)
       ;; the common rows build their op here (text-op's shape), one call fewer per leaf
-      :seon.print/nil {:op :text :text "nil" :seon.print/class :seon.print/nil}
+      :seon.print/nil {:op :text :text "nil" :seon.print/face :seon.print/nil}
       ;; a handle is text: it names an answer, which more than one row of the page may hold (no row is its anchor)
-      :seon.print/symbol {:op :text :text (or (:seon.print/text node) (literal value)) :seon.print/class :seon.print/symbol}
+      :seon.print/symbol {:op :text :text (or (:seon.print/text node) (literal value)) :seon.print/face :seon.print/symbol}
       ;; a float on the page three decimals, its whole text its title: the text a model reads is whole
       :seon.print/number
       (let [text (or (:seon.print/text node) (literal value))]
         (if (and (double? value) (not (:seon.print/text node)) (< (Math/abs ^double value) 1.0e6))
           (text-op :seon.print/number text [:span {:class (css-class :seon.print/number) :title text} (str (/ (Math/round (* ^double value 1000.0)) 1000.0))])
-          {:op :text :text text :seon.print/class :seon.print/number}))
+          {:op :text :text text :seon.print/face :seon.print/number}))
       (:seon.print/boolean :seon.print/keyword :seon.print/char)
-      {:op :text :text (or (:seon.print/text node) (literal value)) :seon.print/class (:seon.print/face node)}
+      {:op :text :text (or (:seon.print/text node) (literal value)) :seon.print/face (:seon.print/face node)}
       :seon.print/string (text-op :seon.print/string (or (:seon.print/text node) (string-literal value))
                                   [:span {:class (css-class :seon.print/string)} (or (:seon.print/text node) value)])
       ;; code (seon.print/code) verbatim at its place, as in its file
@@ -307,7 +307,7 @@
       (:seon.print/inst :seon.print/uuid) (text-op :seon.print/tag (or (:seon.print/text node) (literal value)))
       :seon.print/var (text-op :seon.print/symbol (str "#'" (:seon.print/name node)))
       :seon.print/class (text-op :seon.print/symbol (:seon.print/name node))
-      :seon.print/object (text-op :seon.print/object (str "#object[" (:seon.print/class node)
+      :seon.print/object (text-op :seon.print/object (str "#object[" (:seon.print/class-name node)
                                                           (when-some [rep (:seon.print/rep node)] (str " " rep)) "]"))
       ;; a nested value shown by its own render (seon.print/print-value's :render): its text, and its hiccup
       :seon.print/rendered (text-op :seon.print/rendered (:seon.print/text node) (:seon.print/html node))
@@ -500,7 +500,7 @@
 
 (defn- grid
   "Map node's hiccup from its frame's children: a definition list (`<dl>`, laid out as a grid) of
-  key and value rows, each entry (an entry frame's, marked :seon.print/val) paired with its node's
+  key and value rows, each entry (an entry frame's, marked :seon.print/entry-value) paired with its node's
   entry in order (one frame per entry); what else it holds (a cut) a row of its own; a
   namespace-lifted map's `#:ns` its caption. Its metadata holds its cells by key and its other
   rows, which a table reads. See docs/render.md#a-value-on-the-page-is-its-structure."
@@ -509,15 +509,15 @@
   (let [open (first children)
         lifted (let [t (when (vector? open) (peek open))] (when (and (string? t) (str/starts-with? t "#:")) (subs t 0 (dec (count t)))))
         rows (remove punctuation? children)
-        entries (filter #(contains? (meta %) :seon.print/val) rows)
-        others (remove #(contains? (meta %) :seon.print/val) rows)
+        entries (filter #(contains? (meta %) :seon.print/entry-value) rows)
+        others (remove #(contains? (meta %) :seon.print/entry-value) rows)
         ks (keep #(when (vector? %) (:seon.print/value (nth % 0))) (:seon.print/entries node))
-        row (fn [r] (if (contains? (meta r) :seon.print/val)
+        row (fn [r] (if (contains? (meta r) :seon.print/entry-value)
                       r
                       [:div {:class (css-class :seon.print/entry)} [:dt {:class (css-class :seon.print/key)}] [:dd {:class (css-class :seon.print/val)} r]]))]
     (with-meta (into (cond-> [:dl {:class (css-class :seon.print/grid)}] lifted (conj [:div {:class (css-class :seon.print/caption)} lifted]))
                      (map row) rows)
-      {:seon.print/cells (mapv vector ks (map #(:seon.print/val (meta %)) entries)) :seon.print/rest (vec others)})))
+      {:seon.print/cells (mapv vector ks (map #(:seon.print/entry-value (meta %)) entries)) :seon.print/rest (vec others)})))
 
 (defn- close-frame
   "One collection's hiccup: a map as a definition list of key and value rows (grid), folded as any
@@ -531,7 +531,7 @@
     (= :seon.print/entry node)
     (let [v (peek (vec children))]
       (with-meta [:div {:class (css-class :seon.print/entry)} [:dt {:class (css-class :seon.print/key)} (first children)] [:dd {:class (css-class :seon.print/val)} v]]
-        {:seon.print/val v}))
+        {:seon.print/entry-value v}))
     (and (= :seon.print/map (:seon.print/face node)) (seq (:seon.print/entries node)))
     (let [g (grid node children)]
       ;; the value printed and a map of scalars read at a glance: no fold (owner, 2026-10-23)
@@ -625,7 +625,7 @@
                                 (:seon.print/close event) (let [frame (persistent! (first stack))]
                                                             (close-frame (nth frame 0) (subvec frame 1)))
                                 (= :text op) (or (:seon.print/hiccup event)
-                                                 (let [k (:seon.print/class event)]
+                                                 (let [k (:seon.print/face event)]
                                                    [:span (or (span-attrs k) {:class (css-class k)}) (:text event)]))
                                 (= :line op) [:span (span-attrs :seon.print/separator) (:inline event)]
                                 :else nil)

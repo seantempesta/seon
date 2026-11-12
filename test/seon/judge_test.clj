@@ -1,7 +1,8 @@
 (ns seon.judge-test
   "The first-move judge's facts and score: a reply's first move read by the compiler, never by
   another model."
-  (:require [clojure.test :refer [deftest is testing]] [clojure.edn :as edn] [seon.judge :as judge] [seon.agent-test :as at]))
+  (:require [clojure.test :refer [deftest is testing]] [clojure.edn :as edn] [seon.judge :as judge] [seon.agent-test :as at]
+            [seon.test-store :as ts] [seon.task :as task] [datahike.api :as d] [clojure.string :as str]))
 
 (def ^:private subject
   "A task's subject as seon.judge/subject makes it: the plan cites seon.judge/score (its source
@@ -62,6 +63,15 @@
     (is (= (judge/digest r) (judge/digest r)))
     (is (not= (judge/digest r) (judge/digest (assoc r :thinking :enabled))) "the mode is part of the request")
     (is (not= (judge/digest r) (judge/digest (assoc-in r [:messages 0 :content] "b"))) "so is every byte of the context")))
+
+;; docs/model.md#the-first-move-judge: the request is the one a fresh agent's turn 1 is sent, its record and page drawn from the
+;; db the agent is speculated on, never from the stored commit that db's point names (which holds no such agent)
+(deftest a-first-request-shows-the-task-it-is-of
+  (let [db0 (ts/test-db)
+        db (:db-after (d/with db0 (task/create-tx db0 [{:seon.task/ns 'app.x :seon.task/name "j" :seon.task/plan "Make app.x/f0 double its argument." :seon.task/proofs #{'app.x-test/t0}}])))
+        ms (:messages (judge/request db (task/task db "app.x/j")))]
+    (is (some #(str/includes? (str (:content %)) "double its argument") (rest ms)) "the task's plan, on the page the model reads")
+    (is (some #(str/includes? (str (:content %)) ":seon.agent/task") ms) "and the record holds the agent's task")))
 
 (deftest a-pass-scores-each-request-once
   ;; root's ruling (2026-10-23): the :seon.judge fact is the record; a pass asks the model only

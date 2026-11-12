@@ -28,14 +28,16 @@
  :seon.print/node :map
  :seon.print/op [:map [:op :keyword]]
  ;; the printer's faces, the css class names and the node and op keys the emitter and allotter pass (keys-schemas sweep; docs/render.md#one-printer)
- :seon.print/class [:or {:description "On a print op, the css class keyword of its text; on a class or object node, the class name."} :keyword :string]
- :seon.print/code [:or {:description "Marked code: the one key of a map whose string is code shown exactly as written (seon.print/plain marks text); also the face and the mark naming it."} :string [:= :seon.print/code]]
- :seon.print/face [:enum {:description "What a print node is: the type of value it holds, which picks how it is laid out and its css class."} :seon.print/nil :seon.print/boolean :seon.print/number :seon.print/keyword :seon.print/symbol :seon.print/char :seon.print/string :seon.print/code :seon.print/inst :seon.print/uuid :seon.print/var :seon.print/class :seon.print/object :seon.print/rendered :seon.print/elided :seon.print/vector :seon.print/list :seon.print/set :seon.print/map :seon.print/throwable]
+ :seon.print/class [:= {:description "The face of a java.lang.Class value (a value of :seon.print/face, never a key: an object's class is :seon.print/class-name)."} :seon.print/class]
+ :seon.print/code [:string {:description "A code value's text (seon.print/code), shown verbatim at its place: what a record stores of what a form printed. As a value it is also its face and its mark (:seon.print/face, :seon.print/code?)."}]
+ :seon.print/face [:enum {:description "What a print node or a text op is shown as: the type of value it holds, or its part of a structure (a separator, a delimiter, a tag, an elision), which picks how it is laid out and its css class seon-print-<name>."} :seon.print/nil :seon.print/boolean :seon.print/number :seon.print/keyword :seon.print/symbol :seon.print/char :seon.print/string :seon.print/code :seon.print/inst :seon.print/uuid :seon.print/var :seon.print/class :seon.print/object :seon.print/rendered :seon.print/elided :seon.print/vector :seon.print/list :seon.print/set :seon.print/map :seon.print/throwable :seon.print/separator :seon.print/delimiter :seon.print/tag :seon.print/elision]
  :seon.print/value [:any {:description "The value a print node holds: any value, or for a throwable the map that prints it."}]
  :seon.print/text [:string {:description "A print node's text when it differs from the value's literal (a number too long to print, a cut name, a nested render's text)."}]
  :seon.print/html [:vector {:description "A nested value's own render as hiccup, kept on its rendered node."} :any]
  :seon.print/name [:string {:description "The name of a var (ns/name) or class node."}]
  :seon.print/rep [:string {:description "An object node's identity as hex, 0x..., printed after its class."}]
+ :seon.print/class-name [:string {:description "An object's class, demunged, as #object[class-name rep] prints it."}]
+ :seon.print/entry-value [:any {:description "A map entry row's value, kept in the row's metadata, which a table reads as its cell."}]
  :seon.print/items [:vector {:description "The member nodes of a vector, list or set node."} :seon.print/node]
  :seon.print/entries [:vector {:description "The entries of a map node, each [key-node value-node]."} [:tuple :seon.print/node :seon.print/node]]
  :seon.print/ordered? [:boolean {:description "True when a set node's members are shown in sorted order."}]
@@ -68,6 +70,6 @@
  :seon.print/table [:= {:description "The css class of a vector of like maps shown as a table."} :seon.print/table]
  :seon.print/caption [:= {:description "The css class of a grid's caption, the namespace its keys share."} :seon.print/caption]
  :seon.print/key [:= {:description "The css class of a map entry's key."} :seon.print/key]
- :seon.print/val [:or {:description "On the hiccup of a map entry, in its metadata, the hiccup of its value (for a table or grid); also the css class of that value."} :seon.print/hiccup [:= :seon.print/val]]
+ :seon.print/val [:= {:description "The css face of a map entry's value (a value of :seon.print/face, never a key: a row's value is :seon.print/entry-value)."} :seon.print/val]
  :seon.print/cells [:vector {:description "In the metadata of a grid's hiccup, each entry's [key value-hiccup], from which a table of like maps is built."} [:tuple :any :any]]
  :seon.print/rest [:vector {:description "In the metadata of a grid's hiccup, the rows that are not entries (an elision), kept after a table's cells."} :any]}

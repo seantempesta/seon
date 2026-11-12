@@ -242,8 +242,8 @@
  :seon.status/explain [:map-of {:description "On an enum, each value's explanation in Markdown: what it means and what to do next."} :keyword :string]
  ;; the repl's edit refusal and findings (seon.repl)
  :seon.repl/eof [:= {:description "What the reader answers at the end of an eval's text."} :seon.repl/eof]
- :seon.repl/finding [:keyword {:description "On a warning beside an eval's answer, what it found: :invalid-contract, :uncontracted-definition, :not-program, :program-def or :unknown-var."}]
- :seon.repl/fix [:string {:description "On a warning, what to do about it."}]
+ :seon.repl/finding [:keyword {:description "What one warning of an eval's answer (:seon.repl/answer's :warnings) is about: :uncontracted-definition, :invalid-contract, :not-program, :program-def, :unknown-var. seon.repl/response makes each from what the eval's middleware noted on its forms' replies (seon.repl/wrap-record: :not-program, :seon.repl/program-def, :unknown-vars; seon.repl/wrap-instrument: :instrumented), with its fix."}]
+ :seon.repl/fix [:string {:description "How to fix a finding, beside it in its warning (:seon.repl/finding): a sentence, or the form that does it, ready to evaluate. The model reads it in the eval's printed answer (seon.render/result-text). Made by seon.repl/response; a finding's text is the middleware's note it reads (seon.repl/wrap-record's :not-program)."}]
  :seon.repl/var [:or {:description "On an edit's refusal, the var or the path whose edit was refused."} :symbol :string]
  :seon.repl/refused-because [:enum {:description "On an edit's refusal, why it changed nothing."} :no-source :not-found :ambiguous :overlap :empty :unreadable]
  :seon.repl/lines [:vector {:description "On an edit's refusal, the lines it names, each [line text]."} [:tuple pos-int? :string]]

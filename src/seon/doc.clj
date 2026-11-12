@@ -474,10 +474,17 @@
   {:malli/schema [:=> [:cat :seon.host/db :int :qualified-keyword [:set :keyword]] [:vector :map]]}
   [db e a kinds]
   (case a
-    :form/src (vec (for [dv (d/datoms db :eavt e :form/defines)
-                         :let [v (d/entity db (:v dv)) n (:var/name v) kind (if (contains? (set (:var/meta v)) :test) :test :var)]
-                         :when (and n (kinds kind))]
-                     {:kind kind :name n}))
+    :form/src (let [ds (map #(d/entity db (:v %)) (d/datoms db :eavt e :form/defines))]
+                (if-let [vs (seq (filter :var/name ds))]
+                  (vec (for [v vs :let [n (:var/name v) kind (if (contains? (set (:var/meta v)) :test) :test :var)] :when (kinds kind)]
+                         {:kind kind :name n}))
+                  ;; a form that defines a method or an impl (a defmethod, an extend) and no var is its namespace's, at the line
+                  ;; its file holds it on (seon.source/file-text, which (lines 'the.ns) reads); an ns form's is ns-hit's
+                  (let [n (when (some #(or (:method/key %) (:impl/key %)) ds) (some-> (d/entity db e) :form/ns :ns/name))
+                        kind (if (str/ends-with? (str n) "-test") :test :var)
+                        t (when (and n (kinds kind)) (source/file-text db n))
+                        i (when t (str/index-of t (:form/src (d/entity db e))))]
+                    (if i [{:kind kind :name n :line0 (count (filter #{\newline} (subs t 0 i)))}] []))))
     :seon.doc/text (when (kinds :section) [{:kind :section :name (:seon.doc/address (d/entity db e))}])
     :seon.task/plan (when (kinds :task) [{:kind :task :name (:seon.task/id (d/entity db e))}])
     :schema/form (when (kinds :schema) [{:kind :schema :name (:schema/key (d/entity db e))}])))
@@ -701,8 +708,11 @@
         candidates (when indexed?
                      (group-by second (map (fn [[e a]] [e (index-attrs a)]) (with-index db #(sqlite/fts-substring % pattern numbers)))))]
     (->> (for [a (distinct (keep text-attrs kinds))
-               e (if indexed? (distinct (map first (get candidates a))) (map :e (d/datoms db :aevt a)))
-               :let [v (:v (first (d/datoms db :eavt e a)))]
+               ;; each text with its entity: a candidate's by one seek, every text off the attribute's own datoms (a text is
+               ;; cardinality one, so its :aevt datom holds it: a seek of :eavt again cost 120 KB a text on main)
+               [e v] (if indexed?
+                       (for [e (distinct (map first (get candidates a)))] [e (:v (first (d/datoms db :eavt e a)))])
+                       (map (juxt :e :v) (d/datoms db :aevt a)))
                :when (and v (re-find re v))
                h (or (seq (named-hits db e a kinds)) (ns-hit db e a kinds))
                :when (or (nil? ns) (named-under? (str (:name h)) ns))
@@ -711,7 +721,7 @@
                ;; text (a section's, a plan's) holds a paragraph on one line: its row is each sentence that
                ;; matches, as grep -o selects the match, so a hit costs its sentence and not its paragraph
                part (if (#{:seon.doc/text :seon.task/plan} a) (filter #(re-find re %) (str/split line #"(?<=[.!?])\s+")) [line])]
-           [(str (:name h)) i {:at (str (:name h) ":" (inc i)) :kind (:kind h) :text (str/trim part)}])
+           [(str (:name h)) (+ (:line0 h 0) i) {:at (str (:name h) ":" (inc (+ (:line0 h 0) i))) :kind (:kind h) :text (str/trim part)}])
          (sort-by (juxt first second))
          (mapv peek))))
 
