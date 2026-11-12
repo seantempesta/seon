@@ -1904,6 +1904,8 @@
       "proofs green, nothing changed: proved nothing")
   (is (= [] (r/done-explain {:proofs #{'p/a} :results {'p/a :pass} :main-green #{} :allowed-red #{} :uncontracted #{} :changed? true})) "green and changed: done")
   (is (= [] (r/done-explain {:proofs #{'p/a} :results {'p/a :pass} :main-green #{} :allowed-red #{} :uncontracted #{}})) "not measured: the rule says nothing")
+  (is (= [] (r/done-explain {:kind :merge :proofs #{'p/a} :results {'p/a :pass} :main-green #{} :allowed-red #{} :uncontracted #{} :changed? false}))
+      "a merge task's work is the merge: its diff can be empty once main is in (swarm's merge steps)")
   (let [db0 (with-refine-section (mdb [(decl "a")] :extra (work "a" :running)))]
     (is (= :told (:outcome (judge! db0 "a" {:outcome :green} :results {(t "a") :pass} :diff {:ours []})))
         "the judge refuses a green end whose branch changed nothing: told to its agent")

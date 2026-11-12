@@ -59,9 +59,9 @@
   proofs named in text and never written: the live agents' rounds). A deferred proof (a process test, run
   at the merge gate on a checkout, seon.reconcile's :gate) is neither red nor unknown
   here; while unrun it is the merge's open :unrun problem. A run whose branch changed nothing since its merge base (changed? false:
-  no program key and no carried task content) is refused :no-change, red first for every task: a proof that passed before the
-  run did anything proves nothing it did (a refine of a green task was done at turn 0, its proofs the task's; loop 1, 2026-11-12).
-  A branch that continues another's has that one's merge base, so a merge step's diff holds the work it merges."
+  no program key and no carried task content) is refused :no-change, red first: a proof that passed before the run did anything
+  proves nothing it did (a refine whose proofs were the task's was done at turn 0). A :merge task is the exception: its work is
+  the merge itself, and once it merged main in its own diff can be empty (swarm's merge steps)."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
   [{:keys [proofs results main-green allowed-red main-red uncontracted unmerged caused kind plan plan-before deferred behind changed?]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))
@@ -72,7 +72,7 @@
            (when (some-> behind pos?) [{:reason :behind :behind behind}])
            (if (= :user kind) [{:reason :open}] (when (empty? proofs) [{:reason :no-proofs}]))
            (when (and design? (or (nil? plan-before) (= plan plan-before))) [{:reason :no-design}])
-           (when (false? changed?) [{:reason :no-change}])
+           (when (and (false? changed?) (not= :merge kind)) [{:reason :no-change}])
            ;; a proof with no result never ran: unknown, not red (v1's reading); a design
            ;; leaves its proofs red, never unknown (the implement step needs them written)
            (for [p (sort-by str proofs) :let [s (get results p)] :when (and (not (contains? deferred p)) (if design? (nil? s) (not= :pass s)))]
