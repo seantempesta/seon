@@ -1939,9 +1939,28 @@
     (is (false? (task/names-new-site? base reworded "demo/a-refine")) "a reworded plan that names none is no change site")
     (is (true? (task/names-new-site? base named "demo/a-refine")) "the plan cites app/f, which it did not before")
     (is (nil? (task/names-new-site? base named "demo/a")) "a task that is no refine is not asked")
+    (is (true? (task/names-new-site? base (d/db-with base [{:seon.task/id "demo/a-refine" :seon.task/found-nothing "The run read what its plan cited; nothing it lacked."}]) "demo/a-refine"))
+        "or it found nothing, a typed end with its reason (my.task/found-nothing!), never a site invented to pass")
     (is (= [:no-change-site] (mapv :reason (r/done-explain (in false)))) "refused until then")
     (is (= [] (r/done-explain (in true))) "done once it names one")
     (is (= [] (r/done-explain (dissoc (in true) :named-site?))) "not a refine: the rule says nothing")))
+
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-refine-that-found-nothing-ends-done-not-capped
+  ;; runtime's review of 91caa85fca: a refine with nothing to find was refused :no-change-site every turn, so it capped and was
+  ;; declared again (refine-tx's supersede), a loop with nothing to find. Its typed end, the reason it found nothing, is done, and
+  ;; the reason reaches main for the held review to read. Estimate: one world, two judgings
+  (let [db0 (with-refine-section (mdb [(decl "a")] :extra (work "a" :running)))
+        {db1 :db} (judge! db0 "a" {:outcome :cap} :results {(t "a") :fail})
+        ;; its refine started, as root records a start
+        db1 (d/db-with db1 (work "a-refine" :running))
+        why "The run read what its plan cited; nothing it lacked."
+        found (judge! db1 "a-refine" {:outcome :green} :results {'seon.task-files-test/the-trees-task-files-and-pages-load-with-no-refusal :pass}
+                      :on-branch [{:seon.task/id "demo/a-refine" :seon.task/found-nothing why}])
+        silent (judge! db1 "a-refine" {:outcome :green} :results {'seon.task-files-test/the-trees-task-files-and-pages-load-with-no-refusal :pass})]
+    (is (not-any? #{:no-change-site} (map :reason (:seon.task/reasons (task/task (:db found) "demo/a-refine")))) "found nothing: done")
+    (is (#{:ready :gate :done} (:outcome found)) (str "judged done, its review next, not told again: " (:outcome found)))
+    (is (= why (:seon.task/found-nothing (d/entity (:db found) [:seon.task/id "demo/a-refine"]))) "its reason on main, for the review")
+    (is (some #{:no-change-site} (map :reason (:seon.task/reasons (task/task (:db silent) "demo/a-refine")))) "silent: still refused")))
 
 (deftest a-cap-ends-the-run-held-and-gets-its-refine
   ;; docs/tasks.md#a-refine-curates-its-own-task (Optimization's restated claim, 2026-11-12): a cap ends the run, failed in its number

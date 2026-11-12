@@ -534,7 +534,7 @@
   "Every attribute a task's end writes, defined once from what writes them: a judging's (judged-attrs), a hold's (held-attrs),
   and the outcome, reasons and agent beside them. What a superseded refine retracts (refine-tx), so no earlier end reads as its
   own; a released branch takes the hold's (onto-tx), the evidence its next agent answers. See docs/tasks.md#a-refine-curates-its-own-task."
-  (into (set judged-attrs) (concat held-attrs [:seon.task/outcome :seon.task/reasons :seon.task/agent])))
+  (into (set judged-attrs) (concat held-attrs [:seon.task/outcome :seon.task/reasons :seon.task/agent :seon.task/found-nothing])))
 
 (defn outcome-tx
   "The write that moves task id's outcome from `from` to `to` (Datahike's compare-and-swap: a racing observer, a
@@ -639,7 +639,7 @@
   my.task/update! writes them: a set member (:seon.task/proofs) its values added and retracted, a
   single member its new value. A value its member's schema does not admit (proofs that are no
   set of qualified symbols, a plan that is no string) is the update's contract error, writing nothing."
-  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause] :seon.host/fn [:sequential :any]]
+  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause :seon.task/found-nothing] :seon.host/fn [:sequential :any]]
                   [:or [:vector :any] :seon.task/invalid-member]]}
   [t member f args]
   (let [id [:seon.task/id (:seon.task/id t)]
@@ -1023,15 +1023,18 @@
 
 (defn names-new-site?
   "Whether refine rid's work is done, read on db (its branch) against base (its merge base): the plan of the task it refines cites a
-  program function that plan did not cite at base, the change site its next run reads first. nil when rid is no refine. The done
+  program function that plan did not cite at base, the change site its next run reads first, or the refine ended saying why it found
+  nothing (:seon.task/found-nothing). nil when rid is no refine. The done
   rule's :no-change-site reads it (seon.reconcile/done-explain), taken alike by the agent's turn check (seon.ctx.status/status) and
   root's judging (seon.reconcile/judge-tx). Cost: the task's cites, pulled on each db. See docs/tasks.md#a-refine-curates-its-own-task."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.task/id] [:maybe :boolean]]}
   [base db rid]
   (when (refine? db rid)
-    (let [tid (some-> (d/entity db (pdb/eid db :seon.task/id rid)) :seon.task/after first :seon.task/id)
+    (let [r (d/entity db (pdb/eid db :seon.task/id rid))
+          tid (some-> r :seon.task/after first :seon.task/id)
           fns (fn [d] (into #{} (keep #(get-in % [:seon.cite/target :var/name])) (some->> (pdb/eid d :seon.task/id tid) (cites-of d))))]
-      (boolean (seq (remove (fns base) (fns db)))))))
+      ;; or its typed end: it found nothing to name, and says why (my.task/found-nothing!), never a site invented to pass
+      (boolean (or (:seon.task/found-nothing r) (seq (remove (fns base) (fns db))))))))
 
 (defn refine-decls
   "The refine of task t (a task map as db holds it: its id, ns, name, branch, proofs and agent) and its review, as declarations: a
@@ -1056,7 +1059,8 @@
                            " on branch " br "), folded by my.task/run, called ``(my.task/run \"" (:seon.task/id t) "\")``: the vars it wrote "
                            "and what they use (:final), and what each turn read (:turns): the functions its exploring turns kept reading are the "
                            "site. Edit the plan where your pull holds the task (docs/tasks.md#an-agent-edits-a-task-its-pull-holds), first what "
-                           "blocked the run, then the site. Then stop: your proof is green already. Change no code.")}
+                           "blocked the run, then the site. Then stop: your proof is green already. If the run lacked nothing a plan could name, end with "
+                           "``(my.task/found-nothing! \"why\")`` instead, never a site invented to pass. Change no code.")}
      {:seon.task/ns (:seon.task/ns t) :seon.task/name (str nm "-review") :seon.task/kind :merge
       :seon.task/branch (default-branch rid) :seon.task/needs #{rid}
       :seon.task/plan (str "Review the refine `" rid "`: read what it changed (the task's plan, its cites, wiki sections, the example it kept). "
