@@ -263,16 +263,17 @@
                                                     :stale-section "wiki sections whose cited code changed" :orphan-page "wiki pages nothing links"
                                                     :leadless-section "wiki sections with no lead" :uncited-task "tasks that cite no section"
                                                     :stale-plan "task plans that went stale" :uncited-var "functions that cite no section"
-                                                    :problem-unlinked "problem classes with no wiki section" :long-form "forms too long" :waived-proof "proofs that pass by waiver"}
-                             :seon.problems/derived #{:stalled :unnamed-site :stale-pin :stale-binary :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :waived-proof :unsynced}
+                                                    :problem-unlinked "problem classes with no wiki section" :long-form "forms too long" :waived-proof "proofs that pass by waiver"
+                                                    :unschemed-key "keys with no schema entry" :refused-value "stored values their entry refuses"}
+                             :seon.problems/derived #{:stalled :unnamed-site :stale-pin :stale-binary :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :waived-proof :unsynced :unschemed-key :refused-value}
                              ;; the derived classes a branch's content can make, which seon.problems/caused-split reads from what it moved
                              ;; and judges it on (seon.problems/caused-classes); the rest of :seon.problems/derived is the running system's state
-                             :seon.problems/caused #{:unnamed-site :stale-section :uncited-var :long-form :leadless-section :orphan-page :waived-proof :uncited-task :stale-plan}
+                             :seon.problems/caused #{:unnamed-site :stale-section :uncited-var :long-form :leadless-section :orphan-page :waived-proof :uncited-task :stale-plan :unschemed-key :refused-value}
                              ;; shown, never a reason to refuse done (root's ruling, 2026-10-23: every var edit stales the sections that cite it;
                              ;; and the plans that cite it, an agent's own task's among them)
                              :seon.problems/attention #{:stale-section :uncited-var :long-form :stale-plan}
                              :seon.problems/areas [[:docs #{:stale-pin :stale-section :orphan-page :leadless-section :uncited-var}] [:tests #{:red :cost :waived-proof}]
-                                                    [:laws #{:unnamed-site :long-form}] [:merges #{:merge :task-conflict :unrun :unsynced}] [:tasks #{:failed :uncited-task :stale-plan}]
+                                                    [:laws #{:unnamed-site :long-form :unschemed-key :refused-value}] [:merges #{:merge :task-conflict :unrun :unsynced}] [:tasks #{:failed :uncited-task :stale-plan}]
                                                     [:agents #{:stalled :dead :error :waste}] [:errors #{:platform :eval :agent :effect}] [:health #{:problem-unlinked :stale-binary}]]
                              ;; each class's section of the wiki: what it is and how it is fixed. A class with open rows whose
                              ;; section is no stored section is itself a problem (:problem-unlinked)
@@ -282,14 +283,22 @@
                                                   :merge "docs/merging.md#conflicts-and-pins" :task-conflict "docs/merging.md#conflicts-and-pins"
                                                   :unrun "docs/merging.md#a-merge-runs-what-the-change-reaches" :unsynced "docs/source.md#a-merged-task-reaches-mains-files"
                                                   :dead "docs/root.md#runs-and-judging" :failed "docs/tasks.md#a-refused-run-is-held-for-root"
-                                                  :unnamed-site "docs/health.md#a-laws-unnamed-site"
+                                                  :unnamed-site "docs/health.md#a-laws-unnamed-site" :unschemed-key "docs/health.md#a-key-with-no-schema" :refused-value "docs/health.md#a-stored-value-its-entry-refuses"
                                                   :stale-pin "docs/forks.md#branch-scheme" :stale-binary "docs/health.md#a-stale-binary" :stale-section "docs/health.md#a-stale-section"
                                                   :orphan-page "docs/health.md#an-orphan-page" :leadless-section "docs/health.md#a-section-with-no-lead" :uncited-task "docs/health.md#a-task-that-cites-nothing" :stale-plan "docs/health.md#a-plan-that-went-stale" :uncited-var "docs/health.md#a-function-that-cites-no-section" :long-form "docs/health.md#a-form-too-long" :waived-proof "docs/health.md#a-proof-that-passes-by-waiver" :problem-unlinked "docs/health.md#a-problem-with-no-page"}}
                        :stalled :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict :unnamed-site :stale-pin :stale-binary :unrun
-                       :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :waived-proof :unsynced]
+                       :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :waived-proof :unsynced :unschemed-key :refused-value]
  :seon.problems/row [:map {:seon.render/hiccup seon.render.ui/problem-row}
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]
                      [:at-ms [:maybe :int]]]
  :seon.problems/report [:map {:seon.render/hiccup seon.render.ui/problems :seon.render/model seon.render.ui/problems-model} [:t :int]
-                        [:classes [:map-of :seon.problems/class [:map [:n nat-int?] [:rows [:vector :seon.problems/row]]]]]]}
+                        [:classes [:map-of :seon.problems/class [:map [:n nat-int?] [:rows [:vector :seon.problems/row]]]]]]
+ ;; keys-schemas sweep
+ :seon.git/files [:vector {:description "On a git commit's error, the files the commit was to hold, sorted."} :string]
+ ;; keys-schemas sweep: the properties of :seon.problems/class
+ :seon.problems/areas [:vector {:description "On :seon.problems/class, each area the health page groups classes under, with the classes in it: [area #{class}]."} [:tuple :keyword [:set :keyword]]]
+ :seon.problems/attention [:set {:description "On :seon.problems/class, the classes that are shown but never a reason to refuse done (upkeep)."} :keyword]
+ :seon.problems/caused [:set {:description "On :seon.problems/class, the derived classes a branch's content can make, which a branch is judged on."} :keyword]
+ :seon.problems/derived [:set {:description "On :seon.problems/class, the classes derived from the program and the system's state, not recorded as errors."} :keyword]
+ :seon.problems/docs [:map-of {:description "On :seon.problems/class, each class's section of the wiki, as path#anchor: what it is and how it is fixed."} :keyword :string]}

@@ -327,8 +327,8 @@
   and each attribute equal to before; a node equal to old in every value is old."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? :seon.ctx/spec [:vector :any] :seon.ctx/ix [:maybe :map] [:map-of :any [:vector :any]]] [:tuple :map :seon.ctx/ix]]}
   [db e s p r old touched]
-  (if (and (not (:star? s)) (= #{:db/id} (:attrs s)))
-    ;; a join of `[:db/id]` names its members and holds none of them (agent -> call -> its evals, which the agent's :seon.eval/_agent join holds):
+  (if (and (not (:star? s)) (= #{:db/id} (:attrs s)) (empty? (:joins s)))
+    ;; a join of `[:db/id]` alone names its members and holds none of them (one with joins of its own holds them, as d/pull does) (agent -> call -> its evals, which the agent's :seon.eval/_agent join holds):
     ;; nothing to place (no contracted call: this runs for every member built)
     [(if (stub? old) old {:db/id e}) r]
     (let [r (-> r (update-in [:at e] (fnil conj #{}) p) (assoc-in [:spec p] s))
