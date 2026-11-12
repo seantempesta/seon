@@ -279,21 +279,16 @@
     (and (identical? (:ref (.-src a)) (:ref (.-src b))) (= (.-path a) (.-path b)))
     (= a b)))
 
-(defn fresh-in
-  "x as of now in source src: a view made again over src's current value at x's path, else x. A walk kept as a value
-  (seon.render/walk) holds the views of last time's source and draws again over this time's."
-  {:malli/schema [:=> [:cat :map :any] :any]}
+(defn fresh
+  "x as of now in source src (nil: x's own): a view made again over the source's current value at its path (a stored view holds
+  the value it was made with; an RCursor reads its ratom at each deref), else x. A walk kept as a value (seon.render/walk) holds
+  the views of last time's source and draws again over this time's."
+  {:malli/schema [:=> [:cat [:maybe :map] :any] :any]}
   [src x]
   (if (view? x)
-    (let [p (.-path x) v (get-in (binding [*ratom-context* nil] @(:ref src)) p)]
+    (let [src (or src (.-src x)) p (.-path x) v (get-in (binding [*ratom-context* nil] @(:ref src)) p)]
       (if (and (map? v) (sorted? v)) (sorted-view src v p) (view src v p)))
     x))
-
-(defn fresh
-  "x as of now: a view made again over its source's current value at its path (a stored view
-  holds the value it was made with; an RCursor reads its ratom at each deref), else x."
-  {:malli/schema [:=> [:cat :any] :any]}
-  [x] (if (view? x) (fresh-in (.-src x) x) x))
 
 ;;; --- queueing ------------------------------------------------------------------------------
 

@@ -495,7 +495,7 @@
             ;; the entity: the component's argument (a walk is rooted on [render {} view], so its root has one too)
             ev (when (seq others) (first children))
             ;; as of now: a view holds the value it was made with, and a root's argument is the view the walk was made with
-            e0 (some-> ev ratom/fresh ratom/untracked)
+            e0 (some->> ev (ratom/fresh nil) ratom/untracked)
             ;; an entity's schema by its identity attributes, never a value's metadata: an agent's @ctx carries :seon.ctx/ctx's, which
             ;; names no model render, so the agent's own went unasked
             s0 (when (and (map? e0) (:db/id e0)) (entity-schema ix e0 nil))
@@ -514,11 +514,11 @@
                                                     x)))
                                         xs))
             ;; a walk kept as a value draws over this call's tree (its source), whatever source last time's views held
-            args (if (:pure w) (mapv #(ratom/fresh-in (:src w) %) children) (mapv ratom/fresh children))
+            args (mapv #(ratom/fresh (when (:pure w) (:src w)) %) children)
             db? (or (contains? ks :seon.db/db) (seq fs))
             outs (volatile! nil)
             o (cond-> opts
-                (contains? ks :seon.ctx/ctx) (assoc :seon.ctx/ctx (if (:once w) @(:ref (:src w)) (ratom/fresh (ratom/ref-view (:ref (:src w)) (:changes (:src w))))))
+                (contains? ks :seon.ctx/ctx) (assoc :seon.ctx/ctx (if (:once w) @(:ref (:src w)) (ratom/fresh nil (ratom/ref-view (:ref (:src w)) (:changes (:src w))))))
                 db? (assoc :seon.db/db ((:db w)))
                 true (assoc :seon.render/index @(:index w))
                 (contains? ks :seon.render/drawn) (assoc :seon.render/drawn (:drawn w)))

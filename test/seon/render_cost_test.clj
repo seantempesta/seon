@@ -624,17 +624,18 @@
                           "and the messages put together. Linear: the agent's model render (seon.ctx.wire/agent-msgs) lists every turn again, "
                           "each a reused component; the turn's own component would make it constant (task seon.ctx.wire/a-turn-is-a-component-of-the-request)")
                :growth :linear
-               ;; measured 2026-11-12 on jolt/web at 10 / 20 / 40: 874 / 1,274 / 2,074 calls, 2.75 / 3.47 / 4.95 MB, 591k / 762k / 1.11M ticks
-               ;; (the request drawn cold, seon.ctx.wire/render, 2.4M at 40)
-               :per-n {:calls 40 :bytes 75000}
-               :fixed {:calls 480 :bytes 2050000}
+               ;; measured 2026-11-12 on jolt/web by the test runner at 10 / 20 / 40: 2,768 / 3,828 / 6,068 calls, 3.10 / 3.92 / 5.63 MB,
+               ;; 783k / 976k / 1.38M ticks (the request drawn cold, seon.ctx.wire/render, 2.4M at 40). The first estimate came from root's
+               ;; REPL, whose binary counts no private helper's contracted calls; the test runner counts each
+               :per-n {:calls 110 :bytes 85000}
+               :fixed {:calls 1700 :bytes 2300000}
                :sizes [10 20 40]})
   (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/walk-same-of
                :n "turns of the agent, an eval each"
                :work "nothing moved: the root reused, the last answers answered"
                :growth :constant
-               ;; measured 2026-11-12 on jolt/web: 11 calls, 16.7 KB, 3.3k ticks at every size
-               :fixed {:calls 12 :bytes 18000}
+               ;; measured 2026-11-12 on jolt/web by the test runner: 17 calls, 19.0 KB, 3.5k ticks at every size
+               :fixed {:calls 17 :bytes 19500}
                :sizes [10 20 40]}))
 
 (defn newest-pair-of
@@ -706,9 +707,10 @@
      :work (str "the changed member run twice and nothing else run: calls flat in the members; the swap's diff (seon.ctx/changes) steps past "
                 "each other member of the collection it enters, about 0.8 KB a member")
      :growth :linear
-     ;; measured 2026-11-10: 81 calls at 10, 40 and 160; 99 KB, 124 KB, 217 KB
+     ;; measured 2026-11-10: 81 calls at 10, 40 and 160; 99 KB, 124 KB, 217 KB. 2026-11-12: 87 at 10, 88 KB: the reactions' read index
+     ;; is the one value index a walk kept as a value reads too (seon.ratom/read-index, reached), a call each where it was inline
      :per-n {:calls 0 :bytes 900}
-     :fixed {:calls 85 :bytes 100000}
+     :fixed {:calls 88 :bytes 100000}
      :sizes [10 40 160]}))
 
 (defn big-member
