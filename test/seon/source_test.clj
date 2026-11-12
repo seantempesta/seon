@@ -352,7 +352,8 @@
           (is (true? (at-root "(-> @(seon.system/call! sys {:op :write :req {:op :octopus-merge :branches [:task-cfgt-one]}}) :results first :merged?)")))
           (is (= 7 (at-root reads-the-key)) "root holds main's")
           (is (= 7 (at-root (str "(get-in (datahike.api/pull @(:conn sys) [{:seon.system/config [" k "]}] [:seon.system/id :root]) [:seon.system/config " k "])"))) "and main's config in force, the entity root's :seon.system/config names, says so")
-          (is (= (let [end (str/last-index-of held "}")] (str (subs held 0 end) "\n " k " 7" (subs held end)))
+          ;; the merge replays the branch's own transactions, its file text with them: main's file is the branch's, byte for byte
+          (is (= (str/replace-first held " :seon.config.root/death-stderr-bytes" (str " " k " 7\n :seon.config.root/death-stderr-bytes"))
                  (at-root "(get (seon.source/files @(:conn sys) [seon.config/shipped-file]) seon.config/shipped-file)")))))
       ;; a boot on a file that doesn't load reads no file: seon.system-test/a-boot-reads-no-file-a-commit-broke
       (testing "a re-index that meets a file that doesn't load says which file and which commit, and main keeps its own"
