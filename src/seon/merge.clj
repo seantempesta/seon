@@ -179,9 +179,10 @@
   [db ks]
   (into {} (for [k ks :let [c (key-content db k)] :when (some? c)] [k c])))
 
-(def ^:private content-attr?
-  "Is a an attribute a key's content reads (a plain predicate, asked of every attribute). See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
-  (fn [a] (boolean (and (keyword? a) (not= :db/txInstant a) (or (program/attr-namespaces (namespace a)) (stated-attr? a))))))
+(defn- content-attr?
+  "Is a an attribute a key's content reads (asked of every attribute). See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [a] (boolean (and (keyword? a) (not= :db/txInstant a) (or (program/attr-namespaces (namespace a)) (stated-attr? a)))))
 
 (defn touched-by
   "The program keys whose content may differ between base and db, given moved, the datoms that differ. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
