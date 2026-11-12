@@ -4,7 +4,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.system :as root] [seon.task :as task] [seon.doc :as doc] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
             [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.profile :as profile] [datahike.api :as d]
-            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx] [seon.error :as err] [seon.source :as source] [seon.program :as program] [seon.agent]))
+            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx] [seon.error :as err] [seon.source :as source] [seon.program :as program] [seon.learn :as learn] [seon.agent]))
 
 (defn- write-declared!
   "Declared state's tx written on main: the error that built it as it is; an empty tx
@@ -410,6 +410,19 @@
   [sys]
   (when-let [{:keys [checkout]} (let [g (generation sys)] (when (:binary g) g))]
     (into [checkout] (resume-args sys checkout))))
+
+(defn run-losses
+  "What task id's run lost, read from its branch: each turn that went to a look-up that answered nothing, an error, or a
+  search for code its context did not show, {:turn :rule :producer :form} (seon.learn/waste over seon.learn/turns-of), with the
+  run's turns and the waste by producer (seon.learn/summary). The loop's report of a real task, a query of the branch, run any
+  time, a restart included. See docs/errors.md#learn."
+  {:malli/schema [:=> [:cat :seon.system/sys :seon.task/id] [:map [:turns nat-int?] [:rows [:vector :map]] [:summary :map]]]}
+  [sys id]
+  (let [a (:seon.task/agent (d/entity @(:conn sys) [:seon.task/id id]))
+        db (:db @(root/branch-db sys (:seon.agent/branch a)))
+        turns (learn/turns-of db (:seon.agent/key a) {})
+        rows (learn/waste turns (learn/final-symbols turns))]
+    {:turns (count turns) :rows rows :summary (learn/summary rows)}))
 
 (defn first-moves!
   "Score the first move a model makes on each task of ids (task ids on main): per task, its

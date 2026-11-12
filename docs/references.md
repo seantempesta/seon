@@ -12,7 +12,7 @@ Every text Seon reads as text (a task's plan, a wiki page, a docstring) goes thr
 
 The delimiter around a citation decides how much of what it cites is pulled.
 
-- A bare word holding a `/` is its **summary**, and counts only when it names something. A var's `#'` is punctuation. A word inside a `"..."` string is data, never a citation (`seon.ref-test/a-string-literal-in-text-cites-nothing`).
+- A bare word holding a `/` is its **summary**, and counts only when it names something. A var's `#'` is punctuation; the name's own trailing `!` or `?` is not (`seon.ref-test/a-text-word-keeps-its-names-bang`). A word inside a `"..."` string is data, never a citation (`seon.ref-test/a-string-literal-in-text-cites-nothing`).
 - One backtick, or a link, is its **doc**.
 - Three or more backticks are its **code**.
 - Two backticks are a literal, never a reference: write ``ns/name`` to mention a name without citing it.

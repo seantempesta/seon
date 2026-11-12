@@ -1571,7 +1571,8 @@
             _ (ask! 0)
             a (pdb/eid @conn :seon.agent/key "a1")
             point (fn [] (let [db @conn] {:commit (d/commit-id db) :t (:max-tx db)}))
-            kept #(:w @@#'seon.ctx.wire/kept-walk)
+            ;; the walk kept in the process's state (seon.agent/state), a value: the point it was drawn cold at, which an advance keeps
+            kept #(:drawn (:seon.ctx.wire/parts-walk @seon.agent/state))
             p1 (point)
             h1 (wire/page-parts-at @conn a p1)
             w1 (kept)
@@ -1580,11 +1581,12 @@
             p2 (point)
             h2 (wire/page-parts-at @conn a p2)]
         (is (some? w1) "the walk is kept after a draw")
-        (is (identical? w1 (kept)) "a later point of its branch advanced the same walk")
+        (is (nil? (resolve 'seon.ctx.wire/kept-walk)) "in the process's state, no cell of its own")
+        (is (= w1 (kept)) "a later point of its branch advanced the same walk")
         (is (str/includes? (pr-str h2) "Make f, then g.") "and it shows what moved")
-        (reset! @#'seon.ctx.wire/kept-walk nil)
+        (swap! seon.agent/state dissoc :seon.ctx.wire/parts-walk)
         (is (= h2 (wire/page-parts-at @conn a p2)) "what a cold draw at that point answers")
-        (is (not (identical? w1 (kept))) "a point with no kept walk to advance is drawn")
+        (is (not= w1 (kept)) "a point with no kept walk to advance is drawn")
         (is (not= h1 h2))))))
 
 (deftest a-flush-between-turns-leaves-the-next-turns-pair-to-advance
@@ -1598,7 +1600,8 @@
             _ (ask! 0)
             a (pdb/eid @conn :seon.agent/key "a1")
             point (fn [] (let [db @conn] {:commit (d/commit-id db) :t (:max-tx db)}))
-            kept #(:w @@#'seon.ctx.wire/kept-walk)
+            ;; the walk kept in the process's state (seon.agent/state), a value: the point it was drawn cold at, which an advance keeps
+            kept #(:drawn (:seon.ctx.wire/parts-walk @seon.agent/state))
             pb (point)
             _ (wire/page-parts-through @conn a [nil pb])
             _ (ev! "e1")
@@ -1611,9 +1614,9 @@
             pn (point)
             [h0 h1] (wire/page-parts-through @conn a [pb pn])]
         (is (some? w))
-        (is (identical? w (kept)) "the next turn's pair advanced the walk the flush left, not a page drawn again")
+        (is (= w (kept)) "the next turn's pair advanced the walk the flush left, not a page drawn again")
         (is (str/includes? (pr-str h1) "Make f, then g.") "it shows what moved")
-        (reset! @#'seon.ctx.wire/kept-walk nil)
+        (swap! seon.agent/state dissoc :seon.ctx.wire/parts-walk)
         (is (= [h0 h1] (wire/page-parts-through @conn a [pb pn])) "what a cold draw of the pair answers")))))
 
 (deftest a-write-reruns-the-placing-render-and-no-earlier-page-pair
@@ -2489,3 +2492,25 @@
             (is (and (str/includes? said "Reply 1.") (str/includes? said "Reply 2.")) "the other parts are still there")
             (is (= [:seon.render/component-defect] (map :seon.error/type (render/take-defects! w))) "one defect, recorded once"))
           (finally (render/dispose-walk! w)))))))
+
+;; docs/render.md#style: presentation goes from the page the model reads, and a map the page shows as data keeps its entries:
+;; a map entry [:k {...}] is a vector headed by a keyword with a map second, and was rebuilt as an element, which its map
+;; could not take back (seon.ctx-test/an-agent-adds-a-datum-and-its-render, red in context's land, 2026-11-12)
+(deftest presentation-leaves-a-maps-entries
+  (is (= [:div [:pre {:task {:plan "p"} :opts {} :n 1}]]
+         (#'wire/presentation-free [:div {:class "x"} [:pre {:class "y" :data-n 1} {:task {:plan "p"} :opts {} :n 1}]]))))
+
+;; docs/render.md#a-page-is-a-kept-walk: a point is read as the db it names: its own db, its commit when the commit holds its t, else
+;; the db as of its t. A world written without commits (d/db-with on a store's db, as a speculated or a test world is) names its
+;; store's commit at every point; read as that commit, each past point was the world before any of it, and its page showed nothing
+(deftest a-point-is-read-at-its-own-t
+  (let [db0 (ts/test-db)
+        db1 (d/db-with db0 [{:seon.agent/key "pt-a1"}])
+        db2 (d/db-with db1 [{:seon.agent/key "pt-a2"}])
+        at (fn [db p] (set (keep #(:seon.agent/key (d/entity db (:e %))) (d/datoms (#'wire/db-at db2 p) :aevt :seon.agent/key))))
+        p1 {:commit (d/commit-id db2) :t (:max-tx db1)}
+        p2 {:commit (d/commit-id db2) :t (:max-tx db2)}]
+    (is (= (d/commit-id db0) (d/commit-id db2)) "the world's points all name its store's commit")
+    (is (contains? (at db2 p1) "pt-a1") "a past point holds what was written by its t")
+    (is (not (contains? (at db2 p1) "pt-a2")) "and nothing after it")
+    (is (contains? (at db2 p2) "pt-a2") "the db's own point is the db")))
