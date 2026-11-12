@@ -56,6 +56,7 @@ Sessions reach each other through files in the managing session's notes folder: 
 - **A message is one file of 10 lines or fewer.** Line 1 says what is needed: a tip to land (`LAND <branch> <sha>`), a ruling with the sender's pick, or a fact.
 - **Each session watches its own inbox** with a background command that exits when a file arrives, then reads it and starts the watcher again.
 - **The mailbox is the home of no fact:** what a message teaches goes into the wiki section or task entry that owns it.
+- **`mail/PROVING`** lists the proves running, for information; nothing waits on it.
 
 ## No fan-out
 
@@ -70,7 +71,7 @@ The owner makes the rulings, and a session brings him one decision at a time wit
 
 ## Helpers
 
-A helper is hands for a well-specified piece. It works in a worktree of its own, branched from the session's branch (`bin/worktree NAME jolt/<session-branch>`), commits there and stops: it never lands, never pushes and never works in the main tree. A helper that edits only docs runs no `bin/` command. A brief states:
+A helper is hands for a well-specified piece. It works in a worktree of its own, branched from the session's one branch (`bin/worktree NAME jolt/<session>`), commits there and stops, and the session merges it into its branch: it never lands, never pushes and never works in the main tree. A helper that edits only docs runs no `bin/` command. A brief states:
 1. the question, and which step of THE PLAN it serves;
 2. what is known, as paths;
 3. the scope: what it may run and which files it owns;
