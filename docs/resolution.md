@@ -22,7 +22,7 @@ The sites that resolve a name held in data to a var by design.
 - `seon.contract/function-var?`: a type's positional factory (`->T`) is known by its type `T` beside it, looked up by name.
 - `seon.render/declared-var`: the same, as its var: a component's var's contract says what it reads.
 - `seon.ctx.wire/page-message`: a call Seon writes for the model (`my.render/ctx`, `my.render/page`, `my.render/diff`) names its function as a symbol ([the render is an eval](render.md#the-render-is-an-eval)); `my.render` requires `seon.ctx.wire`, so it is resolved by name.
-- `seon.source/accounts`: a form the store holds whole is not analyzed again, so the vars it defines or declares are interned in its namespace as its analysis would have, for the forms after it ([main's program follows the tree](source.md#main-s-program-follows-the-tree)).
+- `seon.source/accounts`: a form the store holds whole is not analyzed again, so the vars it defines or declares are interned in its namespace as its analysis would have, for the forms after it ([main's program follows the tree](source.md#a-boot-catches-up-with-its-checkout)).
 - `seon.repl/undo-definition!`: a var an agent's definition just changed is put back when recording that definition threw: the agent's own eval undone, in its own process.
 - `seon.db/with-specs`: the entity index keeps each schema's compiled pattern (`seon.render/pattern`, made at its first use, [the pattern](ctx.md#the-pattern)); `seon.render` requires `seon.db`, so it is resolved by name.
 - `seon.cost/run`, `seon.cost/bound`, `seon.cost/cases`: a cost estimate names its function, input and generator as symbols in data.

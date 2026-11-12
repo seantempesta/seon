@@ -96,7 +96,7 @@
     {:units [(program/unit-account (analyze nsym form private?))] :ns-form? ns-form?})))
 
 (defn- alias-held-not-declared
-  "An alias form names that namespace nsx holds and its file's ns form, ns-form, doesn't declare, or nil: what only this process would resolve. A full name, a class's static and quoted data are no alias. See docs/source.md#main-s-program-follows-the-tree."
+  "An alias form names that namespace nsx holds and its file's ns form, ns-form, doesn't declare, or nil: what only this process would resolve. A full name, a class's static and quoted data are no alias. See docs/source.md#a-boot-catches-up-with-its-checkout."
   {:malli/schema [:=> [:cat :any :any :any] [:maybe :symbol]]}
   [nsx ns-form form]
   (let [declared (into #{} (for [c (filter seq? ns-form) :when (= :require (first c)) spec (rest c) :when (vector? spec)
@@ -119,7 +119,7 @@
   ([nsym text] (accounts nsym text nil nil))
   ([nsym text private?] (accounts nsym text private? nil))
   ;; held, given (read-nss's, from the store): (held ns src k ns-src form) answers the account of a form the store holds whole,
-  ;; so it is not analyzed again (an edit of one form analyzes that form, not its file: docs/source.md#main-s-program-follows-the-tree)
+  ;; so it is not analyzed again (an edit of one form analyzes that form, not its file: docs/source.md#a-boot-catches-up-with-its-checkout)
   ([nsym text private? held]
   (let [ns-form (volatile! nil) ns-src (volatile! nil) kseen (volatile! {})
         {:keys [forms tail]} (read-forms nsym text
@@ -406,7 +406,7 @@
   made read of it: its definitions with their meta, its inline definitions, the identities it makes), or nil, so it is
   analyzed: while the file's ns form is the one db holds (its aliases and requires unchanged), never the ns form itself or a
   macro's definition (a later form's analysis expands it), nor a form expanding a macro that reads files (its facts are what
-  the macro read: file-reading-expansions). See docs/source.md#main-s-program-follows-the-tree."
+  the macro read: file-reading-expansions). See docs/source.md#a-boot-catches-up-with-its-checkout."
   {:malli/schema [:=> [:cat :seon.host/db :symbol] :seon.host/fn]}
   [db nsym]
   (let [ne (pdb/eid db :ns/name nsym)
@@ -438,7 +438,7 @@
   once analyzed, so a later file's require of it answers from the analysis, never a load from disk that
   cannot find it; one whose file the checkout has is never marked (a real require must still load it). tree, every file
   the same import has read (files among them, refresh-tx's earlier rounds too), is what a named var's privacy is asked of
-  (`tree-private`), never only this round's files. See docs/source.md#main-s-program-follows-the-tree."
+  (`tree-private`), never only this round's files. See docs/source.md#a-boot-catches-up-with-its-checkout."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string] [:map-of :string :string]] [:map-of :symbol :map]]}
   [db files tree]
   (let [private? (tree-private db tree)]

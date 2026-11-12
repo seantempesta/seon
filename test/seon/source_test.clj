@@ -80,7 +80,7 @@
       (is (= moved (source/file-text a2 'app.pl)) "a form moved reads back where the file has it"))))
 
 (deftest an-edit-of-one-form-analyzes-that-form-not-its-file
-  ;; docs/source.md#main-s-program-follows-the-tree: a catch-up of a file with one form changed analyzed every form of the file
+  ;; docs/source.md#a-boot-catches-up-with-its-checkout: a catch-up of a file with one form changed analyzed every form of the file
   ;; (0.8 MB a form: a one-file catch-up 100 MB, a seven-file one 2.4 GB, 2026-11-12); a form the store holds whole, under
   ;; the same ns form, is taken from the store. Red before: 9 analyses (the ns form and the eight defns)
   (let [text (fn [& fs] (str "(ns app.oe)\n\n" (str/join "\n\n" fs) "\n"))
@@ -98,7 +98,7 @@
     (is (= "(defn f5 [] 5)" (:form/src (:var/form (d/entity after [:var/name 'app.oe/f5])))) "and the others are as they were")))
 
 (deftest a-form-taken-from-the-store-is-declared-for-the-forms-after-it
-  ;; docs/source.md#main-s-program-follows-the-tree: a form the store holds whole is not analyzed again, but a later form that
+  ;; docs/source.md#a-boot-catches-up-with-its-checkout: a form the store holds whole is not analyzed again, but a later form that
   ;; calls it is, in a process that never loaded the namespace (bin/test --health's): the held form's var must be declared
   ;; first. Red before: "Unable to resolve symbol: helper" (Tests, 2026-11-12, an agent_test.clj metadata edit)
   (let [text (fn [body] (str "(ns app.hd)\n\n(defn helper [] 1)\n\n(defn user-fn [] " body ")\n"))
@@ -1503,7 +1503,7 @@
     (is (some #(= '(:import [java.io File]) %) (read-string (source/ns-text-adding old '(ns a.b (:import [java.io File]))))) "another clause is added whole")))
 
 (deftest an-alias-only-the-process-holds-is-refused
-  ;; docs/source.md#main-s-program-follows-the-tree: real run 10: a file whose ns form had lost its requires passed analysis in a process that still held them, and merged.
+  ;; docs/source.md#a-boot-catches-up-with-its-checkout: real run 10: a file whose ns form had lost its requires passed analysis in a process that still held them, and merged.
   ;; What a file's forms name must be what its own ns form declares, in any process
   (binding [*ns* *ns*]
     (eval '(ns app.held-alias (:require [clojure.string :as held]))))
