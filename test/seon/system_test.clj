@@ -98,9 +98,11 @@
   (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
         r (ts/value-of (:response (ts/ask root {:op :eval :agent "root"
                                                 :code (str "(let [ag (seon.system/spawn! sys {}) a @(seon.system/kill! sys ag) b @(seon.system/kill! sys ag)]"
-                                                           " [(select-keys a [:status]) (some? (:ended-ms a)) (= a b)"
+                                                           " [(select-keys a [:status]) (some? (:ended-ms a)) (= a b) (set (keys a))"
                                                            "  (:seon.error/type @(seon.system/kill! sys :no-such-agent))])")})))]
-    (is (= [{:status :killed} true true :seon.system/no-agent] r) (pr-str r))))
+    ;; its answer is the end, {:status :ended-ms}, never the whole entry, which gains :exit when the fork server reaps it (a second
+    ;; kill answered another map in a shard: Context, 2026-11-12)
+    (is (= [{:status :killed} true true #{:status :ended-ms} :seon.system/no-agent] r) (pr-str r))))
 
 (deftest the-sweeper-pool-is-fixed-before-anything-collects
   ;; task seon.system/the-sweeper-pool-is-fixed-before-anything-collects: six threads allocate through 30
