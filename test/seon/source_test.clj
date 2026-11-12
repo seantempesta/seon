@@ -79,6 +79,24 @@
           a2 (d/db-with after tx2)]
       (is (= moved (source/file-text a2 'app.pl)) "a form moved reads back where the file has it"))))
 
+(deftest an-edit-of-one-form-analyzes-that-form-not-its-file
+  ;; docs/source.md#main-s-program-follows-the-tree: a catch-up of a file with one form changed analyzed every form of the file
+  ;; (0.8 MB a form: a one-file catch-up 100 MB, a seven-file one 2.4 GB, 2026-11-12); a form the store holds whole, under
+  ;; the same ns form, is taken from the store. Red before: 9 analyses (the ns form and the eight defns)
+  (let [text (fn [& fs] (str "(ns app.oe)\n\n" (str/join "\n\n" fs) "\n"))
+        fs (mapv #(str "(defn f" % " [] " % ")") (range 8))
+        db (d/db-with (ts/test-db) (source/import-tx (ts/test-db) {"src/app/oe.clj" (apply text fs)}))
+        edited (assoc fs 3 "(defn f3 [] 33)")
+        n (atom 0)
+        analyze @#'seon.source/analyze-form
+        tx (with-redefs [seon.source/analyze-form (fn [& args] (swap! n inc) (apply analyze args))]
+             (source/refresh-tx db {"src/app/oe.clj" (apply text edited)}))
+        after (d/db-with db tx)]
+    (is (= 2 @n) "the ns form and the one edited form are analyzed, no other")
+    (is (= (apply text edited) (source/file-text after 'app.oe)) "the file reads back whole")
+    (is (= "(defn f3 [] 33)" (:form/src (:var/form (d/entity after [:var/name 'app.oe/f3])))) "the edit is the var's form")
+    (is (= "(defn f5 [] 5)" (:form/src (:var/form (d/entity after [:var/name 'app.oe/f5])))) "and the others are as they were")))
+
 (deftest importing-src-records-every-form-exactly
   (let [files (src-files)
         db (imported files)
