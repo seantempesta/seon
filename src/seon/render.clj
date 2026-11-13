@@ -1337,19 +1337,20 @@
   "Tree (seon.ctx/build's :tree) drawn by root render var root on db, kept as a value: prev is what the last call answered (nil, or
   opts :moved nil: drawn cold), :moved the datoms since prev's db. A component is reused when its arguments are the same (a view by
   its path), its render the same fn, and nothing it read moved (`queue-what-moved!`). No reaction, watch or lock: its owner holds
-  the value. opts :index, :outputs, :changes (the tree's diff, seon.ctx/changes), :model-only, :resolve (the page as hiccup too, :hiccup, `resolved`). Answers the next prev: :answers
+  the value. opts :index, :outputs, :changes (the tree's diff, seon.ctx/changes), :model-only, :resolve (the page as hiccup too, :hiccup, `resolved`), :units, :place (`placed-hiccup`, as :placed) and :once (a reader that reads it and lets it go: nothing tracked, never advanced). Answers the next prev: :answers
   {output [[value source] ...]} for each output but the hiccup, :ran, :defects, :ledger and the parts it keeps. See
   docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat [:maybe :map] [:map [:db :seon.host/db] [:tree :any] [:root :any] [:index :map] [:outputs [:set :keyword]]
                                             [:changes :seon.host/fn] [:moved {:optional true} [:maybe [:sequential :any]]]
                                             [:model-only {:optional true} :boolean] [:resolve {:optional true} :boolean] [:units {:optional true} :boolean]
-                                            [:place {:optional true} [:sequential :string]]]]
+                                            [:place {:optional true} [:sequential :string]] [:once {:optional true} :boolean]]]
                   [:map [:answers :map] [:ran :map] [:defects [:vector :map]] [:tree :any] [:index :map] [:root :any]]]}
-  [prev {:keys [db tree root index outputs changes moved model-only resolve units place]}]
+  [prev {:keys [db tree root index outputs changes moved model-only resolve units place once]}]
   (let [r (ratom/atom tree)
-        warm? (and (some? prev) (some? moved) (identical? index (:index prev)) (= root (:root prev)))
+        ;; a value drawn :once tracked nothing, so it is never advanced
+        warm? (and (some? prev) (not (:once prev)) (some? moved) (identical? index (:index prev)) (= root (:root prev)))
         w (assoc (walker {:ref r :changes changes} (constantly db) [root {} (ratom/ref-view r changes)] index)
-                 :pure true :outputs outputs :model-only (boolean model-only) :drawn-moved (volatile! nil))
+                 :pure true :outputs outputs :model-only (boolean model-only) :drawn-moved (volatile! nil) :once (boolean once))
         env {:children (volatile! []) :ran (volatile! {})}]
     (when warm? (queue-what-moved! w prev tree changes moved))
     ;; the root drawn (a hit when nothing it holds moved), then each queued component it holds that its draw did not reach
@@ -1363,7 +1364,8 @@
         (run-queued! w env held?))
       (doseq [c @(:gone w) :when (empty? (:parents (get @(:cache w) c)))] (unmount! w c))
       (vreset! (:gone w) #{}))
-    (walk-answer prev w env warm? {:tree tree :index index :root root :outputs outputs :resolve resolve :units units :place place})))
+    (cond-> (walk-answer prev w env warm? {:tree tree :index index :root root :outputs outputs :resolve resolve :units units :place place})
+      once (assoc :once true))))
 
 (defn dispose-walk!
   "Every component of walk w disposed, and the render vars it watched and the inputs it kept (inputs-in) let go:

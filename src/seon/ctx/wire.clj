@@ -173,7 +173,7 @@
            t (cond-> (or ctx (ctx/agent-ctx ix db (pdb/eid db :seon.agent/key agent)))
                commit (assoc ::here {:commit commit :t (or (:t basis) (:max-tx db))}))
            p (render/walk nil {:db db :tree t :root (render/render-var-of ix (merge {:seon.agent/key agent} t)) :index ix :changes ctx/changes
-                               :model-only true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
+                               :model-only true :once true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
        (request p db)))))
 
 (defn provider-of
