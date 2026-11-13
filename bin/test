@@ -10,7 +10,7 @@
 # each result is stored at its digest, after target/seon is built from this tree when anything
 # runs. Ends on TEST OK / TEST FAILED and its exit status.
 # With bin/prove (both or checks), the check steps to run go beside the shards (bin/check --steps).
-# bin/test --plan|--shard|--store-steps|--overran|--health ... are test/test_runner.clj's parts (bin/prove's; --health is bin/check's
+# bin/test --plan|--shard|--store-steps|--overran|--health|--route ... are test/test_runner.clj's parts (bin/prove's; --health is bin/check's
 # health step; --overran is this script's, for a shard bin/stalls ended).
 # A test running far past its measured time (its end bound: :seon.config.check/step-end-factor times its last run, floored at the
 # factor times :seon.config.agent/stall-ms) is ended by bin/stalls after its evidence (the owner's fourth clock exception,
@@ -52,7 +52,7 @@ runner() { HOME=$ROOT/target/home JOLT_PWD=$ROOT "$JOLT" -A:test run -m test-run
 [[ " $* " == *" --all "* ]] && export SEON_SEEDS=5
 OWN=0
 case ${1:-} in
-  --plan|--shard|--store-steps|--overran|--health) runner "$@"; exit $? ;;
+  --plan|--shard|--store-steps|--overran|--health|--route) runner "$@"; exit $? ;;
   --prove) WHAT=$2 OUT=$3; shift 3 ;;
   *) WHAT=tests OWN=1 OUT=$ROOT/target/prove/$(date +%Y%m%dT%H%M%S)-$$; echo "test: run ${OUT:t}, logs in $OUT" ;;
 esac

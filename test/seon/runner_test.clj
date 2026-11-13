@@ -1,7 +1,7 @@
 (ns seon.runner-test
   "bin/test's and bin/prove's plan (test-runner) refuses a selection that cannot select: `bin/test
   --reach` once took --reach for a namespace, ran nothing and passed (a check that could not fail)."
-  (:require [clojure.test :refer [deftest is]] [test-runner] [clojure.edn] [seon.config] [seon.lib] [seon.fx] [seon.edn] [seon.program] [seon.system] [seon.proofs]))
+  (:require [clojure.test :refer [deftest is]] [test-runner] [clojure.edn] [seon.config] [seon.lib] [seon.fx] [seon.edn] [seon.program] [seon.system] [seon.proofs] [seon.graph] [seon.test-store]))
 
 (deftest a-selection-that-cannot-select-is-refused
   (is (re-find #"no flag --reach" (str (#'test-runner/refused-names ["--reach"]))) "a flag it does not know")
@@ -100,3 +100,35 @@
       (is (= #{:seon.test/shard-fixture} (warm-of ['a/doc-test 'a/process-test] #{'a/process-test})) "a test that starts the root: warmed")
       (is (= #{:seon.test/fixture} (warm-of ['a/store-test] #{})) "the test store is warmed for every test that reaches it")
       (finally (seon.lib/remove-tree! out)))))
+;; docs/merging.md#a-branch-lands-with-binland: bin/land's route is binary-current's answer at :root scope for the standing root's
+;; binary against the tip: live (a fork of main's agent, the branch's diff loaded, through the test service) when what differs
+;; is code an agent loads, its own build when the binary bakes it. The live route's two failures of 2026-11-12 (21:27, 21:55)
+;; were tests of baked state run in a fork of main's: a config value read at load and the codec libraries; both classes route
+;; local here. Each case: the binary's tree made from this checkout's with one change (a git index of its own; the repository
+;; is not touched). Estimate: the kept program and reach graph brought to date ~20M, five routes ~1M each (a tree diff, a
+;; reach walk), five trees by git ~0.5M: 30M ticks.
+(deftest ^{:seon.test/estimate {:ticks 30000000} :seon.test/execs ["git"]} a-landing-routes-live-only-for-what-an-agent-loads
+  (let [here (seon.config/checkout)
+        db (test-runner/program)
+        tree (seon.fx/tree-id here)
+        g (test-runner/reach-graph-of db (seon.fx/declared-refs seon.graph/built-text) (seon.test-store/kept-program-store))
+        git (fn [env & args] (:out (apply seon.lib/sh (concat ["env"] (for [[k v] env] (str k "=" v)) ["git" "-C" here] args))))
+        built-with (fn [path f]
+                     (let [idx (str here "/target/tmp/route-" (random-uuid) ".index") env {"GIT_INDEX_FILE" idx}
+                           _ (.mkdirs (java.io.File. (str here "/target/tmp")))]
+                       (git env "read-tree" tree)
+                       (if (= :pin f)
+                         (git env "update-index" "--cacheinfo" (str "160000," (apply str (repeat 40 "2")) "," path))
+                         (let [blob (clojure.string/trim (:out (seon.lib/sh "git" "-C" here "hash-object" "-w" "--stdin" :in (f (slurp (str here "/" path))))))]
+                           (git env "update-index" "--add" "--cacheinfo" (str "100644," blob "," path))))
+                       (let [t (clojure.string/trim (git env "write-tree"))] (.delete (java.io.File. idx)) t)))
+        route (fn [running] (test-runner/route db g running tree))
+        tweak (fn [marker] (fn [text] (clojure.string/replace-first text marker (str marker " "))))]
+    (is (= {:route :live} (route tree)) "the binary built from the tip itself")
+    (is (= {:route :live} (route (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))) "an agent-only form: loaded in the fork")
+    (is (= :binary-tree (get-in (route nil) [:why :missing])) "a root that answers no tree: its own build, never live")
+    (is (= ["reference-code/zstd"] (get-in (route (built-with "reference-code/zstd" :pin)) [:why :reaches]))
+        "the codec's pin (21:55: libraries a fork of main's holds): its own build")
+    (is (= ["resources/seon/config/default.edn"]
+           (get-in (route (built-with "resources/seon/config/default.edn" #(str % "\n;; a value read at load\n"))) [:why :reaches]))
+        "the shipped config (21:55: a value read at load): its own build")))
