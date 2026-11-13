@@ -148,14 +148,17 @@
 
 (defn cache-write
   "write-verdicts!'s arguments at n: a cache directory (under target/tmp) holding n verdicts of one
-  test each, a new verdict to write, and the bound: with room for it (over? false) or one verdict
-  short (over? true), so the write evicts."
+  test each and the .size ledger a write keeps, laid down as files (the cache's layout, not n writes), a new
+  verdict to write, and the bound: with room for it (over? false) or one verdict short (over? true), so the write evicts."
   {:malli/schema [:=> [:cat pos-int? :boolean] [:tuple :string :map :map :map :int]]}
   [n over?]
   (let [dir (str (cfg/checkout) "/target/tmp/verdicts-cost-" (random-uuid))
         t (fn [i] (symbol "a" (str "t" i)))
         rec (fn [i] {(t i) {:test (t i) :digest (str "d" i) :pass 1 :fail 0 :error 0}})]
-    (doseq [i (range n)] (fx/write-verdicts! dir {:id "w"} (rec i) {} Long/MAX_VALUE))
+    (doseq [i (range n) :let [f (file-of dir (t i) (str "d" i) :pass)]]
+      (.mkdirs (.getParentFile f))
+      (spit f (pr-str {:key (t i) :digest (str "d" i) :status :pass :writer {:id "w"}})))
+    (spit (str dir "/.size") (bytes-in dir))
     [dir {:id "w"} (rec n) {} (if over? (bytes-in dir) Long/MAX_VALUE)]))
 
 (defn cache-write-under [n] (cache-write n false))
@@ -187,7 +190,9 @@
        (finally (clean-costs!))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
-(deftest ^{:seon.test/estimate {:ticks 50000000}} a-write-past-capacity-counts-the-cache-once
+;; Estimate: the cache laid down, 140 files spat and counted twice (bytes-in) at ~25k ticks a file, ~3.5M; three measured writes,
+;; each its fixed part (~34 calls, ~40k ticks) and a listing by metadata of at most 100 files, ~0.3M: ~4M, 5M with slack
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-write-past-capacity-counts-the-cache-once
   (try (cost/proof {:of 'seon.fx/write-verdicts! :input 'seon.results-test/cache-write-over
                     :n "verdicts in the cache"
                     :work "one count of the verdict files by metadata, one removal of the least recently used, and the key's history"
@@ -195,7 +200,8 @@
                     :per-n {:bytes 11500}
                     ;; raised from 20 calls by the owner, 2026-11-06, for seon.fx/history
                     :fixed {:calls 34 :bytes 60000}
-                    :sizes [10 100 1000]})
+                    ;; 10 to 100: below 10 the fixed part is all a write costs (36 calls, 127 KB at n=1, past what it states)
+                    :sizes [10 30 100]})
        (finally (clean-costs!))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
