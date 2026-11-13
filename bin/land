@@ -2,7 +2,8 @@
 # bin/land [-F MSGFILE] — land this worktree's branch on main: the one way any session, Claude's or
 # Seon's, merges (docs/merging.md#a-branch-lands-with-binland). Run in the branch's worktree
 # (bin/worktree NAME), never the main tree, which stays on main and clean.
-#   1. merge main into the branch (a conflict stops it: resolve, commit, run it again);
+#   1. merge main into the branch (a conflict stops it: resolve, commit, run it again), and build the runtime its pins
+#      now name (bin/build jolt: nothing when its stamp is its pin);
 #   1b. bin/check health and bin/laws, seconds: a red stops the landing before any prove;
 #   2. bin/prove --out DIR --merge on that tip (the local path: see step 2's note below), niced, beside any other run (results are shared by digest across
 #      every checkout, and each run writes under its own target/prove/<id>: no run waits on another); a diff of
@@ -95,6 +96,12 @@ cd "$HERE"
 OLD=$(git rev-parse main)
 git merge --no-edit -q main || fail "merging main into $B conflicts: resolve, commit, run bin/land again"
 "$MAIN/bin/worktree" --sync "$HERE" >/dev/null || fail "syncing $HERE's submodules to the pins its branch records"
+# the merge can move this branch's runtime pins (another session's landed Jolt or Chez pin): its built runtime follows the
+# pins it now records before anything runs on it, as bin/update's build does for the main tree; bin/build skips a step whose
+# stamp is its pin. Without it the landing stopped at health on "target/jolt was built for <the old pin>: run bin/build jolt"
+# (jolt/runtime's, after jolt/deps landed f8455357, 2026-11-13)
+nice -n 15 "$HERE/bin/build" jolt > "$HERE/target/land-build.log" 2>&1 || {
+  tail -5 "$HERE/target/land-build.log"; fail "building the runtime the merged pins name (target/land-build.log)"; }
 # a message that says Completes: ns/name lands only with that task's entry gone from the tree it lands, read before
 # the proof (seon.task-files-test/no-shipped-task-is-merged-work reads main's messages, so it went red only after
 # a landing whose branch kept its entry, 2026-11-08)
