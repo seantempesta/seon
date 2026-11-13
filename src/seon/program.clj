@@ -594,7 +594,7 @@
   "Form id as one entity map, from row (a form's account or a merge's form content): its
   text, namespace, order and lead, the definitions and declarations it names (def-ref's ids,
   each definition's entity read from eid-of: a map, or def-eid on the db) and its form-sets."
-  {:malli/schema [:=> [:cat :string :map ifn?] :map]}
+  {:malli/schema [:=> [:cat :string :map ifn?] :seon.db/tx-map]}
   [id {:keys [ns src code order lead defines declares] :as row} eid-of]
   (into (cond-> {:db/id (form-tid id) :form/id id :form/src src :form/ns (ns-tid ns) :form/order order}
           code (assoc :form/code code)

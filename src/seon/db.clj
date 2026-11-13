@@ -416,7 +416,7 @@
   each :db/add and :db/retract of such an attribute stays, and every :db/retractEntity stays, in order. Tempids join the maps
   that kept them as before. The full import of the checkout speculated whole cost 2.7 G ticks and 4.7 GB a call.
   See docs/storage.md#the-write-checks-every-entity-it-touches."
-  {:malli/schema [:=> [:cat :any [:or [:set :keyword] :seon.host/fn]] [:vector :any]]}
+  {:malli/schema [:=> [:cat :any [:or [:set :keyword] :seon.host/fn]] :seon.db/tx-data]}
   [tx-data attr?]
   (into [] (keep (fn [x] (cond (map? x) (let [m (into {} (filter (fn [[k _]] (or (= :db/id k) (attr? k)))) x)]
                                          (when (seq (dissoc m :db/id)) m))

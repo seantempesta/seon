@@ -18,7 +18,7 @@
   that want lacks retracted and the ones it lacks asserted, so an entity that already states
   want writes nothing. In want a set is a card-many attribute's values, any other value one
   value, nil none; a ref is an entity id (a tempid or lookup ref is always asserted)."
-  {:malli/schema [:=> [:cat :seon.host/db :int [:sequential :keyword] :map] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.host/db :int [:sequential :keyword] :map] :seon.db/tx-data]}
   [db e attrs want]
   (vec (for [a attrs
              :let [v (get want a) new (cond (set? v) v (some? v) #{v} :else #{})
@@ -133,7 +133,7 @@
   value) for citation c at place order: its target (seon.ref/target on db, the db the write holds: a lookup that resolves
   against what the write made before it, so a task's own name is the task it makes), its depth, its content id
   \"<of-id> <target>\", upserted by it. See docs/references.md#an-entity-cites."
-  {:malli/schema [:=> [:cat :seon.host/db :any :string [:map [:seon.ref/depth :seon.ref/depth]] :int] :map]}
+  {:malli/schema [:=> [:cat :seon.host/db :any :string [:map [:seon.ref/depth :seon.ref/depth]] :int] :seon.db/tx-map]}
   [db of of-id c order]
   (let [t (ref/target db c)]
     {:seon.cite/id (str of-id " " (second t)) :seon.cite/of of :seon.cite/target t
@@ -180,7 +180,7 @@
   target (cite-tx), at the strongest depth any of cs asks for it and its first's place, each cite of of on db no
   longer among them retracted whole, and its :seon.task/gone cleared. The one writer of a text's cites, called where the text is written (create-tx,
   load-tx, rederive-tx), after what the same write makes. See docs/references.md#an-entity-cites."
-  {:malli/schema [:=> [:cat :seon.host/db :any :string [:sequential [:map [:seon.ref/depth :seon.ref/depth]]]] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.host/db :any :string [:sequential [:map [:seon.ref/depth :seon.ref/depth]]]] :seon.db/tx-data]}
   [db of of-id cs]
   (let [{:keys [by order]} (reduce (fn [{:keys [by order] :as acc} c]
                                      (let [m (cite-tx db of of-id c (count order)) id (:seon.cite/id m)]
@@ -198,7 +198,7 @@
   "The facts that make task t's cites those its text states now (`text-citations` over its plan and
   instructions, `cites-tx`): what a write of its plan or instructions adds, as task creation does
   (my.task/update!). See docs/references.md#task-references."
-  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.host/db :map] :seon.db/tx-data]}
   [db t]
   (cites-tx db [:seon.task/id (:seon.task/id t)] (:seon.task/id t) (text-citations db t)))
 
@@ -221,7 +221,7 @@
   written on its record once, by its first run on its branch (seon.agent/begin-run!), so its own my.agent/cite!
   and uncite! change them. See
   docs/references.md#an-entity-cites."
-  {:malli/schema [:=> [:cat :seon.host/db :any :string] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.host/db :any :string] :seon.db/tx-data]}
   [db of k]
   ;; a cite's target is a lookup ref, which a write refuses for an entity the db does not hold: only the addresses it holds are cited
   ;; here (a store older than its wiki lacks a section; `agent-cites-missing` names those), each at its place in the config's order
@@ -264,7 +264,7 @@
   plan: the ranked matches over code and wiki its page draws, ranked on main as the agent's branch last merged it (seon.render.ui/searched), the place to start
   before any citation. Every task gets it the one way, whether it was declared in a file or asked for (`create-tx`). The query
   is the plan as written, copied once: the agent owns it after. See docs/tasks.md#a-request-is-one-transaction."
-  {:malli/schema [:=> [:cat :any [:maybe :string]] [:maybe :map]]}
+  {:malli/schema [:=> [:cat :any [:maybe :string]] [:maybe :seon.db/tx-map]]}
   [t plan]
   (when-not (str/blank? plan)
     {:seon.search/id (str (if (vector? t) (second t) t) "/request") :seon.search/of t :seon.search/query plan}))
@@ -280,7 +280,7 @@
   "The transaction writing decls (their needs already judged) as held tasks, ids their ids, their cites read on db', the db
   that holds every task the write makes (made-db): create-tx's and load-tx's, so a write speculates its tasks once. See
   docs/references.md#an-entity-cites."
-  {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.task/id] [:vector :map]] [:vector :map]]}
+  {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.task/id] [:vector :map]] :seon.db/tx-data]}
   [db' ids decls]
   (let [graph (zipmap ids (map #(set (:seon.task/needs %)) decls))
         ref-of #(if (graph %) % [:seon.task/id %])
@@ -306,7 +306,7 @@
   its branch; needs refer by id, to a task of this write or one already on db. A cycle
   or a need that names no task is the :seon.task/refused error."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.task/declaration]]
-                  [:or [:vector :map] [:map [:seon.error/type [:= :seon.task/refused]] [:seon.error/message :string]]]]}
+                  [:or :seon.db/tx-data :seon.task/refused]]}
   [db decls]
   (let [ids (mapv #(task-id (:seon.task/ns %) (:seon.task/name %)) decls)
         graph (zipmap ids (map #(set (:seon.task/needs %)) decls))]
@@ -316,7 +316,7 @@
 
 (defn execution-tx
   "Set the desired execution of tasks ids (:running is root's release, run!)."
-  {:malli/schema [:=> [:cat [:sequential :seon.task/id] :seon.task/execution] [:vector :map]]}
+  {:malli/schema [:=> [:cat [:sequential :seon.task/id] :seon.task/execution] :seon.db/tx-data]}
   [ids execution]
   (mapv (fn [id] {:seon.task/id id :seon.task/execution execution}) ids))
 
@@ -324,7 +324,7 @@
   "Change task id's desired environment (branch, model, max-turns): a running run in
   another environment is restarted clean by the reconciler."
   {:malli/schema [:=> [:cat :seon.task/id [:map [:branch {:optional true} :keyword] [:model {:optional true} :string]
-                                           [:max-turns {:optional true} pos-int?]]] [:vector :map]]}
+                                           [:max-turns {:optional true} pos-int?]]] :seon.db/tx-data]}
   [id {:keys [branch model max-turns]}]
   [(cond-> {:seon.task/id id}
      branch (assoc :seon.task/branch branch) model (assoc :seon.task/model model)
@@ -336,7 +336,7 @@
   root's session's pull, through the user's); one still shown live (:busy, :idle, :spawning: a root that
   crashed or was stopped wrote no end) is :dead, its running form retracted; and a stall one showed is over, its :seon.process/stall retracted with its process (an
   open :stalled problem never outlives it)."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.host/db] :seon.db/tx-data]}
   [db] (let [live (:seon.status/live (contract/properties :seon.agent/status))
              ;; every agent still shown live, read by its status (no join through the system entity: docs/users.md#who-started-whom)
              agents (remove (fn [[a]] (:seon.user/name (d/entity db a))) (d/q '[:find ?a :in $ [?s ...] :where [?a :seon.agent/status ?s]] db (vec live)))]
@@ -414,7 +414,7 @@
   forked and ended and a stall it shows: each member of root's view m, written when set and retracted
   when m holds it as nil (the form running, once it returned). Root writes it when its
   view of the agent changes (seon.system/record-agents)."
-  {:malli/schema [:=> [:cat :seon.agent/id :map] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.agent/id :map] :seon.db/tx-data]}
   [id m]
   (let [k (name id)
         v (fn [member x] (case member :running (:form x) :forked-ms (double x) x))
@@ -442,7 +442,7 @@
   main's root entity with the layer each key came from and its one ref to that entity (`:seon.system/config`); and an
   entity per provider and per model (:seon.ai.model/provider-id, :seon.ai.model/id). Root's boot writes it
   with the boot fact, and again when a config entry moves (seon.config/moved). See docs/config.md#facts-on-main."
-  {:malli/schema [:=> [:cat :seon.config/config :seon.config/sources] [:vector :map]]}
+  {:malli/schema [:=> [:cat :seon.config/config :seon.config/sources] :seon.db/tx-data]}
   [c srcs]
   (into [{:seon.system/id :root :seon.config/sources srcs :seon.system/config "config"}
          (assoc c :db/id "config" :seon.config/id (lib/id (lib/digest (sedn/encode (canonical c)))))]
@@ -458,7 +458,7 @@
   makes name it (:seon.eval/by its id), and root's page lists it with its agents; until there is a login, it is who is signed in (:seon.system/signed-in). The user
   stores no pattern: its pull is its schema's (:seon.db/user-fact's :seon.ctx/pattern). A user is never forked, so it has no :seon.agent/parent
   and is in no agent's tree. See docs/users.md#what-each-thing-is."
-  {:malli/schema [:=> [:cat :string :string] [:vector :any]]}
+  {:malli/schema [:=> [:cat :string :string] :seon.db/tx-data]}
   [boot name]
   (into [{:db/id "user" :seon.agent/key name :seon.user/name name}
          {:seon.system/id :root :seon.system/boot boot :seon.system/signed-in "user"}]
@@ -493,7 +493,7 @@
   "Message mid from from (the sender's lookup, `sender`) to the agents with keys tos, its body, sent at sent-ms: the one message entity (mid in seon.lib/id's form: a fresh unique id for a message sent, seon.lib/unique-id, or a content id where the same facts must make the one message, as the reconciler's ask of a task at a t), `to` naming each
   recipient's agent entity by key. Written by root's writer on main at the send, and by the recipient on its branch, with its own ref only,
   when its next act delivers it (seon.agent/deliver!). See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :string :map [:sequential :string] :any :int] [:vector :map]]}
+  {:malli/schema [:=> [:cat :string :map [:sequential :string] :any :int] :seon.db/tx-data]}
   [mid from tos body sent-ms]
   [{:seon.message/id mid :seon.message/from from :seon.message/body body :seon.message/sent-ms sent-ms
     :seon.message/to (mapv #(vector :seon.agent/key %) tos)}])
@@ -541,7 +541,7 @@
   cancel or a newer start that moved it leaves it, and refuses the whole write), setting the judged attributes
   that are in want (a map of :seon.task/* members, with :seon.task/reasons among them when judged) and retracting every other
   that db holds, as seon.program/def-tx does. See docs/reconcile.md#a-task-holds-how-its-work-ended."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id [:maybe :seon.task/outcome] :seon.task/outcome :map] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id [:maybe :seon.task/outcome] :seon.task/outcome :map] :seon.db/tx-data]}
   [db id from to want]
   (let [e (pdb/eid db :seon.task/id id)
         attrs (cond-> judged-attrs (contains? want :seon.task/reasons) (conj :seon.task/reasons))]
@@ -552,7 +552,7 @@
   "The write that moves task id's outcome from `from` to `to` after its judging (compare-and-swap, as outcome-tx), setting the
   members m beside it and retracting nothing: what judging stored of the task (its deferred tests, its changed keys) stays
   for the merge, the gate and the problems that read it. See docs/reconcile.md#a-task-holds-how-its-work-ended."
-  {:malli/schema [:=> [:cat :seon.task/id [:maybe :seon.task/outcome] :seon.task/outcome :map] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.task/id [:maybe :seon.task/outcome] :seon.task/outcome :map] :seon.db/tx-data]}
   [id from to m]
   (cond-> [[:db/cas [:seon.task/id id] :seon.task/outcome from to]]
     (seq m) (conj (assoc m :seon.task/id id))))
@@ -574,8 +574,8 @@
   its boot and when it started, and the agent it is forked from, its :seon.agent/parent (`forked-from`), written with the agent and
   kept when it continues), its turn budget set when it is new (a raised budget stays, docs/turn.md#the-cap) and raised by raise in the same write.
   A refused spawn is the task's outcome :refused with root's reason and error, and no agent."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int] [:vector :any]]
-                  [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int nat-int?] [:vector :any]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int] :seon.db/tx-data]
+                  [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int nat-int?] :seon.db/tx-data]]}
   ([db id boot agent env start-ms] (start-tx db id boot agent env start-ms 0))
   ([db id boot agent {:keys [branch model max-turns holder]} start-ms raise]
    (let [k (when agent (name agent))
@@ -600,7 +600,7 @@
 (defn refused-tx
   "Root refused to spawn task id's agent (the typed error e: the branch is held, or too many live agents): the task's outcome
   :refused with root's reason and the error, from what it was; no agent is made. See docs/reconcile.md#a-task-holds-how-its-work-ended."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :map] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :map] :seon.db/tx-data]}
   [db id e]
   (outcome-tx db id (:seon.task/outcome (d/entity db [:seon.task/id id])) :refused
               {:seon.task/reason (:seon.error/message e) :seon.task/error e}))
@@ -614,7 +614,7 @@
   A set member (the proofs) is compared and written as a set. Answers {:tx :conflicts [{:task
   :attr :base :ours :theirs}]}. Cost: the carried datoms of
   the three dbs, read once."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:map [:tx [:vector :any]] [:conflicts :seon.task/task-conflicts]]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:map [:tx :seon.db/tx-data] [:conflicts :seon.task/task-conflicts]]]}
   [base branch main]
   (let [many (fn [a] (dbu/multival? main a))
         ;; each member's value: a set member's values as a set, a single member's value
@@ -640,7 +640,7 @@
   single member its new value. A value its member's schema does not admit (proofs that are no
   set of qualified symbols, a plan that is no string) is the update's contract error, writing nothing."
   {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause :seon.task/found-nothing] :seon.host/fn [:sequential :any]]
-                  [:or [:vector :any] :seon.task/invalid-member]]}
+                  [:or :seon.db/tx-data :seon.task/invalid-member]]}
   [t member f args]
   (let [id [:seon.task/id (:seon.task/id t)]
         old (if (= :seon.task/proofs member) (set (get t member)) (get t member))
@@ -661,7 +661,7 @@
   its run's end (carry-tx); or the branch was forked before main held the task or its
   needs. Another task the branch holds is left as the branch has it. Empty when the branch
   holds them all as main does. Cost: the closure's tasks, pulled once each."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.task/id] [:vector :map]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.task/id] :seon.db/tx-data]}
   [main branch id]
   (let [;; how a task's work stands and ended is main's alone (judged-attrs): a branch's copy holds the task, not that
         pull #(apply dissoc (d/pull %1 '[* {:seon.task/needs [:seon.task/id]}] [:seon.task/id %2])
@@ -948,7 +948,7 @@
   "The transaction reconciling task files into main db. files: {owning-ns declarations or
   error}, every file read (a file not given is not judged). Answers the tx-data, or the
   first error: a file's own, or needs that name no task or form a cycle."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :symbol :any]] [:or [:vector :any] [:map [:seon.error/type :keyword]]]]}
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :symbol :any]] [:or :seon.db/tx-data :seon.error/base]]}
   [db files]
   (if-let [r (first (filter :seon.error/type (vals files)))]
     r
@@ -1098,7 +1098,7 @@
   declared again on a fresh branch, its end's facts gone. None when id is a refine itself, when a refine of it is in flight or acted on, or when it
   continues another task's branch (it needs a task on its own branch: a merge step, whose work task has its own refine), so a
   refine and its review never loop. See docs/tasks.md#a-refine-curates-its-own-task."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe [:vector :any]]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe :seon.db/tx-data]]}
   [db id]
   (let [t (task db id)
         prior (first (filter #(refine? db %) (citing-tasks db (pdb/eid db :seon.task/id id))))]

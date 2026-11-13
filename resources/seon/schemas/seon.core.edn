@@ -15,7 +15,16 @@
  :seon.db/branch :keyword
  :seon.db/t :int
  :seon.db/cfg [:map [:store :map]]
- :seon.db/tx-data [:sequential :any]
+ ;; transaction data, as datahike.api/transact takes it: entity maps and the ops src writes (docs/storage.md#the-write-checks-every-entity-it-touches)
+ :seon.db/tx-data [:sequential [:or :seon.db/tx-map :seon.db/tx-op]]
+ :seon.db/tx-map [:map-of :keyword :any]
+ ;; the entity an op names: an entity id, a lookup ref, or a tempid string the same transaction names
+ :seon.db/tx-entity [:or :seon.db/entity :string]
+ :seon.db/tx-op [:or [:tuple [:enum :db/add :db/retract] :seon.db/tx-entity :keyword :any]
+                 [:tuple [:= :db/retract] :seon.db/tx-entity :keyword]
+                 [:tuple [:enum :db/retractEntity :db.fn/retractEntity] :seon.db/tx-entity]
+                 [:tuple [:= :db.fn/retractAttribute] :seon.db/tx-entity :keyword]
+                 [:tuple [:= :db/cas] :seon.db/tx-entity :keyword :any :any]]
  ;; an entity as history and at read it: its id, or a lookup ref of a unique attribute (seon.db/history)
  :seon.db/entity [:or :int [:tuple :keyword :any]]
  ;; one datom of an entity's history: attribute :a, value :v (a pulled map under :pull, ref attributes only), :added? false for a
