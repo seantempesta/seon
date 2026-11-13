@@ -1922,3 +1922,71 @@
                    :seon.system/id :other-root :seon.ai.model/id "model-1"
                    :seon.ai.model/provider-id "provider-1" :seon.fn/var 'app/f}]
       (is (= (datahike.db.transaction/content-eid a v) (get-in (d/with db [{:db/id "x" a v}]) [:tempids "x"])) (str a " takes its content id")))))
+
+(defn named-vars
+  "datahike.api/datoms seeks to make: the test store's seed (an LMDB store, nodes restored through the node cache) and
+  the first n entities that name a var."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:vector :int]]]}
+  [n]
+  (let [db (ts/test-db)] [db (vec (take n (map :e (d/datoms db :aevt :var/name))))]))
+
+(defn seek-each
+  "Each entity's :var/name datoms, one d/datoms seek per entity, counted: how many there are."
+  {:malli/schema [:=> [:cat :seon.host/db [:vector :int]] :int]}
+  [db es]
+  (reduce (fn [n e] (+ n (count (d/datoms db :eavt e :var/name)))) 0 es))
+
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-datom-seek-allocates-its-path
+  ;; notes plans/deps-datom-read-alloc.md: a warm seek of one datom allocated 5.7 KB on the program db (depth 4), its
+  ;; lower bound ~0.9 KB, because Jolt built a record by (T. ...) and called a fn of five or more arguments through a
+  ;; rest list: persistent-sorted-set's ten-field Seq cost 464 B where its vector and record are 144, a Datom 161 where
+  ;; it is 80; and a count stepped a Seq per element (489 B a datom). The test: the proof's calls at 10, 30 and 100
+  ;; seeks, ~20 calls of ~300k ticks: ~5M.
+  (cost/proof
+    {:of 'seon.db-test/seek-each :input 'seon.db-test/named-vars
+     :n "entities sought, each by [e a] in :eavt (one datom each)"
+     :work (str "per seek: d/datoms' dispatch and its two bound datoms, the slice comparator, a seq per tree level "
+                "(the seed's :eavt is a root over leaves: two), the leaf restored from the node cache, the count folded")
+     :growth :linear
+     ;; per seek, measured by layer on the program db: two Seqs (a ten-slot vector and a spill record) 144 B each, the
+     ;; comparator closure 128 B, the two bound Datoms 81 B each and their resolution ~110 B, d/datoms' multimethod over
+     ;; [db index & components] (its rest list and dispatch, ~450 B), the db's protocol and context layers ~200 B, the
+     ;; leaf's restore from the node cache 32 B plus 160 B for trove's log fn, which a test process leaves on and
+     ;; production turns off (seon.system), the count's fold ~50 B: ~1.6 KB. The first estimate, 0.9 KB, counted the
+     ;; index's own work and left out the layers above it and the log fn. Ticks: two binary searches of ~10 compares,
+     ;; the restore's lookup, the contract: ~3k.
+     :per-n {:ticks 3000 :bytes 1700}
+     :fixed {:ticks 20000 :bytes 20000}
+     :sizes [10 30 100]}))
+
+(defn keys-of-values-sized
+  "konserve.core/keys' arguments: an LMDB store of its own (Seon's encoding: fasl, zstd) holding 20 keys, each a vector
+  of n * 100 distinct longs, so its stored value grows with n and its metadata does not. Its path is kept in stores-made."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any [:map [:sync? :boolean]]]]}
+  [n]
+  (let [path (str (seon.config/checkout) "/target/db-test-keys-" (random-uuid))
+        s (klmdb/connect-lmdb-store path :opts {:sync? true}
+                                    :config {:encoding {:serializer :FaslSerializer :compressor {:type :zstd}}})]
+    (swap! stores-made conj path)
+    (dotimes [i 20] (k/assoc s (keyword "k" (str i)) (vec (range (* i 1000000) (+ (* i 1000000) (* n 100)))) {:sync? true}))
+    [s {:sync? true}]))
+
+(deftest ^{:seon.test/estimate {:ticks 20000000}} listing-a-stores-keys-costs-its-keys-not-their-values
+  ;; notes plans/deps-datom-read-alloc.md: konserve's key listing reads each key's metadata, and the LMDB backing
+  ;; copied the key's whole value out of the map to read its 20-byte header and its metadata (a Datahike node, ~11 KB a
+  ;; key: 3.6 GB for 325k keys at root). A metadata read now takes the header and the metadata alone, so the listing
+  ;; costs the same whatever the values hold. The test: 20 keys, values of 100 to 10,000 longs; the proof's calls ~2M,
+  ;; the stores' writes (60 values up to ~40 KB each, zstd) ~15M.
+  (try
+    (cost/proof
+      {:of 'konserve.core/keys :input 'seon.db-test/keys-of-values-sized
+       :n "hundreds of longs in each of the store's 20 values"
+       :work (str "the keys read in one cursor pass, and per key one read transaction copying its header and metadata "
+                  "out of the map, the metadata decompressed and decoded: nothing of the value")
+       :growth :constant
+       ;; per key, measured by function (konserve's generic read path, ~9.3 KB): the listing's loop 2.5 KB, read-blob*
+       ;; and decode-part ~1.1 KB each, the read transaction and the prefix copy ~1.7 KB, zstd, fasl and the header
+       ;; ~2.2 KB: 20 keys ~190 KB; ticks ~2.4k a key: ~50k
+       :fixed {:ticks 60000 :bytes 200000}
+       :sizes [1 10 100]})
+    (finally (run! seon.lib/remove-tree! @stores-made) (reset! stores-made []))))

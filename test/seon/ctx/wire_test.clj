@@ -1731,7 +1731,11 @@
             evals (fn [r] (set (keep (fn [[[k x]]] (when (= :eval k) x)) (:parts r))))
             at (fn [b] (wire/render (d/commit-as-db conn (:commit b)) b))]
         (is (empty? (evals (at b0))) "turn 1 at its commit: no eval made after it")
-        (is (= #{"e0" "e1"} (evals (at b2))) "turn 3 at its commit: the evals before it")))))
+        (is (= #{"e0" "e1"} (evals (at b2))) "turn 3 at its commit: the evals before it")
+        ;; the debug page and the context op hand render a later db (the branch's head): the basis names the point, never the db
+        ;; (the loop task's turn 1 drew all 40 turns, 133 messages, from its branch's head)
+        (is (empty? (evals (wire/render @conn b0))) "turn 1 made from the head: still no eval made after it")
+        (is (= #{"e0" "e1"} (evals (wire/render @conn b2))) "turn 3 made from the head: the evals before it, none after")))))
 
 ;; ---- example sessions in an agent's context (specs/example-sessions) ----
 

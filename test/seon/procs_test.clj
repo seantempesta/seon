@@ -10,7 +10,7 @@
             [seon.step :as step] [seon.db :as pdb] [seon.sock :as sock]
             [seon.writer :as writer] [seon.reconcile :as reconcile] [seon.fork-server :as server]
             [seon.agent :as agent] [seon.agent-proc :as ap] [seon.fx] [seon.system :as root] [seon.problems :as problems] [seon.repl :as repl] [seon.render.proc] [seon.web]
-            [taoensso.trove :as trove]))
+            [taoensso.trove :as trove] [my.test :as mt]))
 
 (trove/set-log-fn! nil)
 
@@ -957,6 +957,27 @@
     (is (= (:in m) (:seon.error/in (answer p))) "on the defect")
     (is (= :state (:took (answer p))) "with what its step took")))
 
+;; docs/errors.md#nothing-crashes-and-nothing-hangs: a proc whose transition threw (its init or resume: Flow reports it with no message
+;; and leaves it paused for good, reading no in-port) is down, and what the api would send it is answered with that error instead of
+;; waiting in a buffer nobody reads (plans/runtime-step-contract-hang.md, (A) part 1). Red before: the write went to the writer.
+;; Estimate, its sibling's measured pieces: an ex-info 0.1M, flow-error 0.13M, api-state 0.2M, two api steps (the :error one records
+;; a problem) ~0.4M, step-out-ok?'s first validation 0.3M ~ 1,500,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1500000}} a-request-to-a-proc-whose-transition-threw-is-answered-with-its-error
+  (let [down (#'root/flow-error {:clojure.core.async.flow/pid :writer :clojure.core.async.flow/ex (ex-info "resume threw" {})})
+        ;; wired as system.edn wires them: one bound channel, the api's :to-writer out-port and the writer's :to-writer param, and
+        ;; no conn between them; the built system holds each proc's bound declaration (seon.graph/build's :parts)
+        ch (a/chan 4)
+        st0 (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer ch :events (a/chan 4)
+                              :view {:agents {}} :graph (promise)
+                              :system (doto (promise) (deliver {:procs {} :conns []
+                                                                :parts {[:proc :writer] [{:proc 'seon.writer/writer-proc :args {:to-writer ch}} {}]}}))})
+        [st _] (step #'root/api-proc st0 :back down)
+        p (promise)
+        [_ outs] (step #'root/api-proc st :ext {:op :write :req {:op :tx :branch :db :tx-data []} :p p})]
+    (is (empty? (:to-writer outs)) "nothing is sent to a writer that reads nothing")
+    (is (seon.contract/error? (answer p)) (str "the write's caller is answered with the error: " (pr-str (answer p))))
+    (is (= :writer (get-in (answer p) [:seon.error/data :pid] (:pid (answer p)))) (pr-str (answer p)))))
+
 ;; Estimate: 3 threads started and joined (~30k each) + 3 ex-info throws with their stacks (~20k each) + 1 go block 20k + api-state and 1 api step ~0.1M ~ 0.3M, about 2e5 ~ 200,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 200000}} an-uncaught-error-reaches-root-never-only-stderr
   ;; docs/errors.md#nothing-crashes-and-nothing-hangs (Point 2026, Sean's silent errors): a fiber died at start with its error
@@ -1037,8 +1058,10 @@
                          :view {:agents {}} :system (doto (promise) (deliver {:procs {} :conns []}))
                          :graph (doto (promise) (deliver (reify clojure.core.async.flow.impl.graph/Update (update-flow [_ _] {}))))})))))
 
-;; Estimate: 2 test-branch! x 1M; 6 step-fn calls x 0.1M (a transact or a commit read in each); 1 transacts x 50k ~ 3,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 3000000}} a-fork-server-step-that-throws-answers-and-the-server-serves-on
+;; Estimate: the fork server's state on the world (graph and index given) ~10k + a throw with its stack ~0.1M + a :stats step (a count
+;; of the world's ~2,000 datoms) ~50k + api-state and 3 api steps (a spawn refused, its error printed) ~0.5M ~ 0.7M; plus the world when
+;; this test builds it first in its process, its 5 checked db-withs ~3M (its docstring's 0.6M is low): 4,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-fork-server-step-that-throws-answers-and-the-server-serves-on
   ;; task seon.fork-server/a-throwing-fork-server-step-answers-its-asker: a main commit the fork
   ;; server cannot read (a :tx naming no commit: the replica's d/commit-as-db throws, as a bad
   ;; entity in a d/with did, 2026-10-29) threw out of its step. Unfixed, the server stayed alive
@@ -1048,30 +1071,27 @@
   ;; Then task seon.fork-server/every-fork-server-wait-ends-with-the-server: a server lost (dead
   ;; with no standby, a-lost-fork-server-answers-every-waiter) is heard by root's api, which
   ;; refuses a spawn with the error naming it, before any agent is made.
-  ;; Both are step functions called in process (docs/processes.md#a-step-that-throws)
-  (ts/test-branch! (fn [cfg conn]
-    (let [st (#'server/server-step {:db @conn :cfg cfg :store conn :conn nil})
-          [st1 outs1] (#'server/server-step st :cmd {:op :tx :t 999999999999 :commit (random-uuid) :ns 0 :tx-data []})
-          m (let [rep (d/transact conn [{:note/text "after" :note/agent :t}])]
-              {:op :tx :t (:max-tx @conn) :commit (d/commit-id @conn) :ns 0 :tx-data (pdb/report->tx rep)})
-          [st2 outs2] (step #'server/server-step st1 :cmd m)]
-      (is (identical? st st1) "the step that threw left the server's state as it was")
-      (is (= [:step-failed] (map :ev (:ev outs1))))
-      (is (= :tx (:op (first (:ev outs1)))) "naming the op it took")
-      (is (= :seon.fork-server/step-failed (get-in (first (:ev outs1)) [:error :seon.error/type])))
-      (is (= [:applied] (map :ev (:ev outs2))) "and the next command is served")
-      (is (= (:max-tx @conn) (:max-tx (:db st2))))
-      (spawning-api (fn [api]
-        (let [[told _] (step #'root/api-proc api :from-fs (first (:ev outs1)))
-              [lost _] (step #'root/api-proc told :from-fs {:ev :fork-server-lost})
-              p (promise)
-              [after _] (step #'root/api-proc lost :ext {:op :spawn :opts {} :p p})
-              refused (answer p)]
-          (is (re-find #"step-failed" (pr-str (:seon.system/errors lost))) "root recorded the error")
-          (is (= :lost (get-in lost [:view :fork-server :status])))
-          (is (= :seon.system/refused (:seon.error/type refused)) (pr-str refused))
-          (is (re-find #"fork server is lost" (str (:seon.error/message refused))) (pr-str refused))
-          (is (= (:agents lost) (:agents after)) "no agent was made for the refused spawn"))))))))
+  ;; Both are step functions called in process on values (docs/processes.md#a-step-that-throws): the server on the world
+  ;; with no store, so the :tx's commit can't be read; the catch is the step's own, whatever the op threw on
+  (let [db (mt/world)
+        st (#'server/server-step {:db db :graph {} :index {}})
+        [st1 outs1] (#'server/server-step st :cmd {:op :tx :t (inc (:max-tx db)) :commit (random-uuid) :ns 0 :tx-data []})
+        [_ outs2] (step #'server/server-step st1 :cmd {:op :stats})]
+    (is (identical? st st1) "the step that threw left the server's state as it was")
+    (is (= [:step-failed] (map :ev (:ev outs1))))
+    (is (= :tx (:op (first (:ev outs1)))) "naming the op it took")
+    (is (= :seon.fork-server/step-failed (get-in (first (:ev outs1)) [:error :seon.error/type])))
+    (is (= [[:stats (:max-tx db)]] (map (juxt :ev :t) (:ev outs2))) "and the next command is served, on the db it held")
+    (let [[told _] (step #'root/api-proc (api-state) :from-fs (first (:ev outs1)))
+          [lost _] (step #'root/api-proc told :from-fs {:ev :fork-server-lost})
+          p (promise)
+          [after _] (step #'root/api-proc lost :ext {:op :spawn :opts {} :p p})
+          refused (answer p)]
+      (is (re-find #"step-failed" (pr-str (:seon.system/errors told))) "root recorded the error")
+      (is (= :lost (get-in lost [:view :fork-server :status])))
+      (is (= :seon.system/refused (:seon.error/type refused)) (pr-str refused))
+      (is (re-find #"fork server is lost" (str (:seon.error/message refused))) (pr-str refused))
+      (is (= (:agents lost) (:agents after)) "no agent was made for the refused spawn"))))
 
 ;; Estimate: 1 test-branch! x 1M; 3 step-fn calls x 0.1M (a transact or a commit read in each) ~ 1,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 1000000}} a-spawn-is-answered-at-its-agents-ready

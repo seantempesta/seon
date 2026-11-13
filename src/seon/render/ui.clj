@@ -667,12 +667,7 @@
   id, kind and execution; whole, its name as a title, its namespace and how its work stands above it (the task's outcome
   where it holds one: a capped task is not \"running\"), how its kind is worked and its plan accumulated over its needs
   as Markdown. The agent's own task part is `task`. See docs/render.md#a-component-answers-hiccup."
-  {:seon.render/style ":is(.task-view, .cited, .citations, .references, .searched, .status) { display: flex; flex-direction: column; gap: 0.5rem; border: 1px solid var(--color-base-800); border-radius: 0.375rem; padding: 0.5rem; }
-:is(.task-view, .cited, .citations, .references, .searched, .status) > h2 { text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.625rem; color: var(--color-text-400); }
-.task-view h3 { font-size: 0.75rem; color: var(--color-text-300); }
-:is(.cite, .searched) details > summary { cursor: pointer; list-style: none; color: var(--color-text-400); }
-:is(.cite, .searched) details > summary::before { content: '▸ '; color: var(--color-text-500); }
-:is(.cite, .searched) details[open] > summary::before { content: '▾ '; }
+  {:seon.render/style ".task-view h3 { font-size: 0.75rem; color: var(--color-text-300); }
 .searched ol { display: flex; flex-direction: column; gap: 0.25rem; }
 .searched li > details > p { margin: 0.25rem 0 0 1rem; font-size: 0.75rem; color: var(--color-text-400); }"
    :malli/schema [:=> [:cat :seon.render/opts :map] :any]}
@@ -1233,7 +1228,7 @@
 (defn turn
   "The namespace the agent's REPL is in (a component over ctx), as its heading, which is all the model is sent of it. See
   docs/render.md#the-agents-turn."
-  {:seon.render/style ":is(.turn, .own-problems, .ctx-key) { border-radius: 0.375rem; background: var(--color-base-900); padding: 0.5rem; min-width: 0; overflow-x: auto; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
   (when-let [in-ns (ctx/current-ns c)]
     [:section [:h2 (str "You're in " in-ns ".")]]))
@@ -1556,7 +1551,7 @@
 (defn system-message
   "The agent's system message (a component over ctx and the db): the doc sections it links (:seon.agent/system), else the system prompt (seon.ctx.wire/agent-system-text), for the person a fold. See
   docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
-  {:seon.render/style ":is(.system-message, .example, .proof-story) {font-size: 0.75rem; line-height: 1rem; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
   [:details {}
    [:summary {:class "muted" :wire/for "page"} "system message"]
@@ -2199,10 +2194,7 @@
 (defn root-side
   "Root's own entry in its agents list (a component over ctx): lit, as root is the process answering
   the page; the whole pill links to root's page."
-  {:seon.render/style "#c-side > :is(.root-side, .agent) { display: flex; flex-direction: column; max-width: 15rem; flex-shrink: 0; border-radius: 0.375rem; background: var(--color-base-900); }
-@media (min-width: 64rem) { #c-side > :is(.root-side, .agent) { max-width: none; background: transparent; } }
-#c-side > :is(.root-side, .agent):hover { background: var(--color-base-850); }
-#c-side > .root-side { order: -2; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  {:seon.render/style "#c-side > .root-side { order: -2; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_]
   [:li [:a {:href "/root" :class pill-link :title "root: main"}
         [:span {:class "flex items-baseline gap-2"} [:span {:class "text-signal"} "●"] [:span {:class "font-semibold text-text-100"} "root"] [:span {:class "seon-note"} "main"]]]])
@@ -2266,8 +2258,7 @@
   "Main's open problems (a component over root's ctx, its :health: the report the render proc keeps
   with root's process, seon.problems/health changed by each move of main, seon.render.proc/health!): what needs fixing by the report's render, and
   below it, folded, what is upkeep (:seon.problems/attention). It runs again only when :health changes. See docs/render.md#the-page. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
-  {:seon.render/style ":is(.problems-tile, .process-tile, #p-task .agent, .root .agent) { display: flex; flex-direction: column; gap: 0.5rem; border: 1px solid var(--color-base-800); border-radius: 0.375rem; padding: 0.5rem; }
-:is(.problems-tile, .process-tile) > h2 { text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.625rem; color: var(--color-text-400); }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx ix :seon.render/index}]
   (let [h (some-> (:health c) ratom/realize)
         upkeep (:seon.problems/attention (contract/properties :seon.problems/class))
