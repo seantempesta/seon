@@ -51,7 +51,7 @@ datahike.test.pull-api-test {:test 30, :pass 103, :fail 0, :error 0}
 datahike.test.pull-reverse-test {:test 4, :pass 20, :fail 0, :error 0}
 datahike.test.purge-test {:test 6, :pass 32, :fail 0, :error 0}
 datahike.test.query-aggregates-test {:test 1, :pass 15, :fail 0, :error 0}
-datahike.test.query-cache-test {:test 50, :pass 354, :fail 0, :error 0}
+datahike.test.query-cache-test {:test 51, :pass 358, :fail 0, :error 0}
 datahike.test.query-cancel-test {:test 6, :pass 20, :fail 0, :error 0}
 datahike.test.query-cartesian-test {:test 7, :pass 18, :fail 0, :error 0}
 datahike.test.query-find-specs-test {:test 1, :pass 8, :fail 0, :error 0}
