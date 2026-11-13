@@ -1,7 +1,7 @@
 (ns seon.runner-test
   "bin/test's and bin/prove's plan (test-runner) refuses a selection that cannot select: `bin/test
   --reach` once took --reach for a namespace, ran nothing and passed (a check that could not fail)."
-  (:require [clojure.test :refer [deftest is]] [test-runner] [clojure.edn] [clojure.string] [clojure.java.shell] [seon.config] [seon.lib] [seon.fx] [seon.edn] [seon.program] [seon.system] [seon.proofs]))
+  (:require [clojure.test :refer [deftest is]] [test-runner] [clojure.edn] [clojure.string] [seon.config] [seon.lib] [seon.fx] [seon.edn] [seon.program] [seon.system] [seon.proofs]))
 
 (deftest a-selection-that-cannot-select-is-refused
   (is (re-find #"no flag --reach" (str (#'test-runner/refused-names ["--reach"]))) "a flag it does not know")
@@ -101,13 +101,15 @@
       (is (= #{:seon.test/fixture} (warm-of ['a/store-test] #{})) "the test store is warmed for every test that reaches it")
       (finally (seon.lib/remove-tree! out)))))
 
-(deftest a-base-is-built-with-products-built-for-its-own-pins
+(deftest ^{:seon.test/estimate {:ticks 500000} :seon.test/execs ["git"]} a-base-is-built-with-products-built-for-its-own-pins
   ;; docs/health.md#checks-are-callers-of-seon: health checks out the base commit (make-base-tree!) and clones its built
   ;; products; a branch that moves the Jolt or Chez pin cloned its own, built for its pins, and the base's runner refused
   ;; ("target/jolt was built for <the branch's pin>; its pin is <main's>"), so such a branch could never land. The base takes
   ;; this checkout's products only when they were built for its own runtime pins, else bin/worktree's default, the main tree's.
+  ;; The estimate: eight git rev-parse spawns (two pins read here, two in each of three calls), ~50k ticks each with the
+  ;; contract and its pipes, and three stamp files written: ~0.4M.
   (let [root (seon.config/checkout)
-        pin (fn [p] (clojure.string/trim (:out (clojure.java.shell/sh "git" "-C" root "rev-parse" (str "HEAD:" p)))))
+        pin (fn [p] (clojure.string/trim (:out (seon.lib/sh "git" "-C" root "rev-parse" (str "HEAD:" p)))))
         dir (str (System/getProperty "java.io.tmpdir") "/base-products-" (random-uuid))
         stamp! (fn [step v] (spit (str dir "/target/" step ".stamp") v))]
     (.mkdirs (java.io.File. (str dir "/target")))
