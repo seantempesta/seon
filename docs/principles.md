@@ -53,6 +53,8 @@ loud bug in the one sanctioned place, fixed at its cause, so its whole class can
 
 ## How designs are chosen
 
+A design is judged by these rules before it is built, and each one has stopped a past mistake.
+
 - **Native to the Seon agent.** There is only the Seon agent. Claude sessions get exactly its capabilities, through its own
   ops; anything built for outside callers (scripts, MCP tools, server ops, the web) is a thin wrapper over the native design.
 - **Seon's strengths first.** Content digests, one store with cheap branches, the program indexed as data, recorded reads,
