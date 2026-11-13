@@ -26,7 +26,9 @@
                  [:tuple [:= :db.fn/retractAttribute] :seon.db/tx-entity :keyword]
                  [:tuple [:= :db/cas] :seon.db/tx-entity :keyword :any :any]]
  ;; an entity as history and at read it: its id, or a lookup ref of a unique attribute (seon.db/history)
- :seon.db/entity [:or :int [:tuple :keyword :any]]
+ :seon.db/entity [:or :seon.db/eid [:tuple :keyword :any]]
+ :seon.db/eid [:int {:description "An entity id of the store (ids are issued once across branches, docs/storage.md#ids)."}]
+ :seon.lib/digest [:string {:min 16 :max 16 :description "A content identity: the first 16 hex digits of a SHA-256 (seon.lib/digest)."}]
  ;; one datom of an entity's history: attribute :a, value :v (a pulled map under :pull, ref attributes only), :added? false for a
  ;; retraction, :t its transaction, :at that transaction's :db/txInstant (docs/storage.md#history)
  :seon.db/history-row [:map [:a :keyword] [:v :any] [:added? :boolean] [:t :int] [:at inst?]]

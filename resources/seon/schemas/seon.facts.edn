@@ -525,7 +525,7 @@
  ;; the gate's run of them (each test's status); the changed namespaces the gate could not read from the branch, each with why:
  ;; it tested another tree than the one that merges, so none of its results counts as a pass
  :seon.task/deferred [:map-of {:description "The process tests that the task's change reaches, which its merge runs on a checkout, each with its digest as main held it at the task's base: the key by which the gate reads main's own verdict of that test (seon.proofs/main-red); nil when the test is new on the branch, so its red is the task's. An observation; the gate's results are :seon.task/deferred-results."} :qualified-symbol [:maybe :string]]
- :seon.task/deferred-results [:map-of {:description "The gate's run of the deferred tests, each test's status."} :qualified-symbol :seon.proof/status]
+ :seon.task/deferred-results [:and {:description "The gate's run of the deferred tests, each test's status."} :seon.proof/results]
  :seon.task/gate-unread [:vector {:description "The changed namespaces that the gate could not read from the branch, each with why."} [:map [:ns :symbol] [:reason :string]]]
  ;; measured at its end from the branch (seon.merge/three-way's :ours): the printed program keys it changed since its merge base
  ;; (each seon.edn/encode of a :seon.merge/program-key, so generated ones are too); the octopus merge admits on them
