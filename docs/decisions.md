@@ -12,6 +12,8 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 How it is measured, the same day: "I want randomly selected tasks from backlog and if the solution is good (claude agents review all code until we are sure the system can self review) I want it fully merged to disk and merged into main. DO NOT REPEAT THE TASKS I WANT THEM FIXED WE HAVE 400+ TASKS!" So the measure is never a fixed set of tasks run again: each run takes a task at random from the backlog that no run has taken, a good solution merges to disk and to main and its task is done, and Claude sessions review every agent's change until the system's own review is shown trustworthy.
 
+Refined the same day: "We can iterate on a single randomly selected task until it's done. It doesn't need to be a randomly chosen task for every test. Expect tasks to be badly written or superceded and we need to remove ones that are no longer valid. Again I want claude agents curating the tasks until we have a general system that works well. But the randomness should prevent us from teaching to the test. Maybe 2-3 tests and we run agents in parallel on different tasks in different branches and we learn from groups?" So a round draws 2 or 3 backlog tasks at random, runs agents on them in parallel on their own branches, iterates on each until it is done, and learns from what the group shares; Claude sessions curate the backlog as they go, rewriting a badly written task and deleting one that is superseded or no longer valid.
+
 ## 2026-11-12 rulings
 
 The owner's rulings of this day, each with his words and where it is now stated.
