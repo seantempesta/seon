@@ -667,14 +667,18 @@
               (try (jolt.host/run-interruptible (jolt.host/make-interrupt) #(t/test-var v) (budget v))
                    ;; root's interrupt (a ThreadDeath, seon.intr) stops the run that holds this test: it passes
                    (catch ThreadDeath e (throw e))
+                   ;; a throw that ends the test from outside its body (its budget; a test child's deadlock end, which can land in
+                   ;; the test's start report, outside clojure.test's try) is that test's own :error, and the namespace goes on:
+                   ;; rethrown, it ended the namespace, the test answered no verdict and the rest were reported red unrun
                    (catch Throwable e
                      (if-let [spent (:jolt/ticks-spent (ex-data e))]
                        (t/do-report {:type :error :var v :seon.error/type :seon.test/ticks-spent :ticks spent :budget (budget v)
                                      :message (str "the test spent its budget of " (budget v) " engine ticks (work done, not time): ten times the ticks its estimate states, or the config's test-ticks "
                                                    "(docs/merging.md#a-tests-tick-budget). Ten times over its estimate is the finding: fix the work, or, when the estimate was "
                                                    "wrong, state on the deftest what it must do, ^{:seon.test/estimate {:ticks N}}, worked from first principles")})
-                       (throw e)))))
-        ;; a test whose run threw past its budget is not done: it stays unreported (run-tests!)
+                       (t/do-report (cond-> {:type :error :var v :actual e :message (str "the test was ended from outside its body: " (ex-message e))}
+                                       (:seon.error/type (ex-data e)) (assoc :seon.error/type (:seon.error/type (ex-data e)))))))))
+        ;; only root's interrupt (a ThreadDeath) leaves a test unreported now: every other throw is the test's own :error (one)
         ;; read before the next test's measure opens its epoch: the test's own contracted calls
         measured (fn [v] (let [_ (profile/reads-begin!)
                                m (profile/measure! #(one v))]

@@ -2554,31 +2554,51 @@
   ;; and it held the test service's one slot: 5 of 5 agents idle in observe for 9 minutes. A signal the child waited on (SIGIO, for its
   ;; agent's death) counted as something that could wake it, so Jolt never told it (seon.intr/exit-at-eof!)
   (let [t 'seon.problems-test/a-test-that-waits-for-good
-        write "(do (in-ns 'seon.problems-test) (clojure.test/deftest a-test-that-waits-for-good (let [p (promise)] (clojure.test/is (= 1 @p)))) (in-ns 'user) :ok)"
+        write "(do (in-ns 'seon.problems-test) (clojure.test/deftest ^{:seon.test/estimate {:ticks 3000}} a-test-that-waits-for-good (let [p (promise)] (clojure.test/is (= 1 @p)))) (in-ns 'user) :ok)"
         [_ proved] (in-agent (fn [_] [write "(let [r (my.agent/prove)] {:proofs (:proofs r) :error (:error r)})"]) {:proofs #{t}})]
     (is (= {t :error} (:proofs (:value proved))) (pr-str proved))))
 
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 2}} a-test-waiting-on-a-subprocess-is-no-deadlock
-  ;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a test child ends a test as :seon.test/deadlock only when nothing can wake
-  ;; it. A test that waits on a subprocess (a git call, here sleep) is parked on the poller's wait for its exit, which will wake it:
-  ;; it runs to its end. Red before Jolt counted a fiber parked on poller I/O as idle (2026-11-12, the land at 21:55: tests that
-  ;; called git were ended as deadlocks in the standing system's test children). Estimate: one agent eval and one test child run
-  ;; of one test that waits about a second, the test process's ticks a few million
+  ;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a test that waits on a subprocess (a git call, here sleep) runs to its
+  ;; end: a wait is ended only by the test's wall bound, which its declared work sets (seon.agent/wall-bound-ms), never by a
+  ;; quiescence check (red before Jolt counted a fiber parked on poller I/O as idle, 2026-11-12: tests that called git were ended as
+  ;; deadlocks in the standing system's test children). Estimate: one agent eval and one test child run of one test that waits about
+  ;; a second, the test process's ticks a few million
   (let [t 'seon.problems-test/a-test-that-waits-on-a-subprocess
         write "(do (in-ns 'seon.problems-test) (clojure.test/deftest a-test-that-waits-on-a-subprocess (clojure.test/is (zero? (:exit (clojure.java.shell/sh \"sleep\" \"1\")))))  (in-ns 'user) :ok)"
         [_ proved] (in-agent (fn [_] [write "(let [r (my.agent/prove)] {:proofs (:proofs r) :error (:error r) :failures (mapv :message (:failures r))})"]) {:proofs #{t}})]
     (is (= {t :pass} (:proofs (:value proved))) (pr-str proved))))
 
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 2}} a-test-child-that-ran-an-a-thread-is-still-told-its-deadlock
-  ;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a test that ran work on core.async's thread pool (a/thread) and then
-  ;; waits for good is still ended as :seon.test/deadlock. Deps' lead for the overrun of 2026-11-13 00:0x (the test child alive
-  ;; at 300 s, never quiescent): a/thread's idle pool worker stays parked in TIMED_WAITING, which Jolt counted as a thread that
-  ;; may run, so the child never went quiescent. Estimate: one agent eval and one test child's run of one test, a few million
-  ;; ticks of the test process
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 2}} a-test-that-waits-for-good-is-ended-by-a-bound-as-its-own-error
+  ;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a test that waits for good (here after work on core.async's thread pool,
+  ;; whose idle worker once kept a quiescence check from ever firing) is ended by its wall bound: ten times its estimate at the slowest
+  ;; measured rate (~2 s for the 30,000 ticks it states: an a/thread call, then a wait), its dump first, the typed :seon.test/wall-spent its own :error. Replaces the
+  ;; quiescence end, which could not tell a deadlock from a wait on a peer. Estimate: one agent eval and one test child's run of one
+  ;; test, a few million ticks of the test process
   (let [t 'seon.problems-test/a-test-that-waits-for-good-after-an-a-thread
-        write "(do (in-ns 'seon.problems-test) (clojure.test/deftest a-test-that-waits-for-good-after-an-a-thread (clojure.test/is (= 1 (clojure.core.async/<!! (clojure.core.async/thread 1)))) (let [p (promise)] (clojure.test/is (= 1 @p)))) (in-ns 'user) :ok)"
-        [_ proved] (in-agent (fn [_] [write "(let [r (my.agent/prove)] {:proofs (:proofs r) :error (:error r)})"]) {:proofs #{t}})]
-    (is (= {t :error} (:proofs (:value proved))) (pr-str proved))))
+        write "(do (in-ns 'seon.problems-test) (clojure.test/deftest ^{:seon.test/estimate {:ticks 30000}} a-test-that-waits-for-good-after-an-a-thread (clojure.test/is (= 1 (clojure.core.async/<!! (clojure.core.async/thread 1)))) (let [p (promise)] (clojure.test/is (= 1 @p)))) (in-ns 'user) :ok)"
+        [_ proved] (in-agent (fn [_] [write "(let [r (my.agent/prove)] {:proofs (:proofs r) :error (:error r) :failures (mapv (juxt :seon.error/type :message) (filter #(= :error (:type %)) (:reports r)))})"]) {:proofs #{t}})]
+    (is (= {t :error} (:proofs (:value proved))) (pr-str proved))
+    (is (some #(#{:seon.test/wall-spent :seon.test/ticks-spent} (first %)) (:failures (:value proved))) (str "ended by a bound, typed: " (pr-str proved)))))
+
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-wall-bound-ends-a-parked-fiber-after-its-evidence
+  ;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a wait that spends no ticks (a fiber parked on a channel, as a test's
+  ;; start notice parks on a full link) is ended by its wall bound on the one timer: the typed :seon.test/wall-spent thrown into
+  ;; that fiber, carrying Jolt's dump of every fiber (the evidence, also on stderr); a bound disarmed by the test's end never fires.
+  ;; Estimate: two fibers, two timers, one dump: ~300k ticks of this thread
+  (let [ended (fn [arm]
+                (let [f (promise) r (promise)]
+                  (jolt.fibers/spawn (fn [] (deliver f (jolt.host/current-fiber))
+                                       (deliver r (try (a/<!! (a/chan)) :returned (catch Throwable e (ex-data e))))))
+                  (arm @f)
+                  r))
+        fired (ended #(#'agent/arm-wall! % "#'app/parks" 50))
+        disarmed (ended #(a/close! (:cancel (#'agent/arm-wall! % "#'app/parks" 50))))
+        e (deref fired 2000 :no-answer)]
+    (is (= :seon.test/wall-spent (:seon.error/type e)) (pr-str (dissoc e :dump)))
+    (is (= [50 "#'app/parks"] [(:bound-ms e) (:test e)]) "naming its bound and its test")
+    (is (string? (:dump e)) "with the evidence")
+    (is (= :still-waiting (deref disarmed 200 :still-waiting)) "a disarmed bound never fires")))
 
 ;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a test run's fold (seon.agent/test-run-step) answers once each child's two ends
 ;; are held, its link's end and its reaped exit, whichever comes first. Run here through the real plumbing but the fork: a

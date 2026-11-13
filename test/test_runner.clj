@@ -810,6 +810,22 @@
           b (try (some #(when (str/ends-with? (name %) (str "-" tree)) %) (d/branches c)) (finally (d/release c)))]
       (when b @(pdb/connect (assoc cfg :branch b))))))
 
+(defn- base-products
+  "The checkout whose built products (target/: the runtime, the libraries, the binary) a checkout of commit base of the
+  repository at root clones (bin/worktree --at's FROM): checkout when its Jolt and Chez were built for base's own pins (each
+  target/<step>.stamp holds the pin it was built for, bin/build), else nil, bin/worktree's own default, the main tree, which
+  bin/update keeps on main's pins. The runtime pins are :seon.config.source/runtime-pins, each stamp named by its path's last
+  segment. A branch that moves a runtime pin cloned its own products into the base, and the base's runner refused them. If
+  main moved a runtime pin since base, the main tree's are not the base's either, and the base's runner refuses loudly.
+  See docs/health.md#checks-are-callers-of-seon."
+  [checkout root base]
+  (when (every? (fn [path]
+                  (let [f (io/file checkout "target" (str (.getName (io/file path)) ".stamp"))
+                        r (lib/sh "git" "-C" root "rev-parse" (str base ":" path))]
+                    (and (.isFile f) (zero? (:exit r)) (= (str/trim (slurp f)) (str/trim (:out r))))))
+                (config/value :seon.config.source/runtime-pins))
+    checkout))
+
 (defn- make-base-tree!
   "Make the base's tree's branch in the base store at path (base-program) by the base's own code: a checkout of commit base of the
   repository at root at at (bin/worktree --at, its built products cloned from this checkout's), whose runner plans its tests
@@ -822,7 +838,8 @@
     (lib/sh "cp" "-c" (str store "/data.mdb") (str path "/data.mdb")))
   (try
     (let [fail (fn [msg r] (contract/error :seon.fx/io-error #'test-runner/make-base-tree! (str msg ": " (fx/runner-end (str (:err r) "\n" (:out r)))) {:path at}))
-          made (lib/sh (str (config/checkout) "/bin/worktree") "--at" at base root (str (config/checkout)))
+          made (apply lib/sh (str (config/checkout) "/bin/worktree") "--at" at base root
+                      (some-> (base-products (str (config/checkout)) root base) vector))
           out (str at "/target/prove/health-base")
           r (when (zero? (:exit made))
               (apply lib/sh (concat fx/child-env-scrub [(str at "/bin/test") "--plan" "tests" out
