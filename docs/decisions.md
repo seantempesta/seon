@@ -2,6 +2,14 @@
 
 The owner's standing rulings, one entry each: his words and date, and where the rule is stated now. The mechanism lives in `AGENTS.md` and the wiki; the reasoning and the history around each ruling are in git. A ruling a later one reverses keeps a one-line pointer to it.
 
+## 2026-11-13 rulings
+
+The owner's rulings of this day, each with his words and where it is now stated.
+
+### The number one metric: turns from a roughly specified task to merged code
+
+"The number one metric is minimizing the number of turns it takes to go from a roughly specified task into completed and merged code." Before it: "The landings per hour was to pick up the velocity, but I don't want to use it generally since it incentivies low quality and many merges instead of smart merges." Landings per hour (root's measure from 11-12 16:30) is retired: it rewarded many small merges of machinery while one task merged in 36 hours. Stated in `AGENTS.md` §1: progress is the turns an agent takes from a roughly specified task to merged code; a task that never merges is a failure, not a low count; work is ranked by the turns it removes.
+
 ## 2026-11-12 rulings
 
 The owner's rulings of this day, each with his words and where it is now stated.
