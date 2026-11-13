@@ -7,7 +7,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-] :as contract] [seon.print :as print] [clojure.string :as str] [malli.core :as m] [malli.registry] [seon.schema.datahike :as sd] [seon.config :as cfg]
             [datahike.connections] [datahike.writing] [datahike.config] [datahike.store] [konserve.store] [hasch.core :as hasch] [datahike.api :as d] [org.replikativ.persistent-sorted-set :as pss] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
-            [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix] [seon.lib :as lib] [jolt.ffi :as ffi] [datahike.ids] [datahike.core]))
+            [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix] [seon.lib :as lib] [jolt.ffi :as ffi] [datahike.ids] [datahike.core] [datahike.reads]))
 
 (def schema
   "The Datahike schema, derived from the registry's entity schemas (resources/seon/schemas,
@@ -1153,3 +1153,28 @@
   (vec (for [dt (:tx-data rep) :when (not= (:e dt) (:tx dt))]
          [(if (:added dt) :db/add :db/retract) (:e dt) (:a dt) (:v dt)])))
 
+;; ---- which readers a change reaches: one index from a read key (datahike.reads/range-key) to the readers that recorded it,
+;; a reader being any value its holder names it by (a component, a test's result). See docs/storage.md#what-a-read-scanned.
+
+(defn reads-add
+  "idx with reader recorded under each of keys. See docs/storage.md#what-a-read-scanned."
+  {:malli/schema [:=> [:cat :seon.reads/index :any :seon.reads/keys] :seon.reads/index]}
+  [idx reader keys]
+  (reduce (fn [m k] (update m k (fnil conj #{}) reader)) idx keys))
+
+(defn reads-drop
+  "idx without reader under each of keys (the keys it was added with); a key left with no reader goes. See docs/storage.md#what-a-read-scanned."
+  {:malli/schema [:=> [:cat :seon.reads/index :any :seon.reads/keys] :seon.reads/index]}
+  [idx reader keys]
+  (reduce (fn [m k] (let [rs (disj (get m k #{}) reader)] (if (seq rs) (assoc m k rs) (dissoc m k)))) idx keys))
+
+(defn readers
+  "The readers of idx whose keys a datom of datoms touches; a schema datom reaches every reader. See docs/storage.md#what-a-read-scanned."
+  {:malli/schema [:=> [:cat :seon.reads/index [:sequential :seon.host/datom]] [:set :any]]}
+  [idx datoms]
+  (reduce (fn [acc d]
+            (let [ks (datahike.reads/datom-keys d)]
+              (if (some #{:all} ks)
+                (reduced (into #{} cat (vals idx)))
+                (into acc (mapcat #(get idx %)) ks))))
+          #{} datoms))

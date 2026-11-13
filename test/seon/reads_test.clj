@@ -1,24 +1,24 @@
 (ns seon.reads-test
   "One index from a read key to its readers, matched against moved datoms. See docs/storage.md#what-a-read-scanned."
-  (:require [clojure.test :refer [deftest is]] [seon.reads :as reads] [seon.contract :as contract] [datahike.datom :as dd]))
+  (:require [clojure.test :refer [deftest is]] [seon.db :as pdb] [seon.contract :as contract] [datahike.datom :as dd]))
 
 ;; See docs/storage.md#what-a-read-scanned
 (deftest ^{:seon.test/estimate {:ticks 300000}} a-moved-datom-reaches-exactly-the-readers-of-its-keys
   (let [idx (-> {}
-                (reads/add :page #{[:ea 10 :seon.task/plan] [:av :seon.task/outcome :running]})
-                (reads/add :result #{[:a :seon.task/proofs] [:ea 10 :seon.task/plan]})
-                (reads/add :other #{[:ea 11 :seon.task/plan]}))
-        moved (fn [& ds] (reads/readers idx (map #(apply dd/datom %) ds)))]
+                (pdb/reads-add :page #{[:ea 10 :seon.task/plan] [:av :seon.task/outcome :running]})
+                (pdb/reads-add :result #{[:a :seon.task/proofs] [:ea 10 :seon.task/plan]})
+                (pdb/reads-add :other #{[:ea 11 :seon.task/plan]}))
+        moved (fn [& ds] (pdb/readers idx (map #(apply dd/datom %) ds)))]
     (is (= #{:page :result} (moved [10 :seon.task/plan "new" 2]))
         "an entity's attribute: the readers of [:ea e a], never another entity's")
     (is (= #{:page} (moved [12 :seon.task/outcome :running 2])) "a new datom with a read value: the reader of [:av a v], an absence read")
     (is (= #{:result} (moved [99 :seon.task/proofs 'a/b 2])) "an attribute scan: any datom of it")
     (is (= #{} (moved [10 :seon.task/kind :work 2])) "an attribute nobody read reaches nobody")
     (is (= #{:page :result :other} (moved [5 :db/cardinality :db.cardinality/one 2])) "a schema datom reaches every reader")
-    (is (= #{:result} (reads/readers (reads/drop-reader idx :page #{[:ea 10 :seon.task/plan] [:av :seon.task/outcome :running]})
+    (is (= #{:result} (pdb/readers (pdb/reads-drop idx :page #{[:ea 10 :seon.task/plan] [:av :seon.task/outcome :running]})
                                      [(dd/datom 10 :seon.task/plan "x" 2)]))
         "a dropped reader is no longer reached; its keys with no reader left go")
-    (is (= {} (reads/drop-reader (reads/add {} :page #{[:a :x/y]}) :page #{[:a :x/y]})))))
+    (is (= {} (pdb/reads-drop (pdb/reads-add {} :page #{[:a :x/y]}) :page #{[:a :x/y]})))))
 
 ;; See docs/storage.md#what-a-read-scanned: the shared interfaces other areas build on validate the shapes they will hold
 (deftest ^{:seon.test/estimate {:ticks 400000}} the-shared-read-bound-effect-and-proof-shapes-validate-what-they-name
