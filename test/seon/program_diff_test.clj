@@ -27,7 +27,8 @@
      :load (vec (for [e (sort (vals (apply dissoc (#'program/live-ids to) (keys live-from))))] (program/form-row to e)))
      :schemas (set (for [[k v] (program/schema-changes to) :when (not= v (get sc-from k))] k))}))
 
-(deftest a-diff-plans-what-reading-both-programs-planned
+;; Estimate: branch-of 20: 20 account-tx x 0.1M = 2M; ~16 whole-plan reads (2 program scans of ~50 forms + schema-changes) x 0.3M and ~21 diff-plans x 0.3M = 11M; ~10 db-withs 1M less overlap. Estimated 10,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-diff-plans-what-reading-both-programs-planned
   (let [[db] (pc/branch-of 20)
         var-e (fn [db i] (:db/id (d/entity db [:var/name (symbol "app.pc" (str "f" i))])))
         cases {"nothing changed" db
@@ -56,7 +57,8 @@
 
 (def ^:private diff-sizes "The sizes diff-plan's proof measures." [10 30 100])
 
-(deftest a-diff-costs-the-change-never-the-program
+;; Estimate: sizes 10+30+100 = 140 forms x 0.1M = 14M of setup; 3 LMDB stores made x S 10M = 30M; 3 branch writes and measured diff-plans (9 descents ~0.3M each, measured again when over) ~3M. Estimated 50,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 50000000}} a-diff-costs-the-change-never-the-program
   (try
     (cost/proof
       {:of 'seon.program/diff-plan :input 'seon.program-cost-test/on-disk-diverged-of

@@ -20,3 +20,7 @@ claude_scratch/
 # a session's local permissions, rewritten by its app as it runs: never part of the tree (bin/tree named another tree by
 # whether HOME's own git ignore file listed it, and root forked no agent: 2026-11-10)
 .claude/settings.local.json
+
+# the OS's own files (Finder's .DS_Store): never content. The tree id holds every untracked file git does not ignore, so one
+# made the standing root's binary stale ("reaches .DS_Store", 2026-11-12); docs/source.md#the-binary-records-its-program
+.DS_Store

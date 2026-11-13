@@ -61,9 +61,10 @@
   here; while unrun it is the merge's open :unrun problem. A run whose branch changed nothing since its merge base (changed? false:
   no program key and no carried task content) is refused :no-change, red first: a proof that passed before the run did anything
   proves nothing it did (a refine whose proofs were the task's was done at turn 0). A :merge task is the exception: its work is
-  the merge itself, and once it merged main in its own diff can be empty (swarm's merge steps)."
+  the merge itself, and once it merged main in its own diff can be empty (swarm's merge steps). A refine (named-site? false) is
+  refused :no-change-site until the task it refines names a function its plan did not (seon.task/names-new-site?)."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
-  [{:keys [proofs results main-green allowed-red main-red uncontracted unmerged caused kind plan plan-before deferred behind changed?]}]
+  [{:keys [proofs results main-green allowed-red main-red uncontracted unmerged caused kind plan plan-before deferred behind changed? named-site?]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))
         design? (= :design kind)]
     (vec (concat
@@ -73,6 +74,8 @@
            (if (= :user kind) [{:reason :open}] (when (empty? proofs) [{:reason :no-proofs}]))
            (when (and design? (or (nil? plan-before) (= plan plan-before))) [{:reason :no-design}])
            (when (and (false? changed?) (not= :merge kind)) [{:reason :no-change}])
+           ;; a refine is done by one write, the task it refines naming its change site (seon.task/names-new-site?): its proof is green before it starts
+           (when (false? named-site?) [{:reason :no-change-site}])
            ;; a proof with no result never ran: unknown, not red (v1's reading); a design
            ;; leaves its proofs red, never unknown (the implement step needs them written)
            (for [p (sort-by str proofs) :let [s (get results p)] :when (and (not (contains? deferred p)) (if design? (nil? s) (not= :pass s)))]
@@ -429,7 +432,7 @@
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id :map]
                   [:map [:outcome :seon.task/outcome] [:reasons [:vector :seon.reconcile/not-done]]
                    [:hold {:optional true} :string] [:verdict {:optional true} [:vector :seon.reconcile/not-done]]]]}
-  [idx id {:keys [end died results main-red uncontracted unmerged caused behind plan plan-before basis deferred behinds told changed?]}]
+  [idx id {:keys [end died results main-red uncontracted unmerged caused behind plan plan-before basis deferred behinds told changed? named-site?]}]
   (let [t (get-in idx [:tasks id]) kind (:seon.task/kind t) merge? (merges-in? idx id) step? (merge-step-in? idx id) oc (:outcome end) execution (:seon.task/execution t)
         outside (outside? (:seon.agent/env (task-agent idx id)))]
     (cond
@@ -439,7 +442,8 @@
       (let [rs (done-explain (cond-> (cond-> (assoc (done-input idx id results uncontracted unmerged basis plan-before (set deferred))
                                               :caused (set caused) :main-red (set main-red))
                                 (and plan (= :design kind)) (assoc :plan plan)
-                                (some? changed?) (assoc :changed? changed?))
+                                (some? changed?) (assoc :changed? changed?)
+                                (some? named-site?) (assoc :named-site? named-site?))
                                ;; behind is the work's own to fix only when no merge task follows it: a merge task
                                ;; merges main into the branch and the gate tests what it writes (seon.template's
                                ;; merge-decl), so a green work task is never judged behind; a merge that main moves under is the merge
@@ -923,7 +927,7 @@
                             :plan-before (when (= :design kind) (some-> (task/task base id) :seon.task/accumulated :plan))
                             :behinds (behinds main id) :told (:seon.task/reasons t)
                             ;; what the branch did: a changed key or carried task content (seon.reconcile/done-explain's :no-change)
-                            :changed? (boolean (or (seq (:ours diff)) (seq (:tx carried))))})
+                            :changed? (pm/changed? base db) :named-site? (task/names-new-site? base db id)})
         conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
         ;; the agent's words are the task's reason as they are, unless its end was not green and the done rule found nothing open:
         ;; then they are named as its agent's, beside what root found, so a reader never takes them for the judgment (Context's loop
@@ -1057,17 +1061,15 @@
                              id :started
                              (task/start-tx (:db st) id (:boot st) ag (:env act) now (:raise f 0))))
                  ;; root refused it (the branch is held, or too many live agents): the refused answer
-                 ;; is the task's outcome, with root's reason; the task starts again
-                 ;; once main moves for another reason (:refused, pass), or, held by an agent whose own task is
-                 ;; judged and not kept for a wake (a done task's process still ending), once that agent is stopped:
-                 ;; its end frees the branch but moves no fact the index reads, so its stop's answer is the wake-up
+                 ;; is the task's outcome, with root's reason; the task starts again once main moves for another
+                 ;; reason (:refused, pass), a process's end among them: root records it on main (:seon.process/ended-ms,
+                 ;; seon.task/agent-tx), which frees the branch it held. Held by an agent whose own task is judged and not
+                 ;; kept for a wake (a done task's process still ending), that agent is stopped, and its end is that fact too
                  (let [[st o] (write (update st :refused (fnil conj #{}) id) id :done (task/refused-tx (:db st) id r))
                        h (:agent r) ht (:task r)]
                    (if (and h ht (idx-done? (:idx st) ht) (not (idle (:idx st) ht)))
-                     (let [[st o2] (request st id :holder-ended {:op :kill :id h :ended true})] [st [o o2]])
+                     (let [[st o2] (request st id :ignored {:op :kill :id h :ended true})] [st [o o2]])
                      [st [o]])))
-      ;; the agent a refused start's branch was held by is stopped: the task asks again at the next pass
-      :holder-ended [(update st :refused disj id) []]
       ;; an outside agent works this task (seon.server): no turn loop; it hands it back
       :started (cond
                  (:died-at-spawn f) (dead st (:died-at-spawn f))
@@ -1350,9 +1352,12 @@
                                                                (and (contains? refused-attrs a)
                                                                     (= :refused (get-in idx [:tasks (second (get-in idx [:keys e])) :seon.task/outcome])))))
                                               (:ops m)))
+                 ;; a process's end (root records it: seon.task/agent-tx) frees the branch a refused start was held off: the
+                 ;; refused ask again, whoever the holder was (another task's done agent, stopped, or the task's own ending one)
+                 ended? (some (fn [[_ _ a]] (= :seon.process/ended-ms a)) (:ops m))
                  st (assoc st :db db :t t :idx idx :seen (inc (:seen st)) :lists (cond-> (:lists st 0) (not= (:prev m) (:t st -2)) inc)
                            :quiet (boolean (and (:quiet st) (not work?)))
-                           :refused (if (and work? (not only-refused?)) #{} (:refused st #{})))
+                           :refused (if (or ended? (and work? (not only-refused?))) #{} (:refused st #{})))
                  ;; a root's first listing: its restart has no pending wakes, so each waiting agent owed a message is woken; then the wakes
                  ;; held for agents that were running, which are waiting now
                  st (cond-> st (not (:idx0 st)) boot-wakes true settle-late true (assoc :idx0 true))

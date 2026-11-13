@@ -260,15 +260,15 @@
         whole (if (seq names) (set (keep #(when-not (str/includes? % "/") (symbol %)) names)) nss)
         idx (into {} (filter #(or (whole (symbol (namespace (key %)))) (vars (key %)))) all)]
     {:graph g :inputs in
-     ;; the tests that reach a fixture (a var marked ^:seon.test/fixture, the test store), as their reach says: a shard
-     ;; holding one warms its fixtures before its first test, and one holding none pays nothing (seon.proofs/warm-fixtures!)
-     :fixture-tests (into #{} (mapcat #(program/tests-reaching g %))
-                          (d/q '[:find [?n ...] :in $ [?t ...] :where [?v :var/meta ?t] [?v :var/name ?n]] db
-                               [:seon.test/fixture :seon.test/shard-fixture]))
+     ;; the tests that reach each type of fixture (a var marked ^:seon.test/fixture, the test store, or
+     ;; ^:seon.test/shard-fixture, the shared root), as their reach says: {type #{test}} (warm-by decides what a shard warms)
+     :fixture-tests (into {} (for [t [:seon.test/fixture :seon.test/shard-fixture]]
+                               [t (into #{} (mapcat #(program/tests-reaching g %))
+                                        (d/q '[:find [?n ...] :in $ ?t :where [?v :var/meta ?t] [?v :var/name ?n]] db t))]))
      :rd (delay (reads-index-of root store tree g in))
      ;; whether the binary target/seon is (its build record, target/seon.program) runs this tree's program as a build of it would:
      ;; nil, or what differs that it bakes (seon.system/binary-current, the one rule; docs/source.md#the-binary-records-its-program)
-     :binary-current (seon.system/binary-current db (seon.program/binary-program) tree g)
+     :binary-current (seon.system/binary-current db (seon.program/binary-program) tree {:graph g :scope :all})
      :no-test (vec (sort-by str (concat (remove (set (map (comp symbol namespace key) all)) nss)
                                         (remove all vars))))
      :digests (update-vals idx :digest)
@@ -343,6 +343,16 @@
     (reduce (fn [acc k] (let [i (apply min-key #(load (acc %)) (range (count acc)))] (update-in acc [i 1] assoc k (mg k))))
             base (sort-by (juxt #(- (cost %)) identity) (keys mg)))))
 
+(defn- warm-by
+  "What each fixture type's warm is for, by the tests whose shards warm it ({type #{test}}): the test store for every test that
+  reaches it; the shared root only for a test that reaches it and the binary (binary, the plan's :binary), the one rule by
+  which the plan makes the process store a shared root starts on (prove!'s out/process-store). A test that reaches the shared
+  root's var but not the binary starts no root, so its shard warms none (a docs-only land's doc-tests, 2026-11-13: their shard
+  warmed a root whose store the plan never made, and died before its first test). See docs/merging.md#the-test-service."
+  [fixture-tests binary]
+  {:seon.test/fixture (get fixture-tests :seon.test/fixture #{})
+   :seon.test/shard-fixture (into #{} (filter (set binary)) (get fixture-tests :seon.test/shard-fixture))})
+
 (defn- write-shards!
   "tests (var symbols) dealt into at most jobs shards (shards: :seon.config.proofs/jobs for a full run or a merge's
   verification, what their work is worth for what a change reaches: seon.proofs/worth-shards), the generative check's keys mg
@@ -351,7 +361,7 @@
   holds: every one of a full run, and the reuse audit's) for bin/test to run, one process each (bin/test
   removes the last run's first), and each measured test's stall bound and end bound as out/stall-bounds (\"<test> <stall ms>
   <end ms>\" lines, for bin/stalls). Answers the shard count."
-  [out tests digests tree mg jobs ms rerun fixture-tests]
+  [out tests digests tree mg jobs ms rerun warm]
   (let [sh (proofs/shards tests jobs ms)
         mg-ms (measured-ms (keys mg))
         floor (config/value :seon.config.agent/stall-ms) k (config/value :seon.config.proofs/stall-factor)
@@ -359,7 +369,7 @@
         dealt (deal-mg sh mg ms mg-ms)]
     (doseq [[i [ts m]] (map-indexed vector dealt)]
       (write! (str out "/shard-" i ".edn") (sedn/encode {:tests ts :mg m :digests (select-keys digests ts) :tree tree :rerun (into (sorted-set) (filter (set ts)) rerun)
-                                                          :warm? (boolean (some fixture-tests ts))})))
+                                                          :warm (into #{} (keep (fn [[t ts']] (when (some ts' ts) t))) warm)})))
     ;; each measured test's stall bound, k times its own last run, and its end bound, the step-end factor times the
     ;; same run floored at stall-ms, past which bin/stalls captures its evidence and ends its shard (OVERRAN:
     ;; docs/clocks.md#time-decides-the-owners-exceptions); a test with no record takes the floors, out/stall-ms
@@ -394,7 +404,7 @@
   (an edit during the run: what ran is not what the digests name): then its greens are taken back
   (seon.fx/forget-greens!) and nothing else is stored, and the run stays as reported. Then SHARD n green m red. Answers the exit status."
   [file]
-  (let [{:keys [tests digests tree mg rerun warm?]} (edn/read-string (slurp file))
+  (let [{:keys [tests digests tree mg rerun warm]} (edn/read-string (slurp file))
         ;; what each green read, keyed by the run's reads index (write-reads!): the functions it called, itself, its static reads
         {:keys [rd static]} (shard-reads file)
         with-reads (fn [x] (cond-> x rd (assoc :reads (proofs/reads-key rd {:fns (conj (into #{} (map :var) (:fns x)) (:test x))
@@ -405,7 +415,7 @@
     (contract/instrument! contract/boot-nss)
     ;; the fixtures its tests reach made before the first of them runs, so none pays the test store's seed (~65M ticks)
     ;; inside its own budget; a shard of none that reaches one makes none
-    (when warm? (proofs/warm-fixtures! #{:seon.test/fixture :seon.test/shard-fixture}))
+    (when (seq warm) (proofs/warm-fixtures! warm))
     (let [;; one writer for every verdict this shard stores
           run {:id (str "bin/test " tree " " (random-uuid)) :tree tree}
           ;; the greens this shard wrote as each ended (the cache's, so a run beside it reuses them at once), and the ones it reused
@@ -586,7 +596,7 @@
                          ;; run whatever the cache holds: every test of a full run (bin/test --all, which a rerun by name asks
                          ;; for too), and the reuse audit's greens, whose rerun is its point
                          (if (true? all?) run-tests audit)
-                         (or fixture-tests #{}))
+                         (warm-by fixture-tests binary))
         _ (write-reads! out plan (if no-test [] run-tests))
         ;; what runs and reaches the binary (a test that reaches binary-sh, a step that runs a seon.check
         ;; mode): bin/test builds target/seon only when this is not empty, bin/check seeds only for the steps
@@ -667,7 +677,7 @@
         ;; a step that runs a seon.check mode ran on target/seon: kept only if that binary is current for the plan's tree, the
         ;; one rule the build asked (an empty out/build: current; the plan kept its answer beside the builds, so this reads it);
         ;; laws and the lmdb steps ran no mode, so no binary is theirs to judge
-        current? (delay (nil? (seon.system/binary-current (program) (seon.program/binary-program) tree)))
+        current? (delay (nil? (seon.system/binary-current (program) (seon.program/binary-program) tree {:scope :all})))
         keep? (fn [k] (and (green k) (or (not (proofs/step-needs-binary? k)) @current?)))
         ;; each step's wall ms as bin/check measured it (out/step-ms, "<step> <ms>" a line; a kill/reopen pair's two phases
         ;; summed under their step), kept on its verdict: its bound's measure (out/step-bounds) and the deal's
