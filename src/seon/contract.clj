@@ -188,7 +188,7 @@
 (clojure.core/defn properties
   "The properties map of named schema k's form ([:type {props} ...]), or nil: what a
   schema declares of its values (a status set, a render, a unit), read here only. A registry
-  bound as malli's (an agent's REPL binds its branch's population: seon.repl/with-branch-schemas)
+  bound as malli's (a process's default is its branch's: seon.program/hold-registry!)
   answers first, so a render a branch's schema names is the one its values take."
   {:malli/schema [:=> [:cat :any] [:maybe :map]]}
   [k] (if-let [s (some-> (mr/registry mr/*registry*) (mr/schema k))]
@@ -236,11 +236,12 @@
     (mr/composite-registry (mr/simple-registry @compiled) registry)))
 
 (def options
-  "What every contract compiles against: the built registry, under malli's dynamic registry,
-  so an evaluation that binds malli.registry/*registry* (an agent's REPL, to its branch's
-  schemas: seon.program/schema-registry) compiles against that population instead; and the
+  "What every contract compiles against: the built registry, under malli's default registry, which a process sets to the
+  registry of the one branch it holds (seon.program/hold-registry!), so every path of it (an eval, the turn loop, a Flow step,
+  a thread) checks against that branch's schemas; and over both malli's dynamic registry, bound only where code compiles
+  against a db passed to it, not the process's own (seon.program's loads of another value); and the
   predicate pack's types, as total (their validators never throw)."
-  {:registry (mr/composite-registry (mr/dynamic-registry) registry)
+  {:registry (mr/composite-registry (mr/dynamic-registry) (mr/custom-default-registry) registry)
    ;; the predicate pack's tests are type checks that answer for any value, so an arm built
    ;; of them is checked without a try per call (malli's -total?)
    ::m/total-types (set (keys host-schemas))})

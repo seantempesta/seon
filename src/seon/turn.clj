@@ -468,10 +468,8 @@
     (when-let [tx (not-empty (main-base-tx))] (agent/transact! tx) (agent/commit!))
     (loop [st {:turn 0 :merge-turns 0 :t0 (profile/now-ns) :merge-step? (task/merge-step-on? (agent/db) task)
                :max-turns max-turns :merge? merge?}]
-      ;; each turn under the branch's schemas as they are now (repl/with-branch-schemas): work! is one eval,
-      ;; bound when it began, and a schema the agent registers since must be the one Seon's code checks its
-      ;; values against (a block registered since would otherwise meet the old :seon.ref/block in seon.ref/sections and
-      ;; end the loop); a turn answers its end, or [::next st] to go on
+      ;; each turn checks against the branch's schemas as they are now, this process's registry (seon.program/hold-registry!):
+      ;; a schema the agent registers mid-loop is in force at once; a turn answers its end, or [::next st] to go on
       ;; the turn answers what comes next, [::next st] or [::end st outcome reason error]: its draw, its model call
       ;; and its evals are inside the boundary, since every one runs Seon's code with the program on the
       ;; agent's branch, Seon's own code included, which the agent may change (a registered
@@ -482,8 +480,7 @@
             next-of (fn [st'] (if (contract/error? st') [::end st :error (:seon.error/message st') st'] [::next (dissoc st' :threw :error)]))
             ;; the request the last answered model call sent: a turn whose own call answered replaces it
             asked (:requests @agent/state)
-            step (repl/with-branch-schemas
-                   (fn []
+            step (do
                      (try
                        ;; main moved since the last turn: merge it in now, so the agent works on main's program and
                        ;; wiki as they are and a conflict is an unmerged entry it sees and resolves before it can
@@ -534,7 +531,7 @@
                              ;; a turn that threw counts against the cap, which the next turn checks
                              (if (< 1 (:threw st'))
                                (ended st' :error (str "two turns in a row threw: " (:seon.error/message (:error st'))) (:error st'))
-                               [::next st']))))))]
+                               [::next st'])))))]
         (case (first step)
           ::next (recur (second step))
           ::end (let [[_ st outcome reason err] step] (end! st outcome reason err)))))))

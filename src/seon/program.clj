@@ -1191,6 +1191,14 @@
   {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :seon.host/registry]}
   [changes] (if (empty? changes) contract/registry (contract/registry-with changes)))
 
+(defn hold-registry!
+  "Make registry reg (schema-registry's) this process's: malli's default registry, which every contract
+  reads beneath a binding (seon.contract/options). A process holds one branch, so this is called where it starts holding it or
+  its schemas move: an agent's schema slot (seon.agent's watch), a load that changes schema entries (load-changes!,
+  load-diff!), the fork server's main (warm-start). Answers nil. See docs/source.md#schemas-at-the-repl."
+  {:malli/schema [:=> [:cat :seon.host/registry] :nil]}
+  [reg] (mr/set-default-registry! reg) nil)
+
 (defn schema-declarations
   "The Datahike declarations registry reg derives that db does not hold as declared (a
   registration or merge of a schema carries its attribute, so its facts can be stored)."
@@ -1459,7 +1467,10 @@
     ;; every form the diff names is the branch's own: this process holds db-from's definition of it, never the branch's,
     ;; though its var is bound and the form was imported from a source tree (a tree branch's catch-up imports the checkout's
     ;; changed files: held? read those as the binary's own and kept main's code, and a --root run judged main's code, 2026-11-11)
-    (into (vec (load! db-to load schemas true)) (hold-config! db-to))))
+    (let [errs (into (vec (load! db-to load schemas true)) (hold-config! db-to))]
+      ;; db-to's schemas are this process's from now on (a resumed branch's: an agent holds that one branch)
+      (when (seq schemas) (hold-registry! (schema-registry (schema-changes db-to))))
+      errs)))
 
 (defn load-changes!
   "Load what resolved tx-data ops change, read against db (after them): each definition
@@ -1482,16 +1493,21 @@
             :let [x (d/entity db e)]]
       (cond (:var/name x) (remove-definition! [:var (:var/name x)])
             (:method/key x) (remove-definition! (into [:method] (sedn/decode (:method/key x))))))
-    (into (vec (load! db (vec (for [[op e a] ops
+    (let [schema-keys (set (for [[op e a] ops :when (and (= op :db/add) (= a :schema/form))
+                                 :when (schema-value db e)]
+                             (:schema/key (d/entity db e))))
+          errs (into (vec (load! db (vec (for [[op e a] ops
                                     :when (and (= op :db/add) (= a :form/src) (live? db e))
                                     :let [f (form-row db e)]
                                     :when (or (not (held? db binary f)) (some #(replaced (:v %)) (d/datoms db :eavt e :form/defines)))]
                                 f))
-                      (set (for [[op e a] ops :when (and (= op :db/add) (= a :schema/form))
-                                 :when (schema-value db e)]
-                             (:schema/key (d/entity db e))))
+                      schema-keys
                       tests?))
-          (when (some (fn [[_ _ a]] (= a :config/form)) ops) (hold-config! db))))))
+          (when (some (fn [[_ _ a]] (= a :config/form)) ops) (hold-config! db)))]
+      ;; a moved schema entry is this process's from now on (root's main, the fork server's, an agent's merge of main)
+      ;; any op on a schema entry, a retraction included (a deleted key leaves the registry too)
+      (when (some (fn [[_ _ a]] (#{:schema/form :schema/key} a)) ops) (hold-registry! (schema-registry (schema-changes db))))
+      errs))))
 
 ;; ---- reach: which tests a change reaches ----------------------------------------------
 
