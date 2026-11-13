@@ -3496,3 +3496,22 @@
     (is (= "d-green" (base 'a/unchanged)) "a test whose reach is base's takes its recorded-reads digest on base's side too")
     (is (= "d-base" (base 'a/moved)) "a test whose reach moved keeps base's own digest")
     (is (= '[a/moved] sel) "so the branch's change is the test its reach moved, never one some run recorded reads for")))
+
+;; docs/merging.md#the-test-service: a grant the agent planned again (its held plan gave an item another digest) answers exactly
+;; the granted items, never what the run's own selection filter keeps. Found 2026-11-13: the loop task held by
+;; :seon.prove/no-verdict for my.test-test/the-world-is-built-once-per-process, and before it a datahike test on a refine: the
+;; re-plan's filter dropped a granted test, it was never run nor named, and the service could only answer "no verdict".
+;; Red before: grant-selection answered the fresh plan's own :selected. Estimate: two maps built, ~20k ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-granted-item-is-run-or-answered-with-its-reason
+  (let [sel {:plan {:process #{'a.p-test/boots} :reused {'a.x-test/kept {:pass 1 :fail 0 :error 0}}}
+             :judge [] :selected [] :run [] :deferred [] :reused {} :reused-reports [] :digests {'a.x-test/dropped "d2"}}
+        items {'a.x-test/dropped "d1" 'a.x-test/kept "d3" 'a.p-test/boots "d4"}
+        s (#'agent/granted-selection sel items)
+        named (set (map :var (:reused-reports s)))]
+    (is (= ['a.x-test/dropped] (:run s)) "a granted test the fresh plan's filter left out runs")
+    (is (= #{'a.x-test/dropped 'a.x-test/kept} (set (:selected s))) "every granted test this child can run is selected")
+    (is (contains? named "#'a.x-test/kept") "one green at its digest is answered as reused")
+    (is (= {:type :error :var "#'a.p-test/boots" :not-run true} (select-keys (first (filter :not-run (:reused-reports s))) [:type :var :not-run]))
+        "a process test is answered as an error naming why, never left out")
+    (is (= (set (keys items)) (set (concat (:run s) (map #(symbol (subs (:var %) 2)) (:reused-reports s)))))
+        "every granted item is run or reported")))
