@@ -1130,6 +1130,35 @@
   note-loaded!): what program-differs compares with a branch. See docs/merging.md#a-session-proves-through-root."}
   loaded (atom {}))
 
+(defonce ^{:private true :doc "#{form entity}: the forms this process was found to hold (held-forms), by entity: a form's entity is
+  its content id, the same on every db holding its text, so an import asks each once. See docs/source.md#indexing-a-tree."}
+  held-entities (atom #{}))
+
+(defn held-forms
+  "The ids of the forms this process holds compiled: the binary's (binary-program) and those it loaded since (note-loaded!).
+  See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat] [:set :string]]}
+  [] (into (set (:forms (binary-program))) (vals @loaded)))
+
+(defn unheld-forms
+  "{namespace entity [form entity]}: the forms of each of namespace entities nes on db this process doesn't hold compiled. One
+  :form/ns range a namespace; a form not seen before is asked once a process, by one :form/id range when many are new (a
+  process's first import), else a seek each. See docs/source.md#indexing-a-tree."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.db/eid]] [:map-of :seon.db/eid [:vector :seon.db/eid]]]}
+  [db nes]
+  (let [known @held-entities
+        outs (into {} (for [ne nes] [ne (into [] (comp (map :e) (remove known)) (d/datoms db :avet :form/ns ne))]))
+        new (into [] cat (vals outs))]
+    (if (empty? new)
+      (update-vals outs (constantly []))
+      (let [held (held-forms)
+            id-of (if (< 100 (count new))
+                    (let [ids (into {} (map (juxt :e :v)) (d/datoms db :aevt :form/id))] #(get ids %))
+                    #(:v (first (d/datoms db :eavt % :form/id))))
+            unheld (into #{} (remove #(held (id-of %))) new)]
+        (swap! held-entities into (remove unheld) new)
+        (update-vals outs #(filterv unheld %))))))
+
 (defn note-loaded!
   "Record that this process now runs form id for each var of vars (an agent's REPL definition, as it records it). nil."
   {:malli/schema [:=> [:cat [:sequential :qualified-symbol] :string] :nil]}

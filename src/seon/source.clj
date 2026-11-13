@@ -90,8 +90,8 @@
                               [as target]))]
         (doseq [[a target] (ns-aliases nsx) :when (and (contains? wanted a) (not= (wanted a) (ns-name target)))]
           (ns-unalias nsx a))))
-    (when (or ns-form?
-              (and macro? (not (some-> (ns-resolve nsx (second form)) bound?))))
+    ;; a macro is the text's, whatever this process held before: later forms expand as the program being analyzed says
+    (when (or ns-form? macro?)
       (binding [*ns* nsx] (eval form)))
     {:units [(program/unit-account (analyze nsym form private?))] :ns-form? ns-form?})))
 
@@ -134,6 +134,9 @@
                                                ;; analyzed in a process that may never have loaded the namespace
                                                (do (doseq [v (concat (map :var (:defs h)) (:declares h)) :when (and (find-ns n) (= (namespace v) (str n)))]
                                                      (intern (find-ns n) (symbol (name v))))
+                                                   ;; a macro is set up from its text, as an analysis would: a later form expands it as the program says
+                                                   (when (and (seq? form) (= 'defmacro (first form)) (find-ns n))
+                                                     (binding [*ns* (find-ns n)] (eval form)))
                                                    (assoc f :held h))
                                                (merge f (analyze-form n form private?))))))
         seen (volatile! {})]
@@ -612,19 +615,33 @@
                       (filter requirers))
             lost))))
 
-(defn required-files
-  "Files ({relative path text}) with the files db holds of what they require, and so on, for each namespace loaded? says this process hasn't: analyzing a file runs its ns form, and a
-  namespace no source root reaches (test/'s, in a root) is set up only by reading it first, as a whole tree's read does. Their text is db's, so reading them writes nothing. See docs/source.md#indexing-a-tree."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string] ifn?] [:map-of :string :string]]}
-  [db files loaded?]
-  (let [libs (fn [f] (for [c (rest f) :when (and (seq? c) (= :require (first c))) x (rest c)] (if (sequential? x) (first x) x)))]
-    (loop [out files todo (vec (for [[p t] files :when (str/ends-with? p ".clj")] t))]
-      (if-let [t (peek todo)]
-        (let [more (into {} (for [r (some-> (ns-form t) libs) :when (and (symbol? r) (not (loaded? r)))
-                                  :let [p (:ns/file (d/entity db [:ns/name r]))] :when (and p (not (contains? out p)))]
-                              [p (file-text db r)]))]
-          (recur (into out more) (into (pop todo) (vals more))))
-        out))))
+(defn- db-environment!
+  "Set up in this process every namespace files ({relative path text}) require, and theirs, that no file of read ({path
+  text}, this import's) defines, as db's program has it: its ns form, its vars and its macros, required first, each marked
+  loaded so no require reads a file. What files are analyzed against is then db's program, never what this process
+  happened to load. nil. See docs/source.md#indexing-a-tree."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string] [:map-of :string :string]] :nil]}
+  [db files read]
+  (let [libs (fn [f] (for [c (rest f) :when (and (seq? c) (= :require (first c))) x (rest c) :let [r (if (sequential? x) (first x) x)] :when (symbol? r)] r))
+        own (into #{} (keep #(some-> (ns-form %) second)) (concat (vals files) (vals read)))
+        ns-e (fn [n] (pdb/eid db :ns/name n))
+        requires (fn [n] (or (some-> (ns-e n) (as-> e (d/entity db e)) :ns/form :form/requires seq set) #{}))
+        start (into #{} (comp (keep ns-form) (mapcat libs) (remove own) (filter ns-e)) (vals files))
+        nss (into start (program/closure start #(remove own (filter ns-e (requires %)))))]
+    ;; a namespace this process holds whole at db's forms is left as it is: only what differs is set up (the cost of what differs)
+    (let [unheld (program/unheld-forms db (keep ns-e nss))]
+      (doseq [n (program/topo (vec nss) #(filter nss (requires %)) str)
+              :let [e (ns-e n) forms (map #(d/entity db %) (get unheld e))]
+              :when (or (seq forms) (not (find-ns n)))
+              :let [nsx (program/ensure-ns! n)]]
+        (@mark-loaded! (str n))
+        (binding [*ns* nsx]
+          (some-> (d/entity db e) :ns/form :form/src read-string eval)
+          (doseq [f forms d (:form/defines f) :let [v (:var/name d)] :when (and (qualified-symbol? v) (= (namespace v) (str n)))]
+            (if (contains? (set (:var/meta d)) :macro)
+              (eval (read-string (:form/src f)))
+              (intern nsx (symbol (name v)))))))))
+  nil)
 
 (defn file-reading-expansions
   "{relative path namespace} of db's files holding a form that expands a macro reading files (a macro whose form refers to one
@@ -662,10 +679,12 @@
         read (loop [round texts check (keys gone) read gone tree {}]
                (if (and (empty? round) (empty? check))
                  read
-                 (let [files (required-files db round #(contains? (loaded-libs) %))
+                 (let [files round
+                       ;; what the files require is set up from db's program first, never what this process happened to load
+                       _ (db-environment! db files tree)
                        ;; a later round's privacy is the tree's as every round read it: a dependent read again names a var an
                        ;; earlier round's file made public, which db still holds as private; a file read before keeps the text
-                       ;; it was read with (required-files adds db's text of a namespace this process has not loaded)
+                       ;; it was read with
                        tree (merge files tree)
                        now (read-nss db files tree)
                        read (into read now)
