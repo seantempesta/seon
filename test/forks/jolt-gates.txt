@@ -17,6 +17,7 @@ footprint
 lazyretain
 compilescaling
 applyscaling
+recordctoralloc
 lazyscaling
 vecscaling
 pipescaling
