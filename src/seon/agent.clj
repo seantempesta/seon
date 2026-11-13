@@ -2144,7 +2144,7 @@
      ;; this process holds one branch, so its malli default registry is that branch's, on every path: set from the schema slot
      ;; now and whenever the slot is rebuilt (a write that moves a schema entry, a merge of main), after the swap that rebuilt it
      ;; (docs/source.md#schemas-at-the-repl)
-     (add-watch state ::registry (fn [_ _ o n] (let [r (:schema-registry n)]
+     (add-watch state #'program/hold-registry! (fn [_ _ o n] (let [r (:schema-registry n)]
                                                  (when (and r (not (identical? r (:schema-registry o)))) (program/hold-registry! (:registry r))))))
      (program/hold-registry! (:registry (branch-schemas)))
      (mark! :state)
