@@ -1186,7 +1186,7 @@
       (swap! state assoc :fixtures-warm true)
       n)))
 
-(defn- test-child-runs!
+(defn- ^:seon.test/runner test-child-runs!
   "A test child's body (jolt.async.remote.flow/fork!'s child), end its end of the link to its run's fold proc
   (test-run-step), opened by fork! over the one stream it holds: watched as seon.lib/fork!'s children are (seon.lib/end-with!,
   so it ends with the agent's starter), set up as bin/test's runner is, then tests run (run-tests-here), each value put on
@@ -1350,7 +1350,7 @@
     (run-answered (-> st (update :run-dirs (fnil into []) (map (comp fx/run-dir :os) (vals (:children st))))
                       (assoc :threw e :children {} :by-os {})))))
 
-(defn test-run-step
+(defn ^:seon.test/runner test-run-step
   "One test run's fold, a proc of the agent's own graph (run-tests-forked adds it, and removes it once it has answered):
   at its start it forks a test child per shard (fork-test-child), each a proc of the graph whose values arrive on
   :seon.link/up tagged with its proc id (child-codec), and each child's exit, reaped, on :seon.process/end. It folds

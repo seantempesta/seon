@@ -1841,6 +1841,9 @@
         sids (fn [text] (into [] (map #(str "schema " %)) (names (sedn/decode text))))
         contract (reduce (fn [m [v e]] (if-let [t (:contract e)] (assoc m v (sids t)) (dissoc m v))) (:contract g) facts)
         tests (reduce (fn [s [v e]] (if (contains? (:meta e) :test) (conj s v) (disj s v))) (:tests g) facts)
+        ;; the vars that decide a test's outcome (^:seon.test/runner: the runner, the test child, the fold): every test's digest takes
+        ;; what they reach (index-answer's runner), so a runner fix reruns every test it may have judged wrongly
+        runners (reduce (fn [s [v e]] (if (contains? (:meta e) :seon.test/runner) (conj s v) (disj s v))) (:runners g #{}) facts)
         ;; a name quoted in a test's namespace is one the test hands to what runs it by name
         ;; ((cost/proof {:of 'ns/f}), resolve, an agent's eval): a reach edge there, as a
         ;; reference is (a quoted name in src is data: schema-forms' renders, tree-readers)
@@ -1955,7 +1958,7 @@
                                    (transient (apply dissoc (:flags g) olds))
                                    (:next g)]
                                   (components (vec affected) (fn [id] (filter affected (adj id)))))]
-    (cond-> (assoc g :rows rows :defs defs :methods methods :impls impls :contract contract :tests tests :test-nss test-nss :refd refd :adj adj :rev rev
+    (cond-> (assoc g :rows rows :defs defs :methods methods :impls impls :contract contract :tests tests :runners runners :test-nss test-nss :refd refd :adj adj :rev rev
            :reads reads :scans scans :classed classed :docs docs :proc proc :bin bin :walks walks :plain plain :own own :computed computed
            :comp-of (persistent! comp-of) :cd (persistent! cd) :flags (persistent! fl) :next n :affected (count affected))
       held (assoc :tests-by-ns tests-by-ns
@@ -2150,6 +2153,10 @@
         ;; the test names: seon.lib-test's fork cases kept one flaky digest across a fix to seon.check/fork-cases)
         root (delay (root-digest g (first (roots-of g (:index g)))))
         binary (delay (root-digest g (conj (first (roots-of g (:index g))) 'seon.check/-main)))
+        ;; what decides every test's outcome (the graph's :runners, marked ^:seon.test/runner): the one derived-reach digest
+        ;; (root-digest) over them, taken by every test, so a runner change moves every digest (owner, 2026-11-13: false reds
+        ;; are rerun by a moved digest, never deleted). Made once, when a test asks
+        runner (delay (root-digest g (sort (:runners g #{}))))
         ;; :seon.env/src is a direct reader's (kept-program-store): a process test runs a program it names
         ;; a process reads the classes it runs on (bin/, system.edn, web/, deps, the schemas), not the wiki or the task files,
         ;; which a test reaches only through its own reader (test-class-readers): as classes they would move every process
@@ -2175,11 +2182,12 @@
                                       (when (and (not roots?) (some #(let [f (flags %)] (or (:proc f) (:bin f))) cs)) (str "\nroot " @root))
                                       (when (and (not roots?) (some #(:bin (flags %)) cs)) (str "\nbinary " @binary))
                                       (when (and roots? (or src? (some #(:reads (flags %)) cs))) code)
+                                      (when-not roots? (str "\nrunner " @runner))
                                       (concat (sort (map cd cs)) (map line (sort ks)))))
          :process? (boolean (some #(:proc (flags %)) cs)) :binary? (boolean (some #(:bin (flags %)) cs))
          ;; what this digest takes besides code, as read keys (seon.proofs/reads-key): until a run records its config, schema
          ;; and file reads, its verdict's :reads holds these, so a reuse by reads is never wider than this digest's
-         :reads (cond-> (into #{[:env]} (map #(vector :config %)) ks)
+         :reads (cond-> (into #{[:env] [:runner]} (map #(vector :config %)) ks)
                   (some #(:scans (flags %)) cs) (conj [:tree])
                   (and (not roots?) (some #(let [f (flags %)] (or (:proc f) (:bin f))) cs)) (conj [:root])
                   (and (not roots?) (some #(:bin (flags %)) cs)) (conj [:binary]))
@@ -2282,7 +2290,8 @@
   (merge (var-digests g (vec (keys defs)))
          ;; the whole tree, and what the system and the binary run (root-digest), for a test whose digest takes them
          (let [roots (first (roots-of g (:index g)))]
-           {[:env] (:env inputs) [:tree] (:tree inputs) [:root] (root-digest g roots) [:binary] (root-digest g (conj roots 'seon.check/-main))})
+           {[:env] (:env inputs) [:tree] (:tree inputs) [:root] (root-digest g roots) [:binary] (root-digest g (conj roots 'seon.check/-main))
+            [:runner] (root-digest g (sort (:runners g #{})))})
          (into {} (for [k (keys schemas) :let [d (get own (str "schema " k))] :when d] [[:schema k] d]))
          (into {} (for [[k v] (:config inputs)] [[:config k] v]))
          (into {} (for [[p b] blobs] [[:file p] b]))
