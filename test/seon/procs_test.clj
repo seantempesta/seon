@@ -957,6 +957,27 @@
     (is (= (:in m) (:seon.error/in (answer p))) "on the defect")
     (is (= :state (:took (answer p))) "with what its step took")))
 
+;; docs/errors.md#nothing-crashes-and-nothing-hangs: a proc whose transition threw (its init or resume: Flow reports it with no message
+;; and leaves it paused for good, reading no in-port) is down, and what the api would send it is answered with that error instead of
+;; waiting in a buffer nobody reads (plans/runtime-step-contract-hang.md, (A) part 1). Red before: the write went to the writer.
+;; Estimate, its sibling's measured pieces: an ex-info 0.1M, flow-error 0.13M, api-state 0.2M, two api steps (the :error one records
+;; a problem) ~0.4M, step-out-ok?'s first validation 0.3M ~ 1,500,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1500000}} a-request-to-a-proc-whose-transition-threw-is-answered-with-its-error
+  (let [down (#'root/flow-error {:clojure.core.async.flow/pid :writer :clojure.core.async.flow/ex (ex-info "resume threw" {})})
+        ;; wired as system.edn wires them: one bound channel, the api's :to-writer out-port and the writer's :to-writer param, and
+        ;; no conn between them; the built system holds each proc's bound declaration (seon.graph/build's :parts)
+        ch (a/chan 4)
+        st0 (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer ch :events (a/chan 4)
+                              :view {:agents {}} :graph (promise)
+                              :system (doto (promise) (deliver {:procs {} :conns []
+                                                                :parts {[:proc :writer] [{:proc 'seon.writer/writer-proc :args {:to-writer ch}} {}]}}))})
+        [st _] (step #'root/api-proc st0 :back down)
+        p (promise)
+        [_ outs] (step #'root/api-proc st :ext {:op :write :req {:op :tx :branch :db :tx-data []} :p p})]
+    (is (empty? (:to-writer outs)) "nothing is sent to a writer that reads nothing")
+    (is (seon.contract/error? (answer p)) (str "the write's caller is answered with the error: " (pr-str (answer p))))
+    (is (= :writer (get-in (answer p) [:seon.error/data :pid] (:pid (answer p)))) (pr-str (answer p)))))
+
 ;; Estimate: 3 threads started and joined (~30k each) + 3 ex-info throws with their stacks (~20k each) + 1 go block 20k + api-state and 1 api step ~0.1M ~ 0.3M, about 2e5 ~ 200,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 200000}} an-uncaught-error-reaches-root-never-only-stderr
   ;; docs/errors.md#nothing-crashes-and-nothing-hangs (Point 2026, Sean's silent errors): a fiber died at start with its error

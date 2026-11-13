@@ -41,6 +41,9 @@
                       [:ins {:optional true} [:map-of :keyword :string]]
                       [:outs {:optional true} [:map-of :keyword :string]]
                       [:params {:optional true} [:map-of :keyword :string]]
+                      ;; the params that are channels this proc reads as its own in-ports (bound in system.edn, not routed by a conn):
+                      ;; whoever puts on one knows the proc that reads it (seon.system's answer-down)
+                      [:in-params {:optional true} [:set :keyword]]
                       [:ping-map-fn :seon.host/fn]]
  :seon.step/outputs [:maybe [:map-of [:or :keyword [:tuple :keyword :keyword]] [:sequential :any]]]
  :seon.step/transition [:enum :clojure.core.async.flow/stop :clojure.core.async.flow/pause :clojure.core.async.flow/resume]
@@ -185,6 +188,7 @@
  :seon.system/errors-flight [:boolean {:description "True while a write of the folded errors is in flight, so a second is not made."}]
  :seon.system/inserting [:map-of {:description "The evals given at an agent's spawn, kept by agent until its REPL queue is sent them as one write."} :keyword [:sequential :any]]
  :seon.system/killers [:map-of {:description "The callers of each agent's stop, answered when its end is recorded."} :keyword [:vector [:or :seon.host/promise :map]]]
+ :seon.system/down [:map-of {:description "The procs of root's graph whose transition threw (Flow leaves them paused, reading no in-port), each with its error: what is sent one is answered with it (seon.system/answer-down)."} :keyword :map]
  :seon.system/lost [:maybe {:description "The messages the api's step took when it threw, which the stall check answers as lost; nil when none was."} [:vector :any]]
  :seon.system/prove [:map {:description "What the prove service last reported it holds (its state-view): runs in flight, the queue, free workers, the asks it has open."}]
  :seon.system/respawn [:map-of {:description "The agents ended for a respawn, with the caller and the spawn opts that start the next in their place."} :keyword [:map [:p [:or :seon.host/promise :map]] [:opts :map]]]
