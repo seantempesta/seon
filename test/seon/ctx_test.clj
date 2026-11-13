@@ -888,7 +888,7 @@
     (is (not (str/includes? (pr-str hiccup) style)) "no part the model reads holds the rules")
     (is (str/includes? (:html (some #(when (= task-id (:id %)) %) units)) "class=\"task-view\"")
         "a render with CSS rules keeps its name as its one class")
-    (is (some #(and (str/starts-with? (:id %) "page-rules") (str/includes? (:html %) "> h2 {")) units)
+    (is (some #(and (str/starts-with? (:id %) "page-rules") (str/includes? (:html %) "li > details > p {")) units)
         "the page's rules component draws them, a selector's > as written")))
 
 (deftest a-cited-vars-tests-are-its-pulled-callers
