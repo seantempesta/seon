@@ -618,7 +618,7 @@
 (deftest ^{:seon.test/estimate {:ticks 1000000}} a-judging-retracts-what-it-does-not-set
   ;; the judged attributes are the end's, never an earlier end's: an error and deferred results a task held from its last judging
   ;; do not survive a later one that has none (seon.task/outcome-tx)
-  (let [stale {:seon.task/error {:seon.error/type :seon.fx/io-error :seon.error/message "the last gate failed"}
+  (let [stale {:seon.task/error {:seon.error/type :seon.fx/io-error :seon.error/operation 'seon.fx/write-file :seon.error/message "the last gate failed"}
                :seon.task/deferred {'seon.system-test/boots "d-boots"} :seon.task/deferred-results {'seon.system-test/boots :error}
                :seon.task/waste {'seon.doc/resolve-ref {:forms 2 :turns 1}}}
         db (db-of [(decl "a")] :extra (work "a" :running :members stale))
@@ -1138,7 +1138,7 @@
         (is (= {boots :pass} (:seon.task/deferred-results (task/task db "demo/a-merge"))))
         (is (= octopus (actions-for db)))))
     (testing "a gate that answers an error with no test named is no pass: its candidate didn't analyze"
-      (let [db (gated gate {} [] {:seon.error/type :seon.writer/refused :seon.error/message "the merged tree doesn't analyze: x"})]
+      (let [db (gated gate {} [] {:seon.error/type :seon.writer/refused :seon.error/operation 'seon.writer/refused :seon.error/message "the merged tree doesn't analyze: x"})]
         (is (= :closed (:seon.task/outcome (task/task db "demo/a-merge"))))
         (is (clojure.string/includes? (str (:seon.error/message (:seon.task/error (task/task db "demo/a-merge")))) "doesn't analyze"))))
     (testing "a red, or a run that could not run them (:error), is refused as a red proof is"

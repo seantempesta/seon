@@ -620,8 +620,10 @@
                                                                    ; (Data model, 2026-11-12: nothing switched off; measured 58 -> 64)
                                                               3    ; seon.problems/unschemed-keys: on base and head for the move's forms, and in the full read (data, 64 -> 67)
                                                               2    ; seon.problems/refused-values' contract on base and head (data, 67 -> 69)
-                                                              4)}  ; the test law's two classes (unestimated-tests, undeclared-tests), one reader each on
+                                                              4    ; the test law's two classes (unestimated-tests, undeclared-tests), one reader each on
                                                                    ; base and head (tests, 2026-11-12: 69 -> 73 with data's)
+                                                              8)}  ; :unfocused-docstring (data, 73 -> 81 measured): its reader and its bound on base and head,
+                                                                   ; and a seek and a row for each changed Seon var the input's tree holds
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 25000000}} problems-cost-nothing-for-a-clean-program
@@ -989,7 +991,9 @@
                ;; and 4: the test law's two classes (unestimated-tests, undeclared-tests), one reader each on base and head (tests,
                ;; 2026-11-12: measured 69 -> 73); and 4 for data's two caused classes (unschemed-key, refused-value), one reader
                ;; each on base and head, the same shape (measured 73 -> 77 once both met in one tree)
-               :fixed {:ticks 460000 :bytes 1800000 :calls 77}
+               ;; and 8 for :unfocused-docstring (data, measured 77 -> 85): its reader and its bound on base and head, and a seek
+               ;; and a row for each changed Seon var the tree holds
+               :fixed {:ticks 460000 :bytes 1800000 :calls 85}
                :sizes [10 30 100]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
@@ -1205,7 +1209,8 @@
                ;; 58: :unschemed-key one more (its seon.db/eid and derived-row: this input gives every declared class open rows)
                ;; 60: :refused-value one more, the same two
                ;; 64: :unestimated-test and :undeclared-test two more (each its seon.db/eid and derived-row)
-               :fixed {:ns 3000000 :bytes 4000000 :calls 64}
+               ;; 66: :unfocused-docstring one more (its seon.db/eid and derived-row)
+               :fixed {:ns 3000000 :bytes 4000000 :calls 66}
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 4000000}} attention-survives-a-store-write

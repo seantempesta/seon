@@ -188,6 +188,17 @@
  :seon.result/out [:map {:description "What the forms of the result wrote to out, as printed code."} [:seon.print/code :string]]
  :seon.result/err [:map {:description "What the forms of the result wrote to err, as printed code."} [:seon.print/code :string]]
  :seon.result/forms [:int {:min 2 :description "How many forms ran, when there were several."}]
+ ;; a test's result, keyed by what it read: reused on any branch while nothing its reads name moved (docs/merging.md#verdicts-are-a-cache)
+ :seon.proof/id [:and {:seon.db/identity true :seon.db/content-id true :description "The result's identity: the digest of its test and its reads' digest."} :seon.lib/digest]
+ :seon.proof/test [:qualified-symbol {:seon.db/index true :description "The test the result is of."}]
+ :seon.proof/reads-digest [:and {:description "The digest of the content each read key held at the basis, basis excluded (seon.reads/content-digest): equal content gives one result on any branch."} :seon.lib/digest]
+ :seon.proof/reads [:and {:description "What the run read, matched against what moved to decide reuse."} :seon.reads/set]
+ :seon.proof/failures [:vector {:description "The assertions that failed."} :seon.problems/assertion]
+ :seon.proof/route [:enum {:description "How it was proved: :live, the branch's forms loaded into the running runtime; :full, a binary built from it."} :live :full]
+ :seon.proof/proof-fact [:map {:seon.db/attributes true}
+                         [:seon.proof/id :seon.proof/id] [:seon.proof/test :seon.proof/test] [:seon.proof/reads-digest :seon.proof/reads-digest]
+                         [:seon.proof/reads :seon.proof/reads] [:seon.proof/status :seon.proof/status] [:seon.proof/route :seon.proof/route]
+                         [:seon.proof/failures {:optional true} :seon.proof/failures] [:seon.bound/spent {:optional true} :seon.bound/spent]]
  :seon.result/result-fact [:map {:seon.db/attributes true}
                            [:seon.result/hash :seon.result/hash] [:seon.result/value {:optional true} :seon.result/value]
                            [:seon.result/ex {:optional true} :seon.result/ex] [:seon.result/out {:optional true} :seon.result/out]
