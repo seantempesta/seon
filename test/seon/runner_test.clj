@@ -83,3 +83,20 @@
         (run tree dg {:binary built :tree tree :reaches ['seon.main/-main]})
         (is (not (stored? dg)) "a binary not current for the plan's tree: the step that ran on it is not stored"))
       (finally (seon.lib/remove-tree! out) (doseq [f @files] (.delete (java.io.File. ^String f)))))))
+
+;; docs/merging.md#the-test-service: a shard warms the shared root only for a test of its own that starts one: a test that reaches
+;; the root's var and the binary, the plan's rule for making the process store the root starts on. Found 2026-11-13: a docs-only
+;; land's shard of doc-tests reached the shared root's var, warmed it, and died before its first test, :seon.test-store/no-process-store
+;; (the plan made no store: none of them reaches the binary). Estimate: two shard files written and read, ~1M ticks.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-shard-warms-the-shared-root-only-for-a-test-that-starts-one
+  (let [out (str (System/getProperty "java.io.tmpdir") "/seon-warm-" (random-uuid))
+        reach {:seon.test/fixture #{'a/store-test} :seon.test/shard-fixture #{'a/doc-test 'a/process-test}}
+        warm-of (fn [tests binary]
+                  (seon.lib/remove-tree! out) (.mkdirs (java.io.File. ^String out))
+                  (#'test-runner/write-shards! out tests (zipmap tests (repeat "d")) "t" {} 1 {} #{} (#'test-runner/warm-by reach binary))
+                  (:warm (clojure.edn/read-string (slurp (str out "/shard-0.edn")))))]
+    (try
+      (is (= #{} (warm-of ['a/doc-test] #{})) "doc-tests that reach the root's var but not the binary: no root warmed, as no store is made")
+      (is (= #{:seon.test/shard-fixture} (warm-of ['a/doc-test 'a/process-test] #{'a/process-test})) "a test that starts the root: warmed")
+      (is (= #{:seon.test/fixture} (warm-of ['a/store-test] #{})) "the test store is warmed for every test that reaches it")
+      (finally (seon.lib/remove-tree! out)))))
