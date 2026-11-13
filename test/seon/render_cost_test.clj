@@ -581,27 +581,55 @@
 
 (defn- session-of
   "Agent a1 on db0 (the system prompt, a task) with n turns, each one eval of the model's: the db, its entity index, a1's eid and a
-  function from db to seon.render/walk's opts for a1's request there (its tree pulled as a request pulls it, seon.ctx/agent-ctx)."
+  function from db to seon.render/walk's opts for a1's request there (its tree pulled as a request pulls it, seon.ctx/agent-ctx).
+  Written as production writes it: each transaction a commit on a test branch, so every turn's basis names a commit holding its t
+  (a db-with chain named a commit that never held it, and every point read back was a view: seon.ctx/moved then merged the whole db)."
   {:malli/schema [:=> [:cat nat-int?] [:tuple :seon.host/db :map pos-int? :seon.host/fn]]}
   [n]
   (let [k "a1"
-        db0 (reduce d/db-with (ts/test-db) [[{:seon.system/id :root :seon.system/boot "b1"}] (seon.task/agent-tx :a1 {:status :busy :branch :task-x})])
-        db (reduce d/db-with db0
-                   [(seon.doc/load-tx db0 "docs" {seon.doc/system-page "# You are a Seon agent\n\nThe help page."})
-                    (seon.task/create-tx db0 [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{'t-test/x-test}}])])
-        ;; each turn its own transaction, its call holding its basis as seon.turn writes it: the point its request was made at, before
-        ;; its eval (a call with no basis made every request a first page at the db's own point)
-        db (reduce (fn [db i] (d/db-with db (conj (session-eval (str "e" i) (inc i))
-                                                  {:seon.model-call/id (:seon.model-call/id (seon.task/call-ref k (inc i)))
-                                                   :seon.model-call/basis {:commit (d/commit-id db) :t (:max-tx db) :task "t/x" :turn (inc i)
-                                                                           :max-turns 40 :origin :model}})))
-                   db (range n))
-        db (d/db-with db [{:seon.agent/key k :seon.agent/turn n}])
+        db (ts/test-branch!
+             (fn [_ conn]
+               (doseq [tx [[{:seon.system/id :root :seon.system/boot "b1"}] (seon.task/agent-tx :a1 {:status :busy :branch :task-x})]]
+                 (d/transact conn tx))
+               (d/transact conn (seon.doc/load-tx @conn "docs" {seon.doc/system-page "# You are a Seon agent\n\nThe help page."}))
+               (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{'t-test/x-test}}]))
+               ;; each turn its own commit, its call holding its basis as seon.turn writes it: the point its request was made at, before its eval
+               (doseq [i (range n) :let [db @conn]]
+                 (d/transact conn (conj (session-eval (str "e" i) (inc i))
+                                        {:seon.model-call/id (:seon.model-call/id (seon.task/call-ref k (inc i)))
+                                         :seon.model-call/basis {:commit (d/commit-id db) :t (:max-tx db) :task "t/x" :turn (inc i)
+                                                                 :max-turns 40 :origin :model}})))
+               (d/transact conn [{:seon.agent/key k :seon.agent/turn n}])
+               @conn))
         ix (seon.program/index-of-db db)
         a (:db/id (d/entity db [:seon.agent/key k]))]
     [db ix a (fn [db] (let [t (seon.ctx/agent-ctx ix db a)]
                         {:db db :tree t :root (seon.render/render-var-of ix (merge {:seon.agent/key k} t)) :index ix :changes seon.ctx/changes
                          :outputs #{:seon.render/hiccup :seon.render/openai-compat} :model-only true}))]))
+
+(defn moved-between-turns-of
+  "The input at n: seon.ctx/moved's arguments between the points of turns n-1 and n of agent a1's session (session-of), each the db
+  its basis names (seon.ctx.wire/db-at), as seon.ctx.wire/page-parts-through advances its kept walk from one turn to the next."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :nil]]}
+  [n]
+  (let [[db] (session-of n)
+        b (fn [i] (:seon.model-call/basis (d/entity db [:seon.model-call/id (:seon.model-call/id (seon.task/call-ref "a1" i))])))]
+    [(#'seon.ctx.wire/db-at db (b (dec n))) (#'seon.ctx.wire/db-at db (b n)) nil]))
+
+;; See docs/render.md#a-page-is-a-kept-walk
+(deftest ^{:seon.test/estimate {:ticks 30000000}} what-moved-between-turns-costs-one-turn
+  ;; web's probe, 2026-11-13: a 20-turn page cost 190M ticks, 96% seon.ctx/moved, 21 calls at ~8.7M and 26 MB each on a 6k-datom db,
+  ;; growing with turns x db: the turns' points were views (a db-with chain whose bases named a commit that never held their t), and a
+  ;; view's datoms-diff merges the whole range. Production's points are commits holding their t (40 of 40 on the loop task's run): the
+  ;; diff skips what both share. Estimate: the session at three sizes, a diff each
+  (cost/proof {:of 'seon.ctx/moved :input 'seon.render-cost-test/moved-between-turns-of
+               :n "turns of the agent, an eval each"
+               :work (str "the datoms of one turn (its eval and its call), found by walking the root-to-leaf paths the two commits do not "
+                          "share: one node a level, so the index's depth, log n, and never the db's size")
+               :growth :log
+               :fixed {:calls 1 :bytes 20000}
+               :per-n {:bytes 25000}
+               :sizes [10 20 40]}))
 
 (defn walk-plus-one-of
   "The input at n: seon.render/walk's arguments for agent a1's request after one eval more (turn n+1), its walk at n turns kept from
@@ -619,6 +647,56 @@
   [n]
   (let [[db _ _ at] (session-of n) o (at db) p (seon.render/walk nil o)]
     [p (assoc o :moved [])]))
+
+(defn child-page-of
+  "The input at n: seon.render/walk's arguments for the first page of c1, an agent a1 started (its :seon.agent/parent), a1 having
+  worked n turns: c1 has none, drawn cold, as a forked agent's first page is (its walk is its own, never its parent's)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any :map]]}
+  [n]
+  (let [[db ix _ _] (session-of n)
+        db (d/db-with db [{:seon.agent/key "c1" :seon.agent/root [:seon.system/id :root] :seon.agent/parent [:seon.agent/key "a1"]}])
+        c (:db/id (d/entity db [:seon.agent/key "c1"]))
+        t (seon.ctx/agent-ctx ix db c)]
+    [nil {:db db :tree t :root (seon.render/render-var-of ix (merge {:seon.agent/key "c1"} t)) :index ix :changes seon.ctx/changes
+          :outputs #{:seon.render/hiccup :seon.render/openai-compat}}]))
+
+;; See docs/render.md#style
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-forks-first-page-costs-the-same-at-any-parent-length
+  ;; a forked agent's first page is drawn cold in its own process (its walk is its own, never its parent's), each of its components
+  ;; once: its cost is its own page's, never its parent's history
+  (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/child-page-of
+               :n "turns its parent worked"
+               :work (str "the child's 15 components (agent, its state, parts, rules list and rules, system message, examples, proof story, "
+                          "conversation list and 2 turns, chat end, eval tiles, page message), each drawn once; the rules read twice")
+               :growth :constant
+               ;; derived from the work, item by item (each item's per-unit cost read off its own code path's contracted calls):
+               ;; - 15 components x 46 calls (the walk's 18: render!, emit, inputs, opts-form, with-id, key-id, comp-key, led!, reads-of, props,
+               ;;   id-safe and inputs-in twice; the tree tracking's ~28: read-index, prefixes, view, wrap, fresh per path read), ~15k ticks, ~80 KB = 690 calls
+               ;; - rules, twice (drawn, then again when the renders it drew are first drawn): seon.render.ui's 162 and seon.ctx.wire's 43 vars,
+               ;;   one css? each, ~43k ticks and ~235 KB a read = 412 calls
+               ;; - the printer over the 36 nodes the components print (system message, examples, state), ~32 calls and ~7k ticks a node = 1,150 calls
+               ;; - the system page as markdown (seon.doc, 4 sections): ~125k ticks, ~660 KB
+               ;; - the db, ctx and config reads (members, parents, watch, config values): ~190 calls, ~90k ticks, ~300 KB
+               ;; sum: ~2,440 calls, ~0.78M ticks, ~3.3 MB. Measured 2026-11-13 at 2 / 4 / 8: 2,429 calls, 0.82M ticks, 3.54 MB at every size
+               ;; (1.01M and 4.17 MB when rules sorted all 162 vars). None of it reads the parent's history
+               :fixed {:calls 2440 :bytes 3500000 :ticks 800000}
+               :sizes [2 4 8]}))
+
+(defn rules-of
+  "The input at k: seon.render/rules' argument, k of seon.render.ui's renders drawn (all in one namespace)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple [:map-of :any :any]]]}
+  [k]
+  [(into {} (map (fn [v] [v @v])) (take k (sort-by symbol (filter (comp :malli/schema meta) (vals (ns-interns 'seon.render.ui))))))])
+
+;; See docs/render.md#style
+(deftest ^{:seon.test/estimate {:ticks 2000000}} the-rules-cost-their-namespaces-vars-read-once
+  (cost/proof {:of 'seon.render/rules :input 'seon.render-cost-test/rules-of
+               :n "renders drawn, of one namespace"
+               :work (str "the namespace's 162 vars read once (ns-interns ~7k ticks, 93 KB; a meta read and css? each, ~200 ticks and ~700 B), "
+                          "the 24 that state rules sorted (~3k): constant in the renders drawn. It sorted all 162 vars by symbol: 124k ticks, 492 KB")
+               :growth :constant
+               :fixed {:calls 163 :bytes 240000 :ticks 45000}
+               :sizes [1 4 16]}))
 
 ;; See docs/render.md#a-page-is-a-kept-walk
 (deftest a-request-made-again-costs-what-moved
