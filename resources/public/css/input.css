@@ -138,6 +138,19 @@
   .seon-stack-2 { @apply flex flex-col gap-2; }
   .seon-row { @apply flex gap-2; }
   .seon-row > :first-child { flex-shrink: 0; } /* a row's label keeps its width beside a long value */
+  /* rules several renders share (seon.render.ui), stated once; a render's own :seon.render/style is unlayered, so it overrides these
+     (docs/render.md#style). A part drawn as a card headed by a kicker: */
+  :is(.task-view, .cited, .citations, .references, .searched, .status, .problems-tile, .process-tile, #p-task .agent, .root .agent) { display: flex; flex-direction: column; gap: 0.5rem; border: 1px solid var(--color-base-800); border-radius: 0.375rem; padding: 0.5rem; }
+  :is(.task-view, .cited, .citations, .references, .searched, .status, .problems-tile, .process-tile) > h2 { text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.625rem; color: var(--color-text-400); }
+  :is(.cite, .searched) details > summary { cursor: pointer; list-style: none; color: var(--color-text-400); }
+  :is(.cite, .searched) details > summary::before { content: '▸ '; color: var(--color-text-500); }
+  :is(.cite, .searched) details[open] > summary::before { content: '▾ '; }
+  :is(.turn, .own-problems, .ctx-key) { border-radius: 0.375rem; background: var(--color-base-900); padding: 0.5rem; min-width: 0; overflow-x: auto; }
+  :is(.system-message, .example, .proof-story) { font-size: 0.75rem; line-height: 1rem; }
+  /* an agent's entry in the side list, root's too */
+  #c-side > :is(.root-side, .agent) { display: flex; flex-direction: column; max-width: 15rem; flex-shrink: 0; border-radius: 0.375rem; background: var(--color-base-900); }
+  @media (min-width: 64rem) { #c-side > :is(.root-side, .agent) { max-width: none; background: transparent; } }
+  #c-side > :is(.root-side, .agent):hover { background: var(--color-base-850); }
 }
 @media (min-width: 64rem) {
   .seon-page { height: 100dvh; overflow: hidden; }
