@@ -592,6 +592,11 @@
  ;; branch changed). Unit: engine ticks. The most a test's :seon.test/estimate may state as :ticks: its budget is ten times
  ;; it, so a test past 1e9 ticks is split or moved to a system test's root. At the bound: an :undeclared-test row naming it.
  :seon.config.proofs/test-ticks-cap 100000000
+ ;; Unit: engine ticks a ms. The slowest rate green tests ran at, waiting included: the 5th percentile of ticks/ms over every stored
+ ;; green (88,534 greens, 2026-11-13: p5 149, median 116,069). A test child ends a test that never returns at ten times its estimate
+ ;; at this rate (seon.agent/wall-bound-ms): a wall bound derived from the test's own declared work, never a typed-in time.
+ ;; At the bound: the test ends :error, :seon.test/wall-spent, after its dump.
+ :seon.config.proofs/slow-ticks-per-ms 149
  ;; Unit: asks (requests to its root). The most a system test's estimate may state as :asks. At the bound: an :undeclared-test row.
  :seon.config.proofs/system-test-asks-cap 20
  ;; Unit: commands. The most a binary test's estimate may state as :execs. At the bound: an :undeclared-test row.
