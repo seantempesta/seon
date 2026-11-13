@@ -10,7 +10,6 @@ Seon is where many agents do real work for their user, each in its own process o
 > judged by: the fewest turns for an agent to take a roughly specified task to merged code
 > ([AGENTS.md §1](AGENTS.md#1-what-seon-is-for-and-what-moving-forward-means)).
 
-
 ## Start here
 
 Three places to start, by what you are here to do:
