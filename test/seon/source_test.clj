@@ -1154,8 +1154,11 @@
     (is (= (program-of (d/db-with db (source/replace-tx db (merge files changed)))) (program-of refreshed))
         "as the whole tree's replace reads it")))
 
-;; Estimate: one file-reading-expansions over the kept program: the file-reading macros once, then the forms referencing them (a seek each) = 1000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 1000000}} the-programs-baking-forms-are-found-by-their-macros-reads
+;; Estimate, from its cold work (a process reads these index nodes first here): the kept program read ~1.8M; the file-reading
+;; macros, a seek of the ~20 macros and each one's form and :form/refs read cold, ~2.7M; the forms naming them (a seek each)
+;; and their files ~0.4M: 5M. It was 1M, set from runs where another test had read the same index nodes first (warm: 0.66M
+;; for the macros' query against 7.9M cold, which spent the 10M budget once nothing had)
+(deftest ^{:seon.test/estimate {:ticks 5000000}} the-programs-baking-forms-are-found-by-their-macros-reads
   ;; docs/source.md#indexing-a-tree: on the checkout's own program, the forms baking the schema resources and the shipped
   ;; config file (seon.config/schema-forms, built-text) are found from the facts, so a refresh changing a schema reads them again
   (is (= 'seon.config (get (source/file-reading-expansions (test-runner/program)) "src/seon/config.clj"))))
