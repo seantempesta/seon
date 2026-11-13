@@ -2,6 +2,18 @@
 
 The owner's standing rulings, one entry each: his words and date, and where the rule is stated now. The mechanism lives in `AGENTS.md` and the wiki; the reasoning and the history around each ruling are in git. A ruling a later one reverses keeps a one-line pointer to it.
 
+## 2026-11-13 rulings
+
+The owner's rulings of this day, each with his words and where it is now stated.
+
+### The number one metric: turns from a roughly specified task to merged code
+
+"The number one metric is minimizing the number of turns it takes to go from a roughly specified task into completed and merged code." Before it: "The landings per hour was to pick up the velocity, but I don't want to use it generally since it incentivies low quality and many merges instead of smart merges." Landings per hour (root's measure from 11-12 16:30) is retired: it rewarded many small merges of machinery while one task merged in 36 hours. Stated in `AGENTS.md` §1: progress is the turns an agent takes from a roughly specified task to merged code; a task that never merges is a failure, not a low count; work is ranked by the turns it removes.
+
+How it is measured, the same day: "I want randomly selected tasks from backlog and if the solution is good (claude agents review all code until we are sure the system can self review) I want it fully merged to disk and merged into main. DO NOT REPEAT THE TASKS I WANT THEM FIXED WE HAVE 400+ TASKS!" So the measure is never a fixed set of tasks run again: each run takes a task at random from the backlog that no run has taken, a good solution merges to disk and to main and its task is done, and Claude sessions review every agent's change until the system's own review is shown trustworthy.
+
+Refined the same day: "We can iterate on a single randomly selected task until it's done. It doesn't need to be a randomly chosen task for every test. Expect tasks to be badly written or superceded and we need to remove ones that are no longer valid. Again I want claude agents curating the tasks until we have a general system that works well. But the randomness should prevent us from teaching to the test. Maybe 2-3 tests and we run agents in parallel on different tasks in different branches and we learn from groups?" So a round draws 2 or 3 backlog tasks at random, runs agents on them in parallel on their own branches, iterates on each until it is done, and learns from what the group shares; Claude sessions curate the backlog as they go, rewriting a badly written task and deleting one that is superseded or no longer valid.
+
 ## 2026-11-12 rulings
 
 The owner's rulings of this day, each with his words and where it is now stated.
