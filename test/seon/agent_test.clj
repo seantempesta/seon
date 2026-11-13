@@ -1449,38 +1449,56 @@
     (is (str/includes? r0 " 2]") "its value each one's, (inc g) after (def g 1)")
     (is (str/includes? r1 ":value 11") "and the call after it runs")))
 
-;; Estimate: in-agent's own setup and teardown (3 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 6 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~6000k, 6000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 6000000 :asks 6}} a-turn-that-throws-is-the-agents-to-read-and-the-second-ends-its-work
+(defn- work-with
+  "seon.turn/work! of the world's task for 3 turns, in this process as an agent's test fork on the world (my.test/eval-in's state),
+  its turn's draw and model call (seon.turn/act!) answered by (act st), its status by (status): what the loop decides from what
+  a turn answers. What reads a store or root stands in (main, the proofs, the end's write), the decisions of the loop are its
+  own. Answers its end, with the model calls act made (:model-calls)."
+  [act status]
+  (let [old @agent/state
+        calls (volatile! 0)
+        ;; a model call answered: the agent's turn moves, as open-turn! writes it, and the request is the one it sent
+        called! (fn [] (vswap! calls inc)
+                  (agent/transact! [{:seon.agent/key "test-agent" :seon.agent/turn (inc (agent/turn-now))}])
+                  (swap! agent/state assoc :requests [{:role "user" :content (str "turn " @calls)}]))]
+    (try (reset! agent/state {:n 0 :ns (create-ns 'seon.agent-test.turns) :mode :test :db (mt/world) :key "test-agent"})
+         (with-redefs [seon.turn/begin! (fn [_] {})
+                       agent/heard-main (constantly nil)
+                       my.branch/merge-main! (constantly {})
+                       seon.turn/observe (fn [id] {:task (task/task (agent/db) id)})
+                       seon.turn/status-now status
+                       seon.turn/tell-error! (constantly nil)
+                       seon.turn/act! (fn [st _ _ _] (act st called!))
+                       seon.turn/end! (fn [{:keys [turn]} outcome reason _]
+                                        (cond-> {:outcome outcome :results {} :uncontracted #{} :turns turn :model-calls @calls} reason (assoc :reason reason)))]
+           (seon.turn/work! {:task "app.calc/total-is-exact" :max-turns 3}))
+         (finally (reset! agent/state old)))))
+
+;; Estimate: the world, built once a process (~3.2M measured here; my.test/world's docstring says ~0.6M), and three work! loops of
+;; at most 3 turns on it (each: its start's reads and writes on the value ~0.2M, ~3 turns of a few datoms and an error map,
+;; agent/error-map ~0.3M each; first put at 50k a turn, which missed the error map and the world) = ~6M: 6,000,000
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-turn-that-throws-is-the-agents-to-read-and-the-second-ends-its-work
   ;; docs/failure-points.md (a turn of the agent's loop): md-scan #16 registered :seon.ref/block with list keys its
   ;; scan did not make yet, the registration re-armed seon.ref/scan, and the request's own scan threw after the
-  ;; turn's draw, out of work! (outcome :no-end). Here the agent breaks Seon's own seon.ctx.wire/render, which a turn
-  ;; calls after its draw: the throw is told to the agent and the loop goes on; the second in a row, with no model
+  ;; turn's draw, out of work! (outcome :no-end). A turn whose draw throws (the agent broke Seon's own seon.ctx.wire/render,
+  ;; which a turn calls before its model call) is told to the agent and the loop goes on; the second in a row, with no model
   ;; turn between, ends the work :error, and work! answers its end
-  (let [[_ end] (in-agent (fn [{:keys [task ns]}]
-                            ["(in-ns 'seon.ctx.wire) (clojure.core/defn render [& _] (throw (ex-info \"boom: Seon's own render, changed\" {})))"
-                             (str "(seon.turn/work! {:task " (pr-str task) " :max-turns 3})")])
-                          {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
-        end (:value end)]
+  (let [red {:reasons [{:reason :proof-red}]}
+        end (work-with (fn [_ _] (throw (ex-info "boom: Seon's own render, changed" {}))) (constantly red))]
     (is (= :error (:outcome end)) (pr-str end))
+    (is (= 2 (:turns end)) (str "on the second: " (pr-str end)))
     (is (str/starts-with? (str (:reason end)) "two turns in a row threw") (pr-str end))
-    (is (str/includes? (str (:reason end)) "boom: Seon's own render, changed") "naming its cause"))
-  ;; a turn that threw after its model call answered was the agent's turn: it read the last error and acted, so
-  ;; the count starts again, and the work goes on to its cap (here seon.turn/usage, read after the reply)
-  (let [[_ end] (in-agent (fn [{:keys [task ns]}]
-                            ["(in-ns 'seon.turn) (clojure.core/defn usage [& _] (throw (ex-info \"boom: after the reply\" {})))"
-                             (str "(seon.turn/work! {:task " (pr-str task) " :max-turns 3})")])
-                          {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
-        end (:value end)]
-    (is (= :cap (:outcome end)) (str "each turn reached its model, so none ended the work: " (pr-str end))))
-  ;; md-scan #27: the agent's change broke the status, every turn drew none, and the agent made 156 model calls past its
-  ;; cap of 40: a turn with no status ends at the cap as every turn does
-  (let [[_ end] (in-agent (fn [{:keys [task ns]}]
-                            ["(in-ns 'seon.ctx.status) (clojure.core/defn status [& _] (throw (ex-info \"boom: the status, broken\" {})))"
-                             (str "(seon.turn/work! {:task " (pr-str task) " :max-turns 3})")])
-                          {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
-        end (:value end)]
-    (is (= :cap (:outcome end)) (pr-str end))
-    (is (<= (:model-calls end) 3) (str "no model call past the cap: " (pr-str end)))))
+    (is (str/includes? (str (:reason end)) "boom: Seon's own render, changed") "naming its cause")
+    ;; a turn that threw after its model call answered was the agent's turn: it read the last error and acted, so
+    ;; the count starts again, and the work goes on to its cap (live: seon.turn/usage, read after the reply)
+    (let [end (work-with (fn [_ called!] (called!) (throw (ex-info "boom: after the reply" {}))) (constantly red))]
+      (is (= :cap (:outcome end)) (str "each turn reached its model, so none ended the work: " (pr-str end))))
+    ;; md-scan #27: the agent's change broke the status, every turn drew none, and the agent made 156 model calls past its
+    ;; cap of 40: a turn with no status ends at the cap as every turn does
+    (let [end (work-with (fn [st called!] (called!) (update st :turn inc))
+                         #(agent/error-map (ex-info "boom: the status, broken" {}) 'seon.turn/status-now))]
+      (is (= :cap (:outcome end)) (pr-str end))
+      (is (<= (:model-calls end) 3) (str "no model call past the cap: " (pr-str end))))))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-broken-parser-reaches-the-model
@@ -2755,51 +2773,42 @@
     (is (not= :merged state) "not merged")
     (is (= [:proof-red] reasons) "the status carries why, as data: the proof is red")))
 
-;; Estimate: in-agent's own setup and teardown (~6 asks and their replies, ~1.5M: measured on its neighbours) + a request through the
-;; stages pipeline and one await-db, their answers the implement's first turn and the design's last request whole (~1.5M) = ~3M:
-;; 5,000,000 ticks (it was 300k from 30k an ask; it spent 3.0M, at its budget's edge)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 5000000 :asks 8}} a-requests-implement-continues-its-designs-request
+;; Estimate: a test branch (ts/test-branch!: a pointer write, connect, release, delete ~1M), the system page loaded (~0.5M), the
+;; stages' three tasks written (request-tx ~0.5M), ~8 transacts at ~50k, the boundary read off history (~50k) and two requests
+;; rendered whole (seon.ctx.wire/render ~5M each: the agent's ctx built, the page walked and printed, the system page's text; first
+;; put at 0.5M, which counted the messages and missed the build and the page) = ~12M: 12,000,000
+(deftest ^{:seon.test/estimate {:ticks 12000000}} a-requests-implement-continues-its-designs-request
   ;; live finding A1, on a real request (the pipeline's: the implement's first request sent its own
-  ;; task data in second place and no boundary, 512 of 35,126 tokens cached): through my.root/request! with the
-  ;; staged choice (seon.template/stages, an experiment's: the default request is design-build and merge) and
-  ;; the reconciler, the implement's first turn, on the design's session, sends the design's task data
-  ;; where the design's requests did, the design's last request whole as its prefix, then root's
-  ;; boundary message (seon.reconcile/stage-boundary), read off the turns as the branch recorded them
-  ;; (the design's proof and plan it registered on its branch are carried to main by its judging, which reads the done rule on them:
-  ;; seon.reconcile/judge)
-  (let [code #(str "(let [_ (my.root/request! sys {:seon.task/ns '" % " :seon.task/name \"st\" :seon.task/plan \"Make st.\" :seon.task/config {:seon.config.ai/script 'seon.fixtures/stages}} seon.template/stages)"
-                  ;; the implement parked, or a stage ended without it: its task judged (past :running), the design's
-                  ;; stopped short of done (parked, dead, lost), or a stage's task is held; a fact either way,
-                  ;; so a red answers red rather than waiting
-                  " _ (seon.system/await-db sys \"the implement parked, or a stage ended\""
-                  "      #(let [held? (fn [id] (= :held (:seon.task/execution (datahike.api/entity % [:seon.task/id id]))))"
-                  "             outcome (fn [id] (:seon.task/outcome (datahike.api/entity % [:seon.task/id id])))]"
-                  "         (or (not (contains? #{nil :running} (outcome \"" % "/st-implement\")))"
-                  "             (not (contains? #{nil :running :done :merged} (outcome \"" % "/st\")))"
-                  "             (held? \"" % "/st\") (held? \"" % "/st-implement\"))))"
-                  " ended (into {} (for [id [\"" % "/st\" \"" % "/st-implement\"]]"
-                  "                  [id (when-let [e (datahike.api/entity @(:conn sys) [:seon.task/id id])] {:outcome (:seon.task/outcome e) :reason (:seon.task/reason e)})]))"
-                  " b (:db @(seon.system/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"" % "/st\")}}))"
-                  ;; a stage's turns: the model calls whose basis names the stage's task (the one agent works both, its turns one sequence)
-                  " sent (fn [id] (mapv second (sort-by first (for [[n bs] (datahike.api/q '[:find ?n ?bs :where [?m :seon.model-call/n ?n] [?m :seon.model-call/origin :model] [?m :seon.model-call/basis ?bs]] b) :when (= id (:task bs))]"
-                  "                                              [n (:messages (seon.ctx.wire/render (datahike.api/commit-as-db (:store b) (:commit bs)) bs))]))))"
-                  " boundary (datahike.api/q '[:find ?mid . :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.message/to ?a] [?m :seon.message/from ?s] [?s :seon.system/id :root] [?m :seon.message/id ?mid]] b (:seon.agent/key (:seon.task/agent (datahike.api/pull @(:conn sys) '[{:seon.task/agent [:seon.agent/key]}] [:seon.task/id \"" % "/st\"]))))]"
-                  " {:ended ended :design (sent \"" % "/st\") :implement (sent \"" % "/st-implement\") :boundary boundary})")
-        names (volatile! nil)
-        [_ r] (in-agent #(do (vreset! names %) [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))}])
-                        {})
-        {:keys [ended design implement boundary]} (:value r)
-        last-design (peek design) first-implement (first implement)]
-    (is (= :parked (get-in ended [(str (:ns @names) "/st-implement") :outcome])) (str "the implement parked; the stages' tasks: " (pr-str ended)))
-    (is (and (seq design) (seq implement) boundary) (pr-str r))
-    (is (= (first (first design)) (first first-implement)) "the system prompt, the same")
-    (is (= last-design (subvec first-implement 0 (min (count first-implement) (count last-design))))
-        (let [i (first (keep-indexed (fn [i [a b]] (when (not= a b) i)) (map vector last-design first-implement)))]
-          (str "the design's last request is its exact prefix; first differing message " i " of " (count last-design) ": "
-               (pr-str (some-> i last-design (select-keys [:role :tool-calls :tool-call-id]))) " against " (pr-str (some-> i first-implement (select-keys [:role :tool-calls :tool-call-id])))
-               " design " (pr-str (mapv #(subs (str (:role %) ":" (or (:content %) "") (some-> % :tool-calls first :code)) 0 (min 70 (count (str (:role %) ":" (or (:content %) "") (some-> % :tool-calls first :code))))) last-design))
-               " implement " (pr-str (mapv #(subs (str (:role %) ":" (or (:content %) "") (some-> % :tool-calls first :code)) 0 (min 70 (count (str (:role %) ":" (or (:content %) "") (some-> % :tool-calls first :code))))) first-implement)))))
-    (is (some #(str/includes? (str (:content %)) "Your task now is") (drop (count last-design) first-implement)) "then root's boundary")))
+  ;; task data in second place and no boundary, 512 of 35,126 tokens cached): a request made with the
+  ;; staged choice (seon.template/stages, an experiment's: the default request is design-build and merge), its design started
+  ;; on an agent; the implement's start, as the reconciler makes it, is on the design's session (seon.task/agent-key), root's
+  ;; boundary message opens it (seon.reconcile/stage-boundary, read off the start), and its first request is the design's
+  ;; last request whole as its prefix, then that boundary (seon.ctx.wire/render at each turn's basis, as seon.turn makes them)
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn (seon.doc/load-tx @conn "docs" {seon.doc/system-page (slurp (str (seon.config/checkout) "/" seon.doc/system-page))}))
+      (d/transact conn (tpl/request-tx @conn (tpl/stages {:seon.task/ns 'demo :seon.task/name "st" :seon.task/plan "Make st."
+                                                          :seon.task/proofs #{'demo-test/st-test}})))
+      (let [env {:branch (task/default-branch "demo/st") :model nil :max-turns 9}
+            start! (fn [id k ms] (d/transact conn (task/start-tx @conn id "boot-1" k env ms)))
+            basis (fn [id n] {:commit (d/commit-id @conn) :task id :turn n :max-turns 9 :origin :model :agent "a1"})
+            ;; as seon.turn goes: the turn recorded, then its request on the db that holds it
+            turn! (fn [b] (d/transact conn (ts/turn-tx "a1" (:turn b) {:seon.model-call/basis b :seon.model-call/forms 1 :seon.model-call/ms 1}))
+                    (seon.ctx.wire/render @conn (assoc b :commit (d/commit-id @conn))))
+            _ (start! "demo/st" :a1 1000)
+            _ (d/transact conn [{:seon.eval/id "e0" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/code "(e0)"
+                                 :seon.eval/response {:handle 'result/e0 :value 1} :seon.eval/call (task/call-ref "a1" 0) :seon.eval/call-id "c-e0" :seon.eval/intent "Step."}])
+            design (:messages (turn! (basis "demo/st" 1)))
+            session (task/agent-key @conn "demo/st-implement")
+            _ (start! "demo/st-implement" (keyword session) 2000)
+            boundary (#'r/stage-boundary @conn "demo/st-implement")
+            _ (d/transact conn (task/message-tx "m1" task/system-sender [session] boundary 1500))
+            implement (:messages (turn! (basis "demo/st-implement" 2)))]
+        (is (= "a1" session) "the implement continues the design's agent")
+        (is (str/starts-with? (str boundary) "demo/st is done. Your task now is demo/st-implement") (pr-str boundary))
+        (is (= (first design) (first implement)) "the system prompt, the same")
+        (is (= design (subvec implement 0 (min (count implement) (count design)))) "the design's last request is the implement's exact prefix")
+        (is (some #(str/includes? (str (:content %)) "Your task now is") (drop (count design) implement)) "then root's boundary")))))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-waiting-agent-parks-and-a-message-wakes-the-same-process
@@ -3347,18 +3356,23 @@
                           {})]
     (is (= ["By a string." "By its name."] (:value r)) (pr-str r))))
 
-;; Estimate: in-agent's own setup and teardown (~6 asks and their replies, ~1.5M) + three evals and their recorded answers (~0.7M) = ~2.2M:
-;; 3,000,000 ticks (it was 300k from 30k an ask; it spent 2.2M)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 9}} an-eval-that-registers-a-schema-seons-answer-names-answers-what-it-did
+;; Estimate: one eval of a defn in this process (seon.repl/eval-string, a scratch session: ~0.5M) and the registry with the one
+;; narrowed key, seon.program/schema-registry (contract/registry-with: that key and the forms naming it compiled again, ~1M) and
+;; four validations of a small map (~10k) = ~1.5M: 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} an-eval-that-registers-a-schema-seons-answer-names-answers-what-it-did
   ;; the lab, 2026-11-04: an eval registered :seon.eval/response narrower, for its own use, and its later eval's answer failed
-  ;; seon.repl/response's own contract: told an error, though its forms took effect
-  (let [[reg made ran] (in-agent (fn [_]
-                                   ["(my.schema/register! :seon.eval/response '[:and :map :seon.db/plain])"
-                                    "(defn zz-made {:malli/schema [:=> [:cat] :int]} [] 41)"
-                                    "(zz-made)"])
-                                 {})]
-    (is (nil? (:ex made)) (str "the definition's answer: " (pr-str made) " after " (pr-str reg)))
-    (is (= 41 (:value ran)) (pr-str ran))))
+  ;; seon.repl/response's own contract: told an error, though its forms took effect. The live answer (its value may be a var) is
+  ;; :seon.repl/answer and what stores it :seon.eval/response, so the answer's contract holds under any registration of the stored
+  ;; shape: read off the contracts of response and eval-string, under the registry such a registration makes
+  (let [reg (program/schema-registry {:seon.eval/response '[:and :map :seon.db/plain]})
+        outs (fn [v] (let [c (contract/contract v)] (if (= :function (first c)) (mapv last (rest c)) [(last c)])))
+        made (mt/eval-in "(defn zz-made {:malli/schema [:=> [:cat] :int]} [] 41)" 'seon.agent-test.reg)
+        valid? (fn [s] (binding [malli.registry/*registry* reg] (contract/valid? s made)))]
+    (is (nil? (:ex made)) (pr-str made))
+    (is (var? (:value made)) "its value is the var it defined, no plain value")
+    (is (not (valid? :seon.eval/response)) "which the narrowed stored shape refuses")
+    (is (every? valid? (concat (outs #'repl/response) (outs #'repl/eval-string)))
+        (str "and Seon's answer is checked by its own shape, which the registration leaves alone: " (pr-str (outs #'repl/response))))))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} an-eval-makes-data-and-a-reader-makes-text
