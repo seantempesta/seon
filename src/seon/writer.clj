@@ -408,6 +408,8 @@
   store is clean, its flushes' notices before it."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:conn "main's connection" :cfg "the store config" :to-writer "its in-port channel"}
+       ;; :to-writer is bound, not a conn: the writer drains it whole for one group commit (drain), which a Flow channel never allows
+       :in-params #{:to-writer}
        :outs {:to-fork-server "commits and forks, FIFO" :to-api "answers {:dest :r}" :main "main's commits"
               :to-flusher "the store became dirty"}
        ;; its own thread: a transaction is CPU and store work the fiber scheduler cannot see
