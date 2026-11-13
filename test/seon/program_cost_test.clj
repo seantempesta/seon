@@ -393,12 +393,15 @@
     {:of 'seon.program/reach-indexed :input 'seon.program-cost-test/moved-top
      :n "forms the graph holds (and a test for every tenth)"
      :work (str "the answers of the one stale test (its starting components' digests, the config lines of its inputs, "
-                "one digest) and the answers held kept: constant in the program, where graph-index answered every test "
+                "one digest, and the runner digest every test takes, a root-digest of the runner's reach: one more digest) "
+                "and the answers held kept: constant in the program, where graph-index answered every test "
                 "(Seon's program, 4,698 forms and 1,130 tests, 170 config keys: 18.8M ticks, 134 MB a call)")
      :growth :constant
      :per-n {}
      ;; measured: 2.3k ticks / 15.7 KB at 100, 2.4k / 16.3 KB at 1,000
-     :fixed {:ticks 3000 :bytes 20000 :calls 3}
+     ;; calls 3 -> 5: the runner digest (seon.program/root-digest of the runner's reach, and its seon.lib/digest), recomputed
+     ;; whenever a form moved, since a moved form may be the runner's (a few hundred ticks)
+     :fixed {:ticks 3500 :bytes 20000 :calls 5}
      :sizes [30 100 300]}))
 
 (defn- calls-form

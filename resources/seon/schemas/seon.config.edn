@@ -123,6 +123,8 @@
   [:seon.config.proofs/results-evict-percent {:optional true} :seon.config.proofs/results-evict-percent]
   [:seon.config.proofs/recent-verdicts {:optional true} :seon.config.proofs/recent-verdicts]
   [:seon.config.proofs/test-ticks-cap {:optional true} :seon.config.proofs/test-ticks-cap]
+  [:seon.config.proofs/slow-ticks-per-ms {:optional true} :seon.config.proofs/slow-ticks-per-ms]
+  [:seon.config.proofs/unestimated-wall-ms {:optional true} :seon.config.proofs/unestimated-wall-ms]
   [:seon.config.proofs/system-test-asks-cap {:optional true} :seon.config.proofs/system-test-asks-cap]
   [:seon.config.proofs/binary-test-execs-cap {:optional true} :seon.config.proofs/binary-test-execs-cap]
   [:seon.config.proofs/system-vars {:optional true} :seon.config.proofs/system-vars]
