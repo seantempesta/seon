@@ -1199,14 +1199,15 @@
     (max 1 (quot work (cfg/value :seon.config.proofs/slow-ticks-per-ms)))))
 
 (defn- arm-wall!
-  "Arm test t's wall bound of ms on the one timer (core.async's timeout) for fiber, the fiber running it: past it, Jolt's dump of
+  "Arm test t's wall bound of ms on the one timer (seon.step/put-after!) for fiber, the fiber running it: past it, Jolt's dump of
   every fiber goes to stderr first (the evidence), then the typed :seon.test/wall-spent {:test :bound-ms :dump} is thrown into
   fiber, so the test is its own :error. Answers {:fiber :test :cancel}: closing :cancel (the test's end) disarms it. See
   docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
   {:malli/schema [:=> [:cat :any :string pos-int?] [:map [:fiber :any] [:test :string] [:cancel :seon.host/chan]]]}
   [fiber t ms]
-  (let [cancel (a/chan)]
-    (a/go (let [[_ port] (a/alts! [cancel (a/timeout ms)])]
+  (let [cancel (a/chan) due (a/chan 1)]
+    (step/put-after! due ms :due)
+    (a/go (let [[_ port] (a/alts! [cancel due])]
             (when-not (= port cancel)
               (let [dump (jolt.host/fiber-dump)
                     msg (str "the test ran past its wall bound of " ms " ms (ten times its estimate at the slowest measured rate, "
