@@ -760,14 +760,16 @@
   "The checkout whose built products (target/: the runtime, the libraries, the binary) a checkout of commit base of the
   repository at root clones (bin/worktree --at's FROM): checkout when its Jolt and Chez were built for base's own pins (each
   target/<step>.stamp holds the pin it was built for, bin/build), else nil, bin/worktree's own default, the main tree, which
-  bin/update keeps on main's pins. A branch that moves a runtime pin cloned its own products into the base, and the base's
-  runner refused them. See docs/health.md#checks-are-callers-of-seon."
+  bin/update keeps on main's pins. The runtime pins are :seon.config.source/runtime-pins, each stamp named by its path's last
+  segment. A branch that moves a runtime pin cloned its own products into the base, and the base's runner refused them. If
+  main moved a runtime pin since base, the main tree's are not the base's either, and the base's runner refuses loudly.
+  See docs/health.md#checks-are-callers-of-seon."
   [checkout root base]
-  (when (every? (fn [[step path]]
-                  (let [f (io/file checkout "target" (str step ".stamp"))
-                        r (sh/sh "git" "-C" root "rev-parse" (str base ":" path))]
+  (when (every? (fn [path]
+                  (let [f (io/file checkout "target" (str (.getName (io/file path)) ".stamp"))
+                        r (lib/sh "git" "-C" root "rev-parse" (str base ":" path))]
                     (and (.isFile f) (zero? (:exit r)) (= (str/trim (slurp f)) (str/trim (:out r))))))
-                [["jolt" "reference-code/jolt"] ["chez" "reference-code/chez"]])
+                (config/value :seon.config.source/runtime-pins))
     checkout))
 
 (defn- make-base-tree!
