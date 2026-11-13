@@ -147,6 +147,7 @@ seeddefs
 devbootsmoke
 gatebootsmoke
 aotcachesmoke
+aotframetable
 aotcachepathsmoke
 aotcachesourcepathsmoke
 aotcachestarfilesmoke
