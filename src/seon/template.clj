@@ -187,6 +187,21 @@
                           "Done when the stall has ended (the agent spoke or ended), the cause is recorded with evidence, "
                           "and a bug's defect is filed: its proofs, " (str/join ", " (sort stall-proofs)) ".")}))
 
+(defn focus-docstring
+  "The task that focuses var's docstring, one task a var: its name is focus-<name>, in var's namespace, held as every template's
+  task is. See docs/health.md#an-unfocused-docstring."
+  {:malli/schema [:=> [:cat :qualified-symbol :int [:vector :keyword]] :seon.task/declaration]}
+  [var words why]
+  {:seon.task/ns (symbol (namespace var))
+   :seon.task/name (str "focus-" (str/replace (name var) #"[^A-Za-z0-9-]+" "-"))
+   :seon.task/kind :work
+   :seon.task/plan (str "`" var "`'s docstring is " words " words (" (str/join ", " (map name why)) "), an :unfocused-docstring "
+                        "(docs/health.md#an-unfocused-docstring). Rewrite it with (seon.repl/edit! '" var " old new): its first sentence "
+                        "says what it answers (shape, and when nil); its second the one thing a caller must know (a cost, an effect, an "
+                        "order); its wiki section cited once. Keep every fact: a measurement or a story goes to the wiki section that "
+                        "explains the mechanism (edit! of its address), or is dropped as git's history; never lost. Change no code. Done "
+                        "when (seon.problems/unfocused-docstrings (my.db/db) {} #{'" var "}) answers [].")})
+
 (defn slow-test
   "The task a slow test asks for: test var made fast, its claim unchanged, itself its proof; held, as every
   template's task is, until root or the owner releases it. Its name is fast-<name>, in the test's namespace, one

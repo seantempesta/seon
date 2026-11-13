@@ -1360,6 +1360,25 @@
                                               doc (assoc :var/doc doc))]))
                                  (range 1 (inc n)))))))
 
+;; See docs/health.md#an-unfocused-docstring
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-docstring-that-says-more-than-its-var-is-unfocused
+  (let [words (fn [n] (str/join " " (repeat n "word")))
+        db (d/db-with (world) [{:var/name 'seon.focus/long :var/doc (words 60)}
+                               {:var/name 'seon.focus/short :var/doc "Answers the task's id."}
+                               {:var/name 'seon.focus/measured :var/doc "Answers the plan. Measured at 12 ms."}
+                               {:var/name 'seon.focus/dated :var/doc "Answers the plan, as ruled 2026-11-13."}
+                               {:var/name 'seon.focus/twice :var/doc "Answers the plan (docs/tasks.md#a). See docs/tasks.md#b."}
+                               {:var/name 'app.calc/wordy :var/doc (words 60)}])
+        rows #(into {} (map (fn [{{:keys [var why]} :evidence}] [(symbol (name var)) why]))
+                   (problems/unfocused-docstrings db {} %))]
+    (is (= '{long [:words] measured [:measurement] dated [:date] twice [:wiki-twice]}
+           (rows '#{seon.focus/long seon.focus/short seon.focus/measured seon.focus/dated seon.focus/twice}))
+        "over the bound, a measurement, a date, a page cited twice: each its reason; a focused one none")
+    (is (= {} (rows '#{app.calc/wordy})) "a program's own namespace is not Seon's to judge")
+    (is (= {} (rows #{})) "no changed var, nothing read")
+    (is (contains? seon.problems/caused-classes :unfocused-docstring))
+    (is (contains? (:seon.problems/attention (contract/properties :seon.problems/class)) :unfocused-docstring) "shown, never refused")))
+
 (defn- cite-ns "The namespace var-forms' vars are in: the test db's first var's." [db0]
   (str (:ns/name (:var/ns (d/entity db0 [:var/name 'app.calc/inc2])))))
 
@@ -1535,7 +1554,7 @@
             :let [[caused full] (made base head c)]]
       (is (seq full) (str (name c) ": the branch made a row"))
       (is (= full caused) (str (name c) ": caused-split answers it, as the full reading does")))
-    (is (= (set (keys {:unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated-test 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1}))
+    (is (= (set (keys {:unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :unfocused-docstring 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated-test 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1}))
            seon.problems/caused-classes)
         "the classes a branch is judged on are the content classes, as :seon.problems/class declares them")))
 

@@ -956,6 +956,11 @@
  ;; measured over this program (commit 3fac2a4f04): 2,082 src forms, 83 over 1,000 tokens and 20 over
  ;; 2,000 (seon.ref/scan 6,005); 2,052 test forms, 76 over 1,000.
  :seon.config.shrink/form-tokens 1000
+ ;; Unit: words of a Seon var's docstring. A longer one, or one holding a measurement, a date or a wiki page cited
+ ;; twice, is an open :unfocused-docstring row (seon.problems/unfocused-docstrings), shown to a branch that changes the var
+ ;; (attention, never refused) and closed by focusing it; docs/health.md#an-unfocused-docstring. Provenance: Clojure core's
+ ;; p90 is 49 words; this program's 3,287 docstrings had median 38, p90 102 (2026-11-13; the owner set 50).
+ :seon.config.shrink/docstring-words 50
  ;; Relevance (seon.ctx.search/relevance, docs/vector.md#relevance): a logistic over five features of
  ;; an item near a context, one weight set a kind: zc its cosine with the query's vector, zb its BM25
  ;; for the query's words, over the pool (seon.doc/bm25), zt its cosine with the touched items' mean vector (each a z-score over

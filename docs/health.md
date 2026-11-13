@@ -66,6 +66,10 @@ Every stored value fits its attribute's entry: each write is checked, and a bran
 
 A live form whose `:form/src` is longer than `:seon.config.shrink/form-tokens` tokens (`seon.print.emit/chars-tokens`) is a `:long-form` (`seon.problems/long-forms`), read only for the vars a branch changed and shown as attention.
 
+## An unfocused docstring
+
+A Seon var's docstring says what the var answers and the one thing a caller must know, and cites its wiki section once; its history and measurements belong to git and the wiki. A docstring over `:seon.config.shrink/docstring-words` words, or holding a measurement, a date or a wiki page cited twice, is an `:unfocused-docstring` (`seon.problems/unfocused-docstrings`), read only for the vars a branch changed and shown as attention. Agents close them one task a var (`seon.template/focus-docstring`).
+
 ## A proof that passes by waiver
 
 A cost proof green because of an `:overrun` ([cost](cost.md#an-accepted-overrun-and-its-ratchet)) is a `:waived-proof` (`seon.problems/waived-proofs`): the test, the task, the size, the recorded numbers and their multiple of the proof's own bound in the worst counted dimension (`seon.cost/expected`, `seon.cost/row-ratio`; nothing measured). The proofs are the test forms referencing `seon.cost/proof`, and the `:overrun` is read from the form. A branch that adds an `:overrun` is caused the row, and one that deletes it closes it. `bin/prove` ends with `prove: N proofs pass by waiver`.
