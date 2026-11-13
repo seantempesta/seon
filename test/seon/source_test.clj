@@ -100,8 +100,8 @@
     (is (= "(defn f5 [] 5)" (:form/src (:var/form (d/entity after [:var/name 'app.oe/f5])))) "and the others are as they were")))
 
 ;; Estimate: file-text of seon.system (126 forms x 64k, as the write-back proof) 8M + refresh-tx of one form (2 analyses + gate) 1.9M
-;; + the live forms this process lacks (seon.program/live-ids: 4 index scans of ~6,000 forms, ~10M; an import sets up what it requires
-;; from db's program, docs/source.md#indexing-a-tree) = 20000000 ticks
+;; + the forms of what it requires that this process lacks, found once a process (seon.program/unheld-forms: on a first import one
+;; :form/id range of ~6,000 forms, ~10M; an import reads what it requires from db's program, docs/source.md#indexing-a-tree) = 20000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-held-form-is-checked-against-the-file-reading-macros-not-a-seek-a-reference
   ;; docs/source.md#a-boot-catches-up-with-its-checkout: whether a held form expands a macro that reads files is asked of the program's
   ;; file-reading macros, found once a refresh (file-reading-macros), never by seeking each reference's var: a one-form edit of
