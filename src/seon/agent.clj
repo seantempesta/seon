@@ -1187,16 +1187,15 @@
       n)))
 
 (defn- wall-bound-ms
-  "Test t's (\"#'ns/name\") wall bound in ms: ten times its estimate, ^{:seon.test/estimate {:ticks n}}, or else the run's
-  budget of ticks (none: its tick cap), at the slowest rate measured greens ran (:seon.config.proofs/slow-ticks-per-ms: waiting
-  included), so a test that waits as long as the slowest ever did is never ended by it. See
+  "Test t's (\"#'ns/name\") wall bound in ms: ten times its estimate, ^{:seon.test/estimate {:ticks n}}, at the slowest rate
+  measured greens ran (:seon.config.proofs/slow-ticks-per-ms: waiting included), so a test that waits as long as the slowest ever
+  did is never ended by it; a test that states none takes the class bound (:seon.config.proofs/unestimated-wall-ms). See
   docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
-  {:malli/schema [:=> [:cat :string [:maybe nat-int?]] pos-int?]}
-  [t ticks]
-  (let [v (some-> t (subs 2) symbol resolve)
-        est (some-> v meta :seon.test/estimate :ticks)
-        work (or (some->> est (* 10)) (when (and ticks (pos? ticks)) ticks) (cfg/value :seon.config.proofs/test-ticks-cap))]
-    (max 1 (quot work (cfg/value :seon.config.proofs/slow-ticks-per-ms)))))
+  {:malli/schema [:=> [:cat :string] pos-int?]}
+  [t]
+  (if-let [est (some-> t proofs/test-symbol resolve meta :seon.test/estimate :ticks)]
+    (max 1 (quot (* 10 est) (cfg/value :seon.config.proofs/slow-ticks-per-ms)))
+    (cfg/value :seon.config.proofs/unestimated-wall-ms)))
 
 (defn- arm-wall!
   "Arm test t's wall bound of ms on the one timer (seon.step/put-after!) for fiber, the fiber running it: past it, Jolt's dump of
@@ -1213,9 +1212,8 @@
                     msg (str "the test ran past its wall bound of " ms " ms (ten times its estimate at the slowest measured rate, "
                              ":seon.config.proofs/slow-ticks-per-ms): it waits on what never comes (" t ")")]
                 (binding [*out* *err*] (println msg "\n" dump) (flush))
-                (jolt.host/fiber-interrupt! fiber (ex-info msg {:seon.error/type :seon.test/wall-spent :seon.error/message msg
-                                                                :seon.error/operation 'seon.agent/test-child-runs!
-                                                                :test t :bound-ms ms :dump dump}))))))
+                (jolt.host/fiber-interrupt! fiber (ex-info msg (contract/error :seon.test/wall-spent #'seon.agent/arm-wall! msg
+                                                                              {:test t :bound-ms ms :dump dump})))))))
     {:fiber fiber :test t :cancel cancel}))
 
 (defn- test-child-runs!
@@ -1238,7 +1236,7 @@
         ;; namespace goes on (seon.proofs/test-vars). A child's quiescence can't stand for a deadlock: Jolt counts a wait on a
         ;; peer as quiescent, and every test child waits on its link (fibers.ss's on-quiescent! contract)
         put! (fn [v]
-               (cond (:seon.test/started v) (reset! in-flight (arm-wall! (jolt.host/current-fiber) (:seon.test/started v) (wall-bound-ms (:seon.test/started v) ticks)))
+               (cond (:seon.test/started v) (reset! in-flight (arm-wall! (jolt.host/current-fiber) (:seon.test/started v) (wall-bound-ms (:seon.test/started v))))
                      (:seon.test/ended v) (some-> (first (reset-vals! in-flight nil)) :cancel a/close!))
                (a/>!! out v) (jolt.fibers/yield))]
     ;; the starter's watch, armed again here as seon.lib/fork! arms it in each child: nothing it forked outlives root
