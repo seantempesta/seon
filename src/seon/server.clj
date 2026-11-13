@@ -465,8 +465,7 @@
       r
       (cond-> (select-keys r [:key :ran :pass :fail :error :red :reused :ms])
         (seq (:red r)) (assoc :failures (into (sorted-map) (for [[t fs] (proofs/failures r)] [t (first fs)])))
-        (seq (:deferred r)) (assoc :deferred (:deferred r) :why (:why r))
-        (seq (:baked r)) (assoc :baked (:baked r))))))
+        (seq (:deferred r)) (assoc :deferred (:deferred r) :why (:why r))))))
 
 (defn- done-settled?
   "Whether seon_done may answer on db: task's own work is judged, so its outcome has left :running and :ready (judged green,
