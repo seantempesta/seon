@@ -1745,3 +1745,22 @@
         "a def naming the moved key is among what loads again")
     (is (= [] (mapv :src (program/schema-dependents (record (empty-db) 'app.pt-sd "(defn f [] (seon.contract/properties :app.sd/class))") #{:app.sd/class})))
         "a function's body reads the registry when called: not evaluated again for it")))
+
+;; docs/source.md#tests-run-by-reach: what decides a test's outcome is an input of every test's digest. The owner, 2026-11-13: false
+;; reds a runner made (a deadlock end reporting the rest of its namespace red unrun) are rerun by a moved digest, never deleted.
+;; The runner is the vars marked ^:seon.test/runner and what they reach (one derived-reach digest, root-digest), so a change to a
+;; form the runner reaches moves every test's digest, and a change to a form neither the runner nor a test reaches moves none.
+;; Red before: no test's digest took the runner. Estimate: 2 tiny-file imports 2M + 2 records 0.6M + 3 graphs and indexes 0.9M:
+;; 4,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-change-to-what-decides-outcomes-moves-every-tests-digest
+  (let [srcs {"src/app/rn.clj" "(ns app.rn)\n(defn judge [r] (= :ok r))\n(defn ^:seon.test/runner run [f] (judge (f)))\n(defn spare [x] x)\n"
+              "test/app/rn_test.clj" "(ns app.rn-test (:require [clojure.test :refer [deftest is]]))\n(deftest a (is (= 1 1)))\n(deftest b (is (= 2 2)))\n"}
+        db (let [db (empty-db)] (d/db-with db (source/import-tx db srcs)))
+        in {:env "e" :tree "t" :config {}}
+        digests (fn [db] (update-vals (program/graph-index (program/reach-graph db nil) in nil) :digest))
+        before (digests db)]
+    (is (= #{'app.rn-test/a 'app.rn-test/b} (set (keys before))))
+    (is (every? #(contains? (:reads %) [:runner]) (vals (program/graph-index (program/reach-graph db nil) in nil))) "every test reads the runner")
+    (let [judged (digests (record db 'app.rn "(defn judge [r] (contains? #{:ok} r))"))]
+      (is (every? (fn [[t d]] (not= d (judged t))) before) "a form the runner reaches changed: every test's digest moves"))
+    (is (= before (digests (record db 'app.rn "(defn spare [x] (identity x))"))) "a form nothing of theirs reaches changed: none moves")))

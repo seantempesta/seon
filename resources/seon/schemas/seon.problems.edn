@@ -35,6 +35,7 @@
  :seon.vector/helper-died [:and :seon.error/base [:map [:seon.error/type [:= :seon.vector/helper-died]] [:exit :int] [:stderr :string]]]
  :seon.vector/encode-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.vector/encode-failed]] [:code :int]]]
  :seon.system/no-agent [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/no-agent]] [:agent {:optional true} [:maybe :keyword]]]]
+ :seon.system/binary-not-current [:and {:description "A tree the running system can't prove (seon.system/prove-tree!, tree-refusal): it changes what the binary bakes (a pin, native code, a baked resource: seon.system/baked-changes), so its tests would run on the system's build of them; it is proved on its own build (bin/prove --out DIR). Nothing is run or stored. See docs/merging.md#a-session-proves-through-root."} :seon.error/base [:map [:seon.error/type [:= :seon.system/binary-not-current]] [:binary [:maybe :string]] [:tree :string] [:baked [:vector :string]]]]
  :seon.system/catch-up-skipped [:and {:description "A session's files the system could not all read, so none is proved (seon.system/prove-tree!): each skipped path with why. See docs/merging.md#a-session-proves-through-root."} :seon.error/base [:map [:seon.error/type [:= :seon.system/catch-up-skipped]] [:skipped [:vector :map]]]]
  ;; a wait on main (seon.system/await-db) whose pred was false when the reconciler went quiet at
  ;; t: nothing in flight will make it true (an outside commit still may)

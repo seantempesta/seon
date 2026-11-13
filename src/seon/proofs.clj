@@ -319,12 +319,13 @@
   "What an agent's test run answer ({:reports :digests :fns}, seon.agent/run-tests-forked's) ran:
   {:ran {test result} :failures {test [assertion]}}, seon.fx/write-verdicts!'s arguments. A test reused at its
   digest ran nothing, and one whose child died while it ran (a report with its :exit) has no
-  verdict: a death is unknown, and a result at a digest is reused, so it would never run again."
+  verdict: a death is unknown, and a result at a digest is reused, so it would never run again. Nor has a granted test its
+  child could not run (a report :not-run: seon.agent/granted-selection), which is answered red with why and never cached."
   {:malli/schema [:=> [:cat :map] [:map [:ran :map] [:failures :map]]]}
   [answer]
   (let [reports {:reports (vec (:reports answer))}
         died (set (keep #(when (:exit %) (test-symbol (:var %))) (:reports answer)))
-        reused (set (keep #(when (:reused %) (test-symbol (:var %))) (:reports answer)))
+        reused (set (keep #(when (or (:reused %) (:not-run %)) (test-symbol (:var %))) (:reports answer)))
         cost-of (costs reports)]
     {:ran (into {} (for [[t s] (results reports) :let [dg (get-in answer [:digests t])] :when (and dg (not (died t)) (not (reused t)))]
                      (cond-> [t {:test t :digest dg :pass (if (= :pass s) 1 0) :fail (if (= :fail s) 1 0) :error (if (= :error s) 1 0)
