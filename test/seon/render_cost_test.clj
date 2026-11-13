@@ -638,11 +638,20 @@
   ;; once: its cost is its own page's, never its parent's history
   (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/child-page-of
                :n "turns its parent worked"
-               :work "the child's page (an agent with no turn: its head, state, rules and system message), its rules read twice (once drawn, once more when the renders it drew are first drawn)"
+               :work (str "the child's 15 components (agent, its state, parts, rules list and rules, system message, examples, proof story, "
+                          "conversation list and 2 turns, chat end, eval tiles, page message), each drawn once; the rules read twice")
                :growth :constant
-               ;; measured 2026-11-13 on jolt/web at 2 / 4 / 8: 2,429 calls, 3.54 MB, 0.82M ticks at every size (4.17 MB, 1.01M before the
-               ;; rules' sort was of the styled vars alone): the parent's history is read by none of it
-               :fixed {:calls 2429 :bytes 3700000 :ticks 900000}
+               ;; derived from the work, item by item (each item's per-unit cost read off its own code path's contracted calls):
+               ;; - 15 components x 46 calls (the walk's 18: render!, emit, inputs, opts-form, with-id, key-id, comp-key, led!, reads-of, props,
+               ;;   id-safe and inputs-in twice; the tree tracking's ~28: read-index, prefixes, view, wrap, fresh per path read), ~15k ticks, ~80 KB = 690 calls
+               ;; - rules, twice (drawn, then again when the renders it drew are first drawn): seon.render.ui's 162 and seon.ctx.wire's 43 vars,
+               ;;   one css? each, ~43k ticks and ~235 KB a read = 412 calls
+               ;; - the printer over the 36 nodes the components print (system message, examples, state), ~32 calls and ~7k ticks a node = 1,150 calls
+               ;; - the system page as markdown (seon.doc, 4 sections): ~125k ticks, ~660 KB
+               ;; - the db, ctx and config reads (members, parents, watch, config values): ~190 calls, ~90k ticks, ~300 KB
+               ;; sum: ~2,440 calls, ~0.78M ticks, ~3.3 MB. Measured 2026-11-13 at 2 / 4 / 8: 2,429 calls, 0.82M ticks, 3.54 MB at every size
+               ;; (1.01M and 4.17 MB when rules sorted all 162 vars). None of it reads the parent's history
+               :fixed {:calls 2440 :bytes 3500000 :ticks 800000}
                :sizes [2 4 8]}))
 
 (defn rules-of
