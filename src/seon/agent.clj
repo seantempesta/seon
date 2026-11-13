@@ -1422,7 +1422,7 @@
                  [st nil])))))
        (catch Throwable e [(fold-threw st e) nil])))))
 
-(defn- run-children!
+(defn- ^:seon.test/runner run-children!
   "Run shards (each a vector of tests) in test children of this agent, by one fold proc added to its graph
   (test-run-step) and removed once it has answered: its answer (run-answered's). The one blocking wait left here:
   run-tests-forked's callers take its answer as a value; one-ask makes it a message (the one-unit spec's law 4).

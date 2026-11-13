@@ -803,3 +803,14 @@
 (deftest ^{:seon.test/estimate {:ticks 500000}} a-process-tests-green-is-never-reused-by-what-it-recorded
   (is (= '[a/pure b/also-pure] (proofs/reads-reusable {'a/pure {:process? false} 'c/drives-an-agent {:process? true} 'b/also-pure {}}))
       "every test but the one that reaches a process of its own"))
+
+;; docs/merging.md#verdicts-are-a-cache: a granted test the agent's child can't run (a process test, seon.agent/granted-selection)
+;; is answered as an :error naming why, :not-run: no verdict of its own, so it is never written to the cache. Found by runtime's
+;; review, 2026-11-13: answer-ran left out only :reused and died reports, so that error was cached as a red at the test's real
+;; digest, which a later run would reuse and never run the test. Estimate: one fold of three reports, ~50k ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-test-not-run-is-no-verdict-and-never-cached
+  (let [answer {:reports [{:type :pass :var "#'a.x-test/ran"}
+                          {:type :error :var "#'a.p-test/boots" :not-run true :message "a.p-test/boots reaches a process of its own"}]
+                :digests {'a.x-test/ran "d1" 'a.p-test/boots "d2"}}
+        {:keys [ran]} (proofs/answer-ran answer)]
+    (is (= #{'a.x-test/ran} (set (keys ran))) "only the test that ran is a verdict to cache")))
