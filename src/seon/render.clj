@@ -371,8 +371,10 @@
   a render's helper may carry the rules for what it draws; read from ns-publics, a private helper's were dropped silently), [[render-name text] ...] by name: what is drawn decides which namespaces, not which rules, so a render's first draw, or a person's page asking for what only it draws, moves no rule. See docs/render.md#style."
   {:malli/schema [:=> [:cat [:map-of :any :any]] [:vector [:tuple :symbol :string]]]}
   [drawn]
-  (let [vs (into (set (filter var? (keys drawn))) (comp (filter var?) (map (comp ns-name :ns meta)) (distinct) (mapcat (comp vals ns-interns))) (keys drawn))]
-    (vec (keep (fn [f] (let [s (:seon.render/style (meta f))] (when (css? s) [(symbol f) s]))) (sort-by symbol vs)))))
+  ;; the few vars stating rules sorted, never every var of their namespaces (the sort was most of its cost)
+  (vec (sort-by first (into [] (comp (filter var?) (map (comp ns-name :ns meta)) (distinct) (mapcat (comp vals ns-interns))
+                                     (keep (fn [f] (let [s (:seon.render/style (meta f))] (when (css? s) [(symbol f) s])))))
+                            (keys drawn)))))
 
 (defn- with-id
   "Hiccup hc with its root element's attributes merged with attrs: a component's key as its id, the render that drew it as data

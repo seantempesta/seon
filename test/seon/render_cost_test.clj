@@ -620,6 +620,47 @@
   (let [[db _ _ at] (session-of n) o (at db) p (seon.render/walk nil o)]
     [p (assoc o :moved [])]))
 
+(defn child-page-of
+  "The input at n: seon.render/walk's arguments for the first page of c1, an agent a1 started (its :seon.agent/parent), a1 having
+  worked n turns: c1 has none, drawn cold, as a forked agent's first page is (its walk is its own, never its parent's)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any :map]]}
+  [n]
+  (let [[db ix _ _] (session-of n)
+        db (d/db-with db [{:seon.agent/key "c1" :seon.agent/root [:seon.system/id :root] :seon.agent/parent [:seon.agent/key "a1"]}])
+        c (:db/id (d/entity db [:seon.agent/key "c1"]))
+        t (seon.ctx/agent-ctx ix db c)]
+    [nil {:db db :tree t :root (seon.render/render-var-of ix (merge {:seon.agent/key "c1"} t)) :index ix :changes seon.ctx/changes
+          :outputs #{:seon.render/hiccup :seon.render/openai-compat}}]))
+
+;; See docs/render.md#style
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-forks-first-page-costs-the-same-at-any-parent-length
+  ;; a forked agent's first page is drawn cold in its own process (its walk is its own, never its parent's), each of its components
+  ;; once: its cost is its own page's, never its parent's history
+  (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/child-page-of
+               :n "turns its parent worked"
+               :work "the child's page (an agent with no turn: its head, state, rules and system message), its rules read twice (once drawn, once more when the renders it drew are first drawn)"
+               :growth :constant
+               ;; measured 2026-11-13 on jolt/web at 2 / 4 / 8: 2,429 calls, 3.54 MB, 0.82M ticks at every size (4.17 MB, 1.01M before the
+               ;; rules' sort was of the styled vars alone): the parent's history is read by none of it
+               :fixed {:calls 2429 :bytes 3700000 :ticks 900000}
+               :sizes [2 4 8]}))
+
+(defn rules-of
+  "The input at k: seon.render/rules' argument, k of seon.render.ui's renders drawn (all in one namespace)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple [:map-of :any :any]]]}
+  [k]
+  [(into {} (map (fn [v] [v @v])) (take k (sort-by symbol (filter (comp :malli/schema meta) (vals (ns-interns 'seon.render.ui))))))])
+
+;; See docs/render.md#style
+(deftest ^{:seon.test/estimate {:ticks 2000000}} the-rules-cost-their-namespaces-vars-read-once
+  (cost/proof {:of 'seon.render/rules :input 'seon.render-cost-test/rules-of
+               :n "renders drawn, of one namespace"
+               :work (str "the namespace's 162 vars read once (ns-interns ~7k ticks, 93 KB; a meta read and css? each, ~200 ticks and ~700 B), "
+                          "the 24 that state rules sorted (~3k): constant in the renders drawn. It sorted all 162 vars by symbol: 124k ticks, 492 KB")
+               :growth :constant
+               :fixed {:calls 163 :bytes 240000 :ticks 45000}
+               :sizes [1 4 16]}))
+
 ;; See docs/render.md#a-page-is-a-kept-walk
 (deftest a-request-made-again-costs-what-moved
   ;; seon.render/walk, the request's walk kept as a value by its owner: one eval more draws that eval's component, its call's and the
