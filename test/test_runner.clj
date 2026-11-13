@@ -39,16 +39,44 @@
 ;; docs/source.md): kept as a branch named by the tree's id, a content key
 ;; that is never updated, in one LMDB store per checkout (:seon.config.proofs/program-store).
 
+(defn- requires-of
+  "The namespaces the ns form of a file's text requires (each lib of its :require clauses, :as or :refer or bare), or none."
+  [file-text]
+  (when file-text
+    (let [form (binding [*read-eval* false] (read-string file-text))]
+      (when (and (seq? form) (= 'ns (first form)))
+        (for [clause (rest form) :when (and (seq? clause) (= :require (first clause)))
+              lib (rest clause)
+              :let [n (if (sequential? lib) (first lib) lib)] :when (symbol? n)]
+          n)))))
+
+(defn- importer-files
+  "The relative paths of the importer's code, the files a program's facts are derived by: seon.source and seon.program and
+  every namespace they require, transitively, whose file is under src/ (read by text, a function of a relative path).
+  Derived from the ns forms, never listed; a library's code is its pin's, which the store's own key takes."
+  [text]
+  (let [path #(str "src/" (-> (str %) (str/replace "-" "_") (str/replace "." "/")) ".clj")]
+    (loop [seen #{} todo ['seon.source 'seon.program]]
+      (if-let [n (first todo)]
+        (if (seen n)
+          (recur seen (rest todo))
+          (let [t (text (path n))]
+            (recur (conj seen n) (into (vec (rest todo)) (when t (requires-of t))))))
+        (sort (filter #(text %) (map path seen)))))))
+
 (defn- prefix-of
   "The prefix of the branches a tree's program is kept on, as :seon.config.source/dirs and an importer import it: text, a function
-  of a relative path, answers the importer's files, the code that derives a program's facts from its files (seon.source,
-  seon.program), since a form's :form/refs are its answer and a kept tree's unchanged files are not read again, so a store's
-  branches made under other dirs or other code (another import) are none of this one's. See docs/source.md#tests-run-by-reach."
+  of a relative path (nil for none), answers the importer's files (importer-files: seon.source, seon.program and what they
+  require, the code that derives a program's facts from its files), since a form's :form/refs are its answer and a kept
+  tree's unchanged files are not read again, so a store's branches made under other dirs or other code (another import) are
+  none of this one's. A fix anywhere in that code moves it. See docs/source.md#tests-run-by-reach."
   [text]
-  (str "tree-" (lib/digest (str (pr-str (config/value :seon.config.source/dirs))
-                                (lib/digest (str/join "\n" (map text ["src/seon/source.clj" "src/seon/program.clj"]))))) "-"))
+  (let [files (importer-files text)]
+    (str "tree-" (lib/digest (str (pr-str (config/value :seon.config.source/dirs))
+                                  (lib/digest (str/join "\n" (map #(str % "\n" (text %)) files))))) "-")))
 
-(def ^:private own-prefix "prefix-of this process's checkout, read once." (delay (prefix-of #(slurp (io/file (config/checkout) %)))))
+(def ^:private own-prefix "prefix-of this process's checkout, read once."
+  (delay (prefix-of #(let [f (io/file (config/checkout) %)] (when (.isFile f) (slurp f))))))
 
 (defn- tree-prefix "The prefix of the branches this process's code keeps a tree's program on (prefix-of, docs/source.md#tests-run-by-reach)." [] @own-prefix)
 

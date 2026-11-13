@@ -100,3 +100,19 @@
       (is (= #{:seon.test/shard-fixture} (warm-of ['a/doc-test 'a/process-test] #{'a/process-test})) "a test that starts the root: warmed")
       (is (= #{:seon.test/fixture} (warm-of ['a/store-test] #{})) "the test store is warmed for every test that reaches it")
       (finally (seon.lib/remove-tree! out)))))
+
+;; docs/source.md#tests-run-by-reach: a tree's kept program is keyed by the importer's code, every file seon.source and
+;; seon.program require, derived from their ns forms. The program a tree imports is a function of that code, so a fix anywhere
+;; in it (2026-11-13: refresh-tx's process dependence, in seon.source) must retire every branch it built. Red before: the key
+;; read seon.source and seon.program alone, so a fix in a namespace they require left stale branches in use. Estimate: three
+;; ns forms read, two digests: ~100k ticks.
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-kept-programs-key-moves-with-any-of-the-importers-code
+  (let [files {"src/seon/source.clj" "(ns seon.source (:require [seon.lib :as lib] [clojure.string :as str]))"
+               "src/seon/program.clj" "(ns seon.program (:require [seon.lib]))"
+               "src/seon/lib.clj" "(ns seon.lib)\n(defn f [] 1)"
+               "src/seon/web.clj" "(ns seon.web)"}
+        prefix (fn [fs] (#'test-runner/prefix-of #(get fs %)))]
+    (is (= ["src/seon/lib.clj" "src/seon/program.clj" "src/seon/source.clj"] (vec (#'test-runner/importer-files #(get files %))))
+        "the importer's files: the two and what they require, under src/ (a library is its pin's)")
+    (is (not= (prefix files) (prefix (assoc files "src/seon/lib.clj" "(ns seon.lib)\n(defn f [] 2)"))) "a fix in a required namespace moves the key")
+    (is (= (prefix files) (prefix (assoc files "src/seon/web.clj" "(ns seon.web)\n(defn g [] 1)"))) "a namespace the importer doesn't reach doesn't")))

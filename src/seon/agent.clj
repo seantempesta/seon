@@ -1186,7 +1186,7 @@
       (swap! state assoc :fixtures-warm true)
       n)))
 
-(defn- ^:seon.test/runner test-child-runs!
+(defn- test-child-runs!
   "A test child's body (jolt.async.remote.flow/fork!'s child), end its end of the link to its run's fold proc
   (test-run-step), opened by fork! over the one stream it holds: watched as seon.lib/fork!'s children are (seon.lib/end-with!,
   so it ends with the agent's starter), set up as bin/test's runner is, then tests run (run-tests-here), each value put on
@@ -1350,7 +1350,7 @@
     (run-answered (-> st (update :run-dirs (fnil into []) (map (comp fx/run-dir :os) (vals (:children st))))
                       (assoc :threw e :children {} :by-os {})))))
 
-(defn ^:seon.test/runner test-run-step
+(defn test-run-step
   "One test run's fold, a proc of the agent's own graph (run-tests-forked adds it, and removes it once it has answered):
   at its start it forks a test child per shard (fork-test-child), each a proc of the graph whose values arrive on
   :seon.link/up tagged with its proc id (child-codec), and each child's exit, reaped, on :seon.process/end. It folds
@@ -1393,7 +1393,7 @@
                  [st nil])))))
        (catch Throwable e [(fold-threw st e) nil])))))
 
-(defn- run-children!
+(defn- ^:seon.test/runner run-children!
   "Run shards (each a vector of tests) in test children of this agent, by one fold proc added to its graph
   (test-run-step) and removed once it has answered: its answer (run-answered's). The one blocking wait left here:
   run-tests-forked's callers take its answer as a value; one-ask makes it a message (the one-unit spec's law 4).

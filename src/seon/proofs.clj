@@ -687,7 +687,7 @@
       (body))
     nil))
 
-(defn ^:seon.test/runner run-tests!
+(defn run-tests!
   "The one clojure.test runner (bin/test's shards, an agent's test fork): run tests (var
   symbols, their namespaces loaded) here, each namespace's by clojure.test/test-vars so its
   fixtures run around them, and tell (note! x) as it goes: {:seon.test/started test} as each

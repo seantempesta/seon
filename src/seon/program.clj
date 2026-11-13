@@ -1841,7 +1841,7 @@
         sids (fn [text] (into [] (map #(str "schema " %)) (names (sedn/decode text))))
         contract (reduce (fn [m [v e]] (if-let [t (:contract e)] (assoc m v (sids t)) (dissoc m v))) (:contract g) facts)
         tests (reduce (fn [s [v e]] (if (contains? (:meta e) :test) (conj s v) (disj s v))) (:tests g) facts)
-        ;; the vars that decide a test's outcome (^:seon.test/runner: the runner, the test child, the fold): every test's digest takes
+        ;; the entry of what decides a test's outcome (^:seon.test/runner, seon.agent/run-children!: the children and their fold): every test's digest takes
         ;; what they reach (index-answer's runner), so a runner fix reruns every test it may have judged wrongly
         runners (reduce (fn [s [v e]] (if (contains? (:meta e) :seon.test/runner) (conj s v) (disj s v))) (:runners g #{}) facts)
         ;; a name quoted in a test's namespace is one the test hands to what runs it by name
