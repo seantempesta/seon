@@ -21,7 +21,7 @@ You are in `next/`: **Seon on Jolt, built to replace Seon** (`~/src/seon` is the
 2. an agent works each task from context good enough to finish it in a few turns;
 3. its proofs go green, its branch merges to main, and main runs the result.
 
-**The number one metric is the turns it takes an agent to go from a roughly specified task to completed, merged code** (owner, 2026-11-13; [decisions](docs/decisions.md#the-number-one-metric-turns-from-a-roughly-specified-task-to-merged-code)). A task that never merges is a failure, not a low count. Work is ranked by the turns it removes from that path, with every v1 capability present ([parity](docs/parity.md)); work that removes none, or unblocks no step of THE PLAN (`docs/plan.md`), waits. A count of landings is never a measure of progress. Before building, look at what is built.
+**The number one metric is the turns it takes an agent to go from a roughly specified task to completed, merged code** (owner, 2026-11-13; [decisions](docs/decisions.md#the-number-one-metric-turns-from-a-roughly-specified-task-to-merged-code)). It is measured on tasks drawn at random from the backlog, each worked once and never rerun: a good solution merges to disk and to main and its task is done, and Claude sessions review every agent's change until the system's own review is shown trustworthy. A task that never merges is a failure, not a low count. Work is ranked by the turns it removes from that path, with every v1 capability present ([parity](docs/parity.md)); work that removes none, or unblocks no step of THE PLAN (`docs/plan.md`), waits. A count of landings is never a measure of progress. Before building, look at what is built.
 
 Run, then right, then fast. If you can't show it running, it isn't done.
 
