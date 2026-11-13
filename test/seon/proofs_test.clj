@@ -315,6 +315,29 @@
     (is (pos-int? (:ticks (unbounded 'app.pv-budget-test/after))) "an unbounded run (bin/test with 0) counts ticks too")
     (is (pos-int? (:ticks (ran 'app.pv-budget-test/after))) "each result carries the ticks it did")))
 
+;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a test a test child ends from outside (its wall bound: the child throws
+;; :seon.test/wall-spent into the test's fiber) is that test's own :error, named, and the namespace goes on. Red before: the throw ended the namespace, the test answered no verdict and every later test was reported
+;; red unrun ("run threw before this test reported"; tests' batch through 7888, 2026-11-13: 33 no-verdicts, 91 unrun reds)
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-test-ended-from-outside-is-its-own-error-and-the-namespace-goes-on
+  (record (ts/test-db) 'user "(ns app.pv-ended-test (:require [clojure.test :refer [deftest is]]))"
+          'app.pv-ended-test "(deftest parks (is true))"
+          'app.pv-ended-test "(deftest after (is (= 3 (+ 1 2))))")
+  (let [notes (atom [])
+        ;; what an agent's test child's wall bound does when it lands while the test's start notice is parked on a full link: the
+        ;; typed error thrown into the test's fiber there, outside clojure.test's try (thrown here directly, so no timing decides)
+        note! (fn [x]
+                (swap! notes conj x)
+                (when (= 'app.pv-ended-test/parks (:seon.test/started x))
+                  (throw (ex-info "the test ran past its wall bound (#'app.pv-ended-test/parks)"
+                                  {:seon.error/type :seon.test/wall-spent :test 'app.pv-ended-test/parks}))))
+        ran (proofs/run-tests! '[app.pv-ended-test/parks app.pv-ended-test/after] {} note! 50000000)
+        ended (some #(when (and (= 'app.pv-ended-test/parks (:test %)) (= :error (get-in % [:seon.test/report :type]))) (:seon.test/report %)) @notes)]
+    (is (= {:pass 0 :fail 0 :error 1} (select-keys (ran 'app.pv-ended-test/parks) [:pass :fail :error])) "the ended test is red")
+    (is (not (:unreported (ran 'app.pv-ended-test/parks))) "reported as itself, never as a namespace's throw")
+    (is (= :seon.test/wall-spent (:seon.error/type ended)) (str "its report carries the typed error that ended it: " (pr-str (dissoc ended :actual))))
+    (is (re-find #"wall bound" (str (:message ended))) "and its message")
+    (is (proofs/green? (ran 'app.pv-ended-test/after)) "and the next test ran, green")))
+
 ;; docs/merging.md#a-tests-tick-budget: a test's budget is ten times the ticks its deftest states it should cost (the owner,
 ;; 2026-11-12: measured over ten times the estimate stops the work), never past the cap; a test that states none runs under the
 ;; cap, and no history is read. Red before: the budget was max(4e9 floor, 10 x the median of its greens), whatever it stated
