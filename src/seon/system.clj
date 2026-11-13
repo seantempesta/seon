@@ -910,6 +910,8 @@
                (step/out! o :events (step/event {:type :proc-defect :pid (:pid m) :message (:seon.error/message e)}))
                ;; the view keeps the newest :seon.config.root/view-window and counts them all (renders say how many it left)
                (-> (reduce (fn [st x] (answer-taken st o (:pid m) x e)) (cond-> st (= :api (:pid m)) (dissoc ::lost)) taken)
+                   ;; a proc whose transition threw reads nothing again: what is sent it from here is answered with this error (answer-down)
+                   (cond-> (:down m) (assoc-in [::down (:pid m)] e))
                    (view! update :root-errors #(lib/push-window %1 %2 (cfg/value :seon.config.root/view-window)) (merge {:pid (:pid m) :message (:message m)} (:data m)))
                    (view! update :root-errors-total (fnil inc 0))
                    (problem (err/occurrence e :platform {} (System/currentTimeMillis)))))
@@ -933,6 +935,31 @@
                      (step/fired! (::stall-timer st))
                      (reduce (fn [st id] (to-agent st o id {:op :stall? :now-ms now :stall-ms (:stall-ms st)})) st (::busy st)))
       st)))
+
+(declare answer-taken)
+
+(defn- answer-down
+  "st with each message this step would send to a proc that is down (its transition threw: Flow leaves it paused, reading no
+  in-port; ::down, from its :error) answered with that proc's error (answer-taken: its :dest, :p or route) and taken out of the
+  step's outputs o, never left in a buffer nobody reads. A port's consumer is read from the system's conns, or, for a port
+  that is a bound channel, from the proc that declares it reads that channel (its describe's :in-params, the same channel in
+  its bound declaration: docs/flow.md#the-step-fn-contract-every-proc-follows). One pass over the outputs; nothing when no
+  proc is down. See docs/errors.md#nothing-crashes-and-nothing-hangs."
+  {:malli/schema [:=> [:cat :seon.system/api-state :seon.host/volatile] :seon.system/api-state]}
+  [st o]
+  (if-let [down (not-empty (::down st))]
+    (let [;; a bound channel's reader: the proc whose describe declares it reads that param (:in-params), by the channel itself
+          reads (into {} (for [[[unit pid] [decl]] (get-in st [:system :parts]) :when (= :proc unit)
+                               :let [d ((requiring-resolve (:proc decl)))] k (:in-params d) :let [ch (get-in decl [:args k])] :when ch]
+                           [ch pid]))
+          to (into {} (concat (for [[[from port] [pid]] (get-in st [:system :conns]) :when (= :api from)] [port pid])
+                              (for [port (keys @o) :let [pid (reads (get st port))] :when pid] [port pid])))
+          held (for [[port ms] @o :let [pid (to port)] :when (down pid) m ms] [port pid m])]
+      (if (empty? held)
+        st
+        (do (vswap! o #(apply dissoc % (distinct (map first held))))
+            (reduce (fn [st [_ pid m]] (answer-taken st o pid m (down pid))) st held))))
+    st))
 
 (defn- answer-taken
   "st with the caller of x, a message proc pid's throwing step took, answered the defect e: the answer its :dest names
@@ -1041,7 +1068,7 @@
      (when (and (:closing st) (empty? (:agents st)) (not (:writer-closed st)))
        (a/close! (:to-writer st)))
      (vreset! (::taken st) [])
-     [(cond-> st
+     [(cond-> (answer-down st o)
         (and (:closing st) (empty? (:agents st))) (assoc :writer-closed true)
         ;; at the bound of writer requests in flight: read answers only, not the api
         true (assoc ::flow/input-filter (if (>= (count (:writes st)) (cfg/value :seon.config.root/api-writes)) #(not= :ext %) identity)))
@@ -1658,7 +1685,9 @@
   (let [ex (::flow/ex e)
         in (when ex (err/thrown-in ex))]
     (cond-> {:op :error :pid (::flow/pid e) :message (or (some-> ex ex-message) (str e)) :data (some-> ex ex-data contract/bounded) :msg (::flow/msg e)}
-      (qualified-symbol? in) (assoc :in in))))
+      (qualified-symbol? in) (assoc :in in)
+      ;; a transition's throw (init, resume: Flow names no step op): the proc stays paused for good, reading no in-port
+      (and ex (nil? (::flow/op e))) (assoc :down true))))
 
 (defonce ^:private uncaught
   ;; where an error no thread, fiber or go body caught goes (uncaught!): kept under :early until this process's root listens,

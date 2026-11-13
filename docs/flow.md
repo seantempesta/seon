@@ -61,7 +61,7 @@ The ways a Flow graph can wedge or lose data, each read in the source and confir
 ## The step-fn contract every proc follows
 
 Every component of Seon is a step-fn proc declared as data (`resources/seon/system.edn`), and each follows one contract:
-- a Var with four arities, whose `describe` declares ins, outs, an honest `:workload` and a ping-map;
+- a Var with four arities, whose `describe` declares ins, outs, an honest `:workload` and a ping-map, and `:in-params`, the params that are channels it reads as its own in-ports when one is bound in `system.edn` rather than routed by a conn (the writer's `:to-writer`, which it drains whole for one group commit): whoever puts on that channel knows its reader, so a message to a proc whose transition threw is answered with that error (```seon.system/answer-down```);
 - `transform` returns `[state' outputs]`, with data outputs;
 - a step never blocks on another proc: request and answer with credit, `{:id :reply}`, exactly one answer ([below](#idioms-for-seon));
 - state is plain data under its schema, and a host object lives only in its owning proc;
