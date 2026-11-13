@@ -38,7 +38,16 @@
                    [:map {:closed true} [:branch {:optional true} :seon.db/branch] [:t {:optional true} :int]]]
  :seon.db/op [:tuple [:enum :db/add :db/retract] :int :keyword :any]
  :seon.db/resolved-tx [:vector :seon.db/op]
- :seon.db/tx-report [:map [:tx-data :any] [:db-after :seon.host/db]]
+ :seon.db/tx-report [:map [:tx-data [:sequential :seon.host/datom]] [:db-before {:optional true} :seon.host/db] [:db-after :seon.host/db]]
+ ;; a branch's own schema changes, as the write check takes them (seon.db/checked): their forms and the registry they compile to
+ :seon.db/branch-schemas [:map [:forms [:map-of :qualified-keyword :any]] [:registry :seon.host/registry]]
+ ;; the writer's transact arguments (datahike.writing/transact!), through seon.db/transact-checked
+ :seon.db/transact-args [:map [:tx-data :seon.db/tx-data] [:tx-meta {:optional true} :map] [:seon.db/schemas {:optional true} [:maybe :seon.db/branch-schemas]]]
+ ;; what schema forms say an entity is (seon.db/entity-index): the one value every reader of what an entity is takes first
+ :seon.db/entity-index [:map [:forms :map] [:entity-schemas [:map-of :keyword :qualified-keyword]] [:identity-schemas [:map-of :keyword :qualified-keyword]]
+                        [:schema-identities [:map-of :qualified-keyword :keyword]] [:drawn-schemas [:set :qualified-keyword]] [:history-schemas [:set :qualified-keyword]]
+                        [:required-keys [:map-of :qualified-keyword [:vector :keyword]]] [:own-required [:map-of :qualified-keyword [:vector :keyword]]]
+                        [:targets [:map-of :keyword [:vector :qualified-keyword]]] [:required-refs [:vector :qualified-keyword]] [:specs {:optional true} :any]]
  :seon.db/open [:map [:cfg :seon.db/cfg] [:conn :seon.host/conn] [:recovered? :boolean]]
  ;; the program as facts
  ;; a checkout's inputs with no program facts (seon.fx/inputs): what every reach digest holds

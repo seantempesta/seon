@@ -112,7 +112,7 @@
   any; docs/render.md#the-page); and :forms, the forms it was built from}. It is the one value every reader of what an entity
   is takes first (ix): a branch's own entity schema is recognized by its own index, never the binary's.
   See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:malli/schema [:=> [:cat :map] [:map [:forms :map] [:entity-schemas :map] [:identity-schemas :map] [:schema-identities :map] [:drawn-schemas [:set :any]] [:history-schemas [:set :any]] [:required-keys :map] [:own-required :map] [:targets :map] [:required-refs [:vector :qualified-keyword]]]]}
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :seon.db/entity-index]}
   [forms]
   (let [entity? #(:seon.db/attributes (form-props forms %))
         required (fn [form] (for [e (own-entries form) :let [p (second e)] :when (not (and (map? p) (:optional p)))] (first e)))
@@ -154,7 +154,7 @@
 (defn index
   "The binary's `entity-index`: what every write is held to unless its branch changed an entity schema (`index-of`), and what
   a caller with no branch of its own reads (`index-of-db` is a db's). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:malli/schema [:=> [:cat] :map]}
+  {:malli/schema [:=> [:cat] :seon.db/entity-index]}
   [] binary-index)
 
 (declare extends?)
@@ -162,13 +162,13 @@
 (defn reaching
   "The ref attributes whose targets entity schema s is or extends, in the entity index ix: the refs that reach an s, each read in
   reverse (:ns/_name) to pull what points at it. See docs/data-modeling.md#things-relate-by-refs."
-  {:malli/schema [:=> [:cat :map :qualified-keyword] [:vector :qualified-keyword]]}
+  {:malli/schema [:=> [:cat :seon.db/entity-index :qualified-keyword] [:vector :qualified-keyword]]}
   [ix s] (vec (sort (for [[a ts] (:targets ix) :when (some #(extends? ix s %) ts)] a))))
 
 (defn attributes-of
   "The attributes entity schema s names in the entity index ix, its own and those of the schemas it extends. See
   docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:malli/schema [:=> [:cat :map :qualified-keyword] [:vector :qualified-keyword]]}
+  {:malli/schema [:=> [:cat :seon.db/entity-index :qualified-keyword] [:vector :qualified-keyword]]}
   [ix s] (vec (distinct (concat (mapcat #(attributes-of ix %) (parents ix s)) (own-keys (get (:forms ix) s))))))
 
 (defn- reverse-attr {:malli/schema [:=> [:cat :qualified-keyword] :qualified-keyword]} [a] (keyword (namespace a) (str "_" (name a))))
@@ -177,7 +177,7 @@
   "Each of attributes as with the entity schema that owns it, {attribute schema}, as the entity index ix says (its :entity-schemas):
   the one reading of which entity schemas attributes belong to, for the write check (each schema a write touched) and for a render
   (the one schema that names a map). An attribute no entity schema owns is left out. See docs/data-modeling.md#a-thing-is-its-attributes."
-  {:malli/schema [:=> [:cat :map :any] :map]}
+  {:malli/schema [:=> [:cat :seon.db/entity-index [:maybe [:sequential :any]]] [:map-of :keyword :qualified-keyword]]}
   [ix as] (let [es (:entity-schemas ix)] (into {} (keep (fn [a] (when-let [s (es a)] [a s]))) as)))
 
 (defn implied-pattern
@@ -195,7 +195,7 @@
 
 (defn extends?
   "Does schema a extend schema b, itself or through the schemas it extends (`parents`, in the entity index ix)? See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:malli/schema [:=> [:cat :map :qualified-keyword :qualified-keyword] :boolean]}
+  {:malli/schema [:=> [:cat :seon.db/entity-index :qualified-keyword :qualified-keyword] :boolean]}
   [ix a b] (boolean (or (= a b) (some #(extends? ix % b) (parents ix a)))))
 
 (defn most-specific
@@ -218,7 +218,7 @@
   changed none, else derived again from the registry with the branch's forms over it, a cost of the registry's size (about
   1.8 MB, 0.9 ms), built, never kept here: its holder (a walk, an agent) keeps it until a schema entry moves. See
   docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:malli/schema [:=> [:cat [:maybe :map]] :map]}
+  {:malli/schema [:=> [:cat [:maybe :seon.db/branch-schemas]] :seon.db/entity-index]}
   [schemas]
   (if (seq (:forms schemas)) (with-specs (entity-index (merge contract/forms (:forms schemas)))) binary-index))
 
@@ -383,7 +383,7 @@
   (`connect` adds it to every connection), so root's batch and an agent's run-ahead apply pass it with no call of their own. arg-map's
   :seon.db/schemas (a branch's own schema changes, {:forms :registry}) are the per-datom check's. See
   docs/storage.md#the-write-checks-every-entity-it-touches."
-  {:malli/schema [:=> [:cat :any :map] :map]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.db/transact-args] :seon.db/tx-report]}
   [db arg-map]
   (when-let [e (supplied-instant nil (:tx-meta arg-map))] (refuse! e))
   (checked db (:tx-data arg-map) (:seon.db/schemas arg-map) #(datahike.writing/transact! db (-> arg-map (dissoc :seon.db/schemas) (assoc :tx-data %)))))
@@ -393,7 +393,7 @@
   agent's test fork and a test's world write through it, as the writer's transact does. Answers the report; schemas
   are a branch's own ({:forms :registry}) or nil. A Datahike transaction call at a site docs/storage.md does not
   name is red (bin/laws transactions). See docs/storage.md#the-write-checks-every-entity-it-touches."
-  {:malli/schema [:function [:=> [:cat :any :any] :map] [:=> [:cat :any :any [:maybe :map]] :map]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.db/tx-data] :seon.db/tx-report] [:=> [:cat :seon.host/db :seon.db/tx-data [:maybe :seon.db/branch-schemas]] :seon.db/tx-report]]}
   ([db tx-data] (with db tx-data nil))
   ([db tx-data schemas] (checked db tx-data schemas #(d/with db %))))
 
@@ -402,12 +402,12 @@
   the system; the write that may follow (the same transaction through a connection's `'transact!`) is checked there, once
   (validation at transaction time, never the same data checked again). A state the system shows or
   relies on is written, never only speculated. Each caller is named in docs/storage.md (bin/laws transactions). Answers the report."
-  {:malli/schema [:=> [:cat :any :any] :map]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.db/tx-data] :seon.db/tx-report]}
   [db tx-data] (d/with db tx-data))
 
 (defn speculate-db
   "The db after the hypothetical tx-data (`speculate`'s :db-after). See docs/storage.md#the-write-checks-every-entity-it-touches."
-  {:malli/schema [:=> [:cat :any :any] :any]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.db/tx-data] :seon.host/db]}
   [db tx-data] (:db-after (speculate db tx-data)))
 
 (defn project-tx
@@ -416,7 +416,7 @@
   each :db/add and :db/retract of such an attribute stays, and every :db/retractEntity stays, in order. Tempids join the maps
   that kept them as before. The full import of the checkout speculated whole cost 2.7 G ticks and 4.7 GB a call.
   See docs/storage.md#the-write-checks-every-entity-it-touches."
-  {:malli/schema [:=> [:cat :any [:or [:set :keyword] :seon.host/fn]] :seon.db/tx-data]}
+  {:malli/schema [:=> [:cat :seon.db/tx-data [:or [:set :keyword] :seon.host/fn]] :seon.db/tx-data]}
   [tx-data attr?]
   (into [] (keep (fn [x] (cond (map? x) (let [m (into {} (filter (fn [[k _]] (or (= :db/id k) (attr? k)))) x)]
                                          (when (seq (dissoc m :db/id)) m))
@@ -427,7 +427,7 @@
 
 (defn db-with
   "The db after tx-data (`with`'s :db-after). See docs/storage.md#the-write-checks-every-entity-it-touches."
-  {:malli/schema [:function [:=> [:cat :any :any] :any] [:=> [:cat :any :any [:maybe :map]] :any]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.db/tx-data] :seon.host/db] [:=> [:cat :seon.host/db :seon.db/tx-data [:maybe :seon.db/branch-schemas]] :seon.host/db]]}
   ([db tx-data] (:db-after (with db tx-data)))
   ([db tx-data schemas] (:db-after (with db tx-data schemas))))
 
@@ -435,7 +435,7 @@
   "The entity id of the entity whose unique attribute a has value v on db, or nil: one seek
   in a's AVET index, never a query (a Datalog query here cost ~95 us and 100 KB at 100
   tasks, planned on every call). The one entity lookup (docs/storage.md#entity-ids)."
-  {:malli/schema [:=> [:cat :seon.host/db :keyword :any] [:maybe :int]]}
+  {:malli/schema [:=> [:cat :seon.host/db :keyword :any] [:maybe :seon.db/eid]]}
   [db a v] (:e (first (d/datoms db :avet a v))))
 
 (def ^:private result-parts
@@ -1136,7 +1136,7 @@
 
 (defn take-eid
   "A fresh entity id from the store db reads (`ids!`), issued once across every branch and process: what a record names itself by before it is written. Taken and never written, it is a gap. See docs/users.md#what-each-thing-is."
-  {:malli/schema [:=> [:cat :seon.host/db] nat-int?]}
+  {:malli/schema [:=> [:cat :seon.host/db] :seon.db/eid]}
   [db] (datahike.ids/-take! (datahike.writing/ids db) :eid))
 
 ;; ---- tx-data with explicit ids ----------------------------------------------------
