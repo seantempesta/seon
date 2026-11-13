@@ -615,33 +615,23 @@
                       (filter requirers))
             lost))))
 
-(defn- db-environment!
-  "Set up in this process every namespace files ({relative path text}) require, and theirs, that no file of read ({path
-  text}, this import's) defines, as db's program has it: its ns form, its vars and its macros, required first, each marked
-  loaded so no require reads a file. What files are analyzed against is then db's program, never what this process
-  happened to load. nil. See docs/source.md#indexing-a-tree."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string] [:map-of :string :string]] :nil]}
+(defn- required-files
+  "Files ({relative path text}) with db's text of every namespace they require, and theirs, that no file of read ({path text},
+  this import's) defines and that this process doesn't hold whole at db's forms (seon.program/unheld-forms, by content id): so
+  what they are analyzed against, in one load order with them, is db's program, never what this process happened to load.
+  Reading db's text writes nothing. See docs/source.md#indexing-a-tree."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string] [:map-of :string :string]] [:map-of :string :string]]}
   [db files read]
-  (let [libs (fn [f] (for [c (rest f) :when (and (seq? c) (= :require (first c))) x (rest c) :let [r (if (sequential? x) (first x) x)] :when (symbol? r)] r))
+  (let [libs (fn [t] (for [c (rest (ns-form t)) :when (and (seq? c) (= :require (first c))) x (rest c) :let [r (if (sequential? x) (first x) x)] :when (symbol? r)] r))
         own (into #{} (keep #(some-> (ns-form %) second)) (concat (vals files) (vals read)))
         ns-e (fn [n] (pdb/eid db :ns/name n))
         requires (fn [n] (or (some-> (ns-e n) (as-> e (d/entity db e)) :ns/form :form/requires seq set) #{}))
-        start (into #{} (comp (keep ns-form) (mapcat libs) (remove own) (filter ns-e)) (vals files))
-        nss (into start (program/closure start #(remove own (filter ns-e (requires %)))))]
-    ;; a namespace this process holds whole at db's forms is left as it is: only what differs is set up (the cost of what differs)
-    (let [unheld (program/unheld-forms db (keep ns-e nss))]
-      (doseq [n (program/topo (vec nss) #(filter nss (requires %)) str)
-              :let [e (ns-e n) forms (map #(d/entity db %) (get unheld e))]
-              :when (or (seq forms) (not (find-ns n)))
-              :let [nsx (program/ensure-ns! n)]]
-        (@mark-loaded! (str n))
-        (binding [*ns* nsx]
-          (some-> (d/entity db e) :ns/form :form/src read-string eval)
-          (doseq [f forms d (:form/defines f) :let [v (:var/name d)] :when (and (qualified-symbol? v) (= (namespace v) (str n)))]
-            (if (contains? (set (:var/meta d)) :macro)
-              (eval (read-string (:form/src f)))
-              (intern nsx (symbol (name v)))))))))
-  nil)
+        start (into #{} (comp (keep #(when (ns-form %) %)) (mapcat libs) (remove own) (filter ns-e)) (vals files))
+        nss (into start (program/closure start #(remove own (filter ns-e (requires %)))))
+        unheld (program/unheld-forms db (keep ns-e nss))]
+    (into files (for [n nss :let [e (ns-e n) p (:ns/file (d/entity db e))]
+                      :when (and p (not (contains? read p)) (or (seq (get unheld e)) (not (find-ns n))))]
+                  [p (file-text db n)]))))
 
 (defn file-reading-expansions
   "{relative path namespace} of db's files holding a form that expands a macro reading files (a macro whose form refers to one
@@ -679,12 +669,10 @@
         read (loop [round texts check (keys gone) read gone tree {}]
                (if (and (empty? round) (empty? check))
                  read
-                 (let [files round
-                       ;; what the files require is set up from db's program first, never what this process happened to load
-                       _ (db-environment! db files tree)
+                 (let [files (required-files db round tree)
                        ;; a later round's privacy is the tree's as every round read it: a dependent read again names a var an
                        ;; earlier round's file made public, which db still holds as private; a file read before keeps the text
-                       ;; it was read with
+                       ;; it was read with (required-files adds db's text of what they require and this process doesn't hold)
                        tree (merge files tree)
                        now (read-nss db files tree)
                        read (into read now)
