@@ -611,7 +611,8 @@
 ;; never proved on the system's build of it. Found 2026-11-13 (deps): bin/prove of a branch moving the Jolt, konserve and
 ;; persistent-sorted-set pins ran its tests on main's runtime and stored reds at the branch's digests (a seek 3.2 KB on main's
 ;; build, 1.76 KB on its own). Red before: prove-tree! asked baked-paths, which names no pin, and ran. Each tree is this checkout's
-;; with one change, by a git index of its own (the repository is not touched). Estimate: three tree writes and two diffs, git's
+;; with one change, by a git index of its own, its text read from git, never the checkout's files (a test in this namespace
+;; takes no tree: seon.program-test/no-test-takes-the-tree-in-its-digest). Estimate: three tree writes and two diffs, git's
 ;; work outside the engine, ~0.5M ticks.
 (deftest ^{:seon.test/estimate {:ticks 500000} :seon.test/execs ["git"]} a-tree-the-binary-cant-run-is-refused-before-it-runs
   (let [here (seon.config/checkout)
@@ -623,7 +624,8 @@
                  (git env "read-tree" tree)
                  (if (= :pin change)
                    (git env "update-index" "--cacheinfo" (str "160000," (apply str (repeat 40 "3")) "," path))
-                   (let [blob (clojure.string/trim (:out (seon.lib/sh "git" "-C" here "hash-object" "-w" "--stdin" :in (str (slurp (str here "/" path)) "\n;; changed\n"))))]
+                   (let [text (:out (seon.lib/sh "git" "-C" here "show" (str tree ":" path)))
+                         blob (clojure.string/trim (:out (seon.lib/sh "git" "-C" here "hash-object" "-w" "--stdin" :in (str text "\n;; changed\n"))))]
                      (git env "update-index" "--add" "--cacheinfo" (str "100644," blob "," path))))
                  (let [t (clojure.string/trim (git env "write-tree"))] (.delete (java.io.File. idx)) t)))
         refusal #(#'root/tree-refusal tree %)]
