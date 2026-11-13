@@ -1118,6 +1118,11 @@
                       ;; the end's facts, every one an end writes (end-attrs)
                       (into (when prior (for [x [rid vid] a (sort end-attrs)]
                                           [:db.fn/retractAttribute [:seon.task/id x] a])))
+                      ;; each states its declaration's proofs again, a dropped one retracted, as a changed task file's entry does
+                      ;; (entity-tx): a refine declared when its proofs were a test since deleted kept it, and capped
+                      (into (when prior (mapcat #(entity-tx db (pdb/eid db :seon.task/id (task-id (:seon.task/ns %) (:seon.task/name %)))
+                                                            [:seon.task/proofs] (select-keys % [:seon.task/proofs]))
+                                                decls)))
                       (into (execution-tx [rid] :running))
                       (into (when prior (execution-tx [vid] :held))))
             (:seon.task/agent t) (conj {:seon.task/id rid :seon.task/started-by (sender (:seon.task/agent t))})))))))

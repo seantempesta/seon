@@ -89,15 +89,18 @@
             :else at))))))
 
 (defn- db-at
-  "The db of point p ({:branch :commit :t}) on db's store, the db it names: db itself when p is db's own point (its commit and t: a
+  "The db of point p ({:branch :commit :t}) on db's store, the db it names: db itself when p is db's own point (its commit, and its t or none: a
   value not yet committed, as the judge's speculated agent, d/with, is held by no stored commit); else its commit when the commit
   holds its t (or p names no t); else db as of its t: a world written without commits (d/db-with) names its store's commit at every
-  point, and a commit past what collection kept is gone (docs/storage.md#collection)."
+  point, and a commit past what collection kept is gone (docs/storage.md#collection); with neither a stored commit nor a t, db."
   {:malli/schema [:=> [:cat :seon.host/db :map] :seon.host/db]}
-  [db p] (if (and (= (:commit p) (d/commit-id db)) (= (:t p) (:max-tx db)))
+  [db p] (if (and (= (:commit p) (d/commit-id db)) (or (nil? (:t p)) (= (:t p) (:max-tx db))))
            db
            (let [c (some->> (:commit p) (d/commit-as-db (pdb/store-of db)))]
-             (if (and c (or (nil? (:t p)) (= (:t p) (:max-tx c)))) c (d/as-of db (:t p))))))
+             (cond (and c (or (nil? (:t p)) (= (:t p) (:max-tx c)))) c
+                   (:t p) (d/as-of db (:t p))
+                   ;; no stored commit and no t (a world written without commits): the db handed in is the point
+                   :else db))))
 
 (declare page-diff-msgs example-msgs reply-of)
 
@@ -152,8 +155,8 @@
   [ms] (emit/chars-tokens (transduce (comp (mapcat (fn [m] (cons (:content m) (map :code (:tool-calls m))))) (map #(count (str %)))) + 0 ms)))
 
 (defn render
-  "What a turn's reader got, from its basis b (seon.turn records it on the turn's model call, :seon.model-call/basis) on db,
-  the commit b names: the request (`request`) of b's :agent, how its work stands among it (the page's evals, `status` in the first). The one maker of a context: the model's request is this, and so is every
+  "What a turn's reader got, from its basis b (seon.turn records it on the turn's model call, :seon.model-call/basis), drawn at the
+  point b names on db's store (`db-at`), whatever later db is handed in: the request (`request`) of b's :agent, how its work stands among it (the page's evals, `status` in the first). The one maker of a context: the model's request is this, and so is every
   later reading of it. opts :walk, the agent's live walk, drawn to db (else the tree drawn cold, of opts :ctx, its @ctx at db, or of its record there, its schemas read in opts :index, the agent's held branch index, else built from db). {:messages :parts} (`request`)."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.model-call/basis] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]
                   [:=> [:cat :seon.host/db :seon.model-call/basis :map] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]]}
@@ -161,7 +164,10 @@
   ([db {:keys [agent commit] :as basis} {:keys [walk ctx index]}]
    (if walk
      (request walk)
-     (let [ix (or index (program/index-of-db db))
+     (let [;; the point the basis names, whatever db was handed in: a later db (the debug page's, the context op's) would draw the
+           ;; turns after it as its own
+           db (cond-> db commit (db-at basis))
+           ix (or index (program/index-of-db db))
            ;; the point this request is made at, which its newest call's basis will name (written after this commit): a db read
            ;; as of a t (a commit collection took) holds no commit id of its own
            t (cond-> (or ctx (ctx/agent-ctx ix db (pdb/eid db :seon.agent/key agent)))
