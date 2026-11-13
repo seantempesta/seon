@@ -784,6 +784,18 @@
       (when (try (pdb/branch? c b) (finally (d/release c)))
         @(pdb/connect (assoc cfg :branch b))))))
 
+(defn- read-tree-branch
+  "The db of the branch keeping git tree id tree in the LMDB store at path, read only, whatever importer prefix names it, or nil:
+  a health-base store holds only branches the base's own code made (make-base-tree!), and a tree's code is its files, so a branch
+  there ending in tree was made by that tree's own importer. Never a name this code derives from the base's files: a change to how
+  the prefix is derived (prefix-of) would name the base's branch as the base's code never did. See docs/health.md#checks-are-callers-of-seon."
+  [path tree]
+  (when (pdb/store? path)
+    (let [cfg (pdb/store-cfg :lmdb path)
+          c (pdb/connect cfg)
+          b (try (some #(when (str/ends-with? (name %) (str "-" tree)) %) (d/branches c)) (finally (d/release c)))]
+      (when b @(pdb/connect (assoc cfg :branch b))))))
+
 (defn- make-base-tree!
   "Make the base's tree's branch in the base store at path (base-program) by the base's own code: a checkout of commit base of the
   repository at root at at (bin/worktree --at, its built products cloned from this checkout's), whose runner plans its tests
@@ -821,20 +833,19 @@
   (let [;; the base's tree as a plan of its checkout names it (seon.fx/tree-id: less :seon.config.source/tree-excludes), by bin/tree
         tree (let [r (lib/sh (str (config/checkout) "/bin/tree") root base)]
                (if (zero? (:exit r)) (str/trim (:out r)) (throw (ex-info (str "bin/tree " root " " base ": " (:err r)) {}))))
-        b (keyword (str (prefix-of #(fx/tree-file root base %)) tree))
         path (str stem "-" @ts/kept-program-digest)
         ;; the base's own runner names its store by its own key (seon.test-store/program-store-key: its runtime and pins may be
         ;; another's), so its branch is read from whichever store of the stem holds it, never only this code's
         stems (fn [] (let [d (.getParentFile (io/file stem)) n (.getName (io/file stem))]
                        (for [f (sort (or (.list d) (make-array String 0))) :when (re-matches (re-pattern (str "\\Q" n "\\E-[0-9a-f]{8}")) f)]
                          (str d "/" f))))
-        any (fn [] (some #(read-branch % b) (stems)))]
+        any (fn [] (some #(read-tree-branch % tree) (stems)))]
     (or (read-branch store (tree-branch tree))
         (any)
         (make-base-tree! root base tree store stem path at)
         (any)
         (contract/error :seon.fx/io-error #'test-runner/base-program
-                        (str "the base's program store " path " keeps no branch " b ": the base's program schema or importer is not this code's") {:path path}))))
+                        (str "the base's program store " path " keeps no branch of its tree " tree ": the base's program schema is not this code's") {:path path}))))
 
 (defn unestimated
   "The tests of program db that state no estimate (a test var with no :seon.test/estimate fact), each {:test :ns :ticks}, its

@@ -2154,7 +2154,7 @@
         root (delay (root-digest g (first (roots-of g (:index g)))))
         binary (delay (root-digest g (conj (first (roots-of g (:index g))) 'seon.check/-main)))
         ;; what decides every test's outcome (the graph's :runners, marked ^:seon.test/runner): the one derived-reach digest
-        ;; (root-digest) over them, taken by every test, so a runner change moves every digest (owner, 2026-11-13: false reds
+        ;; (root-digest) over them, taken by every test, so a runner change moves every digest (the owner's ruling: false reds
         ;; are rerun by a moved digest, never deleted). Made once, when a test asks
         runner (delay (root-digest g (sort (:runners g #{}))))
         ;; :seon.env/src is a direct reader's (kept-program-store): a process test runs a program it names

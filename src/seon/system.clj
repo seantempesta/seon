@@ -2184,7 +2184,7 @@
 (defn- tree-refusal
   "Why the running binary can't prove checkout tree, or nil: what the tree changes that the binary bakes (baked-changes, against
   the tree the binary was built from), whose tests would run on this binary's build of them, never the tree's, and be stored at the
-  tree's digests (deps' pin branch, 2026-11-13: a seek measured 3.2 KB on main's build against 1.76 KB on its own). Such a tree
+  tree's digests (deps' pin branch: a seek measured 3.2 KB on main's build against 1.76 KB on its own). Such a tree
   is proved by a build of its own (bin/prove --out DIR). A binary that recorded no tree, or a diff git can't make, is unknown,
   never current. See docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat [:maybe :string] :string] [:maybe :seon.error/base]]}
