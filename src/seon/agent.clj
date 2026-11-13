@@ -360,13 +360,6 @@
   []
   (or (:schema-registry @state) (:schema-registry (swap! state with-slot))))
 
-(defn held-registry
-  "The registry of the branch this process holds as an agent (its schema slot, branch-schemas), or nil when its state holds none:
-  what seon.contract's options read at each lookup, so every path of an agent checks against its branch. See
-  docs/source.md#schemas-at-the-repl."
-  {:malli/schema [:=> [:cat] [:maybe :any]]}
-  [] (when (:db @state) (:registry (branch-schemas))))
-
 (defn branch-index
   "This agent's branch's entity index (`branch-schemas`): what its renders and its recognition of a value take as ix (seon.db/index-of);
   the binary's when no branch is held (root, a scratch session: it has no schema entries of its own). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."

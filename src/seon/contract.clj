@@ -186,10 +186,17 @@
 (def forms "Every named schema form of the platform (seon.config/schema-forms, baked once)." config/schema-forms)
 
 (def ^:private branch-registry
-  "The registry of the branch an agent process holds, read at each lookup from its schema slot (seon.agent/held-registry, found by
-  name since this namespace loads first, never loading it and passing over it while it is still being defined), nil where no agent state holds a branch (root, the fork server, a
-  test process between agents). A lookup, not a copy, so a write that moves a schema entry is in force at once on every path."
-  (let [slot #(let [v (find-var 'seon.agent/held-registry)] (when (and v (bound? v)) (some-> (@v) mr/registry)))]
+  "The registry of the branch an agent process holds, read at each lookup from its state's schema slot (seon.agent/state's
+  :schema-registry; built by seon.agent/branch-schemas when the state holds a db and no slot yet), nil where no agent state holds a
+  branch (root, the fork server, a test process between agents). seon.agent loads after this namespace, so its vars are found by
+  name, once, and never loaded from here; no contracted call is on the path, so a lookup counts as the lookup it is. A lookup,
+  not a copy, so a write that moves a schema entry is in force at once on every path."
+  (let [found (volatile! nil)
+        vars #(or @found (let [st (find-var 'seon.agent/state) bs (find-var 'seon.agent/branch-schemas)]
+                          (when (and st bs (bound? st) (bound? bs)) (vreset! found [st bs]))))
+        slot #(when-let [[st bs] (vars)]
+                (let [s @@st]
+                  (when (:db s) (some-> (or (:schema-registry s) (@bs)) :registry mr/registry))))]
     (reify mr/Registry
       (-schema [_ t] (some-> (slot) (mr/-schema t)))
       (-schemas [_] (or (some-> (slot) mr/-schemas) {})))))

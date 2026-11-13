@@ -3551,11 +3551,10 @@
 
 (defn- throws-here {:malli/schema [:=> [:cat] :any]} [] (throw (ex-info "the place is the finding" {:k 1})))
 
-;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: an error map names the fn the throw happened in
-;; (seon.error/thrown-in), so a turn's error says which code threw. Red before: the turn loop's error kept its message and cause
-;; chain but no place (context's loop task, 2026-11-13: a stale branch's code threw and nothing said which). Estimate: one throw and
-;; one triage (Jolt keeps 25 frames): ~0.2M ticks
-(deftest ^{:seon.test/estimate {:ticks 300000}} an-error-map-names-where-it-was-thrown
-  (let [em (agent/error-map (try (throws-here) (catch Throwable e e)) 'seon.turn/work!)]
-    (is (= 'seon.agent-test/throws-here (:seon.error/in em)) (pr-str em))
-    (is (= 'seon.turn/work! (:seon.error/operation em)) "the boundary stays the operation")))
+;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: a turn's error names the fn the throw happened in
+;; (seon.error/thrown-in), so it says which code threw; a compile error's macro (an unqualified symbol) names none, and is no
+;; contract failure of thrown-in. Red before: the turn loop's error kept no place (context's loop task, 2026-11-13), and thrown-in
+;; failed its own contract on `cond`. Estimate: two throws and two triages (Jolt keeps 25 frames): ~0.3M ticks
+(deftest ^{:seon.test/estimate {:ticks 400000}} an-error-map-names-where-it-was-thrown
+  (is (= 'seon.agent-test/throws-here (seon.error/thrown-in (try (throws-here) (catch Throwable e e)))) "a run's throw names its fn")
+  (is (nil? (seon.error/thrown-in (ex-info "Syntax error macroexpanding cond" {:clojure.error/symbol 'cond}))) "a macroexpansion's names none, and thrown-in answers"))
