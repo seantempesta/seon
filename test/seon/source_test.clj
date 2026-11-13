@@ -298,16 +298,15 @@
         (is (nil? (program/config-refused db0 (source/tx-of db0 (assoc files schema-file schema-text config/shipped-file (str/replace-first conf ":seon.config.zz/k 0" ":seon.config.zz/k 5")) false)))
             "and one valid only under the schema the same import registers is not")))))
 
-;; Estimate: the program's reach graph, built when none is kept for this builder (~310M measured 11-13: a change to seon.source or
-;; seon.program retires the kept one; brought to date ~12M when kept) + 13 built-with x 5 git calls x 70k 4.5M + 14 binary-current x
-;; ~1M (tree diff and reach walk) = 330000000 ticks. The graph's cold build belongs in a fixture warmed once (tests' warm-fixtures).
-(deftest ^{:seon.test/estimate {:ticks 330000000}} a-binary-is-current-for-a-tree-unless-what-differs-reaches-root
+;; Estimate: kept reach graph brought to date 20M + 13 built-with x 5 git calls x 70k 4.5M + 14 binary-current x ~1M (tree diff and reach walk) = 40000000 ticks
+;; (a run with no graph kept for this builder builds it, ~310M, over the cap: the graph belongs in a fixture warmed once, tests' to place)
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-binary-is-current-for-a-tree-unless-what-differs-reaches-root
   ;; docs/source.md#the-binary-records-its-program: the one rule (Point, 2026-11-10) the gate's build, the spawn refusal and the
   ;; stale-binary row ask. db is the checkout's program, so tree is its working tree; each case is the binary's tree made from it
   ;; with one change (a git index of its own: the repository is not touched)
   (let [db (test-runner/program)
         tree (fx/tree-id here)
-        ;; the graph the plan kept for this program (test-runner/reach-graph-of: decoded and brought to date, a sixth of
+        ;; the graph the plan kept (brought to date; built whole only when none is kept for this builder) for this program (test-runner/reach-graph-of: decoded and brought to date, a sixth of
         ;; building it; docs/source.md#tests-run-by-reach), built only when the kept one is another builder's
         g (test-runner/reach-graph-of db (fx/declared-refs seon.graph/built-text) (ts/kept-program-store))
         git (fn [env & args] (:out (apply sh/sh (concat ["env"] (for [[k v] env] (str k "=" v)) ["git" "-C" here] args))))

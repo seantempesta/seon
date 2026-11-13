@@ -1141,9 +1141,8 @@
   [] (into (set (:forms (binary-program))) (vals @loaded)))
 
 (defn unheld-forms
-  "{namespace entity [form entity]}: the forms of each of namespace entities nes on db this process doesn't hold compiled. One
-  :form/ns range a namespace; a form not seen before is asked once a process, by one :form/id range when many are new (a
-  process's first import), else a seek each. See docs/source.md#indexing-a-tree."
+  "{namespace entity [form entity]}: the forms of each of nes on db this process doesn't hold compiled. Each form is asked once
+  a process. See docs/source.md#indexing-a-tree."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.db/eid]] [:map-of :seon.db/eid [:vector :seon.db/eid]]]}
   [db nes]
   (let [known @held-entities
