@@ -1255,14 +1255,14 @@
 
 (defn answer-sources
   "Walk w's answer for output o as `answer-of` reads it, each value with the component whose own answer held it: [[value
-  {:f :args}] ...] in the same order, :f the render or call that answered it and :args what it was called with (an entity
-  rendered by its schema's render, its entity). What a reader that labels the answer by what made it reads (the debug page's
-  sources). See docs/render.md#one-rendering-system-drawn-from-the-data."
+  {:f :args :key}] ...] in the same order, :f the render or call that answered it, :args what it was called with (an entity
+  rendered by its schema's render, its entity) and :key the component's key, the one :ran and the cache use, so a reader joins
+  a message to whether its component ran (the request's kept prefix). See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :map :qualified-keyword] [:vector [:tuple :any :map]]]}
   [w o]
   (let [cache @(:cache w)]
     ;; one pass into one vector, each component's source made once
-    (persistent! ((fn go [acc k] (let [e (get cache k) src (select-keys e [:f :args])]
+    (persistent! ((fn go [acc k] (let [e (get cache k) src (assoc (select-keys e [:f :args]) :key k)]
                                    (reduce (fn [acc x] (if (and (vector? x) (= ::child (first x))) (go acc (second x)) (conj! acc [x src])))
                                            acc (get-in e [:outs o]))))
                   (transient []) @(:out w)))))
