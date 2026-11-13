@@ -371,8 +371,10 @@
   a render's helper may carry the rules for what it draws; read from ns-publics, a private helper's were dropped silently), [[render-name text] ...] by name: what is drawn decides which namespaces, not which rules, so a render's first draw, or a person's page asking for what only it draws, moves no rule. See docs/render.md#style."
   {:malli/schema [:=> [:cat [:map-of :any :any]] [:vector [:tuple :symbol :string]]]}
   [drawn]
-  (let [vs (into (set (filter var? (keys drawn))) (comp (filter var?) (map (comp ns-name :ns meta)) (distinct) (mapcat (comp vals ns-interns))) (keys drawn))]
-    (vec (keep (fn [f] (let [s (:seon.render/style (meta f))] (when (css? s) [(symbol f) s]))) (sort-by symbol vs)))))
+  ;; the few vars stating rules sorted, never every var of their namespaces (the sort was most of its cost)
+  (vec (sort-by first (into [] (comp (filter var?) (map (comp ns-name :ns meta)) (distinct) (mapcat (comp vals ns-interns))
+                                     (keep (fn [f] (let [s (:seon.render/style (meta f))] (when (css? s) [(symbol f) s])))))
+                            (keys drawn)))))
 
 (defn- with-id
   "Hiccup hc with its root element's attributes merged with attrs: a component's key as its id, the render that drew it as data
@@ -1253,14 +1255,14 @@
 
 (defn answer-sources
   "Walk w's answer for output o as `answer-of` reads it, each value with the component whose own answer held it: [[value
-  {:f :args}] ...] in the same order, :f the render or call that answered it and :args what it was called with (an entity
-  rendered by its schema's render, its entity). What a reader that labels the answer by what made it reads (the debug page's
-  sources). See docs/render.md#one-rendering-system-drawn-from-the-data."
+  {:f :args :key}] ...] in the same order, :f the render or call that answered it, :args what it was called with (an entity
+  rendered by its schema's render, its entity) and :key the component's key, the one :ran and the cache use, so a reader joins
+  a message to whether its component ran (the request's kept prefix). See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :map :qualified-keyword] [:vector [:tuple :any :map]]]}
   [w o]
   (let [cache @(:cache w)]
     ;; one pass into one vector, each component's source made once
-    (persistent! ((fn go [acc k] (let [e (get cache k) src (select-keys e [:f :args])]
+    (persistent! ((fn go [acc k] (let [e (get cache k) src (assoc (select-keys e [:f :args]) :key k)]
                                    (reduce (fn [acc x] (if (and (vector? x) (= ::child (first x))) (go acc (second x)) (conj! acc [x src])))
                                            acc (get-in e [:outs o]))))
                   (transient []) @(:out w)))))
