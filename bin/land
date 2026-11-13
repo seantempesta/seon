@@ -5,8 +5,8 @@
 #   1. merge main into the branch (a conflict stops it: resolve, commit, run it again);
 #   1b. bin/check health and bin/laws, seconds: a red stops the landing before any prove;
 #   2. bin/prove --out DIR --merge on that tip (the local path: see step 2's note below), niced, beside any other run (results are shared by digest across
-#      every checkout, and each run writes under its own target/prove/<id>: no run waits on another); a diff of
-#      docs/, resources/seon/tasks/ and top-level *.md only runs bin/check health and seon.doc-test instead (AGENTS.md §3).
+#      every checkout, and each run writes under its own target/prove/<id>: no run waits on another);
+#      a docs or task change is proved the same way: the plan reruns each test whose reads it moved (AGENTS.md §3).
 #      The log and the run's directory are kept in the main tree's target/land/, past the worktree's removal;
 #   3. main moves to a merge commit whose tree is the proved tip's (git commit-tree, then
 #      git update-ref with main's old value: no checkout of main is needed); a main that moved during
@@ -110,34 +110,28 @@ gone=$(dropped "$OLD" HEAD "${MSG:-/dev/null}")
 mkdir -p "$MAIN/target/land"
 STAMP=$(date +%Y%m%dT%H%M%S)-${B//\//-}
 LOG=$MAIN/target/land/$STAMP.log
-# a change of docs and tasks only is never proved (AGENTS.md §3): the wiki's health and seon.doc-test read what it
-# changed, and no test's reach is a page or a task entry's text (docs/merging.md#a-branch-lands-with-binland)
-CHANGED=$(git diff --name-only main...HEAD)
-DOCS=$(print -r -- "$CHANGED" | grep -vE '^(docs/|resources/seon/tasks/)|^[^/]+\.md$' | head -1)
 # health and the laws first, in seconds: a red there stops the landing before the prove (about 35 landing attempts gave 12
 # landings on 2026-11-12, many failing on a health or laws red found 10-20 minutes into a prove)
 { nice -n 15 "$HERE/bin/check" health && nice -n 15 "$HERE/bin/laws"; } > "$LOG.first" 2>&1 || {
   grep -vE '^\s*$' "$LOG.first" | tail -15; fail "health or the laws are red before any prove: $LOG.first"; }
 # the proof is a job, its own process group (bin/prove): a stop of the landing ends all of it, never leaving its
 # shards and check steps running (2026-11-08); waited as a job so the trap runs at once
-if [[ -n $CHANGED && -z $DOCS ]]; then
-  { nice -n 15 "$HERE/bin/test" seon.doc-test && print "MERGE OK"; } > "$LOG" 2>&1 & PJ=$!
-else
+# every change is proved by what it reaches, a docs or task file's included: the plan reruns each test whose reads it moved
+# (the docs and tasks classes; a test reading the wiki through its reader), never a fixed pair (a docs landing skipped
+# seon.repl-test/the-template-instructions-and-the-help-page-run, which reads the help page, and broke main)
   # by the owner's fallback (2026-11-11: a run forks main and loads the branch's whole program in order in one eval, from the
   # branch in the store, as replay does; the fallback a binary built from the branch's source, its tests forked from it):
   # this checkout's own build and runner. The standing system's items are forks of an agent started in the main tree and
   # carry its loaded config and libraries (jolt/runtime's land, 2026-11-12), so it proves no landing until its run loads the
   # branch whole as ruled.
   nice -n 15 "$HERE/bin/prove" --out "$MAIN/target/land/$STAMP-run" --merge > "$LOG" 2>&1 & PJ=$!
-fi
 trap 'kill -TERM -$PJ 2>/dev/null || kill -TERM $PJ 2>/dev/null; fail "stopped: its proof was ended with it"' TERM INT HUP
 wait $PJ; st=$?; trap - TERM INT HUP
 RUN=$(sed -nE 's/^(prove|test): run [^,]*, logs in (.*)$/\2/p' "$LOG" | tail -1)
 [[ -n $RUN && -d $RUN && ${RUN:A} != "$MAIN/target/land/$STAMP-run" ]] && cp -cR "$RUN" "$MAIN/target/land/$STAMP-run" 2>/dev/null
 grep -q "proved green already" "$LOG" && print "proved by an earlier prove of this very tree: merging, nothing run"
 grep -E '^RED |^FAILED ' "$LOG" | cut -c1-200 | head -12
-if [[ -n $CHANGED && -z $DOCS ]]; then LINE="bin/land: docs and tasks only: bin/check health, bin/laws and seon.doc-test green"
-else LINE=$(grep -E ' bin/prove --merge .*: MERGE (OK|FAILED)' "$LOG" | tail -1); fi
+LINE=$(grep -E ' bin/prove --merge .*: MERGE (OK|FAILED)' "$LOG" | tail -1)
 (( st == 0 )) && [[ $(tail -1 "$LOG") == "MERGE OK" ]] || fail "the proof is red: $LOG"
 [[ $(git rev-parse HEAD) == $(git rev-parse "$B") ]] && git merge-base --is-ancestor "$OLD" HEAD || fail "the branch moved during its proof"
 { if [[ -n $MSG ]]; then cat "$MSG"; else print "Merge $B"; fi; print; print "$LINE"; } > "$HERE/target/land-msg"
