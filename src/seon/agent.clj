@@ -1202,16 +1202,22 @@
   (let [{:keys [out fd]} end
         ;; the test in flight and the fiber running it, from its start to its end: what quiescence ends, once
         in-flight (atom nil)
+        ;; while a put waits for room on the link the test is waiting on the agent to read, not deadlocked: :sending says so
         put! (fn [v]
                (cond (:seon.test/started v) (reset! in-flight {:fiber (jolt.host/current-fiber) :test (:seon.test/started v)})
                      (:seon.test/ended v) (reset! in-flight nil))
-               (a/>!! out v) (jolt.fibers/yield))]
+               (swap! in-flight #(some-> % (assoc :sending true)))
+               (a/>!! out v)
+               (swap! in-flight #(some-> % (assoc :sending false)))
+               (jolt.fibers/yield))]
     ;; the starter's watch, armed again here as seon.lib/fork! arms it in each child: nothing it forked outlives root
     (lib/end-with!)
     ;; quiescence may be heard twice for one state (a pump ran): the test is taken from in-flight, so it is ended once
     (jolt.host/on-quiescent!
      (fn [dump]
-       (when-let [{:keys [fiber test]} (first (reset-vals! in-flight nil))]
+       ;; a hang is evidence: every quiescence is written to stderr (the agent's .err) with its dump, before anything ends
+       (binding [*out* *err*] (println "test child quiescent:" (pr-str (dissoc @in-flight :fiber)) "\n" dump) (flush))
+       (when-let [{:keys [fiber test]} (when-not (:sending @in-flight) (first (reset-vals! in-flight nil)))]
          ;; built under the branch's schemas, as run-tests-here binds them: the handler runs in Jolt's scheduler, outside that binding,
          ;; and an error type the binary was not built with (a branch's) threw there, which ended the child with no answer (exit 1)
          (let [msg (str "the test can never go on: every fiber of its process waits and nothing can wake one (" test ")")
