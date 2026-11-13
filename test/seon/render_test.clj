@@ -2206,6 +2206,40 @@
       (is (empty? (.getWatches #'lab-said)) "a disposed walk watches nothing")
       (finally (alter-var-root #'lab-said (constantly was))))))
 
+(defn lab-child
+  "A line of text over ctx, the nested render the test below redefines."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}] [:p (str "plan " (:db/id c))])
+
+(defn lab-root
+  "A walk's root over its ctx view: a section holding lab-child."
+  {:malli/schema [:=> [:cat :map :any] :any]}
+  [_ _] [:section [#'lab-child {}]])
+
+;; See docs/render.md#a-page-is-a-kept-walk
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-redefined-render-redraws-in-the-walk-value
+  ;; estimate: a test db and two transactions (~1M), three walks of two components (~0.1M each)
+  ;; the walk kept as a value takes a redefinition as the eval records it, its :var/form datom moved (no watch): the render's
+  ;; components draw again with the new definition; one that wrote no datom is seen only where the walk visits it again
+  (let [db0 (d/db-with (ts/test-db) [{:db/id "v" :var/name `lab-child :var/form "f"}
+                                     {:db/id "f" :form/id "lab-child-1" :form/src "(defn lab-child ...)" :form/defines #{"v"}}])
+        db1 (d/db-with db0 [{:db/id "f" :form/id "lab-child-2" :form/src "(defn lab-child ... :h2)" :form/defines #{[:var/name `lab-child]}}
+                            {:var/name `lab-child :var/form "f"}])
+        opts (fn [db] {:db db :tree {:db/id 1} :root #'lab-root :index (seon.db/index) :changes seon.ctx/changes :outputs #{:seon.render/hiccup}})
+        k [`lab-child {}]
+        out (fn [p] (pr-str (some (fn [[ck e]] (when (= #'lab-child (:f e)) (:out e))) (:cache p))))
+        ran? (fn [p] (some (fn [[ck v]] (when (= `lab-child (first ck)) v)) (:ran p)))
+        was @#'lab-child
+        p0 (r/walk nil (opts db0))]
+    (try
+      (alter-var-root #'lab-child (fn [f] (fn [& a] (assoc (apply f a) 0 :h2))))
+      (let [p1 (r/walk p0 (assoc (opts db0) :moved []))
+            p2 (r/walk p1 (assoc (opts db1) :moved (seon.ctx/moved db0 db1 nil)))]
+        (is (and (nil? (ran? p1)) (not (str/includes? (out p1) ":h2"))) (str "no :var/form moved: the child is not drawn again " (out p1)))
+        (is (= :miss (ran? p2)) "its :var/form moved: its component runs")
+        (is (str/includes? (out p2) ":h2") (str "with the new definition: " (out p2))))
+      (finally (alter-var-root #'lab-child (constantly was))))))
+
 (deftest a-change-below-a-unit-moves-its-revision
   ;; docs/render.md#a-layout-places-its-lists: every component is a unit, at any depth; one nested in another (a key the agent
   ;; added, under ctx-keys) changing moves its own revision alone, so the render proc sends that unit and not its parent
@@ -4841,11 +4875,13 @@
         db (d/db-with db (seon.doc/load-tx db "docs" {seon.doc/system-page "# A stub of the system prompt\n\nBe brief."}))
         ix (seon.program/index-of-db db)
         c (:tree (seon.ctx/build ix db (seon.db/eid db :seon.agent/key "lab/a1") :b))
-        w (draw c seon.ctx/changes db #'ui/agent {:index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
-    (try {:c c :ix ix :page (apply str (map :html (seon.fixtures/page-units w))) :msgs (pr-str (:messages (seon.ctx.wire/request w))) :parts (:parts (seon.ctx.wire/request w))
-          ;; the conversation as the page shows it: the units its list holds (container #c-rows, seon.render.ui/conversation-list)
-          :rows (apply str (keep #(when (= "#c-rows" (:container %)) (:html %)) (seon.fixtures/page-units w)))}
-         (finally (r/dispose-walk! w))))))
+        p (r/walk nil {:db db :tree c :root #'ui/agent :index ix :changes seon.ctx/changes :units true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})
+        units (seon.fixtures/composed (:units p))
+        req (seon.ctx.wire/request p db)]
+    (seon.fixtures/no-error-render (:defects p))
+    {:c c :ix ix :page (apply str (map :html units)) :msgs (pr-str (:messages req)) :parts (:parts req)
+     ;; the conversation as the page shows it: the units its list holds (container #c-rows, seon.render.ui/conversation-list)
+     :rows (apply str (keep #(when (= "#c-rows" (:container %)) (:html %)) units))})))
 
 (deftest a-joined-entity-of-a-registered-schema-reaches-the-page
   ;; docs/render.md#the-page: what an agent's pull joins reaches the page by its schema's html render, no code naming it.

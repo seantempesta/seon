@@ -1241,10 +1241,8 @@
         ;; and as a test process: a private function's contract is checked on each call here, whatever its agent's
         ;; setting (the owner, 2026-11-10: "Private helpers: tests only"; docs/checks.md#contracts-armed-at-definition)
         (contract/check-private! true)
-        ;; nor the agent's walk: a fork holds its reactions on @ctx, which would run at a test's every write of a
-        ;; record of its own (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
-        (some-> (:walk @state) render/dispose-walk!)
-        (swap! state #(-> % (dissoc :walk) (assoc :mode :test :evaluating false)))
+        ;; nor the agent's walk, a value its test has no use for (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
+        (swap! state #(-> % (dissoc :walk :walk-whole?) (assoc :mode :test :evaluating false)))
         ;; the test's own working directory: what a test writes relative to it is this run's, removed
         ;; when the child has ended (docs/failure-points.md, a directory walk)
         (let [run-dir (fx/run-dir (lib/c-getpid))] (.mkdirs (java.io.File. ^String run-dir)) (lib/c-chdir run-dir))

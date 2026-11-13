@@ -125,20 +125,20 @@
           :else [[:session (:seon.agent/key x)] nil])))
 
 (defn request
-  "The agent's request, walk w's model output (seon.render/openai-compat: each entity rendered by its schema's model render, in
+  "The agent's request on db, walk p's model output (p a value seon.render/walk answered) (seon.render/openai-compat: each entity rendered by its schema's model render, in
   the order the agent's render places them; docs/render.md#the-models-context-a-cached-prefix-then-the-turn). Answers
   {:messages :parts}: provider-neutral messages (seon.model/wire-messages makes the wire shape), and :parts, each [ref messages
   turn] in order, the ref of what answered them (`part-ref`), which the debug page labels its messages by. A request with no
   system message is refused, :seon.ctx/no-system-message, never sent without one."
-  {:malli/schema [:=> [:cat :map] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]}
-  [w]
-  (let [db ((:db w))
-        c @(:ref (:src w))
-        turn-of (into {} (for [[n ps] (when (:db/id c) (ctx/placed-messages @(:index w) c)) :when (int? n) p ps] [(peek p) n]))
+  {:malli/schema [:=> [:cat :map :seon.host/db] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]}
+  [p db]
+  (let [c (:tree p)
+        ix (:index p)
+        turn-of (into {} (for [[n ps] (when (:db/id c) (ctx/placed-messages ix c)) :when (int? n) pl ps] [(peek pl) n]))
         ps (reduce (fn [acc [m src]]
-                     (let [[ref n] (part-ref @(:index w) db turn-of src m) [r0 ms n0] (peek acc)]
+                     (let [[ref n] (part-ref ix db turn-of src m) [r0 ms n0] (peek acc)]
                        (if (and (seq acc) (= ref r0)) (conj (pop acc) [r0 (conj ms m) n0]) (conj acc [ref [m] n]))))
-                   [] (render/answer-sources w :seon.render/openai-compat))
+                   [] (get-in p [:answers :seon.render/openai-compat]))
         ms (into [] (mapcat second) ps)]
     (when-not (= "system" (:role (first ms)))
       (throw (ex-info "the request has no system message"
@@ -157,13 +157,13 @@
 (defn render
   "What a turn's reader got, from its basis b (seon.turn records it on the turn's model call, :seon.model-call/basis), drawn at the
   point b names on db's store (`db-at`), whatever later db is handed in: the request (`request`) of b's :agent, how its work stands among it (the page's evals, `status` in the first). The one maker of a context: the model's request is this, and so is every
-  later reading of it. opts :walk, the agent's live walk, drawn to db (else the tree drawn cold, of opts :ctx, its @ctx at db, or of its record there, its schemas read in opts :index, the agent's held branch index, else built from db). {:messages :parts} (`request`)."
+  later reading of it. opts :walk, the agent's live walk value (seon.render/walk), as of db (else a cold walk of the tree, of opts :ctx, its @ctx at db, or of its record there, its schemas read in opts :index, the agent's held branch index, else built from db). {:messages :parts} (`request`)."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.model-call/basis] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]
                   [:=> [:cat :seon.host/db :seon.model-call/basis :map] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]]}
   ([db basis] (render db basis {}))
   ([db {:keys [agent commit] :as basis} {:keys [walk ctx index]}]
    (if walk
-     (request walk)
+     (request walk db)
      (let [;; the point the basis names, whatever db was handed in: a later db (the debug page's, the context op's) would draw the
            ;; turns after it as its own
            db (cond-> db commit (db-at basis))
@@ -172,8 +172,9 @@
            ;; as of a t (a commit collection took) holds no commit id of its own
            t (cond-> (or ctx (ctx/agent-ctx ix db (pdb/eid db :seon.agent/key agent)))
                commit (assoc ::here {:commit commit :t (or (:t basis) (:max-tx db))}))
-           w (render/draw t ctx/changes db (render/render-var-of ix (merge {:seon.agent/key agent} t)) {:model-only true :once true :index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
-       (try (request w) (finally (render/dispose-walk! w)))))))
+           p (render/walk nil {:db db :tree t :root (render/render-var-of ix (merge {:seon.agent/key agent} t)) :index ix :changes ctx/changes
+                               :model-only true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
+       (request p db)))))
 
 (defn provider-of
   "The model provider a turn with basis b used, from db at b's commit: main as the agent last heard it
