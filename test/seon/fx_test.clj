@@ -330,14 +330,37 @@
     (is (= ["expected 1"] (map :message (get-in v [:failures 'seon.system-test/b]))))
     (is (= {'seon.check-test/a "da" 'seon.system-test/b "db"} (:digests v)))))
 
-(deftest a-gate-is-proved-by-the-system-on-its-candidates-checkout
+(defn- checkout-sh
+  "seon.lib/sh as run-on-checkout runs it, for a test of that function on a repository of a few files: bin/worktree --at is a
+  plain detached worktree of the repository (the script also clones the checkout's built products and submodules: its own
+  proofs' subject, not this one's), --remove-at removes it, bin/build answers built, and bin/test's run is (runner out names);
+  every other command runs. Each command is added to calls as [argv dir]."
+  [calls runner]
+  (let [sh seon.lib/sh repo (atom nil)]
+    (fn [& args]
+      (let [[cmd opts] (split-with string? args)
+            cmd (vec cmd)
+            script (some #(re-find #"bin/(worktree|build|test)$" %) cmd)]
+        (swap! calls conj [cmd (:dir (apply hash-map opts))])
+        (case (second script)
+          "worktree" (if (= "--at" (second cmd))
+                       (let [[_ _ d sha r] cmd] (reset! repo r) (sh "git" "-C" r "worktree" "add" "-q" "--detach" d sha))
+                       (sh "git" "-C" @repo "worktree" "remove" "--force" (nth cmd 2)))
+          "build" {:exit 0 :out "" :err ""}
+          "test" (let [[out & names] (drop (inc (.indexOf ^java.util.List cmd "tests")) cmd)] (runner out names) {:exit 0 :out "" :err ""})
+          (apply sh args))))))
+
+(deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/execs ["git"]} a-gate-is-proved-by-the-system-on-its-candidates-checkout
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: the :tests effect makes the candidate's checkout (the merges head,
   ;; the candidate's files over it) and asks the system to prove it (its :ctx's :prove-tree, seon.system/prove-tree! as root
   ;; binds it), named by exactly the deferred tests, in mode :judge, by the checkout's tree; the checkout is removed after.
-  ;; Before, it ran bin/prove --tests in the checkout, a shell runner beside the test service
+  ;; Before, it ran bin/prove --tests in the checkout, a shell runner beside the test service. The checkout is a worktree of a
+  ;; repository of two files (checkout-sh): bin/worktree's clone of the built products is not this claim.
+  ;; Estimate: ~12 git calls (init, commit, worktree add and remove, two tree-ids) and a few clones and file writes: ~3M ticks
   (let [repo (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/fx-gate-" (random-uuid))) (.mkdirs)))
-        git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@localhost" args)] (clojure.string/trim (str (:out r)))))
+        git (fn [& args] (clojure.string/trim (str (:out (apply seon.lib/sh "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@localhost" args)))))
         asked (atom nil)
+        calls (atom [])
         ;; one red and one test the run never reached (it is answered at its first red): nothing green is held
         prove (fn [on] (reset! asked (assoc on :file (slurp (str (:checkout on) "/src/a.clj")) :tree-now (fx/tree-id (:checkout on))))
                 {:red ['a/t] :reports [{:type :fail :var "#'a/t" :message "red"}] :digests {'a/t "d"}})]
@@ -345,14 +368,16 @@
       (git "init" "-q" "-b" "main")
       ;; target/ ignored, as the repository's is: the checkout's cloned products are no part of its tree
       (spit (str repo "/.gitignore") "/target/\n/runs/\n") (spit (str repo "/f") "1") (git "add" "-A") (git "commit" "-q" "-m" "one")
-      (let [r (fx/run-tests {:req {:repo repo :branch "main" :files {"src/a.clj" (str "(ns a) ; " (random-uuid))} :tests ['a/t 'a/u]}
-                             :ctx {:prove-tree prove}})]
+      (let [r (with-redefs [seon.lib/sh (checkout-sh calls (fn [& _] (is false "the gate runs no runner of its own")))]
+                (fx/run-tests {:req {:repo repo :branch "main" :files {"src/a.clj" (str "(ns a) ; " (random-uuid))} :tests ['a/t 'a/u]}
+                               :ctx {:prove-tree prove}}))]
         (is (= {'a/t :fail} (get-in r [:value :results])) (pr-str r))
         (is (= ["red"] (map :message (get-in r [:value :failures 'a/t]))))
         (is (= #{'a/t 'a/u} (:names @asked)) "named by exactly the deferred tests")
         (is (= :judge (:mode @asked)))
         (is (clojure.string/starts-with? (str (:file @asked)) "(ns a)") "the candidate's files are on the checkout it asks to prove")
         (is (= (:tree-now @asked) (:tree @asked)) "named by the checkout's tree")
+        (is (not-any? (fn [[cmd]] (some #(clojure.string/ends-with? % "bin/build") cmd)) @calls) "nothing is built for it")
         (is (not (.exists (java.io.File. (str (:checkout @asked))))) "and the checkout is removed after"))
       (finally (seon.lib/remove-tree! repo)))))
 
@@ -666,15 +691,35 @@
       (finally (seon.lib/remove-tree! dir)))))
 
 ;; docs/merging.md#a-merge-runs-what-the-change-reaches: the fallback route of a branch's run: a checkout of its commit, the tree's
-;; own binary built there (bin/build seon: current already when the tree is the running one's, so here it is a check), and the
-;; named tests run by that checkout's runner, never proved by root's program. Red before: :built? was not read, the run went to
-;; the gate's path, and with no system to prove on it answered that error
-(deftest a-built-run-judges-the-named-tests-on-the-checkouts-own-build
-  (let [co (str (cfg/checkout))
-        branch (clojure.string/trim (:out (seon.lib/sh "git" "-C" co "rev-parse" "--abbrev-ref" "HEAD")))
-        t 'seon.fx-test/a-read-of-named-paths-reads-only-those-files
-        r (fx/run-tests {:req {:repo co :branch branch :built? true :tests [t]}})]
-    (is (= {t :pass} (get-in r [:value :results])) (str "judged with no system given (:ctx), by the checkout's own runner: " (pr-str r)))))
+;; own binary built there (bin/build seon), and the named tests run by that checkout's runner, never proved by root's program.
+;; Red before: :built? was not read, the run went to the gate's path, and with no system to prove on it answered that error.
+;; The checkout is a worktree of a repository of one file, its build and runner answered (checkout-sh): the runner plans the one
+;; named test at a digest of this run's, whose green is cached as a shard's is; run-on-checkout reads its status from there
+(deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/execs ["git"]} a-built-run-judges-the-named-tests-on-the-checkouts-own-build
+  ;; Estimate: ~8 git calls, a few clones, one verdict written and read: ~3M ticks
+  (let [repo (.getCanonicalPath (doto (java.io.File. (str (cfg/checkout) "/target/tmp/fx-built-" (random-uuid))) (.mkdirs)))
+        git (fn [& args] (clojure.string/trim (str (:out (apply seon.lib/sh "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@localhost" args)))))
+        pn (str "built-probe-" (random-uuid))
+        t (symbol pn "t")
+        cache (cfg/value :seon.config.proofs/results-dir)
+        calls (atom [])
+        ran (atom nil)
+        runner (fn [out names]
+                 (reset! ran names)
+                 (.mkdirs (java.io.File. ^String out))
+                 (spit (str out "/tests.edn") (pr-str {:digests {t pn}}))
+                 (fx/write-verdicts! cache {:id (str "probe " pn) :tree "t"} {t {:test t :digest pn :pass 1 :fail 0 :error 0}} {}))]
+    (try
+      (git "init" "-q" "-b" "main")
+      (spit (str repo "/.gitignore") "/target/\n/runs/\n") (spit (str repo "/f") "1") (git "add" "-A") (git "commit" "-q" "-m" "one")
+      (let [r (with-redefs [seon.lib/sh (checkout-sh calls runner)]
+                (fx/run-tests {:req {:repo repo :branch "main" :built? true :tests [t]}}))
+            build (some (fn [[cmd dir]] (when (some #(clojure.string/ends-with? % "bin/build") cmd) [(last cmd) dir])) @calls)]
+        (is (= {t :pass} (get-in r [:value :results])) (str "judged with no system given (:ctx), by the checkout's own runner: " (pr-str r)))
+        (is (= [(str t)] @ran) "the runner was named exactly the tests")
+        (is (= "seon" (first build)) (pr-str @calls))
+        (is (clojure.string/starts-with? (str (second build)) (cfg/value :seon.config.source/tests-dir)) "the binary built in the checkout, from its own source"))
+      (finally (seon.lib/remove-tree! repo) (seon.lib/remove-tree! (str cache "/" pn))))))
 
 ;; docs/merging.md#verdicts-are-a-cache: a config value naming a file enters a test's digest as the file's name, never where the
 ;; machine keeps it, so one test has one digest from any checkout (the embed model in the main tree's cache read "<checkout>/..."

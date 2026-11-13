@@ -4,7 +4,7 @@
   runner's, whose threads and GC sweepers are the runner's."
   (:require [seon.lib] [clojure.test :refer [deftest is]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.db :as pdb] [datahike.api :as d] [seon.test-store :as ts] [seon.config :as config] [seon.contract :as contract]
-            [seon.system :as root] [seon.program :as program] [my.test :as mt]))
+            [seon.system :as root] [seon.program :as program] [seon.problems] [my.test :as mt]))
 
 (defn- test-store "The one store these tests' roots take a branch of (seon.test-store/process-store)." []
   (ts/process-store))
@@ -403,29 +403,40 @@
                    out))))
        (finally (seon.lib/remove-tree! tree store (str store "-agents") (str store "-in") (str store ".log")))))))
 
-(deftest a-boot-on-a-binary-of-another-program-holds-mains-config
+;; Estimate: the world (built once a process, ~3M when this test builds it first) + main's ~200 config entries through db-with ~1M + one
+;; hold-config! (of-entries' aero read of every entry ~3.6M) ~4M + stale-binary (binary-current: one git child for a tree git cannot
+;; diff ~0.1M) + main's program digest ~1M + 2 booted-source writes and 2 health derivations on the world ~2M = 11,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 11000000}} a-boot-on-a-binary-of-another-program-holds-mains-config
   ;; task seon.system/a-boot-resumes-from-the-db, THE GAP: a landing moves git first, and its bridge's merge brings main in
   ;; the db after it (bin/land), so a boot between them finds main behind its tree and its binary built from another
-  ;; program. Here a merge adds a config key root reads at start (:seon.config.web/streams-buf, read for a :bind/ buffer,
-  ;; as 191e4b56ba did): main holds the tree before it (the key at another value: a missing one refuses the seed, as it
-  ;; would a boot, seon.config's closed), and the tree has the binary's. The boot reads neither the tree nor the commit: it
-  ;; holds main's config, writes no program fact, and says its binary is another program than main's, a problem fact
-  ;; (seon.problems/stale-binary), at each boot until bin/update rebuilds it. Red before: the boot imported the commit
-  (let [file "resources/seon/config/default.edn"
-        ;; the shipped file as the binary was built
-        merged config/built-text
-        before (str/replace merged #"(:seon\.config\.web/streams-buf )(\d+)" (fn [[_ k v]] (str k (inc (parse-long v)))))
-        [seed two three] (boots-on-a-tree file [before merged merged])]
-    (is (not= before merged))
-    (is (str/includes? (str seed) "SEED OK") (str seed))
-    (is (map? two) (str "the root booted on a main behind its tree: " two))
-    (is (= (inc (config/value :seon.config.web/streams-buf)) (:streams-buf two)) "it holds main's value, not the tree's or the binary's")
-    (is (= (:seed-t two) (:program-t two)) "the boot wrote no program fact: main's program is the seed's")
-    (is (< (:program-t two) (:boot-t two)))
-    (is (= 1 (count (:stale two))) (str "its binary is of another tree than main's: one stale-binary row " (pr-str (:stale two))))
-    (is (= (second (first (:stale two))) (:tree (:fact two))) "naming the tree main was last brought to")
-    (is (= (:seed-t three) (:program-t three)) "the next boot neither")
-    (is (= (:stale two) (:stale three)) "and the row stands while the binary does")))
+  ;; program. Here main states a config key root reads at start (:seon.config.web/streams-buf, read for a :bind/ buffer,
+  ;; as 191e4b56ba did) at another value than the binary's (seon.config/built-text, the tree's), and was last brought to
+  ;; another tree. The boot's acts on main's db value (seon.system/boot! and start!): it holds main's config
+  ;; (seon.program/hold-config!), and its source fact (seon.system/booted-source) states main's program, not the binary's,
+  ;; with a stale-binary problem naming the tree main was last brought to (seon.problems/stale-binary), at each boot until
+  ;; bin/update rebuilds it. That a boot reads no file and writes no program fact is the whole sequence's claim, on a root:
+  ;; a-boot-reads-no-file-a-commit-broke, seon.source-test/a-boot-resumes-main-and-reads-no-file
+  (let [k :seon.config.web/streams-buf
+        main (d/db-with (mt/world {:history? true}) (conj (vec (for [[ck v] config/config]
+                                               {:config/key ck :config/form (pr-str (cond-> v (= k ck) inc)) :config/file config/shipped-file}))
+                                         {:seon.system/id :root :seon.system/source {:root "/c" :files 1 :forms 1 :ms 1 :tree "main-tree"}}))
+        built (program/binary-program)
+        source #(:seon.system/source (d/pull % [:seon.system/source] [:seon.system/id :root]))
+        boot (fn [db b] (d/db-with db [{:seon.system/id :root
+                                        :seon.system/source (root/booted-source (source db) b built (program/program-digest db) {} (root/stale-binary db) nil)}]))
+        rows #(mapv (juxt :binary :tree) (get-in (seon.problems/health %) [:classes :stale-binary :rows]))
+        held @@#'config/held]
+    (try
+      (is (= [] (program/hold-config! main)))
+      (is (= (inc (get config/config k)) (config/value k)) "it holds main's value, not the tree's or the binary's")
+      (let [two (boot main "b2")
+            three (boot two "b3")]
+        (is (= (program/program-digest main) (:program (source two))) "its source fact states main's program, the binary's beside it")
+        (is (nil? (:inputs (source two))) "and no inputs of the binary's to key agents' verdicts by")
+        (is (= [[(get-in built [:inputs :tree]) "main-tree"]] (rows two))
+            "its binary is of another tree than main's: one stale-binary row, naming the tree main was last brought to")
+        (is (= (rows two) (rows three)) "and the row stands at the next boot while the binary does"))
+      (finally (reset! @#'config/held held)))))
 
 (deftest what-agents-merged-into-main-is-no-stale-binary
   ;; docs/source.md#a-boot-resumes-from-the-db (the db is the source of truth): root refuses spawns only when its binary was built

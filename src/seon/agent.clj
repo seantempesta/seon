@@ -1473,6 +1473,19 @@
                              (select-keys (proofs/results r) (keys (get-in held [:plan :removed]))) proofs)]
     (cond-> (dissoc r :measured) (contract/error? rec) (update :unrecorded (fnil conj []) (:seon.error/message rec)))))
 
+(defn- reused-reports
+  "The reports of tests ts reused at their digests (reused, {test result}): a green as one :pass report, a red as the failures
+  its run recorded, so it judges as it did, each marked :reused. See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :map [:sequential :qualified-symbol]] [:vector :map]]}
+  [reused ts]
+  (vec (for [t ts :let [r (reused t)] :when r
+             f (or (seq (:failures r))
+                   [(cond-> {:type (if (proofs/green? r) :pass (if (pos? (:error r)) :error :fail))}
+                      (not (proofs/green? r)) (assoc :message "red at this digest, with no failure kept"))])]
+         (cond-> (assoc f :var (str "#'" t) :reused true)
+           ;; a cost proof's rows, as its fresh run reported them (seon.proofs/costs)
+           (and (:cost r) (identical? f (first (:failures r)))) (assoc :cost (:cost r))))))
+
 (defn- run-plan
   "What a run of this branch selects and runs (run-tests-forked's, and the test service's :plan of it, seon.prove): the
   plan (test-plan, with the tests of the namespaces named as proofs), the tests it selects for mode (:turn: the proofs and
@@ -1498,14 +1511,7 @@
                    judge)
         {:keys [reused digests]} plan
         run (filterv #(not (reused %)) selected)
-        ;; a red reused reports the failures its run recorded, so it judges as it did
-        reused-reports (vec (for [t selected :let [r (reused t)] :when r
-                                  f (or (seq (:failures r))
-                                        [(cond-> {:type (if (proofs/green? r) :pass (if (pos? (:error r)) :error :fail))}
-                                           (not (proofs/green? r)) (assoc :message "red at this digest, with no failure kept"))])]
-                              (cond-> (assoc f :var (str "#'" t) :reused true)
-                                ;; a cost proof's rows, as its fresh run reported them (seon.proofs/costs)
-                                (and (:cost r) (identical? f (first (:failures r)))) (assoc :cost (:cost r)))))]
+        reused-reports (reused-reports reused selected)]
     {:plan plan :judge judge :deferred deferred :selected selected :run run :reused reused :digests digests :reused-reports reused-reports}))))
 
 (defn- held-plan
@@ -1529,16 +1535,34 @@
     (let [ts (vec (sort-by str (keys items)))]
       (assoc held :judge ts :selected ts :run ts :deferred [] :reused {} :reused-reports []))))
 
+(defn- granted-selection
+  "sel (a fresh plan of the granted items' names) made to answer exactly the granted items ({test digest}): each runs, or is
+  reused at the digest this plan gives it, whatever the run's own selection filter dropped; one this agent's test child can't
+  run (a test that reaches a process of its own: the plan's :process) is answered as an :error report naming why, never left
+  out, so the service never meets an answer with no verdict for a granted item (task seon.prove/a-granted-item-is-answered).
+  See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map [:map-of :qualified-symbol :string]] :map]}
+  [sel items]
+  (let [process (set (:process (:plan sel)))
+        ts (vec (sort-by str (keys items)))
+        {here false there true} (group-by (comp boolean process) ts)
+        reused (select-keys (:reused (:plan sel)) here)
+        refused (vec (for [t there] {:type :error :var (str "#'" t) :not-run true
+                                     :message (str t " reaches a process of its own: a test child can't start one; it runs on a built checkout")}))]
+    (assoc sel :judge ts :selected (vec here) :run (filterv #(not (reused %)) here) :deferred (vec there) :reused reused
+           :reused-reports (into (reused-reports reused here) refused))))
+
 (defn- grant-selection
   "What a run selects: items given (the test service's grant, {test digest}) are what it runs, as held planned them
-  (item-selection), or, held gone or of another program, as planned again (plan: run-plan of their names); given and empty,
-  nothing (a grant of no items once ran every test, 1,765 of them); items not given (nil), a plan of its own. See
-  docs/merging.md#the-test-service."
+  (item-selection), or, held gone or of another program, exactly those items as planned again (plan: run-plan of their names,
+  granted-selection: none dropped by the run's selection filter); given and empty, nothing (a grant of no items once ran
+  every test, 1,765 of them); items not given (nil), a plan of its own. See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat [:maybe :map] [:maybe [:map-of :qualified-symbol :string]] :seon.host/fn] :map]}
   [held items plan]
   (cond (nil? items) (plan)
         (empty? items) {:plan (:plan held) :judge [] :selected [] :run [] :deferred [] :reused {} :reused-reports [] :digests {}}
-        :else (or (item-selection held items) (plan))))
+        :else (or (item-selection held items)
+                  (let [sel (plan)] (if (:unread sel) sel (granted-selection sel items))))))
 
 (defn run-tests-forked
   "Fork this agent; the child runs what test-plan runs for proofs (the selected tests with no

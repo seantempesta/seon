@@ -325,30 +325,40 @@
         (let [[_ o2] (feed st [(answer-of {:tag 9999} {:ok true})])]
           (is (empty? (filter #(= :prove-state (:op %)) o2))))))))
 
-;; est: two shell-outs and futures; own work is spawn bookkeeping and string checks
-(deftest ^{:seon.test/estimate {:ticks 3000000}} two-runs-on-one-checkout-each-end-with-their-own-result
+(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["bin/prove"]} two-runs-on-one-checkout-each-end-with-their-own-result
   ;; two bin/prove runs at once on one checkout wrote the same target/prove (shard files, logs):
   ;; one run's start removed the other's shards and a plain run destroyed a --merge run's logs.
   ;; Each run writes under a directory of its own, named on its first line, ends with its own
   ;; complete result (its output holds its plan line and PROVE OK), and a green run's directory is
-  ;; removed with the run: its logs are read by no one (a red or killed run's stay, the evidence)
-  ;; run from the checkout this process runs from (seon.config/checkout), never the working directory: a test
-  ;; child of main's boot run works in its own run directory, where bin/prove is not (the thread that
-  ;; threw never delivered its promise, and the whole boot run waited on it for good: 2026-10-30). A
-  ;; future's deref rethrows what its body threw, so a run that cannot start ends this test with that error
+  ;; removed with the run: its logs are read by no one (a red or killed run's stay, the evidence).
+  ;; The script is this checkout's bin/prove, run from a checkout of its own whose bin/test answers at once: what bin/prove
+  ;; decides (the run's directory, its lines, its removal) is the claim, never what the runner proves.
+  ;; Estimate: two script runs (zsh, perl, a stub runner, rm: ~10 processes each), two futures: ~1M ticks in this process
   (let [ck (seon.config/checkout)
-        run (fn [] (clojure.java.shell/sh (str ck "/bin/prove") "--tests" "seon.step-test" :dir ck))
-        fa (future (run)) fb (future (run))
-        rs [@fa @fb]
-        dir (fn [r] (second (re-find #"prove: run \S+, logs in (\S+)" (:out r))))]
-    (doseq [r rs]
-      (is (zero? (:exit r)) (str (:out r) (:err r)))
-      (is (some? (dir r)) "a run says where its logs are")
-      (is (clojure.string/includes? (:out r) "PROVE OK"))
-      (is (re-find #"prove: \d+ keys" (:out r)) "and holds its own plan line"))
-    (is (not= (dir (first rs)) (dir (second rs))) "each run has a directory of its own")
-    (doseq [r rs]
-      (is (not (.exists (java.io.File. ^String (dir r)))) "and a green run's directory is gone with it"))))
+        root (str ck "/target/tmp/two-proves-" (random-uuid))
+        bin (str root "/bin")
+        run (fn [] (seon.lib/sh (str bin "/prove") "--tests" "a.x-test" :dir root))]
+    (try
+      (.mkdirs (java.io.File. bin))
+      (doseq [f ["prove" "remove-tree"]]
+        (java.nio.file.Files/createSymbolicLink (.toPath (java.io.File. (str bin "/" f))) (.toPath (java.io.File. (str ck "/bin/" f)))
+                                                (make-array java.nio.file.attribute.FileAttribute 0)))
+      (spit (str bin "/env") "export SEON_RESULTS_DIR=$ROOT/results\n")
+      ;; bin/test --prove tests OUT NS: a shard's file in OUT and the plan line naming it
+      (spit (str bin "/test") "#!/bin/zsh\nmkdir -p $3 && print shard > $3/shard-0.log && echo \"prove: 1 keys, planned in $3\"\n")
+      (seon.lib/sh "chmod" "+x" (str bin "/test"))
+      (let [fa (future (run)) fb (future (run))
+            rs [@fa @fb]
+            dir (fn [r] (second (re-find #"prove: run \S+, logs in (\S+)" (:out r))))]
+        (doseq [r rs]
+          (is (zero? (:exit r)) (str (:out r) (:err r)))
+          (is (some? (dir r)) "a run says where its logs are")
+          (is (clojure.string/includes? (:out r) "PROVE OK"))
+          (is (clojure.string/includes? (:out r) (str "prove: 1 keys, planned in " (dir r))) "and holds its own plan line"))
+        (is (not= (dir (first rs)) (dir (second rs))) "each run has a directory of its own")
+        (doseq [r rs]
+          (is (not (.exists (java.io.File. ^String (dir r)))) "and a green run's directory is gone with it")))
+      (finally (seon.lib/remove-tree! root)))))
 
 ;; ---- items: the service's unit of work (notes test-system-as-a-flow-2026-11-10.md, step 2) ----------------------------
 
@@ -508,6 +518,21 @@
     (is (= [{:test 'app.x-test/t :digest "d1" :status :pass}] (mapv #(select-keys % [:test :digest :status]) (:verdicts (get (answers o2) "k2"))))
         "k2's answer names the verdict it was told")
     (is (= [{:key "k1" :test 'app.x-test/u :digest "d2" :status :no-verdict}] (told o3)) "an item with no verdict is told so")))
+
+;; docs/merging.md#the-test-service: a batch answer that names no verdict for an item it was granted is the core failing, so
+;; it is a :platform problem with its evidence (the owner, 2026-11-13: "fail loud"): the test, its digest and the names the answer
+;; did report. Red before: the item was told :no-verdict and nothing was filed. Estimate: two asks and one batch end ~0.2M.
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-batch-answer-missing-an-item-files-a-problem-with-its-evidence
+  (let [it {:agent :a1 :ms 5}
+        [st o1] (prove/ask-items (items-st 1) "k1" :batch {['app.x-test/t "d1"] it ['app.x-test/u "d2"] it})
+        b (first (batches o1))
+        [st v] (step/answered st (:tag b))
+        [_ o2] (prove/batch-ended st (parse-long (second v)) (green-of 'app.x-test/t))
+        problems (filterv #(= :problem (:op %)) o2)]
+    (is (= #{'app.x-test/t 'app.x-test/u} (set (get-in b [:req :names]))) "one batch of both")
+    (is (= [[:platform :seon.prove/no-verdict 'app.x-test/u "d2" ['app.x-test/t]]]
+           (mapv (juxt :class (comp :seon.error/type :error) (comp :test :error) (comp :digest :error) (comp :reported :error)) problems))
+        "the missing item is a problem naming it, its digest and what the answer did name")))
 
 (defn queue-of
   "Grant's argument at n: the service's state with n items queued for one batch asker and one free worker. See

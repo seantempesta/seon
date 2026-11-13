@@ -2,7 +2,7 @@
   "Root's server as an outside agent reaches it (seon.server, through the built root:
   seon.agent-test/in-agent). Run: bin/test seon.server-test"
   (:require [clojure.test :refer [deftest is]] [jolt.fibers] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]
-            [seon.test-store :as ts] [seon.task :as task] [datahike.api :as d] [clojure.java.shell] [clojure.core.async :as a]))
+            [seon.test-store :as ts] [seon.task :as task] [seon.main] [seon.fx] [seon.lib] [datahike.api :as d] [clojure.java.shell] [clojure.core.async :as a]))
 
 (deftest each-op-has-its-answer
   ;; the ops table (each op's doc and args, the MCP tool list) and op-answer's methods are one set of
@@ -321,22 +321,24 @@
     (is (nil? (:ex sourced)) (str "source resolves in a namespace the agent switched to: " (pr-str (:ex sourced))))
     (is (clojure.string/includes? (str (:text sourced)) "defn help") "and reads the definition")))
 
-(deftest a-done-shells-on-no-thread-of-roots
+(deftest ^{:seon.test/estimate {:ticks 2000000} :seon.test/execs ["git"]} a-done-shells-on-no-thread-of-roots
   ;; task seon.system/a-boot-runs-no-shell-of-its-own: a connection is answered on its own thread (seon.server/serve!), and
   ;; seon_done's answer reads the checkout's uncommitted files through git (seon.fx/uncommitted): clojure.java.shell called
   ;; off a fiber copies on futures, two clojure-agent-send-off-pool threads root does not declare, which outlive the answer.
-  ;; Every shell runs on a fiber (seon.lib/sh, docs/machine.md#processes): root's threads are the same after the answer.
-  ;; A root of its own (:group): no earlier test's idle pool thread can take the copies.
-  (let [roster (str "(frequencies (map #(clojure.string/replace (.getName ^Thread %) #\"-\\d+$\" \"\")"
-                    " (keys (Thread/getAllStackTraces))))")
-        [before done after] (at/in-agent (fn [{:keys [agent]}]
-                                           [{:op :eval :agent "root" :code roster} {:op :done :agent agent}
-                                            {:op :eval :agent "root" :code roster}])
-                                         {:group :done-threads})
-        pool #(get (:value %) "clojure-agent-send-off-pool" 0)]
-    (is (map? (:value before)) (pr-str before))
-    (is (clojure.string/includes? (str (:line done)) ":outcome") (pr-str done))
-    (is (= (pool before) (pool after)) (str "send-off threads before and after the done: " (pool before) " " (pool after)))))
+  ;; Every shell runs on a fiber (seon.lib/sh, docs/machine.md#processes): that read, made from a plain thread as a connection's
+  ;; is, runs its git on a fiber. A pool's thread count is no proof here (an idle one this process holds takes the copies).
+  ;; Estimate: two git calls on an empty repository (a spawn and an exit event each) and one thread: ~1M ticks
+  (let [dir (str (seon.config/checkout) "/target/tmp/done-shells-" (random-uuid))
+        sh clojure.java.shell/sh
+        on-fiber (atom [])]
+    (try
+      (seon.lib/sh "git" "init" "-q" dir)
+      (with-redefs [clojure.java.shell/sh (fn [& args] (swap! on-fiber conj (jolt.fibers/in-fiber?)) (apply sh args))]
+        (let [files (atom nil)]
+          (doto (Thread. ^Runnable (fn [] (reset! files (seon.fx/uncommitted dir)))) (.start) (.join))
+          (is (= [] @files) "the read answers from the thread")
+          (is (= [true] @on-fiber) "and its one shell ran on a fiber, never on the thread's futures")))
+      (finally (seon.lib/remove-tree! dir)))))
 
 (deftest done-answers-the-judges-reasons
   ;; dogfood 2026-10-25: seon_done answered {:judging ...} and ended the agent, so an outside agent
@@ -618,57 +620,48 @@
                                                    :code (str "(filterv #(clojure.string/ends-with? (name %) " (pr-str (str "tree-" tree)) ") (datahike.api/branches (:conn sys)))")}))))
         "the tree's branch is gone once its runs answered")))
 
-(deftest bin-prove-asks-a-root-and-prints-each-verdict-as-it-lands
+(deftest ^{:seon.test/estimate {:ticks 3000000}} bin-prove-asks-a-root-and-prints-each-verdict-as-it-lands
   ;; docs/merging.md#a-session-proves-through-root (Flow step 3, the client): bin/prove --root PORT asks that root to prove its
-  ;; checkout's tree, prints each test's verdict as root streams it, and ends on the answer. The checkout is a worktree of this
-  ;; tree with two test namespaces added, one green and one red (a run id in each, so no verdict is reused); each is asked
-  ;; alone, so each answer is one namespace's. Its target/ holds links to this checkout's binary, libraries and home, what bin/prove --root runs
-  (let [here (seon.config/checkout)
-        root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str here))])
-        tmp (.getCanonicalPath (doto (java.io.File. (ts/mark-of (str (System/getProperty "java.io.tmpdir") "/seon-prove-client"))) (.mkdirs)))
-        wt (str tmp "/wt")
-        run (str (random-uuid))
-        git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" here "-c" "user.name=t" "-c" "user.email=t@t" args)]
-                           (is (zero? (:exit r)) (str args (:err r))) (clojure.string/trim (:out r))))
-        links (for [f ["seon" "lib" "home"]] (java.io.File. (str wt "/target/" f)))
-        prove (fn [& args] (let [{:keys [exit out]} (apply clojure.java.shell/sh (str wt "/bin/prove") args)]
-                             {:exit exit :out out :lines (clojure.string/split-lines out)}))
+  ;; checkout's tree, prints each test's verdict as root streams it, and ends on the answer. The client is seon.main/prove-client:
+  ;; here it is fed root's stream as values (seon.server/ask-streamed's events, then its answer), so what is proved is what it asks
+  ;; and what it prints; a port no root listens on goes through the real ask-streamed, a refused connect.
+  ;; Estimate: three client calls, each a few out! lines and one shown map (~100k ticks each), one refused connect: ~1M ticks
+  (let [asked (atom [])
+        stream (fn [events answer] (fn [port m on-event] (swap! asked conj [port m]) (run! on-event events) answer))
+        prove (fn [ask & names] (with-redefs [seon.server/ask-streamed ask]
+                                  (let [exit (atom nil)
+                                        out (with-out-str (reset! exit (seon.main/prove-client 7 "/co" (vec names))))]
+                                    {:exit @exit :out out :lines (clojure.string/split-lines out)})))
         before? (fn [lines a b] (let [i (.indexOf ^java.util.List lines a) j (.indexOf ^java.util.List lines b)] (and (<= 0 i) (< i j))))]
-    (try
-      ;; this checkout's files as they are, uncommitted ones included, as a commit of their tree
-      (git "worktree" "add" "-q" "--detach" wt (git "commit-tree" (seon.fx/tree-id here) "-p" "HEAD" "-m" "bin/prove --root's fixture"))
-      (doseq [[n body] [["green" "(deftest a-green (is (string? run)))"] ["red" "(deftest a-red (is (= \"another run\" run)))"]]]
-        (spit (str wt "/test/seon/prove_client_" n "_test.clj")
-              (str "(ns seon.prove-client-" n "-test (:require [clojure.test :refer [deftest is]]))\n\n(def run " (pr-str run) ")\n\n" body "\n")))
-      ;; a schema resource the tree changes: the binary baked main's, so the run must say its in-process verdicts read that bake
-      (let [f (str wt "/resources/seon/schemas/seon.config.proofs.edn")]
-        (spit f (clojure.string/replace-first (slurp f) "The most items" "The most items (a fixture's edit)")))
-      (.mkdirs (java.io.File. (str wt "/target")))
-      (doseq [^java.io.File l links]
-        (java.nio.file.Files/createSymbolicLink (.toPath l) (.toPath (java.io.File. (str here "/target/" (.getName l)))) (make-array java.nio.file.attribute.FileAttribute 0)))
-      (let [port (str (:port root))
-            green (prove "--root" port "seon.prove-client-green-test")
-            red (prove "--root" port "seon.prove-client-red-test")
+    (with-redefs [seon.fx/tree-id (constantly "t1")]
+      (let [green (prove (stream [{:type :prove-verdict :test 'a.x-test/a-green :status :pass :ms 12.4}
+                                  {:type :prove-held :held true :load 20 :max-load 18 :queued 3}
+                                  {:type :prove-held :held false}]
+                                 {:key "tree-t1@1" :selected ['a.x-test/a-green] :ran 1 :pass 1 :baked ["resources/seon/schemas/x.edn"]})
+                         "a.x-test")
+            red (prove (stream [{:type :prove-verdict :test 'a.x-test/a-red :status :fail :failures [{:message "expected 1"}]}]
+                               {:key "tree-t1@2" :selected ['a.x-test/a-red] :ran 1 :fail 1 :red ['a.x-test/a-red]}))
             ;; a port no root listens on: bound for its number, then let go
             free (let [s (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName "127.0.0.1"))] (.close s) (.getLocalPort s))
-            none (prove "--root" (str free) "seon.prove-client-green-test")]
+            none (let [exit (atom nil) out (with-out-str (reset! exit (seon.main/prove-client free "/co" [])))]
+                   {:exit @exit :out out :lines (clojure.string/split-lines out)})]
+        (is (= [7 {:op :prove :checkout "/co" :tree "t1" :mode "judge" :stream true :names ["a.x-test"]}] (first @asked))
+            "it asks for the checkout's tree, streamed, named by what it was given")
+        (is (not (contains? (second (second @asked)) :names)) "and names nothing when given nothing")
         (is (= 0 (:exit green)) (:out green))
         (is (= "PROVE OK" (last (:lines green))) (:out green))
-        (is (some #(clojure.string/includes? % "this tree changes baked values (resources/seon/schemas/seon.config.proofs.edn)") (:lines green))
+        (is (before? (:lines green) "PASS a.x-test/a-green 12 ms" "HELD: load 20 >= max-load 18, 3 items waiting")
+            (str "the green's verdict printed as it landed, then the hold, never a silent wait: " (:out green)))
+        (is (some #{"RESUMED"} (:lines green)) (:out green))
+        (is (some #(clojure.string/includes? % "this tree changes baked values (resources/seon/schemas/x.edn)") (:lines green))
             (str "a tree that changes a baked value is told so, never silently judged on main's: " (:out green)))
-        (is (some #(clojure.string/starts-with? % "PASS seon.prove-client-green-test/a-green") (:lines green))
-            (str "the green's verdict printed as it landed: " (:out green)))
         (is (= 1 (:exit red)) (:out red))
         (is (= "PROVE FAILED" (last (:lines red))) (:out red))
-        (is (before? (:lines red) "RED seon.prove-client-red-test/a-red (fail)" "prove: red seon.prove-client-red-test/a-red")
+        (is (before? (:lines red) "RED a.x-test/a-red (fail)" "prove: red a.x-test/a-red")
             (str "the red's verdict (:fail) printed before the answer, which names it: " (:out red)))
         (is (= 1 (:exit none)) (:out none))
         (is (= ["PROVE FAILED"] (take-last 1 (:lines none))) (:out none))
-        (is (clojure.string/includes? (:out none) "refused the connection") "no root there: a typed end, never a wait"))
-      (finally
-        (doseq [^java.io.File l links] (.delete l))
-        (clojure.java.shell/sh "git" "-C" here "worktree" "remove" "--force" wt)
-        (seon.lib/remove-tree! tmp)))))
+        (is (clojure.string/includes? (:out none) "refused the connection") "no root there: a typed end, never a wait")))))
 
 (deftest two-sessions-proving-one-tree-at-once-each-get-every-verdict
   ;; docs/merging.md#a-session-proves-through-root (Flow step 4, two askers of one tree): two clients ask root for the same tree at

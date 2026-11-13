@@ -398,7 +398,8 @@
   a died child among them): each of its items ended with its own result, one the answer does not name with the typed
   :seon.prove/no-verdict (never silence), every item of a batch that errored with that error; or, for an item of root's
   effect owner (a build, a process test, a step), its {:value {:pass :fail :error :failures :ms}}, or its typed
-  error; its slot is free again and the next is granted. Answers [st outputs]."
+  error; its slot is free again and the next is granted. A no-verdict is the core failing, so it is also a :platform
+  problem, carrying its evidence: the test, its digest and the names the answer did report. Answers [st outputs]."
   {:malli/schema [:=> [:cat :map :int :any] [:tuple :map [:vector :map]]]}
   [st bid r]
   (let [batch (get-in st [:batches bid])
@@ -414,10 +415,13 @@
                                  (and (not fx?) (fails t)) {:pass 0 :fail 1 :error 0 :failures (fails t) :answer r}
                                  (and (not fx?) (reported t)) {:pass 1 :fail 0 :error 0 :answer r}
                                  :else (contract/error :seon.prove/no-verdict #'seon.prove/batch-ended
-                                                       (str t "'s batch answered no verdict for it") {:test t})))
-        [st outs] (reduce (fn [[st outs] k] (let [[st o] (item-ended st k (result k))] [st (into outs o)])) [st []] (sort-by str batch))
+                                                       (str t "'s batch answered no verdict for it")
+                                                       {:test t :digest d :reported (vec (sort-by str reported))})))
+        results (map (juxt identity result) (sort-by str batch))
+        [st outs] (reduce (fn [[st outs] [k r]] (let [[st o] (item-ended st k r)] [st (into outs o)])) [st []] results)
+        no-verdicts (for [[_ r] results :when (= :seon.prove/no-verdict (:seon.error/type r))] {:op :problem :class :platform :error r})
         [st more] (grant st)]
-    [st (into outs more)]))
+    [st (-> outs (into no-verdicts) (into more))]))
 
 ;; ---- the daily full run: a run of its own ------------------------------------------------
 

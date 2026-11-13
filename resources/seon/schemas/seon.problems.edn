@@ -109,7 +109,8 @@
  ;; full run is seen the next day, never a day skipped in silence
  :seon.prove/full-run-red [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/full-run-red]] [:tests [:vector :qualified-symbol]]]]
  :seon.prove/full-run-running [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/full-run-running]] [:running :string]]]
- :seon.prove/no-verdict [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/no-verdict]] [:test [:or :qualified-symbol :string]]]]
+ :seon.prove/no-verdict [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/no-verdict]] [:test [:or :qualified-symbol :string]]
+                                                 [:digest {:optional true} :string] [:reported {:optional true} [:vector :qualified-symbol]]]]
  ;; a tree's build or seed that is not green (seon.prove/item-ended): every item that needs it answers it, none granted
  :seon.prove/build-red [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/build-red]] [:tree :string] [:kind [:enum :build :seed]]]]
  :seon.prove/superseded [:and :seon.error/base [:map {:description "A run of the test service ended because a request for the same slot came at another digest: its branch moved on (seon.prove/request). See docs/merging.md#the-test-service."} [:seon.error/type [:= :seon.prove/superseded]] [:by :string]]]
