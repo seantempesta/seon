@@ -1,6 +1,6 @@
 # The wiki: a map
 
-Seon on Jolt's docs, one concept per page, addressed `topic#section`: find the page where your problem lives, read its leading sentences, and follow its links. The wiki is the one home for how the system works ([AGENTS](../AGENTS.md)). A person arriving starts at the repository's [README](../README.md).
+Seon on Jolt's docs, one concept per page, addressed `topic#section`: find the page where your problem lives, read its leading sentences, and follow its links. The wiki is the one home for how the system works ([AGENTS](../AGENTS.md)). A person arriving starts at the repository's [README](../README.md); every agent and session starts at [principles](principles.md), required reading before any work.
 
 ## How the wiki is kept
 

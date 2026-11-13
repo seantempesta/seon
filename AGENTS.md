@@ -6,11 +6,11 @@ Seon is where agents do real work for their user, each in its own process on its
 
 You are in `next/`: **Seon on Jolt, built to replace Seon** (`~/src/seon` is the JVM version, read-only). A v1 capability left out has its reason in `BAGGAGE.md`.
 
-**Read before acting:** this file, `docs/plan.md` (what is in flight), `docs/README.md` (the wiki's map), then your task (`resources/seon/tasks/<ns>.edn`) and what its plan cites.
+**Read before acting, every time:** [principles](docs/principles.md) first and whole (what Seon is for, how designs are chosen, when to raise the alarm), then this file, `docs/plan.md` (what is in flight), `docs/README.md` (the wiki's map), then your task (`resources/seon/tasks/<ns>.edn`) and what its plan cites. **Every helper or subagent you start is told to read [principles](docs/principles.md) first**, and its brief says how its piece fits the whole, so no research or build happens from a fragment of the picture.
 
 **Find a detail** in `docs/README.md`, then through `seon_context` (§6), then with ``git grep -n 'term' -- docs resources/seon/tasks src``. A `bin/` script's header comment is its manual.
 
-**The running system:** `bin/system status` (server port 7888, dashboard http://127.0.0.1:7777/). The standing system and its store (`runs/store`) are for use: agents work and merge there, and sessions reach it through the MCP tools (§6). Erasing the store is the owner's act. Once a system is up, its store is the source of truth ([files and the db](docs/source.md#files-and-the-db-two-directions)).
+**The running system:** `bin/system status` (server port 7888, dashboard http://127.0.0.1:7777/). The standing system and its store (`runs/store`) are for use: agents work and merge there, and sessions reach it through the MCP tools (§6). The store may be erased while it holds only test data; once it holds data we keep, it is not erased, and everything we keep is in git as code and EDN. Once a system is up, its store is the source of truth ([files and the db](docs/source.md#files-and-the-db-two-directions)).
 
 ## 1. What Seon is for, and what moving forward means
 
