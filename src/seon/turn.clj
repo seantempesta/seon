@@ -526,7 +526,7 @@
                          ;; the second in a row with no model turn between ends its work with that error: a turn
                            ;; whose model call answered before it threw was the agent's turn, so the count starts again
                            (let [called? (not (identical? asked (:requests @agent/state)))
-                                 st' (cond-> (-> (turn-error! st (agent/error-map e 'seon.turn/work!)) (update :turn inc) (update :thrown (fnil inc 0)))
+                                 st' (cond-> (-> (turn-error! st (cond-> (agent/error-map e 'seon.turn/work!) (err/thrown-in e) (assoc :seon.error/in (err/thrown-in e)))) (update :turn inc) (update :thrown (fnil inc 0)))
                                        called? (assoc :threw 1))]
                              ;; a turn that threw counts against the cap, which the next turn checks
                              (if (< 1 (:threw st'))

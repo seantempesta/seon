@@ -360,6 +360,13 @@
   []
   (or (:schema-registry @state) (:schema-registry (swap! state with-slot))))
 
+(defn held-registry
+  "The registry of the branch this process holds as an agent (its schema slot, branch-schemas), or nil when its state holds none:
+  what seon.contract's options read at each lookup, so every path of an agent checks against its branch. See
+  docs/source.md#schemas-at-the-repl."
+  {:malli/schema [:=> [:cat] [:maybe :any]]}
+  [] (when (:db @state) (:registry (branch-schemas))))
+
 (defn branch-index
   "This agent's branch's entity index (`branch-schemas`): what its renders and its recognition of a value take as ix (seon.db/index-of);
   the binary's when no branch is held (root, a scratch session: it has no schema entries of its own). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
@@ -653,9 +660,7 @@
            m (cond (instance? ThreadDeath e) "interrupted by root" no-schema (:message no-schema) unresolved? (unresolved-message sym) :else (step/error-msg e))
            ;; a REPL name in a definition: the program resolves as written, so the definition calls it qualified
            repl (when unresolved? (repl-name (symbol sym)))
-           causes (mapv #(str (type %) ": " (ex-message %)) (take-while some? (rest (iterate ex-cause e))))
-           ;; where it was thrown (seon.error/thrown-in, the one triage): a compile error names its own place, so only a run's
-           in (when-not (:jolt.error/symbol jd) (err/thrown-in e))]
+           causes (mapv #(str (type %) ": " (ex-message %)) (take-while some? (rest (iterate ex-cause e))))]
        (contract/error :seon.agent/eval-error op m
                        (cond-> (assoc jd :class (str (type e)))
                          (seq (:jolt.error/suggestions jd)) (assoc :seon.error/fix (str "did you mean " (str/join ", " (:jolt.error/suggestions jd))))
@@ -665,9 +670,7 @@
                          repl (assoc :seon.error/fix (str sym " is the REPL's: a definition is the program, which resolves as written, so it calls " repl))
                          other (assoc :data other)
                          heap (assoc :jolt/heap heap)
-                         (seq causes) (assoc :causes causes)
-                         ;; so a turn's error names its form: one that kept no place could not say which code of a stale branch threw
-                         in (assoc :seon.error/in in)))))))
+                         (seq causes) (assoc :causes causes)))))))
 
 (defn clear-end!
   "This wake begins: the end the wake before wrote is taken off this agent's branch, committed, so an end root reads there is this
@@ -2141,12 +2144,6 @@
                    ;; schema entry (schema-moved), so no eval reads the schema entries before then
                    (and schema-registry (not resumed)) (assoc :schema-registry schema-registry)))
      (swap! state vary-meta assoc :seon.render/schema :seon.agent/state)
-     ;; this process holds one branch, so its malli default registry is that branch's, on every path: set from the schema slot
-     ;; now and whenever the slot is rebuilt (a write that moves a schema entry, a merge of main), after the swap that rebuilt it
-     ;; (docs/source.md#schemas-at-the-repl)
-     (add-watch state #'program/hold-registry! (fn [_ _ o n] (let [r (:schema-registry n)]
-                                                 (when (and r (not (identical? r (:schema-registry o)))) (program/hold-registry! (:registry r))))))
-     (program/hold-registry! (:registry (branch-schemas)))
      (mark! :state)
      (swap! state assoc :marks @marks)
      ;; a kept branch, resumed (root released its held task: seon.reconcile/hold-tx), takes

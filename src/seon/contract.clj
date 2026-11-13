@@ -185,13 +185,27 @@
 
 (def forms "Every named schema form of the platform (seon.config/schema-forms, baked once)." config/schema-forms)
 
+(def ^:private branch-registry
+  "The registry of the branch an agent process holds, read at each lookup from its schema slot (seon.agent/held-registry, found by
+  name since this namespace loads first, never loading it and passing over it while it is still being defined), nil where no agent state holds a branch (root, the fork server, a
+  test process between agents). A lookup, not a copy, so a write that moves a schema entry is in force at once on every path."
+  (let [slot #(let [v (find-var 'seon.agent/held-registry)] (when (and v (bound? v)) (some-> (@v) mr/registry)))]
+    (reify mr/Registry
+      (-schema [_ t] (some-> (slot) (mr/-schema t)))
+      (-schemas [_] (or (some-> (slot) mr/-schemas) {})))))
+
+(def layers
+  "The registry layers above the built one, in options' order (malli's dynamic registry, the branch an agent holds, the process's
+  default): where a key registered beyond the built forms is found, on every path of a process."
+  (mr/composite-registry (mr/dynamic-registry) branch-registry (mr/custom-default-registry)))
+
 (clojure.core/defn properties
   "The properties map of named schema k's form ([:type {props} ...]), or nil: what a
-  schema declares of its values (a status set, a render, a unit), read here only. A registry
-  bound as malli's (a process's default is its branch's: seon.program/hold-registry!)
-  answers first, so a render a branch's schema names is the one its values take."
+  schema declares of its values (a status set, a render, a unit), read here only. The layers
+  above the built registry (layers: a binding, the agent's branch, the process's default) answer
+  first, so a render a branch's schema names is the one its values take."
   {:malli/schema [:=> [:cat :any] [:maybe :map]]}
-  [k] (if-let [s (some-> (mr/registry mr/*registry*) (mr/schema k))]
+  [k] (if-let [s (mr/schema layers k)]
         (m/properties s)
         (let [form (get forms k)] (when (and (vector? form) (map? (second form))) (second form)))))
 
@@ -236,12 +250,12 @@
     (mr/composite-registry (mr/simple-registry @compiled) registry)))
 
 (def options
-  "What every contract compiles against: the built registry, under malli's default registry, which a process sets to the
-  registry of the one branch it holds (seon.program/hold-registry!), so every path of it (an eval, the turn loop, a Flow step,
-  a thread) checks against that branch's schemas; and over both malli's dynamic registry, bound only where code compiles
-  against a db passed to it, not the process's own (seon.program's loads of another value); and the
+  "What every contract compiles against, first to last: malli's dynamic registry, bound only where code compiles against a db
+  passed to it (seon.program's loads of another value); the branch an agent process holds (branch-registry, read from its schema
+  slot at each lookup), so every path of an agent (an eval, the turn loop, a Flow step, a thread) checks against its branch;
+  malli's default registry, main's in root and the fork server (seon.program/hold-registry!); the built registry; and the
   predicate pack's types, as total (their validators never throw)."
-  {:registry (mr/composite-registry (mr/dynamic-registry) (mr/custom-default-registry) registry)
+  {:registry (mr/composite-registry layers registry)
    ;; the predicate pack's tests are type checks that answer for any value, so an arm built
    ;; of them is checked without a try per call (malli's -total?)
    ::m/total-types (set (keys host-schemas))})
@@ -473,7 +487,7 @@
 (defn fits?
   "Does v satisfy schema key k, one this process holds? A stored value outlives the schema it was written under, and a branch's own key is unknown elsewhere: such a value is data, for the printer. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :qualified-keyword :any] :boolean]}
-  [k v] (boolean (and (or (some-> (mr/registry mr/*registry*) (mr/schema k)) (contains? forms k)) (valid? k v))))
+  [k v] (boolean (and (or (mr/schema layers k) (contains? forms k)) (valid? k v))))
 
 ;; ---- the error map ---------------------------------------------------------------------
 ;; One shape (Seon's errors-cut target: :seon.error/base without :at and :layer): a flat
