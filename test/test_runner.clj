@@ -218,6 +218,18 @@
                      ;; and the config the graph's rows and flags are read under
                      (pr-str (map #(config/value %) [:seon.config.source/pin-namespaces :seon.config.source/process-vars :seon.config.source/binary-vars])))))
 
+(declare reach-graph-of)
+
+(def ^:seon.test/program-fixture kept-program
+  "The checkout's tree as the plan kept it (program-db of seon.config/checkout in seon.test-store/kept-program-store), with its
+  reach graph brought to date and stored (reach-graph-of): made once a shard, before its first test, by the shard (warm-by:
+  only a shard warms a :seon.test/program-fixture; an agent's test child reads its own branch's db). A tree the store keeps no
+  branch of yet is imported here, so no test pays an import inside its own budget (a key change once cost a test its 400M).
+  See docs/merging.md#a-tests-tick-budget."
+  (delay (let [store (ts/kept-program-store) db (program-db (config/checkout) store)]
+           (reach-graph-of db (fx/declared-refs seon.graph/built-text) store)
+           db)))
+
 (defn program
   "The program this process judges, as a db: in a process that holds a branch (an agent's test child, a fork of the
   agent: seon.agent/state's :db) that branch's db, which holds the program as facts already, so nothing is imported
@@ -227,7 +239,7 @@
   itself imported the whole program inside an agent's prove, where no plan had kept the tree: 3.87 G ticks, cut at
   the test's 4.0 G budget, and it judged root's checkout, never the branch (the stray reds of 2026-11-10). The
   second arm goes when a session's tree is a branch of the store. docs/merging.md#a-merge-runs-what-the-change-reaches."
-  [] (or (:db @seon.agent/state) (program-db (config/checkout) (ts/kept-program-store))))
+  [] (or (:db @seon.agent/state) @kept-program))
 
 (defn reach-graph-of
   "The reach graph of db: the one stored in the program store at store (reach-graph.fasl, jfasl:
@@ -290,7 +302,7 @@
     {:graph g :inputs in
      ;; the tests that reach each type of fixture (a var marked ^:seon.test/fixture, the test store, or
      ;; ^:seon.test/shard-fixture, the shared root), as their reach says: {type #{test}} (warm-by decides what a shard warms)
-     :fixture-tests (into {} (for [t [:seon.test/fixture :seon.test/shard-fixture]]
+     :fixture-tests (into {} (for [t [:seon.test/fixture :seon.test/shard-fixture :seon.test/program-fixture]]
                                [t (into #{} (mapcat #(program/tests-reaching g %))
                                         (d/q '[:find [?n ...] :in $ ?t :where [?v :var/meta ?t] [?v :var/name ?n]] db t))]))
      :rd (delay (reads-index-of root store tree g in))
@@ -379,7 +391,9 @@
   warmed a root whose store the plan never made, and died before its first test). See docs/merging.md#the-test-service."
   [fixture-tests binary]
   {:seon.test/fixture (get fixture-tests :seon.test/fixture #{})
-   :seon.test/shard-fixture (into #{} (filter (set binary)) (get fixture-tests :seon.test/shard-fixture))})
+   :seon.test/shard-fixture (into #{} (filter (set binary)) (get fixture-tests :seon.test/shard-fixture))
+   ;; the kept program and its reach graph, for every test that reads them (test-runner/program): a shard's, never an agent's
+   :seon.test/program-fixture (get fixture-tests :seon.test/program-fixture #{})})
 
 (defn- write-shards!
   "tests (var symbols) dealt into at most jobs shards (shards: :seon.config.proofs/jobs for a full run or a merge's
