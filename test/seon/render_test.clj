@@ -1111,6 +1111,38 @@
             ;; forward one turn, back two, forward four
             [p0 (nth vs 2)] [3 1 5])))
 
+;; See docs/render.md#a-page-is-a-kept-walk
+(deftest ^{:seon.test/estimate {:ticks 15000000}} the-page-and-the-request-agree
+  ;; estimate: 3 walks of a 2-to-4-turn session with both outputs and units (one cold ~2.5M, two moves ~1M each) and a scan of
+  ;; their units' html per message (~100 messages x ~50 units, a string search each: ~2M)
+  ;; one walk gives the page and the request (agreed with context, 11-13): each message the model is sent names the component that
+  ;; answered it by the key :ran and the page use, so the request's reader joins a message to whether it ran, and every message's
+  ;; component drawn for the page is on the page
+  (let [[db0 _ _ at] (#'seon.render-cost-test/session-of 2)
+        ;; each turn as production writes it: its eval and the agent's turn moved to it
+        vs (vec (reductions (fn [db i] (d/db-with db (conj (#'seon.render-cost-test/session-eval (str "e" i) (inc i))
+                                                           {:seon.agent/key "a1" :seon.agent/turn (inc i)})))
+                            db0 (range 2 5)))
+        opts (fn [db] (assoc (at db) :model-only false :units true))
+        agree (fn [p what]
+                (let [msgs (:seon.render/openai-compat (:answers p))
+                      html (apply str (map :html (:units p)))
+                      ks (map (comp :key second) msgs)]
+                  (is (seq msgs) (str what ": the request has messages"))
+                  (is (every? #(contains? (:cache p) %) ks) (str what ": every message names its component by its key"))
+                  ;; a component drawn as the model's answer alone (:seon.render/as another output: wire's page message) has no element
+                  (is (every? #(str/includes? html (str "id=\"" (r/key-id %) "\""))
+                              (filter #(and (contains? (:ran p) %)
+                                            (contains? #{nil :seon.render/hiccup} (get-in p [:cache % :opts :seon.render/as]))) ks))
+                      (str what ": each component that ran for a message and is drawn for the page is on it"))))
+        p0 (r/walk nil (opts (nth vs 2)))]
+    (agree p0 "cold")
+    (reduce (fn [[p db0] i]
+              (let [db (nth vs i) p' (r/walk p (assoc (opts db) :moved (seon.ctx/moved db0 db nil)))]
+                (agree p' (str "at " i))
+                [p' db]))
+            [p0 (nth vs 2)] [3 1])))
+
 (deftest a-record-of-another-turn-reads-nothing-this-turn-read
   ;; docs/render.md#the-page: an agent's page is a component for each turn number, each reading its records through the index by
   ;; that number: a new eval at turn n draws turn n's component and its eval, and no other turn's, nor the list's
