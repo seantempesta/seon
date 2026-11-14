@@ -1,0 +1,7 @@
+[
+ {:seon.task/name "a-defect-names-where-it-threw-from-its-top-frames"
+  :seon.task/plan "Found (land 2026-11-13 03:49): seon.procs-test/a-proc-defect-names-where-it-threw spends 2M-4.3M ticks by the stack's depth: naming where a defect threw converts the whole stack (Throwable->map, ~10k ticks a frame over ~400 frames) to read a few. Readers: seon.error/thrown-in (one triage since 79fc53cb7a: flow-error, uncaught-message, render defects), seon.repl/located (the eval's line), seon.proofs/error-at (a report's :at, the first :seon.config.proofs/error-frames). Lower bound: the frames down to the first that names a function, usually 1-3, so ~30k ticks a defect (70-140x less). Fix: one fn, seon.error/top-frames [ex n], the first n frames read from (.getStackTrace ex) without converting the rest, and the readers built on it. Red first: a cost proof of thrown-in over throws at depth 10, 100 and 1000, its growth :constant (linear today). If Jolt's getStackTrace builds every frame itself, the cause is Jolt's (deps gives a top-n read) and the proof is its gate. What each reader shows is unchanged, proved by its existing tests. Estimate: the proof ~0.5M ticks; a-proc-defect-names-where-it-threw back to ~0.4M."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.error-test/naming-where-a-defect-threw-costs-its-top-frames}
+  :seon.task/needs #{}}
+]

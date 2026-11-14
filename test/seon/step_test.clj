@@ -1,6 +1,6 @@
 (ns seon.step-test
   "seon.step's helpers every proc and edge shares: an edge asks a proc one way (ask-edge)."
-  (:require [clojure.test :refer [deftest is testing]] [clojure.core.async :as a] [seon.step :as step]))
+  (:require [clojure.test :refer [deftest is testing]] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.step :as step]))
 
 (deftest an-edge-asks-one-way
   ;; task seon.step/an-edge-asks-one-way: the request carries its promise, the proc delivers its
@@ -36,3 +36,57 @@
     ;; may add one whenever it starts, so the claim is that threads do not grow with the timers
     (is (< (- g1000 g25) 3) (str "975 more pending timers added " (- g1000 g25) " threads"))
     (is (< (- t1000 t25) 3) "the callback form, measured with it: Jolt's pin forks no thread per pending take")))
+
+(defn- running-src
+  "A step-fn whose output tags each number with its code's version and its count (the running-graph proof's source)."
+  {:malli/schema :seon.step/step-fn}
+  ([] {:ins {:in "numbers"} :outs {:out "numbers, tagged"} :workload :io})
+  ([_] {:n 0})
+  ([st _] st)
+  ([st _ m] [(update st :n inc) {:out [[:v1 m (:n st)]]}]))
+
+(defn- running-sink
+  "A step-fn putting each message, with its own count, on the channel its args name (the running-graph proof's sink)."
+  {:malli/schema :seon.step/step-fn}
+  ([] {:ins {:in "tagged numbers"} :outs {} :workload :io})
+  ([args] {:seen 0 :out (:out args)})
+  ([st _] st)
+  ([st _ m] (a/>!! (:out st) [m (inc (:seen st))]) [(update st :seen inc) nil]))
+
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-running-graph-takes-new-code-and-new-procs-with-no-restart
+  ;; docs/flow.md#changing-a-running-graph: a step-fn is held by its Var, so a redefinition is its next step's code, its
+  ;; state kept; update! adds and rewires procs keeping every unchanged proc's loop, state and queue, and restarts only a
+  ;; proc whose own definition changed. Seon relies on it: root adds each agent's proc live, an agent its test runs
+  (let [out (a/chan 100) out2 (a/chan 100)
+        cfg (fn [sink-out tap?] {:procs (cond-> {:src {:proc (flow/process #'running-src)}
+                                                 :sink {:proc (flow/process #'running-sink) :args {:out sink-out}}}
+                                          tap? (assoc :tap {:proc (flow/process #'running-sink) :args {:out out2}}))
+                                 :conns (cond-> [[[:src :out] [:sink :in]]] tap? (conj [[:src :out] [:tap :in]]))})
+        g (flow/create-flow (cfg out false))
+        send! (fn [i] @(flow/inject g [:src :in] [i]))
+        old (var-get #'running-src)]
+    (try
+      (flow/start g) (flow/resume g)
+      (send! 1)
+      (is (= [[:v1 1 0] 1] (a/<!! out)))
+      (testing "a redefined step-fn is the next step's code, and the proc's state is kept"
+        (alter-var-root #'running-src (constantly (fn ([] (old)) ([a] (old a)) ([st t] (old st t))
+                                                    ([st _ m] [(update st :n inc) {:out [[:v2 m (:n st)]]}]))))
+        (send! 2)
+        (is (= [[:v2 2 1] 2] (a/<!! out)) "the new code, the source's count and the sink's count both carried on"))
+      (testing "update! adds and rewires a proc: nothing stops, nothing is lost, kept procs keep their state"
+        (let [r (flow/update! g (cfg out true))]
+          (flow/resume g)
+          (send! 3)
+          (is (= #{} (:stopped r)) "no proc stopped")
+          (is (= {} (:lost r)) "no message lost")
+          (is (= [[:v2 3 2] 3] (a/<!! out)) "the kept sink's state carried on")
+          (is (= [[:v2 3 2] 1] (a/<!! out2)) "the new proc took its first message")))
+      (testing "a proc whose own definition changed restarts alone"
+        (let [out3 (a/chan 100) r (flow/update! g (assoc-in (cfg out true) [:procs :sink :args :out] out3))]
+          (flow/resume g)
+          (send! 4)
+          (is (= #{:sink} (:stopped r) (:started r)) "only the changed proc")
+          (is (= [[:v2 4 3] 1] (a/<!! out3)) "it starts fresh; the source kept its count")
+          (is (= [[:v2 4 3] 2] (a/<!! out2)) "the other kept proc kept its count")))
+      (finally (alter-var-root #'running-src (constantly old)) (flow/stop g)))))

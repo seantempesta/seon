@@ -203,3 +203,14 @@
         (is (contains? held kw) "and what it was given to keep")
         (is (not-any? held [r xr xw kr]) (str "and none of its parent's other descriptors: held " (pr-str held))))
       (finally (run! lib/c-close [r xr xw kr kw])))))
+
+(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["sh"]} a-shell-call-that-cannot-read-its-output-is-a-typed-error-naming-the-command
+  ;; a shell call answers its whole output, or a typed error naming the command, never an empty answer; the read failure is
+  ;; raised as Jolt's pipe port raises it since a5a3a89d (a Scheme error naming the errno). See docs/failure-points.md
+  (is (= {:exit 0 :out "late\n" :err ""} (lib/sh "sh" "-c" "sleep 0.05; echo late")) "a child that writes after a wait answers its text")
+  (let [e (with-redefs [clojure.java.shell/sh (fn [& _] (scm/eval-string "(error 'read \"failed: errno 9\")"))]
+            (try (lib/sh "git" "status" "--porcelain=v2" :dir "/tmp") nil (catch Throwable e e)))
+        d (ex-data e)]
+    (is (= :seon.lib/shell-unanswered (:seon.error/type d)) (str "typed, not " (pr-str (type e)) " " (ex-message e)))
+    (is (= ["git" "status" "--porcelain=v2"] (:seon.lib/command d)) "names the command, its options apart")
+    (is (str/includes? (str (:seon.error/message d)) "errno 9") "says why: the read's own words")))

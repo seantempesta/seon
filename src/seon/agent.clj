@@ -259,6 +259,13 @@
      (try (send! m) @p
           (finally (swap! state update :waits dissoc k))))))
 
+(defn program-db
+  "The db of the program this process holds (its :program reference: the branch as it loaded it at its start), which
+  differs from the branch's head once main is merged in without loading (a process keeps its program until its next start,
+  docs/plan.md item 3). See docs/processes.md#the-agent-process."
+  {:malli/schema [:=> [:cat] [:maybe :seon.host/db]]}
+  [] (when-let [c (get-in @state [:program :seon.db/commit])] (pdb/at-commit (:store-conn @state) c)))
+
 (defn mem-mb
   "This process's memory as the platform charges it, read now (lib/real-mb: one call): on the
   events that report the agent's state (its hello, each commit, a :tests reply, :stats),
@@ -484,16 +491,21 @@
       k)))
 
 (defn fx!
-  "The effect kind with req, through root's owner proc, answered here: its outcome
-  {:value ...} or its declared error. Recorded with this eval request. No lock: an
-  interrupt may end the wait; the outcome then arrives later as an async one does."
+  "The effect kind with req, through root's owner proc: its outcome {:value ...} or its declared error. A
+  request that streams (:call) is ended by its owner; any other waits its kind's :seon.config.fx/bounds, then
+  answers :seon.bound/reached. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
   {:malli/schema [:=> [:cat :keyword :map :map] :map]}
   [kind req opts]
   (if (= :test (:mode @state))
     (fx-test kind req)
     (let [k (:tx-seq (swap! state update :tx-seq inc))
           _ (swap! state update :fx-pending (fnil assoc {}) k kind)
-          r (dissoc (await-reply k (merge opts {:op :fx :k k :kind kind :req req})) :op :k)]
+          ;; a request that streams (it names its call, :call) is ended by its owner's bound of quiet, re-armed by each chunk
+          ;; (seon.fx/stream-due), so a long reply that keeps streaming is never cut here; any other waits its kind's bound
+          m (await-reply k (merge opts {:op :fx :k k :kind kind :req req})
+                         (when-not (:call req) (get-in (cfg/value :seon.config.fx/bounds) [kind :seon.bound/ms])))
+          ;; a bound reached answers as await-reply's own :reply; an effect's answer is its outcome, so that error is the outcome
+          r (if (= :reply (:op m)) (:result m) (dissoc m :op :k))]
       (fx-done! k)
       r)))
 
@@ -2200,6 +2212,9 @@
      ;; pull cost what the inherited node cache lacked, 24-183 KB a spawn
      (reset! link {:fd fd :conn c})
      (reset! state (cond-> {:id id :key session :branch branch :task task :db @store-conn
+                   ;; the program this process holds, as a reference (a kept db value is one, AGENTS.md §4): the branch as it
+                   ;; loaded it at its start (program-db reads it)
+                   :program {:seon.db/branch branch :seon.db/commit (d/commit-id @store-conn) :seon.db/t (:max-tx @store-conn)}
                    :base base :main db0 :store-conn store-conn :cfg cfg :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :waits {} :inbox [] :tx-seq 0 :mode :agent
