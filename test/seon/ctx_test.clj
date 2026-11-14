@@ -469,7 +469,9 @@
         (let [ms (:messages t)]
           (is (= (sort > (keys ms)) (keys ms)) "messages by id, as every collection (their ids are their content's)"))))))
 
-(deftest a-patch-builds-its-index-again-only-when-it-built-it-and-a-schema-entry-moves
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-patch-builds-its-index-again-only-when-it-built-it-and-a-schema-entry-moves
+  ;; estimate: one index built again from the db (~600 schema forms read, ~20k ticks each, then the entity index over them: ~15M)
+  ;; and the rest small (one ctx of one agent built, four patches and four d/with of a datom or two: ~3M)
   ;; docs/ctx.md#kept-by-the-change-never-rebuilt: a pull holds the entity index its schemas are read in (:ix :index). One its caller
   ;; handed (an agent's slot, the one copy) a patch never builds again, and takes the one it is handed; one its caller built for its own
   ;; use (:own-index?, a kept walk's) a patch builds again when it moved a :schema/* datom, and any other patch keeps (O(moved))
