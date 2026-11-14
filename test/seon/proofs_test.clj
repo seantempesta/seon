@@ -884,3 +884,11 @@
                 :digests {'a.x-test/ran "d1" 'a.p-test/boots "d2"}}
         {:keys [ran]} (proofs/answer-ran answer)]
     (is (= #{'a.x-test/ran} (set (keys ran))) "only the test that ran is a verdict to cache")))
+
+;; Estimate: three predicate calls = ~10000.
+(deftest ^{:seon.test/estimate {:ticks 10000}} a-waived-pass-keeps-its-rows
+  ;; docs/cost.md#an-accepted-overrun-and-its-ratchet (web-2's ask): a cost proof that passes by its waiver keeps its rows with its
+  ;; green, so the waiver is read without being taken off; a plain pass keeps nothing, a failure is kept as always
+  (is (runner/kept-report? {:type :pass :actual {:rows [] :verdict {:ok? true :accepted {:task "t/x"}}}}) "a waived pass")
+  (is (not (runner/kept-report? {:type :pass :actual {:rows [] :verdict {:ok? true}}})) "a plain pass")
+  (is (runner/kept-report? {:type :fail :message "over"}) "a failure"))
