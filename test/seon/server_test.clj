@@ -151,7 +151,7 @@
                                               {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 1)"}]}]))]
     (is (keyword? (:agent reset)) (pr-str reset))
     (is (contract/error? old) (str "the agent on the old branch ended: " (pr-str old)))
-    (is (re-find #"-r[0-9a-f-]{36}$" (name (:value branch))) "the task's branch is a new one")
+    (is (re-find #"-r[0-9]+$" (name (:value branch))) "the task's branch is a new one, named by its ending (seon.task/restart-tx)")
     (is (= [nil 0] (:value seen)) "whose agent holds nothing the old one defined, and no conversation")))
 
 (deftest a-fork-goes-on-from-an-agents-head
