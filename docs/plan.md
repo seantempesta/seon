@@ -110,8 +110,10 @@ this path, and is deleted when the path carries a week of landings.
    the fork (deps), the model call and the stalled eval (runtime's deadline slice; context's turn records the stall). Seven
    deadline mechanisms become this one.
 3a. **A process never runs a binary its branch doesn't name** (owner, 2026-11-14: "this shouldn't be possible"): a
-   binary's identity is the digest of exactly what it is built from (forms, pins, `deps.edn`); it is current iff that
-   equals its branch's, checked once at the one start; a mismatch builds. "Current by reach" (`seon.system/stale-binary`,
+   binary's identity is the digest of what only a build can change (pins, `deps.edn`, native code, `bin/build`, shipped
+   schemas and config): a mismatch builds, once. Its program is a second identity, the branch's forms: at the one start
+   a process loads exactly the forms its binary's recorded program differs by (load-diff, O(d)), so it always runs its
+   branch's program, with no guess. "Current by reach" (`seon.system/stale-binary`,
    `binary-current`'s reach) and `seon.problems/stale-binary`'s own check are deleted; `bin/land`, `bin/prove`,
    `bin/update`, `restart-for` and the test service ask the one answer (deps, as `runtime-for`'s core; runtime reviews).
 4. **The reaction's core** (context builds it as one tip with its first production writer, the index and Reagent's
