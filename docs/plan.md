@@ -131,6 +131,8 @@ hypothesis.
 
 ## Throughout
 
+What holds in every stage.
+
 - Context runs the random rounds and reads every run's reasoning; system problems become tasks for their area.
 - Every claim is marked measured or hypothesis; a research round lands a fix or stops for review.
 - The code shrinks as mechanisms merge until it reaches a healthy weight; every landing reports its `src` delta, and useful
