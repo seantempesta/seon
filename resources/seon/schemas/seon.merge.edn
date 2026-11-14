@@ -11,6 +11,7 @@
                    [:tuple [:= :section] :string]
                    [:tuple [:= :config] :qualified-keyword]
                    [:tuple [:= :script] :string]
+                   [:tuple [:= :task] :string]
                    [:tuple [:= :datum] :int :keyword]
                    [:tuple [:= :datum] :int :keyword :any]]
  ;; a definition's key: what a form defines

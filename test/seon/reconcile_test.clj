@@ -66,7 +66,10 @@
         {:keys [tx outcome]} (#'r/judge-tx (st-of db) {:act {:op :spawn :task id :env {:branch (task/default-branch id)}} :deferred deferred
                                                     :run-problems run-problems :worked-error worked-error}
                                         (or results {})
-                                        (merge {:db branch :base db :base-t (:max-tx db) :ours [[:var 'demo/worked]] :uncontracted [] :unmerged [] :caused [] :theirs 0} diff))]
+                                        ;; :ours as the writer's branch read gives it: the worked key and the tasks the branch changed ([:task id] keys)
+                                        (merge {:db branch :base db :base-t (:max-tx db) :uncontracted [] :unmerged [] :caused [] :theirs 0
+                                                :ours (into [[:var 'demo/worked]] (filter #(= :task (first %))) (keys (pm/delta-changes (:base diff db) branch #{})))}
+                                               diff))]
     {:db (d/db-with db tx) :outcome outcome :tx tx}))
 
 (defn- judgment-of
@@ -1777,13 +1780,18 @@
         branch (d/db-with base [{:seon.task/id "demo/b" :seon.task/plan "b, as a's agent learned it"}
                                 {:seon.task/id "demo/c" :seon.task/plan "c, the branch's"}])
         main (d/db-with base [{:seon.task/id "demo/c" :seon.task/plan "c, main's"}])
-        judged (:db (judge! main "a" nil :branch branch :diff {:base base}))
+        ;; the keys the writer's branch read says it changed (:ours): its tasks are [:task id] keys of the one merge
+        judged (:db (judge! main "a" nil :branch branch :diff {:base base :ours [[:var 'demo/worked] [:task "demo/b"] [:task "demo/c"]]}))
         conflict (first (filter #(= [:task "demo/c"] (:key %)) (:seon.task/conflicts (task/task judged "demo/a"))))]
     (is (= "b, as a's agent learned it" (:seon.task/plan (task/task judged "demo/b"))) "another task's edit reaches main at the agent's end")
     (is (= "Make a true." (:seon.task/plan (task/task judged "demo/a"))) "an unchanged task stays as main holds it")
     (is (= "c, main's" (:seon.task/plan (task/task judged "demo/c"))) "a two-sided edit is never resolved here")
     (is (= ["Make c true." "c, main's" "c, the branch's"] [(:plan (:base conflict)) (:plan (:ours conflict)) (:plan (:theirs conflict))])
         "it is among the task's conflicts, each side's content, as any key's (one three-way merge)")
+    (let [member {:task "demo/c" :attr :seon.task/plan :base "Make c true." :ours "c, the branch's" :theirs "c, main's"}]
+      (is (= [member] (:seon.task/task-conflicts (task/task judged "demo/a"))) "and shown on the task, member by member (a feature: kept)")
+      (is (= [(assoc member :from "demo/a")] (map :evidence (get-in (problems/report judged) [:classes :task-conflict :rows])))
+          "root sees it among the problems"))
     (testing "main's task edit is content a branch takes when it merges main (seon.merge's :task key)"
       (is (contains? (set (keys (:theirs (pm/delta-three-way base branch main #{})))) [:task "demo/c"])))))
 
@@ -2231,9 +2239,9 @@
            merge-main! (fn [b bc]
                          (let [main @conn head @bc
                                base (pdb/branch-base conn (pdb/main-branch cfg) b)
-                               r (pm/delta-three-way base head main #{})]
+                               r (pm/delta-three-way base head main :all)]
                            (d/merge-db bc #{(d/commit-id main)}
-                                       (-> (pm/merge-tx head base main (:apply r) #{}) (into (pm/unmerged-tx head (:conflicts r) (:max-tx main))))
+                                       (-> (pm/merge-tx head base main (:apply r) :all) (into (pm/unmerged-tx head (:conflicts r) (:max-tx main))))
                                        (pdb/tx-meta b))
                            (doseq [e (pm/unmerged @bc)] (d/transact bc (pm/resolve-tx @bc (:key e))))
                            (count (:conflicts r))))

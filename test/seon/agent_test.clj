@@ -1719,10 +1719,10 @@
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 ;; Estimate: test-branch! ~1M, 3 transacts and connect ~0.5M, 2 profile epochs ~1M, a mark-only merge and main-changes ~1M, then one real merge-main! ~3M = ~7000000.
-(deftest ^{:seon.test/estimate {:ticks 7000000}} a-merge-of-a-main-moved-only-by-records-reads-no-content
-  ;; docs/storage.md#mains-content-mark: main moves on every request by records (an agent's status, embeddings); when its
-  ;; content mark is still the base's, the agent's merge of main and what main changed since the base answer from the mark,
-  ;; with no diff (today ~3 M ticks a request). Red before: merge-main! and main-changes diffed each content attribute.
+(deftest ^{:seon.test/estimate {:ticks 7000000}} a-merge-of-a-main-moved-only-by-records-takes-them
+  ;; docs/storage.md#mains-content-mark: main moves on every request by records (an agent's status, embeddings); the agent's
+  ;; merge of main takes them as any fact (its [:datum e a] keys, data-attrs :all), and what main changed of the program since the base answers
+  ;; from the mark, with no diff.
   ;; In this process, on a branch of the test store, with a socketpair standing for root
   (ts/test-branch!
    (fn [cfg conn]
@@ -1738,10 +1738,10 @@
            calls (fn [f] (profile/begin!) (let [r (f)] [r (into {} (map (juxt :var :calls)) (profile/touched))]))]
        (try
          (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
-         (let [[r n] (calls #(agent/merge-main! #{}))]
-           (is (= [] (:applied r)) "only records moved main: nothing merges")
-           (is (nil? (n 'seon.merge/content-datoms)) "and no content is diffed")
-           (is (nil? (n 'seon.db/branch-base)) "nor the commit graph walked"))
+         (let [[r _] (calls #(agent/merge-main! :all))]
+           ;; owner, 2026-11-14: "Facts are facts at a certain tx time": a record main wrote reaches the branch as any fact does
+           (is (every? #(= :datum (first %)) (:applied r)) "no program key moved: what merged are main's facts")
+           (is (= :busy (:seon.agent/status (d/entity @store-conn [:seon.agent/key "test/a1"]))) "main's record merged onto the branch"))
          (let [[r n] (calls #(agent/main-changes forked (agent/heard-main)))]
            (is (= {} r) "main changed nothing of the program since the base")
            (is (nil? (n 'seon.merge/content-datoms)) "read from the mark"))

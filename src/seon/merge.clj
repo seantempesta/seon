@@ -60,14 +60,11 @@
   "The attribute namespaces outside the program's that stated-keys carry (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
   (into #{} (keep :carries) (vals stated-keys)))
 
-(defn- platform-record? {:malli/schema [:=> [:cat :keyword] :boolean]} [k]
-  (let [n (namespace k)]
-    (and (some? n) (or (= "seon" n) (str/starts-with? n "seon.")) (not (stated-attr? k)))))
-
 (defn- data-attr?
   "Whether an attribute of db is data that data-attrs (a set, or :all) names, as a predicate:
   the set itself, or for :all one that asks of an attribute alone whether db's own schema entry
-  gives it a value type, outside the program's namespaces and the platform's records. A merge
+  gives it a value type, outside the program's namespaces: every fact, the platform's records included, with no list of what may
+  cross (owner, 2026-11-14: \"If there are no conflicts I don't see any reason to not merge everything\"). A merge
   asks it of the attributes of the datoms that differ, so it costs those, never the schema:
   d/schema rebuilt the whole schema map on every call, once per db per read."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/data-attrs] ifn?]}
@@ -75,7 +72,7 @@
   (if (= :all data-attrs)
     (let [schema (:schema db)]
       (fn [a] (boolean (and (keyword? a) (:db/valueType (get schema a))
-                            (not (or (program/attr-namespaces (namespace a)) (stated-attr? a))) (not (platform-record? a))))))
+                            (not (or (program/attr-namespaces (namespace a)) (stated-attr? a)))))))
     data-attrs))
 
 (defn- data-attr-set
@@ -157,6 +154,20 @@
   (if contract/on?
     (vec (sort-by str (for [[[k sym] [_ ov]] ours :when (and (= :var k) (let [m (:meta ov)] (and (contains? m :arglists) (not-any? m [:macro :protocol :test]))) (nil? (:contract ov)))] sym)))
     []))
+
+(defn task-conflicts
+  "The members of tasks both sides changed differently, from a three-way's conflicts on [:task id] keys, as
+  :seon.task/task-conflicts holds them: {:task :attr :base :ours :theirs}, ours the branch's and theirs main's. mine names
+  the side the branch is (:ours or :theirs in the three-way that found them). See docs/tasks.md#a-task-holds-how-its-work-ended."
+  {:malli/schema [:=> [:cat [:sequential :map] [:enum :ours :theirs]] :seon.task/task-conflicts]}
+  [conflicts mine]
+  (let [attr (into {} (map (fn [[a k]] [k a])) (get-in stated-keys [:task :stated]))
+        main-side (if (= :ours mine) :theirs :ours)]
+    (vec (for [{[kind id] :key :as c} conflicts :when (= :task kind)
+               k (sort (distinct (mapcat (comp keys #(get c %)) [:base :ours :theirs])))
+               :let [b (get-in c [:base k]) o (get-in c [mine k]) t (get-in c [main-side k])]
+               :when (and (not= o t) (not= o b) (not= t b))]
+           {:task id :attr (attr k) :base b :ours o :theirs t}))))
 
 (defn three-way
   "git's three-way merge of program maps: :ours and :theirs (each side's changes since

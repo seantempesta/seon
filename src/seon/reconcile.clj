@@ -882,7 +882,7 @@
       ;; is answered alone
       :octopus-merge (let [bs (mapv #(:branch (:seon.agent/env (task-agent (:idx st) (:task %)))) (:members act))]
                        (one (request (assoc-in st [:flights id :branches] bs) id :octopus-merged
-                                     {:op :write :req {:op :octopus-merge :branches bs :data-attrs #{}}})))
+                                     {:op :write :req {:op :octopus-merge :branches bs :data-attrs :all}})))
       ;; the merge gate (a change reaching process tests): root's one :gate request, the candidate's files read from its
       ;; branch, then its deferred tests run on a checkout of the merges head with them (seon.fx/run-tests)
       :gate (one (request st id :gated {:op :gate :branch (:branch (:seon.agent/env (task-agent (:idx st) id))) :tests (:tests act) :base (:base act)}))
@@ -991,7 +991,9 @@
                (seq (:failures run-problems)) (assoc :seon.task/failures (:failures run-problems))
                (seq (:costs run-problems)) (assoc :seon.task/costs (:costs run-problems))
                error (assoc :seon.task/error error)
-               (seq (:waste end)) (assoc :seon.task/waste (:waste end)))
+               (seq (:waste end)) (assoc :seon.task/waste (:waste end))
+               ;; a task member both changed: shown on the task and as a :task-conflict row (a feature, owner 2026-11-14)
+               (seq (pm/task-conflicts task-conflicts :theirs)) (assoc :seon.task/task-conflicts (pm/task-conflicts task-conflicts :theirs)))
         facts {:conflicts conflicts :unmerged unmerged :red (for [[tt s] results :when (not= :pass s)] tt)}
         outcome (if marked? :closed (:outcome j))
         move (if (and (:hold j) (not marked?))

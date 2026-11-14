@@ -481,7 +481,11 @@
                    ;; a var the form unmapped is no longer program on this branch: its definition retracted
                    (let [gone (when (and l (records-as-agent?) contract/record? (contains? m :repl/value))
                                 (not-empty (unmapped (agent/db) (:repl/form m) (the-ns (:ns l)))))
-                         _ (when gone (agent/transact! (mapv (fn [[_ e f]] [:db/retract e :var/form f]) gone)))
+                         ;; the definition and its form, whole (seon.stage/stage-tx's rule): no dead form keeps its :form/refs
+                         _ (when gone (agent/transact! (into (mapv (fn [[_ e _]] [:db/retractEntity e]) gone)
+                                                             (for [f (distinct (map peek gone))
+                                                                   :when (every? (set (map second gone)) (map :v (d/datoms (agent/db) :eavt f :form/defines)))]
+                                                               [:db/retractEntity f]))))
                          m (cond-> m gone (assoc :unmapped (mapv first gone)))]
                    (if acct
                      (let [;; the vars this form makes that the branch did not hold before it (read before its transaction)

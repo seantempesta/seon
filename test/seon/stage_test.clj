@@ -19,7 +19,8 @@
         ;; this namespace's definitions only: another test of this process may load the test
         ;; store's example namespaces without their vars, which stage-tx rightly retracts
         mine (fn [tx] (filterv #(let [x (d/entity db (second %))]
-                                  (= "app.st-stage" (or (some-> (:var/name x) namespace) (some-> (:method/multi x) namespace))))
+                                  (= "app.st-stage" (or (some-> (:var/name x) namespace) (some-> (:method/multi x) namespace)
+                                                        (some-> (:form/id x) (clojure.string/split #"/") first))))
                                tx))]
     (testing "a runtime that matches the branch stages nothing, a deftype's type included (Jolt interns no var for it)"
       (is (some? (pdb/eid db :var/name 'app.st-stage/Pt)) "the type is recorded as a var, though Jolt interns none")
@@ -28,9 +29,10 @@
     (remove-method @(find-var 'app.st-stage/area) :circle)
     (testing "the unmapped var and the removed method stop pointing to their forms, nothing else"
       (let [tx (mine (stage/stage-tx db))]
-        (is (= 2 (count tx)) (pr-str tx))
-        (is (some #{[:db/retract (pdb/eid db :var/name 'app.st-stage/dropped) :var/form (form-of 'app.st-stage/dropped)]} tx))
-        (is (some #(= :method/form (nth % 2)) tx))
+        (is (= 3 (count tx)) (pr-str tx))
+        (is (some #{[:db/retractEntity (pdb/eid db :var/name 'app.st-stage/dropped)]} tx) "the definition, whole")
+        (is (some #{[:db/retractEntity (form-of 'app.st-stage/dropped)]} tx) "and its form")
+        (is (some #(= :method/form (get % 2)) tx))
         (is (not-any? #(= (pdb/eid db :var/name 'app.st-stage/kept) (second %)) tx))))))
 
 (defn- account-of
@@ -60,3 +62,21 @@
      :per-n {:ns 1100 :bytes 3000}
      :fixed {:ns 45000 :bytes 45000}
      :sizes [30 100 300]}))
+
+;; Estimate: a test db with 3 recorded forms 2M + two stage-tx passes 1M = 3000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-unmap-retracts-its-form-whole
+  ;; agent lb76's branch (2026-11-14): a staged unmap retracted only seon.system/baked-paths' :var/form, so its form stayed, dead,
+  ;; with its :form/refs, and seon.main-test/every-name-a-form-uses-is-a-var counted them on the branch. A definition the runtime
+  ;; dropped takes its form with it (root's ruling, the one merge)
+  (let [db (pt/record (ts/test-db)
+                      'user "(ns app.st-whole)"
+                      'app.st-whole "(defn kept [x] x)"
+                      'app.st-whole "(defn dropped [x] (kept x))")
+        dropped (pdb/eid db :var/name 'app.st-whole/dropped)
+        form (:db/id (:var/form (d/entity db dropped)))]
+    (ns-unmap 'app.st-whole 'dropped)
+    (let [after (d/db-with db (filterv #(#{dropped form} (second %)) (stage/stage-tx db)))]
+      (is (nil? (d/entity after [:var/name 'app.st-whole/dropped])) "the definition is gone")
+      (is (empty? (d/datoms after :eavt form)) "and its form, refs and all: nothing dead stays")
+      (is (some? (:var/form (d/entity after [:var/name 'app.st-whole/kept]))) "the rest stays"))))
+

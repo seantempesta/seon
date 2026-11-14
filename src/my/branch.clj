@@ -49,7 +49,7 @@
   {:malli/schema [:=> [:cat] [:map [:ok :boolean]]]}
   []
   (stage/stage!)
-  (let [r (agent/merge-main! #{})
+  (let [r (agent/merge-main! :all)
         db (agent/db)]
     (with-meta (assoc r :unmerged (pm/unmerged db)) {:seon.render/schema :seon.branch/merged})))
 

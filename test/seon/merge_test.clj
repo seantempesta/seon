@@ -252,15 +252,14 @@
     (is (empty? (:theirs (tw (base) observed))))
     (is (seq (:theirs (tw (base) (with (base) (var-tx "f" "(dec x)"))))))))
 
-(deftest platform-records-never-put-a-branch-behind
-  ;; root's records on main (boot, quiescence, recorded errors) are platform records: with
-  ;; all data merged (the writer's :all) they change no key a branch carries; the task
-  ;; content an agent may improve (my.task/update!) is carried
+(deftest platform-records-merge-as-facts
+  ;; owner, 2026-11-14: "If there are no conflicts I don't see any reason to not merge everything": root's records on main
+  ;; (boot, quiescence, recorded errors) are facts a branch takes by their [:datum e a] keys, as any data; a task's content is its key
   (let [rooted (with (base) [{:seon.system/id :root :seon.system/quiescent {:t 9 :root-causes []}}])
         tasked (with (base) [{:seon.task/id "t/x" :seon.task/plan "better"}])
         p #(pm/program % :all)]
-    (is (empty? (:theirs (pm/three-way (p (base)) (p (base)) (p rooted)))))
-    (is (some (fn [[k]] (= [:datum :seon.task/plan] [(first k) (nth k 2)])) (:ours (pm/three-way (p (base)) (p tasked) (p (base))))))))
+    (is (some #(= :seon.system/quiescent (nth % 2 nil)) (keys (:theirs (pm/three-way (p (base)) (p (base)) (p rooted))))) "main's record is a change the branch takes")
+    (is (some #{[:task "t/x"]} (keys (:ours (pm/three-way (p (base)) (p tasked) (p (base)))))) "a task's content is its [:task id] key")))
 
 (deftest declared-data-merges-by-key
   ;; the data part, used by core's generic merge (every non-program, non-observation attribute)
@@ -575,6 +574,7 @@
         ours (with b (var-tx "f" "(inc x)"))
         r (pm/delta-three-way b ours theirs :all)
         merged (d/db-with ours (pm/merge-tx ours b theirs (:apply r) :all))]
+    (is (empty? (:conflicts r)) "nothing both changed")
     (is (= [:cancelled :done] ((juxt :seon.task/execution :seon.task/outcome) (d/entity merged [:seon.task/id "t/x"]))) "main's end of the task")
     (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch keeps its own change")))
 

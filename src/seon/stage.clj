@@ -13,8 +13,8 @@
 
 (defn stage-tx
   "tx-data making branch db's definitions match this live runtime: each var recorded with a
-  form in a loaded namespace and no longer held there (a deftype's type is held though not interned), and each recorded method its
-  multimethod no longer has, stops pointing to its form."
+  form in a loaded namespace and no longer held there (a deftype's type is held though not interned) is retracted whole with its
+  form, and each recorded method its multimethod no longer has stops pointing to its form."
   {:malli/schema [:=> [:cat :seon.host/db] :seon.db/tx-data]}
   [db]
   ;; one pass over the recorded vars' names and one ns-interns per namespace (it builds the
@@ -24,16 +24,19 @@
         interns (into {} (for [nsym (distinct (map (comp symbol namespace second) vars))
                                :let [n (find-ns nsym)] :when n]
                            [nsym (ns-interns n)]))]
+  (let [dropped (filterv (fn [[_ sym]] (let [in (interns (symbol (namespace sym)))] (and in (not (program/process-var db sym in))))) vars)
+        gone (into #{} (map (comp :e first)) dropped)
+        ;; a form leaves with its definitions once every one it defines is dropped (a defprotocol defines several)
+        whole? (fn [f] (every? #(gone (:v %)) (d/datoms db :eavt f :form/defines)))]
   (vec (concat
-         (for [[dt sym] vars
-               :let [in (interns (symbol (namespace sym)))]
-               :when (and in (not (program/process-var db sym in)))]
-           [:db/retract (:e dt) :var/form (:v dt)])
+         ;; the definition and its form, whole: a dead form kept its :form/refs (agent lb76, 2026-11-14)
+         (for [[dt _] dropped] [:db/retractEntity (:e dt)])
+         (for [f (distinct (map (comp :v first) dropped)) :when (whole? f)] [:db/retractEntity f])
          (for [dt (d/datoms db :aevt :method/form)
                :let [m (d/entity db (:e dt)) v (find-var (:method/multi m))]
                :when (and v (instance? clojure.lang.MultiFn @v)
                           (not (contains? (methods @v) (read-string (:method/dispatch m)))))]
-           [:db/retract (:e dt) :method/form (:v dt)])))))
+           [:db/retract (:e dt) :method/form (:v dt)]))))))
 
 (defn stage!
   "Stage the live runtime onto this agent's branch (one transaction). Answers the tx-data
