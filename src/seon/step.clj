@@ -21,7 +21,7 @@
 
 (defn put-after!
   "Puts m on channel ch once ms milliseconds pass: the one timer of the system (the cron's
-  tick, the delayed insert, an agent's stall bound; docs/clocks.md#time-decides-the-owners-exceptions).
+  tick, the delayed insert, an effect's declared deadline; docs/clocks.md#time-decides-the-owners-exceptions).
   One entry on Jolt's deadline heap (jolt.host/timer-at!, the heap `timeout` uses, in monotonic ms), whose
   thunk is a put! that never waits: nothing parks while it is armed. Answers the handle `cancel!` takes, so a
   bound whose wait ended disarms (0.17 us to arm, 0.04 us to cancel, against a go block on a timeout's 5.4 us

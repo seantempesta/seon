@@ -54,7 +54,7 @@
     (is (= before after) "and nothing was forked: root's fork server is the one it had")))
 
 ;; docs/clocks.md#time-decides-the-owners-exceptions: a run ended past its bound takes its Seon state first (bin/evidence asks it of
-;; root's server, read-only): root's stall check (::stall-armed ::busy ::lost), each agent proc's (:inflight :fx-out :stall-seen
+;; root's server, read-only): root's api (::busy ::lost), each agent proc's (:inflight :fx-out :stall-seen
 ;; :last-frame-ms), and which procs answered the ping, so a proc mid-step is seen missing, never read as nil
 (deftest roots-session-and-what-root-releases-are-the-users
   ;; docs/users.md#who-started-whom (owner, 2026-11-12: "Root is not special: it's the first agent; everyone descends from it"): root's
@@ -82,10 +82,9 @@
         r (ts/value-of (:response (ts/ask root {:op :eval :agent "root"
                                                 :code "(let [ag (seon.system/spawn! sys {}) s (seon.system/stall-state sys)] (seon.system/kill! sys ag) s)"})))]
     (is (map? (:root r)) (pr-str r))
-    (is (every? #{:seon.system/stall-armed :seon.system/busy :seon.system/lost} (keys (:root r))) "root's stall check, nothing else of its state")
+    (is (every? #{:seon.system/busy :seon.system/lost} (keys (:root r))) "root's busy set and losses, nothing else of its state")
     ;; red before (batch 32's problems overrun): the api's ping answered only :agents :closing :pending, so :root was {} on every
-    ;; root and a hang's evidence never showed whether the stall check was armed or which agents it held busy
-    (is (boolean? (:seon.system/stall-armed (:root r))) "the armed flag, read whatever its value")
+    ;; root and a hang's evidence never showed which agents it held busy
     (is (set? (:seon.system/busy (:root r))) "the agents with an eval in flight, empty or not")
     (is (map? (:agents r)) "each agent proc's, by pid")
     (is (and (seq (:agents r)) (every? #(and (contains? % :stall-seen) (contains? % :last-frame-ms)) (vals (:agents r)))) "with what its stall check reads")
@@ -103,6 +102,23 @@
     ;; its answer is the end, {:status :ended-ms}, never the whole entry, which gains :exit when the fork server reaps it (a second
     ;; kill answered another map in a shard: Context, 2026-11-12)
     (is (= [{:status :killed} true true #{:status :ended-ms} :seon.system/no-agent] r) (pr-str r))))
+
+;; Estimate: a spawn (a fork, ~65 ms of work, ~2e6 ticks), one eval sent, the agent's quiescence told at once (no timer pending),
+;; one frame, one fact written, the wait answered at that commit, a kill: ~3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-deadlocked-agent-says-so-with-no-clock
+  ;; docs/flow.md#the-five-rules, rule 3: an agent whose eval waits on what nothing will ever give it is a stall said by its source
+  ;; (seon.agent/quiescent!, Jolt's quiescence event, every fiber's dump), recorded on its process, while root runs no stall timer.
+  ;; Red before: root found a stall only by its own poll (every half :seon.config.agent/stall-ms, 30 s), whose armed flag
+  ;; stall-state read (::stall-armed)
+  (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
+        r (ts/value-of (:response (ts/ask root {:op :eval :agent "root"
+                                                :code (str "(let [ag (seon.system/spawn! sys {})"
+                                                           "      _ (seon.system/submit! sys ag \"(clojure.core.async/<!! (clojure.core.async/chan))\" {:origin :outside})"
+                                                           "      db (seon.system/await-db sys (fn [db] (seq (datahike.api/datoms db :aevt :seon.process/stall))))"
+                                                           "      s (some-> db (datahike.api/datoms :aevt :seon.process/stall) first :v)]"
+                                                           "  @(seon.system/kill! sys ag)"
+                                                           "  [(int? (:quiet-ms s)) (contains? (get-in (seon.system/stall-state sys) [:root]) :seon.system/stall-armed)])")})))]
+    (is (= [true false] r) (str "the agent's stall is recorded, said by the agent; root holds no stall timer: " (pr-str r)))))
 
 (deftest the-sweeper-pool-is-fixed-before-anything-collects
   ;; task seon.system/the-sweeper-pool-is-fixed-before-anything-collects: six threads allocate through 30

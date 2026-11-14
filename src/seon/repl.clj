@@ -1314,7 +1314,8 @@
   ([_] {})
   ([st _] st)
   ([st _ m]
-   (swap! agent/state assoc :busy true)
+   ;; a request in flight; its deadlock, if it comes, is told once (seon.agent/quiescent!)
+   (swap! agent/state assoc :busy true :stall-told false)
    (let [rs (cond
               ;; root's stop: the process ends after the requests before it, what they applied committed
               (= :stop (:op m)) (do (when (:dirty? @agent/state) (agent/commit!)) (lib/c-exit 0))
@@ -1464,6 +1465,8 @@
                              ;; what update! waits for a removed test-run proc's exit, the bound root's graph declares too
                              :stop-timeout-ms (cfg/value :seon.config.root/flow-stop-ms)})
         {:keys [error-chan]} (flow/start g)]
+    ;; a deadlock is an event, never a timer of root's: the agent says it (docs/flow.md#the-five-rules, rule 3)
+    (jolt.host/on-quiescent! #'agent/quiescent!)
     (swap! agent/state assoc :flow g)
     (flow/resume g)
     (loop []

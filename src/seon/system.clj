@@ -254,20 +254,20 @@
     st))
 
 (defn stall-state
-  "What root's stall check and each agent proc hold now, a hang's evidence (bin/evidence asks it through root's server
-  before a run past its bound is ended; it reads, never writes): the api proc's ::stall-armed, ::busy and ::lost (its ping's), and
+  "What root and each agent proc hold now, a hang's evidence (bin/evidence asks it through root's server
+  before a run past its bound is ended; it reads, never writes): the api proc's ::busy and ::lost (its ping's), and
   each agent proc's :inflight (each request's kind), :fx-out, :stall-seen and :last-frame-ms, read by one Flow ping of
   the graph, with :answered, every proc that answered it. The ping's bound is :seon.config.check/ping-ms: a proc
   mid-step that long answers nothing and is missing from :answered (an agent in ::busy and not there is mid-step), never
   read as nil. See docs/clocks.md#time-decides-the-owners-exceptions."
-  {:malli/schema [:=> [:cat :seon.system/sys] [:map [:root [:map [:seon.system/stall-armed {:optional true}] [:seon.system/busy {:optional true}]
+  {:malli/schema [:=> [:cat :seon.system/sys] [:map [:root [:map [:seon.system/busy {:optional true}]
                                                                [:seon.system/lost {:optional true}]]]
                                                    [:agents :map] [:answered [:vector :keyword]]]]}
   [sys]
   (let [states (flow/ping (:graph sys) :timeout-ms (cfg/value :seon.config.check/ping-ms))
         state #(::flow/state (get states %))]
-    ;; as the api's ping answers it (its :ping-map-fn): the armed flag (seon.step/timer), the busy set, what a throw lost
-    {:root (select-keys (state :api) [::stall-armed ::busy ::lost])
+    ;; as the api's ping answers it (its :ping-map-fn): the busy set, what a throw lost
+    {:root (select-keys (state :api) [::busy ::lost])
      :agents (into (sorted-map)
                    (for [[pid m] states :let [s (::flow/state m)] :when (contains? s :inflight)]
                      [pid (assoc (select-keys s [:fx-out :stall-seen :last-frame-ms]) :inflight (update-vals (:inflight s) :kind))]))
@@ -921,7 +921,7 @@
       ;; an effect owner's failed outcome (seon.fx/owner-proc)
       :problem (problem st (err/occurrence (:error m) (:class m) {:agent (:agent m) :task (get-in st [:view :agents (:agent m) :task])}
                                            (System/currentTimeMillis)))
-      ;; an agent's proc observed it stalled (seon.agent-proc :stall?): a fact on the agent, what it
+      ;; an agent said it deadlocked (seon.agent/quiescent!, through its proc): a fact on the agent, what it
       ;; waits on with it, an open problem while it holds (seon.problems/stalled-agents); its next
       ;; frame (:spoke) or its end retracts it
       :stalled (let [s (cond-> {:quiet-ms (:quiet-ms (:error m))} (get-in m [:error :last-op]) (assoc :last-op (get-in m [:error :last-op])))]
@@ -930,10 +930,6 @@
                  (cond-> (-> st (set-agent o (:agent m) {:stalled s}) (stall-task o (:agent m) s))
                    (:closing st) (to-agent o (:agent m) {:op :kill})))
       :spoke (set-agent st o (:agent m) {:stalled nil})
-      ;; the stall timer: each agent with an eval in flight checks its own quiet time
-      :stall-check (let [now (System/currentTimeMillis)]
-                     (step/fired! (::stall-timer st))
-                     (reduce (fn [st id] (to-agent st o id {:op :stall? :now-ms now :stall-ms (:stall-ms st)})) st (::busy st)))
       st)))
 
 (declare answer-taken)
@@ -1018,7 +1014,7 @@
                               ;; every ask it holds unanswered, rid -> [kind agent]: what a waiter waits on
                               :pending (into (sorted-map) (for [[r {:keys [kind agent]}] (:pending st)] [r [kind agent]]))
                               ;; the stall check, a hang's evidence (stall-state): its armed flag, the agents it holds busy, what a throw lost
-                              ::stall-armed (boolean (some-> (::stall-timer st) deref)) ::busy (or (::busy st) #{}) ::lost (::lost st)})})
+                              ::busy (or (::busy st) #{}) ::lost (::lost st)})})
   ;; :system is the root graph's declared procs and conns as built (seon.graph), changed by
   ;; seon.system/apply!; agents' procs join them at each update!
   ([args] (assoc (dissoc args :system) :agents {} :agent-procs {} :pending {} :rid 0
@@ -1026,8 +1022,6 @@
                  ;; what this step took, kept across Flow's catch (which keeps the state from
                  ;; before the step): a host object of this proc's own
                  ::taken (volatile! [])
-                 ;; the stall check's timer: armed while an agent has an eval in flight (seon.step/timer)
-                 ::stall-timer (step/timer)
                  ::errors {}
                  ;; the waits on main (await-db), {k {:pred :p}}: each checked as of every commit until it holds
                  ::waits {}
@@ -1056,10 +1050,6 @@
                 st))
          st (flush-problems st o)
          st (record-agents st o before)
-         ;; while an agent has an eval in flight, the stall check runs every half stall bound
-         ;; its armed flag is a host object (seon.step/timer): a step that took :stall-check and then threw cannot leave it armed for good
-         _ (when (and (seq (::busy st)) (pos? (:stall-ms st)) (:back st))
-             (step/arm! (::stall-timer st) (:back st) (quot (:stall-ms st) 2) {:op :stall-check}))
          st (if (::update st)
               (do (flow/update! @(:graph st) {:procs (merge (get-in st [:system :procs]) (:agent-procs st)) :conns (get-in st [:system :conns])})
                   (dissoc st ::update))
@@ -1791,8 +1781,7 @@
    about n datoms of an example program on :db; a root holds no program it was not given)
    :main branch (root's main; an existing branch is resumed; :db is the seed itself)
    :backend :lmdb|:file :log? true :max-running n (parallel runs) :provider p (the
-   runs' model) :started-by \"ns/test\" (the test whose process started it, :seon.system/started-by) :stall-ms (the stall bound, :seon.config.agent/stall-ms by default, for the checks that
-   move it) :source s}. s: Seon's own source
+   runs' model) :started-by \"ns/test\" (the test whose process started it, :seon.system/started-by) :source s}. s: Seon's own source
    is the program, {:root dir :dirs [\"src\"] :branch \"jolt/seon-merges\"}: indexed into a main
    that holds none (boot!'s seed; every other boot resumes main and reads no file), and each merge
    that changes it is committed on branch (the reconciler's write-back); absent, the config's
@@ -1800,7 +1789,7 @@
   :seon.config.root/main (resumed; made from :db when the store has none), :seon.config.store/backend, :seon.config.agent/max-running and the provider of
   :seon.config.ai/*. The config in force is written on main's root entity."
   {:malli/schema [:=> [:cat :map] :seon.system/sys]}
-  [{:keys [datoms log? path main backend max-running provider stall-ms source started-by] :or {datoms 0}}]
+  [{:keys [datoms log? path main backend max-running provider source started-by] :or {datoms 0}}]
   (lib/ignore-sigpipe!)
   (when-not log? (trove/set-log-fn! nil))
   ;; first of all, before anything spawns: an error no thread, fiber or go body catches reaches root (uncaught!), never only stderr
@@ -1869,7 +1858,7 @@
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
                          :cron-tick (a/chan 1) :full-run-at (cfg/value :seon.config.proofs/full-run-at)
-                         :stall-ms (or stall-ms (cfg/value :seon.config.agent/stall-ms)) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1) :web-streams-buf (a/sliding-buffer (cfg/value :seon.config.web/streams-buf))
+                         :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1) :web-streams-buf (a/sliding-buffer (cfg/value :seon.config.web/streams-buf))
                          :prove-tree (fn [on] (prove-tree! @sys-p on))
                          :item-workers (:workers (seon.prove/config-admission)) :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
                          :web-port (cfg/value :seon.config.web/port)

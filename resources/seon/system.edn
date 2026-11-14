@@ -17,7 +17,7 @@
                     ;; every commit, in order: each wait on main (seon.system/await-db) is checked as of it
                     :main {:buf-or-n :bind/reconciler-buf}}
         :args {:view :bind/view :ext :bind/ext :back :bind/back :graph :bind/graph
-               :system :bind/system :conn :bind/conn :stall-ms :bind/stall-ms
+               :system :bind/system :conn :bind/conn
                :to-writer :bind/to-writer :events :bind/events :boot :bind/boot :source :bind/source}}
   :writer {:proc seon.writer/writer-proc
            :args {:conn :bind/conn :cfg :bind/store-cfg :durable? :bind/durable?

@@ -82,7 +82,7 @@ Root records what it observes of each agent on main (```seon.system/record-agent
 
 ## A stalled agent
 
-An agent with a request in flight that sends root nothing past `:seon.config.agent/stall-ms` (a clock named in [clocks](clocks.md)) is observed stalled, once per quiet spell: a fact, never an end (`seon.agent-proc`'s stall check). Root's frames to the agent never block its proc (```seon.agent-proc/to-proc!``` puts without waiting), so an agent that stopped reading is still seen (```seon.procs-test/an-agent-that-reads-nothing-is-seen-as-a-stall```).
+An agent says its own stall: with a request in flight, when no fiber of it can run and nothing it asked root is owed, Jolt's quiescence event (```seon.agent/quiescent!```) sends root `{:op :stalled}` with every fiber's dump, once per request, and root records it on the agent's process: a fact, never an end, with no clock in root (```seon.system-test/a-deadlocked-agent-says-so-with-no-clock```). A wait on root is root's turn, ended by root's answer or the request's declared bound. Its socket's reader is marked a pump, so waiting on root holds no quiescence off. Root's frames to the agent never block its proc (```seon.agent-proc/to-proc!``` puts without waiting), so an agent that stopped reading is still seen (```seon.procs-test/an-agent-that-reads-nothing-is-seen-as-a-stall```).
 
 Root writes `:seon.process/stall` on the agent's process entity with what it waits on (the last request, its kind and form, and for a test run the test that started last, from `:testing` frames). While it holds it is an open `:stalled` problem (`seon.problems/stalled-agents`). The agent's next frame retracts it, and so does its end.
 

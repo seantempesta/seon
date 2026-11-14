@@ -23,10 +23,6 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.system-test/root-threads-are-what-root-declares
                       seon.render-test/a-slow-render-step-is-recorded-not-abandoned}}
- {:seon.task/name "a-stall-is-past-the-requests-own-bound"
-  :seon.task/plan "What exists: `:seon.config.agent/stall-ms` (30000, a guessed tolerance, now a config key; it was a var) is the silence after which a busy agent is observed stalled once; `seon.system/start!` takes :stall-ms, and the api's step schedules its stall check with `step/put-after!` at half of it (seon.system, :stall-check). A 25 s compute shows nothing while a legitimate long proof run reads as stalled. Correct: a request carries its declared bound (the form's, :seon.config.agent/form-ticks; a test run's is its tick budget, `:seon.config.agent/test-ticks`) and the agent proc observes a stall when that bound passes with no frame: one recorded :seon.agent/stalled naming the bound, no second number; the ticks come from the one :clock proc. Deletes stall-ms, the :stall-ms option and the :stall-check timer. The flusher's sleep this task also named is gone (durability is continuous group commit: docs/storage.md#durability-is-continuous-group-commit), and its proof with it."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.procs-test/a-stall-is-observed-past-the-requests-own-bound}}
  {:seon.task/name "event-loss-is-counted"
   :seon.task/plan "Root's buffers are literals: `seon.system/start!`'s events-in is `(a/sliding-buffer 8192)`, `seon.system/events` taps a sliding 1024 that is never untapped, and the render proc's tap is a sliding 4096 (seon.render.proc). A sliding buffer drops the oldest with no count, so the dashboard can miss events and nothing says so. Correct (the step-fn law: buffers bounded by their loss semantics): every buffer is declared in resources/seon/system.edn :chan-opts with its loss; a sliding buffer counts its drops into the api's view (:events-dropped by tap), shown on the dashboard; c/events taps are released with their reader. Estimate: one counter per drop."
   :seon.task/kind :work

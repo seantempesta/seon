@@ -68,12 +68,29 @@
         ;; unbuffered: the reader parks with each message until the transport takes it, so root's
         ;; further frames wait in the socket's own buffer
         (let [ch (a/chan)]
-          (a/io-thread (loop [] (let [m (sock/recv! c)]
+          ;; the socket's reader is root's to end (its frames, its EOF), never this program's work: marked a pump, so a wait on
+          ;; it holds no quiescence off, and a deadlock of the agent's own fibers is told (`quiescent!`)
+          (a/io-thread (jolt.host/fiber-pump!)
+                       (loop [] (let [m (sock/recv! c)]
                                   (if (= :eof m) (a/close! ch) (when (a/>!! ch m) (recur))))))
           (swap! link assoc :ch ch)
           ch))))
 
 (declare commit!)
+
+(defn quiescent!
+  "This process's quiescence handler (jolt.host/on-quiescent!, set by seon.repl/serve!): told, with every fiber's dump, the moment
+  no fiber can run and no timer is pending. With a request in flight (:busy) and nothing it asked root still owed (:waits,
+  :fx-pending: a wait on root is root's turn, ended by root's answer or the request's declared bound), nothing can ever move it:
+  a deadlock, said to root once per request as {:op :stalled :dump}, which root records as the agent's stall. No clock: the
+  stall is an event from its source (docs/flow.md#the-five-rules, rule 3). nil."
+  {:malli/schema [:=> [:cat :string] :nil]}
+  [dump]
+  (let [s @state]
+    (when (and (:busy s) (not (:stall-told s)) (empty? (:waits s)) (empty? (:fx-pending s)))
+      (swap! state assoc :stall-told true)
+      (send! {:op :stalled :dump dump})))
+  nil)
 
 ;; ---- the agent's own API ------------------------------------------------------
 
