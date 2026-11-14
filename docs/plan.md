@@ -99,8 +99,9 @@ this path, and is deleted when the path carries a week of landings.
 ### The order
 
 1. **Stage 0's merge.** "Main's reds" were on the agent's branch: merging main into it lost main's task lifecycle datoms
-   and kept callers of definitions main deleted. Data's one merge (`seon.merge/a-tasks-content-is-a-key-of-the-one-merge`,
-   deleting `carry-tx`) fixes it; then context runs the first task's `seon_done` again, watched, alone. Main stays clean:
+   and kept callers of definitions main deleted. Data's one merge (`seon.merge/a-tasks-content-is-a-key-of-the-one-merge`) fixes it: it takes every
+   datom main wrote that the branch did not also change at the same entity and attribute, and only that conflict stops it
+   (owner: "Facts are facts at a certain tx time"); `carried-platform-attrs` and `carry-tx` are deleted; then context runs the first task's `seon_done` again, watched, alone. Main stays clean:
    a red on main is its owner's first item.
 2. **Load within the machine:** proving goes through the one effects owner (`seon.fx/owner-proc`, a `:process` kind,
    admission from the cores) and `bin/prove` becomes its client; per-checkout shard sizing goes (tests; runtime reviews).
