@@ -1656,7 +1656,7 @@
     (is (some? (d/entity db [:var/name 'app.kt/f])) "the tree is read: the store was made again and the program imported")
     (is (= :db.type/data (get-in (:schema db) [:seon.model-call/basis :db/valueType])) "on a store of this schema")))
 
-;; Estimate: 2 stores made by program-db (the first import and the bound's restart) x S 10M = 20M; 3 one-file imports 3M; 1 kept read 0.5M; 4 git children and 3 tree-ids ~1M. Estimated 20,000,000 ticks, worked from the work, never from a run.
+;; Estimate: 2 stores made by program-db (the first import and the bound's next generation) x S 10M = 20M; 3 one-file imports 3M; 1 kept read 0.5M; 4 git children and 3 tree-ids ~1M. Estimated 20,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-kept-tree-is-read-whatever-its-stores-size
   ;; found 2026-11-10 (Context, the Tests session): the plan imported a tree past the store's bound,
   ;; then a shard found the store over it, removed it, and its first program reader imported the tree again inside its own
@@ -1676,7 +1676,8 @@
     (spit (str d "/src/app/ks2.clj") "(ns app.ks2)\n")
     (sh/sh "git" "-C" d "add" ".")
     (runner/program-db d store (fx/tree-id d) 1)
-    (is (not (.isFile marker)) "the plan's bound, at a new tree, starts the store again")))
+    (is (.isFile marker) "the plan's bound, at a new tree, starts the key's next generation: the full store is never removed or moved")
+    (is (= [(str store "-1") store] (ts/generations store)) "generation 1 holds the new tree")))
 
 ;; Estimate: 4 record-tx 0.2M (the world is cached); 3 graph+index builds x 0.25M = 0.75M; 2 with-db-withs 0.2M; 1 held index + update 0.5M. Estimated 2,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-change-to-what-root-runs-moves-every-test-that-starts-a-root
