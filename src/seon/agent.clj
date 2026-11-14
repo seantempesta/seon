@@ -481,7 +481,8 @@
 (defn fx!
   "The effect kind with req, through root's owner proc, answered here: its outcome
   {:value ...} or its declared error. Recorded with this eval request. No lock: an
-  interrupt may end the wait; the outcome then arrives later as an async one does. The wait
+  interrupt may end the wait; the outcome then arrives later as an async one does. A request that
+  streams (:call) waits until its owner answers, which its bound of quiet guarantees; any other
   lasts as long as the kind declares (:seon.config.fx/bounds, its :seon.bound/ms) and no longer:
   past it the outcome is the typed :seon.bound/reached. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
   {:malli/schema [:=> [:cat :keyword :map :map] :map]}
@@ -490,8 +491,10 @@
     (fx-test kind req)
     (let [k (:tx-seq (swap! state update :tx-seq inc))
           _ (swap! state update :fx-pending (fnil assoc {}) k kind)
+          ;; a request that streams (it names its call, :call) is ended by its owner's bound of quiet, re-armed by each chunk
+          ;; (seon.fx/stream-due), so a long reply that keeps streaming is never cut here; any other waits its kind's bound
           m (await-reply k (merge opts {:op :fx :k k :kind kind :req req})
-                         (get-in (cfg/value :seon.config.fx/bounds) [kind :seon.bound/ms]))
+                         (when-not (:call req) (get-in (cfg/value :seon.config.fx/bounds) [kind :seon.bound/ms])))
           ;; a bound reached answers as await-reply's own :reply; an effect's answer is its outcome, so that error is the outcome
           r (if (= :reply (:op m)) (:result m) (dissoc m :op :k))]
       (fx-done! k)

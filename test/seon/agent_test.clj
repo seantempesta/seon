@@ -3709,5 +3709,10 @@
           (is (contract/error? r) (str "an error, as the turn reads it: " (pr-str r)))
           (is (= :seon.bound/reached (:seon.error/type r)))
           (is (= {:seon.bound/ms 50} (:seon.bound/bound r)) "its kind's declared bound")
-          (is (empty? (:fx-pending @agent/state)) "the wait let its key go")))
+          (is (empty? (:fx-pending @agent/state)) "the wait let its key go"))
+        ;; a request that streams (:call) takes no total bound here: its owner's quiet bound answers it (seon.fx/stream-due)
+        (let [asked (atom ::none)]
+          (with-redefs [agent/await-reply (fn [_ _ ms] (reset! asked ms) {:op :fx-reply :value 1})]
+            (agent/fx! :model {:messages [] :call "c1"} {}))
+          (is (nil? @asked) "a streamed call's wait is the owner's to end")))
       (finally (reset! agent/state held)))))
