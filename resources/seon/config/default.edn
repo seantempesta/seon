@@ -41,6 +41,7 @@
  ;; Unit: ms. Flow's :stop-timeout-ms for root's graph (seon.system/start!). Provenance: the literal
  ;; 10000 it replaces. At the bound: flow/stop answers the pids still running.
  :seon.config.root/flow-stop-ms 10000
+ :seon.config.root/stop-ms 3000
  ;; Unit: entries. The newest entries root's view keeps of a list it grows: an agent's
  ;; evaluations and root's own defects; the view counts them all, and a render says how many it
  ;; left. Provenance: the value seon.system held as a literal twice (shrink). At the bound: the

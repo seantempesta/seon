@@ -94,7 +94,9 @@
         (when-not (:forms (seon.program/binary-program))
           (out! "ROOT NO BINARY FORMS target/seon.program records no forms of the tree target/seon was built from: the fork server"
                 " loads every form of main's program over the binary (bin/build records them)"))
-        (out! "ROOT LISTENING " bound))
+        ;; the port, then how long bin/system stop waits for this process's exit after its TERM (:seon.config.root/stop-ms):
+        ;; the script reads the one resolver's value from this line, never the config files itself
+        (out! "ROOT LISTENING " bound " " (seon.config/value :seon.config.root/stop-ms)))
       (loop [] (when (read-line) (recur)))
       (end! :stdin-eof))
     (lib/c-exit 0)))

@@ -926,19 +926,32 @@
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} an-eval-reads-the-schema-entries-only-after-one-moved
-  ;; docs/machine.md#an-agents-first-write: seon.repl/branch-registry, which each eval calls (wrap-registry,
+  ;; docs/machine.md#an-agents-first-write: seon.agent/branch-schemas, which the process's registry is set from (
   ;; instrument, the page walk), read every schema entry (two passes, seon.program/schema-changes: 748
   ;; entries, 1.08 MB) to learn nothing had changed. With the registry held (the fork hands main's) a call
   ;; costs under a tenth of one read; after a registration the next eval binds the registered schema.
   (let [m "(fn [f] (let [b (seon.profile/alloc-bytes)] (f) (- (seon.profile/alloc-bytes) b)))"
         [_ costs reg valid]
         (in-agent [(str "(def meas " m ")")
-                   "[(meas #'seon.repl/branch-registry) (meas #(seon.program/schema-changes (:db @seon.agent/state)))]"
+                   "[(meas #'seon.agent/branch-schemas) (meas #(seon.program/schema-changes (:db @seon.agent/state)))]"
                    "(my.schema/register! :lab.gap/n [:int {:min 3}])"
-                   "[(malli.core/validate :lab.gap/n 5 {:registry malli.registry/*registry*}) (malli.core/validate :lab.gap/n 1 {:registry malli.registry/*registry*})]"])
+                   "[(seon.contract/valid? :lab.gap/n 5) (seon.contract/valid? :lab.gap/n 1)]"])
         [held read] (:value costs)]
-    (is (< (* 10 held) read) (str "a call of branch-registry with the registry held allocated " held " bytes; one read of the schema changes " read))
+    (is (< (* 10 held) read) (str "a call of branch-schemas with the registry held allocated " held " bytes; one read of the schema changes " read))
     (is (= [true false] (:value valid)) (str "after a registration the next eval binds it: " (pr-str reg) " " (pr-str valid)))))
+
+;; docs/source.md#schemas-at-the-repl: an agent process holds one branch, so its one malli registry is that branch's, on every path:
+;; an eval, the turn loop, a Flow step, a handler, a thread. Red before: the branch's registry was bound only around some paths (11
+;; hand bindings), so code outside them checked against main's and threw "malli has no schema" (context's loop task, 2026-11-13: a
+;; key its branch held and main had deleted). Here a raw Thread, which conveys no binding, stands for every such path, and a
+;; lookup by name at call time (contract/valid?, as contract/error's type check and config's key check do) is what failed.
+;; Estimate: in-agent's setup (~1.5M) + 3 asks (~0.25M each) = ~2.3M
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-branchs-own-schema-holds-on-every-path
+  (let [[reg _ called]
+        (in-agent ["(my.schema/register! :lab.reg/n [:int {:min 3}])"
+                   ":registered"
+                   "(let [r (promise) t (Thread. #(deliver r (try [(seon.contract/valid? :lab.reg/n 5) (seon.contract/valid? :lab.reg/n 1)] (catch Throwable e (ex-message e)))))] (.start t) (.join t) @r)"])]
+    (is (= [true false] (:value called)) (str "a call outside any eval checks against the branch's schema: " (pr-str reg) " " (pr-str called)))))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} root-reads-the-health-the-render-proc-keeps
@@ -1263,7 +1276,7 @@
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} an-edit-of-a-middleware-runs-next
   (let [[_ _ marked vars] (in-agent ["(def marks (atom 0)) (in-ns 'seon.repl)"
-                                     "(let [old wrap-registry] (alter-var-root #'wrap-registry (fn [_] (fn [h] (let [n (old h)] (fn [req] (swap! @(find-var (symbol (str (ns-name (first (filter #(ns-resolve % 'marks) (all-ns)))) \"/marks\"))) inc) (n req)))))))"
+                                     "(let [old wrap-cost] (alter-var-root #'wrap-cost (fn [_] (fn [h] (let [n (old h)] (fn [req] (swap! @(find-var (symbol (str (ns-name (first (filter #(ns-resolve % 'marks) (all-ns)))) \"/marks\"))) inc) (n req)))))))"
                                      "@@(find-var (symbol (str (ns-name (first (filter #(ns-resolve % 'marks) (all-ns)))) \"/marks\")))"
                                      "(every? var? seon.repl/middleware)"])]
     (is (pos? (:value marked)) (pr-str marked))
@@ -1477,6 +1490,22 @@
 ;; Estimate: the world, built once a process (~3.2M measured here; my.test/world's docstring says ~0.6M), and three work! loops of
 ;; at most 3 turns on it (each: its start's reads and writes on the value ~0.2M, ~3 turns of a few datoms and an error map,
 ;; agent/error-map ~0.3M each; first put at 50k a turn, which missed the error map and the world) = ~6M: 6,000,000
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-reasoning-overrun-is-the-next-turns-to-read
+  ;; docs/failure-points.md (a turn of the agent's loop): a model call whose reasoning spent its whole token budget answers
+  ;; :seon.model/reasoning-ate-reply, and the run ended :error at that turn, though the agent could reason less and go on
+  ;; (root's Stage 0.3, 2026-11-14). A model call's typed error (:seon.model/failure) is a turn's error the next turn reads,
+  ;; as a throw is; two in a row with no answered call between end the work. Estimate: as its sibling below, the world and
+  ;; two work! loops of at most 3 turns
+  (let [red {:reasons [{:reason :proof-red}]}
+        overrun (seon.contract/error :seon.model/reasoning-ate-reply #'seon.model/reply-of
+                                     "the reply is empty: reasoning took 8192 tokens of a 8192-token budget" {:reasoning-chars 30000 :reasoning-tokens 8192 :max-tokens 8192})
+        n (volatile! 0)
+        end (work-with (fn [st called!] (if (= 1 (vswap! n inc)) overrun (do (called!) st))) (constantly red))]
+    (is (= :cap (:outcome end)) (str "the overrun was a turn the next one read, and the work went on to its cap: " (pr-str end)))
+    (let [end (work-with (fn [_ _] overrun) (constantly red))]
+      (is (= :error (:outcome end)) (pr-str end))
+      (is (str/includes? (str (:reason end)) "reasoning took 8192 tokens") "two in a row end the work, naming the error"))))
+
 (deftest ^{:seon.test/estimate {:ticks 6000000}} a-turn-that-throws-is-the-agents-to-read-and-the-second-ends-its-work
   ;; docs/failure-points.md (a turn of the agent's loop): md-scan #16 registered :seon.ref/block with list keys its
   ;; scan did not make yet, the registration re-armed seon.ref/scan, and the request's own scan threw after the
@@ -2387,14 +2416,17 @@
     (is (= [:closed :seon.model/no-provider [:seon.model/no-provider]] (:value r)) (pr-str r))))
 
 (defn- answers-gate
-  "Agent code that answers this agent's gate at its seam (seon.agent/ask-gate), each ask counted in user/gate-asks, with what user/gate-answer holds: a real
+  "Agent code that answers this agent's gate at its seams (seon.agent/ask-gate, and send-gate! whose answer arrives for the next prove), each ask counted in user/gate-asks, with what user/gate-answer holds: a real
   gate is a worktree, a build and a run, and the claim here is what the agent does with its answer."
   {:malli/schema [:=> [:cat :qualified-symbol] :string]}
   [t]
   (str "(do (in-ns 'user) (def gate-asks (atom 0)) (def gate-answer (atom :fail))"
-       " (alter-var-root #'seon.agent/ask-gate (constantly (fn [tests _] (swap! gate-asks inc)"
+       " (def gate-of (fn [tests] (swap! gate-asks inc)"
        "   {:value {:results (zipmap tests (repeat @gate-answer)) :digests (zipmap tests (repeat \"gate\"))"
-       "            :failures (if (= :fail @gate-answer) {'" t " [{:type :fail :message \"the gate's red\"}]} {})}})))"
+       "            :failures (if (= :fail @gate-answer) {'" t " [{:type :fail :message \"the gate's red\"}]} {})}}))"
+       " (alter-var-root #'seon.agent/ask-gate (constantly (fn [tests _] (gate-of tests))))"
+       ;; an eval's prove sends the gate and waits on nothing: its answer arrives as root's :reply does, for the next prove
+       " (alter-var-root #'seon.agent/send-gate! (constantly (fn [k tests _] (seon.agent/handle! {:op :reply :k k :result (gate-of tests)}) nil)))"
        " :ok)"))
 
 (defn- process-proof
@@ -2405,16 +2437,17 @@
        " (let [[r] (seon.agent-test/in-agent (fn [_] [\"(+ 1 1)\"]))] (clojure.test/is (= " n " (:value r))))) (in-ns 'user) :ok)"))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 9 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3750k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 9}} a-process-test-gets-its-verdict-while-the-agent-can-act
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4500000 :asks 11}} a-process-test-gets-its-verdict-while-the-agent-can-act
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches. The shape of seon.repl/a-docstring-redefinition-is-a-change's run (2026-11-06): the agent wrote
   ;; its proof as a process test and never ran it; deferred read as green, the run ended, and the judge found it red at the
   ;; merge with no turn left. Now its prove takes the gate's answer and the red is the agent's, on its status (the gate answered at its seam)
   (let [t 'seon.repl-test/a-process-proof-of-the-gate
         prove "(let [r (my.agent/prove)] {:proofs (:proofs r) :deferred (:deferred r) :ran (:ran r) :line (:seon.print/code (my.agent/prove-summary {} r))})"
         reasons "(mapv :reason (:reasons (seon.ctx.status/status (seon.agent/db) @seon.ctx/ctx {})))"
-        [_ _ red red-reasons _ _ green green-reasons again asks]
-        (in-agent (fn [_] [(answers-gate t) (process-proof "a-process-proof-of-the-gate" 3) prove reasons
-                           "(reset! user/gate-answer :pass)" (process-proof "a-process-proof-of-the-gate" 2) prove reasons prove "@user/gate-asks"])
+        ;; each change's first prove asks the gate and answers at once (an eval never waits on it); the next reads its answer
+        [_ _ _ red red-reasons _ _ _ green green-reasons again asks]
+        (in-agent (fn [_] [(answers-gate t) (process-proof "a-process-proof-of-the-gate" 3) prove prove reasons
+                           "(reset! user/gate-answer :pass)" (process-proof "a-process-proof-of-the-gate" 2) prove prove reasons prove "@user/gate-asks"])
                   {:proofs #{t}})]
     (is (= {t :fail} (:proofs (:value red))) (pr-str red))
     (is (str/starts-with? (:line (:value red)) "red: 1") "its prove says red")
@@ -2710,8 +2743,31 @@
   (let [[r] (in-agent (fn [_] [{:op :eval :agent "root" :code "(:seon.error/type @(seon.system/call! sys {:op :gate :branch :no-such-branch :tests ['a/b]}))"}]))]
     (is (= :seon.writer/refused (:value r)) (pr-str r))))
 
+;; docs/merging.md#a-merge-runs-what-the-change-reaches: an eval never waits on the merge gate. A fresh agent's (my.agent/prove) of one
+;; docs edit sat 17+ minutes in judge! > ask-gate > await-reply behind another agent's 37-minute gate (root's :tests had one worker;
+;; runs/evidence/hang-101236, 2026-11-14). Now the prove asks the gate and answers at once, its process proof :deferred; the gate's
+;; answer, arriving later, is held, and the next prove writes it as the test's status, asking nothing again. The gate answered at
+;; its seams (seon.agent/send-gate!, seon.agent/ask-gate). Estimate: in-agent's setup and teardown ~1.5M + 4 asks at ~0.25M = ~2500k.
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} an-eval-never-waits-on-the-gate
+  (let [t 'seon.repl-test/a-proof-only-the-gate-runs
+        _ '[seon.agent/judge! seon.agent/send-gate! seon.agent/handle! seon.proofs/gate-tx]
+        seam (str "(do (in-ns 'user) (def asks (atom 0)) (def sent (atom []))"
+                  " (alter-var-root #'seon.agent/ask-gate (constantly (fn [_ _] (swap! asks inc) nil)))"
+                  " (alter-var-root #'seon.agent/send-gate! (constantly (fn [k tests _] (swap! sent conj [k tests]) nil))) :ok)")
+        status (str "(:seon.test/status (datahike.api/pull (seon.agent/db) [:seon.test/status] [:var/name '" t "]))")
+        first-prove "(let [r (my.agent/prove)] {:asks @user/asks :sent (count @user/sent) :unjudged (:unjudged r)})"
+        arrive (str "(let [[k tests] (first @user/sent)] (seon.agent/handle! {:op :reply :k k :result {:value {:results (zipmap tests (repeat :pass))"
+                    " :digests (zipmap tests (repeat \"gate\")) :failures {}}}}) :ok)")
+        second-prove (str "(do (my.agent/prove) {:asks @user/asks :sent (count @user/sent) :status " status "})")
+        [_ _ first-r _ second-r]
+        (in-agent (fn [_] [seam (process-proof "a-proof-only-the-gate-runs" 2) first-prove arrive second-prove])
+                  {:proofs #{t}})]
+    (is (= [0 1] ((juxt :asks :sent) (:value first-r))) (str "the prove asked the gate and waited on nothing: " (pr-str first-r)))
+    (is (some-> (:unjudged (:value first-r)) (str/includes? "gate")) (str "and says its process proof is on the gate: " (pr-str first-r)))
+    (is (= {:asks 0 :sent 1 :status :green} (:value second-r)) (str "the gate's answer, arrived since, is its status; nothing asked again: " (pr-str second-r)))))
+
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 6 asks of the test's own at ~0.25M (an eval's recorded answer decoded); one log file written and deleted ~50k = ~3000k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 6}} a-gate-that-cannot-run-is-the-proves-answer
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3500000 :asks 8}} a-gate-that-cannot-run-is-the-proves-answer
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a gate that cannot run the candidate (its runner made no plan: on 2026-11-10 a checkout
   ;; that took another tree's binary) answers its typed error, and the agent's prove answers that error, never a verdict that reads as nothing to
   ;; judge; a gate whose run reached no test is a verdict that is not green. The gate answered at its seam (seon.agent/ask-gate)
@@ -2719,15 +2775,16 @@
         _ '[seon.agent/judge! seon.agent/ask-gate seon.proofs/gate-tx]
         log (str (System/getProperty "java.io.tmpdir") "/gate-" (random-uuid) ".log")
         _ (spit log "prove: run\nSHARD 0 tests\n")
+        ;; an eval's prove asks the gate and waits on nothing (send-gate!): its answer, delivered here as root's :reply is, is the next prove's
         seam (str "(do (in-ns 'user) (def gate-reply (atom nil))"
-                  " (alter-var-root #'seon.agent/ask-gate (constantly (fn [tests _] (@gate-reply tests)))) :ok)")
+                  " (alter-var-root #'seon.agent/send-gate! (constantly (fn [k tests _] (seon.agent/handle! {:op :reply :k k :result (@gate-reply tests)}) nil))) :ok)")
         prove "(let [r (my.agent/prove)] (if (seon.contract/error? r) [:error (:seon.error/type r)] [:verdict (:proofs r)]))"
-        [_ _ _ refused _ unreached]
+        [_ _ _ _ refused _ _ unreached]
         (in-agent (fn [_] [seam (process-proof "a-proof-no-gate-could-run" 2)
                            "(reset! user/gate-reply (fn [_] (seon.contract/error :seon.fx/io-error 'seon.fx/run-on-checkout \"the test runner made no plan\" {:no-plan true})))"
-                           prove
+                           prove prove
                            (str "(reset! user/gate-reply (fn [tests] {:value {:results (zipmap tests (repeat :error)) :digests (zipmap tests (repeat \"gate\")) :log " (pr-str log) "}}))")
-                           prove])
+                           prove prove])
                   {:proofs #{t}})]
     (.delete (java.io.File. ^String log))
     (is (= [:error :seon.fx/io-error] (:value refused)) (pr-str refused))
@@ -3535,3 +3592,13 @@
         "a process test is answered as an error naming why, never left out")
     (is (= (set (keys items)) (set (concat (:run s) (map #(symbol (subs (:var %) 2)) (:reused-reports s)))))
         "every granted item is run or reported")))
+
+(defn- throws-here {:malli/schema [:=> [:cat] :any]} [] (throw (ex-info "the place is the finding" {:k 1})))
+
+;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: a turn's error names the fn the throw happened in
+;; (seon.error/thrown-in), so it says which code threw; a compile error's macro (an unqualified symbol) names none, and is no
+;; contract failure of thrown-in. Red before: the turn loop's error kept no place (context's loop task, 2026-11-13), and thrown-in
+;; failed its own contract on `cond`. Estimate: two throws and two triages (Jolt keeps 25 frames): ~0.3M ticks
+(deftest ^{:seon.test/estimate {:ticks 400000}} an-error-map-names-where-it-was-thrown
+  (is (= 'seon.agent-test/throws-here (seon.error/thrown-in (try (throws-here) (catch Throwable e e)))) "a run's throw names its fn")
+  (is (nil? (seon.error/thrown-in (ex-info "Syntax error macroexpanding cond" {:clojure.error/symbol 'cond}))) "a macroexpansion's names none, and thrown-in answers"))

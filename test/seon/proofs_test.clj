@@ -421,6 +421,33 @@
   "[{var calls} of the contracted functions thunk called, and thunk's answer]."
   [thunk] (profile/begin!) (let [r (thunk)] [(into {} (map (juxt :var :calls)) (profile/touched)) r]))
 
+;; docs/merging.md#verdicts-are-a-cache: the kept program store is the repository's, read by every checkout's plans and shards at
+;; once, so one past its bound is moved aside whole (an atomic rename) for a new one, never removed in place: a removal under
+;; another process's reader left an empty data file its next connect read as "Database does not exist" (data's, runtime's and
+;; root's health runs, 2026-11-14, program-store-37babf7c). What was moved aside goes once no process holds it.
+;; Cost: two small imports (~20M each, a-failed-import's), one rename = ~40M.
+(deftest ^{:seon.test/estimate {:ticks 40000000} :seon.test/execs ["git"]} a-kept-program-store-past-its-bound-is-moved-aside-not-removed
+  (let [d (checkout! {"deps.edn" "{}" "src/app/mv_calc.clj" "(ns app.mv-calc)\n(defn add [a b] (+ a b))\n"})
+        dir (scratch-dir)
+        store (str dir "/ps-0123abcd")
+        aside #(seq (filter (fn [n] (str/starts-with? n "ps-0123abcd.retired-")) (.list (java.io.File. ^String dir))))]
+    (try
+      (runner/program-db d store (fx/tree-id d))
+      (spit (str d "/src/app/mv_calc.clj") "(ns app.mv-calc)\n(defn add [a b] (+ b a))\n")
+      (clojure.java.shell/sh "git" "-C" d "add" ".")
+      (close-stores! store)
+      (let [tree (fx/tree-id d)]
+        (runner/program-db d store tree 1)
+        (is (= 1 (count (aside))) "the store past its bound was moved aside whole, not removed under its readers")
+        (is (.isFile (java.io.File. (str dir "/" (first (aside)) "/data.mdb"))) "with its data")
+        (close-stores! store)
+        (let [{:keys [conn]} (pdb/open! :lmdb store 0 :db)]
+          (try (is (pdb/branch? conn (runner/tree-branch tree)) "and the new store holds the new tree")
+               (finally (d/release conn)))))
+      (ts/shared-program-store! (str dir "/ps") "0123abcd")
+      (is (nil? (aside)) "what was moved aside goes once no process holds it")
+      (finally (close-stores! store)))))
+
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-failed-import-leaves-no-branch
   ;; task seon.proofs/a-failed-import-leaves-no-branch: an import that threw left its tree's branch
   ;; behind, and every later plan of that tree read the partial program: 0 tests, and TEST OK
@@ -808,6 +835,18 @@
 ;; is answered as an :error naming why, :not-run: no verdict of its own, so it is never written to the cache. Found by runtime's
 ;; review, 2026-11-13: answer-ran left out only :reused and died reports, so that error was cached as a red at the test's real
 ;; digest, which a later run would reuse and never run the test. Estimate: one fold of three reports, ~50k ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-wall-time-end-is-no-verdict-and-never-cached
+  ;; docs/principles.md#6-nothing-changed-nothing-runs-a-change-costs-what-it-touched: a test ended at its wall bound
+  ;; (:seon.test/wall-spent, seon.agent/arm-wall!) read the machine's load, not its own work: 21 root-starting tests ended so in the
+  ;; service at load, green alone, and their cached reds made them flaky at their digests (root.log, 2026-11-14). Its end stops the
+  ;; hang; it is never a verdict. Estimate: two reports read, ~0.1M
+  (let [answer {:reports [{:type :pass :var "#'a.x-test/ran"}
+                          {:type :error :var "#'a.p-test/waits" :seon.error/type :seon.test/wall-spent
+                           :message "Uncaught exception, not in assertion." :actual "the test ran past its wall bound of 36700 ms"}]
+                :digests {'a.x-test/ran "d1" 'a.p-test/waits "d2"}}
+        {:keys [ran]} (proofs/answer-ran answer)]
+    (is (= #{'a.x-test/ran} (set (keys ran))) "only the test that ended by its own work is a verdict to cache")))
+
 (deftest ^{:seon.test/estimate {:ticks 100000}} a-test-not-run-is-no-verdict-and-never-cached
   (let [answer {:reports [{:type :pass :var "#'a.x-test/ran"}
                           {:type :error :var "#'a.p-test/boots" :not-run true :message "a.p-test/boots reaches a process of its own"}]
