@@ -1377,25 +1377,52 @@
                                             {:ns n :message (:seon.error/message r)}))]))
               [#{} []] (filterv whole? (distinct (map :ns (load-order forms))))))))
 
+(defn defined-keys
+  "The var and method keys of every definition a form of db points to: what bin/build records as binary-program's :defs, so
+  load-all! unmaps what another program dropped. One scan of two pointers. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :seon.host/db] [:set :seon.merge/program-key]]}
+  [db]
+  (into #{} (comp (mapcat #(d/datoms db :aevt %)) (map :e) (distinct) (keep #(definition-key db %)))
+        [:var/form :method/form]))
+
+(defn- gone-definitions
+  "Of defs (the binary's definition keys), those db's program no longer defines, sorted: what to unmap to run db's program.
+  Only in a namespace db imported from a file (:ns/file), so held whole: a recorded one (an example program's) is not the
+  binary's namespace. One seek a key."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe [:set :seon.merge/program-key]]] [:vector :seon.merge/program-key]]}
+  [db defs]
+  (let [nss (into #{} (keep #(:v (first (d/datoms db :eavt (:e %) :ns/name)))) (d/datoms db :aevt :ns/file))
+        defined? (fn [k] (when-let [x (def-eid db k)] (some #(seq (d/datoms db :eavt x %)) (vals pointer))))]
+    (vec (sort-by str (for [[_ a :as k] defs :when (and (nss (symbol (namespace a))) (not (defined? k)))] k)))))
+
 (defn load-all!
-  "Load db's program where this binary runs: every live form it does not hold, with what
-  they reach (load!). With {:tests? false} (root's) the test namespaces' forms are left
-  unevaluated: root imports test/ as facts and runs no deftest; the fork server loads them for
-  every agent and test child, each namespace read from its file whole where main holds it as the
-  file is (required!), the rest form by form
-  (docs/source.md#a-process-holds-the-tests-only-when-it-runs-them). :forms, the binary's form ids (held?), is the running
-  binary's record by default (binary-program); a test passes the set it means.
-  Answers {:loaded n :errors [...]}."
+  "Make this process run db's program where its binary holds another: at root's boot ({:tests? false}) unmap each definition
+  the binary holds that db's program dropped (gone-definitions of the binary's :defs), then load every live form it does not hold, with what they
+  reach (load!). With {:tests? false} (root's, at its boot) the test namespaces' forms are left unevaluated: root imports
+  test/ as facts and runs no deftest; and only the forms whose ids the binary lacks are read (live-ids first: unchanged
+  forms are never read or evaluated). The fork server loads the tests for every agent and test child, each namespace read
+  from its file whole where main holds it as the file is (required!), the rest form by form
+  (docs/source.md#a-process-holds-the-tests-only-when-it-runs-them). :forms and :defs, the binary's form ids (held?) and
+  definition keys, are the running binary's record by default (binary-program); a test passes the sets it means.
+  Answers {:loaded n :errors [...]}, with :removed [keys] when it unmapped any. See docs/source.md#a-boot-runs-mains-program."
   {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.program/load-report]
-                  [:=> [:cat :seon.host/db [:map [:tests? {:optional true} :boolean] [:forms {:optional true} [:maybe [:set :string]]]]] :seon.program/load-report]]}
+                  [:=> [:cat :seon.host/db [:map [:tests? {:optional true} :boolean] [:forms {:optional true} [:maybe [:set :string]]]
+                                            [:defs {:optional true} [:maybe [:set :seon.merge/program-key]]]]] :seon.program/load-report]]}
   ([db] (load-all! db {}))
   ([db {:keys [tests?] :or {tests? true} :as opts}]
-   (let [lf (live-forms db)
-         binary (if (contains? opts :forms) (:forms opts) (:forms (binary-program)))
+   (let [built (binary-program)
+         binary (if (contains? opts :forms) (:forms opts) (:forms built))
+         ;; root's boot alone unmaps: the fork server and every agent fork from root and hold what it holds
+         removed (if tests? [] (gone-definitions db (if (contains? opts :defs) (:defs opts) (:defs built))))
+         _ (run! remove-definition! removed)
+         lf (if tests?
+              (live-forms db)
+              (mapv #(form-row db %) (sort (keep (fn [[id e]] (when-not (contains? binary id) e)) (live-ids db)))))
          forms (loadable db (filterv #(not (held? db binary %)) lf) tests?)
          [required errs] (if tests? (required! db forms lf) [#{} []])]
-     {:loaded (count forms)
-      :errors (into errs (load! db (filterv #(not (required (:ns %))) forms) (set (keys (schema-changes db))) tests?))})))
+     (cond-> {:loaded (count forms)
+              :errors (into errs (load! db (filterv #(not (required (:ns %))) forms) (set (keys (schema-changes db))) tests?))}
+       (seq removed) (assoc :removed removed)))))
 
 (defn- live-in?
   "Is form entity e live on db, for one form: it has an id, and defines nothing or one of its

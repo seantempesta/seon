@@ -84,14 +84,6 @@
   {:malli/schema [:=> [:cat :map] [:enum :busy :idle]]}
   [st] (if (some (complement :read?) (vals (:inflight st))) :busy :idle))
 
-(defn- await-dead
-  "Wait on the end's :in for its close: the process is gone, its socket's last holder with it.
-  No bound: the agent was interrupted and told to stop (stop!), and one that never ends is
-  a stall the stall check records (docs/processes.md#a-stalled-agent). nil."
-  {:malli/schema [:=> [:cat :seon.host/chan] :nil]}
-  [from]
-  (loop [] (when (some? (a/<!! from)) (recur))))
-
 (defn- stop!
   "Stop the agent by draining it: :stop, which its transport reads at once (the run in flight ends between turns,
   seon.turn/work!) and its REPL answers after the requests before it by exiting, each ending by its own bound (an eval's
@@ -346,9 +338,9 @@
    (case tr
      ::flow/pause (if (:pid st) (to-proc! st {:op :pause}) st)
      ::flow/resume (if (:pid st) (to-proc! st {:op :resume}) st)
-     ::flow/stop (do (when-not (:dead? st)
-                       (await-dead (:in (:end (stop! st)))))
-                     (assoc st :dead? true))
+     ;; told to stop, never waited on (docs/flow.md#the-five-rules): an agent proc leaves while root runs only once its
+     ;; death is recorded (its end's EOF, :dead); at root's own stop the process reads :stop, or its end's close
+     ::flow/stop (stop! st)
      st))
   ([st in m]
    (case in
