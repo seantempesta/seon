@@ -99,7 +99,9 @@
  :seon.db/entity-index-shape [:map [:forms :map] [:entity-schemas [:map-of :keyword :qualified-keyword]] [:identity-schemas [:map-of :keyword :qualified-keyword]]
                         [:schema-identities [:map-of :qualified-keyword :keyword]] [:drawn-schemas [:set :qualified-keyword]] [:history-schemas [:set :qualified-keyword]]
                         [:required-keys [:map-of :qualified-keyword [:vector :keyword]]] [:own-required [:map-of :qualified-keyword [:vector :keyword]]]
-                        [:targets [:map-of :keyword [:vector :qualified-keyword]]] [:required-refs [:vector :qualified-keyword]] [:derived-attrs [:set :keyword]] [:specs {:optional true} :any]]
+                        [:targets [:map-of :keyword [:vector :qualified-keyword]]] [:required-refs [:vector :qualified-keyword]] [:derived-attrs [:set :keyword]]
+                        [:ancestors [:map-of :qualified-keyword [:set :qualified-keyword]]] [:reaching [:map-of :qualified-keyword [:vector :qualified-keyword]]]
+                        [:specs {:optional true} :any]]
  :seon.db/open [:map [:cfg :seon.db/cfg] [:conn :seon.host/conn] [:recovered? :boolean]]
  ;; the program as facts
  ;; a checkout's inputs with no program facts (seon.fx/inputs): what every reach digest holds

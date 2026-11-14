@@ -826,7 +826,7 @@
         m (some-> e pull)]
     (when (or to-come? (:seon.model-call/basis m))
       (let [[tdb b swept?] (if to-come?
-                      ;; as seon.turn/act! draws it: the turn's number first, then the request at the head
+                      ;; as seon.turn/model-request! draws it: the turn's number first, then the request at the head
                       (let [n (inc (:turn lb)) b (assoc lb :commit (d/commit-id db) :turn n)]
                         [db b])
                       (let [b (:seon.model-call/basis m)]
@@ -843,6 +843,9 @@
             sent-hash (:seon.model-call/sent-hash m)]
         {:at at :to-come? to-come? :turn (:turn b) :agent (:agent b) :origin (:origin b) :raw? raw? :swept? (boolean swept?)
          :body (:body w) :sources (:sources w) :new (:new w)
+         ;; each wire message's tokens and the request's, by the one sizer (seon.ctx.wire/messages-tokens, the turn's cache check's): it
+         ;; reads lengths and writes no JSON
+         :sizes (mapv #(wire/messages-tokens (mapv (:messages w) %)) (:groups w)) :tokens (wire/messages-tokens (:messages w))
          :differs? (boolean (and sent-hash (not= sent-hash (lib/digest (sedn/encode (:messages w))))))
          :usage (select-keys m [:seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens :seon.model-call/ms :seon.model-call/model])
          :error (:seon.model-call/error m)})))))
@@ -2489,9 +2492,9 @@
   "The debug page of id (an agent's id, :root) laid out: what its model is sent. An agent's is a timeline
   of its requests, live on latest or fixed on a turn chosen: steps, each request a button (strip: {:turns [{:e :turn
   :origin}] :at e-or-:latest :to-come? b :gone e-chosen-but-no-request-of-the-branch}), previous, next and latest moving the view (/at), and the one
-  request shown (turn: a unit, :seon.render/debug-turn); for root, besides its session's requests, the context the
+  request shown (turn: its units, `debug-units`); for root, besides its session's requests, the context the
   system reads now (context: a unit, :seon.render/root-context). See docs/render.md#the-debug-page-is-the-wire-request."
-  {:malli/schema [:=> [:cat :any [:maybe :map] [:maybe :map] [:maybe :map]] [:map [:seon.render/hiccup :any] [:seon.render/units [:vector :map]]]]}
+  {:malli/schema [:=> [:cat :any [:maybe :map] [:maybe [:vector :map]] [:maybe :map]] [:map [:seon.render/hiccup :any] [:seon.render/units [:vector :map]]]]}
   [focus strip turn context]
   (let [{:keys [label] :as id} (focus-of focus)
         view (view-param (if (= :root focus) [:debug :root] [:debug (:view id)]))
@@ -2538,8 +2541,8 @@
                                      (btn false (if (< (inc i) (count es)) (nth es (inc i)) "latest") "next ▶")
                                      (btn (= :latest at) "latest" "latest")))
                              ;; a turn chosen that is no request of this branch any more (the branch replaced): said, then latest shown
-                             (when-let [g (:gone strip)] [:span {:class "text-warning"} (str "the turn chosen (" g ") is no request of this branch: latest is shown")])])}
-             (or turn {:id "d-turn" :input :none :html (h/html [:p {:id "d-turn" :class "muted"} "no model turn yet"])}))
+                             (when-let [g (:gone strip)] [:span {:class "text-warning"} (str "the turn chosen (" g ") is no request of this branch: latest is shown")])])})
+       (or strip (not context)) (into (or turn [{:id "d-turn" :input :none :html (h/html [:p {:id "d-turn" :class "muted"} "no model turn yet"])}]))
        context (conj context))}))
 
 (defn root-context
@@ -2571,66 +2574,35 @@
   "Each wire role's border class."
   {"system" "border-info" "user" "border-signal" "assistant" "border-eval" "tool" "border-text-500"})
 
-(defn debug-turn
-  "One request of the debug timeline as it went on the wire, each message a row in order, opened whole on /open. See docs/render.md#the-debug-page-is-the-wire-request."
-  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [opts {:keys [view to-come? turn agent origin body sources new raw? error differs? opened swept?]
-         {:seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens] call-ms :seon.model-call/ms call-model :seon.model-call/model} :usage}]
-  (let [unit (:unit opts)
-        ms (:messages body)
-        sizes (mapv #(select/estimate (json/write-str %)) ms)
-        prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
+(defn- debug-sizes
+  "Input's wire messages' tokens (debug-input's :sizes, by the one sizer), scaled to the provider's prompt tokens when it said them,
+  and how many lead the request within what its cache served (nil: none). See docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:=> [:cat :map] [:map [:est :int] [:cached [:maybe :int]]]]}
+  [{:keys [sizes] {:seon.model-call/keys [cache-hit-tokens cache-miss-tokens]} :usage}]
+  (let [prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
         est (reduce + 0 sizes)
-        scale (if (and prompt (pos? est)) (/ (double prompt) est) 1.0)
-        cached (when (and cache-hit-tokens (pos? cache-hit-tokens))
-                 (count (take-while #(<= % cache-hit-tokens) (reductions + (map #(* scale %) sizes)))))
-        line-budget (config/value :seon.config.render/line-budget)
-        opened (or opened #{})
-        ;; a size reads quiet, amber or red: only its colour changes at a bound
-        size-of (fn [warn over] (let [warn (config/value warn) over (config/value over)]
-                                  (fn [n] (cond (>= n over) "font-semibold text-error" (>= n warn) "font-semibold text-warning" :else "text-text-400"))))
-        size-class (size-of :seon.config.render/tokens-warn :seon.config.render/tokens-over)
-        request-class (size-of :seon.config.render/request-tokens-warn :seon.config.render/request-tokens-over)
-        line (fn [cls text] [:div {:class (str "my-1 flex items-center gap-2 text-2xs " cls)}
-                             [:span {:class "h-px flex-1 bg-current opacity-40"}] text [:span {:class "h-px flex-1 bg-current opacity-40"}]])
-        field (fn [k v] [:div {:class "flex flex-col"} [:span {:class "seon-note"} k] v])
-        verbatim (fn [s] [:pre {:class "whitespace-pre-wrap break-words font-mono text-text-100"} s])
-        highlighted (fn [s] (emit/marked-hiccup :seon.print/code s))
-        ;; a tool call's arguments as the opened row reads them: seon.model/wire-message writes them from a map, always JSON
-        args (fn [{:keys [function]}] (json/read-str (:arguments function)))
-        ;; a row's one line: its text, else its calls as sent
-        says (fn [{:keys [content tool_calls]}]
-               (if (seq content) content (str/join " " (map (fn [{{:keys [name arguments]} :function}] (str name " " arguments)) tool_calls))))
-        row (fn [i {:keys [role content tool_calls tool_call_id reasoning_content] :as m}]
-              (let [rs (get sources i) new? (get new i) u (str unit "-o" i) open? (contains? opened u)
-                    example (some (fn [[k x]] (when (= :example k) x)) rs)
-                    border (get role-looks role)]
-                [:details (cond-> {:class (str "group rounded-sm border-l-4 bg-base-950 px-2 py-1 " border)
-                                   :data-role role :data-new (str new?) :data-example (when example example)
-                                   (keyword "data-on:toggle") (str "@post('/open?view=" view "&unit=" u "&open=' + el.open)")}
-                            open? (assoc :open true))
-                 [:summary {:class "flex cursor-pointer items-baseline gap-2"}
-                  [:b {:class "w-20 shrink-0 text-2xs text-text-200"} role]
-                  [:span {:class "seon-text min-w-0 flex-1 break-words text-text-100 group-open:hidden"} (let [{:keys [shown truncated? omitted lines]} (print/plain (says m) line-budget {:one-line? true})]
-                                     ;; the cut says what it left; the rest is the row, opened, so no copy is kept on its line
-                                     (if truncated? [:span shown " " [:span {:class "seon-print-elision"} (emit/cut-words omitted lines nil)]] shown))]
-                  (when new? [:span {:class "shrink-0 text-2xs text-signal"} "new"])
-                  (when example [:span {:class "shrink-0 text-2xs text-info"} (str "example session " example)])
-                  [:span {:class (str "ml-auto shrink-0 tabular-nums " (size-class (get sizes i)))} (emit/tokens-text (get sizes i))]]
-                 (when open?
-                   [:div {:class "mt-1 flex min-w-0 flex-col gap-2"}
-                    (when (seq rs) [:span {:class "seon-note"} (str/join " · " (map source rs))])
-                    (when tool_call_id (field "tool_call_id" (verbatim tool_call_id)))
-                    (when reasoning_content [:details [:summary {:class "seon-note"} "reasoning_content"] (markdown reasoning_content {:inline? true})])
-                    (when (seq content) (field "content" ((if (= "system" role) #(markdown % {:inline? true}) (if (= "tool" role) highlighted verbatim)) content)))
-                    (map-indexed (fn [j {:keys [id function] :as c}]
-                                   (field (str "tool_calls[" j "] · " (:name function) " · " id)
-                                          (into [:div {:class "flex flex-col gap-1"}]
-                                                ;; the call's own fields by their wire names
-                                                (map (fn [[k v]] (field (str "arguments." k) (if (= "code" k) (highlighted (str v)) (verbatim (str v)))))
-                                                     (args c)))))
-                                 tool_calls)])]))]
-    [:section {:id unit :class "flex flex-col gap-2 rounded-md bg-base-900 p-3 text-xs"}
+        scale (if (and prompt (pos? est)) (/ (double prompt) est) 1.0)]
+    {:est est
+     :cached (when (and cache-hit-tokens (pos? cache-hit-tokens))
+               (count (take-while #(<= % cache-hit-tokens) (reductions + (map #(* scale %) sizes)))))}))
+
+(defn- size-of
+  "A size's class at the config's warn and over bounds: quiet, amber or red, so only its colour changes at a bound."
+  {:malli/schema [:=> [:cat :keyword :keyword] fn?]}
+  [warn over]
+  (let [warn (config/value warn) over (config/value over)]
+    (fn [n] (cond (>= n over) "font-semibold text-error" (>= n warn) "font-semibold text-warning" :else "text-text-400"))))
+
+(defn debug-head
+  "A debug request's head as hiccup: its turn, tokens (:est, by the one sizer, when the provider gave none), cache, :messages and
+  :fresh counts, the call's model and time, and what makes it differ from what went out. See docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [opts {:keys [to-come? turn agent origin messages fresh est error differs? swept?]
+         {:seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens] call-ms :seon.model-call/ms call-model :seon.model-call/model} :usage}]
+  (let [prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
+        est (or est 0)
+        request-class (size-of :seon.config.render/request-tokens-warn :seon.config.render/request-tokens-over)]
+    [:div {:id (:unit opts) :class "flex flex-col gap-2"}
      [:div {:class "flex flex-wrap items-baseline gap-3"}
       [:b {:class "text-signal"} (if to-come? (str "turn " turn ", to come: what it would send now") (str "turn " turn))]
       [:span {:class "text-text-400"} agent]
@@ -2638,7 +2610,7 @@
        (if tokens (str (group3 tokens) " tokens") (emit/tokens-text est))]
       (when (and prompt (pos? prompt))
         [:span {:class "tabular-nums text-text-400"} (str (group3 cache-hit-tokens) " of " (group3 prompt) " prompt tokens from cache (" (long (* 100 (/ cache-hit-tokens prompt))) "%)")])
-      [:span {:class "muted"} (str (count ms) " messages · " (count (filter true? new)) " new")]
+      [:span {:class "muted"} (str (or messages 0) " messages · " (or fresh 0) " new")]
       ;; which model answered it and how long the call took, as the turn recorded them (the two facts the model call keeps)
       (when (or call-model call-ms) [:span {:class "muted"} (str/join " · " (remove nil? [call-model (some-> call-ms (str " ms"))]))])
       (cond (= :outside origin) [:span {:class "muted"} "an outside read: no model call"]
@@ -2648,14 +2620,98 @@
      (when swept?
        [:p {:class "text-warning"} "This turn's commit is gone from the store (seon.db/retain!), so this is drawn from the branch as it is now, not as it was sent."])
      (when (and differs? (not swept?))
-       [:p {:class "seon-note"} "Drawn again with today's renders: its bytes differ from what the turn sent, because a render or a record changed since. The turn kept one hash of the whole request (:seon.model-call/sent-hash), so this page can't say where."])
+       [:p {:class "seon-note"} "Drawn again with today's renders: its bytes differ from what the turn sent, because a render or a record changed since. The turn kept one hash of the whole request (:seon.model-call/sent-hash), so this page can't say where."])]))
+
+(defn debug-turn
+  "One request of the debug timeline as it went on the wire: its head's slot (`debug-head`), its envelope, the region
+  (`seon.render/region`) its messages' units go in (`debug-units`) and its raw body, so a move draws the head and the rows it added,
+  never the request whole. See docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [opts {:keys [view envelope raw? body]}]
+  (let [unit (:unit opts)]
+    [:section {:id unit :class "flex flex-col gap-2 rounded-md bg-base-900 p-3 text-xs"}
+     (slot (str unit "-head"))
      [:details [:summary {:class "cursor-pointer text-text-400"} "the envelope: every field but the messages, as sent"]
-      (verbatim (json/write-str (dissoc body :messages)))]
-     (into [:div {:class "flex flex-col gap-1"}]
-           (mapcat (fn [i m]
-                     (cond-> [(row i m)]
-                       (= (inc i) cached) (conj (line "text-info" (str "the provider's cache ends here: " (group3 cache-hit-tokens) " tokens served from cache (placed by estimate)")))))
-                   (range) ms))
+      [:pre {:class "whitespace-pre-wrap break-words font-mono text-text-100"} (json/write-str envelope)]]
+     ;; its messages: each a unit of its own (debug-units), placed here when the page is composed
+     [:div {:id (str unit "-rows") :class "flex flex-col gap-1"} (render/region (str unit "-rows"))]
      [:details (cond-> {(keyword "data-on:toggle") (str "@post('/open?view=" view "&unit=" unit "-raw&open=' + el.open)")} raw? (assoc :open true))
       [:summary {:class "cursor-pointer text-text-400"} "the body's JSON, whole, as sent"]
       (when raw? [:pre {:class "whitespace-pre-wrap break-all font-mono text-text-100" :data-wire "body"} (json/write-str body)])]]))
+
+(defn- debug-fields
+  "Wire message m opened: what made it (rs, its sources), then its fields whole as sent, its calls' arguments by their wire names.
+  See docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:=> [:cat :map [:maybe [:vector :any]]] :any]}
+  [{:keys [role content tool_calls tool_call_id reasoning_content]} rs]
+  (let [field (fn [k v] [:div {:class "flex flex-col"} [:span {:class "seon-note"} k] v])
+        verbatim (fn [s] [:pre {:class "whitespace-pre-wrap break-words font-mono text-text-100"} s])
+        highlighted (fn [s] (emit/marked-hiccup :seon.print/code s))
+        ;; a tool call's arguments as the opened row reads them: seon.model/wire-message writes them from a map, always JSON
+        args (fn [{:keys [function]}] (json/read-str (:arguments function)))]
+    [:div {:class "mt-1 flex min-w-0 flex-col gap-2"}
+     (when (seq rs) [:span {:class "seon-note"} (str/join " · " (map source rs))])
+     (when tool_call_id (field "tool_call_id" (verbatim tool_call_id)))
+     (when reasoning_content [:details [:summary {:class "seon-note"} "reasoning_content"] (markdown reasoning_content {:inline? true})])
+     (when (seq content) (field "content" ((if (= "system" role) #(markdown % {:inline? true}) (if (= "tool" role) highlighted verbatim)) content)))
+     (map-indexed (fn [j {:keys [id function] :as c}]
+                    (field (str "tool_calls[" j "] · " (:name function) " · " id)
+                           (into [:div {:class "flex flex-col gap-1"}]
+                                 ;; the call's own fields by their wire names
+                                 (map (fn [[k v]] (field (str "arguments." k) (if (= "code" k) (highlighted (str v)) (verbatim (str v)))))
+                                      (args c)))))
+                  tool_calls)]))
+
+(defn- debug-row
+  "Wire message m of a debug request as its row: its role, its one line, new or not, its size, opened whole on /open (its element
+  id u, what /open names), and after it, when cache-end?, where the provider's cache ended. See
+  docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:=> [:cat :map] :any]}
+  [{:keys [u view m rs new? open? size cache-end? cache-hit-tokens]}]
+  (let [{:keys [role content tool_calls]} m
+        line-budget (config/value :seon.config.render/line-budget)
+        size-class (size-of :seon.config.render/tokens-warn :seon.config.render/tokens-over)
+        ;; its one line: its text, else its calls as sent
+        says (if (seq content) content (str/join " " (map (fn [{{:keys [name arguments]} :function}] (str name " " arguments)) tool_calls)))
+        example (some (fn [[k x]] (when (= :example k) x)) rs)]
+    [:div {:id u :class "flex flex-col gap-1"}
+     [:details (cond-> {:class (str "group rounded-sm border-l-4 bg-base-950 px-2 py-1 " (get role-looks role))
+                        :data-role role :data-new (str new?) :data-example (when example example)
+                        (keyword "data-on:toggle") (str "@post('/open?view=" view "&unit=" u "&open=' + el.open)")}
+                 open? (assoc :open true))
+      [:summary {:class "flex cursor-pointer items-baseline gap-2"}
+       [:b {:class "w-20 shrink-0 text-2xs text-text-200"} role]
+       [:span {:class "seon-text min-w-0 flex-1 break-words text-text-100 group-open:hidden"} (let [{:keys [shown truncated? omitted lines]} (print/plain says line-budget {:one-line? true})]
+                          ;; the cut says what it left; the rest is the row, opened, so no copy is kept on its line
+                          (if truncated? [:span shown " " [:span {:class "seon-print-elision"} (emit/cut-words omitted lines nil)]] shown))]
+       (when new? [:span {:class "shrink-0 text-2xs text-signal"} "new"])
+       (when example [:span {:class "shrink-0 text-2xs text-info"} (str "example session " example)])
+       [:span {:class (str "ml-auto shrink-0 tabular-nums " (size-class size))} (emit/tokens-text size)]]
+      (when open? (debug-fields m rs))]
+     (when cache-end?
+       [:div {:class "my-1 flex items-center gap-2 text-2xs text-info"}
+        [:span {:class "h-px flex-1 bg-current opacity-40"}]
+        (str "the provider's cache ends here: " (group3 cache-hit-tokens) " tokens served from cache (placed by estimate)")
+        [:span {:class "h-px flex-1 bg-current opacity-40"}]])]))
+
+(defn debug-units
+  "Debug request in (`debug-input`'s, with the tab's :view and :opened) as turn opts :unit's units: its frame, its head in the
+  frame's slot and a row a wire message (unit-o<i>, what /open names), each drawn only when its own input moves. See
+  docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:=> [:cat :seon.render/opts :map] [:vector :map]]}
+  [opts {:keys [view body sources new sizes opened raw?] :as in}]
+  (let [unit (:unit opts)
+        opened (or opened #{})
+        {:keys [cached]} (debug-sizes in)
+        hit (get-in in [:usage :seon.model-call/cache-hit-tokens])
+        frame {:view view :envelope (dissoc body :messages) :raw? raw? :body (when raw? body)}
+        head (-> (select-keys in [:to-come? :turn :agent :origin :usage :error :differs? :swept?])
+                 (assoc :messages (count (:messages body)) :fresh (count (filter true? new)) :est (or (:tokens in) (:est (debug-sizes in)))))]
+    (into [{:id unit :input frame :regions [(str unit "-rows")] :draw (fn [_] [(debug-turn opts frame) nil])}
+           {:id (str unit "-head") :parent unit :input head :draw (fn [_] [(debug-head (assoc opts :unit (str unit "-head")) head) nil])}]
+          (map-indexed (fn [i m]
+                         (let [u (str unit "-o" i)
+                               row {:u u :view view :m m :rs (get sources i) :new? (boolean (get new i)) :open? (contains? opened u)
+                                    :size (get sizes i 0) :cache-end? (= (inc i) cached) :cache-hit-tokens hit}]
+                           {:id u :container (str "#" unit "-rows") :input row :draw (fn [_] [(debug-row row) nil])})))
+          (:messages body))))

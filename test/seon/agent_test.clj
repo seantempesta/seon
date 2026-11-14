@@ -1532,7 +1532,7 @@
 
 (defn- work-with
   "seon.turn/work! of the world's task for 3 turns, in this process as an agent's test fork on the world (my.test/eval-in's state),
-  its turn's draw and model call (seon.turn/act!) answered by (act st), its status by (status): what the loop decides from what
+  its turn's model call (seon.turn/model-request!, the request made ready; seon.turn/act!, its answer acted on) answered by (act st), its status by (status): what the loop decides from what
   a turn answers. What reads a store or root stands in (main, the proofs, the end's write), the decisions of the loop are its
   own. Answers its end, with the model calls act made (:model-calls)."
   [act status]
@@ -1549,7 +1549,8 @@
                        seon.turn/observe (fn [id] {:task (task/task (agent/db) id)})
                        seon.turn/status-now status
                        seon.turn/tell-error! (constantly nil)
-                       seon.turn/act! (fn [st _ _ _] (act st called!))
+                       seon.turn/model-request! (fn [_ _ _] {:id "test-agent/call" :t1 0 :request {}})
+                       seon.turn/act! (fn [st _ _] (act st called!))
                        seon.turn/end! (fn [{:keys [turn]} outcome reason _]
                                         (cond-> {:outcome outcome :results {} :uncontracted #{} :turns turn :model-calls @calls} reason (assoc :reason reason)))]
            (seon.turn/work! {:task "app.calc/total-is-exact" :max-turns 3}))
@@ -1706,7 +1707,7 @@
   ;; the green status first, so a model agent that failed its task on green proofs ended :green and its task merged. One order:
   ;; the agent's own verdict first, in the loop as at a hand-back
   (let [acted (volatile! false)
-        end (with-redefs [seon.turn/judged identity]
+        end (with-redefs [agent/judge! (constantly {})]
               (work-with (fn [st called!] (called!) (vreset! acted true) (seon.turn/request-stop! :failed "the plan is wrong") (update st :turn inc))
                          #(if @acted {:reasons []} {:reasons [{:reason :proof-red}]})))]
     (is (= :failed (:outcome end)) (pr-str end))
@@ -3337,10 +3338,10 @@
                                              "  {:calls (mapv (fn [[i c]] {:eval i :code c}) evals) :reply (:seon.model-call/reply m) :basis-keys (set (keys (:seon.model-call/basis m)))"
                                              "   :agent-key (:key @seon.agent/state) :on-branch (msgs db)"
                                              "   :turn (:seon.agent/turn (datahike.api/entity db [:seon.agent/key (:key @seon.agent/state)]))"
-                                             "   :eval-turns (set (datahike.api/q '[:find ?by ?t :in $ ?by :where [?be :seon.agent/key ?by] [?e :seon.eval/by ?be] [?e :seon.eval/call ?c] [?c :seon.model-call/n ?t]] db (:key @seon.agent/state)))"
-                                             "   :loop-eval-turns (vec (datahike.api/q '[:find [?t ...] :where (not-join [?e] [?e :seon.eval/by ?s] [?s :seon.system/id :root]) [(missing? $ ?e :seon.eval/call-id)] [?e :seon.eval/turn ?t]] db))"
+                                             "   :eval-turns (seon.fixtures/agent-eval-turns db (:key @seon.agent/state))"
+                                             "   :loop-eval-turns (seon.fixtures/agent-loop-eval-turns db (:key @seon.agent/state))"
                                              "   :message-turns (let [c @seon.ctx/ctx] (vec (for [[n cid] (seon.ctx/turns c) :when (seq (get (seon.ctx/placed-messages (seon.db/index) c) n))] n)))"
-                                             "   :call-ids (vec (datahike.api/q '[:find [?id ...] :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a] [?m :seon.model-call/id ?id]] db (:key @seon.agent/state)))"
+                                             "   :call-ids (seon.fixtures/agent-call-ids db (:key @seon.agent/state))"
                                              "   :committed (msgs (datahike.api/commit-as-db db (get-in m [:seon.model-call/basis :commit])))"
                                              "   :intent (mapv #(datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.eval/id ?i] [?e :seon.eval/intent ?r]] db %) (map first evals))})")
                                         {:op :eval :agent "root"

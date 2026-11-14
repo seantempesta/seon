@@ -125,7 +125,8 @@
   :own-required, only its own; :schema-identities, :identity-schemas turned around; :targets, each ref attribute's target
   entity schemas ({:seon.db/to}); :drawn-schemas, the entity schemas that declare a render (:seon.render/hiccup), theirs or a parent's; :history-schemas,
   those that are history (seon.render/history?: a model render, :seon.render/openai-compat, theirs or a parent's, and no :seon.ctx/pattern on
-  any; docs/render.md#the-page); and :forms, the forms it was built from}. It is the one value every reader of what an entity
+  any; docs/render.md#the-page); :ancestors, each schema that extends another with all it extends and itself (`extends?`); :reaching,
+  the refs whose targets a schema is or extends (`reaching`); and :forms, the forms it was built from}. It is the one value every reader of what an entity
   is takes first (ix): a branch's own entity schema is recognized by its own index, never the binary's.
   See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :seon.db/entity-index-shape]}
@@ -133,7 +134,10 @@
   (let [entity? #(:seon.db/attributes (form-props forms %))
         required (fn [form] (for [e (own-entries form) :let [p (second e)] :when (not (and (map? p) (:optional p)))] (first e)))
         es (into {} (for [[k form] forms :when (entity? k) a (own-keys form)] [a k]))
-        ids (into {} (filter #(:seon.db/identity (form-props forms (key %)))) es)]
+        ids (into {} (filter #(:seon.db/identity (form-props forms (key %)))) es)
+        targets (into {} (for [[a _] es :let [to (:seon.db/to (form-props forms a))] :when to] [a to]))
+        ;; each schema that extends another, with every schema it extends and itself; one that extends none is its own only
+        anc (into {} (for [k (keys forms) :when (seq (parents-in forms k))] [k (set (tree-seq (constantly true) #(parents-in forms %) k))]))]
     ;; checked against its shape once, here (this function's output), and marked so: a contract naming :seon.db/entity-index admits
     ;; it at once, never validating the whole index again (seon.contract/checked-once)
     (seon.contract/checked-once
@@ -153,12 +157,19 @@
                                [k (vec (distinct (mapcat #(required (get forms %)) (filter entity? (tree-seq (constantly true) #(parents-in forms %) k)))))]))
      :own-required (into {} (for [k (distinct (vals es))] [k (vec (required (get forms k)))]))
      ;; each ref attribute's target entity schemas, as its own schema states them ({:seon.db/to [...]}), once
-     :targets (into {} (for [[a _] es :let [to (:seon.db/to (form-props forms a))] :when to] [a to]))
+     :targets targets
      ;; the attributes marked {:seon.db/derived true}, on their own schema or their entity schema's: caches never merged (seon.merge), once
      :derived-attrs (into (into #{} (keep (fn [[a k]] (when (:seon.db/derived (form-props forms k)) a))) es)
                           (filter #(and (qualified-keyword? %) (:seon.db/derived (form-props forms %)))) (keys forms))
      ;; the ref attributes some entity schema requires: what the write check's cascade follows from a retracted entity, once
-     :required-refs (vec (sort (distinct (for [k (distinct (vals es)) a (required (get forms k)) :when (:seon.db/to (form-props forms a))] a))))} :seon.db/entity-index-shape)))
+     :required-refs (vec (sort (distinct (for [k (distinct (vals es)) a (required (get forms k)) :when (:seon.db/to (form-props forms a))] a))))
+     ;; each schema that extends another, with all it extends and itself (`extends?` is one lookup), once
+     :ancestors anc
+     ;; the ref attributes whose targets each schema is or extends (`reaching`), for every schema that extends another or is a target, once:
+     ;; any other schema is or extends no target
+     :reaching (into {} (for [k (into (set (keys anc)) (mapcat val targets))
+                              :let [as (get anc k #{k})]]
+                          [k (vec (sort (for [[a ts] targets :when (some as ts)] a)))]))} :seon.db/entity-index-shape)))
 
 (defn- with-specs
   "Index ix with :specs, each pattern an entity schema declares (:seon.ctx/pattern) to its compiled spec, made at its
@@ -188,7 +199,7 @@
   "The ref attributes whose targets entity schema s is or extends, in the entity index ix: the refs that reach an s, each read in
   reverse (:ns/_name) to pull what points at it. See docs/data-modeling.md#things-relate-by-refs."
   {:malli/schema [:=> [:cat :seon.db/entity-index :qualified-keyword] [:vector :qualified-keyword]]}
-  [ix s] (vec (sort (for [[a ts] (:targets ix) :when (some #(extends? ix s %) ts)] a))))
+  [ix s] (get (:reaching ix) s []))
 
 (defn attributes-of
   "The attributes entity schema s names in the entity index ix, its own and those of the schemas it extends. See
@@ -206,22 +217,37 @@
   [ix as] (let [es (:entity-schemas ix)] (into {} (keep (fn [a] (when-let [s (es a)] [a s]))) as)))
 
 (defn implied-pattern
-  "The pull entity schema s implies: its own attributes, each ref it names followed to its first target and each ref
-  that reaches it followed back to the schema that owns it, a schema already walked not followed again (Malli's
-  ::walked-refs), so no join loops. What can relate to an s; an entity's :seon.ctx/pattern chooses from it. See
-  docs/data-modeling.md#things-relate-by-refs."
-  {:malli/schema [:function [:=> [:cat :map :qualified-keyword] [:vector :any]] [:=> [:cat :map :qualified-keyword [:set :any]] [:vector :any]]]}
-  ([ix s] (implied-pattern ix s #{}))
-  ([ix s walked]
-   (let [w (conj walked s) as (attributes-of ix s) targets (:targets ix)]
-     (vec (concat (remove targets as)
-                  (for [a as :when (targets a) :let [t (first (remove w (targets a)))] :when t] {a (implied-pattern ix t w)})
-                  (for [a (reaching ix s) :let [o (get (owners ix [a]) a)] :when (and o (not (w o)))] {(reverse-attr a) (implied-pattern ix o w)}))))))
+  "The pull entity schema s implies: its own attributes, each ref it names followed to its first target and each ref that reaches it
+  followed back to the schema that owns it. Each schema is joined in full once, where it is nearest s (its depth breadth first, the
+  first join there), and every other join to it holds its own attributes alone (what lies past it is read under its nearest join,
+  never through a second path), so the pattern grows with the schemas and refs it
+  reaches, never with the paths to them, and no join loops. What can relate to an s; an entity's :seon.ctx/pattern chooses from it.
+  See docs/data-modeling.md#things-relate-by-refs."
+  {:malli/schema [:=> [:cat :map :qualified-keyword] [:vector :any]]}
+  [ix s]
+  (let [targets (:targets ix)
+        ;; the joins of schema t: [key schema] for each ref it names (to its first target) and each ref reaching it (to its owner)
+        joins (fn [t] (concat (for [a (attributes-of ix t) :when (targets a)] [a (first (targets a))])
+                              (for [a (reaching ix t) :let [o (get (owners ix [a]) a)] :when o] [(reverse-attr a) o])))
+        depth (loop [d {s 0} q (conj clojure.lang.PersistentQueue/EMPTY s)]
+                (if-let [t (peek q)]
+                  (let [new (distinct (remove d (map second (joins t))))]
+                    (recur (into d (map vector new (repeat (inc (d t))))) (into (pop q) new)))
+                  d))
+        own (fn [t] (vec (remove targets (attributes-of ix t))))
+        ;; [t's pattern, the schemas joined in full so far]: claimed threads through the walk in order, a value
+        walk (fn walk [t dt claimed]
+               (reduce (fn [[out claimed] [k u]]
+                         (if (and (= (depth u) (inc dt)) (not (contains? claimed u)))
+                           (let [[sub claimed] (walk u (inc dt) (conj claimed u))] [(conj out {k sub}) claimed])
+                           [(conj out {k (own u)}) claimed]))
+                       [(own t) claimed] (joins t)))]
+    (first (walk s 0 #{s}))))
 
 (defn extends?
   "Does schema a extend schema b, itself or through the schemas it extends (`parents`, in the entity index ix)? See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat :seon.db/entity-index :qualified-keyword :qualified-keyword] :boolean]}
-  [ix a b] (boolean (or (= a b) (some #(extends? ix % b) (parents ix a)))))
+  [ix a b] (contains? (get (:ancestors ix) a #{a}) b))
 
 (defn most-specific
   "What one entity schema map e is, for a render, which needs one: of the schemas owning its attributes (`owners`, the reading the write

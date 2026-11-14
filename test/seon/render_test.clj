@@ -1039,6 +1039,23 @@
         (is (= 2 (runs `ui/evaluation)) "the new eval's component ran once a placement, the model's then the page's, never more")
         (is (some #(re-find #"e9" (str (:id %))) (:units (r/laid-out (:p kw')))) (str "and the page draws it: " (pr-str (mapv :id (:units (r/laid-out (:p kw')))))))))))
 
+;; See docs/render.md#the-debug-page-is-the-wire-request
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-debug-move-draws-the-rows-it-added
+  ;; task seon.render/a-debug-entry-allocates-what-it-shows: the debug page's latest request is units (seon.render.ui/debug-units), each
+  ;; drawn when its own input moved, so a move of the branch by one eval sends the head and the rows it touched, never the request
+  ;; whole: what the tab is sent is flat in the session's evals
+  (let [sent (fn [n] (let [[st view] (seon.render-cost-test/latest-of n)
+                           [_ msg] (#'p/pass-view st view)
+                           ;; a frag is [id html]; an append, prepend or after ends with the html it puts, its element's id first
+                           ids (into (mapv first (:frags msg)) (map #(second (re-find #"id=\"([^\"]+)\"" (str (peek (vec %))))))
+                                     (concat (:appends msg) (:prepends msg) (:afters msg)))]
+                       {:ids ids :bytes (count (pr-str msg))}))
+        a (sent 3) b (sent 10)]
+    (is (not-any? #{"d-turn"} (:ids b)) (str "the request's frame is not sent again: " (:ids b)))
+    (is (every? #(re-matches #"d-turn-head|d-turn-o\d+|d-steps" %) (:ids b)) (str "only its head and rows: " (:ids b)))
+    (is (= (count (:ids a)) (count (:ids b))) (str "as many units at 3 evals as at 10: " (:ids a) " " (:ids b)))
+    (is (< (:bytes b) (+ (:bytes a) 2000)) (str "and as many bytes, within 2 KB: " (:bytes a) " " (:bytes b)))))
+
 ;; See docs/render.md#a-page-is-a-kept-walk
 (deftest a-walk-kept-as-a-value-answers-what-a-cold-request-does
   ;; seon.render/walk moved to any value of the branch, forward, back and across several turns, by the datoms between, answers the
@@ -1358,6 +1375,13 @@
         (is (nil? (get-in st2 [:views [:chat :a3]])))
         (is (nil? (get-in st2 [:branches [:chat :a3]])))))))
 
+(defn- turn-html
+  "Debug request in drawn whole as a tab composes it: its units (seon.render.ui/debug-units), each drawn, its rows in its region."
+  [in]
+  (let [us (ui/debug-units {:seon.render/index (seon.db/index) :unit "d-turn"} in)
+        units (into {} (map (fn [u] [(:id u) {:html (h/html (first ((:draw u) nil)))}])) us)]
+    (p/compose (get-in units ["d-turn" :html]) units {"#d-turn-rows" (into [] (keep #(when (:container %) (:id %))) us)})))
+
 (defn- debug-state
   "The render proc's state holding agent a1's debug page: context-test's two model turns (each
   recorded the hash of what it sent), root's boot b whose agent a1 is, main and the branch the same db."
@@ -1481,11 +1505,13 @@
                                         [{:seon.eval/id "e9" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key "a1"}
                                           :seon.eval/code "(f 9)" :seon.eval/response {:handle 'result/e9 :value 9} :seon.eval/call (seon.task/call-ref "a1" 2) :seon.eval/call-id "c9"}]))
             drawn (fn [st] (let [[st1 _] (pass-view st [:debug :a1]) [st2 _] (pass-view (moved st1) [:debug :a1])]
-                             (- (get-in st2 [:counts :rendered] 0) (get-in st1 [:counts :rendered] 0))))]
+                             (- (get-in st2 [:counts :rendered] 0) (get-in st1 [:counts :rendered] 0))))
+            ;; latest's units after a move: its frame, its head and a row a message (seon.render.ui/debug-units)
+            held (fn [st] (let [[st1 _] (pass-view st [:debug :a1]) [st2 _] (pass-view (moved st1) [:debug :a1])] (count (get-in st2 [:views [:debug :a1] :units]))))]
         (is (zero? (drawn (assoc-in st [:tab [:debug :a1] :at] e0))) "a chosen turn: nothing drawn again")
         (let [[st' _] (pass-view (assoc-in st [:tab [:debug :a1] :at] 999999) [:debug :a1])]
           (is (str/includes? (p/view-html st' [:debug :a1]) "is no request of this branch: latest is shown") "a turn chosen that is gone is said, never shown as latest in silence"))
-        (is (= 1 (drawn st)) "latest: its request, once")))))
+        (is (< 0 (drawn st) (held st)) "latest: its head and the rows the move touched, never every unit of its request")))))
 
 (deftest stepping-the-timeline-draws-the-turn-on-a-still-branch
   ;; the browser check of 2026-11-03: a step (/at) on a branch that no longer moves (its agent ended) drew
@@ -1583,8 +1609,8 @@
 (deftest the-debug-tabs-turn-shows-its-model-and-time
   ;; docs/render.md#the-debug-page-is-the-wire-request: a turn on the debug tab says which model answered it and how long the call took,
   ;; the two facts a model call keeps (the Data model session's D1: they had no reader; red before: neither was drawn)
-  (let [html (h/html (ui/debug-turn {:unit "d-turn"} {:view [:debug :a1] :turn 3 :agent "a1" :origin :model :body {:messages []} :new []
-                                                       :usage {:seon.model-call/tokens 120 :seon.model-call/ms 2345 :seon.model-call/model "deepseek-chat"}}))]
+  (let [html (h/html (ui/debug-head {:unit "d-turn-head"} {:turn 3 :agent "a1" :origin :model :messages 0 :fresh 0
+                                                           :usage {:seon.model-call/tokens 120 :seon.model-call/ms 2345 :seon.model-call/model "deepseek-chat"}}))]
     (is (str/includes? html "deepseek-chat · 2345 ms") html)))
 
 (deftest roots-context-is-its-debug-page
@@ -1677,7 +1703,7 @@
         html (h/html (r/hiccup {:seon.render/index (seon.db/index)} {:seon.schema/key :lab.ctx/steps :seon.schema/definition form}))]
     (is (str/includes? html "seon.render.ui/debug-turn") "the properties print as the data they are")
     (is (not (str/includes? html "threw")) "and no render is called with them"))
-  (let [html (h/html [:div [:p "before"] [#'ui/debug-turn {} {:body 1}] [:p "after"]])]
+  (let [html (h/html [:div [:p "before"] [#'ui/debug-turn {} 1] [:p "after"]])]
     (is (str/includes? html "seon.render.ui/debug-turn threw:") html)
     (is (and (str/includes? html "before") (str/includes? html "after")) "the page around it is written")))
 
@@ -1787,7 +1813,7 @@
 (deftest an-outside-read-is-no-model-call
   ;; the browser pass (3b-root): an outside read's turn (seon_context) said "the call is in flight"
   ;; on the debug page, though it calls no model
-  (let [row (fn [origin] (h/html (ui/debug-turn {:seon.render/index (seon.db/index) :unit "d-turn"} {:turn 0 :agent "a1" :view "a1" :origin origin :body {:messages []} :sources [] :new [] :usage {}})))]
+  (let [row (fn [origin] (turn-html {:turn 0 :agent "a1" :view "a1" :origin origin :body {:messages []} :sources [] :new [] :usage {}}))]
     (is (str/includes? (row :outside) "an outside read: no model call"))
     (is (not (str/includes? (row :outside) "in flight")))
     (is (str/includes? (row :model) "the call is in flight") "a model turn with no usage yet is in flight")))
@@ -1795,17 +1821,17 @@
 (deftest the-debug-page-names-an-example-sessions-messages
   ;; the debug page's request: a message an example session made says so in its gutter, from its :example
   ;; ref (the messages' text is never read), its content as sent
-  (let [h (h/html (ui/debug-turn {:seon.render/index (seon.db/index) :unit "d-turn"} {:turn 1 :agent "a1" :view "a1" :origin :model :usage {}
+  (let [h (turn-html {:turn 1 :agent "a1" :view "a1" :origin :model :usage {}
                                                    :body {:messages [{:role "system" :content "help"} {:role "user" :content "an opening, whatever it says"}]}
-                                                   :sources [[[:section 1 1]] [[:example "example/abc" 5]]] :new [false true]}))]
+                                                   :sources [[[:section 1 1]] [[:example "example/abc" 5]]] :new [false true]})]
     (is (str/includes? h "example session example/abc"))
     (is (str/includes? h "an opening, whatever it says"))
     (is (= 1 (count (re-seq #"data-example=" h))) "the system message is no session's")))
 
 (deftest a-turn-whose-commit-is-gone-says-so
   ;; docs/render.md#the-debug-page-is-the-wire-request: the store's keep can sweep a turn's commit; the page draws and says what it drew
-  (let [h (h/html (ui/debug-turn {:seon.render/index (seon.db/index) :unit "d-turn"} {:turn 1 :agent "a1" :view "a1" :origin :model :usage {} :swept? true :differs? true
-                                                   :body {:messages [{:role "system" :content "help"}]} :sources [[]] :new [false]}))]
+  (let [h (turn-html {:turn 1 :agent "a1" :view "a1" :origin :model :usage {} :swept? true :differs? true
+                                                   :body {:messages [{:role "system" :content "help"}]} :sources [[]] :new [false]})]
     (is (str/includes? h "gone from the store") "said plainly")
     (is (not (str/includes? h "a render or a record changed")) "and not as something else")))
 
@@ -1815,8 +1841,10 @@
   (let [ms [{:role "system" :content "# Help\n\nread this"}
             {:role "assistant" :tool_calls [{:id "a" :function {:name "repl" :arguments "{\"intent\":\"Read it\",\"code\":\"(first-call)\"}"}}]}
             {:role "tool" :tool_call_id "a" :content (str/join " " (repeat 8000 "word"))}]
-        draw (fn [opened] (h/html (ui/debug-turn {:seon.render/index (seon.db/index) :unit "d-turn"} {:turn 1 :agent "a1" :view "a1" :origin :model :usage {} :opened opened
-                                                                   :body {:messages ms} :sources [[[:section 1 1]] [[:eval "e1"]] [[:eval "e1"]]] :new [false false true]})))
+        draw (fn [opened] (turn-html {:turn 1 :agent "a1" :view "a1" :origin :model :usage {} :opened opened
+                                                                   :body {:messages ms} :sources [[[:section 1 1]] [[:eval "e1"]] [[:eval "e1"]]] :new [false false true]
+                                                                   ;; each message's tokens, as debug-input sizes them (the one sizer: lengths)
+                                                                   :sizes (mapv #(seon.print.emit/chars-tokens (count (str (:content %) (get-in % [:tool_calls 0 :function :arguments])))) ms)}))
         h (draw #{})]
     (is (= ["system" "assistant" "tool"] (mapv second (re-seq #"data-role=\"(\w+)\"" h))) "a row a message, in the wire's order, by its role")
     (is (not-any? #(str/includes? h %) ["tool_calls[0]" "arguments.code"]) "a closed row is its line: its fields are drawn when opened")

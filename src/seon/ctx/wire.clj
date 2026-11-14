@@ -188,14 +188,14 @@
 
 (defn wire-turn
   "Turn basis b's request as it went on the wire, made again from the records at b's commit (one `render`):
-  {:body :provider :messages :sources :new}: the body seon.model/request-body made of its messages under its provider
+  {:body :provider :messages :sources :new :groups}: the body seon.model/request-body made of its messages under its provider
   (`provider-of`), :sources, for each of the body's messages in order the refs of the records that made it (seon.model/wire-groups
   folds a reply's calls into one message), and :new, whether each message is of a record the call before it did not hold: one of
   a turn after since, that call's number (nil: none is new), or the page it ended with. Drawn with today's renders: the debug page
   compares :messages with what the turn hashed (:seon.model-call/sent-hash). See docs/render.md#the-debug-page-is-the-wire-request."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.model-call/basis] [:map [:body :map] [:provider :seon.model/provider] [:messages [:vector :seon.model/message]] [:sources [:vector [:vector :any]]] [:new [:vector :boolean]]]]
-                  [:=> [:cat :seon.host/db :seon.model-call/basis [:maybe nat-int?]] [:map [:body :map] [:provider :seon.model/provider] [:messages [:vector :seon.model/message]] [:sources [:vector [:vector :any]]] [:new [:vector :boolean]]]]
-                  [:=> [:cat :seon.host/db :seon.model-call/basis [:maybe nat-int?] [:maybe :map]] [:map [:body :map] [:provider :seon.model/provider] [:messages [:vector :seon.model/message]] [:sources [:vector [:vector :any]]] [:new [:vector :boolean]]]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.model-call/basis] [:map [:body :map] [:provider :seon.model/provider] [:messages [:vector :seon.model/message]] [:sources [:vector [:vector :any]]] [:new [:vector :boolean]] [:groups [:vector [:vector nat-int?]]]]]
+                  [:=> [:cat :seon.host/db :seon.model-call/basis [:maybe nat-int?]] [:map [:body :map] [:provider :seon.model/provider] [:messages [:vector :seon.model/message]] [:sources [:vector [:vector :any]]] [:new [:vector :boolean]] [:groups [:vector [:vector nat-int?]]]]]
+                  [:=> [:cat :seon.host/db :seon.model-call/basis [:maybe nat-int?] [:maybe :map]] [:map [:body :map] [:provider :seon.model/provider] [:messages [:vector :seon.model/message]] [:sources [:vector [:vector :any]]] [:new [:vector :boolean]] [:groups [:vector [:vector nat-int?]]]]]]}
   ([db basis] (wire-turn db basis nil))
   ([db basis since] (wire-turn db basis since nil))
   ([db basis since walk]
@@ -211,7 +211,9 @@
       :provider p
       :messages messages
       :sources (mapv (fn [is] (vec (distinct (map #(first (nth per %)) is)))) groups)
-      :new (mapv (fn [is] (boolean (some #(second (nth per %)) is))) groups)})))
+      :new (mapv (fn [is] (boolean (some #(second (nth per %)) is))) groups)
+      ;; for each wire message, the indexes of the messages it folds (seon.model/wire-groups), so a reader sizes it by the one sizer
+      :groups groups})))
 
 (defn read-text
   "A read of messages, the request basis b makes on db, as an outside agent is answered it: the system prompt, then each record as the call made and its result; wire?: the request body as JSON, the bytes a provider is sent (`wire-turn`). See docs/server.md#ops."
