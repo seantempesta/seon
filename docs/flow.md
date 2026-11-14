@@ -2,6 +2,16 @@
 
 Every Seon component is a Flow proc. Jolt's Flow is upstream's API over Jolt's own implementation; this page states the proc contract, where each workload runs, what the API really does and its hazards, read from the pinned source under `reference-code/jolt/stdlib/clojure/core/async/` (`flow.clj`, `flow/impl.clj`, `flow/spi.clj`, `flow/impl/graph.clj`, `impl/dispatch.clj`). Read [core-async](core-async.md) first.
 
+## The five rules
+
+Every design that waits, steps or bounds follows these; the Flow specialist reviews each such design before it is built.
+
+1. **A proc waits only by parking on its in-port for the thing itself,** and steps when it arrives. A step never waits inside: a call out is an output, its answer a message on the proc's own in-port (a model call, an ask of root, a test run). A step that waits inside can be neither pinged nor stopped until it returns.
+2. **Control never waits:** a lifecycle command is a `put!` (never blocks, arrives in order), a ping an `offer!` that names who did not answer, and a closed control channel is the proc's exit. A proc stuck in a step then wedges nothing else.
+3. **"Nothing hangs" comes from sources, never from a watcher.** Every way a thing can fail to answer is a message from where it happens: its answer; its death (the socket's end of file); its deadlock, which Jolt tells as an event (``jolt.host/on-quiescent!`` on a main carrier, with every fiber's dump), read against what the process itself is owed (a wait on a peer it asked is the peer's turn, not a deadlock); a loop that never parks, by its tick budget (counted work). No proc polls another's quiet.
+4. **Time only at the outside edge:** an effect on the outside world (the model, a shell, the network) has its declared deadline, one entry on Jolt's deadline heap (```seon.step/put-after!```), cancelled when it is answered (```seon.step/cancel!```). This is the only clock after boot.
+5. **The residue is named, not timed:** a blocking native call that may never return is closed at its source, as an effect with its bound or with a bound of its own (the fork's `:seon.config.agent/fork-wait-ms`).
+
 ## Where Jolt's Flow differs from upstream
 
 `flow.clj` and `flow/spi.clj` are upstream's `dev-flow-alpha` plus `update!`. `flow/impl.clj` is Jolt's:
