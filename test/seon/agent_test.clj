@@ -684,6 +684,19 @@
         (str "red as recorded, with its failure, nothing run and no child forked " (pr-str judge)))
     (is (= [:pass 1] (:value other)) (str "another's red runs, and is green: " (pr-str other)))))
 
+;; Estimate: as its sibling below (in-agent and three asks, a test child forked), ~20M
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 20000000 :asks 3}} a-test-child-holds-its-branchs-config-never-its-parents
+  ;; the owner, 2026-11-14: \"Why does it matter what the config is that we are forking from\": a process is handed its branch's
+  ;; environment and its first act is to hold it (seon.agent/hold-env!), whatever its parent held. A test child was a fork of its
+  ;; agent, itself a fork of root, so it held root's own layers and variables: here the shared root's source root (its --set and
+  ;; SEON_SOURCE_ROOT), as the standing root's gave the first real task's agent's tests (seon.source-test's red in context's agent
+  ;; nae67b62, 2026-11-14). A test process holds a test's layers (--profile scripted, no local layer) and variables over its
+  ;; branch's config entries, as a bin/test shard does
+  (let [[_ run] (in-agent ["(ns env-test (:require [clojure.test :refer [deftest is]])) (deftest no-parents-layers (is (nil? (get seon.config/config :seon.config.source/root))) (is (= :scripted (seon.config/profile))))"
+                           "(select-keys (my.agent/prove 'env-test/no-parents-layers) [:results])"]
+                          {:proofs #{'env-test/no-parents-layers}})]
+    (is (= {:results '{env-test/no-parents-layers :pass}} (:value run)) (str "the test child holds a test's environment, not root's: " (pr-str run)))))
+
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 20000000 :asks 3}} an-agents-green-records-what-it-read
   ;; docs/source.md#tests-run-by-reach: a green an agent's run stores is keyed by what it read (seon.proofs/reads-key): the
   ;; functions it called and itself, at the digests of the agent's reads index, beside its verdict as reads.edn, so a later plan

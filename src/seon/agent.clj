@@ -1215,6 +1215,22 @@
                                                                               {:test t :bound-ms ms :dump dump})))))))
     {:fiber fiber :test t :cancel cancel}))
 
+(defn hold-env!
+  "A process's first act: hold the environment of the branch it runs, db, whatever its parent held (the owner:
+  \"Why does it matter what the config is that we are forking from\"). Its config is db's entries under its role's layers, args
+  (a test process: --profile scripted, no local layer: seon.config/hold-args!), never its parent's, read with its environment
+  variables, which are a test process's of its checkout (the run's, or else the agent's: seon.fx/checkout-env!, until one
+  statement of them takes its place), never root's (SEON_SOURCE_ROOT, SEON_RUNS, its ports). Its
+  program and registry are db's already: a test child is forked from the agent holding db, and seon.contract/layers reads the
+  agent's slot. A test child calls it at its start, unconditionally. Answers the config's refusal, or nil. See
+  docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat :seon.host/db [:map [:args [:sequential :string]] [:checkout {:optional true} [:maybe :string]]]] [:maybe :map]]}
+  [db {:keys [args checkout]}]
+  ;; its environment variables first, since the config reads some (:seon.config.source/root is #env SEON_SOURCE_ROOT): a
+  ;; test process's are bin/test's for its checkout, the run's or else the agent's, never root's
+  (fx/checkout-env! (or checkout (cfg/checkout)))
+  (cfg/hold-args! args (cfg/entries db) (program/schema-changes db)))
+
 (defn- test-child-runs!
   "A test child's body (jolt.async.remote.flow/fork!'s child), end its end of the link to its run's fold proc
   (test-run-step), opened by fork! over the one stream it holds: watched as seon.lib/fork!'s children are (seon.lib/end-with!,
@@ -1249,9 +1265,6 @@
         ;; the test child's own ceiling, from its own heap at its fork: the agent's absolute ceiling
         ;; left a child of a grown agent less room than any test needs (docs/machine.md#what-a-process-owns-in-memory)
         (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)) (cfg/value :seon.config.agent/trip-bytes))
-        ;; a run of a session's checkout (seon.system/prove-tree!): its tests read that checkout's files, as their digests
-        ;; (the tree's) say, and they and what they start run in its environment and test config, never root's, which this agent was forked from
-        (when-let [co (:checkout plan)] (fx/checkout-env! co) (cfg/hold-checkout! co))
         ;; a batch the test service granted: every process this child starts carries it, so the service reads what its
         ;; running batches hold (seon.prove/held-processes)
         (when-let [b (:seon.prove/batch plan)] (lib/c-setenv "SEON_PROVE_BATCH" b 1))
@@ -1260,6 +1273,9 @@
         (intr/forked!)
         ;; its reads through its own env, never the agent's (own-store!); its writes stay its own value's (:test mode)
         (own-store! (:cfg @state) (:branch @state))
+        ;; its first act on its own env: the branch's environment, whatever the agent it was forked from held (its reads of
+        ;; db go through its own env, so after own-store!)
+        (hold-env! (db) {:args ["--profile" "scripted"] :checkout (:checkout plan)})
         ;; and as a test process: a private function's contract is checked on each call here, whatever its agent's
         ;; setting (the owner, 2026-11-10: "Private helpers: tests only"; docs/checks.md#contracts-armed-at-definition)
         (contract/check-private! true)
