@@ -952,8 +952,9 @@
                ;; fixed bytes re-derived 2026-10-23 (jolt/similar-finds-helpers-by-embedding): 3.01 MB at 10,
                ;; 10.0 MB at 100, 80.2 MB at 1,000 sites; a fixed part near the smallest size's whole cost read
                ;; as steeper growth (task seon.cost/a-speedup-never-reads-as-steeper)
-               ;; 91 (main) + 7: the one-printer law's rule in the full read, its four dials read once (tests, measured 92 -> 99 at 10 before main's 91)
-               :fixed {:ns 19500000 :bytes 17500000 :calls 98}
+               ;; 91 (main) + 13: the one-printer law's rule in the full read, its four dials read through the resolver (tests: 92 -> 99 at 10
+               ;; before main's 91; measured 184 against a summed 178 on the merged tip, the sum having counted the dials' reads once)
+               :fixed {:ns 19500000 :bytes 17500000 :calls 104}
                :sizes [10 30 100]}))
 
 ;; ---- caused reads what changed (diff by value), and agrees with the full reading ---------------
