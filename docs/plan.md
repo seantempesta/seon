@@ -84,6 +84,19 @@ recorded.
 
 ## Stage 1: Claude sessions work through the system (the priority)
 
+**Safe to start only when all of these are on main,** each proved red first (2026-11-14: a merge gate on the standing system
+booted ~74 test roots at once and took the owner's machine to load 70; a prove waited 17 minutes on that gate):
+- admission weighs a test that boots a root as a whole system, so no run, gate or landing makes more processes than the
+  cores and memory admit, and a killed or failed child never restarts a root on its own (tests);
+- no eval waits on a gate, and every wait on a gate or a reply ends with its value or a typed error (tests);
+- an update that must restart root waits until nothing is in flight, and a wall-time end is a platform problem, never a
+  cached red (web, runtime);
+- the MCP relay answers each call on its own (web);
+- one session's edit, proved and merged through the system end to end, keeps the machine's load within its cores
+  (`seon.server/a-sessions-file-edit-merges-through-done`, with its cost proof).
+Until then no session calls `seon_done`, `seon_prove` or `(my.agent/prove)` on the standing system, and the path's own
+tasks land through a worktree and `bin/land`.
+
 **Goal:** a Claude session changes Seon the way a Seon agent does: its change enters the one system as a valid branch, is
 proved there by what it reaches, and merges into main through Seon's own merge, with git following the store. Everything a
 session needs to get work done is a task or the wiki. **Done when:** one area's session lands a week of work with no
