@@ -76,7 +76,7 @@
   ;; a prove's items (seon.prove asks them all): a test batch, asked of the agent holding its branch, or a build, one process test, one
   ;; check step on the session's own checkout (docs/merging.md#a-session-proves-through-root); admitted by the processes each class
   ;; holds under the config's dials (seon.fx/admits?, read live), one performer a core
-  :process {:perform seon.fx/run-item :workers :bind/process-workers :ctx {:ask-tests :bind/ask-tests}}
+  :process {:perform seon.fx/run-item :workers :bind/process-workers}
   ;; the wiki's history from git: what each section was last written against (seon.doc/baseline-plan)
   :history {:perform seon.fx/wiki-history :workers 1}
   ;; a stalled agent's evidence (sample, lsof, ps, its fiber dump), captured as the stall is recorded

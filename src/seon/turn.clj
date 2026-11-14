@@ -181,11 +181,13 @@
   (tell-error! em "your turn threw: Seon's code ran with the program on your branch as it stands now (Seon's own code and what you changed of it), so the cause may be either")
   (-> st (update :threw (fnil inc 0)) (assoc :error em)))
 
-(def ^:private turn-can-change
-  "The model call's typed errors a next turn or a next call can change (seon.turn/model-failed!): the agent reasons less, or the
-  provider answers next time. The rest of :seon.model/failure are the config's (no provider, no script, a script's invalid
-  reply), which no turn changes. See docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error."
-  #{:seon.model/reasoning-ate-reply :seon.model/rate-limited :seon.model/transport :seon.model/provider-error})
+(defn- turn-can-change
+  "Whether a model call's typed error of type t is one a next turn or a next call can change (seon.turn/model-failed!): its schema
+  entry says so, with its reason (:seon.model/retryable, root's ruling: data, never a second list). The rest of :seon.model/failure
+  are the config's (no provider, no script, a script's invalid reply), which no turn changes. See
+  docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error."
+  {:malli/schema [:=> [:cat :keyword] :boolean]}
+  [t] (boolean (:seon.model/retryable (contract/properties t))))
 
 (defn- model-failed!
   "A model call that answered its typed error (em, a :seon.model/failure: the reasoning spent the whole token budget, the
