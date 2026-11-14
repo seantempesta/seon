@@ -337,10 +337,11 @@
  ;; measure large sizes. Provenance: the per-run judge bound it was (no single in-process test
  ;; needed more); each result records its :ticks. At the bound that test is an :error of
  ;; :seon.test/ticks-spent naming it, and the run goes on. 0: none. Lowered 2026-10-29 (owner: "I don't
- ;; want long running tests period and I want to catch the problems sooner"): 200 G let a looping
- ;; test run ~30 min; the costliest green in-process test recorded 8.3 G ticks (p99 1.9 G, median
- ;; 2 M; 1,186 tests' newest verdicts), so 10 G ends a loop in about a minute and fails none today.
- :seon.config.agent/test-ticks 10000000000
+ ;; want long running tests period and I want to catch the problems sooner"; and "What should the longest test ever be? make
+ ;; that config a lot smaller"): the newest greens of 2,139 tests read p50 1.0 M, p99 164 M, p99.5 219 M ticks, the costliest real
+ ;; one 252 M (seon.ctx-test's 5.4 G implied-joins test fixed at its cause, 36 M), so 300 M ends a loop in about 3 s and fails
+ ;; none; it caps a stated estimate's budget too (ten times the estimate, never past this).
+ :seon.config.agent/test-ticks 300000000
  ;; The silence, ms, after which an agent with a request in flight is observed stalled, once per
  ;; quiet spell (seon.agent-proc's stall check), and a test bin/test runs is named STALLED: a
  ;; recorded fact (:seon.agent/stall, an open :stalled problem), never an end. Provenance: the
@@ -845,8 +846,9 @@
  ;; costs ~$5.8 (one such reply ~$0.04). Thinking at :low effort (below) reasons in hundreds to a few
  ;; thousand tokens a reply; a reply that spends the bound on reasoning is
  ;; :seon.model/reasoning-ate-reply, and a task or model raises the bound through the resolver
- ;; (v1's 65,536 for :high).
- :seon.config.ai/max-tokens 8192
+ ;; (v1's 65,536 for :high). Raised to v1's 65,536 after a run died at 8,192 of 8,192 in reasoning
+ ;; (b6f1354d); the owner: "raise it whatever it needs to be ... if it's cheap I don't care".
+ :seon.config.ai/max-tokens 65536
  ;; DeepSeek's thinking mode (:enabled | :disabled), on at :low effort (owner, 2026-11-12,
  ;; reasoning :low as the default for work tasks: "Sure"; it replaces off, 2026-10-21). The
  ;; reasoning is what shows where the context confused the model (docs/decisions.md, "Reasoning is

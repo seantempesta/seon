@@ -44,7 +44,11 @@
     (is (d/reads-touched? two (tx [{:db/id t1 :seon.task/plan "Changed."}])) "an attribute it read")
     (is (not (d/reads-touched? two (tx [{:db/id t1 :seon.task/ns 'x.y}]))) "an attribute of the entity it did not read")
     (is (not (d/reads-touched? one (tx [{:db/id t1 :seon.task/ns 'x.z}]))) "nor another attribute, for a one-attribute pull")
-    (is (contains? (reads #(d/pull db [:seon.task/plan] 987654321)) [:e 987654321]) "a missing entity: its first datom reaches it")))
+    (is (contains? (reads #(d/pull db [:seon.task/plan] 987654321)) [:e 987654321]) "a missing entity: its first datom reaches it")
+    ;; a read answers the same recorded or not (web-2, 2026-11-15: a recorded pull of an attribute the schema lacks threw)
+    (is (= (d/pull db [:seon.task/plan :no.such/attribute] t1)
+           (first (d/with-reads #(d/pull db [:seon.task/plan :no.such/attribute] t1))))
+        "an attribute the schema does not define: the same answer inside the recorder as outside")))
 
 ;; Estimate: a seeded db, 200 pulls of one attribute under one recorder ~1M; one planned join query ~0.2M; 3 d/with ~0.2M = ~1500000
 (deftest ^{:seon.test/estimate {:ticks 1500000}} a-recorder-holds-one-range-a-key-and-the-planner-records
@@ -65,6 +69,17 @@
     (is (d/reads-touched? idx (tx [{:db/id t1 :seon.task/needs [{:seon.task/id "r/t3"}]}])) "a need added to the entity it joined from")
     (is (d/reads-touched? idx (tx [[:db/retract t2 :seon.task/id "r/t2"]])) "the joined entity's id, retracted")
     (is (not (d/reads-touched? idx (tx [{:db/id t2 :seon.task/plan "Other."}]))) "an attribute the join did not read")))
+
+;; Estimate: a seeded db and two pulls under nested recorders, ~0.2M = 200000
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-nested-with-reads-records-into-the-outer
+  ;; task datahike.reads/with-reads-nests-in-an-outer-recorder: a read inside a nested with-reads reached only the inner
+  ;; recorder, so a pass whose component recorded its own reads lost them (seon.ratom/deref-capture copied them out by
+  ;; hand). Recording composes: the inner reads are the outer's too.
+  (let [[db t1 t2] (seeded)
+        [[_ inner] outer] (d/with-reads #(do (d/pull db [:seon.task/id] t2)
+                                             (d/with-reads (fn [] (d/pull db [:seon.task/plan] t1)))))]
+    (is (= #{[:ea t1 :seon.task/plan]} (d/reads-index inner)) (pr-str (d/reads-index inner)))
+    (is (= #{[:ea t1 :seon.task/plan] [:ea t2 :seon.task/id]} (d/reads-index outer)) (pr-str (d/reads-index outer)))))
 
 (deftest a-transaction-touches-only-what-a-read-scanned
   (let [[db t1 t2] (seeded)

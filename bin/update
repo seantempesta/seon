@@ -16,7 +16,7 @@
 #   (bin/update --profile deepseek), as it is on every root's command line (docs/config.md#layers).
 # bin/land runs it after it moves main (docs/merging.md#a-branch-lands-with-binland); the owner runs it by hand too.
 # Every step's exit status counts; the last line is UPDATE OK or UPDATE FAILED (UPDATE FAILED: ROOT STALE BINARY ... when the
-# restarted root's binary is another program than its store's main: it runs, forks no agent, and the line names the acts).
+# restarted root's binary is another program than its store's main: it runs main's program loaded over it, and the line names the acts).
 setopt pipefail
 # the restart's background job keeps this run's nice: zsh's BG_NICE renices it by 5 more, which a run already niced to 15
 # (bin/land runs it so) may not do ("nice(5) failed: operation not permitted"), as bin/test and bin/check say
@@ -118,7 +118,7 @@ perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' zsh -c 'bin/system stop > target/u
 wait $! || fail "the standing root did not start (runs/root.log, $restart)"
 out=$(<$restart)
 [[ $(<$stopped.status) != 3 ]] || { print -r -- "UPDATE FAILED: $(grep -m1 'STOP OVERRAN' $stopped) (the system was started again)"; exit 1 }
-# a root whose binary is another program than its main's forks no agent: the update's last line says so, with its acts
+# a root whose binary is another program than its main's loads main's over it at each boot: the update's last line says so, with its acts
 stale=$(print -r -- "$out" | grep -m1 '^ROOT STALE BINARY')
 [[ -n $stale ]] || print -r -- "${out##*$'\n'}"
 # what the verdict cache shows slow is work: root files a held task per slow test (docs/merging.md#a-slow-test-runs-last)
