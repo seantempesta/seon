@@ -10,6 +10,13 @@
 # naming every gate that is red and not known, and every known-red gate that passed (remove its line).
 # JOLT_GATES_JOBS sets the workers (default: cores less 2).
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# Jolt's gates judge Jolt as it ships, so they run in none of Seon's environment: a caller that had sourced bin/env
+# exported JOLT_COMPILER_OPTIONS {:image-fn-forms false}, the caches and HOME, and seven gates went red on code that is
+# green (fnform, stateimage, inline-body, corpus, unit, aotcachesmoke, gambitseedcheck; 2026-11-14). Every JOLT_ and
+# SEON_ variable is cleared but the two this script reads.
+for v in ${(k)parameters[(I)JOLT_*]} ${(k)parameters[(I)SEON_*]}; do
+  [[ $v == JOLT_CHEZ || $v == JOLT_GATES_JOBS ]] || unset $v
+done
 J=$ROOT/reference-code/jolt; T=$ROOT/target/jolt-gates; C=$ROOT/target/chez/bin/scheme
 [[ -x $C ]] || { echo "JOLT GATES FAILED (no $C; run bin/build chez first)"; exit 1 }
 PIN=$(git -C "$J" rev-parse HEAD) || exit 1

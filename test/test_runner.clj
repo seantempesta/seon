@@ -161,6 +161,24 @@
               (catch Throwable t (when-not (= :branch-already-exists (:type (ex-data t))) (throw t))))
          (finally (d/delete-branch! conn stage)))))
 
+(defn- move-aside!
+  "Move the kept program store at store out of its path in one rename, to store.retired-<uuid>, and answer nil: never removed in
+  place, since the store is the repository's and other processes' plans and shards read it at once (a removal under a reader
+  left an empty data file its next connect read as \"Database does not exist\", 2026-11-14). A reader holding its env keeps
+  reading the files moved aside; seon.test-store/shared-program-store! removes them once no process holds them. A rename that
+  fails throws. See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :string] :nil]}
+  [store]
+  ;; this process's own env first (docs/failure-points.md#lmdb-locks), as a removal closed it
+  (klmdb/close-env! store)
+  (when (.exists (io/file store))
+    (let [to (str store ".retired-" (random-uuid))
+          [rc errno] (seon.lib/c-rename store to)]
+      (when-not (zero? rc)
+        (throw (ex-info (str "the kept program store " store " could not be moved aside to " to " (errno " errno ")")
+                        {:seon.error/type :seon.test-store/not-moved-aside :path store :errno errno})))))
+  nil)
+
 (defn program-db
   "The db holding :seon.config.source/dirs of the checkout at root as program facts (seon.source: analyzed,
   not run), kept in the LMDB store at store on a branch named by root's git tree id (seon.fx/
@@ -173,8 +191,8 @@
   seon.proofs/a-failed-import-leaves-no-branch: one selected 0 tests and said OK). Every text is
   read from the tree's git objects (tree-files). Two runs on one new tree both import it and the first to
   finish keeps the branch (keep-tree!). A store past
-  max-bytes on disk (an LMDB file never shrinks) is removed when a tree must be imported into it, and starts again from
-  that tree; a tree it keeps is read whatever its size. Only the plan passes a bound (tests-of:
+  max-bytes on disk (an LMDB file never shrinks) is moved aside (move-aside!, never removed under its readers) when a tree
+  must be imported into it, and starts again from that tree; a tree it keeps is read whatever its size. Only the plan passes a bound (tests-of:
   :seon.config.proofs/program-store-max-bytes), before anything of its run reads the store: the health step importing
   the base tree beside the shards removed the store, and the head's branch the plan had kept with it, so every shard's
   first program reader imported the program inside its own budget. Any other caller (nil) imports beside what is kept. The branch's connection stays open for
@@ -191,7 +209,7 @@
                    (catch clojure.lang.ExceptionInfo e
                      (if (#{:seon.db/types-differ :seon.db/name-retired} (:seon.error/type (ex-data e)))
                        ;; its env, opened before the refusal, closed first (seon.lib/remove-tree! closes it too: docs/failure-points.md#lmdb-locks)
-                       (do (klmdb/close-env! store) (seon.lib/remove-tree! store) (pdb/open! :lmdb store 0 :db))
+                       (do (move-aside! store) (pdb/open! :lmdb store 0 :db))
                        (throw e))))
         ;; the bound is the write's: a tree the store keeps is read whatever the store's size (a shard read the plan's tree
         ;; from a store the plan's import had taken past it, removed it, and its first program reader imported the tree
@@ -201,11 +219,14 @@
         {:keys [conn cfg]} (let [o (open)]
                              (if (or (nil? max-bytes) (pdb/branch? (:conn o) b) (<= (.length (io/file store "data.mdb")) max-bytes))
                                o
-                               (do (d/release (:conn o)) (seon.lib/remove-tree! store) (open))))]
+                               (do (d/release (:conn o)) (move-aside! store) (open))))]
     (when-not (pdb/branch? conn b)
       (keep-tree! conn cfg root tree b (d/branches conn)))
-    (d/release conn)
-    @(pdb/connect (assoc cfg :branch b)))))
+    ;; the branch's connection made while the store's main one is held: its env stays this process's, never a path another
+    ;; process moved aside in between (a connect of a missing store makes an empty one)
+    (let [bc @(pdb/connect (assoc cfg :branch b))]
+      (d/release conn)
+      bc))))
 
 (defn- builder-id
   "The id of the code that builds a reach graph on db: the digest of the :form/id of every var of
