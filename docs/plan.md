@@ -98,6 +98,8 @@ this path, and is deleted when the path carries a week of landings.
 
 ### The self-merge path (owner: "make merging as simple as a passing proofs")
 
+The steps by which an agent merges its own branch once its proofs pass, with no release and no human in the loop, each owned by the area named.
+
 1. A verdict reads only its own work: a red that depended on load, a cold fixture or a shared file is a platform problem,
    never a verdict against a change, so main is never shown red by another run's measurement
    (`seon.prove/a-verdict-reads-only-its-own-work`, tests).
@@ -117,6 +119,8 @@ never batched; a code change loads live. The test is each branch's drift from ma
 sync), shown on the dashboard: drift is a problem, not a merge-time surprise.
 
 ### The order
+
+The order the areas work in now, each item with its owner; a later item starts when what it needs has landed.
 
 1. **Stage 0's merge.** "Main's reds" were on the agent's branch: merging main into it lost main's task lifecycle datoms
    and kept callers of definitions main deleted. Data's one merge (`seon.merge/a-tasks-content-is-a-key-of-the-one-merge`) fixes it: it takes every
