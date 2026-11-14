@@ -114,7 +114,7 @@ build_jolt() {
   copy_tree "$RC/jolt" "$T/src/jolt"
   say "jolt: build-jolt.ss release -> target/jolt/jolt"
   mkdir -p "$T/jolt"
-  ( cd "$T/src/jolt"
+  ( set -e; cd "$T/src/jolt"
     HOME=$T/home JOLT_VERSION=$version JOLT_CHEZ=$CHEZ \
       "$CHEZ" --script host/chez/build-jolt.ss release "$T/jolt/jolt" ) > "$T/jolt-build.log" 2>&1 ||
     die "jolt build failed; see target/jolt-build.log"
@@ -141,7 +141,7 @@ build_hello() {
   if [ -n "$key" ] && fresh hello "$key" && [ -x "$T/hello" ]; then say "hello up to date (tree $TREE)"; return; fi
   rm -f "$T/hello.stamp"
   say "hello: jolt build -m build.hello (Datahike from reference-code/) -> target/hello"
-  ( cd "$ROOT"
+  ( set -e; cd "$ROOT"
     HOME=$T/home JOLT_PWD=$ROOT "$JOLT" -A:hello build -m build.hello -o "$T/hello" ) > "$T/hello-build.log" 2>&1 ||
     die "hello build failed; see target/hello-build.log"
   [ -z "$key" ] || echo "$key" > "$T/hello.stamp"
@@ -336,7 +336,7 @@ build_seon() {
   # (seon.check, in test/, outside src) from the checkout's
   # source for every other mode, so the release binary holds only the program
   say "seon: jolt build -m seon.main -> target/seon"
-  ( cd "$ROOT"
+  ( set -e; cd "$ROOT"
     HOME=$T/home JOLT_PWD=$ROOT "$JOLT" build -m seon.main -o "$T/seon.$ID.new" ) > "$T/seon-build.$ID.log" 2>&1 ||
     { tail -30 "$T/seon-build.$ID.log" >&2; rm -rf "$T/seon.$ID.new" "$T/seon.$ID.new.build"; die "seon build failed; see target/seon-build.$ID.log"; }
   # jolt's intermediate files for this output (flat.ss, boot data, main.c): this run's alone, 386 MB, removed once it is built
