@@ -149,6 +149,12 @@
   docs/source.md#the-next-generation."
   (mapv second (filter #(= "-u" (first %)) (partition 2 1 child-env-scrub))))
 
+(def root-variables
+  "The variables only a root's own process has, bin/system's for the standing system: its source root, runs and ports. A
+  process forked from root that is not root drops them (seon.agent/hold-env!), so its config never reads root's source tree
+  (:seon.config.source/root is #env SEON_SOURCE_ROOT). See docs/source.md#the-next-generation."
+  ["SEON_SOURCE_ROOT" "SEON_RUNS" "SEON_WEB_PORT" "SEON_SERVER_PORT"])
+
 (defn checkout-env!
   "This process's environment made checkout's own, as bin/test starts a shard of it: child-env-variables removed, then
   SEON_CHECKOUT, HOME, JOLT_PWD and JOLT_LMDB_LIB set from checkout as bin/env and bin/test set them. For a process forked from another checkout's (a test child of the

@@ -1223,16 +1223,17 @@
   "A process's first act: hold the environment of the branch it runs, db, whatever its parent held (the owner:
   \"Why does it matter what the config is that we are forking from\"). Its config is db's entries under its role's layers, args
   (a test process: --profile scripted, no local layer: seon.config/hold-args!), never its parent's, read with its environment
-  variables, which are a test process's of its checkout (the run's, or else the agent's: seon.fx/checkout-env!, until one
-  statement of them takes its place), never root's (SEON_SOURCE_ROOT, SEON_RUNS, its ports). Its
+  variables, never root's: a run of a session's checkout takes that checkout's (seon.fx/checkout-env!), any other child keeps
+  its agent's and drops root's own (seon.fx/root-variables), until one statement of them takes the place of both. Its
   program and registry are db's already: a test child is forked from the agent holding db, and seon.contract/layers reads the
   agent's slot. A test child calls it at its start, unconditionally. Answers the config's refusal, or nil. See
   docs/config.md#a-process-holds-its-branchs-config."
   {:malli/schema [:=> [:cat :seon.host/db [:map [:args [:sequential :string]] [:checkout {:optional true} [:maybe :string]]]] [:maybe :map]]}
   [db {:keys [args checkout]}]
-  ;; its environment variables first, since the config reads some (:seon.config.source/root is #env SEON_SOURCE_ROOT): a
-  ;; test process's are bin/test's for its checkout, the run's or else the agent's, never root's
-  (fx/checkout-env! (or checkout (cfg/checkout)))
+  ;; its environment variables first, since the config reads some (:seon.config.source/root is #env SEON_SOURCE_ROOT): a run
+  ;; of a session's checkout takes that checkout's, as bin/test gives a shard; any other child keeps its agent's checkout,
+  ;; home and working directory (its run's own, seon.fx/run-dir) and drops root's own variables
+  (if checkout (fx/checkout-env! checkout) (doseq [v fx/root-variables] (lib/c-unsetenv v)))
   (cfg/hold-args! args (cfg/entries db) (program/schema-changes db)))
 
 (defn- test-child-runs!
