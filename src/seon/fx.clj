@@ -255,6 +255,19 @@
         (seq ps) (assoc :tree (tree-id root) :commit (git-try root ["rev-parse" "--verify" "--quiet" "HEAD"]))))
     (catch Throwable e (error #'seon.fx/changed-since :seon.fx/io-error (step/error-msg e) {:path root}))))
 
+(defn files-at
+  "The files paths name (relative to root) as they are on disk, read as changed-since reads the files that changed: {:value {path
+  text} :modes {path mode}}, a text nil when the file is gone, a mode for each the allow-list names. What a session's import
+  reads (my.branch/import!): the files it names, never the tree's diff. See docs/source.md#a-boot-catches-up-with-its-checkout."
+  {:malli/schema [:=> [:cat :string [:sequential :string]] :map]}
+  [root paths]
+  (try
+    (let [texts (into (sorted-map) (for [p paths :let [f (java.io.File. (str root "/" p))]] [p (when (.isFile f) (slurp f))]))]
+      {:value texts
+       :modes (into {} (for [[p t] texts :when (and t (cfg/file-kind p))]
+                         [p (if (.canExecute (java.io.File. (str root "/" p))) "100755" "100644")]))})
+    (catch Throwable e (error #'seon.fx/files-at :seon.fx/io-error (step/error-msg e) {:path root}))))
+
 (defn- env-input?
   "Is the file at relative path p an input of every test: everything git tracks or would
   track but the source program facts carry (.clj under src and test), task files (data
