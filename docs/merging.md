@@ -160,6 +160,7 @@ A merge into main is judged against main with the earlier members of the same oc
 Root's REPL (`seon_eval` as root, or one EDN request a line to its port) repairs these:
 - **Merge refused (`:hairy`, `:merge-failed`):** `(my.root/problems sys)`; pull `[:seon.task/outcome :seon.task/reason :seon.task/conflicts :seon.task/unmerged]` of the task. Attach (`{:op :attach :task "T"}`), in the agent resolve each `(my.branch/unmerged)` entry with `my.branch/resolve!` or redefine the var, then `{:op :done :agent "A"}`.
 - **Green on its branch, red once merged (`:semantic`):** attach, `(my.branch/merge-main!)`, rerun the proofs, fix, `:done`. The writer refuses a branch behind main.
+- **A branch whose program predates a merge fix** (its own merge runs its old code): with its agent not live, the writer merges main into it on main's program, ``@(seon.system/call! sys {:op :write :req {:op :merge-main :branch b}})`` (`seon.reconcile-test/the-writer-merges-main-into-a-branch-on-mains-program`); the branch then holds main's program, and its next agent merges with it.
 - **A held task:** raise the limit that held it on the task (`:seon.config.merge/max-conflicts`), then `(my.root/run! sys ["T"])`. A task stuck `:behind` has no repair yet (task `seon.system/a-behind-merge-ends-in-a-fact`); `(my.root/cancel! sys ["T"])` ends it.
 - **A failed write-back** (`:seon.git/commit-failed` on the task): remove the cause (a stale `.git/refs/heads/jolt/seon-merges.lock`), then `(my.root/write-back! sys ["T" ...])`.
 
