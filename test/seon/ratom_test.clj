@@ -7,7 +7,7 @@
   Run: bin/test seon.ratom-test"
   (:refer-clojure :exclude [run!])
   (:require [clojure.test :refer [deftest is testing]] [seon.ratom :as rv :refer [reaction run! dispose! flush! make-reaction running]]
-            [seon.ctx :as ctx]))
+            [seon.ctx :as ctx] [seon.db :as pdb] [seon.test-store :as ts] [datahike.api :as d]))
 
 (def testite 10)
 
@@ -354,3 +354,49 @@
     (is (nil? (get v :seon.render/hiccup)) "an absent key answers nil")
     (is (identical? (:task @a) (rv/unwrap (:task v))) "unwrap: the real value")
     (is (= {:t (:task @a)} (rv/realize {:t (:task v)})) "realize: every view in it")))
+
+;; docs/plan.md#the-root-concept-one-reaction-over-the-store: the store is a source a reaction derefs; what the run read of it is
+;; recorded by Datahike's recorder as datom keys, and a commit re-runs the reaction only when its datoms touch one of them
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-reaction-reruns-on-a-commit-touching-a-key-it-read
+  (let [db0 (pdb/db-with (ts/test-db) [{:note/text "a" :note/agent :x} {:note/text "b" :note/agent :y}])
+        [ea eb] (sort (map :e (d/datoms db0 :aevt :note/text)))
+        s (rv/store db0)
+        n (volatile! 0)
+        ;; the slice read as a seek of [e a]: a pull records [:e e] today (datahike.pull-api/resolve-pull-eid's existence read,
+        ;; filed: datahike.pull-api/a-pull-of-an-attribute-records-its-slice)
+        r (run! (vswap! n inc) (:v (first (d/datoms @s :eavt ea :note/text))))
+        commit! (fn [tx] (let [rep (pdb/with @s tx)] (rv/commit! s (:db-after rep) (:tx-data rep))))]
+    (is (= 1 @n))
+    (is (= "a" @r))
+    (commit! [[:db/add eb :note/text "b2"]]) (flush!)
+    (is (= 1 @n) "a sibling slice of the same attribute moved: not rerun")
+    (commit! [[:db/add ea :note/agent :z]]) (flush!)
+    (is (= 1 @n) "another attribute of the entity it read: not rerun")
+    (commit! [[:db/add ea :note/text "a2"]]) (flush!)
+    (is (= 2 @n) "the slice it read moved: rerun once")
+    (is (= "a2" @r))
+    (dispose! r)))
+
+;; reagent.ratom/track (fa4dc05 ratom.cljs 182-240): (track f & args) is = by f and args, and inside a reaction its value is one
+;; cached reaction shared by every deref of an equal track, run again only when what it read moved
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-track-answers-its-cached-value-while-nothing-it-read-moved
+  (let [db0 (pdb/db-with (ts/test-db) [{:note/text "a" :note/agent :x} {:note/text "b" :note/agent :y}])
+        [ea eb] (sort (map :e (d/datoms db0 :aevt :note/text)))
+        s (rv/store db0)
+        calls (volatile! 0)
+        text (fn [e] (vswap! calls inc) (:v (first (d/datoms @s :eavt e :note/text))))
+        r (run! [@(rv/track text ea) @(rv/track text ea)])]
+    (is (= (rv/track text ea) (rv/track text ea)) "= by f and args, as Reagent's")
+    (is (not= (rv/track text ea) (rv/track text eb)))
+    (is (= ["a" "a"] @r))
+    (is (= 1 @calls) "two derefs of equal tracks in one reaction: one run")
+    (let [rep (pdb/with @s [[:db/add eb :note/text "b2"]])] (rv/commit! s (:db-after rep) (:tx-data rep))) (flush!)
+    (is (= 1 @calls) "nothing it read moved: its cached value")
+    (let [rep (pdb/with @s [[:db/add ea :note/text "a2"]])] (rv/commit! s (:db-after rep) (:tx-data rep))) (flush!)
+    (is (= 2 @calls) "what it read moved: run once again")
+    (is (= ["a2" "a2"] @r))
+    (is (= "a2" @(rv/track text ea)) "outside a reaction while its reaction lives: the cached value")
+    (is (= 2 @calls))
+    (dispose! r)
+    (is (= "a2" @(rv/track text ea)) "and once nothing watches it, Reagent's: f called")
+    (is (= 3 @calls))))

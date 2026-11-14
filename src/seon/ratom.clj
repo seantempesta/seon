@@ -20,7 +20,7 @@
   Reagent's own rule, and once per transaction after its patch, the server's frame; its render
   queue is the walk's, drained in mount order. docs/render.md#reactive-renders."
   (:refer-clojure :exclude [defn defn- atom run!])
-  (:require [seon.contract :refer [defn defn-]]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.reads :as reads]))
 
 (defprotocol IReaction
   "A reaction's own state, read and set by this namespace's functions (Reagent's JavaScript
@@ -70,15 +70,48 @@
     (-set! r :captured (conj (or (-get r :captured) []) derefed)))
   nil)
 
+(defprotocol IStore
+  "The store as a source a reaction derefs (docs/plan.md#the-root-concept-one-reaction-over-the-store)."
+  (-moved [s] "The datoms of the commit that made its db, which its watchers are matched against.")
+  (commit! [s db datoms] "s at db, made by a commit of datoms: each reaction that read one of their keys runs again."))
+
+(deftype Store [^:volatile-mutable db ^:volatile-mutable moved ^:volatile-mutable watches]
+  clojure.lang.IDeref
+  (deref [this] (notify-deref-watcher! this) db)
+  clojure.lang.IRef
+  (addWatch [this k fw] (set! watches (check-watches watches (assoc watches k fw))) this)
+  (removeWatch [this k] (set! watches (check-watches watches (dissoc watches k))) this)
+  (getWatches [_] watches)
+  (getValidator [_] nil)
+  (setValidator [_ _] (throw (ex-info "a store takes no validator" {})))
+  IStore
+  (-moved [_] moved)
+  (commit! [this db' datoms]
+    (let [old db]
+      (set! db db')
+      (set! moved datoms)
+      (notify-w this watches old db'))
+    this))
+
+(defn store
+  "The store at db as a source: a deref inside a reaction answers db and makes the store one of the reaction's sources, and
+  what the run read of it is recorded by Datahike's recorder (datahike.reads) as the reaction's key set; `commit!` re-runs a
+  reaction only when the commit's datoms touch that set (datahike.reads/reads-touched?). See
+  docs/plan.md#the-root-concept-one-reaction-over-the-store."
+  {:malli/schema [:=> [:cat :seon.host/db] :seon.host/deref]}
+  [db] (Store. db nil nil))
+
 (defn- deref-capture
   "(f) in r's context: its derefs become r's sources (watched when they differ from the last
-  run's). Clears r's dirty flag. Reagent's."
+  run's), and its reads of the store, recorded by Datahike's recorder, r's key set. Clears r's
+  dirty flag. Reagent's, with the store's reads recorded."
   {:malli/schema [:=> [:cat :seon.host/fn :any] :any]}
   [f r]
   (-set! r :captured nil)
-  (let [res (binding [*ratom-context* r] (f))
+  (let [[res rs] (reads/with-reads #(binding [*ratom-context* r] (f)))
         c (-get r :captured)]
     (-set! r :dirty? false)
+    (-set! r :key-set (when (some #(instance? Store %) c) (reads/reads-index rs)))
     (when-not (= c (-get r :last)) (-update-watching r c))
     res))
 
@@ -381,7 +414,7 @@
                    ^:volatile-mutable watching ^:volatile-mutable watches ^:volatile-mutable auto-run
                    ^:volatile-mutable caught ^:volatile-mutable captured ^:volatile-mutable last-captured
                    ^:volatile-mutable reads ^:volatile-mutable on-set ^:volatile-mutable on-dispose
-                   ^:volatile-mutable on-dispose-arr]
+                   ^:volatile-mutable on-dispose-arr ^:volatile-mutable key-set]
   clojure.lang.IRef
   (addWatch [this k fw] (set! watches (check-watches watches (assoc watches k fw))) this)
   (removeWatch [this k]
@@ -409,13 +442,13 @@
   IReaction
   (-get [this k]
     (case k :captured captured :last last-captured :watching watching :dirty? dirty? :state state
-            :auto-run auto-run :reads reads :peek (binding [*ratom-context* nil] (.deref this))))
+            :auto-run auto-run :reads reads :key-set key-set :peek (binding [*ratom-context* nil] (.deref this))))
   (-set! [_ k v]
-    (case k :captured (set! captured v) :dirty? (set! dirty? v) :f (set! f v) :auto-run (set! auto-run v)))
+    (case k :captured (set! captured v) :dirty? (set! dirty? v) :f (set! f v) :auto-run (set! auto-run v) :key-set (set! key-set v)))
   (-handle-change [this sender oldval newval]
     ;; a source read through views reaches this reaction only by a changed path it read (::reached:
-    ;; source-changed's index); every other source by Reagent's own watch
-    (when-not (or (identical? oldval newval) dirty?)
+    ;; source-changed's index); the store only by a commit touching a key its run read; every other source by Reagent's own watch
+    (when-not (or (identical? oldval newval) dirty? (and (instance? Store sender) (not (reads/reads-touched? key-set (-moved sender)))))
       (if (nil? auto-run)
         (do (set! dirty? true) (rea-enqueue this))
         (if (true? auto-run) (-run this false) (auto-run this)))))
@@ -492,7 +525,7 @@
   before its watches; :on-dispose, called with its last value when it is disposed."
   {:malli/schema [:=> [:cat [:maybe :seon.host/fn] [:* :any]] :seon.host/deref]}
   [f & {:keys [auto-run on-set on-dispose]}]
-  (let [r (Reaction. f nil true false nil nil nil nil nil nil nil nil nil nil)]
+  (let [r (Reaction. f nil true false nil nil nil nil nil nil nil nil nil nil nil)]
     (-set-opts r {:auto-run auto-run :on-set on-set :on-dispose on-dispose})
     r))
 
@@ -516,3 +549,50 @@
     (if (nil? (-get r :watching))
       [res nil]
       (do (-set-opts r opts) (-set! r :f f) (-set! r :auto-run (fn [_] (run obj))) [res r]))))
+
+;;; --- Track: reagent.ratom's (fa4dc05 ratom.cljs 182-244) --------------------------------------
+
+;; Reagent keeps the cache on f itself (.-reagReactionCache); a JVM fn has no field to set, so the cache is keyed by [f args]
+(defonce ^:private track-cache (volatile! {}))
+
+(defn- cached-reaction
+  "The value of f, the reaction cached under k: an existing one derefed; outside a reaction, (f); else a new reaction,
+  cached while anything watches it. Reagent's."
+  {:malli/schema [:=> [:cat :seon.host/fn :any] :any]}
+  [f k]
+  (let [r (get @track-cache k)]
+    (cond
+      (some? r) (deref r)
+      (nil? *ratom-context*) (f)
+      :else (let [r (make-reaction f :on-dispose (fn [_] (vswap! track-cache dissoc k)))
+                  v (deref r)]
+              (vswap! track-cache assoc k r)
+              v))))
+
+(deftype Track [f args]
+  clojure.lang.IDeref
+  (deref [_] (cached-reaction #(apply f args) [f args]))
+  Object
+  (equals [_ o] (and (instance? Track o) (= f (.-f ^Track o)) (= args (.-args ^Track o))))
+  (hashCode [_] (hash [f args])))
+
+(defn make-track
+  "A Track of f and args (Reagent's)."
+  {:malli/schema [:=> [:cat :seon.host/fn [:maybe [:sequential :any]]] :seon.host/deref]}
+  [f args] (Track. f args))
+
+(defn make-track!
+  "A Track of f and args, derefed by a reaction run now and on each change (Reagent's)."
+  {:malli/schema [:=> [:cat :seon.host/fn [:maybe [:sequential :any]]] :seon.host/deref]}
+  [f args] (let [t (make-track f args) r (make-reaction #(deref t) :auto-run true)] (deref r) r))
+
+(defn track
+  "(f & args) as a reactive value, = by f and args: inside a reaction one cached reaction shared by every equal track, run
+  again only when what it read moved (Reagent's)."
+  {:malli/schema [:=> [:cat :seon.host/fn [:* :any]] :seon.host/deref]}
+  [f & args] (make-track f args))
+
+(defn track!
+  "track, run eagerly: a reaction that derefs it now and on each change; dispose! stops it (Reagent's)."
+  {:malli/schema [:=> [:cat :seon.host/fn [:* :any]] :seon.host/deref]}
+  [f & args] (make-track! f args))
