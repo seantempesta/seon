@@ -2115,6 +2115,8 @@
   ;; Estimate: one small world, one judging, one restart
   (let [db0 (with-refine-section (mdb [(decl "a")] :extra (work "a" :running)))
         {db1 :db} (judge! db0 "a" {:outcome :cap} :results {(t "a") :fail})
+        ;; specified on the branch it leaves (seon.turn/specified-tx): the next run starts from main, unspecified until its proof is red there
+        db1 (d/db-with db1 [{:seon.task/id "demo/a" :seon.task/specified-turn 4}])
         old (task/task db1 "demo/a")
         db2 (d/db-with db1 (my.root/restart-tx db1 ["demo/a"]))
         a (d/entity db2 [:seon.task/id "demo/a"])]
@@ -2122,6 +2124,7 @@
     (is (not= (:seon.task/branch old) (:seon.task/branch a)) "a fresh branch")
     (is (= (:seon.task/branch a) (:branch (task/restart-tx db1 "demo/a"))) "named by its ending: the same write names the same branch")
     (is (empty? (filter a seon.task/end-attrs)) "none of the end's facts, no agent")
+    (is (nil? (:seon.task/specified-turn a)) "nor when it was specified: its next run is told to specify it again")
     (is (str/includes? (str (:seon.task/instructions a)) "a-a") "its instructions name the agent of the run it left")
     (is (= :running (:seon.task/execution a)) "released")
     (is (some #(and (= :spawn (:op %)) (= "demo/a" (:task %))) (actions-for db2)) "its next action is a new agent")))
