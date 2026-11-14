@@ -836,7 +836,7 @@
                                (nil? (get edits nm)) (vec (reverse (drop-while node/whitespace-or-comment? (reverse acc))))
                                :else (conj acc (entry-edit n (get edits nm))))))
                      [] cs)
-        kept (vec (if (space? (first cs)) kept (drop-while space? kept)))
+        kept (vec (if (some-> (first cs) space?) kept (drop-while space? kept)))
         ;; a task the file lacks: after the last entry, each on its own line as the files lay them out
         added (for [[nm decl] (sort-by key edits) :when (and decl (not (held nm)))] (entry-node decl))
         last-entry (last (keep-indexed (fn [i n] (when-not (node/whitespace-or-comment? n) i)) kept))
