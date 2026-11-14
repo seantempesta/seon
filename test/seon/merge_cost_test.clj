@@ -101,8 +101,11 @@
        ;; (43 calls since touched-keys asks each of the 4 differing datoms' attributes whether a key
        ;; reads it, one call apiece: measured with the filter inline, in a def and as a contracted
        ;; function, 43, 43 and 47); reading (d/schema db) per db per read it was 8.11 / 11.84 / 25.57 MB and 2,726 / 3,926 /
-       ;; 8,126 calls; 46 since touched-keys calls touched-by (which takes datoms a caller already holds) once per side
-       :fixed {:bytes 650000 :calls 48}
+       ;; 8,126 calls; 46 since touched-keys calls touched-by (which takes datoms a caller already holds) once per side;
+       ;; 71 since a fact is a side's change only if it wrote it, about 23 more, split approximately: seon.merge/derived? once per
+       ;; attribute asked whether it is data (~14: the differing datoms' attributes on two dbs, the keys' on three), and per changed key
+       ;; and side one seon.merge/owned?, one tx-branch of the other side's last writer and one per datom it added (~9)
+       :fixed {:bytes 650000 :calls 71}
        :sizes [10 30 100]}))
 
 (defn embedded-of
