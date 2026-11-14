@@ -442,7 +442,7 @@
  ;; a root with a source root imports (bin/system's: SEON_SOURCE_ROOT); a test's root states its
  ;; own dirs. It costs each boot the test forms' evaluation (+5 s a restart, measured
  ;; 2026-10-22; task seon.source/test-namespaces-built-into-the-binary).
- :seon.config.source/dirs ["src" "test" "resources/seon/schemas" "resources/seon/config" "bin"]
+ :seon.config.source/dirs ["src" "test" "resources/seon/schemas" "resources/seon/config" "resources/seon/tasks" "bin"]
  ;; Unit: path, relative to the source root. Where the tree keeps its task files: a fact of the tree's layout, what a reader of a
  ;; tree's task files at a commit takes (bin/check's health step, test-runner/tasks-dir), never a process's place. A root's own
  ;; task dir is :seon.config.root/tasks-dir (the same path under the checkout by default; a check run's root takes its run's own).
@@ -451,7 +451,7 @@
  ;; reads and draws the file, a pattern a path whose one * stands for any name in that directory. Read by the import, the merge and the write-back
  ;; (seon.config/file-kind). Provenance: the owner, 2026-11-07: "an allow list with patterns seems like a good idea". At the bound: a file no pattern
  ;; names, under the dirs or not, is an ordinary file: no branch holds it and no merge carries it.
- :seon.config.source/things {"resources/seon/schemas/*.edn" :schema "resources/seon/config/default.edn" :config "bin/*" :script "test/seon/*.edn" :fixture}
+ :seon.config.source/things {"resources/seon/schemas/*.edn" :schema "resources/seon/config/default.edn" :config "bin/*" :script "test/seon/*.edn" :fixture "resources/seon/tasks/*.edn" :task}
  ;; Unit: paths under the root, of those above. The program proper: a namespace whose file is under
  ;; one is the program's, one under test/ (a test's, a fixture's, a helper's like seon.check or
  ;; seon.fixtures, whose names do not end in -test) is not (seon.program/program-nss). Read where

@@ -826,22 +826,6 @@
    :seon.task/deferred :seon.task/gate-unread :seon.task/deferred-results :seon.task/conflicts
    {:seon.task/agent [:seon.agent/key :seon.agent/ended-ms]}])
 
-(defn unsynced?
-  "Whether task entity e on db differs from its file: merged and still declared, or live, stated (not seon.task/derived?) and never
-  filed or edited since its file was read (a member datom newer than :seon.task/declared, which load-tx writes beside them). Seeks
-  only. See docs/source.md#a-merged-task-reaches-mains-files."
-  {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
-  [db e]
-  (let [declared (first (d/datoms db :eavt e :seon.task/declared))]
-    (boolean
-      (if (= :merged (:v (first (d/datoms db :eavt e :seon.task/outcome))))
-        (some? declared)
-        (and (not (task/finished (:v (first (d/datoms db :eavt e :seon.task/outcome)))))
-             (not (#{:done :cancelled} (:v (first (d/datoms db :eavt e :seon.task/execution)))))
-             (or (nil? declared)
-                 (some (fn [a] (some #(> (:tx %) (:tx declared)) (d/datoms db :eavt e a))) (conj task/stated-attributes :seon.task/needs)))
-             (not (task/derived? db e)))))))
-
 (defn- task-reads
   "The one reading of which tasks are ready and what they cite, on db: {:ready? :cited}, `ready?` a function of a task
   entity (not done, every task it needs done; every task's outcome read once, so readiness is a lookup) and `cited`
@@ -870,7 +854,7 @@
                                         [k [nil (or (now k) (when (= :form kind) {:ns (symbol (first (str/split x #"/" 2)))}))]])))))
 
 (defn- unsynced-candidates
-  "The task entities among es that may differ from their files (`unsynced?` judges them): a merged one its file still declares,
+  "The task entities among es that may differ from their files (seon.task/unsynced? judges them): a merged one its file still declares,
   or any not finished; a finished one costs a seek or two and no call."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :int]] [:vector :int]]}
   [db es]
@@ -880,7 +864,7 @@
            es))
 
 (defn unsynced-tasks
-  "Each task that differs from its file (`unsynced?`), as an :unsynced row naming the task, the files a merged one's changes touch
+  "Each task that differs from its file (seon.task/unsynced?), as an :unsynced row naming the task, the files a merged one's changes touch
   (`changed-paths`) and the act that syncs it: my.root/sync! writes them from main, with its entry removed (merged) or written as
   main holds it (seon.task/declaration), onto a branch a session reviews and lands (Completes: for a merged one). The row's owner
   is the task's own namespace: no data names which session's area a namespace is in. Closed by that landing, whose load-tx reads
@@ -889,7 +873,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :map [:sequential :int]] [:vector :seon.problems/row]]}
   [db ans es]
   (vec (for [e (sort-by #(:v (first (d/datoms db :eavt % :seon.task/id))) (unsynced-candidates db es))
-             :when (unsynced? db e)
+             :when (task/unsynced? db e)
              :let [{id :seon.task/id nsym :seon.task/ns t :seon.task/merged-t o :seon.task/outcome d :seon.task/declared}
                    (d/pull db [:seon.task/id :seon.task/ns :seon.task/merged-t :seon.task/outcome :seon.task/declared] e)
                    merged? (= :merged o)

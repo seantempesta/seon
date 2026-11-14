@@ -1843,3 +1843,27 @@
           db2 (d/db-with db1 (:tx i2))]
       (is (= {a (sha "c")} (source/pins-of db2)) "a moved pin is the new commit, a removed one is gone")
       (is (empty? (d/datoms db2 :avet :seon.pin/path b)) "the removed submodule's entity is retracted whole"))))
+
+;; Estimate: import of every task file (~20 files, ~600 KB of EDN, one held text each) 20M + a draw of each with no task on the db 20M = 50000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 50000000}} task-file-indexed-then-drawn-main-zero-diff
+  ;; docs/source.md#a-merged-task-reaches-mains-files: a task file is a file kind of the one import and write-back, as a schema
+  ;; resource is; imported and drawn from main with nothing changed, every one is the same text, byte for byte
+  (let [dir (java.io.File. (str here "/resources/seon/tasks"))
+        files (into {} (for [f (.listFiles dir) :when (str/ends-with? (.getName f) ".edn")]
+                         [(str "resources/seon/tasks/" (.getName f)) (slurp f)]))
+        db (d/db-with (empty-db) (source/import-tx (empty-db) files))]
+    (is (< 10 (count files)) "the tasks directory holds the files")
+    (is (= files (source/files db (vec (keys files)))) "each drawn from main as its file holds it")))
+
+;; Estimate: a held task file and load-tx of its tasks ~3M + one changed plan + changed-files and one draw ~2M = 10000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-merge-that-changed-a-task-writes-its-file-and-no-other
+  ;; a merge whose change is a task's plan ([:task id], seon.merge's key) names that task's file, and the file drawn holds the new
+  ;; plan in the task's entry, every other byte as it was
+  (let [path "resources/seon/tasks/demo.edn"
+        text "[{:seon.task/name \"a\"\n  :seon.task/plan \"Make a.\"\n  :seon.task/kind :work\n  :seon.task/proofs #{demo-test/a}}\n {:seon.task/name \"b\"\n  :seon.task/plan \"Make b.\"\n  :seon.task/kind :work\n  :seon.task/proofs #{demo-test/b}}]\n"
+        db0 (empty-db)
+        db (d/db-with db0 (into (source/import-tx db0 {path text}) (seon.task/load-tx db0 {'demo (seon.task/file-declarations 'demo text)})))
+        db' (d/db-with db [[:db/add [:seon.task/id "demo/b"] :seon.task/plan "Make b, better."]])
+        changes (pm/delta-changes db db' #{})]
+    (is (= [path] (source/changed-files db' changes)) "the task's file, and no other")
+    (is (= (str/replace text "Make b." "Make b, better.") (get (source/files db' [path]) path)) "its entry rewritten, every other byte as it was")))

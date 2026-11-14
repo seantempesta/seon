@@ -271,6 +271,20 @@
     (is (str/includes? (:text gone) ":unmapped") (str "the answer says what it removed: " (pr-str gone)))
     (is (empty? (:value branch)) (str "the branch records no definition of the method: " (pr-str branch)))))
 
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} a-removal-whose-arguments-are-computed-is-recorded
+  ;; runtime's review: a removal is observed by what the eval did, whatever its arguments computed, so (ns-unmap *ns* s) with s bound
+  ;; in a let, or (remove-method m (keyword x)), reaches the branch as a literal one does
+  (let [[_ _ _ _ var-form methods] (at/in-agent (fn [{:keys [ns task]}]
+                                                  [(str "(ns " ns ".cu) (defn scratch [] 1) (defmulti area :shape)")
+                                                   "(defmethod area :circle [{:keys [r]}] (* 3 r r))"
+                                                   "(let [s (symbol \"scratch\")] (ns-unmap *ns* s))"
+                                                   "(remove-method area (keyword \"circle\"))"
+                                                   (fn [{:keys [root]}] (:var/form (d/entity (ts/read-task-branch root task) [:var/name (symbol (str ns ".cu/scratch"))])))
+                                                   (fn [{:keys [root]}] (d/q '[:find [?f ...] :in $ ?m :where [?e :method/multi ?m] [?e :method/form ?f]]
+                                                                             (ts/read-task-branch root task) (symbol (str ns ".cu/area"))))]))]
+    (is (nil? (:value var-form)) (str "the computed unmap is recorded: " (pr-str var-form)))
+    (is (empty? (:value methods)) (str "and the computed remove-method: " (pr-str methods)))))
+
 (deftest an-eval-that-printed-answers-its-value
   ;; since an eval's :out is shown verbatim (md-scan #20), the printed answer is no EDN once it printed, and a reader
   ;; that read the value back from the text got nil (seon.source-test's restart read nil of a turn that printed); the
