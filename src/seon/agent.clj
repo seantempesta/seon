@@ -553,9 +553,8 @@
 (defn merge-main!
   "git merge main into this agent's branch, in this process (it owns the branch's writes):
   main's changes since the merge base that do not conflict apply in one merge commit with
-  main as parent, each conflict stays on the branch as an unmerged entry; none of main's forms loads into this running
-  process, whose program stays the one :program names (program-db) until its test children and its next start load the
-  branch's difference (load-diff!). The task content main carried since the base (seon.task/carry-tx,
+  main as parent, each conflict stays on the branch as an unmerged entry, and the changed
+  definitions load here. The task content main carried since the base (seon.task/carry-tx,
   the other way: another session's design, root's edit) comes in the same commit, since the
   base moves to main's head and a member main changed would otherwise read, at the run's end,
   as this branch reverting it (live finding F3); one both changed keeps the branch's and is
@@ -584,13 +583,11 @@
                                                (into (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
                                                (into (:tx carried)))
                              (pdb/tx-meta (:branch @state) {:seon.tx/merged main-b}))
-            ops (pdb/report->tx rep)]
+            ops (pdb/report->tx rep)
+            errs (program/load-changes! (:db-after rep) ops)]
         ;; the merge base is now main's head, the value just merged, so no walk of the commit graph finds it: what main changed is not this branch's change
         (let [attrs (into #{} (map (fn [op] (nth op 2 nil))) ops)]
           (doc/carry-index! head @conn (map (fn [op] [(nth op 1) (nth op 2)]) ops))
-          ;; none of main's forms loads into this running process (a process keeps its program until its next start,
-          ;; docs/plan.md item 3): its program stays the one :program names (program-db), and its test children and its
-          ;; next start bring it to the branch (seon.program/load-diff!)
           (swap! state #(-> % (assoc :db @conn :base main) (schema-moved attrs)))
           ;; the same on the branch's fact, or the status, which reads the fact, takes what main changed for this branch's work until a next turn writes it
           (let [merged-t (:max-tx @conn)]
@@ -600,7 +597,8 @@
             (swap! state assoc :db @conn :merged-t merged-t)))
         (send! {:op :committed :t (:max-tx @conn) :txs 1})
         (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:merged-t @state) :datoms (count ops)}
-          (seq (:conflicts carried)) (assoc :task-conflicts (:conflicts carried)))))))
+          (seq (:conflicts carried)) (assoc :task-conflicts (:conflicts carried))
+          (seq errs) (assoc :load-errors errs))))))
 
 ;; ---- evaluation -----------------------------------------------------------------
 
@@ -1312,9 +1310,6 @@
         ;; its first act on its own env: the branch's environment, whatever the agent it was forked from held (its reads of
         ;; db go through its own env, so after own-store!)
         (hold-env! (db) {:args ["--profile" "scripted"] :checkout (:checkout plan)})
-        ;; an agent behind its branch (a merge of main loads nothing into it: merge-main!) forks children holding its own program:
-        ;; each brings it to the branch first, the forms that differ only (seon.program/load-diff!), so a verdict judges the branch
-        (when-let [p (program-db)] (when (not= (d/commit-id p) (d/commit-id (db))) (program/load-diff! p (db))))
         ;; and as a test process: a private function's contract is checked on each call here, whatever its agent's
         ;; setting (the owner, 2026-11-10: "Private helpers: tests only"; docs/checks.md#contracts-armed-at-definition)
         (contract/check-private! true)

@@ -3741,34 +3741,3 @@
          (is (not= (d/commit-id start) (d/commit-id @conn)) "the branch moved on")
          (is (= (d/commit-id start) (d/commit-id (agent/program-db))) "the program it holds is still the one it started on")
          (finally (reset! agent/state old)))))))
-;; Estimate: test-branch! ~1M, 3 transacts and connect ~0.5M, one merge-main! of one changed form ~3M = ~5000000.
-(deftest ^{:seon.test/estimate {:ticks 5000000}} a-merge-of-main-loads-none-of-mains-forms-into-the-agent
-  ;; task seon.merge/a-merge-of-main-costs-what-the-branch-changed (docs/plan.md item 3: a process keeps the program it started
-  ;; on until its next start): the merge writes main's change onto the branch and loads none of it into this running process,
-  ;; whose program stays the one :program names (program-db), so its test children and its next start bring it to the branch
-  ;; (load-diff!). Red before: merge-main! loaded main's changed forms here (2.81B ticks for 1,117 forms, measured 2026-11-14)
-  (ts/test-branch!
-   (fn [cfg conn]
-     (let [mark! #(d/transact conn [{:seon.system/id :root :seon.system/content-t (inc (:max-tx @conn))}])
-           _ (mark!)
-           ab (pdb/on-main (:branch cfg) :agent-base)
-           _ (d/branch! conn (:branch cfg) ab)
-           forked @conn
-           store-conn (pdb/connect (assoc cfg :branch ab))
-           [a b] (sock/socketpair)
-           old @agent/state old-link @agent/link
-           calls (fn [f] (profile/begin!) (let [r (f)] [r (into {} (map (juxt :var :calls)) (profile/touched))]))]
-       (try
-         (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked
-                                                          :program {:seon.db/branch ab :seon.db/commit (d/commit-id @store-conn) :seon.db/t (:max-tx @store-conn)}})
-         (let [before @store-conn
-               [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f1] [?v :var/form ?f] [?f :form/ns ?n]] forked)]
-           (d/transact conn [{:db/id "f1'" :form/id "app.m0/f1-redefined" :form/ns nsx :form/order 100 :form/defines [v]
-                              :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
-                             [:db/add v :var/form "f1'"]])
-           (mark!)
-           (let [[r n] (calls #(agent/merge-main! #{}))]
-             (is (some #{[:var 'app.m0/f1]} (:applied r)) "main's change is written onto the branch")
-             (is (nil? (n 'seon.program/load-form!)) "and none of main's forms is loaded into this process")
-             (is (= (d/commit-id before) (d/commit-id (agent/program-db))) "its program is still the one it started on")))
-         (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
