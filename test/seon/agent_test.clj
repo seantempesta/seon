@@ -95,7 +95,9 @@
         _ (.mkdirs (java.io.File. tasks))
         decls (if (fn? decls) (decls names) decls)
         with-config #(cond-> % config (assoc :seon.task/config config))
-        _ (spit (str tasks "/" tns ".edn") (pr-str (mapv with-config (into [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}] decls))))
+        task-decls (mapv with-config (into [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}] decls))
+        task-names (mapv :seon.task/name task-decls)
+        _ (spit (str tasks "/" tns ".edn") (pr-str task-decls))
         args (into (cond-> ["--set" (str ":seon.config.source/root=" (pr-str checkout))]
                      dirs (into ["--set" (str ":seon.config.source/dirs=" (pr-str dirs))]))
                    (mapcat (fn [x] ["--set" x])) sets)
@@ -116,8 +118,10 @@
                                                     " (when a @(c/kill! sys a))"
                                                     ;; its tasks cancelled: a run left :running keeps the reconciler from
                                                     ;; ever being quiet, and a later test's await-quiet waits on it
-                                                    " (my.root/cancel! sys (filterv #(clojure.string/starts-with? % \"" tns "/\")"
-                                                    "   (datahike.api/q '[:find [?id ...] :where [_ :seon.task/id ?id]] @(:conn sys))))"
+                                                    ;; exactly the ids this test made (its task file's names): a query of every task id on
+                                                    ;; the shared main cost each teardown more than the last (O(every test so far), in the
+                                                    ;; shared root's one REPL)
+                                                    " (my.root/cancel! sys " (pr-str (mapv #(str tns "/" %) task-names)) ")"
                                                     " (doseq [b (datahike.api/branches (:conn sys)) :when (and (= (namespace b) (name (:main (:store (c/state sys)))))"
                                                     "                                                       (clojure.string/starts-with? (name b) " (pr-str (str "task-" tns "-")) "))]"
                                                     "   (datahike.api/delete-branch! (:conn sys) b)))")))))
@@ -249,6 +253,17 @@
 ;; docs/merging.md#the-test-service: the one call proves a reference (Sean, 2026-11-11: "seon.test/prove #commit id or
 ;; whatever we are passing in to signify the branch or point in time and that runs it"). Wrong if a reference at an earlier
 ;; commit answers the head's verdicts: a past point always forks, onto a branch made at that commit, which loads its program
+;; docs/merging.md#the-test-service, flow's review (task seon.prove/a-test-batch-holds-the-processes-it-is-weighed-at): the service
+;; weighs a granted batch at one process and the :process owner admits it so, but the agent dealt it into up to
+;; :seon.config.proofs/jobs children, two schedulers, ~72 processes against a budget of 20 [H]. A granted batch (one asked with its
+;; items) runs in one child, the service its one scheduler; a run of the agent's own (no items) still deals what its work is worth.
+;; Red before: the deal ignored whether the service had granted it. Estimate: pure, a few calls.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-granted-batch-holds-the-processes-it-was-weighed-at
+  (let [big (* 100 (seon.config/value :seon.config.proofs/child-min-ms))]
+    (is (= 1 (agent/child-count big true)) "a batch the service granted: one child, as it was weighed")
+    (is (= (seon.config/value :seon.config.proofs/jobs) (agent/child-count big false)) "the agent's own run: what the work is worth, up to jobs")
+    (is (= 1 (agent/child-count 1 false)) "and one child when the work is small")))
+
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 5 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2750k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} a-reference-at-an-earlier-commit-is-proved-at-that-point
   (let [[head past] (with-agent {}
@@ -450,15 +465,21 @@
   ;; (seon.repl/serve-item!); a child of one run kept the other run's pipe end, so that run's end of file waited on the
   ;; other child and it answered a :pipe-held error with no report (bin/check agent-checks, 2026-11-12). Here run a's test
   ;; parks on a fifo until run b's test has run and opened it, so a's child is alive the whole time b's pipe is; each run
-  ;; answers its own test, green, and nothing else. A regression waits for ever on b's end of file (no clock may end it)
+  ;; answers its own test, green, and nothing else. A regression waits for ever on b's end of file (no clock may end it).
+  ;; A run that answers first and is not green (its fork refused, :seon.test/fork-refused naming its holders) never ran
+  ;; its end of the fifo, so the test opens that end itself: the other run ends red, and the first one's answer is said
   (let [fifo (str (seon.config/checkout) "/target/runs/two-runs-" (random-uuid))
         _ (clojure.java.shell/sh "mkfifo" fifo)
         nss ["(ns app.twa-test (:require [clojure.test :refer [deftest is]])) (deftest waits (is (= \"b ran\" (slurp " (pr-str fifo) "))))"
              "(ns app.twb-test (:require [clojure.test :refer [deftest is]])) (deftest runs (spit " (pr-str fifo) " \"b ran\") (is (= 1 1)))"]
-        run "(let [go (fn [n] (clojure.core.async/io-thread (seon.agent/run-tests-forked 100000000 #{} :main (fn [_] nil) #{n})))
+        run (str "(let [go (fn [n] (clojure.core.async/io-thread (seon.agent/run-tests-forked 100000000 #{} :main (fn [_] nil) #{n})))
                    a (go 'app.twa-test) b (go 'app.twb-test)
-                   pick (fn [r] (select-keys r [:pass :fail :error :reports]))]
-               (pr-str {:a (pick (clojure.core.async/<!! a)) :b (pick (clojure.core.async/<!! b))}))"
+                   pick (fn [r] (if (contains? r :pass) (select-keys r [:pass :fail :error :reports]) r))
+                   [r1 ch] (clojure.core.async/alts!! [a b])
+                   _ (when-not (= 1 (:pass r1)) (if (= ch b) (spit " (pr-str fifo) " \"b did not run\") (slurp " (pr-str fifo) ")))
+                   r2 (clojure.core.async/<!! (if (= ch a) b a))
+                   [ra rb] (if (= ch a) [r1 r2] [r2 r1])]
+               (pr-str {:a (pick ra) :b (pick rb)}))")
         [_ _ two] (in-agent [(apply str nss) "nil" run])
         v (some-> (:value two) clojure.edn/read-string)]
     (.delete (java.io.File. fifo))
@@ -3628,6 +3649,29 @@
     (is (= 37 (:held v)) (str "the agent holds its branch's value from its start, not root's (" (:root v) "): " (pr-str v)))
     (is (nil? (:value (:bad v))) (str "a config the branch cannot hold is refused at its write, never reaching a branch an agent starts on: " (pr-str v)))
     (is (some? (:ex (:bad v))) (pr-str v))))
+
+;; docs/source.md#the-binary-records-its-program, plan Stage 0.5 slice B (deps' seon.fx/runtime-for, called at init!): an agent whose
+;; branch was imported from a tree another runtime's build inputs name (here the tree before the last Chez pin moved) is refused at
+;; its one start: its hello carries :seon.process/env-mismatch, root answers the spawn with it and tells the agent it failed, so it
+;; serves nothing on a binary its branch doesn't name. Red before: the agent started on root's binary, whatever its tree's pins.
+;; Estimate: in-agent's setup ~1.5M, one root eval: two git reads, one write and commit, one spawn (~0.5M) = ~2.5M
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2500000 :asks 1} :seon.test/execs ["git"]} an-agent-on-another-runtimes-tree-is-refused-at-its-start
+  (let [[r] (in-agent (fn [{:keys [agent ns]}]
+                        [{:op :eval :agent "root"
+                          :code (str "(let [sub (fn [a code] (:value @(c/submit! sys a code {:origin :outside})))"
+                                     "      a :" agent
+                                     "      git (fn [& args] (clojure.string/trim (:out (apply seon.lib/sh \"git\" \"-C\" (seon.config/checkout) args))))"
+                                     "      moved (git \"log\" \"-1\" \"--format=%H\" \"--\" \"reference-code/chez\")"
+                                     "      before (git \"rev-parse\" (str moved \"^^{tree}\"))"
+                                     "      cid (sub a (str \"(let [s (:seon.system/source (datahike.api/pull (seon.agent/db) [:seon.system/source] [:seon.system/id :root]))]"
+                                     "                      (seon.agent/transact! [{:seon.system/id :root :seon.system/source (assoc s :tree \" (pr-str before) \")}])"
+                                     "                      (seon.agent/commit!) (datahike.api/commit-id (seon.agent/db)))\"))"
+                                     "      r @(seon.system/call! sys {:op :spawn :opts {:branch :task-" ns "-other-runtime :commit cid}})]"
+                                     "  (when (:id r) (c/kill! sys (:id r)))"
+                                     "  {:type (:seon.error/type r) :id (:id r) :tree before})")}]))
+        v (:value r)]
+    (is (= :seon.process/env-mismatch (:type v)) (str "the spawn is answered with the refusal: " (pr-str v)))
+    (is (nil? (:id v)) "and no agent is handed back to serve")))
 
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-session-restored-at-an-older-commit-runs-that-commits-definitions
   ;; docs/storage.md#compiled-code: a spawn with {:branch b :commit C}

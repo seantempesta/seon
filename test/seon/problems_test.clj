@@ -517,7 +517,8 @@
                 :orphan-page 1         ; the sections' references, one scan
                 :leadless-section 1    ; the stored sections' first blocks
                 :uncited-task 15       ; the ready tasks' plans, cites and proofs (12 are the proofs read, seon.db/eid per proof), and task-reads (19 while it asked the program which cited vars were its own)
-                :unnamed-site 9        ; the catch sites of the program's forms (live? and form-of per form, the namespaces once)
+                :unnamed-site 18       ; the catch sites of the program's forms (live? and form-of per form, the namespaces once), and
+                                       ; the one-printer law's (its rule, four dials read once, and its marks' sites: tests, 9 -> 18)
                 :stale-section 2       ; the read datoms and the vars' forms, one scan each
                 :stale-plan 3          ; task-reads, and a seon.db/eid per cited var of a ready task
                 :waived-proof 1        ; the test forms' cost proofs passing by :overrun, one scan (Deep fixes' class)
@@ -525,7 +526,8 @@
                 ;; derived? and its seon.db/eid of the refine section, and its row (derived-row) when it differs; a filed one's
                 ;; edit and a refine's cite are seeks, no call (data, 2026-11-14: the store is the source, so every live task is judged)
                 :unsynced (+ 2 (* 4 (count (#'problems/unsynced-candidates db (mapv :e (d/datoms db :aevt :seon.task/id))))))
-                :fixed 52              ; (50 -> 52, data 11-14: this world's own store-made tasks give :unsynced rows, so problem-unlinked seeks its section, seon.db/eid, and writes its row, derived-row) answers, report-with (every recorded class), health-with (problem-unlinked over all of them, the derived rows as health hands them)
+                :fixed 55              ; (52 -> 55, tests: the world's own unnamed printer sites are rows problem-unlinked reads)
+                                       ; (50 -> 52, data 11-14: this world's own store-made tasks give :unsynced rows, so problem-unlinked seeks its section, seon.db/eid, and writes its row, derived
                 ;; the owner's decree (2026-11-14): per var with a form, its read (scan-form, seon.source/read-forms and the reader's two
                 ;; contracted helpers) and its walk (literal-lists), and the class's own. At import the form is read once already: keeping its
                 ;; literals there makes this a seek a var (seon.problems/a-forms-hand-made-lists-are-read-at-its-import)
@@ -669,7 +671,9 @@
                                                                    ; 2026-11-14, measured 86 -> 88)
                                                               2    ; :stateful-outside-flow's reader on base and head for the move's changed vars (flow,
                                                                    ; 2026-11-14, measured 89 -> 91)
-                                                              1)}  ; retyped-attributes' own contract, once a read (data, 2026-11-14)
+                                                              1    ; retyped-attributes' own contract, once a read (data, 2026-11-14)
+                                                              13)} ; the one-printer law's rule (seon.problems/printer-law): its four dials read once through the
+                                                                   ; resolver for both sides (tests, measured 89 -> 102)
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 25000000}} problems-cost-nothing-for-a-clean-program
@@ -852,6 +856,24 @@
       (let [page (str "# Failure points\n\n| failure | edge |\n|---|---|\n| x | `" v "` |\n")]
         (is (= [] (unnamed (d/db-with db1 (seon.doc/load-tx db1 "docs" {"docs/failure-points.md" page})))))))))
 
+;; docs/render.md#one-printer as a law (root: the test stopped three landings, each found late): a src form referencing a printer
+;; beside seon.print, a cut in a display namespace or a budgeted cut outside one is a site its section must name, read over the
+;; compiler's :form/refs in health, so a land sees it before any prove. Red before: no law; the test read every form at prove time.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-printer-the-one-printer-section-does-not-name-is-a-law-problem
+  (let [db0 (world)
+        v 'app.calc/inc2
+        fe (:db/id (:var/form (d/entity db0 [:var/name v])))
+        ns-e (:db/id (:var/ns (d/entity db0 (:e (first (d/datoms db0 :avet :var/name v))))))
+        src (fn [db] (d/db-with db [[:db/add ns-e :ns/file "src/app/m.clj"]]))
+        with-ref (fn [db r] (d/db-with db [[:db/add fe :form/refs r]]))
+        unnamed #(into [] (comp (filter (comp #{:printer} :law)) (map (juxt :law :site))) (get-in (problems/health %) [:classes :unnamed-site :rows]))]
+    (is (= [] (unnamed (src db0))) "no printer, no site")
+    (is (= [[:printer v]] (unnamed (src (with-ref db0 'clojure.core/pr-str)))) "a pr-str the section does not name")
+    (is (= [] (unnamed (src (with-ref db0 'clojure.core/subs)))) "a cut outside a display namespace is no site")
+    (testing "the section names it: no problem"
+      (let [page (str "# Render\n\n## One printer\n\nEach site with its reason.\n\n- `" v "`: the wire\n")]
+        (is (= [] (unnamed (let [db (src (with-ref db0 'clojure.core/pr-str))] (d/db-with db (seon.doc/load-tx db "docs" {"docs/render.md" page}))))))))))
+
 (deftest ^{:seon.test/estimate {:ticks 6000000}} a-root-on-a-stale-binary-is-a-problem
   ;; task seon.problems/a-root-on-a-stale-binary-is-a-problem, docs/health.md#a-stale-binary: a boot holds seon.system/stale-binary's
   ;; answer (is the binary current for the tree main was last brought to, by what differs reaching root's code) on root's source
@@ -940,7 +962,7 @@
                ;; fixed calls 5 -> 9 (39 measured at n=10, 35 before): the world's test namespace app.calc-test has two
                ;; forms carrying a catch (a deftest's `is`), each read and dropped as no program namespace's: 2 calls each
                :per-n {:ns 76000 :bytes 74500 :calls 3}
-               :fixed {:ns 50000 :bytes 50000 :calls 9}
+               :fixed {:ns 50000 :bytes 50000 :calls 22} ; 22: the one-printer law's rule beside catch, its four dials read once (tests, 9 -> 22 by 39 -> 52 at 10)
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 15000000}} stale-pins-follow-the-pin-page
@@ -963,7 +985,9 @@
                ;; fixed bytes re-derived 2026-10-23 (jolt/similar-finds-helpers-by-embedding): 3.01 MB at 10,
                ;; 10.0 MB at 100, 80.2 MB at 1,000 sites; a fixed part near the smallest size's whole cost read
                ;; as steeper growth (task seon.cost/a-speedup-never-reads-as-steeper)
-               :fixed {:ns 19500000 :bytes 17500000 :calls 91}
+               ;; 91 (main) + 13: the one-printer law's rule in the full read, its four dials read through the resolver (tests: 92 -> 99 at 10
+               ;; before main's 91; measured 184 against a summed 178 on the merged tip, the sum having counted the dials' reads once)
+               :fixed {:ns 19500000 :bytes 17500000 :calls 104}
                :sizes [10 30 100]}))
 
 ;; ---- caused reads what changed (diff by value), and agrees with the full reading ---------------
@@ -1046,10 +1070,10 @@
                ;; and 4 for :hand-written-list (context, measured 85 -> 89): its reader on base and head, and on each side the seek of
                ;; each changed var's metadata
                ;; 97 (context, 2026-11-14, the owner's hand-list decree): each changed var's form read and walked for its literal lists
-               ;; (scan-form, seon.source/read-forms, literal-lists) on base and head
-               ;; 101 (flow, 2026-11-14, measured 97 -> 101): :stateful-outside-flow's reader on base and head, and on each side the
-               ;; seek of each changed var's namespace file
-               :fixed {:ticks 460000 :bytes 1800000 :calls 101} ; 90: and retyped-attributes' own contract, once a read (data, 2026-11-14)
+               ;; (scan-form, seon.source/read-forms, literal-lists) on base and head; + 13: the one-printer law's rule, its four dials read
+               ;; once for both sides (tests, measured 90 -> 103 before context's 97); + 4 (flow, 2026-11-14): :stateful-outside-flow's reader
+               ;; on base and head, and on each side the seek of each changed var's namespace file
+               :fixed {:ticks 460000 :bytes 1800000 :calls 114} ; 90: and retyped-attributes' own contract, once a read (data, 2026-11-14)
                :sizes [10 30 100]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------

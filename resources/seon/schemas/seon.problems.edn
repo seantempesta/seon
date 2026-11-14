@@ -181,13 +181,13 @@
  :seon.fx/unknown-kind [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/unknown-kind]]]]
  :seon.fx/in-test [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/in-test]]]]
  ;; the provider's HTTP 429: transient, the :model owner keeps the request and pauses (its Retry-After when given)
- :seon.model/rate-limited [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/rate-limited]] [:status {:optional true} :int]
+ :seon.model/rate-limited [:and {:seon.model/retryable "the provider may answer next time, after its rate window"} :seon.error/base [:map [:seon.error/type [:= :seon.model/rate-limited]] [:status {:optional true} :int]
                                                   [:body {:optional true} :string] [:retry-after-ms {:optional true} :int]]]
  ;; the connection failed or died (connect, reset, EOF mid-reply): transient, kept and retried after a pause
  :seon.turn/cache-miss [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/cache-miss]] [:hit nat-int?] [:expected nat-int?] [:block pos-int?] [:shared nat-int?] [:messages nat-int?]]]
- :seon.model/transport [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/transport]] [:url {:optional true} :string]]]
+ :seon.model/transport [:and {:seon.model/retryable "a dropped connection is transient: the next call may reach the provider"} :seon.error/base [:map [:seon.error/type [:= :seon.model/transport]] [:url {:optional true} :string]]]
  ;; the reply's content is empty while its reasoning is not: thinking spent the token budget
- :seon.model/reasoning-ate-reply [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/reasoning-ate-reply]]
+ :seon.model/reasoning-ate-reply [:and {:seon.model/retryable "the agent can reason less on its next turn"} :seon.error/base [:map [:seon.error/type [:= :seon.model/reasoning-ate-reply]]
                                                          [:reasoning-tokens {:optional true} :int] [:completion-tokens {:optional true} :int]
                                                          [:max-tokens {:optional true} :int] [:reasoning-chars :int]]]
  ;; the config names no model provider (no profile): the turn ends on it, naming what to set
@@ -203,6 +203,7 @@
  :seon.model/no-script [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/no-script]] [:script :qualified-symbol]]]
  ;; a scripted model (a test fixture) that answered no :seon.model/script-reply: its problems say what is wrong
  :seon.model/script-invalid [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/script-invalid]] [:script :qualified-symbol]]]
+ :seon.model/retryable [:string {:description "On a :seon.model/failure member's schema, why a next turn or call can change it (the turn reads it, seon.turn/turn-can-change): present only on those."}]
  :seon.model/failure [:or :seon.model/no-provider :seon.model/no-script :seon.model/script-invalid :seon.model/provider-error :seon.model/rate-limited :seon.model/transport :seon.model/reasoning-ate-reply]
 
  ;; ---- recorded errors: one entity per signature (main), counted across agents ----

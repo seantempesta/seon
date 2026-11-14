@@ -167,6 +167,7 @@
                  (step/out! o :to-api (status st (cond-> {:forked-ms (lib/r2 (:start-ms m)) :mem-mb (:mem-mb m) :t (:t m) :ready true :phases (:phases m)}
                                               (:cloned-from m) (assoc :pid (:pid m))
                                               (seq (:load-errors m)) (assoc :load-errors (:load-errors m))
+                                              (:seon.process/env-mismatch m) (assoc :seon.process/env-mismatch (:seon.process/env-mismatch m))
                                               (seq (:seon.agent/missing-cites m)) (assoc :seon.agent/missing-cites (:seon.agent/missing-cites m)))))
                  ;; root's interrupt cannot reach it (its SIGUSR1 handler never ran: a process not
                  ;; forked from a main thread): a recorded problem, to whoever can act on it

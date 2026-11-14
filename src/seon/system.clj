@@ -137,7 +137,7 @@
    "main's changes since the session's base"
    "host state: atoms, open files, sockets, fibers"])
 
-(declare answer-spawn insert-evals start-spawn no-room binary-current kill! prove-tree! stop!)
+(declare answer-spawn insert-evals start-spawn no-room binary-current kill! prove-tree! stop! to-agent)
 
 (defn- record-death
   "Agent aid's death, folded, and answered to the requests it died in (inflight): its died
@@ -231,7 +231,12 @@
         e (problem (err/occurrence e :agent {:agent id :task (:task a)} (System/currentTimeMillis)))
         ;; its hello: the spawn is answered now, the agent ready
         ;; its hello answers the spawn, whatever a request sent before it made its status
-        (:ready m) (answer-spawn o id (cond-> {:id id} swp (assoc :started-without-program swp)
+        ;; its one start found it on a runtime its branch doesn't name (seon.fx/runtime-for, carried on its hello): the spawn is
+        ;; answered with that error, a platform problem never a verdict, and the agent is told it failed, so it hangs up and takes
+        ;; no work (spawn-failed's path), never an anonymous death
+        (and (:ready m) (:seon.process/env-mismatch m)) (-> (answer-spawn o id (:seon.process/env-mismatch m))
+                                                            (to-agent o id {:op :failed :error (:seon.process/env-mismatch m)}))
+        (and (:ready m) (not (:seon.process/env-mismatch m))) (answer-spawn o id (cond-> {:id id} swp (assoc :started-without-program swp)
                                                               ;; the sections its config cites and its store lacks, by address
                                                               (seq (:seon.agent/missing-cites m)) (assoc :seon.agent/missing-cites (vec (:seon.agent/missing-cites m)))
                                                               (get-in st [::restored id]) (assoc :not-restored not-restored)))
@@ -1890,8 +1895,7 @@
                          :stall-ms (or stall-ms (cfg/value :seon.config.agent/stall-ms)) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1) :web-streams-buf (a/sliding-buffer (cfg/value :seon.config.web/streams-buf))
                          :prove-tree (fn [on] (prove-tree! @sys-p on))
                          :process-workers (cfg/value :seon.config.machine/cores)
-                         ;; a test batch the :process owner admitted, asked of the agent holding its branch (the api's :tests op)
-                         :ask-tests (fn [msg] @(call! @sys-p msg)) :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
+                         :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
                          :web-port (cfg/value :seon.config.web/port)
                          :vectors-main-buf (a/sliding-buffer 1) :embed-batch (cfg/value :seon.config.vector/batch)
                          :embed-model (vector/model-id (cfg/value :seon.config.vector/model))

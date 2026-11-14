@@ -126,13 +126,33 @@
                       {:kind :stalled :agent id :pid pid :quiet-ms (:quiet-ms st) :waits-on (:last-op st)}
                       {:agent id}))))
 
+(defn printer-law
+  "The one-printer law's site rule and marks, from the :seon.config.render dials read once: {:marks (every printer, cut and
+  budgeted var), :site? (fn [form ns]): a printer beside seon.print anywhere, a cut in a display namespace, a budgeted cut
+  outside one}. See docs/render.md#one-printer."
+  {:malli/schema [:=> [:cat] [:map [:marks [:set :qualified-symbol]] [:site? fn?]]]}
+  []
+  (let [printers (config/value :seon.config.render/printer-vars) cuts (config/value :seon.config.render/cut-vars)
+        budgeted (config/value :seon.config.render/budgeted-vars) display (map str (config/value :seon.config.render/display-namespaces))]
+    {:marks (into printers (concat cuts budgeted))
+     :site? (fn [f nsym]
+              (let [refs (set (:form/refs f)) n (str nsym)
+                    display? (some #(or (= n %) (str/starts-with? n (str % "."))) display)
+                    printer? (not (str/starts-with? n "seon.print"))]
+                (boolean (or (and printer? (some refs printers))
+                             (and display? (some refs cuts))
+                             (and printer? (not display?) (some refs budgeted))))))}))
+
 (def laws
   "The laws the compiler's facts answer exactly, as data: the fact that marks a site, the page
   that must name each site's function, and the namespaces the law leaves out (the check
   drivers: bin/laws' scope). The others stay bin/laws' text scan: clocks and measures (a host
   member is recorded as jolt.host/static-member, not by its name), resolution (a quoted
   symbol is a ref, so the facts over-count)."
-  [{:law :catch :fact :form/catches :page "docs/failure-points.md" :except #{"seon.check" "seon.e2e"}}])
+  [{:law :catch :fact :form/catches :page "docs/failure-points.md" :except #{"seon.check" "seon.e2e"}}
+   ;; the one printer (docs/render.md#one-printer): a form whose refs hold a printer, a cut in a display namespace or a budgeted
+   ;; cut outside one; the law's marks and display namespaces are config dials (printer-law), named by that one section
+   {:law :printer :fact :form/refs :page "docs/render.md" :section "docs/render.md#one-printer" :except #{} :rule printer-law}])
 
 (defn unnamed-sites
   "Each site of a law (`laws`) its page does not name: a live form carrying the law's fact, by
@@ -140,23 +160,34 @@
   :var/meta holds :test, the compiler's fact of a deftest wherever it lives, an agent's REPL
   namespace included: its `is` expands to a catch), whose name no section of the page cites
   (:seon.doc/names), as an :unnamed-site row. Cost: the forms carrying the fact (aevt) and the
-  page's cited names, once. With only (a set of form entity ids) just those forms are read (what `caused` asks).
+  page's cited names, once. With only ({law [form entity id]}) just each law's forms are read (what `caused` asks); with rules
+  ({law {:marks :site?}}, each law's :rule answered once by its caller) a law's dials are not read again.
   See docs/health.md#a-laws-unnamed-site."
   {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]
-                  [:=> [:cat :seon.host/db :map [:maybe [:set :int]]] [:vector :seon.problems/row]]]}
-  ([db ans] (unnamed-sites db ans nil))
-  ([db ans only]
+                  [:=> [:cat :seon.host/db :map [:maybe [:map-of :keyword [:set :int]]]] [:vector :seon.problems/row]]
+                  [:=> [:cat :seon.host/db :map [:maybe [:map-of :keyword [:set :int]]] [:maybe :map]] [:vector :seon.problems/row]]]}
+  ([db ans] (unnamed-sites db ans nil nil))
+  ([db ans only] (unnamed-sites db ans only nil))
+  ([db ans only rules]
   ;; the law is the program's own source's: its namespaces, read once, when a site asks
   (let [program (delay (program/program-nss db))]
-  (vec (for [{:keys [law fact page except]} laws
-             :let [;; the page's cited names, read when a candidate site asks (a branch that changed no catching form reads nothing)
+  (vec (for [{:keys [law fact page section except rule]} laws
+             :let [{:keys [marks site?]} (or (get rules law) (when rule (rule)))]
+             :let [;; the page's cited names (or its one section's), read when a candidate site asks (a branch that changed no
+                   ;; catching form reads nothing)
                    named-set (delay (into #{} (comp (map :e) (mapcat #(d/datoms db :eavt % :seon.doc/names)) (map :v))
-                                          (d/index-range db {:attrid :seon.doc/address :start (str page "#") :end (str page "#\uffff")})))
+                                          (if section
+                                            (d/datoms db :avet :seon.doc/address section)
+                                            (d/index-range db {:attrid :seon.doc/address :start (str page "#") :end (str page "#\uffff")}))))
+                   site-of (or site? (constantly true))
                    named (fn [v] (@named-set v))
                    ;; the multimethod or protocol a form without a var extends: read only if one asks
                    owners (delay (merge (into {} (map (fn [{:keys [e v]}] [v (:method/multi (d/entity db e))])) (d/datoms db :aevt :method/form))
                                         (into {} (map (fn [{:keys [e v]}] [v (:impl/protocol (d/entity db e))])) (d/datoms db :aevt :impl/form))))]
-             fe (distinct (if only (filter (fn [e] (seq (d/datoms db :eavt e fact))) only) (map :e (d/datoms db :aevt fact))))
+             fe (distinct (cond only (filter (fn [e] (seq (d/datoms db :eavt e fact))) (get only law))
+                                ;; a law of marks seeks each mark in the fact's index, never every form's refs
+                                marks (mapcat (fn [m] (map :e (d/datoms db :avet fact m))) marks)
+                                :else (map :e (d/datoms db :aevt fact))))
              :when (program/live? db fe)
              :let [f (d/entity db fe)]
              ;; a test is no failure point: a deftest's var holds :test (its definition's metadata), in test/ or in a
@@ -164,12 +195,14 @@
              :when (not-any? #(contains? (:var/meta %) :test) (:form/defines f))
              :let [;; a catch is attributed to its form: the vars it defines, else the multimethod or
                    ;; protocol it extends, else the form's id: no site drops
-                   sites (or (seq (map :var/name (:form/defines f))) (some-> (@owners fe) vector) [(:form/id f)])
+                   ;; a defmethod's form defines its method, named by its multi: (map :var/name ...) of it was (nil), a site
+                   ;; named nil that no page can name
+                   sites (or (seq (keep #(or (:var/name %) (:method/multi %)) (:form/defines f))) (some-> (@owners fe) vector) [(:form/id f)])
                    nsym (:ns/name (:form/ns f))]
              v sites
              ;; the law is Seon's own source's (bin/laws scans src): a namespace with no file, and a
              ;; test helper's under test/, are not failure points of the system
-             :when (and (not (except (str nsym))) (not (named v)) (contains? @program nsym))
+             :when (and (not (except (str nsym))) (not (named v)) (contains? @program nsym) (site-of f nsym))
              :let [s (str "unnamed-site " (name law) " " v)]]
          (derived-row ans s nsym (str v " has a " (name law) " site that " page " does not name")
                       {:kind :unnamed-site :law law :site v :page page} {:law law :site v :page page}))))))
@@ -799,16 +832,24 @@
         eids (fn [state] (into #{} (keep #(:e (state %))) secs))
         page? (fn [a] (some #(str/starts-with? a (str (:page %) "#")) laws))
         all-sites? (some page? changed)
+        ;; each law's site rule and marks, read once for both sides (a law of marks: the one printer's dials)
+        rules (into {} (keep (fn [{:keys [law rule]}] (when rule [law (rule)]))) laws)
+        law-marks (update-vals rules :marks)
         sites (fn [db state eids-of]
                 (if all-sites?
-                  (unnamed-sites db ans nil)
-                  (mapcat (fn [{:keys [fact]}] (unnamed-sites db ans (eids-of fact))) laws)))
-        ;; the forms carrying a law's fact whose catches or text differ
-        changed-forms (memoize (fn [fact]
-                                 (set (for [id (into #{} (keep #(either % :form/id)) (ents [fact :form/src]))
-                                            :let [h (law-form-at head fact id)]
-                                            :when (and h (not= (dissoc h :e) (dissoc (law-form-at base fact id) :e)))]
-                                        id))))
+                  (unnamed-sites db ans nil rules)
+                  (unnamed-sites db ans (into {} (map (fn [l] [(:law l) (eids-of l)])) laws) rules)))
+        ;; the forms carrying a law's fact whose catches or text differ; for a law of marks, only a form whose refs hold one on
+        ;; either side, found by plain seeks before any contracted read (a changed form touching no mark is no candidate)
+        changed-forms (memoize (fn [{:keys [law fact]}]
+                                 (let [ms (law-marks law)
+                                       marked? (fn [db id] (some (fn [e] (some #(seq (d/datoms db :eavt e fact %)) ms))
+                                                                 (map :e (d/datoms db :avet :form/id id))))]
+                                   (set (for [id (into #{} (keep #(either % :form/id)) (ents [fact :form/src]))
+                                              :when (or (nil? ms) (marked? head id) (marked? base id))
+                                              :let [h (law-form-at head fact id)]
+                                              :when (and h (not= (dissoc h :e) (dissoc (law-form-at base fact id) :e)))]
+                                          id)))))
         ;; the stale sections the branch's change can have made: those citing a var it changed, and the sections that differ
         moved-vars (pm/changed-vars ch)
         ;; the content classes a branch can make, each read for what the move touched: the sections whose address or lead moved;
@@ -853,7 +894,7 @@
                          (map #(assoc % :class :refused-value) (refused-values db ans moved-attrs))
                          (map #(assoc % :class :uncited-task) (uncited-tasks db ans tr))
                          (map #(assoc % :class :stale-plan) (stale-plans db ans tr)))))
-        forms-in (fn [db] (fn [fact] (set (keep #(:e (law-form-at db fact %)) (changed-forms fact)))))
+        forms-in (fn [db] (fn [l] (set (keep #(:e (law-form-at db (:fact l) %)) (changed-forms l)))))
         had (vec (rows base bs (forms-in base)))
         has (vec (rows head hs (forms-in head)))
         sigs (fn [rs] (into #{} (map :signature) rs))]

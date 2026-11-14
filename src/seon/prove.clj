@@ -154,13 +154,15 @@
   root's :process effect owner, the most valuable first (a :turn asker's, then the one whose nearest-done asker has the least
   measured work left, item-value breaking a tie), each with its batch (batch-of: a share of the queue for one fork) as
   {:op :fx :kind :process :prio v :seon.fx/class c :req r}: the owner admits it by the processes its class holds
-  (seon.fx/admits?), so this service holds no admission of its own. r is a test batch {:kind :test :msg {:op :tests :id agent
+  (seon.fx/admits?), so this service holds no admission of its own. r is a test batch {:kind :test :seon.fx/ask {:op :tests :id agent
   :mode m :names #{test} :items {test digest}}} (each at the digest the agent's plan gave it: seon.agent/item-selection), or
   {:kind :tree :checkout :name :digest :binary? :bound} for a build, a check step, a tree's build or seed. Tagged [:batch bid].
   Answers [st outputs]."
   {:malli/schema [:=> [:cat :map] [:tuple :map [:vector :map]]]}
   [st]
-  (loop [st st outs [] sent 0]
+  ;; the owner's max-workers as the config states it now, read once a grant, so a dial turned deals the next grant by it; a
+  ;; :fixed-budget in st (a test's) holds it instead
+  (loop [st (assoc st :budget (or (:fixed-budget st) (:max-workers (fx/config-limits)))) outs [] sent 0]
     (let [bid0 (:bid st 0)
           turns (into #{} (keep (fn [[r a]] (when (= :turn (:prio a)) r))) (:askers st))
           ;; each asker's work left: the measured ms of its queued items, one pass, only when two or more wait
@@ -174,9 +176,11 @@
                                   (let [v (value it)] (if (or (nil? best) (> v (nth best 2))) [k it v] best))
                                   best))
                               nil (:items st))]
-      (if (nil? k)
+      ;; credit at the ask site: no batch is asked once the open asks fill the :answers port (flow's review: one grant could open
+      ;; a budget's worth past it; the input filter is only the backstop)
+      (if (or (nil? k) (>= (count (:pending st)) (cfg/value :seon.config.root/reconciler-buf)))
         [st outs]
-        (let [batch (batch-of st k it (max 1 (- (:budget st 1) sent)))
+        (let [batch (batch-of st k it (max 1 (- (:budget st) sent)))
               bid (inc (:bid st 0))
               st (reduce #(assoc-in %1 [:items %2 :status] :running) (-> st (assoc :bid bid) (assoc-in [:batches bid] batch)) batch)
               c (item-class it)
@@ -186,7 +190,8 @@
                                         :seon.prove/askers (into (sorted-set) (mapcat #(get-in st [:items % :waiters])) batch)
                                         :req (if (= :test (:kind it :test))
                                                {:kind :test :seon.prove/batch (fx/batch-tag bid)
-                                                :msg (cond-> {:op :tests :id (:agent it) :mode (:mode it :judge) :names (into #{} (map first) batch) :items (into {} batch)
+                                                ;; the agent runs it: the owner asks the api for it and takes its one answer
+                                                :seon.fx/ask (cond-> {:op :tests :id (:agent it) :mode (:mode it :judge) :names (into #{} (map first) batch) :items (into {} batch)
                                                               :seon.prove/batch (fx/batch-tag bid)}
                                                        (:checkout it) (assoc :checkout (:checkout it)))}
                                                ;; a build, a seed or a check step: run on the run's checkout
@@ -596,7 +601,7 @@
        :ping-map-fn (fn [st] {:runs (count (:runs st)) :full (some-> st :full :key) :queued (count (:items st))
                               :main-t (:main-t st) :stale-answers (:stale st 0)})})
   ([args] {:rid 0 :pending {} :runs {} :done {} :items {} :askers {} :batches {} :conn (:conn args)
-           :budget (:max-workers (fx/config-limits))})
+           })
   ([st _tr] st)
   ([st0 in m]
    (let [st st0
@@ -607,5 +612,8 @@
                              (if (and (cfg/value :seon.config.proofs/prove-main-on-commit) (program/moves-program? (:ops m)))
                                (request st {:branch :main :t (:t m) :digest (program/run-digest (pdb/at-commit (:conn st) (:commit m))) :mode :main})
                                [st []])))]
-     (let [outs (cond-> (vec outs) (not= (state-view st) (state-view st0)) (conj {:op :prove-state :r (state-view st)}))]
+     (let [outs (cond-> (vec outs) (not= (state-view st) (state-view st0)) (conj {:op :prove-state :r (state-view st)}))
+           ;; credit (docs/flow.md, request and answer): its asks are answered on :answers, which holds reconciler-buf; with that many
+           ;; open it reads only :answers, so the api never parks putting an answer while this parks putting an ask
+           st (assoc st ::flow/input-filter (if (>= (count (:pending st)) (cfg/value :seon.config.root/reconciler-buf)) #{:answers} identity))]
        [st (if (seq outs) {:to-api outs} {})]))))
