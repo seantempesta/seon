@@ -28,6 +28,59 @@
       (let [[_ reads] (d/with-reads #(d/q '[:find ?id :where [?e :seon.task/id ?id]] db))]
         (is (= #{[:a :seon.task/id]} (d/reads-index reads)))))))
 
+;; Estimate: a seeded test db and 3 pulls under the recorder, ~0.3M; 4 d/with of one datom each ~0.2M = ~500000
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-pull-records-the-attributes-it-read
+  ;; task datahike.pull-api/a-pull-of-an-attribute-records-its-slice: a pull records [:ea e a] for each attribute of its
+  ;; pattern and no wider key, so a reader of one slice of an entity is not reached by a commit to its other attributes
+  ;; (a :plan-only track reran on a :seon.task/ns change, root's trial 2026-11-14). The entity's :eavt range is still read
+  ;; once (cost unchanged). A missing entity records [:e e], so its first datom reaches the read.
+  (let [[db t1 _] (seeded)
+        reads #(d/reads-index (second (d/with-reads %)))
+        tx (fn [tx-data] (:tx-data (d/with db tx-data)))
+        two (reads #(d/pull db [:seon.task/id :seon.task/plan] t1))
+        one (reads #(d/pull db [:seon.task/plan] t1))]
+    (is (= #{[:ea t1 :seon.task/id] [:ea t1 :seon.task/plan]} two) (pr-str two))
+    (is (= #{[:ea t1 :seon.task/plan]} one) (str "one attribute, and no [:e e] from the existence probe: " (pr-str one)))
+    (is (d/reads-touched? two (tx [{:db/id t1 :seon.task/plan "Changed."}])) "an attribute it read")
+    (is (not (d/reads-touched? two (tx [{:db/id t1 :seon.task/ns 'x.y}]))) "an attribute of the entity it did not read")
+    (is (not (d/reads-touched? one (tx [{:db/id t1 :seon.task/ns 'x.z}]))) "nor another attribute, for a one-attribute pull")
+    (is (contains? (reads #(d/pull db [:seon.task/plan] 987654321)) [:e 987654321]) "a missing entity: its first datom reaches it")
+    ;; a read answers the same recorded or not (web-2, 2026-11-15: a recorded pull of an attribute the schema lacks threw)
+    (is (= (d/pull db [:seon.task/plan :no.such/attribute] t1)
+           (first (d/with-reads #(d/pull db [:seon.task/plan :no.such/attribute] t1))))
+        "an attribute the schema does not define: the same answer inside the recorder as outside")))
+
+;; Estimate: a seeded db, 200 pulls of one attribute under one recorder ~1M; one planned join query ~0.2M; 3 d/with ~0.2M = ~1500000
+(deftest ^{:seon.test/estimate {:ticks 1500000}} a-recorder-holds-one-range-a-key-and-the-planner-records
+  ;; task datahike.reads/a-lazy-read-records-into-the-read-it-belongs-to (2) and context's T9: the recorder kept one range a
+  ;; read, so 200 reads of one attribute held 200 ranges for one key (565 B each); it holds each range once. And a query the
+  ;; planner runs records what it read: with-reads no longer turns the planner off (on Jolt its cursors read through the
+  ;; index protocol, which records), so a commit to what a planned join read reaches it.
+  (let [[db t1 t2] (seeded)
+        one (count (second (d/with-reads #(d/pull db [:seon.task/plan] t1))))
+        [_ rs] (d/with-reads #(dotimes [_ 200] (d/pull db [:seon.task/plan] t1)))
+        q '[:find ?id :in $ ?e :where [?e :seon.task/needs ?n] [?n :seon.task/id ?id]]
+        ;; the planner on, whatever with-reads binds: what this asks is that the planner's reads are recorded
+        [v qrs] (d/with-reads #(binding [datahike.query/*disable-planner* false] (d/q q db t1)))
+        idx (d/reads-index qrs)
+        tx (fn [tx-data] (:tx-data (d/with db tx-data)))]
+    (is (= one (count rs)) (str "200 pulls of one attribute hold what one pull holds (" one "): " (count rs)))
+    (is (= #{["r/t2"]} v))
+    (is (d/reads-touched? idx (tx [{:db/id t1 :seon.task/needs [{:seon.task/id "r/t3"}]}])) "a need added to the entity it joined from")
+    (is (d/reads-touched? idx (tx [[:db/retract t2 :seon.task/id "r/t2"]])) "the joined entity's id, retracted")
+    (is (not (d/reads-touched? idx (tx [{:db/id t2 :seon.task/plan "Other."}]))) "an attribute the join did not read")))
+
+;; Estimate: a seeded db and two pulls under nested recorders, ~0.2M = 200000
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-nested-with-reads-records-into-the-outer
+  ;; task datahike.reads/with-reads-nests-in-an-outer-recorder: a read inside a nested with-reads reached only the inner
+  ;; recorder, so a pass whose component recorded its own reads lost them (seon.ratom/deref-capture copied them out by
+  ;; hand). Recording composes: the inner reads are the outer's too.
+  (let [[db t1 t2] (seeded)
+        [[_ inner] outer] (d/with-reads #(do (d/pull db [:seon.task/id] t2)
+                                             (d/with-reads (fn [] (d/pull db [:seon.task/plan] t1)))))]
+    (is (= #{[:ea t1 :seon.task/plan]} (d/reads-index inner)) (pr-str (d/reads-index inner)))
+    (is (= #{[:ea t1 :seon.task/plan] [:ea t2 :seon.task/id]} (d/reads-index outer)) (pr-str (d/reads-index outer)))))
+
 (deftest a-transaction-touches-only-what-a-read-scanned
   (let [[db t1 t2] (seeded)
         point (d/reads-index (second (d/with-reads #(d/q '[:find ?e . :in $ ?id :where [?e :seon.task/id ?id]] db "r/t2"))))

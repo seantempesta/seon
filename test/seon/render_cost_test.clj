@@ -198,7 +198,7 @@
 
 (defn latest-of
   "The input of size n: the render proc's state holding agent a1's debug page on latest after a pass, over a
-  session of n earlier evals and one model turn (its basis recorded as seon.turn/act! writes it), with one eval
+  session of n earlier evals and one model turn (its basis recorded as seon.turn/model-request! writes it), with one eval
   more on the branch since: what the next pass draws (the turn to come's request, made at the head); and the view."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
@@ -233,8 +233,9 @@
      :work (str "one request made at the branch's head (seon.ctx.wire/render: the system prompt, the session's records each "
                 "printed by its own render, the turn's page message made at the head) "
                 "under its provider, put in the wire shape "
-                "(seon.model/request-body) and drawn once (seon.render.ui/debug-turn: an entry a message), and the timeline's "
-                "strip (a pull of each model call's basis). Linear in the evals: the page's rows, and the cold draw's ctx")
+                "(seon.model/request-body), its head and the rows the move added drawn (seon.render.ui/debug-units: a unit a message), and the timeline's "
+                "strip (a pull of each model call's basis). Linear in the evals: the page's rows, and the request read from the agent's kept walk "
+                "(seon.render.proc/branch-walk, advanced by the eval more), never a cold draw")
      :growth :linear
      ;; 2026-11-14 (web): restated in ticks and bytes, the owner's measure (ticks, bytes, seconds; calls retired: they count private
      ;; helpers production does not check, W-5's marker tests among them). Ticks = the work's calls above x ~1.4k ticks a contracted call
@@ -245,8 +246,11 @@
      :per-n {:ticks 444000 :bytes 20000}
      :fixed {:ticks 2660000 :bytes 1000000}
      ;; measured 8.2 / 11.0 / 19.2 MB at 3 / 10 / 30: ~8x the fixed bound and ~20x the per-eval one, waste, its task
+     ;; read from the kept walk (web, 2026-11-14): 14.28 MB and 4.40M ticks at 30, against 19.23 MB and 6.21M drawn cold
+     ;; a row a unit (web, 2026-11-15): 10.33 MB and 2.99M ticks at 30; what still grows an eval is the request made whole each move
+     ;; (seon.ctx/node, own, join, linked ~50 KB an eval; the wire shape ~20 KB): context's P7
      ;; seon.render/a-debug-entry-allocates-what-it-shows
-     :overrun {:task "seon.render/a-debug-entry-allocates-what-it-shows" :n 30 :measured {:ticks 6210000.0 :bytes 19230000.0}}
+     :overrun {:task "seon.render/a-debug-entry-allocates-what-it-shows" :n 30 :measured {:ticks 2990000.0 :bytes 10330000.0}}
      :sizes [3 10 30]}))
 
 (deftest a-transaction-renders-what-it-touched
@@ -675,7 +679,10 @@
                ;; - 2026-11-14 (web): one seon.render/entity-read-keys per component run, its tree reads as datom keys: 15 calls
                ;; sum: ~2,455 calls, ~0.78M ticks, ~3.3 MB. Measured 2026-11-13 at 2 / 4 / 8: 2,429 calls, 0.82M ticks, 3.54 MB at every size
                ;; (1.01M and 4.17 MB when rules sorted all 162 vars). None of it reads the parent's history
-               :fixed {:calls 2455 :bytes 3500000 :ticks 800000}
+               ;; 2026-11-15 (web): restated in ticks and bytes, the owner's measure. Calls went green and red at one digest (2,455 / 2,463):
+               ;; seon.profile's call counters are process-wide, so a thread still running during the measure adds its calls, while ticks
+               ;; and bytes are this thread's own (docs/cost.md#how-we-measure)
+               :fixed {:bytes 3500000 :ticks 800000}
                :sizes [2 4 8]}))
 
 (defn rules-of
@@ -721,8 +728,11 @@
                ;; A waiver (:overrun) was refused by health's :no-waived-proof.
                ;; 2026-11-14 (web, W-5): every reader of an output asks one marker test a node and one element split an element (seon.render/marker-key,
                ;; element-parts, private: checked in tests, not on a production call), contracted calls the inline tests were not: +6 a turn (its output's nodes)
+               ;; 2026-11-14 (web): +300 fixed calls, the html of the move's new eval and its call, drawn once: the model output places them
+               ;; first (::for, no html), and the page's placement used to hit that entry and draw no html (the bug, seon.render/render!'s
+               ;; :for-only); measured 2,909 / 4,629 / 8,189 at 10 / 20 / 40, ~300 over the old bound at each size, so fixed, not per turn
                :per-n {:calls 176 :bytes 156000}
-               :fixed {:calls 850 :bytes 1850000}
+               :fixed {:calls 1150 :bytes 1850000}
                :sizes [10 20 40]})
   (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/walk-same-of
                :n "turns of the agent, an eval each"

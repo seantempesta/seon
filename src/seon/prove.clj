@@ -160,9 +160,9 @@
   Answers [st outputs]."
   {:malli/schema [:=> [:cat :map] [:tuple :map [:vector :map]]]}
   [st]
-  ;; the owner's max-workers as the config states it now, read once a grant, so a dial turned deals the next grant by it; a
-  ;; :fixed-budget in st (a test's) holds it instead
-  (loop [st (assoc st :budget (or (:fixed-budget st) (:max-workers (fx/config-limits)))) outs [] sent 0]
+  ;; the owner's max-workers as the config states it now, derived once a config change (seon.fx/limits-held: one compare a grant),
+  ;; so a dial turned deals the next grant by it; a :fixed-budget in st (a test's) holds it instead
+  (loop [st (let [[st lim] (fx/limits-held st)] (assoc st :budget (or (:fixed-budget st) (:max-workers lim)))) outs [] sent 0]
     (let [bid0 (:bid st 0)
           turns (into #{} (keep (fn [[r a]] (when (= :turn (:prio a)) r))) (:askers st))
           ;; each asker's work left: the measured ms of its queued items, one pass, only when two or more wait

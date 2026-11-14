@@ -1019,17 +1019,25 @@
   ;; root); it reads the render proc's, kept by what each move of main changed, at the api's fold. It
   ;; answers what the whole read does, after boot and after main moved, and a read with nothing moved
   ;; costs under a tenth of the whole read.
-  (let [same "(let [h (my.root/problems sys) w (seon.problems/health @(:conn sys) (seon.system/errors sys))] [(= (:classes h) (:classes w)) (count (:classes h))])"
+  ;; the whole read is made at the point the held answer was put at (its metadata's :db and :fold), never a later main or fold: an
+  ;; error recorded between the two reads (load, a stall) once made them differ, and the test raced
+  (let [same "(let [h (my.root/problems sys) {at :db f :fold} (meta h) w (seon.problems/health at f)] [(= (:classes h) (:classes w)) (count (:classes h))])"
+        between (str "(let [h (my.root/problems sys) n (count (seon.system/errors sys))"
+                     " _ (clojure.core.async/>!! (:back sys) (seon.system/uncaught-message nil (ex-info \"recorded between the reads\" {})))"
+                     " _ (loop [i 0] (when (and (< i 1000) (<= (count (seon.system/errors sys)) n)) (recur (inc i))))"
+                     " {at :db f :fold} (meta h) w (seon.problems/health at f)] [(= (:classes h) (:classes w)) (> (count (seon.system/errors sys)) n)])")
         cost "(let [m (fn [f] (let [b (seon.profile/alloc-bytes)] (f) (- (seon.profile/alloc-bytes) b)))] (my.root/problems sys) [(m #(my.root/problems sys)) (m #(seon.problems/health @(:conn sys) (seon.system/errors sys)))])"
-        [booted moved costs]
+        [booted moved costs raced]
         (in-agent (fn [{:keys [task]}]
                     [{:op :eval :agent "root" :code same}
                      {:op :eval :agent "root" :code (str "(do @(seon.system/transact-main! sys [{:seon.task/id " (pr-str task) " :seon.task/failure {:reason \"provoked\"}}]) " same ")")}
-                     {:op :eval :agent "root" :code cost}]))
+                     {:op :eval :agent "root" :code cost}
+                     {:op :eval :agent "root" :code between}]))
         [held whole] (:value costs)]
     (is (= true (first (:value booted))) (str "after boot, held and whole agree: " (pr-str booted)))
     (is (= true (first (:value moved))) (str "after main moved, held and whole agree: " (pr-str moved)))
-    (is (< (* 10 held) whole) (str "a held read allocated " held " bytes; a whole read " whole))))
+    (is (< (* 10 held) whole) (str "a held read allocated " held " bytes; a whole read " whole))
+    (is (= [true true] (:value raced)) (str "an error recorded between the two reads leaves them agreeing, each at the held answer's point: " (pr-str raced)))))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 5 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2750k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} an-agents-first-search-reads-the-index-it-inherited
@@ -1524,7 +1532,7 @@
 
 (defn- work-with
   "seon.turn/work! of the world's task for 3 turns, in this process as an agent's test fork on the world (my.test/eval-in's state),
-  its turn's draw and model call (seon.turn/act!) answered by (act st), its status by (status): what the loop decides from what
+  its turn's model call (seon.turn/model-request!, the request made ready; seon.turn/act!, its answer acted on) answered by (act st), its status by (status): what the loop decides from what
   a turn answers. What reads a store or root stands in (main, the proofs, the end's write), the decisions of the loop are its
   own. Answers its end, with the model calls act made (:model-calls)."
   [act status]
@@ -1541,7 +1549,8 @@
                        seon.turn/observe (fn [id] {:task (task/task (agent/db) id)})
                        seon.turn/status-now status
                        seon.turn/tell-error! (constantly nil)
-                       seon.turn/act! (fn [st _ _ _] (act st called!))
+                       seon.turn/model-request! (fn [_ _ _] {:id "test-agent/call" :t1 0 :request {}})
+                       seon.turn/act! (fn [st _ _] (act st called!))
                        seon.turn/end! (fn [{:keys [turn]} outcome reason _]
                                         (cond-> {:outcome outcome :results {} :uncontracted #{} :turns turn :model-calls @calls} reason (assoc :reason reason)))]
            (seon.turn/work! {:task "app.calc/total-is-exact" :max-turns 3}))
@@ -1570,6 +1579,47 @@
     (is (= :refork (:outcome end)) (pr-str end))
     (is (= 1 (:model-calls end)) (str "the turn in flight finished, and no model call ran on the old program: " (pr-str end)))))
 
+;; Estimate: 200 generated runs x ~8 requests x ~3 proc steps at ~5k ticks = ~24M ticks
+(deftest ^{:seon.test/estimate {:ticks 30000000}} every-request-an-agent-proc-holds-is-released-by-any-of-its-ends
+  ;; the class behind the :done hang (a state a request sets, released only by its success): root's proc for an agent is a
+  ;; pure step, so generated interleavings of clone and eval requests, each answered by any of its ends once the agent has it
+  ;; (a clone: its descriptor asked, cloned, failed or never sent; an eval: replied or never sent), must leave nothing held
+  ;; and nothing in flight; two clones at once among them, whose second overwrote the first's hold before
+  (with-redefs [seon.sock/send! (fn [& _] true) seon.sock/close! (fn [& _] nil)]
+    (doseq [seed (range 200)]
+      (let [rng (java.util.Random. seed)
+            pick #(nth % (.nextInt rng (count %)))
+            out (clojure.core.async/chan 1000)
+            kinds (vec (repeatedly (+ 2 (.nextInt rng 6)) #(pick [:clone :eval :clone])))
+            frame (fn [st m] (#'seon.agent-proc/agent-frame st (volatile! {}) m))
+            drain (fn [got] (loop [got got] (if-let [m (clojure.core.async/poll! out)] (recur (conj got (or (:k m) (:id m)))) got)))
+            final (loop [st {:id :a1 :end {:out out :fd -1} :inflight {}} next 0 got #{} ended #{} n 0]
+                    (let [got (drain got)
+                          endable (vec (remove ended got))]
+                      (cond
+                        (> n 200) (assoc st ::stuck true)
+                        (and (= next (count kinds)) (empty? endable)) st
+                        (or (empty? endable) (and (< next (count kinds)) (zero? (.nextInt rng 2))))
+                        (let [k (kinds next)
+                              [st _] (#'seon.agent-proc/agent-in st (cond-> {:op :req :rid next :kind k :msg {:op k}} (= k :eval) (assoc-in [:msg :forms] "1") (= k :clone) (assoc :pass-fd 7)))]
+                          (recur st (inc next) got ended (inc n)))
+                        :else
+                        (let [rid (pick endable)
+                              k (kinds rid)
+                              end (if (= k :clone) (pick [:fd-ready :cloned :clone-failed :unsendable]) (pick [:reply :unsendable]))
+                              st (case end
+                                   :fd-ready (frame st {:op :fd-ready :k rid})
+                                   (:cloned :clone-failed) (frame st {:op end :k rid :error {:seon.error/type :x :seon.error/message "x"}})
+                                   :unsendable (frame st {:op :unsendable :rid rid :error {:seon.error/type :x :seon.error/message "x"}})
+                                   :reply (frame st {:op :reply :id rid :response {:value 1}}))
+                              ;; a clone's descriptor asked keeps the request in flight until its answer
+                              st (if (= end :fd-ready) (frame st {:op :cloned :k rid}) st)]
+                          (recur st next got (conj ended rid) (inc n))))))]
+        (is (not (::stuck final)) (str "seed " seed " " kinds))
+        (is (nil? (:holding final)) (str "seed " seed " held by " (:holding final) " " kinds))
+        (is (empty? (:held final)) (str "seed " seed " " kinds))
+        (is (empty? (:inflight final)) (str "seed " seed " in flight " (keys (:inflight final)) " " kinds))))))
+
 ;; Estimate: three proc steps on a map and two channel puts, ~0.3M ticks
 (deftest ^{:seon.test/estimate {:ticks 300000}} a-clone-that-fails-before-its-descriptor-releases-what-waited
   ;; the hang behind an-outside-agent-writes-its-end in three land checks (2026-11-14): root holds every message to an agent
@@ -1597,6 +1647,21 @@
         (is (= [] @sigs) "no signal: the eval in flight ends by its own bound")
         (is (= [:stop] @sent) "the agent is told to stop after it")
         (is (:stop-sent st))))))
+
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-stop-transition-never-waits-on-its-process
+  ;; task seon.agent-proc/a-stop-transition-never-waits-on-its-process (docs/flow.md#the-five-rules: a proc waits only by
+  ;; parking on its in-port): Flow's stop of root's graph calls each agent proc's ::flow/stop, which waited in await-dead for
+  ;; its process's end to close, so an agent ignoring :stop held root's whole stop. It sends :stop and returns; the death,
+  ;; when an agent proc leaves while root runs, is already recorded (its end's EOF, :dead). Red before: the transition
+  ;; never returned. Estimate: one transition of a map and two channel ops, ~0.1M
+  (let [in (clojure.core.async/chan) out (clojure.core.async/chan 4)
+        st {:id :a1 :pid 4242 :end {:in in :out out} :inflight {}}
+        ;; on the test's own fiber, no clock (docs/testing.md): a transition that waited would park on in, which nothing
+        ;; feeds, and the test child's quiescence would end it red
+        v (seon.agent-proc/agent-proc st :clojure.core.async.flow/stop)]
+    (is (:stop-sent v) "it returns with the agent's end still open, having told the agent to stop")
+    (is (= {:op :stop} (clojure.core.async/poll! out)) "its :stop went out on the end")
+    (clojure.core.async/close! in)))
 
 (deftest ^{:seon.test/estimate {:ticks 6000000}} a-reasoning-overrun-is-the-next-turns-to-read
   ;; docs/failure-points.md (a turn of the agent's loop): a model call whose reasoning spent its whole token budget answers
@@ -1642,7 +1707,7 @@
   ;; the green status first, so a model agent that failed its task on green proofs ended :green and its task merged. One order:
   ;; the agent's own verdict first, in the loop as at a hand-back
   (let [acted (volatile! false)
-        end (with-redefs [seon.turn/judged identity]
+        end (with-redefs [agent/judge! (constantly {})]
               (work-with (fn [st called!] (called!) (vreset! acted true) (seon.turn/request-stop! :failed "the plan is wrong") (update st :turn inc))
                          #(if @acted {:reasons []} {:reasons [{:reason :proof-red}]})))]
     (is (= :failed (:outcome end)) (pr-str end))
@@ -3267,10 +3332,10 @@
                                              "  {:calls (mapv (fn [[i c]] {:eval i :code c}) evals) :reply (:seon.model-call/reply m) :basis-keys (set (keys (:seon.model-call/basis m)))"
                                              "   :agent-key (:key @seon.agent/state) :on-branch (msgs db)"
                                              "   :turn (:seon.agent/turn (datahike.api/entity db [:seon.agent/key (:key @seon.agent/state)]))"
-                                             "   :eval-turns (set (datahike.api/q '[:find ?by ?t :where [?e :seon.eval/by ?be] [?be :seon.agent/key ?by] [?e :seon.eval/call ?c] [?c :seon.model-call/n ?t]] db))"
-                                             "   :loop-eval-turns (vec (datahike.api/q '[:find [?t ...] :where (not-join [?e] [?e :seon.eval/by ?s] [?s :seon.system/id :root]) [(missing? $ ?e :seon.eval/call-id)] [?e :seon.eval/turn ?t]] db))"
+                                             "   :eval-turns (seon.fixtures/agent-eval-turns db (:key @seon.agent/state))"
+                                             "   :loop-eval-turns (seon.fixtures/agent-loop-eval-turns db (:key @seon.agent/state))"
                                              "   :message-turns (let [c @seon.ctx/ctx] (vec (for [[n cid] (seon.ctx/turns c) :when (seq (get (seon.ctx/placed-messages (seon.db/index) c) n))] n)))"
-                                             "   :call-ids (vec (datahike.api/q '[:find [?id ...] :where [?m :seon.model-call/id ?id]] db))"
+                                             "   :call-ids (seon.fixtures/agent-call-ids db (:key @seon.agent/state))"
                                              "   :committed (msgs (datahike.api/commit-as-db db (get-in m [:seon.model-call/basis :commit])))"
                                              "   :intent (mapv #(datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.eval/id ?i] [?e :seon.eval/intent ?r]] db %) (map first evals))})")
                                         {:op :eval :agent "root"

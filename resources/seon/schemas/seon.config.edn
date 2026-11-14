@@ -220,6 +220,8 @@
   ;; the web, instrumentation, the native probe
   [:seon.config.web/port {:optional true} :seon.config.web/port]
   [:seon.config.root/server-port {:optional true} :seon.config.root/server-port]
+  [:seon.config.root/server-connections {:optional true} :seon.config.root/server-connections]
+  [:seon.config.root/server-op-workers {:optional true} :seon.config.root/server-op-workers]
   [:seon.config.root/end-with {:optional true} :seon.config.root/end-with]
   [:seon.config.web/public-dir {:optional true} :seon.config.web/public-dir]
   [:seon.config.web/stylesheet {:optional true} :seon.config.web/stylesheet]

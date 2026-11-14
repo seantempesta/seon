@@ -133,10 +133,10 @@
   (let [;; the recorder outside every reaction (a read of the render proc's pass): taken at the outermost run, where no reaction is
         ;; in progress, and handed down, so a nested run's reads reach it and never its parent run's (each run's reads are its own)
         outer (or *outer-reads* (when (nil? *ratom-context*) datahike.index.interface/*reads*))
-        [res rs] (binding [*outer-reads* outer] (reads/with-reads #(binding [*ratom-context* r] (f))))
-        ;; with-reads binds a recorder of its own and does not nest; deps' task datahike.reads/with-reads-nests-in-an-outer-recorder
-        ;; moves this into with-reads, and this line goes
-        _ (when (and outer (seq rs)) (swap! outer into rs))
+        ;; the recorder with-reads composes into at its return is the outermost, never the parent run's: a parent depends on
+        ;; its child's value, not on what the child read (Reagent's rule); at the outermost run that is the binding already in force
+        [res rs] (binding [*outer-reads* outer datahike.index.interface/*reads* outer]
+                   (reads/with-reads #(binding [*ratom-context* r] (f))))
         c (-get r :captured)]
     (-set! r :dirty? false)
     ;; every read the run made is a dependency, however it reached the db: the one recorder (docs/plan.md#the-root-concept-one-reaction-over-the-store)

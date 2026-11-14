@@ -102,32 +102,68 @@
     (and (.isFile (java.io.File. f))
          (not (clojure.string/blank? (:out (seon.lib/sh "lsof" "-t" "--" f)))))))
 
+(defn- numbered-generations
+  "[[n path] ...] of the generations of the key's store at stem, newest first: stem-<n> for each n of them, and stem itself as 0.
+  A stage a generation is made in (stem-<n>.stage-<uuid>, test-runner/program-db) is no generation."
+  {:malli/schema [:=> [:cat :string] [:vector [:tuple :int :string]]]}
+  [stem]
+  (let [f (java.io.File. ^String stem) dir (.getParentFile f)
+        pat (re-pattern (str "\\Q" (.getName f) "\\E-(\\d+)"))]
+    (->> (concat (when (.isDirectory f) [[0 stem]])
+                 (for [n (some-> dir .list seq) :let [m (re-matches pat n)]
+                       :when (and m (.isDirectory (java.io.File. dir ^String n)))]
+                   [(Long/parseLong (second m)) (str dir "/" n)]))
+         (sort-by (comp - first))
+         vec)))
+
+(defn generations
+  "The directories of the key's store at stem (kept-program-store's path), newest generation first: stem-<n> for each n of
+  them, and stem itself as generation 0. A key's store is a series of generations, each one LMDB store holding a branch a git
+  tree (test-runner/program-db): a store past :seon.config.proofs/program-store-max-bytes is never moved or removed under the
+  runs reading it, and the next tree imported starts the next generation (next-generation). See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :string] [:vector :string]]}
+  [stem] (mapv second (numbered-generations stem)))
+
+(defn next-generation
+  "The path of the generation after the key's newest at stem: stem-<n+1> (stem-1 when the key has only its generation 0 or none)."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [stem] (str stem "-" (inc (or (ffirst (numbered-generations stem)) 0))))
+
 (defn shared-program-store!
   "The path of the program store at base for key (program-store-key), base-<key>: the repository's, which checkouts at other
   keys share at once (another Jolt pin, another program schema), so a store of another key is never removed for being another
   key's (seon.db/kept-store!'s rule, made for a store one process owns, deleted a store a plan of the new key was opening,
-  2026-11-12). This one is marked used (its directory's mtime); stores of other keys beyond the
-  :seon.config.proofs/program-stores-kept most recently used are removed, so the disk stays bounded. Nothing is made here.
+  2026-11-12). This one is marked used (its newest generation's mtime). A key's store is its generations (generations, base-<key>-<n>):
+  those of this key beyond the :seon.config.proofs/program-stores-kept most recently used, and the keys beyond that count
+  (the most recently used generation of each ranks it), are removed, so the disk stays bounded, but never a generation a process
+  holds open (held-open?), however many: a run reads its tree's generation to the end. A stage a generation was left in
+  (<generation>.stage-<uuid>) that no process holds open is removed too. Nothing is made here.
   See docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :string :string] :string]}
   [base k]
   (let [f (java.io.File. ^String base) dir (.getParentFile f) stem (.getName f)
         path (str dir "/" stem "-" k)
-        own (java.io.File. path)
-        others (for [n (some-> dir .list seq) :when (and (re-matches (re-pattern (str "\\Q" stem "\\E-[0-9a-f]{8}")) n) (not= n (.getName own)))]
-                 (java.io.File. dir ^String n))]
-    (when (.isDirectory own) (.setLastModified own (System/currentTimeMillis)))
-    ;; a store a plan moved aside (test-runner/move-aside!, of any key) goes once no process holds it open
-    (doseq [n (some-> dir .list seq)
-            :when (re-matches (re-pattern (str "\\Q" stem "\\E-[0-9a-f]{8}\\.retired-.+")) n)
-            :let [p (str dir "/" n)]
-            :when (not (held-open? p))]
-      (seon.lib/remove-tree! p))
+        key-of (fn [n] (second (re-matches (re-pattern (str "\\Q" stem "\\E-([0-9a-f]{8})(?:-\\d+)?")) n)))
+        used (fn [g] (.lastModified (java.io.File. ^String g)))
+        mine (generations path)
+        others (->> (for [n (some-> dir .list seq) :let [kk (key-of n)] :when (and kk (not= kk k))] [kk (str dir "/" n)])
+                    (group-by first))]
+    (when-let [g (first mine)] (.setLastModified (java.io.File. ^String g) (System/currentTimeMillis)))
     ;; never one a process holds open (its LMDB environment, data.mdb): removing it under that process failed its write
     ;; (NoSuchFileException under program-store-<key>/, 2026-11-12), whatever the count
-    (doseq [^java.io.File o (drop (dec (config/value :seon.config.proofs/program-stores-kept)) (sort-by #(- (.lastModified ^java.io.File %)) others))
-            :when (not (held-open? (.getPath o)))]
-      (seon.lib/remove-tree! (.getPath o)))
+    (doseq [g (drop (config/value :seon.config.proofs/program-stores-kept) (sort-by #(- (used %)) mine))
+            :when (not (held-open? g))]
+      (seon.lib/remove-tree! g))
+    (doseq [n (some-> dir .list seq)
+            :when (re-matches (re-pattern (str "\\Q" stem "\\E-[0-9a-f]{8}(?:-\\d+)?\\.stage-.+")) n)
+            :let [g (str dir "/" n)]
+            :when (not (held-open? g))]
+      (seon.lib/remove-tree! g))
+    (doseq [[_ gs] (drop (dec (config/value :seon.config.proofs/program-stores-kept))
+                         (sort-by (fn [[_ gs]] (- (apply max (map (comp used second) gs)))) others))
+            [_ g] gs
+            :when (not (held-open? g))]
+      (seon.lib/remove-tree! g))
     path))
 
 (defn kept-program-store
@@ -241,7 +277,7 @@
       (seq cs) (into (seon.task/config-tx cs {})))))
 
 (defn turn-tx
-  "Model turn n of agent k (a key) as seon.turn/act! writes it first: the agent's number n and its model call
+  "Model turn n of agent k (a key) as seon.turn/model-request! writes it first: the agent's number n and its model call
   <k>/<n> (origin :model), with more, the call's other attributes. A record the test writes
   in that turn names that call (:seon.eval/call, seon.task/call-ref). See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :string pos-int? :map] [:vector :map]]}
@@ -582,6 +618,8 @@
                                                (sh/sh "git" "-C" checkout "branch" "-q" "-D" branch))))
     root))
 
+(declare default-root-args)
+
 (defn shared-root!
   "The root this test process shares among its tests for root arguments args: started at the
   first call for them (start-shared-root!), then the same one: a root boots once per shard, not
@@ -591,7 +629,11 @@
   generation) or main itself starts a root of its own."
   {:malli/schema [:=> [:cat [:sequential :string]] :map]}
   [args]
-  (let [k [(seon.config/checkout) (vec args)]
+  ;; no arguments is the shard's shared root (docs/testing.md#test-types): default-root-args, the one shard-fixture warms, never a
+  ;; second root booted inside the first asking test's budget (an-idle-connection-holds-no-os-thread: 1.2M ticks or 10.3M, by
+  ;; whether another test had booted the [] root first)
+  (let [args (if (empty? args) (default-root-args) args)
+        k [(seon.config/checkout) (vec args)]
         ;; a start that is not run unless it is the one put: two callers at once share one root
         d (delay (start-shared-root! (first k) (second k)))]
     @(or (.putIfAbsent ^java.util.concurrent.ConcurrentHashMap shared-roots k d) d)))

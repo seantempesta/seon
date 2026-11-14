@@ -743,7 +743,7 @@
   (let [i (mod (* k n) (- (count text) n))] (subs text i (+ i n))))
 
 (defn- turn-facts
-  "Turn k of an agent as seon.turn/act! records it: the basis its context was built from
+  "Turn k of an agent as a turn records it (seon.turn/model-request!, seon.turn/act!): the basis its context was built from
   (the commit, its red assertion; the text is made again from it, seon.ctx.wire/render), its
   reply (1,500 bytes) and its eval call, whose eval's record holds what it evaluated to as the
   next turn shows it (2,000). The reply is real text and the evaluated value real source, each turn its own
@@ -1197,20 +1197,16 @@
      :sizes [30 100 300]}))
 
 (deftest an-identity-costs-its-seek
-  ;; task datahike.transaction/an-identity-costs-its-seek: an identity adds its :avet insert,
+  ;; an identity adds its :avet insert,
   ;; the unique check's :avet descent and the entity's upsert seek, ~1.5x a plain datom's
-  ;; floor; a content id adds hashing [attribute value] once. The overruns below are what
-  ;; 1,000 datoms cost when the task was filed: :db/unique 11.5k ticks and 34 KB per datom,
-  ;; a content id 16.9k and 65 KB
+  ;; floor; a content id adds hashing [attribute value] once. Within bound since 2026-11-14 with no waiver (filed at
+  ;; 11.5k ticks and 34 KB a :db/unique datom, a content id 16.9k and 65 KB, at 1,000 datoms)
   (cost/proof
     {:of 'datahike.api/db-with :input 'seon.db-test/unique-datoms
      :n "datoms, half a :db/unique identity naming its entity map"
      :work "per datom: its inserts (:avet too for the identity), one descent for a card-one value, one :avet seek per identity"
      :growth :linear
      :per-n {:ticks 10000 :bytes 15000}
-     ;; the overruns' :measured are the proofs' at 100, their largest size, taken 2026-11-10: :db/unique 1.28x the bytes of its
-     ;; bound (8.3k ticks and 19 KB a datom), a content id 2.68x (12.9k ticks and 43 KB)
-     :overrun {:task "datahike.transaction/an-identity-costs-its-seek" :n 100 :measured {:ticks 834866.0 :bytes 1916704.0}}
      :sizes [10 30 100]})
   (cost/proof
     {:of 'datahike.api/db-with :input 'seon.db-test/content-id-datoms
@@ -1218,7 +1214,6 @@
      :work "per datom: as a :db/unique identity's, and the identity's [attribute value] hashed once to its entity id"
      :growth :linear
      :per-n {:ticks 11000 :bytes 16000}
-     :overrun {:task "datahike.transaction/an-identity-costs-its-seek" :n 100 :measured {:ticks 1289618.0 :bytes 4288032.0}}
      :sizes [10 30 100]}))
 
 (defn newest-evals
@@ -2033,3 +2028,51 @@
         (is (= 3 (count values)) (str "the mark found " (count values) " of the 3 values out of line"))
         (is (= (- (count marked) 3) reads) (str reads " reads for " (- (count marked) 3) " nodes and 3 values out of line")))
       (finally (d/release conn) (run! seon.lib/remove-tree! @stores-made) (reset! stores-made [])))))
+
+;; Estimate: the test branch ~1M + two transactions through the checked path ~1M = 3000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-transaction-names-its-branch-whoever-writes-it
+  ;; task seon.db/every-transaction-names-its-branch: the merge reads a datom's owner by its transaction's :seon.tx/branch, and a
+  ;; transaction written with no tx-meta named none (a seed's, a raw write's), so a side could not tell its own facts from shared ones;
+  ;; the one path stamps the connection's branch and runtime, and a caller's own value wins
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [b (:branch cfg)
+           r (d/transact conn {:tx-data [{:seon.agent/key "stamp-raw" :seon.agent/status :idle}]})
+           tx (d/entity (:db-after r) (:max-tx (:db-after r)))
+           r2 (d/transact conn {:tx-data [{:seon.agent/key "stamp-own" :seon.agent/status :idle}] :tx-meta {:seon.tx/branch :elsewhere}})
+           tx2 (d/entity (:db-after r2) (:max-tx (:db-after r2)))]
+       (is (= b (:seon.tx/branch tx)) "a raw write names the connection's branch")
+       (is (string? (:seon.tx/runtime tx)) "and the runtime that made it")
+       (is (= :elsewhere (:seon.tx/branch tx2)) "a caller's own value wins")))))
+
+;; Estimate: two seon.db/owners calls on the marked index ~2k ticks and ~2 KB each = 10000000 ticks with the profile
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-contract-checks-the-entity-index-once-where-it-is-made
+  ;; root's waiver audit: seon.program-cost-test's record-tx proof was 8.6x its bytes, and 41 KB of its 91 KB was two contracts
+  ;; validating the whole entity index (seon.db/index's return, seon.db/owners' argument), at every call; the index is checked once
+  ;; where it is made and marked, and a contract naming it admits the mark at once
+  (let [ix (pdb/index)
+        _ (pdb/owners ix [:seon.agent/key])
+        _ (seon.profile/begin!)
+        _ (pdb/owners ix [:seon.agent/key])
+        b (:bytes (first (filter #(= 'seon.db/owners (:var %)) (seon.profile/touched))))]
+    (is (< b 4000) (str "a call taking the index checks no more than the mark: " b " bytes"))
+    (is (= (hash ix) (get (:seon.contract/valid (meta ix)) :seon.db/entity-index-shape)) "the index carries its mark, its hash")
+    (is (not (seon.contract/valid? :seon.db/entity-index (assoc ix :entity-schemas {:x 1})))
+        "a changed copy keeps the metadata but not the hash: it is checked in full, and refused")
+    (is (not (seon.contract/valid? :seon.db/entity-index (with-meta (dissoc ix :forms) nil))) "an unmarked value is checked in full, and refused")))
+
+;; Estimate: a test db with one task, two entity reads under one recorder, ~0.3M ticks = 300000
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-lazy-read-records-into-the-read-it-belongs-to
+  ;; task datahike.reads/a-lazy-read-records-into-the-read-it-belongs-to: an entity made inside a recorded read and read
+  ;; after it returns recorded nothing, so a commit to what it read reached no reader. It records into the recorder it was
+  ;; made under when none is bound where it is read: the live recorder, (:datahike.reads/live (meta reads)).
+  (let [db (d/db-with (ts/test-db) [{:db/id "t" :seon.task/id "lazy/t" :seon.task/plan "P."}])
+        t (:db/id (d/entity db [:seon.task/id "lazy/t"]))
+        [e reads] (d/with-reads #(d/entity db t))
+        live (:datahike.reads/live (meta reads))]
+    (is (some? live) "the read set carries its live recorder")
+    (is (= "P." (:seon.task/plan e)) "read after the recorded read returned")
+    (is (contains? (d/reads-index @live) [:ea t :seon.task/plan]) (str "the lazy lookup is in the read it belongs to: " (pr-str (d/reads-index @live))))
+    (is (not (contains? (d/reads-index reads) [:ea t :seon.task/plan])) "the set answered at the return is what was read by then")
+    (let [[_ outer] (d/with-reads #(:seon.task/id e))]
+      (is (contains? (d/reads-index outer) [:ea t :seon.task/id]) "read under another recorder, it records there"))))

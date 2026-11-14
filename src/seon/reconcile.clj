@@ -954,6 +954,8 @@
         ks (filterv #(= :task (first %)) (:ours diff))
         tw (pm/three-way (pm/program-of base ks #{}) (pm/program-of main ks #{}) (pm/program-of db ks #{}))
         carried (pm/merge-tx main base db (:apply tw) #{})
+        ;; a merged task's cites are derived from its text: made again on main as the merge leaves it, never carried
+        carried (if (seq carried) (into carried (task/merged-cites-tx (pdb/speculate-db main carried) (:apply tw))) carried)
         task-conflicts (:conflicts tw)
         ;; the done rule reads main as this judging leaves it, so the rule is applied to the index with the merge observed
         idx (if (seq carried) (let [w (pdb/speculate main carried)] (index idx main (:db-after w) (:tx-data w))) idx)
@@ -1392,8 +1394,12 @@
                 :judge "outside agents' tasks to judge {:op :judge :task :env :agent}, and waits on main {:op :quiet :after t :p promise}, each answered at the first quiet at or after t (external; seon.system/await-db)"}
        :ins {:main "main's commits" :answers "the api's answers" :wake "an agent a message reached, {:agent key}"} :outs {:to-api "requests"}
        :workload :io
-       :ping-map-fn (fn [st] {:seen (:seen st 0) :lists (:lists st 0) :t (:t st) :flights (count (:flights st)) :pending (count (:pending st)) :behind (count (:behind st))
-                              :quiet (boolean (:quiet st)) :root-causes (count (:root-causes (:quiescent st)))})})
+       :ping-map-fn (fn [st] {:seen (:seen st 0) :lists (:lists st 0) :t (:t st) :flights (count (:flights st))
+                              ;; each flight's task and the step it waits at, so a hang's evidence names a judge that never settles
+                              :flight-steps (into (sorted-map) (for [[id f] (:flights st)] [id (or (:step f) (get-in f [:act :op]))])) :pending (count (:pending st)) :behind (count (:behind st))
+                              :quiet (boolean (:quiet st)) :root-causes (count (:root-causes (:quiescent st)))
+                              ;; the waits on main it holds ({:after t}) and its quiet report's write until answered: what a parked await-db waits on
+                              :waits (mapv :after (:waits st)) :report (:report st) :live (count (:live (:idx st)))})})
   ([args] (assoc (dissoc args :judge) :seen 0 :rid 0 :flights {} :pending {} :waits [] :behind []
                  ::flow/in-ports {:judge (:judge args)}))
   ;; a stop answers every wait still held: root stopped, nothing will answer it

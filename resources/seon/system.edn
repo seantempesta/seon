@@ -77,6 +77,9 @@
   ;; check step on the session's own checkout (docs/merging.md#a-session-proves-through-root); admitted by the processes each class
   ;; holds under the config's dials (seon.fx/admits?, read live), one performer a core
   :process {:perform seon.fx/run-item :workers :bind/process-workers}
+  ;; root's server ops (seon.server): each answered on a :mixed worker, so an op that blocks holds its worker, never the
+  ;; connection's fiber, a carrier or another connection (docs/server.md#ops)
+  :server-op {:perform seon.server/perform-op :workers :bind/server-op-workers}
   ;; the wiki's history from git: what each section was last written against (seon.doc/baseline-plan)
   :history {:perform seon.fx/wiki-history :workers 1}
   ;; a stalled agent's evidence (sample, lsof, ps, its fiber dump), captured as the stall is recorded

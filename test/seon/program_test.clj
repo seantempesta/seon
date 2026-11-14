@@ -383,6 +383,40 @@
     (is (= {:test 2 :pass 2 :fail 0 :error 0}
            (select-keys (binding [clojure.test/*test-out* (java.io.StringWriter.)] (clojure.test/test-ns 'app.pt-calc-test)) [:test :pass :fail :error])))))
 
+;; Estimate: 3 records 0.9M + defined-keys over ~3 definitions 0.1M + a retraction 0.3M + load-all!'s live-ids, one form row and
+;; its load (~0.6M) + gone-definitions' 3 seeks. Estimated 3,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-process-on-another-program-unmaps-what-main-dropped-and-loads-what-it-changed
+  ;; docs/source.md#a-boot-runs-mains-program: a root whose binary was built from db (forms B, definitions defs) boots on
+  ;; main, which redefined f and deleted g (an import retracts a removed form and its var). Red before: g stayed bound,
+  ;; and load-all! read every live form's row
+  (let [db (record (empty-db) 'app.pt-boot "(defn f [] 1)" 'app.pt-boot "(defn g [] 2)")
+        ;; imported from its file, as main's namespaces are: held whole
+        db (d/db-with db [{:ns/name 'app.pt-boot :ns/file "src/app/pt_boot.clj"}])
+        forms (into #{} (map :v) (d/datoms db :aevt :form/id))
+        defs (conj (program/defined-keys db) [:var 'app.pt-boot-other/x])
+        _ (intern (program/ensure-ns! 'app.pt-boot-other) 'x 1)
+        g-var (:db/id (d/entity db [:var/name 'app.pt-boot/g]))
+        main (record (d/db-with db [[:db/retractEntity (:db/id (:var/form (d/entity db g-var)))] [:db/retractEntity g-var]])
+                     'app.pt-boot "(defn f [] 3)")
+        ;; the process back on the binary's f (recording main's evaluated it)
+        _ (eval-account 'app.pt-boot "(defn f [] 1)")]
+    (is (= #{[:var 'app.pt-boot/f] [:var 'app.pt-boot/g] [:var 'app.pt-boot-other/x]} defs))
+    (is (= 1 ((resolve (quote app.pt-boot/f)))) "the process holds the binary's f")
+    (let [r (program/load-all! main {:tests? false :forms forms :defs defs})]
+      (is (= {:loaded 1 :removed [[:var 'app.pt-boot/g]] :errors []} r) "main's f loaded; g unmapped; a namespace main holds none of untouched")
+      (is (= 3 ((resolve 'app.pt-boot/f))) "main's definition answers")
+      (is (nil? (resolve 'app.pt-boot/g)) "the deleted var is unbound")
+      (is (= 1 @(resolve 'app.pt-boot-other/x)) "another program's namespace keeps the binary's"))
+    (is (= {:loaded 0 :errors []} (program/load-all! main {:tests? false :forms (into #{} (map :v) (d/datoms main :aevt :form/id)) :defs (program/defined-keys main)}))
+        "a binary of main's own program loads and unmaps nothing")
+    ;; red at the land of 2026-11-15 01:34: a test store's example program records a namespace the binary holds whole
+    (let [x (record (empty-db) 'app.pt-boot-rec "(defn h [] 1)" 'app.pt-boot-rec "(defn k [] 2)")
+          defs (program/defined-keys x)
+          rec (record (empty-db) 'app.pt-boot-rec "(defn h [] 1)")]
+      (is (empty? (:removed (program/load-all! rec {:tests? false :forms #{} :defs defs}))) "a recorded namespace is not main's whole: nothing unmapped")
+      (is (some? (resolve 'app.pt-boot-rec/k)))
+      (is (empty? (:removed (program/load-all! main {:forms forms :defs defs}))) "and a process that is not root's boot never unmaps"))))
+
 (defn- selected
   "What a change from db to db' selects, as every run selects it: seon.proofs/plan's :selected
   over the two dbs' reach digests."
@@ -1656,7 +1690,7 @@
     (is (some? (d/entity db [:var/name 'app.kt/f])) "the tree is read: the store was made again and the program imported")
     (is (= :db.type/data (get-in (:schema db) [:seon.model-call/basis :db/valueType])) "on a store of this schema")))
 
-;; Estimate: 2 stores made by program-db (the first import and the bound's restart) x S 10M = 20M; 3 one-file imports 3M; 1 kept read 0.5M; 4 git children and 3 tree-ids ~1M. Estimated 20,000,000 ticks, worked from the work, never from a run.
+;; Estimate: 2 stores made by program-db (the first import and the bound's next generation) x S 10M = 20M; 3 one-file imports 3M; 1 kept read 0.5M; 4 git children and 3 tree-ids ~1M. Estimated 20,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-kept-tree-is-read-whatever-its-stores-size
   ;; found 2026-11-10 (Context, the Tests session): the plan imported a tree past the store's bound,
   ;; then a shard found the store over it, removed it, and its first program reader imported the tree again inside its own
@@ -1676,7 +1710,8 @@
     (spit (str d "/src/app/ks2.clj") "(ns app.ks2)\n")
     (sh/sh "git" "-C" d "add" ".")
     (runner/program-db d store (fx/tree-id d) 1)
-    (is (not (.isFile marker)) "the plan's bound, at a new tree, starts the store again")))
+    (is (.isFile marker) "the plan's bound, at a new tree, starts the key's next generation: the full store is never removed or moved")
+    (is (= [(str store "-1") store] (ts/generations store)) "generation 1 holds the new tree")))
 
 ;; Estimate: 4 record-tx 0.2M (the world is cached); 3 graph+index builds x 0.25M = 0.75M; 2 with-db-withs 0.2M; 1 held index + update 0.5M. Estimated 2,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-change-to-what-root-runs-moves-every-test-that-starts-a-root

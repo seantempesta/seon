@@ -58,6 +58,20 @@
     (is (= "abc" (:value sent)) "the request's input is what the forms read")
     (is (= "" (:value none)) "with none sent, stdin is empty: a read answers at once")))
 
+;; Estimate: the shard's shared root (booted once, ~0 here), twelve sockets opened and closed (~10k ticks each) and two root evals
+;; (~0.25M each): ~0.6M; 1,000,000 ticks, worked from the work.
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 1000000} :seon.test/execs ["git"]} an-idle-connection-holds-no-os-thread
+  ;; task seon.server/connections-park-on-fibers-and-ops-run-bounded (docs/server.md): a connection is a fiber parked on its socket,
+  ;; ~6 KB, never an OS thread of its own (~87 KB, one per connection, unbounded): twelve idle connections leave root's thread count as it was
+  (let [root @ts/shared-root-default
+        threads #(ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code "(seon.lib/nthreads)"})))
+        before (threads)
+        socks (vec (repeatedly 12 #(java.net.Socket. "127.0.0.1" (int (:port root)))))
+        ;; each accepted before the count: one request on a thirteenth connection is answered after the twelve were taken
+        during (threads)]
+    (run! #(.close ^java.net.Socket %) socks)
+    (is (<= (- during before) 1) (str "twelve idle connections added " (- during before) " OS threads (one is the asking connection's own, today)"))))
+
 (deftest a-server-refused-answer-is-the-one-error-map
   ;; task seon.render/one-owner-per-view-path (B2): the server refuses as root does, with the
   ;; one error map, never a second {:error "text"} shape

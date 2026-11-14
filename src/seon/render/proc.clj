@@ -334,10 +334,13 @@
                                :view v}
           :else v)))
 
+;; debug-value reads the branch's one kept walk, which branch-walk (below, beside the other kept walks) makes and advances
+(declare branch-walk)
+
 (defn- debug-value
   "View [:debug id]'s page: the timeline of agent id's requests on its branch as this proc last read it
   (its model calls, each with its basis), the one shown at the view's :at (a model call's eid; absent,
-  :latest), drawn by seon.render.ui/debug-turn over seon.render.ui/debug-input when its input changes: a past
+  :latest), drawn as units (seon.render.ui/debug-units: its frame, its head, a row a message) over seon.render.ui/debug-input, each when its own input changes: a past
   turn's is its eid (made again from its basis, it never changes), latest's the branch's newest transaction (drawn
   again each time the branch moves, and only while a tab watches the view). nil until the branch is read;
   an agent with no branch on main (the user's) or whose branch could not be read has no turn to show, and
@@ -365,15 +368,25 @@
           opened (get-in st [:tab view :open] #{})
           raw? (contains? opened "d-turn-raw")
           lb (peek bases)
-          to-come? (ui/to-come? bdb lb)]
-      (ui/debug (if (= :root (second view)) :root (focus (:main-db st) view))
+          to-come? (ui/to-come? bdb lb)
+          ;; the turn to come reads the branch's one kept walk (branch-walk: the one every view of the agent draws from), advanced
+          ;; to bdb, never a cold draw of its request (docs/render.md#the-debug-page-is-the-wire-request)
+          b (get-in st [:branches view :branch])
+          e (when-let [eid (location (:main-db st) view)] (d/entity (:main-db st) eid))
+          kw (when (and to-come? b e (= :latest at)) (branch-walk (get-in st [:branch-reads b :walk]) bdb e))]
+      (cond-> (ui/debug (if (= :root (second view)) :root (focus (:main-db st) view))
                 (cond-> {:turns (mapv (fn [e {:seon.model-call/keys [basis tokens cache-hit-tokens]}]
                                                   (cond-> {:e e :turn (:turn basis) :origin (:origin basis)} tokens (assoc :tokens tokens) cache-hit-tokens (assoc :cached cache-hit-tokens)))
                                                 calls pulled) :at at :to-come? to-come?} gone (assoc :gone gone))
-                (when (seq calls)
-                  {:id "d-turn" :input [at (when (= :latest at) (:max-tx bdb)) opened]
-                   :draw (fn [_] [(ui/debug-turn {:unit "d-turn" :seon.render/index (program/index-of-db bdb)} (-> (ui/debug-input bdb at calls raw?) (assoc :view (ui/view-param view) :opened opened))) nil])})
-                context)))))
+                ;; the turn's frame, head and each of its messages a unit (ui/debug-units), each drawn only when its own input moved: a move
+                ;; draws the messages it added (docs/render.md#the-debug-page-is-the-wire-request)
+                ;; read outside the view's recorder, as every read of the branch here is (branch-walk): the request is keyed by the branch's
+                ;; head, and its reads are the branch's, never main's index
+                (when-let [in (when (seq calls) (some-> (binding [datahike.index.interface/*reads* nil] (ui/debug-input bdb at calls raw? (:p kw)))
+                                                        (assoc :view (ui/view-param view) :opened opened)))]
+                  (ui/debug-units {:unit "d-turn" :seon.render/index (program/index-of-db bdb)} in))
+                context)
+        kw (assoc ::walks {:branch [b kw]}))))))
 
 (def ^:private gone "The agent statuses of an ended process (:seon.agent/status)." (:seon.status/gone (contract/properties :seon.agent/status)))
 
@@ -422,14 +435,15 @@
   (seon.render/walk, `walk-of`) by its entity's render (seon.render/render-var-of: its tree, with ident, the identity the caller
   holds of it, for a branch that holds no entity yet): {:p the walk's value :c the ctx :db the db it is at :ident}. Root's own page
   (root-walk), each user's (`user-walk`) and each watched agent's branch (`branch-walk`) keep one; `advance-walk!` moves it.
-  Walk-opts go on the walk (:id-prefix, `user-walk`'s). See docs/render.md#a-page-is-a-kept-walk."
+  Walk-opts go on the walk (:id-prefix, `user-walk`'s; :outputs, the outputs it answers, kept while it is: a branch's answers the
+  model's request too, `branch-walk`). See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:maybe pos-int?] :any :map :seon.host/fn] :map]
-                  [:=> [:cat :seon.host/db [:maybe pos-int?] :any :map :seon.host/fn [:map [:id-prefix {:optional true} :string]]] :map]]}
+                  [:=> [:cat :seon.host/db [:maybe pos-int?] :any :map :seon.host/fn [:map [:id-prefix {:optional true} :string] [:outputs {:optional true} [:set :keyword]]]] :map]]}
   ([db e branch ident mark] (kept-walk db e branch ident mark {}))
   ([db e branch ident mark walk-opts]
   (let [c (assoc-in (ctx/build (program/index-of-db db) db e branch) [:ix :own-index?] true)
-        kw (merge {:c c :db db :ident ident} (select-keys walk-opts [:id-prefix]))]
-    (assoc kw :p (walk-of nil db (mark (:tree c)) (get-in c [:ix :index]) ident nil (select-keys walk-opts [:id-prefix]))))))
+        kw (merge {:c c :db db :ident ident} (select-keys walk-opts [:id-prefix :outputs]))]
+    (assoc kw :p (walk-of nil db (mark (:tree c)) (get-in c [:ix :index]) ident nil (select-keys walk-opts [:id-prefix :outputs]))))))
 
 (defn- advance-walk!
   "Kept walk kw (`kept-walk`) as of db, a later value of its branch: its ctx patched by what moved
@@ -441,20 +455,20 @@
   {:malli/schema [:function [:=> [:cat :map :seon.host/db :any :seon.host/fn] :map]
                   [:=> [:cat :map :seon.host/db :any :seon.host/fn [:maybe [:map [:from :seon.host/db] [:moved [:sequential :any]]]]] :map]]}
   ([kw db branch mark] (advance-walk! kw db branch mark nil))
-  ([{:keys [p c ident id-prefix] held :db :as kw} db branch mark known]
+  ([{:keys [p c ident id-prefix outputs] held :db :as kw} db branch mark known]
   (let [same? (identical? held db)
         moved (cond same? [] (identical? held (:from known)) (:moved known) :else (ctx/moved held db nil))
         c' (if same? c (ctx/patch c db moved branch))]
     (assoc kw :c c' :db db
-           :p (walk-of p db (mark (:tree c')) (get-in c' [:ix :index]) ident moved (cond-> {} id-prefix (assoc :id-prefix id-prefix)))))))
+           :p (walk-of p db (mark (:tree c')) (get-in c' [:ix :index]) ident moved (cond-> {} id-prefix (assoc :id-prefix id-prefix) outputs (assoc :outputs outputs)))))))
 
 (defn- rewalk
   "Kept walk kw with f applied to the tree its value holds (root's runtime values, `process!`, `health!`), walked again over
   the db it holds with nothing moved: the tree's diff (seon.ctx/changes) draws exactly the components that read what f changed.
   See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :map :seon.host/fn] :map]}
-  [{:keys [p db ident id-prefix] :as kw} f]
-  (assoc kw :p (walk-of p db (f (:tree p)) (:index p) ident [] (cond-> {} id-prefix (assoc :id-prefix id-prefix)))))
+  [{:keys [p db ident id-prefix outputs] :as kw} f]
+  (assoc kw :p (walk-of p db (f (:tree p)) (:index p) ident [] (cond-> {} id-prefix (assoc :id-prefix id-prefix) outputs (assoc :outputs outputs)))))
 
 (defn- take-walk-defects
   "St with the defects its kept walks hold (root's, each branch read's, each user's: the components that threw in a walk since
@@ -491,7 +505,8 @@
         ;; a walk of another entity than the branch holds now (none, before the agent's first write to its
         ;; branch; another, a branch made again) is made again: a patch reaches only what its ctx holds
         (or (nil? kw) (not= eid (get-in kw [:c :tree :db/id])))
-        (assoc (kept-walk bdb eid branch {:seon.agent/key (:seon.agent/key e)} mark) :opened opened)
+        ;; it answers the model's request too, so the debug page's latest reads it, never a cold draw (seon.ctx.wire/render's :walk)
+        (assoc (kept-walk bdb eid branch {:seon.agent/key (:seon.agent/key e)} mark {:outputs #{:seon.render/hiccup :seon.render/openai-compat}}) :opened opened)
         (and (identical? (:db kw) bdb) (= opened (:opened kw))) kw
         :else (assoc (advance-walk! kw bdb branch mark) :opened opened))))))
 
@@ -1297,8 +1312,10 @@
                           :health (let [st (-> st (advance-main (:db m)) (assoc :fold (:fold m)) health!)
                                         h (some-> (:root-walk st) :p :tree :health)]
                                     ;; none held (no root walk yet): read whole, as health! does when it holds none
+                                    ;; the point it was put at rides on it (its metadata's :db and :fold): a reader comparing
+                                    ;; it reads there, never a later main or fold (seon.agent-test/root-reads-the-health-the-render-proc-keeps)
                                     (step/out! o :to-api {:op :health-answer :rid (:rid m) :db (:main-db st)
-                                                          :r (or h (problems/health (:main-db st)))})
+                                                          :r (with-meta (or h (problems/health (:main-db st))) {:db (:main-db st) :fold (:fold st)})})
                                     (pass st o))
                           :context (let [st (-> st health! with-context)] (step/out! o :to-web {:op :text :k (:k m) :text (get-in st [:context :text] "")}) st)
                           ;; the debug timeline stepped to a turn, or to latest

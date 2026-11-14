@@ -673,8 +673,8 @@
   (let [dir (str (System/getProperty "java.io.tmpdir") "/evidence-" (random-uuid))
         ;; the leader is disowned (zsh waits on none of it) and says its pid on a fifo once its member has exec'd
         leader (str/trim (:out (clojure.java.shell/sh
-                                "zsh" "-c" (str "mkdir -p " dir " && mkfifo " dir "/leader && "
-                                                "{ perl -e 'setpgrp(0,0); pipe(R,W); if (!fork) { if (!fork) { close R; open STDOUT, \">/dev/null\"; "
+                                "zsh" "-c" (str "mkdir -p " dir "/runs && mkfifo " dir "/leader && "
+                                                "{ perl -e 'setpgrp(0,0); pipe(R,W); if (!fork) { if (!fork) { close R; open STDOUT, \">" dir "/runs/probe.log\"; $|=1; print \"probe-line\\n\"; "
                                                 "exec {\"sleep\"} \"jolt-evidence-probe\", \"30\" } exit 0 } close W; my $x = <R>; wait; "
                                                 "print \"$$\\n\"; close STDOUT; sleep 30' > " dir "/leader 2>/dev/null </dev/null &! }; "
                                                 "read -r p < " dir "/leader; print -r -- $p"))))]
@@ -685,11 +685,46 @@
         (is (zero? (:exit r)) (:err r))
         (is (seq signalled) "the member that left the tree is signalled through its group")
         (is (every? #(.exists (java.io.File. (str dir "/sample-" % ".txt"))) signalled)
-            (str "every process signalled has its sample: " (vec signalled) " " (vec (.list (java.io.File. dir))))))
+            (str "every process signalled has its sample: " (vec signalled) " " (vec (.list (java.io.File. dir)))))
+        ;; and the log it writes under a runs directory, which its shard's hook removes when the shard ends (deps' run14 lost the
+        ;; shared root's log that way): kept beside the samples
+        (is (some #(and (str/ends-with? % "probe.log") (str/includes? (slurp (str dir "/logs/" %)) "probe-line"))
+                  (seq (.list (java.io.File. (str dir "/logs")))))
+            (str "the log a signalled process writes is kept: " (vec (.list (java.io.File. (str dir "/logs")))))))
       (finally
         ;; the group this test made, led by the process it started (AGENTS.md section 8: a verified pid)
         (when (re-matches #"\d+" leader) (clojure.java.shell/sh "kill" "-TERM" (str "-" leader)))
         (seon.lib/remove-tree! dir)))))
+
+;; docs/machine.md#reading-a-hang: a root a shard started detached is the run's, and its evidence asks it for its state at the port it
+;; listens on and keeps the log it writes through bin/held's pipe (flow's dry run: neither, so its hang could not be read). The root
+;; is a stand-in: a process of the run, never signalled (not Jolt), listening on localhost and writing a log under a runs directory.
+;; Estimate: two shell calls in process, ~0.5M ticks.
+(deftest ^{:seon.test/estimate {:ticks 1000000} :seon.test/execs ["perl" "bin/evidence"]} bin-evidence-asks-each-listening-process-and-keeps-every-log
+  (let [dir (str (System/getProperty "java.io.tmpdir") "/evidence-" (random-uuid))
+        _ (.mkdirs (java.io.File. (str dir "/runs")))
+        ;; a log its parent's command names with --log and no process holds open, as bin/held --log P writes a root's stderr a
+        ;; write at a time; the parent (the held) is above the process handed in, so it is no member of the run's tree
+        _ (spit (str dir "/runs/held.log") "held-line\n")
+        listener (str "open(my $log, \">\", \"" dir "/runs/listener.log\"); $log->autoflush(1); print $log \"listener-line\\n\"; "
+                      "my $l = IO::Socket::INET->new(Listen => 1, LocalAddr => \"127.0.0.1:0\") or die; $| = 1; print $l->sockport, \"\\n\"; "
+                      "my $c = $l->accept; my $q = <$c>; print $c \"{:probe-state true}\\n\"; close $c; sleep 30")
+        held (.start (ProcessBuilder. ^java.util.List
+                                      ["perl" "-e" "$| = 1; my $k = fork; if (!$k) { exec @ARGV[0..3] } print \"$k\\n\"; sleep 30"
+                                       "perl" "-MIO::Socket::INET" "-e" listener "--log" (str dir "/runs/held.log")]))
+        out (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream held)))
+        pid (.readLine out)
+        port (.readLine out)]
+    (try
+      (is (re-matches #"\d+" (str port)) (str "the listener's port: " port))
+      (let [r (clojure.java.shell/sh (str (seon.config/checkout) "/bin/evidence") dir pid)
+            logs (seq (.list (java.io.File. (str dir "/logs"))))]
+        (is (zero? (:exit r)) (:err r))
+        (is (str/includes? (str (slurp (str dir "/seon-state-" pid ".edn"))) ":probe-state") "the listening process is asked for its state")
+        (is (some #(and (str/ends-with? % "listener.log") (str/includes? (slurp (str dir "/logs/" %)) "listener-line")) logs)
+            (str "and the log it writes is kept, though it is never signalled: " (vec logs)))
+        (is (some #(str/ends-with? % "held.log") logs) (str "and the log its parent's command names with --log: " (vec logs))))
+      (finally (seon.lib/c-kill (parse-long (str pid)) 15) (.destroy held) (seon.lib/remove-tree! dir)))))
 
 ;; bin/laws defs (AGENTS.md section 5, every definition happens once): a namespace defining one name twice keeps only the second, silently
 ;; (runtime found its shell test had replaced deps' of one name). The law reads the files' text, so it is proved

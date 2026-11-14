@@ -682,7 +682,15 @@
         ;; only root's interrupt (a ThreadDeath) leaves a test unreported now: every other throw is the test's own :error (one)
         ;; read before the next test's measure opens its epoch: the test's own contracted calls
         measured (fn [v] (let [_ (profile/reads-begin!)
-                               m (profile/measure! #(one v))]
+                               m (profile/measure! #(one v))
+                               ;; bytes are a budget as ticks are: ten times what the deftest states (^{:seon.test/estimate {:bytes n}}),
+                               ;; judged once the test ends (an allocation is not interrupted mid-test), the test's own typed error
+                               eb (:bytes (:seon.test/estimate (meta v)))]
+                           (when (and eb (:bytes m) (> (:bytes m) (* 10 eb)))
+                             (t/do-report {:type :error :var v :seon.error/type :seon.test/bytes-spent :bytes (:bytes m) :budget (* 10 eb)
+                                           :message (str "the test allocated " (:bytes m) " bytes against its budget of " (* 10 eb)
+                                                         ": ten times the bytes its estimate states (docs/merging.md#a-tests-tick-budget). Ten times over is "
+                                                         "the finding: fix the work, or, when the estimate was wrong, restate it worked from its parts")}))
                            (done v (assoc (dissoc m :value :thrown) :fns (profile/with-reads (profile/touched)) :budget (budget v)))
                            (when-let [e (:thrown m)] (throw e))))
         body #((t/join-fixtures (get @t/once-fixtures n []))

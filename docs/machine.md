@@ -8,7 +8,7 @@ The machine Seon is built on and for, and how builds, memory, disk and processes
 
 Native profiling needs no root: `sample PID SECS -file F` and `xcrun xctrace record --template 'Time Profiler' --attach PID`. Native frames resolve (liblmdb through ``target/lib/liblmdb.dylib.dSYM``, the probe library); Chez and Jolt code shows as `???`, so Clojure-level counts and times are `seon.profile`'s. `vmmap` and `vm_stat` need no root (`vmmap` is slow on the store's 64 GiB map); `dtrace`, `fs_usage` and `spindump` need root with SIP on, so do not plan on them.
 
-A `bin/check` run still going after 600 s (`SEON_CHECK_EVIDENCE_AFTER_S`) leaves `at-checkpoint/` in its directory (`bin/evidence`): the process tree, each Jolt process's sample and files, and a fiber dump on its stderr.
+A `bin/check` run still going after 600 s (`SEON_CHECK_EVIDENCE_AFTER_S`) leaves `at-checkpoint/` in its directory (`bin/evidence`): the process tree, each Jolt process's sample and files, a fiber dump on its stderr, a clone of each log any process of the run writes under a runs directory (`logs/`: a shared root's `root.log`, where `bin/held` writes its stderr and so its dump, and which its shard's end removes), and each listening process's Seon state asked at its own port (`seon-state-PID.edn`), so a root a shard started detached is read with no port handed in.
 
 ### Reading a number
 

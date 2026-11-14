@@ -294,6 +294,21 @@
     (is (re-find #"the fixture's store is gone" (:message t)) "the throw's own message, not a guess")
     (is (= "{:store :gone}" (:data t)) "and its data")))
 
+;; Estimate: two tiny tests, one building a vector of 100k (~1M ticks, ~2 MB), and their runner = ~5000000.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-test-past-its-bytes-budget-ends-typed
+  ;; docs/merging.md#a-tests-tick-budget, task seon.proofs/a-tests-bytes-and-wall-are-budgets-as-its-ticks-are (owner: "we don't
+  ;; accept large overruns for ticks, mem or time"): bytes are a budget as ticks are, ten times what the deftest states
+  (record (ts/test-db) 'user "(ns app.pv-bytes-test (:require [clojure.test :refer [deftest is]]))"
+          'app.pv-bytes-test "(deftest ^{:seon.test/estimate {:ticks 100000000 :bytes 1000}} allocates (is (= 100000 (count (vec (range 100000))))))"
+          'app.pv-bytes-test "(deftest ^{:seon.test/estimate {:ticks 100000000 :bytes 100000000}} within (is (= 100000 (count (vec (range 100000))))))")
+  (let [notes (atom [])
+        ran (proofs/run-tests! '[app.pv-bytes-test/allocates app.pv-bytes-test/within] {} #(swap! notes conj %))
+        spent (some #(when (= :seon.test/bytes-spent (get-in % [:seon.test/report :seon.error/type])) (:seon.test/report %)) @notes)]
+    (is (= 1 (:error (ran 'app.pv-bytes-test/allocates))) "past ten times its stated bytes: the test's own error")
+    (is (= 10000 (:budget spent)) (pr-str spent))
+    (is (> (:bytes spent) 10000) "naming what it allocated")
+    (is (proofs/green? (ran 'app.pv-bytes-test/within)) "within its budget: green")))
+
 (deftest ^{:seon.test/estimate {:ticks 10000000}} each-test-has-its-own-budget
   ;; task seon.proofs/one-prove-path: the bound is per test, so a test that never ends is red,
   ;; named, as the typed :seon.test/ticks-spent, and the run goes on: the next test is green,
@@ -415,7 +430,7 @@
   connection for the process (its db reads the store), so a shard running these tests would hold
   one env per scratch store for its life: a test's own store ends with the test
   (docs/failure-points.md#lmdb-locks)."
-  [& paths] (run! klmdb/close-env! paths))
+  [& paths] (run! (fn [p] (run! klmdb/close-env! (cons p (ts/generations p)))) paths))
 
 (defn- calls-of
   "[{var calls} of the contracted functions thunk called, and thunk's answer]."
@@ -431,30 +446,38 @@
       "both worlds are fixtures: an agent forces them before its first test fork, a shard before its first test"))
 
 ;; docs/merging.md#verdicts-are-a-cache: the kept program store is the repository's, read by every checkout's plans and shards at
-;; once, so one past its bound is moved aside whole (an atomic rename) for a new one, never removed in place: a removal under
-;; another process's reader left an empty data file its next connect read as "Database does not exist" (data's, runtime's and
-;; root's health runs, 2026-11-14, program-store-37babf7c). What was moved aside goes once no process holds it.
-;; Cost: two small imports (~20M each, a-failed-import's), one rename = ~40M.
-(deftest ^{:seon.test/estimate {:ticks 40000000} :seon.test/execs ["git"]} a-kept-program-store-past-its-bound-is-moved-aside-not-removed
+;; once, so one past its bound is never moved or removed: the next tree imported starts the key's next generation
+;; (seon.test-store/generations), and a run reads its tree from the generation that holds it. A store moved aside whole under its
+;; readers sent every run whose plan had kept its tree there to import the program again inside a test's tick budget (a
+;; 1,000,305,016-tick red, tests-4, 2026-11-14). Run A holds its tree's db in generation 0; tree B, past the bound, goes to
+;; generation 1; A's db is read whole and A's branch found again by program-db, nothing imported.
+;; Estimate: A's whole import ~20M (a-failed-import's); B's whole import into the empty generation 1 ~20M; A's program-db again,
+;; two branch? seeks (a generation each) and an open each ~3M; A's read of its forms 1M; git children and tree-ids ~1M. Estimated 45,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 45000000} :seon.test/execs ["git"]} a-new-trees-store-never-replaces-a-store-a-run-reads
   (let [d (checkout! {"deps.edn" "{}" "src/app/mv_calc.clj" "(ns app.mv-calc)\n(defn add [a b] (+ a b))\n"})
         dir (scratch-dir)
         store (str dir "/ps-0123abcd")
-        aside #(seq (filter (fn [n] (str/starts-with? n "ps-0123abcd.retired-")) (.list (java.io.File. ^String dir))))]
+        a (fx/tree-id d)
+        names #(set (filter (fn [n] (= "app.mv-calc" (namespace n))) (d/q '[:find [?n ...] :where [?v :var/name ?n]] %)))
+        db-a (runner/program-db d store a 1)]
     (try
-      (runner/program-db d store (fx/tree-id d))
-      (spit (str d "/src/app/mv_calc.clj") "(ns app.mv-calc)\n(defn add [a b] (+ b a))\n")
+      (spit (str d "/src/app/mv_calc.clj") "(ns app.mv-calc)\n(defn add [a b] (+ b a))\n(defn sub [a b] (- a b))\n")
       (clojure.java.shell/sh "git" "-C" d "add" ".")
-      (close-stores! store)
-      (let [tree (fx/tree-id d)]
-        (runner/program-db d store tree 1)
-        (is (= 1 (count (aside))) "the store past its bound was moved aside whole, not removed under its readers")
-        (is (.isFile (java.io.File. (str dir "/" (first (aside)) "/data.mdb"))) "with its data")
-        (close-stores! store)
-        (let [{:keys [conn]} (pdb/open! :lmdb store 0 :db)]
-          (try (is (pdb/branch? conn (runner/tree-branch tree)) "and the new store holds the new tree")
-               (finally (d/release conn)))))
-      (ts/shared-program-store! (str dir "/ps") "0123abcd")
-      (is (nil? (aside)) "what was moved aside goes once no process holds it")
+      (let [b (fx/tree-id d)
+            db-b (runner/program-db d store b 1)
+            [calls db-a2] (calls-of #(runner/program-db d store a 1))]
+        (is (= [(str store "-1") store] (ts/generations store)) "tree B, past the bound, started generation 1; generation 0 is where it was")
+        (is (= #{'app.mv-calc/add} (names db-a)) "run A reads its tree to the end, its store not moved: its program, not B's")
+        (is (= #{'app.mv-calc/add 'app.mv-calc/sub} (names db-b)) "and B's db is B's tree")
+        (is (and (nil? (calls 'seon.source/import-tx)) (nil? (calls 'seon.source/refresh-tx))) "A's branch is found in generation 0: nothing imported")
+        (is (= #{'app.mv-calc/add} (names db-a2)) "and it is A's program")
+        (is (.isFile (java.io.File. store "data.mdb")) "generation 0 is where it was, with its data")
+        (let [stage (java.io.File. (str store "-2.stage-left-behind"))]
+          (.mkdirs stage)
+          (is (= [(str store "-1") store] (ts/generations store)) "a stage left behind is no generation")
+          (is (= (str store "-2") (ts/next-generation store)) "and does not move the next one")
+          (ts/shared-program-store! (str dir "/ps") "0123abcd")
+          (is (not (.exists stage)) "and a stage no process holds is collected")))
       (finally (close-stores! store)))))
 
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-failed-import-leaves-no-branch
@@ -849,3 +872,11 @@
                 :digests {'a.x-test/ran "d1" 'a.p-test/boots "d2"}}
         {:keys [ran]} (proofs/answer-ran answer)]
     (is (= #{'a.x-test/ran} (set (keys ran))) "only the test that ran is a verdict to cache")))
+
+;; Estimate: three predicate calls = ~10000.
+(deftest ^{:seon.test/estimate {:ticks 10000}} a-waived-pass-keeps-its-rows
+  ;; docs/cost.md#an-accepted-overrun-and-its-ratchet (web-2's ask): a cost proof that passes by its waiver keeps its rows with its
+  ;; green, so the waiver is read without being taken off; a plain pass keeps nothing, a failure is kept as always
+  (is (runner/kept-report? {:type :pass :actual {:rows [] :verdict {:ok? true :accepted {:task "t/x"}}}}) "a waived pass")
+  (is (not (runner/kept-report? {:type :pass :actual {:rows [] :verdict {:ok? true}}})) "a plain pass")
+  (is (runner/kept-report? {:type :fail :message "over"}) "a failure"))

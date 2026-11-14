@@ -161,72 +161,85 @@
               (catch Throwable t (when-not (= :branch-already-exists (:type (ex-data t))) (throw t))))
          (finally (d/delete-branch! conn stage)))))
 
-(defn- move-aside!
-  "Move the kept program store at store out of its path in one rename, to store.retired-<uuid>, and answer nil: never removed in
-  place, since the store is the repository's and other processes' plans and shards read it at once (a removal under a reader
-  left an empty data file its next connect read as \"Database does not exist\", 2026-11-14). A reader holding its env keeps
-  reading the files moved aside; seon.test-store/shared-program-store! removes them once no process holds them. A rename that
-  fails throws. See docs/merging.md#verdicts-are-a-cache."
-  {:malli/schema [:=> [:cat :string] :nil]}
-  [store]
-  ;; this process's own env first (docs/failure-points.md#lmdb-locks), as a removal closed it
-  (klmdb/close-env! store)
-  (when (.exists (io/file store))
-    (let [to (str store ".retired-" (random-uuid))
-          [rc errno] (seon.lib/c-rename store to)]
-      (when-not (zero? rc)
-        (throw (ex-info (str "the kept program store " store " could not be moved aside to " to " (errno " errno ")")
-                        {:seon.error/type :seon.test-store/not-moved-aside :path store :errno errno})))))
-  nil)
+(defn kept-report?
+  "Is clojure.test report m one a run keeps with its test's result: a failing assertion, or a cost proof that passed by its waiver
+  (its verdict :accepted, seon.cost/judge): its rows are the numbers its waiver is read by, kept on the green's verdict (:cost), so
+  the waiver is read without being taken off. See docs/cost.md#an-accepted-overrun-and-its-ratchet."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [m] (boolean (or (#{:fail :error} (:type m)) (and (= :pass (:type m)) (get-in m [:actual :verdict :accepted])))))
 
 (defn program-db
   "The db holding :seon.config.source/dirs of the checkout at root as program facts (seon.source: analyzed,
   not run), kept in the LMDB store at store on a branch named by root's git tree id (seon.fx/
-  tree-id): the same tree reads its branch; a tree never seen is branched from the kept tree of
-  the fewest changed program files (one in root's repository) and brought current by
-  seon.source/refresh-tx; a store keeping no tree imports the whole program (seon.source/
+  tree-id): the same tree reads its branch, from whichever generation of the key's store holds it, newest first
+  (seon.test-store/generations; one seon.db/branch? a generation); a tree never seen is branched from the kept tree of
+  the fewest changed program files (one in root's repository, of the generation it is made in) and brought current by
+  seon.source/refresh-tx; a generation keeping no tree imports the whole program (seon.source/
   import-tx). A tree's branch exists only once its import committed: its facts are made before
   the branch (a file that does not read throws first), and a transaction refused takes the
   branch it made with it, so no later plan reads a partial program as the tree's (task
   seon.proofs/a-failed-import-leaves-no-branch: one selected 0 tests and said OK). Every text is
   read from the tree's git objects (tree-files). Two runs on one new tree both import it and the first to
-  finish keeps the branch (keep-tree!). A store past
-  max-bytes on disk (an LMDB file never shrinks) is moved aside (move-aside!, never removed under its readers) when a tree
-  must be imported into it, and starts again from that tree; a tree it keeps is read whatever its size. Only the plan passes a bound (tests-of:
-  :seon.config.proofs/program-store-max-bytes), before anything of its run reads the store: the health step importing
-  the base tree beside the shards removed the store, and the head's branch the plan had kept with it, so every shard's
-  first program reader imported the program inside its own budget. Any other caller (nil) imports beside what is kept. The branch's connection stays open for
-  the process (the db value reads the store); the store's main connection is released. tree: the
-  checkout's tree-id when the caller holds it (the plan computes it once)."
+  finish keeps the branch (keep-tree!). A tree to import goes into the newest generation, or, when its data file
+  is past max-bytes (an LMDB file never shrinks), into the next generation, made whole in a stage beside it and renamed in once (a run
+  whose rename finds it made reads again), an empty store: a full store is never moved or
+  removed under the runs that read it (task seon.test-store/the-kept-program-store-is-one-store-a-tree-added-never-replaced:
+  the plan's tree, kept in a store a later tree filled, was imported again by every shard inside a test's budget). Only the plan
+  passes a bound (tests-of: :seon.config.proofs/program-store-max-bytes); any other caller (nil) imports into the newest generation.
+  The branch's connection stays open for the process (the db value reads the store); the store's main connection is released.
+  tree: the checkout's tree-id when the caller holds it (the plan computes it once). See docs/merging.md#verdicts-are-a-cache."
   ([root store] (program-db root store (fx/tree-id root)))
   ([root store tree] (program-db root store tree nil))
   ([root store tree max-bytes]
-  (let [b (tree-branch tree)
-        ;; the store is output keyed by the program's attributes alone (seon.test-store/program-schema-digest), and its open checks
-        ;; every attribute's value type: one the open refuses (another attribute's type changed since it was made, a retired name)
-        ;; is made again, never a refusal every checkout must clear by hand (2026-11-10: two message attributes made refs)
-        open #(try (pdb/open! :lmdb store 0 :db)
-                   (catch clojure.lang.ExceptionInfo e
-                     (if (#{:seon.db/types-differ :seon.db/name-retired} (:seon.error/type (ex-data e)))
-                       ;; its env, opened before the refusal, closed first (seon.lib/remove-tree! closes it too: docs/failure-points.md#lmdb-locks)
-                       (do (move-aside! store) (pdb/open! :lmdb store 0 :db))
-                       (throw e))))
-        ;; the bound is the write's: a tree the store keeps is read whatever the store's size (a shard read the plan's tree
-        ;; from a store the plan's import had taken past it, removed it, and its first program reader imported the tree
-        ;; again inside its own tick budget); only a tree to import starts a store past it again
-        ;; the tree's branch asked for alone (seon.db/branch?, one read); the store's branches listed only for a tree to
-        ;; import (keep-tree! picks the nearest kept tree), since d/branches reads every roster entry (35k ticks, 102 KB a branch)
-        {:keys [conn cfg]} (let [o (open)]
-                             (if (or (nil? max-bytes) (pdb/branch? (:conn o) b) (<= (.length (io/file store "data.mdb")) max-bytes))
-                               o
-                               (do (d/release (:conn o)) (move-aside! store) (open))))]
-    (when-not (pdb/branch? conn b)
-      (keep-tree! conn cfg root tree b (d/branches conn)))
-    ;; the branch's connection made while the store's main one is held: its env stays this process's, never a path another
-    ;; process moved aside in between (a connect of a missing store makes an empty one)
-    (let [bc @(pdb/connect (assoc cfg :branch b))]
-      (d/release conn)
-      bc))))
+   (let [b (tree-branch tree)
+         ;; the store is output keyed by the program's attributes alone (seon.test-store/program-schema-digest), and its open checks
+         ;; every attribute's value type: one the open refuses (another attribute's type changed since it was made, a retired name)
+         ;; is made again, never a refusal every checkout must clear by hand (2026-11-10: two message attributes made refs)
+         open (fn [path]
+                (try (pdb/open! :lmdb path 0 :db)
+                     (catch clojure.lang.ExceptionInfo e
+                       (if (#{:seon.db/types-differ :seon.db/name-retired} (:seon.error/type (ex-data e)))
+                         ;; its env, opened before the refusal, closed by the removal (docs/failure-points.md#lmdb-locks)
+                         (do (seon.lib/remove-tree! path) nil)
+                         (throw e)))))
+         gens (ts/generations store)
+         ;; the tree's branch asked for alone (seon.db/branch?, one read) in each generation that holds a store (an open makes
+         ;; one), newest first
+         found (some (fn [g] (when-let [o (when (.isFile (io/file g "data.mdb")) (open g))]
+                               (if (pdb/branch? (:conn o) b) (assoc o :path g) (do (d/release (:conn o)) nil))))
+                     gens)
+         found-or-made
+         (or found
+             (let [newest (first gens)
+                   full? (and newest max-bytes (> (.length (io/file newest "data.mdb")) max-bytes))
+                   path (cond (nil? newest) store full? (ts/next-generation store) :else newest)]
+               (if full?
+                 ;; a new generation is made in a stage beside it, whole, then renamed in once: two runs starting it at once
+                 ;; never open one path that does not exist yet (a store's open makes it); the run whose rename finds it made
+                 ;; reads again, and finds the tree there or imports into theirs
+                 (let [stage (str path ".stage-" (random-uuid))]
+                   (try (let [st (pdb/open! :lmdb stage 0 :db)]
+                          (try (keep-tree! (:conn st) (:cfg st) root tree b (d/branches (:conn st)))
+                               ;; the stage's env closed before the rename: an env left open on the renamed file would be
+                               ;; a second open of one file when this process opens the final path (docs/failure-points.md#lmdb-locks)
+                               (finally (d/release (:conn st)) (klmdb/close-env! stage))))
+                        (let [[rc _] (seon.lib/c-rename stage path)]
+                          (if (zero? rc) (assoc (pdb/open! :lmdb path 0 :db) :path path) :made-meanwhile))
+                        (finally (seon.lib/remove-tree! stage))))
+                 (let [o (or (open path) (pdb/open! :lmdb path 0 :db))]
+                   ;; the store's branches listed only for a tree to import (keep-tree! picks the nearest kept tree), since
+                   ;; d/branches reads every roster entry (35k ticks, 102 KB a branch)
+                   (keep-tree! (:conn o) (:cfg o) root tree b (d/branches (:conn o)))
+                   (assoc o :path path)))))]
+     (if (= :made-meanwhile found-or-made)
+       (program-db root store tree max-bytes)
+       (let [{:keys [conn cfg path]} found-or-made]
+         (.setLastModified (io/file path) (System/currentTimeMillis))
+         ;; the branch's connection made while the store's main one is held: its env stays this process's, never a path another
+         ;; process removed in between (a connect of a missing store makes an empty one)
+         (let [bc @(pdb/connect (assoc cfg :branch b))]
+           (d/release conn)
+           bc))))))
 
 (defn- builder-id
   "The id of the code that builds a reach graph on db: the digest of the :form/id of every var of
@@ -264,14 +277,24 @@
 
 (defn- tree-file
   "The file of base (\"reach-graph\", \"reads-index\") kept for tree in the program store at store: one a tree, so plans of two
-  trees at once never overwrite each other's (one slot for every tree made a test's cost the last writer's). A tree-less run
+  trees at once never overwrite each other's (one slot for every tree made a test's cost the last writer's). It lies in the
+  generation that has it (seon.test-store/generations, newest first), else the newest generation, else store. A tree-less run
   (a scratch store of a test's own) keeps base.fasl."
-  [store base tree] (io/file store (if tree (str base "-" tree ".fasl") (str base ".fasl"))))
+  [store base tree]
+  (let [n (if tree (str base "-" tree ".fasl") (str base ".fasl"))
+        here (io/file store n)]
+    ;; the store's own first (one stat): its generations are listed (a read of the directory beside them) only for a file not
+    ;; there, so a kept file costs what it cost before generations (seon.program-cost-test/a-plan-reads-the-stored-reach-and-pays-for-what-moved)
+    (if (.isFile here)
+      here
+      (let [gens (ts/generations store)]
+        (or (some #(let [f (io/file % n)] (when (.isFile f) f)) gens)
+            (io/file (or (first gens) store) n))))))
 
 (defn- kept-tree-files
-  "The files of base kept for any tree in store, newest first."
+  "The files of base kept for any tree in any generation of store, newest first."
   [store base]
-  (->> (.listFiles (io/file store))
+  (->> (mapcat #(.listFiles (io/file %)) (or (seq (ts/generations store)) [store]))
        (filter (fn [^java.io.File f] (let [n (.getName f)] (and (str/starts-with? n (str base "-")) (str/ends-with? n ".fasl")))))
        (sort-by (fn [^java.io.File f] (- (.lastModified f))))))
 
@@ -279,7 +302,7 @@
   "Write bs to f atomically (a reader sees the whole file or none), then remove base's files past the
   :seon.config.proofs/tree-files-kept newest, so the disk stays bounded. Regenerable output: a file removed is made again."
   [store base ^java.io.File f ^bytes bs]
-  (let [tmp (io/file store (str (.getName f) "." (random-uuid)))]
+  (let [tmp (io/file (.getParentFile f) (str (.getName f) "." (random-uuid)))]
     (java.nio.file.Files/write (.toPath tmp) bs (make-array java.nio.file.OpenOption 0))
     (java.nio.file.Files/move (.toPath tmp) (.toPath f) (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/ATOMIC_MOVE java.nio.file.StandardCopyOption/REPLACE_EXISTING]))
     (doseq [^java.io.File o (drop (config/value :seon.config.proofs/tree-files-kept) (kept-tree-files store base))]
@@ -518,7 +541,9 @@
                                                (:seon.test/output x) (print (:seon.test/output x))
                                                (:seon.test/report x) (let [m (:seon.test/report x)]
                                                                         ;; a failing assertion, as the results keep it (seon.proofs/failures): the agent's one reading of a report
-                                                                        (when (#{:fail :error} (:type m))
+                                                                        ;; and a cost proof that passes by its waiver (its verdict :accepted): its rows are the numbers
+                                                                        ;; the waiver is read by, kept on its green's verdict (:cost), never only on a red's
+                                                                        (when (kept-report? m)
                                                                           (vswap! reports conj (seon.agent/test-report m (str "#'" (:test x))))))
                                                ;; a test's end, so bin/stalls never names one that finished
                                                ;; and its cost, the work it did (a green test's is read nowhere else)
@@ -662,8 +687,8 @@
         _ (when no-test
             (println (str "prove: the program db holds no test of " (str/join " " no-test)
                           ": a namespace with no deftest, a name (NS/TEST) that is no deftest, or a program db that misses it (a store made before"
-                          " seon.proofs/a-failed-import-leaves-no-branch: move "
-                          (config/value :seon.config.proofs/program-store) "-* aside, and the tree imports)")))
+                          " seon.proofs/a-failed-import-leaves-no-branch: remove "
+                          (config/value :seon.config.proofs/program-store) "-*, and the tree imports)")))
         ;; the generative check's keys (one per function, and the schema registry) run in the shards beside the
         ;; tests (shard!, seon.proofs/mg-run): no binary, no process of their own
         {mg-run true run-steps false} (group-by proofs/mg-key? run-steps)
@@ -878,13 +903,15 @@
 (defn- make-base-tree!
   "Make the base's tree's branch in the base store at path (base-program) by the base's own code: a checkout of commit base of the
   repository at root at at (bin/worktree --at, its built products cloned from this checkout's), whose runner plans its tests
-  (bin/test --plan tests) with its program store set to stem, path's (stem-<program schema digest>); path seeded from store, this checkout's kept program store,
+  (bin/test --plan tests) with its program store set to stem, path's (stem-<program schema digest>); path seeded from store, this checkout's kept program store (its newest generation),
   when it is not there, so the base's import refreshes the nearest kept tree. The checkout is removed after. Answers nil, or
   :seon.fx/io-error naming the step that failed and the end of what it said. See docs/health.md#checks-are-callers-of-seon."
   [root base tree store stem path at]
+  ;; the newest generation of the kept store (seon.test-store/generations) holds the trees most recently imported
   (when-not (pdb/store? path)
-    (.mkdirs (io/file path))
-    (lib/sh "cp" "-c" (str store "/data.mdb") (str path "/data.mdb")))
+    (when-let [from (first (ts/generations store))]
+      (.mkdirs (io/file path))
+      (lib/sh "cp" "-c" (str from "/data.mdb") (str path "/data.mdb"))))
   (try
     (let [fail (fn [msg r] (contract/error :seon.fx/io-error #'test-runner/make-base-tree! (str msg ": " (fx/runner-end (str (:err r) "\n" (:out r)))) {:path at}))
           made (apply lib/sh (str (config/checkout) "/bin/worktree") "--at" at base root
@@ -906,7 +933,7 @@
 
 (defn base-program
   "The program db of commit base of the repository at root, for the health step (docs/health.md#checks-are-callers-of-seon): its
-  tree's branch in store, this checkout's kept program store, when it keeps it; else its branch in the base store, stem-<program
+  tree's branch in store, this checkout's kept program store (any generation), when it keeps it; else its branch in the base store, stem-<program
   schema digest> as store is keyed (health!'s stem: :seon.config.proofs/program-store's with -health-base), which the base's own
   code makes when it is not there (make-base-tree!, a process of its own in a checkout at at), read here as facts. Never analyzed
   in this image: analysis runs each file's ns form in the live namespace, so a base's ns form that aliases a namespace
@@ -921,10 +948,10 @@
         ;; the base's own runner names its store by its own key (seon.test-store/program-store-key: its runtime and pins may be
         ;; another's), so its branch is read from whichever store of the stem holds it, never only this code's
         stems (fn [] (let [d (.getParentFile (io/file stem)) n (.getName (io/file stem))]
-                       (for [f (sort (or (.list d) (make-array String 0))) :when (re-matches (re-pattern (str "\\Q" n "\\E-[0-9a-f]{8}")) f)]
+                       (for [f (sort (or (.list d) (make-array String 0))) :when (re-matches (re-pattern (str "\\Q" n "\\E-[0-9a-f]{8}(?:-\\d+)?")) f)]
                          (str d "/" f))))
         any (fn [] (some #(read-tree-branch % tree) (stems)))]
-    (or (read-branch store (tree-branch tree))
+    (or (some #(read-branch % (tree-branch tree)) (ts/generations store))
         (any)
         (make-base-tree! root base tree store stem path at)
         (any)

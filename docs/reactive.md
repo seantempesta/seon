@@ -1,6 +1,6 @@
 # The reactive core: one way to keep a derived value current
 
-Almost everything Seon keeps is derived: a page, a model request, health, a task's readiness, a test's verdict, the program a process runs. Each is a function of what it read. The reactive core is the one mechanism that records what a computation read and runs it again only when a commit moved something it read. Runtime owns it; every area moves its own "did this change?" code onto it and deletes that code ([the plan](plan.md)).
+Almost everything Seon keeps is derived: a page, a model request, health, a task's readiness, a test's verdict, the program a process runs. Each is a function of what it read. The reactive core is the one mechanism that records what a computation read and runs it again only when a commit moved something it read. Runtime owns it; every area moves its own "did this change?" code onto it and deletes that code ([the plan](plan.md#the-root-concept-one-reaction-over-the-store)).
 
 ## The idea in one paragraph
 
@@ -17,8 +17,9 @@ Datahike's recorder (``datahike.reads/with-reads``) sees every read of the store
 - **Views** (`seon.ratom/view`) read a pulled value as Vue 3's reactive proxy does. Each lookup records the path read, so a walk can match a tree's diff against what each component read ([reactive renders](render.md#reactive-renders)).
 - `seon.ratom/reads-of` runs a function outside any reaction and answers its value, its view reads and its key set: what a walk kept as a value keeps per component.
 
-Two of Reagent's rules matter here [M, trials A1 and T0]:
+Three of Reagent's rules matter here [M, trials A1 and T0]:
 - A reaction that is not auto-run, derefed from outside any reaction, is not reactive. It runs its function and records nothing. Make the outermost reader auto-run (`seon.ratom/run!`), or deref it inside one.
+- A nested reaction's reads are its own: they reach the outermost recorder (the render proc's pass), never its parent's, since a parent depends on its child's value, not on what the child read (``seon.ratom/deref-capture`` binds the outermost around each run; Datahike's ``with-reads`` composes into the recorder bound outside it). An entity a run returns records a lookup made after the run into that run's reads.
 - An auto-run reaction runs at once, inside the change that dirtied it. In a diamond (one source read by several paths that meet again) its top therefore runs once per path, which is three times in the reconciler's trial.
 
 A minimal reader, at root's REPL:
@@ -59,4 +60,4 @@ Each limit below names the task that lifts it. The design, its cost analysis (n,
 - Commit cost linear in readers, the diamond's glitch, a source gained mid-flush: `seon.ratom/a-commit-reaches-only-the-readers-of-what-it-moved`.
 - No owner step feeding commits (in root, the fork server and each agent): `seon.ratom/an-owner-step-advances-its-store-and-flushes`.
 - A boxed key costs 135 B: `seon.ratom/a-read-key-is-one-fixnum`.
-- A pull records its entity, not its attribute; lazy reads after recording ends are missed; nested recorders do not nest. These are deps' Datahike tasks, named in each plan above.
+- A pull records its entity, not its attribute: deps' Datahike task, named in the plans above.
