@@ -273,13 +273,13 @@
   (let [states (flow/ping (:graph sys) :timeout-ms (cfg/value :seon.config.check/ping-ms))
         state #(::flow/state (get states %))]
     ;; as the api's ping answers it (its :ping-map-fn): the armed flag (seon.step/timer), the busy set, what a throw lost
-    {:root (select-keys (state :api) [::stall-armed ::busy ::lost :pending])
+    {:root (select-keys (state :api) [::stall-armed ::busy ::lost :pending :awaits])
      ;; each effect owner's workers busy, requests in flight and queued: an op the api holds pending is named running, waiting
      ;; or answered and lost (a server op's connection parked with no worker busy, context's overrun 2026-11-15)
      :fx (into (sorted-map) (for [[pid m] states :let [s (::flow/state m)] :when (and (contains? s :in-flight) (contains? s :queued))]
                               [pid (select-keys s [:busy :in-flight :queued :done])]))
      ;; the reconciler's flights by task and the step each waits at: a judge that never settles is named
-     :reconciler (select-keys (state :reconciler) [:flights :flight-steps])
+     :reconciler (select-keys (state :reconciler) [:flights :flight-steps :quiet :t :waits :report :live :pending :behind])
      :agents (into (sorted-map)
                    (for [[pid m] states :let [s (::flow/state m)] :when (contains? s :inflight)]
                      [pid (assoc (select-keys s [:fx-out :stall-seen :last-frame-ms :holding :held]) :inflight (update-vals (:inflight s) :kind))]))
@@ -1035,6 +1035,8 @@
        :ping-map-fn (fn [st] {:agents (count (:agents st)) :closing (boolean (:closing st))
                               ;; every ask it holds unanswered, rid -> [kind agent]: what a waiter waits on
                               :pending (into (sorted-map) (for [[r {:keys [kind agent]}] (:pending st)] [r [kind agent]]))
+                              ;; the waits on main it checks at each commit (await-db's preds), by key
+                              :awaits (vec (sort (keys (::waits st))))
                               ;; the stall check, a hang's evidence (stall-state): its armed flag, the agents it holds busy, what a throw lost
                               ::stall-armed (boolean (some-> (::stall-timer st) deref)) ::busy (or (::busy st) #{}) ::lost (::lost st)})})
   ;; :system is the root graph's declared procs and conns as built (seon.graph), changed by
