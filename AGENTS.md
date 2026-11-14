@@ -18,10 +18,12 @@ You are in `next/`: **Seon on Jolt, built to replace Seon** (`~/src/seon` is the
 | You work as | Your change lives on | It reaches git by |
 |---|---|---|
 | A Seon agent | your task's branch in the store | its merge into main (`seon_done`), then the write-back of main's changed files |
-| A Claude session in a worktree | `jolt/<area>` in git, imported into the system | your landing |
+| A Claude session | its Seon agent's branch (`seon_attach`, then `seon_eval` and `seon.repl/edit!`), as a Seon agent's | the same: `seon_done`, then the write-back |
 | Anyone writing on main directly (`seon_create`, `my.task/update!` on main) | main in the store | nothing yet: write the same entry into its file on your branch, in the same session |
 
-**The rule:** a change you mean to keep is in a file on a branch that will land, before you end your turn. Until a task created in the store is written to its file by the system (`seon.task/a-task-created-in-the-store-reaches-its-file`), that last row is yours to do by hand. The store is erased only while it holds nothing that is not in git; ask root before any erase.
+**Seon's way, nothing beside it** (owner, 2026-11-14: "No more heavy machinery on the claude side. It all goes into seon and we do things the seon way going forward"): a Claude session works through its Seon agent, and no script, runner or landing feature is built for sessions outside the system. One exception, until `seon.server/a-sessions-file-edit-merges-through-done` is green: the tasks that make that path work land through a worktree and `bin/land`, and nothing else does.
+
+**The rule:** a change you mean to keep is on a branch that will merge, with its file, before you end your turn. Until a task created in the store is written to its file by the system (`seon.task/a-task-created-in-the-store-reaches-its-file`), that last row is yours to do by hand. The store is erased only while it holds nothing that is not in git; ask root before any erase.
 
 ## 1. What Seon is for, and what moving forward means
 
