@@ -52,7 +52,7 @@ A session runs Seon agents on real tasks to find what in the system cost the age
 
 ## Messages
 
-Work that blocks another area is a task in that area's namespace, with its evidence, named in the blocked task's `:seon.task/needs` ([the plan](plan.md#stage-1-the-work-lives-in-seon-as-tasks-and-the-wiki)). A session messages the owning session directly, through the app's session messages, only to block, unblock or agree an interface: 6 lines or fewer, the evidence and one ask, no acknowledgements ([decisions](decisions.md#blockers-are-tasks-sessions-message-the-owning-session-directly)). A message is the home of no fact: what it teaches goes into the wiki section or task entry that owns it.
+Work that blocks another area is a task in that area's namespace, with its evidence, named in the blocked task's `:seon.task/needs` ([the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority)). A session messages the owning session directly, through the app's session messages, only to block, unblock or agree an interface: 6 lines or fewer, the evidence and one ask, no acknowledgements ([decisions](decisions.md#blockers-are-tasks-sessions-message-the-owning-session-directly)). A message is the home of no fact: what it teaches goes into the wiki section or task entry that owns it.
 
 ## No fan-out
 

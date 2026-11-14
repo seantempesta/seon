@@ -17,8 +17,9 @@ reported to the owner daily. A task that never merges is a failure, not a low nu
 A process often runs on state its branch doesn't name (stale code, pins, schema registry, config, caches), so verdicts are
 wrong or flaky, landings fail on what the change didn't touch, and the merge a task needs runs on that stale state. Around
 it, the work itself lives outside Seon: blockers, deletions, the landing queue, the turns ledger and the owner's rulings are
-files in root's notes and messages between sessions, which no agent reads and nothing checks. The stages remove the stale
-state first, then bring the work into Seon, then make the store the only source, then the turns agents spend.
+files in root's notes and messages between sessions, which no agent reads and nothing checks. The priority (owner,
+2026-11-14) is one view: fix the broken processes that slow us down, and move Claude sessions off files and git onto the
+system, working, proving and merging as Seon agents do. Everything else in this plan stays, in order behind it.
 
 ## Stage 0: one happy path (now)
 
@@ -31,26 +32,35 @@ recorded.
 3. `seon.repl/an-uncited-public-defn-is-told-at-its-eval` (proof green at turn 48, its agent now lost) restarted on a fresh
    agent, or the first of the random round's tasks to reach green, merged (context).
 
-## Stage 1: the work lives in Seon, as tasks and the wiki
+## Stage 1: Claude sessions work through the system (the priority)
 
-**Goal:** everything an agent needs to get work done is in the store, read through its pull: what to do is a task, how the
-system works is the wiki, and nothing lives in a file or message only a Claude session sees. **Done when:** root's notes hold
-no board, ledger, queue or ruling, and a landing needs no message from root.
-1. **A blocker is a task** in the owning area's namespace, with its `:seon.task/evidence` and `:seon.task/cause`; the task
-   it blocks names it in `:seon.task/needs`, so "what is blocking this" is a pull, and it ends when its merge completes it.
-   The blockers board goes (context, with each area filing its rows).
-2. **A deletion is a proof:** the replacement's task carries a test that the old path is gone, red until it is; the
-   deletions ledger goes, and the `Deletes:` line is what that proof names (tests).
-3. **The landing queue is tasks waiting to merge:** a branch whose proofs are green asks to merge by its task; `bin/land`
-   admits from that, in `:seon.task/needs` order, with `--check` first; main keeps its own results, so a landing's reds split
-   into main's and the branch's. Only what Stage 2 keeps is built: no queue file, no new script (tests, deps).
-4. **Turns to merged is a query** over the store (each task's agents, their turns, merged or why not), shown on the task and
-   the dashboard; the turns file goes (context).
-5. **The owner's rulings are in [decisions](decisions.md)**, his words and where each is stated; root's answers file goes.
-   A message between sessions is about a task and is written there (`seon_message` to its agent); one that names no task
-   becomes one (root, all).
-6. **Results are entities in the store**, `:seon.proof/*` on the results branch, keyed by what each run read (Datahike's
-   read recorder, the one the query cache's lineage uses); the result files under `target/results` go (tests, data).
+**Goal:** a Claude session changes Seon the way a Seon agent does: its change enters the one system as a valid branch, is
+proved there by what it reaches, and merges into main through Seon's own merge, with git following the store. Everything a
+session needs to get work done is a task or the wiki. **Done when:** one area's session lands a week of work with no
+worktree, no per-checkout system and no `bin/land`, and root's notes hold no board, ledger, queue or ruling. Then the
+infrastructure this replaces is cut, each removal brought to the owner as an audit.
+1. **A session is an agent:** each Claude session holds one agent keyed by its area's name on one branch of the one store
+   (`seon_attach` exists), with its REPL and its branch's program; `seon_eval` and `seon.repl/edit!` change code, docs,
+   tasks and `bin/` scripts as writes on that branch (runtime).
+2. **Pushing a change is easy:** a file a session edits is imported as a transaction on its branch (the same path an
+   agent's eval takes), so a session that works on files gets a valid branch with no extra step; a read-only copy of the
+   branch is written out for reading (runtime, data).
+3. **Proving is on the branch, in the system:** the session's agent proves by reach, live, and by a full build only when
+   the change may differ (a pin, native code, `deps.edn`); results are entities in the store keyed by what each run read,
+   through Datahike's read recorder, the one the query cache uses (tests, data).
+4. **Merging is Seon's:** `seon_done` runs the gate and Seon's three-way merge on main's program; conflicts go back to the
+   branch; a merge costs what moved (today one merge of main costs 62 s, 9.9B ticks and 47.5 GB, measured) (runtime,
+   tests).
+5. **Git follows the store:** a merge is written back, and git's main moves after root reads its diff (`my.root/sync!`);
+   main is pushed to GitHub (runtime, root).
+6. **The work lives in Seon:** a blocker is a task in the owning area's namespace with its `:seon.task/evidence` and
+   `:seon.task/cause`, named in the blocked task's `:seon.task/needs`; a deletion is a proof that the old path is gone; the
+   merge queue is tasks waiting to merge, in `:seon.task/needs` order; turns to merged is a query shown on the task and the
+   dashboard; the owner's rulings are in [decisions](decisions.md); a message between sessions is about a task and is
+   written there, and one that names no task becomes one (context, tests, root).
+7. **Pilot, then all:** one area moves first after two or three merged tasks; then the rest. The audit to cut follows:
+   worktrees, per-checkout systems and ports, `checkout-env!`, `bin/land`'s local prove and git bridge, the shell test
+   runner and its shards, the result files, the boards as files (root, with each owner).
 
 ## Stage 2: the database is the one source of truth
 
@@ -62,14 +72,7 @@ the one start path, and no failure in a week comes from a stale or mismatched en
    (runtime, deps, data).
 2. A build writes the branch's files from the store and builds from them; a git tree matters only when files are imported
    (runtime, deps).
-3. Root merges main and an agent's branch on main's program, proves the merged result, and promotes it when green;
-   conflicts go back to the branch. A merge costs what moved: today one merge of main costs 62 s, 9.9B ticks and 47.5 GB
-   (measured), far over any estimate (runtime).
-4. A file edit is imported as a transaction on a branch, the path an agent's eval takes. Each Claude session gets a Seon
-   agent on its own branch; its edits flow there, minimal tests run by reach, and root merges it when nothing conflicts.
-   Pilot one area after two or three merged tasks, then the rest (runtime, tests, context).
-5. Deleted: tree ids and tree diffs, per-tree program caches, health's base tree, worktrees, per-checkout systems and
-   ports, `checkout-env!`.
+3. Deleted, after an audit to the owner: tree ids and tree diffs, per-tree program caches, health's base tree.
 
 ## Stage 3: live, and nothing hangs
 
@@ -118,8 +121,8 @@ of landings with no restart except for a pin, native code or `deps.edn`, and no 
 ## Enforcement owed
 
 The principles each name what enforces them; these are not yet enforced, and each is owed a law or a test, filed as a task
-in the stage that builds its mechanism: turns counted by the system (Stage 1.4); no design starting outside the Seon agent;
-a proof seen red first; a duplicate schema or unnamed public shape seen twice (Stage 4.1); `Deletes:` checked (Stage 1.2);
+in the stage that builds its mechanism: turns counted by the system (Stage 1.6); no design starting outside the Seon agent;
+a proof seen red first; a duplicate schema or unnamed public shape seen twice (Stage 4.1); `Deletes:` checked (Stage 1.6);
 effects routed at Jolt's host primitives (Stage 3.2); no program loaded outside the one start (Stage 2.1); atoms; no test
 reading wall time, load or system memory; a second status at one digest filed as a defect; claims marked measured or
 hypothesis.
