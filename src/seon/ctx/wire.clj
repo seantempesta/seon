@@ -125,7 +125,7 @@
           :else [[:session (:seon.agent/key x)] nil])))
 
 (defn request
-  "The agent's request on db, walk p's model output (p a value seon.render/walk answered) (seon.render/openai-compat: each entity rendered by its schema's model render, in
+  "The agent's request on db, walk p's model output (p a value seon.render/walk answered) (its :answers for :seon.render/openai-compat, seon.render/answer-sources: each entity rendered by its schema's model render, in
   the order the agent's render places them; docs/render.md#the-models-context-a-cached-prefix-then-the-turn). Answers
   {:messages :parts}: provider-neutral messages (seon.model/wire-messages makes the wire shape), and :parts, each [ref messages
   turn] in order, the ref of what answered them (`part-ref`), which the debug page labels its messages by. A request with no
