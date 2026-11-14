@@ -346,14 +346,10 @@
   value is no data: the authored contract is kept as data)."
   {:malli/schema [:=> [:cat [:maybe :seon.host/var] :map] [:maybe :string]]}
   [v d]
-  ;; only a def a contract arms (seon.contract/defn's def, whose init is seon.contract/checked): a run records the calls of those
-  ;; alone, so a :malli/schema on a clojure.core/defn is no contract, and the reach follows it as the plain helper it is (task
-  ;; seon.proofs/a-verdict-reused-by-its-reads-covers-every-var-it-reaches: a test was reused while such a helper changed)
-  (when (= 'seon.contract/checked (:init d))
-    (let [c (some-> v meta :malli/schema)]
-      (if (and (some? c) (edn-value? c))
-        (sedn/encode c)
-        (some-> (get (:meta d) :malli/schema) unquote-form sedn/encode)))))
+  (let [c (some-> v meta :malli/schema)]
+    (if (and (some? c) (edn-value? c))
+      (sedn/encode c)
+      (some-> (get (:meta d) :malli/schema) unquote-form sedn/encode))))
 
 (defn- def-meta
   "A defined var's own Clojure metadata keys (:var/meta in resources/seon/schemas/seon.facts.edn): from the live var when it is
