@@ -2505,7 +2505,8 @@
   "Agent code writing test var seon.repl-test/name, a process test (it reaches an agent), asserting (+ 1 1) is n."
   {:malli/schema [:=> [:cat :string :int] :string]}
   [nm n]
-  (str "(do (in-ns 'seon.repl-test) (clojure.test/deftest " nm
+  ;; declared as a process test with its estimate, so health's caused classes (an undeclared or unestimated test) don't stand before its verdict
+  (str "(do (in-ns 'seon.repl-test) (clojure.test/deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 1}} " nm
        " (let [[r] (seon.agent-test/in-agent (fn [_] [\"(+ 1 1)\"]))] (clojure.test/is (= " n " (:value r))))) (in-ns 'user) :ok)"))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 9 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3750k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
@@ -3705,3 +3706,4 @@
 (deftest ^{:seon.test/estimate {:ticks 400000}} an-error-map-names-where-it-was-thrown
   (is (= 'seon.agent-test/throws-here (seon.error/thrown-in (try (throws-here) (catch Throwable e e)))) "a run's throw names its fn")
   (is (nil? (seon.error/thrown-in (ex-info "Syntax error macroexpanding cond" {:clojure.error/symbol 'cond}))) "a macroexpansion's names none, and thrown-in answers"))
+
