@@ -1221,9 +1221,10 @@
 
 (defn hold-registry!
   "Make registry reg (schema-registry's) this process's: malli's default registry, which every contract
-  reads beneath a binding (seon.contract/options). A process holds one branch, so this is called where it starts holding it or
-  its schemas move: an agent's schema slot (seon.agent's watch), a load that changes schema entries (load-changes!,
-  load-diff!), the fork server's main (warm-start). Answers nil. See docs/source.md#schemas-at-the-repl."
+  reads beneath a binding (seon.contract/options). Called by the act of holding main, nowhere else: root's boot
+  (seon.system/start!) and each main commit (seon.writer's main-commit), the fork server's warm start per main move. An agent's
+  branch is its slot's, read by seon.contract/layers; the loaders never set it, since tests call them on throwaway dbs.
+  Answers nil. See docs/source.md#schemas-at-the-repl."
   {:malli/schema [:=> [:cat :seon.host/registry] :nil]}
   [reg] (mr/set-default-registry! reg) nil)
 
@@ -1498,10 +1499,9 @@
     ;; every form the diff names is the branch's own: this process holds db-from's definition of it, never the branch's,
     ;; though its var is bound and the form was imported from a source tree (a tree branch's catch-up imports the checkout's
     ;; changed files: held? read those as the binary's own and kept main's code, and a --root run judged main's code, 2026-11-11)
-    (let [errs (into (vec (load! db-to load schemas true)) (hold-config! db-to))]
-      ;; db-to's schemas are this process's from now on (a resumed branch's: an agent holds that one branch)
-      (when (seq schemas) (hold-registry! (schema-registry (schema-changes db-to))))
-      errs)))
+    ;; the schemas db-to moved are read by the agent's branch layer (seon.contract/layers), never set process-wide here: a
+    ;; loader is called on throwaway dbs too, and the default is the act of holding main (hold-registry!'s callers)
+    (into (vec (load! db-to load schemas true)) (hold-config! db-to))))
 
 (defn load-changes!
   "Load what resolved tx-data ops change, read against db (after them): each definition
@@ -1535,9 +1535,6 @@
                       schema-keys
                       tests?))
           (when (some (fn [[_ _ a]] (= a :config/form)) ops) (hold-config! db)))]
-      ;; a moved schema entry is this process's from now on (root's main, the fork server's, an agent's merge of main)
-      ;; any op on a schema entry, a retraction included (a deleted key leaves the registry too)
-      (when (some (fn [[_ _ a]] (#{:schema/form :schema/key} a)) ops) (hold-registry! (schema-registry (schema-changes db))))
       errs))))
 
 ;; ---- reach: which tests a change reaches ----------------------------------------------

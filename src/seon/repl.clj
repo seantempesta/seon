@@ -542,7 +542,7 @@
   (fn [req]
     (h (around-reply req
          (fn [m]
-           ;; arming compiles the contract against this process's registry, its branch's (seon.program/hold-registry!)
+           ;; arming compiles the contract against this process's registry, its branch's (seon.contract/layers)
            (reduce (fn [m s] (if-let [i (some-> (find-var s) instrument)] (update m :instrumented (fnil conj []) i) m)) m (:repl/defined m)))))))
 
 (def middleware

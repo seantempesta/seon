@@ -1052,7 +1052,7 @@
                                     (swap! reports into @current)
                                     (reset! current []))
                       :else nil))
-        ;; this process's registry is its branch's (seon.program/hold-registry!), so the tests check against it
+        ;; this process's lookups read its branch's registry (seon.contract/layers), so the tests check against it
         _ (proofs/run-tests! tests (zipmap tests (repeat nil)) note! ticks)
         reports @reports
         counts (frequencies (map :type reports))]
