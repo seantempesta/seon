@@ -77,7 +77,9 @@ for k in ${(k)ERR}; do tail -c +$(( AT[$k] + 1 )) "${ERR[$k]}" > "$D/dump-$k.txt
 # (deps' run14: the root's log was gone before anyone read it). Each is cloned (cp -c: APFS copy-on-write, no bytes copied).
 mkdir -p "$D/logs"
 for k in ${(u)MEMBERS}; do
-  lsof -a -p $k -Fn 2>/dev/null | sed -n 's/^n//p' | grep -E '/runs/.*\.(log|err|out)$' | sort -u | while read -r f; do
+  # the files it holds open, and the log its command names (bin/held --log P writes a root's stderr there, a write at a time)
+  { lsof -a -p $k -Fn 2>/dev/null | sed -n 's/^n//p'; ps -o command= -p $k 2>/dev/null | sed -n 's/.*--log \([^ ]*\).*/\1/p' } \
+    | grep -E '/runs/.*\.(log|err|out)$' | sort -u | while read -r f; do
     [[ -f $f ]] && cp -c "$f" "$D/logs/$k-${f:t}" 2>/dev/null
   done
 done

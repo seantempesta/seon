@@ -703,11 +703,14 @@
 (deftest ^{:seon.test/estimate {:ticks 1000000} :seon.test/execs ["perl" "bin/evidence"]} bin-evidence-asks-each-listening-process-and-keeps-every-log
   (let [dir (str (System/getProperty "java.io.tmpdir") "/evidence-" (random-uuid))
         _ (.mkdirs (java.io.File. (str dir "/runs")))
+        ;; a log its command names and it never holds open, as bin/held --log P writes a root's stderr a write at a time
+        _ (spit (str dir "/runs/held.log") "held-line\n")
         p (.start (ProcessBuilder. ^java.util.List
                                    ["perl" "-MIO::Socket::INET" "-e"
                                     (str "open(my $log, \">\", \"" dir "/runs/listener.log\"); $log->autoflush(1); print $log \"listener-line\\n\"; "
                                          "my $l = IO::Socket::INET->new(Listen => 1, LocalAddr => \"127.0.0.1:0\") or die; $| = 1; print $l->sockport, \"\\n\"; "
-                                         "my $c = $l->accept; my $q = <$c>; print $c \"{:probe-state true}\\n\"; close $c; sleep 30")]))
+                                         "my $c = $l->accept; my $q = <$c>; print $c \"{:probe-state true}\\n\"; close $c; sleep 30")
+                                    "--" "--log" (str dir "/runs/held.log")]))
         pid (str (.pid p))
         port (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream p))))]
     (try
@@ -717,7 +720,9 @@
         (is (str/includes? (str (slurp (str dir "/seon-state-" pid ".edn"))) ":probe-state") "the listening process is asked for its state")
         (is (some #(and (str/ends-with? % "listener.log") (str/includes? (slurp (str dir "/logs/" %)) "listener-line"))
                   (seq (.list (java.io.File. (str dir "/logs")))))
-            (str "and the log it writes is kept, though it is never signalled: " (vec (.list (java.io.File. (str dir "/logs")))))))
+            (str "and the log it writes is kept, though it is never signalled: " (vec (.list (java.io.File. (str dir "/logs"))))))
+        (is (some #(str/ends-with? % "held.log") (seq (.list (java.io.File. (str dir "/logs")))))
+            "and the log its command names with --log, which it never holds open"))
       (finally (.destroy p) (seon.lib/remove-tree! dir)))))
 
 ;; bin/laws defs (AGENTS.md section 5, every definition happens once): a namespace defining one name twice keeps only the second, silently
