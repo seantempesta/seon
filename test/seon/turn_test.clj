@@ -25,3 +25,17 @@
                                     {:op :context :agent agent}
                                     "(mapv (fn [m] (:max-turns (:seon.model-call/basis (datahike.api/pull (seon.agent/db) [:seon.model-call/basis] m)))) (map first (datahike.api/q '[:find ?m :where [?m :seon.model-call/origin :outside]] (seon.agent/db))))"]))]
     (is (= [7] (:value bases)) (str "the read's basis names the run's max-turns: " (pr-str bases) (pr-str ctxr)))))
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-hand-back-says-a-failed-run-before-its-unknown-proofs
+  ;; docs/render.md#how-the-work-stands: while a test run has failed as a whole (:seon.agent/test-error) no verdict counts, so the done
+  ;; rule reads every proof unknown. Seen 11-14: seon_done told a session "ended red saying proof-unknown <proof>" of a proof green at its
+  ;; digest, the failed run (one test past its wall bound, the batch no verdict) unsaid. The end says the run first, then the reasons
+  (let [s {:reasons [{:reason :proof-unknown :symbol 'app.x-test/t}]
+           :test-run {:failed ["app.y-test/slow ended at its wall bound: no verdict"]}}
+        [o why] (turn/hand-back-end nil s)]
+    (is (= :red o))
+    (is (clojure.string/starts-with? why "the test run failed as a whole (app.y-test/slow ended at its wall bound: no verdict), so no verdict counts:")
+        (str "the run named first: " why))
+    (is (clojure.string/includes? why "proof-unknown app.x-test/t") "then the reasons as before"))
+  (is (= [:green nil] (turn/hand-back-end nil {:reasons []})) "a clear status ends green")
+  (is (= [:red "proof-red app.x-test/t"] (turn/hand-back-end nil {:reasons [{:reason :proof-red :symbol 'app.x-test/t}]})) "a run that didn't fail says only its reasons")
+  (is (= [:failed "gave up"] (turn/hand-back-end {:outcome :failed :reason "gave up"} {:reasons []})) "a failed task ends as it said"))

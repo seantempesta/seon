@@ -406,14 +406,17 @@
 
 (defn hand-back-end
   "How an outside agent's run ends: [outcome reason] from the stop its agent requested
-  (my.task/fail! makes it :failed, with the reason it gave) and the done rule's reasons. A task
-  the agent failed ends :failed whatever the proofs say, as the turn loop ends it (work!); else
-  :green when the done rule has no reason, else :red with the reasons."
-  {:malli/schema [:=> [:cat [:maybe :map] [:sequential :any]] [:tuple :seon.agent/outcome [:maybe :string]]]}
-  [stop reasons]
+  (my.task/fail! makes it :failed, with the reason it gave) and its status s (seon.ctx.status/status: the done rule's :reasons, and
+  :test-run when a test run failed as a whole). A task the agent failed ends :failed whatever the proofs say, as the turn loop ends it
+  (work!); else :green when the done rule has no reason, else :red with the reasons, after the failed run when there is one: while it
+  stands no verdict counts and every proof reads unknown, so the run is what to fix, said first. See docs/render.md#how-the-work-stands."
+  {:malli/schema [:=> [:cat [:maybe :map] :map] [:tuple :seon.agent/outcome [:maybe :string]]]}
+  [stop {:keys [reasons test-run]}]
   (cond (= :failed (:outcome stop)) [:failed (:reason stop)]
         (empty? reasons) [:green nil]
-        :else [:red (r/explain-text reasons)]))
+        :else [:red (str (when-let [f (seq (:failed test-run))]
+                           (str "the test run failed as a whole (" (str/join "; " f) "), so no verdict counts: "))
+                         (r/explain-text reasons))]))
 
 (defn- unjudged-reason
   "What a green end of status s leaves unjudged, in words, or nil (seon.task/unjudged): the end says it, and the judge decides as before."
@@ -450,7 +453,7 @@
         _ (branch/merge-main!)
         _ (observe task)
         s (judged (status-now))
-        [outcome reason] (if (contract/error? s) [:error (:seon.error/message s)] (let [[o why] (hand-back-end stop (:reasons s))] [o (or why (unjudged-reason s))]))]
+        [outcome reason] (if (contract/error? s) [:error (:seon.error/message s)] (let [[o why] (hand-back-end stop s)] [o (or why (unjudged-reason s))]))]
     (end! {} outcome reason (when (contract/error? s) s))))
 
 (defn work!
