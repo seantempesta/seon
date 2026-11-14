@@ -595,3 +595,20 @@
     (when (seq tx) @(root/transact-main! sys tx))
     (vec (keep :seon.task/id tx))))
 
+
+(defn held-agent
+  "The live agent client attached (seon.server/attach!'s :holder, its :seon.agent/holder) and the task it works, as
+  {:agent :task}; nil when it holds none. What a session's edit hook imports onto (bin/seon-import). See
+  docs/server.md#working-a-task-from-a-worktree."
+  {:malli/schema [:=> [:cat :seon.system/sys :string] [:maybe [:map [:agent :keyword] [:task :string]]]]}
+  [sys client]
+  (let [db @(:conn sys)]
+    (->> (d/datoms db :aevt :seon.agent/holder)
+         (keep (fn [dt] (when (= client (:v dt))
+                          (let [a (d/entity db (:e dt))
+                                t (or (:seon.agent/task a) (first (:seon.task/_agent a)))]
+                            (when (and (not (:seon.agent/ended-ms a)) (:seon.task/id t))
+                              {:agent (keyword (:seon.agent/key a)) :task (:seon.task/id t) :tx (:tx dt)})))))
+         (sort-by :tx >)
+         first
+         (#(some-> % (dissoc :tx))))))

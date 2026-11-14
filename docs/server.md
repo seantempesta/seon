@@ -49,4 +49,6 @@ bin/system stop
 
 A restart leaves an attached task `:lost` until someone attaches it again; its session and branch continue.
 
+A file a session writes reaches its agent's branch by itself: the hook in `.claude/settings.json` runs `bin/seon-import` after each Edit and Write, which asks the standing root for the agent the file's checkout attached (```my.root/held-agent```, by the client `bin/mcp call` names, `checkout-<checkout>`) and imports the file onto it (```my.branch/import!```). So a session that edits files attaches its task from its own checkout with `bin/mcp call attach task=NS/NAME`; a checkout that holds no agent imports nothing and says so (```seon.server-test/a-checkout-names-the-agent-it-holds```).
+
 A file edited on disk reaches this root's main only when imported: `bin/mcp call eval agent=root code='(my.root/import! sys #{"src/seon/x.clj"})'` (no set: the tree's changes) ([source](source.md#files-and-the-db-two-directions)). A fix to Seon itself is made in the worktree's source and proved with `bin/prove`. `bin/worktree --remove NAME` ends it.
