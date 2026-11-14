@@ -1743,7 +1743,7 @@
 
 (defn- gate-later!
   "Ask the merge gate for tests at prio without waiting (send-gate!), held as pending under its key so its answer is kept when it
-  arrives (handle!): an eval never waits on a gate, which may run for minutes behind others' (2026-11-14: 17 minutes). Answers the key."
+  arrives (handle!): an eval never waits on a gate, which may run for minutes behind others' (one waited 17 minutes). Answers the key."
   {:malli/schema [:=> [:cat [:vector :qualified-symbol] :int] :int]}
   [tests prio]
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
