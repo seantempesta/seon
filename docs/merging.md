@@ -24,7 +24,7 @@ A session lands its one branch with `bin/land [-F MSGFILE]`, run in its one work
 
 It ends on `LANDED` or `LAND FAILED`; a TERM, INT or HUP ends its whole prove group. The message is MSGFILE plus `bin/prove`'s merge line.
 
-`LANDED, ROOT NOT UPDATED` means git's main moved but the standing root's main refused the bridge's write, so no `bin/update` ran (a new binary on an older program would fork no agent). Fix the refusal's cause on a new branch if it is the landing's, then bring root's main to the tree by one of the acts in [files and the db](source.md#files-and-the-db-two-directions), then `bin/update`. Running `bin/update` alone first ends on `UPDATE FAILED: ROOT STALE BINARY`.
+`LANDED, ROOT NOT UPDATED` means git's main moved but the standing root's main refused the bridge's write, so no `bin/update` ran (a new binary on an older program would load that program over itself at each boot). Fix the refusal's cause on a new branch if it is the landing's, then bring root's main to the tree by one of the acts in [files and the db](source.md#files-and-the-db-two-directions), then `bin/update`. Running `bin/update` alone first ends on `UPDATE FAILED: ROOT STALE BINARY`.
 
 The standing root follows main only through `bin/update`, never `bin/system stop` and `start`: root imports main's program from `.worktrees/merges`, which only `bin/update` moves, and it says `UPDATE OK` only once that tree's HEAD contains main (`seon.source-test/an-update-never-says-ok-on-a-merge-that-did-nothing`).
 

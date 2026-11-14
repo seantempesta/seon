@@ -2060,3 +2060,19 @@
     (is (not (seon.contract/valid? :seon.db/entity-index (assoc ix :entity-schemas {:x 1})))
         "a changed copy keeps the metadata but not the hash: it is checked in full, and refused")
     (is (not (seon.contract/valid? :seon.db/entity-index (with-meta (dissoc ix :forms) nil))) "an unmarked value is checked in full, and refused")))
+
+;; Estimate: a test db with one task, two entity reads under one recorder, ~0.3M ticks = 300000
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-lazy-read-records-into-the-read-it-belongs-to
+  ;; task datahike.reads/a-lazy-read-records-into-the-read-it-belongs-to: an entity made inside a recorded read and read
+  ;; after it returns recorded nothing, so a commit to what it read reached no reader. It records into the recorder it was
+  ;; made under when none is bound where it is read: the live recorder, (:datahike.reads/live (meta reads)).
+  (let [db (d/db-with (ts/test-db) [{:db/id "t" :seon.task/id "lazy/t" :seon.task/plan "P."}])
+        t (:db/id (d/entity db [:seon.task/id "lazy/t"]))
+        [e reads] (d/with-reads #(d/entity db t))
+        live (:datahike.reads/live (meta reads))]
+    (is (some? live) "the read set carries its live recorder")
+    (is (= "P." (:seon.task/plan e)) "read after the recorded read returned")
+    (is (contains? (d/reads-index @live) [:ea t :seon.task/plan]) (str "the lazy lookup is in the read it belongs to: " (pr-str (d/reads-index @live))))
+    (is (not (contains? (d/reads-index reads) [:ea t :seon.task/plan])) "the set answered at the return is what was read by then")
+    (let [[_ outer] (d/with-reads #(:seon.task/id e))]
+      (is (contains? (d/reads-index outer) [:ea t :seon.task/id]) "read under another recorder, it records there"))))

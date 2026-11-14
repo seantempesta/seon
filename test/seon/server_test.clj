@@ -63,7 +63,7 @@
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 1000000} :seon.test/execs ["git"]} an-idle-connection-holds-no-os-thread
   ;; task seon.server/connections-park-on-fibers-and-ops-run-bounded (docs/server.md): a connection is a fiber parked on its socket,
   ;; ~6 KB, never an OS thread of its own (~87 KB, one per connection, unbounded): twelve idle connections leave root's thread count as it was
-  (let [root (ts/shared-root! [])
+  (let [root @ts/shared-root-default
         threads #(ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code "(seon.lib/nthreads)"})))
         before (threads)
         socks (vec (repeatedly 12 #(java.net.Socket. "127.0.0.1" (int (:port root)))))

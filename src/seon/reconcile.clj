@@ -1397,7 +1397,9 @@
        :ping-map-fn (fn [st] {:seen (:seen st 0) :lists (:lists st 0) :t (:t st) :flights (count (:flights st))
                               ;; each flight's task and the step it waits at, so a hang's evidence names a judge that never settles
                               :flight-steps (into (sorted-map) (for [[id f] (:flights st)] [id (or (:step f) (get-in f [:act :op]))])) :pending (count (:pending st)) :behind (count (:behind st))
-                              :quiet (boolean (:quiet st)) :root-causes (count (:root-causes (:quiescent st)))})})
+                              :quiet (boolean (:quiet st)) :root-causes (count (:root-causes (:quiescent st)))
+                              ;; the waits on main it holds ({:after t}) and its quiet report's write until answered: what a parked await-db waits on
+                              :waits (mapv :after (:waits st)) :report (:report st) :live (count (:live (:idx st)))})})
   ([args] (assoc (dissoc args :judge) :seen 0 :rid 0 :flights {} :pending {} :waits [] :behind []
                  ::flow/in-ports {:judge (:judge args)}))
   ;; a stop answers every wait still held: root stopped, nothing will answer it
