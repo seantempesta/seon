@@ -72,7 +72,7 @@ A live form whose `:form/src` is longer than `:seon.config.shrink/form-tokens` t
 
 ## A hand-written list
 
-A page's parts are what its entity's pull holds, each drawn by its schema's render ([the page](render.md#the-page)); a list names none. A render whose var carries `:seon.render/list` and whose form names a component (a render whose contract takes `:seon.render/opts`, [components](render.md#components)) other than itself is a `:hand-written-list` (`seon.problems/hand-written-lists`), one row a list naming its parts. A branch that adds one is refused done; one main already had is a task of the list's owner. It closes when the list draws its parts from the pull.
+Every hand-made list is shown with its owning namespace for judgement, case by case (the owner, 2026-11-14): a dial (kept, as spec'd config with its reason), a patch over a missing mechanism (the root is fixed), or held data restated (derived from the schema, a pull or the program). A `:hand-written-list` row (`seon.problems/hand-written-lists`) is either a page list naming its parts, a render whose var carries `:seon.render/list` and whose form names a component other than itself (a page draws what its pull holds, each part by its schema's render: [the page](render.md#the-page)), or a literal enumeration a form holds: a set, or vector of keywords or of strings, of three or more members, not a malli schema, a datalog clause, an `ns` form or what a read takes (a pull pattern, `select-keys`, a path). The class is attention: a branch that adds one is shown it and still merges; nothing is deleted for it, and a list closes when its owner's judgement is carried out.
 
 ## An unfocused docstring
 
