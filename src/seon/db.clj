@@ -1186,9 +1186,31 @@
   (vec (for [dt (:tx-data rep) :when (not= (:e dt) (:tx dt))]
          [(if (:added dt) :db/add :db/retract) (:e dt) (:a dt) (:v dt)])))
 
-;; ---- which readers a change reaches: the one stored index, :seon.reads/key-set on every derived entity, from a read key
-;; (datahike.reads/range-key, its pr-str) to the entities that recorded it; a key set held in a value (a page component's
-;; walk) is matched by Datahike's own datahike.reads/reads-touched?. See docs/storage.md#what-a-read-scanned.
+;; ---- which readers a change reaches: one index from a read key (datahike.reads/range-key) to the readers that recorded it,
+;; a reader being any value its holder names it by (a component, a test's result). See docs/storage.md#what-a-read-scanned.
+
+(defn reads-add
+  "idx with reader recorded under each of keys. See docs/storage.md#what-a-read-scanned."
+  {:malli/schema [:=> [:cat :seon.reads/index :any :seon.reads/keys] :seon.reads/index]}
+  [idx reader keys]
+  (reduce (fn [m k] (update m k (fnil conj #{}) reader)) idx keys))
+
+(defn reads-drop
+  "idx without reader under each of keys (the keys it was added with); a key left with no reader goes. See docs/storage.md#what-a-read-scanned."
+  {:malli/schema [:=> [:cat :seon.reads/index :any :seon.reads/keys] :seon.reads/index]}
+  [idx reader keys]
+  (reduce (fn [m k] (let [rs (disj (get m k #{}) reader)] (if (seq rs) (assoc m k rs) (dissoc m k)))) idx keys))
+
+(defn readers
+  "The readers of idx whose keys a datom of datoms touches; a schema datom reaches every reader. See docs/storage.md#what-a-read-scanned."
+  {:malli/schema [:=> [:cat :seon.reads/index [:sequential :seon.host/datom]] [:set :any]]}
+  [idx datoms]
+  (reduce (fn [acc d]
+            (let [ks (datahike.reads/datom-keys d)]
+              (if (some #{:all} ks)
+                (reduced (into #{} cat (vals idx)))
+                (into acc (mapcat #(get idx %)) ks))))
+          #{} datoms))
 
 (defn- key-content
   "What read key k (as datahike.reads/range-key makes it) holds on db: its datoms' content, or for an attribute read whole
@@ -1215,14 +1237,14 @@
   (lib/digest (pr-str [(vec (for [s (sort keys)] [s (key-content db (clojure.edn/read-string s))]))
                        (vec (sort-by pr-str outside))])))
 
-(defn readers
-  "The derived entities on db whose :seon.reads/key-set holds a key a datom of datoms touches: one AVET seek a key, from the db
-  alone, so a restart, a fork and a merge keep them; a schema datom reaches every one. See docs/storage.md#what-a-read-scanned."
+(defn results-moved
+  "The results (:seon.proof/proof-fact entities) on db a move's datoms reach: one AVET seek of :seon.proof/read-keys for each of a
+  datom's keys; a schema datom reaches every result. See docs/storage.md#what-a-read-scanned."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/datom]] [:set :seon.db/eid]]}
   [db datoms]
   (reduce (fn [acc dt]
             (let [ks (datahike.reads/datom-keys dt)]
               (if (some #{:all} ks)
-                (reduced (into #{} (map :e) (d/datoms db :aevt :seon.reads/key-set)))
-                (into acc (comp (mapcat #(d/datoms db :avet :seon.reads/key-set (pr-str %))) (map :e)) ks))))
+                (reduced (into #{} (map :e) (d/datoms db :aevt :seon.proof/read-keys)))
+                (into acc (comp (mapcat #(d/datoms db :avet :seon.proof/read-keys (pr-str %))) (map :e)) ks))))
           #{} datoms))
