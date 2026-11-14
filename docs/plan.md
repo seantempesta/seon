@@ -100,6 +100,11 @@ one test result, 73 staleness functions), and the bugs are those copies disagree
 3. **Nothing hangs, one rule:** every wait passes its declared bound and ends with `:seon.bound/reached` or a typed error:
    the fork (deps), the model call and the stalled eval (runtime's deadline slice; context's turn records the stall). Seven
    deadline mechanisms become this one.
+3a. **A process never runs a binary its branch doesn't name** (owner, 2026-11-14: "this shouldn't be possible"): a
+   binary's identity is the digest of exactly what it is built from (forms, pins, `deps.edn`); it is current iff that
+   equals its branch's, checked once at the one start; a mismatch builds. "Current by reach" (`seon.system/stale-binary`,
+   `binary-current`'s reach) and `seon.problems/stale-binary`'s own check are deleted; `bin/land`, `bin/prove`,
+   `bin/update`, `restart-for` and the test service ask the one answer (deps, as `runtime-for`'s core; runtime reviews).
 4. **The reaction's core** (context builds it as one tip with its first production writer, the index and Reagent's
    `reaction`/`track` over it; data reviews the schema; deps the recorder): the lazy-read gap and the
    planner's two seeks recorded (deps); one stored index; the writer's commit datoms; the 8 `*reads* nil` bypasses removed.
