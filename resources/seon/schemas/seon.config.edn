@@ -170,6 +170,7 @@
   [:seon.config.render.agent/max-number-digits {:optional true} :seon.config.render.agent/max-number-digits]
   [:seon.config.render.agent/sort-bound {:optional true} :seon.config.render.agent/sort-bound]
   [:seon.config.render/width {:optional true} :seon.config.render/width]
+  [:seon.config.render/step-ticks {:optional true} :seon.config.render/step-ticks]
   [:seon.config.render/printer-vars {:optional true} :seon.config.render/printer-vars]
   [:seon.config.render/cut-vars {:optional true} :seon.config.render/cut-vars]
   [:seon.config.render/budgeted-vars {:optional true} :seon.config.render/budgeted-vars]

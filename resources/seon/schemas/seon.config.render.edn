@@ -10,6 +10,7 @@
  :seon.config.render/cut-vars [:set {:seon.config/unit "vars" :description "What shortens what is shown: a one-printer site where a display namespace references one."} :qualified-symbol]
  :seon.config.render/budgeted-vars [:set {:seon.config/unit "vars" :description "The printer's calls that cut to a budget: a one-printer site where a namespace outside the display ones references one."} :qualified-symbol]
  :seon.config.render/display-namespaces [:set {:seon.config/unit "namespaces, each with those under it" :description "Where output is made for a person or a model (the one-printer law's display namespaces)."} :symbol]
+ :seon.config.render/step-ticks [:int {:min 1 :seon.config/unit "engine ticks" :description "The render proc's step budget (Jolt Flow's :step-ticks): a pass past it ends as its typed error. Grows as a * the program's forms (a: twice one whole health read per form); restated when the forms double."}]
  :seon.config.render/width [:int {:min 16 :seon.config/unit "chars" :description "The printed line width."}]
  :seon.config.render/agent-tree-depth [:int {:min 1 :max 16 :seon.config/unit "levels" :description "How many levels of the agents each one started a user's pull joins (its agents list): an agent at the last level shows how many it started, never a silent cut. See docs/users.md#whats-on-screen."}]
  :seon.config.render/recent-errors [:int {:min 0 :seon.config/unit "errors" :description "How many of an agent's newest failures (a model call's error, an eval's) its open problems show, with their causes."}]
