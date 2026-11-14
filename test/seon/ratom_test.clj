@@ -283,7 +283,9 @@
         v #(rv/ref-view a ctx/changes)
         runs {:plan #(:plan (:task (v))) :count #(count (:evals (v))) :e10 #(:v (get (:evals (v)) 10))
               ;; the entity's own key set alone (seon.render.ui/added-keys): which keys it holds, never their values
-              :key-set #(rv/key-set (v))}
+              :key-set #(rv/key-set (v))
+              ;; a nested node's key set (runtime-2's review): reached by a key added under it, and by the node itself replaced
+              :task-keys #(rv/key-set (:task (v)))}
         ix (reduce-kv (fn [ix k f] (rv/read-index ix k (second (rv/reads-of a f)) conj)) nil runs)
         ;; the tree moved by f: the runs its diff reaches
         moved (fn [f] (let [t0 @a] (swap! a f) (rv/reached ix (ctx/changes t0 @a))))]
@@ -291,6 +293,9 @@
     (is (= #{} (moved #(assoc % :x 1))) "nor an unread key's, nor a key set's: a value replaced adds or removes no key")
     (is (= #{:key-set} (moved #(assoc % :y 1))) "a key added reaches the key set")
     (is (= #{:key-set} (moved #(dissoc % :y))) "and a key gone")
+    (is (= #{:task-keys} (moved #(assoc-in % [:task :z] 1))) "a key added under a nested node reaches that node's key set alone")
+    (is (= #{:plan :task-keys} (moved #(assoc % :task {:db/id 3 :plan "r" :n 1 :z 1})))
+        "another entity in the node's place reaches its key set too (the whole node replaced, through :pre), never under-invalidated")
     (is (= #{:plan} (moved #(assoc-in % [:task :plan] "q"))) "a read path's change reaches its reader")
     (is (= #{} (moved #(assoc-in % [:evals 11 :v] 7))) "iterating reads the key set: a member's change reaches no count, nor a read of another member")
     (is (= #{:count} (moved #(assoc-in % [:evals 12] {:db/id 12 :v 3}))) "a member added reaches the iteration, not a read of another member")
