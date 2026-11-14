@@ -22,7 +22,7 @@
   Reagent's own rule, and after a commit (`commit!`); a page's render queue is the walk's, drained
   in mount order. docs/render.md#reactive-renders."
   (:refer-clojure :exclude [defn defn- atom run!])
-  (:require [seon.contract :refer [defn defn-]] [datahike.reads :as reads]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.reads :as reads] [datahike.index.interface]))
 
 (defprotocol IReaction
   "A reaction's own state, read and set by this namespace's functions (Reagent's JavaScript
@@ -111,7 +111,12 @@
   {:malli/schema [:=> [:cat :seon.host/fn :any] :any]}
   [f r]
   (-set! r :captured nil)
-  (let [[res rs] (reads/with-reads #(binding [*ratom-context* r] (f)))
+  (let [outer datahike.index.interface/*reads*
+        [res rs] (reads/with-reads #(binding [*ratom-context* r] (f)))
+        ;; with-reads binds a recorder of its own and does not nest: a read made here is also the outer recorder's (a page
+        ;; read inside the render proc's pass), as it was before this run recorded its own. Deps' task
+        ;; datahike.reads/with-reads-nests-in-an-outer-recorder moves this into with-reads, and this line goes
+        _ (when (and outer (seq rs)) (swap! outer into rs))
         c (-get r :captured)]
     (-set! r :dirty? false)
     ;; every read the run made is a dependency, however it reached the db: the one recorder (docs/plan.md#the-root-concept-one-reaction-over-the-store)
