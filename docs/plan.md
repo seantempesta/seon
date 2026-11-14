@@ -86,9 +86,11 @@ recorded.
 
 **Safe to start only when all of these are on main,** each proved red first (2026-11-14: a merge gate on the standing system
 booted ~74 test roots at once and took the owner's machine to load 70; a prove waited 17 minutes on that gate):
-- admission weighs a test that boots a root as a whole system, so no run, gate or landing makes more processes than the
-  cores and memory admit, and a killed or failed child never restarts a root on its own (tests);
-- no eval waits on a gate, and every wait on a gate or a reply ends with its value or a typed error (tests);
+- proving runs as Flow: a test, a process test and a merge's check are messages to the effects owner's procs, whose
+  bounded channels admit work from the cores and memory by backpressure, so load stays within the machine with no
+  admission check, worker count or gate beside it; the merge gate's git worktree and rebuild go, and a merge's check is a
+  prove of the candidate branch in the system (`seon.reconcile/the-gate-proves-the-candidate-branch`) (tests, runtime);
+- every wait ends with its value or a typed error, so no eval waits on a check with no end (tests);
 - an update that must restart root waits until nothing is in flight, and a wall-time end is a platform problem, never a
   cached red (web, runtime);
 - the MCP relay answers each call on its own (web);
