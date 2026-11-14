@@ -383,6 +383,31 @@
     (is (= {:test 2 :pass 2 :fail 0 :error 0}
            (select-keys (binding [clojure.test/*test-out* (java.io.StringWriter.)] (clojure.test/test-ns 'app.pt-calc-test)) [:test :pass :fail :error])))))
 
+;; Estimate: 3 records 0.9M + defined-keys over ~3 definitions 0.1M + a retraction 0.3M + load-all!'s live-ids, one form row and
+;; its load (~0.6M) + gone-definitions' 3 seeks. Estimated 3,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-process-on-another-program-unmaps-what-main-dropped-and-loads-what-it-changed
+  ;; docs/source.md#a-boot-runs-mains-program: a root whose binary was built from db (forms B, definitions defs) boots on
+  ;; main, which redefined f and deleted g (an import retracts a removed form and its var). Red before: g stayed bound,
+  ;; and load-all! read every live form's row
+  (let [db (record (empty-db) 'app.pt-boot "(defn f [] 1)" 'app.pt-boot "(defn g [] 2)")
+        forms (into #{} (map :v) (d/datoms db :aevt :form/id))
+        defs (conj (program/defined-keys db) [:var 'app.pt-boot-other/x])
+        _ (intern (program/ensure-ns! 'app.pt-boot-other) 'x 1)
+        g-var (:db/id (d/entity db [:var/name 'app.pt-boot/g]))
+        main (record (d/db-with db [[:db/retractEntity (:db/id (:var/form (d/entity db g-var)))] [:db/retractEntity g-var]])
+                     'app.pt-boot "(defn f [] 3)")
+        ;; the process back on the binary's f (recording main's evaluated it)
+        _ (eval-account 'app.pt-boot "(defn f [] 1)")]
+    (is (= #{[:var 'app.pt-boot/f] [:var 'app.pt-boot/g] [:var 'app.pt-boot-other/x]} defs))
+    (is (= 1 ((resolve (quote app.pt-boot/f)))) "the process holds the binary's f")
+    (let [r (program/load-all! main {:tests? false :forms forms :defs defs})]
+      (is (= {:loaded 1 :removed [[:var 'app.pt-boot/g]] :errors []} r) "main's f loaded; g unmapped; a namespace main holds none of untouched")
+      (is (= 3 ((resolve 'app.pt-boot/f))) "main's definition answers")
+      (is (nil? (resolve 'app.pt-boot/g)) "the deleted var is unbound")
+      (is (= 1 @(resolve 'app.pt-boot-other/x)) "another program's namespace keeps the binary's"))
+    (is (= {:loaded 0 :removed [] :errors []} (program/load-all! main {:tests? false :forms (into #{} (map :v) (d/datoms main :aevt :form/id)) :defs (program/defined-keys main)}))
+        "a binary of main's own program loads and unmaps nothing")))
+
 (defn- selected
   "What a change from db to db' selects, as every run selects it: seon.proofs/plan's :selected
   over the two dbs' reach digests."

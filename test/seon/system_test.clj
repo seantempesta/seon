@@ -82,7 +82,10 @@
         r (ts/value-of (:response (ts/ask root {:op :eval :agent "root"
                                                 :code "(let [ag (seon.system/spawn! sys {}) s (seon.system/stall-state sys)] (seon.system/kill! sys ag) s)"})))]
     (is (map? (:root r)) (pr-str r))
-    (is (every? #{:seon.system/stall-armed :seon.system/busy :seon.system/lost} (keys (:root r))) "root's stall check, nothing else of its state")
+    (is (every? #{:seon.system/stall-armed :seon.system/busy :seon.system/lost :pending} (keys (:root r))) "root's stall check and its open asks, nothing else of its state")
+    (is (map? (get-in r [:root :pending])) "every ask the api holds unanswered, by rid")
+    (is (and (seq (:fx r)) (every? #(every? (fn [k] (int? (get % k))) [:busy :in-flight :queued]) (vals (:fx r)))) "each effect owner's load")
+    (is (= #{:busy :in-flight :queued :done} (set (keys (get-in r [:fx :fx/server-op])))) "the server ops' owner among them: a parked connection's op is running, queued or answered")
     ;; red before (batch 32's problems overrun): the api's ping answered only :agents :closing :pending, so :root was {} on every
     ;; root and a hang's evidence never showed whether the stall check was armed or which agents it held busy
     (is (boolean? (:seon.system/stall-armed (:root r))) "the armed flag, read whatever its value")
@@ -466,36 +469,37 @@
       (is (nil? (root/stale-binary landed)) "after it: the landed tree is the binary's, nothing refused"))))
 
 (def ^:private spawn-on-it
-  "A request to root: spawn an agent and answer its id, or the refusal's [type message stale-binary] when the spawn is
+  "A request to root: spawn an agent and answer [:spawned its id], or the refusal's [type message binary] when the spawn is
   refused; the agent, if one was made, is ended after."
   {:op :eval :agent "root"
    :code (str "(try (let [ag (seon.system/spawn! sys {})] (seon.system/kill! sys ag) [:spawned ag])"
               " (catch clojure.lang.ExceptionInfo e (let [d (ex-data e)] [(:seon.error/type d) (ex-message e) (some? (:binary d))])))")})
 
-(deftest a-root-on-a-binary-of-another-program-forks-no-agent
-  ;; task seon.system/a-boot-resumes-from-the-db, the owner's rule (2026-11-10: "dbboot is supposed to resume if the store is
-  ;; already there ... make sure this rule holds"): a store made by tree A (here a schema entry, :seon.config.web/streams-buf
-  ;; with another bound, seeded) under the binary of tree B. Root resumes it and stays up, but forks no agent: an agent
-  ;; would load main's forms over the binary's code and run the two mixed (2026-11-10, Web's and Context's roots: old
-  ;; contracts against new callers, a fork server lost on its first fork). The refusal names the acts that bring them
-  ;; into agreement: erase the store, reindex from disk, or bin/system next. Red before: the agent forked, holding main's entry
+(deftest a-root-on-a-binary-of-another-program-runs-mains-program
+  ;; task seon.program/a-process-runs-its-branchs-program (docs/source.md#a-boot-runs-mains-program): a store made by tree A
+  ;; (here a schema entry, :seon.config.web/streams-buf with another bound, seeded) under the binary of tree B. Root resumes it,
+  ;; loads main's program over the binary's (seon.program/load-all!, which seon.program-test/a-process-on-another-program-unmaps-
+  ;; what-main-dropped-and-loads-what-it-changed proves form by form), and a spawn is asked only what the agent's one start asks:
+  ;; its binary's identity. Red before: every spawn was refused by the tree compare while the binary was stale (359 refusals,
+  ;; 2026-11-14). The mismatch is still never silent to a person: bin/system
+  ;; start's last line names it and the acts that make the next boot load nothing (docs/source.md#files-and-the-db-two-directions)
   (let [file "resources/seon/schemas/seon.config.web.edn"
         form (get contract/forms :seon.config.web/streams-buf)
         merged (pr-str {:seon.config.web/streams-buf form})
         before (pr-str {:seon.config.web/streams-buf (update form 1 assoc :min 2)})
         [seed two] (boots-on-a-tree file [before merged] {:also [spawn-on-it]})
-        [type message stale?] (first (:also two))]
+        [spawned message] (first (:also two))]
     (is (not= before merged))
     (is (str/includes? (str seed) "SEED OK") (str seed))
     (is (true? (:listening? two)) (str "root resumed the store and listens: " two))
-    (is (= :seon.system/refused type) (str "the spawn is refused: " (pr-str (first (:also two)))))
-    (is stale? "naming the two trees")
-    (doseq [act ["bin/remove-tree runs/store" "bin/system start --reindex" "my.root/import!" "bin/system next"]]
-      (is (str/includes? (str message) act) (str "its message names " act))
-      ;; docs/source.md#files-and-the-db-two-directions: a mismatch is never silent to a person
-      (is (str/includes? (str (:started two)) act) (str "and bin/system start's last line names it too: " (:started two))))
+    ;; never refused for the program: the spawn reaches the agent's one start, where only the binary's identity is asked
+    ;; (seon.fx/runtime-for: this scratch tree names no build inputs, so another binary than target/seon)
+    (is (= :seon.process/env-mismatch spawned) (str "the agent's start asks its binary, nothing before it: " (pr-str (first (:also two)))))
+    (is (not (str/includes? (str message) "git tree")) "no refusal names the trees")
+    (doseq [act ["bin/system start --reindex" "bin/system next"]]
+      (is (str/includes? (str (:started two)) act) (str "bin/system start's last line names " act ": " (:started two))))
     (is (str/starts-with? (str (:started two)) "ROOT STALE BINARY") (str "bin/system start ends on the mismatch: " (:started two)))
-    (is (true? (:schema-changed? two)) "main's entry differs from the binary's")
+    (is (true? (:schema-changed? two)) "main's entry differs from the binary's, and root holds main's")
     (is (= (:seed-t two) (:program-t two)) "and the boot wrote no program fact")))
 
 (def ^:private broken-boot

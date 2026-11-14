@@ -260,7 +260,8 @@
 
 (defn stall-state
   "What root's stall check and each agent proc hold now, a hang's evidence (bin/evidence asks it through root's server
-  before a run past its bound is ended; it reads, never writes): the api proc's ::stall-armed, ::busy and ::lost (its ping's), and
+  before a run past its bound is ended; it reads, never writes): the api proc's ::stall-armed, ::busy, ::lost and :pending (its
+  ping's: every ask it holds unanswered), each effect owner's :busy, :in-flight, :queued and :done (:fx), and
   each agent proc's :inflight (each request's kind), :fx-out, :stall-seen, :last-frame-ms, :holding and :held (a clone's handshake held, and how many wait behind it), read by one Flow ping of
   the graph, with :answered, every proc that answered it. The ping's bound is :seon.config.check/ping-ms: a proc
   mid-step that long answers nothing and is missing from :answered (an agent in ::busy and not there is mid-step), never
@@ -272,7 +273,11 @@
   (let [states (flow/ping (:graph sys) :timeout-ms (cfg/value :seon.config.check/ping-ms))
         state #(::flow/state (get states %))]
     ;; as the api's ping answers it (its :ping-map-fn): the armed flag (seon.step/timer), the busy set, what a throw lost
-    {:root (select-keys (state :api) [::stall-armed ::busy ::lost])
+    {:root (select-keys (state :api) [::stall-armed ::busy ::lost :pending])
+     ;; each effect owner's workers busy, requests in flight and queued: an op the api holds pending is named running, waiting
+     ;; or answered and lost (a server op's connection parked with no worker busy, context's overrun 2026-11-15)
+     :fx (into (sorted-map) (for [[pid m] states :let [s (::flow/state m)] :when (and (contains? s :in-flight) (contains? s :queued))]
+                              [pid (select-keys s [:busy :in-flight :queued :done])]))
      ;; the reconciler's flights by task and the step each waits at: a judge that never settles is named
      :reconciler (select-keys (state :reconciler) [:flights :flight-steps])
      :agents (into (sorted-map)
@@ -481,8 +486,9 @@
   between the two trees reaches root's own code or a build input. What agents merged into main since is main's own and never a
   mismatch (the db is the source of truth). Unknown is never current (binary-current's own rule: a main with a source tree on a binary whose build
   recorded none names :missing :binary-tree), and a diff git cannot make is {:binary :tree :error}. Nil with no source tree
-  (a store seeded with no source: nothing known). Agents of a stale binary would load main's forms over code it was not built
-  from, so no agent is forked (no-room). See docs/source.md#a-boot-resumes-from-the-db."
+  (a store seeded with no source: nothing known). Root's boot loads main's program over a stale binary's
+  (seon.program/load-all!), so agents fork from main's; what the answer names tells bin/system start to build. See
+  docs/source.md#a-boot-runs-mains-program."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :map]]}
   [db]
   (let [held (:tree (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root])))
@@ -497,11 +503,6 @@
   [st n]
   (cond
     (= :lost (get-in st [:view :fork-server :status])) (fs/lost)
-    (get-in st [:view :boot :stale-binary])
-    (refused 'seon.system/spawn!
-             (str "this root's binary was built from another git tree than the one its store's main was last brought to, so no agent is "
-                  "forked: it would run the two mixed. " problems/stale-binary-acts)
-             (get-in st [:view :boot :stale-binary]))
     (> n (cfg/value :seon.config.root/max-agents)) (refused 'seon.system/spawn! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)})))
 
 (defn- spawn-agent
@@ -1484,7 +1485,8 @@
 
 (defn built-program
   "The program of the tree at root as a seed indexes it, and the inputs bin/test keys verdicts by: {:program
-  (seon.program/program-digest of the tree's index) :forms (the ids of its live forms, what seon.program/held? asks) :inputs
+  (seon.program/program-digest of the tree's index) :forms (the ids of its live forms, what seon.program/held? asks) :defs
+  (its definition keys, seon.program/defined-keys: what a process on another program unmaps) :inputs
   (seon.fx/inputs, whose :tree is the tree's git id: what binary-current and the source fact compare)}, or the error of a read or an analysis.
   The index is the build's cache, a store other than the one store because it is regenerable from the tree at any time
   and root never reads it: kept between builds under base (bin/build's target/seon.index, keyed by the schema and layout:
@@ -1498,9 +1500,11 @@
    (let [inputs (fx/inputs root)
          ;; the ids of the tree's live forms: what the binary holds compiled (seon.program/held?)
          index (fn [conn] (let [a (import-tree! conn {:root root :dirs (cfg/value :seon.config.source/dirs)} (profile/now-ns))]
-                            (if (:error a) a (assoc a :forms (into (sorted-set) (map :v) (d/datoms @conn :aevt :form/id))))))
+                            ;; and its definitions: what a process on another program unmaps (seon.program/load-all!)
+                            (if (:error a) a (assoc a :forms (into (sorted-set) (map :v) (d/datoms @conn :aevt :form/id))
+                                                    :defs (program/defined-keys @conn)))))
          r (kept-index! (str (pdb/kept-store! base) "/index") index inputs roots)]
-     (if (:error r) (:error r) {:program (:program r) :forms (:forms r) :inputs (assoc-in inputs [:config :seon.env/index] (or (:indexed-by r) "none"))}))))
+     (if (:error r) (:error r) {:program (:program r) :forms (:forms r) :defs (:defs r) :inputs (assoc-in inputs [:config :seon.env/index] (or (:indexed-by r) "none"))}))))
 
 (defn held-inputs
   "The inputs of the files this system's checkout holds, as bin/system start (or bin/update's no-restart landing) last computed
@@ -1520,8 +1524,8 @@
   held's :tree, the one main was last brought to from outside (an import, a landing; what agents merged since is main's own and
   never a mismatch), the binary's inputs with the config in force (config-input, seon.fx/config-input), which agents key their
   test results by (seon.agent/test-inputs), and :program the binary's, the program those inputs describe; otherwise :program is
-  main's at boot (main-digest, seon.program/program-digest) and no inputs. Another tree is seon.problems/stale-binary's row
-  and refuses spawns: stale, stale-binary's answer at this boot, is held as :stale-binary for the row. A binary built from
+  main's at boot (main-digest, seon.program/program-digest) and no inputs. Another tree is seon.problems/stale-binary's row:
+  stale, stale-binary's answer at this boot, is held as :stale-binary for the row. A binary built from
   another tree and current for held's by reach (stale nil: what differs reaches nothing root runs, seon.system/binary-current)
   hands agents current-inputs, the inputs of held's tree (seon.fx/inputs of it), never its own: a binary current for
   another tree must not key verdicts by its own tree. Never imported. See docs/source.md#a-boot-resumes-from-the-db."
@@ -1531,7 +1535,7 @@
         ;; the inputs of what this boot read come first (bin/system start's, runs/root-inputs.edn): they are the files the
         ;; system judges, whatever tree id the build or the last landing recorded; a root started with none (a test's) keys
         ;; by its binary's record when that is held's tree
-        ;; none on a stale binary: such a root forks no agent (seon.problems-test/a-root-on-a-stale-binary-is-a-problem)
+        ;; none on a stale binary: a build input it bakes may not be the tree's (seon.problems-test/a-root-on-a-stale-binary-is-a-problem)
         inputs (when-not stale (or current-inputs (when one? (:inputs built))))]
     (cond-> (-> held (dissoc :inputs :binary :binary-tree :stale-binary) (assoc :boot boot :program (if one? (:program built) main-digest)))
       (:program built) (assoc :binary (:program built))
@@ -1729,6 +1733,9 @@
             t2 (profile/now-ns)
             ;; main's own config, before anything below reads one and before the fork server inherits it
             config-errors (program/hold-config! @conn)
+            ;; and main's program where the binary holds another: what main dropped unmapped, the forms the binary lacks
+            ;; loaded, never a test namespace's (docs/source.md#a-boot-runs-mains-program)
+            program-load (program/load-all! @conn {:tests? false})
             digest (program/program-digest @conn)
             digest-ms (profile/ms-since t2)
             contracts (contract/instrument! contract/boot-nss)
@@ -1746,7 +1753,7 @@
         (let [db @conn]
           (merge opened (fs/fork-server db store-cfg)
                  {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :retained retained :dropped-trees dropped-trees
-                  :seeded seeded :caught-up caught :seed-ms seed-ms :config-errors config-errors :digest digest :digest-ms digest-ms :contracts contracts :main-inputs main-inputs}))))))
+                  :seeded seeded :caught-up caught :seed-ms seed-ms :config-errors config-errors :program-load program-load :digest digest :digest-ms digest-ms :contracts contracts :main-inputs main-inputs}))))))
 
 (defn- flow-error
   "Flow's error-channel value e as the api's :error message: the proc, the throw's message and
@@ -1847,7 +1854,7 @@
         max-running (or max-running (cfg/value :seon.config.agent/max-running))
         source (or source (when-let [r (get cfg/config :seon.config.source/root)]
                             {:root r :dirs (cfg/value :seon.config.source/dirs) :branch (cfg/value :seon.config.source/branch)}))
-        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors digest digest-ms contracts pid fd compacted retained dropped-trees main-inputs]}
+        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors program-load digest digest-ms contracts pid fd compacted retained dropped-trees main-inputs]}
         (boot! backend path datoms main source t0)
         recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
         ;; root holds main, so its malli default registry is main's (its schema entries beyond the binary's included)
@@ -1884,7 +1891,7 @@
               :store {:backend backend :path path :main main :agents-dir agents-dir :recovered? (boolean recovered?)
                       :recovered-branches recovered :open-ms (lib/r2 open-ms)}
               :boot {:gc-sweepers sweepers :compacted compacted :retained retained :dropped-trees dropped-trees :seeded seeded :caught-up caught-up :seed-ms (lib/r2 seed-ms)
-                     :config-errors config-errors :digest digest :digest-ms (lib/r2 digest-ms)
+                     :config-errors config-errors :program-load (update program-load :removed count) :digest digest :digest-ms (lib/r2 digest-ms)
                      :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :instrument (if contract/on? :on :off)
                      :stale-binary stale}}
         graph-p (promise)
