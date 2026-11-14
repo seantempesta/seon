@@ -2,6 +2,74 @@
 
 The owner's standing rulings, one entry each: his words and date, and where the rule is stated now. The mechanism lives in `AGENTS.md` and the wiki; the reasoning and the history around each ruling are in git. A ruling a later one reverses keeps a one-line pointer to it.
 
+## 2026-11-14 rulings
+
+The owner's rulings of this day and the night before, each with his words where recorded and where it is now stated.
+
+### The priority: Claude sessions work through the system
+
+"I want to optimize what fixes broken processes that are slowing us down and getting more of the system off the file based git focused standpoint. I want claude agents to work through the system ... Collapse the focus to just this one view." Then: "Don't delete useful parts of the plan, I said prioritize." Stated in [the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority).
+
+### A rule is removed only with its reasons
+
+"I want more engineering rigor encoded into our processes. Rarely should you be telling me you want to flatten AGENTS.md without clear reasons. We keep re-solving the same problems over and over because of these institutional knowledge wipes." A rule goes only with the incident or ruling behind it, what holds it now, and why it no longer earns its place. Stated in [the plan](plan.md#throughout).
+
+### Tests: the harness does the thinking
+
+"Every test needs a justification why it can't fork main or a specific branch ... Only tests that boot the system and get it to the running state can even be considered for a non online test." "Why does it matter what the config is that we are forking from. Part of the env setup for the agent is updating the runtime. Don't make this complicated. Make it so it's routing and we can't fuck this up." "Our test fixtures should handle all thought so agents can't write shitty tests." A test is an assertion; the harness gives it a fork on its branch, set to that branch's environment at start, warm fixtures before timing, a budget from its declared estimate, writes to its own branch only, and a mutation check; booting a system is allowed only to a test of booting, with its reason. Stated in [the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority).
+
+### The system operates via Flow; no gates or fences
+
+"No gates or fences unless it's at boot or an edge and we have clear understanding of why it's required. I want the system to operate via flow and that should fix all the crazy load and processing issues." After a merge gate outside Flow (a git worktree, a rebuild, a hand-set worker count) booted ~74 test roots at once. Work, proving included, flows through Flow procs and the effects owner, admitted by bounded channels; a check exists only at boot or at an edge, with its reason stated. Stated in [the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority) and [principles](principles.md#5-boring-by-construction).
+
+### Bootstrap checks once; runtime guarantees
+
+"We have a bootstrap phase and then we have a runtime phase where we have a certain set of guarantees that the core system is running properly. I'm all for proper startup checks, I'm not okay with layers of guards and fences." A process proves at its one start that it holds what its branch names; past startup nothing re-checks it. Stated in [principles](principles.md#5-boring-by-construction) and [the plan](plan.md#stage-0-one-happy-path-now).
+
+### A leaked environment is made impossible, not checked
+
+On the test child that inherited root's state three times: "This sounds like a root cause that we keep patching. How is this even possible and how do we make it impossible rather than adding another check?" A test child forks only from a process already on its branch's environment. Stated in [the plan](plan.md#stage-0-one-happy-path-now).
+
+### Store what will be read back: pull first
+
+"Why aren't we storing enough data that we can query for what we need later? ... Pull first mentality as we need to store the data optimized in the way that we want it read back." A result holds what its run read, where it ran and its status, so reuse and diagnosis are queries. Stated in [the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority).
+
+### Any random task, however unspecified
+
+"The goal is for agents to handle any random task even if it's unspecified. We need context to have reactive renders telling the agent the task isn't specified so the specification is the first of the proofs ... If an agent doesn't solve the task but they improve it I want that synced to disk if one of our claude agents reviews it ... With enough iterations we should be able to take all tasks from beginning to end." Stated in [the plan](plan.md#the-goal).
+
+### Approved designs are tasks
+
+An approved, unbuilt design becomes one task whose plan holds it ("A task each"). Stated in [the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority).
+
+### A reasoning overrun is an error the next turn reads
+
+"A reasoning overrun should be an effect that triggers an error which the system interprets for the agent on their next turn. We can add a render function to display all recent errors and what the causes are?" Stated in [the plan](plan.md#stage-0-one-happy-path-now).
+
+### Failure causes are verifiable tags
+
+"Let's start classifying them and schemas can sets of truths -- several classes can be true at the same time kind of like verifiable tags." Stated in [the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority).
+
+### Blockers are tasks; sessions message the owning session directly
+
+Set the night of 2026-11-13 (quote not recorded), after many back-and-forth messages; it replaces "sessions talk to root only" (2026-11-12). On 2026-11-14: "The board and ledgers and however you are communciating with your agents needs to folded into seon from a db centric standpoint. Agents acting within seon need to get shit done ... Wiki and tasks for sure." A blocker or a bug in another area is a task in the owning area's namespace, named in the blocked task's `:seon.task/needs`; a message goes to the owning session only to block, unblock or agree an interface, in 6 lines or fewer, with evidence and one ask, one thread per problem, no acknowledgements. Root keeps releases and the owner's decisions. Stated in `AGENTS.md` §2 and [the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority), which folds the board, the ledgers, the landing queue and the turns ledger into tasks, queries and this page.
+
+### Main is pushed to GitHub
+
+"push main now so nothing is lost", after README.md says plainly that a major refinement is under way (2026-11-13, as recorded by root). Root pushes main to `github.com/seantempesta/seon` after landings; no other branch of this repository is pushed; a pull request upstream is a draft, opened only with his yes. Stated in `AGENTS.md` §3 and §8.
+
+### Worktrees are temporary; Claude sessions become Seon agents on branches
+
+"The worktrees and everything else is a hack for your claude agents ... Perhaps having agents just work on branches and then we can really deepen the merge and testing mechanisms just like real agents will do?" (2026-11-13). Sessions move onto branches of the one system after 2 or 3 real tasks have merged end to end, one area first. Stated in `AGENTS.md` §3.
+
+### Docs changes are proved by reach
+
+"Yeah that was my mistake. Docs are indexed and should trigger checks." (2026-11-14; earlier, "prove by reach, narrow later"). A docs-and-tasks change reruns every test that reads the changed docs, as any change does; a docs landing broke main (4af7a1f2ae) when `seon.repl-test/the-template-instructions-and-the-help-page-run`, which reads the help page, did not run; narrowing to the tests that read the changed section follows. It replaces "a docs-and-tasks change is never proved". Stated in `AGENTS.md` §3 and [tests run by reach](source.md#tests-run-by-reach).
+
+### Process fixes from the retrospectives
+
+Approved with the retrospectives' working theory: every claim is marked measured or hypothesis; `bin/land --check` before any release ask; a landing's `Deletes:` line names what it deletes (a proof that the old path is gone, per the plan's Stage 1), and a replacement lands with its old path deleted; a session updates its resume note before any landing or long run. Quote not recorded. Stated in `AGENTS.md` §2 and §3, and in [principles](principles.md#7-say-what-you-know-and-say-it-when-it-is-wrong).
+
 ## 2026-11-13 rulings
 
 The owner's rulings of this day, each with his words and where it is now stated.
@@ -64,7 +132,7 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 ### A layout is a render over the same pulled data
 
-"I don't want to lose our data driven UI rendering and don't want any hand rolled systems. This a design goal." Stated in [the plan](plan.md#the-plan), part 3; not built.
+"I don't want to lose our data driven UI rendering and don't want any hand rolled systems. This a design goal." Stated in [the plan](plan.md#stage-5-the-users-system); not built.
 
 ### An agent reads what it can read; a question goes to its parent
 
@@ -76,19 +144,19 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 ### An agent may hold a set of tasks
 
-"These fork and improve sessions should reuse the same task system." "maybe we need to differentiate between start now and start when the system is free." Stated in [the plan](plan.md#the-plan), parts 1 and 2; not built.
+"These fork and improve sessions should reuse the same task system." "maybe we need to differentiate between start now and start when the system is free." Stated in [the plan](plan.md#stage-4-agents-finish-in-few-turns), stages 4 and 5; not built.
 
 ### Tasks chain by needs
 
-"make sure we aren't hard coding in "example" or whatever when they get turned into openai-compat formats." Stated in [the plan](plan.md#the-plan), part 2, and [tasks](tasks.md#a-task-names-examples).
+"make sure we aren't hard coding in "example" or whatever when they get turned into openai-compat formats." Stated in [the plan](plan.md#stage-4-agents-finish-in-few-turns), and [tasks](tasks.md#a-task-names-examples).
 
 ### The data model is worked through live
 
-"Is a session just an agent if so then we don't need session-open/example-open." "What's the next step that will strain our data model". Stated in [the plan](plan.md#the-plan), part 1.
+"Is a session just an agent if so then we don't need session-open/example-open." "What's the next step that will strain our data model". Stated in [the plan](plan.md#stage-5-the-users-system).
 
 ### A message's turn is not asked
 
-"In general I think the message shouldn't matter what turn it arrived on". Stated in [the plan](plan.md#the-plan), part 1.
+"In general I think the message shouldn't matter what turn it arrived on". Stated in [the plan](plan.md#stage-5-the-users-system).
 
 ### Ids are unique across branches; order by time, not by transaction id (owner, 2026-11-11)
 
@@ -104,7 +172,7 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 ### A sync merges everything that does not conflict
 
-"I don't want a hand made list of attributes to sync. I want all non conflicting data to merge and conflicts to be fixed before we merge anything else." Stated in [the plan](plan.md#the-plan), part 1; not built.
+"I don't want a hand made list of attributes to sync. I want all non conflicting data to merge and conflicts to be fixed before we merge anything else." Stated in [the plan](plan.md#stage-5-the-users-system); not built.
 
 ### An unread attribute gets a render or goes
 
@@ -120,7 +188,7 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 ### A merge replays the source's transactions
 
-"We should never record two transaction times that are the same". Each source transaction becomes a new, later transaction of the receiving branch. Stated in [the plan](plan.md#the-plan), part 1; not built.
+"We should never record two transaction times that are the same". Each source transaction becomes a new, later transaction of the receiving branch. Stated in [the plan](plan.md#stage-5-the-users-system); not built.
 
 ### No derived value is stored
 
@@ -128,15 +196,15 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 ### Work, then refine, then review
 
-"And then we can test those refinements without losing the previous one because we have db history." Stated in [the plan](plan.md#the-plan), part 2; not built.
+"And then we can test those refinements without losing the previous one because we have db history." Stated in [the plan](plan.md#stage-4-agents-finish-in-few-turns); not built.
 
 ### Reviewed sessions are kept in the repository
 
-"Make it a general import area like tasks and it's in the repo". Stated in [the plan](plan.md#the-plan), part 2; not built.
+"Make it a general import area like tasks and it's in the repo". Stated in [the plan](plan.md#stage-4-agents-finish-in-few-turns); not built.
 
 ### Measures accumulate from use; a measurement is one call
 
-"I wanted results to accumulate and become more precise over time naturally as they are exercised in the system." Stated in [cost](cost.md#how-we-measure) and [the plan](plan.md#the-plan), part 6.
+"I wanted results to accumulate and become more precise over time naturally as they are exercised in the system." Stated in [cost](cost.md#how-we-measure) and [the plan](plan.md#stage-4-agents-finish-in-few-turns).
 
 ### Before a compaction a session reports up
 
@@ -160,7 +228,7 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 ### When lines of work collide: proving, the product loop, renders as data, Jolt fiber safety (owner, 2026-11-11)
 
-"B, A, D, C": proving through the system, the product loop, renders as data, Jolt fiber safety. Stated in [the plan](plan.md#now).
+"B, A, D, C": proving through the system, the product loop, renders as data, Jolt fiber safety. Stated in [the plan](plan.md#the-plan).
 
 ### A stuck agent is stopped and analyzed
 
@@ -848,7 +916,7 @@ Approved: a changed part sends `clojure.data/diff` of its value; a cited var at 
 
 ### Simplify by constraint; the test suite must be trusted
 
-"I'm okay with adding constraints to the system to simplify the solutions"; "I want all correctness issues solved with our test suite. We need to trust it as much as possible." Stated in [the plan](plan.md#now).
+"I'm okay with adding constraints to the system to simplify the solutions"; "I want all correctness issues solved with our test suite. We need to trust it as much as possible." Stated in [the plan](plan.md#the-plan).
 
 ## 2026-10-29 rulings
 
