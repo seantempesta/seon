@@ -289,6 +289,8 @@
  :seon.db/retired [:map-of {:description "On the error that refuses a store at open, the stored names a rename retired, each to the name that replaced it."} :keyword :keyword]
  :seon.db/schemas [:map {:description "In a write's argument map, a branch's own schema changes, which the per-datom check reads: the key forms and the registry they compile in."} [:forms :map] [:registry :seon.host/registry]]
  ;; processes
+ :seon.agent-proc/clone [:map {:description "A clone request held behind another clone's handshake in an agent proc's :held (seon.agent-proc/end-hold): the message that goes out, and holds, when the hold before it ends."}]
+ :seon.agent-proc/rid [:int {:description "The request id of a clone held behind another clone's handshake, which holds in its turn when it goes out (seon.agent-proc/end-hold)."}]
  :seon.agent-proc/streams [:map-of {:description "An agent proc's in-flight eval output by stream id: the pieces of text of that stream so far, sent whole to the web proc's :streams in-port."} :any [:vector :string]]
  :seon.agent/threw [:and {:description "A child test run's result when it threw: what it threw, which the run rethrows once every child was taken."} :seon.host/throwable]
  :seon.agent/env [:and {:description "A task's agent as the reconciler reads it: the env (branch, model, turn bound) its run started with."} :seon.task/env]
