@@ -190,6 +190,9 @@
       ;; its eval's record could not be written on its branch (its entity ids are spent):
       ;; the typed error is recorded on main as its problem
       :fd-ready (send-fd! st (:k m) (get-in st [:inflight (:k m) :pass-fd]))
+      ;; merge main into this agent's branch, on main's program: root's writer decides and writes it (seon.writer's :merge-main), and
+      ;; its answer is the agent's wait's (seon.agent/merge-main!)
+      :merge-main (do (step/out! o :to-writer {:op :merge-main :branch (:branch st) :dest {:agent id :op :reply :k (:k m)}}) st)
       :branch-me (let [branch (get-in st [:inflight (:k m) :branch])]
                    (step/out! o :to-writer {:op :clone-branch :from (:branch st) :branch branch
                                        :dest {:agent id :op :branched :k (:k m)}})

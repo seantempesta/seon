@@ -1680,6 +1680,16 @@
       (is (= {} (proofs/results run)))
       (is (= 1 (count (proofs/test-run-errors run)))))))
 
+;; Estimate: a helper, no test of its own.
+(defn- merging
+  "This agent's merge-main! as its root answers it: the writer's merge on main's program (seon.writer/merge-main-into) on main's
+  connection conn, in this process, standing for the :merge-main request it sends. See docs/merging.md#a-branch-merges-main-in."
+  [conn cfg]
+  ;; the request key an agent's state starts with (seon.agent/init!'s :tx-seq 0), which these tests' hand-made states leave out
+  (swap! agent/state update :tx-seq #(or % 0))
+  (with-redefs [agent/await-reply (fn [k m & _] (assoc (writer/merge-main-into conn cfg (:branch @agent/state)) :op :reply :k k))]
+    (agent/merge-main!)))
+
 ;; Estimate: test-branch! ~1M, connect and 3 transacts ~0.5M, text-index build ~3M, merge-main! ~3M, 3 branch-changes at ~0.8M = ~10000000.
 (deftest ^{:seon.test/estimate {:ticks 10000000}} after-merge-main-the-agent-judges-against-the-new-base
   ;; an agent chooses the tests that judge
@@ -1703,7 +1713,7 @@
          (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
          (is (empty? (pm/changed-vars (agent/branch-changes (:base @agent/state) (agent/db)))) "the agent has changed nothing")
          (seon.doc/text-index (agent/db))
-         (let [r (agent/merge-main!)]
+         (let [r (merging conn cfg)]
            (is (some #{[:var 'app.m0/f1]} (:applied r)) "main's change merges in")
            ;; docs/vector.md#search: the merge reads none of main's moves, so it carries no index; the slot is keyed by its db, so the
            ;; next search builds it at the db the merge left, never answering from the branch's old one
@@ -1740,7 +1750,7 @@
            calls (fn [f] (profile/begin!) (let [r (f)] [r (into {} (map (juxt :var :calls)) (profile/touched))]))]
        (try
          (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
-         (let [[r _] (calls #(agent/merge-main!))]
+         (let [[r _] (calls #(merging conn cfg))]
            ;; owner, 2026-11-14: "Facts are facts at a certain tx time": a record main wrote reaches the branch as any fact does
            (is (every? #(= :datum (first %)) (:applied r)) "no program key moved: what merged are main's facts")
            (is (= :busy (:seon.agent/status (d/entity @store-conn [:seon.agent/key "test/a1"]))) "main's record merged onto the branch"))
@@ -1752,7 +1762,7 @@
                               :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
                              [:db/add v :var/form "f1'"]])
            (mark!))
-         (is (some #{[:var 'app.m0/f1]} (:applied (agent/merge-main!))) "a definition and its mark: main's change merges in")
+         (is (some #{[:var 'app.m0/f1]} (:applied (merging conn cfg))) "a definition and its mark: main's change merges in")
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 ;; Estimate: test-branch! ~1M, 2 redefinitions and a commit ~0.5M, the writer merging the branch up ~4M, heard-main ~0.5M, one merge-main! ~3M = ~10000000.
@@ -1784,7 +1794,7 @@
            (is (:merged? up) (str "root merges the agent's branch up: " (pr-str up))))
          (redefine "app.m0/f1-second" "(+ x 2)")
          (agent/heard-main)
-         (let [r (agent/merge-main!)]
+         (let [r (merging conn cfg)]
            (is (= [] (:conflicts r)) "its own merged edit is no change of main's")
            (is (= "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 2))" (src (agent/db))) "and its second edit stands"))
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
@@ -1822,7 +1832,7 @@
                                 :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
                                [:db/add v :var/form "f1'"]]))
            (agent/heard-main)
-           (is (some #{[:var 'app.m0/f1]} (:applied (agent/merge-main!))) "main's change merges in")
+           (is (some #{[:var 'app.m0/f1]} (:applied (merging conn cfg))) "main's change merges in")
            (is (= [] (stale [:base :main])) "right after a merge of main, whose db-after is not the branch's now")
            (note 5)
            (agent/branch-changes (:base @agent/state) (agent/db))
@@ -1855,7 +1865,7 @@
            old @agent/state old-link @agent/link]
        (try
          (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
-         (agent/merge-main!)
+         (merging conn cfg)
          (let [x (task/task (agent/db) "demo/x")]
            (is (= #{'demo-test/x-design-wrote-test} (set (:seon.task/proofs x))) "main's carried proof is on the branch")
            (is (= "Make x. The design: f1 adds 100." (:seon.task/plan x)) "and its plan"))
@@ -2003,7 +2013,7 @@
 (deftest ^{:seon.test/estimate {:ticks 9000000}} a-program-pull-leaves-messages-alone
   ;; docs/users.md#messages: merge-main! brings the program, never another agent's messages
   (delivery-world
-   (fn [{:keys [conn as ka kb heads]}]
+   (fn [{:keys [conn cfg as ka kb heads]}]
      (let [body (str "for b " (random-uuid))
            _ (d/transact conn (task/message-tx "m-b" (seon.task/sender "owner") [kb] body 1000))
            [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f1] [?v :var/form ?f] [?f :form/ns ?n]] @conn)
@@ -2011,7 +2021,7 @@
                                 :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
                                [:db/add v :var/form "f1'"]])
            on-branch (fn [k] (d/q '[:find [?id ...] :where [_ :seon.message/id ?id]] (heads k)))]
-       (as ka #(is (true? (:ok (agent/merge-main!))) "the pull applied main's program change"))
+       (as ka #(is (true? (:ok (merging conn cfg))) "the pull applied main's program change"))
        (is (= [] (on-branch ka)) "and no message of b's came with it")
        (is (= [] (on-branch kb)) "b's branch holds none until b's own delivery")
        (as ka #(is (= [] (agent/deliver!)) "a is sent none"))
@@ -3795,7 +3805,7 @@
                               :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
                              [:db/add v :var/form "f1'"]])
            (mark!)
-           (let [[r n] (calls #(agent/merge-main!))]
+           (let [[r n] (calls #(merging conn cfg))]
              (is (some #{[:var 'app.m0/f1]} (:applied r)) "main's change is written onto the branch")
              (is (nil? (n 'seon.program/load-form!)) "and none of main's forms is loaded into this process")
              (is (= (d/commit-id before) (d/commit-id (agent/program-db))) "its program is still the one it started on")))

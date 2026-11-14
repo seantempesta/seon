@@ -18,7 +18,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.ref :as ref] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [seon.render :as render] [seon.template :as template] [seon.graph :as graph] [clojure.repl]
-            [malli.registry :as mr] [malli.core] [jolt.analyzer] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.async.remote :as remote] [jolt.async.remote.flow :as rflow] [jolt.fibers] [jolt.io-poller :as poller]))
+            [malli.registry :as mr] [malli.core] [jolt.analyzer] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.async.remote :as remote] [jolt.async.remote.flow :as rflow] [jolt.fibers] [jolt.io-poller :as poller] [datahike.connector]))
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task (the task root forked it for, or nil) :db :base (main at the branch's merge base: as forked, then each merge-main!) :main (main's head as last read: as forked, then heard-main) :results :n :waits (seon.agent/await-reply's promises, by key) :busy (the :repl proc runs a request) :tx-seq :mode :ns :home :mismatch
@@ -551,53 +551,49 @@
 ;; ---- merging main into this branch (seon.merge; session M1) -------------------------------
 
 (defn merge-main!
-  "git merge main into this agent's branch, in this process (it owns the branch's writes), by the one merge
-  (seon.merge/merge-main): the merged branch is main's head plus this branch's own datoms since the base, so it costs what the
-  branch wrote, never how far main moved. A key both changed stops it: nothing of main's is applied, the base stays, and each
-  conflict is an unmerged entry the branch resolves. Clean, it is one commit (datahike.versioning/force-branch!, parents the
-  branch's head and the main merged, refused if the branch moved), and this process's connection follows it. None of main's forms loads into this running process: its program stays the one :program names
-  (program-db), :behind says so, and its test children and its next start load the branch's difference (load-diff!).
-  Answers {:ok :merged :applied :conflicts :t}: :merged the main commit merged, nil when main had not moved; :applied the program
-  keys main changed since the old base (main-changes, held for the pair main-line already read: no second diff). See
-  docs/merging.md#a-branch-merges-main-in."
+  "git merge main into this agent's branch, decided on MAIN's program: root's writer runs the one merge (its :merge-main,
+  seon.merge/merge-main), never this branch's code. The branch becomes main's head plus its own datoms since the base, one commit
+  only while the branch is still at the head this process committed; a key both changed stops it, and each conflict is an unmerged
+  entry on the branch. This process writes nothing of its branch while it waits (the wait is bounded,
+  :seon.config.agent/merge-ms), then its connection follows the branch's moved head (datahike.connector/follow-head!). None of
+  main's forms loads here: its program stays the one :program names (program-db) and :behind says so, so the run re-forks at its
+  next turn boundary (seon.turn) and its test children load the branch's difference first (load-diff!). Answers {:ok :merged
+  :applied :conflicts :t}: :merged the main commit merged, nil when main had not moved; :applied the program keys main changed since
+  the old base (main-changes, the pair main-line already holds). See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat] [:map [:ok :boolean]]]}
   []
   (commit!)
   (let [conn (:store-conn @state)
-        cfg (:cfg @state)
-        branch (:branch @state)
-        main-b (pdb/main-branch cfg)
-        main (heard-main)
-        head @conn]
+        main (heard-main)]
     (if (= (d/commit-id main) (d/commit-id (:base @state)))
-      {:ok true :merged nil :applied [] :conflicts [] :t (:max-tx head)}
-      ;; git's merge base: the main last merged, unless main has since merged a commit of this branch (its own merge up), which
-      ;; is then the base (docs/sharing.md#a-merge)
-      (let [base (pdb/branch-base conn main-b branch)
-            r (pm/merge-main base head main)]
-        (if (seq (:conflicts r))
-          ;; a conflict stops the merge: only its unmerged entries are written, main's changes wait until they are resolved
-          (do (transact! (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
-              {:ok false :merged nil :applied [] :conflicts (:conflicts r) :t (:max-tx @conn)})
-          (let [applied (vec (keys (main-changes (:base @state) main)))
-                merged (pdb/db-with main (conj (vec (:tx r)) (assoc (pdb/tx-meta branch {:seon.tx/merged main-b}) :db/id :db/current-tx)))
-                ;; Datahike's force-branch! moves this process's live connection to the merged head with it (follow-head!), so
-                ;; its writer's next commit builds on what the merge brought
-                _ (d/force-branch! merged branch #{(d/commit-id head) (d/commit-id main)} {:expected-current-commit (d/commit-id head)})
-                conn' conn ;; kept: it follows the head
-                ;; the merge commit's own transaction: what :t answers
-                merged-t (:max-tx @conn')
-                ;; the merge base is now main's head, the value just merged, so no walk of the commit graph finds it
-                _ (swap! state assoc :db @conn' :base main :behind true)
-                ;; the registry slot built again on the merged branch: main's schema moves are in it too, unread by the merge
-                _ (swap! state with-slot)
-                ;; the same on the branch's fact, or the status, which reads the fact, takes what main changed for this branch's work
-                ;; until a next turn writes it. The text index is not carried: what main's moves wrote is not read here, so the slot,
-                ;; keyed by its db, is built again at its next read, and at the re-fork the fork server's index for main is inherited
-                _ (d/transact conn' [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id main)}])]
-            (swap! state assoc :db @conn' :merged-t merged-t)
-            (send! {:op :committed :t merged-t :txs 1})
-            {:ok true :merged (d/commit-id main) :applied applied :conflicts [] :t merged-t}))))))
+      {:ok true :merged nil :applied [] :conflicts [] :t (:max-tx @conn)}
+      (let [applied (vec (keys (main-changes (:base @state) main)))
+            k (:tx-seq (swap! state update :tx-seq inc))
+            r (await-reply k {:op :merge-main :k k} (cfg/value :seon.config.agent/merge-ms))
+            r (if (contains? r :result) (:result r) (dissoc r :op :k))]
+        (if (contract/error? r)
+          r
+          (do
+            ;; root's writer moved this branch's head: this process's connection and its writer follow it, so the next commit
+            ;; builds on what the merge brought (Datahike's follow-head!, what its force-branch! does for a connection in its own process)
+            (datahike.connector/follow-head! conn)
+            (let [merged? (:ok r)
+                  ;; the main the writer merged, which may be newer than the main this process last heard
+                  main (if-let [c (:main r)] (pdb/at-commit conn c) main)]
+              (swap! state #(cond-> (assoc % :db @conn)
+                              ;; the merge base is now the main just merged
+                              merged? (assoc :base main :behind true :merged-t (:t r))
+                              ;; main's schema moves are in the merged branch too: the registry slot built again
+                              merged? with-slot))
+              (when merged?
+                ;; the same on the branch's fact, or the status, which reads the fact, takes what main changed for this branch's
+                ;; work until a next turn writes it. The text index is not carried: the slot, keyed by its db, is built again at
+                ;; its next read, and at the re-fork the fork server's index for main is inherited
+                (d/transact conn [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id main)}])
+                (swap! state assoc :db @conn))
+              (send! {:op :committed :t (:max-tx @conn) :txs 1})
+              {:ok merged? :merged (when merged? (d/commit-id main)) :applied (if merged? applied []) :conflicts (vec (:conflicts r))
+               :t (if merged? (:t r) (:max-tx @conn))})))))))
 
 ;; ---- evaluation -----------------------------------------------------------------
 
