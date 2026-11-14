@@ -379,6 +379,25 @@
   (let [r (git-run {} root ["show" (str tree ":" path)] nil)]
     (when (zero? (:exit r)) (:out r))))
 
+(defn runtime-for
+  "The binary a process on tree's branch runs: {:binary its path :digest d} when target/seon's identity (target/seon.digest, what
+  bin/build wrote: bin/binary-digest, the digest of what only a build can change) is tree's, else :seon.process/env-mismatch
+  naming both digests, for its caller to build once. The one check of which runtime a branch needs, made at the one start;
+  the program (src/'s forms) is not in it: the process loads its branch's forms as a diff. Cost: one git ls-tree of the build
+  inputs and the pins, ~30 ms. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :string] [:or [:map [:binary :string] [:digest :string]] :seon.error/base]]}
+  [tree]
+  (let [root (cfg/checkout)
+        f (java.io.File. (str root "/target/seon.digest"))
+        built (when (.isFile f) (str/trim (slurp f)))
+        r (lib/sh (str root "/bin/binary-digest") root tree)
+        want (str/trim (str (:out r)))]
+    (cond (not (zero? (:exit r))) (error #'runtime-for :seon.fx/io-error (str "bin/binary-digest " tree ": " (:err r)) {:path root})
+          (= built want) {:binary (str root "/target/seon") :digest want}
+          :else (error #'runtime-for :seon.process/env-mismatch
+                       (str "target/seon's identity " (or built "(none recorded)") " is not tree " tree "'s " want ": build it")
+                       {:seon.process/binary-digest built :seon.process/branch-digest want :seon.process/tree tree}))))
+
 (defn tree-id
   "git's id of the tree at root as it is on disk: HEAD's tree (none before a first commit) with every
   changed and untracked unignored file added, in an index of its own (the repository's untouched), less
