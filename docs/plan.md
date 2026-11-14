@@ -60,8 +60,10 @@ Agreed 2026-11-14 by every area and the owner ([decisions](decisions.md#2026-11-
 in this order, on its one branch, and lands when green ([AGENTS.md](../AGENTS.md#3-how-work-moves)). Every item names its
 expected finish to root; root holds it to 2x and 3x.
 
-1. **Stage 0's merge.** Context retries the first backlog task's `seon_done`, watched, once the fork fix is live
-   (4cf7d0ca6a, live since 14:56).
+1. **Main clean, then Stage 0's merge.** An agent's merge is judged against main's problems too, so main is kept clean
+   (owner, 2026-11-14): a red or open problem on main is its owner's first item, ahead of all else. Then context retries the
+   first backlog task's `seon_done`, watched, alone (the fork fix live since 14:56); random rounds of 2-3 start once the
+   model call has its bound (item 2).
 2. **Nothing hangs, one rule:** every wait passes its declared bound (`:seon.bound/bound`) and ends with
    `:seon.bound/reached` or a typed error the stall check reads. The fork's wait (deps: Chez, Jolt, `seon.lib/fork!`;
    runtime reviews); the model call's await and the stall check's effect exemption, agent_proc.clj:123 (runtime's deadline

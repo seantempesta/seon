@@ -6,6 +6,14 @@ The owner's standing rulings, one entry each: his words and date, and where the 
 
 The owner's rulings of this day and the night before, each with his words where recorded and where it is now stated.
 
+### Main is kept clean
+
+Asked whether an agent's merge should be judged only on what it changed, since the first backlog task's merge was refused for main's own stray reds: "Main must be clean." A red or open problem on main is its owner's first item. Stated in [the plan](plan.md#the-order-of-work-now).
+
+### One watched agent now; the reasoning budget raised
+
+Context runs one watched task now, random rounds after the model call's bound. On `:seon.config.ai/max-tokens`: "I don't care raise it whatever it needs to be. Let me know if it starts getting crazy but if it's cheap I don't care." Set to 65,536 in `resources/seon/config/default.edn`.
+
 ### No new process before the existing one is found
 
 "Do not create any new processes until you have verified we don't have an existing solution that needs to updated or deleted by this implementation. I will say that is a standing rule for all agents." Stated in [AGENTS.md](../AGENTS.md#3-how-work-moves) (the gate).
