@@ -117,6 +117,7 @@
                       [:ping-map-fn :seon.host/fn]]
  :seon.step/outputs [:maybe [:map-of [:or :keyword [:tuple :keyword :keyword]] [:sequential :any]]]
  :seon.step/transition [:enum :clojure.core.async.flow/stop :clojure.core.async.flow/pause :clojure.core.async.flow/resume]
+ :seon.flow/edge [:string {:description "On a var's metadata, why it holds state or waits outside a Flow proc (an edge reader for a blocking read, the interrupt stack, an OS signal's hook): the reason travels with the code, and health's :stateful-outside-flow leaves the var out (docs/health.md#state-or-a-wait-outside-flow)."}]
  :seon.step/step-fn [:function
                      [:=> [:cat] :seon.step/describe]
                      [:=> [:cat :map] :map]

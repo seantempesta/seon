@@ -61,7 +61,7 @@
   :transport proc's in-port (seon.repl/transport-step), the socket's one reader. Made when first
   asked on this connection (a clone's is its own: its connection is new).
   See docs/processes.md#the-socket-and-the-agent-proc."
-  {:malli/schema [:=> [:cat] :seon.host/chan]}
+  {:seon.flow/edge "an edge reader for a blocking read: root's socket, read by one fiber marked a pump that puts each frame on the transport's in-port" :malli/schema [:=> [:cat] :seon.host/chan]}
   []
   (let [{c :conn ch :ch} @link]
     (or ch

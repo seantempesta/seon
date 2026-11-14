@@ -27,7 +27,7 @@
 ;; The live bounded evals of this process, innermost first. The signal handlers run
 ;; on this (the only) thread at a Chez safe point and must find them; this is the
 ;; process's one interrupt cell.
-(defonce ^:private stack (atom ()))
+(defonce ^{:private true :seon.flow/edge "the interrupt stack Chez's interrupt handler reads, outside any step: physics, not a proc's state"} stack (atom ()))
 
 (defn- set-token!
   "Set e's token for cause: true when it was not set before."
@@ -41,7 +41,7 @@
 
 ;; root's interrupt that found no eval running: between two forms of a request, the next
 ;; bounded eval starts stopped; idle, it is cleared by the next request (seon.repl/eval-code).
-(defonce ^:private pending (atom false))
+(defonce ^{:private true :seon.flow/edge "an interrupt delivered while none is armed, read by Chez's interrupt handler: physics, not a proc's state"} pending (atom false))
 (defn clear-pending! {:malli/schema [:=> [:cat] :boolean]}
   [] (reset! pending false))
 

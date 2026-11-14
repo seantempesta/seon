@@ -503,6 +503,7 @@
                  :unnamed-site #(problems/unnamed-sites db ans) :stale-section #(problems/stale-sections db ans)
                  :stale-plan #(problems/stale-plans db ans) :waived-proof #(problems/waived-proofs db ans)
                  :hand-written-list #(problems/hand-written-lists db ans nil)
+                 :stateful-outside-flow #(problems/stateful-outside-flow db ans nil)
                  :unsynced #(problems/unsynced-tasks db ans (mapv :e (d/datoms db :aevt :seon.task/id)))
                  ;; the remainder: answers, report-with, health-with (and problem-unlinked inside it, over the derived rows as health hands them), and the folds
                  :fixed (let [derived (#'problems/other-derived db ans (mapv :e (d/datoms db :aevt :seon.task/id)))]
@@ -529,6 +530,13 @@
                 ;; contracted helpers) and its walk (literal-lists), and the class's own. At import the form is read once already: keeping its
                 ;; literals there makes this a seek a var (seon.problems/a-forms-hand-made-lists-are-read-at-its-import)
                 :hand-written-list (+ 1 (* 5 (count (d/datoms db :aevt :var/form))))
+                ;; its own contract, a derived-row per row, and a seon.db/eid per qualified ref of each src var that swaps or resets
+                ;; (the seek that tells whether the ref is process-global state)
+                :stateful-outside-flow (let [vs (keep #(let [ve (d/entity db (:e %))] (when (some-> ve :var/ns :ns/file (str/starts-with? "src/")) ve)) (d/datoms db :aevt :var/form))]
+                                         (+ 1 (count (problems/stateful-outside-flow db ans nil))
+                                            (reduce + (for [ve vs :let [refs (set (some-> ve :var/form :form/refs))]
+                                                            :when (some '#{clojure.core/swap! clojure.core/reset!} refs)]
+                                                        (count (filter qualified-symbol? refs))))))
                 :wrappers 2}]         ; health's and other-derived's own contracts
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
@@ -1710,6 +1718,29 @@
 
 ;; See docs/health.md#a-hand-written-list: the owner's decree (2026-11-14, AGENTS.md section 5), each hand-made list shown with its
 ;; owner for judgement (a dial, a patch over a missing mechanism, or a restatement of held data)
+(deftest ^{:seon.test/estimate {:ticks 3000000}} state-or-a-wait-outside-flow-is-named-with-what-it-does
+  ;; docs/health.md#state-or-a-wait-outside-flow: each src var holding process-global state, mutating it, waiting on a channel outside
+  ;; go or starting a thread is a row naming what it does; a var whose metadata says why it must stay (:seon.flow/edge) is not, nor is
+  ;; a step's own local volatile. Red before: no such class. Estimate: one small world (~2M), six vars read by seek (~0.1M)
+  (let [nsym (cite-ns (world))
+        v #(symbol nsym (str "v" %))
+        specs {1 {:src "(defonce v1 (atom {}))" :refs #{'clojure.core/atom}}
+               2 {:src "(defn v2 [] (swap! v1 assoc :a 1))" :refs #{'clojure.core/swap! (v 1)}}
+               3 {:src "(defn v3 [c] (clojure.core.async/<!! c))" :refs #{'clojure.core.async/<!!}}
+               4 {:src "(defn v4 [] (.start (Thread. (fn []))))" :refs #{}}
+               5 {:src "(defonce v5 (atom ()))" :refs #{'clojure.core/atom} :meta #{:seon.flow/edge}}
+               6 {:src "(defn v6 [] (let [o (volatile! {})] (vswap! o assoc :a 1) @o))" :refs #{'clojure.core/volatile! 'clojure.core/vswap!}}}
+        head (var-forms (world) 6 (fn [i] (specs (int i))))
+        rows (mapv :evidence (problems/stateful-outside-flow head {} nil))]
+    (is (= [{:kind :stateful-outside-flow :var (v 1) :what [:holds]}
+            {:kind :stateful-outside-flow :var (v 2) :what [:mutates]}
+            {:kind :stateful-outside-flow :var (v 3) :what [:blocks]}
+            {:kind :stateful-outside-flow :var (v 4) :what [:threads]}]
+           (filterv #(= nsym (namespace (:var %))) rows))
+        "global state, its mutator, a blocking take and a thread are each named; an edge with its reason and a local volatile are not")
+    (is (= [{:kind :stateful-outside-flow :var (v 2) :what [:mutates]}] (mapv :evidence (problems/stateful-outside-flow head {} #{(v 2) (v 5) (v 6)})))
+        "the moved vars alone, each by its seek")))
+
 (deftest ^{:seon.test/estimate {:ticks 4000000}} a-literal-enumeration-is-a-hand-written-list
   ;; estimate: one small world (~2M), six forms read and walked (~50k each), the rows derived (~0.5M)
   (let [nsym (cite-ns (world))

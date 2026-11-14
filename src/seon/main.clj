@@ -49,7 +49,7 @@
   before it, on one line, when the binary is not current for main (seon.system/stale-binary), which bin/system start ends on.
   args: the mode's own, `--started-by ns/test` naming the test that started it (its boot's
   :seon.system/started-by)."
-  {:malli/schema [:=> [:cat [:sequential :string]] :any]}
+  {:seon.flow/edge "an OS signal's edge: the shutdown hook the platform calls on its own thread, which ends root through its one stop" :malli/schema [:=> [:cat [:sequential :string]] :any]}
   [args]
   (let [port (seon.config/value :seon.config.root/server-port)
         _ (when (zero? port)
