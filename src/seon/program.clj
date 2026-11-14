@@ -1378,19 +1378,16 @@
               [#{} []] (filterv whole? (distinct (map :ns (load-order forms))))))))
 
 (defn defined-keys
-  "The var and method keys of every definition db's program holds (a form points to it): what a binary built from db's tree
-  holds bound, which bin/build records beside it (binary-program's :defs), so a process on another program unmaps what that
-  program dropped (load-all!). One scan of the two pointers. See docs/source.md#the-binary-records-its-program."
+  "The var and method keys of every definition a form of db points to: what bin/build records as binary-program's :defs, so
+  load-all! unmaps what another program dropped. One scan of two pointers. See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat :seon.host/db] [:set :seon.merge/program-key]]}
   [db]
   (into #{} (comp (mapcat #(d/datoms db :aevt %)) (map :e) (distinct) (keep #(definition-key db %)))
         [:var/form :method/form]))
 
 (defn- gone-definitions
-  "Of defs (the binary's definition keys, binary-program's :defs), those db's program no longer defines in a namespace it
-  holds, sorted: what a process built from defs' tree must unmap to run db's program. A namespace db holds none of is not
-  db's (a store of another program, an example's: its process runs the rest from the binary), so nothing of it is removed.
-  One seek a key."
+  "Of defs (the binary's definition keys), those db's program no longer defines, sorted: what to unmap to run db's program.
+  Only in a namespace db holds: another program's store (an example's) runs the rest from the binary. One seek a key."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe [:set :seon.merge/program-key]]] [:vector :seon.merge/program-key]]}
   [db defs]
   (let [nss (into #{} (map :v) (d/datoms db :aevt :ns/name))

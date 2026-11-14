@@ -475,7 +475,9 @@
    :code (str "(try (let [ag (seon.system/spawn! sys {})] (seon.system/kill! sys ag) [:spawned ag])"
               " (catch clojure.lang.ExceptionInfo e (let [d (ex-data e)] [(:seon.error/type d) (ex-message e) (some? (:binary d))])))")})
 
-(deftest a-root-on-a-binary-of-another-program-runs-mains-program
+;; Estimate: the seed's and the boot's output read back (binary-sh, 2 x ~0.3M) + one root started and stopped from this process
+;; (~0.4M) + 4 git commands ~0.1M = ~1.5M; 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000} :seon.test/root [] :seon.test/execs ["git"]} a-root-on-a-binary-of-another-program-runs-mains-program
   ;; task seon.program/a-process-runs-its-branchs-program (docs/source.md#a-boot-runs-mains-program): a store made by tree A
   ;; (here a schema entry, :seon.config.web/streams-buf with another bound, seeded) under the binary of tree B. Root resumes it,
   ;; loads main's program over the binary's (seon.program/load-all!, which seon.program-test/a-process-on-another-program-unmaps-
