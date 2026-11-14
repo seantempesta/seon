@@ -2238,6 +2238,33 @@
       (is (= t (clojure.edn/read-string (pr-str t))) "plain data: it reads back from its print, so it chains")
       (is (seon.contract/valid? (seon.contract/schema :seon.render/tree) t) "and its schema"))))
 
+(defn lab-plan
+  "The pulled task's plan: one attribute of one entity, read through the ctx view."
+  {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]]] :any]}
+  [{c :seon.ctx/ctx}] [:p (get-in c [:task :seon.task/plan])])
+
+(defn lab-plan-root
+  "A walk's root placing lab-plan, reading nothing itself: the root the test below walks."
+  {:malli/schema [:=> [:cat :map :any] :any]}
+  [_ _] [:main [#'lab-plan {}]])
+
+(deftest a-view-of-a-pulled-entity-is-matched-by-its-datom-keys
+  ;; docs/plan.md#the-root-concept-one-reaction-over-the-store, task seon.ratom/a-view-of-a-pulled-entity-records-its-datom-keys:
+  ;; a component that read attribute a of a pulled entity e (one carrying :db/id) through the ctx view records [:ea e a], so a
+  ;; commit of e's a re-runs it and a commit of a sibling attribute does not, matched by the commit's datom keys alone: the
+  ;; tree's diff is given as empty, so the path index (seon.ratom/read-index, the walk's :tree-readers) reaches nothing
+  (let [db0 (ts/test-db)
+        {db :db-after [{e :e}] :tx-data} (d/with db0 [{:seon.task/id "lab/t" :seon.task/plan "write the test" :seon.task/kind :work}])
+        tree (fn [db] {:db/id 1 :t (:max-tx db) :task (d/pull db [:db/id :seon.task/plan :seon.task/kind] e)})
+        opts (fn [db] {:db db :tree (tree db) :root #'lab-plan-root :index (seon.db/index) :changes (fn [_ _] [])
+                       :outputs #{:seon.render/hiccup}})
+        p0 (r/walk nil (opts db))
+        step (fn [tx] (let [{db' :db-after moved :tx-data} (d/with db tx)]
+                        (set (map first (keys (:ran (r/walk p0 (assoc (opts db') :moved moved))))))))]
+    (is (contains? (set (map first (keys (:ran p0)))) `lab-plan) "drawn cold")
+    (is (contains? (step [[:db/add e :seon.task/plan "ship it"]]) `lab-plan) "a commit of the attribute it read re-runs it")
+    (is (not (contains? (step [[:db/add e :seon.task/kind :whole]]) `lab-plan)) "a commit of a sibling attribute does not")))
+
 (defn lab-said
   "A line of text, a render redefined by the test below."
   {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]]] :any]}
