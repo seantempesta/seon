@@ -261,6 +261,17 @@
     (calls "Add one to the value the last call showed." (str "(+ 1 " (:value seen) ")"))
     (calls "Add twenty and twenty-one." "(+ 20 21)")))
 
+(defn redefines-response
+  "The scripted model of an agent that redefines how every eval answers in the middle of its run (seon.turn-test, Stage 0.6:
+  agent o8c24b62 edited seon.repl/response at turn 24 and its turn loop hung): its first reply keeps the original and wraps
+  seon.repl/response so every answer it builds carries :seon.test/by; every later reply adds one and one."
+  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
+  [{:keys [turn]}]
+  (if (zero? turn)
+    (calls "Wrap how every eval answers."
+           "(def original-response @#'seon.repl/response) (alter-var-root #'seon.repl/response (fn [f] (fn [answers] (assoc (f answers) :seon.test/by :redefined))))")
+    (calls "Add one and one." "(+ 1 1)")))
+
 (defn calls-one-throws
   "The scripted model of a reply whose second call throws (seon.agent-test): three calls, the
   third never run (docs/prompt.md)."

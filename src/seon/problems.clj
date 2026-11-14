@@ -467,6 +467,36 @@
            (derived-row ans s nsym (str v " is " n " tokens, over the bound of " bound ": split it by what it does")
                         {:kind :long-form :var v :tokens n :bound bound} {:var v :tokens n :bound bound})))))
 
+(defn- component?
+  "Whether the var named v on db is a component: a render whose stored contract (:var/contract) takes :seon.render/opts first
+  (docs/render.md#components). A helper a list calls (a plain function, markdown) is no part."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] :boolean]}
+  [db v]
+  (let [c (some->> (pdb/eid db :var/name v) (d/entity db) :var/contract sedn/decode)
+        arities (if (= :function (first c)) (rest c) [c])]
+    (boolean (some (fn [a] (and (vector? a) (= :=> (first a)) (vector? (second a))
+                                (some #{:seon.render/opts} (tree-seq coll? seq (second (second a))))))
+                   arities))))
+
+(defn hand-written-lists
+  "Each page list (a render whose var carries :seon.render/list) among names, the vars a branch changed (nil: every list on db,
+  one :var/meta seek), whose form names a component other than itself (`component?`), as a :hand-written-list row naming them:
+  a page's parts are what its pull holds, each drawn by its schema's render, never named in a list's code. Closed when the list
+  names none. Cost: one seek a list and one a ref. See docs/health.md#a-hand-written-list."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:maybe [:set :symbol]]] [:vector :seon.problems/row]]}
+  [db ans names]
+  (let [lists (if names
+                (filter #(some-> (pdb/eid db :var/name %) (as-> e (d/entity db e)) :var/meta (contains? :seon.render/list)) names)
+                (keep #(:var/name (d/entity db (:e %))) (d/datoms db :avet :var/meta :seon.render/list)))]
+    (vec (for [v (sort-by str lists)
+               :let [refs (some->> (pdb/eid db :var/name v) (d/entity db) :var/form :form/refs)
+                     parts (vec (sort-by str (filter #(and (symbol? %) (not= v %) (component? db %)) refs)))]
+               :when (seq parts)
+               :let [s (str "hand-written-list " v)]]
+           (derived-row ans s (some-> (namespace v) symbol)
+                        (str v " names its parts (" (str/join ", " parts) "): a page draws what its pull holds, each part by its schema's render")
+                        {:kind :hand-written-list :var v :parts parts} {:var v :parts parts})))))
+
 (defn unfocused-docstrings
   "An :unfocused-docstring row for each named Seon var whose docstring is over :seon.config.shrink/docstring-words words or
   holds a measurement, a date or a wiki page cited twice. One seek a var. See docs/health.md#an-unfocused-docstring."
@@ -710,6 +740,7 @@
                          (map #(assoc % :class :stale-section) (stale-sections db ans {:names moved-vars :sections (eids state)}))
                          (map #(assoc % :class :uncited-var) (uncited-vars db ans moved-vars))
                          (map #(assoc % :class :long-form) (long-forms db ans moved-vars))
+                         (map #(assoc % :class :hand-written-list) (hand-written-lists db ans moved-vars))
                          (map #(assoc % :class :unfocused-docstring) (unfocused-docstrings db ans moved-vars))
                          (map #(assoc % :class :unestimated-test) (unestimated-tests db ans moved-vars))
                          (map #(assoc % :class :undeclared-test) (undeclared-tests db ans moved-vars))
@@ -1083,7 +1114,8 @@
   ([db fold]
    (let [ans (answers db)]
      (health-with db ans (:classes (report-with db ans fold nil)) (assoc (other-derived db ans (mapv :e (d/datoms db :aevt :seon.task/id)))
-                                     :unnamed-site (unnamed-sites db ans) :stale-section (stale-sections db ans))))))
+                                     :unnamed-site (unnamed-sites db ans) :stale-section (stale-sections db ans)
+                                     :hand-written-list (hand-written-lists db ans nil))))))
 
 (defn- touched-tasks
   "The task entities of head the move touched (moved: the datoms that differ between the dbs, as
@@ -1126,7 +1158,7 @@
                                        (update :unsynced #(vec (sort-by :task (into (into [] (comp (remove (fn [r] (ids (:task r)))) (map current))
                                                                                           (get-in prev [:classes :unsynced :rows]))
                                                                                     %))))
-                                       (assoc :unnamed-site (carried :unnamed-site) :stale-section (carried :stale-section))))))
+                                       (assoc :unnamed-site (carried :unnamed-site) :stale-section (carried :stale-section) :hand-written-list (carried :hand-written-list))))))
 
 (defn own
   "The open problems of one agent, by class and shaped as `report` (so the one render draws it, an

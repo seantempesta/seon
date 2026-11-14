@@ -627,9 +627,11 @@
                                                                    ; base and head (tests, 2026-11-12: 69 -> 73 with data's)
                                                               8    ; :unfocused-docstring (data, 73 -> 81 measured): its reader and its bound on base and head,
                                                                    ; and a seek and a row for each changed Seon var the input's tree holds
-                                                              5)}  ; :unsynced judges the move's touched tasks, not only merged ones (data, 2026-11-14,
+                                                              5    ; :unsynced judges the move's touched tasks, not only merged ones (data, 2026-11-14,
                                                                    ; 81 -> 86): unsynced-candidates' contract, and the touched task's unsynced?, derived?,
                                                                    ; and refine?'s eid and cites-of
+                                                              2)}  ; :hand-written-list's reader on base and head for the move's changed vars (context,
+                                                                   ; 2026-11-14, measured 86 -> 88)
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 25000000}} problems-cost-nothing-for-a-clean-program
@@ -1000,7 +1002,9 @@
                ;; each on base and head, the same shape (measured 73 -> 77 once both met in one tree)
                ;; and 8 for :unfocused-docstring (data, measured 77 -> 85): its reader and its bound on base and head, and a seek
                ;; and a row for each changed Seon var the tree holds
-               :fixed {:ticks 460000 :bytes 1800000 :calls 85}
+               ;; and 4 for :hand-written-list (context, measured 85 -> 89): its reader on base and head, and on each side the seek of
+               ;; each changed var's metadata
+               :fixed {:ticks 460000 :bytes 1800000 :calls 89}
                :sizes [10 30 100]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
@@ -1217,7 +1221,8 @@
                ;; 60: :refused-value one more, the same two
                ;; 64: :unestimated-test and :undeclared-test two more (each its seon.db/eid and derived-row)
                ;; 66: :unfocused-docstring one more (its seon.db/eid and derived-row)
-               :fixed {:ns 3000000 :bytes 4000000 :calls 66}
+               ;; 68: :hand-written-list one more (its seon.db/eid and derived-row), context 2026-11-14
+               :fixed {:ns 3000000 :bytes 4000000 :calls 68}
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 4000000}} attention-survives-a-store-write
@@ -1629,3 +1634,28 @@
     (is (empty? (get-in (problems/health (d/db-with (world) [(ended "t/ok" {:seon.task/proofs #{'app.t/g-cost}
                                                                             :seon.task/costs {'app.t/g-cost {:rows rows :verdict green}}})]))
                         [:classes :cost :rows])) "a green verdict reads as no problem")))
+
+;; See docs/health.md#a-hand-written-list
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-list-naming-its-parts-is-a-problem
+  ;; the owner (2026-11-10: "NO HAND WRITTEN LISTS"; 2026-11-14: enforced through the problems): a page list draws what its pull
+  ;; holds, each part by its schema's render; one that names a component in its code is a problem a branch is refused for
+  (let [comp-c (seon.edn/encode [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any])
+        helper-c (seon.edn/encode [:=> [:cat :map] :any])
+        nsym (cite-ns (world))
+        v #(symbol nsym (str "v" %))
+        named (fn [refs] (-> (var-forms (world) 3 (fn [i] (case (int i)
+                                                            1 (cond-> {:src (str "(defn v1 [o c] [:div {:id \"p-x\"} " (pr-str (sort refs)) "])") :meta #{:arglists :seon.render/list}} (seq refs) (assoc :refs refs))
+                                                            2 {:src "(defn v2 [o c] [:div])"}
+                                                            3 {:src "(defn v3 [c] c)"})))
+                             (d/db-with [{:var/name (v 2) :var/contract comp-c} {:var/name (v 3) :var/contract helper-c}])))
+        head (named #{(v 1) (v 2) (v 3)})
+        row [{:kind :hand-written-list :var (v 1) :parts [(v 2)]}]]
+    (is (= row (mapv :evidence (problems/hand-written-lists head {} #{(v 1)})))
+        "a list naming a component has its row naming that part; itself and a helper it calls are no part")
+    (is (= row (mapv :evidence (problems/hand-written-lists head {} nil))) "every list on the db, found by its metadata")
+    (is (= [] (problems/hand-written-lists head {} #{(v 2) (v 3)})) "a component or a helper is no list")
+    (is (= [] (problems/hand-written-lists (named #{(v 3)}) {} nil)) "a list that draws its parts from the pull, calling helpers, has none")
+    (let [split (problems/caused-split (named #{(v 3)}) head)]
+      (is (some #(re-find #"names its parts" %) (map str (:caused split))) (str "a branch that adds one is refused done: " (pr-str split))))
+    (is (contains? seon.problems/caused-classes :hand-written-list))
+    (is (not (contains? (:seon.problems/attention (contract/properties :seon.problems/class)) :hand-written-list)) "a reason to refuse, not attention")))
