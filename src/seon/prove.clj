@@ -648,10 +648,8 @@
       seed? (assoc sk (cond-> (assoc on :kind :seed :binary? stores?) build? (assoc :needs #{bk}))))))
 
 (defn ticks-apart
-  "The :platform problems of a plan r's reused reports (seon.agent's :reused-reports, :digests {test digest}): each flaky one whose
-  green and red at one digest spent ticks over ten times apart (seon.proofs/flaky's :seon.proofs/ticks; ten, the factor a test's
-  budget takes over its estimate, docs/merging.md#a-tests-tick-budget) ran different work for one input, an input its digest
-  misses; filed once a digest (st's :ticks-apart, the digests filed). Answers [st problems]. See docs/merging.md#verdicts-are-a-cache."
+  "[st problems]: a :platform problem for each flaky reused report of plan r whose green and red spent ticks over ten times
+  apart (:seon.proofs/ticks), once a digest (st's :ticks-apart). See docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
   [st r]
   (reduce (fn [[st ps] {:keys [var] :as f}]
