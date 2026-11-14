@@ -4,7 +4,7 @@
   many branches, as in production; owner, 2026-10-21). Test-only, so it lives in test/, not
   in src (session DUP-HELPERS); it seeds and opens through seon.db's own seed! and open-main!."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step] [clojure.core.async] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [clojure.test] [seon.lib] [seon.program :as program] [seon.fx :as fx] [seon.task :as task] [seon.config :as config] [hasch.core :as hasch]
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [clojure.test] [seon.lib] [seon.program :as program] [seon.fx :as fx] [seon.task :as task] [seon.config :as config] [hasch.core :as hasch]
             [seon.ref :as ref] [seon.doc :as doc] [seon.template :as template]))
 
 (defn standing-targets-tx
@@ -478,52 +478,31 @@
                (:value m))
              (catch Exception _ nil))))
 
-(defn- ask-on
-  "Request m on socket s, as one line, and its one reply line read: the reply as data (tagged literals kept), or {:error :eof}."
-  {:malli/schema [:=> [:cat :any :map] :map]}
-  [s m]
-  (let [w (java.io.OutputStreamWriter. (.getOutputStream s) "UTF-8")
-        r (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s) "UTF-8"))]
-    (.write w (str (pr-str m) "\n"))
-    (.flush w)
-    (let [line (.readLine r)]
-      (if (clojure.string/blank? line)
-        {:error :eof}
-        (clojure.edn/read-string {:default tagged-literal} line)))))
-
 (defn ask
   "One request m to a started root's server: its line on a socket this process opens, one reply line read,
   ending on the reply or when the root closes the connection or dies: the reply as data (tagged literals
   kept), or one recorded error value, {:error :eof} (closed with no reply), {:error :reset} or {:error
   :refused} (docs/failure-points.md). A root that died before listening (start-root!'s :port nil) answers
   {:error :root-did-not-listen :log}, its log, never a request to no port. A caller asserts on :error.
-  Inside a test the wait has the test's peer bound (seon.proofs/*peer*) on the one timer (seon.step/put-after!, cancelled
-  at the answer): past it the socket is closed and the test is :seon.test/wall-spent, no verdict (it reads the machine), with
-  every fiber's dump, until a root says its own deadlock (task clojure.core.async.flow/a-graph-counts-its-messages-and-says-when-it-is-quiet;
-  docs/testing.md#a-test-waits-without-a-clock). In-process, not bin/ask: a perl process a request was ~17 ms of a cheap
-  one's ~20 under load (docs/testing.md#a-root-costs-what-it-boots)."
+  In-process, not bin/ask: a perl process a request was ~17 ms of a cheap one's ~20 under load
+  (docs/testing.md#a-root-costs-what-it-boots)."
   {:malli/schema [:=> [:cat [:map [:port [:maybe :int]]] :map] :map]}
   [{:keys [port log]} m]
   (if (nil? port)
     {:error :root-did-not-listen :log log}
-    (let [{:keys [test ms]} seon.proofs/*peer*
-          passed (volatile! false)]
-      ;; the edge where the socket's failures become values (bin/ask's three)
-      (try
-        (with-open [s (java.net.Socket. "127.0.0.1" (int port))]
-          (let [due (clojure.core.async/chan 1)
-                h (when ms (seon.step/put-after! due ms :due))]
-            (when h (clojure.core.async/go (when (clojure.core.async/<! due) (vreset! passed true) (.close s))))
-            (try (ask-on s m)
-                 (finally (seon.step/cancel! h) (clojure.core.async/close! due)))))
-        (catch java.net.ConnectException _ {:error :refused})
-        (catch java.io.IOException e
-          (if-not @passed
-            {:error :reset}
-            ;; the peer answered nothing within the test's bound: the machine's reading, so no verdict (seon.prove)
-            (let [dump (jolt.host/fiber-dump)
-                  msg (str "the root asked gave no answer within the test's peer bound of " ms " ms (" test ")")]
-              (throw (ex-info msg (contract/error :seon.test/wall-spent #'seon.test-store/ask msg {:test test :bound-ms ms :dump dump}))))))))))
+    ;; the edge where the socket's failures become values (bin/ask's three)
+    (try
+      (with-open [s (java.net.Socket. "127.0.0.1" (int port))]
+        (let [w (java.io.OutputStreamWriter. (.getOutputStream s) "UTF-8")
+              r (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s) "UTF-8"))]
+          (.write w (str (pr-str m) "\n"))
+          (.flush w)
+          (let [line (.readLine r)]
+            (if (clojure.string/blank? line)
+              {:error :eof}
+              (clojure.edn/read-string {:default tagged-literal} line)))))
+      (catch java.net.ConnectException _ {:error :refused})
+      (catch java.io.IOException _ {:error :reset}))))
 
 (defn stop-root!
   "Stop a root start-root! started (bin/system stop: its stdin closes, it stops cleanly, and the

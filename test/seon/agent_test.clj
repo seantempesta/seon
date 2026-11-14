@@ -2719,21 +2719,6 @@
     (is (= {t :error} (:proofs (:value proved))) (pr-str proved))
     (is (= [:seon.test/deadlock] (mapv first (:failures (:value proved)))) (str "its own deadlock, told with no clock: " (pr-str proved)))))
 
-(deftest ^{:seon.test/estimate {:ticks 300000}} a-peer-root-that-never-answers-ends-at-the-tests-peer-bound
-  ;; docs/testing.md#a-test-waits-without-a-clock: the one wall bound a test has is on its wait for a peer root (an outside process,
-  ;; rule 4): seon.test-store/ask's socket carries the peer bound the runner binds (seon.proofs/*peer*), and past it throws the typed
-  ;; :seon.test/wall-spent with every fiber's dump (no verdict: it reads the machine). Red before: no bound, the read waited for good.
-  ;; Estimate: one socket, one 50 ms read timeout, one dump: ~300k ticks of this thread
-  (let [ss (java.net.ServerSocket. 0)
-        held (promise)
-        _ (future (let [c (.accept ss)] @held (.close c)))
-        e (try (binding [seon.proofs/*peer* {:test "#'app/asks" :ms 50}] (ts/ask {:port (.getLocalPort ss)} {:op :ping}) nil)
-               (catch Throwable t (ex-data t)))]
-    (deliver held true) (.close ss)
-    (is (= :seon.test/wall-spent (:seon.error/type e)) (pr-str (dissoc e :dump)))
-    (is (= [50 "#'app/asks"] [(:bound-ms e) (:test e)]) "naming its bound and its test")
-    (is (string? (:dump e)) "with the evidence")))
-
 ;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a test run's fold (seon.agent/test-run-step) answers once each child's two ends
 ;; are held, its link's end and its reaped exit, whichever comes first. Run here through the real plumbing but the fork: a
 ;; core.async.flow graph holding the fold proc, its resume forking each shard's child by fork-test-child, whose
