@@ -1491,21 +1491,13 @@
                        {:path checkout}))))))
 
 (defn run-item
-  "The :process effect: one item of a prove that the test service (seon.prove) asked, which this kind's owner admitted by the
-  processes its class holds (admits?). A test batch ({:kind :test :msg}) is asked of the agent holding its branch through
-  :ask-tests (root binds it: the api's :tests op), its answer the agent's. Any other is run on the session's
-  checkout at tree, niced: :build is bin/build seon there; :seed brings the checkout's program store to the tree and, :binary?,
-  seeds its check store fresh, once a tree (each binary step takes a clone of it, as bin/check's steps do); :step is one check
-  step (bin/check --steps, then bin/test --store-steps, which stores it green at its digest; past its bound bin/check fails
-  it). Its answer {:value {:pass :fail :error :failures :ms}}, the verdict read back from the cache by its digest, so an
-  item asked again is reused there. A checkout whose files are no longer tree is refused (:seon.fx/io-error, :tree-moved): a verdict would be
-  stored under a digest of files that are not there. A green already stored is answered at once, :reused, with no process
-  started. See docs/merging.md#a-session-proves-through-root."
+  "The :process effect's worker perform: one item of a prove that the test service (seon.prove) asked and this kind's owner
+  admitted by the processes its class holds (admits?): a build, a seed or a check step on the session's checkout
+  (run-tree-item). A test batch is never a worker's: the owner asks the api for it (:seon.fx/ask). See
+  docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [kind] :as req} :req {:keys [ask-tests]} :ctx}]
-  (if (= :test kind)
-    (ask-tests (:msg req))
-    (run-tree-item req)))
+  [{req :req}]
+  (run-tree-item req))
 
 ;; ---- the owner -----------------------------------------------------------------------
 
@@ -1614,7 +1606,7 @@
   (cond
     (spent? st m)
     (error #'seon.fx/admit :seon.fx/budget-spent "the request's budget is spent" {:budget budget :spent (get-in st [:spent budget-key])})
-    (>= (:busy st) (:workers st)) :wait
+    (and (>= (:busy st) (:workers st)) (not (get-in m [:req :seon.fx/ask]))) :wait
     (not (admits? (:lim st) st m)) :wait
     (and (:bucket st) (< (:tokens (refill (:bucket st) now-ms)) (or est 0))) :wait
     :else :run))
@@ -1746,9 +1738,16 @@
                                         st ms)
                              st (cond-> st (and (:holding st) (some :fkey ms)) (resumed-told o))
                              t (profile/now-ns)]
+                         (if-let [ask (get-in (first ms) [:req :seon.fx/ask])]
+                           ;; a run another process does for it (a test batch, the agent's): asked of the api as an output and
+                           ;; answered on :answers, so no step waits inside (docs/flow.md, the five rules); it holds no worker
+                           (let [[st msg] (step/ask st [(keyword "fx" (name (:kind st))) :answers] (assoc (first ms) :taken-ns t) ask)]
+                             (step/out! o :out msg)
+                             (recur st))
+                           (do
                          (step/out! o :to-workers (if (:batch st) {:batch (mapv #(assoc % :taken-ns t) ms)} (assoc (first ms) :taken-ns t)))
                          (recur (cond-> (update st :busy inc)
-                                  (:bucket st) (update :bucket #(update (refill % now) :tokens - (transduce (map (fn [r] (or (:est r) 0))) + ms))))))
+                                  (:bucket st) (update :bucket #(update (refill % now) :tokens - (transduce (map (fn [r] (or (:est r) 0))) + ms))))))))
             :else (do (reply! o (:dest m) d)
                       (recur (update st :queue dissoc qk)))))
         (dissoc st :lim :read? :fresh :reading)))))
@@ -1759,13 +1758,27 @@
   {:malli/schema [:=> [:cat :map] :map]}
   [st] (assoc st ::flow/input-filter (if (>= (count (:queue st)) (cfg/value :seon.config.fx/buf)) #(not= :in %) identity)))
 
+(defn- done-of
+  "The owner's :done item for request m answered r, taken at t0 and answered at t1 (ns): the outcome with its
+  timing, a failure with the time it failed (seon.error/asked-tx), and its cost. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat :map :map :int :int] :map]}
+  [m r t0 t1]
+  (cond-> {:dest (:dest m) :request m :budget-key (:budget-key m) :est (:est m 0)
+           :outcome (cond-> (assoc r :seon.fx/queue-us (quot (- (:taken-ns m) (:in-ns m)) 1000)
+                                   :seon.fx/us (quot (- t1 t0) 1000))
+                      ;; when it failed, as its asker records it (seon.error/asked-tx)
+                      (contract/error? r) (assoc :seon.fx/at-ms (System/currentTimeMillis)))}
+    (:cost r) (assoc :cost (:cost r))))
+
+
 (defn owner-proc
   "The owner of one effect kind. In :in (the agent procs' requests {:req :dest :prio
   :budget :budget-key :agent}, addressed by id; :seon.config.fx/buf), :ask (root's own asks, the api's: the same requests,
   never held back by the bound, since the api that puts them answers every asker and must never wait on one owner; they are
   bounded where they start: the test service's workers, the reconciler's flights), :done (the workers'
-  outcomes). Out :to-workers (its performers' shared channel), :out (the api's :back:
-  {:dest :r})."
+  outcomes), :answers (the api's answers to what it asked: a request whose :req names :seon.fx/ask, a run another process does,
+  is asked of the api, never performed by a worker; the port holds every request admission lets be in flight). Out :to-workers
+  (its performers' shared channel), :out (the api's :back: {:dest :r}, and the asks)."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:kind "the effect kind" :workers "performers, its concurrency"
                 :rate "tokens per second the provider admits (nil: no bucket)"
@@ -1774,11 +1787,12 @@
                 :tick "its clock's channel (external in-port, with :rate): a :tick when the bucket refilled"
                 :limits "its admission dials (limits' map; nil: config-limits, read at each admission)"
                 :load-fn "reads the machine's load (lib/load-average)" :held-fn "reads the processes by tag (held-processes)"}
-       :ins {:in "requests, addressed [:fx/<kind> :in] by any proc" :ask "root's own requests, never held back by the bound" :done "its workers' outcomes"} :outs {}
+       :ins {:in "requests, addressed [:fx/<kind> :in] by any proc" :ask "root's own requests, never held back by the bound" :done "its workers' outcomes"
+              :answers "the api's answers to the requests it asked (:seon.fx/ask), one each"} :outs {}
        ;; admission and routing only: never blocks, never computes long
        :workload :io
        :ping-map-fn (fn [st] (-> (select-keys st [:kind :workers :busy :peaks :load :done]) (assoc :in-flight (count (:flight st))) (assoc :queued (count (:queue st)) :spent (:spent st))))})
-  ([args] (assoc (select-keys args [:kind :workers :batch :close? :limits]) :busy 0 :flight {} :peaks {} :done 0
+  ([args] (assoc (select-keys args [:kind :workers :batch :close? :limits]) :busy 0 :flight {} :peaks {} :done 0 :rid 0 :pending {}
                  :load-fn (or (:load-fn args) lib/load-average) :held-fn (or (:held-fn args) held-processes) :seq 0 :queue (sorted-map) :spent {}
                  :bucket (when-let [r (:rate args)]
                            {:tokens (double r) :cap (double r) :per-ms (/ r 1000.0) :rate-ms (/ r 1000.0) :at (quot (profile/now-ns) 1000000)})
@@ -1802,19 +1816,12 @@
                  (when (and (:close? st) (zero? (:busy st)) (empty? (:queue st)) (not-any? #(get-in % [:request :req :more]) (or (:batch m) [m])))
                    (step/out! o :to-workers {:idle true}))
                  [st @o])
-         :tick (do (step/fired! (:tick-timer st)) [(bound (dispatch st o)) @o]))))))
-
-(defn- done-of
-  "The owner's :done item for request m answered r, taken at t0 and answered at t1 (ns): the outcome with its
-  timing, a failure with the time it failed (seon.error/asked-tx), and its cost. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
-  {:malli/schema [:=> [:cat :map :map :int :int] :map]}
-  [m r t0 t1]
-  (cond-> {:dest (:dest m) :request m :budget-key (:budget-key m) :est (:est m 0)
-           :outcome (cond-> (assoc r :seon.fx/queue-us (quot (- (:taken-ns m) (:in-ns m)) 1000)
-                                   :seon.fx/us (quot (- t1 t0) 1000))
-                      ;; when it failed, as its asker records it (seon.error/asked-tx)
-                      (contract/error? r) (assoc :seon.fx/at-ms (System/currentTimeMillis)))}
-    (:cost r) (assoc :cost (:cost r))))
+         :tick (do (step/fired! (:tick-timer st)) [(bound (dispatch st o)) @o])
+         ;; the api's one answer to a request asked of it (step/ask); a second, or a late :ended, finds nothing (step/answered)
+         :answers (let [[st m0] (step/answered st (:tag m))]
+                    (if m0
+                      [(bound (dispatch (outcome st o (done-of m0 (:r m) (:taken-ns m0) (profile/now-ns))) o)) @o]
+                      [st @o])))))))
 
 (defn- put-lines!
   "The lines of the bytes b, a piece cut anywhere: every newline byte (never inside a multi-byte character) ends the line
@@ -1993,7 +2000,10 @@
       (let [work (a/chan workers) owner (keyword "fx" (name kind))]
         (-> acc
             (assoc owner {:proc (flow/process #'owner-proc)
-                          :chan-opts {:in {:buf-or-n (cfg/value :seon.config.fx/buf)} :ask {:buf-or-n (cfg/value :seon.config.fx/buf)} :done {:buf-or-n (* 2 workers)}}
+                          :chan-opts {:in {:buf-or-n (cfg/value :seon.config.fx/buf)} :ask {:buf-or-n (cfg/value :seon.config.fx/buf)} :done {:buf-or-n (* 2 workers)}
+                                      ;; credit: every request admission lets be in flight at once (each weighs a process or more, within
+                                      ;; limits' :budget, the one bound it is taken from), so an answer never parks (docs/flow.md, request and answer)
+                                      :answers {:buf-or-n (:budget (config-limits))}}
                           :args (cond-> {:kind kind :workers workers :work work :back back}
                                   rate (assoc :rate rate :tick (a/chan 1))
                                   batch (assoc :batch batch)

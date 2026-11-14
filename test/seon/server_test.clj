@@ -2,7 +2,7 @@
   "Root's server as an outside agent reaches it (seon.server, through the built root:
   seon.agent-test/in-agent). Run: bin/test seon.server-test"
   (:require [clojure.test :refer [deftest is]] [jolt.fibers] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]
-            [seon.test-store :as ts] [seon.task :as task] [seon.main] [seon.fx] [seon.lib] [datahike.api :as d] [clojure.java.shell] [clojure.core.async :as a] [my.root]))
+            [seon.test-store :as ts] [seon.task :as task] [seon.main] [seon.fx] [seon.lib] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell] [clojure.core.async :as a] [my.root]))
 
 (deftest each-op-has-its-answer
   ;; the ops table (each op's doc and args, the MCP tool list) and op-answer's methods are one set of
@@ -213,12 +213,16 @@
   (let [[ctx status sent] (at/in-agent (fn [{:keys [agent task]}]
                                          [{:op :context :agent agent} "(my.task/status)"
                                           ;; read here, from the store (seon.test-store/read-task-branch): no request to root
-                                          (fn [{:keys [root]}]
-                                            (let [db (ts/read-task-branch root task)]
-                                              {:ns (d/q '[:find [?n ...] :where [?m :seon.model-call/origin :outside] [?m :seon.model-call/sent-hash _] [?m :seon.model-call/n ?n]] db)
-                                               :ids (d/q '[:find [?id ...] :where [?m :seon.model-call/origin :outside] [?m :seon.model-call/id ?id]] db)
-                                               :turns (d/q '[:find [?t ...] :where [_ :seon.agent/turn ?t]] db)
-                                               :key (d/q '[:find ?k . :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a]] db)}))]))
+                                          ;; this test's own agent's facts only: its task branch forks from the shard's main, which holds every
+                                          ;; earlier test's agents and their reads (seon.agent-test/in-agent)
+                                          (fn [{:keys [root names]}]
+                                            (let [db (ts/read-task-branch root task)
+                                                  k (name (:agent names))
+                                                  a (pdb/eid db :seon.agent/key k)]
+                                              {:ns (d/q '[:find [?n ...] :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/sent-hash _] [?m :seon.model-call/n ?n]] db a)
+                                               :ids (d/q '[:find [?id ...] :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/id ?id]] db a)
+                                               :turns (d/q '[:find [?t ...] :in $ ?a :where [?a :seon.agent/turn ?t]] db a)
+                                               :key k}))]))
         text (:context ctx)]
     (is (clojure.string/starts-with? text "# You are a Seon agent") "the system prompt, first")
     (is (clojure.string/includes? text "(my.render/page {:commit") "the page, as the call Seon made and its answer")
