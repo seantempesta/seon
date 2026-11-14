@@ -158,7 +158,16 @@
             (pred :seon.host/void (constantly true))
             ;; a character, as malli's type keys name a value's type (:int, :string): malli names it only as the
             ;; predicate char?, and agents write :char
-            [:char (m/-simple-schema {:type :char :pred char?})]]))
+            [:char (m/-simple-schema {:type :char :pred char?})]
+            ;; [:seon.contract/once shape]: a value its maker checked against shape and marked (`checked-once`) is admitted at
+            ;; once, any other is checked against shape in full; it generates as shape does. A large immutable value made once (the
+            ;; entity index) is then validated once, where it is made, never at every contract that names it
+            [:seon.contract/once (m/-simple-schema
+                                   {:type :seon.contract/once :min 1 :max 1
+                                    :compile (fn [_ [shape] opts]
+                                               (let [valid? (delay (m/validator (m/schema shape opts)))]
+                                                 {:pred (fn [v] (or (contains? (::valid (meta v)) shape) (@valid? v)))
+                                                  :type-properties {:gen/schema shape}}))})]]))
 
 ;; ---- the registry ------------------------------------------------------------------
 
@@ -182,6 +191,11 @@
     (vreset! reg (mr/composite-registry (m/default-schemas) host-schemas lazy))
     (doseq [k (keys forms)] (mr/-schema lazy k))
     (mr/composite-registry (m/default-schemas) host-schemas (mr/simple-registry @compiled))))
+
+(clojure.core/defn checked-once
+  "Value v, which its maker has just checked against named schema shape, marked so: a [:seon.contract/once shape] contract admits it
+  at once. Metadata travels with the value, so no table is kept anywhere. See docs/checks.md#contracts-armed-at-definition."
+  [v shape] (vary-meta v update ::valid (fnil conj #{}) shape))
 
 (def forms "Every named schema form of the platform (seon.config/schema-forms, baked once)." config/schema-forms)
 

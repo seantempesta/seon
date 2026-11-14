@@ -2049,3 +2049,17 @@
        (is (= b (:seon.tx/branch tx)) "a raw write names the connection's branch")
        (is (string? (:seon.tx/runtime tx)) "and the runtime that made it")
        (is (= :elsewhere (:seon.tx/branch tx2)) "a caller's own value wins")))))
+
+;; Estimate: two seon.db/owners calls on the marked index ~2k ticks and ~2 KB each = 10000000 ticks with the profile
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-contract-checks-the-entity-index-once-where-it-is-made
+  ;; root's waiver audit: seon.program-cost-test's record-tx proof was 8.6x its bytes, and 41 KB of its 91 KB was two contracts
+  ;; validating the whole entity index (seon.db/index's return, seon.db/owners' argument), at every call; the index is checked once
+  ;; where it is made and marked, and a contract naming it admits the mark at once
+  (let [ix (pdb/index)
+        _ (pdb/owners ix [:seon.agent/key])
+        _ (seon.profile/begin!)
+        _ (pdb/owners ix [:seon.agent/key])
+        b (:bytes (first (filter #(= 'seon.db/owners (:var %)) (seon.profile/touched))))]
+    (is (< b 4000) (str "a call taking the index checks no more than the mark: " b " bytes"))
+    (is (contains? (:seon.contract/valid (meta ix)) :seon.db/entity-index-shape) "the index carries its mark")
+    (is (not (seon.contract/valid? :seon.db/entity-index (with-meta (dissoc ix :forms) nil))) "an unmarked value is checked in full, and refused")))

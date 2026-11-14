@@ -128,12 +128,15 @@
   any; docs/render.md#the-page); and :forms, the forms it was built from}. It is the one value every reader of what an entity
   is takes first (ix): a branch's own entity schema is recognized by its own index, never the binary's.
   See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :seon.db/entity-index]}
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :seon.db/entity-index-shape]}
   [forms]
   (let [entity? #(:seon.db/attributes (form-props forms %))
         required (fn [form] (for [e (own-entries form) :let [p (second e)] :when (not (and (map? p) (:optional p)))] (first e)))
         es (into {} (for [[k form] forms :when (entity? k) a (own-keys form)] [a k]))
         ids (into {} (filter #(:seon.db/identity (form-props forms (key %)))) es)]
+    ;; checked against its shape once, here (this function's output), and marked so: a contract naming :seon.db/entity-index admits
+    ;; it at once, never validating the whole index again (seon.contract/checked-once)
+    (seon.contract/checked-once
     {:forms forms
      :entity-schemas es
      :identity-schemas ids
@@ -155,7 +158,7 @@
      :derived-attrs (into (into #{} (keep (fn [[a k]] (when (:seon.db/derived (form-props forms k)) a))) es)
                           (filter #(and (qualified-keyword? %) (:seon.db/derived (form-props forms %)))) (keys forms))
      ;; the ref attributes some entity schema requires: what the write check's cascade follows from a retracted entity, once
-     :required-refs (vec (sort (distinct (for [k (distinct (vals es)) a (required (get forms k)) :when (:seon.db/to (form-props forms a))] a))))}))
+     :required-refs (vec (sort (distinct (for [k (distinct (vals es)) a (required (get forms k)) :when (:seon.db/to (form-props forms a))] a))))} :seon.db/entity-index-shape)))
 
 (defn- with-specs
   "Index ix with :specs, each pattern an entity schema declares (:seon.ctx/pattern) to its compiled spec, made at its

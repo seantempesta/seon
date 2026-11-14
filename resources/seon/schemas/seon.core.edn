@@ -94,7 +94,9 @@
  ;; the writer's transact arguments (datahike.writing/transact!), through seon.db/transact-checked
  :seon.db/transact-args [:map [:tx-data :seon.db/tx-data] [:tx-meta {:optional true} [:maybe :map]] [:seon.db/schemas {:optional true} [:maybe :seon.db/branch-schemas]]]
  ;; what schema forms say an entity is (seon.db/entity-index): the one value every reader of what an entity is takes first
- :seon.db/entity-index [:map [:forms :map] [:entity-schemas [:map-of :keyword :qualified-keyword]] [:identity-schemas [:map-of :keyword :qualified-keyword]]
+ ;; the entity index as every reader takes it: its shape, checked once where it is made (seon.db's entity-index marks it)
+ :seon.db/entity-index [:seon.contract/once :seon.db/entity-index-shape]
+ :seon.db/entity-index-shape [:map [:forms :map] [:entity-schemas [:map-of :keyword :qualified-keyword]] [:identity-schemas [:map-of :keyword :qualified-keyword]]
                         [:schema-identities [:map-of :qualified-keyword :keyword]] [:drawn-schemas [:set :qualified-keyword]] [:history-schemas [:set :qualified-keyword]]
                         [:required-keys [:map-of :qualified-keyword [:vector :keyword]]] [:own-required [:map-of :qualified-keyword [:vector :keyword]]]
                         [:targets [:map-of :keyword [:vector :qualified-keyword]]] [:required-refs [:vector :qualified-keyword]] [:derived-attrs [:set :keyword]] [:specs {:optional true} :any]]

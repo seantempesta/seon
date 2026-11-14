@@ -60,18 +60,20 @@
                 "each one log n index seek (seon.task-cost-test: ~3 us and 1.3 KB)")
      :growth :log
      :per-n {:ns 900 :bytes 300}
-     ;; contracted calls: record-tx, account-tx, eid x2, form-of, the tempid makers x6, method/impl
-     ;; keys none here: 12, whatever n
-     :fixed {:ns 18000 :bytes 8000 :calls 12}
+     ;; contracted calls: record-tx, account-tx, def-tx, form-tx, form-of, var-attributes, owners, index, def-keys, def-eid, eid x2,
+     ;; def-ref x2, the tempid makers x9 (form-tid x3, var-tid x2, ns-tid x4), method/impl keys none here: 23, whatever n (the 12 of
+     ;; 2026-10-21 predates def-tx and var-attributes). Bytes: the transaction's own facts, as maps, ~21 KB in account-tx (the form's)
+     ;; and ~14 KB in def-tx (the var's), and ~10 KB of seeks and entity reads (form-of, the eids): 48 KB, whatever n
+     :fixed {:ns 18000 :bytes 48000 :calls 23}
      :sizes [30 100 300]
      ;; measured 2026-10-21 (source mode, load 5): 105 -> 114 us and 121 -> 138 KB from 100 to
      ;; 10k forms, on the whole process's count. Re-measured 2026-10-23 on the proof's own thread
      ;; (18b0774: per-thread bytes, thread CPU time; release runtime, Chez 80e4b9f, load 17, as
      ;; bin/prove runs): 161 -> 183 KB, the same in every run (six AVET seeks, ~21 KB each as
      ;; seon.task-cost-test's one seek, and the entity reads), and 192 -> 213 us, which machine
-     ;; load moves ~1.3x (158 us at load 10). Taken again 2026-11-10 at 300, the largest size: 90 KB, 8.6x the bound's
-     ;; bytes, and 20 contracted calls against its 12. The record a ratchet compares with is this measure's
-     :overrun {:task "seon.db/avet-seek-allocates" :n 300 :measured {:ns 127791.0 :bytes 90256.0 :calls 20.0}}}))
+     ;; load moves ~1.3x (158 us at load 10). The 2026-11-10 overrun (90 KB, 8.6x) was two contracts validating the whole
+     ;; entity index at every call (seon.db/index's return, seon.db/owners' argument); the index is checked once where it is made
+     }))
 
 (defn program-of
   "load-order's argument: the n live forms of app.pc (the test store's example program is
