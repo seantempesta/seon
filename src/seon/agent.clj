@@ -1052,9 +1052,8 @@
                                     (swap! reports into @current)
                                     (reset! current []))
                       :else nil))
-        ;; the branch's registry as the REPL binds it: the one held (branch-schemas), never derived again here
-        _ (binding [mr/*registry* (:registry (branch-schemas))]
-            (proofs/run-tests! tests (zipmap tests (repeat nil)) note! ticks))
+        ;; this process's lookups read its branch's registry (seon.contract/layers), so the tests check against it
+        _ (proofs/run-tests! tests (zipmap tests (repeat nil)) note! ticks)
         reports @reports
         counts (frequencies (map :type reports))]
     {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
