@@ -111,6 +111,32 @@
             [_ o3] (fx/owner-proc st :in (preq 3 :seon.fx/processes 1))]
         (is (empty? (sent o3)) "max-workers turned to two: the third waits, no restart")))))
 
+;; docs/flow.md, the five rules (rule 1, reviewed by flow): a test batch's run is the agent's, never a wait inside a worker's step. The
+;; owner asks the api for it as an output (step/ask) and takes its one answer on its own :answers port: no worker, no timer, and its
+;; end comes from its sources (the agent's answer, or the api's :seon.system/ended at its death). Exactly one answer frees the batch's
+;; weight; a late one finds nothing. Red before: run-item derefed the api's answer inside the worker's step.
+;; Estimate: four owner steps, ~0.2M ticks.
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-test-batch-is-asked-of-the-api-and-answered-once
+  (let [batch (fn [k] (preq k :req {:kind :test :seon.fx/ask {:op :tests :id :a1 :names #{(symbol "app.t-test" (str "t" k))}} :seon.prove/batch (str "b" k)}
+                          :seon.fx/class [:test false false] :seon.fx/processes 1))
+        asks (fn [out] (filterv #(= :request (:op %)) (:out out)))
+        o (powner :kind :t :workers 1 :limits (fx/limits {:cores 4}))
+        ;; the one worker busy with a build: a batch takes no worker, so it is asked all the same
+        [st _] (fx/owner-proc o :in (preq 0 :req {:kind :build :seon.prove/batch "b0"} :seon.fx/class [:build false true] :seon.fx/processes 1))
+        [st out] (fx/owner-proc st :in (batch 1))
+        [ask] (asks out)
+        _ (is (= {:op :tests :id :a1 :names '#{app.t-test/t1}} (:req ask)) (str "asked of the api as an output: " (pr-str out)))
+        _ (is (= [:fx/t :answers] (:route ask)) "answered on the owner's own port")
+        _ (is (empty? (:to-workers out)) "no worker takes it")
+        _ (is (contains? (:flight st) "b1") "in flight at its weight until its answer")
+        [st out] (fx/owner-proc st :answers {:tag (:tag ask) :r {:pass 1 :fail 0 :error 0}})
+        _ (is (= [{:dest {:rid 1} :r {:pass 1 :fail 0 :error 0}}] (mapv #(update % :r select-keys [:pass :fail :error]) (filterv :dest (:out out))))
+                "its one answer goes to its asker")
+        _ (is (not (contains? (:flight st) "b1")) "and its weight comes back")
+        [st2 out2] (fx/owner-proc st :answers {:tag (:tag ask) :r {:seon.error/type :seon.system/ended}})]
+    (is (empty? (:out out2)) "a late answer (the api's :ended after the agent's own) finds nothing")
+    (is (= (:flight st) (:flight st2)) "and gives no weight back twice")))
+
 (deftest owner-refuses-a-spent-budget
   (let [[st _] (fx/owner-proc (owner 1) :in (req 1 :budget 10 :budget-key :task-a))
         [st _] (fx/owner-proc st :done {:dest {:agent "boot/1" :op :fx-reply :k 1} :outcome {:value 1} :budget-key :task-a :cost 10})

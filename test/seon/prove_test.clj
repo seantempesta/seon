@@ -20,7 +20,7 @@
   [rid branch t & [agent]] [:req (cond-> {:rid rid :branch branch :t t :digest (str "d" t)} agent (assoc :agent agent))])
 (defn- unwrap
   "A test batch the service asked of the :process owner, read as the :tests ask of the agent it carries."
-  [m] (if (= :test (get-in m [:req :req :kind])) (assoc m :req (get-in m [:req :req :msg])) m))
+  [m] (if (= :test (get-in m [:req :req :kind])) (assoc m :req (get-in m [:req :req :seon.fx/ask])) m))
 (defn- asks [outs op] (filterv #(= op (get-in % [:req :op])) (map unwrap outs)))
 (defn- answer-of [m r] [:answers {:tag (:tag m) :r r}])
 (defn- waiters-answered [outs] (sort (map :rid (filter #(= :prove-answer (:op %)) outs))))
@@ -442,7 +442,7 @@
 ;; an agent's turn waits to act: its items go ahead of a batch's, however the batch's are valued
 (defn- prio-of
   "The :prio each test batch in outs was asked of the :process owner at, by its names."
-  [outs] (into {} (for [m outs :when (= :test (get-in m [:req :req :kind]))] [(get-in m [:req :req :msg :names]) (get-in m [:req :prio])])))
+  [outs] (into {} (for [m outs :when (= :test (get-in m [:req :req :kind]))] [(get-in m [:req :req :seon.fx/ask :names]) (get-in m [:req :prio])])))
 
 (deftest ^{:seon.test/estimate {:ticks 200000}} a-turns-item-goes-ahead-of-a-batchs
   ;; both asked of the owner in one grant, whose queue takes the higher :prio first: the turn's, however the batch's is valued

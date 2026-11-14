@@ -154,7 +154,7 @@
   root's :process effect owner, the most valuable first (a :turn asker's, then the one whose nearest-done asker has the least
   measured work left, item-value breaking a tie), each with its batch (batch-of: a share of the queue for one fork) as
   {:op :fx :kind :process :prio v :seon.fx/class c :req r}: the owner admits it by the processes its class holds
-  (seon.fx/admits?), so this service holds no admission of its own. r is a test batch {:kind :test :msg {:op :tests :id agent
+  (seon.fx/admits?), so this service holds no admission of its own. r is a test batch {:kind :test :seon.fx/ask {:op :tests :id agent
   :mode m :names #{test} :items {test digest}}} (each at the digest the agent's plan gave it: seon.agent/item-selection), or
   {:kind :tree :checkout :name :digest :binary? :bound} for a build, a check step, a tree's build or seed. Tagged [:batch bid].
   Answers [st outputs]."
@@ -186,7 +186,8 @@
                                         :seon.prove/askers (into (sorted-set) (mapcat #(get-in st [:items % :waiters])) batch)
                                         :req (if (= :test (:kind it :test))
                                                {:kind :test :seon.prove/batch (fx/batch-tag bid)
-                                                :msg (cond-> {:op :tests :id (:agent it) :mode (:mode it :judge) :names (into #{} (map first) batch) :items (into {} batch)
+                                                ;; the agent runs it: the owner asks the api for it and takes its one answer
+                                                :seon.fx/ask (cond-> {:op :tests :id (:agent it) :mode (:mode it :judge) :names (into #{} (map first) batch) :items (into {} batch)
                                                               :seon.prove/batch (fx/batch-tag bid)}
                                                        (:checkout it) (assoc :checkout (:checkout it)))}
                                                ;; a build, a seed or a check step: run on the run's checkout

@@ -310,6 +310,7 @@
  :seon.lib/load-refused [:and {:description "The error when the OS refuses the machine's load average (getloadavg)."} :seon.error/base [:map [:seon.error/type [:= :seon.lib/load-refused]]]]
  :seon.fx/us [:int {:min 0 :description "On an effect's outcome, the microseconds it ran."}]
  :seon.fx/queue-us [:int {:min 0 :description "On an effect's outcome, the microseconds it waited in its owner's queue."}]
+ :seon.fx/ask [:map {:description "On an effect request's :req, a run another process does (a test batch: the api's {:op :tests} of the agent holding its branch): its owner asks the api for it as an output and takes its one answer on :answers, never a worker waiting inside its step (docs/flow.md, the five rules)."}]
  :seon.fx/class [:any {:description "On an effect's request, what its processes are measured by (a process test, a check step): its owner admits it at that class's peak, the whole budget until one is read (seon.fx/admits?)."}]
  :seon.fx/processes [:int {:min 1 :description "On an effect's request, the processes it holds by construction (a plain test's batch: its one fork), its weight at admission until its class's peak is read (seon.fx/admits?)."}]
  :seon.fx/peak-processes [:int {:min 1 :description "On an effect's outcome, the most processes its work held at once, counted where they started (seon.lib/a-process-reports-the-most-processes-it-held-at-once): its class's weight from then on."}]
