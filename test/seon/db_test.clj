@@ -1815,7 +1815,9 @@
      :growth :linear
      ;; measured 2026-11-10: 7.1k / 19.6k / 63.2k ticks and 12.2 / 31.4 / 98.6 KB at 100 / 300 / 1,000: 63 ticks and 96 B a datom
      :per-n {:ticks 80 :bytes 120}
-     :fixed {:ticks 2000 :bytes 4000 :calls 4}
+     ;; calls 4 -> 5 (data, 2026-11-14): whether an attribute is tagged (:seon.db/tagged, seon.contract/properties), asked once an
+     ;; attribute a transaction, never a datom
+     :fixed {:ticks 2000 :bytes 4000 :calls 5}
      :sizes [100 300 1000]}))
 
 (deftest a-datom-is-held-to-the-schema-in-effect-at-its-write

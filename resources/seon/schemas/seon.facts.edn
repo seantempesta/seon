@@ -227,10 +227,6 @@
                          [:seon.proof/agent {:optional true} :seon.proof/agent] [:seon.proof/program {:optional true} :seon.proof/program]
                          [:seon.proof/profile {:optional true} :seon.proof/profile]
                          [:seon.proof/failures {:optional true} :seon.proof/failures] [:seon.bound/spent {:optional true} :seon.bound/spent]]
- ;; one run's measure of a result (tests' T-1): many a result, kept by a retention count per test
- :seon.proof/of [:and {:seon.db/to [:seon.proof/proof-fact] :seon.db/index true :description "The result this run measured."} :seon.db/ref]
- :seon.proof/run [:string {:seon.db/index true :description "The run that measured it (a prove run's id)."}]
- :seon.proof/measure-fact [:map {:seon.db/attributes true} [:seon.proof/of :seon.proof/of] [:seon.proof/run :seon.proof/run] [:seon.bound/spent :seon.bound/spent]]
  :seon.result/result-fact [:map {:seon.db/attributes true}
                            [:seon.result/hash :seon.result/hash] [:seon.result/value {:optional true} :seon.result/value]
                            [:seon.result/ex {:optional true} :seon.result/ex] [:seon.result/out {:optional true} :seon.result/out]

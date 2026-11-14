@@ -49,7 +49,7 @@
 ;; See docs/storage.md#what-a-read-scanned: a result is read back by seek from what moved, and its status is written once
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-result-is-found-by-what-moved-and-its-status-is-written-once
   (let [db0 (pdb/db-with (ts/test-db) [{:note/text "read" :note/agent :t}])
-        e (:e (first (d/datoms db0 :avet :note/text "read")))
+        e (:e (first (d/datoms db0 :aevt :note/text)))
         k-ea [:ea e :note/text] k-a [:a :seon.task/plan]
         db (pdb/db-with db0 [(proof db0 'app-test/one #{k-ea} :pass) (proof db0 'app-test/two #{k-a} :pass)])
         id-of #(:seon.proof/test (d/entity db %))
@@ -66,7 +66,7 @@
 ;; See docs/storage.md#what-a-read-scanned: equal content, one digest, whatever the basis
 (deftest ^{:seon.test/estimate {:ticks 1000000}} a-reads-digest-is-the-content-read-not-the-basis
   (let [db0 (pdb/db-with (ts/test-db) [{:note/text "read" :note/agent :t}])
-        e (:e (first (d/datoms db0 :avet :note/text "read")))
+        e (:e (first (d/datoms db0 :aevt :note/text)))
         ks #{(pr-str [:ea e :note/text])}
         later (pdb/db-with db0 [{:note/text "unrelated" :note/agent :t}])]
     (is (= (pdb/reads-digest db0 ks nil) (pdb/reads-digest later ks nil)) "a commit that moved nothing it read: one digest")

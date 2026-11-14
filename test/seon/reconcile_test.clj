@@ -66,7 +66,14 @@
         {:keys [tx outcome]} (#'r/judge-tx (st-of db) {:act {:op :spawn :task id :env {:branch (task/default-branch id)}} :deferred deferred
                                                     :run-problems run-problems :worked-error worked-error}
                                         (or results {})
-                                        (merge {:db branch :base db :base-t (:max-tx db) :ours [[:var 'demo/worked]] :uncontracted [] :unmerged [] :caused [] :theirs 0} diff))]
+                                        (merge {:db branch :base db :base-t (:max-tx db) :uncontracted [] :unmerged [] :caused [] :theirs 0
+                                                ;; the writer's :ours names the tasks the branch changed as [:task id] keys, as its three-way does
+                                                :ours (into [[:var 'demo/worked]]
+                                                            (if branch
+                                                              ;; a branch given whole: its task keys as the writer's three-way finds them
+                                                              (filterv #(= :task (first %)) (keys (seon.merge/delta-changes db branch #{})))
+                                                              (distinct (keep #(when-let [i (and (map? %) (:seon.task/id %))] [:task i]) on-branch))))}
+                                               diff))]
     {:db (d/db-with db tx) :outcome outcome :tx tx}))
 
 (defn- judgment-of
@@ -1338,8 +1345,11 @@
       (is (= {:outcome :told :reasons [{:reason :no-design}] :verdict [{:reason :no-design}]}
              (judgment-of db "a" {:end {:outcome :green} :results {(t "a") :fail} :plan plan :plan-before plan}))))))
 
-;; Estimate: 1 judgings x 0.7M (the index and the judge-tx) ~ 700,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 700000}} a-design-step-is-done-when-it-improved-the-plan
+;; Estimate: the design world 0.6M; one judging: the done rule's reads of the world ~4M (the judge with no task merge, 4.6M
+;; measured by parts 11-14; the 0.7M this said missed them); the plan carried (merge-tx of one task key, ~4k ticks a program-of)
+;; and main as the judging leaves it speculated and indexed again ~3.5M (as carry-tx's carry was: task
+;; seon.reconcile/a-carried-task-edit-reindexes-the-judges-state) = 9,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 9000000}} a-design-step-is-done-when-it-improved-the-plan
   ;; root's judge carries the plan the agent improved on its branch to main (judge)
   (let [better "Make a true. Design: (defn f [xs] ...) one pass over xs."
         {:keys [db outcome]} (judge! (design-db (work "a" :running)) "a" {:outcome :green} :results {(t "a") :fail}

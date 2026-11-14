@@ -913,10 +913,10 @@
         end (when k (pull-end db k))
         ;; the task content its branch changed (the proofs a design or a whole task registered, its plan), merged to main as any key:
         ;; changed on the branch alone, applied (merge-tx); changed on both, a conflict among the task's (seon.merge/three-way)
-        ;; only the task keys the branch changed since its base (its side's diff, what the branch did), three-way over those alone:
-        ;; never the program's whole diff, which main moving makes billions of ticks (runtime's merge measurement, 11-14)
-        task-key? (fn [k] (= :task (first k)))
-        ks (filterv task-key? (keys (pm/delta-changes base db #{})))
+        ;; only the task keys the branch changed since its base, as the branch diff already read them (:ours), three-way over
+        ;; those alone: never the program's whole diff, which main moving makes billions of ticks (runtime's merge measurement, 11-14),
+        ;; nor the branch's diffed again (7M ticks for a one-task design step, data 11-14)
+        ks (filterv #(= :task (first %)) (:ours diff))
         tw (pm/three-way (pm/program-of base ks #{}) (pm/program-of main ks #{}) (pm/program-of db ks #{}))
         carried (pm/merge-tx main base db (:apply tw) #{})
         task-conflicts (:conflicts tw)

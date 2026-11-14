@@ -44,18 +44,22 @@
                                  (if (contains? forms a) (m/schema a {:registry registry}) (contract/schema a))))
         ;; an attribute's validator is found once a transaction: a transaction writes many datoms of few attributes
         seen (volatile! {})
-        valid-of (fn [a] (or (get @seen a) (let [f (m/validator (schema-of a))] (vswap! seen assoc a f) f)))]
+        valid-of (fn [a] (or (get @seen a) (let [f (m/validator (schema-of a))] (vswap! seen assoc a f) f)))
+        ;; and whether it is tagged, once an attribute
+        tagged (volatile! {})
+        tagged? (fn [a] (let [t (get @tagged a ::unread)] (if (= ::unread t) (let [t (boolean (:seon.db/tagged (contract/properties a)))] (vswap! tagged assoc a t) t) t)))]
     (letfn [(refused [a v]
               (if-not ((valid-of a) v)
                 (let [ps (contract/problems (schema-of a) v)]
                   (contract/error :seon.db/invalid-datom #'invalid-datom (let [{:keys [in value]} (first ps)] (str a " refuses this value at " in ": " (:seon.print/code value)))
                                   {:attribute a :seon.error/problems ps}))
                 ;; a tagged attribute (:seon.db/tagged): each value is also held to the schema its own :seon.db/tag names
-                (when (:seon.db/tagged (contract/properties a))
+                (when (tagged? a)
                   (some (fn [x] (let [t (:seon.db/tag x)]
                                   (when-not (and (known? t) ((valid-of t) x))
                                     (contract/error :seon.db/invalid-datom #'invalid-datom
-                                                    (str a "'s value tagged " t " is not what " t " says: " (pr-str (contract/problems (schema-of t) x)))
+                                                    (if (known? t) (str a "'s value tagged " t " is not what " t " says: " (pr-str (contract/problems (schema-of t) x)))
+                                                        (str a "'s value is tagged " (pr-str t) ", which no schema registers"))
                                                     {:attribute a :seon.error/problems (if (known? t) (contract/problems (schema-of t) x) [])}))))
                         (if (or (set? v) (sequential? v)) v [v])))))
             (value [a v]
