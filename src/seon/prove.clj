@@ -160,7 +160,9 @@
   Answers [st outputs]."
   {:malli/schema [:=> [:cat :map] [:tuple :map [:vector :map]]]}
   [st]
-  (loop [st st outs [] sent 0]
+  ;; the owner's max-workers as the config states it now, read once a grant, so a dial turned deals the next grant by it; a
+  ;; :fixed-budget in st (a test's) holds it instead
+  (loop [st (assoc st :budget (or (:fixed-budget st) (:max-workers (fx/config-limits)))) outs [] sent 0]
     (let [bid0 (:bid st 0)
           turns (into #{} (keep (fn [[r a]] (when (= :turn (:prio a)) r))) (:askers st))
           ;; each asker's work left: the measured ms of its queued items, one pass, only when two or more wait
@@ -176,7 +178,7 @@
                               nil (:items st))]
       (if (nil? k)
         [st outs]
-        (let [batch (batch-of st k it (max 1 (- (:budget st 1) sent)))
+        (let [batch (batch-of st k it (max 1 (- (:budget st) sent)))
               bid (inc (:bid st 0))
               st (reduce #(assoc-in %1 [:items %2 :status] :running) (-> st (assoc :bid bid) (assoc-in [:batches bid] batch)) batch)
               c (item-class it)
@@ -602,7 +604,7 @@
        :ping-map-fn (fn [st] {:runs (count (:runs st)) :full (some-> st :full :key) :queued (count (:items st))
                               :main-t (:main-t st) :stale-answers (:stale st 0)})})
   ([args] {:rid 0 :pending {} :runs {} :done {} :items {} :askers {} :batches {} :conn (:conn args)
-           :budget (:max-workers (fx/config-limits))})
+           })
   ([st _tr] st)
   ([st0 in m]
    (let [st st0
@@ -613,5 +615,8 @@
                              (if (and (cfg/value :seon.config.proofs/prove-main-on-commit) (program/moves-program? (:ops m)))
                                (request st {:branch :main :t (:t m) :digest (program/run-digest (pdb/at-commit (:conn st) (:commit m))) :mode :main})
                                [st []])))]
-     (let [outs (cond-> (vec outs) (not= (state-view st) (state-view st0)) (conj {:op :prove-state :r (state-view st)}))]
+     (let [outs (cond-> (vec outs) (not= (state-view st) (state-view st0)) (conj {:op :prove-state :r (state-view st)}))
+           ;; credit (docs/flow.md, request and answer): its asks are answered on :answers, which holds reconciler-buf; with that many
+           ;; open it reads only :answers, so the api never parks putting an answer while this parks putting an ask
+           st (assoc st ::flow/input-filter (if (>= (count (:pending st)) (cfg/value :seon.config.root/reconciler-buf)) #{:answers} identity))]
        [st (if (seq outs) {:to-api outs} {})]))))

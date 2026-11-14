@@ -363,7 +363,7 @@
 
 ;; ---- items: the service's unit of work (notes test-system-as-a-flow-2026-11-10.md, step 2) ----------------------------
 
-(defn- items-st [budget] (assoc (proc0) :budget budget))
+(defn- items-st [budget] (assoc (proc0) :fixed-budget budget))
 (defn- batches [outs] (asks outs :tests))
 (defn- answers [outs] (into {} (for [o outs :when (= :asker-answered (:op o))] [(:asker o) (:r o)])))
 (def ^:private green-of (fn [& ts] {:pass (count ts) :fail 0 :error 0 :reports (mapv #(hash-map :type :pass :var (str "#'" %)) ts)}))
@@ -425,7 +425,7 @@
   (let [one 'a.x-test/one two 'a.x-test/two
         red (fn [ts] {:pass 0 :fail (count ts) :error 0 :reports (mapv #(hash-map :type :fail :var (str "#'" %) :message "no") ts)})
         run (fn [mode]
-              (let [[st0 o0] (feed (assoc (proc0) :budget 1) [[:req {:rid 1 :branch :b :t 5 :digest "d5" :agent :a1 :mode mode}]])]
+              (let [[st0 o0] (feed (assoc (proc0) :fixed-budget 1) [[:req {:rid 1 :branch :b :t 5 :digest "d5" :agent :a1 :mode mode}]])]
                 (loop [st st0 all o0 seen 0]
                   (if-let [m (first (filter :req (drop seen all)))]
                     (let [u (unwrap m)
@@ -583,6 +583,21 @@
     (is (clojure.string/includes? (-> (filter #(= :problem (:op %)) o1) first :error :seon.error/message) "over ten times apart") "30x apart says so")
     (is (= 'app.x (-> (filter #(= :problem (:op %)) o1) first :error :owner)) "named for the namespace whose task file holds its work")
     (is (= [] (problems o2)) "the same digest read by the next run is not filed again")))
+
+;; docs/flow.md, request and answer (flow's review, task seon.prove/the-services-asks-are-capped-by-its-answers-port): the service's
+;; asks are answered on its :answers port, which holds :seon.config.root/reconciler-buf; past that many open, the api would park putting
+;; an answer while the service parks putting an ask. So at the cap the service reads only :answers, as the fx owner leaves :in
+;; unread at its bound. Red before: no input filter, the asks uncapped. Estimate: a few steps, ~0.1M ticks.
+(deftest ^{:seon.test/estimate {:ticks 500000}} the-service-never-asks-more-than-its-answers-port-holds
+  (with-redefs [seon.config/value (let [v seon.config/value] (fn [k & more] (if (= k :seon.config.root/reconciler-buf) 4 (apply v k more))))]
+    (let [full (assoc (proc0) :pending (into {} (for [i (range 4)] [i {:k i}])))
+          [st _] (prove/prove-proc full :main {:t 1 :ops []})
+          f (:clojure.core.async.flow/input-filter st)]
+      (is (some? f) "an input filter is set")
+      (is (and f (not (f :req)) (f :answers)) "at the cap it reads only its answers")
+      (let [[st2 _] (prove/prove-proc (assoc st :pending {}) :main {:t 2 :ops []})
+            f2 (:clojure.core.async.flow/input-filter st2)]
+        (is (or (nil? f2) (f2 :req)) "below it, requests are read again")))))
 
 (defn queue-of
   "Grant's argument at n: the service's state with n items queued for one batch asker and a budget of one. See
@@ -749,10 +764,12 @@
 ;; docs/merging.md#the-test-service: the service deals an agent's queued tests over the owner's max-workers (seon.fx/limits of the
 ;; config in force), a share a fork
 (deftest ^{:seon.test/estimate {:ticks 500000}} the-queue-is-dealt-over-the-owners-budget
-  (let [init (prove/prove-proc {:conn nil})
+  (let [budget (:max-workers (fx/config-limits))
         [_ outs] (prove/ask-items (proc0) 1 :batch (into {} (for [i (range 10)] [[(symbol "app.s-test" (str "t" i)) (str "d" i)] {:agent :a1 :ms 5}])))]
-    (is (= (:max-workers (fx/config-limits)) (:budget init)) "the config in force: its max-workers (the shipped one, the cores)")
-    (is (= (min 10 (:budget init)) (count (batches outs))) "ten items over that budget, a share each")
+    (is (= (min 10 budget) (count (batches outs))) "ten items over the config's max-workers, read at the grant, a share each")
+    (testing "a dial turned deals the next grant by it, no restart"
+      (with-redefs [fx/config-limits (fn [] {:max-workers 2 :budget 20 :max-load nil})]
+        (is (= 2 (count (batches (second (prove/ask-items (proc0) 1 :batch (into {} (for [i (range 10)] [[(symbol "app.s-test" (str "u" i)) (str "e" i)] {:agent :a1 :ms 5}]))))))))))
     (is (= 10 (count (mapcat #(get-in % [:req :names]) (batches outs)))) "every item asked")))
 
 (deftest ^{:seon.test/estimate {:ticks 300000}} a-batchs-error-that-names-no-test-reaches-its-answer
