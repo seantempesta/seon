@@ -1578,6 +1578,47 @@
     (is (= :refork (:outcome end)) (pr-str end))
     (is (= 1 (:model-calls end)) (str "the turn in flight finished, and no model call ran on the old program: " (pr-str end)))))
 
+;; Estimate: 200 generated runs x ~8 requests x ~3 proc steps at ~5k ticks = ~24M ticks
+(deftest ^{:seon.test/estimate {:ticks 30000000}} every-request-an-agent-proc-holds-is-released-by-any-of-its-ends
+  ;; the class behind the :done hang (a state a request sets, released only by its success): root's proc for an agent is a
+  ;; pure step, so generated interleavings of clone and eval requests, each answered by any of its ends once the agent has it
+  ;; (a clone: its descriptor asked, cloned, failed or never sent; an eval: replied or never sent), must leave nothing held
+  ;; and nothing in flight; two clones at once among them, whose second overwrote the first's hold before
+  (with-redefs [seon.sock/send! (fn [& _] true) seon.sock/close! (fn [& _] nil)]
+    (doseq [seed (range 200)]
+      (let [rng (java.util.Random. seed)
+            pick #(nth % (.nextInt rng (count %)))
+            out (clojure.core.async/chan 1000)
+            kinds (vec (repeatedly (+ 2 (.nextInt rng 6)) #(pick [:clone :eval :clone])))
+            frame (fn [st m] (#'seon.agent-proc/agent-frame st (volatile! {}) m))
+            drain (fn [got] (loop [got got] (if-let [m (clojure.core.async/poll! out)] (recur (conj got (or (:k m) (:id m)))) got)))
+            final (loop [st {:id :a1 :end {:out out :fd -1} :inflight {}} next 0 got #{} ended #{} n 0]
+                    (let [got (drain got)
+                          endable (vec (remove ended got))]
+                      (cond
+                        (> n 200) (assoc st ::stuck true)
+                        (and (= next (count kinds)) (empty? endable)) st
+                        (or (empty? endable) (and (< next (count kinds)) (zero? (.nextInt rng 2))))
+                        (let [k (kinds next)
+                              [st _] (#'seon.agent-proc/agent-in st (cond-> {:op :req :rid next :kind k :msg {:op k}} (= k :eval) (assoc-in [:msg :forms] "1") (= k :clone) (assoc :pass-fd 7)))]
+                          (recur st (inc next) got ended (inc n)))
+                        :else
+                        (let [rid (pick endable)
+                              k (kinds rid)
+                              end (if (= k :clone) (pick [:fd-ready :cloned :clone-failed :unsendable]) (pick [:reply :unsendable]))
+                              st (case end
+                                   :fd-ready (frame st {:op :fd-ready :k rid})
+                                   (:cloned :clone-failed) (frame st {:op end :k rid :error {:seon.error/type :x :seon.error/message "x"}})
+                                   :unsendable (frame st {:op :unsendable :rid rid :error {:seon.error/type :x :seon.error/message "x"}})
+                                   :reply (frame st {:op :reply :id rid :response {:value 1}}))
+                              ;; a clone's descriptor asked keeps the request in flight until its answer
+                              st (if (= end :fd-ready) (frame st {:op :cloned :k rid}) st)]
+                          (recur st next got (conj ended rid) (inc n))))))]
+        (is (not (::stuck final)) (str "seed " seed " " kinds))
+        (is (nil? (:holding final)) (str "seed " seed " held by " (:holding final) " " kinds))
+        (is (empty? (:held final)) (str "seed " seed " " kinds))
+        (is (empty? (:inflight final)) (str "seed " seed " in flight " (keys (:inflight final)) " " kinds))))))
+
 ;; Estimate: three proc steps on a map and two channel puts, ~0.3M ticks
 (deftest ^{:seon.test/estimate {:ticks 300000}} a-clone-that-fails-before-its-descriptor-releases-what-waited
   ;; the hang behind an-outside-agent-writes-its-end in three land checks (2026-11-14): root holds every message to an agent
