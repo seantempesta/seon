@@ -123,6 +123,12 @@ infrastructure this replaces is cut, each removal brought to the owner as an aud
    (datoms through Datahike's read recorder; config entries, files, environment variables and the pin as recorded outside
    reads), the environment and process it ran in, and its cost. Reuse, "why is this red", "what ran where" and "flaky" are
    then queries, not keys chosen in advance; the result files go (tests, data, with runtime for the outside reads).
+   **The target, a lower bound worked from the work** (tests, 2026-11-14): T(d) = plan(d) + R(d) × t_test ÷ C + t_fork +
+   B × t_boot, unchanged tests costing nothing. With t_fork 65 ms and t_test 21 ms (`docs/cost.md`), R ≈ 216 tests for a
+   typical change and N ≈ 2,000 in all: a typical change proves in about 1.3 s on 18 cores (1.6 s on the 8-core target),
+   and a pin change that reuses nothing in about 25 s, one shared boot for the few genuine boot tests included. Each
+   test's declared work stays within its estimate (median 10 ms), its fixtures warm before timing, and only a test of
+   booting boots. Today: 85 ms a test in a warm prove, and 223 tests booting a system for 1,541 s.
 6. **Merging is Seon's:** `seon_done` runs the gate and Seon's three-way merge on main's program; conflicts go back to the
    branch; one three-way merge, not two (`seon.task/carry-tx` goes); a merge costs what moved (today one merge of main
    costs 62 s, 9.9B ticks and 47.5 GB, measured) (data, runtime).
