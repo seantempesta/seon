@@ -2061,5 +2061,7 @@
         _ (pdb/owners ix [:seon.agent/key])
         b (:bytes (first (filter #(= 'seon.db/owners (:var %)) (seon.profile/touched))))]
     (is (< b 4000) (str "a call taking the index checks no more than the mark: " b " bytes"))
-    (is (contains? (:seon.contract/valid (meta ix)) :seon.db/entity-index-shape) "the index carries its mark")
+    (is (= (hash ix) (get (:seon.contract/valid (meta ix)) :seon.db/entity-index-shape)) "the index carries its mark, its hash")
+    (is (not (seon.contract/valid? :seon.db/entity-index (assoc ix :entity-schemas {:x 1})))
+        "a changed copy keeps the metadata but not the hash: it is checked in full, and refused")
     (is (not (seon.contract/valid? :seon.db/entity-index (with-meta (dissoc ix :forms) nil))) "an unmarked value is checked in full, and refused")))

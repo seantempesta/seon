@@ -166,8 +166,11 @@
   entity compiles no schema's pattern again. See docs/ctx.md#the-pattern."
   {:malli/schema [:=> [:cat :map] :map]}
   [ix]
-  (assoc ix :specs (into {} (for [k (distinct (vals (:entity-schemas ix))) :let [p (:seon.ctx/pattern (form-props (:forms ix) k))] :when p]
-                              [p (delay ((requiring-resolve 'seon.render/pattern) ix p #{}))]))))
+  ;; :specs is any value the shape admits, so the index with it is still checked: marked again, as its hash moved (seon.contract/checked-once)
+  (seon.contract/checked-once
+    (assoc ix :specs (into {} (for [k (distinct (vals (:entity-schemas ix))) :let [p (:seon.ctx/pattern (form-props (:forms ix) k))] :when p]
+                                [p (delay ((requiring-resolve 'seon.render/pattern) ix p #{}))])))
+    :seon.db/entity-index-shape))
 
 (def ^:private binary-index
   "The binary's `entity-index`, derived once from its registry. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."

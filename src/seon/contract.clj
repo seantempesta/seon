@@ -166,7 +166,7 @@
                                    {:type :seon.contract/once :min 1 :max 1
                                     :compile (fn [_ [shape] opts]
                                                (let [valid? (delay (m/validator (m/schema shape opts)))]
-                                                 {:pred (fn [v] (or (contains? (::valid (meta v)) shape) (@valid? v)))
+                                                 {:pred (fn [v] (or (= (hash v) (get (::valid (meta v)) shape)) (@valid? v)))
                                                   :type-properties {:gen/schema shape}}))})]]))
 
 ;; ---- the registry ------------------------------------------------------------------
@@ -194,8 +194,11 @@
 
 (clojure.core/defn checked-once
   "Value v, which its maker has just checked against named schema shape, marked so: a [:seon.contract/once shape] contract admits it
-  at once. Metadata travels with the value, so no table is kept anywhere. See docs/checks.md#contracts-armed-at-definition."
-  [v shape] (vary-meta v update ::valid (fnil conj #{}) shape))
+  at once while it is that value (the mark holds its hash; a collection caches its own, so it is computed once), and checks a changed
+  copy, which keeps the metadata but not the hash, in full. Metadata travels with the value, so no table is kept anywhere. See
+  docs/checks.md#contracts-armed-at-definition."
+  {:malli/schema [:=> [:cat :map :qualified-keyword] :map]}
+  [v shape] (vary-meta v assoc-in [::valid shape] (hash v)))
 
 (def forms "Every named schema form of the platform (seon.config/schema-forms, baked once)." config/schema-forms)
 
