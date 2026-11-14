@@ -32,7 +32,7 @@
   `report` reads what was recorded, at a cost that follows the problems. `health` adds the
   derived classes, read from the program's facts when asked (docs/health.md#cost)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print.emit :as emit] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.source :as source] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.doc :as doc] [seon.task :as task] [seon.config :as config] [seon.cost :as cost] [seon.reader :as reader] [seon.edn :as sedn]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print.emit :as emit] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.source :as source] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.doc :as doc] [seon.task :as task] [seon.config :as config] [seon.cost :as cost] [seon.reader :as reader] [seon.edn :as sedn] [seon.schema.datahike :as sd]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses task/failed)
@@ -489,6 +489,25 @@
                         (str v "'s docstring is " words " words (" (str/join ", " (map name why)) "): say what it answers and the one thing a caller must know, and cite the wiki once")
                         {:kind :unfocused-docstring :var v :words words :why why :bound bound} {:var v :words words :why why})))))
 
+(defn retyped-attributes
+  "Each attribute of attrs whose value type or cardinality head's entry declares otherwise than base's, as a :retyped-attribute row:
+  a stored attribute's are fixed once installed and the store follows main, so a branch that retypes one would leave root unable to
+  open its store (seon.db/install-missing!). Read from each side's schema entries (seon.schema.datahike/declaration of its registry),
+  for the attributes a branch's move changed the entry of, never in a full health read. See docs/health.md#a-retyped-attribute."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :map [:set :qualified-keyword]] [:vector :seon.problems/row]]}
+  [base head ans attrs]
+  (if (empty? attrs)
+    []
+    (let [shape (fn [db] (let [reg (program/schema-registry (program/schema-changes db))]
+                           (fn [a] (let [dc (sd/declaration reg a)]
+                                     (when-not (contract/error? dc) (not-empty (select-keys dc [:db/valueType :db/cardinality])))))))
+          b (shape base) h (shape head)]
+      (vec (for [a (sort attrs) :let [x (b a) y (h a)] :when (and x y (not= x y))]
+             (derived-row ans (str "retyped-attribute " a) (symbol (namespace a))
+                          (str a " is installed as " (:db/valueType x) " " (:db/cardinality x) " and the branch declares " (:db/valueType y) " "
+                               (:db/cardinality y) ": a stored attribute's type and cardinality are fixed once installed; give the new shape a key of its own")
+                          {:kind :retyped-attribute :attribute a} {:attribute a}))))))
+
 (defn refused-values
   "Each stored datom of the attributes attrs whose value db's own entry for its attribute refuses, as a :refused-value row naming
   the attribute, the entity and why: a value written before its entry tightened, held to the entry now (seon.db/invalid-datom, with
@@ -724,7 +743,10 @@
         had (vec (rows base bs (forms-in base)))
         has (vec (rows head hs (forms-in head)))
         sigs (fn [rs] (into #{} (map :signature) rs))]
-    {:made (vec (remove (comp (sigs had) :signature) has)) :closed (vec (remove (comp (sigs has) :signature) had))}))
+    ;; an attribute the branch retyped is the branch's by its own reading of both sides (retyped-attributes), never had by base
+    {:made (into (vec (remove (comp (sigs had) :signature) has))
+                 (map #(assoc % :class :retyped-attribute)) (retyped-attributes base head ans moved-attrs))
+     :closed (vec (remove (comp (sigs has) :signature) had))}))
 
 (defn caused-split
   "{:caused :attention :rows :closed}: the derived problems the branch at head has that base (its merge base) had not, by
