@@ -233,7 +233,7 @@
      :work (str "one request made at the branch's head (seon.ctx.wire/render: the system prompt, the session's records each "
                 "printed by its own render, the turn's page message made at the head) "
                 "under its provider, put in the wire shape "
-                "(seon.model/request-body) and drawn once (seon.render.ui/debug-turn: an entry a message), and the timeline's "
+                "(seon.model/request-body), its head and the rows the move added drawn (seon.render.ui/debug-units: a unit a message), and the timeline's "
                 "strip (a pull of each model call's basis). Linear in the evals: the page's rows, and the request read from the agent's kept walk "
                 "(seon.render.proc/branch-walk, advanced by the eval more), never a cold draw")
      :growth :linear
@@ -247,8 +247,10 @@
      :fixed {:ticks 2660000 :bytes 1000000}
      ;; measured 8.2 / 11.0 / 19.2 MB at 3 / 10 / 30: ~8x the fixed bound and ~20x the per-eval one, waste, its task
      ;; read from the kept walk (web, 2026-11-14): 14.28 MB and 4.40M ticks at 30, against 19.23 MB and 6.21M drawn cold
+     ;; a row a unit (web, 2026-11-15): 10.33 MB and 2.99M ticks at 30; what still grows an eval is the request made whole each move
+     ;; (seon.ctx/node, own, join, linked ~50 KB an eval; the wire shape ~20 KB): context's P7
      ;; seon.render/a-debug-entry-allocates-what-it-shows
-     :overrun {:task "seon.render/a-debug-entry-allocates-what-it-shows" :n 30 :measured {:ticks 4400000.0 :bytes 14280000.0}}
+     :overrun {:task "seon.render/a-debug-entry-allocates-what-it-shows" :n 30 :measured {:ticks 2990000.0 :bytes 10330000.0}}
      :sizes [3 10 30]}))
 
 (deftest a-transaction-renders-what-it-touched
