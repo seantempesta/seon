@@ -668,7 +668,7 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 ### Seon's key files are facts, on one mechanism
 
-"is the indexing a shared system or are we building another parallel system": the schema files' entity and merge are generalised, not copied. Task `seon.source/seon-files-move-by-branch`.
+"is the indexing a shared system or are we building another parallel system": the schema files' entity and merge are generalised, not copied. Task `seon.source/the-trees-commit-merges-three-way`.
 
 ### A user's branch tracks main like an agent's
 
@@ -1076,7 +1076,7 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 ### Test results are a few facts per test and per function, with no history
 
-"We want to be able to query things in the db, functions, tests, schemas and understand what tests are failing and timings so don't remove everything from the db". Task seon.proofs/test-results-are-a-few-facts.
+"We want to be able to query things in the db, functions, tests, schemas and understand what tests are failing and timings so don't remove everything from the db". Task seon.proofs/a-verdict-is-an-entity-that-names-its-environment.
 
 ### A kept db value is a reference, {:branch :commit :t}
 

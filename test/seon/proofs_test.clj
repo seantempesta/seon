@@ -673,7 +673,7 @@
         (is (= :deferred (:seon.test/status (first (proofs/result-tx held {} {} {} {t "d2"} #{t})))) "a moved digest is unjudged")))))
 
 (deftest ^{:seon.test/estimate {:ticks 100000}} a-run-records-a-few-facts-and-a-run-that-changes-nothing-records-none
-  ;; task seon.proofs/test-results-are-a-few-facts (R2a): seon.proofs/result-tx, what an agent's run
+  ;; task seon.proofs/a-verdict-is-an-entity-that-names-its-environment (R2a): seon.proofs/result-tx, what an agent's run
   ;; writes on its branch beside the cache: the digest, status, failing assertions (as data) and running
   ;; sums of each test that ran, and the digest and status of one reused; only what differs; and a test whose
   ;; reach digest moved, not judged by the run, loses its facts (a status is the verdict at the digest it has now)
