@@ -1158,6 +1158,15 @@
      :failures (into {} (for [[t s] results :when (= :fail s) :let [fs (get fails t)] :when (seq fs)] [t (vec fs)]))
      :digests (select-keys (:digests a) (keys results))}))
 
+(defn- kept-files
+  "The files of a program store d a copy of it carries: its data, and the reach graphs and reads indexes kept for its trees
+  (test-runner/tree-file: one a tree, so the copy's tests read their own tree's, never rebuild it)."
+  {:malli/schema [:=> [:cat :any] [:sequential :string]]}
+  [^java.io.File d]
+  (into [] (comp (filter #(.isFile ^java.io.File %)) (map #(.getName ^java.io.File %))
+                 (filter #(or (= % "data.mdb") (str/starts-with? % "reach-graph") (str/starts-with? % "reads-index"))))
+        (some-> (.listFiles d) seq)))
+
 (defn- run-on-checkout
   "One run of the :tests effect (run-tests) on a checkout of the merge candidate: a detached worktree of repo at
   branch's head (bin/worktree --at, as a generation's), files ({relative path text}, the candidate's changed files)
@@ -1221,7 +1230,7 @@
                                      (.isFile (java.io.File. d "data.mdb")))]
                     (let [to (str dir "/target/" rel)]
                       (seon.lib/remove-tree! to) (lib/sh "mkdir" "-p" to)
-                      (doseq [n ["data.mdb" "reach-graph.fasl"] :when (.isFile (java.io.File. d n))]
+                      (doseq [n (kept-files d)]
                         (lib/sh "cp" "-c" (str (.getPath d) "/" n) (str to "/" n))))))
               ;; a gate's run builds only through its runner, when the binary is not current for the candidate's tree
               ;; (bin/test's plan: seon.system/binary-current, rule (a)); the full run builds main's tree here, into its kept slot
@@ -1385,7 +1394,7 @@
             :when (and (.isDirectory d) (re-matches (re-pattern (str "\\Q" stem "\\E-[0-9a-f]{8}")) (.getName d)))
             :let [to (str base (subs (.getName d) (count stem)))]]
       (lib/sh "mkdir" "-p" to)
-      (doseq [n ["data.mdb" "reach-graph.fasl"] :when (.isFile (java.io.File. d ^String n))]
+      (doseq [n (kept-files d)]
         (lib/sh "cp" "-c" (str (.getPath d) "/" n) (str to "/" n))))
     base))
 

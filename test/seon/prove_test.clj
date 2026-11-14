@@ -6,7 +6,7 @@
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.test-store :as ts] [clojure.java.shell :as sh] [seon.agent-test :as at] [clojure.edn] [seon.prove :as prove] [seon.fx :as fx] [seon.step :as step] [seon.agent] [seon.cost] [seon.proofs :as proofs] [seon.program] [seon.config]))
 
-;; the service's state as a test starts it: the budget of the config in force (seon.fx/budget), which deals the queue in
+;; the service's state as a test starts it: the max-workers of the config in force (seon.fx/limits), which deals the queue in
 ;; shares; nothing here reads the machine's load (docs/cost.md#what-is-measured: no assertion the load can turn red)
 (defn- proc0 [] (prove/prove-proc {:conn nil}))
 
