@@ -354,7 +354,6 @@
  ;; 2026-11-14). Provenance: 100 forks right after a wake waited 3.9-4.6 ms median, 6.4 ms at most, fork(2)
  ;; included (load 15, a small process, 2026-11-14); root's fork(2) alone is 65 ms (docs/cost.md); about ten times that.
  :seon.config.agent/fork-wait-ms 1000
- :seon.config.agent/merge-ms 30000
  ;; Unit: bytes. How much of a stalled agent's stderr file its stall evidence keeps as the fiber dump
  ;; (seon.fx/stall-evidence; seon.lib/tail-bytes says how many earlier bytes were left out). Provenance:
  ;; the literal 262144 (256 KiB) the evidence script's `tail -c` held; a dump of a few hundred fibers fits.

@@ -564,8 +564,8 @@
   "git merge main into this agent's branch, decided on MAIN's program: root's writer runs the one merge (its :merge-main,
   seon.merge/merge-main), never this branch's code. The branch becomes main's head plus its own datoms since the base, one commit
   only while the branch is still at the head this process committed; a key both changed stops it, and each conflict is an unmerged
-  entry on the branch. This process writes nothing of its branch while it waits (the wait is bounded,
-  :seon.config.agent/merge-ms), then its connection follows the branch's moved head (datahike.connector/follow-head!). None of
+  entry on the branch. This process writes nothing of its branch while it waits; the wait ends by the writer's answer, or, if
+  its step throws, the typed error root answers the request's :dest with (seon.system/answer-taken), or root's end; then its connection follows the branch's moved head (datahike.connector/follow-head!). None of
   main's forms loads here: its program stays the one :program names (program-db) and :behind says so, so the run re-forks at its
   next turn boundary (seon.turn) and its test children load the branch's difference first (load-diff!). Answers {:ok :merged
   :applied :conflicts :t}: :merged the main commit merged, nil when main had not moved; :applied the program keys main changed since
@@ -579,7 +579,7 @@
       {:ok true :merged nil :applied [] :conflicts [] :t (:max-tx @conn)}
       (let [applied (vec (keys (main-changes (:base @state) main)))
             k (:tx-seq (swap! state update :tx-seq inc))
-            r (await-reply k {:op :merge-main :k k} (cfg/value :seon.config.agent/merge-ms))
+            r (await-reply k {:op :merge-main :k k})
             r (if (contains? r :result) (:result r) (dissoc r :op :k))]
         (if (contract/error? r)
           r

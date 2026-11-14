@@ -539,6 +539,19 @@
 ;; answer that was already an error is not taken back through its :dest again. Red before: :agent-facts (a vector) went whole into
 ;; err/occurrence's :agent, the api's step threw, and its :error answer re-ran back-op on the same answer, throwing again: a loop
 ;; of errors each wrapping the last (bin/check problems hung on it, 2026-11-12)
+;; docs/errors.md#nothing-crashes-and-nothing-hangs: an agent's :merge-main waits with no clock (its merge-ms bound is deleted,
+;; 2026-11-15); a writer step that throws on it answers the request's :dest, so the agent's await-reply ends with the typed error.
+;; Estimate: one answer-taken over a map, ~0.2M
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-merge-the-writer-threw-on-answers-the-agent-waiting
+  (let [st {:agents {:a1 {:status :busy}} :pending {} :rid 0 :boot "b" :seon.system/errors {}}
+        o (volatile! {})
+        e (seon.contract/error :seon.system/proc-defect #'seon.system/flow-error "merge-main-into threw" {})
+        _ (#'seon.system/answer-taken st o :writer {:op :merge-main :branch "b" :dest {:agent :a1 :op :reply :k 7}} e)
+        sent (get @o [:a1 :in])]
+    (is (= 1 (count sent)) (pr-str @o))
+    (is (= {:op :reply :k 7 :seon.error/type :seon.system/proc-defect} (select-keys (:msg (first sent)) [:op :k :seon.error/type]))
+        "the agent's request :k is answered with the error, which merge-main! returns as it is")))
+
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-refused-facts-write-is-each-agents-problem-and-is-not-answered-again
   (let [st {:agents {} :pending {} :rid 0 :boot "b" :seon.system/errors {}}
         o (volatile! {})
