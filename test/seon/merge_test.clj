@@ -293,6 +293,16 @@
     (is (= :db.type/long (:db/valueType (get (d/schema onto) :app.shape/size))) "the merge compiled it and carries its declaration")
     (is (= #{:app.shape/size} (set (keys (program/schema-changes onto)))) "and the branch says the binary lacks it")))
 
+(deftest a-schema-entry-the-source-deleted-merges-as-its-deletion
+  ;; docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program: main deleted :seon.config.proofs/root-item-workers from its
+  ;; file, and context's branch could not merge main: merge-tx asked the merged registry, which no longer holds the key, for its
+  ;; declaration, and threw :malli.core/invalid-schema (measured 2026-11-14 on a copy of that branch). A deleted entry declares nothing
+  (let [file "resources/seon/schemas/app.shape.edn"
+        base (d/db-with (empty-db) (source/file-tx file "{:app.shape/size :int :app.shape/name :string}"))
+        src (d/db-with base (source/refresh-tx base {file "{:app.shape/name :string}"}))
+        onto (d/db-with base (pm/merge-tx base base src [[:schema :app.shape/size]] #{}))]
+    (is (= #{:app.shape/name} (set (keys (program/schema-changes onto)))) "the merge deletes the entry, as the source did")))
+
 (deftest a-tree-the-binary-was-built-from-states-no-schema-change
   ;; docs/source.md#a-program-file: the shipped schema resources, imported as the import reads them (seon.source/file-tx), are no change against the binary built
   ;; from them, so a root and a checkout on one tree key a test alike (seon.agent/branch-inputs mixes changes into :seon.env/schemas). Red on any entry the import writes otherwise

@@ -1239,9 +1239,12 @@
   "The attribute registered key k is, when no entity map lists it and its value is storable (an attribute is a registered key whose schema is its stored value: an agent's own datum, written on its own entity): [its declaration], when db does not hold it so; else []. A registration and a merge of the entry read it here, so the attribute travels with it. See docs/storage.md#the-write-checks-every-datom."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :seon.host/registry] [:vector :seon.schema/declaration]]}
   [db k reg]
-  (let [dcl (sd/declaration reg k)
-        entity? (:seon.db/attributes (m/properties (m/deref (m/schema k {:registry reg}))))]
-    (if (or (contract/error? dcl) entity? (= dcl (select-keys (get (d/schema db) k) (keys dcl)))) [] [dcl])))
+  ;; a key reg lacks (an entry the merge deletes) declares nothing: its declaration is an error, read before reg is asked for k
+  (let [dcl (sd/declaration reg k)]
+    (if (or (contract/error? dcl)
+            (:seon.db/attributes (m/properties (m/deref (m/schema k {:registry reg}))))
+            (= dcl (select-keys (get (d/schema db) k) (keys dcl))))
+      [] [dcl])))
 
 (defn- load-forms!
   "Load form rows of db in load order, compiling against db's schemas (malli's dynamic
