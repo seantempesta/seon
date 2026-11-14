@@ -2497,6 +2497,25 @@
         mg (:mg (#'agent/process-plan {:plan plan :deferred []} nil))]
     (is (contains? (set (keys mg)) "mg/seon.ref/lead-sentence") (str "a contract key with no green at its digest is an item of the merge: " (pr-str mg)))))
 
+;; docs/source.md#tests-run-by-reach: a db no store commit names (a test's world) is graphed whole, at its own size, never updated from the
+;; graph its process holds. In an agent's test child that graph is main's whole program, and updating it down to the world cost
+;; seon.agent-test/an-unchanged-branch-reads-no-test-as-changed 40M ticks (its budget; 0.88M where a test before it had left the world's
+;; graph held, 4.4M under bin/test; context's evidence, 2026-11-14). Estimate: two small worlds' graphs ~3M each, one test plan ~3M = ~9M.
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-test-world-is-graphed-whole-never-updated-from-a-held-program
+  (let [w (mt/world)
+        [_ in] (agent/test-inputs w)
+        other (seon.program-test/record w 'app.held "(defn held [] 1)")
+        g0 (program/reach-graph other (:data-refs in))
+        hits (atom 0)
+        update0 program/reach-update
+        before @agent/state]
+    (try
+      (swap! agent/state assoc :base-graph {:point ["held-commit" 1] :graph g0 :inputs in :value nil})
+      (with-redefs [program/reach-update (fn [g db] (when (identical? g g0) (swap! hits inc)) (update0 g db))]
+        (agent/test-plan w w #{}))
+      (is (= 0 @hits) "the world was graphed whole, never the held program's graph updated down to it")
+      (finally (reset! agent/state before)))))
+
 ;; docs/merging.md#verdicts-are-a-cache: base and branch are digested by the same inputs, so a branch that changed nothing selects
 ;; nothing as changed. Red before: the inputs design added the private checks, the index class and a process test's config
 ;; to the branch's inputs only, and an unchanged agent of the standing system selected 1,765 of 1,835 tests as changed
