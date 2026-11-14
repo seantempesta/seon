@@ -2826,7 +2826,8 @@
   ;; test, a few million ticks of the test process
   (let [t 'seon.problems-test/a-test-that-waits-for-good-after-an-a-thread
         write "(do (in-ns 'seon.problems-test) (clojure.test/deftest ^{:seon.test/estimate {:ticks 30000}} a-test-that-waits-for-good-after-an-a-thread (clojure.test/is (= 1 (clojure.core.async/<!! (clojure.core.async/thread 1)))) (let [p (promise)] (clojure.test/is (= 1 @p)))) (in-ns 'user) :ok)"
-        [_ proved] (in-agent (fn [_] [write "(let [r (my.agent/prove)] {:proofs (:proofs r) :error (:error r) :failures (mapv (juxt :seon.error/type :message) (filter #(= :error (:type %)) (:reports r)))})"]) {:proofs #{t} :sets [":seon.config.proofs/ticks-decide=true"]})]
+        [_ _ proved] (in-agent (fn [_] [;; the tick bound proved with it on, stated on its own branch (an agent holds its branch's config, never root's --set)
+                                   "(do (seon.agent/transact! [{:config/key :seon.config.proofs/ticks-decide :config/form \"true\" :config/file \"resources/seon/config/default.edn\"}]) (seon.agent/commit!))" write "(let [r (my.agent/prove)] {:proofs (:proofs r) :error (:error r) :failures (mapv (juxt :seon.error/type :message) (filter #(= :error (:type %)) (:reports r)))})"]) {:proofs #{t}})]
     (is (= {t :error} (:proofs (:value proved))) (pr-str proved))
     (is (some #(#{:seon.test/wall-spent :seon.test/ticks-spent} (first %)) (:failures (:value proved))) (str "ended by a bound, typed: " (pr-str proved)))))
 
@@ -3287,9 +3288,11 @@
   ;; bounded runs' included. Step E's run 7 (2026-10-22): the agent's proof fork, whose
   ;; tests each run bounded evals (seon.intr/run), spun 2.5 h past its 2e11-tick budget.
   ;; Here a proof that loops over bounded evals for ever ends at its own budget, named
-  (let [[_ r] (in-agent ["(do (ns spin-test (:require [clojure.test :refer [deftest is]]))
+  (let [[_ _ r] (in-agent [;; the tick bound proved with it on, stated on its own branch (an agent holds its branch's config)
+                        "(do (seon.agent/transact! [{:config/key :seon.config.proofs/ticks-decide :config/form \"true\" :config/file \"resources/seon/config/default.edn\"}]) (seon.agent/commit!))"
+                        "(do (ns spin-test (:require [clojure.test :refer [deftest is]]))
                               (deftest spin (loop [] (seon.intr/run 100000 #(reduce + (range 1000))) (recur))))"
-                         "(let [r (seon.agent/run-tests-forked 100000000 #{'spin-test/spin} :turn)] [(:seon.error/type (first (filter :seon.error/type (:reports r)))) (some :var (:reports r))])"] {:sets [":seon.config.proofs/ticks-decide=true"]})
+                         "(let [r (seon.agent/run-tests-forked 100000000 #{'spin-test/spin} :turn)] [(:seon.error/type (first (filter :seon.error/type (:reports r)))) (some :var (:reports r))])"])
         [type test] (:value r)]
     (is (= :seon.test/ticks-spent type) (:text r))
     (is (= "#'spin-test/spin" test) "naming the test that was running")))
