@@ -1404,7 +1404,10 @@
           schema-changes (into {} (for [[p t] (:value r) :when (and t (str/starts-with? p "resources/seon/schemas/") (str/ends-with? p ".edn"))
                                         :let [m (sedn/decode t)] :when (map? m)] m))
           skipped (vec (for [[p t] (:value r)
-                                 :let [why (cond (unsynced p) (str "merged task " (unsynced p) " changed it and main holds it unsynced: (my.root/sync! sys [\"" (unsynced p) "\"]), then start again")
+                                 ;; a merged task's file the checkout holds as main does (git followed the store: the write-back
+                                 ;; committed it there) is no conflict; only another text would replace the merge's
+                                 :let [why (cond (and (unsynced p) (not= t (get (doc/files db [p]) p)))
+                                                 (str "merged task " (unsynced p) " changed it and main holds it unsynced: (my.root/sync! sys [\"" (unsynced p) "\"]), then start again")
                                                  (and t (fx/unreadable p t schema-changes)) (fx/unreadable p t schema-changes)
                                                  (and refused (task? p)) (str "the task files are refused: " refused))]
                                  :when why]

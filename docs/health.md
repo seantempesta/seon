@@ -58,6 +58,10 @@ A public function, macro or def of Seon's own source whose docstring cites no `d
 
 Every key Seon names is one schema entry: each of Seon's own qualified keywords (a `seon` or `my` namespace) that a source form names (`:form/keywords`) and no entry defines (`:schema/key`) is an `:unschemed-key` (```seon.problems/unschemed-keys```), one row a key naming the vars that use it. A reverse ref and an enum's value are not keys. A branch that names a new key without its entry, or removes the entry of a key still named, is caused the row; it closes when the entry is written, with its `:description`.
 
+## A retyped attribute
+
+A stored attribute's value type and cardinality are fixed once installed: Datahike holds its datoms in that shape, and a root that opens a store whose attribute its schema now declares otherwise refuses it (```seon.db/install-missing!```, `:seon.db/types-differ`). The standing store follows main, so a branch whose entry gives an attribute main declares another type or cardinality is a `:retyped-attribute` row of the branch's health (```seon.problems/retyped-attributes```, read from both sides' schema entries for the attributes the branch's move changed), and its land check is red before anything lands. The new shape takes a key of its own; the old key's entry stays as installed.
+
 ## A stored value its entry refuses
 
 Every stored value fits its attribute's entry: each write is checked, and a branch that changes an entry is held to the values already stored. A datom of an attribute whose entry the branch changed, whose value the new entry refuses (```seon.db/invalid-datom```, with the branch's own schema changes), is a `:refused-value` (```seon.problems/refused-values```), one row a value, read from that attribute's datoms alone. It closes when the value is fixed or the entry loosened.
@@ -65,6 +69,10 @@ Every stored value fits its attribute's entry: each write is checked, and a bran
 ## A form too long
 
 A live form whose `:form/src` is longer than `:seon.config.shrink/form-tokens` tokens (`seon.print.emit/chars-tokens`) is a `:long-form` (`seon.problems/long-forms`), read only for the vars a branch changed and shown as attention.
+
+## A hand-written list
+
+A page's parts are what its entity's pull holds, each drawn by its schema's render ([the page](render.md#the-page)); a list names none. A render whose var carries `:seon.render/list` and whose form names a component (a render whose contract takes `:seon.render/opts`, [components](render.md#components)) other than itself is a `:hand-written-list` (`seon.problems/hand-written-lists`), one row a list naming its parts. A branch that adds one is refused done; one main already had is a task of the list's owner. It closes when the list draws its parts from the pull.
 
 ## An unfocused docstring
 

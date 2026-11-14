@@ -386,10 +386,27 @@
    (observe idx db (for [dt moved :let [a (:a dt)] :when (and (keyword? a) (or (watched-attrs a) (watched-ns (namespace a))))]
                      [:db/add (:e dt) a]))))
 
+(defn input
+  "The done rule's input for task t ({:proofs :kind :plan :plan-before}) and its results; green? and red? say whether main holds a
+  test green and whether it may be red. The one producer the judge's `done-input` and seon.ctx.status/status call. See
+  docs/tasks.md#the-done-rule."
+  {:malli/schema [:=> [:cat :map :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:set :qualified-symbol] fn? fn?] :seon.reconcile/done-input]}
+  [{:keys [proofs kind plan plan-before]} results uncontracted unmerged deferred green? red?]
+  (cond-> {:proofs (or proofs #{})
+           :kind kind
+           :results results
+           :main-green (into #{} (filter green?) (keys results))
+           :allowed-red (into #{} (filter red?) (keys results))
+           :uncontracted uncontracted
+           :unmerged (vec unmerged)
+           :deferred deferred}
+    (= :design kind) (assoc :plan plan)
+    (and (= :design kind) plan-before) (assoc :plan-before plan-before)))
+
 (defn done-input
-  "The done rule's input for the results of task id's end, observed against main at t basis
-  (nil: main as idx holds it), over the index: the regression and allowed-red sets restricted to the tests
-  that ran (the only ones done-explain asks about), each test looked up by its claimants; for
+  "The done rule's input (`input`) for the results of task id's end, observed against main at t basis
+  (nil: main as idx holds it), over the index: a test is main-green when a task claiming it merged by the basis, allowed-red when
+  one claiming it has not (each test looked up by its claimants); for
   a :design task, its accumulated plan now and plan-before, the one its branch began with
   (its merge base's; nil: unknown); deferred, the process tests its end left to root's gate."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:maybe :int] [:maybe :seon.task/plan] [:set :qualified-symbol]] :seon.reconcile/done-input]}
@@ -397,16 +414,10 @@
   (let [by? (fn [x] (when-let [mt (get-in idx [:done x :merged-t])] (or (nil? basis) (<= mt basis))))
         claim (fn [t] (disj (get-in idx [:claims t] #{}) id))
         kind (get-in idx [:tasks id :seon.task/kind] :work)]
-    (cond-> {:proofs (get-in idx [:acc id] #{})
-             :kind kind
-             :results results
-             :main-green (into #{} (filter #(some by? (claim %))) (keys results))
-             :allowed-red (into #{} (filter #(some (complement by?) (claim %))) (keys results))
-             :uncontracted uncontracted
-             :unmerged (vec unmerged)
-             :deferred deferred}
-      (= :design kind) (assoc :plan (:plan (task/accumulate (:tasks idx) id)))
-      (and (= :design kind) plan-before) (assoc :plan-before plan-before))))
+    (input {:proofs (get-in idx [:acc id] #{}) :kind kind :plan-before plan-before
+            :plan (when (= :design kind) (:plan (task/accumulate (:tasks idx) id)))}
+           results uncontracted unmerged deferred
+           #(some by? (claim %)) #(some (complement by?) (claim %)))))
 
 (defn- merge-keys
   "The program keys merge task id merges: what the tasks on its branch measured as changed
@@ -603,6 +614,19 @@
                (for [[id t] (sort-by key (:tasks idx)) :let [e (lost-write-back t)] :when e]
                  {:task id :blocks []
                   :cause (str "write-back lost: " (:seon.error/message e) " [" (str/join ", " (:seon.git/files e)) "]; (my.root/write-back! sys [\"" id "\"]) writes it again")}))))
+
+(defn source-moved-tx
+  "Main's source fact moved to the commit r (the :git effect's answer) made on git's main, when it was one made from the commit main
+  was imported from (seon.fx/git-commit :expect) and main's fact still names that commit: main holds the commit's files now, so a
+  catch-up reads from it. Its :tree is the tree's id when the tree followed. None for any other answer. See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
+  [db r]
+  (let [held (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))]
+    ;; a compare-and-swap in the store as in git: only while main's fact still names the commit the write was made from, so a
+    ;; catch-up written in between is never written over
+    (if-let [{:keys [sha tree]} (when (and (:commit held) (= (:commit held) (get-in r [:value :expected]))) (:value r))]
+      [{:seon.system/id :root :seon.system/source (cond-> (assoc held :commit sha) tree (assoc :tree tree))}]
+      [])))
 
 (defn commit-tx
   "Main's write of the :git effect's answer r for the tasks of members, which wanted paths written
@@ -1181,13 +1205,30 @@
                      (one (write st id :done (commit-tx (:db st) (contract/error :seon.system/no-source-text #'seon.reconcile/commit-tx
                                                                                  (str "main holds no text for " (str/join ", " paths)) {:paths (vec paths)})
                                                         members paths [])))
-                     (one (request (assoc-in st [:flights id :writeback :written] (vec (keys files))) id :committed
-                                   {:op :fx :kind :git :req {:dir (:root (:source st)) :branch (:branch (:source st)) :files files :modes (source/modes (:db r) (keys files))
-                                                             :message (source/commit-message members)}}))))
+                     ;; git follows the store's main: committed on the branch main was imported from (git's main for the standing root), only from
+                     ;; (:expect, one compare-and-swap; a landing that moved it since answers :seon.fx/ref-moved, nothing written);
+                     ;; a main imported from no commit writes the merges branch, as before
+                     ;; the branch main was imported from (its source fact's :branch, git's main for the standing root), from its :commit
+                     (let [{imported :commit from :branch} (:seon.system/source (d/pull (:db r) [:seon.system/source] [:seon.system/id :root]))
+                           imported (when from imported)]
+                       (one (request (assoc-in st [:flights id :writeback :written] (vec (keys files))) id :committed
+                                     {:op :fx :kind :git :req (cond-> {:dir (:root (:source st)) :files files :modes (source/modes (:db r) (keys files))
+                                                                       :message (source/commit-message members)
+                                                                       :branch (if imported from (:branch (:source st)))}
+                                                                imported (assoc :expect imported))})))))
       ;; the sha on each merged task; the merge already runs where main's program runs
       ;; (seon.program/load-changes!), so nothing is built (BUILD plan P4)
+      ;; and main's source fact moves to the commit, in the same write: main was imported from it now (catch-up reads from there)
       :committed (if-let [tx (commit-tx (:db st) r (:members (:writeback f)) (:files (:writeback f)) (:written (:writeback f)))]
-                   (one (write st id :done tx))
+                   (let [[st o] (write st id :done (into tx (source-moved-tx (:db st) r)))]
+                     ;; git's main moved but its checked-out tree could not follow: a platform problem someone reads, not only the answer
+                     [st (cond-> [o]
+                           (get-in r [:value :tree-unmoved])
+                           (conj {:op :problem :class :platform
+                                  :error (contract/error :seon.fx/tree-unmoved #'seon.reconcile/source-moved-tx
+                                                         (str "git's main moved to " (get-in r [:value :sha]) " but its checked-out tree did not follow: "
+                                                              (get-in r [:value :tree-unmoved]) "; bring the tree in (git read-tree -m -u)")
+                                                         {:sha (get-in r [:value :sha])})}))])
                    (done st)))))
 
 (defn- quiet

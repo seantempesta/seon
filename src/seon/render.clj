@@ -267,19 +267,20 @@
 
 ;;; --- the walk: a render of components (docs/render.md#components) -------------------------------
 
-(defn- opts-form
-  "The opts schema form of render var v's contract (its first argument), or nil."
-  {:malli/schema [:=> [:cat :any] :any]}
-  [v]
-  (when (var? v)
-    (let [s (:malli/schema (meta v)) arity (if (= :function (first s)) (second s) s)]
-      (when (vector? arity) (second (second arity))))))
+(defn contract-inputs
+  "Which of :seon.ctx/ctx, :seon.db/db and :seon.render/drawn the contract form s (a :malli/schema, live or stored) asks to
+  receive in its opts, its first argument: a render that declares any is a component. See docs/render.md#components."
+  {:malli/schema [:=> [:cat :any] [:set :qualified-keyword]]}
+  [s]
+  (let [arity (if (= :function (first s)) (second s) s)
+        opts (when (vector? arity) (second (second arity)))]
+    (into #{} (filter #{:seon.ctx/ctx :seon.db/db :seon.render/drawn}) (tree-seq vector? seq opts))))
 
 (defn inputs
-  "Which of :seon.ctx/ctx, :seon.db/db and :seon.render/drawn render var v's opts contract asks to receive: a render
-  that declares any is a component, kept in the walk's cache, those keys filled in (`render!`)."
+  "Which inputs render var v's live contract asks to receive (`contract-inputs`): a component is kept in the walk's cache,
+  those keys filled in (`render!`)."
   {:malli/schema [:=> [:cat :any] [:set :qualified-keyword]]}
-  [v] (into #{} (filter #{:seon.ctx/ctx :seon.db/db :seon.render/drawn}) (tree-seq vector? seq (opts-form v))))
+  [v] (if (var? v) (contract-inputs (:malli/schema (meta v))) #{}))
 
 (defn- inputs-in
   "The inputs render var f asks for (`inputs`), as walk w found them: kept by f with the value its root held then, so

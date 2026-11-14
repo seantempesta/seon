@@ -32,7 +32,7 @@
   `report` reads what was recorded, at a cost that follows the problems. `health` adds the
   derived classes, read from the program's facts when asked (docs/health.md#cost)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print.emit :as emit] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.source :as source] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.doc :as doc] [seon.task :as task] [seon.config :as config] [seon.cost :as cost] [seon.reader :as reader] [seon.edn :as sedn]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print.emit :as emit] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.source :as source] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.doc :as doc] [seon.task :as task] [seon.config :as config] [seon.cost :as cost] [seon.reader :as reader] [seon.edn :as sedn] [seon.render :as render] [seon.schema.datahike :as sd]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses task/failed)
@@ -467,6 +467,30 @@
            (derived-row ans s nsym (str v " is " n " tokens, over the bound of " bound ": split it by what it does")
                         {:kind :long-form :var v :tokens n :bound bound} {:var v :tokens n :bound bound})))))
 
+(defn- component?
+  "Whether the var named v on db is a component, by the walk's own rule (seon.render/contract-inputs) over its stored contract;
+  a helper a list calls is no part. See docs/render.md#components."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] :boolean]}
+  [db v]
+  (boolean (some->> (pdb/eid db :var/name v) (d/entity db) :var/contract sedn/decode render/contract-inputs seq)))
+
+(defn hand-written-lists
+  "A :hand-written-list row for each page list (:seon.render/list) among names (nil: every list on db) whose form names a
+  component other than itself (`component?`), with the parts it names. See docs/health.md#a-hand-written-list."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:maybe [:set :symbol]]] [:vector :seon.problems/row]]}
+  [db ans names]
+  (let [lists (if names
+                (filter #(some-> (pdb/eid db :var/name %) (as-> e (d/entity db e)) :var/meta (contains? :seon.render/list)) names)
+                (keep #(:var/name (d/entity db (:e %))) (d/datoms db :avet :var/meta :seon.render/list)))]
+    (vec (for [v (sort-by str lists)
+               :let [refs (some->> (pdb/eid db :var/name v) (d/entity db) :var/form :form/refs)
+                     parts (vec (sort-by str (filter #(and (symbol? %) (not= v %) (component? db %)) refs)))]
+               :when (seq parts)
+               :let [s (str "hand-written-list " v)]]
+           (derived-row ans s (some-> (namespace v) symbol)
+                        (str v " names its parts (" (str/join ", " parts) "): a page draws what its pull holds, each part by its schema's render")
+                        {:kind :hand-written-list :var v :parts parts} {:var v :parts parts})))))
+
 (defn unfocused-docstrings
   "An :unfocused-docstring row for each named Seon var whose docstring is over :seon.config.shrink/docstring-words words or
   holds a measurement, a date or a wiki page cited twice. One seek a var. See docs/health.md#an-unfocused-docstring."
@@ -488,6 +512,25 @@
            (derived-row ans (str "unfocused-docstring " v) nsym
                         (str v "'s docstring is " words " words (" (str/join ", " (map name why)) "): say what it answers and the one thing a caller must know, and cite the wiki once")
                         {:kind :unfocused-docstring :var v :words words :why why :bound bound} {:var v :words words :why why})))))
+
+(defn retyped-attributes
+  "Each attribute of attrs whose value type or cardinality head's entry declares otherwise than base's, as a :retyped-attribute row:
+  a stored attribute's are fixed once installed and the store follows main, so a branch that retypes one would leave root unable to
+  open its store (seon.db/install-missing!). Read from each side's schema entries (seon.schema.datahike/declaration of its registry),
+  for the attributes a branch's move changed the entry of, never in a full health read. See docs/health.md#a-retyped-attribute."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :map [:set :qualified-keyword]] [:vector :seon.problems/row]]}
+  [base head ans attrs]
+  (if (empty? attrs)
+    []
+    (let [shape (fn [db] (let [reg (program/schema-registry (program/schema-changes db))]
+                           (fn [a] (let [dc (sd/declaration reg a)]
+                                     (when-not (contract/error? dc) (not-empty (select-keys dc [:db/valueType :db/cardinality])))))))
+          b (shape base) h (shape head)]
+      (vec (for [a (sort attrs) :let [x (b a) y (h a)] :when (and x y (not= x y))]
+             (derived-row ans (str "retyped-attribute " a) (symbol (namespace a))
+                          (str a " is installed as " (:db/valueType x) " " (:db/cardinality x) " and the branch declares " (:db/valueType y) " "
+                               (:db/cardinality y) ": a stored attribute's type and cardinality are fixed once installed; give the new shape a key of its own")
+                          {:kind :retyped-attribute :attribute a} {:attribute a}))))))
 
 (defn refused-values
   "Each stored datom of the attributes attrs whose value db's own entry for its attribute refuses, as a :refused-value row naming
@@ -710,6 +753,7 @@
                          (map #(assoc % :class :stale-section) (stale-sections db ans {:names moved-vars :sections (eids state)}))
                          (map #(assoc % :class :uncited-var) (uncited-vars db ans moved-vars))
                          (map #(assoc % :class :long-form) (long-forms db ans moved-vars))
+                         (map #(assoc % :class :hand-written-list) (hand-written-lists db ans moved-vars))
                          (map #(assoc % :class :unfocused-docstring) (unfocused-docstrings db ans moved-vars))
                          (map #(assoc % :class :unestimated-test) (unestimated-tests db ans moved-vars))
                          (map #(assoc % :class :undeclared-test) (undeclared-tests db ans moved-vars))
@@ -724,7 +768,10 @@
         had (vec (rows base bs (forms-in base)))
         has (vec (rows head hs (forms-in head)))
         sigs (fn [rs] (into #{} (map :signature) rs))]
-    {:made (vec (remove (comp (sigs had) :signature) has)) :closed (vec (remove (comp (sigs has) :signature) had))}))
+    ;; an attribute the branch retyped is the branch's by its own reading of both sides (retyped-attributes), never had by base
+    {:made (into (vec (remove (comp (sigs had) :signature) has))
+                 (map #(assoc % :class :retyped-attribute)) (retyped-attributes base head ans moved-attrs))
+     :closed (vec (remove (comp (sigs has) :signature) had))}))
 
 (defn caused-split
   "{:caused :attention :rows :closed}: the derived problems the branch at head has that base (its merge base) had not, by
@@ -1083,7 +1130,8 @@
   ([db fold]
    (let [ans (answers db)]
      (health-with db ans (:classes (report-with db ans fold nil)) (assoc (other-derived db ans (mapv :e (d/datoms db :aevt :seon.task/id)))
-                                     :unnamed-site (unnamed-sites db ans) :stale-section (stale-sections db ans))))))
+                                     :unnamed-site (unnamed-sites db ans) :stale-section (stale-sections db ans)
+                                     :hand-written-list (hand-written-lists db ans nil))))))
 
 (defn- touched-tasks
   "The task entities of head the move touched (moved: the datoms that differ between the dbs, as
@@ -1126,7 +1174,7 @@
                                        (update :unsynced #(vec (sort-by :task (into (into [] (comp (remove (fn [r] (ids (:task r)))) (map current))
                                                                                           (get-in prev [:classes :unsynced :rows]))
                                                                                     %))))
-                                       (assoc :unnamed-site (carried :unnamed-site) :stale-section (carried :stale-section))))))
+                                       (assoc :unnamed-site (carried :unnamed-site) :stale-section (carried :stale-section) :hand-written-list (carried :hand-written-list))))))
 
 (defn own
   "The open problems of one agent, by class and shaped as `report` (so the one render draws it, an
