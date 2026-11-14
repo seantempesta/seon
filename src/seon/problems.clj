@@ -24,8 +24,8 @@
                                     derived from the compiler's facts and the page's names
     :stale-pin                      a pin the wiki states (`pins`: docs/forks.md) that is not
                                     the gitlink root's source import recorded
-    :unsynced                       a merged task whose entry main's files still declare: its
-                                    work is not reviewed onto main's files (my.root/sync!)
+    :unsynced                       a task that differs from its file: merged with its entry still
+                                    there, or stated on main and changed or in no file (my.root/sync!)
 
   `report` reads what was recorded, at a cost that follows the problems. `health` adds the
   derived classes, read from the program's facts when asked (docs/health.md#cost)."
@@ -778,11 +778,20 @@
    {:seon.task/agent [:seon.agent/key :seon.agent/ended-ms]}])
 
 (defn unsynced?
-  "Whether task entity e merged on db and main's files still declare it (its :seon.task/declared, which a landing that
-  removes its entry retracts: seon.task/load-tx). See docs/source.md#a-merged-task-reaches-mains-files."
+  "Whether task entity e on db differs from its file: merged with main's files still declaring it (its :seon.task/declared, which
+  a landing that removes its entry retracts: seon.task/load-tx), or live, stated (not seon.task/derived?) and either never filed
+  (no declared) or changed on main since its file was read (seon.task/declaration differs from it). The store is the source and
+  its files follow. See docs/source.md#a-merged-task-reaches-mains-files."
   {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
   [db e]
-  (boolean (and (= :merged (:v (first (d/datoms db :eavt e :seon.task/outcome)))) (seq (d/datoms db :eavt e :seon.task/declared)))))
+  (let [declared (:v (first (d/datoms db :eavt e :seon.task/declared)))]
+    (boolean
+      (if (= :merged (:v (first (d/datoms db :eavt e :seon.task/outcome))))
+        (some? declared)
+        (and (not (task/finished (:v (first (d/datoms db :eavt e :seon.task/outcome)))))
+             (not (#{:done :cancelled} (:v (first (d/datoms db :eavt e :seon.task/execution)))))
+             (not (task/derived? db e))
+             (or (nil? declared) (not= (task/declaration db e) (task/stated (assoc (sedn/decode declared) :seon.task/ns (:v (first (d/datoms db :eavt e :seon.task/ns))))))))))))
 
 (defn- task-reads
   "The one reading of which tasks are ready and what they cite, on db: {:ready? :cited}, `ready?` a function of a task
@@ -796,13 +805,10 @@
   (let [done (if only
                (fn [e] (boolean (some-> (first (d/datoms db :eavt e :seon.task/outcome)) :v task/finished)))
                (into #{} (comp (filter #(task/finished (:v %))) (map :e)) (d/datoms db :aevt :seon.task/outcome)))]
-    (cond-> {:ready? (fn [e] (and (not (done e)) (every? #(done (:v %)) (d/datoms db :eavt e :seon.task/needs))))
+    {:ready? (fn [e] (and (not (done e)) (every? #(done (:v %)) (d/datoms db :eavt e :seon.task/needs))))
              :cited (fn [e] (into [] (comp (map #(:var/name (:seon.cite/target (d/entity db (:e %))))) (filter qualified-symbol?)) (d/datoms db :avet :seon.cite/of e)))
              ;; the tasks the readers judge: every task, or only's
-             :tasks (if only (keep #(first (d/datoms db :eavt % :seon.task/id)) only) (d/datoms db :aevt :seon.task/id))}
-      ;; the merged tasks main's files still declare (`unsynced-tasks`): unsynced?'s rule over the declared tasks, which the task
-      ;; files bound (never every task that ever merged), with no contracted call a task
-      (nil? only) (assoc :unsynced (into [] (comp (map :e) (filter #(= :merged (:v (first (d/datoms db :eavt % :seon.task/outcome)))))) (d/datoms db :aevt :seon.task/declared)))))))
+             :tasks (if only (keep #(first (d/datoms db :eavt % :seon.task/id)) only) (d/datoms db :aevt :seon.task/id))})))
 
 (defn changed-paths
   "The files task entity e's merged changes touch (its :seon.task/changed keys), as db holds them now: seon.source/changed-files
@@ -814,22 +820,38 @@
     (source/changed-files db (into {} (for [[kind x :as k] ks]
                                         [k [nil (or (now k) (when (= :form kind) {:ns (symbol (first (str/split x #"/" 2)))}))]])))))
 
+(defn- unsynced-candidates
+  "The task entities among es that may differ from their files (`unsynced?` judges them): a merged one its file still declares,
+  or any not finished; a finished one costs a seek or two and no call."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :int]] [:vector :int]]}
+  [db es]
+  (filterv #(let [o (:v (first (d/datoms db :eavt % :seon.task/outcome)))]
+              (if (= :merged o) (seq (d/datoms db :eavt % :seon.task/declared))
+                  (not (or (task/finished o) (= :cancelled (:v (first (d/datoms db :eavt % :seon.task/execution))))))))
+           es))
+
 (defn unsynced-tasks
-  "Each merged task whose entry main's files still declare (its :seon.task/declared, which a landing that removes the entry
-  retracts: seon.task/load-tx), as an :unsynced row naming the task, the files its changes touch (`changed-paths`) and the act
-  that syncs it: my.root/sync! writes them from main, with the entry removed, onto a branch a session reviews and lands
-  (Completes:). The row's owner is the task's own namespace: no data names which session's area a namespace is in.
-  Closed by that landing. tr, the reading `task-reads` makes once a health read. Cost: a seek a declared task (the task files
-  bound them), and program-of of each row's keys. See docs/source.md#a-merged-task-reaches-mains-files."
-  {:malli/schema [:=> [:cat :seon.host/db :map :map] [:vector :seon.problems/row]]}
-  [db ans {:keys [unsynced]}]
-  (vec (for [e unsynced
-             :let [{id :seon.task/id nsym :seon.task/ns t :seon.task/merged-t} (d/pull db [:seon.task/id :seon.task/ns :seon.task/merged-t] e)
-                   paths (changed-paths db e)]]
+  "Each task that differs from its file (`unsynced?`), as an :unsynced row naming the task, the files a merged one's changes touch
+  (`changed-paths`) and the act that syncs it: my.root/sync! writes them from main, with its entry removed (merged) or written as
+  main holds it (seon.task/declaration), onto a branch a session reviews and lands (Completes: for a merged one). The row's owner
+  is the task's own namespace: no data names which session's area a namespace is in. Closed by that landing, whose load-tx reads
+  the entry back. es, the task entities to judge (`unsynced-candidates`): every task's in `health`, the touched ones in
+  `health-moved`. By task id. See docs/source.md#a-merged-task-reaches-mains-files."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:sequential :int]] [:vector :seon.problems/row]]}
+  [db ans es]
+  (vec (for [e (sort-by #(:v (first (d/datoms db :eavt % :seon.task/id))) (unsynced-candidates db es))
+             :when (unsynced? db e)
+             :let [{id :seon.task/id nsym :seon.task/ns t :seon.task/merged-t o :seon.task/outcome d :seon.task/declared}
+                   (d/pull db [:seon.task/id :seon.task/ns :seon.task/merged-t :seon.task/outcome :seon.task/declared] e)
+                   merged? (= :merged o)
+                   paths (if merged? (changed-paths db e) [])]]
          (derived-row ans (str "unsynced " id) nsym
-                      (str id " merged on main" (when t (str " at t " t)) ", and main's files still hold its entry"
-                           (when (seq paths) (str " and not its changes to " (str/join ", " paths)))
-                           ": (my.root/sync! sys [\"" id "\"]) writes them from main, its entry removed, onto a branch to review and land (Completes: " id ")")
+                      (if merged?
+                        (str id " merged on main" (when t (str " at t " t)) ", and main's files still hold its entry"
+                             (when (seq paths) (str " and not its changes to " (str/join ", " paths)))
+                             ": (my.root/sync! sys [\"" id "\"]) writes them from main, its entry removed, onto a branch to review and land (Completes: " id ")")
+                        (str id (if d " changed on main since its file was read" " is on main and in no file")
+                             ": (my.root/sync! sys [\"" id "\"]) writes its entry as main holds it onto a branch to review and land"))
                       {:kind :unsynced :task id :paths paths} {:task id :paths paths}))))
 
 (defn uncited-tasks
@@ -1035,14 +1057,14 @@
                assoc :seon.render/schema :seon.problems/report)))
 
 (defn- other-derived
-  "The derived classes `caused-split` does not read, their rows on db."
-  {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
-  [db ans]
+  "The derived classes `caused-split` does not read, their rows on db; :unsynced judges the task entities es (`unsynced-tasks`)."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:sequential :int]] :map]}
+  [db ans es]
   (let [tr (task-reads db)]
   {:stalled (stalled-agents db ans) :stale-pin (stale-pins db ans) :stale-binary (stale-binary db ans) :orphan-page (orphan-pages db ans)
    :leadless-section (leadless-sections db ans)
    ;; the tasks' readiness and cites read once for the two classes that judge them
-   :uncited-task (uncited-tasks db ans tr) :stale-plan (stale-plans db ans tr) :unsynced (unsynced-tasks db ans tr)
+   :uncited-task (uncited-tasks db ans tr) :stale-plan (stale-plans db ans tr) :unsynced (unsynced-tasks db ans es)
    :waived-proof (waived-proofs db ans) :unschemed-key (unschemed-keys db ans)}))
 
 (defn health
@@ -1055,7 +1077,7 @@
   ([db] (health db {}))
   ([db fold]
    (let [ans (answers db)]
-     (health-with db ans (:classes (report-with db ans fold nil)) (assoc (other-derived db ans)
+     (health-with db ans (:classes (report-with db ans fold nil)) (assoc (other-derived db ans (mapv :e (d/datoms db :aevt :seon.task/id)))
                                      :unnamed-site (unnamed-sites db ans) :stale-section (stale-sections db ans))))))
 
 (defn- touched-tasks
@@ -1094,8 +1116,12 @@
                                       :let [rows (into (into [] (comp (remove #(ids (:judged %))) (map current)) (get-in prev [:classes c :rows])) (get-in recorded [c :rows]))
                                             rows (vec (sort-by #(- (or (:end-ms %) 0)) rows))]]
                                   [c {:n (count rows) :rows rows}]))]
-    (health-with head ans recorded (assoc (other-derived head ans)
-                                          :unnamed-site (carried :unnamed-site) :stale-section (carried :stale-section)))))
+    (health-with head ans recorded (-> (other-derived head ans (vec touched))
+                                       ;; the tasks the move left alone keep prev's rows; the touched ones were judged anew
+                                       (update :unsynced #(vec (sort-by :task (into (into [] (comp (remove (fn [r] (ids (:task r)))) (map current))
+                                                                                          (get-in prev [:classes :unsynced :rows]))
+                                                                                    %))))
+                                       (assoc :unnamed-site (carried :unnamed-site) :stale-section (carried :stale-section))))))
 
 (defn own
   "The open problems of one agent, by class and shaped as `report` (so the one render draws it, an

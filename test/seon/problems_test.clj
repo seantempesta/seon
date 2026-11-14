@@ -479,9 +479,9 @@
                  :leadless-section #(problems/leadless-sections db ans) :uncited-task #(problems/uncited-tasks db ans)
                  :unnamed-site #(problems/unnamed-sites db ans) :stale-section #(problems/stale-sections db ans)
                  :stale-plan #(problems/stale-plans db ans) :waived-proof #(problems/waived-proofs db ans)
-                 :unsynced #(problems/unsynced-tasks db ans (#'problems/task-reads db))
+                 :unsynced #(problems/unsynced-tasks db ans (mapv :e (d/datoms db :aevt :seon.task/id)))
                  ;; the remainder: answers, report-with, health-with (and problem-unlinked inside it, over the derived rows as health hands them), and the folds
-                 :fixed (let [derived (#'problems/other-derived db ans)]
+                 :fixed (let [derived (#'problems/other-derived db ans (mapv :e (d/datoms db :aevt :seon.task/id)))]
                           #(let [a (problems/answers db)]
                              (#'problems/health-with db a (:classes (#'problems/report-with db a {} nil)) derived)))}
         measured (update-vals classes calls-of)
@@ -496,8 +496,11 @@
                 :stale-section 2       ; the read datoms and the vars' forms, one scan each
                 :stale-plan 3          ; task-reads, and a seon.db/eid per cited var of a ready task
                 :waived-proof 1        ; the test forms' cost proofs passing by :overrun, one scan (Deep fixes' class)
-                :unsynced 2            ; task-reads (a seek a declared task), and its own contract (Optimization's class, 2026-11-10)
-                :fixed 50              ; answers, report-with (every recorded class), health-with (problem-unlinked over all of them, the derived rows as health hands them)
+                ;; its own and unsynced-candidates' contracts, and per task that may differ from its file at most 8: unsynced?,
+                ;; derived?, refine? (its seon.db/eid and cites-of), and for a filed one declaration and stated twice (data, 2026-11-14:
+                ;; the store is the source, so every live task is judged, not only the merged ones)
+                :unsynced (+ 2 (* 8 (count (#'problems/unsynced-candidates db (mapv :e (d/datoms db :aevt :seon.task/id))))))
+                :fixed 51              ; (51: problem-unlinked reads :unsynced's section now this world's own store-made tasks give it rows) answers, report-with (every recorded class), health-with (problem-unlinked over all of them, the derived rows as health hands them)
                 :wrappers 2}]         ; health's and other-derived's own contracts
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
@@ -622,8 +625,11 @@
                                                               2    ; seon.problems/refused-values' contract on base and head (data, 67 -> 69)
                                                               4    ; the test law's two classes (unestimated-tests, undeclared-tests), one reader each on
                                                                    ; base and head (tests, 2026-11-12: 69 -> 73 with data's)
-                                                              8)}  ; :unfocused-docstring (data, 73 -> 81 measured): its reader and its bound on base and head,
+                                                              8    ; :unfocused-docstring (data, 73 -> 81 measured): its reader and its bound on base and head,
                                                                    ; and a seek and a row for each changed Seon var the input's tree holds
+                                                              5)}  ; :unsynced judges the move's touched tasks, not only merged ones (data, 2026-11-14,
+                                                                   ; 81 -> 86): unsynced-candidates' contract, and the touched task's unsynced?, derived?,
+                                                                   ; and refine?'s eid and cites-of
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 25000000}} problems-cost-nothing-for-a-clean-program
@@ -744,7 +750,8 @@
         db (d/db-with db0 [(ended "t/m" {:seon.task/outcome :merged :seon.task/merged-t 7 :seon.task/declared (sedn/encode decl) :seon.task/changed changed})
                            (ended "t/n" {:seon.task/outcome :merged :seon.task/changed changed})
                            (ended "t/k" {:seon.task/outcome :done :seon.task/declared (sedn/encode (assoc decl :seon.task/name "k"))})])
-        rows #(get-in (problems/health %) [:classes :unsynced :rows])]
+        ;; the world's own tasks are made on main and in no file, so unsynced too: this test's are the t/ ones
+        rows #(filterv (fn [r] (str/starts-with? (:task r) "t/")) (get-in (problems/health %) [:classes :unsynced :rows]))]
     (is (some? path) "the world holds a form whose namespace has a file")
     (is (= [["t/m" [path] true 't]] (mapv (juxt :task :paths :open? :owner-ns) (rows db)))
         "one row, naming its files; a merged task no file declares (made in the store) and a declared task not merged have none")

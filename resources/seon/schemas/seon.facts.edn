@@ -191,7 +191,7 @@
  ;; a value that says which schema it satisfies: an attribute marked :seon.db/tagged holds each of its values to the schema its tag names
  :seon.db/tag [:qualified-keyword {:description "The registered schema this value satisfies (seon.db/invalid-datom holds it to it)."}]
  ;; a task's causes (docs/plan.md stage 1.8): several true at once, each a tag (a :seon.cause/* schema) and the evidence that makes it true
- :seon.task/causes [:vector {:seon.db/tagged true :description "Why the task is blocked or failed: each cause a :seon.cause/* tag with its evidence, held to that tag's schema; several hold at once."} [:map [:seon.db/tag :seon.db/tag]]]
+ :seon.task/causes [:vector {:seon.db/tagged true :description "Why the task exists, is blocked or failed: each cause a :seon.cause/* tag with its evidence, held to that tag's schema; several hold at once."} [:map [:seon.db/tag :seon.db/tag]]]
  :seon.cause/var [:qualified-symbol {:description "The var the cause is about."}]
  :seon.cause/held [:any {:description "What the process or store held."}]
  :seon.cause/expected [:any {:description "What the branch names."}]
@@ -201,6 +201,8 @@
                             [:seon.cause/process {:optional true} :seon.cause/process]]
  :seon.cause/pin-off [:map {:description "A checkout's dependency pin isn't the one its branch records."}
                       [:seon.db/tag [:= :seon.cause/pin-off]] [:seon.fx.read/pin :seon.fx.read/pin] [:seon.cause/held :seon.cause/held] [:seon.cause/expected :seon.cause/expected]]
+ :seon.cause/slow-test [:map {:description "A test ran at or over the slow-test bound: the test, the ms measured (held) and the bound (expected); the task it makes is remade from the verdict cache (my.root/file-slow-tests!)."}
+                        [:seon.db/tag [:= :seon.cause/slow-test]] [:seon.cause/var :seon.cause/var] [:seon.cause/held :int] [:seon.cause/expected :int]]
  :seon.cause/warm-state [:map {:description "A result depended on state its reads don't name (a cache's warmth, a process's loaded code): what it was and both readings."}
                          [:seon.db/tag [:= :seon.cause/warm-state]] [:seon.cause/held :seon.cause/held] [:seon.cause/expected :seon.cause/expected]]
  ;; a test's result, keyed by what it read: reused on any branch while nothing its reads name moved (docs/merging.md#verdicts-are-a-cache)

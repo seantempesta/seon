@@ -260,7 +260,8 @@
         tasked (with (base) [{:seon.task/id "t/x" :seon.task/plan "better"}])
         p #(pm/program % :all)]
     (is (empty? (:theirs (pm/three-way (p (base)) (p (base)) (p rooted)))))
-    (is (some (fn [[k]] (= [:datum :seon.task/plan] [(first k) (nth k 2)])) (:ours (pm/three-way (p (base)) (p tasked) (p (base))))))))
+    (is (some (fn [[k]] (= [:task "t/x"] k)) (:ours (pm/three-way (p (base)) (p tasked) (p (base)))))
+        "a task's content is one key, by its id (seon.merge's :task row)")))
 
 (deftest declared-data-merges-by-key
   ;; the data part, used by core's generic merge (every non-program, non-observation attribute)
@@ -551,7 +552,7 @@
 ;; docs/tasks.md#a-task-holds-how-its-work-ended (plan stage 1.6): a task's content is a key of the one three-way merge
 ;; Estimate: a world 0.5M (cached) + 2 create-tx 1M + 3 three-ways of a few keys 1.5M + 2 merge-tx 1M = 4000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 4000000}} a-tasks-content-is-a-key-of-the-one-merge
-  (let [w (mt/world)
+  (let [w (base)
         base (d/db-with w (seon.task/create-tx w [{:seon.task/ns 'demo :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{}}]))
         branch (d/db-with base [[:db/add [:seon.task/id "demo/x"] :seon.task/plan "Make x, as the agent learned it."]])
         main (d/db-with base [[:db/add [:seon.task/id "demo/x"] :seon.task/proofs 'demo-test/x-test]])

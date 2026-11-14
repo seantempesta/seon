@@ -1352,7 +1352,7 @@
   (landed-tx: code, pages and task files, the source fact moved to the tree now), less those left out and named under :skipped,
   which keep the fact at the tree it held, so the next catch-up reads them again: a file that does not read as its reader reads it
   (seon.fx/unreadable), a task file the changed task files are refused with (seon.task/load-tx), and a file a merged task main
-  holds unsynced also changed (seon.problems/unsynced?: the checkout's text would replace the merge's). Answers {:tx :paths
+  holds unsynced also changed (seon.problems/unsynced? of a merged task: the checkout's text would replace the merge's). Answers {:tx :paths
   :skipped}, {:paths []} when nothing differs, nil when db holds no tree, or the read's error. Its caller writes :tx on the branch
   it brings up to date (boot!: main). opts: :tree, the tree to read what differs from (default db's held one), and :fact? false,
   which moves no source fact (changed-tx alone): a session's files written as a branch of the store, never main."
@@ -1367,7 +1367,8 @@
         (contract/error? r) r
         (empty? (:value r)) {:paths []}
         :else
-        (let [unsynced (into {} (for [{:keys [e]} (d/datoms db :aevt :seon.task/declared) :when (problems/unsynced? db e)
+        (let [unsynced (into {} (for [{:keys [e]} (d/datoms db :aevt :seon.task/declared)
+                                      :when (and (= :merged (:v (first (d/datoms db :eavt e :seon.task/outcome)))) (problems/unsynced? db e))
                                       p (problems/changed-paths db e)]
                                   [p (:v (first (d/datoms db :eavt e :seon.task/id)))]))
               task? #(and (str/ends-with? % ".edn") (str/starts-with? % (str tasks-dir "/")))

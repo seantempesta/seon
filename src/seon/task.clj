@@ -985,6 +985,40 @@
   [db id]
   (boolean (some #(= refine-section (get-in % [:seon.cite/target :seon.doc/address])) (cites-of db (pdb/eid db :seon.task/id id)))))
 
+(def ^:private entry-config
+  "The config keys a task file's entry nests under :seon.task/config and load-tx flattens onto the task."
+  [:seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
+
+(defn stated
+  "Declaration d in the one shape main's and a file's are compared in: its proofs and needs sets, and none of what no file
+  states (its branch, the system's run state; after; cause; an empty member). See docs/source.md#a-merged-task-reaches-mains-files."
+  {:malli/schema [:=> [:cat :seon.task/declaration] :seon.task/declaration]}
+  [d]
+  (into {} (remove (fn [[_ v]] (and (coll? v) (empty? v))))
+        (cond-> (dissoc d :seon.task/branch :seon.task/after :seon.task/cause :seon.task/causes)
+          (:seon.task/proofs d) (update :seon.task/proofs set)
+          (:seon.task/needs d) (update :seon.task/needs set))))
+
+(defn declaration
+  "The declaration main states for task entity e, as its file's entry would (`stated`): load-tx's write read back, its needs
+  as ids and its config nested. What a sync writes to the task's file. See docs/source.md#a-merged-task-reaches-mains-files."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :seon.task/declaration]}
+  [db e]
+  (let [p (d/pull db (into [:seon.task/ns :seon.task/name {:seon.task/needs [:seon.task/id]}] (remove #{:seon.task/branch} stated-attributes)) e)
+        c (select-keys p entry-config)]
+    (stated (cond-> (-> (apply dissoc p entry-config) (update :seon.task/needs #(set (map :seon.task/id %))))
+              (:seon.task/proofs p) (update :seon.task/proofs set)
+              (seq c) (assoc :seon.task/config c)))))
+
+(defn derived?
+  "Whether task entity e is made by the system from data it derives again, so no file states it: it has a cause (a stall's
+  :seon.task/cause, a :seon.task/causes tag such as a slow test's measurement) or is a refine (`refine?`). See
+  docs/source.md#a-merged-task-reaches-mains-files."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
+  [db e]
+  (boolean (or (seq (d/datoms db :eavt e :seon.task/cause)) (seq (d/datoms db :eavt e :seon.task/causes))
+               (refine? db (:v (first (d/datoms db :eavt e :seon.task/id)))))))
+
 (def ^:private refine-proofs
   "What every refine proves: the shipped task files are still whole tasks, what a refine's edit of a task reaches at its
   write-back. Its done is its write (names-new-site?); this proof is green before it starts. A test of the tree, checked so

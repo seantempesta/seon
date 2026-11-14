@@ -3,7 +3,8 @@
   seon.task/a-task-cites-what-it-needs): references from the plan, never authored, each a ref to what it names, and a
   citation that names nothing refused by the write (docs/references.md#an-entity-cites)."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d] [seon.repl :as repl]
-            [seon.db :as pdb] [seon.task :as task] [seon.ref :as ref] [seon.template :as template] [clojure.string :as str]))
+            [seon.db :as pdb] [seon.task :as task] [seon.ref :as ref] [seon.template :as template] [clojure.string :as str]
+            [seon.problems :as problems] [my.root]))
 
 (defn- db-with-program []
   ;; one recorded definition, its form (seon.program's facts), written as data; and a page of the wiki, a schema entry and a
@@ -487,3 +488,38 @@
     (is (= [] (task/load-tx db1 files)) "an unchanged entry under the same reader writes nothing")
     (is (= [] (task/load-tx stale files)) "its cites are kept by their digest: the same text and reader read nothing again")
     (is (= #{(quote demo/f)} (cites (d/db-with moved (task/load-tx moved files)))) "the reader's code moved: an unchanged entry's cites follow")))
+
+;; Estimate: 4 task writes on a test db (load-tx, create-tx, a datom, slow-test create: ~1.5M each) + 6 unsynced? reads (~100k)
+;; + 2 sync-req draws (a 1-2 entry file, one rewrite-clj parse each, ~100k) + 1 load-tx read back (~1.5M) = 9000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 9000000}} a-task-created-on-main-is-written-to-its-namespaces-file
+  ;; docs/source.md#a-merged-task-reaches-mains-files: the store is the source and files follow it. A task made on main (seon_create)
+  ;; is in no file until a reviewed sync writes its entry as main holds it; landed, load-tx reads it back as the same task, held,
+  ;; never cancelled. A task changed on main is written again; one the system makes from data it derives again is never filed.
+  (let [dir (str (doto (java.io.File/createTempFile "seon-tasks" "") (.delete) (.mkdirs)))
+        file "[{:seon.task/name \"old\" :seon.task/plan \"p\" :seon.task/kind :work}]\n"
+        _ (spit (str dir "/demo.edn") file)
+        db0 (ts/test-db)
+        db1 (d/db-with db0 (task/load-tx db0 {'demo (task/file-declarations 'demo file)}))
+        db (d/db-with db1 (task/create-tx db1 [{:seon.task/ns 'demo :seon.task/name "new" :seon.task/plan "made in the store" :seon.task/proofs '#{demo-test/it}}]))
+        e (fn [db id] (pdb/eid db :seon.task/id id))
+        path (str (seon.config/value :seon.config.source/tasks-dir) "/demo.edn")]
+    (is (not (problems/unsynced? db (e db "demo/old"))) "a task as its file states it")
+    (is (problems/unsynced? db (e db "demo/new")) "a task made on main is in no file")
+    (let [{:keys [tasks req not-unsynced]} (my.root/sync-req db ["demo/new" "demo/old"] dir)
+          text (get-in req [:files path])
+          db' (d/db-with db (task/load-tx db {'demo (task/file-declarations 'demo text)}))]
+      (is (= ["demo/new"] tasks))
+      (is (= ["demo/old"] (mapv :task not-unsynced)) "a task as its file states it: nothing to sync")
+      (is (str/starts-with? text "[{:seon.task/name \"old\" :seon.task/plan \"p\" :seon.task/kind :work}\n {:seon.task/name \"new\"")
+          "appended after the file's own entry, which keeps its text")
+      (is (= :held (:seon.task/execution (d/entity db' [:seon.task/id "demo/new"]))) "landed and read back: held, not cancelled")
+      (is (= (task/declaration db (e db "demo/new")) (task/declaration db' (e db' "demo/new"))) "the same task")
+      (is (not (problems/unsynced? db' (e db' "demo/new"))) "and its file states it now"))
+    (testing "a task changed on main is written as main holds it"
+      (let [db (d/db-with db [[:db/add [:seon.task/id "demo/old"] :seon.task/plan "q"]])]
+        (is (problems/unsynced? db (e db "demo/old")))
+        (is (str/starts-with? (get-in (:req (my.root/sync-req db ["demo/old"] dir)) [:files path])
+                              "[{:seon.task/name \"old\" :seon.task/plan \"q\" :seon.task/kind :work}]"))))
+    (testing "a slow test's task is the system's, made again from the verdict cache: never filed"
+      (let [db (d/db-with db (task/create-tx db [(template/slow-test 'demo-test/slow 6000 5000)]))]
+        (is (not (problems/unsynced? db (e db "demo-test/fast-slow"))))))))
