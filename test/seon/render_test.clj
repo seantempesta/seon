@@ -2316,7 +2316,11 @@
     ;; a turn is derived data the render proc keeps: never one of what root records of an agent on main
     (is (not (contains? (#'seon.system/observed {:status :idle :mem-mb 10 :turn 12}) :turn)) "an agent's :turn is no fact on main")
     (is (= {"w1" 13 "l1" 40} (#'seon.render.proc/view-turns {"w1" 12 "l1" 40} {:agents {:w1 {:turn 13} :l1 {:turn 39} :x {:status :idle}}}))
-        "the render proc takes each agent's turn its status carried, the higher kept")))
+        "the render proc takes each agent's turn its status carried, the higher kept")
+    ;; an agent whose run ended commits no more: its turn is read once from its branch, its highest model-call number there
+    (let [bdb (d/db-with db (for [n [1 2 3]] {:seon.model-call/id (str "l1/" n) :seon.model-call/agent [:seon.agent/key "l1"] :seon.model-call/n n}))]
+      (is (= 3 (#'seon.render.proc/branch-turn bdb "l1")) "a branch's turn is its agent's highest call there")
+      (is (nil? (#'seon.render.proc/branch-turn bdb "w1")) "an agent with no call there has none"))))
 
 (deftest a-change-below-a-unit-moves-its-revision
   ;; docs/render.md#a-layout-places-its-lists: every component is a unit, at any depth; one nested in another (a key the agent

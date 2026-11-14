@@ -693,6 +693,11 @@
   [ts view]
   (reduce-kv (fn [ts id a] (if-let [n (:turn a)] (update ts (name id) (fnil max 0) n) ts)) ts (:agents view {})))
 
+(defn- branch-turn
+  "Agent k's turn on its branch db bdb: its highest :seon.model-call/n there, where its turn loop writes it (nil: no model call)."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe nat-int?]]}
+  [bdb k] (d/q '[:find (max ?n) . :in $ ?k :where [?a :seon.agent/key ?k] [?c :seon.model-call/agent ?a] [?c :seon.model-call/n ?n]] bdb k))
+
 (defn- ask-turns
   "St having asked, once, for the branch db of each agent main says worked a task, to read its turn there: an agent whose run
   ended commits no more, and its turn is on its branch (the highest :seon.model-call/n of its own)."
@@ -1148,7 +1153,7 @@
     ;; an agent's branch db, read once for its turn (`ask-turns`)
     (and (vector? kind) (= :turns (first kind)))
     (let [[_ _ k] kind
-          n (when-let [bdb (:db r)] (d/q '[:find (max ?n) . :in $ ?k :where [?a :seon.agent/key ?k] [?c :seon.model-call/agent ?a] [?c :seon.model-call/n ?n]] bdb k))]
+          n (some-> (:db r) (branch-turn k))]
       (pass (cond-> st n (turns! (update (:turns st {}) k (fnil max 0) n))) o))
     ;; an agent drew its page's parts (or did not: gone, refused): held for its view, which renders again
     (and (vector? kind) (= :parts (first kind)))
