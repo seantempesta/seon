@@ -21,7 +21,7 @@
 #   --done F  at CMD's end, its exit status written on the fifo F if someone holds it open
 # held exits with CMD's status (128+N for a signal).
 #
-# bin/held --end SIG PID FIFO N   (no CMD) sends signal SIG to PID and prints the first N lines
+# bin/held --end SIG PID FIFO N [MS]   (no CMD) sends signal SIG to PID and prints the first N lines
 # held writes on FIFO (its --done fifo: CMD's status, then "drained"): what bin/system stop and kill
 # wait on. The reader is opened before the signal goes, and the wait ends on a line or on the
 # fifo's last writer closing: the holder's exit, never a clock. Held keeps the fifo open for its
@@ -34,16 +34,24 @@
 # or is terminated (TERM, INT, HUP); only SIGKILL runs nothing, and leaves its fifo for the next
 # starter to reclaim here (kill -0: a fact about a process, not a clock; a reused pid keeps a
 # stale file, never loses a live one's).
-use strict; use warnings; use POSIX (); use IO::Handle; use IO::Select; use Fcntl qw(O_RDONLY O_RDWR O_WRONLY O_NONBLOCK F_SETFD);
+use strict; use warnings; use POSIX (); use IO::Handle; use IO::Select; use Time::HiRes (); use Fcntl qw(O_RDONLY O_RDWR O_WRONLY O_NONBLOCK F_SETFD);
 if (@ARGV && $ARGV[0] eq "--end") {
-  shift; my ($sig, $pid, $fifo, $n) = @ARGV; $n ||= 1;
+  shift; my ($sig, $pid, $fifo, $n, $ms) = @ARGV; $n ||= 1;
   -p $fifo or do { print STDERR "held: $fifo is not a fifo\n"; exit 2 };
   sysopen(my $r, $fifo, O_RDONLY | O_NONBLOCK) or do { print STDERR "held: $fifo: $!\n"; exit 2 };
   kill $sig, $pid;   # a holder that is gone: the fifo has no writer, and the read below ends
   my ($sel, $buf, $lines) = (IO::Select->new($r), "", 0);
+  # with MS, the wait is the stop effect's declared deadline (:seon.config.root/stop-ms): past it, "overran MS" and status 4,
+  # so the caller takes its evidence and kills it; without MS it waits on the holder's end alone
+  my $due = defined $ms ? Time::HiRes::time() + $ms / 1000 : undef;
   while ($lines < $n) {
     my $got = sysread($r, my $chunk, 4096);
-    if (!defined $got) { if ($!{EAGAIN} || $!{EINTR}) { $sel->can_read; next } last }
+    if (!defined $got) {
+      if ($!{EAGAIN} || $!{EINTR}) {
+        if (defined $due) { my $left = $due - Time::HiRes::time(); if ($left <= 0 || !$sel->can_read($left)) { print "overran $ms\n"; exit 4 } }
+        else { $sel->can_read }
+        next }
+      last }
     last if $got == 0;
     $buf .= $chunk;
     while ($lines < $n && $buf =~ s/^([^\n]*)\n//) { print "$1\n"; $lines++ }
@@ -125,7 +133,7 @@ if ($out_r) {
     $buf .= $chunk;
     while ($buf =~ s/^([^\n]*)\n//) {
       my $line = $1;
-      if ($ready && $line =~ /^ROOT LISTENING (\d+)/) { print $ready "$$ $cmd $1\n"; close $ready; undef $ready }
+      if ($ready && $line =~ /^ROOT LISTENING (\d+)(?: (\d+))?/) { print $ready "$$ $cmd $1" . (defined $2 ? " $2" : "") . "\n"; close $ready; undef $ready }
     }
   }
   close $ready if $ready;
