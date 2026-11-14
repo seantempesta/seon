@@ -632,3 +632,27 @@
     (testing "a key both changed, differently, stops it"
       (let [main' (as main :main (var-tx "f" "(* 2 x)"))]
         (is (seq (:conflicts (pm/merge-main b0 head main'))) "a conflict, and no tx")))))
+
+
+;; Estimate: the world 0.5M (cached) + 5 small transactions + 3 merge-mains (each a diff of a few datoms, program-of on ~3 keys of three
+;; dbs) ~10M = 15000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 15000000}} a-conflict-the-branch-resolved-merges-the-next-time
+  ;; docs/merging.md#a-branch-merges-main-in: a conflict stops the merge and is an unmerged entry; the branch resolving it (git add)
+  ;; is its decision, so the next merge of the same main takes the branch's value and settles the entry; main moving the key again is
+  ;; a new conflict (root and context-4's catch: a resolved conflict met the same conflict forever)
+  (let [as (fn [db branch tx] (:db-after (d/with db {:tx-data (if (fn? tx) (tx db) tx) :tx-meta {:seon.tx/branch branch}})))
+        b0 (base)
+        head (as b0 :main/b (var-tx "f" "(inc x)"))
+        main (as b0 :main (var-tx "f" "(* 2 x)"))
+        {:keys [conflicts]} (pm/merge-main b0 head main)
+        k (:key (first conflicts))
+        with-entry (as head :main/b (pm/unmerged-tx head conflicts (:max-tx main)))
+        resolved (as with-entry :main/b (pm/resolve-tx with-entry k))
+        r (pm/merge-main b0 resolved main)
+        merged (d/db-with main (:tx r))]
+    (is (= [(vk "f")] (mapv :key conflicts)) "both changed f: a conflict")
+    (is (nil? (:conflicts r)) (str "resolved, the next merge is clean: " (pr-str (:conflicts r))))
+    (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch's value stands")
+    (is (empty? (pm/entries merged)) "and the entry is settled")
+    (testing "main moving the key again is a new conflict"
+      (is (seq (:conflicts (pm/merge-main b0 resolved (as main :main (var-tx "f" "(- x)")))))))))
