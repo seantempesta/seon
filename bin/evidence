@@ -62,3 +62,12 @@ for k in ${(u)MEMBERS}; do
 done
 sleep 1
 for k in ${(k)ERR}; do tail -c +$(( AT[$k] + 1 )) "${ERR[$k]}" > "$D/dump-$k.txt" 2>/dev/null; done
+# and the logs the signalled processes write (a shared root's root.log, an agent's .err): the runs directory that holds them is
+# removed when its shard ends (seon.test-store/start-shared-root!'s hook), which took the one record of the wait an overrun lost
+# (deps' run14: the root's log was gone before anyone read it). Each is cloned (cp -c: APFS copy-on-write, no bytes copied).
+mkdir -p "$D/logs"
+for k in $(awk '{print $1}' "$D/signalled.txt" 2>/dev/null); do
+  lsof -a -p $k -Fn 2>/dev/null | sed -n 's/^n//p' | grep -E '/runs/.*\.(log|err|out)$' | sort -u | while read -r f; do
+    [[ -f $f ]] && cp -c "$f" "$D/logs/$k-${f:t}" 2>/dev/null
+  done
+done
