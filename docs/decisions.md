@@ -14,6 +14,10 @@ The owner's rulings of this day and the night before, each with his words where 
 
 "I want more engineering rigor encoded into our processes. Rarely should you be telling me you want to flatten AGENTS.md without clear reasons. We keep re-solving the same problems over and over because of these institutional knowledge wipes." A rule goes only with the incident or ruling behind it, what holds it now, and why it no longer earns its place. Stated in [the plan](plan.md#throughout).
 
+### Bootstrap checks once; runtime guarantees
+
+"We have a bootstrap phase and then we have a runtime phase where we have a certain set of guarantees that the core system is running properly. I'm all for proper startup checks, I'm not okay with layers of guards and fences." A process proves at its one start that it holds what its branch names; past startup nothing re-checks it. Stated in [principles](principles.md#5-boring-by-construction) and [the plan](plan.md#stage-0-one-happy-path-now).
+
 ### A leaked environment is made impossible, not checked
 
 On the test child that inherited root's state three times: "This sounds like a root cause that we keep patching. How is this even possible and how do we make it impossible rather than adding another check?" A test child forks only from a process already on its branch's environment. Stated in [the plan](plan.md#stage-0-one-happy-path-now).

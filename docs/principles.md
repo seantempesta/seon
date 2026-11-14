@@ -54,7 +54,7 @@ Every agent reads this page whole before any work: Claude sessions directly, Seo
 - **Shapes and the wire:** one fully namespaced malli schema per shape stored, synced or offered as an interface; one codec with a format version.
 - **Lifecycle and resources:** clean start, stop and resume, a path back after a crash; bounds on ticks, bytes, memory and time, declared once ([config](config.md#constants)).
 
-*Why.* A guard at each caller multiplies with the callers and hides the bug. A check belongs inside the one owner, where every path meets it, and a law goes red on any path around it; a failure is then a loud bug in one known place.
+*Why.* Seon has two phases: bootstrap, where a process proves once that it holds what its branch names, and runtime, where that holds and nothing downstream checks it again (owner, 2026-11-14). A guard at each caller multiplies with the callers and hides the bug. A check belongs inside the one owner, where every path meets it, and a law goes red on any path around it; a failure is then a loud bug in one known place.
 
 *Rules out.* A guard, retry or special case at a caller. An atom, a lock, a poll, a wait on a clock. An effect outside the effects system; a catch outside a named edge ([failure points](failure-points.md)). A caller's own guess at the binary, registry or pin it holds. Switching off, sampling or waiving a mechanism because it has a bug.
 

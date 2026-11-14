@@ -45,7 +45,8 @@ recorded.
    runs another checkout's tests in a fork of root's long-running agent, which carries root's config, environment, heap,
    threads and loaded libraries, and each fix so far swapped one of those (owner, 2026-11-14: make it impossible, not
    another check). The agent `seon.system/prove-tree!` spawns on a branch starts on that branch's environment through the
-   one start path; the import of a checkout's files onto a branch and the live route stay, since Stage 1 builds on them
+   one start path, which checks once, at startup, that the process holds exactly that environment (config, environment
+   variables, libraries, pin) and refuses to start otherwise; past startup nothing re-checks it; the import of a checkout's files onto a branch and the live route stay, since Stage 1 builds on them
    (runtime, tests; moved up from Stage 4.3).
 6. `seon.repl/an-uncited-public-defn-is-told-at-its-eval` (proof green at turn 48, its agent now lost) restarted on a fresh
    agent, or the first of the random round's tasks to reach green, merged by `seon_done` (context).
