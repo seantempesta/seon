@@ -2,6 +2,14 @@
 
 The owner's standing rulings, one entry each: his words and date, and where the rule is stated now. The mechanism lives in `AGENTS.md` and the wiki; the reasoning and the history around each ruling are in git. A ruling a later one reverses keeps a one-line pointer to it.
 
+## 2026-11-14 rulings
+
+The owner's rulings of this day, each with his words and where it is now stated.
+
+### Prove by reach, narrow later
+
+"Prove by reach, narrow later" (relayed by root). A docs-and-tasks landing is proved like any change: every test whose reads the change moved reruns. It replaces the rule that docs were never proved and landed after `bin/check health` and `seon.doc-test` alone: a docs landing broke main (4af7a1f2ae) when `seon.repl-test/the-template-instructions-and-the-help-page-run`, which reads the help page, did not run. Narrowing the rerun to the tests that read the changed page or section, through the reads mechanism, comes later. Stated in `AGENTS.md` §3 and [merging](merging.md#a-branch-lands-with-binland).
+
 ## 2026-11-13 rulings
 
 The owner's rulings of this day, each with his words and where it is now stated.
