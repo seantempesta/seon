@@ -61,5 +61,5 @@
  {:seon.task/name "the-gates-test-run-is-asked-of-the-api-never-awaited-in-a-worker"
   :seon.task/plan "Flow's review (rule 1 of docs/flow.md's five rules) [M, read]: the :tests kind's worker (seon.fx/run-tests, system.edn's :tests) waits inside its perform for seon.system/prove-tree!'s whole run, so it can be neither pinged nor stopped until the run answers. The :process kind's shape fits it (jolt/tests 2accaadbc2): the request names :seon.fx/ask, the owner asks the api as an output and takes its one answer on :answers (step/answered), sized by limits' :budget; the run's end comes from its sources, never a timer. Deletes run-tests' wait and the :prove-tree binding's deref. Owner: tests; flow reviews."
   :seon.task/kind :work
-  :seon.task/proofs #{}}
+  :seon.task/proofs #{seon.fx-test/the-gates-run-is-asked-and-answered-once}}
 ]
