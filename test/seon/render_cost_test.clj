@@ -696,10 +696,11 @@
 (deftest ^{:seon.test/estimate {:ticks 2000000}} the-rules-cost-their-namespaces-vars-read-once
   (cost/proof {:of 'seon.render/rules :input 'seon.render-cost-test/rules-of
                :n "renders drawn, of one namespace"
-               :work (str "the namespace's 162 vars read once (ns-interns ~7k ticks, 93 KB; a meta read and css? each, ~200 ticks and ~700 B), "
+               :work (str "the namespace's 163 vars read once (ns-interns ~7k ticks, 93 KB; a meta read and css? each, ~200 ticks and ~700 B), "
                           "the 24 that state rules sorted (~3k): constant in the renders drawn. It sorted all 162 vars by symbol: 124k ticks, 492 KB")
                :growth :constant
-               :fixed {:calls 163 :bytes 240000 :ticks 45000}
+               ;; calls: rules and a css? a var of seon.render.ui; 163 since recent-errors (web, ed4ebcf766) added the 163rd var
+               :fixed {:calls 164 :bytes 240000 :ticks 45000}
                :sizes [1 4 16]}))
 
 ;; See docs/render.md#a-page-is-a-kept-walk

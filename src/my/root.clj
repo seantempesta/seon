@@ -219,28 +219,32 @@
       (seq not-lost) (assoc :not-lost not-lost)))))
 
 (defn sync-req
-  "What a reviewed sync of the merged tasks ids commits, read from db: each task's changed files (seon.problems/changed-paths) as
-  db holds them now, and its task file, read under tasks-dir (where root reads its tasks), with its entry removed
-  (seon.source/task-file-text), as the :git effect's request for root's source dir: on jolt/sync-<the first task's name>, a new
-  branch starting at git's main (:seon.config.source/main), its message naming each task as Completes:. A task that is no
-  merged task its files still declare (seon.problems/unsynced?) is :seon.system/nothing-to-sync under :not-unsynced. Answers
+  "What a reviewed sync of the tasks ids that differ from their files (seon.problems/unsynced?) commits, read from db: a merged
+  task's changed files (seon.problems/changed-paths) as db holds them now, and each task's file, read under tasks-dir (where root
+  reads its tasks), with a merged task's entry removed and any other's written as db holds it (seon.task/declaration, through
+  seon.source/task-file-text), as the :git effect's request for root's source dir: on jolt/sync-<the first task's name>, a new
+  branch starting at git's main (:seon.config.source/main), its message naming each task as Completes:. A task that does not
+  differ from its file is :seon.system/nothing-to-sync under :not-unsynced. Answers
   {:tasks :paths :req :not-unsynced}. See docs/source.md#a-merged-task-reaches-mains-files."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.task/id] :string] :map]}
   [db ids tasks-dir]
   (let [ts (filterv #(some->> (pdb/eid db :seon.task/id %) (problems/unsynced? db)) ids)
         es (mapv #(pdb/eid db :seon.task/id %) ts)
-        paths (vec (sort (distinct (mapcat #(problems/changed-paths db %) es))))
+        merged? #(= :merged (:seon.task/outcome (d/pull db [:seon.task/outcome] %)))
+        paths (vec (sort (distinct (mapcat #(problems/changed-paths db %) (filter merged? es)))))
         entries (into {} (for [[nsym names] (group-by #(:seon.task/ns (d/pull db [:seon.task/ns] %)) es)]
                            [(str (config/value :seon.config.source/tasks-dir) "/" nsym ".edn")
-                            (source/task-file-text (slurp (io/file tasks-dir (str nsym ".edn")))
-                                                   (zipmap (map #(:seon.task/name (d/pull db [:seon.task/name] %)) names) (repeat nil)))]))
+                            (source/task-file-text (let [f (io/file tasks-dir (str nsym ".edn"))] (if (.exists f) (slurp f) "[]\n"))
+                                                   (into {} (map #(vector (:seon.task/name (d/pull db [:seon.task/name] %))
+                                                                          (when-not (merged? %) (dissoc (task/declaration db %) :seon.task/ns))))
+                                                         names))]))
         files (merge (doc/files db paths) entries)]
     {:tasks ts :paths paths
      :not-unsynced (vec (for [id ids :when (not-any? #{id} ts)]
-                          (contract/error :seon.system/nothing-to-sync #'my.root/sync-req (str "task " id " is no merged task main's files still declare") {:task id})))
+                          (contract/error :seon.system/nothing-to-sync #'my.root/sync-req (str "task " id " is as its file states it, or no task") {:task id})))
      :req {:branch (str "jolt/sync-" (some-> (first ts) (str/split #"/" 2) second)) :base (config/value :seon.config.source/main)
-           :files files :modes (source/modes db (keys files))
-           :message (str "Sync: " (str/join ", " ts) "\n\n" (str/join (for [id ts] (str "Completes: " id "\n"))))}}))
+           :files files :modes (source/modes db (vec (keys files)))
+           :message (str "Sync: " (str/join ", " ts) "\n\n" (str/join (for [[id e] (map vector ts es) :when (merged? e)] (str "Completes: " id "\n"))))}}))
 
 (defn sync!
   "Write the merged tasks ids' work onto a branch for a session to review and land (sync-req), in one :git effect on root's source

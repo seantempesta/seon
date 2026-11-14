@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.reconcile :as r] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.program-test] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.agent-proc] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [seon.doc] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.async.remote :as remote] [jolt.async.remote.flow :as rflow] [jolt.io-poller :as poller]))
+            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.agent-proc] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [my.branch] [seon.template :as tpl] [seon.stall-proofs] [seon.doc] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.async.remote :as remote] [jolt.async.remote.flow :as rflow] [jolt.io-poller :as poller]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -696,6 +696,32 @@
                            "(select-keys (my.agent/prove 'env-test/no-parents-layers) [:results])"]
                           {:proofs #{'env-test/no-parents-layers}})]
     (is (= {:results '{env-test/no-parents-layers :pass}} (:value run)) (str "the test child holds a test's environment, not root's: " (pr-str run)))))
+
+;; Estimate: in-agent's setup and teardown (~1.5M) + 4 asks of the test's own (~0.25M each: an import is two reads of one
+;; one-form file and one branch write, a lookup) = ~2.5M
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2500000 :asks 4}} a-sessions-edit-is-imported-onto-its-agents-branch
+  ;; plan Stage 1 (a session's files as its branch's transaction; agreed by context, data and runtime): (my.branch/import! root
+  ;; paths) at the agent's REPL reads the files a session edited and writes what changed onto the agent's branch through its own
+  ;; writer, the shape an eval writes (seon.system/catch-up :fact? false :paths); main never moves. The goal, data's: the edit is on
+  ;; the branch as forms, not on main, and the same edit again is unchanged
+  (let [dir (str (seon.config/checkout) "/target/tmp/import-" (random-uuid))
+        path "src/seon/import_probe.clj"
+        _ (.mkdirs (java.io.File. (str dir "/src/seon")))
+        _ (spit (str dir "/" path) "(ns seon.import-probe)\n\n(defn probe [] 3)\n")
+        ;; the agent evaluates it from text, which no reach reads: named here, so a change to it reruns this test
+        _ my.branch/import!
+        imp (str "(my.branch/import! " (pr-str dir) " [" (pr-str path) "])")]
+    (try
+      (let [[first-r on-branch on-main again]
+            (in-agent [imp
+                       "(some-> (datahike.api/entity (seon.agent/db) [:var/name 'seon.import-probe/probe]) :var/form :form/src)"
+                       "(some? (seon.db/eid (seon.agent/heard-main) :var/name 'seon.import-probe/probe))"
+                       imp])]
+        (is (= {:imported [path] :unchanged [] :skipped []} (:value first-r)) (pr-str first-r))
+        (is (str/includes? (str (:value on-branch)) "(defn probe [] 3)") (str "on the agent's branch as forms: " (pr-str on-branch)))
+        (is (false? (:value on-main)) "not on main: main moves only by the merge")
+        (is (= {:imported [] :unchanged [path] :skipped []} (:value again)) (str "the same edit again is unchanged: " (pr-str again))))
+      (finally (seon.lib/remove-tree! dir)))))
 
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 20000000 :asks 3}} an-agents-green-records-what-it-read
   ;; docs/source.md#tests-run-by-reach: a green an agent's run stores is keyed by what it read (seon.proofs/reads-key): the

@@ -226,6 +226,15 @@
                                         [p (if (.canExecute (java.io.File. (str base "/" p))) "100755" "100644")]))))
     (catch Throwable e (error #'seon.fx/read-source :seon.fx/io-error (step/error-msg e) {:path root}))))
 
+(defn messages-since
+  "The messages of the commits git at root holds from commit from (excluded) to commit to: what a landing brought, read for the
+  tasks it says it completes (seon.task/completes). \"\" when from is to; :seon.fx/io-error when git cannot read either. See
+  docs/source.md#a-landing-enters-main-as-data."
+  {:malli/schema [:=> [:cat :string :string :string] [:or :string :seon.error/base]]}
+  [root from to]
+  (try (if (= from to) "" (git! {} root ["log" "--format=%B" (str from ".." to)] nil))
+       (catch Throwable e (error #'seon.fx/messages-since :seon.fx/io-error (step/error-msg e) {:path root}))))
+
 (defn changed-since
   "The files of the tree at root as it is on disk that differ from tree (a tree id seon.fx/tree-id made): git's diff of tree
   against the files, submodules left out (a pin is a build input, which seon.system/binary-current judges), and each untracked
@@ -254,6 +263,19 @@
                                  [p (if (.canExecute (java.io.File. (str root "/" p))) "100755" "100644")]))}
         (seq ps) (assoc :tree (tree-id root) :commit (git-try root ["rev-parse" "--verify" "--quiet" "HEAD"]))))
     (catch Throwable e (error #'seon.fx/changed-since :seon.fx/io-error (step/error-msg e) {:path root}))))
+
+(defn files-at
+  "The files paths name (relative to root) as they are on disk, read as changed-since reads the files that changed: {:value {path
+  text} :modes {path mode}}, a text nil when the file is gone, a mode for each the allow-list names. What a session's import
+  reads (my.branch/import!): the files it names, never the tree's diff. See docs/source.md#a-boot-catches-up-with-its-checkout."
+  {:malli/schema [:=> [:cat :string [:sequential :string]] :map]}
+  [root paths]
+  (try
+    (let [texts (into (sorted-map) (for [p paths :let [f (java.io.File. (str root "/" p))]] [p (when (.isFile f) (slurp f))]))]
+      {:value texts
+       :modes (into {} (for [[p t] texts :when (and t (cfg/file-kind p))]
+                         [p (if (.canExecute (java.io.File. (str root "/" p))) "100755" "100644")]))})
+    (catch Throwable e (error #'seon.fx/files-at :seon.fx/io-error (step/error-msg e) {:path root}))))
 
 (defn- env-input?
   "Is the file at relative path p an input of every test: everything git tracks or would

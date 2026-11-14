@@ -188,16 +188,46 @@
  :seon.result/out [:map {:description "What the forms of the result wrote to out, as printed code."} [:seon.print/code :string]]
  :seon.result/err [:map {:description "What the forms of the result wrote to err, as printed code."} [:seon.print/code :string]]
  :seon.result/forms [:int {:min 2 :description "How many forms ran, when there were several."}]
+ ;; a value that says which schema it satisfies: an attribute marked :seon.db/tagged holds each of its values to the schema its tag names
+ :seon.db/tag [:qualified-keyword {:description "The registered schema this value satisfies (seon.db/invalid-datom holds it to it)."}]
+ ;; a task's causes (docs/plan.md stage 1.8): several true at once, each a tag (a :seon.cause/* schema) and the evidence that makes it true
+ :seon.task/causes [:vector {:seon.db/tagged true :description "Why the task exists, is blocked or failed: each cause a :seon.cause/* tag with its evidence, held to that tag's schema; several hold at once."} [:map [:seon.db/tag :seon.db/tag]]]
+ :seon.cause/var [:qualified-symbol {:description "The var the cause is about."}]
+ :seon.cause/held [:any {:description "What the process or store held."}]
+ :seon.cause/expected [:any {:description "What the branch names."}]
+ :seon.cause/process [:string {:description "The process (an agent's key or a pid) the cause was seen in."}]
+ :seon.cause/stale-program [:map {:description "A process ran code its branch doesn't name: the var, the form id it held and the one its branch names."}
+                            [:seon.db/tag [:= :seon.cause/stale-program]] [:seon.cause/var :seon.cause/var] [:seon.cause/held :seon.cause/held] [:seon.cause/expected :seon.cause/expected]
+                            [:seon.cause/process {:optional true} :seon.cause/process]]
+ :seon.cause/pin-off [:map {:description "A checkout's dependency pin isn't the one its branch records."}
+                      [:seon.db/tag [:= :seon.cause/pin-off]] [:seon.fx.read/pin :seon.fx.read/pin] [:seon.cause/held :seon.cause/held] [:seon.cause/expected :seon.cause/expected]]
+ :seon.cause/slow-test [:map {:description "A test ran at or over the slow-test bound: the test, the ms measured (held) and the bound (expected); the task it makes is remade from the verdict cache (my.root/file-slow-tests!)."}
+                        [:seon.db/tag [:= :seon.cause/slow-test]] [:seon.cause/var :seon.cause/var] [:seon.cause/held :int] [:seon.cause/expected :int]]
+ :seon.cause/warm-state [:map {:description "A result depended on state its reads don't name (a cache's warmth, a process's loaded code): what it was and both readings."}
+                         [:seon.db/tag [:= :seon.cause/warm-state]] [:seon.cause/held :seon.cause/held] [:seon.cause/expected :seon.cause/expected]]
  ;; a test's result, keyed by what it read: reused on any branch while nothing its reads name moved (docs/merging.md#verdicts-are-a-cache)
  :seon.proof/id [:and {:seon.db/identity true :seon.db/content-id true :description "The result's identity: the digest of its test and its reads' digest."} :seon.lib/digest]
  :seon.proof/test [:qualified-symbol {:seon.db/index true :description "The test the result is of."}]
  :seon.proof/reads-digest [:and {:description "The digest of the content each read key held at the basis, basis excluded (seon.reads/content-digest): equal content gives one result on any branch."} :seon.lib/digest]
+ ;; read back by seek: a moved datom's five keys (datahike.reads/datom-keys, each its pr-str) find the results they move, one AVET seek each
  :seon.proof/reads [:and {:description "What the run read, matched against what moved to decide reuse."} :seon.reads/set]
+ ;; its own key, never :seon.proof/reads retyped: a stored attribute's type is fixed once installed (seon.db/install-missing!)
+ :seon.proof/read-keys [:set {:seon.db/index true :description "The read keys the run's reads recorded (datahike.reads/range-key, each its pr-str): what a moved datom is sought by."} :string]
+ :seon.proof/outside [:set {:description "The reads the run made outside the store, as its effects answered them."} :seon.fx/read]
+ :seon.proof/unreusable [:and {:description "The effects the run used whose answers its inputs don't decide: such a result is recorded, never reused."} :seon.reads/unreusable]
+ :seon.proof/basis [:and {:description "The db the run read: its branch, commit and t."} :seon.db/reference]
+ :seon.proof/agent [:and {:seon.db/to [:seon.db/agent-fact] :description "The agent whose process ran it."} :seon.db/ref]
+ :seon.proof/program [:and {:description "The digest of the program the running binary was built from (seon.program/binary-program)."} :seon.lib/digest]
+ :seon.proof/profile [:keyword {:description "The config profile the run resolved under."}]
  :seon.proof/failures [:vector {:description "The assertions that failed."} :seon.problems/assertion]
  :seon.proof/route [:enum {:description "How it was proved: :live, the branch's forms loaded into the running runtime; :full, a binary built from it."} :live :full]
  :seon.proof/proof-fact [:map {:seon.db/attributes true}
                          [:seon.proof/id :seon.proof/id] [:seon.proof/test :seon.proof/test] [:seon.proof/reads-digest :seon.proof/reads-digest]
-                         [:seon.proof/reads :seon.proof/reads] [:seon.proof/status :seon.proof/status] [:seon.proof/route :seon.proof/route]
+                         [:seon.proof/reads :seon.proof/reads] [:seon.proof/read-keys {:optional true} :seon.proof/read-keys] [:seon.proof/status :seon.proof/status] [:seon.proof/route :seon.proof/route]
+                         [:seon.proof/basis :seon.proof/basis]
+                         [:seon.proof/outside {:optional true} :seon.proof/outside] [:seon.proof/unreusable {:optional true} :seon.proof/unreusable]
+                         [:seon.proof/agent {:optional true} :seon.proof/agent] [:seon.proof/program {:optional true} :seon.proof/program]
+                         [:seon.proof/profile {:optional true} :seon.proof/profile]
                          [:seon.proof/failures {:optional true} :seon.proof/failures] [:seon.bound/spent {:optional true} :seon.bound/spent]]
  :seon.result/result-fact [:map {:seon.db/attributes true}
                            [:seon.result/hash :seon.result/hash] [:seon.result/value {:optional true} :seon.result/value]
@@ -326,7 +356,7 @@
                                {:seon.agent/task :seon.task/task-fact}
                                {:seon.agent/system [:db/id]}
                                {[:seon.model-call/_agent :tx :at] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated :seon.model-call/error :seon.model-call/forms :seon.model-call/basis {[:seon.eval/_call :tx :at] [:db/id :seon.eval/call-id :seon.eval/agent]}]}
-                               {[:seon.eval/_agent :tx :at] [:seon.eval/id :seon.eval/agent {:seon.eval/by [:db/id :seon.agent/key :seon.system/id]} :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response :seon.eval/result :seon.eval/opened]}
+                               {[:seon.eval/_agent :tx :at] [:seon.eval/id :seon.eval/agent {:seon.eval/by [:db/id :seon.agent/key :seon.system/id]} :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response {:seon.eval/result [:db/id :seon.result/ex]} :seon.eval/opened]}
                                {[:seon.message/_to :tx :at] [:seon.message/id {:seon.message/from [:seon.agent/key :seon.user/name :seon.system/id]} :seon.message/to :seon.message/body]}
                                {:seon.cite/_of :seon.cite/cite-fact}
                                {:seon.search/_of :seon.search/search-fact}] :seon.render/hiccup seon.render.ui/agent :seon.render/openai-compat seon.ctx.wire/agent-msgs}
@@ -506,7 +536,8 @@
                           [:seon.task/conflicts {:optional true} :seon.task/conflicts] [:seon.task/unmerged {:optional true} :seon.task/unmerged]
                           [:seon.task/task-conflicts {:optional true} :seon.task/task-conflicts] [:seon.task/failures {:optional true} :seon.task/failures]
                           [:seon.task/costs {:optional true} :seon.task/costs] [:seon.task/waste {:optional true} :seon.task/waste]
-                          [:seon.task/declared {:optional true} :seon.task/declared] [:seon.task/cites-digest {:optional true} :seon.task/cites-digest]]
+                          [:seon.task/declared {:optional true} :seon.task/declared] [:seon.task/cites-digest {:optional true} :seon.task/cites-digest]
+                     [:seon.task/causes {:optional true} :seon.task/causes]]
  ;; ---- how a task's work stands and ended: attributes of the task, on main, written when root starts and judges it ----
  ;; (docs/reconcile.md#a-task-holds-how-its-work-ended). A task's history is its attributes' previous values (d/history).
  ;; the agent that works it now (an agent moves between a session's tasks, seon.reconcile/stage-boundary)
@@ -547,7 +578,7 @@
  :seon.task/unmerged [:set {:description "The keys still unmerged on the task's branch."} :string]
  ;; a test's name and status in a proof's results (a gate's, seon.proofs/results); verdicts themselves are cached by
  ;; digest outside the store (docs/merging.md#verdicts-are-a-cache)
- :seon.proof/status [:enum :pass :fail :error :none]
+ :seon.proof/status [:enum {:seon.db/write-once true :description "A result's status: written once; a second, different one is refused (seon.db/checked), a defect, never flaky."} :pass :fail :error :none]
  ;; ---- root's boot and config keys (main) ----
  :seon.system/id [:and {:seon.db/identity true :seon.db/content-id true} :keyword]
  :seon.system/boot :string
