@@ -276,6 +276,7 @@
  ;; a property a schema carries, read by seon.schema.datahike when it declares the attribute (docs/storage.md)
  :seon.db/attributes [:boolean {:description "On a schema's properties, true when it is an entity schema: the keys of its map are attributes, and an entity holding one is checked against its required keys. See docs/storage.md#the-write-checks-every-entity-it-touches."}]
  :seon.db/identity [:boolean {:description "On an attribute's schema, true when its value identifies its entity, a lookup ref (Datahike's :db.unique/identity)."}]
+ :seon.contract/valid [:set {:description "In a value's metadata, the named schemas its maker checked it against (seon.contract/checked-once): a [:seon.contract/once shape] contract admits it at once. See docs/checks.md#contracts-armed-at-definition."} :qualified-keyword]
  :seon.db/derived [:boolean {:description "On an entity schema's properties, true when its entities are derived from other facts (an embedding of a text, a cite of a plan): a cache each branch computes, never merged (docs/merging.md#a-branch-merges-main-in)."}]
  :seon.db/index [:boolean {:description "On an attribute's schema, true when its values are indexed for lookup by value (Datahike's :db/index)."}]
  :seon.db/tagged [:boolean {:description "On an attribute's schema, true when each of its values names the schema it satisfies by :seon.db/tag and is held to it at the write (seon.db/invalid-datom)."}]
