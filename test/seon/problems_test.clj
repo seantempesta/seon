@@ -500,7 +500,7 @@
                 ;; derived?, refine? (its seon.db/eid and cites-of), and for a filed one declaration and stated twice (data, 2026-11-14:
                 ;; the store is the source, so every live task is judged, not only the merged ones)
                 :unsynced (+ 2 (* 8 (count (#'problems/unsynced-candidates db (mapv :e (d/datoms db :aevt :seon.task/id))))))
-                :fixed 51              ; (51: problem-unlinked reads :unsynced's section now this world's own store-made tasks give it rows) answers, report-with (every recorded class), health-with (problem-unlinked over all of them, the derived rows as health hands them)
+                :fixed 52              ; (50 -> 52, data 11-14: this world's own store-made tasks give :unsynced rows, so problem-unlinked seeks its section, seon.db/eid, and writes its row, derived-row) answers, report-with (every recorded class), health-with (problem-unlinked over all of them, the derived rows as health hands them)
                 :wrappers 2}]         ; health's and other-derived's own contracts
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
