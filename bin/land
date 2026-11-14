@@ -1,5 +1,5 @@
 #!/bin/zsh
-# bin/land [-F MSGFILE] — land this worktree's branch on main: the one way any session, Claude's or
+# bin/land [--check] [-F MSGFILE] — land this worktree's branch on main: the one way any session, Claude's or
 # Seon's, merges (docs/merging.md#a-branch-lands-with-binland). Run in the branch's worktree
 # (bin/worktree NAME), never the main tree, which stays on main and clean.
 #   1. merge main into the branch (a conflict stops it: resolve, commit, run it again), and build the runtime its pins
@@ -19,10 +19,13 @@
 #   5. the session's one worktree and branch are kept, the branch fast-forwarded to the landed main: the next change starts
 #      there (owner, 2026-11-12: one worktree per agent, never a branch per change).
 # MSGFILE is the merge message (what it completes, its numbers: AGENTS §3); bin/prove's line is added.
+# --check runs steps 1, 1b and 2 exactly and stops before step 3, main unmoved, ending on LAND CHECK OK <branch> <tip> on
+# main <sha>: <the proof's line> (or LAND CHECK FAILED): the line a release ask carries. The land after it proves again,
+# reusing every green at its digest.
 # SEON_UPDATE_ARGS: bin/update's arguments, the standing root's (default --profile deepseek).
 # The last line is LANDED or LAND FAILED, and the exit status says the same.
 setopt pipefail
-fail() { print -u2 "land: $*"; print "LAND FAILED"; exit 1 }
+fail() { print -u2 "land: $*"; print "LAND${CHECK:+ CHECK} FAILED"; exit 1 }
 # tidy: the landed worktree $HERE and its branch $B stay, the branch moved to the landed main $NEW.
 tidy() {
   # the session's one worktree and branch are kept, at the main it landed (owner, 2026-11-12: one worktree per agent, never
@@ -84,8 +87,14 @@ MSG=
 [[ ${1:-} == --dropped ]] && { dropped "${@:2}"; exit }
 [[ ${1:-} == --completes ]] && { completes; exit }
 [[ ${1:-} == --bridge ]] && { MAIN=$(git rev-parse --path-format=absolute --git-common-dir)/..; MAIN=${MAIN:A}; bridge "${@:2}"; exit }
-[[ ${1:-} == -F ]] && { MSG=${2:A}; [[ -f $MSG ]] || fail "no message file $2"; shift 2 }
-(( $# == 0 )) || fail "unknown arguments: $*"
+CHECK=
+while (( $# )); do
+  case $1 in
+    --check) CHECK=1; shift ;;
+    -F) MSG=${2:A}; [[ -f $MSG ]] || fail "no message file $2"; shift 2 ;;
+    *) fail "unknown arguments: $*" ;;
+  esac
+done
 HERE=$(git rev-parse --show-toplevel) || fail "not in a git checkout"
 MAIN=$(git rev-parse --path-format=absolute --git-common-dir)/..; MAIN=${MAIN:A}
 [[ $HERE != $MAIN ]] || fail "run it in the branch's worktree (bin/worktree NAME), not the main tree"
@@ -148,6 +157,11 @@ else LINE=$(grep -E ' bin/prove --merge .*: MERGE (OK|FAILED)' "$LOG" | tail -1)
 (( st == 0 )) && [[ $(tail -1 "$LOG") == "MERGE OK" ]] || fail "the proof is red: $LOG"
 [[ $(git rev-parse HEAD) == $(git rev-parse "$B") ]] && git merge-base --is-ancestor "$OLD" HEAD || fail "the branch moved during its proof"
 { if [[ -n $MSG ]]; then cat "$MSG"; else print "Merge $B"; fi; print; print "$LINE"; } > "$HERE/target/land-msg"
+# --check stops here, main unmoved: everything a land does to the tip has run (merge, rebuild, health, laws, the proof), and
+# the line names the tip and the main it proved, for the release ask (docs/merging.md#a-branch-lands-with-binland)
+if [[ -n $CHECK ]]; then
+  print "LAND CHECK OK $B $(git rev-parse --short=10 HEAD) on main $(git rev-parse --short=10 "$OLD"): $LINE"; exit 0
+fi
 # main moves to the proved tree; when another landing moved main during the proof, main is merged in and landed
 # without proving again: what main gained was proved when it landed, and chasing main under load could prove
 # forever (owner, 2026-11-08: "that's fucked"); the combination is the daily full run's to catch. Only a
