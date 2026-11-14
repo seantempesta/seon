@@ -607,9 +607,9 @@
      :per-n {:ticks 24000.0 :bytes 70000.0}
      :sizes [3 10 30]}))
 
-;; ---- every verdict is kept: a digest green and red is flaky (red, never reused as green, never run)
+;; ---- every verdict is kept: a digest green and red is flaky (no verdict, a :platform problem, never run again)
 
-(deftest ^{:seon.test/estimate {:ticks 500000}} a-digest-green-and-red-is-flaky-red-and-never-runs
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-digest-green-and-red-is-flaky-no-verdict-and-never-runs
   ;; the merge-cost proof was red once and green on its next run at one digest: with one verdict
   ;; kept per digest the red was gone, and the green reused
   (with-dir
@@ -626,11 +626,9 @@
              {:keys [run reused selected]} (proofs/plan nil cand found #{})
              f (found "d-flaky")]
          (is (:flaky f) "a digest that holds a green and a red is flaky")
-         (is (not (proofs/green? f)) "judged red, never reused as green")
-         (is (= {:type :fail :flaky true :message "flaky: green and red at digest d-flaky (seon.proofs/flaky)"
-                 :seon.proofs/ticks {:green 1000 :red 30000}} (first (:failures f)))
-             "its failures lead with one saying so, with both runs' ticks (seon.prove/ticks-apart reads them), then the red's own")
-         (is (= "1 is not 2" (:message (second (:failures f)))))
+         (is (zero? (+ (:fail f) (:error f))) "no verdict: never a red that holds a landing or shows main red (owner, 2026-11-14)")
+         (is (= {:green 1000 :red 30000} (:seon.proofs/ticks f)) "both runs' ticks, the evidence seon.prove/flaky-problems files")
+         (is (= ["1 is not 2"] (mapv :message (:seon.proofs/red-failures f))) "and the red run's own failures")
          (is (not (proofs/green? (found "d-red"))) "a red alone is reused red, with its failures")
          (is (= ['app.f-test/n] run) "only the digest with no result runs: the flaky and the red are reused, never run again")
          (is (= #{'app.f-test/t 'app.f-test/r 'app.f-test/n} (set selected)) "the flaky one and the red are selected: they judge")

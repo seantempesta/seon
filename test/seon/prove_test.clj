@@ -559,12 +559,12 @@
            (mapv (juxt :class (comp :seon.error/type :error) (comp :test :error) (comp :digest :error) (comp :reported :error)) problems))
         "the missing item is a problem naming it, its digest and what the answer did name")))
 
-;; docs/merging.md#verdicts-are-a-cache: a green and a red at one digest whose ticks are over ten times apart (AGENTS 3, the one
-;; factor) ran different work for one input: a fixture's world, a commit-less db, a namespace read whole (2026-11-14's three
-;; hidden reds), each a :platform problem with its evidence, filed by the run whose plan reads it, once a digest. Red before: the
-;; flaky verdict judged red and nothing was filed. Estimate: three short feeds ~0.3M.
-(deftest ^{:seon.test/estimate {:ticks 300000}} a-green-and-a-red-ten-times-apart-at-one-digest-is-a-platform-problem
-  (let [flaky (fn [t g r] {:type :fail :flaky true :var (str "#'" t) :reused true :message "flaky"
+;; docs/merging.md#verdicts-are-a-cache: a green and a red at one digest read something its digest misses (load, a cold fixture, a
+;; shared file: the owner, 2026-11-14), so it is no verdict and a :platform problem with its evidence, filed by the run whose plan
+;; reads it, once a digest; ticks over ten times apart say its runs did different work. Red before: the flaky verdict judged red,
+;; held every landing that reached it, and only a ten-times gap was filed. Estimate: three short feeds ~0.3M.
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-green-and-a-red-at-one-digest-is-a-platform-problem-never-a-red
+  (let [flaky (fn [t g r] {:type :pass :flaky true :var (str "#'" t) :reused true :seon.proofs/red-failures [{:type :fail :message "1 is not 2"}]
                            :seon.proofs/ticks {:green g :red r}})
         plan {:items {} :selected ['app.x-test/t 'app.x-test/u 'app.x-test/v]
               :digests {'app.x-test/t "d1" 'app.x-test/u "d2" 'app.x-test/v "d3"}
@@ -577,8 +577,10 @@
                                  (feed st [(answer-of m plan)])))
         [st o1] (plan-of (proc0) 1 5)
         [_ o2] (plan-of st 2 6)]
-    (is (= [[:platform :seon.proofs/ticks-apart 'app.x-test/t "d1" {:green 1000000 :red 30000000}]] (problems o1))
-        "30x apart is a problem naming the test, its digest and both ticks; 9x apart and a red alone are not")
+    (is (= [[:platform :seon.proofs/flaky 'app.x-test/t "d1" {:green 1000000 :red 30000000}]
+            [:platform :seon.proofs/flaky 'app.x-test/u "d2" {:green 1000000 :red 9000000}]] (problems o1))
+        "every flaky digest is a problem naming the test, its digest and both ticks; a red alone is a red, not a problem")
+    (is (clojure.string/includes? (-> (filter #(= :problem (:op %)) o1) first :error :seon.error/message) "over ten times apart") "30x apart says so")
     (is (= [] (problems o2)) "the same digest read by the next run is not filed again")))
 
 (defn queue-of

@@ -1538,7 +1538,9 @@
   {:malli/schema [:=> [:cat :map [:sequential :qualified-symbol]] [:vector :map]]}
   [reused ts]
   (vec (for [t ts :let [r (reused t)] :when r
-             f (or (seq (:failures r))
+             ;; a flaky digest: one :pass report carrying its evidence, which seon.prove/flaky-problems files as a :platform problem
+             f (or (when (:flaky r) [(assoc (select-keys r [:flaky :seon.proofs/ticks :seon.proofs/red-failures :digest]) :type :pass)])
+                   (seq (:failures r))
                    [(cond-> {:type (if (proofs/green? r) :pass (if (pos? (:error r)) :error :fail))}
                       (not (proofs/green? r)) (assoc :message "red at this digest, with no failure kept"))])]
          (cond-> (assoc f :var (str "#'" t) :reused true)

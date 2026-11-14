@@ -1082,7 +1082,7 @@
   tree it ran in (out/tests.edn: {:digests {test digest}}; nil when the plan never ran), found the
   verdicts cached at those digests ({digest result}, stored-results, which the run's shards wrote).
   :pass when a green is cached (it ran green, or was green at its
-  digest), :fail when a red is (flaky, or a red), :error with none: a run that never reached it
+  digest, or flaky there: no verdict, never a red), :fail when a red is, :error with none: a run that never reached it
   (its plan or its build failed, it died) says nothing of it passing. The record read, never
   prove's printed output."
   {:malli/schema [:=> [:cat [:maybe [:map [:digests [:map-of :qualified-symbol :string]]]] [:map-of :string :map] [:sequential :qualified-symbol]]

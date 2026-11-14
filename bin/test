@@ -152,8 +152,8 @@ if (( ${#FAST} )); then
   [[ -s $OUT/fast/step-ms ]] && cat "$OUT/fast/step-ms" >> "$OUT/step-ms"
   print -r -- "$ALL" > "$OUT/steps"
 fi
-# a test green and red at its digest (the plan's out/flaky) is red, though nothing ran it
-[[ -s $OUT/flaky ]] && { cat "$OUT/flaky"; st=1 }
+# a test green and red at its digest (the plan's out/flaky) is no verdict, a :platform problem, never a red (seon.proofs/flaky)
+[[ -s $OUT/flaky ]] && cat "$OUT/flaky"
 # a reused green the plan ran again (out/audit) that ran red: its digest missed an input (seon.proofs/plan-of's :audit)
 if [[ -s $OUT/audit ]]; then
   for t in ${(f)"$(cat $OUT/audit)"}; do
