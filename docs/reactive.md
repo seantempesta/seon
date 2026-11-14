@@ -1,6 +1,6 @@
 # The reactive core: one way to keep a derived value current
 
-Almost everything Seon keeps is derived: a page, a model request, health, a task's readiness, a test's verdict, the program a process runs. Each is a function of what it read. The reactive core is the one mechanism that records what a computation read and runs it again only when a commit moved something it read. Runtime owns it; every area moves its own "did this change?" code onto it and deletes that code ([the plan](plan.md)).
+Almost everything Seon keeps is derived: a page, a model request, health, a task's readiness, a test's verdict, the program a process runs. Each is a function of what it read. The reactive core is the one mechanism that records what a computation read and runs it again only when a commit moved something it read. Runtime owns it; every area moves its own "did this change?" code onto it and deletes that code ([the plan](plan.md#the-root-concept-one-reaction-over-the-store)).
 
 ## The idea in one paragraph
 
