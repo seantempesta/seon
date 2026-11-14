@@ -28,6 +28,24 @@
       (let [[_ reads] (d/with-reads #(d/q '[:find ?id :where [?e :seon.task/id ?id]] db))]
         (is (= #{[:a :seon.task/id]} (d/reads-index reads)))))))
 
+;; Estimate: a seeded test db and 3 pulls under the recorder, ~0.3M; 4 d/with of one datom each ~0.2M = ~500000
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-pull-records-the-attributes-it-read
+  ;; task datahike.pull-api/a-pull-of-an-attribute-records-its-slice: a pull records [:ea e a] for each attribute of its
+  ;; pattern and no wider key, so a reader of one slice of an entity is not reached by a commit to its other attributes
+  ;; (a :plan-only track reran on a :seon.task/ns change, root's trial 2026-11-14). The entity's :eavt range is still read
+  ;; once (cost unchanged). A missing entity records [:e e], so its first datom reaches the read.
+  (let [[db t1 _] (seeded)
+        reads #(d/reads-index (second (d/with-reads %)))
+        tx (fn [tx-data] (:tx-data (d/with db tx-data)))
+        two (reads #(d/pull db [:seon.task/id :seon.task/plan] t1))
+        one (reads #(d/pull db [:seon.task/plan] t1))]
+    (is (= #{[:ea t1 :seon.task/id] [:ea t1 :seon.task/plan]} two) (pr-str two))
+    (is (= #{[:ea t1 :seon.task/plan]} one) (str "one attribute, and no [:e e] from the existence probe: " (pr-str one)))
+    (is (d/reads-touched? two (tx [{:db/id t1 :seon.task/plan "Changed."}])) "an attribute it read")
+    (is (not (d/reads-touched? two (tx [{:db/id t1 :seon.task/ns "x.y"}]))) "an attribute of the entity it did not read")
+    (is (not (d/reads-touched? one (tx [{:db/id t1 :seon.task/id "r/t1b"}]))) "nor another attribute, for a one-attribute pull")
+    (is (contains? (reads #(d/pull db [:seon.task/plan] 987654321)) [:e 987654321]) "a missing entity: its first datom reaches it")))
+
 (deftest a-transaction-touches-only-what-a-read-scanned
   (let [[db t1 t2] (seeded)
         point (d/reads-index (second (d/with-reads #(d/q '[:find ?e . :in $ ?id :where [?e :seon.task/id ?id]] db "r/t2"))))
