@@ -6,6 +6,38 @@ The owner's standing rulings, one entry each: his words and date, and where the 
 
 The owner's rulings of this day and the night before, each with his words where recorded and where it is now stated.
 
+### The priority: Claude sessions work through the system
+
+"I want to optimize what fixes broken processes that are slowing us down and getting more of the system off the file based git focused standpoint. I want claude agents to work through the system ... Collapse the focus to just this one view." Then: "Don't delete useful parts of the plan, I said prioritize." Stated in [the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority).
+
+### A rule is removed only with its reasons
+
+"I want more engineering rigor encoded into our processes. Rarely should you be telling me you want to flatten AGENTS.md without clear reasons. We keep re-solving the same problems over and over because of these institutional knowledge wipes." A rule goes only with the incident or ruling behind it, what holds it now, and why it no longer earns its place. Stated in [the plan](plan.md#throughout).
+
+### A leaked environment is made impossible, not checked
+
+On the test child that inherited root's state three times: "This sounds like a root cause that we keep patching. How is this even possible and how do we make it impossible rather than adding another check?" A test child forks only from a process already on its branch's environment. Stated in [the plan](plan.md#stage-0-one-happy-path-now).
+
+### Store what will be read back: pull first
+
+"Why aren't we storing enough data that we can query for what we need later? ... Pull first mentality as we need to store the data optimized in the way that we want it read back." A result holds what its run read, where it ran and its status, so reuse and diagnosis are queries. Stated in [the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority).
+
+### Any random task, however unspecified
+
+"The goal is for agents to handle any random task even if it's unspecified. We need context to have reactive renders telling the agent the task isn't specified so the specification is the first of the proofs ... If an agent doesn't solve the task but they improve it I want that synced to disk if one of our claude agents reviews it ... With enough iterations we should be able to take all tasks from beginning to end." Stated in [the plan](plan.md#the-goal).
+
+### Approved designs are tasks
+
+An approved, unbuilt design becomes one task whose plan holds it ("A task each"). Stated in [the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority).
+
+### A reasoning overrun is an error the next turn reads
+
+"A reasoning overrun should be an effect that triggers an error which the system interprets for the agent on their next turn. We can add a render function to display all recent errors and what the causes are?" Stated in [the plan](plan.md#stage-0-one-happy-path-now).
+
+### Failure causes are verifiable tags
+
+"Let's start classifying them and schemas can sets of truths -- several classes can be true at the same time kind of like verifiable tags." Stated in [the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority).
+
 ### Blockers are tasks; sessions message the owning session directly
 
 Set the night of 2026-11-13 (quote not recorded), after many back-and-forth messages; it replaces "sessions talk to root only" (2026-11-12). On 2026-11-14: "The board and ledgers and however you are communciating with your agents needs to folded into seon from a db centric standpoint. Agents acting within seon need to get shit done ... Wiki and tasks for sure." A blocker or a bug in another area is a task in the owning area's namespace, named in the blocked task's `:seon.task/needs`; a message goes to the owning session only to block, unblock or agree an interface, in 6 lines or fewer, with evidence and one ask, one thread per problem, no acknowledgements. Root keeps releases and the owner's decisions. Stated in `AGENTS.md` §2 and [the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority), which folds the board, the ledgers, the landing queue and the turns ledger into tasks, queries and this page.

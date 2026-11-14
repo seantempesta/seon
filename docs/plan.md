@@ -8,7 +8,10 @@ is in [principles](principles.md); the owner's rulings are in [decisions](decisi
 
 A user's roughly specified task becomes merged code in as few turns as possible. The measure is taken on rounds of two or
 three backlog tasks drawn at random and worked by live agents: one row per task (turns, runs, merged or not and why),
-reported to the owner daily. A task that never merges is a failure, not a low number. Beyond it, the owner's system goal
+reported to the owner daily. A task that never merges is a failure, not a low number. The draw stays random, because agents must take any task, however
+unspecified: a task's specification is its first proof, the page says so reactively while it is missing, and an agent that
+improves its task without finishing it has the improvement synced to disk once a Claude session's review finds it better,
+so repeated rounds carry every task from start to end (owner, 2026-11-14). Beyond it, the owner's system goal
 (2026-11-11): the system improves its own code (correctness, cost, how interwoven it is, the turns its agents take) by
 "lots of base hits rather than swinging for homeruns".
 
@@ -38,7 +41,12 @@ recorded.
    round (runtime for the effect, context and web for the render).
 4. A fork waits for other threads to park, never races them: a refusal agents hit in production, built and pinned on
    jolt/deps, landing after item 2 because a pin change reruns everything (deps; moved from Stage 3).
-5. `seon.repl/an-uncited-public-defn-is-told-at-its-eval` (proof green at turn 48, its agent now lost) restarted on a fresh
+5. A test child forks only from a process already on its branch's environment, never from root's agent: today the service
+   runs another checkout's tests in a fork of root's long-running agent, which carries root's config, environment, heap,
+   threads and loaded libraries, and each fix so far swapped one of those (owner, 2026-11-14: make it impossible, not
+   another check). Until the branch's own clean program process exists, the service runs no test across environments
+   (runtime, tests; moved up from Stage 4.3).
+6. `seon.repl/an-uncited-public-defn-is-told-at-its-eval` (proof green at turn 48, its agent now lost) restarted on a fresh
    agent, or the first of the random round's tasks to reach green, merged by `seon_done` (context).
 
 ## Stage 1: Claude sessions work through the system (the priority)
@@ -48,28 +56,38 @@ proved there by what it reaches, and merges into main through Seon's own merge, 
 session needs to get work done is a task or the wiki. **Done when:** one area's session lands a week of work with no
 worktree, no per-checkout system and no `bin/land`, and root's notes hold no board, ledger, queue or ruling. Then the
 infrastructure this replaces is cut, each removal brought to the owner as an audit.
-1. **A session is an agent:** each Claude session holds one agent keyed by its area's name on one branch of the one store
+1. **Approved designs are tasks:** each approved, unbuilt design (the one-unit spec, the Flow standard, process start, the
+   effects plan, the online takeover and resume, data's 11-13 interface agreements, main keeping its own proofs, the
+   landing queue as data) is one task whose plan holds the design, so no compaction loses it (owner, 2026-11-14) (each
+   design's area).
+2. **A task's specification is its first proof:** a task whose plan lacks what the work needs is shown so on its page,
+   reactively, and specifying it is the agent's first step; an improved task reaches disk after a Claude session's review
+   (context, data).
+3. **A session is an agent:** each Claude session holds one agent keyed by its area's name on one branch of the one store
    (`seon_attach` exists), with its REPL and its branch's program; `seon_eval` and `seon.repl/edit!` change code, docs,
    tasks and `bin/` scripts as writes on that branch (runtime).
-2. **Pushing a change is easy:** a file a session edits is imported as a transaction on its branch (the same path an
+4. **Pushing a change is easy:** a file a session edits is imported as a transaction on its branch (the same path an
    agent's eval takes), so a session that works on files gets a valid branch with no extra step; a read-only copy of the
    branch is written out for reading (runtime, data).
-3. **Proving is on the branch, in the system:** the session's agent proves by reach, live, and by a full build only when
-   the change may differ (a pin, native code, `deps.edn`); results are entities in the store keyed by what each run read,
-   through Datahike's read recorder, the one the query cache uses (tests, data).
-4. **Merging is Seon's:** `seon_done` runs the gate and Seon's three-way merge on main's program; conflicts go back to the
+5. **Proving is on the branch, in the system:** the session's agent proves by reach, live, and by a full build only when
+   the change may differ (a pin, native code, `deps.edn`). Results are entities in the store, shaped for how they are read
+   back (owner, 2026-11-14: "pull first"): each holds its test, its status (written once), everything its run read
+   (datoms through Datahike's read recorder; config entries, files, environment variables and the pin as recorded outside
+   reads), the environment and process it ran in, and its cost. Reuse, "why is this red", "what ran where" and "flaky" are
+   then queries, not keys chosen in advance; the result files go (tests, data, with runtime for the outside reads).
+6. **Merging is Seon's:** `seon_done` runs the gate and Seon's three-way merge on main's program; conflicts go back to the
    branch; one three-way merge, not two (`seon.task/carry-tx` goes); a merge costs what moved (today one merge of main
    costs 62 s, 9.9B ticks and 47.5 GB, measured) (data, runtime).
-5. **Git follows the store:** a merge is written back, and git's main moves after root reads its diff (`my.root/sync!`);
+7. **Git follows the store:** a merge is written back, and git's main moves after root reads its diff (`my.root/sync!`);
    main is pushed to GitHub (runtime, root).
-6. **The work lives in Seon:** a blocker is a task in the owning area's namespace with its causes (`:seon.task/causes`,
+8. **The work lives in Seon:** a blocker is a task in the owning area's namespace with its causes (`:seon.task/causes`,
    a set of schema keys each with its evidence, re-derived, owed a schema entry by data), named in the blocked task's `:seon.task/needs`; a deletion is a proof that the old path is gone; the
    merge queue is tasks waiting to merge, in `:seon.task/needs` order; turns to merged is a query shown on the task and the
    dashboard; the owner's rulings are in [decisions](decisions.md); a message between sessions is about a task and is
    written there, and one that names no task becomes one; when a landing completes what a task needed, the sessions waiting on
    it are told (`my.root/landed!` sends `seon_message`); a flaky result is a derived problem class, never a hand-filed row
    (context, tests, root).
-7. **Pilot, then all:** one area moves first after two or three merged tasks; then the rest. The audit to cut follows:
+9. **Pilot, then all:** one area moves first after two or three merged tasks; then the rest. The audit to cut follows:
    worktrees, per-checkout systems and ports, `checkout-env!`, `bin/land`'s local prove and git bridge, the shell test
    runner and its shards, the result files, the boards as files (root, with each owner).
 
@@ -110,8 +128,8 @@ of landings with no restart except for a pin, native code or `deps.edn`, and no 
    1M-token pages, and the reactive walker is deleted; reference sessions in the native wire format; compaction: deleting, editing, compacting
    or forgetting an eval is a change of data the next request is rendered from, with page controls for each (only
    unlinking has a test today) (context, web).
-3. REPL redefinitions: the REPL may do anything; only definitions become program; each eval's answer says what was saved;
-   test children fork from a clean branch-program process (runtime, context).
+3. REPL redefinitions: the REPL may do anything; only definitions become program; each eval's answer says what was saved
+   (runtime, context).
 4. The loop closes at a task's end: work, then refine (the worker's conversation continued, curating its own task and the
    docs it pulled), then review (a separate agent that judges and files tasks, never editing what it reviews; green merges a
    change to the system itself). A refinement is tried by rerunning from the earlier point in history beside the original,
@@ -135,8 +153,8 @@ of landings with no restart except for a pin, native code or `deps.edn`, and no 
 ## Enforcement owed
 
 The principles each name what enforces them; these are not yet enforced, and each is owed a law or a test, filed as a task
-in the stage that builds its mechanism: turns counted by the system (Stage 1.6); no design starting outside the Seon agent;
-a proof seen red first; a duplicate schema or unnamed public shape seen twice (Stage 4.1); `Deletes:` checked (Stage 1.6);
+in the stage that builds its mechanism: turns counted by the system (Stage 1.8); no design starting outside the Seon agent;
+a proof seen red first; a duplicate schema or unnamed public shape seen twice (Stage 4.1); `Deletes:` checked (Stage 1.8);
 effects routed at Jolt's host primitives (Stage 3.2); no program loaded outside the one start (Stage 2.1); atoms; no test
 reading wall time, load or system memory; a second status at one digest filed as a defect; claims marked measured or
 hypothesis.
