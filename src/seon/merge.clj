@@ -532,6 +532,51 @@
             (into (mapcat #(program/own-declaration onto % reg)) own)))
       tx)))
 
+
+(defn own-datoms
+  "The datoms head wrote since base, as [gone added] (datahike.api/datoms-diff of base and head, one read of what differs): each a
+  fact head owns (`owned?`: its transaction names no branch of main's, or head held and let go of it), of no derived attribute
+  (`derived?`) and no transaction's own facts. A value head holds only because main wrote it, or lacks because it never held it, is
+  main's and left out. What seon.merge/merge-main writes onto main's head. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:tuple [:vector :seon.host/datom] [:vector :seon.host/datom]]]}
+  [base head main]
+  (let [mains (tx-branch main (:max-tx main))
+        tx? (fn [e] (some? (first (d/datoms head :eavt e :db/txInstant))))
+        [gone added] (d/datoms-diff base head :eavt [])
+        ;; derived? once per attribute the diff holds, never per datom
+        kept (into #{} (filter #(and (keyword? %) (not= "db" (namespace %)) (not (and (qualified-keyword? %) (derived? %)))))
+                   (into #{} (map :a) (concat gone added)))
+        fact? (fn [{:keys [e a]}] (and (kept a) (not (tx? e))))]
+    [(filterv #(and (fact? %) (seq (d/datoms (d/history head) :eavt (:e %) (:a %) (:v %)))) gone)
+     (filterv #(and (fact? %) (not (and mains (= mains (tx-branch head (:tx %)))))) added)]))
+
+(defn merge-main
+  "The one merge of main into a branch, decided: head's own datoms since base (`own-datoms`), their keys (program keys and facts,
+  `touched-by`), and main's content at those keys only, against base's: a key both changed, differently, is a conflict, and any
+  conflict stops it, writing nothing ({:conflicts}). Clean, the tx that makes main's head the merged branch, head's own datoms with
+  their transactions' facts and retractions ({:tx :keys}): main plus the branch's own change. Main's moves elsewhere are never read,
+  so it costs what the branch wrote, never how far main moved. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:or [:map [:conflicts [:vector :map]]] [:map [:tx :seon.db/tx-data] [:keys [:vector :any]]]]]}
+  [base head main]
+  (let [[gone added] (own-datoms base head main)
+        ks (vec (touched-by base head :all (into gone added)))
+        b (program-of base ks :all)
+        ;; main's content at the branch's keys counts as main's change only if main wrote it (owned?)
+        m (reduce (fn [p k] (if (and (or (= :datum (first k)) (stated-keys (first k))) (not= (get p k) (get b k)) (not (owned? base main head k)))
+                              (if (contains? b k) (assoc p k (get b k)) (dissoc p k)) p))
+                  (program-of main ks :all) ks)
+        r (three-way b (program-of head ks :all) m)]
+    (if (seq (:conflicts r))
+      {:conflicts (:conflicts r)}
+      (let [unique? #(= :db.unique/identity (get-in (:schema head) [% :db/unique]))
+            named (into #{} (keep #(when (unique? (:a %)) (:e %))) added)
+            txs (into (sorted-set) (map :tx) added)]
+        {:keys ks
+         :tx (-> (attribute-declarations main added)
+                 (into (for [{:keys [e a v]} gone] (if (and (unique? a) (not (named e))) [:db/retractEntity e] [:db/retract e a v])))
+                 (into added)
+                 (into (for [t txs dt (d/datoms head :eavt t)] dt)))}))))
+
 ;; ---- what program code does not do ----------------------------------------------------
 
 (defn mutations
