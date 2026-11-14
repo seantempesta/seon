@@ -47,6 +47,15 @@ for g in $GROUPS; do
   (( ${TREE[(Ie)$g]} )) || continue
   MEMBERS+=($(awk -v g=$g '$3==g{print $1}' "$D/ps-signal.txt"))
 done
+# each root of the run asked for its Seon state at the port it listens on, before any signal (a dump can free a hang): a root a
+# shard started detached (bin/held) is the run's by its fifo, and its port is read off its own listening socket, so no caller
+# names it (flow's dry run: the peer root's state was never asked, no PORT reached bin/evidence)
+for k in ${(u)MEMBERS}; do
+  for p in $(lsof -a -p $k -iTCP -sTCP:LISTEN -P -n -Fn 2>/dev/null | sed -n 's/^n.*:\([0-9]*\)$/\1/p' | sort -u); do
+    [[ $p == $PORT ]] && continue
+    print -r -- '{:op :eval :agent "root" :code "(seon.system/stall-state sys)"}' | "${0:h}/ask" "$p" > "$D/seon-state-$k.edn" 2>&1
+  done
+done
 for k in ${(u)MEMBERS}; do
   c=$(ps -o command= -p $k 2>/dev/null)
   [[ $c == *seon* || $c == *jolt* ]] || continue
@@ -62,12 +71,15 @@ for k in ${(u)MEMBERS}; do
 done
 sleep 1
 for k in ${(k)ERR}; do tail -c +$(( AT[$k] + 1 )) "${ERR[$k]}" > "$D/dump-$k.txt" 2>/dev/null; done
-# and the logs the signalled processes write (a shared root's root.log, an agent's .err): the runs directory that holds them is
+# and the logs every process of the run writes (a shared root's root.log, which bin/held's perl writes from the root's stderr pipe,
+# so the root's fiber dump is there; an agent's .err): the runs directory that holds them is
 # removed when its shard ends (seon.test-store/start-shared-root!'s hook), which took the one record of the wait an overrun lost
 # (deps' run14: the root's log was gone before anyone read it). Each is cloned (cp -c: APFS copy-on-write, no bytes copied).
 mkdir -p "$D/logs"
-for k in $(awk '{print $1}' "$D/signalled.txt" 2>/dev/null); do
-  lsof -a -p $k -Fn 2>/dev/null | sed -n 's/^n//p' | grep -E '/runs/.*\.(log|err|out)$' | sort -u | while read -r f; do
+for k in ${(u)MEMBERS}; do
+  # the files it holds open, and the log its command names (bin/held --log P writes a root's stderr there, a write at a time)
+  { lsof -a -p $k -Fn 2>/dev/null | sed -n 's/^n//p'; ps -o command= -p $k 2>/dev/null | sed -n 's/.*--log \([^ ]*\).*/\1/p' } \
+    | grep -E '/runs/.*\.(log|err|out)$' | sort -u | while read -r f; do
     [[ -f $f ]] && cp -c "$f" "$D/logs/$k-${f:t}" 2>/dev/null
   done
 done

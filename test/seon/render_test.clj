@@ -1017,6 +1017,28 @@
                    kw0 [3 4 3 1 5 0 4 4 2])]
     (is (empty? (:defects (:p kw))) "no component drew an error")))
 
+;; See docs/render.md#the-debug-page-is-the-wire-request
+;; Estimate: paged-dbs' two dbs (~1M), the branch's kept walk built once (~0.3M), and two requests read at the head, one cold (~0.5M)
+;; and one from the kept walk's answers (~0.05M): ~1.9M; 2,000,000 ticks, worked from the work.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} the-latest-request-reads-the-kept-branch-walk
+  ;; task seon.render/a-debug-entry-allocates-what-it-shows (context-4's design: the request is a reading of the agent's one walk):
+  ;; the request the debug page shows on latest is the render proc's kept branch walk's model answers (seon.ctx.wire/render's :walk),
+  ;; byte for byte the request a cold draw at the same head makes, so no pass builds the agent's ctx again
+  (let [[main branch eid] (paged-dbs)
+        kw (#'p/branch-walk nil branch (d/entity main eid))
+        basis {:agent "a3" :task "demo/f" :turn 3 :max-turns 9 :origin :model :commit (d/commit-id branch) :t (:max-tx branch)}
+        cold (seon.ctx.wire/render branch basis)
+        kept (seon.ctx.wire/render branch basis {:walk (:p kw)})]
+    (is (seq (:messages cold)) "the cold request holds the session")
+    (is (= (:messages cold) (:messages kept)) "the kept walk's request is the cold one, message for message")
+    (testing "a move adds an eval the model output places first and the page then: it runs once, never once a placement"
+      (let [branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key "a3"} "e9" (seon.task/sender "a3")
+                                                            {:seon.eval/call (seon.task/call-ref "a3" 1) :seon.eval/code "(h)" :seon.eval/response {:handle 'result/e9 :value 1}}))
+            kw' (#'p/branch-walk kw branch' (d/entity main eid))
+            runs (fn [f] (reduce + (for [[g l] (:ledger (:p kw')) :when (= (str g) (str f))] (+ (:miss l 0) (:same l 0)))))]
+        (is (= 2 (runs `ui/evaluation)) "the new eval's component ran once a placement, the model's then the page's, never more")
+        (is (some #(re-find #"e9" (str (:id %))) (:units (r/laid-out (:p kw')))) (str "and the page draws it: " (pr-str (mapv :id (:units (r/laid-out (:p kw')))))))))))
+
 ;; See docs/render.md#a-page-is-a-kept-walk
 (deftest a-walk-kept-as-a-value-answers-what-a-cold-request-does
   ;; seon.render/walk moved to any value of the branch, forward, back and across several turns, by the datoms between, answers the

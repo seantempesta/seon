@@ -194,10 +194,13 @@
   a turn after since, that call's number (nil: none is new), or the page it ended with. Drawn with today's renders: the debug page
   compares :messages with what the turn hashed (:seon.model-call/sent-hash). See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.model-call/basis] [:map [:body :map] [:provider :seon.model/provider] [:messages [:vector :seon.model/message]] [:sources [:vector [:vector :any]]] [:new [:vector :boolean]]]]
-                  [:=> [:cat :seon.host/db :seon.model-call/basis [:maybe nat-int?]] [:map [:body :map] [:provider :seon.model/provider] [:messages [:vector :seon.model/message]] [:sources [:vector [:vector :any]]] [:new [:vector :boolean]]]]]}
+                  [:=> [:cat :seon.host/db :seon.model-call/basis [:maybe nat-int?]] [:map [:body :map] [:provider :seon.model/provider] [:messages [:vector :seon.model/message]] [:sources [:vector [:vector :any]]] [:new [:vector :boolean]]]]
+                  [:=> [:cat :seon.host/db :seon.model-call/basis [:maybe nat-int?] [:maybe :map]] [:map [:body :map] [:provider :seon.model/provider] [:messages [:vector :seon.model/message]] [:sources [:vector [:vector :any]]] [:new [:vector :boolean]]]]]}
   ([db basis] (wire-turn db basis nil))
-  ([db basis since]
-   (let [{:keys [messages parts]} (render db basis)
+  ([db basis since] (wire-turn db basis since nil))
+  ([db basis since walk]
+   ;; walk: the agent's kept walk value at db (the debug page's turn to come), read as `render`'s :walk, never drawn cold
+   (let [{:keys [messages parts]} (render db basis (if walk {:walk walk} {}))
          p (provider-of db basis)
          ;; of a turn after since, or since's own but for the messages it took, which that request read
          fresh? (fn [[ref _ n]] (boolean (and since n (or (> n since) (and (= n since) (not (#{:message :page} (first ref))))))))
