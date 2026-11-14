@@ -571,8 +571,9 @@
 ;; docs/config.md#a-process-holds-its-branchs-config: a test child of the service is a fork of root's agent and held root's
 ;; config (--profile deepseek, local.edn's source root and branch), so its tests ran under it: runtime's prove read main's
 ;; "jolt/merges" and the armed-call unit measured 6.1 ticks, 15.1 under scripted. Cost: the shipped file read and resolved
-;; three times (layered: aero, then the schema's validation), ~3M ticks each.
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-test-process-of-a-checkout-holds-its-config-not-its-parents
+;; twice (layered: aero, then the whole config validated against its schema), ~15M ticks each, and held twice = ~40M
+;; (was 10M at 3M a resolve: measured 39M, the resolve's validation of every key was the work it missed).
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-test-process-of-a-checkout-holds-its-config-not-its-parents
   (let [held @#'seon.config/held h @held c config/config s config/sources
         parent (config/layered (config/load-layers (config/checkout) ["--profile" "deepseek" "--set" ":seon.config.source/branch=\"jolt/merges\""]))]
     (try
