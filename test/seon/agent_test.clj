@@ -95,7 +95,9 @@
         _ (.mkdirs (java.io.File. tasks))
         decls (if (fn? decls) (decls names) decls)
         with-config #(cond-> % config (assoc :seon.task/config config))
-        _ (spit (str tasks "/" tns ".edn") (pr-str (mapv with-config (into [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}] decls))))
+        task-decls (mapv with-config (into [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}] decls))
+        task-names (mapv :seon.task/name task-decls)
+        _ (spit (str tasks "/" tns ".edn") (pr-str task-decls))
         args (into (cond-> ["--set" (str ":seon.config.source/root=" (pr-str checkout))]
                      dirs (into ["--set" (str ":seon.config.source/dirs=" (pr-str dirs))]))
                    (mapcat (fn [x] ["--set" x])) sets)
@@ -116,8 +118,10 @@
                                                     " (when a @(c/kill! sys a))"
                                                     ;; its tasks cancelled: a run left :running keeps the reconciler from
                                                     ;; ever being quiet, and a later test's await-quiet waits on it
-                                                    " (my.root/cancel! sys (filterv #(clojure.string/starts-with? % \"" tns "/\")"
-                                                    "   (datahike.api/q '[:find [?id ...] :where [_ :seon.task/id ?id]] @(:conn sys))))"
+                                                    ;; exactly the ids this test made (its task file's names): a query of every task id on
+                                                    ;; the shared main cost each teardown more than the last (O(every test so far), in the
+                                                    ;; shared root's one REPL)
+                                                    " (my.root/cancel! sys " (pr-str (mapv #(str tns "/" %) task-names)) ")"
                                                     " (doseq [b (datahike.api/branches (:conn sys)) :when (and (= (namespace b) (name (:main (:store (c/state sys)))))"
                                                     "                                                       (clojure.string/starts-with? (name b) " (pr-str (str "task-" tns "-")) "))]"
                                                     "   (datahike.api/delete-branch! (:conn sys) b)))")))))
