@@ -109,7 +109,7 @@ Root's page draws every open class; an agent's page draws only its own task's an
 
 ## A stale binary
 
-Root's binary is stale when built from another git tree than the one main was last brought to from outside (an import or a landing): its boot writes both trees on `:seon.system/source` (```seon.system/booted-source```) and ```seon.problems/stale-binary``` derives one `:stale-binary` row while they differ. Root then forks no agent (```seon.system/stale-binary```), and its agents share no verdicts ([source](source.md#the-binary-records-its-program)). The message names the acts that bring the two into agreement (```seon.problems/stale-binary-acts```, [files and the db](source.md#files-and-the-db-two-directions)); the next boot on a binary of main's tree closes it.
+Root's binary is stale when built from another git tree than the one main was last brought to from outside (an import or a landing): its boot writes both trees on `:seon.system/source` (```seon.system/booted-source```) and ```seon.problems/stale-binary``` derives one `:stale-binary` row while they differ. Root then runs main's program loaded over its binary at each boot ([a boot runs main's program](source.md#a-boot-runs-mains-program)), a build input stays the binary's, and its agents share no verdicts ([source](source.md#the-binary-records-its-program)). The message names the acts that bring the two into agreement (```seon.problems/stale-binary-acts```, [files and the db](source.md#files-and-the-db-two-directions)); the next boot on a binary of main's tree closes it.
 
 ## Every writer: the db is written, files follow
 
