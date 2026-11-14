@@ -1,0 +1,28 @@
+[{:seon.task/name "agent-parts-draws-its-own-state-from-the-pull"
+  :seon.task/plan "Context's (seon.problems/a-hand-written-list-of-parts-is-a-problem). seon.render.ui/agent-parts names the agent's own state as parts (seon.render.ui/agent-state, ctx-keys, eval-tiles, own-problems, status, turn), a :hand-written-list row. Each is declared as the render of the data it draws on the agent's schema, so the walk matches it from the agent's pull and agent-parts names none."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.render-test/agent-parts-draws-its-own-state-from-the-pull}}
+ {:seon.task/name "agents-list-draws-its-parts-from-the-pull"
+  :seon.task/plan "Web's (agreed 2026-11-14 with context; seon.problems/a-hand-written-list-of-parts-is-a-problem, the owner: \"NO HAND WRITTEN LISTS\"). seon.render.ui/agents-list names its parts in its code (seon.render.ui/root-side), a :hand-written-list row. Each part is drawn because the entity's pull holds what it draws, each by its schema's render (docs/render.md#a-layout-places-its-lists), and the list names none; the row closes."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.render-test/agents-list-draws-its-parts-from-the-pull}}
+ {:seon.task/name "conversation-list-draws-its-parts-from-the-pull"
+  :seon.task/plan "Web's (agreed 2026-11-14 with context; seon.problems/a-hand-written-list-of-parts-is-a-problem, the owner: \"NO HAND WRITTEN LISTS\"). seon.render.ui/conversation-list names its parts in its code (seon.render.ui/chat-ask, seon.render.ui/chat-end, seon.render.ui/conversation-turn, seon.render.ui/examples, seon.render.ui/proof-story, seon.render.ui/system-message), a :hand-written-list row. Each part is drawn because the entity's pull holds what it draws, each by its schema's render (docs/render.md#a-layout-places-its-lists), and the list names none; the row closes."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.render-test/conversation-list-draws-its-parts-from-the-pull}}
+ {:seon.task/name "pull-list-draws-its-parts-from-the-pull"
+  :seon.task/plan "Web's (agreed 2026-11-14 with context; seon.problems/a-hand-written-list-of-parts-is-a-problem, the owner: \"NO HAND WRITTEN LISTS\"). seon.render.ui/pull-list names its parts in its code (seon.render.ui/pull-front), a :hand-written-list row. Each part is drawn because the entity's pull holds what it draws, each by its schema's render (docs/render.md#a-layout-places-its-lists), and the list names none; the row closes."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.render-test/pull-list-draws-its-parts-from-the-pull}}
+ {:seon.task/name "rules-list-draws-its-parts-from-the-pull"
+  :seon.task/plan "Web's (agreed 2026-11-14 with context; seon.problems/a-hand-written-list-of-parts-is-a-problem, the owner: \"NO HAND WRITTEN LISTS\"). seon.render.ui/rules-list names its parts in its code (seon.render.ui/page-rules), a :hand-written-list row. Each part is drawn because the entity's pull holds what it draws, each by its schema's render (docs/render.md#a-layout-places-its-lists), and the list names none; the row closes."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.render-test/rules-list-draws-its-parts-from-the-pull}}
+ {:seon.task/name "stage-list-draws-its-parts-from-the-pull"
+  :seon.task/plan "Web's (agreed 2026-11-14 with context; seon.problems/a-hand-written-list-of-parts-is-a-problem, the owner: \"NO HAND WRITTEN LISTS\"). seon.render.ui/stage-list names its parts in its code (seon.render.ui/stage-front), a :hand-written-list row. Each part is drawn because the entity's pull holds what it draws, each by its schema's render (docs/render.md#a-layout-places-its-lists), and the list names none; the row closes."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.render-test/stage-list-draws-its-parts-from-the-pull}}
+ {:seon.task/name "unresolved-list-draws-its-parts-from-the-pull"
+  :seon.task/plan "Web's (agreed 2026-11-14 with context; seon.problems/a-hand-written-list-of-parts-is-a-problem, the owner: \"NO HAND WRITTEN LISTS\"). seon.render.ui/unresolved-list names its parts in its code (seon.render.ui/unresolved-render), a :hand-written-list row. Each part is drawn because the entity's pull holds what it draws, each by its schema's render (docs/render.md#a-layout-places-its-lists), and the list names none; the row closes."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.render-test/unresolved-list-draws-its-parts-from-the-pull}}]

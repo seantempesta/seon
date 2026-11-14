@@ -70,6 +70,10 @@ Every stored value fits its attribute's entry: each write is checked, and a bran
 
 A live form whose `:form/src` is longer than `:seon.config.shrink/form-tokens` tokens (`seon.print.emit/chars-tokens`) is a `:long-form` (`seon.problems/long-forms`), read only for the vars a branch changed and shown as attention.
 
+## A hand-written list
+
+A page's parts are what its entity's pull holds, each drawn by its schema's render ([the page](render.md#the-page)); a list names none. A render whose var carries `:seon.render/list` and whose form names a component (a render whose contract takes `:seon.render/opts`, [components](render.md#components)) other than itself is a `:hand-written-list` (`seon.problems/hand-written-lists`), one row a list naming its parts. A branch that adds one is refused done; one main already had is a task of the list's owner. It closes when the list draws its parts from the pull.
+
 ## An unfocused docstring
 
 A Seon var's docstring says what the var answers and the one thing a caller must know, and cites its wiki section once; its history and measurements belong to git and the wiki. A docstring over `:seon.config.shrink/docstring-words` words, or holding a measurement, a date or a wiki page cited twice, is an `:unfocused-docstring` (`seon.problems/unfocused-docstrings`), read only for the vars a branch changed and shown as attention. Agents close them one task a var (`seon.template/focus-docstring`).
