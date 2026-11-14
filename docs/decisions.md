@@ -14,6 +14,10 @@ The owner's rulings of this day and the night before, each with his words where 
 
 "I want more engineering rigor encoded into our processes. Rarely should you be telling me you want to flatten AGENTS.md without clear reasons. We keep re-solving the same problems over and over because of these institutional knowledge wipes." A rule goes only with the incident or ruling behind it, what holds it now, and why it no longer earns its place. Stated in [the plan](plan.md#throughout).
 
+### Tests: the harness does the thinking
+
+"Every test needs a justification why it can't fork main or a specific branch ... Only tests that boot the system and get it to the running state can even be considered for a non online test." "Why does it matter what the config is that we are forking from. Part of the env setup for the agent is updating the runtime. Don't make this complicated. Make it so it's routing and we can't fuck this up." "Our test fixtures should handle all thought so agents can't write shitty tests." A test is an assertion; the harness gives it a fork on its branch, set to that branch's environment at start, warm fixtures before timing, a budget from its declared estimate, writes to its own branch only, and a mutation check; booting a system is allowed only to a test of booting, with its reason. Stated in [the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority).
+
 ### The system operates via Flow; no gates or fences
 
 "No gates or fences unless it's at boot or an edge and we have clear understanding of why it's required. I want the system to operate via flow and that should fix all the crazy load and processing issues." After a merge gate outside Flow (a git worktree, a rebuild, a hand-set worker count) booted ~74 test roots at once. Work, proving included, flows through Flow procs and the effects owner, admitted by bounded channels; a check exists only at boot or at an edge, with its reason stated. Stated in [the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority) and [principles](principles.md#5-boring-by-construction).
