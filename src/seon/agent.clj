@@ -744,7 +744,8 @@
   resumed branch's older one) is the graph held updated to it (seon.program/reach-update, in
   either direction), never built again: the graph held is the one this process was forked
   with, main's, kept by the fork server (:graph) with its index (seon.program/reach-indexed), and built
-  here only when there is none or its :data-refs are not inputs'. The graph held keeps its index
+  here only when there is none, its :data-refs are not inputs', or base is no store's value (no commit: a test's world, graphed
+  whole at its own size). The graph held keeps its index
   across the update, so the base's is the answers of the tests the move touched, never of every test
   (docs/source.md#tests-run-by-reach)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.program/inputs] :map]}
@@ -755,6 +756,9 @@
     (if (and w (first at) (= at w-at) (= inputs (:inputs w)))
       (:value w)
       (let [g (cond (not (and g0 (= (:data-refs inputs) (:data-refs g0)))) (program/reach-graph base (:data-refs inputs))
+                    ;; a db no store commit names (a test's world) shares nothing with the graph held: graphed whole, at its own
+                    ;; size, never main's whole program updated down to it (40M ticks in a test child)
+                    (nil? (first at)) (program/reach-graph base (:data-refs inputs))
                     (and (first at) (= at w-at)) g0
                     :else (program/reach-update g0 base))
             g (program/reach-indexed g inputs)
@@ -1263,10 +1267,8 @@
         ;; and as a test process: a private function's contract is checked on each call here, whatever its agent's
         ;; setting (the owner, 2026-11-10: "Private helpers: tests only"; docs/checks.md#contracts-armed-at-definition)
         (contract/check-private! true)
-        ;; nor the agent's walk: a fork holds its reactions on @ctx, which would run at a test's every write of a
-        ;; record of its own (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
-        (some-> (:walk @state) render/dispose-walk!)
-        (swap! state #(-> % (dissoc :walk) (assoc :mode :test :evaluating false)))
+        ;; nor the agent's walk, a value its test has no use for (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
+        (swap! state #(-> % (dissoc :walk :walk-whole?) (assoc :mode :test :evaluating false)))
         ;; the test's own working directory: what a test writes relative to it is this run's, removed
         ;; when the child has ended (docs/failure-points.md, a directory walk)
         (let [run-dir (fx/run-dir (lib/c-getpid))] (.mkdirs (java.io.File. ^String run-dir)) (lib/c-chdir run-dir))
@@ -1734,6 +1736,23 @@
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
     (:result (await-reply k {:op :gate :k k :tests tests :prio prio}))))
 
+(defn send-gate!
+  "Send root's :gate request k for tests at prio and wait on nothing: its answer arrives as a :reply nobody awaits, which handle!
+  holds for the next judge! (gate-later!). The seam a test answers at, as ask-gate is. See
+  docs/merging.md#a-merge-runs-what-the-change-reaches."
+  {:malli/schema [:=> [:cat :int [:vector :qualified-symbol] :int] :nil]}
+  [k tests prio] (send! {:op :gate :k k :tests tests :prio prio}) nil)
+
+(defn- gate-later!
+  "Ask the merge gate for tests at prio without waiting (send-gate!), held as pending under its key so its answer is kept when it
+  arrives (handle!): an eval never waits on a gate, which may run for minutes behind others' (one waited 17 minutes). Answers the key."
+  {:malli/schema [:=> [:cat [:vector :qualified-symbol] :int] :int]}
+  [tests prio]
+  (let [k (:tx-seq (swap! state update :tx-seq inc))]
+    (swap! state assoc-in [:gates-pending k] tests)
+    (send-gate! k tests prio)
+    k))
+
 (defn judge!
   "A run's whole verdict: prove! :judge (names as it takes them), and once what it ran is green, the process tests it left
   (:deferred, which a fork of this agent cannot run) on the merge gate's checkout through root's one :gate request (seon.fx/run-tests),
@@ -1757,10 +1776,8 @@
             named? (fn [t] (or (task/proof? tk t) (contains? names t) (contains? names (symbol (namespace t)))))
             pull-of (fn [t] (d/pull (db) [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes] [:var/name t]))
             open (filterv #(contains? #{nil :deferred} (:seon.test/status (pull-of %))) (remove (set (:tests closed)) (:deferred r)))
-            ;; one stage's tests through the gate, written where the status reads them; its error or nil
-            gate! (fn [tests prio]
-                    (when (seq tests)
-                      (let [g (ask-gate tests prio)]
+            ;; a gate's answer g for tests, written where the status reads them; its error or nil
+            apply-gate! (fn [tests g]
                         (cond
                           (contract/error? g) g
                           (seq (:unread g)) (contract/error :seon.agent/gate-unread #'judge! (str "the gate can't run your process tests: " (str/join "; " (for [u (:unread g)] (str (:ns u) ": " (:reason u))))) {:unread (:unread g)})
@@ -1771,12 +1788,25 @@
                                           (gate-plan-failure (slurp (:log (:value g))) (sort (for [[k n] (keys (branch-changes (:base @state) (db))) :when (= :ns k)] n))) {:tests tests})
                           :else (do (transact! (proofs/gate-tx (into {} (map (juxt identity pull-of)) tests) (:value g)))
                                     (commit!)
-                                    nil)))))
-            first-err (gate! (filterv named? open) 1)
+                                    nil)))
+            ;; one stage's tests through the gate, waited on: the judge's own run (reach?), never an eval's
+            gate! (fn [tests prio] (when (seq tests) (apply-gate! tests (ask-gate tests prio))))
+            ;; the answers of gates an eval asked (gate-later!) that arrived since, written first, each once
+            arrived (let [a (:gate-answers @state)] (swap! state dissoc :gate-answers) a)
+            arrived-err (some (fn [[_ {:keys [tests result]}]] (apply-gate! tests result)) (sort-by key arrived))
+            open (filterv #(contains? #{nil :deferred} (:seon.test/status (pull-of %))) open)
+            pending (into #{} cat (vals (:gates-pending @state)))
+            named-open (filterv named? open)
+            first-err (or arrived-err
+                          (if reach?
+                            (gate! named-open 1)
+                            ;; an eval's prove: asked of the gate, never waited on
+                            (do (when-let [ask (seq (remove pending named-open))] (gate-later! (vec ask) 1)) nil)))
             red? (some (fn [t] (= :red (:seon.test/status (pull-of t)))) (filter named? open))
             rest-tests (when-not (or first-err red?) (filterv (complement named?) open))
             err (or first-err (when reach? (gate! rest-tests 0)))
             unjudged (cond closed (:why closed)
+                           (and (seq named-open) (not reach?)) "your process proofs run on the merge gate, asked now: their verdicts reach your page when it ends, and the next (my.agent/prove) records them"
                            (and (seq rest-tests) (not reach?)) "the tests your change reaches run when your status is clear")]
         (if err
           err
@@ -1922,6 +1952,13 @@
                                      (:checkout m)
                                      (:seon.prove/batch m))]
              [{:op :tests :id (:id m) :result (if (and (map? r) (not (contract/error? r))) (proofs/answer r (asked m proofs (:selected r))) r) :mem-mb (mem-mb)}]))
+    ;; a gate an eval asked (gate-later!) has answered: held for the next judge!, and a message to this agent
+    :reply (when-let [tests (get-in @state [:gates-pending (:k m)])]
+             (swap! state #(-> %
+                               (update :gates-pending dissoc (:k m))
+                               (assoc-in [:gate-answers (:k m)] {:tests tests :result (:result m)})
+                               (update :inbox (fnil conj []) {:from :gate :k (:k m) :kind :gate :body {:tests tests}})))
+             nil)
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
     :fx-reply (let [r (dissoc m :op :k)]
                 (swap! state update :inbox (fnil conj []) {:from :fx :k (:k m) :kind (fx-done! (:k m)) :body r})

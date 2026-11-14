@@ -497,6 +497,33 @@
   [{:seon.message/id mid :seon.message/from from :seon.message/body body :seon.message/sent-ms sent-ms
     :seon.message/to (mapv #(vector :seon.agent/key %) tos)}])
 
+(defn landed-messages
+  "Who to tell that tasks ids landed on db, and what: for each, the live agents (no :seon.agent/ended-ms) of the tasks whose
+  :seon.task/needs name it, each a message {:to its key :body :landed id} naming what landed, the task it unblocks and the form that takes it.
+  A task nothing needs tells no one. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.task/id]] [:vector [:map [:to :string] [:body :string] [:landed :seon.task/id]]]]}
+  [db ids]
+  (vec (for [id ids
+             :let [e (pdb/eid db :seon.task/id id)
+                   mt (:seon.task/merged-t (d/entity db e))]
+             :when e
+             w (sort (map :e (d/datoms db :avet :seon.task/needs e)))
+             :let [wt (d/entity db w) a (:seon.task/agent wt)]
+             :when (and a (not (:seon.agent/ended-ms a)))]
+         {:to (:seon.agent/key a) :landed id
+          :body (str id " landed on main" (when mt (str " (t " mt ")")) ", which your task " (:seon.task/id wt)
+                     " needs. Take it with (my.branch/merge-main!).")})))
+
+(defn landed-tx
+  "The messages of `landed-messages` for tasks ids landing on db, each from the system (system-sender) at sent-ms, its id named by
+  what landed, its recipient and db's t, so a replay of the same write names the same message: what the reconciler's merge writes
+  with the merge, whose write wakes each recipient. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.task/id] :int] :seon.db/tx-data]}
+  [db ids sent-ms]
+  (vec (mapcat (fn [{:keys [to body landed]}]
+                 (message-tx (lib/id (lib/digest (str "landed/" landed "/" to "/" (:max-tx db)))) system-sender [to] body sent-ms))
+               (landed-messages db ids))))
+
 (defn undelivered
   "The messages main holds to the agent with key k that branch-db, its branch, does not hold: each {:id :from :body :sent-ms}, :from its sender as a ref's value (`sender`), in main's
   order (by transaction, then id). The agent's ref on main is the fact (a seek of :seon.message/to on its entity, never a scan of the

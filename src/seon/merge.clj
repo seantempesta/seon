@@ -467,7 +467,13 @@
                    carried)
         tx (-> (attribute-declarations onto carried) (into carried) (into gone))]
     (if-let [own (seq (keep #(when (= :schema (first %)) (second %)) ks))]
-      (let [merged (pdb/speculate-db onto tx)
+      ;; the merged registry reads only schema entries (program/schema-changes), so only their datoms are speculated: the
+      ;; whole tx, speculated, cost the merge's own commit a second time (2.11B ticks and 4.7 GB of 10.3B on context's branch, 2026-11-14)
+      (let [schema-attr? #{:schema/key :schema/form :schema/file}
+            entry? (fn [x] (if (vector? x)
+                             (and (= :db/retractEntity (first x)) (some? (:schema/key (d/entity onto (second x)))))
+                             (schema-attr? (:a x))))
+            merged (pdb/speculate-db onto (filterv entry? tx))
             reg (program/schema-registry (program/schema-changes merged))]
         (-> tx (into (program/schema-declarations onto reg))
             (into (mapcat #(program/own-declaration onto % reg)) own)))

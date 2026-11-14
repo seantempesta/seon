@@ -481,10 +481,10 @@
   (let [doc-load (requiring-resolve 'seon.doc/load-tx)
         page (requiring-resolve 'seon.doc/system-page)
         db (if (@(requiring-resolve 'seon.doc/page-text) db @page) db (datahike.api/db-with db (doc-load db "docs" {@page "# A stub of the system prompt\n\nBe brief."})))
-        w (draw c @(requiring-resolve 'seon.ctx/changes) db #'seon.render.ui/agent
-                            {:model-only true :once true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
-    (try (vec (remove (fn [[r]] (or (nil? r) (#{:section :session :page} (first r)))) (:parts (@(requiring-resolve (quote seon.ctx.wire/request)) w))))
-         (finally (seon.render/dispose-walk! w)))))
+        p (seon.render/walk nil {:db db :tree c :root #'seon.render.ui/agent :index (seon.program/index-of-db db) :changes @(requiring-resolve 'seon.ctx/changes)
+                                 :model-only true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
+    (no-error-render (:defects p))
+    (vec (remove (fn [[r]] (or (nil? r) (#{:section :session :page} (first r)))) (:parts (@(requiring-resolve (quote seon.ctx.wire/request)) p db))))))
 
 (defn tree-messages
   "The messages of `tree-parts`."

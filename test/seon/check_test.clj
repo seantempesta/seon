@@ -239,6 +239,29 @@
       ;; the holders this test started end with it, by their own pids, whatever an assertion threw
       (finally (doseq [p @started] (sh "kill" "-9" p)) (seon.lib/remove-tree! dir)))))
 
+;; Estimate: as its sibling above (two held processes, a few sh calls, ~15M), plus the 300 ms bound waited
+(deftest ^{:seon.test/estimate {:ticks 15000000} :seon.test/execs ["bin/held" "mkfifo" "sh" "kill"]} a-stop-that-never-answers-ends-at-its-bound
+  ;; task seon.system/a-stop-that-never-answers-ends-with-its-evidence: a root that ignored TERM held bin/system stop (and the
+  ;; bin/test above it) for 10 minutes on 2026-11-14, two threads spinning in a failing dlsym; bin/held --end waited with no
+  ;; bound. The root's ROOT LISTENING line now carries its stop bound (:seon.config.root/stop-ms), the ready fifo passes it
+  ;; on, and --end given it answers "overran MS" with status 4 past it, so bin/system stop takes the evidence and kills
+  (let [dir (str (.getCanonicalPath (java.io.File. (seon.config/checkout) "target/tmp")) "/overran-" (random-uuid))
+        _ (.mkdirs (java.io.File. dir))
+        sh clojure.java.shell/sh
+        held-bin (str (seon.config/checkout) "/bin/held")
+        ready (str dir "/ready") done (str dir "/done") never (str dir "/never")
+        _ (sh "mkfifo" ready done never)
+        ;; it says it is up with a 300 ms stop bound, then ignores TERM and never ends, as that root did: it blocks opening a
+        ;; fifo nobody writes (no clock, no spin)
+        _ (sh held-bin "--detach" "--log" (str dir "/log") "--ready" ready "--done" done
+              "sh" "-c" (str "echo ROOT LISTENING 1 300; trap '' TERM; exec cat < " never))
+        [h c port ms] (str/split (str/trim (slurp ready)) #" ")]
+    (try
+      (is (= ["1" "300"] [port ms]) "the ready line carries the port and the stop bound")
+      (let [r (sh held-bin "--end" "TERM" h done "1" ms)]
+        (is (= [4 "overran 300\n"] [(:exit r) (:out r)]) "past its bound the wait ends, overran, status 4"))
+      (finally (doseq [p [h c]] (sh "kill" "-9" p)) (seon.lib/remove-tree! dir)))))
+
 ;; ---- task seon.check/health-is-what-a-branch-caused ------------------------------------------
 
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-failed-seed-says-failed
@@ -611,3 +634,27 @@
     (is (seon.check/left? {:pid 9 :ppid 1 :stat "S"} true self) "a row still running: left")
     (is (not (seon.check/left? {:pid 9 :ppid 1 :stat "Z"} true self)) "a row that can run nothing more: not left")))
 
+
+;; docs/server.md#working-a-task-from-a-worktree: bin/mcp relays each message on its own connection to root, and answers each as it
+;; comes, so one call waiting (a prove parked on a gate) blocks no other: measured 2026-11-14, one held call kept a session's every
+;; other tool call waiting 17 min while root answered others in 3 ms. Here a stand-in root holds call 1 open and answers call 2
+(deftest ^{:seon.test/execs ["bin/mcp"] :seon.test/estimate {:ticks 3000000}} a-relay-answers-a-quick-call-while-a-slow-one-waits
+  ;; estimate: one relay process started (~1M ticks of ours to start it and read its pipes) and three socket accepts
+  (with-open [ss (java.net.ServerSocket. 0 4 (java.net.InetAddress/getByName "127.0.0.1"))]
+    (let [p (.start (ProcessBuilder. ^java.util.List [(str (seon.config/checkout) "/bin/mcp") (str (.getLocalPort ss))]))
+          in (.getOutputStream p)
+          line! (fn [^java.io.OutputStream os s] (.write os (.getBytes (str s "\n") "UTF-8")) (.flush os))
+          out (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream p)))
+          answer! (fn [^java.net.Socket s line]
+                    (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s))))
+                    (line! (.getOutputStream s) line)
+                    (.close s))]
+      (try
+        (line! in "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\"}")
+        (let [slow (.accept ss)]
+          (line! in "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}")
+          (answer! (.accept ss) "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}")
+          (is (str/includes? (.readLine out) "\"id\":2") "the quick call is answered while the slow one waits")
+          (answer! slow "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[]}}")
+          (is (str/includes? (.readLine out) "\"id\":1") "and the slow one when root answers it, a whole line"))
+        (finally (.close in) (.waitFor p))))))

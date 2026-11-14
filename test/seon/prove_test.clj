@@ -496,6 +496,20 @@
     (is (seon.contract/error? (get-in r [:results 'app.x-test/t])) "the asker holds the typed error for the item")
     (is (= 1 (free st)))))
 
+;; docs/principles.md#6-nothing-changed-nothing-runs-a-change-costs-what-it-touched: a wall-time end read the machine, so the service
+;; answers it as no verdict and a :platform problem (the core's own, loud), never a red its cache keeps (root.log 2026-11-14: 21 such)
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-wall-time-end-is-a-platform-problem-never-a-red
+  (let [[st o1] (prove/ask-items (items-st 1) 7 :batch {['app.x-test/t "d1"] {:agent :a1 :ms 5}})
+        b (first (batches o1))
+        [st v] (step/answered st (:tag b))
+        ended {:pass 0 :fail 0 :error 1
+               :reports [{:type :error :var "#'app.x-test/t" :seon.error/type :seon.test/wall-spent :message "Uncaught exception, not in assertion."
+                          :actual "the test ran past its wall bound of 36700 ms"}]}
+        [st o2] (prove/batch-ended st (parse-long (second v)) ended)
+        r (get-in (answers o2) [7 :results 'app.x-test/t])]
+    (is (= :seon.prove/no-verdict (:seon.error/type r)) (str "no verdict, never a red: " (pr-str r)))
+    (is (some #(and (= :problem (:op %)) (= :platform (:class %))) o2) "and a :platform problem, loud")))
+
 ;; docs/merging.md#the-test-service: each asker is told an item's verdict as it lands, before it is answered, so a session's
 ;; bin/prove prints each test as it ends; an item with no verdict is told as :no-verdict, never left out
 (deftest ^{:seon.test/estimate {:ticks 200000}} each-asker-is-told-a-verdict-as-it-lands
@@ -724,6 +738,23 @@
     (is (= 0 (nth (run nil 3) 2)) "no reading: nothing more while one runs")
     (is (= 18 (count (batches (second (prove/ask-items st0 1 :batch (into {} (for [i (range 18)] [[(symbol "app.w-test" (str "t" i)) (str "d" i)] {:agent (keyword (str "a" i)) :ms 5}])))))))
         "a plain test's batch is its child alone: eighteen, one a worker")))
+
+;; docs/merging.md#the-test-service: a class no reading has seen is never sized by another class's peak. A merge gate's 20 process tests,
+;; each booting a whole root (its bin/held, its embed-worker, its children), were granted beside each other at a step's measured 3
+;; processes a batch: ~74 roots and load 70 on 18 cores (runs/evidence/load70-1026). A class never read runs alone, its peak is
+;; read, and then it is admitted by that peak. T1, in process: ~40 grant passes over 20 items.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-class-never-read-runs-alone-until-its-peak-is-read
+  (let [procs (fn [pre n] (into {} (for [i (range n)] [[(symbol "app.r-test" (str pre i)) (str pre "d" i)]
+                                                       {:agent (keyword (str pre i)) :process? true :tree "t" :checkout "/c" :ms 5}])))
+        st0 (assoc (merge (proc0) (prove/admission {:cores 18})) :peaks {[:step false true] 3})]
+    (with-redefs [prove/held-processes (fn [] {})]
+      (is (= 1 (count (batches (second (prove/ask-items st0 1 :batch (procs "t" 20))))))
+          "twenty root-booting tests, their class never read: one batch alone, not one at each step's three"))
+    (with-redefs [prove/held-processes (fn [] {(prove/batch-tag 1) 15})]
+      (let [[st _] (prove/ask-items st0 1 :batch (procs "a" 1))
+            [st o] (prove/ask-items st 2 :batch (procs "b" 19))]
+        (is (= 16 (get-in st [:peaks [:test true false]])) "its batch read at 15 and its own child: the class's peak")
+        (is (= 0 (count (batches o))) "sixteen beside sixteen is over twenty: nothing more while it runs")))))
 
 ;; docs/clocks.md#the-machines-load-admits-work: over max-load nothing more is granted while an item runs; with nothing
 ;; running one item is granted anyway, so the queue never stalls with nothing to wake it

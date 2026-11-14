@@ -1069,6 +1069,26 @@
     (let [u1 (into {} (map (juxt :id :html)) (render/placed-units w))]
       (vec (sort (for [[id h] u1 :when (not= h (get u0 id))] id))))))
 
+(defn- kept-walk
+  "Agent demo/a1's walk on db (sections-near's, working demo/r) kept as a value, as its process keeps it (seon.repl/page-walk):
+  [walk-cell db-cell ctx-cell]. A change is (step-kept! k tx-data): the transaction applied, ctx patched by its datoms, the
+  walk advanced by them. See docs/render.md#a-page-is-a-kept-walk."
+  [db & [outputs]]
+  (let [db (d/db-with db [{:seon.agent/key "demo/a1" :seon.agent/task {:seon.task/id "demo/r"}}])
+        ix (seon.db/index)
+        c (ctx/build ix db (pdb/eid db :seon.agent/key "demo/a1") :b)
+        opts (fn [db c] {:db db :tree (:tree c) :root #'seon.render.ui/agent :index ix :changes ctx/changes
+                         :outputs (or outputs #{:seon.render/hiccup})})]
+    [(volatile! (render/walk nil (opts db c))) (volatile! db) (volatile! c) opts]))
+
+(defn- step-kept!
+  "Transaction tx-data on kept-walk's db: ctx patched by its datoms, the walk advanced by them. Answers the walk."
+  [[p cell c opts] tx-data]
+  (let [r (d/with @cell tx-data)]
+    (vreset! cell (:db-after r))
+    (vswap! c ctx/patch (:db-after r) (:tx-data r) :b)
+    (vswap! p render/walk (assoc (opts @cell @c) :moved (:tx-data r)))))
+
 (deftest a-new-turn-does-not-run-the-status-again
   ;; docs/render.md#how-the-work-stands: the status reads facts about the work, never the conversation. Its read of the newest
   ;; turn, for a design task, ran it again each turn for every task: about 11 MB a turn, for the same output
@@ -1090,13 +1110,13 @@
 (deftest the-status-is-one-reaction-the-page-and-the-turn-read
   ;; docs/render.md#how-the-work-stands: the turn decides from what the component kept, so a status nothing moved costs nothing, and a move reaches both at once
   (let [[db te] (sections-near "Make ```demo/g``` say one thing.")
-        [w :as walk] (walked db)
-        kept #(render/kept-of w '[seon.render.ui/status])
+        [p :as walk] (kept-walk db)
+        kept #(render/kept-of @p '[seon.render.ui/status])
         c (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "demo/a1") :b))
         before (kept)]
     (is (map? before))
     (is (= (select-keys before [:phase :next]) (select-keys (status/status db (ctx/build (seon.db/index) (d/db-with db [{:seon.agent/key "demo/a1" :seon.agent/task {:seon.task/id "demo/r"}}]) (pdb/eid db :seon.agent/key "demo/a1") :b) {}) [:phase :next])))
-    (step! walk [{:seon.model-call/id (seon.lib/call-id "demo/a1" 1) :seon.model-call/agent [:seon.agent/key "demo/a1"] :seon.model-call/n 1 :seon.model-call/origin :model}])
+    (step-kept! walk [{:seon.model-call/id (seon.lib/call-id "demo/a1" 1) :seon.model-call/agent [:seon.agent/key "demo/a1"] :seon.model-call/n 1 :seon.model-call/origin :model}])
     (is (identical? before (kept)) "nothing of how the work stands moved: the same value, nothing ran")))
 
 (deftest what-is-taken-for-the-next-turn-is-read-before-that-turn-begins
@@ -1105,15 +1125,15 @@
   (let [[db _] (sections-near "Make ```demo/g``` say one thing.")
         ;; the request has a system message: a stub of the prompt
         db (d/db-with db (doc/load-tx db "docs" {doc/system-page "# A stub of the system prompt\n\nBe brief."}))
-        [w :as walk] (walked db #{:seon.render/hiccup :seon.render/openai-compat})
-        says #(pr-str (:messages (wire/request w)))
+        [p cell :as walk] (kept-walk db #{:seon.render/hiccup :seon.render/openai-compat})
+        says #(pr-str (:messages (wire/request @p @cell)))
         take! (fn [id body] (seon.task/message-tx id (seon.task/sender "owner") ["demo/a1"] body 1000))]
     (is (not (str/includes? (says) "Before the turn.")))
-    (step! walk (take! "m1" "Before the turn."))
+    (step-kept! walk (take! "m1" "Before the turn."))
     (is (str/includes? (says) "Before the turn.") "delivered for the turn after the one in force, 0")
-    (step! walk (ts/turn-tx "demo/a1" 1 {}))
+    (step-kept! walk (ts/turn-tx "demo/a1" 1 {}))
     (is (str/includes? (says) "Before the turn.") "and read by turn 1 when it opens")
-    (step! walk (take! "m2" "One past it again."))
+    (step-kept! walk (take! "m2" "One past it again."))
     (is (str/includes? (says) "One past it again.") "and past each turn after")))
 
 (deftest opening-a-page-does-not-change-what-the-model-reads
@@ -2488,14 +2508,13 @@
             ix (seon.db/index)
             c (ctx/agent-ctx ix db (pdb/eid db :seon.agent/key "a1"))
             ;; task-msgs throwing as a contract refusal does (Context's case: its arguments refused), the call the walk places left as it is
-            w (with-redefs [wire/task-msgs (fn [_ before id] (throw (ex-info "seon.ctx.wire/task-msgs invalid-input" {:seon.error/type :seon.instrument/contract-error :in [before id]})))]
-                (render/draw c ctx/changes db (render/render-var-of ix c) {:model-only true :once true :index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}}))]
-        (try
-          (let [said (pr-str (:messages (wire/request w)))]
-            (is (str/includes? said "seon.ctx.wire/task-msgs") (str "the model reads which call threw: " said))
-            (is (and (str/includes? said "Reply 1.") (str/includes? said "Reply 2.")) "the other parts are still there")
-            (is (= [:seon.render/component-defect] (map :seon.error/type (render/take-defects! w))) "one defect, recorded once"))
-          (finally (render/dispose-walk! w)))))))
+            p (with-redefs [wire/task-msgs (fn [_ before id] (throw (ex-info "seon.ctx.wire/task-msgs invalid-input" {:seon.error/type :seon.instrument/contract-error :in [before id]})))]
+                (render/walk nil {:db db :tree c :root (render/render-var-of ix c) :index ix :changes ctx/changes :model-only true
+                                  :outputs #{:seon.render/hiccup :seon.render/openai-compat}}))]
+        (let [said (pr-str (:messages (wire/request p db)))]
+          (is (str/includes? said "seon.ctx.wire/task-msgs") (str "the model reads which call threw: " said))
+          (is (and (str/includes? said "Reply 1.") (str/includes? said "Reply 2.")) "the other parts are still there")
+          (is (= [:seon.render/component-defect] (map :seon.error/type (:defects p))) "one defect, recorded once"))))))
 
 ;; docs/render.md#style: presentation goes from the page the model reads, and a map the page shows as data keeps its entries:
 ;; a map entry [:k {...}] is a vector headed by a keyword with a map second, and was rebuilt as an element, which its map

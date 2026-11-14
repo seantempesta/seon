@@ -1457,7 +1457,8 @@
                                          (= [{:seon.agent/key (seon.config/value :seon.config.root/user-name)}] (mapv :by roots)))
                 :agent-eval (clojure.string/includes? (str (text 4)) "42") :root-eval (clojure.string/includes? (str (text 5)) "1")
                 :relay-within-bound (boolean (some-> (peak-mb r) (<= bound)))
-                :root-down-answers-every-request (and (zero? (:exit down)) (= [1 2 3 4 5] (mapv #(get % "id") (lines down)))
+                ;; in any order: the relay answers each message as root answers it (JSON-RPC pairs by id)
+                :root-down-answers-every-request (and (zero? (:exit down)) (= [1 2 3 4 5] (sort (mapv #(get % "id") (lines down))))
                                                       (every? #(get-in % ["error" "message"]) (lines down)))}}))))
 
 (defn- os-threads

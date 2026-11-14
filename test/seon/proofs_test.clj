@@ -421,6 +421,15 @@
   "[{var calls} of the contracted functions thunk called, and thunk's answer]."
   [thunk] (profile/begin!) (let [r (thunk)] [(into {} (map (juxt :var :calls)) (profile/touched)) r]))
 
+;; docs/testing.md#testing-in-the-world: the world (my.test/world) is built before any test, never inside the first one's budget.
+;; seon.program-test/a-config-entry-moves-the-program-digest measured 91,663 ticks and 3,306,725 at one digest, both under bin/test:
+;; the run in which it was the first to read the world built it (~3.2M) inside its 300k estimate's budget, red on main. Cost: the two
+;; worlds' builds once a process, ~3.2M each, which every test that reads them no longer pays.
+(deftest ^{:seon.test/estimate {:ticks 8000000}} the-world-is-built-before-any-test-reads-it
+  (proofs/warm-fixtures!)
+  (is (every? realized? [@#'my.test/plain-world @#'my.test/history-world])
+      "both worlds are fixtures: an agent forces them before its first test fork, a shard before its first test"))
+
 ;; docs/merging.md#verdicts-are-a-cache: the kept program store is the repository's, read by every checkout's plans and shards at
 ;; once, so one past its bound is moved aside whole (an atomic rename) for a new one, never removed in place: a removal under
 ;; another process's reader left an empty data file its next connect read as "Database does not exist" (data's, runtime's and
@@ -835,6 +844,18 @@
 ;; is answered as an :error naming why, :not-run: no verdict of its own, so it is never written to the cache. Found by runtime's
 ;; review, 2026-11-13: answer-ran left out only :reused and died reports, so that error was cached as a red at the test's real
 ;; digest, which a later run would reuse and never run the test. Estimate: one fold of three reports, ~50k ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-wall-time-end-is-no-verdict-and-never-cached
+  ;; docs/principles.md#6-nothing-changed-nothing-runs-a-change-costs-what-it-touched: a test ended at its wall bound
+  ;; (:seon.test/wall-spent, seon.agent/arm-wall!) read the machine's load, not its own work: 21 root-starting tests ended so in the
+  ;; service at load, green alone, and their cached reds made them flaky at their digests (root.log, 2026-11-14). Its end stops the
+  ;; hang; it is never a verdict. Estimate: two reports read, ~0.1M
+  (let [answer {:reports [{:type :pass :var "#'a.x-test/ran"}
+                          {:type :error :var "#'a.p-test/waits" :seon.error/type :seon.test/wall-spent
+                           :message "Uncaught exception, not in assertion." :actual "the test ran past its wall bound of 36700 ms"}]
+                :digests {'a.x-test/ran "d1" 'a.p-test/waits "d2"}}
+        {:keys [ran]} (proofs/answer-ran answer)]
+    (is (= #{'a.x-test/ran} (set (keys ran))) "only the test that ended by its own work is a verdict to cache")))
+
 (deftest ^{:seon.test/estimate {:ticks 100000}} a-test-not-run-is-no-verdict-and-never-cached
   (let [answer {:reports [{:type :pass :var "#'a.x-test/ran"}
                           {:type :error :var "#'a.p-test/boots" :not-run true :message "a.p-test/boots reaches a process of its own"}]

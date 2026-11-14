@@ -1133,7 +1133,7 @@
                             back? (and (:source st) (seq paths) (cfg/value :seon.config.source/write-back-on-merge))]
                         (one (write (cond-> st back? (assoc-in [:flights id :writeback] {:files paths :members (vec (for [[m x] merged :when (seq (:files x))] m))}))
                                     id (if back? :write-back :done)
-                                    (vec (mapcat (fn [{:keys [task]} r]
+                                    (vec (concat (mapcat (fn [{:keys [task]} r]
                                                    (let [n (behinds (:db st) task)
                                                          problem (if (= :seon.merge/behind (:seon.error/type r))
                                                                    (str "merge behind main " (inc n) " times (past :seon.config.merge/max-behind): " (:seon.error/message r))
@@ -1151,7 +1151,10 @@
                                                        (task/move-tx task :ready :behind {:seon.task/reason (:seon.error/message r) :seon.task/error r})
                                                        :else (hold-tx (:db st) task (task/move-tx task :ready :closed {:seon.task/reason problem :seon.task/error r})
                                                                       problem {:conflicts (:seon.task/conflicts t) :unmerged (:seon.task/unmerged t)}))))
-                                                 (:members act) (:results r))))))
+                                                 (:members act) (:results r))
+                                         ;; the live agents of the tasks a merged one unblocks are told, in this write, which wakes each
+                                         ;; (seon.task/landed-tx; plan Stage 1.8)
+                                         (task/landed-tx (:db st) (mapv (comp :task first) merged) (System/currentTimeMillis)))))))
       ;; each deferred test's status on the task. The candidate is the writer's: the files the octopus merge would write
       ;; (seon.writer's :merge-candidate), forms', tests' and schema resources' alike (a :seon.ref/block change left out would
       ;; meet its new seon.ref/scan in the checkout, and the seed would throw on scan's contract). A refused candidate (an
