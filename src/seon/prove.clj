@@ -176,7 +176,9 @@
                                   (let [v (value it)] (if (or (nil? best) (> v (nth best 2))) [k it v] best))
                                   best))
                               nil (:items st))]
-      (if (nil? k)
+      ;; credit at the ask site: no batch is asked once the open asks fill the :answers port (flow's review: one grant could open
+      ;; a budget's worth past it; the input filter is only the backstop)
+      (if (or (nil? k) (>= (count (:pending st)) (cfg/value :seon.config.root/reconciler-buf)))
         [st outs]
         (let [batch (batch-of st k it (max 1 (- (:budget st) sent)))
               bid (inc (:bid st 0))

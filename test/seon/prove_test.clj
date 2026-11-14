@@ -597,7 +597,11 @@
       (is (and f (not (f :req)) (f :answers)) "at the cap it reads only its answers")
       (let [[st2 _] (prove/prove-proc (assoc st :pending {}) :main {:t 2 :ops []})
             f2 (:clojure.core.async.flow/input-filter st2)]
-        (is (or (nil? f2) (f2 :req)) "below it, requests are read again")))))
+        (is (or (nil? f2) (f2 :req)) "below it, requests are read again")))
+    (testing "the cap holds at the ask site: a grant at one below it deals one batch, never a budget's worth (flow's review)"
+      (let [items (into {} (for [i (range 8)] [[(symbol "app.c-test" (str "t" i)) (str "d" i)] {:agent (keyword (str "a" i)) :ms 5}]))
+            [st _] (prove/ask-items (assoc (items-st 8) :pending {0 {:k 0} 1 {:k 1} 2 {:k 2}}) 1 :batch items)]
+        (is (<= (count (:pending st)) 4) (str "open asks within the answers port: " (count (:pending st))))))))
 
 (defn queue-of
   "Grant's argument at n: the service's state with n items queued for one batch asker and a budget of one. See
