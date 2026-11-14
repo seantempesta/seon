@@ -1696,11 +1696,12 @@
               3 "(def v3 [:enum :one :two :three])"
               4 "(defn v4 [m] (select-keys m [:app.x/a :app.x/b :app.x/c]))"
               5 "(defn v5 [] (cfg/value :seon.config.x/y))"
-              6 "(defn v6 [m] (get-in m [:a :b :c]))"}
-        head (var-forms (world) 6 (fn [i] {:src (srcs (int i))}))
+              6 "(defn v6 [m] (get-in m [:a :b :c]))"
+              7 "(defn v7 [root] (git! {} root [\"rev-parse\" \"--verify\" \"HEAD\"] nil))"}
+        head (var-forms (world) 7 (fn [i] {:src (srcs (int i))}))
         rows (fn [names] (mapv :evidence (problems/hand-written-lists head {} names)))]
     (is (= [{:kind :hand-written-list :var (v 1) :members [:app.x/a :app.x/b :app.x/c]}] (rows #{(v 1)}))
         "a set of three attributes a function tests membership in is a row naming its members, its owner the var's namespace")
-    (is (= [] (rows #{(v 2) (v 3) (v 4) (v 5) (v 6)}))
-        "not a pull pattern, a malli enum, the keys a select takes, a config read or a path: each names what its read takes")
+    (is (= [] (rows #{(v 2) (v 3) (v 4) (v 5) (v 6) (v 7)}))
+        "not a pull pattern, a malli enum, the keys a select takes, a config read, a path or a command's argv: each names what its call takes")
     (is (= [(v 1)] (mapv :var (rows nil))) "the whole program's: every form on the db")))

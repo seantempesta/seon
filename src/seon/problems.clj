@@ -475,9 +475,9 @@
   (boolean (some->> (pdb/eid db :var/name v) (d/entity db) :var/contract sedn/decode render/contract-inputs seq)))
 
 (def ^:private reads-name
-  "The calls whose literal vector argument names what the read takes (a pull pattern, the keys a select takes, a path): never a
-  hand-made list. See docs/health.md#a-hand-written-list."
-  '#{pull pull-many select-keys get-in assoc-in update-in})
+  "The calls whose literal vector argument names what the call takes (a pull pattern, the keys a select takes, a path, a command's
+  argv, a foreign function's signature): never a hand-made list. See docs/health.md#a-hand-written-list."
+  '#{pull pull-many select-keys get-in assoc-in update-in git! git-try git-run sh defc})
 
 (defn- literal-lists
   "The hand-made lists in form f: each literal set, or vector of keywords or of strings, of three or more members all keywords, all
