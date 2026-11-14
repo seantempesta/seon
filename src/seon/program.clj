@@ -103,6 +103,11 @@
   passed to one is a reference, as a symbol in code is (any other quoted name is data, :quoted)."
   '#{clojure.core/resolve clojure.core/ns-resolve clojure.core/requiring-resolve})
 
+(def ^:private ns-enumerators
+  "The clojure.core functions that read every var of a namespace at run time: a literal namespace passed to one is a read of all
+  its vars, recorded as the keyword :seon.ns-vars/<namespace> on the form (reach-step gives it an edge to each)."
+  '#{clojure.core/ns-interns clojure.core/ns-publics clojure.core/ns-map})
+
 (defn- resolved
   "The var a call of resolver f names with its literal arguments args (datum): the qualified
   symbol it is passed, or ns-resolve's namespace and name; nil when they are no literal names
@@ -252,7 +257,10 @@
          :invoke (let [f (invoked n)]
                    ;; (resolve 'ns/x): the var it looks up by name is one it references
                    (when-some [s (when (resolvers f) (resolved f (mapv datum (:args n))))]
-                     (vswap! acc update :refs conj s)))
+                     (vswap! acc update :refs conj s))
+                   ;; (ns-interns 'n): every var of n is read, so one added there is a change of what this form reads
+                   (when-some [nsym (when (ns-enumerators f) (let [x (some-> (first (:args n)) datum)] (when (simple-symbol? x) x)))]
+                     (vswap! acc update :keywords conj (keyword "seon.ns-vars" (str nsym)))))
          nil)
        (case (:op n)
          :invoke (when-not in-fn?
@@ -1868,6 +1876,9 @@
                                                          (vec (for [k (:keywords f) :when (contains? (:schemas g) k)] (str "schema " k)))))
                                       ;; a docstring fact it names is kept, for :docs
                                       (cond-> (some doc-attrs (:keywords f)) (assoc :doc-attr? true))
+                                      ;; the namespaces it enumerates ((ns-interns 'n): analysis's :seon.ns-vars/<n>), each a read of all its vars
+                                      (as-> r (let [ns (into [] (keep #(when (= "seon.ns-vars" (namespace %)) (symbol (name %)))) (:keywords f))]
+                                                (cond-> r (seq ns) (assoc :ns-vars ns))))
                                       (dissoc :keywords))))
         rows (into (apply dissoc old removed) (map (juxt :id identity)) added)
         defs (if bulk? (indexed (for [f added a (defined f :var)] [a (:id f)]) false) (by (:defs g) :var))
@@ -1896,7 +1907,9 @@
         ;; it sends the process it answers for ('seon.turn/hand-back!)
         entry (cfg/value :seon.config.source/process-entry)
         entry-method? (fn [f] (some (fn [[k m]] (and (= :method k) (entry m))) (:defines f)))
-        named (fn [f] (if (or (test-nss (:ns f)) (entry-method? f)) (into (:refs f) (:quoted f)) (:refs f)))
+        ns-vars :ns-vars
+        named (fn [f] (cond-> (if (or (test-nss (:ns f)) (entry-method? f)) (into (:refs f) (:quoted f)) (:refs f))
+                        (seq (ns-vars f)) (into (map #(vector :ns-vars %)) (ns-vars f))))
         refd (if bulk?
                (indexed (for [f added r (named f)] [r (:id f)]) true)
                (reduce (fn [m f] (reduce #(update %1 %2 (fnil conj #{}) (:id f)) m (named f)))
@@ -1926,6 +1939,8 @@
                                      ;; a request a test's code builds goes to a root's server (in-agent's ask)
                                      (when (or (proc (:id f)) (bin (:id f)) (test-nss (:ns f))) (op-ids f))
                                      (filter rows (:sedges f))
+                                     ;; every var of a namespace it enumerates
+                                     (for [n (ns-vars f) [v _] defs :when (= (namespace v) (str n)) :let [id (var-form v)] :when id] id)
                                      (for [s (defined f :var)
                                            id (concat (get methods s) (get impls s) (filter rows (get contract s)) (keep var-form (get data-refs s)))]
                                        id)))))
@@ -1935,6 +1950,8 @@
         starters (when (some (into V M) entry) (concat proc bin (filter #(seq (:ops (rows %))) (keys rows))))
         dirty (-> (into (set (map :id added)) touched)
                   (into (mapcat #(get refd %)) V)
+                  ;; a var added to or gone from a namespace re-edges the forms that enumerate it
+                  (into (mapcat #(get refd [:ns-vars (symbol (namespace %))])) V)
                   (into (keep var-form) (concat V M P))
                   (into holders)
                   (into starters)

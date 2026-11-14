@@ -102,6 +102,9 @@
  ;; what a function cost on this branch, one entity a function, sorted together by an issued id: docs/sharing.md#a-functions-cost-is-a-fact
  :seon.fn/var [:and {:seon.db/identity true :seon.db/content-id true} :qualified-symbol]
  :seon.fn/stats [:and {:seon.db/no-history? true} [:map [:calls :int] [:ticks :int] [:self-ticks :int] [:bytes :int] [:self-bytes :int] [:hist [:map-of :int :int]] [:worst [:map [:self-ticks :int] [:eval [:maybe :string]]]]]]
+ :seon.pin/path [:and {:seon.db/identity true :description "A dependency's path in the source tree (a submodule, e.g. reference-code/jolt): a gitlink of the branch, one entity each."} :string]
+ :seon.pin/commit [:string {:description "The commit a gitlink pins its submodule at, as git names it (40 hex digits)."}]
+ :seon.pin/pin-fact [:map {:seon.db/attributes true} [:seon.pin/path :seon.pin/path] [:seon.pin/commit :seon.pin/commit]]
  :seon.db/fn-fact [:map {:seon.db/attributes true} [:seon.fn/var :seon.fn/var] [:seon.fn/stats {:optional true} :seon.fn/stats]]
  :seon.db/config-fact [:map {:seon.db/attributes true} [:config/key :config/key] [:config/form :config/form] [:config/file :config/file]]
  :seon.db/schema-fact [:map {:seon.db/attributes true} [:schema/key :schema/key] [:schema/form :schema/form]

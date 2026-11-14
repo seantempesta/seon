@@ -1155,7 +1155,6 @@
                              (:branch r) (assoc :branch (:branch r))
                              ;; the tree it read: the next import reads only what differs from it
                              (:tree r) (assoc :tree (:tree r))
-                             (seq (:pins r)) (assoc :pins (:pins r))
                              ;; a read that carries its files with an error (a gap with main) imports, and says so
                              (contract/error? r) (assoc :error (:seon.error/message r))))]
     (cond
@@ -1166,7 +1165,9 @@
             bad (if (contract/error? tx) tx (unimportable db files tx (:commit held)))]
         (if bad
           {:digest digest :fact (assoc (fact-on db (count files)) :error (:seon.error/message bad)) :error bad}
-          (let [tx (into (vec tx) (source/modes-tx db (:modes r)))]
+          (let [tx (cond-> (into (vec tx) (source/modes-tx db (:modes r)))
+                     ;; the gitlinks a git read found: the branch's pins are exactly these (a read with none, no git, leaves them)
+                     (contains? r :pins) (into (source/pins-tx db (:pins r))))]
             {:digest digest :tx tx
              ;; the counts read three attributes after tx: only their part of it is applied (seon.db/project-tx), never the whole import
              :fact (assoc (fact-on (pdb/speculate-db db (pdb/project-tx tx #{:form/id :ns/name :ns/file :schema/key :schema/file})) (count files))
@@ -1355,14 +1356,18 @@
   changed-tx of its changed files and modes, and root's :seon.system/source fact moved to the landed tree (its :tree,
   :commit and :digest, as an import of that tree records them), so the next re-index (my.root/import!) reads only what
   differs from that tree, not every file landed since the last import."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string :string] :string :string] :seon.db/tx-data]}
-  [db changed modes tree commit]
-  (let [held (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))]
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string :string] :string :string] :seon.db/tx-data]
+                  [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string :string] :string :string [:map-of :string [:maybe :string]]] :seon.db/tx-data]]}
+  ([db changed modes tree commit] (landed-tx db changed modes tree commit {}))
+  ([db changed modes tree commit pin-changes]
+  (let [held (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))
+        ;; the landed tree's pins: main's, moved by the landing's gitlinks (a commit, or nil for a submodule removed)
+        pins (into {} (remove (comp nil? val)) (merge (source/pins-of db) pin-changes))]
     ;; the tree's task files where the tree keeps them (its layout, :seon.config.source/tasks-dir), never this root's own task dir;
     ;; the tasks the landed commits say they complete, done (landed-completes)
-    (cond-> (changed-tx db changed modes (cfg/value :seon.config.source/tasks-dir) (landed-completes held commit))
+    (cond-> (into (changed-tx db changed modes (cfg/value :seon.config.source/tasks-dir) (landed-completes held commit)) (source/pin-changes-tx db pin-changes))
       held (conj {:seon.system/id :root
-                  :seon.system/source (assoc held :tree tree :commit commit :digest (source-digest {:tree tree :pins (:pins held)} (:dirs held [])))}))))
+                  :seon.system/source (assoc (dissoc held :pins) :tree tree :commit commit :digest (source-digest {:tree tree :pins pins} (:dirs held [])))})))))
 
 (defn catch-up
   "What brings db's index of its checkout up to date with the files at root as they are now (docs/source.md#a-boot-catches-up-with-its-checkout):

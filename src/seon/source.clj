@@ -311,6 +311,29 @@
   [db modes]
   (vec (for [[p m] (sort modes) :when (not= m (:file/mode (d/entity db [:file/path p])))] {:file/path p :file/mode m})))
 
+(defn pins-of
+  "{path commit} of db's pins: each gitlink of the branch, a :seon.pin/pin-fact entity the import wrote. What seon.fx/runtime-for
+  reads to name the runtime a branch runs on. See docs/source.md#indexing-a-tree."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :string :string]]}
+  [db]
+  (into {} (for [{:keys [e v]} (d/datoms db :aevt :seon.pin/path)] [v (:v (first (d/datoms db :eavt e :seon.pin/commit)))])))
+
+(defn pin-changes-tx
+  "The facts of changes ({path commit-or-nil}) to db's pins: a commit pins that path, nil retracts its entity whole (the submodule
+  is gone); only what differs from db. See docs/source.md#indexing-a-tree."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]]] :seon.db/tx-data]}
+  [db changes]
+  (let [held (pins-of db)]
+    (vec (for [[p c] (sort changes) :when (not= c (held p))]
+           (if c {:seon.pin/path p :seon.pin/commit c} [:db/retractEntity [:seon.pin/path p]])))))
+
+(defn pins-tx
+  "The facts that make db's pins exactly pins ({path commit}, every gitlink a tree read): each pinned, and each db holds that pins
+  does not retracted. See docs/source.md#indexing-a-tree."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] :seon.db/tx-data]}
+  [db pins]
+  (pin-changes-tx db (merge (zipmap (keys (pins-of db)) (repeat nil)) pins)))
+
 (defn modes
   "{relative path git mode} of the files at paths whose mode db holds, what a write-back commits with its text. See docs/source.md#a-program-file."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :string]] [:map-of :string :string]]}
@@ -836,7 +859,7 @@
                                (nil? (get edits nm)) (vec (reverse (drop-while node/whitespace-or-comment? (reverse acc))))
                                :else (conj acc (entry-edit n (get edits nm))))))
                      [] cs)
-        kept (vec (if (space? (first cs)) kept (drop-while space? kept)))
+        kept (vec (if (some-> (first cs) space?) kept (drop-while space? kept)))
         ;; a task the file lacks: after the last entry, each on its own line as the files lay them out
         added (for [[nm decl] (sort-by key edits) :when (and decl (not (held nm)))] (entry-node decl))
         last-entry (last (keep-indexed (fn [i n] (when-not (node/whitespace-or-comment? n) i)) kept))

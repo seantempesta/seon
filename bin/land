@@ -41,12 +41,15 @@ tidy() {
 # (docs/source.md#a-landing-enters-main-as-data). The last line says it landed or why not.
 bridge() {
   local repo=$1 old=$2 new=$3 port=$4 r
-  r=$(git -C "$repo" diff --raw --no-renames -z "$old" "$new" | perl -e '
-    my ($repo, $new, $tree) = @ARGV; local $/; my @f = split /\0/, <STDIN>; my (%text, %mode);
+  r=$(git -C "$repo" diff --raw --no-abbrev --no-renames -z "$old" "$new" | perl -e '
+    my ($repo, $new, $tree) = @ARGV; local $/; my @f = split /\0/, <STDIN>; my (%text, %mode, %pin);
     sub edn { my $s = shift; $s =~ s/\\/\\\\/g; $s =~ s/"/\\"/g; $s =~ s/\n/\\n/g; $s =~ s/\r/\\r/g; $s =~ s/\t/\\t/g; "\"$s\"" }
     while (@f) {
       my ($meta, $path) = (shift @f, shift @f);
-      my ($nm, $sha, $st) = $meta =~ /^:\d+ (\d+) \S+ (\S+) (\S)/ or die "bridge: git diff --raw said $meta\n";
+      my ($om, $nm, $sha, $st) = $meta =~ /^:(\d+) (\d+) \S+ (\S+) (\S)/ or die "bridge: git diff --raw said $meta\n";
+      # a gitlink is a pin: its commit, or nil for a submodule removed (seon.source/pin-changes-tx)
+      if ($om eq "160000" && $st eq "D") { $pin{$path} = undef; next }
+      if ($nm eq "160000") { $pin{$path} = $sha; next }
       if ($st eq "D") { $text{$path} = undef; next }
       next unless $nm eq "100644" || $nm eq "100755";   # a gitlink or a link: no text, a build input
       open my $b, "-|", "git", "-C", $repo, "cat-file", "blob", $sha or die "bridge: git cat-file $sha: $!\n";
@@ -55,7 +58,8 @@ bridge() {
       ($text{$path}, $mode{$path}) = ($t, $nm) }
     my $ch = join " ", map { edn($_) . " " . (defined $text{$_} ? edn($text{$_}) : "nil") } sort keys %text;
     my $md = join " ", map { edn($_) . " " . edn($mode{$_}) } sort keys %mode;
-    my $code = "(let [db @(:conn sys) r @(seon.system/transact-main! sys (seon.system/landed-tx db {$ch} {$md} " . edn($tree) . " " . edn($new) . "))] (if (seon.contract/error? r) r :landed))";
+    my $pn = join " ", map { edn($_) . " " . (defined $pin{$_} ? edn($pin{$_}) : "nil") } sort keys %pin;
+    my $code = "(let [db @(:conn sys) r @(seon.system/transact-main! sys (seon.system/landed-tx db {$ch} {$md} " . edn($tree) . " " . edn($new) . " {$pn}))] (if (seon.contract/error? r) r :landed))";
     print "{:op :eval :agent \"root\" :code " . edn($code) . "}\n";
   ' "$repo" "$new" "$("$MAIN/bin/tree" "$repo" "$new")" | "$MAIN/bin/ask" $port)
   [[ $r == *':landed'* ]] || { print "bridge: $new did not enter main: $r"; return 1 }
