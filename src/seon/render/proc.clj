@@ -1242,9 +1242,6 @@
        ;; which grows when a pass is submitted before the last worker is idle again
        ;; (session THREADS: root's threads are a declared number)
        :workload :mixed
-       ;; a pass that burns past its tick budget ends as the step's typed error, its state kept, its next message taken (Jolt's
-       ;; :step-ticks): a runaway pass never holds root's api behind it (docs/flow.md#the-five-rules, rule 3)
-       :step-ticks (fn [_] (config/value :seon.config.render/step-ticks))
        :ping-map-fn stats})
   ([args]
    ;; no beat: a pass happens on an event, an api answer or a tab's request, never on a clock

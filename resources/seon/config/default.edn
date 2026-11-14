@@ -944,11 +944,6 @@
  :seon.config.render.agent/sort-bound 64
  ;; Unit: characters per printed line (session P1's printer, matching v1's corpus output).
  :seon.config.render/width 72
- ;; Unit: engine ticks. The render proc's step budget (Jolt Flow's :step-ticks): a pass past it ends as its typed error, its state
- ;; kept. Growth: a * forms, a = 2 x one whole health read per form (web-2, 2026-11-14: 80.6 s on live main x ~4.2e8 ticks/s (flow-lab
- ;; e17) / 5,994 forms ~ 5.6e6), so ~1.13e7 x 5,994 forms; restated when the program's forms double. It ends a runaway, never
- ;; today's whole health read, which is the cost bug (O(what moved) through the reaction core). At the bound: the pass's typed error.
- :seon.config.render/step-ticks 68000000000
  ;; The one-printer law (docs/render.md#one-printer; owner: "Do not create more than one value printer and no clipping happens
  ;; before then"), read by seon.problems/unnamed-sites over the compiler's :form/refs. Why dials: they are the law's definition,
  ;; the host's printers and cutters no fact of ours can name, and the namespaces where output is made for a person or a model.
