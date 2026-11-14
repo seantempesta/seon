@@ -592,8 +592,10 @@
         kept (into #{} (filter #(and (keyword? %) (not= "db" (namespace %)) (not (derived %))))
                    (into #{} (map :a) (concat gone added)))
         fact? (fn [{:keys [e a]}] (and (kept a) (not (tx? e))))]
-    [(filterv #(and (fact? %) (seq (d/datoms (d/history head) :eavt (:e %) (:a %) (:v %)))) gone)
-     (filterv #(and (fact? %) (not (and mains (= mains (tx-branch head (:tx %))))) (not (shared? base %))) added)]))
+    ;; datoms-diff compares whole datoms, tx included: one fact both hold, asserted in different transactions, is a gone and an added
+    ;; datom, and neither is a change; a fact is [e a v]
+    [(filterv #(and (fact? %) (empty? (d/datoms head :eavt (:e %) (:a %) (:v %))) (seq (d/datoms (d/history head) :eavt (:e %) (:a %) (:v %)))) gone)
+     (filterv #(and (fact? %) (empty? (d/datoms base :eavt (:e %) (:a %) (:v %))) (not (and mains (= mains (tx-branch head (:tx %))))) (not (shared? base %))) added)]))
 
 (defn merge-main
   "The one merge of main into a branch, decided: head's own datoms since base (`own-datoms`), their keys (program keys and facts,
