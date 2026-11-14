@@ -1460,7 +1460,9 @@
   ;; socket does: at the bound the transport waits to hand on the next (docs/flow.md#flow-inside-an-agent)
   (let [in {:in {:buf-or-n (cfg/value :seon.config.agent/inbox-size)}}
         g (flow/create-flow {:procs (update-vals agent-steps (fn [step] (cond-> {:proc (flow/process step)} (not= step #'transport-step) (assoc :chan-opts in))))
-                             :conns [[[:transport :repl] [:repl :in]] [[:transport :tests] [:tests :in]]]})
+                             :conns [[[:transport :repl] [:repl :in]] [[:transport :tests] [:tests :in]]]
+                             ;; what update! waits for a removed test-run proc's exit, the bound root's graph declares too
+                             :stop-timeout-ms (cfg/value :seon.config.root/flow-stop-ms)})
         {:keys [error-chan]} (flow/start g)]
     (swap! agent/state assoc :flow g)
     (flow/resume g)

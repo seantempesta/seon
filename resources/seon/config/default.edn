@@ -38,7 +38,7 @@
  ;; file. Provenance: the value seon.system held as a literal (shrink). At the bound: earlier
  ;; output is not recorded; the file itself is kept.
  :seon.config.root/death-stderr-bytes 2048
- ;; Unit: ms. Flow's :stop-timeout-ms for root's graph (seon.system/start!). Provenance: the literal
+ ;; Unit: ms. Flow's :stop-timeout-ms for every graph: root's (seon.system/start!) and each agent's (seon.repl/serve!). Provenance: the literal
  ;; 10000 it replaces. At the bound: flow/stop answers the pids still running.
  :seon.config.root/flow-stop-ms 10000
  :seon.config.root/stop-ms 3000
