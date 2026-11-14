@@ -16,7 +16,7 @@
   (delay
     (let [main (str "root-test-" (random-uuid))
           r (ts/binary-sh "env" "SEON_WEB_PORT=0" (str "SEON_STORE=" (test-store)) (str "SEON_MAIN=" main)
-                          "./seon" "boot-twice" "--profile" (name (config/profile)) :dir "target")]
+                          "./seon" "boot-twice" "--profile" ts/root-profile :dir "target")]
       (ts/drop-main! (test-store) main)
       (assoc r :res (edn/read-string (last (str/split-lines (:out r))))))))
 
@@ -109,7 +109,7 @@
   ;; collections in a fresh binary; Chez starts a sweeper per waiting thread and never stops one, so a
   ;; pool not fixed first ends at 6 (measured) and root-threads-are-what-root-declares reads whatever
   ;; its boot happened to start. seon.main/-main fixes the pool at 0 before anything runs: 0 sweepers.
-  (let [{:keys [exit out err]} (ts/binary-sh "./seon" "sweepers-held" "--profile" (name (config/profile)) :dir "target")
+  (let [{:keys [exit out err]} (ts/binary-sh "./seon" "sweepers-held" "--profile" ts/root-profile :dir "target")
         res (edn/read-string (last (str/split-lines out)))]
     (is (= 0 exit) (str out err))
     (is (<= 30 (:collections res)) "the workers collect on until joined: at least the 30 waited for")
@@ -388,7 +388,7 @@
        (spit (str tree "/" path) seeded)
        (git "add" "-A")
        (git "commit" "-q" "-m" "seeded")
-       (into [(:out (apply ts/binary-sh (concat ["./seon" "seed-program" store] args ["--profile" (name (config/profile)) :dir "target"])))]
+       (into [(:out (apply ts/binary-sh (concat ["./seon" "seed-program" store] args ["--profile" ts/root-profile :dir "target"])))]
              (for [text texts]
                (let [_ (spit (str tree "/" path) text)
                      _ (git "add" "-A")

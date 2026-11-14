@@ -298,6 +298,7 @@
 (def named-test-inputs
   "{[test-namespace var, the read] why its verdict is a function of its digest anyway}."
   '{[seon.config-test/env-reads-a-set-variable-and-nil-for-an-unset-one System/getenv] "the tag and the test read the one variable, so the verdict is the same whatever its value"
+    [seon.fx-test/a-run-of-another-checkout-holds-none-of-roots-environment System/getenv] "it reads the variables only to restore them after, so the verdict is the same whatever their values"
     [seon.config-test/envf-formats-variables System/getenv] "the tag and the test read the one variable, so the verdict is the same whatever its value"
     [seon.config-test/or-takes-the-first-non-nil System/getenv] "the tag and the test read the one variable, so the verdict is the same whatever its value"
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it clojure.core/rand-int] "a port: a collision can only turn it red (FINDINGS #14)"

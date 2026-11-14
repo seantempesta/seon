@@ -56,7 +56,7 @@
   (target/seon forks k): a process forks from its main carrier, where it is the one thread,
   never from this runner's, whose runtime threads would race the fork."
   [k]
-  (let [{:keys [exit out err]} (ts/binary-sh "./seon" "forks" k "--profile" (name (config/profile)) :dir "target")]
+  (let [{:keys [exit out err]} (ts/binary-sh "./seon" "forks" k "--profile" ts/root-profile :dir "target")]
     (if (zero? exit) (edn/read-string (last (str/split-lines out))) {:exit exit :err err})))
 
 (deftest a-forked-child-that-throws-exits-and-never-returns-into-its-parent

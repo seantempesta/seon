@@ -414,7 +414,7 @@
   (seon.check/units: a child forked per measurement from a fresh binary's main carrier): {k [row ...]}. A row measured in
   a shard moved with what the shard ran before it (:db/pull-attr 1870, 2590 and 2774 ticks, 7488 and 8560 B, 2026-11-10)."
   [k reps]
-  (let [{:keys [exit out err]} (ts/binary-sh "./seon" "units" (if k (str k) "all") (str reps) "--profile" (name (seon.config/profile)) :dir "target")]
+  (let [{:keys [exit out err]} (ts/binary-sh "./seon" "units" (if k (str k) "all") (str reps) "--profile" ts/root-profile :dir "target")]
     (when-not (zero? exit) (throw (ex-info (str "./seon units exited " exit ": " err) {:exit exit})))
     (reduce (fn [acc l] (let [[k row] (edn/read-string (subs l 5))] (update acc k (fnil conj []) row)))
             {} (filter #(str/starts-with? % "UNIT ") (str/split-lines out)))))
