@@ -78,9 +78,14 @@
   ;; for a request it holds none for, and a cost it cannot price ends the pass (unknown, never 0).
   ;; The scripted model reports no cache split, so its first move is scored (in the agent the
   ;; pass spawns), written, and stops the pass; the second pass reads it back and calls nothing.
-  ;; Counted as what this test's passes wrote: the shard's main holds earlier tests' facts
+  ;; Counted as what this test's passes wrote: the shard's main holds earlier tests' facts.
+  ;; Both passes must read one request: its page draws the task's search once the search's query has a vector, which root's
+  ;; embedding pipeline writes when it gets to it (seon.vector/vectors-proc), on in a root the test service forks from and off
+  ;; in bin/test's (SEON_EMBED_TEXTS=0). Measured on the standing store: one task's request digest with its search's vector,
+  ;; 122349d0, without, 4d8fcb74. So this test's own task holds no search: the request is the same whatever the pipeline does
   (let [[r] (at/in-agent #(vector {:op :eval :agent "root"
-                                   :code (str "(let [n0 (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/digest)) a (my.root/first-moves! sys [" (pr-str (:task %)) "]) b (my.root/first-moves! sys [" (pr-str (:task %)) "])]"
+                                   :code (str "(let [_ @(c/transact-main! sys [[:db/retractEntity [:seon.search/id " (pr-str (str (:task %) "/request")) "]]])"
+                                              " n0 (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/digest)) a (my.root/first-moves! sys [" (pr-str (:task %)) "]) b (my.root/first-moves! sys [" (pr-str (:task %)) "])]"
                                               " [(get-in a [:error :seon.error/type]) (mapv :reused? (:rows a)) (boolean? (:acted (first (:rows a))))"
                                               " (mapv :reused? (:rows b)) (:usd b) (- (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/digest)) n0)"
                                               ;; the provider's token counts are kept on the score (seon.judge/fact), never dropped

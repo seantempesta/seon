@@ -1209,7 +1209,9 @@
         [:p "Main changed these too, so they are unmerged. Settle each: keep yours, or take main's."]
         (for [{:keys [key ours theirs]} unmerged]
           [:div {:key key} [:p [:code (str key)] ". Yours:"] [:pre [:code (as-text ours)]] [:p "Main's:"] [:pre [:code (as-text theirs)]]
-           [:p "Keep yours: " [:code (str "(my.branch/resolve! '" key ")")] ". Take main's: " [:code (str "(my.branch/resolve! '" key " :theirs)")] "."]])])
+           ;; a var's entry is settled by its name, any other program key by the key itself (my.branch/resolve!'s contract)
+           (let [arg (if (= :var (first key)) (second key) key)]
+             [:p "Keep yours: " [:code (str "(my.branch/resolve! '" arg ")")] ". Take main's: " [:code (str "(my.branch/resolve! '" arg " :theirs)")] "."])])])
      (when (seq (:conflicts merge)) [:p {:key :conflicts} (str (count (:conflicts merge)) " things conflict with main; they are listed above.")])
      (when main-moved [:p {:key :main-moved} main-moved])
      ;; a fact beside its box, which stays open: the agent's to clear whoever caused it (the owner, 2026-11-07)
