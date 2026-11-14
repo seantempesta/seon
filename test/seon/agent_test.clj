@@ -249,6 +249,17 @@
 ;; docs/merging.md#the-test-service: the one call proves a reference (Sean, 2026-11-11: "seon.test/prove #commit id or
 ;; whatever we are passing in to signify the branch or point in time and that runs it"). Wrong if a reference at an earlier
 ;; commit answers the head's verdicts: a past point always forks, onto a branch made at that commit, which loads its program
+;; docs/merging.md#the-test-service, flow's review (task seon.prove/a-test-batch-holds-the-processes-it-is-weighed-at): the service
+;; weighs a granted batch at one process and the :process owner admits it so, but the agent dealt it into up to
+;; :seon.config.proofs/jobs children, two schedulers, ~72 processes against a budget of 20 [H]. A granted batch (one asked with its
+;; items) runs in one child, the service its one scheduler; a run of the agent's own (no items) still deals what its work is worth.
+;; Red before: the deal ignored whether the service had granted it. Estimate: pure, a few calls.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-granted-batch-holds-the-processes-it-was-weighed-at
+  (let [big (* 100 (seon.config/value :seon.config.proofs/child-min-ms))]
+    (is (= 1 (agent/child-count big true)) "a batch the service granted: one child, as it was weighed")
+    (is (= (seon.config/value :seon.config.proofs/jobs) (agent/child-count big false)) "the agent's own run: what the work is worth, up to jobs")
+    (is (= 1 (agent/child-count 1 false)) "and one child when the work is small")))
+
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 5 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2750k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} a-reference-at-an-earlier-commit-is-proved-at-that-point
   (let [[head past] (with-agent {}

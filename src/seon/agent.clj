@@ -1636,6 +1636,14 @@
         :else (or (item-selection held items)
                   (let [sel (plan)] (if (:unread sel) sel (granted-selection sel items))))))
 
+(defn child-count
+  "How many test children a run of total-ms of measured work forks: one when the test service granted it (granted?: asked with its
+  items), since the service weighed it as one and is the one scheduler; else what the work is worth, a child per
+  :seon.config.proofs/child-min-ms, at most :seon.config.proofs/jobs (a run of the agent's own). See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat nat-int? :boolean] pos-int?]}
+  [total-ms granted?]
+  (if granted? 1 (-> (quot total-ms (cfg/value :seon.config.proofs/child-min-ms)) (max 1) (min (cfg/value :seon.config.proofs/jobs)))))
+
 (defn run-tests-forked
   "Fork this agent; the child runs what test-plan runs for proofs (the selected tests with no
   green held at their digest), each test within ticks engine ticks of work of its own, writing
@@ -1695,7 +1703,7 @@
         t0 (profile/now-ns)
         ;; every selected test green at its digest (a turn's run of the same tree, a session's): nothing to run, so no
         ;; child is forked. Else the tests are dealt by the one deal bin/test uses (proofs/shards, by each test's
-        ;; median measured ms) into at most :seon.config.proofs/jobs children, each a proc of this agent's graph, folded
+        ;; median measured ms) into child-count's children (one for a batch the service granted), each a proc of this agent's graph, folded
         ;; by one proc of the run's (run-children!, test-run-step); a child that dies loses the test it was running and
         ;; the rest of its shard runs in a new child; one child is the 1-child case
         run-all (fn [say]
@@ -1704,7 +1712,9 @@
               (let [;; each test's measured ms, or its class's configured estimate (seon.proofs/estimated-ms)
                     ms (proofs/estimated-ms run (fx/typical-ms run) (:process plan))
                     ;; no more children than the work needs: each is worth at least what a fork and a child's start cost
-                    n (-> (quot (reduce + (vals ms)) (cfg/value :seon.config.proofs/child-min-ms)) (max 1) (min (cfg/value :seon.config.proofs/jobs)))
+                    ;; a batch the service granted (asked with its items) runs in one child, as it was weighed: the service is the
+                    ;; one scheduler; the agent's own run deals what its work is worth (child-count)
+                    n (child-count (long (reduce + (vals ms))) (some? items))
                     res (run-children! plan ticks (proofs/shards run n ms) forked say)]
                 (cond (::threw res) (throw (::threw res))
                       (contract/error? res) res
