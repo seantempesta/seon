@@ -88,7 +88,7 @@
         (when-let [{:keys [binary tree reaches missing error]} (get-in @(c/call! sys {:op :state}) [:boot :stale-binary])]
           (out! "ROOT STALE BINARY binary " (or binary "unrecorded") ", main's tree " tree
                 (cond missing (str ", " (name missing) " missing") error (str ", " error) :else (str ", what differs reaches " (clojure.string/join " " reaches)))
-                ": root forks no agent. " problems/stale-binary-acts))
+                ": root runs main's program loaded over it. " problems/stale-binary-acts))
         ;; a binary with no record of its forms holds none of main's: the fork server loads every live form (seon.program/held?),
         ;; a cost never paid silently
         (when-not (:forms (seon.program/binary-program))
