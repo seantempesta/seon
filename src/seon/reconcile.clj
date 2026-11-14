@@ -954,6 +954,8 @@
         ks (filterv #(= :task (first %)) (:ours diff))
         tw (pm/three-way (pm/program-of base ks #{}) (pm/program-of main ks #{}) (pm/program-of db ks #{}))
         carried (pm/merge-tx main base db (:apply tw) #{})
+        ;; a merged task's cites are derived from its text: made again on main as the merge leaves it, never carried
+        carried (if (seq carried) (into carried (task/merged-cites-tx (pdb/speculate-db main carried) (:apply tw))) carried)
         task-conflicts (:conflicts tw)
         ;; the done rule reads main as this judging leaves it, so the rule is applied to the index with the merge observed
         idx (if (seq carried) (let [w (pdb/speculate main carried)] (index idx main (:db-after w) (:tx-data w))) idx)
@@ -1137,6 +1139,13 @@
                 (one (write st id :done (into (task/move-tx id :running :lost {:seon.task/reason (str "its parked process was gone: " (:seon.error/message r))})
                                               (ended-ms-tx (:db st) id now))))
                 (contract/error? r) (errored st r)
+                ;; its run merged main and ended between turns to run on main's program (seon.turn's :refork): nothing to judge; the task
+                ;; goes on as a lost run does, a spawn on its branch (its process resumed from the fork server, only the branch's own
+                ;; forms loaded: seon.program/load-diff!), and this process is stopped (docs/merging.md#a-branch-merges-main-in)
+                (= :refork (:outcome (:value r)))
+                (stop-kept (one (write st id :done (into (task/move-tx id :running :lost {:seon.task/reason "merged main: forked again on main's program"})
+                                                         (ended-ms-tx (:db st) id now))))
+                           id agent)
                 :else
                 (if (= :diffed (after-work r (:seon.task/proofs (d/entity (:db st) [:seon.task/id id]))))
                   (one (request (assoc-in st [:flights id :results] {}) id :diffed {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}}))

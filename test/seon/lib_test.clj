@@ -16,6 +16,19 @@
     (.join spin)
     (is (= [:forked {:exit 3}] r) (str "answered " r))))
 
+(deftest ^{:seon.test/estimate {:ticks 100000000}} a-full-collection-answers-from-a-process-running-several-threads
+  ;; task seon.lib/a-full-collection-asked-from-any-thread-answers: Chez refuses (collect) while another thread is active, so
+  ;; root's writer :collect and the fork server's freeze test never collected in full (context at root's REPL: "cannot collect
+  ;; when multiple threads are active"); a full collection asked from any thread answers. A second thread spins Scheme while it
+  ;; is asked. The estimate: one full collection of this test process's heap (~100 MB, ~0.5 ticks a byte: ~50M), the spin beside it
+  (let [stop (volatile! false) running (promise)
+        spin (doto (Thread. #(do (deliver running true) (loop [] (when-not @stop (recur))))) (.start))
+        _ @running
+        r (try (lib/non-static-live!) (catch Exception e e))]
+    (vreset! stop true)
+    (.join spin)
+    (is (int? r) (str "answered " r))))
+
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-forks-wait-ends-at-its-bound-naming-its-holders
   ;; task seon.lib/a-forks-wait-ends-at-its-declared-bound-naming-its-holders: a thread in a C call that is not
   ;; collect-safe never parks, and a fork beside it waited for good (a test child, 2026-11-14). fork! waits at most

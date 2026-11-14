@@ -43,6 +43,22 @@
         (:holding st) (update st :held (fnil conj []) m)
         :else (do (a/put! (:out (:end st)) m) st)))
 
+(defn- end-hold
+  "St with the clone handshake of request rid ended, whatever ended it (its fd sent, the clone answered or failed, the request
+  never sent): what waited behind it (:held) goes out in order, up to a clone request held behind it, which goes out and holds
+  in turn. A hold ended only by :fd-ready waited for good when a clone failed first, and a second clone sent while one held
+  overwrote the first's hold, so neither's end released it (docs/processes.md#the-socket-and-the-agent-proc)."
+  {:malli/schema [:=> [:cat :map :any] :map]}
+  [st rid]
+  (if (not= rid (:holding st))
+    st
+    (loop [xs (seq (:held st)) st (dissoc st :holding :held)]
+      (if-let [[x & more] xs]
+        (if-let [c (::clone x)]
+          (-> st (to-proc! c) (assoc :holding (::rid x) :held (vec more)))
+          (recur more (to-proc! st x)))
+        st))))
+
 (defn- send-fd!
   "The descriptor fd to the agent, in a frame of its own ({:op :fd :k k}, SCM_RIGHTS). The
   agent asked for it ({:op :fd-ready}) after taking the request before it, and nothing was
@@ -51,7 +67,7 @@
   {:malli/schema [:=> [:cat :map :int :seon.lib/fd] :map]}
   [st k fd]
   (sock/send! (:fd (:end st)) {:op :fd :k k} fd)
-  (reduce to-proc! (dissoc st :holding :held) (:held st)))
+  (end-hold st k))
 
 (defn- hang-up!
   "Close root's end: the agent (if any) reads the end frame; this proc's :from closes."
@@ -101,9 +117,12 @@
            (contains? (:gates st) (:tag m)) (-> (update :gates disj (:tag m)) (update :fx-out (fnil dec 1)))) nil]
     :req (let [{:keys [rid msg kind]} m
                read? (= :context (:origin msg))]
-           (let [st (cond-> (to-proc! st (assoc msg (if (= kind :clone) :k :id) rid))
+           (let [out (assoc msg (if (= kind :clone) :k :id) rid)
+                 ;; a clone sent while another clone's handshake holds waits behind it as a request, and holds when it goes out
+                 queued? (and (= kind :clone) (:holding st))
+                 st (cond-> (if queued? (update st :held (fnil conj []) {::clone out ::rid rid}) (to-proc! st out))
                       ;; a clone's socket follows in its own frame once the agent asks
-                      (= kind :clone) (assoc :holding rid)
+                      (and (= kind :clone) (not queued?)) (assoc :holding rid)
                       true (update :inflight assoc rid (cond-> (assoc (select-keys m [:kind :branch :new :pass-fd]) :read? read?)
                                                          ;; an eval's text, for its :started event
                                                          (string? (:forms msg)) (assoc :form (:forms msg))))
@@ -191,6 +210,9 @@
       ;; its eval's record could not be written on its branch (its entity ids are spent):
       ;; the typed error is recorded on main as its problem
       :fd-ready (send-fd! st (:k m) (get-in st [:inflight (:k m) :pass-fd]))
+      ;; merge main into this agent's branch, on main's program: root's writer decides and writes it (seon.writer's :merge-main), and
+      ;; its answer is the agent's wait's (seon.agent/merge-main!)
+      :merge-main (do (step/out! o :to-writer {:op :merge-main :branch (:branch st) :dest {:agent id :op :reply :k (:k m)}}) st)
       :branch-me (let [branch (get-in st [:inflight (:k m) :branch])]
                    (step/out! o :to-writer {:op :clone-branch :from (:branch st) :branch branch
                                        :dest {:agent id :op :branched :k (:k m)}})
@@ -199,15 +221,15 @@
       (let [{:keys [new pass-fd]} (get-in st [:inflight (:k m)])
             ;; the clone's socket end: the parent has it (or failed), root's copy closes now
             _ (some-> pass-fd sock/close!)
-            st (answer-rid st o (:k m) (if (= :cloned (:op m)) {:ok true :id new} (:error m)))]
+            st (answer-rid (end-hold st (:k m)) o (:k m) (if (= :cloned (:op m)) {:ok true :id new} (:error m)))]
         (when (= :clone-failed (:op m)) (step/out! o :to-api {:op :clone-failed :agent new :error (:error m)}))
         (step/out! o :to-api (status st {:status (busy st)}))
         st)
       ;; a request of root's the end's codec could not encode (unencodable): never sent, so answered here
       :unsendable (let [{:keys [pass-fd]} (get-in st [:inflight (:rid m)])
                         _ (some-> pass-fd sock/close!)
-                        st (answer-rid st o (:rid m) (:error m))]
-                    (step/out! o :to-api (status st {:status (busy st)}))
+                        st (answer-rid (end-hold st (:rid m)) o (:rid m) (:error m))]
+                    (step/out! o :to-api (status st {:status (busy st) :running nil}))
                     st)
       :synced (do (step/out! o :to-api (status st {:t (:t m) :load-errors (:load-errors m)})) st)
       ;; the back-pressure check's flood: counted, in order
@@ -313,7 +335,9 @@
                               ;; what root asked of it and holds unanswered, rid and kind: what a stuck agent is owed
                               :inflight (into (sorted-map) (update-vals (:inflight st) :kind)) :fx-out (:fx-out st)
                               ;; what its stall check reads (:stall?): whether it reported one, and when its last frame came (nil: none yet)
-                              :stall-seen (boolean (:stall-seen st)) :last-frame-ms (:last-frame-ms st)})})
+                              :stall-seen (boolean (:stall-seen st)) :last-frame-ms (:last-frame-ms st)
+                              ;; a clone's handshake it holds (the request id) and how many messages wait behind it: a held agent reads as held
+                              :holding (:holding st) :held (count (:held st))})})
   ([args] (assoc (select-keys args [:id :end :branch :pid])
                  :inflight {} :noise 0 :fx-out 0 :fx-kinds (:fx-kinds args)
                  ::flow/in-ports {:from (:in (:end args))}

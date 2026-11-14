@@ -812,8 +812,10 @@
   shown whole. Which messages are new: those of a record the request before it did not hold (the turns after its number).
   :differs? says the redraw is not what went out: the turn hashed the bytes it sent (:seon.model-call/sent-hash), and
   today's renders drew others. See docs/render.md#the-debug-page-is-the-wire-request."
-  {:malli/schema [:=> [:cat :seon.host/db [:or pos-int? [:= :latest]] [:vector pos-int?] :boolean] [:maybe :map]]}
-  [db at calls raw?]
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:or pos-int? [:= :latest]] [:vector pos-int?] :boolean] [:maybe :map]]
+                  [:=> [:cat :seon.host/db [:or pos-int? [:= :latest]] [:vector pos-int?] :boolean [:maybe :map]] [:maybe :map]]]}
+  ([db at calls raw?] (debug-input db at calls raw? nil))
+  ([db at calls raw? walk]
   (let [pull #(d/pull db [:seon.model-call/basis :seon.model-call/sent-hash :seon.model-call/tokens :seon.model-call/cache-hit-tokens
                           :seon.model-call/cache-miss-tokens :seon.model-call/error :seon.model-call/ms :seon.model-call/model] %)
         last-e (peek calls)
@@ -836,13 +838,14 @@
             prev-e (when (pos? i) (nth calls (dec i)))
             ;; with no request before it, nothing is marked: every message is the first request's
             since (some-> prev-e pull :seon.model-call/basis :turn)
-            w (wire/wire-turn tdb b since)
+            ;; the turn to come reads the render proc's kept walk of the branch (walk: its value at db), never a cold draw
+            w (wire/wire-turn tdb b since (when to-come? walk))
             sent-hash (:seon.model-call/sent-hash m)]
         {:at at :to-come? to-come? :turn (:turn b) :agent (:agent b) :origin (:origin b) :raw? raw? :swept? (boolean swept?)
          :body (:body w) :sources (:sources w) :new (:new w)
          :differs? (boolean (and sent-hash (not= sent-hash (lib/digest (sedn/encode (:messages w))))))
          :usage (select-keys m [:seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens :seon.model-call/ms :seon.model-call/model])
-         :error (:seon.model-call/error m)}))))
+         :error (:seon.model-call/error m)})))))
 
 ;;; --- render-ctx: an agent's ctx as components (docs/render.md#components) ----------------------
 

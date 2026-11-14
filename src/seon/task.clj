@@ -201,6 +201,20 @@
   [db t]
   (cites-tx db [:seon.task/id (:seon.task/id t)] (:seon.task/id t) (text-citations db t)))
 
+(defn merged-cites-tx
+  "The cites of each task a merge's keys ks touch ([:task id], or a fact [:datum e a ...] of a task entity: a task new to the side
+  arrives as its facts), as its text states them on db, the db the merge leaves (rederive-tx): cites are derived from a task's plan
+  and instructions, so they never merge, and are made again where a merge lands. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] :seon.db/tx-data]}
+  [db ks]
+  (let [ids (distinct (for [[kind x] ks
+                            :let [id (case kind :task x :datum (:seon.task/id (d/entity db x)) nil)]
+                            :when id]
+                        id))]
+    (vec (for [id ids :let [e (pdb/eid db :seon.task/id id)] :when e
+               op (rederive-tx db (d/pull db [:seon.task/id :seon.task/plan :seon.task/instructions] e))]
+           op))))
+
 (defn- agent-citations
   "What agent k is to be made citing on db, [address citation held?] for each address of :seon.config.agent/cites as its task holds
   it, else the shipped value (the resolver's order, docs/config.md: task first), read by seon.ref/address-citation: held?, whether db

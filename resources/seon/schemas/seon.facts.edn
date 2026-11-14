@@ -285,7 +285,7 @@
  :seon.agent/test-error [:and {:description "The error, as data, of a test run that failed as a whole; present only while it is so."} :seon.error/base]
  ;; how its work ended, as the agent writes it on its branch (seon.agent/write-end!), naming its turn: root reads it at judging
  ;; (seon.reconcile/pull-end), and an end whose turn is not past the wake's is none (:no-end)
- :seon.agent/outcome [:enum {:description "How the agent's work ended, as the agent writes it on its branch."} :green :red :waiting :cap :failed :merge-failed :error]
+ :seon.agent/outcome [:enum {:description "How the agent's work ended, as the agent writes it on its branch; :refork, a run that merged main and goes on in a process forked on main's program (seon.turn)."} :green :red :waiting :cap :failed :merge-failed :error :refork]
  :seon.agent/reason [:string {:description "Why the agent's work ended as its outcome says."}]
  :seon.agent/ended-turn [:int {:description "The turn that the agent's end names."}]
  ;; an entity's own pattern, stored with it from its first change; before that it reads its schema's (its role's). The
@@ -439,7 +439,7 @@
                                                   :file/path]}]
  ;; the cite as ctx holds it: what it names, its owner and its target by identity, drawn by its two renders, which read the
  ;; rest from the db (docs/render.md#a-component-answers-hiccup)
- :seon.cite/cite-fact [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/cite
+ :seon.cite/cite-fact [:map {:seon.db/attributes true :seon.db/derived true :seon.render/hiccup seon.render.ui/cite
                              ;; what it names, by identity alone: its render reads the rest from the db (:seon.cite/of-read, :seon.cite/target-read)
                              :seon.ctx/pattern [:seon.cite/id :seon.cite/depth :seon.cite/order
                                                 {:seon.cite/of [:seon.task/id :seon.task/ns :seon.agent/key]}
@@ -670,13 +670,15 @@
  ;; the eval whose code made it (its :seon.eval/id on the branch): an agent's write during
  ;; an eval, its record's included (seon.agent/transact!); none outside an eval
  :seon.tx/eval [:string {:min 1 :description "The id of the eval whose code made the transaction; none outside an eval."}]
+ :seon.tx/asker [:string {:min 1 :description "Who asked for the transaction (a client's id or an agent's key), as the api passed it to the writer: what a test's own writes are found by; none when nothing asked (root's own procs)."}]
  ;; the branch a catch-up merged (seon.agent/merge-main!): what it applied is that branch's, not
  ;; the agent's, though :seon.tx/branch names the branch it was written on
  :seon.tx/merged [:and {:description "The branch that a catch-up merged, when the transaction is a merge."} :seon.db/branch]
  :seon.tx/meta [:map {:seon.db/attributes true} [:seon.tx/runtime {:optional true} :seon.tx/runtime]
                 [:seon.tx/branch {:optional true} :seon.tx/branch]
                 [:seon.tx/eval {:optional true} :seon.tx/eval]
-                [:seon.tx/merged {:optional true} :seon.tx/merged]]
+                [:seon.tx/merged {:optional true} :seon.tx/merged]
+                [:seon.tx/asker {:optional true} :seon.tx/asker]]
  ;; a message, one entity read by everyone it is to (docs/users.md#messages): written on main by root's writer at the send,
  ;; and on each recipient's branch whole when its next act delivers it (seon.agent/deliver!). from names a sender: an agent's
  ;; key, "root" or "owner"; to names its recipients by agent entity, a ref each, and a recipient's branch holds its own ref

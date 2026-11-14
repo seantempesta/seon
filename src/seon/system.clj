@@ -261,7 +261,7 @@
 (defn stall-state
   "What root's stall check and each agent proc hold now, a hang's evidence (bin/evidence asks it through root's server
   before a run past its bound is ended; it reads, never writes): the api proc's ::stall-armed, ::busy and ::lost (its ping's), and
-  each agent proc's :inflight (each request's kind), :fx-out, :stall-seen and :last-frame-ms, read by one Flow ping of
+  each agent proc's :inflight (each request's kind), :fx-out, :stall-seen, :last-frame-ms, :holding and :held (a clone's handshake held, and how many wait behind it), read by one Flow ping of
   the graph, with :answered, every proc that answered it. The ping's bound is :seon.config.check/ping-ms: a proc
   mid-step that long answers nothing and is missing from :answered (an agent in ::busy and not there is mid-step), never
   read as nil. See docs/clocks.md#time-decides-the-owners-exceptions."
@@ -275,7 +275,7 @@
     {:root (select-keys (state :api) [::stall-armed ::busy ::lost])
      :agents (into (sorted-map)
                    (for [[pid m] states :let [s (::flow/state m)] :when (contains? s :inflight)]
-                     [pid (assoc (select-keys s [:fx-out :stall-seen :last-frame-ms]) :inflight (update-vals (:inflight s) :kind))]))
+                     [pid (assoc (select-keys s [:fx-out :stall-seen :last-frame-ms :holding :held]) :inflight (update-vals (:inflight s) :kind))]))
      :answered (vec (sort (keys states)))}))
 
 (defn- stall-task
@@ -908,7 +908,11 @@
       ;; a defect in a root proc: recorded as data (its error map when it carries one), and
       ;; the message the step took answered with it (Flow's catch dropped the step's outputs):
       ;; the api's own throw answers every message its step took (::lost)
-      :error (let [e (if (contract/error? (:data m))
+      :error (if (stopped-statuses (get-in st [:view :agents (:to m) :status]))
+               ;; an output Flow dropped for an agent the api stopped on purpose (its cancel, stop or kill: :seon.status/stopped): the
+               ;; stop meant to drop what was in flight to it, so it is no problem (seon.problems-test/a-drop-to-an-agent-stopped-on-purpose-is-no-problem)
+               st
+               (let [e (if (contract/error? (:data m))
                        (:data m)
                        (contract/error :seon.system/proc-defect (proc-sym st (:pid m)) (or (:message m) "a defect with no message")
                                        ;; where it threw, and what it took (a message's op, or an answer's keys)
@@ -925,7 +929,7 @@
                    (cond-> (:down m) (assoc-in [::down (:pid m)] e))
                    (view! update :root-errors #(lib/push-window %1 %2 (cfg/value :seon.config.root/view-window)) (merge {:pid (:pid m) :message (:message m)} (:data m)))
                    (view! update :root-errors-total (fnil inc 0))
-                   (problem (err/occurrence e :platform {} (System/currentTimeMillis)))))
+                   (problem (err/occurrence e :platform {} (System/currentTimeMillis))))))
       ;; an agent's errors since its last commit (seon.error/note, each of its class), counted across agents
       :errors (let [task (get-in st [:view :agents (:agent m) :task])]
                 (reduce (fn [st s] (problem st (err/sent->occurrence s (:agent m) task))) st (:entries m)))
@@ -1766,6 +1770,8 @@
     (let [c (sedn/encode coord)
           msg (str "an output was lost: " c (if (::flow/dropped-on-stop r) ", dropped by a stop" ", which nothing in the graph takes"))]
       {:op :error :pid (::flow/pid r) :message msg
+       ;; the pid an undeliverable output was for: the api judges whether it left on purpose (its :error case)
+       :to (when (::flow/undeliverable r) (first coord))
        :data (contract/error :seon.system/undeliverable #'seon.system/flow-report msg {:coord c})})))
 
 (defonce ^:private uncaught
@@ -1895,6 +1901,7 @@
                          :stall-ms (or stall-ms (cfg/value :seon.config.agent/stall-ms)) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1) :web-streams-buf (a/sliding-buffer (cfg/value :seon.config.web/streams-buf))
                          :prove-tree (fn [on] (prove-tree! @sys-p on))
                          :process-workers (cfg/value :seon.config.machine/cores)
+                         :server-op-workers (cfg/value :seon.config.root/server-op-workers)
                          :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
                          :web-port (cfg/value :seon.config.web/port)
                          :vectors-main-buf (a/sliding-buffer 1) :embed-batch (cfg/value :seon.config.vector/batch)

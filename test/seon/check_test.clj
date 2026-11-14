@@ -325,7 +325,10 @@
 ;; namespace this image has loaded under another target (across the rename of seon.system to seon.graph, seon.server's `c` names
 ;; one in each tree) is a retargeted alias, which Jolt refuses. This image has loaded seon.check-test, `contract` naming
 ;; seon.contract; a clone of this checkout's HEAD gets a base commit where that alias names seon.error, and a head restoring it
-(deftest ^{:seon.test/estimate {:ticks 100000000}} the-health-step-reads-a-base-whose-alias-the-head-retargets
+;; Estimate, from its parts (the import is the shard's, test-runner/kept-program, warmed before the first test, never this budget's):
+;; ~10 store connects at ~0.15M (1.5M), store config and ids (0.8M), the kept store's key and digest (0.6M), two tree ids (0.5M),
+;; ~24 git shells (0.2M), three queries of one namespace's forms on two program dbs and a base read from its store (~5M) = ~9000000.
+(deftest ^{:seon.test/estimate {:ticks 9000000}} the-health-step-reads-a-base-whose-alias-the-head-retargets
   (let [co (str (seon.config/checkout))
         dir (str co "/target/tmp/health-rename-" (random-uuid))
         repo (str dir "/repo")
@@ -340,10 +343,12 @@
                                             (d/q '[:find [?s ...] :in $ ?n :where [?ns :ns/name ?n] [?ns :ns/form ?f] [?f :form/src ?s]] db 'seon.check-test))))]
     (try
       (sh! "git" "clone" "-q" "--shared" co repo)
-      ;; as a shard's earlier test does on a clean checkout: this process holds HEAD's tree from the kept store, so the test reads
-      ;; that store itself, never a copy: a copy keeps the store's id, and one branch under two paths is refused by Datahike
-      ;; (\"Configuration does not match existing connections\", batches 58 and 60, here and in every later test of the process)
-      (test-runner/program-db repo (ts/kept-program-store))
+      ;; this process holds the checkout's tree from the kept store (test-runner/kept-program, a program fixture the shard makes
+      ;; before its first test, so an import of a tree the store lacks is never this test's: one took its 1B budget in data's
+      ;; land, 945M of it seon.source/text-tx), and the clone of a clean checkout is that tree, so the head below is read, not
+      ;; imported. The test reads that store itself, never a copy: a copy keeps the store's id, and one branch under two paths is
+      ;; refused by Datahike (\"Configuration does not match existing connections\", batches 58 and 60)
+      @test-runner/kept-program
       (let [text (slurp (str repo "/" file))
             _ (is (str/includes? text "[seon.contract :as contract]"))
             _ (spit (str repo "/" file) (str/replace text "[seon.contract :as contract]" "[seon.error :as contract]"))
@@ -668,8 +673,8 @@
   (let [dir (str (System/getProperty "java.io.tmpdir") "/evidence-" (random-uuid))
         ;; the leader is disowned (zsh waits on none of it) and says its pid on a fifo once its member has exec'd
         leader (str/trim (:out (clojure.java.shell/sh
-                                "zsh" "-c" (str "mkdir -p " dir " && mkfifo " dir "/leader && "
-                                                "{ perl -e 'setpgrp(0,0); pipe(R,W); if (!fork) { if (!fork) { close R; open STDOUT, \">/dev/null\"; "
+                                "zsh" "-c" (str "mkdir -p " dir "/runs && mkfifo " dir "/leader && "
+                                                "{ perl -e 'setpgrp(0,0); pipe(R,W); if (!fork) { if (!fork) { close R; open STDOUT, \">" dir "/runs/probe.log\"; $|=1; print \"probe-line\\n\"; "
                                                 "exec {\"sleep\"} \"jolt-evidence-probe\", \"30\" } exit 0 } close W; my $x = <R>; wait; "
                                                 "print \"$$\\n\"; close STDOUT; sleep 30' > " dir "/leader 2>/dev/null </dev/null &! }; "
                                                 "read -r p < " dir "/leader; print -r -- $p"))))]
@@ -680,11 +685,45 @@
         (is (zero? (:exit r)) (:err r))
         (is (seq signalled) "the member that left the tree is signalled through its group")
         (is (every? #(.exists (java.io.File. (str dir "/sample-" % ".txt"))) signalled)
-            (str "every process signalled has its sample: " (vec signalled) " " (vec (.list (java.io.File. dir))))))
+            (str "every process signalled has its sample: " (vec signalled) " " (vec (.list (java.io.File. dir)))))
+        ;; and the log it writes under a runs directory, which its shard's hook removes when the shard ends (deps' run14 lost the
+        ;; shared root's log that way): kept beside the samples
+        (is (some #(and (str/ends-with? % "probe.log") (str/includes? (slurp (str dir "/logs/" %)) "probe-line"))
+                  (seq (.list (java.io.File. (str dir "/logs")))))
+            (str "the log a signalled process writes is kept: " (vec (.list (java.io.File. (str dir "/logs")))))))
       (finally
         ;; the group this test made, led by the process it started (AGENTS.md section 8: a verified pid)
         (when (re-matches #"\d+" leader) (clojure.java.shell/sh "kill" "-TERM" (str "-" leader)))
         (seon.lib/remove-tree! dir)))))
+
+;; docs/machine.md#reading-a-hang: a root a shard started detached is the run's, and its evidence asks it for its state at the port it
+;; listens on and keeps the log it writes through bin/held's pipe (flow's dry run: neither, so its hang could not be read). The root
+;; is a stand-in: a process of the run, never signalled (not Jolt), listening on localhost and writing a log under a runs directory.
+;; Estimate: two shell calls in process, ~0.5M ticks.
+(deftest ^{:seon.test/estimate {:ticks 1000000} :seon.test/execs ["perl" "bin/evidence"]} bin-evidence-asks-each-listening-process-and-keeps-every-log
+  (let [dir (str (System/getProperty "java.io.tmpdir") "/evidence-" (random-uuid))
+        _ (.mkdirs (java.io.File. (str dir "/runs")))
+        ;; a log its command names and it never holds open, as bin/held --log P writes a root's stderr a write at a time
+        _ (spit (str dir "/runs/held.log") "held-line\n")
+        p (.start (ProcessBuilder. ^java.util.List
+                                   ["perl" "-MIO::Socket::INET" "-e"
+                                    (str "open(my $log, \">\", \"" dir "/runs/listener.log\"); $log->autoflush(1); print $log \"listener-line\\n\"; "
+                                         "my $l = IO::Socket::INET->new(Listen => 1, LocalAddr => \"127.0.0.1:0\") or die; $| = 1; print $l->sockport, \"\\n\"; "
+                                         "my $c = $l->accept; my $q = <$c>; print $c \"{:probe-state true}\\n\"; close $c; sleep 30")
+                                    "--" "--log" (str dir "/runs/held.log")]))
+        pid (str (.pid p))
+        port (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream p))))]
+    (try
+      (is (re-matches #"\d+" (str port)) (str "the listener's port: " port))
+      (let [r (clojure.java.shell/sh (str (seon.config/checkout) "/bin/evidence") dir pid)]
+        (is (zero? (:exit r)) (:err r))
+        (is (str/includes? (str (slurp (str dir "/seon-state-" pid ".edn"))) ":probe-state") "the listening process is asked for its state")
+        (is (some #(and (str/ends-with? % "listener.log") (str/includes? (slurp (str dir "/logs/" %)) "listener-line"))
+                  (seq (.list (java.io.File. (str dir "/logs")))))
+            (str "and the log it writes is kept, though it is never signalled: " (vec (.list (java.io.File. (str dir "/logs"))))))
+        (is (some #(str/ends-with? % "held.log") (seq (.list (java.io.File. (str dir "/logs")))))
+            "and the log its command names with --log, which it never holds open"))
+      (finally (.destroy p) (seon.lib/remove-tree! dir)))))
 
 ;; bin/laws defs (AGENTS.md section 5, every definition happens once): a namespace defining one name twice keeps only the second, silently
 ;; (runtime found its shell test had replaced deps' of one name). The law reads the files' text, so it is proved

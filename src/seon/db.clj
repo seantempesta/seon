@@ -129,7 +129,7 @@
   the refs whose targets a schema is or extends (`reaching`); and :forms, the forms it was built from}. It is the one value every reader of what an entity
   is takes first (ix): a branch's own entity schema is recognized by its own index, never the binary's.
   See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :seon.db/entity-index]}
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :seon.db/entity-index-shape]}
   [forms]
   (let [entity? #(:seon.db/attributes (form-props forms %))
         required (fn [form] (for [e (own-entries form) :let [p (second e)] :when (not (and (map? p) (:optional p)))] (first e)))
@@ -138,6 +138,9 @@
         targets (into {} (for [[a _] es :let [to (:seon.db/to (form-props forms a))] :when to] [a to]))
         ;; each schema that extends another, with every schema it extends and itself; one that extends none is its own only
         anc (into {} (for [k (keys forms) :when (seq (parents-in forms k))] [k (set (tree-seq (constantly true) #(parents-in forms %) k))]))]
+    ;; checked against its shape once, here (this function's output), and marked so: a contract naming :seon.db/entity-index admits
+    ;; it at once, never validating the whole index again (seon.contract/checked-once)
+    (seon.contract/checked-once
     {:forms forms
      :entity-schemas es
      :identity-schemas ids
@@ -155,6 +158,9 @@
      :own-required (into {} (for [k (distinct (vals es))] [k (vec (required (get forms k)))]))
      ;; each ref attribute's target entity schemas, as its own schema states them ({:seon.db/to [...]}), once
      :targets targets
+     ;; the attributes marked {:seon.db/derived true}, on their own schema or their entity schema's: caches never merged (seon.merge), once
+     :derived-attrs (into (into #{} (keep (fn [[a k]] (when (:seon.db/derived (form-props forms k)) a))) es)
+                          (filter #(and (qualified-keyword? %) (:seon.db/derived (form-props forms %)))) (keys forms))
      ;; the ref attributes some entity schema requires: what the write check's cascade follows from a retracted entity, once
      :required-refs (vec (sort (distinct (for [k (distinct (vals es)) a (required (get forms k)) :when (:seon.db/to (form-props forms a))] a))))
      ;; each schema that extends another, with all it extends and itself (`extends?` is one lookup), once
@@ -163,7 +169,7 @@
      ;; any other schema is or extends no target
      :reaching (into {} (for [k (into (set (keys anc)) (mapcat val targets))
                               :let [as (get anc k #{k})]]
-                          [k (vec (sort (for [[a ts] targets :when (some as ts)] a)))]))}))
+                          [k (vec (sort (for [[a ts] targets :when (some as ts)] a)))]))} :seon.db/entity-index-shape)))
 
 (defn- with-specs
   "Index ix with :specs, each pattern an entity schema declares (:seon.ctx/pattern) to its compiled spec, made at its
@@ -171,8 +177,11 @@
   entity compiles no schema's pattern again. See docs/ctx.md#the-pattern."
   {:malli/schema [:=> [:cat :map] :map]}
   [ix]
-  (assoc ix :specs (into {} (for [k (distinct (vals (:entity-schemas ix))) :let [p (:seon.ctx/pattern (form-props (:forms ix) k))] :when p]
-                              [p (delay ((requiring-resolve 'seon.render/pattern) ix p #{}))]))))
+  ;; :specs is any value the shape admits, so the index with it is still checked: marked again, as its hash moved (seon.contract/checked-once)
+  (seon.contract/checked-once
+    (assoc ix :specs (into {} (for [k (distinct (vals (:entity-schemas ix))) :let [p (:seon.ctx/pattern (form-props (:forms ix) k))] :when p]
+                                [p (delay ((requiring-resolve 'seon.render/pattern) ix p #{}))])))
+    :seon.db/entity-index-shape))
 
 (def ^:private binary-index
   "The binary's `entity-index`, derived once from its registry. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
@@ -437,15 +446,24 @@
       (when-let [e (write-once-refusal r ix)] (refuse! e))
       r)))
 
+(declare tx-meta)
+
 (defn transact-checked
-  "The writer's transact (`datahike.writing/transact!`) through both checks (`checked`): the connection's 'transact!
+  "The writer's transact (`datahike.writing/transact!`) through both checks (`checked`), its tx-meta stamped with the runtime and the
+  connection's branch (`tx-meta`, a caller's own values winning): the connection's 'transact!
   (`connect` adds it to every connection), so root's batch and an agent's run-ahead apply pass it with no call of their own. arg-map's
   :seon.db/schemas (a branch's own schema changes, {:forms :registry}) are the per-datom check's. See
   docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :seon.host/db :seon.db/transact-args] :seon.db/tx-report]}
   [db arg-map]
   (when-let [e (supplied-instant nil (:tx-meta arg-map))] (refuse! e))
-  (checked db (:tx-data arg-map) (:seon.db/schemas arg-map) #(datahike.writing/transact! db (-> arg-map (dissoc :seon.db/schemas) (assoc :tx-data %)))))
+  ;; every transaction names its runtime and the connection's branch (tx-meta), a caller's own values winning: the merge reads a
+  ;; datom's owner by its transaction's branch, and one that named none was nobody's (task seon.db/every-transaction-names-its-branch)
+  ;; (a store still installing its schema, bootstrap, holds no :seon.tx/* attribute yet: its install transaction names nothing)
+  ;; (and a store opened from before an attribute was installed names only those it holds)
+  (let [stamp (into {} (filter #(get-in db [:schema (key %)])) (tx-meta (get-in db [:config :branch] :db)))
+        arg-map (if (seq stamp) (update arg-map :tx-meta #(merge stamp %)) arg-map)]
+    (checked db (:tx-data arg-map) (:seon.db/schemas arg-map) #(datahike.writing/transact! db (-> arg-map (dissoc :seon.db/schemas) (assoc :tx-data %))))))
 
 (defn with
   "The one transaction on a database value (Datahike's `d/with`) through both checks (`checked`): every speculation, an

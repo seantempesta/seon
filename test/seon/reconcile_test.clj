@@ -661,6 +661,22 @@
            (actions-for (db-of [(decl "a")] :extra (work "a" :lost)) :woken [(akey "a")]))
         "the next start is a spawn")))
 
+;; Estimate: 2 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 actions call x 0.7M; 1 db-with x 50k ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-run-that-merged-main-is-forked-again-on-mains-program
+  ;; docs/merging.md#a-branch-merges-main-in: a merge of main loads none of main's forms into the running agent, so its run ends
+  ;; between turns :refork (seon.turn); nothing is judged: the task goes on as a lost run does, a spawn on its branch (resumed: only
+  ;; the branch's own forms load), and the old process is stopped
+  (let [flight {:act {:op :spawn :task "demo/a" :env {:branch :demo/a}} :agent :a-a1 :step :worked}
+        db (db-of [(decl "a")] :extra (work "a" :running))
+        st (st-of db :flights {"demo/a" flight})
+        [_ outs] (#'r/advance st "demo/a" :worked {:value {:outcome :refork}})
+        reqs (mapv :req outs)
+        tx (some #(get-in % [:req :tx-data]) reqs)]
+    (is (some #(= [:db/cas [:seon.task/id "demo/a"] :seon.task/outcome :running :lost] %) tx) "its task goes on as a lost run, unjudged")
+    (is (some #{{:op :kill :id :a-a1 :ended true}} reqs) "its old process is stopped")
+    (is (not-any? #(#{:judge} (:op %)) reqs) "and nothing is judged")
+    (is (= [(spawn "a")] (actions-for (db-of [(decl "a")] :extra (work "a" :lost)))) "the next start is a spawn on its branch, with no wake")))
+
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M) ~ 500,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 500000}} the-judge-reads-its-branch-in-one-request
   ;; task seon.reconcile/the-judge-reads-its-branch-in-one-request: once the tests answer, the flight
@@ -2335,6 +2351,27 @@
        (try
          (d/transact bc {:tx-data [{:seon.agent/key "mm-own" :seon.agent/status :busy}] :tx-meta (pdb/tx-meta b)})
          (d/transact conn {:tx-data [{:seon.agent/key "mm-main" :seon.agent/status :idle}] :tx-meta (pdb/tx-meta (:branch cfg))})
+         ;; a task both hold, whose plan the branch changes to cite a var: the cites are derived from its text, never merged, so
+         ;; the merge makes them again where it lands
+         (d/transact conn {:tx-data (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "mm" :seon.task/plan "Make mm."
+                                                             :seon.task/proofs #{'demo-test/mm}}])
+                           :tx-meta (pdb/tx-meta (:branch cfg))})
+         (let [b2 (pdb/on-main (:branch cfg) :mm-branch-2)
+               _ (d/branch! conn (:branch cfg) b2)
+               bc2 (pdb/connect (assoc cfg :branch b2))
+               t {:seon.task/id "demo/mm" :seon.task/plan "Change `app.m0/f1`."}]
+           (try
+             (d/transact bc2 {:tx-data (into [[:db/add [:seon.task/id "demo/mm"] :seon.task/plan (:seon.task/plan t)]] (task/rederive-tx @bc2 t))
+                              :tx-meta (pdb/tx-meta b2)})
+             (d/transact conn {:tx-data [{:seon.agent/key "mm-main-2" :seon.agent/status :idle}] :tx-meta (pdb/tx-meta (:branch cfg))})
+             (let [before (mapv task/cited-name (task/cites-of @bc2 (pdb/eid @bc2 :seon.task/id "demo/mm")))
+                   r (ask {:op :merge-main :branch b2}) merged (pdb/head conn b2)]
+               (is (seq before) "the branch's plan cites the var")
+               (is (:ok r) (pr-str r))
+               (is (= "Change `app.m0/f1`." (:seon.task/plan (d/entity merged [:seon.task/id "demo/mm"]))) "the branch's plan")
+               (is (= before (mapv task/cited-name (task/cites-of merged (pdb/eid merged :seon.task/id "demo/mm"))))
+                   "and its cites, made again from it on the merged branch"))
+             (finally (d/release bc2))))
          (let [r (ask {:op :merge-main :branch b})
                merged (pdb/head conn b)]
            (is (:ok r) (pr-str r))

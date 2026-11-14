@@ -1019,17 +1019,25 @@
   ;; root); it reads the render proc's, kept by what each move of main changed, at the api's fold. It
   ;; answers what the whole read does, after boot and after main moved, and a read with nothing moved
   ;; costs under a tenth of the whole read.
-  (let [same "(let [h (my.root/problems sys) w (seon.problems/health @(:conn sys) (seon.system/errors sys))] [(= (:classes h) (:classes w)) (count (:classes h))])"
+  ;; the whole read is made at the point the held answer was put at (its metadata's :db and :fold), never a later main or fold: an
+  ;; error recorded between the two reads (load, a stall) once made them differ, and the test raced
+  (let [same "(let [h (my.root/problems sys) {at :db f :fold} (meta h) w (seon.problems/health at f)] [(= (:classes h) (:classes w)) (count (:classes h))])"
+        between (str "(let [h (my.root/problems sys) n (count (seon.system/errors sys))"
+                     " _ (clojure.core.async/>!! (:back sys) (seon.system/uncaught-message nil (ex-info \"recorded between the reads\" {})))"
+                     " _ (loop [i 0] (when (and (< i 1000) (<= (count (seon.system/errors sys)) n)) (recur (inc i))))"
+                     " {at :db f :fold} (meta h) w (seon.problems/health at f)] [(= (:classes h) (:classes w)) (> (count (seon.system/errors sys)) n)])")
         cost "(let [m (fn [f] (let [b (seon.profile/alloc-bytes)] (f) (- (seon.profile/alloc-bytes) b)))] (my.root/problems sys) [(m #(my.root/problems sys)) (m #(seon.problems/health @(:conn sys) (seon.system/errors sys)))])"
-        [booted moved costs]
+        [booted moved costs raced]
         (in-agent (fn [{:keys [task]}]
                     [{:op :eval :agent "root" :code same}
                      {:op :eval :agent "root" :code (str "(do @(seon.system/transact-main! sys [{:seon.task/id " (pr-str task) " :seon.task/failure {:reason \"provoked\"}}]) " same ")")}
-                     {:op :eval :agent "root" :code cost}]))
+                     {:op :eval :agent "root" :code cost}
+                     {:op :eval :agent "root" :code between}]))
         [held whole] (:value costs)]
     (is (= true (first (:value booted))) (str "after boot, held and whole agree: " (pr-str booted)))
     (is (= true (first (:value moved))) (str "after main moved, held and whole agree: " (pr-str moved)))
-    (is (< (* 10 held) whole) (str "a held read allocated " held " bytes; a whole read " whole))))
+    (is (< (* 10 held) whole) (str "a held read allocated " held " bytes; a whole read " whole))
+    (is (= [true true] (:value raced)) (str "an error recorded between the two reads leaves them agreeing, each at the held answer's point: " (pr-str raced)))))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 5 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2750k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} an-agents-first-search-reads-the-index-it-inherited
@@ -1561,6 +1569,73 @@
     (is (= :waiting (:outcome end)) (pr-str end))
     (is (= 1 (:model-calls end)) (str "the turn in flight finished (its one model call), and no other began: " (pr-str end)))))
 
+;; Estimate: as a-run-told-to-stop-ends-between-turns, the world and one work! loop of 2 turns = ~6M: 6,000,000
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-run-that-merged-main-ends-between-turns-to-run-on-mains-program
+  ;; docs/merging.md#a-branch-merges-main-in: a merge of main loads none of main's forms into the running agent (seon.agent/merge-main!
+  ;; leaves it :behind), and no turn runs old code: the run ends :refork after the turn in flight, before its next model call, and
+  ;; root forks it again on main's program (seon.reconcile-test/a-run-that-merged-main-is-forked-again-on-mains-program)
+  (let [red {:reasons [{:reason :proof-red}]}
+        end (work-with (fn [st called!] (called!) (swap! agent/state assoc :behind true) st) (constantly red))]
+    (is (= :refork (:outcome end)) (pr-str end))
+    (is (= 1 (:model-calls end)) (str "the turn in flight finished, and no model call ran on the old program: " (pr-str end)))))
+
+;; Estimate: 200 generated runs x ~8 requests x ~3 proc steps at ~5k ticks = ~24M ticks
+(deftest ^{:seon.test/estimate {:ticks 30000000}} every-request-an-agent-proc-holds-is-released-by-any-of-its-ends
+  ;; the class behind the :done hang (a state a request sets, released only by its success): root's proc for an agent is a
+  ;; pure step, so generated interleavings of clone and eval requests, each answered by any of its ends once the agent has it
+  ;; (a clone: its descriptor asked, cloned, failed or never sent; an eval: replied or never sent), must leave nothing held
+  ;; and nothing in flight; two clones at once among them, whose second overwrote the first's hold before
+  (with-redefs [seon.sock/send! (fn [& _] true) seon.sock/close! (fn [& _] nil)]
+    (doseq [seed (range 200)]
+      (let [rng (java.util.Random. seed)
+            pick #(nth % (.nextInt rng (count %)))
+            out (clojure.core.async/chan 1000)
+            kinds (vec (repeatedly (+ 2 (.nextInt rng 6)) #(pick [:clone :eval :clone])))
+            frame (fn [st m] (#'seon.agent-proc/agent-frame st (volatile! {}) m))
+            drain (fn [got] (loop [got got] (if-let [m (clojure.core.async/poll! out)] (recur (conj got (or (:k m) (:id m)))) got)))
+            final (loop [st {:id :a1 :end {:out out :fd -1} :inflight {}} next 0 got #{} ended #{} n 0]
+                    (let [got (drain got)
+                          endable (vec (remove ended got))]
+                      (cond
+                        (> n 200) (assoc st ::stuck true)
+                        (and (= next (count kinds)) (empty? endable)) st
+                        (or (empty? endable) (and (< next (count kinds)) (zero? (.nextInt rng 2))))
+                        (let [k (kinds next)
+                              [st _] (#'seon.agent-proc/agent-in st (cond-> {:op :req :rid next :kind k :msg {:op k}} (= k :eval) (assoc-in [:msg :forms] "1") (= k :clone) (assoc :pass-fd 7)))]
+                          (recur st (inc next) got ended (inc n)))
+                        :else
+                        (let [rid (pick endable)
+                              k (kinds rid)
+                              end (if (= k :clone) (pick [:fd-ready :cloned :clone-failed :unsendable]) (pick [:reply :unsendable]))
+                              st (case end
+                                   :fd-ready (frame st {:op :fd-ready :k rid})
+                                   (:cloned :clone-failed) (frame st {:op end :k rid :error {:seon.error/type :x :seon.error/message "x"}})
+                                   :unsendable (frame st {:op :unsendable :rid rid :error {:seon.error/type :x :seon.error/message "x"}})
+                                   :reply (frame st {:op :reply :id rid :response {:value 1}}))
+                              ;; a clone's descriptor asked keeps the request in flight until its answer
+                              st (if (= end :fd-ready) (frame st {:op :cloned :k rid}) st)]
+                          (recur st next got (conj ended rid) (inc n))))))]
+        (is (not (::stuck final)) (str "seed " seed " " kinds))
+        (is (nil? (:holding final)) (str "seed " seed " held by " (:holding final) " " kinds))
+        (is (empty? (:held final)) (str "seed " seed " " kinds))
+        (is (empty? (:inflight final)) (str "seed " seed " in flight " (keys (:inflight final)) " " kinds))))))
+
+;; Estimate: three proc steps on a map and two channel puts, ~0.3M ticks
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-clone-that-fails-before-its-descriptor-releases-what-waited
+  ;; the hang behind an-outside-agent-writes-its-end in three land checks (2026-11-14): root holds every message to an agent
+  ;; while a clone's descriptor is in its handshake (:holding), and only the agent's :fd-ready released it, so a clone that
+  ;; failed first (its fork refused at its bound, under load) held the agent's next request, the :done eval among them, for
+  ;; good. Any end of the clone request now ends the hold, in order
+  (let [out (clojure.core.async/chan 10)
+        st0 {:id :a1 :end {:out out} :inflight {}}
+        [st _] (#'seon.agent-proc/agent-in st0 {:op :req :rid 5 :kind :clone :new :a2 :msg {:op :clone}})
+        _ (clojure.core.async/poll! out)
+        [st _] (#'seon.agent-proc/agent-in st {:op :req :rid 6 :kind :eval :msg {:op :eval :forms "(hand-back!)"}})
+        _ (is (nil? (clojure.core.async/poll! out)) "held while the clone's handshake is open")
+        st (#'seon.agent-proc/agent-frame st (volatile! {}) {:op :clone-failed :k 5 :error {:seon.error/type :seon.lib/fork-refused :seon.error/message "refused"}})]
+    (is (nil? (:holding st)) "the clone's failure ends the hold")
+    (is (= :eval (:op (clojure.core.async/poll! out))) "and the request that waited goes out")))
+
 (deftest ^{:seon.test/estimate {:ticks 200000}} a-stop-lets-the-eval-in-flight-end-by-its-own-bound
   ;; the same drain, root's side (seon.agent-proc/stop!): a stop interrupted an agent's eval in flight (SIGUSR1), cutting it at
   ;; its next safe point; it now sends :stop alone, which the agent answers after the request before it, that request ending by
@@ -1702,6 +1777,16 @@
       (is (= {} (proofs/results run)))
       (is (= 1 (count (proofs/test-run-errors run)))))))
 
+;; Estimate: a helper, no test of its own.
+(defn- merge-in-writer
+  "This agent's merge-main! as its root answers it: the writer's merge on main's program (seon.writer/merge-main-into) on main's
+  connection conn, in this process, standing for the :merge-main request it sends. See docs/merging.md#a-branch-merges-main-in."
+  [conn cfg]
+  ;; the request key an agent's state starts with (seon.agent/init!'s :tx-seq 0), which these tests' hand-made states leave out
+  (swap! agent/state update :tx-seq #(or % 0))
+  (with-redefs [agent/await-reply (fn [k m & _] (assoc (writer/merge-main-into conn cfg (:branch @agent/state)) :op :reply :k k))]
+    (agent/merge-main!)))
+
 ;; Estimate: test-branch! ~1M, connect and 3 transacts ~0.5M, text-index build ~3M, merge-main! ~3M, 3 branch-changes at ~0.8M = ~10000000.
 (deftest ^{:seon.test/estimate {:ticks 10000000}} after-merge-main-the-agent-judges-against-the-new-base
   ;; an agent chooses the tests that judge
@@ -1725,11 +1810,13 @@
          (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
          (is (empty? (pm/changed-vars (agent/branch-changes (:base @agent/state) (agent/db)))) "the agent has changed nothing")
          (seon.doc/text-index (agent/db))
-         (let [r (agent/merge-main! #{})]
+         (let [r (merge-in-writer conn cfg)]
            (is (some #{[:var 'app.m0/f1]} (:applied r)) "main's change merges in")
-           ;; docs/vector.md#search: an agent's writes carry the text index (seon.doc/carry-index!), so a search after one rebuilds nothing; the merge's
-           ;; own record of its base was a write that skipped it, so the next search after any merge rebuilt the index, about 20 MB, seen as a flake
-           (is (= [(:hash (agent/db)) (:max-tx (agent/db))] (first @@#'seon.doc/indexes)) "the search's index is at the db the merge left")
+           ;; docs/vector.md#search: the merge reads none of main's moves, so it carries no index; the slot is keyed by its db, so the
+           ;; next search builds it at the db the merge left, never answering from the branch's old one
+           (is (not= [(:hash (agent/db)) (:max-tx (agent/db))] (first @@#'seon.doc/indexes)) "the index held is not claimed for the merged db")
+           (seon.doc/text-index (agent/db))
+           (is (= [(:hash (agent/db)) (:max-tx (agent/db))] (first @@#'seon.doc/indexes)) "the next search's index is at the db the merge left")
            (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity (agent/db) (:t r))))
                "in a merge commit that names its runtime")
            (is (= [ab (:branch cfg)] ((juxt :seon.tx/branch :seon.tx/merged) (d/entity (agent/db) (:t r))))
@@ -1760,7 +1847,7 @@
            calls (fn [f] (profile/begin!) (let [r (f)] [r (into {} (map (juxt :var :calls)) (profile/touched))]))]
        (try
          (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
-         (let [[r _] (calls #(agent/merge-main! :all))]
+         (let [[r _] (calls #(merge-in-writer conn cfg))]
            ;; owner, 2026-11-14: "Facts are facts at a certain tx time": a record main wrote reaches the branch as any fact does
            (is (every? #(= :datum (first %)) (:applied r)) "no program key moved: what merged are main's facts")
            (is (= :busy (:seon.agent/status (d/entity @store-conn [:seon.agent/key "test/a1"]))) "main's record merged onto the branch"))
@@ -1772,7 +1859,7 @@
                               :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
                              [:db/add v :var/form "f1'"]])
            (mark!))
-         (is (some #{[:var 'app.m0/f1]} (:applied (agent/merge-main! #{}))) "a definition and its mark: main's change merges in")
+         (is (some #{[:var 'app.m0/f1]} (:applied (merge-in-writer conn cfg))) "a definition and its mark: main's change merges in")
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 ;; Estimate: test-branch! ~1M, 2 redefinitions and a commit ~0.5M, the writer merging the branch up ~4M, heard-main ~0.5M, one merge-main! ~3M = ~10000000.
@@ -1804,7 +1891,7 @@
            (is (:merged? up) (str "root merges the agent's branch up: " (pr-str up))))
          (redefine "app.m0/f1-second" "(+ x 2)")
          (agent/heard-main)
-         (let [r (agent/merge-main! #{})]
+         (let [r (merge-in-writer conn cfg)]
            (is (= [] (:conflicts r)) "its own merged edit is no change of main's")
            (is (= "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 2))" (src (agent/db))) "and its second edit stands"))
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
@@ -1842,7 +1929,7 @@
                                 :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
                                [:db/add v :var/form "f1'"]]))
            (agent/heard-main)
-           (is (some #{[:var 'app.m0/f1]} (:applied (agent/merge-main! #{}))) "main's change merges in")
+           (is (some #{[:var 'app.m0/f1]} (:applied (merge-in-writer conn cfg))) "main's change merges in")
            (is (= [] (stale [:base :main])) "right after a merge of main, whose db-after is not the branch's now")
            (note 5)
            (agent/branch-changes (:base @agent/state) (agent/db))
@@ -1875,7 +1962,7 @@
            old @agent/state old-link @agent/link]
        (try
          (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
-         (agent/merge-main! #{})
+         (merge-in-writer conn cfg)
          (let [x (task/task (agent/db) "demo/x")]
            (is (= #{'demo-test/x-design-wrote-test} (set (:seon.task/proofs x))) "main's carried proof is on the branch")
            (is (= "Make x. The design: f1 adds 100." (:seon.task/plan x)) "and its plan"))
@@ -2023,7 +2110,7 @@
 (deftest ^{:seon.test/estimate {:ticks 9000000}} a-program-pull-leaves-messages-alone
   ;; docs/users.md#messages: merge-main! brings the program, never another agent's messages
   (delivery-world
-   (fn [{:keys [conn as ka kb heads]}]
+   (fn [{:keys [conn cfg as ka kb heads]}]
      (let [body (str "for b " (random-uuid))
            _ (d/transact conn (task/message-tx "m-b" (seon.task/sender "owner") [kb] body 1000))
            [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f1] [?v :var/form ?f] [?f :form/ns ?n]] @conn)
@@ -2031,7 +2118,7 @@
                                 :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
                                [:db/add v :var/form "f1'"]])
            on-branch (fn [k] (d/q '[:find [?id ...] :where [_ :seon.message/id ?id]] (heads k)))]
-       (as ka #(is (true? (:ok (agent/merge-main! #{}))) "the pull applied main's program change"))
+       (as ka #(is (true? (:ok (merge-in-writer conn cfg))) "the pull applied main's program change"))
        (is (= [] (on-branch ka)) "and no message of b's came with it")
        (is (= [] (on-branch kb)) "b's branch holds none until b's own delivery")
        (as ka #(is (= [] (agent/deliver!)) "a is sent none"))
@@ -3812,3 +3899,34 @@
          (is (not= (d/commit-id start) (d/commit-id @conn)) "the branch moved on")
          (is (= (d/commit-id start) (d/commit-id (agent/program-db))) "the program it holds is still the one it started on")
          (finally (reset! agent/state old)))))))
+;; Estimate: test-branch! ~1M, 3 transacts and connect ~0.5M, one merge-main! of one changed form ~3M = ~5000000.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-merge-of-main-loads-none-of-mains-forms-into-the-agent
+  ;; task seon.merge/a-merge-of-main-costs-what-the-branch-changed (docs/plan.md item 3: a process keeps the program it started
+  ;; on until its next start): the merge writes main's change onto the branch and loads none of it into this running process,
+  ;; whose program stays the one :program names (program-db), so its test children and its next start bring it to the branch
+  ;; (load-diff!). Red before: merge-main! loaded main's changed forms here (2.81B ticks for 1,117 forms, measured 2026-11-14)
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [mark! #(d/transact conn [{:seon.system/id :root :seon.system/content-t (inc (:max-tx @conn))}])
+           _ (mark!)
+           ab (pdb/on-main (:branch cfg) :agent-base)
+           _ (d/branch! conn (:branch cfg) ab)
+           forked @conn
+           store-conn (pdb/connect (assoc cfg :branch ab))
+           [a b] (sock/socketpair)
+           old @agent/state old-link @agent/link
+           calls (fn [f] (profile/begin!) (let [r (f)] [r (into {} (map (juxt :var :calls)) (profile/touched))]))]
+       (try
+         (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked
+                                                          :program {:seon.db/branch ab :seon.db/commit (d/commit-id @store-conn) :seon.db/t (:max-tx @store-conn)}})
+         (let [before @store-conn
+               [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f1] [?v :var/form ?f] [?f :form/ns ?n]] forked)]
+           (d/transact conn [{:db/id "f1'" :form/id "app.m0/f1-redefined" :form/ns nsx :form/order 100 :form/defines [v]
+                              :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
+                             [:db/add v :var/form "f1'"]])
+           (mark!)
+           (let [[r n] (calls #(merge-in-writer conn cfg))]
+             (is (some #{[:var 'app.m0/f1]} (:applied r)) "main's change is written onto the branch")
+             (is (nil? (n 'seon.program/load-form!)) "and none of main's forms is loaded into this process")
+             (is (= (d/commit-id before) (d/commit-id (agent/program-db))) "its program is still the one it started on")))
+         (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))

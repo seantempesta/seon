@@ -60,6 +60,8 @@ A task is edited where the pull holds it, whoever's task it is: an edit at a pat
 
 The edit is on your branch and reaches main when your task merges, so a task that prepares another is one the other needs. Two edits of one plan conflict at the merge.
 
+`:seon.task/needs` is a ref to the needed task's entity; written as an id string, it makes a new empty entity, so a write names the entity (`(:db/id (d/entity db [:seon.task/id id]))`).
+
 ## The agent knows its task
 
 An agent holds the task root started it for from its first form: `my.task/current` reads it through `seon.turn/current-task`. `seon.system/spawn!`'s opts (`:branch`, `:task`) ride into the fork, and `seon.agent/init!` keeps them in the agent's state.

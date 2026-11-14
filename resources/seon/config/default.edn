@@ -353,6 +353,7 @@
  ;; 2026-11-14). Provenance: 100 forks right after a wake waited 3.9-4.6 ms median, 6.4 ms at most, fork(2)
  ;; included (load 15, a small process, 2026-11-14); root's fork(2) alone is 65 ms (docs/cost.md); about ten times that.
  :seon.config.agent/fork-wait-ms 1000
+ :seon.config.agent/merge-ms 30000
  ;; Unit: bytes. How much of a stalled agent's stderr file its stall evidence keeps as the fiber dump
  ;; (seon.fx/stall-evidence; seon.lib/tail-bytes says how many earlier bytes were left out). Provenance:
  ;; the literal 262144 (256 KiB) the evidence script's `tail -c` held; a dump of a few hundred fibers fits.
@@ -740,8 +741,9 @@
  :seon.config.proofs/tree-files-kept 12
  ;; Unit: bytes. The kept program dbs' store on disk (its data.mdb). Measured 2026-10-23: 12 MB
  ;; for the whole program (118 files), about 2 MB more a kept tree that changed a file. At the
- ;; bound: the store is removed before it is opened and starts again from the run's tree (one
- ;; import); an LMDB file never shrinks, so collecting would not bring it under.
+ ;; bound: the next tree the plan imports starts the key's next generation, <path>-<key>-<n> (test-runner/program-db), a whole
+ ;; import; the full one is never moved or removed under the runs reading it (an LMDB file never shrinks, so collecting would
+ ;; not bring it under); generations past program-stores-kept that no process holds open are removed.
  :seon.config.proofs/program-store-max-bytes 268435456
  ;; Unit: path. The checks' own store, bin/check's store when SEON_STORE names none: output, regenerable from its seed, so
  ;; seon.check/seed keys it by the digest of what the seed writes (a link to <path>-<digest>) and removes one made from another
@@ -1189,6 +1191,14 @@
  ;; #env honours where bin/system names it (until a built binary's top-level code sees its argv,
  ;; so --set can say it).
  :seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 0]
+ ;; Unit: connections. Root's server connections open at once, each a fiber (~6 KB); one past it waits in the accept until one
+ ;; closes. Provenance: the sessions' relays (bin/mcp, a connection a call) and the test roots' askers, a few dozen at most; bounded,
+ ;; where a connection was an OS thread each with no bound (2026-11-14).
+ :seon.config.root/server-connections 256
+ ;; Unit: workers. Server ops answered at once, each on a :mixed worker (an OS thread): an op that blocks (a root eval, a
+ ;; :done waiting on its judge) holds its worker, never a carrier or another connection. Provenance: the sessions working at once
+ ;; (seven tonight), doubled; an op past them waits its turn at the :server-op owner.
+ :seon.config.root/server-op-workers 16
  ;; Unit: pid. The process this root ends with (seon.lib/end-with!, armed once its boot has forked the fork server):
  ;; a test's root names its test process (seon.test-store/start-root! sets SEON_END_WITH), so however that process
  ;; ends, -9 included, its roots and their agents end too (2026-11-08: 12 process groups outlived a stopped prove). 0: none.
