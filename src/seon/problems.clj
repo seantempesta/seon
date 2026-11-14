@@ -467,6 +467,28 @@
            (derived-row ans s nsym (str v " is " n " tokens, over the bound of " bound ": split it by what it does")
                         {:kind :long-form :var v :tokens n :bound bound} {:var v :tokens n :bound bound})))))
 
+(defn unfocused-docstrings
+  "An :unfocused-docstring row for each named Seon var whose docstring is over :seon.config.shrink/docstring-words words or
+  holds a measurement, a date or a wiki page cited twice. One seek a var. See docs/health.md#an-unfocused-docstring."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:set :symbol]] [:vector :seon.problems/row]]}
+  [db ans names]
+  (let [bound (config/value :seon.config.shrink/docstring-words)]
+    (vec (for [v (sort names)
+               :when (re-find #"^(seon|my)\." (str (namespace v)))
+               :let [doc (some->> (pdb/eid db :var/name v) (d/entity db) :var/doc)]
+               :when doc
+               :let [words (count (re-seq #"\S+" doc))
+                     why (cond-> []
+                           (> words bound) (conj :words)
+                           (re-find #"\d[\d.,]*\s?(ms|µs|us|ticks|KB|MB|GB|bytes)\b" doc) (conj :measurement)
+                           (re-find #"20\d\d-\d\d-\d\d" doc) (conj :date)
+                           (some #(< 1 %) (vals (frequencies (re-seq #"docs/[a-z-]+\.md" doc)))) (conj :wiki-twice))]
+               :when (seq why)
+               :let [nsym (symbol (namespace v))]]
+           (derived-row ans (str "unfocused-docstring " v) nsym
+                        (str v "'s docstring is " words " words (" (str/join ", " (map name why)) "): say what it answers and the one thing a caller must know, and cite the wiki once")
+                        {:kind :unfocused-docstring :var v :words words :why why :bound bound} {:var v :words words :why why})))))
+
 (defn refused-values
   "Each stored datom of the attributes attrs whose value db's own entry for its attribute refuses, as a :refused-value row naming
   the attribute, the entity and why: a value written before its entry tightened, held to the entry now (seon.db/invalid-datom, with
@@ -688,6 +710,7 @@
                          (map #(assoc % :class :stale-section) (stale-sections db ans {:names moved-vars :sections (eids state)}))
                          (map #(assoc % :class :uncited-var) (uncited-vars db ans moved-vars))
                          (map #(assoc % :class :long-form) (long-forms db ans moved-vars))
+                         (map #(assoc % :class :unfocused-docstring) (unfocused-docstrings db ans moved-vars))
                          (map #(assoc % :class :unestimated-test) (unestimated-tests db ans moved-vars))
                          (map #(assoc % :class :undeclared-test) (undeclared-tests db ans moved-vars))
                          (map #(assoc % :class :leadless-section) (leadless-sections db ans led-cands))
