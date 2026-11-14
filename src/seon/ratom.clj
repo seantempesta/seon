@@ -120,9 +120,12 @@
   (let [;; the recorder outside every reaction (a read of the render proc's pass): taken at the outermost run, where no reaction is
         ;; in progress, and handed down, so a nested run's reads reach it and never its parent run's (each run's reads are its own)
         outer (or *outer-reads* (when (nil? *ratom-context*) datahike.index.interface/*reads*))
-        [res rs] (binding [*outer-reads* outer] (reads/with-reads #(binding [*ratom-context* r] (f))))
-        ;; with-reads binds a recorder of its own and does not nest; deps' task datahike.reads/with-reads-nests-in-an-outer-recorder
-        ;; moves this into with-reads, and this line goes
+        ;; the recorder with-reads composes into at its return is the outermost, never the parent run's: a parent depends on
+        ;; its child's value, not on what the child read (Reagent's rule); at the outermost run that is the binding already in force
+        [res rs] (binding [*outer-reads* outer datahike.index.interface/*reads* outer]
+                   (reads/with-reads #(binding [*ratom-context* r] (f))))
+        ;; until the pinned Datahike composes nested recorders (task datahike.reads/with-reads-nests-in-an-outer-recorder), the
+        ;; run's reads reach the outermost here; after it this adds the same keys again, and goes with the pin
         _ (when (and outer (seq rs)) (swap! outer into rs))
         c (-get r :captured)]
     (-set! r :dirty? false)
