@@ -18,6 +18,10 @@ Context runs one watched task now, random rounds after the model call's bound. O
 
 "Your job is see waste and that's how you find what to delete. Unify the concept at the root of all of our problems and the other problems should go away because they aren't possible anymore." On the survey: "If we have many ways what is the best way? Don't we have a way of auto tracking what reads have changed in ratoms and datahike reads ... I want the optimal solution not the first one that each agent came up with." On recording's switch-offs: "Assume agents did stupid shit ... we shouldn't just accept the bad ideas that are easily fixable." On cost: "Don't worry about a few ms. Focus on what is the best mechanism that our agents can use that's simple and the most expressive and powerful. We can optimize it later. Right now we dedupe and upgrade everyone." Then: "Can we make the ratom do the reaction work but in the way that agents are expecting when writing hiccup components? Most agents are trained on reagent and I don't want to teach a foreign concept. I don't care if we have two interfaces if it's the same system and we are computing things efficiently." Agreed by every area: one reaction over the store, one tracker, one stored index. Stated in [the plan](plan.md#the-root-concept-one-reaction-over-the-store).
 
+### No timers outside Flow
+
+"No timers. We must take anything that needs a timer and port the code to work with flow." A deadline is a message a Flow proc receives (the one clock, `seon.step/put-after!`); every other timer (polls, script timeouts, watchdogs) is ported onto Flow procs and deleted, its job kept. Stated in [the plan](plan.md#the-order).
+
 ### Hand-made lists: case by case
 
 "I want a case by case basis for judging if we should keep the hand lists or fix the problem they are trying to solve at their root. max-workers and all of those config dials are there for a reason." A dial is kept as spec'd config; a list patching a missing mechanism is fixed at its root; a list restating held data is derived. Stated in [AGENTS.md](../AGENTS.md#5-laws).

@@ -106,7 +106,7 @@ this path, and is deleted when the path carries a week of landings.
 2. **Load within the machine:** proving goes through the one effects owner (`seon.fx/owner-proc`, a `:process` kind,
    admission from the cores) and `bin/prove` becomes its client; per-checkout shard sizing goes (tests; runtime reviews).
    Until it lands, no session starts a prove while the 1-minute load is over 18.
-3. **Nothing hangs, one rule:** every wait passes its declared bound and ends with `:seon.bound/reached` or a typed error:
+3. **Nothing hangs, one rule, no timers outside Flow** (owner: "No timers. We must take anything that needs a timer and port the code to work with flow"): every wait passes its declared bound and ends with `:seon.bound/reached` or a typed error:
    the fork (deps), the model call and the stalled eval (runtime's deadline slice; context's turn records the stall). Seven
    deadline mechanisms become this one.
 3a. **A process never runs a binary its branch doesn't name** (owner, 2026-11-14: "this shouldn't be possible"): a
