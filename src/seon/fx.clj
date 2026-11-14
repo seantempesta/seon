@@ -1979,8 +1979,8 @@
             (assoc owner {:proc (flow/process #'owner-proc)
                           :chan-opts {:in {:buf-or-n (cfg/value :seon.config.fx/buf)} :ask {:buf-or-n (cfg/value :seon.config.fx/buf)} :done {:buf-or-n (* 2 workers)}
                                       ;; credit: every request admission lets be in flight at once (each weighs a process or more, within
-                                      ;; the budget, the cores and two: limits), so an answer never parks (docs/flow.md, request and answer)
-                                      :answers {:buf-or-n (+ 2 (cfg/value :seon.config.machine/cores))}}
+                                      ;; limits' :budget, the one bound it is taken from), so an answer never parks (docs/flow.md, request and answer)
+                                      :answers {:buf-or-n (:budget (config-limits))}}
                           :args (cond-> {:kind kind :workers workers :work work :back back}
                                   rate (assoc :rate rate :tick (a/chan 1))
                                   batch (assoc :batch batch)
