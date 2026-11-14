@@ -106,8 +106,9 @@
        ;; attribute asked whether it is data (~14: the differing datoms' attributes on two dbs, the keys' on three), and per changed key
        ;; and side one seon.merge/owned?, one tx-branch of the other side's last writer and one per datom it added (~9);
        ;; 47 since the derived attributes are the entity index's own (one seon.db/index read per data-attr?, 7, never a derived? per
-       ;; attribute) and a transaction's entity bears no key (its instant, runtime and branch ride with its datoms): measured 47
-       :fixed {:bytes 650000 :calls 47}
+       ;; attribute) and a transaction's entity bears no key (its instant, runtime and branch ride with its datoms): measured 47;
+       ;; 49 since a datom a side added is its change only if base's history doesn't hold it (seon.merge/shared?, one per side here)
+       :fixed {:bytes 650000 :calls 49}
        :sizes [10 30 100]}))
 
 (defn embedded-of

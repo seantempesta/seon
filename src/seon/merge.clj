@@ -354,10 +354,18 @@
   {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :keyword]]}
   [db tx] (:seon.tx/branch (d/entity db tx)))
 
+(defn- shared?
+  "Whether datom d (one side holds) is base's history: base asserted the same fact in the same transaction, written before the
+  sides parted (or carried to both), so neither side's change since base, whatever the transaction names. Cost: one history seek."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/datom] :boolean]}
+  [base {:keys [e a v tx]}]
+  (boolean (some #(and (:added %) (= tx (:tx %))) (d/datoms (d/history base) :eavt e a v))))
+
 (defn- owned?
   "Whether side's fact at key k (a datum, [:datum e a] or [:datum e a v], or a stated key, by the attributes it states) differs from
   base's because side wrote it: a datom side holds
-  and base lacks written on side (its transaction names no branch of other's, the side db's own last writer), or a datom base holds
+  and base lacks written on side (its transaction names no branch of other's, the side db's own last writer, and is not base's
+  history: `shared?`), or a datom base holds
   that side once held and let go. A value side holds only because other wrote it (carried before its base moved), or lacks because it
   never held it, is other's: facts are facts at the transaction that wrote them (docs/merging.md#a-branch-merges-main-in). Cost: the
   datoms of [e a] on side and base, and a history seek per datom side lacks."
@@ -370,7 +378,7 @@
                       (let [dts (fn [db] (if (seq vs) (d/datoms db :eavt e a (first vs)) (d/datoms db :eavt e a)))
                             held (into #{} (map :v) (dts base))
                             now (dts side)]
-                        (or (some #(and (not (held (:v %))) (own-datom? %)) now)
+                        (or (some #(and (not (held (:v %))) (own-datom? %) (not (shared? base %))) now)
                             ;; a value base holds that side let go of: side's change only if side's own transaction retracted it
                             (some (fn [v] (some #(and (not (:added %)) (own-datom? %)) (d/datoms (d/history side) :eavt e a v)))
                                   (remove (into #{} (map :v) now) held)))))]
@@ -534,7 +542,7 @@
 
 (defn own-datoms
   "The datoms head wrote since base, as [gone added] (datahike.api/datoms-diff of base and head, one read of what differs): each a
-  fact head owns (`owned?`: its transaction names no branch of main's, or head held and let go of it), of no derived attribute
+  fact head owns (`owned?`: its transaction names no branch of main's and is not base's history, `shared?`, or head held and let go of it), of no derived attribute
   (the entity index's :derived-attrs) and no transaction's own facts. A value head holds only because main wrote it, or lacks because it never held it, is
   main's and left out. What seon.merge/merge-main writes onto main's head. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:tuple [:vector :seon.host/datom] [:vector :seon.host/datom]]]}
@@ -548,7 +556,7 @@
                    (into #{} (map :a) (concat gone added)))
         fact? (fn [{:keys [e a]}] (and (kept a) (not (tx? e))))]
     [(filterv #(and (fact? %) (seq (d/datoms (d/history head) :eavt (:e %) (:a %) (:v %)))) gone)
-     (filterv #(and (fact? %) (not (and mains (= mains (tx-branch head (:tx %)))))) added)]))
+     (filterv #(and (fact? %) (not (and mains (= mains (tx-branch head (:tx %))))) (not (shared? base %))) added)]))
 
 (defn merge-main
   "The one merge of main into a branch, decided: head's own datoms since base (`own-datoms`), their keys (program keys and facts,

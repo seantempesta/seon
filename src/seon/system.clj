@@ -273,6 +273,8 @@
         state #(::flow/state (get states %))]
     ;; as the api's ping answers it (its :ping-map-fn): the armed flag (seon.step/timer), the busy set, what a throw lost
     {:root (select-keys (state :api) [::stall-armed ::busy ::lost])
+     ;; the reconciler's flights by task and the step each waits at: a judge that never settles is named
+     :reconciler (select-keys (state :reconciler) [:flights :flight-steps])
      :agents (into (sorted-map)
                    (for [[pid m] states :let [s (::flow/state m)] :when (contains? s :inflight)]
                      [pid (assoc (select-keys s [:fx-out :stall-seen :last-frame-ms :holding :held]) :inflight (update-vals (:inflight s) :kind))]))
