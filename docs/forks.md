@@ -18,7 +18,7 @@ How a fork's branches are named and where a pin sits.
 - **The difference from upstream is kept small.** Where upstream's solution is almost as good as ours, we take theirs. Ours stays for the Jolt port, for a measured gain upstream cannot give, or for something Seon calls that upstream lacks.
 - **Merge upstream often, in slices**, each built and gated. A fork far behind is rebuilt instead: upstream's head with only what Seon needs applied as fresh commits.
 - **Fork code is written to be offered:** upstream's style, naming, tests and changelog rules, one reason a commit.
-- **A pin proves whole before it lands:** `bin/prove` on its own branch, the [own suites](#own-suites) included. A Jolt pin also runs `bin/jolt-gates` (its header is its manual): green when the gates not passing are exactly those `test/forks/jolt-gates-red.txt` names.
+- **A pin proves whole before it lands:** `bin/prove` on its own branch, the [own suites](#own-suites) included. A Jolt pin also runs `bin/jolt-gates` (its header is its manual): green when every gate passes (a red gate is fixed at its cause, never kept as known).
 - **A stricter upstream compiler is a law.** What upstream refuses at compile (a malformed `ns` form, an overlapping `fn` arity, a method declared twice) Seon's code may not contain; Jolt's `tools/ns_audit.clj` reads a source tree for the first.
 
 ## Own suites
@@ -27,7 +27,7 @@ A pin bump runs the forks' own tests on Jolt, so a fork commit cannot change sem
 
 ## jolt
 
-`reference-code/jolt` at `f2571af9` (``jolt/deps``), upstream ``jolt-lang/jolt`` main `8d3ba3c9` plus our commits merged on top. Seon's agents run on one OS thread with fibers ([processes](processes.md)), fork from root, and are measured by ticks and bytes ([cost](cost.md#what-is-measured)); most of what we carry serves those three. Jolt's one red gate (`buildsmoke`) is listed with its cause in `test/forks/jolt-gates-red.txt`; catching up with upstream is task `jolt.host/jolt-is-at-upstreams-head`.
+`reference-code/jolt` at `e5c6e170` (``jolt/flow``), upstream ``jolt-lang/jolt`` main `8d3ba3c9` plus our commits merged on top. Seon's agents run on one OS thread with fibers ([processes](processes.md)), fork from root, and are measured by ticks and bytes ([cost](cost.md#what-is-measured)); most of what we carry serves those three. Every Jolt gate is green on the pin; catching up with upstream is task `jolt.host/jolt-is-at-upstreams-head`.
 
 - **The main carrier** (Jolt): a program and its fibers on its one thread; it wakes on a fiber another thread queues, on a timer, on signals; decides it is stuck only under the lock its wakers take; `main-carrier-run!` returns into an ordinary process, so root boots there and then starts its threads. A process nothing can wake tells each waiter `{:jolt/deadlock true :parked dump}` in its own frame ([failure points](failure-points.md)).
 - **Fork safety** (Generic): ``jolt.host/fork-alone`` is the one way to fork; `jolt-after-fork-child!` drops the bookkeeping of threads fork(2) did not copy, remakes every process lock and object monitor, and runs none of the parent's fibers or shutdown hooks; a forked child re-protects MAP_JIT code (chez-patches 0006, 0007, macOS arm64).

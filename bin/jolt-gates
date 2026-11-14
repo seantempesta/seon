@@ -5,9 +5,9 @@
 # The gates run in a clone of the fork kept at target/jolt-gates/work, moved to the pinned commit, never in
 # reference-code/jolt: Jolt's Makefile runs `git submodule update` for its vendored libraries, which a
 # worktree's checkout must never do (bin/worktree). Verdicts go to target/jolt-gates/verdicts.tsv as they
-# land (GATE, PASS|FAIL|TIMEOUT, seconds). It ends on JOLT GATES OK when the gates that are not PASS are
-# exactly the ones test/forks/jolt-gates-red.txt names (each with its reason there), else JOLT GATES FAILED
-# naming every gate that is red and not known, and every known-red gate that passed (remove its line).
+# land (GATE, PASS|FAIL|TIMEOUT, seconds). It ends on JOLT GATES OK when every gate passed, else JOLT GATES
+# FAILED naming each that did not: a red gate is fixed, never listed as known (the known-red list went when its
+# last gate, buildsmoke, was fixed at its cause, 2026-11-14).
 # JOLT_GATES_JOBS sets the workers (default: cores less 2).
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # Jolt's gates judge Jolt as it ships, so they run in none of Seon's environment: a caller that had sourced bin/env
@@ -29,7 +29,6 @@ git -C "$T/work" fetch -q "$J" "$PIN" && git -C "$T/work" checkout -q --detach "
 ( cd "$T/work" && HOME=$T/home JOLT_CHEZ=$C nice -n 15 make CHEZ=$C deps ) > "$T/logs/deps.out" 2>&1 < /dev/null \
   || { echo "JOLT GATES FAILED (the clone's vendored libraries: $T/logs/deps.out)"; exit 1 }
 if (( $# )); then gates=("$@"); else gates=(${(f)"$(grep -v '^#' "$ROOT/test/forks/jolt-gates.txt")"}); fi
-known=(${(f)"$(grep -v '^#' "$ROOT/test/forks/jolt-gates-red.txt" | cut -d' ' -f1)"})
 # One build, then the gates in parallel: the built clone is copied per worker with APFS clonefile (cp -c: no bytes
 # copied), each worker its own HOME and TMPDIR, the gates dealt longest first by the last run's seconds
 # (target/jolt-gates/times.tsv) to the least loaded worker. JOLT_GATES_JOBS workers (default: cores less 2).
@@ -62,9 +61,6 @@ done
 wait $P
 awk -F'\t' '{print $1, $3}' "$T/verdicts.tsv" > "$T/times.tsv"
 red=(${(f)"$(awk -F'\t' '$2 != "PASS" {print $1}' "$T/verdicts.tsv")"})
-new=(${red:|known}); if (( $# )); then fixed=(); else fixed=(${known:|red}); fi
 print "jolt-gates: $PIN, ${#gates} gates, $(( ${#gates} - ${#red} )) PASS, ${#red} not"
-(( ${#new} )) && print "red and not known: $new"
-(( ${#fixed} )) && print "known red and now PASS (remove from test/forks/jolt-gates-red.txt): $fixed"
-if (( ${#new} + ${#fixed} )); then echo "JOLT GATES FAILED"; exit 1; fi
+if (( ${#red} )); then print "red: $red"; echo "JOLT GATES FAILED"; exit 1; fi
 echo "JOLT GATES OK"
