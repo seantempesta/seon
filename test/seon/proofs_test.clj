@@ -294,6 +294,21 @@
     (is (re-find #"the fixture's store is gone" (:message t)) "the throw's own message, not a guess")
     (is (= "{:store :gone}" (:data t)) "and its data")))
 
+;; Estimate: two tiny tests, one building a vector of 100k (~1M ticks, ~2 MB), and their runner = ~5000000.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-test-past-its-bytes-budget-ends-typed
+  ;; docs/merging.md#a-tests-tick-budget, task seon.proofs/a-tests-bytes-and-wall-are-budgets-as-its-ticks-are (owner: "we don't
+  ;; accept large overruns for ticks, mem or time"): bytes are a budget as ticks are, ten times what the deftest states
+  (record (ts/test-db) 'user "(ns app.pv-bytes-test (:require [clojure.test :refer [deftest is]]))"
+          'app.pv-bytes-test "(deftest ^{:seon.test/estimate {:ticks 100000000 :bytes 1000}} allocates (is (= 100000 (count (vec (range 100000))))))"
+          'app.pv-bytes-test "(deftest ^{:seon.test/estimate {:ticks 100000000 :bytes 100000000}} within (is (= 100000 (count (vec (range 100000))))))")
+  (let [notes (atom [])
+        ran (proofs/run-tests! '[app.pv-bytes-test/allocates app.pv-bytes-test/within] {} #(swap! notes conj %))
+        spent (some #(when (= :seon.test/bytes-spent (get-in % [:seon.test/report :seon.error/type])) (:seon.test/report %)) @notes)]
+    (is (= 1 (:error (ran 'app.pv-bytes-test/allocates))) "past ten times its stated bytes: the test's own error")
+    (is (= 10000 (:budget spent)) (pr-str spent))
+    (is (> (:bytes spent) 10000) "naming what it allocated")
+    (is (proofs/green? (ran 'app.pv-bytes-test/within)) "within its budget: green")))
+
 (deftest ^{:seon.test/estimate {:ticks 10000000}} each-test-has-its-own-budget
   ;; task seon.proofs/one-prove-path: the bound is per test, so a test that never ends is red,
   ;; named, as the typed :seon.test/ticks-spent, and the run goes on: the next test is green,
