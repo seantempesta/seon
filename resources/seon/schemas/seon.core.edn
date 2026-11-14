@@ -52,9 +52,9 @@
  :seon.reads/keys [:set :seon.reads/key]
  ;; the one stored index of who read what (docs/plan.md#the-root-concept-one-reaction-over-the-store): a moved datom's keys (datahike.reads/datom-keys, each its pr-str) find its readers, one AVET seek each
  :seon.reads/key-set [:set {:seon.db/index true :description "The read keys a derived entity's run recorded (datahike.reads/range-key, each its pr-str): what a moved datom finds it by."} :string]
- :seon.reads/written-key-set [:set {:seon.db/index true :description "The keys of the datoms a derived entity's run transacted (datahike.reads/datom-keys, each its pr-str; seon.db/written-keys): what a reader of a key finds its writer by."} :string]
- :seon.reads/reader [:map {:seon.db/attributes true :seon.db/derived true :description "A derived entity (a test's result, a page part, a reaction's value) as what its run read: held beside its own schema's attributes, so any entity can be one."}
-                     [:seon.reads/key-set :seon.reads/key-set] [:seon.reads/written-key-set {:optional true} :seon.reads/written-key-set]]
+ :seon.reads/written-keys [:set {:description "The keys a run's writes touch (seon.db/written-keys: datahike.reads/datom-keys of each datom it transacted, each its pr-str): a run reads another's writes when its :seon.reads/key-set holds one."} :string]
+ :seon.reads/reader [:map {:seon.db/attributes true :description "A derived entity (a test's result, a page part, a reaction's value) as what its run read: held beside its own schema's attributes, so any entity can be one."}
+                     [:seon.reads/key-set :seon.reads/key-set]]
  :seon.reads/branch [:and {:description "The branch a read set was read on."} :seon.db/branch]
  :seon.reads/commit [:uuid {:description "The commit a read set was read at."}]
  :seon.reads/outside [:set {:description "The reads outside the store, as effects answered them."} :seon.fx/read]

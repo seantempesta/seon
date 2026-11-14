@@ -158,7 +158,7 @@
           (finally (vreset! stopped (end!))))]
     (when main-before
       (clojure.test/do-report {:type :seon.test/store-reads :seon.reads/key-set (into #{} (map pr-str) @read-keys)
-                               :seon.reads/written-key-set (pdb/written-keys (seon.union/changes main-before (ts/read-main root)))}))
+                               :seon.reads/written-keys (pdb/written-keys (seon.union/changes main-before (ts/read-main root)))}))
     (when-let [a (and (map? out) (::attach-made-no-agent out))]
       (throw (ex-info (str "in-agent: the attach made no agent: " (pr-str a))
                       {:attach a})))
