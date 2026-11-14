@@ -1221,6 +1221,23 @@
       (is (= :seon.ctx/invalid-pattern (refused '[:seon.eval/_agent])) "a reverse attribute outside a join")
       (is (= :seon.ctx/invalid-pattern (refused '[{[:seon.eval/_agent :limit 3] [*]}])) "a window with no :reverse (the oldest n)"))))
 
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-proof-written-later-joins-its-task-by-name
+  ;; docs/ctx.md#the-pattern: a task's proofs join their vars by name ([:seon.task/proofs :by :var/name :as :proved]), and a proof is
+  ;; usually written after the record was built. A patch that writes the var (its verdict with it) holds it as a build of the same db
+  ;; does: else the status, drawn from the record, reads it unknown. Seen 11-14: an outside agent's seon_done ended "red saying
+  ;; proof-unknown" on a proof green five minutes before at the same digest
+  (let [p 'app.x-test/later
+        db (:db-after (d/with (seeded 0 nil) [[:db/add [:seon.task/id "lab/ctx"] :seon.task/proofs p]]))
+        c (ctx/build (seon.db/index) db (aid db) :b)
+        rep (d/with db [{:db/id "f" :form/id "app.x-test/later-1" :form/src "(deftest later (is true))"}
+                        {:var/name p :var/meta #{:test} :var/form "f" :seon.test/status :green :seon.test/digest "d1"}])
+        c' (ctx/patch c (:db-after rep) (:tx-data rep) :b)
+        proved #(get-in (:tree %) [:seon.agent/task :proved])
+        green? (fn [c] (some #(and (= p (:var/name %)) (= :green (:seon.test/status %))) (vals (proved c))))]
+    (is (not (green? c)) "before: no var by that name")
+    (is (green? (ctx/build (seon.db/index) (:db-after rep) (aid (:db-after rep)) :b)) "a build of the new db holds it")
+    (is (green? c') "and so does the patch that wrote it")))
+
 (deftest an-agent-edits-its-pattern
   ;; the owner, 2026-10-26: "the pull pattern ... stored in the context and the agent can update it":
   ;; a swap! of :seon.ctx/pattern is written on the agent's entity, and the record is pulled by it. It edits its role's
