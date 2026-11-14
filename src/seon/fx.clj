@@ -809,7 +809,8 @@
               (when g (.setLastModified (java.io.File. ^String gp) (System/currentTimeMillis)))
               (when (map? r) (.setLastModified (java.io.File. ^String rp) (System/currentTimeMillis)))
               (cond (contract/error? r) (reduced r)
-                    (contract/error? gt) (reduced gt)
+                    ;; gt is nil but at a flaky digest: no check, so a green costs what it did
+                    (and gt (contract/error? gt)) (reduced gt)
                     :else (if-let [v (proofs/verdict dg (when g (cond-> {:digest dg :pass 1 :fail 0 :error 0} gt (assoc :ticks gt)))
                                                      (when r (cond-> {:digest dg :pass 0 :fail (if (= :fail (:status r)) 1 0) :error (if (= :error (:status r)) 1 0)
                                                                       :failures (vec (:failures r)) :writer (:writer r)}
