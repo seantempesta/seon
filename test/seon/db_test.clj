@@ -2000,7 +2000,7 @@
                   k/get-immutable (fn [& args] (swap! n inc) (apply gi args))]
       (let [marked (psi/mark (:eavt db))] [@n marked]))))
 
-(deftest ^{:seon.test/estimate {:ticks 400000000}} a-collections-mark-reads-each-node-once
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-collections-mark-reads-each-node-once
   ;; docs/storage.md#collection: a collection's mark (datahike.gc, under seon.db/retain! at every root boot) walks each
   ;; branch's index and collects the out-of-line values its nodes reference. On Jolt it restored each upper branch through
   ;; the node cache to walk it, then read every marked node again whole for its references: on the standing store one boot's
@@ -2008,7 +2008,8 @@
   ;; a dry run on a clone). Now each node is read once, raw, its references taken from that read, and nothing enters the
   ;; node cache. The test: a store of its own, 3,000 datoms (a tree three levels deep at the store's branching factor of
   ;; 64) and three values past :seon.config.store/value-out-of-line-bytes, each its own key; the mark finds the three and
-  ;; reads each node once. The estimate: the 3,000-datom transaction ~300M ticks, the mark ~1k nodes at ~30k ticks.
+  ;; reads each node once. The estimate: the transaction of 1,003 entities ~25M ticks (first written as 300M, ten times what
+  ;; a datom of a new entity costs here; measured 30.3M for the whole test), the mark ~116 keys at ~30k ticks: 40M.
   (let [path (str (seon.config/checkout) "/target/db-test-mark-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
     (swap! stores-made conj path)
