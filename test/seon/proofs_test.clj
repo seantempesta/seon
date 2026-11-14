@@ -835,6 +835,18 @@
 ;; is answered as an :error naming why, :not-run: no verdict of its own, so it is never written to the cache. Found by runtime's
 ;; review, 2026-11-13: answer-ran left out only :reused and died reports, so that error was cached as a red at the test's real
 ;; digest, which a later run would reuse and never run the test. Estimate: one fold of three reports, ~50k ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-wall-time-end-is-no-verdict-and-never-cached
+  ;; docs/principles.md#6-nothing-changed-nothing-runs-a-change-costs-what-it-touched: a test ended at its wall bound
+  ;; (:seon.test/wall-spent, seon.agent/arm-wall!) read the machine's load, not its own work: 21 root-starting tests ended so in the
+  ;; service at load, green alone, and their cached reds made them flaky at their digests (root.log, 2026-11-14). Its end stops the
+  ;; hang; it is never a verdict. Estimate: two reports read, ~0.1M
+  (let [answer {:reports [{:type :pass :var "#'a.x-test/ran"}
+                          {:type :error :var "#'a.p-test/waits" :seon.error/type :seon.test/wall-spent
+                           :message "Uncaught exception, not in assertion." :actual "the test ran past its wall bound of 36700 ms"}]
+                :digests {'a.x-test/ran "d1" 'a.p-test/waits "d2"}}
+        {:keys [ran]} (proofs/answer-ran answer)]
+    (is (= #{'a.x-test/ran} (set (keys ran))) "only the test that ended by its own work is a verdict to cache")))
+
 (deftest ^{:seon.test/estimate {:ticks 100000}} a-test-not-run-is-no-verdict-and-never-cached
   (let [answer {:reports [{:type :pass :var "#'a.x-test/ran"}
                           {:type :error :var "#'a.p-test/boots" :not-run true :message "a.p-test/boots reaches a process of its own"}]

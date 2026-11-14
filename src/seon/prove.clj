@@ -408,11 +408,16 @@
         st (update st :batches dissoc bid)
         fails (when-not (or fx? (contract/error? r)) (proofs/failures r))
         reported (when-not (or fx? (contract/error? r)) (into #{} (keep #(some-> (:var %) (subs 2) symbol)) (:reports r)))
+        ;; ended at its wall bound: wall time reads the machine, so no verdict, a :platform problem (seon.proofs/answer-ran)
+        wall (when-not (or fx? (contract/error? r)) (into #{} (keep #(when (= :seon.test/wall-spent (:seon.error/type %)) (some-> (:var %) (subs 2) symbol))) (:reports r)))
         v (when fx? (:value r))
         result (fn [[t d]] (cond (contract/error? r) r
                                  ;; root's effect owner ran it: its verdict reads as a test's
                                  (and fx? (map? v)) (assoc v :answer {:pass (:pass v 0) :fail (:fail v 0) :error (:error v 0) :digests {t d}
                                                                       :reports (if (seq (:failures v)) (mapv #(assoc % :var (str "#'" t)) (:failures v)) [{:type :pass :var (str "#'" t)}])})
+                                 (and (not fx?) (wall t)) (contract/error :seon.prove/no-verdict #'seon.prove/batch-ended
+                                                                          (str t " ended at its wall bound (:seon.test/wall-spent): wall time reads the machine, so it is no verdict and is never cached; its fiber dump is on its test child's stderr")
+                                                                          {:test t :digest d :reported (vec (sort-by str reported))})
                                  (and (not fx?) (fails t)) {:pass 0 :fail 1 :error 0 :failures (fails t) :answer r}
                                  (and (not fx?) (reported t)) {:pass 1 :fail 0 :error 0 :answer r}
                                  :else (contract/error :seon.prove/no-verdict #'seon.prove/batch-ended
