@@ -521,7 +521,7 @@
 (defn conflict-tx
   "A conflict as the members of one merge entity (no :db/id): for the branch's entries
   and a run's evidence alike."
-  {:malli/schema [:=> [:cat :seon.merge/conflict] :map]}
+  {:malli/schema [:=> [:cat :seon.merge/conflict] :seon.db/tx-map]}
   [{:keys [key base ours theirs]}]
   (cond-> {:seon.merge/key key}
     base (assoc :seon.merge/base base)
