@@ -27,6 +27,116 @@
     (is (= [3] (map #(get-in % [:req :k]) (:to-workers o))) "the higher priority runs next")
     (is (= 1 (:busy st)))))
 
+;; docs/config.md#the-test-services-three-limits: the dials, any combination: a count, a share of the cores, the least set holds;
+;; the processes in flight bounded by the cores and two, derived, never a key
+(deftest ^{:seon.test/estimate {:ticks 500000}} the-dials-make-one-count-and-a-derived-process-bound
+  (is (= {:max-workers 18 :budget 20 :max-load nil} (fx/limits {:cores 18})) "nothing set: the cores, and the cores and two")
+  (is (= 2 (:max-workers (fx/limits {:max-workers 2 :cores 18}))))
+  (is (= 2 (:max-workers (fx/limits {:max-cores 0.5 :cores 4}))) "half of four cores: two")
+  (is (= 3 (:max-workers (fx/limits {:max-cores 0.2 :max-workers 4 :cores 18}))) "a fifth of eighteen, under max-workers")
+  (is (= 1 (:max-workers (fx/limits {:max-cores 0.1 :cores 4}))) "at least one")
+  (is (= 12.0 (:max-load (fx/limits {:max-load 12.0 :cores 4})))))
+
+(defn- flight [& fs] (into {} (map-indexed (fn [i f] [i (merge {:tag (str "t" i)} f)])) fs))
+
+;; a pure fn of the dials and the owner's state: why a request waits, or nil
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-request-is-held-by-the-dials-and-the-processes-in-flight
+  (let [lim (fx/limits {:cores 18 :max-workers 4 :max-load 10.0})
+        st {:flight (flight {:class :root} {:class :test :declared 1}) :peaks {:root 6}}]
+    (is (nil? (fx/hold-reason lim st {:seon.fx/class :test :seon.fx/processes 1})) "7 held and 1 more, under 20")
+    (is (= :processes (fx/hold-reason lim (assoc-in st [:peaks :root] 14) {:seon.fx/class :root})) "6 + 1 + a root's 14 is past 20")
+    (is (= :processes (fx/hold-reason lim st {:seon.fx/class :unread})) "a class never measured weighs the whole bound")
+    (is (nil? (fx/hold-reason lim {:flight {}} {:seon.fx/class :unread})) "and runs when nothing else is in flight")
+    (is (= :workers (fx/hold-reason (assoc lim :max-workers 2) st {:seon.fx/class :test})) "max-workers of a class in flight")
+    (is (= :load (fx/hold-reason lim (assoc st :load 30.0) {:seon.fx/class :test})) "the load over max-load")
+    (is (nil? (fx/hold-reason lim (assoc st :load 30.0 :flight {}) {:seon.fx/class :test})) "nothing in flight: never stalls")
+    (is (nil? (fx/hold-reason (assoc lim :max-workers 1) (assoc st :load 30.0) {})) "a request of no class (a model call) is never held")
+    (is (= :processes (fx/hold-reason lim (assoc st :reading {"t0" 19}) {:seon.fx/class :test :seon.fx/processes 1}))
+        "the root measured holding 19 now: what it holds, not its weight, counts")))
+
+(defn- powner [& {:as args}] (fx/owner-proc (merge {:kind :process :workers 18 :work nil :back nil :held-fn (constantly {}) :load-fn (constantly 1.0)} args)))
+(defn- preq [k & {:as more}] (merge {:req {:k k :kind :step :seon.prove/batch (str "b" k)} :dest {:rid k} :seon.fx/class :step} more))
+(defn- sent [out] (mapv #(get-in % [:req :k]) (:to-workers out)))
+
+(deftest ^{:seon.test/estimate {:ticks 2000000}} owner-holds-a-requests-weight-until-its-outcome
+  (let [[st out] (fx/owner-proc (powner :limits (fx/limits {:cores 1})) :in (preq 1 :seon.fx/class :root))
+        _ (is (= [1] (sent out)) "nothing in flight: an unread class runs alone")
+        [st out] (fx/owner-proc st :in (preq 2 :seon.fx/class :root))
+        _ (is (empty? (sent out)) "the unread class holds the whole bound")
+        [st out] (fx/owner-proc st :done {:dest {:rid 1} :request (first (:to-workers (second (fx/owner-proc (powner :limits (fx/limits {:cores 1})) :in (preq 1 :seon.fx/class :root)))))
+                                          :outcome {:value 1 :seon.fx/peak-processes 2}})]
+    (is (= {:root 2} (:peaks st)) "the outcome's peak is the class's weight from now on")
+    (is (= [2] (sent out)) "the next runs once the weight is given back")
+    (is (= #{"b2"} (set (keys (:flight st)))) "in flight at its class's measured peak, no longer the whole bound")))
+
+;; the owner's processes in flight are read from the machine by each request's tag (held-processes, stubbed): a reading is its
+;; class's peak, then the class is admitted by it. Measured red (2026-11-13): 127 processes, load 45.4 on 18 cores at a weight of 3
+(deftest ^{:seon.test/estimate {:ticks 2000000}} admission-counts-the-processes-its-requests-hold
+  (let [run (fn [reading n] (let [[st _] (fx/owner-proc (powner :limits (fx/limits {:cores 18}) :held-fn (constantly reading)) :in (preq 1))]
+                              (reduce (fn [[st c] k] (let [[st o] (fx/owner-proc st :in (preq k))] [st (+ c (count (sent o)))])) [st 0] (range 2 (+ 2 n)))))]
+    (let [[st more] (run {"b1" 18} 3)]
+      (is (= 0 more) "it holds 18: a step measured at 18 does not fit under 20")
+      (is (= 18 (get-in st [:peaks :step])) "the reading is its class's peak"))
+    (let [[st more] (run {"b1" 3} 8)]
+      (is (= 5 more) "it holds 3, so a step counts 3: five more make 18, a sixth 21")
+      (is (= 3 (get-in st [:peaks :step]))))))
+
+;; docs/clocks.md#the-machines-load-admits-work: over max-load nothing more is admitted while one runs, its askers told once and
+;; again when it resumes; nothing in flight admits one anyway
+(deftest ^{:seon.test/estimate {:ticks 2000000}} max-load-admits-only-under-it-tells-its-askers-and-never-stalls
+  (let [load (atom 30.0)
+        o (powner :limits (fx/limits {:cores 18 :max-load 10.0}) :load-fn #(deref load))
+        held (fn [out] (filterv #(= :prove-held (:op %)) (:out out)))
+        [st o1] (fx/owner-proc o :in (preq 1 :seon.fx/processes 1 :seon.prove/askers #{"k1"}))
+        _ (is (= [1] (sent o1)) "nothing in flight: one admitted though the load is over")
+        [st o2] (fx/owner-proc st :in (preq 2 :seon.fx/processes 1 :seon.prove/askers #{"k2"}))
+        _ (is (empty? (sent o2)) "one in flight and the load over: held")
+        _ (is (= [["k2" true 30.0 10.0]] (mapv (juxt :key :held :load :max-load) (held o2))) "its asker told once")
+        [st o3] (fx/owner-proc st :in (preq 3 :seon.fx/processes 1 :seon.prove/askers #{"k3"}))
+        _ (is (= [] (held o3)) "a hold is told once, not at each ask")
+        _ (reset! load 2.0)
+        [_ o4] (fx/owner-proc st :done {:dest {:rid 1} :request (first (:to-workers o1)) :outcome {:value 1}})]
+    (is (= [2 3] (sent o4)) "the load under it: both run")
+    (is (= [["k2" false]] (mapv (juxt :key :held) (held o4))) "and the asker told of the hold told it resumed")))
+
+;; the owner's dials are the config in force at each admission: the owner turns max-workers down while he games, and the next
+;; admission holds by it, no restart
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-dial-turned-holds-at-the-next-admission
+  (let [lim (atom (fx/limits {:cores 18}))]
+    (with-redefs [fx/config-limits (fn [] @lim)]
+      (let [[st _] (fx/owner-proc (powner) :in (preq 1 :seon.fx/processes 1))
+            [st o2] (fx/owner-proc st :in (preq 2 :seon.fx/processes 1))
+            _ (is (= [2] (sent o2)) "eighteen workers: a second admitted")
+            _ (reset! lim (fx/limits {:cores 18 :max-workers 2}))
+            [_ o3] (fx/owner-proc st :in (preq 3 :seon.fx/processes 1))]
+        (is (empty? (sent o3)) "max-workers turned to two: the third waits, no restart")))))
+
+;; docs/flow.md, the five rules (rule 1, reviewed by flow): a test batch's run is the agent's, never a wait inside a worker's step. The
+;; owner asks the api for it as an output (step/ask) and takes its one answer on its own :answers port: no worker, no timer, and its
+;; end comes from its sources (the agent's answer, or the api's :seon.system/ended at its death). Exactly one answer frees the batch's
+;; weight; a late one finds nothing. Red before: run-item derefed the api's answer inside the worker's step.
+;; Estimate: four owner steps, ~0.2M ticks.
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-test-batch-is-asked-of-the-api-and-answered-once
+  (let [batch (fn [k] (preq k :req {:kind :test :seon.fx/ask {:op :tests :id :a1 :names #{(symbol "app.t-test" (str "t" k))}} :seon.prove/batch (str "b" k)}
+                          :seon.fx/class [:test false false] :seon.fx/processes 1))
+        asks (fn [out] (filterv #(= :request (:op %)) (:out out)))
+        o (powner :kind :t :workers 1 :limits (fx/limits {:cores 4}))
+        ;; the one worker busy with a build: a batch takes no worker, so it is asked all the same
+        [st _] (fx/owner-proc o :in (preq 0 :req {:kind :build :seon.prove/batch "b0"} :seon.fx/class [:build false true] :seon.fx/processes 1))
+        [st out] (fx/owner-proc st :in (batch 1))
+        [ask] (asks out)
+        _ (is (= {:op :tests :id :a1 :names '#{app.t-test/t1}} (:req ask)) (str "asked of the api as an output: " (pr-str out)))
+        _ (is (= [:fx/t :answers] (:route ask)) "answered on the owner's own port")
+        _ (is (empty? (:to-workers out)) "no worker takes it")
+        _ (is (contains? (:flight st) "b1") "in flight at its weight until its answer")
+        [st out] (fx/owner-proc st :answers {:tag (:tag ask) :r {:pass 1 :fail 0 :error 0}})
+        _ (is (= [{:dest {:rid 1} :r {:pass 1 :fail 0 :error 0}}] (mapv #(update % :r select-keys [:pass :fail :error]) (filterv :dest (:out out))))
+                "its one answer goes to its asker")
+        _ (is (not (contains? (:flight st) "b1")) "and its weight comes back")
+        [st2 out2] (fx/owner-proc st :answers {:tag (:tag ask) :r {:seon.error/type :seon.system/ended}})]
+    (is (empty? (:out out2)) "a late answer (the api's :ended after the agent's own) finds nothing")
+    (is (= (:flight st) (:flight st2)) "and gives no weight back twice")))
+
 (deftest owner-refuses-a-spent-budget
   (let [[st _] (fx/owner-proc (owner 1) :in (req 1 :budget 10 :budget-key :task-a))
         [st _] (fx/owner-proc st :done {:dest {:agent "boot/1" :op :fx-reply :k 1} :outcome {:value 1} :budget-key :task-a :cost 10})
@@ -669,6 +779,41 @@
           (is (not (.exists (java.io.File. (str dir "/b.txt")))) "and no file written into it")))
       (finally (seon.lib/remove-tree! dir)))))
 
+;; Estimate: about 25 git processes (init, commits, rev-parse, status, update-ref, read-tree) at ~150k ticks of spawn and read each
+;; = 4000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 4000000} :seon.test/execs ["git"]} main-moves-only-from-the-commit-the-store-was-imported-from
+  ;; docs/source.md#commit-the-merges-branch: git's main follows the store's main (task seon.source/a-merge-moves-gits-main-to-the-
+  ;; stores-files): a commit carries :expect, the commit the store's main was imported from, and the ref moves only from it, as
+  ;; one compare-and-swap (git update-ref NEW EXPECT). A landing that moved main since is never undone by the store's older text:
+  ;; the answer is :seon.fx/ref-moved, nothing written
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/fx-expect-" (random-uuid))) (.mkdirs)))
+        git (fn [& args] (clojure.string/trim (str (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@localhost" args)))))
+        commit #(fx/git-commit {:req (merge {:dir dir :branch "main" :message "Seon merge"} %)})]
+    (try
+      (git "init" "-q" "-b" "main")
+      (spit (str dir "/a.txt") "a\n") (git "add" "-A") (git "commit" "-q" "-m" "one")
+      (let [imported (git "rev-parse" "HEAD")
+            r (commit {:expect imported :files {"src/demo/x.clj" "(ns demo.x)\n"}})]
+        (is (= (get-in r [:value :sha]) (git "rev-parse" "HEAD")) (pr-str r))
+        (is (= imported (git "rev-parse" "HEAD^")) "one commit on the commit the store was imported from")
+        (is (= "" (git "status" "--short")) "the checked-out tree moved with it, clean")
+        (is (= "(ns demo.x)\n" (slurp (str dir "/src/demo/x.clj"))))
+        (is (= [imported (fx/tree-id dir)] ((juxt :expected :tree) (:value r))) "the answer names the commit it was made from and the tree now"))
+      (testing "a landing moved main after the store's import: refused, the landing kept"
+        (let [stale (git "rev-parse" "HEAD")]
+          (spit (str dir "/c.txt") "landed\n") (git "add" "-A") (git "commit" "-q" "-m" "a landing")
+          (let [landed (git "rev-parse" "HEAD")
+                r (commit {:expect stale :files {"c.txt" "the store's older text\n"}})]
+            (is (= :seon.fx/ref-moved (:seon.error/type r)) (pr-str r))
+            (is (= [stale landed] ((juxt :expected :found) r)) "naming the commit it expected and the one main holds")
+            (is (= landed (git "rev-parse" "HEAD")) "main unmoved")
+            (is (= "landed\n" (slurp (str dir "/c.txt"))) "and the landing's file as it landed"))))
+      (testing "a branch no tree has checked out: the same compare-and-swap"
+        (git "branch" "-q" "side" "HEAD^")
+        (let [r (commit {:branch "side" :expect (git "rev-parse" "HEAD") :files {"d.txt" "d\n"}})]
+          (is (= :seon.fx/ref-moved (:seon.error/type r)) (pr-str r))))
+      (finally (seon.lib/remove-tree! dir)))))
+
 (deftest a-sessions-item-runs-on-its-checkout-once
   ;; docs/merging.md#a-session-proves-through-root: the :item effect runs one item seon.prove granted (a check step) on the
   ;; session's checkout, and its verdict is the cache's by digest: an item green at its digest is answered from the cache with no
@@ -761,3 +906,42 @@
       (fx/write-verdicts! dir {:id "r"} {t {:digest "d3" :pass 0 :fail 1 :error 0 :reads {'a/f "f3"}}} {})
       (is (= {t [{:digest "d2" :reads {'a/f "f2"}}]} (fx/held-reads dir [t 'a.r-test/none])) "the newest green's, and none for a test with none")
       (finally (seon.lib/sh "rm" "-rf" dir)))))
+
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-stream-that-goes-quiet-past-its-kinds-bound-is-ended-reached
+  ;; docs/flow.md#effects-one-owner-and-its-workers-per-kind: a streaming call is bounded by its kind's :seon.bound/ms of
+  ;; quiet, re-armed by each line (a long reply that keeps streaming is never cut); past it the worker shuts the connection
+  ;; and the call's outcome is :seon.bound/reached, so its worker is free again and its asker answered
+  (let [value cfg/value
+        gate (promise)
+        shut? (atom false)
+        lines-in (atom ["data: a"])
+        pull (fn [] (if-let [l (first @lines-in)] (do (swap! lines-in rest) (.getBytes (str l "\n") "UTF-8")) @gate))]
+    (with-redefs [cfg/value (fn [k] (if (= k :seon.config.fx/bounds) {:t {:seon.bound/ms 50}} (value k)))]
+      (let [st (fx/worker-proc {:kind :t :owner :fx/t
+                                :perform (fn [_] {:stream {:pull pull :init [] :step (fn [s l] [(conj s l) []]) :final (fn [s] {:value s})
+                                                           :close (fn [_] []) :shut (fn [] (reset! shut? true) (deliver gate nil))}})})
+            [st o] (fx/worker-proc st :work (assoc (req 1) :in-ns 0 :taken-ns 0))
+            _ (is (nil? o) "the call streams: no outcome yet")
+            ;; feed the worker what reaches its :lines until its call ends: the one line, the bound's due, the reader's end
+            [st done] (loop [st st n 0]
+                        (let [m (a/<!! (:lines st)) [st o] (fx/worker-proc st :lines m)]
+                          (if-let [d (get o [:fx/t :done])] [st (first d)] (if (< n 20) (recur st (inc n)) [st nil]))))]
+        (is @shut? "the connection was shut")
+        (is (= :seon.bound/reached (get-in done [:outcome :seon.error/type])) (pr-str done))
+        (is (= {:seon.bound/ms 50} (get-in done [:outcome :seon.bound/bound])))
+        (is (nil? (:call st)) "the worker is free for its next item")))))
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-process-on-another-runtime-answers-env-mismatch
+  ;; task seon.fx/runtime-for-reads-the-pins-from-the-branch: the one check of which runtime a branch needs. target/seon's
+  ;; identity (target/seon.digest, bin/build's record of bin/binary-digest) answers the binary for the tree it was built
+  ;; from, and a tree from before the last Chez pin moved (another runtime) answers :seon.process/env-mismatch naming both
+  ;; digests, for its caller to build once. The estimate: two git ls-trees of the build inputs, ~30 ms each.
+  (let [root (cfg/checkout)
+        git (fn [& args] (clojure.string/trim (:out (apply seon.lib/sh "git" "-C" root args))))
+        built (clojure.string/trim (:out (seon.lib/sh (str root "/bin/tree") root)))
+        moved (git "log" "-1" "--format=%H" "--" "reference-code/chez")
+        before (git "rev-parse" (str moved "^^{tree}"))
+        same (fx/runtime-for built)
+        other (fx/runtime-for before)]
+    (is (= (str root "/target/seon") (:binary same)) (str "answered " same))
+    (is (= :seon.process/env-mismatch (:seon.error/type other)) (str "answered " other))
+    (is (not= (:seon.process/binary-digest other) (:seon.process/branch-digest other)))))

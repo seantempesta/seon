@@ -1,0 +1,5 @@
+[{:seon.task/name "a-reaction-queue-is-its-owners"
+  :seon.task/plan "Found by runtime's Flow survey (notes runtime-flow-survey-2026-11-14.md, H6) [M]: seon.ratom's rea-queue (src/seon/ratom.clj, the reactions a change dirtied, run by flush!) is a process-global defonce volatile, shared by every owner of reactions in the process, as the track cache was until f111c14806. Fix as that was: the queue is its owner's (bound by the owner, as *tracks* is), so two owners' flushes never run each other's reactions. Proof: two owners each with a dirty reaction, one flush! runs only its own."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.ratom-test/a-flush-runs-only-its-owners-reactions}}
+]

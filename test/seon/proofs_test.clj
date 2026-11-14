@@ -607,15 +607,15 @@
      :per-n {:ticks 24000.0 :bytes 70000.0}
      :sizes [3 10 30]}))
 
-;; ---- every verdict is kept: a digest green and red is flaky (red, never reused as green, never run)
+;; ---- every verdict is kept: a digest green and red is flaky (no verdict, a :platform problem, never run again)
 
-(deftest ^{:seon.test/estimate {:ticks 500000}} a-digest-green-and-red-is-flaky-red-and-never-runs
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-digest-green-and-red-is-flaky-no-verdict-and-never-runs
   ;; the merge-cost proof was red once and green on its next run at one digest: with one verdict
   ;; kept per digest the red was gone, and the green reused
   (with-dir
    (fn [dir]
-     (let [green {:test 'app.f-test/t :digest "d-flaky" :pass 1 :fail 0 :error 0}
-           red {:test 'app.f-test/t :digest "d-flaky" :pass 0 :fail 1 :error 0}
+     (let [green {:test 'app.f-test/t :digest "d-flaky" :pass 1 :fail 0 :error 0 :ticks 1000}
+           red {:test 'app.f-test/t :digest "d-flaky" :pass 0 :fail 1 :error 0 :ticks 30000}
            fails {'app.f-test/t [{:type :fail :message "1 is not 2"}]}
            cand {'app.f-test/t "d-flaky" 'app.f-test/g "d-green" 'app.f-test/r "d-red" 'app.f-test/n "d-none"}]
        (store! dir {'app.f-test/t green})
@@ -626,10 +626,9 @@
              {:keys [run reused selected]} (proofs/plan nil cand found #{})
              f (found "d-flaky")]
          (is (:flaky f) "a digest that holds a green and a red is flaky")
-         (is (not (proofs/green? f)) "judged red, never reused as green")
-         (is (= {:type :fail :flaky true :message "flaky: green and red at digest d-flaky (seon.proofs/flaky)"} (first (:failures f)))
-             "its failures lead with one saying so, then the red's own")
-         (is (= "1 is not 2" (:message (second (:failures f)))))
+         (is (zero? (+ (:fail f) (:error f))) "no verdict: never a red that holds a landing or shows main red (owner, 2026-11-14)")
+         (is (= {:green 1000 :red 30000} (:seon.proofs/ticks f)) "both runs' ticks, the evidence seon.prove/flaky-problems files")
+         (is (= ["1 is not 2"] (mapv :message (:seon.proofs/red-failures f))) "and the red run's own failures")
          (is (not (proofs/green? (found "d-red"))) "a red alone is reused red, with its failures")
          (is (= ['app.f-test/n] run) "only the digest with no result runs: the flaky and the red are reused, never run again")
          (is (= #{'app.f-test/t 'app.f-test/r 'app.f-test/n} (set selected)) "the flaky one and the red are selected: they judge")
@@ -674,7 +673,7 @@
         (is (= :deferred (:seon.test/status (first (proofs/result-tx held {} {} {} {t "d2"} #{t})))) "a moved digest is unjudged")))))
 
 (deftest ^{:seon.test/estimate {:ticks 100000}} a-run-records-a-few-facts-and-a-run-that-changes-nothing-records-none
-  ;; task seon.proofs/test-results-are-a-few-facts (R2a): seon.proofs/result-tx, what an agent's run
+  ;; task seon.proofs/a-verdict-is-an-entity-that-names-its-environment (R2a): seon.proofs/result-tx, what an agent's run
   ;; writes on its branch beside the cache: the digest, status, failing assertions (as data) and running
   ;; sums of each test that ran, and the digest and status of one reused; only what differs; and a test whose
   ;; reach digest moved, not judged by the run, loses its facts (a status is the verdict at the digest it has now)

@@ -122,12 +122,19 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/result] [:maybe :map]]}
   [main head r]
   (let [unmerged (pm/unmerged head)
-        uncontracted (pm/uncontracted (:ours r))]
+        uncontracted (pm/uncontracted (:ours r))
+        ;; behind means main's program moved: a fact main wrote ([:datum ...], its records) is already main's and merges as it is;
+        ;; one the branch also changed is a conflict (:conflicts), never behind
+        moved (into {} (remove (comp #{:datum} first key)) (:theirs r))]
     (cond
-      (seq (:theirs r))
+      (seq (:conflicts r))
       (contract/error :seon.merge/behind #'seon.writer/merge-refused
-                      (str "main changed " (count (:theirs r)) " key(s) since the branch's merge base: merge main into the branch first")
-                      {:tx (:max-tx main) :behind (count (:theirs r))
+                      (str "the branch and main changed " (count (:conflicts r)) " key(s) differently: merge main into the branch and resolve them first")
+                      {:tx (:max-tx main) :behind (count (:conflicts r))})
+      (seq moved)
+      (contract/error :seon.merge/behind #'seon.writer/merge-refused
+                      (str "main changed " (count moved) " key(s) since the branch's merge base: merge main into the branch first")
+                      {:tx (:max-tx main) :behind (count moved)
                        :seon.error/fix "A merge task merges main into the branch (my.branch/merge-main!), resolves any conflict, and its proofs run on the combined program."})
       (seq unmerged)
       (contract/error :seon.merge/unmerged #'seon.writer/merge-refused
@@ -327,7 +334,23 @@
                                         :else {:ok true :dropped false}))
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
                         (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st)}))
-      :octopus-merge (let [[st r] (octopus-merge st o (vec (:branches m)) (:data-attrs m #{}))] (reply st r))
+      :octopus-merge (let [[st r] (octopus-merge st o (vec (:branches m)) (:data-attrs m :all))] (reply st r))
+      ;; main merged into branch b, decided here on main's program (seon.merge/merge-main), never on the branch's own code: a
+      ;; conflict writes only its unmerged entries on b; clean, b becomes main's head plus its own datoms, one commit with parents
+      ;; b's head and main, only while b is still at that head (docs/merging.md#a-branch-merges-main-in). Its agent waits meanwhile.
+      :merge-main (reply st (if-not (exists? (:branch m))
+                              (refused (str "no branch " (:branch m)) {})
+                              (let [b (:branch m) main-b (pdb/conn-main conn) main @conn head (pdb/head conn b)
+                                    base (pdb/branch-base conn main-b b)
+                                    r (pm/merge-main base head main)]
+                                (if (:conflicts r)
+                                  (let [bc (pdb/connect (assoc (:cfg st) :branch b))]
+                                    (try (d/transact bc {:tx-data (pm/unmerged-tx head (vec (:conflicts r)) (:max-tx main)) :tx-meta (pdb/tx-meta b)})
+                                         (finally (d/release bc)))
+                                    {:ok false :conflicts (:conflicts r)})
+                                  (let [merged (:db-after (d/with main {:tx-data (:tx r) :tx-meta (pdb/tx-meta b {:seon.tx/merged main-b})}))
+                                        cid (d/force-branch! merged b #{(d/commit-id head) (d/commit-id main)} {:expected-current-commit (d/commit-id head)})]
+                                    {:ok true :commit cid :keys (count (:keys r)) :t (:max-tx merged)})))))
       ;; the merge gate's candidate: branch b merged over main as the octopus merge would merge it, applied to
       ;; a value and never committed, and the files that merge would write, with their text as it holds them
       ;; (written, source/files): what the gate tests is what the merge writes, schema resources included

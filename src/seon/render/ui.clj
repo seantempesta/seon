@@ -3,7 +3,7 @@
   the agent UI and context\"; W1's proto.render.ui). Ported from proto/web's
   proto.web.view (session L2's dashboard and L4's polish).
 
-  Every page is the render of a ctx through the one walk (seon.render/walker): root's
+  Every page is the render of a ctx through the one walk (seon.render/walk, a value kept across moves): root's
   (`root-ctx`), an agent's (`render-ctx`), each a layout of components ([f opts & children]) over
   its ctx, placed in root's chrome (`page-chrome`) as units. The render proc (seon.render.proc)
   sends a unit only when its revision moved. A value draws by its schema's declared :html render
@@ -1579,13 +1579,15 @@
                     [:span {:class "text-text-400"} line])]))]])]))))
 
 (defn system-message
-  "The agent's system message (a component over ctx and the db): the doc sections it links (:seon.agent/system), else the system prompt (seon.ctx.wire/agent-system-text), for the person a fold. See
+  "The agent's system message (a component over ctx and the db): the doc sections it links (:seon.agent/system), else the system prompt (seon.ctx.wire/agent-system-text), for the person a fold; nothing when the db holds neither. See
   docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
-  [:details {}
-   [:summary {:class "muted" :wire/for "page"} "system message"]
-   [#'markdown (wire/agent-system-text db c)]])
+  ;; a db with no system prompt (a fresh world) has no message to show
+  (when-let [t (wire/agent-system-text db c)]
+    [:details {}
+     [:summary {:class "muted" :wire/for "page"} "system message"]
+     [#'markdown t]]))
 
 (defn example
   "Example session k (a component over the db, named by its key), as the model reads it and, folded, the person: its opening, what it asked, its records by the same hiccup as the agent's own, drawn as of its last t (the session never changes after it). See
@@ -2306,6 +2308,28 @@
                 [:summary {:class "seon-note cursor-pointer"} (str "Upkeep · " (total (of upkeep)))]
                 (render/hiccup {:seon.render/index ix :schema :seon.problems/report} (of upkeep))])))]))
 
+(defn turns-tile
+  "Turns to merged on root's page: one row a task an agent worked, its runs' turns (root's ctx's :turns, the render proc's, never on
+  main) summed, merged or not. See docs/plan.md#the-goal."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db}]
+  (let [turns (or (some-> (:turns c) ratom/realize) {})
+        runs (->> (d/q '[:find ?k ?t ?ms :where [?a :seon.agent/task ?t] [?a :seon.agent/key ?k] [(get-else $ ?a :seon.agent/started-ms 0) ?ms]] db)
+                  (filter (fn [[k]] (contains? turns k)))
+                  (group-by second))
+        rows (sort-by :id (for [[t rs] runs :let [task (d/pull db [:seon.task/id :seon.task/outcome :seon.task/merged-t :seon.task/reasons] t)
+                                                     ks (map first (sort-by #(nth % 2) rs))]]
+                            {:id (:seon.task/id task) :runs (mapv (fn [k] [k (get turns k)]) ks) :total (reduce + (map turns ks))
+                             :merged? (some? (:seon.task/merged-t task)) :outcome (:seon.task/outcome task) :reasons (:seon.task/reasons task)}))]
+    (when (seq rows)
+      [:section [:h2 "Turns to merged"]
+       [:p {:class "muted"} (str (count rows) " tasks, " (reduce + (map :total rows)) " turns, " (count (filter :merged? rows)) " merged")]
+       (into [:ul]
+             (for [{:keys [id runs total merged? outcome reasons]} rows]
+               [:li {:key id} [:code id] (str " " total " turns, " (if merged? "merged" (str "not merged" (when outcome (str " (" (kname outcome) ")")))))
+                (when (and (not merged?) (seq reasons)) [:span {:class "muted"} (str " · " (count reasons) " reasons the done rule gave")])
+                [:span {:class "muted"} (str " · runs " (str/join ", " (for [[k n] runs] (str k ": " n))))]]))])))
+
 (defn process-tile
   "Root's process (a component over root's ctx, its :process: the render proc's numbers of the
   writer, the fork server and the store, each proc's defects and the newest events; root's own data
@@ -2384,7 +2408,7 @@
   [:div {:id "root-ctx"}
    [:span {:id "p-system"} [#'system-source {}]]
    [:div {:id "p-head"} [#'root-head {}]]
-   [:aside {:id "p-tiles"} [#'process-tile {}] [#'problems-tile {}] [#'root-evals {}]]])
+   [:aside {:id "p-tiles"} [#'process-tile {}] [#'problems-tile {}] [#'turns-tile {}] [#'root-evals {}]]])
 
 (defn bare-page
   "The page of a location no walk draws (the sign-in page, an agent's @ctx tab, an agent whose branch is not read): the chat column's

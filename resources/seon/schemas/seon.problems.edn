@@ -74,6 +74,7 @@
  ;; (the writer's :spawn names main's commit and t on :fork; seon.agent/init! compares)
  :seon.agent/fork-misaligned [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/fork-misaligned]]
                                                      [:commit :uuid] [:t :int] [:branch-commit [:maybe :uuid]] [:image-t :int]]]
+ :seon.system/undeliverable [:and {:description "An output Flow could not deliver (no proc takes it) or a stop dropped, read from Flow's report chan (seon.system/flow-report)."} :seon.error/base [:map [:seon.error/type [:= :seon.system/undeliverable]] [:coord :string]]]
  :seon.system/proc-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/proc-defect]] [:pid {:optional true} [:maybe :keyword]]
                                                      [:took {:optional true} [:or :keyword [:vector :keyword]]]]]
  :seon.system/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/refused]]]]
@@ -81,7 +82,7 @@
  ;; a step of the fork server that threw (seon.fork-server/server-step): docs/processes.md#a-step-that-throws
  :seon.fork-server/step-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/step-failed]] [:op {:optional true} [:maybe :keyword]]]]
  ;; the fork server made no standby (seon.system/back-op): a platform problem, and root's view shows it has none (docs/processes.md#a-step-that-throws)
- :seon.fork-server/standby-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/standby-failed]] [:active-threads {:optional true} [:maybe :int]] [:gen {:optional true} [:maybe :int]]]]
+ :seon.fork-server/standby-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/standby-failed]] [:active-threads {:optional true} [:maybe :int]] [:gen {:optional true} [:maybe :int]] [:holders {:optional true} [:maybe [:sequential [:map [:id :int] [:name :string]]]]]]]
  ;; a release (my.root/run!) of a task that is not held: unknown (execution nil), already
  ;; running, or cancelled; the held ids of the same call are released
  :seon.system/not-held [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/not-held]] [:task :string]
@@ -112,6 +113,13 @@
  :seon.prove/full-run-running [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/full-run-running]] [:running :string]]]
  :seon.prove/no-verdict [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/no-verdict]] [:test [:or :qualified-symbol :string]]
                                                  [:digest {:optional true} :string] [:reported {:optional true} [:vector :qualified-symbol]]]]
+ ;; a green and a red at one digest (seon.prove/flaky-problems): an input the digest misses
+ :seon.proofs/flaky [:and {:description "A test green and red at one digest (seon.proofs/flaky): no verdict, a :platform problem naming what its digest misses (seon.prove/flaky-problems). See docs/merging.md#verdicts-are-a-cache."}
+                     :seon.error/base [:map [:seon.error/type [:= :seon.proofs/flaky]] [:test :qualified-symbol] [:digest :string] [:owner :symbol]
+                                       [:red-failures [:vector :seon.problems/assertion]] [:ticks {:optional true} :seon.proofs/ticks]]]
+ :seon.proofs/red-failures [:vector {:description "On a flaky result, the red run's failures, kept as the evidence (seon.proofs/flaky)."} :seon.problems/assertion]
+ ;; the ticks the green and the red at one digest spent (seon.proofs/flaky), on its flaky failure
+ :seon.proofs/ticks [:map [:green :int] [:red :int]]
  ;; a tree's build or seed that is not green (seon.prove/item-ended): every item that needs it answers it, none granted
  :seon.prove/build-red [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/build-red]] [:tree :string] [:kind [:enum :build :seed]]]]
  :seon.prove/superseded [:and :seon.error/base [:map {:description "A run of the test service ended because a request for the same slot came at another digest: its branch moved on (seon.prove/request). See docs/merging.md#the-test-service."} [:seon.error/type [:= :seon.prove/superseded]] [:by :string]]]
@@ -142,7 +150,7 @@
  ;; a form that allocated past its byte budget (seon.intr/run): what it allocated, its budget
  :seon.repl/bytes-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.repl/bytes-spent]] [:bytes :int] [:budget :int]]]
  ;; the agent could not fork its test run (threads were active): no proof ran
- :seon.test/fork-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/fork-refused]] [:active-threads :int]]]
+ :seon.test/fork-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/fork-refused]] [:active-threads :int] [:holders {:optional true} [:maybe [:sequential [:map [:id :int] [:name :string]]]]]]]
  ;; a value the agent's test process sent does not read (a value that prints as no EDN in it): its test
  ;; ends :error with the value's head, and the agent goes on (seon.agent/child-codec)
  :seon.test/unreadable-line [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/unreadable-line]]]]
@@ -153,6 +161,14 @@
  :seon.test/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int]
                                                 [:test {:optional true} :string]]]
  :seon.fx/io-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/io-error]]]]
+ :seon.process/binary-digest [:maybe {:description "target/seon's identity as bin/build recorded it (target/seon.digest), or nil when none was recorded."} :string]
+ :seon.process/branch-digest [:string {:description "A branch tree's binary identity (bin/binary-digest at that tree)."}]
+ :seon.process/tree [:string {:description "A git tree id, as bin/tree and the import name it."}]
+ :seon.process/env-mismatch [:and {:description "A process's binary is not its branch's: target/seon's identity (bin/binary-digest) differs from the branch tree's; its caller builds once (seon.fx/runtime-for)."} :seon.error/base [:map [:seon.error/type [:= :seon.process/env-mismatch]] [:seon.process/binary-digest [:maybe :string]] [:seon.process/branch-digest :string] [:seon.process/tree :string]]]
+ :seon.fx/tree-unmoved [:and {:description "A commit moved git's main but its checked-out tree could not follow: the commit stands, the tree is brought in by hand."}
+                        :seon.error/base [:map [:seon.error/type [:= :seon.fx/tree-unmoved]] [:sha :string]]]
+ :seon.fx/ref-moved [:and {:description "A commit asked to move a branch only from the commit it expected found the branch elsewhere: nothing written; the caller reads what moved it and asks again."}
+                     :seon.error/base [:map [:seon.error/type [:= :seon.fx/ref-moved]] [:expected :string] [:found [:maybe :string]] [:path :string]]]
  ;; a merged task's write-back the git effect refused (seon.reconcile/commit-tx): held in the task's :seon.task/error
  ;; with the source files no commit holds yet, until one does (my.root/write-back!)
  :seon.git/commit-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.git/commit-failed]] [:seon.git/files [:vector :string]]]]
@@ -165,13 +181,13 @@
  :seon.fx/unknown-kind [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/unknown-kind]]]]
  :seon.fx/in-test [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/in-test]]]]
  ;; the provider's HTTP 429: transient, the :model owner keeps the request and pauses (its Retry-After when given)
- :seon.model/rate-limited [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/rate-limited]] [:status {:optional true} :int]
+ :seon.model/rate-limited [:and {:seon.model/retryable "the provider may answer next time, after its rate window"} :seon.error/base [:map [:seon.error/type [:= :seon.model/rate-limited]] [:status {:optional true} :int]
                                                   [:body {:optional true} :string] [:retry-after-ms {:optional true} :int]]]
  ;; the connection failed or died (connect, reset, EOF mid-reply): transient, kept and retried after a pause
  :seon.turn/cache-miss [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/cache-miss]] [:hit nat-int?] [:expected nat-int?] [:block pos-int?] [:shared nat-int?] [:messages nat-int?]]]
- :seon.model/transport [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/transport]] [:url {:optional true} :string]]]
+ :seon.model/transport [:and {:seon.model/retryable "a dropped connection is transient: the next call may reach the provider"} :seon.error/base [:map [:seon.error/type [:= :seon.model/transport]] [:url {:optional true} :string]]]
  ;; the reply's content is empty while its reasoning is not: thinking spent the token budget
- :seon.model/reasoning-ate-reply [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/reasoning-ate-reply]]
+ :seon.model/reasoning-ate-reply [:and {:seon.model/retryable "the agent can reason less on its next turn"} :seon.error/base [:map [:seon.error/type [:= :seon.model/reasoning-ate-reply]]
                                                          [:reasoning-tokens {:optional true} :int] [:completion-tokens {:optional true} :int]
                                                          [:max-tokens {:optional true} :int] [:reasoning-chars :int]]]
  ;; the config names no model provider (no profile): the turn ends on it, naming what to set
@@ -187,6 +203,7 @@
  :seon.model/no-script [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/no-script]] [:script :qualified-symbol]]]
  ;; a scripted model (a test fixture) that answered no :seon.model/script-reply: its problems say what is wrong
  :seon.model/script-invalid [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/script-invalid]] [:script :qualified-symbol]]]
+ :seon.model/retryable [:string {:description "On a :seon.model/failure member's schema, why a next turn or call can change it (the turn reads it, seon.turn/turn-can-change): present only on those."}]
  :seon.model/failure [:or :seon.model/no-provider :seon.model/no-script :seon.model/script-invalid :seon.model/provider-error :seon.model/rate-limited :seon.model/transport :seon.model/reasoning-ate-reply]
 
  ;; ---- recorded errors: one entity per signature (main), counted across agents ----
@@ -232,7 +249,7 @@
  ;; the error that ended it: the agent's death, the turn loop's error, a refused merge
  :seon.task/error :seon.error/base
  ;; failing assertions per red test (at most 8 each, printed by seon.print under :part)
- :seon.problems/assertion [:map [:type [:enum :fail :error]] [:message {:optional true} [:maybe :string]] [:flaky {:optional true} :boolean]
+ :seon.problems/assertion [:map [:type [:enum :fail :error]] [:message {:optional true} [:maybe :string]] [:flaky {:optional true} :boolean] [:seon.proofs/ticks {:optional true} :seon.proofs/ticks]
                            [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]
                            [:got {:optional true} [:maybe :string]] [:at {:optional true} [:vector :string]] [:seon.error/type {:optional true} :qualified-keyword]]
  ;; one clojure.test report as the test child keeps it (seon.agent/test-report)
@@ -256,7 +273,7 @@
  :seon.agent/waste :seon.learn/waste
  :seon.agent/error :seon.error/base
  ;; task content a branch and main both changed since the branch's base, differently: root's
- ;; to resolve (seon.task/carry-tx; owner, 2026-10-22, D4)
+ ;; to resolve (seon.merge/task-conflicts of the one merge; owner, 2026-10-22, D4)
  :seon.task/task-conflicts [:vector [:map [:task :seon.task/id] [:attr :keyword] [:base :any] [:ours :any] [:theirs :any]]]
 
  ;; ---- the one read: seon.problems/report ----
@@ -272,16 +289,16 @@
                                                     :leadless-section "wiki sections with no lead" :uncited-task "tasks that cite no section"
                                                     :stale-plan "task plans that went stale" :uncited-var "functions that cite no section"
                                                     :problem-unlinked "problem classes with no wiki section" :long-form "forms too long" :unfocused-docstring "docstrings that say more than the var" :waived-proof "proofs that pass by waiver"
-                                                    :unestimated-test "tests that state no estimate" :undeclared-test "tests that break their law" :unschemed-key "keys with no schema entry" :refused-value "stored values their entry refuses"}
-                             :seon.problems/derived #{:stalled :unnamed-site :stale-pin :stale-binary :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :unfocused-docstring :waived-proof :unsynced :unestimated-test :undeclared-test :unschemed-key :refused-value}
+                                                    :unestimated-test "tests that state no estimate" :undeclared-test "tests that break their law" :unschemed-key "keys with no schema entry" :refused-value "stored values their entry refuses" :retyped-attribute "attributes a branch retypes" :hand-written-list "page lists that name their parts"}
+                             :seon.problems/derived #{:retyped-attribute :stalled :unnamed-site :stale-pin :stale-binary :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :unfocused-docstring :waived-proof :unsynced :unestimated-test :undeclared-test :unschemed-key :refused-value :hand-written-list}
                              ;; the derived classes a branch's content can make, which seon.problems/caused-split reads from what it moved
                              ;; and judges it on (seon.problems/caused-classes); the rest of :seon.problems/derived is the running system's state
-                             :seon.problems/caused #{:unnamed-site :stale-section :uncited-var :long-form :unfocused-docstring :leadless-section :orphan-page :waived-proof :uncited-task :stale-plan :unestimated-test :undeclared-test :unschemed-key :refused-value}
+                             :seon.problems/caused #{:retyped-attribute :unnamed-site :stale-section :uncited-var :long-form :unfocused-docstring :leadless-section :orphan-page :waived-proof :uncited-task :stale-plan :unestimated-test :undeclared-test :unschemed-key :refused-value :hand-written-list}
                              ;; shown, never a reason to refuse done (root's ruling, 2026-10-23: every var edit stales the sections that cite it;
                              ;; and the plans that cite it, an agent's own task's among them)
-                             :seon.problems/attention #{:stale-section :uncited-var :long-form :unfocused-docstring :stale-plan}
+                             :seon.problems/attention #{:stale-section :uncited-var :long-form :unfocused-docstring :stale-plan :hand-written-list}
                              :seon.problems/areas [[:docs #{:stale-pin :stale-section :orphan-page :leadless-section :uncited-var :unfocused-docstring}] [:tests #{:red :cost :waived-proof :unestimated-test :undeclared-test}]
-                                                    [:laws #{:unnamed-site :long-form :unschemed-key :refused-value}] [:merges #{:merge :task-conflict :unrun :unsynced}] [:tasks #{:failed :uncited-task :stale-plan}]
+                                                    [:laws #{:unnamed-site :long-form :unschemed-key :refused-value :hand-written-list :retyped-attribute}] [:merges #{:merge :task-conflict :unrun :unsynced}] [:tasks #{:failed :uncited-task :stale-plan}]
                                                     [:agents #{:stalled :dead :error :waste}] [:errors #{:platform :eval :agent :effect}] [:health #{:problem-unlinked :stale-binary}]]
                              ;; each class's section of the wiki: what it is and how it is fixed. A class with open rows whose
                              ;; section is no stored section is itself a problem (:problem-unlinked)
@@ -291,12 +308,12 @@
                                                   :merge "docs/merging.md#conflicts-and-pins" :task-conflict "docs/merging.md#conflicts-and-pins"
                                                   :unrun "docs/merging.md#a-merge-runs-what-the-change-reaches" :unsynced "docs/source.md#a-merged-task-reaches-mains-files"
                                                   :dead "docs/root.md#runs-and-judging" :failed "docs/tasks.md#a-refused-run-is-held-for-root"
-                                                  :unnamed-site "docs/health.md#a-laws-unnamed-site" :unschemed-key "docs/health.md#a-key-with-no-schema" :refused-value "docs/health.md#a-stored-value-its-entry-refuses"
+                                                  :unnamed-site "docs/health.md#a-laws-unnamed-site" :unschemed-key "docs/health.md#a-key-with-no-schema" :refused-value "docs/health.md#a-stored-value-its-entry-refuses" :retyped-attribute "docs/health.md#a-retyped-attribute"
                                                   :stale-pin "docs/forks.md#branch-scheme" :stale-binary "docs/health.md#a-stale-binary" :stale-section "docs/health.md#a-stale-section"
                                                   :orphan-page "docs/health.md#an-orphan-page" :leadless-section "docs/health.md#a-section-with-no-lead" :uncited-task "docs/health.md#a-task-that-cites-nothing" :stale-plan "docs/health.md#a-plan-that-went-stale" :uncited-var "docs/health.md#a-function-that-cites-no-section" :unfocused-docstring "docs/health.md#an-unfocused-docstring" :long-form "docs/health.md#a-form-too-long" :waived-proof "docs/health.md#a-proof-that-passes-by-waiver" :problem-unlinked "docs/health.md#a-problem-with-no-page"
-                                                  :unestimated-test "docs/merging.md#a-tests-tick-budget" :undeclared-test "docs/testing.md#test-types"}}
+                                                  :unestimated-test "docs/merging.md#a-tests-tick-budget" :undeclared-test "docs/testing.md#test-types" :hand-written-list "docs/health.md#a-hand-written-list"}}
                        :stalled :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict :unnamed-site :stale-pin :stale-binary :unrun
-                       :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :unfocused-docstring :waived-proof :unsynced :unestimated-test :undeclared-test :unschemed-key :refused-value]
+                       :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :unfocused-docstring :waived-proof :unsynced :unestimated-test :undeclared-test :unschemed-key :refused-value :hand-written-list :retyped-attribute]
  :seon.problems/row [:map {:seon.render/hiccup seon.render.ui/problem-row}
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]

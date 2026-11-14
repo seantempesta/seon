@@ -6,19 +6,26 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [jolt.ffi :as ffi] [jolt.scheme :as scm]
             [seon.contract :refer [defn defn- defchecked] :as contract] [seon.config :as config]
-            [seon.edn :as sedn] [clojure.java.shell :as sh] [konserve.jolt.lmdb :as klmdb] [jolt.fibers :as fibers] [jolt.async.remote :as remote]))
+            [seon.edn :as sedn] [clojure.java.shell :as sh] [clojure.string :as str] [seon.step :as step] [konserve.jolt.lmdb :as klmdb] [jolt.fibers :as fibers] [jolt.async.remote :as remote]))
 
 (defn sh
   "Run a command as clojure.java.shell/sh does (args, its options among them; answers {:exit :out :err}), always on a fiber: there
   Jolt's sh copies the child's pipes on fibers parked on their readiness and waits for its exit as an event, starting no thread.
   Called from a thread (a server connection's, seon.server/serve!) it ran its copies on futures, threads of Clojure's
   send-off pool that no proc declares and that outlive the call. A thread's call runs on a fiber of its own here, joined. Every shell of Seon's runs
-  through it. See docs/machine.md#processes."
+  through it. It answers the child's whole output, or throws :seon.lib/shell-unanswered naming the command and why (a pipe
+  whose read failed, Jolt raising its errno; a command that could not start), never an empty answer in place of what
+  could not be read. See docs/machine.md#processes and docs/failure-points.md."
   {:malli/schema [:=> [:cat [:* :any]] :map]}
   [& args]
-  (if (fibers/in-fiber?)
-    (apply sh/sh args)
-    (fibers/join (fibers/spawn #(apply sh/sh args)))))
+  (try
+    (if (fibers/in-fiber?)
+      (apply sh/sh args)
+      (fibers/join (fibers/spawn #(apply sh/sh args))))
+    (catch Throwable e
+      (let [cmd (vec (take-while string? args))
+            msg (str (str/join " " cmd) ": " (step/error-msg e))]
+        (throw (ex-info msg (contract/error :seon.lib/shell-unanswered #'seon.lib/sh msg {:seon.lib/command cmd}) e))))))
 
 (def ^:private c-schemas
   "Malli schemas of C types, for contracts derived from an FFI declaration (G1's proto.lib)."
@@ -129,7 +136,7 @@
 
 (defn load-average
   "The machine's 1-minute load average (libc getloadavg): a reading of the machine, which the test service's admission
-  reads in a step it already takes (seon.prove/machine-load), never polled. Throws :seon.lib/load-refused when the OS
+  reads in a step it already takes (seon.fx/read-machine), never polled. Throws :seon.lib/load-refused when the OS
   refuses it. See docs/clocks.md#the-machines-load-admits-work."
   {:malli/schema [:=> [:cat] :double]}
   []
@@ -240,7 +247,8 @@
 ;; bytes in Chez's collected generations 1-4 (outside static): what a forked agent inherits of its parent's heap, read at its start (seon.agent/init!), before its own allocation is promoted into them
 (defchecked generation-bytes [:=> [:cat] :int] (scm/proc "proto-generation-bytes"))
 (defchecked non-static-live! [:=> [:cat] :int] (scm/proc "proto-non-static-live!"))
-(defchecked ^:private fork-alone* [:=> [:cat] :seon.lib/pid] jolt.host/fork-alone)
+(defchecked ^:private fork-alone* [:=> [:cat nat-int?] :seon.lib/pid] jolt.host/fork-alone)
+(defchecked ^:private fork-holders [:=> [:cat] [:sequential [:map [:id :int] [:name :string]]]] jolt.host/fork-holders)
 
 (defn wait-status
   "Reap child pid (blocking waitpid): its decoded exit status."
@@ -250,20 +258,22 @@
 (defn fork!
   "The one spawning skeleton (docs/failure-points.md#physics-who-may-run-threads): fork once this is the one active Chez
   thread (E11/E13: a fork beside a running thread breaks the child): jolt.host/fork-alone waits for the others to park,
-  woken by each one that does, so a thread finishing the turn that woke this one is waited out, never a refusal; (refused n)
-  comes only from jolt.host/fork-alone-cancel!, the caller's bound. The child closes every stream descriptor
+  woken by each one that does, so a thread finishing the turn that woke this one is waited out, never a refusal; the wait
+  ends at :seon.config.agent/fork-wait-ms (a thread in a C call that is not collect-safe never parks), and then
+  (refused {:active-threads n :holders [{:id :name}] :bound-ms ms}) names who held it (jolt.host/fork-holders). The child closes every stream descriptor
   but 0-2, fd and keep (jolt.async.remote/close-streams-but!, the one rule, docs/processes.md#a-child-holds-what-it-is-given),
   once, before anything else runs in it. Then
   (child) in the child, exiting 0 if it returns and 1 however else it ends (a throw, said on
   stderr with the frames it unwound from; a raise or an escape no catch takes): the child holds a copy of the parent's frames,
-  and unwinding into them would run the parent's code in the child; (refused n) here, n the
-  active threads (1: the OS refused); or (parent pid) here, whose answer is this fn's. fd, the
+  and unwinding into them would run the parent's code in the child; (refused m) here, m the
+  bound's answer above ({:active-threads 1}: the OS refused); or (parent pid) here, whose answer is this fn's. fd, the
   child's own, is closed here; keep, descriptors the child keeps and this process keeps too. double? forks the child again and reaps the middle: a clone is
   nobody's child."
   {:malli/schema [:=> [:cat [:map [:child :seon.host/fn] [:refused :seon.host/fn] [:parent :seon.host/fn]
                              [:fd {:optional true} :seon.lib/fd] [:keep {:optional true} [:set :seon.lib/fd]] [:double? {:optional true} :boolean]]] :any]}
   [{:keys [child refused parent fd keep double?]}]
-  (let [pid (fork-alone*)]
+  (let [bound (config/value :seon.config.agent/fork-wait-ms)
+        pid (fork-alone* bound)]
     (if (zero? pid)
       (let [status (volatile! 1) said? (volatile! false)]
         (remote/close-streams-but! (cond-> (set keep) fd (conj fd)))
@@ -281,7 +291,9 @@
                  (binding [*out* *err*] (println "a forked child left its code by an escape no catch took: exiting 1") (flush)))
                (c-exit @status))))
       (do (some-> fd c-close)
-          (if (neg? pid) (refused (active-threads)) (do (when double? (wait-status pid)) (parent pid)))))))
+          (if (neg? pid)
+            (refused {:active-threads (active-threads) :holders (vec (fork-holders)) :bound-ms bound})
+            (do (when double? (wait-status pid)) (parent pid)))))))
 
 ;; ---- stats ----
 (defn percentile {:malli/schema [:=> [:cat [:maybe [:sequential number?]] [:double {:min 0.0 :max 1.0}]] [:maybe number?]]}

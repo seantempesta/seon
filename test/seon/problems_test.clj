@@ -479,6 +479,7 @@
                  :leadless-section #(problems/leadless-sections db ans) :uncited-task #(problems/uncited-tasks db ans)
                  :unnamed-site #(problems/unnamed-sites db ans) :stale-section #(problems/stale-sections db ans)
                  :stale-plan #(problems/stale-plans db ans) :waived-proof #(problems/waived-proofs db ans)
+                 :hand-written-list #(problems/hand-written-lists db ans nil)
                  :unsynced #(problems/unsynced-tasks db ans (mapv :e (d/datoms db :aevt :seon.task/id)))
                  ;; the remainder: answers, report-with, health-with (and problem-unlinked inside it, over the derived rows as health hands them), and the folds
                  :fixed (let [derived (#'problems/other-derived db ans (mapv :e (d/datoms db :aevt :seon.task/id)))]
@@ -492,7 +493,8 @@
                 :orphan-page 1         ; the sections' references, one scan
                 :leadless-section 1    ; the stored sections' first blocks
                 :uncited-task 15       ; the ready tasks' plans, cites and proofs (12 are the proofs read, seon.db/eid per proof), and task-reads (19 while it asked the program which cited vars were its own)
-                :unnamed-site 9        ; the catch sites of the program's forms (live? and form-of per form, the namespaces once)
+                :unnamed-site 18       ; the catch sites of the program's forms (live? and form-of per form, the namespaces once), and
+                                       ; the one-printer law's (its rule, four dials read once, and its marks' sites: tests, 9 -> 18)
                 :stale-section 2       ; the read datoms and the vars' forms, one scan each
                 :stale-plan 3          ; task-reads, and a seon.db/eid per cited var of a ready task
                 :waived-proof 1        ; the test forms' cost proofs passing by :overrun, one scan (Deep fixes' class)
@@ -500,7 +502,12 @@
                 ;; derived? and its seon.db/eid of the refine section, and its row (derived-row) when it differs; a filed one's
                 ;; edit and a refine's cite are seeks, no call (data, 2026-11-14: the store is the source, so every live task is judged)
                 :unsynced (+ 2 (* 4 (count (#'problems/unsynced-candidates db (mapv :e (d/datoms db :aevt :seon.task/id))))))
-                :fixed 52              ; (50 -> 52, data 11-14: this world's own store-made tasks give :unsynced rows, so problem-unlinked seeks its section, seon.db/eid, and writes its row, derived-row) answers, report-with (every recorded class), health-with (problem-unlinked over all of them, the derived rows as health hands them)
+                :fixed 55              ; (52 -> 55, tests: the world's own unnamed printer sites are rows problem-unlinked reads)
+                                       ; (50 -> 52, data 11-14: this world's own store-made tasks give :unsynced rows, so problem-unlinked seeks its section, seon.db/eid, and writes its row, derived
+                ;; the owner's decree (2026-11-14): per var with a form, its read (scan-form, seon.source/read-forms and the reader's two
+                ;; contracted helpers) and its walk (literal-lists), and the class's own. At import the form is read once already: keeping its
+                ;; literals there makes this a seek a var (seon.problems/a-forms-hand-made-lists-are-read-at-its-import)
+                :hand-written-list (+ 1 (* 5 (count (d/datoms db :aevt :var/form))))
                 :wrappers 2}]         ; health's and other-derived's own contracts
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
@@ -627,9 +634,13 @@
                                                                    ; base and head (tests, 2026-11-12: 69 -> 73 with data's)
                                                               8    ; :unfocused-docstring (data, 73 -> 81 measured): its reader and its bound on base and head,
                                                                    ; and a seek and a row for each changed Seon var the input's tree holds
-                                                              5)}  ; :unsynced judges the move's touched tasks, not only merged ones (data, 2026-11-14,
-                                                                   ; 81 -> 86): unsynced-candidates' contract, and the touched task's unsynced?, derived?,
-                                                                   ; and refine?'s eid and cites-of
+                                                              5    ; :unsynced judges the move's touched tasks, not only merged ones (data, 2026-11-14, 81 -> 86): unsynced-candidates'
+                                                                   ; contract, and the touched task's unsynced?, derived? and derived?'s seon.db/eid of the refine section
+                                                              2    ; :hand-written-list's reader on base and head for the move's changed vars (context,
+                                                                   ; 2026-11-14, measured 86 -> 88)
+                                                              1    ; retyped-attributes' own contract, once a read (data, 2026-11-14)
+                                                              13)} ; the one-printer law's rule (seon.problems/printer-law): its four dials read once through the
+                                                                   ; resolver for both sides (tests, measured 89 -> 102)
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 25000000}} problems-cost-nothing-for-a-clean-program
@@ -812,6 +823,24 @@
       (let [page (str "# Failure points\n\n| failure | edge |\n|---|---|\n| x | `" v "` |\n")]
         (is (= [] (unnamed (d/db-with db1 (seon.doc/load-tx db1 "docs" {"docs/failure-points.md" page})))))))))
 
+;; docs/render.md#one-printer as a law (root: the test stopped three landings, each found late): a src form referencing a printer
+;; beside seon.print, a cut in a display namespace or a budgeted cut outside one is a site its section must name, read over the
+;; compiler's :form/refs in health, so a land sees it before any prove. Red before: no law; the test read every form at prove time.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-printer-the-one-printer-section-does-not-name-is-a-law-problem
+  (let [db0 (world)
+        v 'app.calc/inc2
+        fe (:db/id (:var/form (d/entity db0 [:var/name v])))
+        ns-e (:db/id (:var/ns (d/entity db0 (:e (first (d/datoms db0 :avet :var/name v))))))
+        src (fn [db] (d/db-with db [[:db/add ns-e :ns/file "src/app/m.clj"]]))
+        with-ref (fn [db r] (d/db-with db [[:db/add fe :form/refs r]]))
+        unnamed #(into [] (comp (filter (comp #{:printer} :law)) (map (juxt :law :site))) (get-in (problems/health %) [:classes :unnamed-site :rows]))]
+    (is (= [] (unnamed (src db0))) "no printer, no site")
+    (is (= [[:printer v]] (unnamed (src (with-ref db0 'clojure.core/pr-str)))) "a pr-str the section does not name")
+    (is (= [] (unnamed (src (with-ref db0 'clojure.core/subs)))) "a cut outside a display namespace is no site")
+    (testing "the section names it: no problem"
+      (let [page (str "# Render\n\n## One printer\n\nEach site with its reason.\n\n- `" v "`: the wire\n")]
+        (is (= [] (unnamed (let [db (src (with-ref db0 'clojure.core/pr-str))] (d/db-with db (seon.doc/load-tx db "docs" {"docs/render.md" page}))))))))))
+
 (deftest ^{:seon.test/estimate {:ticks 6000000}} a-root-on-a-stale-binary-is-a-problem
   ;; task seon.problems/a-root-on-a-stale-binary-is-a-problem, docs/health.md#a-stale-binary: a boot holds seon.system/stale-binary's
   ;; answer (is the binary current for the tree main was last brought to, by what differs reaching root's code) on root's source
@@ -900,7 +929,7 @@
                ;; fixed calls 5 -> 9 (39 measured at n=10, 35 before): the world's test namespace app.calc-test has two
                ;; forms carrying a catch (a deftest's `is`), each read and dropped as no program namespace's: 2 calls each
                :per-n {:ns 76000 :bytes 74500 :calls 3}
-               :fixed {:ns 50000 :bytes 50000 :calls 9}
+               :fixed {:ns 50000 :bytes 50000 :calls 22} ; 22: the one-printer law's rule beside catch, its four dials read once (tests, 9 -> 22 by 39 -> 52 at 10)
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 15000000}} stale-pins-follow-the-pin-page
@@ -917,11 +946,15 @@
                :n "unnamed catch sites (the derived classes dominate; the recorded part is the seed's)"
                :work "report once, then the three derived reads; the sites dominate"
                :growth :linear
-               :per-n {:ns 80000 :bytes 80000 :calls 3}
+               ;; calls 3 -> 8 a site and 62 -> 91 fixed (context, 2026-11-14, the owner's hand-list decree): every var's form read and
+               ;; walked for its literal lists (scan-form, seon.source/read-forms and its two helpers, literal-lists), each site a var's form
+               :per-n {:ns 80000 :bytes 80000 :calls 8}
                ;; fixed bytes re-derived 2026-10-23 (jolt/similar-finds-helpers-by-embedding): 3.01 MB at 10,
                ;; 10.0 MB at 100, 80.2 MB at 1,000 sites; a fixed part near the smallest size's whole cost read
                ;; as steeper growth (task seon.cost/a-speedup-never-reads-as-steeper)
-               :fixed {:ns 19500000 :bytes 17500000 :calls 62}
+               ;; 91 (main) + 13: the one-printer law's rule in the full read, its four dials read through the resolver (tests: 92 -> 99 at 10
+               ;; before main's 91; measured 184 against a summed 178 on the merged tip, the sum having counted the dials' reads once)
+               :fixed {:ns 19500000 :bytes 17500000 :calls 104}
                :sizes [10 30 100]}))
 
 ;; ---- caused reads what changed (diff by value), and agrees with the full reading ---------------
@@ -1001,7 +1034,12 @@
                ;; each on base and head, the same shape (measured 73 -> 77 once both met in one tree)
                ;; and 8 for :unfocused-docstring (data, measured 77 -> 85): its reader and its bound on base and head, and a seek
                ;; and a row for each changed Seon var the tree holds
-               :fixed {:ticks 460000 :bytes 1800000 :calls 85}
+               ;; and 4 for :hand-written-list (context, measured 85 -> 89): its reader on base and head, and on each side the seek of
+               ;; each changed var's metadata
+               ;; 97 (context, 2026-11-14, the owner's hand-list decree): each changed var's form read and walked for its literal lists
+               ;; (scan-form, seon.source/read-forms, literal-lists) on base and head; + 13: the one-printer law's rule, its four dials read
+               ;; once for both sides (tests, measured 90 -> 103 before context's 97)
+               :fixed {:ticks 460000 :bytes 1800000 :calls 110} ; 90: and retyped-attributes' own contract, once a read (data, 2026-11-14)
                :sizes [10 30 100]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
@@ -1218,7 +1256,9 @@
                ;; 60: :refused-value one more, the same two
                ;; 64: :unestimated-test and :undeclared-test two more (each its seon.db/eid and derived-row)
                ;; 66: :unfocused-docstring one more (its seon.db/eid and derived-row)
-               :fixed {:ns 3000000 :bytes 4000000 :calls 66}
+               ;; 68: :hand-written-list one more (its seon.db/eid and derived-row), context 2026-11-14
+               ;; 70: :retyped-attribute one more, the same two (data, 2026-11-14)
+               :fixed {:ns 3000000 :bytes 4000000 :calls 70}
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 4000000}} attention-survives-a-store-write
@@ -1567,7 +1607,7 @@
             :let [[caused full] (made base head c)]]
       (is (seq full) (str (name c) ": the branch made a row"))
       (is (= full caused) (str (name c) ": caused-split answers it, as the full reading does")))
-    (is (= (set (keys {:unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :unfocused-docstring 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated-test 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1}))
+    (is (= (set (keys {:unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :unfocused-docstring 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated-test 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1 :hand-written-list 1 :retyped-attribute 1}))
            seon.problems/caused-classes)
         "the classes a branch is judged on are the content classes, as :seon.problems/class declares them")))
 
@@ -1596,6 +1636,18 @@
         caused-of (fn [head] (filter #(str/includes? % ":seon.agent/started-ms") (problems/caused base head)))]
     (is (seq (caused-of (d/db-with base (entry "[:int {:min 10 :description \"Ms.\"}]")))) "an entry tightened under a stored value is caused it")
     (is (empty? (caused-of (d/db-with base (entry "[:int {:min 0 :description \"Ms.\"}]")))) "one every stored value still fits is not")))
+
+;; Estimate: a world (cached) 0.5M + 3 caused-split reads of one moved entry (a registry each side, ~1.5M) = 6000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-branch-that-retypes-an-installed-attribute-is-caused-it
+  ;; docs/health.md#a-retyped-attribute (root, 2026-11-14): a stored attribute's value type and cardinality are fixed once installed,
+  ;; and the store follows main, so a branch whose entry gives an attribute main declares another type or cardinality is caused a row
+  ;; at its land check, never found by root refusing to open its store (seon.db/install-missing!'s :seon.db/types-differ)
+  (let [base (world)
+        entry (fn [form] [{:schema/key :seon.agent/started-ms :schema/form form}])
+        retyped (fn [head] (filter #(str/includes? % "fixed once installed") (problems/caused base head)))]
+    (is (seq (retyped (d/db-with base (entry "[:string {:description \"Ms.\"}]")))) "a type another than main's is caused it")
+    (is (empty? (retyped (d/db-with base (entry "[:int {:min 0 :description \"Ms, newly described.\"}]"))))
+        "an entry changed in what it says or how it checks, its type kept, is not")))
 
 (deftest ^{:seon.test/estimate {:ticks 8000000}} a-branch-that-changes-what-its-plan-cites-is-shown-the-stale-plan-never-refused
   ;; docs/health.md#a-plan-that-went-stale: changing the code a plan cites is the work (an agent's own task cites what it
@@ -1630,3 +1682,54 @@
     (is (empty? (get-in (problems/health (d/db-with (world) [(ended "t/ok" {:seon.task/proofs #{'app.t/g-cost}
                                                                             :seon.task/costs {'app.t/g-cost {:rows rows :verdict green}}})]))
                         [:classes :cost :rows])) "a green verdict reads as no problem")))
+
+;; See docs/health.md#a-hand-written-list
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-list-naming-its-parts-is-a-problem
+  ;; the owner (2026-11-10: "NO HAND WRITTEN LISTS"; 2026-11-14: enforced through the problems): a page list draws what its pull
+  ;; holds, each part by its schema's render; one that names a component in its code is a problem a branch is refused for
+  (let [comp-c (seon.edn/encode [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any])
+        helper-c (seon.edn/encode [:=> [:cat :map] :any])
+        nsym (cite-ns (world))
+        v #(symbol nsym (str "v" %))
+        named (fn [refs] (-> (var-forms (world) 3 (fn [i] (case (int i)
+                                                            1 (cond-> {:src (str "(defn v1 [o c] [:div {:id \"p-x\"} " (pr-str (sort refs)) "])") :meta #{:arglists :seon.render/list}} (seq refs) (assoc :refs refs))
+                                                            2 {:src "(defn v2 [o c] [:div])"}
+                                                            3 {:src "(defn v3 [c] c)"})))
+                             (d/db-with [{:var/name (v 2) :var/contract comp-c} {:var/name (v 3) :var/contract helper-c}])))
+        head (named #{(v 1) (v 2) (v 3)})
+        row [{:kind :hand-written-list :var (v 1) :parts [(v 2)]}]]
+    (is (= row (mapv :evidence (problems/hand-written-lists head {} #{(v 1)})))
+        "a list naming a component has its row naming that part; itself and a helper it calls are no part")
+    (is (= row (mapv :evidence (problems/hand-written-lists head {} nil))) "every list on the db, found by its metadata")
+    (is (= [] (problems/hand-written-lists head {} #{(v 2) (v 3)})) "a component or a helper is no list")
+    (is (= [] (problems/hand-written-lists (named #{(v 3)}) {} nil)) "a list that draws its parts from the pull, calling helpers, has none")
+    (let [split (problems/caused-split (named #{(v 3)}) head)]
+      ;; the owner, 2026-11-14 (AGENTS.md section 5): each list is shown with its owner for judgement, never refused at done
+      (is (some #(re-find #"names its parts" %) (map str (:attention split))) (str "a branch that adds one is shown it: " (pr-str split)))
+      (is (not-any? #(re-find #"names its parts" %) (map str (:caused split))) "and is not refused done"))
+    (is (contains? seon.problems/caused-classes :hand-written-list) "judged on what a branch moved")
+    (is (contains? (:seon.problems/attention (contract/properties :seon.problems/class)) :hand-written-list) "shown, never a reason to refuse")))
+
+;; See docs/health.md#a-hand-written-list: the owner's decree (2026-11-14, AGENTS.md section 5), each hand-made list shown with its
+;; owner for judgement (a dial, a patch over a missing mechanism, or a restatement of held data)
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-literal-enumeration-is-a-hand-written-list
+  ;; estimate: one small world (~2M), six forms read and walked (~50k each), the rows derived (~0.5M)
+  (let [nsym (cite-ns (world))
+        v #(symbol nsym (str "v" %))
+        srcs {1 "(defn v1 [k] (contains? #{:app.x/a :app.x/b :app.x/c} k))"
+              2 "(defn v2 [db e] (d/pull db [:app.x/a :app.x/b :app.x/c] e))"
+              3 "(def v3 [:enum :one :two :three])"
+              4 "(defn v4 [m] (select-keys m [:app.x/a :app.x/b :app.x/c]))"
+              5 "(defn v5 [] (cfg/value :seon.config.x/y))"
+              6 "(defn v6 [m] (get-in m [:a :b :c]))"
+              7 "(defn v7 [root] (git! {} root [\"rev-parse\" \"--verify\" \"HEAD\"] nil))"
+              8 "(defn v8 [k] (contains? #{::zz/a ::zz/b ::zz/c} k))"}
+        head (var-forms (world) 8 (fn [i] {:src (srcs (int i))}))
+        rows (fn [names] (mapv :evidence (problems/hand-written-lists head {} names)))]
+    (is (= [{:kind :hand-written-list :var (v 1) :members [:app.x/a :app.x/b :app.x/c]}] (rows #{(v 1)}))
+        "a set of three attributes a function tests membership in is a row naming its members, its owner the var's namespace")
+    (is (= [] (rows #{(v 2) (v 3) (v 4) (v 5) (v 6) (v 7)}))
+        "not a pull pattern, a malli enum, the keys a select takes, a config read, a path or a command's argv: each names what its call takes")
+    (is (= [{:kind :hand-written-list :var (v 8) :members [:zz/a :zz/b :zz/c]}] (rows #{(v 8)}))
+        "a form whose namespace this process never loaded is read all the same: an unloaded alias keeps its text")
+    (is (= [(v 1) (v 8)] (mapv :var (rows nil))) "the whole program's: every form on the db")))

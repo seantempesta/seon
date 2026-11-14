@@ -263,17 +263,8 @@
           [st2 _] (#'seon.render.proc/pass-view (assoc st1 :main-db (:db-after r)) :a1)]
       (clojure.test/is (= 1 (- (get-in st2 [:counts :rendered]) (get-in st1 [:counts :rendered]))) (str n " rows: the agent's head rendered, nothing else")))))
 
-(def ^:private kept-walks
-  "The walks `step-of` made for the proof in hand, which cost/proof holds no end for: let go by `with-kept-walks`."
-  (atom []))
-
-(defn- with-kept-walks
-  "f, then every walk `step-of` made for it disposed: one left behind runs at every later redefinition of a render in this process."
-  {:malli/schema [:=> [:cat :seon.host/fn] :any]}
-  [f] (try (f) (finally (run! seon.render/dispose-walk! @kept-walks) (reset! kept-walks []))))
-
 (defn step-of
-  "The input of size n: a kept walk of an agent's page (as seon.render.proc/kept-walk holds one) drawn over n-1 of its turns, each
+  "The input of size n: a kept walk of an agent's page (seon.render.proc/kept-walk, a value) drawn over n-1 of its turns, each
   as production writes it (docs/turn.md#the-turn-is-a-number: its model call and reply, an eval the call ran, and every third turn a message
   it took), and the db with the n-th turn written: [kept-walk db-before db-after]."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db :seon.host/db]]}
@@ -295,13 +286,9 @@
                                (d/db-with db [{:seon.model-call/id (seon.lib/call-id k (inc i))
                                                :seon.model-call/basis {:commit (random-uuid) :t (:max-tx db) :task "demo/b1" :turn (inc i) :max-turns 9 :origin :model}}])))
         db (reduce with-turn base (range (dec n)))
-        c (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.agent/key k) :b)
-        at (volatile! db)
-        a (seon.ratom/atom (:tree c))
-        w (seon.render/walker {:ref a :changes seon.ctx/changes} (fn [] @at) [#'seon.render.ui/agent {} (seon.ratom/ref-view a seon.ctx/changes)])]
-    (seon.fixtures/flush! w nil)
-    (swap! kept-walks conj w)
-    [{:w w :a a :c c :at at} db (with-turn db (dec n))]))
+        kw (#'seon.render.proc/kept-walk db (seon.db/eid db :seon.agent/key k) :b {:seon.agent/key k} identity)]
+    (seon.fixtures/no-error-render (:defects (:p kw)))
+    [kw db (with-turn db (dec n))]))
 
 (defn step!
   "The kept walk kw (held at db, a branch) moved to later, the branch with one more turn, and back (seon.render.proc/advance-walk!
@@ -311,24 +298,24 @@
   (-> kw (#'seon.render.proc/advance-walk! later :b identity) (#'seon.render.proc/advance-walk! db :b identity)))
 
 (defn change-of
-  "The input of size n: an agent's page kept over n turns as production writes them (`step-of`): its walk and the atom holding its
-  ctx, then one eval's value changed (the atom reset! as the patch does): what flush! draws."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/deref]]}
+  "The input of size n: an agent's page kept over n turns as production writes them (`step-of`): its walk's value and the db it is at,
+  which `redraw!` changes one eval of."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db]]}
   [n]
-  (let [[kw] (step-of n)] [(:w kw) (:a kw)]))
+  (let [[kw] (step-of n)] [(:p kw) (:db kw)]))
 
 (defn redraw!
-  "One change drawn: an eval opened or closed in the atom (each call a change, as a patch reset!s ctx: each component watching it
-  asked whether one of its read paths moved), then the walk's frame: what it redrew."
-  {:malli/schema [:=> [:cat :map :seon.host/deref] [:map-of [:vector :any] [:enum :miss :same]]]}
-  [w a]
-  (swap! a (fn [c] (update-in c [:seon.eval/_agent (first (keys (:seon.eval/_agent c))) :seon.eval/opened] not)))
-  (seon.render/flush! w nil))
+  "One change drawn: walk value p moved to its tree with an eval opened or closed (each call a change from p, as a patch moves ctx: the
+  tree's diff, seon.ctx/changes, looks up the components whose read paths it reaches), nothing moved in db: what it redrew."
+  {:malli/schema [:=> [:cat :map :seon.host/db] [:map-of [:vector :any] [:enum :miss :same]]]}
+  [p db]
+  (:ran (seon.render/walk p {:db db :tree (update-in (:tree p) [:seon.eval/_agent (first (keys (:seon.eval/_agent (:tree p)))) :seon.eval/opened] not)
+                             :root (:root p) :index (:index p) :outputs #{:seon.render/hiccup} :changes seon.ctx/changes :moved []})))
 
 (deftest a-change-costs-its-components
   ;; a change draws the components whose read paths it
   ;; reaches, and nothing else of the page
-  (with-kept-walks #(cost/proof
+  (cost/proof
     {:of 'seon.render-cost-test/redraw! :input 'seon.render-cost-test/change-of
      :n "evals in the agent's ctx"
      :work (str "the one eval's component and the turn holding it, drawn again, on real records, and nothing else: no other turn's "
@@ -338,7 +325,7 @@
      :growth :linear
      :per-n {:calls 0 :bytes 3400}
      :fixed {:calls 400 :bytes 150000}
-     :sizes [30 100 300]})))
+     :sizes [30 100 300]}))
 
 ;; See docs/render.md#a-change-is-edits-by-name
 (defn keyed-part
@@ -359,8 +346,11 @@
                 "Linear in the children in bytes and flat in contracted calls, whatever the rest of the page holds; ticks 27k at 10 children, 326k at 100, "
                 "17.6M at 1,000, the map reads being an array map's")
      :growth :linear
-     :per-n {:calls 0 :bytes 12500}
-     :fixed {:calls 9 :bytes 60000}
+     :per-n {:calls 12 :bytes 12500}
+     ;; 2026-11-14 (web, W-5): every reader of an output asks one marker test a node and one element split an element (seon.render/marker-key,
+     ;; element-parts, private: checked in tests, not on a production call), contracted calls the inline tests were not: +12 a member (the edited component's
+     ;; output holds a row a member, each row's markers tested and elements split; the inline tests counted none) and +22 fixed
+     :fixed {:calls 31 :bytes 60000}
      :sizes [10 30 100 300]}))
 
 ;; See docs/render.md#components
@@ -370,27 +360,27 @@
   [{c :seon.ctx/ctx} id] [:li (str id (:n c))])
 (defn gone-list
   "A list of ctx's :ids."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}] (into [:ol] (for [id (seon.ratom/realize (:ids c))] [#'gone-member {} id])))
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :any] :any]}
+  [{c :seon.ctx/ctx} _view] (into [:ol] (for [id (seon.ratom/realize (:ids c))] [#'gone-member {} id])))
+
+(defn- moved-to
+  "Walk value p on db moved to tree t, nothing moved in db (seon.render/walk, :moved []): a change of its ctx alone."
+  {:malli/schema [:=> [:cat :map :seon.host/db :any] :map]}
+  [p db t] (seon.render/walk p {:db db :tree t :root (:root p) :index (:index p) :outputs #{:seon.render/hiccup} :changes seon.ctx/changes :moved []}))
 
 (defn list-of
-  "The input of size n: a list of n members drawn, and the atom holding its ids."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/deref]]}
+  "The input of size n: a list of n members drawn as a walk value, and the db it is on."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db]]}
   [n]
-  (let [a (seon.ratom/atom {:db/id 1 :ids (vec (range n))})
-        w (seon.render/walker {:ref a :changes seon.ctx/changes} (constantly nil) [#'gone-list {}] (seon.db/index))]
-    (seon.fixtures/flush! w nil)
-    [w a]))
+  (let [db (ts/test-db)]
+    [(seon.fixtures/walk nil {:db db :tree {:db/id 1 :ids (vec (range n))} :root #'gone-list :index (seon.db/index)}) db]))
 
 (defn member-gone-and-back!
   "One member let go and drawn again: the list's runs and what went."
-  {:malli/schema [:=> [:cat :map :seon.host/deref] :any]}
-  [w a]
-  (let [ids (:ids @a)]
-    (swap! a assoc :ids (pop ids))
-    (seon.render/flush! w nil)
-    (swap! a assoc :ids ids)
-    (seon.render/flush! w nil)))
+  {:malli/schema [:=> [:cat :map :seon.host/db] :any]}
+  [p db]
+  (let [t (:tree p)]
+    (moved-to (moved-to p db (update t :ids pop)) db t)))
 
 (deftest a-member-gone-costs-the-lists-lookups
   ;; a member the list no longer draws goes at the flush's end, by who holds it: no walk of the page and no scan of the list per member
@@ -408,7 +398,7 @@
 (deftest a-step-costs-what-changed
   ;; task seon.render/a-step-costs-what-changed (docs/render.md#a-page-is-a-kept-walk): one more turn draws its own component of the
   ;; conversation, found by its number; the earlier turns are a lookup each (a form drawn keeps its marker) and are not drawn again
-  (with-kept-walks #(cost/proof
+  (cost/proof
     {:of 'seon.render-cost-test/step! :input 'seon.render-cost-test/step-of
      :n "turns the agent took before the one stepped to and back from"
      :work (str "the turn's records read through the index by its number and drawn (its message, its reply and its eval), ctx patched "
@@ -425,7 +415,7 @@
      ;; (seon.print/response-text); the owner approved 250 for a change's 379, and said cull later
      :per-n {:calls 8.2 :bytes 37000}
      :fixed {:calls 1285 :bytes 11250000}
-     :sizes [10 40 160]})))
+     :sizes [10 40 160]}))
 
 ;; On disk, the one-store rule's last resort (docs/cost.md#how-we-measure): a page advanced from one turn's basis to the next
 ;; takes the datoms between the two commits (seon.ctx/moved, d/datoms-diff), which skips the subtrees they share by address; the
@@ -499,7 +489,7 @@
                      :sizes [1 10 30]})))))
 
 (def ^:dynamic *sels*
-  "The draw proof's opts (bound by its deftest)."
+  "The cold walk proof's opts (bound by its deftest)."
   {:model-only true :once true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})
 
 (deftest printing-a-result-is-the-models-reading-of-it
@@ -511,25 +501,21 @@
                                               :seon.eval/code (str "(f " i ")") :seon.eval/call-id (str "c" i) :seon.eval/response {:handle (symbol "result" (str "e" i)) :value i}}]))
                    db (range n))
         a (:db/id (d/entity db [:seon.agent/key k]))
-        src (seon.ratom/atom (:tree (seon.ctx/build (seon.db/index) db a :b)))
-        walk (fn [outs] (cond-> (seon.render/walker {:ref src :changes seon.ctx/changes} (constantly db) [#'seon.render.ui/agent {} (seon.ratom/ref-view src seon.ctx/changes)])
-                          outs (assoc :outputs outs)))
-        w (walk nil)
-        prints (fn [f] (seon.profile/measure! f) (or (some (fn [x] (when (= 'seon.print/record-text (:var x)) (:calls x))) (seon.profile/touched)) 0))]
-    (try
-      (clojure.test/is (zero? (prints #(do (seon.render/flush! w nil) (seon.render/placed-units w)))) "a page drawn and written prints none")
-      (finally (seon.render/dispose-walk! w)))
+        t (:tree (seon.ctx/build (seon.db/index) db a :b))
+        ix (seon.program/index-of-db db)
+        opts (fn [outs] {:db db :tree t :root #'seon.render.ui/agent :index ix :outputs outs})
+        prints (fn [f] (seon.profile/measure! f) (or (some (fn [x] (when (= 'seon.print/record-text (:var x)) (:calls x))) (seon.profile/touched)) 0))
+        both #{:seon.render/hiccup :seon.render/openai-compat}]
+    (clojure.test/is (zero? (prints #(seon.fixtures/walk nil (assoc (opts #{:seon.render/hiccup}) :units true)))) "a page drawn and written prints none")
     ;; the walk asked for the model's output prints each result in the eval's model render, and keeps its messages
-    (let [w (walk #{:seon.render/hiccup :seon.render/openai-compat})]
-      (try
-        (clojure.test/is (<= n (prints #(seon.render/flush! w nil))) "the first reading prints each")
-        (clojure.test/is (zero? (prints #(seon.render/openai-compat w))) "the next finds each where the walk keeps it")
-        (finally (seon.render/dispose-walk! w))))))
+    (let [p (volatile! nil)]
+      (clojure.test/is (<= n (prints #(vreset! p (seon.fixtures/walk nil (opts both))))) "the first reading prints each")
+      (clojure.test/is (zero? (prints #(seon.fixtures/walk @p (assoc (opts both) :moved [])))) "the next finds each where the walk keeps it"))))
 
 (defn page-of
-  "The input at n: the arguments of seon.render/draw for agent b/p<n>'s page on a branch where it
+  "The input at n: the arguments of seon.render/walk drawing agent b/p<n>'s page cold on a branch where it
   holds a task and n turns, each production-shaped: its eval (a record as the REPL writes it), the reply that holds it and, every other turn, a message taken at it:
-  its ctx tree, the diff, the db, the layout and its opts (*sels*)."
+  no prev, and its ctx tree, the db, the layout, the db's entity index, the diff and *sels*."
   {:malli/schema [:=> [:cat pos-int?] [:vector :any]]}
   [n]
   (let [conn *conn* k (str "b/p" n) tid (str "demo/p" n)]
@@ -546,7 +532,9 @@
       (d/transact conn [{:seon.model-call/id (seon.lib/call-id k (inc i))
                          :seon.model-call/basis {:commit (d/commit-id @conn) :t (:max-tx @conn) :task tid :turn (inc i) :max-turns 9 :origin :model}}]))
     (let [db @conn a (:db/id (d/entity db [:seon.agent/key k]))]
-      (into [(:tree (seon.ctx/build (seon.db/index) db a (:seon.agent/branch (d/entity db a)))) seon.ctx/changes db #'seon.render.ui/agent] (some-> *sels* vector)))))
+      [nil (merge {:db db :tree (:tree (seon.ctx/build (seon.db/index) db a (:seon.agent/branch (d/entity db a)))) :root #'seon.render.ui/agent
+                   :index (seon.program/index-of-db db) :changes seon.ctx/changes}
+                  *sels*)])))
 
 ;; See docs/render.md#the-models-context-a-cached-prefix-then-the-turn
 (deftest a-cold-request-draws-what-the-model-reads
@@ -556,20 +544,25 @@
     (disk-branch!
       (fn [conn]
         (binding [*conn* conn]
-          (cost/proof {:of 'seon.render/draw :input 'seon.render-cost-test/page-of
+          (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/page-of
                        :n "evals of the agent (and a message for every other)"
                        :work "the task's list drawn once, a component for each turn, message and eval, each eval's response printed once"
                        :growth :linear
-                       ;; set by this proof's first measure, for the owner's word: the old proof's flat 1,050 calls drew one list, and this draws the conversation. An eval's response is printed
-                       ;; here once, under the armed printer, 197 calls: seon.ctx.wire/request's old cold cost was 546 a record
-                       :per-n {:calls 200 :bytes 120000}
-                       :fixed {:calls 700 :bytes 1300000}
-                       ;; owner's yes, 2026-11-10 ("Land now, three waivers", docs/decisions.md#three-request-cost-proofs-land-waived-owner-2026-11-10): a cold request draws
-                       ;; the page at the first turn's basis and advances one walk through every later basis (~6k calls), and each history record is drawn
-                       ;; by its own model render (~3k, an eval's print the most); the rest is outside the model render. The waiver comes off with that task.
-                       ;; Measured on jolt/pages 2026-11-10 at its largest size, 66.3k calls and 127.2 MB at 80 (its bound: 16.7k calls, 10.9 MB).
-                       :overrun {:task "seon.render/a-model-render-draws-each-turns-diff" :n 80 :measured {:calls 66300.0 :bytes 127170000.0}}
-                       :sizes [10 40 80]}))))))
+                       ;; derived from the work, item by item (each item's calls read off its own code path, web 2026-11-14):
+                       ;; - a turn: its eval component (~60 calls of the walk's own and the tree tracking's views of its members:
+                       ;;   wrap, view?, notify-deref-watcher!, ~25 each) and its response printed once by the armed printer
+                       ;;   (seon.print.select/emit, ~600 calls: classify, more?, member-indent, child, sized, node-of), its reply, and
+                       ;;   a message every other turn (~80): ~840 calls and ~1.17 MB a turn (the printer's text and the views, the
+                       ;;   print cache filling: a cold request's first draw, which is what one is)
+                       ;; - fixed: the task's list, the system message (the doc's markdown) and the page's head: ~6.6k calls, ~12.3 MB
+                       ;; Measured on jolt/web 2026-11-14, a first draw at 10 / 20 / 40: 15,057 / 23,343 / 40,207 calls, 24.1 / 33.8 /
+                       ;; 59.2 MB (a second draw allocates 15-25% less, its prints cached). The
+                       ;; old estimate (200 a turn, 700 fixed) left every size over, so each was measured again 18-43 times: the
+                       ;; proof cost ~1.0B ticks for ~63M of draws and ~155M of building its input. The tree tracking of a draw no
+                       ;; one advances (~30% of the calls) is the cost to cut next: task seon.render/a-model-render-draws-each-turns-diff
+                       :per-n {:calls 850 :bytes 1200000}
+                       :fixed {:calls 6700 :bytes 12500000}
+                       :sizes [10 20 40]}))))))
 
 (defn- session-eval
   "Eval id of agent a1's turn n, as its REPL records it (seon.repl/record-tx), its call that turn's."
@@ -681,9 +674,10 @@
                ;; - the printer over the 36 nodes the components print (system message, examples, state), ~32 calls and ~7k ticks a node = 1,150 calls
                ;; - the system page as markdown (seon.doc, 4 sections): ~125k ticks, ~660 KB
                ;; - the db, ctx and config reads (members, parents, watch, config values): ~190 calls, ~90k ticks, ~300 KB
-               ;; sum: ~2,440 calls, ~0.78M ticks, ~3.3 MB. Measured 2026-11-13 at 2 / 4 / 8: 2,429 calls, 0.82M ticks, 3.54 MB at every size
+               ;; - 2026-11-14 (web): one seon.render/entity-read-keys per component run, its tree reads as datom keys: 15 calls
+               ;; sum: ~2,455 calls, ~0.78M ticks, ~3.3 MB. Measured 2026-11-13 at 2 / 4 / 8: 2,429 calls, 0.82M ticks, 3.54 MB at every size
                ;; (1.01M and 4.17 MB when rules sorted all 162 vars). None of it reads the parent's history
-               :fixed {:calls 2440 :bytes 3500000 :ticks 800000}
+               :fixed {:calls 2455 :bytes 3500000 :ticks 800000}
                :sizes [2 4 8]}))
 
 (defn rules-of
@@ -696,11 +690,12 @@
 (deftest ^{:seon.test/estimate {:ticks 2000000}} the-rules-cost-their-namespaces-vars-read-once
   (cost/proof {:of 'seon.render/rules :input 'seon.render-cost-test/rules-of
                :n "renders drawn, of one namespace"
-               :work (str "the namespace's 163 vars read once (ns-interns ~7k ticks, 93 KB; a meta read and css? each, ~200 ticks and ~700 B), "
-                          "the 24 that state rules sorted (~3k): constant in the renders drawn. It sorted all 162 vars by symbol: 124k ticks, 492 KB")
+               :work (str "the namespace's vars (" (count (ns-interns 'seon.render.ui)) " now) read once (ns-interns ~7k ticks, 93 KB; a meta read and css? each, ~200 ticks and ~700 B), "
+                          "the 24 that state rules sorted (~3k): constant in the renders drawn. It sorted every var by symbol: 124k ticks, 492 KB")
                :growth :constant
-               ;; calls: rules and a css? a var of seon.render.ui; 163 since recent-errors (web, ed4ebcf766) added the 163rd var
-               :fixed {:calls 164 :bytes 240000 :ticks 45000}
+               ;; calls: rules, and css? once for each var of seon.render.ui, counted from the namespace itself: a restated count went red
+               ;; at each new render (163, then 164 with turns-tile)
+               :fixed {:calls (inc (count (ns-interns 'seon.render.ui))) :bytes 240000 :ticks 45000}
                :sizes [1 4 16]}))
 
 ;; See docs/render.md#a-page-is-a-kept-walk
@@ -726,7 +721,9 @@
                ;; every turn, seon.db/owners via schema-of 42 KB, ratom reads-of 24 KB, wire/turn-entities 18 KB, the ratom's wrap, notify and
                ;; view ~28 KB), which task seon.ctx.wire/a-turn-is-a-component-of-the-request removes: back to ~115 KB a turn when it lands.
                ;; A waiver (:overrun) was refused by health's :no-waived-proof.
-               :per-n {:calls 170 :bytes 156000}
+               ;; 2026-11-14 (web, W-5): every reader of an output asks one marker test a node and one element split an element (seon.render/marker-key,
+               ;; element-parts, private: checked in tests, not on a production call), contracted calls the inline tests were not: +6 a turn (its output's nodes)
+               :per-n {:calls 176 :bytes 156000}
                :fixed {:calls 850 :bytes 1850000}
                :sizes [10 20 40]})
   (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/walk-same-of
@@ -778,27 +775,24 @@
   [{c :seon.ctx/ctx} id] [:li (str id ":" (get-in c [:vals id :v]))])
 (defn val-list
   "A list of ctx's :ids, each member reading its own value."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}] (into [:ol] (for [id (seon.ratom/realize (:ids c))] [#'val-member {} id])))
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :any] :any]}
+  [{c :seon.ctx/ctx} _view] (into [:ol] (for [id (seon.ratom/realize (:ids c))] [#'val-member {} id])))
 
 (defn vals-of
-  "The input of size n: a list of n members drawn, each reading its own value, and the atom holding them."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/deref]]}
+  "The input of size n: a list of n members drawn as a walk value, each reading its own value, and the db it is on."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db]]}
   [n]
   ;; held as ctx holds a join: a map sorted by its members' ids, each member an entity
-  (let [a (seon.ratom/atom {:db/id 1 :ids (vec (range 10 (+ 10 n))) :vals (into (sorted-map-by (fn [a b] (cond (and (int? a) (int? b)) (compare b a) (int? a) -1 (int? b) 1 :else (compare (str a) (str b))))) (map (fn [i] [i {:db/id i :v i}])) (range 10 (+ 10 n)))})
-        w (seon.render/walker {:ref a :changes seon.ctx/changes} (constantly nil) [#'val-list {}] (seon.db/index))]
-    (seon.render/flush! w nil)
-    [w a]))
+  (let [db (ts/test-db)
+        t {:db/id 1 :ids (vec (range 10 (+ 10 n))) :vals (into (sorted-map-by (fn [a b] (cond (and (int? a) (int? b)) (compare b a) (int? a) -1 (int? b) 1 :else (compare (str a) (str b))))) (map (fn [i] [i {:db/id i :v i}])) (range 10 (+ 10 n)))}]
+    [(seon.fixtures/walk nil {:db db :tree t :root #'val-list :index (seon.db/index)}) db]))
 
 (defn one-member-changed!
   "One member's value changed and drawn, then changed back and drawn."
-  {:malli/schema [:=> [:cat :map :seon.host/deref] :any]}
-  [w a]
-  (swap! a update-in [:vals 10 :v] inc)
-  (seon.render/flush! w nil)
-  (swap! a update-in [:vals 10 :v] dec)
-  (seon.render/flush! w nil))
+  {:malli/schema [:=> [:cat :map :seon.host/db] :any]}
+  [p db]
+  (let [t (:tree p)]
+    (moved-to (moved-to p db (update-in t [:vals 10 :v] inc)) db t)))
 
 (deftest a-flush-costs-the-children-that-changed
   ;; seon.render/a-flush-costs-the-children-that-changed: one member changed reruns that member alone, whatever the list holds
@@ -811,7 +805,9 @@
      ;; measured 2026-11-10: 81 calls at 10, 40 and 160; 99 KB, 124 KB, 217 KB. 2026-11-12: 87 at 10, 88 KB: the reactions' read index
      ;; is the one value index a walk kept as a value reads too (seon.ratom/read-index, reached), a call each where it was inline
      :per-n {:calls 0 :bytes 900}
-     :fixed {:calls 88 :bytes 100000}
+     ;; 2026-11-14 (web): +3, the changed member's two runs each derive their tree reads' datom keys (seon.render/entity-read-keys), and
+     ;; its re-run takes the entity keys it held out of the walk's index (forget-readers!), which a tree-only reader never held before
+     :fixed {:calls 91 :bytes 100000}
      :sizes [10 40 160]}))
 
 (defn big-member
@@ -820,21 +816,20 @@
   [{c :seon.ctx/ctx}] (into [:li [:h3 "bulk"]] (for [i (range (:size c))] [:p [:span (str "x" i)]])))
 (defn bulk-list
   "A list of one big member (`big-member`) and ctx's :ids, each member reading its own value."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}] (into [:ol [#'big-member {}]] (for [id (seon.ratom/realize (:ids c))] [#'val-member {} id])))
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :any] :any]}
+  [{c :seon.ctx/ctx} _view] (into [:ol [#'big-member {}]] (for [id (seon.ratom/realize (:ids c))] [#'val-member {} id])))
 
 (defn bulk-of
   "The input of size n: a page of ten small members and one whose hiccup is n elements, drawn and its units written once, then one
-  small member changed and flushed: placed-units' argument, the walk."
+  small member changed and walked: placed-units' argument, that walk value."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
   [n]
-  (let [a (seon.ratom/atom {:db/id 1 :size n :ids (vec (range 10 20)) :vals (into {} (map (fn [i] [i {:v 0}])) (range 10 20))})
-        w (seon.render/walker {:ref a :changes seon.ctx/changes} (constantly nil) [#'bulk-list {}] (seon.db/index))]
-    (seon.render/flush! w nil)
-    (seon.render/placed-units w)
-    (swap! a update-in [:vals 10 :v] inc)
-    (seon.render/flush! w nil)
-    [w]))
+  (let [db (ts/test-db)
+        t {:db/id 1 :size n :ids (vec (range 10 20)) :vals (into {} (map (fn [i] [i {:v 0}])) (range 10 20))}
+        ;; drawn and its units written once (each component's placements kept on its entry)
+        p (seon.fixtures/walk nil {:db db :tree t :root #'bulk-list :index (seon.db/index) :units true})]
+    ;; one small member changed and drawn, its units not yet written: what placed-units, on the walk value, writes
+    [(moved-to p db (update-in t [:vals 10 :v] inc))]))
 
 ;; docs/render.md#a-layout-places-its-lists
 (deftest a-flush-places-what-moved
@@ -846,8 +841,14 @@
      :n "elements in an unchanged member's hiccup"
      :work "each component's kept placements read once, the changed member's html written again; nothing of the unchanged member's hiccup"
      :growth :constant
-     ;; measured 2026-11-11: 2 calls and 18.8 KB at 10, within 20 KB at 100 and 1000; before (the prewalk) 31.2 KB at 10, 83.7 KB at 100 (n^0.43)
-     :fixed {:calls 2 :bytes 20000}
+     ;; measured 2026-11-11: 2 calls and 18.8 KB at 10, within 20 KB at 100 and 1000; before (the prewalk) 31.2 KB at 10, 83.7 KB at 100 (n^0.43).
+     ;; Those 2 calls were wrong: the input was a walker's cells, which the measure's first call wrote, so every later call it kept
+     ;; measured a page already laid out. Over a walk value each call does the work: placed-units, placed, places of the changed member,
+     ;; styled and thrown-in (5), and its one <li> written by seon.web.html (html, write!, write-attrs!, callback, an attr-name per
+     ;; attribute's part and an escape per text: ~23), ~28 calls; its html, its placements and the value's new cache entries, ~35 KB
+     ;; 2026-11-14 (web, W-5): every reader of an output asks one marker test a node and one element split an element (seon.render/marker-key,
+     ;; element-parts, private: checked in tests, not on a production call), contracted calls the inline tests were not: +8 (the placed list's nodes)
+     :fixed {:calls 38 :bytes 40000}
      :sizes [10 100 1000]}))
 
 
@@ -865,6 +866,8 @@
      :work "each element's attributes checked once against the schema, a misfit counted by kind; a child's marker skipped"
      :growth :linear
      ;; measured 2026-11-11: 41 calls and 26.4 KB at 10, within 4 calls and 3 KB an element at 100 and 1000 (seon.contract/fits? an element)
-     :per-n {:calls 4 :bytes 3000}
+     ;; 2026-11-14 (web, W-5): every reader of an output asks one marker test a node and one element split an element (seon.render/marker-key,
+     ;; element-parts, private: checked in tests, not on a production call), contracted calls the inline tests were not: +3 a member (its row's nodes)
+     :per-n {:calls 7 :bytes 3000}
      :fixed {:calls 5 :bytes 5000}
      :sizes [10 100 1000]}))

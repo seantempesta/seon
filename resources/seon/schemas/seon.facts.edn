@@ -66,7 +66,7 @@
  :var/meta [:set {:seon.db/index true :description "The keys of the var's own metadata (:test, :macro, :arglists, :private, :malli/schema, ...), without their values and without location keys, :doc or contract-instrumentation keys. See docs/source.md#a-program-file."} :keyword]
  :var/contract [:string {:description "The var's declared :malli/schema as seon.edn text; read it back with seon.edn/decode."}]
  ;; A TEST'S LAST RESULT, on its var entity on the branch whose agent ran it (seon.proofs/result-tx,
- ;; written by seon.agent/run-tests-forked when a run ends; task seon.proofs/test-results-are-a-few-facts,
+ ;; written by seon.agent/run-tests-forked when a run ends; task seon.proofs/a-verdict-is-an-entity-that-names-its-environment,
  ;; R2a): overwritten in place, no history. The digest it was judged at; green, red, or flaky (green and red at
  ;; that digest, seon.proofs/verdict), or deferred (a process test the run left to root's gate), and present only while that digest is the test's reach digest now (a
  ;; moved digest retracts them: unknown); its failing assertions as data, the test child's reports (seon.proofs/failures,
@@ -216,7 +216,6 @@
  :seon.proof/reads [:and {:description "What the run read, matched against what moved to decide reuse."} :seon.reads/set]
  ;; its own key, never :seon.proof/reads retyped: a stored attribute's type is fixed once installed (seon.db/install-missing!)
  :seon.proof/read-keys [:set {:seon.db/index true :description "The read keys the run's reads recorded (datahike.reads/range-key, each its pr-str): what a moved datom is sought by."} :string]
- :seon.proof/outside [:set {:description "The reads the run made outside the store, as its effects answered them."} :seon.fx/read]
  :seon.proof/unreusable [:and {:description "The effects the run used whose answers its inputs don't decide: such a result is recorded, never reused."} :seon.reads/unreusable]
  :seon.proof/basis [:and {:description "The db the run read: its branch, commit and t."} :seon.db/reference]
  :seon.proof/agent [:and {:seon.db/to [:seon.db/agent-fact] :description "The agent whose process ran it."} :seon.db/ref]
@@ -228,7 +227,7 @@
                          [:seon.proof/id :seon.proof/id] [:seon.proof/test :seon.proof/test] [:seon.proof/reads-digest :seon.proof/reads-digest]
                          [:seon.proof/reads :seon.proof/reads] [:seon.proof/read-keys {:optional true} :seon.proof/read-keys] [:seon.proof/status :seon.proof/status] [:seon.proof/route :seon.proof/route]
                          [:seon.proof/basis :seon.proof/basis]
-                         [:seon.proof/outside {:optional true} :seon.proof/outside] [:seon.proof/unreusable {:optional true} :seon.proof/unreusable]
+                         [:seon.proof/unreusable {:optional true} :seon.proof/unreusable]
                          [:seon.proof/agent {:optional true} :seon.proof/agent] [:seon.proof/program {:optional true} :seon.proof/program]
                          [:seon.proof/profile {:optional true} :seon.proof/profile]
                          [:seon.proof/failures {:optional true} :seon.proof/failures] [:seon.bound/spent {:optional true} :seon.bound/spent]]
@@ -445,7 +444,7 @@
                              :seon.ctx/pattern [:seon.cite/id :seon.cite/depth :seon.cite/order
                                                 {:seon.cite/of [:seon.task/id :seon.task/ns :seon.agent/key]}
                                                 ;; a cited task also by what an agent may edit of it at this path: the task content a run's end
-                                                ;; carries to main (seon.task/carry-tx), so a task that curates another reads and writes its plan here
+                                                ;; merges to main (seon.merge's [:task id] key), so a task that curates another reads and writes its plan here
                                                 {:seon.cite/target [:seon.doc/address :var/name :schema/key :ns/name :file/path
                                                                     :seon.task/id :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause]}]}
                        [:seon.cite/id :seon.cite/id] [:seon.cite/of {:optional true} :seon.cite/of] [:seon.cite/target :seon.cite/target]
@@ -492,7 +491,7 @@
  :seon.task/gone [:and {:description "What the task's text cites whose cites ended with their targets (each target's identity value), written by the write that ended them and cleared when the text is written again. See docs/references.md#task-references."} [:vector :any] :seon.db/plain]
  :seon.task/failure [:map {:description "The failure the task was held or marked failed with: its reason, counterexample, agent and turn."} [:reason :string] [:counterexample {:optional true} :string] [:agent {:optional true} :string] [:turn {:optional true} :int]]
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
- :seon.task/declared [:string {:description "The declaration that a task file last stated for this task, as EDN."}]
+ :seon.task/declared [:string {:seon.db/derived true :description "The declaration that a task file last stated for this task, as EDN: derived from main's file, never merged."}]
  ;; the citation reader's code its cites were read by (seon.task/reader-digest): a reader change reads every task again; a text change is its declaration's
  :seon.task/cites-digest [:string {:description "The digest of the code that read this task's cites (seon.task/reader-digest): load-tx reads its cites again when the reader's code moved. See docs/data-modeling.md#derived-data-is-a-cache-never-relied-on."}]
  ;; a task may hold config keys as its overrides, by their own names; each key is defined once, by its own schema

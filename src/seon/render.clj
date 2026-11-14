@@ -23,7 +23,7 @@
     3. the one value printer (seon.print/print-value), the default render.
   A nested value renders by a call ([render opts v] in hiccup, or render's result)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.print.emit :as emit] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [seon.db :as pdb :refer [parents own-keys extends? most-specific]] [seon.program :as program] [seon.print :as print] [seon.config :as config]
+  (:require [seon.print.emit :as emit] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [seon.db :as pdb :refer [parents own-keys extends? most-specific]] [seon.print :as print] [seon.config :as config]
             [clojure.string :as str] [clojure.walk] [datahike.api :as d] [datahike.reads :as reads] [datahike.db.utils :as dbu] [seon.web.html :as h] [seon.ratom :as ratom] [seon.profile :as profile] [editscript.core :as ed]))
 
 (defn props
@@ -267,19 +267,20 @@
 
 ;;; --- the walk: a render of components (docs/render.md#components) -------------------------------
 
-(defn- opts-form
-  "The opts schema form of render var v's contract (its first argument), or nil."
-  {:malli/schema [:=> [:cat :any] :any]}
-  [v]
-  (when (var? v)
-    (let [s (:malli/schema (meta v)) arity (if (= :function (first s)) (second s) s)]
-      (when (vector? arity) (second (second arity))))))
+(defn contract-inputs
+  "Which of :seon.ctx/ctx, :seon.db/db and :seon.render/drawn the contract form s (a :malli/schema, live or stored) asks to
+  receive in its opts, its first argument: a render that declares any is a component. See docs/render.md#components."
+  {:malli/schema [:=> [:cat :any] [:set :qualified-keyword]]}
+  [s]
+  (let [arity (if (= :function (first s)) (second s) s)
+        opts (when (vector? arity) (second (second arity)))]
+    (into #{} (filter #{:seon.ctx/ctx :seon.db/db :seon.render/drawn}) (tree-seq vector? seq opts))))
 
 (defn inputs
-  "Which of :seon.ctx/ctx, :seon.db/db and :seon.render/drawn render var v's opts contract asks to receive: a render
-  that declares any is a component, kept in the walk's cache, those keys filled in (`render!`)."
+  "Which inputs render var v's live contract asks to receive (`contract-inputs`): a component is kept in the walk's cache,
+  those keys filled in (`render!`)."
   {:malli/schema [:=> [:cat :any] [:set :qualified-keyword]]}
-  [v] (into #{} (filter #{:seon.ctx/ctx :seon.db/db :seon.render/drawn}) (tree-seq vector? seq (opts-form v))))
+  [v] (if (var? v) (contract-inputs (:malli/schema (meta v))) #{}))
 
 (defn- inputs-in
   "The inputs render var f asks for (`inputs`), as walk w found them: kept by f with the value its root held then, so
@@ -335,22 +336,20 @@
          (for [c (rest k)] (str "-" (id-safe (if (keyword? c) (str (namespace c) (when (namespace c) "/") (name c)) (str c)))))))
 
 (defn walker
-  "A walk of a render of ctx: its source (src, {:ref r :changes f}: the reference ctx is, seon.ctx/ctx, and its
-  one diff, seon.ctx/changes), the db its db renders read (db-fn, called when one runs) and its
-  root call. Holds, in this process, the one cache: each component's reaction, args, output and
-  db reads ({key entry}), an index from read key to the components that read it, the marker of each form drawn, its render queue (the keys a change reached), what a flush's runs let go of (:gone), who left out a page's piece (:skipped, a walk :model-only), mount counter and ledger
-  (calls, hits, misses and allocation by render var), and the render vars it watches: each it drew, once,
-  whose redefinition (a defn at the REPL: Clojure's watch on a var's root) queues that var's components
-  for the next flush!, found in the cache when it fires. It holds the entity index its renders read schemas in (:index,
-  seon.db/index-of): the caller's ix when given (an agent passes its slot's: one copy, handed again by each flush! that is given
-  one, never built again here), else built from its db here (:own-index?) and built again by a flush that moved a :schema/* datom
-  (`flush!`), never otherwise. A cold walk (root drawing a branch) is a
-  walker drawn once."
-  {:malli/schema [:function [:=> [:cat :map :seon.host/fn [:vector :any]] :map] [:=> [:cat :map :seon.host/fn [:vector :any] :map] :map]]}
-  ([src db-fn root] (assoc (walker src db-fn root (program/index-of-db (db-fn))) :own-index? true))
-  ([src db-fn root ix]
-  {:src src :db db-fn :root root :index (volatile! ix) :own-index? false :cache (volatile! {}) :queue (volatile! #{}) :mounts (volatile! 0)
-   :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{}) :readers (volatile! {}) :forms (volatile! {}) :drawn (ratom/atom {}) :watched (volatile! #{}) :inputs (volatile! {}) :tree-readers (volatile! nil) :drawn-fns (volatile! {}) :gone (volatile! #{}) :skipped (volatile! #{}) :defects (volatile! [])}))
+  "The cells of one call of `walk`: its source (src, {:ref r :changes f}: the reference the tree is in, and its one diff,
+  seon.ctx/changes), the db its db renders read (db-fn, called when one runs), its root render and opts ([root opts], called on the
+  view of the tree's root) and the entity index its renders
+  read schemas in (ix, seon.db/index-of: the caller's, handed by each call). The parts a walk kept as a value carries (`kept-parts`:
+  each component's entry, who read what, the root's key, the forms drawn, the render vars drawn) start at kept's, the last value
+  (nil: drawn cold), and the rest are made anew for this call: its queue (the keys a change reached), what the call's runs let go of (:gone), who
+  left out a page's piece (:skipped, a walk :model-only), the defects and the ledger (calls, hits, misses and allocation by
+  render var). See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :map :seon.host/fn [:vector :any] :map [:maybe :map]] :map]}
+  [src db-fn root ix kept]
+  {:src src :db db-fn :root root :index (volatile! ix) :queue (volatile! #{}) :ledger (volatile! {}) :gone (volatile! #{}) :defects (volatile! [])
+   :cache (volatile! (:cache kept {})) :mounts (volatile! (:mounts kept 0)) :out (volatile! (:out kept)) :db-keys (volatile! (:db-keys kept #{}))
+   :readers (volatile! (:readers kept {})) :forms (volatile! (:forms kept {})) :inputs (volatile! (:inputs kept {}))
+   :tree-readers (volatile! (:tree-readers kept)) :drawn-fns (volatile! (:drawn-fns kept {})) :skipped (volatile! (:skipped kept #{}))})
 
 (defn- led!
   "Count k (:hit, :miss, :same) for render var f in w's ledger, with the ticks and bytes a run took."
@@ -359,7 +358,7 @@
   (vswap! (:ledger w) update (symbol f) #(-> (or % {}) (update k (fnil inc 0)) (update :ticks (fnil + 0) (or ticks 0)) (update :bytes (fnil + 0) (or bytes 0))))
   nil)
 
-(declare emit unmount!)
+(declare emit unmount! render!)
 
 (defn- css?
   "Whether a render's :seon.render/style is CSS rules rather than Tailwind classes. See docs/render.md#style."
@@ -404,6 +403,19 @@
 
 (declare entity-schema)
 
+(defn- marker-key
+  "The key of the child component whose marker x is ([::child k], what `emit` puts in an output in its place), else nil: every
+  reader of an output stops there, the child's output being its own. See docs/render.md#components."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [x] (when (and (vector? x) (= ::child (first x))) (second x)))
+
+(defn- element-parts
+  "Hiccup element x ([tag attrs? & children]) as [tag attrs children]: attrs its second place when that is a map and not raw html
+  (seon.web.html/raw?), which is a child as text is; nil attrs otherwise. The one split every reader of an output makes. See
+  docs/render.md#the-hiccup-is-checked."
+  {:malli/schema [:=> [:cat [:vector :any]] [:tuple :any [:maybe :map] [:sequential :any]]]}
+  [x] (let [a (second x) a? (and (map? a) (not (h/raw? a)))] [(first x) (when a? a) (if a? (drop 2 x) (rest x))]))
+
 (defn misfits
   "What hiccup output out holds that the intermediate refuses, by kind (:seon.render/misfits): each element's attributes against
   :seon.render/hiccup-attrs, walked through its own elements and never into a child's (a marker is the child's own output). {} when it
@@ -416,24 +428,24 @@
                              (not (or (string? v) (number? v) (boolean? v) (nil? v) (keyword? v) (symbol? v) (uuid? v))) :value))]
     ;; the counts so far threaded through the walk, a value
     ((fn walk [n x]
-       (cond (and (vector? x) (= ::child (first x))) n
+       (cond (marker-key x) n
              (and (vector? x) (keyword? (first x)))
-             (let [attrs (when (and (map? (second x)) (not (h/raw? (second x)))) (second x))
+             (let [[_ attrs kids] (element-parts x)
                    n (if (and attrs (not (contract/fits? :seon.render/hiccup-attrs attrs)))
                        (reduce (fn [n [k v]] (if-let [c (kind k v)] (update n c (fnil inc 0)) n)) n attrs)
                        n)]
-               (reduce walk n (if attrs (drop 2 x) (rest x))))
+               (reduce walk n kids))
              (sequential? x) (reduce walk n x)
              :else n))
      {} out)))
 
 (defn misfits-by-render
-  "Walk w's misfits (`misfits`) by the render that drew them, each component's own output as it last ran, summed: {render-sym
+  "Walk p's misfits (`misfits`; p a value `walk` answered) by the render that drew them, each component's own output as it last ran, summed: {render-sym
   misfits}, the renders that fit left out. What a render still writes that the intermediate refuses, read at the REPL and pinned by
   seon.render-test/every-render-fits-the-hiccup. See docs/render.md#the-hiccup-is-checked."
   {:malli/schema [:=> [:cat :map] [:map-of :symbol :seon.render/misfits]]}
-  [w]
-  (reduce (fn [m [_ c]] (let [f (misfits (:out c))] (if (seq f) (update m (symbol (:f c)) #(merge-with + % f)) m))) {} @(:cache w)))
+  [p]
+  (reduce (fn [m [_ c]] (let [f (misfits (:out c))] (if (seq f) (update m (symbol (:f c)) #(merge-with + % f)) m))) {} (:cache p)))
 
 (defn- places
   "The components output out places, in order, [[sel k]]: each child's marker with the selector of the nearest element above it in out
@@ -443,11 +455,11 @@
   [out]
   ;; the placements so far threaded through the walk, a value
   ((fn walk [found x sel]
-     (cond (and (vector? x) (= ::child (first x))) (conj found [sel (second x)])
+     (cond (marker-key x) (conj found [sel (marker-key x)])
            (and (vector? x) (keyword? (first x)))
-           (let [attrs (when (map? (second x)) (second x))
+           (let [[_ attrs kids] (element-parts x)
                  sel (if-let [id (:id attrs)] (str "#" id) sel)]
-             (reduce #(walk %1 %2 sel) found (if attrs (drop 2 x) (rest x))))
+             (reduce #(walk %1 %2 sel) found kids))
            (sequential? x) (reduce #(walk %1 %2 sel) found x)
            :else found))
    [] out nil))
@@ -470,26 +482,48 @@
     (= (.-path a) (.-path b))
     (= a b)))
 
+(defn- defect-of!
+  "The :seon.render/component-defect of render sym (nil: a fn value, which has no name) throwing e, recorded with walk w's defects for
+  whoever records a problem (the walk's :defects): what threw, its message and the thrown error's own data. The one builder of a
+  component's defect, wherever a render throws. See docs/failure-points.md."
+  {:malli/schema [:=> [:cat :map [:maybe :symbol] :any] :map]}
+  [w sym e]
+  (let [defect (contract/error :seon.render/component-defect #'render! (thrown-line (or sym 'a-render) e)
+                               (cond-> {} sym (assoc :seon.error/in sym) (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
+    (vswap! (:defects w) conj defect)
+    defect))
+
+(defn entity-read-keys
+  "The datom keys tree reads rs (seon.ratom/reads-of's #{[path kind]}) made of the pulled entities in tree: a read of attribute a
+  of a map that carries :db/id e is [:ea e a], the key a store read of that slice records, so a commit of e's a reaches its
+  reader by the walk's datom index (:readers) and a commit of a sibling attribute does not. One get-in a read. See
+  docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :any [:maybe [:set :any]]] [:set :any]]}
+  [tree rs]
+  (into #{} (keep (fn [[path _]]
+                    (when (and (seq path) (qualified-keyword? (peek path)))
+                      (let [m (get-in tree (pop path))]
+                        (when-let [e (and (map? m) (:db/id m))]
+                          [:ea e (peek path)])))))
+        rs))
+
 (defn render!
   "Component [f opts & children] drawn in walk w: its marker [::child key], its output kept in w's
-  cache. Skipped when its children are = to last time's (views by source and path) and nothing it
-  read changed: no reaction and no transaction (`flush!`, by what it read) queued it;
-  otherwise run in its reaction (seon.ratom/run-in-reaction), opts filled with the view of ctx
-  (:seon.ctx/ctx) and the db (:seon.db/db) it declares, a db render under d/with-reads, and its
-  output drawn (emit) with its root element's id its key. An output = to last time's is the
-  same (:same), and moves its revision only when it differs. A child it no longer holds is
-  let go at the end of the flush (`flush!`), so one another parent drew stays. A render that throws draws its error's
+  cache. Skipped when its children are the same as last time's (`same-arg?`: views by path), its render the same fn, and
+  nothing it read moved (`walk` queued it: a tree path, a datom or a definition, `queue-what-moved!`); otherwise run, opts
+  filled with the view of ctx (:seon.ctx/ctx) and the db (:seon.db/db) it declares, what it read of the tree and of the store
+  recorded once (seon.ratom/reads-of; a walk :once records nothing), and its output drawn (emit) with its root element's id
+  its key. An output = to last time's is the same (:same), and moves its revision only when it differs. A child it no longer
+  holds is let go at the end of the walk (`walk`), so one another parent drew stays. A render that throws draws its error's
   render in its place (docs/failure-points.md: a component's render); every other component draws."
   {:malli/schema [:=> [:cat :map :any :map [:sequential :any] :map] [:tuple [:= ::child] [:vector :any]]]}
   [w f opts children env]
   (let [k (comp-key f opts children) prev (get @(:cache w) k) ks (inputs-in w f)]
     (vswap! (:children env) conj k)
     (if (and prev (= opts (:opts prev)) (= (count children) (count (:args prev)))
-             (if (:pure w)
-               ;; a walk kept as a value (`walk`) holds no reaction: an argument is the same when its value is, and a render when
-               ;; its fn is (a defn at the REPL is a new one)
-               (and (every? true? (map same-arg? children (:args prev))) (or (not (var? f)) (identical? (var-get f) (:fv prev))))
-               (every? true? (map ratom/view= children (:args prev))))
+             ;; an argument is the same when its value is (a view by its path), and a render when its fn is (a defn at the REPL is a
+             ;; new one)
+             (every? true? (map same-arg? children (:args prev))) (or (not (var? f)) (identical? (var-get f) (:fv prev)))
              (not (contains? @(:queue w) k)))
       (do (led! w f :hit nil nil) [::child k])
       (let [;; an entity rendered by its schema's render: the render its schema names for each other output the walk asks
@@ -499,8 +533,9 @@
             ix @(:index w)
             ;; the entity: the component's argument (a walk is rooted on [render {} view], so its root has one too)
             ev (when (seq others) (first children))
-            ;; as of now: a view holds the value it was made with, and a root's argument is the view the walk was made with
-            e0 (some->> ev (ratom/fresh nil) ratom/untracked)
+            ;; as of now, over this call's tree: a view holds the value it was made with, and a component queued again holds last
+            ;; time's view (an entity that appeared since is read in this tree, not that one)
+            e0 (some->> ev (ratom/fresh (:src w)) ratom/untracked)
             ;; an entity's schema by its identity attributes, never a value's metadata: an agent's @ctx carries :seon.ctx/ctx's, which
             ;; names no model render, so the agent's own went unasked
             s0 (when (and (map? e0) (:db/id e0)) (entity-schema ix e0 nil))
@@ -519,43 +554,33 @@
                                                     x)))
                                         xs))
             ;; a walk kept as a value draws over this call's tree (its source), whatever source last time's views held
-            args (mapv #(ratom/fresh (when (:pure w) (:src w)) %) children)
+            args (mapv #(ratom/fresh (:src w) %) children)
             db? (or (contains? ks :seon.db/db) (seq fs))
             outs (volatile! nil)
             o (cond-> opts
-                (contains? ks :seon.ctx/ctx) (assoc :seon.ctx/ctx (if (:once w) @(:ref (:src w)) (ratom/fresh nil (ratom/ref-view (:ref (:src w)) (:changes (:src w))))))
+                (contains? ks :seon.ctx/ctx) (assoc :seon.ctx/ctx (if (:once w) @(:ref (:src w)) (ratom/ref-view (:ref (:src w)) (:changes (:src w)))))
                 db? (assoc :seon.db/db ((:db w)))
                 true (assoc :seon.render/index @(:index w))
-                (contains? ks :seon.render/drawn) (assoc :seon.render/drawn (if (:pure w) (ratom/atom @(:drawn-fns w)) (:drawn w))))
-            ;; a render drawn for the first time in this walk: watched, so its redefinition draws it again
-            ;; a walk kept as a value: the render drawn, kept as a value (:drawn-fns); one new to it queues the readers of what was drawn (`walk`)
-            _ (when (and (:pure w) (var? f) (not (identical? (get @(:drawn-fns w) f) (var-get f))))
+                (contains? ks :seon.render/drawn) (assoc :seon.render/drawn (ratom/atom @(:drawn-fns w))))
+            ;; the render drawn, kept as a value (:drawn-fns); one new to it queues the readers of what was drawn (`walk`)
+            _ (when (and (var? f) (not (identical? (get @(:drawn-fns w) f) (var-get f))))
                 (vswap! (:drawn-fns w) assoc f (var-get f))
                 (vswap! (:drawn-moved w) (fnil conj #{}) f))
-            _ (when (and (var? f) (not (:pure w)) (not (contains? @(:watched w) f)))
-                (vswap! (:watched w) conj f)
-                (swap! (:drawn w) assoc f (var-get f))
-                (add-watch f (:watched w) (fn [_ _ _ new]
-                                            (vswap! (:queue w) into (keep (fn [[ck c]] (when (= f (:f c)) ck))) @(:cache w))
-                                            (swap! (:drawn w) assoc f new))))
             order (or (:order prev) (vswap! (:mounts w) inc))
             kids (volatile! [])
             ;; a walk whose units another page composes names its elements apart (:id-prefix, seon.render.proc/user-walk)
             id (str (:id-prefix w) (key-id k))
             reads (volatile! nil)
             tree-reads (volatile! nil)
+            ;; its reads of pulled entities in the tree, as datom keys (`entity-read-keys`), matched as its db reads are
+            entity-reads (volatile! nil)
             kept (volatile! nil)
             ;; its render and the drawing of its output in one: a lazy part of the hiccup reads (and
             ;; throws) only when it is drawn, and a db render's reads are all of what it drew
             ;; what a component that throws draws in its place: a call of the error's render on the error as data (what threw, and the
-            ;; thrown error's own data), recorded for health (`take-defects!`)
-            drawn-defect (fn [e] (let [defect (contract/error :seon.render/component-defect #'render!
-                                                     (thrown-line (symbol f) e)
-                                                     (cond-> {:seon.error/in (symbol f)}
-                                                       (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
+            ;; thrown error's own data), recorded for health (the walk's :defects)
+            drawn-defect (fn [e] (let [defect (defect-of! w (symbol f) e)]
                           (vreset! kept nil)
-                          ;; health sees it (`take-defects!`)
-                          (vswap! (:defects w) conj defect)
                           ;; a call placed to answer an output (opts' :seon.render/as: wire's task-msgs in the request) answers that output
                           ;; with the error, as an entity's model render that throws does above: by the render the error's schema names for
                           ;; it, so the model reads that its context lost a part, never a gap
@@ -579,13 +604,10 @@
                         ;; an entity's own render for each other output, where no call answers that output for it
                         ;; each in a run of its own at this edge (docs/failure-points.md, a component's render): a model render that throws
                         ;; is that output's defect, never the page's, which the person still reads; its error is data both see: a problem
-                        ;; (health, take-defects!) and, in its place in the output, what the error schema's own render for that output answers
+                        ;; (health, the walk's :defects) and, in its place in the output, what the error schema's own render for that output answers
                         (doseq [[op of] fs :when (not= op as)]
                           (vswap! outs assoc op
-                                  (let [model-defect (fn [e] (let [defect (contract/error :seon.render/component-defect #'render!
-                                                                      (thrown-line (symbol of) e)
-                                                                      (cond-> {:seon.error/in (symbol of)} (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
-                                           (vswap! (:defects w) conj defect)
+                                  (let [model-defect (fn [e] (let [defect (defect-of! w (symbol of) e)]
                                            ;; the error answers this output by the render its schema names for it (a model render of an error, as
                                            ;; every model render is a schema's), else nothing beside the problem
                                            (if-let [ef (some-> (render-for ix :seon.render/component-defect op) requiring-resolve)]
@@ -601,24 +623,20 @@
                       ;; an Exception, or a stack overflow by name: root's interrupt (a ThreadDeath, seon.intr) passes, as any other Error
                       (catch Exception e (drawn-defect e))
                       (catch StackOverflowError e (drawn-defect e)))
-            draw #(if (and db? (not (:once w))) (let [[out rs] (d/with-reads one)] (vreset! reads rs) out) (one))
             a0 (profile/alloc-bytes)
-            [out rx] (cond
-                       ;; a walk read once and let go (`draw`'s :once) runs again for nothing: no reaction, no read index
-                       (:once w) [(binding [ratom/*ratom-context* nil] (draw)) nil]
-                       ;; no reaction: what it read of the tree kept, which the tree's next diff is matched against (`walk`)
-                       (:pure w) (let [[out rs] (ratom/reads-of (:ref (:src w)) draw)] (vreset! tree-reads rs) [out nil])
-                       (:rx prev) (let [rx (:rx prev)] (ratom/-set! rx :f draw) [(ratom/-run rx false) rx])
-                       :else (ratom/run-in-reaction draw k (fn [k] (vswap! (:queue w) conj k)) {}))
-            ;; run: its closure holds the db and the ctx view of this run, which a kept walk has no use for (a kept db value is a reference: docs/storage.md#a-kept-db-value-is-a-reference); render! sets it anew
-            _ (when rx (ratom/-set! rx :f (constantly nil)))
+            out (if (:once w)
+                  ;; a walk read once and let go (:once) tracks nothing: it is never advanced
+                  (binding [ratom/*ratom-context* nil] (one))
+                  ;; what it read of the tree and of the store, recorded once (the one recorder, seon.ratom/reads-of): the tree's next
+                  ;; diff and the next datoms moved are matched against them (`walk`)
+                  (let [[out rs ks] (ratom/reads-of (:ref (:src w)) one)] (vreset! tree-reads rs) (vreset! reads ks) (vreset! entity-reads (entity-read-keys @(:ref (:src w)) rs)) out))
             bytes (- (profile/alloc-bytes) a0)
             ;; a child the hiccup and the model output both placed is held once
             children (if (seq others) (vec (distinct @kids)) @kids)
             same? (and prev (= out (:out prev)))
-            read-keys (some-> @reads seq d/reads-index)]
+            read-keys @reads]
         (vswap! (:queue w) disj k)
-        ;; who holds each child, moved only when its children did: one that lost its last parent goes at the flush's end
+        ;; who holds each child, moved only when its children did: one that lost its last parent goes at the walk's end
         (when (not= (seq children) (seq (:children prev)))
           (let [was (set (:children prev)) now (set children)]
             (doseq [c now :when (not (was c))] (vswap! (:cache w) update-in [c :parents] (fnil conj #{}) k))
@@ -633,41 +651,34 @@
         (led! w f (if same? :same :miss) nil bytes)
         (some-> (:ran env) (vswap! assoc k (if same? :same :miss)))
         ;; merged: its written html (placed-units) stays while its revision does
-        (vswap! (:cache w) update k merge {:f f :opts opts :args args :rx rx :out (if same? (:out prev) out) :children children
+        (vswap! (:cache w) update k merge {:f f :opts opts :args args :out (if same? (:out prev) out) :children children
                                     :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0))) :kept @kept :outs @outs
-                                    :reads read-keys :fv (when (var? f) (var-get f)) :tree-reads @tree-reads :drawn? (contains? ks :seon.render/drawn)})
-        ;; a walk kept as a value: who read what of the tree, as it reads its db (`walk`)
-        (when (:pure w)
-          (let [was (or (:tree-reads prev) #{}) now (or @tree-reads #{})]
-            (when-not (= was now)
-              (vswap! (:tree-readers w) #(ratom/read-index (ratom/read-index % k (remove now was) disj) k (remove was now) conj)))))
+                                    :reads read-keys :entity-reads @entity-reads :fv (when (var? f) (var-get f)) :tree-reads @tree-reads :drawn? (contains? ks :seon.render/drawn)})
+        ;; who read what of the tree, as it reads its db (`walk`)
+        (let [was (or (:tree-reads prev) #{}) now (or @tree-reads #{})]
+          (when-not (= was now)
+            (vswap! (:tree-readers w) ratom/move-reads k was now)))
         ;; the components that read the db: the ones a transaction's datoms are matched against
-        (vswap! (:db-keys w) (if (seq @reads) conj disj) k)
-        (when (:reads prev) (forget-readers! w k (:reads prev)))
-        (doseq [rk read-keys] (vswap! (:readers w) update rk (fnil conj #{}) k))
+        (vswap! (:db-keys w) (if (seq read-keys) conj disj) k)
+        (when (or (:reads prev) (:entity-reads prev)) (forget-readers! w k (into (or (:reads prev) #{}) (:entity-reads prev))))
+        (doseq [rk (into (or read-keys #{}) @entity-reads)] (vswap! (:readers w) update rk (fnil conj #{}) k))
         [::child k]))))
 
 (defn kept-of
-  "What component k of walk p (a value `walk` answered) kept as of its last run, its output's metadata :seon.render/kept: the data its hiccup was made of, for a reader that decides from it (a turn, the status), so one reaction serves both and an unchanged one
+  "What component k of walk p (a value `walk` answered) kept as of its last run, its output's metadata :seon.render/kept: the data its hiccup was made of, for a reader that decides from it (a turn, the status), so one component serves both and an unchanged one
   costs nothing. Nil when it did not draw or threw. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :map [:vector :any]] :any]}
   [p k] (:kept (get (:cache p) k)))
 
-(defn take-defects!
-  "The components of walk w that threw since the last take, each its :seon.render/component-defect, for whoever records a problem (the agent's fold, root's api). See docs/health.md."
-  {:malli/schema [:=> [:cat :map] [:vector :map]]}
-  [w] (let [ds @(:defects w)] (when (seq ds) (vreset! (:defects w) [])) ds))
-
 (defn unmount!
-  "Component k gone from walk w: its reaction disposed, and each child it alone held with it. See docs/render.md#components."
+  "Component k gone from walk w: its entry and who it read let go, and each child it alone held with it. See docs/render.md#components."
   {:malli/schema [:=> [:cat :map [:vector :any]] :nil]}
   [w k]
   (when-let [c (get @(:cache w) k)]
-    (some-> (:rx c) ratom/dispose!)
     (vswap! (:cache w) dissoc k)
     (vswap! (:queue w) disj k)
     (vswap! (:db-keys w) disj k)
-    (forget-readers! w k (:reads c))
+    (forget-readers! w k (into (or (:reads c) #{}) (:entity-reads c)))
     (when (:tree-reads c) (vswap! (:tree-readers w) ratom/read-index k (:tree-reads c) disj))
     (some->> (:form c) (vswap! (:forms w) dissoc))
     (doseq [ch (:children c) :when (contains? @(:cache w) ch)]
@@ -678,7 +689,7 @@
   "Is x, an element or a component call, for the page alone (its attributes or opts :wire/for \"page\": what the model does not read)? See
   docs/render.md#a-part-prints-as-its-render."
   {:malli/schema [:=> [:cat :any] :boolean]}
-  [x] (and (vector? x) (map? (second x)) (= "page" (:wire/for (second x)))))
+  [x] (and (vector? x) (= "page" (:wire/for (second (element-parts x))))))
 
 (defn emit
   "Hiccup hc drawn in walk w: an element's children drawn; a component call rendered (render!) to
@@ -732,7 +743,7 @@
   {:malli/schema [:=> [:cat :any :any] :any]}
   [out f]
   (let [style (:seon.render/style (meta f))]
-    (if (and (vector? out) (map? (second out)) (:class (second out)))
+    (if (and (vector? out) (:class (second (element-parts out))))
       (cond-> out
         (and style (not (css? style))) (update-in [1 :class] str " " style)
         ;; the render that drew it, which the walk put on the root as data (:render, `with-id`), written as an html attribute
@@ -741,18 +752,22 @@
       out)))
 
 (defn resolved
-  "Component k's output in walk w with every child's marker replaced by that child's output: the
-  page's hiccup below k. With html? true each component as the page writes it (styled)."
+  "Component k's output in walk p (a value `walk` answered) with every child's marker replaced by that child's output: the
+  page's hiccup below k. With html? true each component as the page writes it (styled). See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:function [:=> [:cat :map [:vector :any]] :any] [:=> [:cat :map [:vector :any] :boolean] :any]]}
-  ([w k] (resolved w k false))
-  ([w k html?]
-   (let [c (get @(:cache w) k)]
-     ;; through elements and lists, never into an element's attributes: a :wire/result holds a whole record, and no marker sits there
-     ((fn go [x] (cond (and (vector? x) (= ::child (first x))) (resolved w (second x) html?)
-                       (vector? x) (mapv go x)
-                       (seq? x) (doall (map go x))
-                       :else x))
-      (cond-> (:out c) html? (styled (:f c)))))))
+  ([p k] (resolved p k false))
+  ([p k html?]
+   (let [cache (:cache p)]
+     ;; one local fn down the components: no contracted call a child
+     ((fn res [k]
+        (let [c (get cache k)]
+          ;; through elements and lists, never into an element's attributes: a :wire/result holds a whole record, and no marker sits there
+          ((fn go [x] (cond (marker-key x) (res (marker-key x))
+                            (vector? x) (mapv go x)
+                            (seq? x) (doall (map go x))
+                            :else x))
+           (cond-> (:out c) html? (styled (:f c))))))
+      k))))
 
 (defn- render-reach
   "The vars whose work reaches any of vars names on db, names among them: each form naming one (:form/refs), and what
@@ -793,75 +808,31 @@
       (let [{:keys [f opts args]} (get @(:cache w) k)] (render! w f opts args (assoc env :children (volatile! []))))
       (recur))))
 
-(defn flush!
-  "Walk w drawn as of now, Reagent's batching flush (reagent.core/flush: the queued components rendered
-  at once): its root on the first, then each component a change queued (a reaction's, after
-  seon.ratom/flush!; a render var redefined) or whose db reads
-  datoms touch (:all: every db render), in mount order, parents first, none the root no longer reaches through who holds it (it runs only if a parent draws it
-  again); then those it let go that no parent drew go (a child moved between parents stays, whichever ran first). Answers what it ran, {key :miss} for an output new
-  and {key :same} for one = to the last, the components it skipped left out ({} when nothing a
-  render read changed); none is left queued. See docs/render.md#reactive-renders."
-  {:malli/schema [:function [:=> [:cat :map [:or [:= :all] [:maybe [:sequential :any]]]] [:map-of [:vector :any] [:enum :miss :same]]]
-                  [:=> [:cat :map [:or [:= :all] [:maybe [:sequential :any]]] [:maybe :map]] [:map-of [:vector :any] [:enum :miss :same]]]]}
-  ([w datoms] (flush! w datoms nil))
-  ([w datoms ix]
-  (let [env {:children (volatile! []) :ran (volatile! {})}
-        run-queued! #(run-queued! w env %)]
-    (when ix (vreset! (:index w) ix))
-    (if-let [root @(:out w)]
-      (let [held? (fn held? [k] (or (= root k) (some held? (:parents (get @(:cache w) k)))))]
-          (ratom/flush!)
-          ;; a schema entry moved: what an entity is may have, so the index is built again from the db; no other write does
-          (when (and (nil? ix) (:own-index? w) (or (= :all datoms) (some #(= "schema" (namespace (:a %))) datoms)))
-            (vreset! (:index w) (program/index-of-db ((:db w)))))
-          (if (= :all datoms)
-            (vswap! (:queue w) into @(:db-keys w))
-            (when (seq datoms)
-              ;; a definition moved: what draws by it again. No contracted call on a move that moved none
-              (when (some #(= :var/form (:a %)) datoms) (queue-moved-renders! w datoms))
-              ;; each datom's keys once, then who read them: what moved, whatever the components
-              (let [ks (into #{} (mapcat reads/datom-keys) datoms)]
-                (if (contains? ks :all)
-                  (vswap! (:queue w) into @(:db-keys w))
-                  (doseq [rk ks] (vswap! (:queue w) into (get @(:readers w) rk #{})))))))
-          (run-queued! held?)
-          (doseq [k @(:gone w) :when (empty? (:parents (get @(:cache w) k)))] (unmount! w k))
-          (vreset! (:gone w) #{})
-          @(:ran env))
-      (let [[f opts & children] (:root w) [_ k] (render! w f (or opts {}) (vec children) env)]
-        (vreset! (:out w) k)
-        ;; a first draw leaves nothing queued
-        (run-queued! (constantly true))
-        @(:ran env))))))
-
-(defn- tree-rev
-  "Component k's revision with its children's, below it: what moves when anything it shows changed
-  (a child's own output changes the child's revision, not its parent's)."
-  {:malli/schema [:=> [:cat :map [:vector :any]] :int]}
-  [w k] (let [c (get @(:cache w) k)] (hash (into [(:rev c)] (map #(tree-rev w %)) (:children c)))))
-
 (defn- placed
-  "Walk w's components placed directly in a container of the root's output (an element with an id:
+  "Walk p's (a value `walk` answered) components placed directly in a container of the root's output (an element with an id:
   its list), in order, [[sel k]]: its container's selector and its key; a list component (its var's
   :seon.render/list) is no
   part: its output is its list, the components in it placed there; one that drew nothing (with-id) is placed nowhere. With sels,
   those lists' alone, in sels' order. Read from what each component places (`places`, kept by its revision), from the root down,
   never the hiccup (seon.render-cost-test/a-flush-places-what-moved). nested? true: each placed component's own components too, each in the element of
   its parent that holds it, at any depth (the page's units), each [sel k parent-k] (parent-k nil in a root list); false: the lists' own
-  components (the model's parts, which nest their children themselves). See docs/render.md#a-layout-places-its-lists."
-  {:malli/schema [:function [:=> [:cat :map] [:vector [:tuple :string [:vector :any]]]]
-                  [:=> [:cat :map [:maybe [:sequential :string]]] [:vector [:tuple :string [:vector :any]]]]
-                  [:=> [:cat :map [:maybe [:sequential :string]] :boolean] [:vector [:or [:tuple :string [:vector :any]] [:tuple :string [:vector :any] [:maybe [:vector :any]]]]]]]}
-  ([w] (placed w nil false))
-  ([w sels] (placed w sels false))
-  ([w sels nested?]
+  components (the model's parts, which nest their children themselves). Answers [placed p']: p' holds each placement made (its
+  cache's :places), so the next reader of an unchanged page makes none. See docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:function [:=> [:cat :map] [:tuple [:vector [:tuple :string [:vector :any]]] :map]]
+                  [:=> [:cat :map [:maybe [:sequential :string]]] [:tuple [:vector [:tuple :string [:vector :any]]] :map]]
+                  [:=> [:cat :map [:maybe [:sequential :string]] :boolean] [:tuple [:vector [:or [:tuple :string [:vector :any]] [:tuple :string [:vector :any] [:maybe [:vector :any]]]]] :map]]]}
+  ([p] (placed p nil false))
+  ([p sels] (placed p sels false))
+  ([p sels nested?]
   (let [want (some-> sels set)
-        cache @(:cache w)
+        cache (:cache p)
+        ;; the placements this read makes, local to it: answered in p'
+        made (volatile! cache)
         list (fn [k] (let [f (:f (get cache k))] (when (var? f) (:seon.render/list (meta f)))))
         ;; what k places, kept by its revision: made again only for a component whose output moved since it was last read
         places-of (fn [k] (let [c (get cache k)]
                             (if (and (contains? c :places) (= (:rev c) (:places-rev c))) (:places c)
-                                (let [ps (places (:out c))] (vswap! (:cache w) update k assoc :places ps :places-rev (:rev c)) ps))))
+                                (let [ps (places (:out c))] (vswap! made update k assoc :places ps :places-rev (:rev c)) ps))))
         ;; component k's placements, sel the selector above them where k's own output gives none; parent, the placed component
         ;; whose output they are in (nil in the root's): a list component is no part, its placements are its parent's
         ;; the placements so far threaded through, a value
@@ -877,8 +848,9 @@
                                 :else (cond-> (conj found (if nested? [s ck parent] [s ck])) nested? (go ck nil ck)))
                           (next ps)))
                  found)))
-        found (go [] @(:out w) nil nil)]
-    (if sels (vec (mapcat (group-by first found) sels)) found))))
+        found (go [] (:out p) nil nil)]
+    [(if sels (vec (mapcat (group-by first found) sels)) found)
+     (if (identical? cache @made) p (assoc p :cache @made))])))
 
 (def root-container
   "The container the frame places a walk's root unit in (`placed-units`' first: the root render's own output, the page), the one
@@ -902,9 +874,9 @@
         [ids hc'] ((fn go [ids x]
                      (cond (h/raw? x) [ids x]
                            (and (vector? x) (keyword? (first x)))
-                           (let [attrs (when (and (map? (second x)) (not (h/raw? (second x)))) (second x))
+                           (let [[_ attrs xs] (element-parts x)
                                  id (:id attrs)
-                                 [ids ks] (kids go (cond-> ids id (conj (str id))) (if attrs (drop 2 x) (rest x)))]
+                                 [ids ks] (kids go (cond-> ids id (conj (str id))) xs)]
                              [ids (cond-> (into (if attrs [(first x) attrs] [(first x)]) ks) id (conj (region (str id))))])
                            (seq? x) (let [[ids ks] (kids go ids x)] [ids (or (seq ks) ())])
                            :else [ids x]))
@@ -912,58 +884,61 @@
     [hc' ids]))
 
 (defn- thrown-in
-  "What walk w's writer draws where a plain call [f & args] (one the walk keeps as written, so the model reads the call) threw e: the
-  error as a component's defect, recorded with the walk's own (take-defects!) and drawn by its render, as `render!` draws a component that
-  throws: one boundary for a render that throws. See docs/failure-points.md."
-  {:malli/schema [:=> [:cat :map] :seon.host/fn]}
-  [w]
+  "What the writer of a walk's units draws where a plain call [f & args] (one the walk keeps as written, so the model reads the call)
+  threw e, the walk's entity index ix: the error as a component's defect, recorded in defects (a volatile the reader, `placed-units`,
+  adds to the walk's :defects) and drawn by its render, as `render!` draws a component that throws: one boundary for a render that
+  throws. See docs/failure-points.md."
+  {:malli/schema [:=> [:cat :map :seon.host/volatile] :seon.host/fn]}
+  [ix defects]
   (fn [f e]
     ;; a var names where it threw; a fn value has no name to give (:seon.error/in is a var's qualified symbol)
-    (let [sym (when (var? f) (symbol f))
-          defect (contract/error :seon.render/component-defect #'render! (thrown-line (or sym 'a-render) e)
-                                 (cond-> {} sym (assoc :seon.error/in sym) (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
-      (vswap! (:defects w) conj defect)
+    (let [defect (defect-of! {:defects defects} (when (var? f) (symbol f)) e)]
       [:section {:class "err"} [:p (:seon.error/message defect)]
-       [#'hiccup {:schema :seon.render/component-defect :as :block :seon.render/index @(:index w)} defect]])))
+       [#'hiccup {:schema :seon.render/component-defect :as :block :seon.render/index ix} defect]])))
 
 (defn- page-unit
-  "Walk w's root unit, its component rk's output as the page writes it (`placed-units`' first), written and kept on its cache entry
-  with at, the revisions it was written at: each list drawn-list? says the root places is that list's own output, every element
-  with an id holds its `region`, and no other component is drawn into it. See docs/render.md#a-layout-places-its-lists."
-  {:malli/schema [:=> [:cat :map [:vector :any] :int :seon.host/fn] :map]}
-  [w rk at drawn-list?]
-  (let [cache @(:cache w)
-        rc (get cache rk)
+  "Walk cache's root unit, its component rk's output as the page writes it (`placed-units`' first, which keeps it on rk's entry
+  with the revisions it was written at): each list drawn-list? says the root places is that list's own output, every element
+  with an id holds its `region`, and no other component is drawn into it; thrown, what the writer draws where a plain call threw
+  (`thrown-in`). See docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat :map [:vector :any] :seon.host/fn :seon.host/fn] :map]}
+  [cache rk drawn-list? thrown]
+  (let [rc (get cache rk)
         shell (fn shell [x]
-                (cond (and (vector? x) (= ::child (first x)))
-                      (let [c (get cache (second x))] (when (drawn-list? (second x)) (shell (styled (:out c) (:f c)))))
+                (cond (marker-key x)
+                      (let [c (get cache (marker-key x))] (when (drawn-list? (marker-key x)) (shell (styled (:out c) (:f c)))))
                       (h/raw? x) x
                       (and (vector? x) (keyword? (first x)))
-                      (let [attrs (when (and (map? (second x)) (not (h/raw? (second x)))) (second x))]
-                        (into (if attrs [(first x) attrs] [(first x)]) (map shell) (if attrs (drop 2 x) (rest x))))
+                      (let [[tag attrs kids] (element-parts x)]
+                        (into (if attrs [tag attrs] [tag]) (map shell) kids))
                       (seq? x) (doall (map shell x))
                       :else x))
         [hc ids] (regions (shell (styled (:out rc) (:f rc))))
-        html (h/html hc (thrown-in w))
-        u {:id (:id rc) :container root-container :parent nil :rev (hash html) :html html :regions ids}]
-    (vswap! (:cache w) update rk assoc :page-at at :page u)
-    u))
+        html (h/html hc thrown)]
+    {:id (:id rc) :container root-container :parent nil :rev (hash html) :html html :regions ids}))
 
 (defn placed-units
-  "Walk w's render as the units root's render proc lays out (seon.render.ui/page-chrome): first the root's own, the page
+  "Walk p's (a value `walk` answered) render as the units root's render proc lays out (seon.render.ui/page-chrome): first the root's own, the page
   (`page-unit`, written again only when the root's revision or a list's it places moved; its :rev is its html's, so a member added
   never sends it), then every component placed, at any depth (`placed` nested), {:id :container :parent :rev :html}: its element id,
   its container's selector (a root list's, or its parent's element), its parent's unit id (nil in a root list), its own revision
   (moved only when its own output changed: a child's change is the child's unit alone) and its html with each child's slot
   (seon.render.ui/slot's marker, which the render proc composes with the child's unit). A change costs the component that moved, at
-  any depth. See docs/render.md#a-layout-places-its-lists."
-  {:malli/schema [:=> [:cat :map] [:vector [:map [:id :string] [:container :string] [:parent [:maybe :string]] [:rev :int] [:html :string]
-                                             [:regions {:optional true} [:vector :string]]]]]}
-  [w]
-  (let [pl (placed w nil true)
+  any depth. Answers [units p']: p' keeps what it wrote on each component's entry (its placements, its html by its revision, the
+  page at the revisions it was written at) and adds a plain call's defect to its :defects, so the next read of an unchanged page
+  writes nothing. See docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat :map] [:tuple [:vector [:map [:id :string] [:container :string] [:parent [:maybe :string]] [:rev :int] [:html :string]
+                                                       [:regions {:optional true} [:vector :string]]]]
+                                   :map]]}
+  [p0]
+  (let [[pl p] (placed p0 nil true)
         ;; read after `placed`, which keeps each placed component's and list's placements (:places) current
-        cache @(:cache w)
-        rk @(:out w)
+        cache (:cache p)
+        ;; what this read writes, local to it: answered in p'
+        made (volatile! cache)
+        defects (volatile! [])
+        thrown (thrown-in (:index p) defects)
+        rk (:out p)
         rc (get cache rk)
         drawn-list? (fn [k] (let [c (get cache k) f (:f c)] (and (var? f) (:seon.render/list (meta f)) (some? (:out c)))))
         ;; the root's revision and those of the lists it places, through lists: when they stand, its page stands. Local fns, no
@@ -972,23 +947,40 @@
         at (at-of (:rev rc 0) rk)
         page (if (= at (:page-at rc))
                (:page rc)
-               (page-unit w rk at drawn-list?))]
-    (into [page]
+               (let [u (page-unit cache rk drawn-list? thrown)] (vswap! made update rk assoc :page-at at :page u) u))
+        units (into [page]
           (map (fn [[sel k parent]]
-                 (let [c (get @(:cache w) k)
+                 (let [c (get cache k)
                        r (:rev c)
                        ;; its html written once a revision: kept on its cache entry, by its revision
                        html (if (= r (:unit-rev c)) (:unit-html c)
-                                (let [slotted ((fn go [x] (cond (and (vector? x) (= ::child (first x)))
-                                                                (when-let [id (:id (get @(:cache w) (second x)))] (h/raw (str "<!--s:" id "-->")))
+                                (let [slotted ((fn go [x] (cond (marker-key x)
+                                                                (when-let [id (:id (get cache (marker-key x)))] (h/raw (str "<!--s:" id "-->")))
                                                                 (vector? x) (mapv go x)
                                                                 (seq? x) (doall (map go x))
                                                                 :else x))
                                                (styled (:out c) (:f c)))
-                                      h (h/html slotted (thrown-in w))]
-                                  (vswap! (:cache w) update k assoc :unit-rev r :unit-html h) h))]
-                   {:id (:id c) :container sel :parent (when parent (:id (get @(:cache w) parent))) :rev r :html html})))
-          pl)))
+                                      h (h/html slotted thrown)]
+                                  (vswap! made update k assoc :unit-rev r :unit-html h) h))]
+                   {:id (:id c) :container sel :parent (when parent (:id (get cache parent))) :rev r :html html})))
+          pl)]
+    [units (cond-> p
+             (not (identical? cache @made)) (assoc :cache @made)
+             (seq @defects) (update :defects (fnil into []) @defects))]))
+
+(declare page-lists)
+
+(defn laid-out
+  "Walk p (a value `walk` answered) with its page as the render proc lays it out: :units (`placed-units`) and :lists (`page-lists`),
+  and what writing them kept (each component's placements and html by its revision). A walk answers none of it: it is laid out when a
+  reader asks, never on a move, and a value laid out already is answered as it is, so its holder keeps the answer and a second read
+  costs nothing. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :map] [:map [:units [:vector :map]] [:lists [:vector :string]]]]}
+  [p]
+  (if (contains? p :units)
+    p
+    (let [[us p] (placed-units p)]
+      (assoc p :units us :lists (page-lists p)))))
 
 (defn- strip-attrs
   "An element's attributes as a reader of its hiccup reads them: its presentation (class, style) is the page's and its marks (:wire/*) the reading's; an id names it, so the model need not guess it; its :render is said by the part's head (`part-form`), never twice."
@@ -1012,37 +1004,39 @@
 (declare part-form)
 
 (defn- body-forms
-  "Part output out as the forms its printed hiccup holds, in w: a child component a part of its own (`part-form`),
+  "Part output out as the forms its printed hiccup holds, in walk p: a child component a part of its own (`part-form`),
   an element without its presentation, an element for the page alone left out, a call of a function its var named."
   {:malli/schema [:=> [:cat :map :any] [:maybe [:sequential :any]]]}
-  [w out]
+  [p out]
   (cond
     (nil? out) nil
-    (and (vector? out) (= ::child (first out))) (when-let [f (part-form w (second out))] [(assoc-in f [1 :id] (:id (get @(:cache w) (second out))))])
+    (marker-key out) (let [k (marker-key out)] (when-let [f (part-form p k)] [(assoc-in f [1 :id] (:id (get (:cache p) k)))]))
     (page-only? out) nil
     (and (vector? out) (keyword? (first out)))
-    (let [[tag & more] out m? (and (map? (first more)) (not (h/raw? (first more))))
-          attrs (when m? (strip-attrs (first more)))]
-      [(into (cond-> [tag] attrs (conj attrs)) (mapcat #(body-forms w %)) (if m? (rest more) more))])
+    (let [[tag a kids] (element-parts out)
+          attrs (when a (strip-attrs a))]
+      [(into (cond-> [tag] attrs (conj attrs)) (mapcat #(body-forms p %)) kids)])
     (and (vector? out) (or (var? (first out)) (fn? (first out)))) [(into [(if (var? (first out)) (symbol (first out)) (first out))] (rest out))]
-    (seq? out) (mapcat #(body-forms w %) out)
-    (h/raw? out) [(str out)]
+    (seq? out) (mapcat #(body-forms p %) out)
+    ;; raw html is read as its html text, never the raw value's map
+    (h/raw? out) [(:seon.web.html/raw out)]
     :else [out]))
 
 (defn part-form
-  "Component k of walk w as the form the model reads it, `[seon.render.ui/status {:ctx [:seon.agent/task :proved]} [:h2 ...] ...]`:
+  "Component k of walk p (a value `walk` answered) as the form the model reads it, `[seon.render.ui/status {:ctx [:seon.agent/task :proved]} [:h2 ...] ...]`:
   the render's name, the ctx path it read (its opts' :at: (get-in @ctx path) answers the data it drew), then the hiccup
   it returned, each child component a part of its own and no presentation (class, style) in it; its root's id is the name it goes by, so it is said once. What is for the
   page alone is no form. See docs/render.md#a-part-prints-as-its-render."
   {:malli/schema [:=> [:cat :map [:vector :any]] :any]}
-  [w k]
-  (let [c (get @(:cache w) k)
-        out (cond-> (:out c) (and (vector? (:out c)) (map? (second (:out c)))) (update 1 dissoc :id))
+  [p k]
+  (let [c (get (:cache p) k)
+        out (cond-> (:out c) (and (vector? (:out c)) (second (element-parts (:out c)))) (update 1 dissoc :id))
+        [_ wrapper-attrs wrapper-kids] (when (vector? out) (element-parts out))
         ;; a part's own root element, a plain section or div, is the part itself: its children stand under the head
-        wrapper? (and (vector? out) (#{:section :div} (first out)) (nil? (strip-attrs (if (map? (second out)) (second out) {}))))
+        wrapper? (and (vector? out) (#{:section :div} (first out)) (nil? (strip-attrs (or wrapper-attrs {}))))
         body (if wrapper?
-               (mapcat #(body-forms w %) (if (map? (second out)) (drop 2 out) (rest out)))
-               (body-forms w out))]
+               (mapcat #(body-forms p %) wrapper-kids)
+               (body-forms p out))]
     (when (and (seq body) (not= "page" (:wire/for (:opts c))))
       (into [(symbol (:f c)) (if-let [at (:at (:opts c))] {:ctx at} {})] body))))
 
@@ -1076,18 +1070,20 @@
   [f] (print/text (vary-meta (printable f) assoc :seon.print/full true)))
 
 (defn placed-hiccup
-  "The parts of walk w placed in the root's lists with element ids sels ([\"#p-task\"]), in order, as {id form}: what
-  the model reads of each (`part-form`). See docs/render.md#a-part-prints-as-its-render."
-  {:malli/schema [:=> [:cat :map [:sequential :string]] :map]}
-  [w sels]
-  (apply array-map (mapcat (fn [[_ k]] (when-let [f (part-form w k)] [(:id (get @(:cache w) k)) f])) (placed w sels))))
+  "The parts of walk p (a value `walk` answered) placed in the root's lists with element ids sels ([\"#p-task\"]), in order, as {id
+  form}: what the model reads of each (`part-form`). Answers [parts p'], p' keeping the placements it made (`placed`). See
+  docs/render.md#a-part-prints-as-its-render."
+  {:malli/schema [:=> [:cat :map [:sequential :string]] [:tuple :map :map]]}
+  [p sels]
+  (let [[pl p] (placed p sels)]
+    [(apply array-map (mapcat (fn [[_ k]] (when-let [f (part-form p k)] [(:id (get (:cache p) k)) f])) pl)) p]))
 
 (defn keyed
   "Hiccup form x as a diff reads it: an element's children in their order, each under a name and read the same way, and under :own the element without them; an element holding text directly is text, one value, and so is an element holding a single child with no name of its own, and anything else. A child's name is what identifies it: its :key (Reagent's), else its id (a component's name-based id), else, among those with neither, its tag when no sibling shares it and its first words when one does. Names that are not distinct stay in :own. The form it read is its metadata, ::form. Local fns: no contracted call a node. See docs/render.md#a-change-is-edits-by-name."
   {:malli/schema [:=> [:cat :any] :any]}
   [x0]
   (letfn [(el? [x] (and (vector? x) (some? (first x))))
-          (given [x] (when (and (el? x) (map? (second x))) (let [a (second x)] (or (:key a) (:id a)))))
+          (given [x] (when-let [a (and (el? x) (second (element-parts x)))] (or (:key a) (:id a))))
           (words [x]
             (let [t (first (filter string? (tree-seq coll? seq x)))]
               (when t (str/join " " (keep-indexed (fn [i w] (when (< i 6) w)) (str/split (str/trim t) #"\s+"))))))
@@ -1101,7 +1097,7 @@
           (go [x]
             (if-not (el? x)
               x
-              (let [n (if (map? (second x)) 2 1)
+              (let [n (if (second (element-parts x)) 2 1)
                     kids (subvec x n)]
                 (if (or (empty? kids) (some #(or (string? %) (number? %)) kids) (and (keyword? (first x)) (nil? (next kids)) (nil? (given (first kids)))))
                   x
@@ -1165,42 +1161,14 @@
         (keep (fn [[id f]] (when-not (contains? after id) [id f nil])))
         before))
 
-(defn draw
-  "Tree t (a ctx value: seon.ctx/build's :tree) drawn once by the layout var root-var over db, its
-  diff changes: a walker over a reactive atom holding t, flushed once. Its caller reads it
-  (placed-units, placed-hiccup, `wire`) and disposes it (dispose-walk!): root drawing an agent's branch, the
-  model's request at a commit. opts :model-only true, for a reader that is the model: nothing for the page alone is drawn (`emit`), so
-  that read costs what the model reads; :once true, for a caller that reads it and lets it go: no component watches what it read (docs/render.md#a-layout-places-its-lists);
-  :index, the entity index (seon.db/index-of) the walk holds instead of building one from db (a one-shot render of an agent passes its held one)."
-  {:malli/schema [:function [:=> [:cat :map :seon.host/fn :seon.host/db :any] :map]
-                  [:=> [:cat :map :seon.host/fn :seon.host/db :any [:map [:model-only {:optional true} :boolean] [:once {:optional true} :boolean] [:index {:optional true} :map] [:outputs {:optional true} [:set :keyword]]]] :map]]}
-  ([t changes db root-var] (draw t changes db root-var {}))
-  ([t changes db root-var opts]
-   (let [r (ratom/atom t)
-         ;; the walk is rooted on the entity's render with the entity, a view of the tree, as its argument
-         w (merge (if-let [ix (:index opts)]
-                       (walker {:ref r :changes changes} (constantly db) [root-var {} (ratom/ref-view r changes)] ix)
-                       (walker {:ref r :changes changes} (constantly db) [root-var {} (ratom/ref-view r changes)])) (select-keys opts [:model-only :once :outputs]))]
-     (flush! w nil)
-     w)))
-
-(defn draw-all
-  "Walk w as one that draws what is for the page too, each component that left a piece out queued, drawn at its next flush!: the walk
-  whose reader was the model alone has a person reading it. See docs/render.md#a-layout-places-its-lists."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [w]
-  (vswap! (:queue w) into @(:skipped w))
-  (vreset! (:skipped w) #{})
-  (dissoc w :model-only))
-
 (defn page-lists
-  "The lists of walk w read as parts, their element ids (\"#p-task\"): each list component the root drew that holds no messages (a list var's
+  "The lists of walk p (a value `walk` answered) read as parts, their element ids (\"#p-task\"): each list component the root drew that holds no messages (a list var's
   :seon.render/messages) and is not for the page alone. What is in them is what the agent's pull holds, so nothing names them here. See
   docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat :map] [:vector :string]]}
-  [w]
-  (let [cache @(:cache w)]
-    (vec (for [k (:children (get cache @(:out w)))
+  [p]
+  (let [cache (:cache p)]
+    (vec (for [k (:children (get cache (:out p)))
                :let [{:keys [f opts]} (get cache k) m (when (var? f) (meta f))]
                :when (and (:seon.render/list m) (not (:seon.render/messages m)) (not= "page" (:wire/for opts)))]
            (str "#" (:seon.render/list m))))))
@@ -1217,13 +1185,7 @@
       (str "{" (str/join " " (map (fn [[k v]] (str k " " (pr-str v))) with)) " :response " text "}")
       text)))
 
-(defn ledger
-  "Walk w's ledger: by render var, its :miss (ran, output new), :same (ran, output =) and :hit
-  (skipped) counts and the bytes its runs allocated."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [w] @(:ledger w))
-
-(declare openai-compat dispose-walk!)
+(declare walk)
 
 (defn render-pull
   "Pull (a ctx tree, as seon.ctx/build answers it) rendered on db by root render f, in the entity index ix, in one pass and let
@@ -1237,48 +1199,34 @@
   ;; component reading :seon.ctx/ctx reads nothing); {:seon.render/as :seon.render/openai-compat} makes the root a model output's call, its answer
   ;; (messages and what it places) the walk's model output, as a call a model output places is
   ([pull db f ix outputs opts]
-  (let [r (ratom/atom pull)
-        ;; the pull's own diff (opts' :seon.render/changes, seon.ctx/changes for a ctx tree): a view reads a pull's collections by it
-        ch (or (:seon.render/changes opts) (fn [_ _] nil))
-        w (assoc (walker {:ref r :changes ch} (constantly db) [f (dissoc opts :seon.render/changes) (ratom/ref-view r ch)] ix) :outputs outputs)]
-    (try (flush! w nil) {:hiccup (resolved w @(:out w) false) :messages (openai-compat w)}
-         (finally (dispose-walk! w))))))
-
-(defn answer-of
-  "Walk w's answer for output o (a schema property naming a render, asked in the walk's :outputs, other than hiccup): its root's
-  (kept on its cache entry, :outs, made in the same run as its hiccup), each placed component's marker replaced by that component's
-  own, as `resolved` places hiccup: the order is each render's. See docs/render.md#one-rendering-system-drawn-from-the-data."
-  {:malli/schema [:=> [:cat :map :qualified-keyword] [:vector :any]]}
-  [w o]
-  (let [cache @(:cache w)]
-    (vec ((fn go [k] (mapcat #(if (and (vector? %) (= ::child (first %))) (go (second %)) [%]) (get-in cache [k :outs o]))) @(:out w)))))
+   ;; one walk drawn :once (nothing tracked, never advanced) and let go: its answers are a value, so nothing is disposed
+   (let [p (walk nil {:db db :tree pull :root f :root-opts (dissoc opts :seon.render/changes) :index ix :outputs outputs
+                      ;; the pull's own diff (opts' :seon.render/changes, seon.ctx/changes for a ctx tree): a view reads a pull's collections by it
+                      :changes (or (:seon.render/changes opts) (fn [_ _] nil)) :resolve true :once true})]
+     {:hiccup (:hiccup p) :messages (mapv first (get-in p [:answers :seon.render/openai-compat]))})))
 
 (defn answer-sources
-  "Walk w's answer for output o as `answer-of` reads it, each value with the component whose own answer held it: [[value
-  {:f :args :key}] ...] in the same order, :f the render or call that answered it, :args what it was called with (an entity
+  "Walk p's (a value `walk` answered) answer for output o (a schema property naming a render, asked in the walk's :outputs, other than hiccup): its root's (kept
+  on its cache entry, :outs, made in the same run as its hiccup), each placed component's marker replaced by that component's own, as
+  `resolved` places hiccup, the order each render's; each value with the component whose own answer held it: [[value
+  {:f :args :key}] ...], :f the render or call that answered it, :args what it was called with (an entity
   rendered by its schema's render, its entity) and :key the component's key, the one :ran and the cache use, so a reader joins
   a message to whether its component ran (the request's kept prefix). See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :map :qualified-keyword] [:vector [:tuple :any :map]]]}
-  [w o]
-  (let [cache @(:cache w)]
+  [p o]
+  (let [cache (:cache p)]
     ;; one pass into one vector, each component's source made once
     (persistent! ((fn go [acc k] (let [e (get cache k) src (assoc (select-keys e [:f :args]) :key k)]
-                                   (reduce (fn [acc x] (if (and (vector? x) (= ::child (first x))) (go acc (second x)) (conj! acc [x src])))
+                                   (reduce (fn [acc x] (if (marker-key x) (go acc (marker-key x)) (conj! acc [x src])))
                                            acc (get-in e [:outs o]))))
-                  (transient []) @(:out w)))))
-
-(defn openai-compat
-  "The model's messages of walk w: its answer for :seon.render/openai-compat (`answer-of`). See
-  docs/render.md#one-rendering-system-drawn-from-the-data."
-  {:malli/schema [:=> [:cat :map] [:vector :seon.model/message]]}
-  [w] (answer-of w :seon.render/openai-compat))
+                  (transient []) (:out p)))))
 
 (defn tree
   "What draws what in walk p (a value `walk` answered), from its root, as data that chains and prints nothing: each component its cache holds as
   {:render the render's name, :args what it was called with, :id its element id, :tokens the one sizer's over the characters of its own output
   (its children stand there as markers: their output is theirs), :reads? true when it read the db, :children
   [those it drew, in order]}. Whatever has been drawn so far: a walk of the lists a reader asked for draws no others. Nil
-  for a walk not yet flushed. An agent's own is `my.render/tree`; root's draws of a branch (`draw`) answer alike. See
+  for a walk not yet drawn. An agent's own is `my.render/tree`; root's draws of a branch (seon.render.proc's kept walks) answer alike. See
   docs/render.md#what-draws-what."
   {:malli/schema [:=> [:cat :map] [:maybe :seon.render/tree]]}
   [p]
@@ -1293,16 +1241,15 @@
 
 (def ^:private kept-parts
   "The parts of a walker a walk kept as a value (`walk`) carries from one call to the next: each component's entry, who read
-  what, the components that read the db, the root's key, the mount counter and each render var's inputs. The rest are made anew.
+  what, the components that read the db, the root's key, the mount counter, each render var's inputs and the components a walk only the model read left out (:skipped). The rest are made anew.
   See docs/render.md#a-page-is-a-kept-walk."
-  [:cache :readers :db-keys :out :mounts :inputs :tree-readers :forms :drawn-fns])
+  [:cache :readers :db-keys :out :mounts :inputs :tree-readers :forms :drawn-fns :skipped])
 
 (defn- queue-what-moved!
-  "Walk w holding prev's parts (`walk`), each component queued that what moved since reaches: who read a tree path under one the
+  "Walk w holding prev's parts (`walker`), each component queued that what moved since reaches: who read a tree path under one the
   tree's diff names, the renders a moved definition reaches, and who read a datom that moved. See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :map :map :any :seon.host/fn [:sequential :any]] :nil]}
   [w prev tree changes moved]
-  (doseq [p kept-parts] (vreset! (get w p) (get prev p)))
   (when-not (identical? tree (:tree prev)) (vswap! (:queue w) into (ratom/reached @(:tree-readers w) (changes (:tree prev) tree))))
   (when (some #(= :var/form (:a %)) moved) (queue-moved-renders! w moved))
   (let [ks (into #{} (mapcat reads/datom-keys) moved)]
@@ -1312,49 +1259,62 @@
   nil)
 
 (defn- walk-answer
-  "What `walk` answers of walk w after its draw: the next prev (its kept parts), :answers for each output but the hiccup (last time's
-  when nothing ran), and, asked, :hiccup (`resolved`) and :units (`placed-units`), read while w's cells are live. See
-  docs/render.md#a-page-is-a-kept-walk."
+  "What `walk` answers of walk w after its draw, a value: the next prev (its kept parts), :answers for each output but the hiccup
+  (last time's when nothing ran), :defects, and, asked, :hiccup (`resolved`), the page laid out (`laid-out`: :units, :lists) and
+  :placed (`placed-hiccup`), each read from the value. See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat [:maybe :map] :map :map :boolean :map] :map]}
   [prev w env warm? {:keys [tree index root outputs resolve units place]}]
-  (let [ran @(:ran env)]
-    (into (cond-> {:tree tree :index index :root root :ran ran :defects @(:defects w) :ledger @(:ledger w)
-           ;; nothing ran: every answer is last time's
-           :answers (if (and warm? (empty? ran))
-                      (:answers prev)
-                      (into {} (for [o outputs :when (not= o :seon.render/hiccup)] [o (answer-sources w o)])))}
-           ;; the page as hiccup, each placed component's output in its place (`resolved`), when the hiccup is asked; last time's when nothing ran
-           resolve (assoc :hiccup (if (and warm? (empty? ran) (contains? prev :hiccup)) (:hiccup prev) (resolved w @(:out w) false)))
-           ;; the page as the render proc lays it out (`placed-units`), read while its cells are live, so each component's placements and
-           ;; html stay kept on its entry for the next call
-           units (assoc :units (placed-units w))
-           ;; the parts placed in the root's lists with these element ids, as the model reads each (`placed-hiccup`)
-           place (assoc :placed (placed-hiccup w place)))
-          (map (fn [p] [p @(get w p)]))
-          kept-parts)))
+  (let [ran @(:ran env)
+        p (into {:tree tree :index index :root root :ran ran :ledger @(:ledger w) :defects @(:defects w)}
+                (map (fn [k] [k @(get w k)]))
+                kept-parts)
+        ;; nothing ran: every answer is last time's
+        p (assoc p :answers (if (and warm? (empty? ran))
+                              (:answers prev)
+                              (into {} (for [o outputs :when (not= o :seon.render/hiccup)] [o (answer-sources p o)]))))]
+    (cond-> p
+      ;; the page as hiccup, each placed component's output in its place (`resolved`), when the hiccup is asked; last time's when nothing ran
+      resolve (assoc :hiccup (if (and warm? (empty? ran) (contains? prev :hiccup)) (:hiccup prev) (resolved p (:out p) false)))
+      ;; the page as the render proc lays it out, for a reader that asks it with the walk
+      units laid-out
+      ;; the parts placed in the root's lists with these element ids, as the model reads each (`placed-hiccup`)
+      place ((fn [p] (let [[m p] (placed-hiccup p place)] (assoc p :placed m)))))))
 
 (defn walk
   "Tree (seon.ctx/build's :tree) drawn by root render var root on db, kept as a value: prev is what the last call answered (nil, or
   opts :moved nil: drawn cold), :moved the datoms since prev's db. A component is reused when its arguments are the same (a view by
   its path), its render the same fn, and nothing it read moved (`queue-what-moved!`). No reaction, watch or lock: its owner holds
-  the value. opts :index, :outputs, :changes (the tree's diff, seon.ctx/changes), :model-only, :resolve (the page as hiccup too, :hiccup, `resolved`), :units, :place (`placed-hiccup`, as :placed) and :once (a reader that reads it and lets it go: nothing tracked, never advanced). Answers the next prev: :answers
+  the value. opts :index, :outputs, :changes (the tree's diff, seon.ctx/changes), :model-only, :resolve (the page as hiccup too, :hiccup, `resolved`), :units (the page laid out with the walk, `laid-out`: a reader that asks later lays out the value), :place (`placed-hiccup`, as :placed), :id-prefix (each element id's, `render!`), :root-opts (the root call's opts, [root root-opts view]: {:seon.render/as o} makes the root a call output o places, `render-pull`'s) and :once (a reader that reads it and lets it go: nothing tracked, never advanced). Answers the next prev: :answers
   {output [[value source] ...]} for each output but the hiccup, :ran, :defects, :ledger and the parts it keeps. See
   docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat [:maybe :map] [:map [:db :seon.host/db] [:tree :any] [:root :any] [:index :map] [:outputs [:set :keyword]]
                                             [:changes :seon.host/fn] [:moved {:optional true} [:maybe [:sequential :any]]]
                                             [:model-only {:optional true} :boolean] [:resolve {:optional true} :boolean] [:units {:optional true} :boolean]
-                                            [:place {:optional true} [:sequential :string]] [:once {:optional true} :boolean]]]
+                                            [:place {:optional true} [:sequential :string]] [:once {:optional true} :boolean]
+                                            [:id-prefix {:optional true} :string] [:root-opts {:optional true} :map]]]
                   [:map [:answers :map] [:ran :map] [:defects [:vector :map]] [:tree :any] [:index :map] [:root :any]]]}
-  [prev {:keys [db tree root index outputs changes moved model-only resolve units place once]}]
+  [prev {:keys [db tree root index outputs changes moved model-only resolve units place once id-prefix root-opts]}]
   (let [r (ratom/atom tree)
         ;; a value drawn :once tracked nothing, so it is never advanced
-        warm? (and (some? prev) (not (:once prev)) (some? moved) (identical? index (:index prev)) (= root (:root prev)))
-        w (assoc (walker {:ref r :changes changes} (constantly db) [root {} (ratom/ref-view r changes)] index)
-                 :pure true :outputs outputs :model-only (boolean model-only) :drawn-moved (volatile! nil) :once (boolean once))
+        warm? (and (some? prev) (not (:once prev)) (some? moved) (identical? index (:index prev)) (= root (:root prev)) (= root-opts (:root-opts prev)))
+        w (assoc (walker {:ref r :changes changes} (constantly db) [root (or root-opts {})] index (when warm? prev))
+                 :outputs outputs :model-only (boolean model-only) :drawn-moved (volatile! nil) :once (boolean once)
+                 ;; a walk whose units another page composes names its elements apart (seon.render.proc/user-walk)
+                 :id-prefix id-prefix)
         env {:children (volatile! []) :ran (volatile! {})}]
     (when warm? (queue-what-moved! w prev tree changes moved))
-    ;; the root drawn (a hit when nothing it holds moved), then each queued component it holds that its draw did not reach
-    (let [[f opts & children] (:root w) [_ k] (render! w f (or opts {}) (vec children) env)
+    ;; a walk only the model read, read now by a person: each component that left a page's piece out draws it
+    (when (and warm? (not model-only) (seq @(:skipped w)))
+      (vswap! (:queue w) into @(:skipped w))
+      (vreset! (:skipped w) #{}))
+    ;; the root drawn cold, then each queued component it holds
+    (let [[f opts] (:root w)
+          ;; warm, the root call is the last one's (its root and opts the same, its view at the tree's root): it is drawn when what moved
+          ;; queued it or its render is a new fn, as `render!` decides, and nothing is asked of it otherwise
+          c0 (when warm? (get @(:cache w) (:out prev)))
+          _ (when (and c0 (var? f) (not (identical? (var-get f) (:fv c0)))) (vswap! (:queue w) conj (:out prev)))
+          ;; drawn cold on the view of the tree's root
+          k (if c0 (:out prev) (second (render! w f opts [(ratom/ref-view r changes)] env)))
           held? (fn held? [c] (or (= k c) (some held? (:parents (get @(:cache w) c)))))]
       (vreset! (:out w) k)
       (run-queued! w env held?)
@@ -1365,18 +1325,8 @@
       (doseq [c @(:gone w) :when (empty? (:parents (get @(:cache w) c)))] (unmount! w c))
       (vreset! (:gone w) #{}))
     (cond-> (walk-answer prev w env warm? {:tree tree :index index :root root :outputs outputs :resolve resolve :units units :place place})
+      root-opts (assoc :root-opts root-opts)
       once (assoc :once true))))
-
-(defn dispose-walk!
-  "Every component of walk w disposed, and the render vars it watched and the inputs it kept (inputs-in) let go:
-  a cold walk's end."
-  {:malli/schema [:=> [:cat :map] :nil]}
-  [w]
-  (when-let [k @(:out w)] (unmount! w k))
-  (doseq [f @(:watched w)] (remove-watch f (:watched w)))
-  (vreset! (:watched w) #{})
-  (vreset! (:inputs w) {})
-  nil)
 
 ;; ---- entity schemas and patterns (docs/ctx.md#the-pattern) ----
 

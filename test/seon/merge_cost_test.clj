@@ -101,8 +101,11 @@
        ;; (43 calls since touched-keys asks each of the 4 differing datoms' attributes whether a key
        ;; reads it, one call apiece: measured with the filter inline, in a def and as a contracted
        ;; function, 43, 43 and 47); reading (d/schema db) per db per read it was 8.11 / 11.84 / 25.57 MB and 2,726 / 3,926 /
-       ;; 8,126 calls; 46 since touched-keys calls touched-by (which takes datoms a caller already holds) once per side
-       :fixed {:bytes 650000 :calls 48}
+       ;; 8,126 calls; 46 since touched-keys calls touched-by (which takes datoms a caller already holds) once per side;
+       ;; 71 since a fact is a side's change only if it wrote it, about 23 more, split approximately: seon.merge/derived? once per
+       ;; attribute asked whether it is data (~14: the differing datoms' attributes on two dbs, the keys' on three), and per changed key
+       ;; and side one seon.merge/owned?, one tx-branch of the other side's last writer and one per datom it added (~9)
+       :fixed {:bytes 650000 :calls 71}
        :sizes [10 30 100]}))
 
 (defn embedded-of
@@ -218,3 +221,41 @@
      ;; uncontracted (as a contracted predicate asked of each attribute it was 1,771)
      :fixed {:bytes 4000000 :calls 27}
      :sizes [10 30 100]}))
+
+(defn moved-main-of
+  "merge-main's arguments: base (a store branch holding 2 forms, app.pc/f0..f1), head, a branch of it that redefined f0 once, and main,
+  base after n new forms of its own (app.pc/f2..fn+1): a branch that wrote one form against a main that moved n."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db]]}
+  [n]
+  (let [conn @store
+        cfg (pdb/store-cfg :lmdb (get-in @conn [:config :store :path]))
+        b (keyword (str "m" n "-" (random-uuid)))
+        _ (d/branch! conn :db b)
+        bc (pdb/connect (assoc cfg :branch b))
+        _ (d/transact bc {:tx-data (vec (mapcat #(program/account-tx @bc (#'pc/acct % "x") %) (range 2))) :tx-meta {:seon.tx/branch :main}})
+        base (pdb/head conn b)
+        hb (keyword (str (name b) "-head"))
+        _ (d/branch! conn b hb)
+        hc (pdb/connect (assoc cfg :branch hb))
+        _ (d/transact hc {:tx-data (program/record-tx @hc (#'pc/acct 0 "(inc x)")) :tx-meta {:seon.tx/branch hb}})
+        _ (d/transact bc {:tx-data (vec (mapcat #(program/account-tx @bc (#'pc/acct % "x") %) (range 2 (+ 2 n)))) :tx-meta {:seon.tx/branch :main}})
+        r [base (pdb/head conn hb) (pdb/head conn b)]]
+    (d/release hc) (d/release bc)
+    r))
+
+;; Estimate, from its parts: one diff of base and head (the leaves one redefinition rewrote); the content of the k = 3 keys its datoms
+;; bear read on three dbs, ~6.5 contracted calls a read (key-content, eid, definition-key, form-row, form-of, live?, def-content, same?),
+;; 59; derived? once per distinct attribute of the diff, 7, with its properties and index reads, 21; a tx-branch per datom the branch
+;; added and main's last writer's, 7; entity-keys 6, data-attr? 5, program-of 3, and own-datoms, touched-by, content-attr, three-way,
+;; attribute-declarations, changes and merge-main itself, 7: 114 calls, ~2 MB. (A first estimate of 15 missed the content reads, ~8
+;; calls each, and derived? was asked per datom, 13 times; now per attribute.) Nothing of main's n forms is read: constant in n
+(deftest ^{:seon.test/estimate {:ticks 60000000}} merge-main-costs-the-branchs-change-not-mains-moves
+  (cost/proof
+      {:of 'seon.merge/merge-main :input 'seon.merge-cost-test/moved-main-of
+       :n "forms main defined since the branch's base"
+       :work (str "the datoms the branch wrote since base (one diff of base and head), the keys they bear, and main's content at "
+                  "those keys only: main's own moves are never read, so the same work however far main moved")
+       :growth :constant
+       :fixed {:bytes 2000000 :calls 114}
+       :sizes [10 30 100]}))
+

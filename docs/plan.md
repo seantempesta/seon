@@ -233,7 +233,7 @@ infrastructure this replaces is cut, each removal brought to the owner as an aud
    test's declared work stays within its estimate (median 10 ms), its fixtures warm before timing, and only a test of
    booting boots. Within 2x of this is met (owner: "pretty close ... is good enough"); past it, the cause is found and fixed. Today: 85 ms a test in a warm prove, and 223 tests booting a system for 1,541 s.
 6. **Merging is Seon's:** `seon_done` runs the gate and Seon's three-way merge on main's program; conflicts go back to the
-   branch; one three-way merge, not two (`seon.task/carry-tx` goes); a merge costs what moved (today one merge of main
+   branch; one three-way merge, not two (``seon.task/carry-tx`` goes); a merge costs what moved (today one merge of main
    costs 62 s, 9.9B ticks and 47.5 GB, measured) (data, runtime).
 7. **Git follows the store:** a merge is written back, and git's main moves after root reads its diff (`my.root/sync!`);
    main is pushed to GitHub (runtime, root).

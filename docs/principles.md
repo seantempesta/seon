@@ -10,7 +10,7 @@ Every agent reads this page whole before any work: Claude sessions directly, Seo
 
 *Rules out.* Counting landings, tests or lines as progress. Reading a task that never merged as a small number: it is a failure. Work that removes no turn while no agent can merge: then everything goes to the one path through. Carrying on over a failure of the system itself: it stops the work loudly and is fixed at its cause first.
 
-*Enforced by:* not yet enforced; owed `my.root/turns`, the query context runs by hand.
+*Enforced by:* root's page shows turns to merged (```seon.render.ui/turns-tile```, each agent's turn kept by the render proc from its commits, never written to main), and the same ledger is data at root's REPL (```my.root/turns```). The tile draws ```my.root/turns-of```'s rows once a render reads branches through the one reaction.
 
 ## 2. There is only the Seon agent
 
@@ -58,7 +58,7 @@ Every agent reads this page whole before any work: Claude sessions directly, Seo
 
 *Rules out.* A guard, retry or special case at a caller. An atom, a lock, a poll, a wait on a clock. An effect outside the effects system; a catch outside a named edge ([failure points](failure-points.md)). A caller's own guess at the binary, registry or pin it holds. Switching off, sampling or waiving a mechanism because it has a bug.
 
-*Enforced by:* `bin/laws` (catch, clocks, measures, resolution, transactions); contracts armed at definition ([checks](checks.md#contracts-armed-at-definition)); the test service's `:seon.agent/program-differs` refusal, which compares forms only. Not yet enforced: effects routed at Jolt's host primitives; a law that no program loads outside the one start; atoms; config, environment and libraries checked at a child's start; one merge on main's program (today a branch's merge runs on the branch's own program, `seon.agent/merge-main!`); one writer per branch (agents and root run separate Datahike writers on one LMDB, unmeasured).
+*Enforced by:* `bin/laws` (catch, clocks, measures, resolution, transactions, defs); contracts armed at definition ([checks](checks.md#contracts-armed-at-definition)); the test service's `:seon.agent/program-differs` refusal, which compares forms only. Not yet enforced: effects routed at Jolt's host primitives; a law that no program loads outside the one start; atoms; config, environment and libraries checked at a child's start; one merge on main's program (today a branch's merge runs on the branch's own program, `seon.agent/merge-main!`); one writer per branch (agents and root run separate Datahike writers on one LMDB, unmeasured).
 
 ## 6. Nothing changed, nothing runs; a change costs what it touched
 

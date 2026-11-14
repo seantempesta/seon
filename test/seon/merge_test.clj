@@ -9,7 +9,7 @@
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.merge :as pm]
-            [seon.program :as program] [seon.doc] [seon.config] [seon.source] [seon.profile :as profile]
+            [seon.program :as program] [seon.doc] [seon.config] [seon.source] [seon.profile :as profile] [seon.task]
             [seon.edn :as sedn] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg]
             [my.schema :as schema]
             [seon.source :as source] [seon.writer]
@@ -252,15 +252,15 @@
     (is (empty? (:theirs (tw (base) observed))))
     (is (seq (:theirs (tw (base) (with (base) (var-tx "f" "(dec x)"))))))))
 
-(deftest platform-records-never-put-a-branch-behind
-  ;; root's records on main (boot, quiescence, recorded errors) are platform records: with
-  ;; all data merged (the writer's :all) they change no key a branch carries; the task
-  ;; content an agent may improve (my.task/update!) is carried
+;; Estimate: the world 0.5M (cached) + 2 small dbs + 3 programs of :all, each a read of every data attribute's datoms (a few thousand) ~2M = 10000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} platform-records-merge-as-facts
+  ;; owner, 2026-11-14: "If there are no conflicts I don't see any reason to not merge everything": root's records on main
+  ;; (boot, quiescence, recorded errors) are facts a branch takes by their [:datum e a] keys, as any data; a task's content is its key
   (let [rooted (with (base) [{:seon.system/id :root :seon.system/quiescent {:t 9 :root-causes []}}])
         tasked (with (base) [{:seon.task/id "t/x" :seon.task/plan "better"}])
         p #(pm/program % :all)]
-    (is (empty? (:theirs (pm/three-way (p (base)) (p (base)) (p rooted)))))
-    (is (some (fn [[k]] (= [:datum :seon.task/plan] [(first k) (nth k 2)])) (:ours (pm/three-way (p (base)) (p tasked) (p (base))))))))
+    (is (some #(= :seon.system/quiescent (nth % 2 nil)) (keys (:theirs (pm/three-way (p (base)) (p (base)) (p rooted))))) "main's record is a change the branch takes")
+    (is (some #{[:task "t/x"]} (keys (:ours (pm/three-way (p (base)) (p tasked) (p (base)))))) "a task's content is its [:task id] key")))
 
 (deftest declared-data-merges-by-key
   ;; the data part, used by core's generic merge (every non-program, non-observation attribute)
@@ -564,3 +564,71 @@
         (is (= c0 (pm/content-commit held @conn)) "and no content, so the commit held stands")
         (d/transact conn ((var-tx "g" "x") @conn))
         (is (= (d/commit-id @conn) (pm/content-commit held @conn)) "a definition moves it")))))
+
+;; Estimate: the world, three small dbs and one delta three-way = 80000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 80000000}} a-task-main-finished-is-finished-on-the-branch-after-merging-main
+  ;; agent lb76's branch (2026-11-14): main closed seon.check/a-selection-derives-what-it-needs-from-its-steps (:done, :cancelled);
+  ;; after merging main the branch read it as ready with no proof, and the done rule refused the agent for it. A branch's state after
+  ;; merging main is main's plus its own change: what the branch never wrote is main's
+  (let [b (with (base) [{:seon.task/id "t/x" :seon.task/plan "Do it." :seon.task/execution :ready}])
+        theirs (with b [{:seon.task/id "t/x" :seon.task/execution :cancelled :seon.task/outcome :done}])
+        ours (with b (var-tx "f" "(inc x)"))
+        r (pm/delta-three-way b ours theirs :all)
+        merged (d/db-with ours (pm/merge-tx ours b theirs (:apply r) :all))]
+    (is (empty? (:conflicts r)) "nothing both changed")
+    (is (= [:cancelled :done] ((juxt :seon.task/execution :seon.task/outcome) (d/entity merged [:seon.task/id "t/x"]))) "main's end of the task")
+    (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch keeps its own change")))
+
+;; docs/tasks.md#a-task-holds-how-its-work-ended (plan stage 1.6): a task's content is a key of the one three-way merge
+;; Estimate: a world 0.5M (cached) + 2 create-tx 1M + 3 three-ways of a few keys 1.5M + 2 merge-tx 1M = 4000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-tasks-content-is-a-key-of-the-one-merge
+  (let [w (base)
+        base (d/db-with w (seon.task/create-tx w [{:seon.task/ns 'demo :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{}}]))
+        branch (d/db-with base [[:db/add [:seon.task/id "demo/x"] :seon.task/plan "Make x, as the agent learned it."]])
+        main (d/db-with base [[:db/add [:seon.task/id "demo/x"] :seon.task/proofs 'demo-test/x-test]])
+        r (pm/delta-three-way base main branch #{})]
+    (is (= [[:task "demo/x"]] (filterv #(= :task (first %)) (keys (:theirs r)))) "a branch's task edit is a change of its :task key")
+    (testing "changed on one side alone: taken"
+      (let [merged (d/db-with main (pm/merge-tx main base branch [[:task "demo/x"]] #{}))]
+        (is (= "Make x, as the agent learned it." (:seon.task/plan (d/entity merged [:seon.task/id "demo/x"]))))))
+    (testing "a task the receiving branch doesn't hold is never made by its content alone"
+      (let [newer (d/db-with branch (seon.task/create-tx branch [{:seon.task/ns 'demo :seon.task/name "y" :seon.task/plan "Make y." :seon.task/proofs #{}}]))]
+        (is (empty? (pm/merge-tx main base newer [[:task "demo/y"]] #{})))))
+    (testing "an unmerged task entry is settled by writing a side's content (my.branch/resolve! of [:task ...])"
+      (let [settled (d/db-with main (pm/content-tx main [:task "demo/x"] {:plan "Make x, settled." :proofs #{'demo-test/x-test}}))]
+        (is (= ["Make x, settled." #{'demo-test/x-test}] ((juxt :seon.task/plan (comp set :seon.task/proofs)) (d/entity settled [:seon.task/id "demo/x"]))))))))
+
+;; Estimate: the world 0.5M (cached) + 4 small transactions + one delta three-way at :all over a few keys ~5M = 10000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-fact-a-branch-holds-only-because-main-wrote-it-is-mains
+  ;; agent lb76's branch (2026-11-14): 6,907 conflicts, nearly all facts main wrote that the branch held stale (carried before its
+  ;; base moved, never written by it), and embeddings each side computes. Facts are facts at the transaction that wrote them: a
+  ;; side changed [e a] only if its own transaction wrote it; a derived entity ({:seon.db/derived true}) never merges
+  (let [as (fn [db branch tx] (:db-after (d/with db {:tx-data tx :tx-meta {:seon.tx/branch branch}})))
+        w (as (base) :main [{:seon.agent/key "a1" :seon.agent/status :busy}])
+        branch (as w :main/b ((var-tx "f" "(inc x)") w))
+        base' (as w :main [[:db/retract [:seon.agent/key "a1"] :seon.agent/status :busy]])
+        main (as base' :main [[:db/add [:seon.agent/key "a1"] :seon.agent/status :idle]])
+        r (pm/delta-three-way base' branch main :all)
+        merged (d/db-with branch (pm/merge-tx branch base' main (:apply r) :all))]
+    (is (empty? (:conflicts r)) (str "a stale value of main's is no conflict: " (pr-str (:conflicts r))))
+    (is (= :idle (:seon.agent/status (d/entity merged [:seon.agent/key "a1"]))) "main's fact")
+    (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch keeps its own change")))
+
+;; Estimate: the world 0.5M (cached) + 5 small transactions ~1M + one merge-main (a diff of a few datoms, program-of on 2 keys of three
+;; dbs) ~3M + one db-with ~0.5M = 10000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} merge-main-is-main-plus-the-branchs-own-change
+  ;; docs/merging.md#a-branch-merges-main-in, the agreed seon.merge/merge-main: the merged branch is main's head plus what the branch
+  ;; wrote since base; main's other moves are main's already and never read; a key both changed stops the merge, nothing written
+  (let [as (fn [db branch tx] (:db-after (d/with db {:tx-data (if (fn? tx) (tx db) tx) :tx-meta {:seon.tx/branch branch}})))
+        b0 (as (base) :main [{:seon.agent/key "a1" :seon.agent/status :busy}])
+        head (as b0 :main/b (var-tx "f" "(inc x)"))
+        main (-> b0 (as :main (var-tx "g" "(dec x)")) (as :main [{:seon.agent/key "a2" :seon.agent/status :idle}]))
+        {:keys [tx conflicts]} (pm/merge-main b0 head main)
+        merged (d/db-with main tx)]
+    (is (nil? conflicts) (pr-str conflicts))
+    (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch's own change")
+    (is (= (fid "g" "(dec x)") (:form/id (:var/form (d/entity merged [:var/name 'app/g])))) "main's, as main holds it")
+    (is (= :idle (:seon.agent/status (d/entity merged [:seon.agent/key "a2"]))) "and main's facts")
+    (testing "a key both changed, differently, stops it"
+      (let [main' (as main :main (var-tx "f" "(* 2 x)"))]
+        (is (seq (:conflicts (pm/merge-main b0 head main'))) "a conflict, and no tx")))))

@@ -386,10 +386,27 @@
    (observe idx db (for [dt moved :let [a (:a dt)] :when (and (keyword? a) (or (watched-attrs a) (watched-ns (namespace a))))]
                      [:db/add (:e dt) a]))))
 
+(defn input
+  "The done rule's input for task t ({:proofs :kind :plan :plan-before}) and its results; green? and red? say whether main holds a
+  test green and whether it may be red. The one producer the judge's `done-input` and seon.ctx.status/status call. See
+  docs/tasks.md#the-done-rule."
+  {:malli/schema [:=> [:cat :map :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:set :qualified-symbol] fn? fn?] :seon.reconcile/done-input]}
+  [{:keys [proofs kind plan plan-before]} results uncontracted unmerged deferred green? red?]
+  (cond-> {:proofs (or proofs #{})
+           :kind kind
+           :results results
+           :main-green (into #{} (filter green?) (keys results))
+           :allowed-red (into #{} (filter red?) (keys results))
+           :uncontracted uncontracted
+           :unmerged (vec unmerged)
+           :deferred deferred}
+    (= :design kind) (assoc :plan plan)
+    (and (= :design kind) plan-before) (assoc :plan-before plan-before)))
+
 (defn done-input
-  "The done rule's input for the results of task id's end, observed against main at t basis
-  (nil: main as idx holds it), over the index: the regression and allowed-red sets restricted to the tests
-  that ran (the only ones done-explain asks about), each test looked up by its claimants; for
+  "The done rule's input (`input`) for the results of task id's end, observed against main at t basis
+  (nil: main as idx holds it), over the index: a test is main-green when a task claiming it merged by the basis, allowed-red when
+  one claiming it has not (each test looked up by its claimants); for
   a :design task, its accumulated plan now and plan-before, the one its branch began with
   (its merge base's; nil: unknown); deferred, the process tests its end left to root's gate."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:maybe :int] [:maybe :seon.task/plan] [:set :qualified-symbol]] :seon.reconcile/done-input]}
@@ -397,16 +414,10 @@
   (let [by? (fn [x] (when-let [mt (get-in idx [:done x :merged-t])] (or (nil? basis) (<= mt basis))))
         claim (fn [t] (disj (get-in idx [:claims t] #{}) id))
         kind (get-in idx [:tasks id :seon.task/kind] :work)]
-    (cond-> {:proofs (get-in idx [:acc id] #{})
-             :kind kind
-             :results results
-             :main-green (into #{} (filter #(some by? (claim %))) (keys results))
-             :allowed-red (into #{} (filter #(some (complement by?) (claim %))) (keys results))
-             :uncontracted uncontracted
-             :unmerged (vec unmerged)
-             :deferred deferred}
-      (= :design kind) (assoc :plan (:plan (task/accumulate (:tasks idx) id)))
-      (and (= :design kind) plan-before) (assoc :plan-before plan-before))))
+    (input {:proofs (get-in idx [:acc id] #{}) :kind kind :plan-before plan-before
+            :plan (when (= :design kind) (:plan (task/accumulate (:tasks idx) id)))}
+           results uncontracted unmerged deferred
+           #(some by? (claim %)) #(some (complement by?) (claim %)))))
 
 (defn- merge-keys
   "The program keys merge task id merges: what the tasks on its branch measured as changed
@@ -603,6 +614,30 @@
                (for [[id t] (sort-by key (:tasks idx)) :let [e (lost-write-back t)] :when e]
                  {:task id :blocks []
                   :cause (str "write-back lost: " (:seon.error/message e) " [" (str/join ", " (:seon.git/files e)) "]; (my.root/write-back! sys [\"" id "\"]) writes it again")}))))
+
+(defn write-back-target
+  "Where the write-back commits main's files, from main's source fact held and the root's merges branch (:seon.config.source/branch,
+  its source's :branch): {:branch} that branch, and :expect held's commit when main was imported from a commit on it, so the ref
+  moves only from that commit (git follows the store, seon.fx/git-commit :expect). See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat [:maybe :map] :string] [:map [:branch :string] [:expect {:optional true} :string]]]}
+  [held branch]
+  ;; never the branch the checkout has checked out when it is another: a test root sourced from a session's worktree committed its
+  ;; scratch task's file onto that session's branch (seon.reconcile-test/a-write-back-commits-only-its-roots-merges-branch)
+  (let [{imported :commit from :branch} held]
+    (cond-> {:branch branch} (and imported (= branch from)) (assoc :expect imported))))
+
+(defn source-moved-tx
+  "Main's source fact moved to the commit r (the :git effect's answer) made on git's main, when it was one made from the commit main
+  was imported from (seon.fx/git-commit :expect) and main's fact still names that commit: main holds the commit's files now, so a
+  catch-up reads from it. Its :tree is the tree's id when the tree followed. None for any other answer. See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
+  [db r]
+  (let [held (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))]
+    ;; a compare-and-swap in the store as in git: only while main's fact still names the commit the write was made from, so a
+    ;; catch-up written in between is never written over
+    (if-let [{:keys [sha tree]} (when (and (:commit held) (= (:commit held) (get-in r [:value :expected]))) (:value r))]
+      [{:seon.system/id :root :seon.system/source (cond-> (assoc held :commit sha) tree (assoc :tree tree))}]
+      [])))
 
 (defn commit-tx
   "Main's write of the :git effect's answer r for the tasks of members, which wanted paths written
@@ -847,7 +882,7 @@
       ;; is answered alone
       :octopus-merge (let [bs (mapv #(:branch (:seon.agent/env (task-agent (:idx st) (:task %)))) (:members act))]
                        (one (request (assoc-in st [:flights id :branches] bs) id :octopus-merged
-                                     {:op :write :req {:op :octopus-merge :branches bs :data-attrs #{}}})))
+                                     {:op :write :req {:op :octopus-merge :branches bs :data-attrs :all}})))
       ;; the merge gate (a change reaching process tests): root's one :gate request, the candidate's files read from its
       ;; branch, then its deferred tests run on a checkout of the merges head with them (seon.fx/run-tests)
       :gate (one (request st id :gated {:op :gate :branch (:branch (:seon.agent/env (task-agent (:idx st) id))) :tests (:tests act) :base (:base act)}))
@@ -901,8 +936,8 @@
   branch (:branch-diff: its head db, its merge base and main's t there, the keys it changed,
   its unmerged keys, its contract gaps); `judgment` decides from them what comes next (the outcome, the reasons the done rule gave,
   a verdict to tell, a hold for root) and the answer is stored on the task (:seon.task/outcome and the rest, retracting
-  what this end did not set); the task content the branch changed carried to main, or its conflicts with main's recorded
-  for root (seon.task/carry-tx); and a failure the agent marked (my.task/fail!) carried with the task held.
+  what this end did not set); the task content the branch changed merged to main (seon.merge's three-way merge of its :task keys),
+  a member both changed among the task's conflicts for root; and a failure the agent marked (my.task/fail!) carried with the task held.
   Answers {:tx :outcome :kept?}: kept? when the agent's process is to stay."
   {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db] [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]]] [:map [:tx [:vector :any]] [:outcome :seon.task/outcome]]]}
   [st {:keys [act run-problems worked-error deferred deferred-digests main-red]} results {:keys [db base base-t] :as diff}]
@@ -911,10 +946,17 @@
         t (get-in idx [:tasks id])
         {k :key branch :branch} (agent-of main id)
         end (when k (pull-end db k))
-        carried (task/carry-tx base db main)
-        ;; the done rule reads main as this judging leaves it: the task content its branch changed (the proofs a design or a whole
-        ;; task registered, its plan) is carried in the same write, so the rule is applied to the index with the carry observed
-        idx (if (seq (:tx carried)) (let [w (pdb/speculate main (:tx carried))] (index idx main (:db-after w) (:tx-data w))) idx)
+        ;; the task content its branch changed (the proofs a design or a whole task registered, its plan), merged to main as any key:
+        ;; changed on the branch alone, applied (merge-tx); changed on both, a conflict among the task's (seon.merge/three-way)
+        ;; only the task keys the branch changed since its base, as the branch diff already read them (:ours), three-way over
+        ;; those alone: never the program's whole diff, which main moving makes billions of ticks (runtime's merge measurement, 11-14),
+        ;; nor the branch's diffed again (7M ticks for a one-task design step, data 11-14)
+        ks (filterv #(= :task (first %)) (:ours diff))
+        tw (pm/three-way (pm/program-of base ks #{}) (pm/program-of main ks #{}) (pm/program-of db ks #{}))
+        carried (pm/merge-tx main base db (:apply tw) #{})
+        task-conflicts (:conflicts tw)
+        ;; the done rule reads main as this judging leaves it, so the rule is applied to the index with the merge observed
+        idx (if (seq carried) (let [w (pdb/speculate main carried)] (index idx main (:db-after w) (:tx-data w))) idx)
         failure (:seon.task/failure (task/task db id))
         turn (:seon.agent/turn (d/entity db [:seon.agent/key k]) 0)
         ;; marked failed by its agent at the turn its end came on (my.task/fail!): the failure on main and the task held for root
@@ -928,7 +970,7 @@
                             :behinds (behinds main id) :told (:seon.task/reasons t)
                             ;; what the branch did: a changed key or carried task content (seon.reconcile/done-explain's :no-change)
                             :changed? (pm/changed? base db) :named-site? (task/names-new-site? base db id)})
-        conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
+        conflicts (into (mapv #(dissoc % :main-t :resolved?) (pm/entries db)) task-conflicts)
         ;; the agent's words are the task's reason as they are, unless its end was not green and the done rule found nothing open:
         ;; then they are named as its agent's, beside what root found, so a reader never takes them for the judgment (Context's loop
         ;; D3: "proof-unknown ..." stood beside :gate, written by an agent whose last prove answer was a gate build's failure)
@@ -950,7 +992,8 @@
                (seq (:costs run-problems)) (assoc :seon.task/costs (:costs run-problems))
                error (assoc :seon.task/error error)
                (seq (:waste end)) (assoc :seon.task/waste (:waste end))
-               (seq (:conflicts carried)) (assoc :seon.task/task-conflicts (:conflicts carried)))
+               ;; a task member both changed: shown on the task and as a :task-conflict row (a feature, owner 2026-11-14)
+               (seq (pm/task-conflicts task-conflicts :theirs)) (assoc :seon.task/task-conflicts (pm/task-conflicts task-conflicts :theirs)))
         facts {:conflicts conflicts :unmerged unmerged :red (for [[tt s] results :when (not= :pass s)] tt)}
         outcome (if marked? :closed (:outcome j))
         move (if (and (:hold j) (not marked?))
@@ -963,7 +1006,7 @@
                                         (verdict-body (:verdict j) {:results results :deferred deferred :unmerged unmerged :caused (:caused diff)
                                                                     :basis (or base-t (:max-tx main))})
                                         now)))
-               (into (:tx carried))
+               (into carried)
                ;; every end gets its refine, a task after this one on a branch of its own, and the refine's review
                ;; (docs/tasks.md#a-refine-curates-its-own-task): none while the agent goes on or waits (parked, told a verdict, behind main),
                ;; none for a refine or a merge step, none twice (seon.task/refine-tx), and none for a run that took no turn: it left
@@ -1181,13 +1224,28 @@
                      (one (write st id :done (commit-tx (:db st) (contract/error :seon.system/no-source-text #'seon.reconcile/commit-tx
                                                                                  (str "main holds no text for " (str/join ", " paths)) {:paths (vec paths)})
                                                         members paths [])))
+                     ;; git follows the store's main: committed on the branch main was imported from (git's main for the standing root), only from
+                     ;; (:expect, one compare-and-swap; a landing that moved it since answers :seon.fx/ref-moved, nothing written);
+                     ;; a main imported from no commit writes the merges branch, as before
+                     ;; the branch main was imported from (its source fact's :branch, git's main for the standing root), from its :commit
                      (one (request (assoc-in st [:flights id :writeback :written] (vec (keys files))) id :committed
-                                   {:op :fx :kind :git :req {:dir (:root (:source st)) :branch (:branch (:source st)) :files files :modes (source/modes (:db r) (keys files))
-                                                             :message (source/commit-message members)}}))))
+                                   {:op :fx :kind :git :req (merge {:dir (:root (:source st)) :files files :modes (source/modes (:db r) (keys files))
+                                                                    :message (source/commit-message members)}
+                                                                   (write-back-target (:seon.system/source (d/pull (:db r) [:seon.system/source] [:seon.system/id :root]))
+                                                                                      (:branch (:source st))))}))))
       ;; the sha on each merged task; the merge already runs where main's program runs
       ;; (seon.program/load-changes!), so nothing is built (BUILD plan P4)
+      ;; and main's source fact moves to the commit, in the same write: main was imported from it now (catch-up reads from there)
       :committed (if-let [tx (commit-tx (:db st) r (:members (:writeback f)) (:files (:writeback f)) (:written (:writeback f)))]
-                   (one (write st id :done tx))
+                   (let [[st o] (write st id :done (into tx (source-moved-tx (:db st) r)))]
+                     ;; git's main moved but its checked-out tree could not follow: a platform problem someone reads, not only the answer
+                     [st (cond-> [o]
+                           (get-in r [:value :tree-unmoved])
+                           (conj {:op :problem :class :platform
+                                  :error (contract/error :seon.fx/tree-unmoved #'seon.reconcile/source-moved-tx
+                                                         (str "git's main moved to " (get-in r [:value :sha]) " but its checked-out tree did not follow: "
+                                                              (get-in r [:value :tree-unmoved]) "; bring the tree in (git read-tree -m -u)")
+                                                         {:sha (get-in r [:value :sha])})}))])
                    (done st)))))
 
 (defn- quiet

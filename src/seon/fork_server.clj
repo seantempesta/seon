@@ -226,7 +226,7 @@
                  ;; the spawn's phases here, on the one clock (seon.agent/spawn-phases)
                  marks [[:fork-server-in t0 nil] [:reach-graph tg nil] [:index t1 nil] [:static (profile/now-ns) nil]]]
              (fork-carrying! st fd open #(repl/run! % (fork-args st m marks) (:db st) (:ns m))
-                             (fn [n] [st {:ev (cond-> [{:ev :fork-failed :agent (:agent m) :active-threads n}]
+                             (fn [{n :active-threads hs :holders}] [st {:ev (cond-> [{:ev :fork-failed :agent (:agent m) :active-threads n :holders hs}]
                                             load-errs (conj {:ev :load-errors :t (:max-tx (:db st)) :errors (vec load-errs)}))}])
                              (fn [pid] (let [[st evs] (adopt st pid)]
                                          [st {:ev (cond-> (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
@@ -251,7 +251,7 @@
      :standby (let [fd (sock/take-fd! (:conn st)) _ (vreset! open fd)
                     st (-> st graph-at-fork index-at-fork)]
                (fork-carrying! st fd open #(main (:db st) (:cfg st) % false (select-keys st [:graph :index :tests-due]))
-                              (fn [n] [st {:ev [{:ev :standby-failed :gen (:gen m) :active-threads n}]}])
+                              (fn [{n :active-threads hs :holders}] [st {:ev [{:ev :standby-failed :gen (:gen m) :active-threads n :holders hs}]}])
                               (fn [pid] (when-let [old (:standby-pid st)] (lib/kill! old 9))
                                 (let [[st evs] (adopt (assoc st :standby-pid pid) pid)]
                                   [st {:ev (into [{:ev :standby :gen (:gen m) :pid pid :t (:max-tx (:db st))}] evs)}]))))
@@ -401,7 +401,7 @@
   (let [[r s] (sock/socketpair)]
     (lib/fork! {:fd s :child #(main db cfg s true)
                 :refused #(throw (ex-info "the fork server cannot fork: root boots with more than one thread"
-                                          {:seon.error/type ::not-single-threaded :active-threads %}))
+                                          {:seon.error/type ::not-single-threaded :active-threads (:active-threads %) :holders (:holders %)}))
                 :parent (fn [pid] {:pid pid :fd r})})))
 
 (defn- request-standby

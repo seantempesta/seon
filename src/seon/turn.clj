@@ -10,8 +10,8 @@
 
   A merge task's agent first merges main into the branch (no model call) and merges main
   again each time all is green, until a merge brings nothing new; it stops early when the
-  merge is too hairy (seon.reconcile/hairy). Either way the live runtime is staged onto the
-  branch at the end (seon.stage/stage!), so the next agent on the branch holds it.
+  merge is too hairy (seon.reconcile/hairy). What its evals did is on the branch as each ran
+  (seon.repl/wrap-record), so the next agent on the branch holds it.
 
   Root starts it by evaluating (seon.turn/work! '{...}) in the agent; its end is
   a fact on the agent's record on the branch (:seon.agent/outcome and the rest), which root's judge reads."
@@ -19,7 +19,7 @@
   (:require [seon.ctx :as ctx] [seon.edn :as sedn] [seon.profile :as profile] [seon.intr :as intr] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.ctx.status :as status] [seon.ctx.wire :as wire] [seon.merge :as pm] [seon.problems :as problems]
-            [seon.stage :as stage] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print]
+            [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print]
             [seon.error :as err] [datahike.api :as d] [seon.db :as pdb] [seon.render :as render] [seon.model :as model] [clojure.data.json :as json]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: whether this
@@ -102,12 +102,11 @@
     (cond-> {:model-calls (count calls)} (seq ts) (assoc :tokens (reduce + ts)))))
 
 (defn- end!
-  "The agent's end: the live runtime staged onto the branch, the end written there (with
+  "The agent's end: the end written on its branch (with
   the error that ended it and the turns' waste, as data: session D2), and the branch committed
   (a turn's end commits the agent's run-ahead writes)."
   {:malli/schema [:=> [:cat :map :seon.agent/outcome [:maybe :string] [:maybe :map]] :seon.turn/end]}
   [{:keys [turn t0]} outcome reason error]
-  (stage/stage!)
   (let [db (agent/db) k (:key @agent/state)
         {:keys [tokens model-calls]} (agent-usage db k)
         ;; the run as its branch recorded it, whole across a restart (seon.learn/turns-of), and what its context showed: its task's
@@ -182,11 +181,13 @@
   (tell-error! em "your turn threw: Seon's code ran with the program on your branch as it stands now (Seon's own code and what you changed of it), so the cause may be either")
   (-> st (update :threw (fnil inc 0)) (assoc :error em)))
 
-(def ^:private turn-can-change
-  "The model call's typed errors a next turn or a next call can change (seon.turn/model-failed!): the agent reasons less, or the
-  provider answers next time. The rest of :seon.model/failure are the config's (no provider, no script, a script's invalid
-  reply), which no turn changes. See docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error."
-  #{:seon.model/reasoning-ate-reply :seon.model/rate-limited :seon.model/transport :seon.model/provider-error})
+(defn- turn-can-change
+  "Whether a model call's typed error of type t is one a next turn or a next call can change (seon.turn/model-failed!): its schema
+  entry says so, with its reason (:seon.model/retryable, root's ruling: data, never a second list). The rest of :seon.model/failure
+  are the config's (no provider, no script, a script's invalid reply), which no turn changes. See
+  docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error."
+  {:malli/schema [:=> [:cat :keyword] :boolean]}
+  [t] (boolean (:seon.model/retryable (contract/properties t))))
 
 (defn- model-failed!
   "A model call that answered its typed error (em, a :seon.model/failure: the reasoning spent the whole token budget, the
@@ -550,15 +551,15 @@
                                                                             (keep #(get-in % [:seon.cite/target :var/name]))
                                                                             (task/task-cites (agent/db) task))})))]
                          (cond
+                           ;; the agent's own fail! is its verdict, on green proofs and at the cap too, as at a hand-back
+                           ;; (hand-back-end); a wait on the last turn is the budget spent, so the run is :cap, never :waiting
+                           (= :failed (:outcome stop)) (ended st :failed (:reason stop) nil)
                            ;; git's CI after the merge: green on the combined program; merge main again until
                            ;; it brings nothing new, a work task's run as a merge's, so it ends on main as main is
                            ;; (a green run that ended behind main's newer merges was judged behind: swarm's s9)
                            (and (not no-status?) (empty? reasons))
                            (let [m (branch/merge-main!)]
                              (if (and (empty? (:applied m)) (empty? (:conflicts m))) (ended st :green (unjudged-reason s) nil) [::next st]))
-                           ;; the agent's own fail! is its verdict, at the cap too; a wait on the last turn is
-                           ;; the budget spent, so the run is :cap, never :waiting (its session parks either way)
-                           (= :failed (:outcome stop)) (ended st :failed (:reason stop) nil)
                            hairy (ended st :merge-failed (:reason hairy) nil)
                            ;; the one check of the cap, before any model call: every turn reaches it, one with no
                            ;; status and one after a turn that threw included (a change that broke

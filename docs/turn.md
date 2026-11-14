@@ -14,7 +14,7 @@ Root's reconciler starts an agent for a released task (a fork, or a wake of the 
 
 ## The end
 
-An agent's end is a fact on its branch, which root reads once to decide how its task stands. The loop writes it through ```seon.agent/write-end!```: `:seon.agent/outcome` (`:green` `:red` `:waiting` `:cap` `:failed` `:merge-failed` `:error`), the reason, the error as data, the turns' `:waste`, and `:seon.agent/ended-turn`. The process's death writes it the same way, and each wake clears the end before it (```seon.agent/clear-end!```). The live runtime is staged onto the branch (`seon.stage/stage!`). Root's judge reads the end (```seon.reconcile/pull-end```), the agent's test results and the branch's diff, and stores its decision on the task (`seon.reconcile/judge-tx`; [reconcile](reconcile.md#a-task-holds-how-its-work-ended)). An agent that wrote no end is a task `:dead`; an outside agent's `:done` writes its end through `seon.turn/hand-back!`.
+An agent's end is a fact on its branch, which root reads once to decide how its task stands. The loop writes it through ```seon.agent/write-end!```: `:seon.agent/outcome` (`:green` `:red` `:waiting` `:cap` `:failed` `:merge-failed` `:error`), the reason, the error as data, the turns' `:waste`, and `:seon.agent/ended-turn`. The process's death writes it the same way, and each wake clears the end before it (```seon.agent/clear-end!```). Root's judge reads the end (```seon.reconcile/pull-end```), the agent's test results and the branch's diff, and stores its decision on the task (`seon.reconcile/judge-tx`; [reconcile](reconcile.md#a-task-holds-how-its-work-ended)). An agent that wrote no end is a task `:dead`; an outside agent's `:done` writes its end through `seon.turn/hand-back!`.
 
 ## The cap
 

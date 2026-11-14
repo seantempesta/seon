@@ -157,6 +157,7 @@
                  (step/out! o :to-api (status st (cond-> {:forked-ms (lib/r2 (:start-ms m)) :mem-mb (:mem-mb m) :t (:t m) :ready true :phases (:phases m)}
                                               (:cloned-from m) (assoc :pid (:pid m))
                                               (seq (:load-errors m)) (assoc :load-errors (:load-errors m))
+                                              (:seon.process/env-mismatch m) (assoc :seon.process/env-mismatch (:seon.process/env-mismatch m))
                                               (seq (:seon.agent/missing-cites m)) (assoc :seon.agent/missing-cites (:seon.agent/missing-cites m)))))
                  ;; root's interrupt cannot reach it (its SIGUSR1 handler never ran: a process not
                  ;; forked from a main thread): a recorded problem, to whoever can act on it
@@ -246,7 +247,8 @@
       ;; the agent committed its branch (it owns the branch's writes): the writer's next flush
       ;; covers it
       :committed (do (step/out! o :to-writer {:op :agent-commit :branch (:branch st) :t (:t m)})
-                     (when (:mem-mb m) (step/out! o :to-api (status st {:mem-mb (:mem-mb m)})))
+                     ;; its memory and its turn (when it moved) in one status; :turn is kept in root's view, never a fact on main
+                     (when (or (:mem-mb m) (:turn m)) (step/out! o :to-api (status st (select-keys m [:mem-mb :turn]))))
                      ;; its eval errors since its last commit: root counts them (seon.error)
                      (when (:errors m) (step/out! o :to-api {:op :errors :agent id :entries (:errors m)}))
                      (step/out! o :events (step/event {:type :commit :agent id :branch (:branch st) :t (:t m) :txs (:txs m)}))

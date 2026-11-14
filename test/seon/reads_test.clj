@@ -37,7 +37,7 @@
     (is (contract/valid? :seon.proof/proof-fact {:seon.proof/id "0123456789abcdef" :seon.proof/test 'seon.x-test/t :seon.proof/reads-digest "0123456789abcdef"
                                                  :seon.proof/reads rs :seon.proof/read-keys (set (map pr-str (:seon.reads/keys rs))) :seon.proof/status :pass :seon.proof/route :live
                                                  :seon.proof/basis {:seon.db/branch :main :seon.db/commit #uuid "00000000-0000-0000-0000-000000000001" :seon.db/t 7}
-                                                 :seon.proof/outside (:seon.reads/outside rs) :seon.bound/spent {:seon.bound/ticks 5}}))))
+                                                 :seon.bound/spent {:seon.bound/ticks 5}}))))
 
 (defn- proof
   "A result of test t that read keys ks, at db's basis, as tests' T-1 writes one."

@@ -289,7 +289,7 @@
   "The reach graph of the checkout's own program, as bin/test's plan keeps it (test-runner/reach-graph-of over the kept
   program store): decoded and brought to date, a sixth of what building it costs (docs/source.md#tests-run-by-reach)."
   [here]
-  (runner/reach-graph-of (runner/program) (data-refs here) (ts/kept-program-store)))
+  (runner/reach-graph-of (runner/program) (data-refs here) (ts/kept-program-store) (seon.fx/tree-id here)))
 
 ;; docs/source.md#tests-run-by-reach: a form that enumerates a namespace's vars ((ns-interns 'n), ns-publics, ns-map) reads every one
 ;; of them, so a var added there moves the digest of every test that reaches the form. Red before (data and root, 2026-11-14):
@@ -608,6 +608,26 @@
     (testing "other data-refs: built over"
       (let [refs {'seon.graph/read-decl #{'app.pt-calc/add}}]
         (is (= (digests (program/reach-graph db' refs)) (digests (runner/reach-graph-of db' refs dir))))))))
+
+;; docs/source.md#tests-run-by-reach: the program store keeps a reach graph for each tree, so two trees' plans at once never overwrite
+;; each other's and a test of a tree reads its own tree's graph: its cost is its own, never the last writer's (one slot for every
+;; tree made seon.program-test/a-name-a-test-hands-over-quoted-is-what-it-reaches cost 200M against 61.7M at load 41, runtime's
+;; land 2026-11-14). The files stay at :seon.config.proofs/tree-files-kept. Estimate: calc-db 2.4M + 1 record 0.3M; 2 builds and
+;; 4 reads and updates of ~40 forms with their writes ~4M; a few file listings. Estimated 8,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 8000000}} each-tree-keeps-its-own-reach-graph
+  (let [dir (scratch-dir "tree-reach")
+        db (calc-db)
+        db' (record db 'app.pt-calc "(defn add [a b] (+ b a))")
+        file (fn [t] (java.io.File. dir (str "reach-graph-" t ".fasl")))]
+    (runner/reach-graph-of db nil dir "ta")
+    (runner/reach-graph-of db' nil dir "tb")
+    (is (and (.isFile (file "ta")) (.isFile (file "tb"))) "a file for each tree")
+    (let [g (runner/reach-graph-of db nil dir "ta")]
+      (is (zero? (:affected g)) "tree a's own graph, unmoved by tree b's plan: nothing re-folded"))
+    (with-redefs [seon.config/value (let [v seon.config/value] (fn [k] (if (= k :seon.config.proofs/tree-files-kept) 2 (v k))))]
+      (runner/reach-graph-of db' nil dir "tc")
+      (is (= 2 (count (filter #(clojure.string/starts-with? (.getName ^java.io.File %) "reach-graph-") (.listFiles (java.io.File. dir)))))
+          "the files stay at the dial: the oldest removed"))))
 
 ;; Estimate: 7 cases x (4 records of types ~0.4M = 1.6M + 3 reach-digests x 0.25M = 0.75M) = 17M. Estimated 20,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-types-method-is-in-the-reach-of-what-constructs-it
@@ -1337,13 +1357,13 @@
         digests (fn [inputs roots] (update-vals (program/graph-index g inputs roots) :digest))
         a (digests (in "t1") nil)
         b (digests (in "t2") nil)
-        step #(digests (in %) {"step" ['seon.render-test/one-printer-and-no-cut-before-it]})]
+        step #(digests (in %) {"step" ['seon.render-test/a-site-the-one-printer-section-names-still-prints]})]
     (is (< 20 (count a)) "a sample of the suite, not an empty tree")
     ;; the one exception: a test whose test namespace reads the checkout's files itself judges the files
     ;; themselves, so it takes the tree
     (let [moved (set (for [[t d] a :when (not= d (b t))] t))]
       ;; a test calling a file reader from its own namespace (slurp, seon.doc/load-dir-tx): each was reused over an edit to the files it judges (web-ui, 2026-10-28)
-      (is (contains? moved 'seon.render-test/one-printer-and-no-cut-before-it) "a test slurping a doc takes the tree")
+      (is (contains? moved 'seon.render-test/a-site-the-one-printer-section-names-still-prints) "a test slurping a doc takes the tree")
       (is (not (contains? moved 'seon.doc-test/every-section-of-the-wiki-has-a-lead)) "a test loading the wiki through its reader takes no tree")
       (is (contains? moved 'seon.repl-test/the-template-instructions-and-the-help-page-run) "a test reading the wiki through seon.doc/pages takes the tree (it was reused over edits to the help page)")
       (is (not (contains? moved 'seon.task-files-test/no-shipped-task-is-merged-work)) "nor one reading the task files through seon.system/task-files")
