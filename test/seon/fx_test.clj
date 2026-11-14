@@ -881,6 +881,29 @@
       (is (= {t [{:digest "d2" :reads {'a/f "f2"}}]} (fx/held-reads dir [t 'a.r-test/none])) "the newest green's, and none for a test with none")
       (finally (seon.lib/sh "rm" "-rf" dir)))))
 
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-stream-that-goes-quiet-past-its-kinds-bound-is-ended-reached
+  ;; docs/flow.md#effects-one-owner-and-its-workers-per-kind: a streaming call is bounded by its kind's :seon.bound/ms of
+  ;; quiet, re-armed by each line (a long reply that keeps streaming is never cut); past it the worker shuts the connection
+  ;; and the call's outcome is :seon.bound/reached, so its worker is free again and its asker answered
+  (let [value cfg/value
+        gate (promise)
+        shut? (atom false)
+        lines-in (atom ["data: a"])
+        pull (fn [] (if-let [l (first @lines-in)] (do (swap! lines-in rest) (.getBytes (str l "\n") "UTF-8")) @gate))]
+    (with-redefs [cfg/value (fn [k] (if (= k :seon.config.fx/bounds) {:t {:seon.bound/ms 50}} (value k)))]
+      (let [st (fx/worker-proc {:kind :t :owner :fx/t
+                                :perform (fn [_] {:stream {:pull pull :init [] :step (fn [s l] [(conj s l) []]) :final (fn [s] {:value s})
+                                                           :close (fn [_] []) :shut (fn [] (reset! shut? true) (deliver gate nil))}})})
+            [st o] (fx/worker-proc st :work (assoc (req 1) :in-ns 0 :taken-ns 0))
+            _ (is (nil? o) "the call streams: no outcome yet")
+            ;; feed the worker what reaches its :lines until its call ends: the one line, the bound's due, the reader's end
+            [st done] (loop [st st n 0]
+                        (let [m (a/<!! (:lines st)) [st o] (fx/worker-proc st :lines m)]
+                          (if-let [d (get o [:fx/t :done])] [st (first d)] (if (< n 20) (recur st (inc n)) [st nil]))))]
+        (is @shut? "the connection was shut")
+        (is (= :seon.bound/reached (get-in done [:outcome :seon.error/type])) (pr-str done))
+        (is (= {:seon.bound/ms 50} (get-in done [:outcome :seon.bound/bound])))
+        (is (nil? (:call st)) "the worker is free for its next item")))))
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-process-on-another-runtime-answers-env-mismatch
   ;; task seon.fx/runtime-for-reads-the-pins-from-the-branch: the one check of which runtime a branch needs. target/seon's
   ;; identity (target/seon.digest, bin/build's record of bin/binary-digest) answers the binary for the tree it was built

@@ -1882,6 +1882,24 @@
         [(-> st (dissoc :call) (assoc ::flow/input-filter (constantly true)) (update :n inc))
          (merge {[(:owner st) :done] [done]} (stream-out (when (sequential? ends) ends)))]))))
 
+(defn- stream-due
+  "A streaming worker's step on its bound's due {:due t0}: a call quiet past its kind's :seon.bound/ms is shut and its
+  outcome made :seon.bound/reached; one that streamed since is re-armed. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat :map :map] [:tuple :map [:maybe :map]]]}
+  [st m]
+  (let [{:keys [ms t0 last-ns shut dead]} (:call st)]
+    (if (or (nil? (:call st)) dead (not= t0 (:due m)))
+      [st nil]
+      (let [quiet (quot (- (profile/now-ns) last-ns) 1000000)]
+        (if (< quiet ms)
+          (do (step/put-after! (:lines st) (- ms quiet) {:due t0}) [st nil])
+          (do (when shut (shut))
+              [(assoc-in st [:call :dead] (error #'seon.fx/stream-due :seon.bound/reached
+                                                 (str "the " (name (:kind st)) " stream sent nothing for " quiet " ms, past its bound of " ms " ms")
+                                                 {:seon.bound/bound {:seon.bound/ms ms} :seon.bound/spent {:seon.bound/ms quiet}
+                                                  :seon.bound/at (keyword "seon.fx" (name (:kind st)))}))
+               nil]))))))
+
 (defn worker-proc
   "One performer of an effect kind: takes a work item from its owner's shared channel,
   performs it with the kind's Var, and gives the owner the outcome (with its timing). A batch
@@ -1918,7 +1936,9 @@
   ([st in m]
    (cond
      (nil? m) [st nil]
-     (= :lines in) (stream-step st m)
+     (:due m) (stream-due st m)
+     ;; a line is the call's progress: its quiet is counted from it (stream-due)
+     (= :lines in) (if (:call st) (stream-step (cond-> st (:line m) (assoc-in [:call :last-ns] (profile/now-ns))) m) [st nil])
      (:idle m) [(cond-> st (and (:close st) (:handle st)) (assoc :closed ((:close st) (:handle st)))) nil]
      :else
      (let [ms (or (:batch m) [m])
@@ -1939,8 +1959,11 @@
            done (mapv #(done-of %1 %2 t0 t1) ms rs)]
        (if-let [sm (and (not (:batch m)) (:stream (first rs)))]
          ;; a streaming perform: the call is read a line at a time on :lines until it ends, and the worker reads nothing else meanwhile
-         (do (read-lines! (:pull sm) (:lines st) (:shut sm))
-             [(assoc st :call (assoc (select-keys sm [:step :final :close :shut]) :m m :s (:init sm) :t0 t0)
+         (let [bound-ms (get-in (cfg/value :seon.config.fx/bounds) [(:kind st) :seon.bound/ms])]
+           (read-lines! (:pull sm) (:lines st) (:shut sm))
+           ;; the kind's declared bound, of quiet: re-armed by each line, so a reply that keeps streaming is never cut
+           (when bound-ms (step/put-after! (:lines st) bound-ms {:due t0}))
+             [(assoc st :call (cond-> (assoc (select-keys sm [:step :final :close :shut]) :m m :s (:init sm) :t0 t0 :last-ns t0) bound-ms (assoc :ms bound-ms))
                      ::flow/input-filter #(= % :lines))
               nil])
          [(update st :n + (count ms)) {[(:owner st) :done] [(if (:batch m) {:batch done} (first done))]}])))))

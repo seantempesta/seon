@@ -6,19 +6,26 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [jolt.ffi :as ffi] [jolt.scheme :as scm]
             [seon.contract :refer [defn defn- defchecked] :as contract] [seon.config :as config]
-            [seon.edn :as sedn] [clojure.java.shell :as sh] [konserve.jolt.lmdb :as klmdb] [jolt.fibers :as fibers] [jolt.async.remote :as remote]))
+            [seon.edn :as sedn] [clojure.java.shell :as sh] [clojure.string :as str] [seon.step :as step] [konserve.jolt.lmdb :as klmdb] [jolt.fibers :as fibers] [jolt.async.remote :as remote]))
 
 (defn sh
   "Run a command as clojure.java.shell/sh does (args, its options among them; answers {:exit :out :err}), always on a fiber: there
   Jolt's sh copies the child's pipes on fibers parked on their readiness and waits for its exit as an event, starting no thread.
   Called from a thread (a server connection's, seon.server/serve!) it ran its copies on futures, threads of Clojure's
   send-off pool that no proc declares and that outlive the call. A thread's call runs on a fiber of its own here, joined. Every shell of Seon's runs
-  through it. See docs/machine.md#processes."
+  through it. It answers the child's whole output, or throws :seon.lib/shell-unanswered naming the command and why (a pipe
+  whose read failed, Jolt raising its errno; a command that could not start), never an empty answer in place of what
+  could not be read. See docs/machine.md#processes and docs/failure-points.md."
   {:malli/schema [:=> [:cat [:* :any]] :map]}
   [& args]
-  (if (fibers/in-fiber?)
-    (apply sh/sh args)
-    (fibers/join (fibers/spawn #(apply sh/sh args)))))
+  (try
+    (if (fibers/in-fiber?)
+      (apply sh/sh args)
+      (fibers/join (fibers/spawn #(apply sh/sh args))))
+    (catch Throwable e
+      (let [cmd (vec (take-while string? args))
+            msg (str (str/join " " cmd) ": " (step/error-msg e))]
+        (throw (ex-info msg (contract/error :seon.lib/shell-unanswered #'seon.lib/sh msg {:seon.lib/command cmd}) e))))))
 
 (def ^:private c-schemas
   "Malli schemas of C types, for contracts derived from an FFI declaration (G1's proto.lib)."
