@@ -2723,8 +2723,31 @@
   (let [[r] (in-agent (fn [_] [{:op :eval :agent "root" :code "(:seon.error/type @(seon.system/call! sys {:op :gate :branch :no-such-branch :tests ['a/b]}))"}]))]
     (is (= :seon.writer/refused (:value r)) (pr-str r))))
 
+;; docs/merging.md#a-merge-runs-what-the-change-reaches: an eval never waits on the merge gate. A fresh agent's (my.agent/prove) of one
+;; docs edit sat 17+ minutes in judge! > ask-gate > await-reply behind another agent's 37-minute gate (root's :tests had one worker;
+;; runs/evidence/hang-101236, 2026-11-14). Now the prove asks the gate and answers at once, its process proof :deferred; the gate's
+;; answer, arriving later, is held, and the next prove writes it as the test's status, asking nothing again. The gate answered at
+;; its seams (seon.agent/send-gate!, seon.agent/ask-gate). Estimate: in-agent's setup and teardown ~1.5M + 4 asks at ~0.25M = ~2500k.
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} an-eval-never-waits-on-the-gate
+  (let [t 'seon.repl-test/a-proof-only-the-gate-runs
+        _ '[seon.agent/judge! seon.agent/send-gate! seon.agent/handle! seon.proofs/gate-tx]
+        seam (str "(do (in-ns 'user) (def asks (atom 0)) (def sent (atom []))"
+                  " (alter-var-root #'seon.agent/ask-gate (constantly (fn [_ _] (swap! asks inc) nil)))"
+                  " (alter-var-root #'seon.agent/send-gate! (constantly (fn [k tests _] (swap! sent conj [k tests]) nil))) :ok)")
+        status (str "(:seon.test/status (datahike.api/pull (seon.agent/db) [:seon.test/status] [:var/name '" t "]))")
+        first-prove "(let [r (my.agent/prove)] {:asks @user/asks :sent (count @user/sent) :unjudged (:unjudged r)})"
+        arrive (str "(let [[k tests] (first @user/sent)] (seon.agent/handle! {:op :reply :k k :result {:value {:results (zipmap tests (repeat :pass))"
+                    " :digests (zipmap tests (repeat \"gate\")) :failures {}}}}) :ok)")
+        second-prove (str "(do (my.agent/prove) {:asks @user/asks :sent (count @user/sent) :status " status "})")
+        [_ _ first-r _ second-r]
+        (in-agent (fn [_] [seam (process-proof "a-proof-only-the-gate-runs" 2) first-prove arrive second-prove])
+                  {:proofs #{t}})]
+    (is (= [0 1] ((juxt :asks :sent) (:value first-r))) (str "the prove asked the gate and waited on nothing: " (pr-str first-r)))
+    (is (some-> (:unjudged (:value first-r)) (str/includes? "gate")) (str "and says its process proof is on the gate: " (pr-str first-r)))
+    (is (= {:asks 0 :sent 1 :status :green} (:value second-r)) (str "the gate's answer, arrived since, is its status; nothing asked again: " (pr-str second-r)))))
+
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 6 asks of the test's own at ~0.25M (an eval's recorded answer decoded); one log file written and deleted ~50k = ~3000k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 6}} a-gate-that-cannot-run-is-the-proves-answer
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3500000 :asks 8}} a-gate-that-cannot-run-is-the-proves-answer
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a gate that cannot run the candidate (its runner made no plan: on 2026-11-10 a checkout
   ;; that took another tree's binary) answers its typed error, and the agent's prove answers that error, never a verdict that reads as nothing to
   ;; judge; a gate whose run reached no test is a verdict that is not green. The gate answered at its seam (seon.agent/ask-gate)
@@ -2732,15 +2755,16 @@
         _ '[seon.agent/judge! seon.agent/ask-gate seon.proofs/gate-tx]
         log (str (System/getProperty "java.io.tmpdir") "/gate-" (random-uuid) ".log")
         _ (spit log "prove: run\nSHARD 0 tests\n")
+        ;; an eval's prove asks the gate and waits on nothing (send-gate!): its answer, delivered here as root's :reply is, is the next prove's
         seam (str "(do (in-ns 'user) (def gate-reply (atom nil))"
-                  " (alter-var-root #'seon.agent/ask-gate (constantly (fn [tests _] (@gate-reply tests)))) :ok)")
+                  " (alter-var-root #'seon.agent/send-gate! (constantly (fn [k tests _] (seon.agent/handle! {:op :reply :k k :result (@gate-reply tests)}) nil))) :ok)")
         prove "(let [r (my.agent/prove)] (if (seon.contract/error? r) [:error (:seon.error/type r)] [:verdict (:proofs r)]))"
-        [_ _ _ refused _ unreached]
+        [_ _ _ _ refused _ _ unreached]
         (in-agent (fn [_] [seam (process-proof "a-proof-no-gate-could-run" 2)
                            "(reset! user/gate-reply (fn [_] (seon.contract/error :seon.fx/io-error 'seon.fx/run-on-checkout \"the test runner made no plan\" {:no-plan true})))"
-                           prove
+                           prove prove
                            (str "(reset! user/gate-reply (fn [tests] {:value {:results (zipmap tests (repeat :error)) :digests (zipmap tests (repeat \"gate\")) :log " (pr-str log) "}}))")
-                           prove])
+                           prove prove])
                   {:proofs #{t}})]
     (.delete (java.io.File. ^String log))
     (is (= [:error :seon.fx/io-error] (:value refused)) (pr-str refused))
