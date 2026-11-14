@@ -1570,6 +1570,22 @@
     (is (= :refork (:outcome end)) (pr-str end))
     (is (= 1 (:model-calls end)) (str "the turn in flight finished, and no model call ran on the old program: " (pr-str end)))))
 
+;; Estimate: three proc steps on a map and two channel puts, ~0.3M ticks
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-clone-that-fails-before-its-descriptor-releases-what-waited
+  ;; the hang behind an-outside-agent-writes-its-end in three land checks (2026-11-14): root holds every message to an agent
+  ;; while a clone's descriptor is in its handshake (:holding), and only the agent's :fd-ready released it, so a clone that
+  ;; failed first (its fork refused at its bound, under load) held the agent's next request, the :done eval among them, for
+  ;; good. Any end of the clone request now ends the hold, in order
+  (let [out (clojure.core.async/chan 10)
+        st0 {:id :a1 :end {:out out} :inflight {}}
+        [st _] (#'seon.agent-proc/agent-in st0 {:op :req :rid 5 :kind :clone :new :a2 :msg {:op :clone}})
+        _ (clojure.core.async/poll! out)
+        [st _] (#'seon.agent-proc/agent-in st {:op :req :rid 6 :kind :eval :msg {:op :eval :forms "(hand-back!)"}})
+        _ (is (nil? (clojure.core.async/poll! out)) "held while the clone's handshake is open")
+        st (#'seon.agent-proc/agent-frame st (volatile! {}) {:op :clone-failed :k 5 :error {:seon.error/type :seon.lib/fork-refused :seon.error/message "refused"}})]
+    (is (nil? (:holding st)) "the clone's failure ends the hold")
+    (is (= :eval (:op (clojure.core.async/poll! out))) "and the request that waited goes out")))
+
 (deftest ^{:seon.test/estimate {:ticks 200000}} a-stop-lets-the-eval-in-flight-end-by-its-own-bound
   ;; the same drain, root's side (seon.agent-proc/stop!): a stop interrupted an agent's eval in flight (SIGUSR1), cutting it at
   ;; its next safe point; it now sends :stop alone, which the agent answers after the request before it, that request ending by
