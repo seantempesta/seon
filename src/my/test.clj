@@ -74,21 +74,27 @@
    (page "docs/calc.md" "# Calc\n\nThe arithmetic every example uses: app.calc/add, app.calc/total.\n\n## Reports\n\nA report line, app.report/line, totals with app.calc/total.\n")
    (task 'app.calc "total-is-exact" "Make app.calc/total exact for an empty seq (0)." #{'app.calc-test/total-sums})])
 
-(def ^:private the-worlds
-  "The world and the world that keeps history, each built once a process from base (`world` answers them). See docs/testing.md#testing-in-the-world."
-  {false (delay (apply with (pdb/empty-db false) base)) true (delay (apply with (pdb/empty-db true) base))})
+(def ^:private ^:seon.test/fixture plain-world
+  "The world, built once a process from base (`world` answers it), a fixture: forced before any test (seon.proofs/warm-fixtures!),
+  never inside the first test's budget (~3.2M ticks). See docs/testing.md#testing-in-the-world."
+  (delay (apply with (pdb/empty-db false) base)))
+
+(def ^:private ^:seon.test/fixture history-world
+  "The world on a db that keeps history, built once a process from base (`world` answers it), a fixture as plain-world is. See
+  docs/testing.md#testing-in-the-world."
+  (delay (apply with (pdb/empty-db true) base)))
 
 (defn world
   "The base world, a db value: Seon's schema and a small program shaped like production:
   namespaces app.calc (add, inc2, total; a macro twice; add contracted) and app.report (line,
   calling app.calc/total), their tests app.calc-test (add-adds, total-sums), the wiki page
   docs/calc.md citing them, and the task app.calc/total-is-exact. Built once per process, in
-  memory (~0.6 M ticks). Add what a test needs with `with`. With {:history? true}, the same world
+  memory (~3.2M ticks), before any test (a fixture). Add what a test needs with `with`. With {:history? true}, the same world
   on a db that keeps history, for a test that reads d/history or d/as-of.
   Example: (my.test/world {:history? true}) See docs/testing.md#testing-in-the-world."
   {:malli/schema [:function [:=> [:cat] :seon.host/db] [:=> [:cat [:map [:history? {:optional true} :boolean]]] :seon.host/db]]}
   ([] (world {}))
-  ([{:keys [history?]}] @(the-worlds (boolean history?))))
+  ([{:keys [history?]}] (if history? @history-world @plain-world)))
 
 (defn eval-in
   "The response of code asked of the REPL in this process, as clojure's REPL answers it, in namespace nsym
