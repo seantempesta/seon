@@ -351,7 +351,7 @@
   [base dbs data-attrs]
   (into #{} (mapcat (fn [db] (touched-by base db data-attrs (content-datoms base db data-attrs)))) dbs))
 
-(declare key-entity)
+(declare key-entity entries entry-eids)
 
 (defn- tx-branch
   "The branch transaction tx was written on, as db holds its facts (:seon.tx/branch, seon.db/tx-meta)."
@@ -368,10 +368,8 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/program-key] :boolean]}
   [base side other [kind x a & vs :as k]]
   (let [others (tx-branch other (:max-tx other))
-        ;; a datom side's transaction wrote: one naming the other side's branch is the other's, and one the other side's history holds
-        ;; at the same transaction is history both share (a seed, a merge either way), so it is no one's change; one naming none is the side's
-        own-datom? (fn [d] (not (or (and others (= others (tx-branch side (:tx d))))
-                                    (some #(= (:tx d) (:tx %)) (d/datoms (d/history other) :eavt (:e d) (:a d) (:v d))))))
+        ;; a datom side's transaction wrote: one naming the other side's branch is the other's; one naming none is the side's
+        own-datom? (fn [d] (not (and others (= others (tx-branch side (:tx d))))))
         attr-owned? (fn [e a vs]
                       (let [dts (fn [db] (if (seq vs) (d/datoms db :eavt e a (first vs)) (d/datoms db :eavt e a)))
                             held (into #{} (map :v) (dts base))
@@ -558,7 +556,8 @@
 (defn merge-main
   "The one merge of main into a branch, decided: head's own datoms since base (`own-datoms`), their keys (program keys and facts,
   `touched-by`), and main's content at those keys only, against base's: a key both changed, differently, is a conflict, and any
-  conflict stops it, writing nothing ({:conflicts}). Clean, the tx that makes main's head the merged branch, head's own datoms with
+  conflict stops it, writing nothing ({:conflicts}), unless the branch decided it (its unmerged entry resolved, or the key redefined
+  since, while main's content there is still the entry's theirs: the branch's value stands). Clean, the tx that makes main's head the merged branch, head's own datoms with
   their transactions' facts and retractions ({:tx :keys}): main plus the branch's own change. Main's moves elsewhere are never read,
   so it costs what the branch wrote, never how far main moved. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:or [:map [:conflicts [:vector :map]]] [:map [:tx :seon.db/tx-data] [:keys [:vector :any]]]]]}
@@ -575,9 +574,15 @@
         o (reduce (fn [p k] (if (and (or (= :datum (first k)) (stated-keys (first k))) (not= (get p k) (get b k)) (not (owned? base head main k)))
                               (if (contains? b k) (assoc p k (get b k)) (dissoc p k)) p))
                   (program-of head ks :all) ks)
-        r (three-way b o m)]
-    (if (seq (:conflicts r))
-      {:conflicts (:conflicts r)}
+        r (three-way b o m)
+        ;; a conflict the branch has decided (git add): its entry is resolved, or the branch redefined the key since, and main's content
+        ;; there is still the entry's theirs, so the branch's value stands; main moving the key again is a new conflict
+        held (into {} (map (juxt :key identity)) (entries head))
+        decided? (fn [{k :key}] (when-let [en (held k)]
+                                  (and (or (:resolved? en) (not= (get o k) (:ours en))) (= (get m k) (:theirs en)))))
+        conflicts (vec (remove decided? (:conflicts r)))]
+    (if (seq conflicts)
+      {:conflicts conflicts}
       (let [unique? #(= :db.unique/identity (get-in (:schema head) [% :db/unique]))
             named (into #{} (keep #(when (unique? (:a %)) (:e %))) added)
             txs (into (sorted-set) (map :tx) added)]
@@ -585,7 +590,9 @@
          :tx (-> (attribute-declarations main added)
                  (into (for [{:keys [e a v]} gone] (if (and (unique? a) (not (named e))) [:db/retractEntity e] [:db/retract e a v])))
                  (into added)
-                 (into (for [t txs dt (d/datoms head :eavt t)] dt)))}))))
+                 (into (for [t txs dt (d/datoms head :eavt t)] dt))
+                 ;; the merge settles every entry: none stays on the merged branch
+                 (into (for [e (entry-eids head)] [:db/retractEntity e])))}))))
 
 ;; ---- what program code does not do ----------------------------------------------------
 
