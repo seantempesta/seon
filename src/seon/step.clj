@@ -26,13 +26,13 @@
   thunk is a put! that never waits: nothing parks while it is armed. Answers the handle `cancel!` takes, so a
   bound whose wait ended disarms (measured: 0.17 us to arm and 0.04 us to cancel, against 5.4 us and a fiber
   held for the whole bound for a go block on a timeout)."
-  {:malli/schema [:=> [:cat :seon.host/chan :int :any] :any]}
+  {:malli/schema [:=> [:cat :seon.host/chan :int :any] :seon.host/object]}
   [ch ms m]
   (jolt.host/timer-at! (+ (quot (System/nanoTime) 1000000) (max 1 ms)) (fn [] (a/put! ch m))))
 
 (defn cancel!
   "Disarm a `put-after!` by its handle: its message is never put (one that already fired is put already). Answers nil."
-  {:malli/schema [:=> [:cat :any] :nil]}
+  {:malli/schema [:=> [:cat [:maybe :seon.host/object]] :nil]}
   [h] (when h (jolt.host/timer-cancel! h)) nil)
 
 (defn timer

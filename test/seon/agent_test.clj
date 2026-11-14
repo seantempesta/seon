@@ -3801,6 +3801,8 @@
       (is (= 3 (count (:held-plans one))) "an answered ask's digest's plans stay while another ask awaits that digest")
       (let [after (#'agent/release-plan one 2)]
         (is (= #{"b@dB"} (set (keys (:held-plans after)))) "and go once none does")
+        (is (= #{"b@dB"} (set (keys (:held-plans (#'agent/release-plan (assoc-in after [:proving 3] "dB") 3)))))
+            "but the newest stays past its ask's answer: a second ask at its digest the service answers from its done run records with it")
         (is (= #{"b@dC"} (set (keys (:held-plans (#'agent/hold-plan after "b@dC" "dC" (plan 'a.x-test/one "1c" []))))))
             "a plan no ask awaits is dropped by the next: what is held is the runs in flight plus the newest")))))
 

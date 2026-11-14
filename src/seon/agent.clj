@@ -1632,12 +1632,13 @@
 
 (defn- release-plan
   "Agent state st with prove! ask k answered or ended: k leaves :proving, and the plans of its digest go when no other ask
-  awaits it. See docs/merging.md#the-test-service."
+  awaits it, but for the newest: an ask the service answers from its done run, planning nothing, records with it, as the one
+  slot it replaces always did. See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :map :int] :map]}
   [st k]
-  (let [d (get-in st [:proving k]) st (update st :proving dissoc k)]
+  (let [d (get-in st [:proving k]) st (update st :proving dissoc k) n (:newest-plan st)]
     (cond-> st (not-any? #{d} (vals (:proving st)))
-      (update :held-plans #(into {} (remove (fn [[_ p]] (= d (:digest p)))) %)))))
+      (update :held-plans #(into {} (remove (fn [[pk p]] (and (= d (:digest p)) (not= pk n)))) %)))))
 
 (defn- held-plans
   "The plans agent state st holds (`hold-plan`), the newest first: a grant's items run as the first that gave each its digest.
