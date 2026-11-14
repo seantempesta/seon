@@ -874,14 +874,14 @@
                              (pdb/written-keys (seon.union/changes before @conn))))
            reads (fn [f] (into #{} (map pr-str) (nth (seon.ratom/reads-of nil f) 2)))
            ;; a: writes, reads nothing; c: writes its own fact and reads it back by its key; b: reads every agent's key
-           a {:seon.reads/written-keys (write! "a-write")}
+           a {:seon.reads/written-key-set (write! "a-write")}
            c-w (write! "c-write")
-           c {:seon.reads/written-keys c-w
+           c {:seon.reads/written-key-set c-w
               :seon.reads/key-set (reads #(:db/id (d/entity @conn [:seon.agent/key "c-write"])))}
            b {:seon.reads/key-set (reads #(set (d/q '[:find [?k ...] :where [_ :seon.agent/key ?k]] @conn)))}
            named (proofs/reading-others-writes {'t/a a 't/b b 't/c c})]
        (is (= '#{t/a t/c} (named 't/b)) "a read of an attribute whole reads every test's writes of it")
        (is (not (contains? named 't/c)) "a read of its own entity by its id reads no other test's writes")
        (is (not (contains? named 't/a)) "a test that read nothing is no reader")
-       (is (= '{t/x #{t/a}} (proofs/reading-others-writes {'t/a {:seon.reads/written-keys #{":all"}} 't/x {:seon.reads/key-set #{"[:e 1]"}}}))
+       (is (= '{t/x #{t/a}} (proofs/reading-others-writes {'t/a {:seon.reads/written-key-set #{":all"}} 't/x {:seon.reads/key-set #{"[:e 1]"}}}))
            "a schema datom touches every read")))))
