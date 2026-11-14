@@ -3741,6 +3741,25 @@
     (is (= "d-base" (base 'a/moved)) "a test whose reach moved keeps base's own digest")
     (is (= '[a/moved] sel) "so the branch's change is the test its reach moved, never one some run recorded reads for")))
 
+;; docs/merging.md#the-test-service: runs of one branch overlap (a turn's prove!, root's :judge, a session's run; tests-4 read it
+;; 2026-11-14: root forwards each :tests with no per-agent exclusion, system.clj's pend), so a plan is held under its run's digest.
+;; Red before: one :held-plan slot, so the second run's plan replaced the first's while its prove! awaited, and the first recorded its
+;; answer at the second's digests. Estimate: a few assocs and two item checks over two plans, ~10k ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000}} an-overlapping-runs-plan-is-its-own
+  (let [plan (fn [t d] {:digests {t d} :plan {}})
+        st (-> {:proving {1 "dA"}}
+               (#'agent/hold-plan "dA" (plan 'a.x-test/one "1a"))
+               (#'agent/hold-plan "dB" (plan 'a.x-test/one "1b")))
+        sel #(#'agent/grant-selection (vec (vals (:held-plans %1))) %2 (fn [] :planned-again))]
+    (is (= "1a" (get-in st [:held-plans "dA" :digests 'a.x-test/one])) "the plan an ask awaits stays, whatever plan came after")
+    (is (= "1b" (get-in st [:held-plans "dB" :digests 'a.x-test/one])) "beside the newest")
+    (is (= ['a.x-test/one] (:run (sel st {'a.x-test/one "1a"}))) "an item of the first run runs as its plan planned it")
+    (is (= ['a.x-test/one] (:run (sel st {'a.x-test/one "1b"}))) "and one of the second as its")
+    (let [after (#'agent/release-plan st 1)]
+      (is (= #{"dB"} (set (keys (:held-plans after)))) "an answered ask's plan goes; nothing awaits it")
+      (is (= #{"dC"} (set (keys (:held-plans (#'agent/hold-plan after "dC" (plan 'a.x-test/one "1c"))))))
+          "and a plan no ask awaits is dropped by the next: at most one more than the asks in flight are held"))))
+
 ;; docs/merging.md#the-test-service: a grant the agent planned again (its held plan gave an item another digest) answers exactly
 ;; the granted items, never what the run's own selection filter keeps. Found 2026-11-13: the loop task held by
 ;; :seon.prove/no-verdict for my.test-test/the-world-is-built-once-per-process, and before it a datahike test on a refine: the

@@ -126,7 +126,7 @@
   ;; the session's seon_prove for agent a3's branch at tx 7, and a3's turn asking for the same
   (let [[st outs] (feed (proc0) [(req 10 :agent-3 7 :a3) (req 11 :agent-3 7 :a3)])]
     (is (= 1 (count (asks outs :tests))) "one plan request, to the agent that holds the branch")
-    (is (= {:op :tests :id :a3 :mode :judge :plan? true} (:req (first (asks outs :tests)))))
+    (is (= {:op :tests :id :a3 :mode :judge :plan? true :digest "d7"} (:req (first (asks outs :tests)))) "its run's digest, which the agent holds the plan under")
     (is (empty? (asks outs :spawn)) "the agent runs its own branch: no prove agent")
     (let [[_ all] (run-through st outs test-run-answer)]
       (is (= [10 11] (waiters-answered all)))

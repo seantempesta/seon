@@ -342,7 +342,7 @@
   (when (:store-conn @state)
     (swap! state #(assoc % :fn-costs (profile/accrue (:fn-costs % {}) fns (:eval %))))))
 
-(declare transact!)
+(declare transact! release-plan)
 
 (defn commit!
   "Commit the writes this agent applied (run-ahead) to its branch, once, through its own
@@ -1049,21 +1049,25 @@
   ;; inherits it and the turn's other readers find it held (branch-changes)
   (branch-changes (:base @state) (db))
   (let [k (:tx-seq (swap! state update :tx-seq inc))
+        ;; the run's digest, the key its plan is held under (`hold-plan`) while this ask awaits it
+        d (program/run-digest (db))
         answered (volatile! false)]
+    (swap! state assoc-in [:proving k] d)
     (try
       (let [;; its proofs, the task's and those asked for by name: the service answers past a red until each has its verdict
             ;; (seon.prove/item-ended; Sean, 2026-11-11: "have them fix that"), which an ask that named none never got
             proofs (into (or (some->> (:task @state) (task/task (db)) :seon.task/accumulated :proofs) #{}) (filter qualified-symbol?) names)
-            r (:result (await-reply k (cond-> {:op :prove :k k :t (:max-tx (db)) :digest (program/run-digest (db)) :mode mode}
+            r (:result (await-reply k (cond-> {:op :prove :k k :t (:max-tx (db)) :digest d :mode mode}
                                         (seq names) (assoc :names names)
                                         (seq proofs) (assoc :proofs proofs))))]
         (vreset! answered true)
         ;; its facts on this branch, once an ask, from the answer and this agent's plan of the run
         (if (and (map? r) (not (contract/error? r)))
-          (record-answer! r (:held-plan @state) (or (some->> (:task @state) (task/task (db)) :seon.task/accumulated :proofs) #{}))
+          (record-answer! r (get (:held-plans @state) d) (or (some->> (:task @state) (task/task (db)) :seon.task/accumulated :proofs) #{}))
           r))
       ;; an interrupt ended this wait, the only way one ends before its answer: the test child it was for goes too, so its run answers as a death (no verdict) and nothing is left running
-      (finally (when-not @answered (some-> (:test-child @state) (lib/kill! (jolt.host/signal-number "KILL")))))))))
+      (finally (swap! state release-plan k)
+               (when-not @answered (some-> (:test-child @state) (lib/kill! (jolt.host/signal-number "KILL")))))))))
 
 (defn- load-removed!
   "In a test child, define each of main's tests the branch removed that this run runs (test-plan's :removed, {test src}, of
@@ -1601,6 +1605,24 @@
    :plan (cond-> (select-keys (:plan sel) [:removed :process :base-digests :static-reads])
            (:reads-rd (:plan sel)) (assoc :reads-rd (force (:reads-rd (:plan sel)))))})
 
+;; docs/merging.md#the-test-service: runs of one branch overlap (a turn's prove!, root's :judge, a session's run, each its
+;; own ask of the service), so a plan is held under its run's digest, never in one slot the next plan overwrites
+(defn- hold-plan
+  "Agent state st holding plan (held-plan) under digest d, its run's (seon.prove/plan! names it), beside the plans some
+  prove! of this agent still awaits (:proving, {k digest}); any other is dropped, so at most one more than the asks in flight
+  are held. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map [:maybe :string] :map] :map]}
+  [st d plan]
+  (assoc st :held-plans (assoc (select-keys (:held-plans st) (vals (:proving st))) d plan)))
+
+(defn- release-plan
+  "Agent state st with prove! ask k answered or ended: k leaves :proving, and its digest's plan goes when no other ask awaits
+  it. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map :int] :map]}
+  [st k]
+  (let [d (get-in st [:proving k]) st (update st :proving dissoc k)]
+    (cond-> st (not-any? #{d} (vals (:proving st))) (update :held-plans dissoc d))))
+
 (defn- item-selection
   "The selection that runs items ({test digest}, the test service's grant) as held (held-plan, this agent's last plan of a
   run) planned them: each test alone, selected and run, reused and deferred nothing; nil when held gave any of them another
@@ -1630,15 +1652,15 @@
            :reused-reports (into (reused-reports reused here) refused))))
 
 (defn- grant-selection
-  "What a run selects: items given (the test service's grant, {test digest}) are what it runs, as held planned them
-  (item-selection), or, held gone or of another program, exactly those items as planned again (plan: run-plan of their names,
+  "What a run selects: items given (the test service's grant, {test digest}) are what it runs, as one of held (the plans this
+  agent holds, `hold-plan`) planned them (item-selection), or, none held or each of another program, exactly those items as planned again (plan: run-plan of their names,
   granted-selection: none dropped by the run's selection filter); given and empty, nothing (a grant of no items once ran
   every test, 1,765 of them); items not given (nil), a plan of its own. See docs/merging.md#the-test-service."
-  {:malli/schema [:=> [:cat [:maybe :map] [:maybe [:map-of :qualified-symbol :string]] :seon.host/fn] :map]}
+  {:malli/schema [:=> [:cat [:maybe [:sequential :map]] [:maybe [:map-of :qualified-symbol :string]] :seon.host/fn] :map]}
   [held items plan]
   (cond (nil? items) (plan)
-        (empty? items) {:plan (:plan held) :judge [] :selected [] :run [] :deferred [] :reused {} :reused-reports [] :digests {}}
-        :else (or (item-selection held items)
+        (empty? items) {:plan (:plan (first held)) :judge [] :selected [] :run [] :deferred [] :reused {} :reused-reports [] :digests {}}
+        :else (or (some #(item-selection % items) held)
                   (let [sel (plan)] (if (:unread sel) sel (granted-selection sel items))))))
 
 (defn child-count
@@ -1699,7 +1721,7 @@
     (contract/error :seon.agent/program-differs #'seon.agent/run-tests-forked
                     (str "this agent runs another program than its branch: " (str/join ", " (map :var differs)))
                     {:differs differs})
-  (let [{:keys [unread] :as sel} (cond-> (grant-selection (:held-plan @state) items #(run-plan proofs mode names))
+  (let [{:keys [unread] :as sel} (cond-> (grant-selection (some-> (:held-plans @state) vals vec) items #(run-plan proofs mode names))
                                     checkout (assoc-in [:plan :checkout] checkout)
                                     batch (assoc-in [:plan :seon.prove/batch] batch))]
   (if unread
@@ -1992,7 +2014,7 @@
                    ;; digests (each item's run records what it ran); main's run is main's prove's to write
                    ;; held for the items it grants this agent (item-selection), each run at the digest planned here, and for
                    ;; the facts its answer writes on this branch (record-answer!)
-                   _ (when-not (or (:unread sel) (:unread pp)) (swap! state assoc :held-plan (held-plan sel)))]
+                   _ (when-not (or (:unread sel) (:unread pp)) (swap! state hold-plan (:digest m) (held-plan sel)))]
                [{:op :tests :id (:id m) :mem-mb (mem-mb)
                  :result (or (:unread sel) (:unread pp)
                              (cond-> {:items (select-keys (:digests sel) (:run sel)) :selected (:selected sel) :deferred (:deferred sel)

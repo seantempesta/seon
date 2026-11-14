@@ -641,7 +641,7 @@
         (let [[st rid] (pend st p op id)
               msg (case op
                     :eval (cond-> {:op :eval :forms (:forms m)} (:ticks m) (assoc :ticks (:ticks m)) (:origin m) (assoc :origin (:origin m)))
-                    :tests (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m)) (:names m) (assoc :names (:names m)) (:mode m) (assoc :mode (:mode m)) (:plan? m) (assoc :plan? true) (:process? m) (assoc :process? true) (:items m) (assoc :items (:items m))
+                    :tests (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m)) (:names m) (assoc :names (:names m)) (:mode m) (assoc :mode (:mode m)) (:plan? m) (assoc :plan? true :digest (:digest m)) (:process? m) (assoc :process? true) (:items m) (assoc :items (:items m))
                                             ;; a session's or a landing's checkout: its granted items' test children read its files and its process store
                                             (:checkout m) (assoc :checkout (:checkout m))
                                             ;; the batch's tag: its test child and what that starts carry it, so the :process owner reads
