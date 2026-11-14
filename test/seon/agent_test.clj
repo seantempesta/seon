@@ -684,6 +684,19 @@
         (str "red as recorded, with its failure, nothing run and no child forked " (pr-str judge)))
     (is (= [:pass 1] (:value other)) (str "another's red runs, and is green: " (pr-str other)))))
 
+;; Estimate: as its sibling below (in-agent and three asks, a test child forked), ~20M
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 20000000 :asks 3}} a-test-child-holds-its-branchs-config-never-its-parents
+  ;; the owner, 2026-11-14: \"Why does it matter what the config is that we are forking from\": a process is handed its branch's
+  ;; environment and its first act is to hold it (seon.agent/hold-env!), whatever its parent held. A test child was a fork of its
+  ;; agent, itself a fork of root, so it held root's own layers and variables: here the shared root's source root (its --set and
+  ;; SEON_SOURCE_ROOT), as the standing root's gave the first real task's agent's tests (seon.source-test's red in context's agent
+  ;; nae67b62, 2026-11-14). A test process holds a test's layers (--profile scripted, no local layer) and variables over its
+  ;; branch's config entries, as a bin/test shard does
+  (let [[_ run] (in-agent ["(ns env-test (:require [clojure.test :refer [deftest is]])) (deftest no-parents-layers (is (nil? (get seon.config/config :seon.config.source/root))) (is (= :scripted (seon.config/profile))))"
+                           "(select-keys (my.agent/prove 'env-test/no-parents-layers) [:results])"]
+                          {:proofs #{'env-test/no-parents-layers}})]
+    (is (= {:results '{env-test/no-parents-layers :pass}} (:value run)) (str "the test child holds a test's environment, not root's: " (pr-str run)))))
+
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 20000000 :asks 3}} an-agents-green-records-what-it-read
   ;; docs/source.md#tests-run-by-reach: a green an agent's run stores is keyed by what it read (seon.proofs/reads-key): the
   ;; functions it called and itself, at the digests of the agent's reads index, beside its verdict as reads.edn, so a later plan
@@ -1490,6 +1503,28 @@
 ;; Estimate: the world, built once a process (~3.2M measured here; my.test/world's docstring says ~0.6M), and three work! loops of
 ;; at most 3 turns on it (each: its start's reads and writes on the value ~0.2M, ~3 turns of a few datoms and an error map,
 ;; agent/error-map ~0.3M each; first put at 50k a turn, which missed the error map and the world) = ~6M: 6,000,000
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-run-told-to-stop-ends-between-turns
+  ;; task seon.system/a-stop-or-crash-resumes-from-one-resume-point-and-says-what-it-lost (one stop, one drain, agreed by
+  ;; runtime, tests and web, 2026-11-14): a stop lets each item in flight end by its own bound. An agent working a task holds
+  ;; one request for the whole run, so the item is the turn: told to stop (root's :stop, read at once by its transport), the run
+  ;; ends :waiting after the turn in flight, never cut inside it. Estimate: as its sibling below, the world and one work! loop
+  (let [red {:reasons [{:reason :proof-red}]}
+        end (work-with (fn [st called!] (swap! agent/state assoc :draining true) (called!) st) (constantly red))]
+    (is (= :waiting (:outcome end)) (pr-str end))
+    (is (= 1 (:model-calls end)) (str "the turn in flight finished (its one model call), and no other began: " (pr-str end)))))
+
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-stop-lets-the-eval-in-flight-end-by-its-own-bound
+  ;; the same drain, root's side (seon.agent-proc/stop!): a stop interrupted an agent's eval in flight (SIGUSR1), cutting it at
+  ;; its next safe point; it now sends :stop alone, which the agent answers after the request before it, that request ending by
+  ;; its own tick budget. Estimate: one step of a map, ~0.2M
+  (let [sigs (atom []) sent (atom [])]
+    (with-redefs [seon.lib/kill! (fn [_ sig] (swap! sigs conj sig) nil)
+                  seon.agent-proc/to-proc! (fn [st m] (swap! sent conj (:op m)) st)]
+      (let [st (#'seon.agent-proc/stop! {:pid 4242 :inflight {7 {:op :eval}}})]
+        (is (= [] @sigs) "no signal: the eval in flight ends by its own bound")
+        (is (= [:stop] @sent) "the agent is told to stop after it")
+        (is (:stop-sent st))))))
+
 (deftest ^{:seon.test/estimate {:ticks 6000000}} a-reasoning-overrun-is-the-next-turns-to-read
   ;; docs/failure-points.md (a turn of the agent's loop): a model call whose reasoning spent its whole token budget answers
   ;; :seon.model/reasoning-ate-reply, and the run ended :error at that turn, though the agent could reason less and go on
