@@ -281,12 +281,16 @@
   (let [a (rv/atom {:db/id 1 :x 0 :task {:db/id 2 :plan "p" :n 1}
                     :evals (#'seon.ctx/members-map [[10 {:db/id 10 :v 1}] [11 {:db/id 11 :v 2}]])})
         v #(rv/ref-view a ctx/changes)
-        runs {:plan #(:plan (:task (v))) :count #(count (:evals (v))) :e10 #(:v (get (:evals (v)) 10))}
+        runs {:plan #(:plan (:task (v))) :count #(count (:evals (v))) :e10 #(:v (get (:evals (v)) 10))
+              ;; the entity's own key set alone (seon.render.ui/added-keys): which keys it holds, never their values
+              :key-set #(rv/key-set (v))}
         ix (reduce-kv (fn [ix k f] (rv/read-index ix k (second (rv/reads-of a f)) conj)) nil runs)
         ;; the tree moved by f: the runs its diff reaches
         moved (fn [f] (let [t0 @a] (swap! a f) (rv/reached ix (ctx/changes t0 @a))))]
     (is (= #{} (moved #(assoc-in % [:task :n] 2))) "a sibling attribute's change reaches no read")
-    (is (= #{} (moved #(assoc % :x 1))) "nor an unread key's")
+    (is (= #{} (moved #(assoc % :x 1))) "nor an unread key's, nor a key set's: a value replaced adds or removes no key")
+    (is (= #{:key-set} (moved #(assoc % :y 1))) "a key added reaches the key set")
+    (is (= #{:key-set} (moved #(dissoc % :y))) "and a key gone")
     (is (= #{:plan} (moved #(assoc-in % [:task :plan] "q"))) "a read path's change reaches its reader")
     (is (= #{} (moved #(assoc-in % [:evals 11 :v] 7))) "iterating reads the key set: a member's change reaches no count, nor a read of another member")
     (is (= #{:count} (moved #(assoc-in % [:evals 12] {:db/id 12 :v 3}))) "a member added reaches the iteration, not a read of another member")
@@ -319,7 +323,7 @@
         (is (= #{[[:evals 3 :v] :deep]} (set (remove r2 r1))) "a member gone: its read lost")
         (is (= (whole r2) ix2) "moved by it: the index built whole")
         (is (= #{:r} (reached ix2 #(assoc-in % [:evals 3] {:db/id 3 :v 1}))) "and back: the iteration")
-        (is (= {:pre {} :deep {} :keys {}} (move ix2 r2 #{})) "a reader that reads nothing is gone from it")))))
+        (is (= {:pre {} :deep {} :keys {} :key-set {}} (move ix2 r2 #{})) "a reader that reads nothing is gone from it")))))
 
 (deftest a-view-is-a-map
   ;; the view passes as the value it views wherever a map is read, and the printer takes the real one

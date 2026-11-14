@@ -679,7 +679,9 @@
                ;; - 2026-11-14 (web): one seon.render/entity-read-keys per component run, its tree reads as datom keys: 15 calls
                ;; sum: ~2,455 calls, ~0.78M ticks, ~3.3 MB. Measured 2026-11-13 at 2 / 4 / 8: 2,429 calls, 0.82M ticks, 3.54 MB at every size
                ;; (1.01M and 4.17 MB when rules sorted all 162 vars). None of it reads the parent's history
-               :fixed {:calls 2455 :bytes 3500000 :ticks 800000}
+               ;; 2026-11-15 (context): +24 calls, seon.ratom/key-set (contracted) in each entity-schema of a view and in placed-messages, where an
+               ;; iteration was read: a page's key-set reads, constant in the parent's length
+               :fixed {:calls 2479 :bytes 3500000 :ticks 800000}
                :sizes [2 4 8]}))
 
 (defn rules-of
@@ -728,8 +730,10 @@
                ;; 2026-11-14 (web): +300 fixed calls, the html of the move's new eval and its call, drawn once: the model output places them
                ;; first (::for, no html), and the page's placement used to hit that entry and draw no html (the bug, seon.render/render!'s
                ;; :for-only); measured 2,909 / 4,629 / 8,189 at 10 / 20 / 40, ~300 over the old bound at each size, so fixed, not per turn
+               ;; 2026-11-15 (context): +6 fixed calls, seon.ratom/key-set (contracted) where the root's and joins' key sets are read in place of
+               ;; an iteration (seon.ctx/placed-messages, seon.render/entity-schema), so a value replaced reruns no reader of which keys exist
                :per-n {:calls 176 :bytes 156000}
-               :fixed {:calls 1150 :bytes 1850000}
+               :fixed {:calls 1156 :bytes 1850000}
                :sizes [10 20 40]})
   (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/walk-same-of
                :n "turns of the agent, an eval each"
