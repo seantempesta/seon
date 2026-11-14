@@ -311,7 +311,7 @@
         tree (fx/tree-id here)
         ;; the graph the plan kept for this program (test-runner/reach-graph-of: decoded and brought to date, a sixth of
         ;; building it; docs/source.md#tests-run-by-reach), built only when the kept one is another builder's
-        g (test-runner/reach-graph-of db (fx/declared-refs seon.graph/built-text) (ts/kept-program-store))
+        g (test-runner/reach-graph-of db (fx/declared-refs seon.graph/built-text) (ts/kept-program-store) tree)
         git (fn [env & args] (:out (apply sh/sh (concat ["env"] (for [[k v] env] (str k "=" v)) ["git" "-C" here] args))))
         built-with (fn [path f]
                      ;; tree with path's text replaced by (f text), or its gitlink moved when f is :pin
