@@ -444,7 +444,7 @@
                              :seon.ctx/pattern [:seon.cite/id :seon.cite/depth :seon.cite/order
                                                 {:seon.cite/of [:seon.task/id :seon.task/ns :seon.agent/key]}
                                                 ;; a cited task also by what an agent may edit of it at this path: the task content a run's end
-                                                ;; carries to main (seon.task/carry-tx), so a task that curates another reads and writes its plan here
+                                                ;; merges to main (seon.merge's [:task id] key), so a task that curates another reads and writes its plan here
                                                 {:seon.cite/target [:seon.doc/address :var/name :schema/key :ns/name :file/path
                                                                     :seon.task/id :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause]}]}
                        [:seon.cite/id :seon.cite/id] [:seon.cite/of {:optional true} :seon.cite/of] [:seon.cite/target :seon.cite/target]

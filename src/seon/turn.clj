@@ -10,8 +10,8 @@
 
   A merge task's agent first merges main into the branch (no model call) and merges main
   again each time all is green, until a merge brings nothing new; it stops early when the
-  merge is too hairy (seon.reconcile/hairy). Either way the live runtime is staged onto the
-  branch at the end (seon.stage/stage!), so the next agent on the branch holds it.
+  merge is too hairy (seon.reconcile/hairy). What its evals did is on the branch as each ran
+  (seon.repl/wrap-record), so the next agent on the branch holds it.
 
   Root starts it by evaluating (seon.turn/work! '{...}) in the agent; its end is
   a fact on the agent's record on the branch (:seon.agent/outcome and the rest), which root's judge reads."
@@ -19,7 +19,7 @@
   (:require [seon.ctx :as ctx] [seon.edn :as sedn] [seon.profile :as profile] [seon.intr :as intr] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.ctx.status :as status] [seon.ctx.wire :as wire] [seon.merge :as pm] [seon.problems :as problems]
-            [seon.stage :as stage] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print]
+            [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print]
             [seon.error :as err] [datahike.api :as d] [seon.db :as pdb] [seon.render :as render] [seon.model :as model] [clojure.data.json :as json]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: whether this
@@ -102,12 +102,11 @@
     (cond-> {:model-calls (count calls)} (seq ts) (assoc :tokens (reduce + ts)))))
 
 (defn- end!
-  "The agent's end: the live runtime staged onto the branch, the end written there (with
+  "The agent's end: the end written on its branch (with
   the error that ended it and the turns' waste, as data: session D2), and the branch committed
   (a turn's end commits the agent's run-ahead writes)."
   {:malli/schema [:=> [:cat :map :seon.agent/outcome [:maybe :string] [:maybe :map]] :seon.turn/end]}
   [{:keys [turn t0]} outcome reason error]
-  (stage/stage!)
   (let [db (agent/db) k (:key @agent/state)
         {:keys [tokens model-calls]} (agent-usage db k)
         ;; the run as its branch recorded it, whole across a restart (seon.learn/turns-of), and what its context showed: its task's

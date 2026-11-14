@@ -67,7 +67,7 @@ The words for data and branches, in Datahike's and git's terms, and the namespac
 | **program** | the forms held as facts (`:form/src`), loaded where main or a branch changes them | `seon.program` |
 | **store** | konserve under Datahike | `seon.db` |
 | **entity schema** | a Malli map with `{:seon.db/attributes true}`; its members are Datahike attributes | `seon.schema.datahike/declarations` |
-| **observation** | data on the branch that observed it, never merged | `seon.merge/carried-platform-attrs` |
+| **observation** | data on the branch that observed it, never merged | every `seon.*` attribute but `seon.merge`'s stated keys |
 | **generation** | a build of Seon's own source, recorded on main ([source](source.md#the-next-generation)) | `seon.fx/build` |
 | **prove** | run what a change reaches, reusing every green at its reach digest ([merging](merging.md#a-merge-runs-what-the-change-reaches)) | `seon.proofs/plan`, `my.agent/prove` |
 
@@ -111,7 +111,6 @@ The words for tasks and their prerequisites, and the namespace that owns each.
 | **turn loop** | inside an agent: observe, then end or act | `seon.turn/work!` |
 | **three-way** | git's merge of program maps keyed by var, form and schema entry ([storage](storage.md#merges-read-what-changed)) | `seon.merge/three-way` |
 | **unmerged entry** | a conflict kept on the branch until re-defn or `resolve!` | `seon.merge/unmerged` |
-| **stage** | staging the live runtime onto the branch | `seon.stage/stage!` |
 | **failure point** | a place the outside world can fail us, met by one named edge ([failure points](failure-points.md)) | |
 | **problem** | an open fact that something needs fixing ([errors](errors.md#problems)) | `seon.problems/report` |
 | **error fact** | an error recorded as data where it happened ([errors](errors.md#errors)) | `seon.error/fold` |
