@@ -2236,6 +2236,18 @@
   {:malli/schema [:=> [:cat :map :any] :any]}
   [_ _] [:main [#'lab-plan {}]])
 
+(deftest every-output-reader-splits-an-element-one-way
+  ;; task seon.render/one-hiccup-walk-reads-every-output (docs/render.md#a-part-prints-as-its-render): an element's second place is its
+  ;; attributes only when it is a map that is not raw html (seon.web.html/raw?), for every reader of an output: raw html there is a
+  ;; child, as text is, so a part whose output wraps either prints them in one shape
+  (let [k [`lab-plan]
+        p (fn [out] {:cache {k {:f #'lab-plan :opts {} :out out}}})
+        raw (h/raw "<b>x</b>")]
+    (is (= (r/part-form (p [:div "<b>x</b>"]) k) (r/part-form (p [:div raw]) k))
+        "raw html prints as its html text, as a text child does: one shape, never the raw value's map printed")
+    (is (= [[nil k]] (#'r/places [:div raw [::r/child k]])) "raw html in second place names no selector")
+    (is (= {} (r/misfits [:div raw [::r/child k]])) "nor is it counted as attributes")))
+
 (deftest a-view-of-a-pulled-entity-is-matched-by-its-datom-keys
   ;; docs/plan.md#the-root-concept-one-reaction-over-the-store, task seon.ratom/a-view-of-a-pulled-entity-records-its-datom-keys:
   ;; a component that read attribute a of a pulled entity e (one carrying :db/id) through the ctx view records [:ea e a], so a

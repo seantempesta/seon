@@ -346,8 +346,11 @@
                 "Linear in the children in bytes and flat in contracted calls, whatever the rest of the page holds; ticks 27k at 10 children, 326k at 100, "
                 "17.6M at 1,000, the map reads being an array map's")
      :growth :linear
-     :per-n {:calls 0 :bytes 12500}
-     :fixed {:calls 9 :bytes 60000}
+     :per-n {:calls 12 :bytes 12500}
+     ;; 2026-11-14 (web, W-5): every reader of an output asks one marker test a node and one element split an element (seon.render/marker-key,
+     ;; element-parts, private: checked in tests, not on a production call), contracted calls the inline tests were not: +12 a member (the edited component's
+     ;; output holds a row a member, each row's markers tested and elements split; the inline tests counted none) and +22 fixed
+     :fixed {:calls 31 :bytes 60000}
      :sizes [10 30 100 300]}))
 
 ;; See docs/render.md#components
@@ -718,7 +721,9 @@
                ;; every turn, seon.db/owners via schema-of 42 KB, ratom reads-of 24 KB, wire/turn-entities 18 KB, the ratom's wrap, notify and
                ;; view ~28 KB), which task seon.ctx.wire/a-turn-is-a-component-of-the-request removes: back to ~115 KB a turn when it lands.
                ;; A waiver (:overrun) was refused by health's :no-waived-proof.
-               :per-n {:calls 170 :bytes 156000}
+               ;; 2026-11-14 (web, W-5): every reader of an output asks one marker test a node and one element split an element (seon.render/marker-key,
+               ;; element-parts, private: checked in tests, not on a production call), contracted calls the inline tests were not: +6 a turn (its output's nodes)
+               :per-n {:calls 176 :bytes 156000}
                :fixed {:calls 850 :bytes 1850000}
                :sizes [10 20 40]})
   (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/walk-same-of
@@ -841,7 +846,9 @@
      ;; measured a page already laid out. Over a walk value each call does the work: placed-units, placed, places of the changed member,
      ;; styled and thrown-in (5), and its one <li> written by seon.web.html (html, write!, write-attrs!, callback, an attr-name per
      ;; attribute's part and an escape per text: ~23), ~28 calls; its html, its placements and the value's new cache entries, ~35 KB
-     :fixed {:calls 30 :bytes 40000}
+     ;; 2026-11-14 (web, W-5): every reader of an output asks one marker test a node and one element split an element (seon.render/marker-key,
+     ;; element-parts, private: checked in tests, not on a production call), contracted calls the inline tests were not: +8 (the placed list's nodes)
+     :fixed {:calls 38 :bytes 40000}
      :sizes [10 100 1000]}))
 
 
@@ -859,6 +866,8 @@
      :work "each element's attributes checked once against the schema, a misfit counted by kind; a child's marker skipped"
      :growth :linear
      ;; measured 2026-11-11: 41 calls and 26.4 KB at 10, within 4 calls and 3 KB an element at 100 and 1000 (seon.contract/fits? an element)
-     :per-n {:calls 4 :bytes 3000}
+     ;; 2026-11-14 (web, W-5): every reader of an output asks one marker test a node and one element split an element (seon.render/marker-key,
+     ;; element-parts, private: checked in tests, not on a production call), contracted calls the inline tests were not: +3 a member (its row's nodes)
+     :per-n {:calls 7 :bytes 3000}
      :fixed {:calls 5 :bytes 5000}
      :sizes [10 100 1000]}))
