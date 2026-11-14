@@ -49,7 +49,7 @@ A test ends by its result, or by a deadlock event; never by a clock ([flow](flow
 - **An effect the test does not provide answers at once** (`:seon.fx/in-test`; a model call with no provider, its typed error), never at a bound.
 - **A child's end is an event** (its link's end of file, its exit on the poller), and its process group ends with its test; a full queue parks its putter, and quiescence names the queue when its reader is parked too.
 - **What a test makes is its own:** its agents, branches and asks on a shared root are released at its end, in O(what it made).
-The wall bounds this replaces (`seon.agent/arm-wall!`, `bin/stalls`, the no-verdict cap, a test's step-end bound) go as each is ported: task `seon.step/every-wait-past-a-bound-is-a-flow-message-from-the-one-timer`.
+The one wall bound left is a peer root's answer (```seon.test-store/ask```'s peer bound, an outside process); `seon.agent/arm-wall!` is gone, and `bin/stalls`, the no-verdict cap and a test's step-end bound go as each is ported: task `seon.step/every-wait-past-a-bound-is-a-flow-message-from-the-one-timer`.
 
 ## A root costs what it boots
 
