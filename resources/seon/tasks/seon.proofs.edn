@@ -91,4 +91,9 @@ Proofs, to write red first: a test run writes one fact set per test that ran and
   :seon.task/kind :work
   :seon.task/proofs #{seon.proofs-test/a-process-tests-reads-come-back-with-its-answer}
   :seon.task/needs #{}}
+ {:seon.task/name "a-jolt-gate-is-a-test-reused-by-what-it-reads"
+  :seon.task/plan "Root, 2026-11-14 (principle 6: a status is written once; a flake is a defect). What exists: bin/jolt-gates runs every gate of Jolt's (215) for every pin, a shell runner whose verdicts are a TSV (target/jolt-gates/verdicts.tsv), outside the prove; it was run twice per pin to show non-flakiness (dropped today: once). Change: each gate is a test under the one prove (bin/prove, docs/merging.md#the-test-service), its verdict stored at its digest like every test's, its reads recorded (the Jolt files and pins it reads), so a pin reruns only the gates whose reads moved and reuses the rest. Deletes: bin/jolt-gates' own runner, verdicts.tsv and times.tsv (the prove keeps verdicts and times), test/forks/jolt-gates.txt (the gates come from Jolt's own Makefile CI-GATES). Estimate: a Jolt change reruns the gates that read it, a fraction of the 215 (~8 min whole today)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.proofs-test/a-jolt-gate-is-a-test-reused-by-what-it-reads}
+  :seon.task/needs #{}}
 ]
