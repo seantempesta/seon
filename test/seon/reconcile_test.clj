@@ -2149,6 +2149,27 @@
     (is (= #{:ba :ba2 :bb} (set @read)) "each branch read")
     (is (= 3 (count @read)) "once")))
 
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-merge-tells-the-agents-whose-tasks-need-it
+  ;; plan Stage 1.8: when a task merges, the live agents of the tasks that need it are told (a session waiting on it among them), with
+  ;; the form that takes it; no one else is. One function answers who and what (seon.task/landed-messages); the reconciler and bin/land send
+  (let [db (-> (mdb [(decl "a") (decl "b") (decl "c") (decl "d")])
+               (d/db-with [{:seon.agent/key "kb" :seon.agent/task [:seon.task/id "demo/b"]}
+                           {:seon.agent/key "kc" :seon.agent/task [:seon.task/id "demo/c"]}
+                           {:seon.agent/key "kd" :seon.agent/task [:seon.task/id "demo/d"] :seon.agent/ended-ms 5}
+                           {:seon.task/id "demo/a" :seon.task/merged-t 42}
+                           {:seon.task/id "demo/b" :seon.task/agent [:seon.agent/key "kb"] :seon.task/needs [[:seon.task/id "demo/a"]]}
+                           {:seon.task/id "demo/c" :seon.task/agent [:seon.agent/key "kc"]}
+                           {:seon.task/id "demo/d" :seon.task/agent [:seon.agent/key "kd"] :seon.task/needs [[:seon.task/id "demo/a"]]}]))
+        ms (task/landed-messages db ["demo/a"])]
+    (is (= ["kb"] (mapv :to ms)) "the live agent of the task that needs it, and no other")
+    (is (every? #(str/includes? (:body (first ms)) %) ["demo/a" "demo/b" "(my.branch/merge-main!)"])
+        (str "what landed, the task it unblocks, and the form that takes it: " (pr-str ms)))
+    (is (empty? (task/landed-messages db ["demo/c"])) "a task nothing needs tells no one")
+    (let [[m] (task/landed-tx db ["demo/a"] 7)]
+      (is (= [[[:seon.agent/key "kb"]] seon.task/system-sender (:body (first ms))] [(:seon.message/to m) (:seon.message/from m) (:seon.message/body m)])
+          "written as one message from the system to it, which the merge's write carries and so wakes (seon.reconcile/write)")
+      (is (= m (first (task/landed-tx db ["demo/a"] 7))) "the same landing on the same db names the same message"))))
+
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-cap-ends-the-run-held-and-gets-its-refine
   ;; docs/tasks.md#a-refine-curates-its-own-task (Optimization's restated claim, 2026-11-12): a cap ends the run, failed in its number
   ;; of turns; nothing parks at a cap; it is held, its release runs it again from its branch's head, and it gets its refine as any end
