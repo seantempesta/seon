@@ -32,6 +32,18 @@
     (is (= :refused (first r)) (str "answered " r))
     (is (<= 1 (second r)) (str "active threads " (second r)))))
 
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-shell-call-answers-its-output-or-says-why-not
+  ;; seon.lib/sh, the one shell, answered exit 0 with no output (`git status`, 2026-11-12): Jolt's pipe port read errno in a
+  ;; later call, where a collection or another fiber could overwrite it, and took any errno but EINTR and EAGAIN for the end
+  ;; of the output. Its read now keeps the errno of its own call and a failed read raises naming it (Jolt gate
+  ;; pipereadfailure, red first on a closed descriptor). Here 20 calls at once on fibers, each child writing only after it
+  ;; has read its stdin, so its first read finds nothing and parks: each answers exit 0 and its whole text. The estimate:
+  ;; 20 spawns and their pipe reads, ~2M ticks each.
+  (let [calls (doall (for [i (range 20)]
+                       (future (lib/sh "/bin/sh" "-c" (str "read go; printf 'out-" i "'") :in "go\n"))))
+        answers (mapv deref calls)]
+    (is (= (mapv (fn [i] {:exit 0 :out (str "out-" i)}) (range 20)) (mapv #(select-keys % [:exit :out]) answers)))))
+
 (def ^:private park-in-a-read
   ;; a raw Chez thread (no Jolt lock taken to start it) blocked in a collect-safe read of fd
   (scm/eval-string

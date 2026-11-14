@@ -33,8 +33,14 @@ known=(${(f)"$(grep -v '^#' "$ROOT/test/forks/jolt-gates-red.txt" | cut -d' ' -f
 # One build, then the gates in parallel: the built clone is copied per worker with APFS clonefile (cp -c: no bytes
 # copied), each worker its own HOME and TMPDIR, the gates dealt longest first by the last run's seconds
 # (target/jolt-gates/times.tsv) to the least loaded worker. JOLT_GATES_JOBS workers (default: cores less 2).
-( cd "$T/work" && HOME=$T/home JOLT_CHEZ=$C nice -n 15 make CHEZ=$C testbin ) > "$T/logs/testbin.out" 2>&1 < /dev/null \
+# Jolt's binary links Chez's kernel, and its testbin rule looks only at Jolt's sources: a Chez pin change kept the
+# binary built on the old kernel, and its gates ran the old Chez (forkbesidenative, 2026-11-14). The Chez the binary
+# was built on is kept beside it; another forces the build (Jolt's JOLT_FORCE_TESTBIN).
+CHEZ_PIN=$(cat "$ROOT/target/chez.stamp" 2>/dev/null)
+FORCE=; [[ $(cat "$T/testbin-chez" 2>/dev/null) == $CHEZ_PIN ]] || FORCE=1
+( cd "$T/work" && HOME=$T/home JOLT_CHEZ=$C JOLT_FORCE_TESTBIN=$FORCE nice -n 15 make CHEZ=$C testbin ) > "$T/logs/testbin.out" 2>&1 < /dev/null \
   || { echo "JOLT GATES FAILED (the build: $T/logs/testbin.out)"; exit 1 }
+print -r -- "$CHEZ_PIN" > "$T/testbin-chez"
 N=${JOLT_GATES_JOBS:-$(( $(sysctl -n hw.ncpu) - 2 ))}; (( N > ${#gates} )) && N=${#gates}
 typeset -A last load; [[ -f $T/times.tsv ]] && while read -r g s; do last[$g]=$s; done < "$T/times.tsv"
 for (( w = 1; w <= N; w++ )); do load[$w]=0; : > "$T/w$w.list"
