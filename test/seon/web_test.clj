@@ -15,6 +15,14 @@
 (def ^:private called? (atom false))
 (defn ^:private witness [& _] (reset! called? true) [:b "called"])
 
+;; See docs/render.md#a-component-answers-hiccup
+(deftest ^{:seon.test/estimate {:ticks 1000000}} an-html-void-element-has-no-end-tag
+  ;; seon.web.html writes no end tag for the HTML standard's void elements, read from :seon.web.html/void-element; the hand-kept set
+  ;; it replaced lacked track, so a video's <track> was written with </track>
+  (is (= "<track src=\"c.vtt\">" (h/html [:track {:src "c.vtt"}])) "track is a void element")
+  (is (= "<br>" (h/html [:br])))
+  (is (= "<p></p>" (h/html [:p])) "an element with content has its end tag"))
+
 (deftest a-symbol-in-stored-data-calls-nothing
   (reset! called? false)
   (let [out (h/html ['seon.web-test/witness "arg"])]
