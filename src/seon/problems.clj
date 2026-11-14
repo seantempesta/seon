@@ -502,6 +502,16 @@
     (walk f false false)
     @out))
 
+(defn- scan-form
+  "Form text src of namespace nsym, read to tell its lists, never to run it: an auto keyword whose alias this process has not
+  loaded keeps the alias text as its namespace (::f/x reads as :f/x, as Jolt's reader does in its build's scan mode) and a tagged
+  literal reads as itself, so a form of any namespace reads here. Deps' jolt.host/the-readers-scan-mode-is-a-read-option exposes
+  that mode, and the rewrite goes. See docs/health.md#a-hand-written-list."
+  {:malli/schema [:=> [:cat :symbol :string] :any]}
+  [nsym src]
+  (binding [*read-eval* false *default-data-reader-fn* tagged-literal]
+    (:form (first (:forms (source/read-forms nsym (str/replace src #"(?<![\w:])::(?=[\w.*+!?<>=-])" ":")))))))
+
 (defn hand-written-lists
   "A :hand-written-list row for each hand-made list among the vars names (nil: every var on db), shown with its owning namespace for
   judgement (a dial, a patch over a missing mechanism, or a restatement of held data), never a reason to refuse: a page list
@@ -525,7 +535,7 @@
           (for [ve (sort-by (comp str :var/name) vars)
                 :let [v (:var/name ve) src (some-> ve :var/form :form/src)]
                 :when src
-                :let [form (:form (first (:forms (source/read-forms (symbol (namespace v)) src))))]
+                :let [form (scan-form (symbol (namespace v)) src)]
                 m (literal-lists form)
                 :let [s (str "hand-written-list " v " " (pr-str m))]]
             (derived-row ans s (some-> (namespace v) symbol)

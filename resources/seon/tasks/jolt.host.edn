@@ -49,4 +49,8 @@
   :seon.task/kind :work
   :seon.task/proofs #{jolt.host-test/every-var-read-and-macro-expansion-records-its-forms-key}
   :seon.task/needs #{"jolt.host/a-runs-redefinition-is-its-threads-alone"}}
+ {:seon.task/name "the-readers-scan-mode-is-a-read-option"
+  :seon.task/plan "Found by context building the hand-list rule (2026-11-14) [M]: health reads every var's form text to tell its lists, in a process that has not loaded every namespace, so an auto keyword with an unloaded alias (::flow/status) throws Invalid token. Jolt's reader already has the mode for this, rdr-scan-mode (host/chez/reader.ss:88-93: the alias text kept as the keyword's ns), used only by the build's require scanner. Expose it to Clojure as a read option (or a binding), so seon.problems/scan-form reads with it and its text rewrite of :: goes. Proof: reading \"#{::f/x}\" in scan mode in a namespace with no f alias answers #{:f/x}."
+  :seon.task/kind :work
+  :seon.task/proofs #{jolt.host-test/a-scan-read-keeps-an-unloaded-alias}}
 ]

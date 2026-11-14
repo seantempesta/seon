@@ -502,10 +502,10 @@
                 ;; edit and a refine's cite are seeks, no call (data, 2026-11-14: the store is the source, so every live task is judged)
                 :unsynced (+ 2 (* 4 (count (#'problems/unsynced-candidates db (mapv :e (d/datoms db :aevt :seon.task/id))))))
                 :fixed 52              ; (50 -> 52, data 11-14: this world's own store-made tasks give :unsynced rows, so problem-unlinked seeks its section, seon.db/eid, and writes its row, derived-row) answers, report-with (every recorded class), health-with (problem-unlinked over all of them, the derived rows as health hands them)
-                ;; the owner's decree (2026-11-14): per var with a form, its read (seon.source/read-forms and the reader's two contracted
-                ;; helpers) and its walk (literal-lists), and the class's own. At import the form is read once already: keeping its
+                ;; the owner's decree (2026-11-14): per var with a form, its read (scan-form, seon.source/read-forms and the reader's two
+                ;; contracted helpers) and its walk (literal-lists), and the class's own. At import the form is read once already: keeping its
                 ;; literals there makes this a seek a var (seon.problems/a-forms-hand-made-lists-are-read-at-its-import)
-                :hand-written-list (+ 1 (* 4 (count (d/datoms db :aevt :var/form))))
+                :hand-written-list (+ 1 (* 5 (count (d/datoms db :aevt :var/form))))
                 :wrappers 2}]         ; health's and other-derived's own contracts
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
@@ -924,13 +924,13 @@
                :n "unnamed catch sites (the derived classes dominate; the recorded part is the seed's)"
                :work "report once, then the three derived reads; the sites dominate"
                :growth :linear
-               ;; calls 3 -> 7 a site and 62 -> 101 fixed (context, 2026-11-14, the owner's hand-list decree): every var's form read and
-               ;; walked for its literal lists (seon.source/read-forms and its two helpers, literal-lists), each site a var's form
-               :per-n {:ns 80000 :bytes 80000 :calls 7}
+               ;; calls 3 -> 8 a site and 62 -> 91 fixed (context, 2026-11-14, the owner's hand-list decree): every var's form read and
+               ;; walked for its literal lists (scan-form, seon.source/read-forms and its two helpers, literal-lists), each site a var's form
+               :per-n {:ns 80000 :bytes 80000 :calls 8}
                ;; fixed bytes re-derived 2026-10-23 (jolt/similar-finds-helpers-by-embedding): 3.01 MB at 10,
                ;; 10.0 MB at 100, 80.2 MB at 1,000 sites; a fixed part near the smallest size's whole cost read
                ;; as steeper growth (task seon.cost/a-speedup-never-reads-as-steeper)
-               :fixed {:ns 19500000 :bytes 17500000 :calls 101}
+               :fixed {:ns 19500000 :bytes 17500000 :calls 91}
                :sizes [10 30 100]}))
 
 ;; ---- caused reads what changed (diff by value), and agrees with the full reading ---------------
@@ -1012,9 +1012,9 @@
                ;; and a row for each changed Seon var the tree holds
                ;; and 4 for :hand-written-list (context, measured 85 -> 89): its reader on base and head, and on each side the seek of
                ;; each changed var's metadata
-               ;; 96 (context, 2026-11-14, the owner's hand-list decree): each changed var's form read and walked for its literal lists
-               ;; (seon.source/read-forms, literal-lists) on base and head
-               :fixed {:ticks 460000 :bytes 1800000 :calls 96} ; 90: and retyped-attributes' own contract, once a read (data, 2026-11-14)
+               ;; 97 (context, 2026-11-14, the owner's hand-list decree): each changed var's form read and walked for its literal lists
+               ;; (scan-form, seon.source/read-forms, literal-lists) on base and head
+               :fixed {:ticks 460000 :bytes 1800000 :calls 97} ; 90: and retyped-attributes' own contract, once a read (data, 2026-11-14)
                :sizes [10 30 100]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
