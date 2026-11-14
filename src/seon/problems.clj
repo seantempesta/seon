@@ -535,15 +535,34 @@
     (walk f false false)
     @out))
 
+(defn- unaliased
+  "Form text src with each auto keyword's :: made one colon (::f/x is :f/x, ::x is :x): a :: not after a word character or a colon
+  and before a symbol character. One pass over the characters: the lookbehind regex it replaces cost ~4.5k ticks and ~89 KB a
+  character on Jolt (context 2026-11-14, root's REPL: 1.4B ticks and 27.7 GB for 300 forms). See docs/health.md#a-hand-written-list."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [^String src]
+  (let [n (.length src) sb (StringBuilder. n)
+        ;; the regex's \w: ASCII letters, digits and _
+        word? (fn [c] (let [i (int c)] (or (<= 48 i 57) (<= 65 i 90) (<= 97 i 122) (= 95 i))))
+        sym? (fn [c] (or (word? c) (contains? #{\. \* \+ \! \? \< \> \= \-} c)))]
+    (loop [i 0]
+      (if (< i n)
+        (let [c (.charAt src i)]
+          (if (and (= \: c) (< (+ i 2) n) (= \: (.charAt src (inc i))) (sym? (.charAt src (+ i 2)))
+                   (or (zero? i) (let [p (.charAt src (dec i))] (not (or (word? p) (= \: p))))))
+            (do (.append sb \:) (recur (+ i 2)))
+            (do (.append sb c) (recur (inc i)))))
+        (str sb)))))
+
 (defn- scan-form
   "Form text src of namespace nsym, read to tell its lists, never to run it: an auto keyword whose alias this process has not
-  loaded keeps the alias text as its namespace (::f/x reads as :f/x, as Jolt's reader does in its build's scan mode) and a tagged
-  literal reads as itself, so a form of any namespace reads here. Deps' jolt.host/the-readers-scan-mode-is-a-read-option exposes
-  that mode, and the rewrite goes. See docs/health.md#a-hand-written-list."
+  loaded keeps the alias text as its namespace (::f/x reads as :f/x, as Jolt's reader does in its build's scan mode: `unaliased`,
+  only for a text holding ::) and a tagged literal reads as itself, so a form of any namespace reads here. Deps'
+  jolt.host/the-readers-scan-mode-is-a-read-option exposes that mode, and the rewrite goes. See docs/health.md#a-hand-written-list."
   {:malli/schema [:=> [:cat :symbol :string] :any]}
-  [nsym src]
+  [nsym ^String src]
   (binding [*read-eval* false *default-data-reader-fn* tagged-literal]
-    (:form (first (:forms (source/read-forms nsym (str/replace src #"(?<![\w:])::(?=[\w.*+!?<>=-])" ":")))))))
+    (:form (first (:forms (source/read-forms nsym (if (.contains src "::") (unaliased src) src)))))))
 
 (defn hand-written-lists
   "A :hand-written-list row for each hand-made list among the vars names (nil: every var on db), shown with its owning namespace for
