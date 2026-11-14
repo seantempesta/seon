@@ -1245,11 +1245,8 @@
   [] (render/render-var-of (agent/branch-index) (merge {:seon.agent/key (:key @agent/state)} @ctx/ctx)))
 
 (defn- walk!
-  "This agent's walk of its render of ctx, kept as a value in its state (seon.render/walk): advanced by what its db moved since
-  the last (seon.ctx/take-moved!) and ctx's diff, drawn cold when its layout, index or reader changed. It draws what its model
-  reads until a person's page asks for the rest (whole?, kept from then on: a walk holds no count of who is watching), with the
-  page's units then. A component that threw is a problem of the agent's, in its fold (docs/health.md). See
-  docs/render.md#a-page-is-a-kept-walk."
+  "This agent's walk, a seon.render/walk value kept in its state and advanced by what moved: the model's reading, or the whole
+  page once a person asks (whole?, kept from then on). See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :boolean] :map]}
   [whole?]
   (let [st @agent/state
