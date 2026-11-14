@@ -12,7 +12,7 @@ The owner's rulings on the morning after the first night run on its own.
 
 ### Ticks do not fail a test until they are measured reliably
 
-"Lets focus on fixing the reds, disable the tick counting test until we can reliably measure ticks." The same test at one digest measured 161M and 300M ticks, so a tick count does not make a verdict red until the same test at one digest measures within 10% across runs; ticks are still recorded. A named exception to "nothing is switched off", made by the owner with its end condition. Stated in [cost](cost.md#what-is-measured).
+"Lets focus on fixing the reds, disable the tick counting test until we can reliably measure ticks." The same test at one digest measured 161M and 300M ticks, so a tick count does not make a verdict red until the same test at one digest measures within 10% across runs; ticks are still recorded. A named exception to "nothing is switched off", made by the owner with its end condition. Then: "I want the ticks measurement fixed so we can have failing conditions based on going over on limits. Until then it's temporarily disabled." Fixing the measurement is the tests area's first item, and the land that fixes it turns failing on ticks back on. Stated in [cost](cost.md#what-is-measured).
 
 ### Encode what was learned into the wiki
 
