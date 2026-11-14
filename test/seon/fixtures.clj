@@ -7,7 +7,7 @@
   task's agent redefines its function). The proofs namespace sorts after the subjects, so a boot that
   loads main's program in name order loads a subject before its proof."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.template :as tpl] [seon.source :as source] [seon.reader :as reader] [seon.config :as config] [seon.render] [clojure.test :refer [is]]))
+  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.template :as tpl] [seon.source :as source] [seon.reader :as reader] [seon.config :as config] [seon.render] [datahike.api] [clojure.test :refer [is]]))
 
 (def calc
   "The six-task graph: add; twice and square need add; sum-sq needs both; neg (the one the demo
@@ -542,3 +542,27 @@
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [p]
   (composed (:units (seon.render/laid-out p))))
+
+;; ---- a test's reads of its own agent's records (docs/testing.md#testing-in-the-world) ---------------------------------------
+;; A shard's shared main holds every earlier test's agents, and an agent's branch forks from it, so a query a test runs in its
+;; agent finds those agents' records too: each reader here takes the agent's key, so no query can read past its own agent.
+
+(defn agent-call-ids
+  "The ids of the model calls of agent k (its key) on db, in no order. See docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :string]]}
+  [db k] (vec (datahike.api/q '[:find [?id ...] :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a] [?m :seon.model-call/id ?id]] db k)))
+
+(defn agent-eval-turns
+  "Each eval of agent k on db that names a model call, as [the key of who made it, the call's turn number]. See
+  docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:set [:tuple :string :int]]]}
+  [db k] (set (datahike.api/q '[:find ?by ?t :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a] [?e :seon.eval/by ?be]
+                                [?be :seon.agent/key ?by] [?e :seon.eval/call ?c] [?c :seon.model-call/n ?t]] db k)))
+
+(defn agent-loop-eval-turns
+  "The turn numbers on agent k's evals that are no conversation record (made by no one but root's loop, and no model call's: no
+  :seon.eval/call-id): the turn loop's own evals, which take none. See docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :int]]}
+  [db k] (vec (datahike.api/q '[:find [?t ...] :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a]
+                                (not-join [?e] [?e :seon.eval/by ?s] [?s :seon.system/id :root]) [(missing? $ ?e :seon.eval/call-id)]
+                                [?e :seon.eval/turn ?t]] db k)))

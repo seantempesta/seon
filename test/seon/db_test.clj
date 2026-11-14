@@ -743,7 +743,7 @@
   (let [i (mod (* k n) (- (count text) n))] (subs text i (+ i n))))
 
 (defn- turn-facts
-  "Turn k of an agent as seon.turn/act! records it: the basis its context was built from
+  "Turn k of an agent as a turn records it (seon.turn/model-request!, seon.turn/act!): the basis its context was built from
   (the commit, its red assertion; the text is made again from it, seon.ctx.wire/render), its
   reply (1,500 bytes) and its eval call, whose eval's record holds what it evaluated to as the
   next turn shows it (2,000). The reply is real text and the evaluated value real source, each turn its own

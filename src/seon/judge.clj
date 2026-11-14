@@ -11,7 +11,7 @@
             [seon.task :as task] [seon.program :as program] [seon.db :as pdb] [seon.ctx :as ctx] [clojure.string :as str] [datahike.api :as d]))
 
 (defn request
-  "Task t's first-turn model request on db, as seon.turn/act! sends it at turn 1: the
+  "Task t's first-turn model request on db, as seon.turn/model-request! draws it at turn 1: the
   messages seon.ctx.wire/render makes for a fresh agent whose proofs have no result yet
   (the agent written on a speculative db, d/with: nothing stored), and the model
   and thinking mode the task resolves to. A fresh agent's status has no verdicts yet: a proof
