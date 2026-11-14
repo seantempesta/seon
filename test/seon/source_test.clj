@@ -529,6 +529,21 @@
     (is (some? (d/entity db1 [:var/name 'app.landed/f])) "and the landed file's facts are main's")))
 
 ;; Estimate: 8 restart-for x 5k + 2 empty-db and checked writes 0.2M + booted-source and 2 test-inputs pulls 0.1M = 400000 ticks
+(deftest ^{:seon.test/estimate {:ticks 400000}} a-config-or-schema-landing-loads-in-place
+  ;; the owner, 2026-11-14: Seon restarts only for a binary change. The landing's commit loads a changed schema entry (its
+  ;; dependents re-armed, root's registry held: seon.program/load-changes!, seon.writer's main-commit) and a changed config entry
+  ;; (seon.program/hold-config!) in place, so neither is a restart: root's restart at 29e63624cc named only config and schema files
+  ;; (and forms). A pin, native code or deps.edn still is. Estimate: four calls of a pure fn, ~0.4M
+  (let [held {:root "/r" :dirs ["src"] :tree "t1" :commit "c1"}
+        inputs {:tree "t1m" :env "e" :code "c" :config {}}
+        why #(root/restart-for held "t1" {:binary "t0" :tree "t1" :reaches %} inputs)]
+    (is (nil? (why ["resources/seon/config/default.edn" "resources/seon/schemas/seon.config.root.edn" 'seon.main/root-serve]))
+        "config and schema entries and forms root runs: all loaded by the landing's commit, keep running")
+    (is (re-find #"reaches deps.edn" (str (why ["deps.edn" "resources/seon/schemas/seon.core.edn"])))
+        "a build input no load brings still restarts, naming it")
+    (is (re-find #"system.edn" (str (why ["resources/seon/system.edn"])))
+        "root's graph (system.edn) is not loaded in place yet: a restart (its procs swap through Flow's update!, the plan's next step)")))
+
 (deftest ^{:seon.test/estimate {:ticks 400000}} a-landing-keeps-the-system-running-only-when-nothing-calls-for-a-restart
   ;; docs/source.md#a-landing-enters-main-as-data: after the bridge moved main's source fact to the landed tree, bin/update keeps
   ;; the system running (my.root/landed!) when its binary is current for that tree and the inputs of the files were written;
