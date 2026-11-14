@@ -799,7 +799,7 @@
   [decl]
   (let [lead [:seon.task/name :seon.task/plan :seon.task/kind :seon.task/proofs]
         ks (concat (filter #(contains? decl %) lead) (sort (remove (set lead) (keys decl))))]
-    (parser/parse-string (str "{" (str/join "\n  " (for [k ks] (str k " " (pr-str (get decl k))))) "}"))))
+    (parser/parse-string (str "{" (str/join "\n  " (for [k ks] (str k " " (sedn/encode (get decl k))))) "}"))))
 
 (defn- entry-edit
   "Entry node e (a task's map, plain or namespaced) with its members made decl's: each member whose value differs replaced in its
@@ -813,7 +813,7 @@
         held (read-raw (node/string e))
         edits (for [k (distinct (concat (keys held) (keys decl)))
                     :when (not= (get held k ::absent) (get decl k ::absent))]
-                [k (when (contains? decl k) (pr-str (get decl k)))])
+                [k (when (contains? decl k) (sedn/encode (get decl k)))])
         m2 (node/replace-children m (reduce (fn [cs [k form]] (schema-entry-edit cs prefix k form)) (vec (node/children m)) edits))]
     (if (identical? m e) m2 (node/replace-children e (mapv #(if (identical? % m) m2 %) (node/children e))))))
 
