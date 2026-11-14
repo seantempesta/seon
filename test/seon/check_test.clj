@@ -241,7 +241,7 @@
 
 ;; Estimate: as its sibling above (two held processes, a few sh calls, ~15M), plus the 300 ms bound waited
 (deftest ^{:seon.test/estimate {:ticks 15000000} :seon.test/execs ["bin/held" "mkfifo" "sh" "kill"]} a-stop-that-never-answers-ends-at-its-bound
-  ;; task seon.system/a-stop-that-never-answers-ends-with-its-evidence: a root that ignored TERM held bin/system stop (and the
+  ;; seon.system's stop bound (landed 98494a4f08, its task done): a root that ignored TERM held bin/system stop (and the
   ;; bin/test above it) for 10 minutes on 2026-11-14, two threads spinning in a failing dlsym; bin/held --end waited with no
   ;; bound. The root's ROOT LISTENING line now carries its stop bound (:seon.config.root/stop-ms), the ready fifo passes it
   ;; on, and --end given it answers "overran MS" with status 4 past it, so bin/system stop takes the evidence and kills
