@@ -274,18 +274,18 @@
                            (main-base-tx)))
     [id (cond-> (assoc (basis! task n max-turns :model merge?) :agent k) model-name (assoc :model model-name))]))
 
-(defn- act!
-  "One model turn: the agent's turn number moves (docs/turn.md#the-turn-is-a-number), the agent's context (its walk's model output read by seon.ctx.wire/request, each turn's page message among it; the status s is the turn's own) to the model, the reply's eval calls
-  through the one REPL path, each answered as its own result, the turn's facts on its model call on the branch. Answers the loop state after it, or the
-  provider error. The model call is an effect (my.fx :model, session FX1): root's model owner
-  admits, performs and answers it; the API key never enters this process."
-  {:malli/schema [:=> [:cat :map :map :map [:maybe :string]] [:or :map :map]]}
-  [{:keys [turn max-turns merge? merge-step?] :as st} obs s model-name]
-  (let [t (:task obs)
-        ;; the turn this is: the agent's number, one past the one in force, which the messages taken now and every record
+(defn- model-request!
+  "Turn n's model call made ready and never sent (docs/flow.md#the-step-fn-contract-every-proc-follows: a call out is an
+  output): the agent's turn number moves (docs/turn.md#the-turn-is-a-number), its basis is recorded, and the request is drawn
+  from the agent's context (its walk's model output read by seon.ctx.wire/request, each turn's page message among it).
+  st is the run's state, t the task as the turn observed it. Answers the call: :request, what root's :model owner is asked
+  (my.fx :model, session FX1: it admits, performs and answers it, and the API key never enters this process), with :id
+  and :t1, when it was ready. See docs/turn.md#act."
+  {:malli/schema [:=> [:cat :map :map [:maybe :string]] [:map [:id :string] [:request :map] [:t1 :int]]]}
+  [{:keys [turn max-turns merge?]} t model-name]
+  (let [;; the turn this is: the agent's number, one past the one in force, which the messages taken now and every record
         ;; this turn writes take
         n (inc (agent/turn-now))
-        k (:key @agent/state)
         [id basis] (open-turn! (:seon.task/id t) n max-turns (boolean merge?) model-name)
         ;; the provider as the config stands at the basis (main's as the turn heard it, over the task's own), never one copied at boot
         provider (wire/provider-of (agent/db) basis)
@@ -296,11 +296,20 @@
         {:keys [messages]} (wire/render db basis {:walk (repl/page-walk)})
         ;; a hash of the bytes sent, which the debug page compares with its redraw
         _ (agent/transact! [{:seon.model-call/id id :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}])
-        _ (agent/commit!)
-        t1 (profile/now-ns)
-        ;; :call and :agent name this model call and its agent, so the reply is read as it streams (docs/flow.md#effects-one-owner-and-its-workers-per-kind)
-        r (agent/fx! :model {:messages messages :task (:seon.task/id t) :turn turn :provider provider :call id :agent (:key @agent/state)} {})
-        model-ms (long (profile/ms-since t1))
+        _ (agent/commit!)]
+    ;; :call and :agent name this model call and its agent, so the reply is read as it streams (docs/flow.md#effects-one-owner-and-its-workers-per-kind)
+    {:id id :t1 (profile/now-ns)
+     :request {:messages messages :task (:seon.task/id t) :turn turn :provider provider :call id :agent (:key @agent/state)}}))
+
+(defn- act!
+  "One model turn's answer r acted on: the outcome of the call made ready by model-request! (pending: that call, with :task, the
+  task as the turn observed it, and :unmerged, its status's), {:value completion} or the provider's typed error. The reply's eval
+  calls go through the one REPL path, each answered as its own result, and the turn's facts on its model call on the branch.
+  Answers the run's state st after it, or the provider error. See docs/turn.md#act."
+  {:malli/schema [:=> [:cat :map :map :map] :map]}
+  [{:keys [turn merge? merge-step? model-name] :as st} {:keys [id request t1 unmerged] t :task} r]
+  (let [model-ms (long (profile/ms-since t1))
+        messages (:messages request)
         c (:value r)
         ;; the request before this one in its run: what the cache check compares (cache-miss)
         prev (:requests @agent/state)]
@@ -346,7 +355,7 @@
           ;; a merge turn: each turn of a merge step (seon.task/merge-step?, read from its needs and branch, since a merge
           ;; step's every turn is merge work); a task that merges its own work does that work first, so only a turn with what
           ;; both sides changed still to resolve
-          (and merge? (or merge-step? (seq (:unmerged s)))) (update :merge-turns inc))))))
+          (and merge? (or merge-step? (seq unmerged))) (update :merge-turns inc))))))
 
 (defn context-block
   "The request of task as a model is sent it on this branch now, as one text: the system prompt, its conversation and its page.
@@ -438,15 +447,26 @@
   [{:keys [unjudged]}]
   (when unjudged (str "process tests not judged: " (str/join ", " (:tests unjudged)) ": " (:why unjudged))))
 
+(defn- clear?
+  "Whether status s is clear: it was drawn and the done rule gives no reason, so the tests its change reaches are judged before it
+  is done or merges (judged; turn-begin's :prove). See docs/render.md#how-the-work-stands."
+  {:malli/schema [:=> [:cat [:or :map :seon.error/base]] :boolean]}
+  [s] (and (not (contract/error? s)) (empty? (:reasons s))))
+
+(def ^:private judge-request
+  "What a clear status asks of the judge (seon.agent/judge!'s names and reach?): every test its change reaches."
+  {:names #{} :reach? true})
+
 (defn- judged
   "Status s, the tests its change reaches judged when s is clear: its proofs pass, so the tests its change reaches run now, as the
   judge judges them, the process tests among them on the gate's checkout (agent/judge!, their results facts on the branch), and the
   status is read again from the branch, before it is done or merges (the owner's ruling: a turn runs the proofs, the reach runs once
-  they are green). A run that ended green on its proofs alone left the judge to find the reds its change made, with no turn left to fix them."
+  they are green). A run that ended green on its proofs alone left the judge to find the reds its change made, with no turn left to fix them.
+  A turn asks the same as an output (turn-begin's :prove); a hand-back waits on it here."
   {:malli/schema [:=> [:cat [:or :map :seon.error/base]] [:or :map :seon.error/base]]}
   [s]
-  (if (and (not (contract/error? s)) (empty? (:reasons s)))
-    (do (test-error! (agent/judge! #{} true)) (status-now))
+  (if (clear? s)
+    (do (test-error! (agent/judge! (:names judge-request) (:reach? judge-request))) (status-now))
     s))
 
 (defn hand-back!
@@ -471,23 +491,149 @@
         [outcome reason] (if (contract/error? s) [:error (:seon.error/message s)] (let [[o why] (hand-back-end stop s)] [o (or why (unjudged-reason s))]))]
     (end! {} outcome reason (when (contract/error? s) s))))
 
-(defn work!
-  "Work task `task` (the model `model` when set, else root's), until the agent's turn reaches
-  max-turns (agent-wide: its :seon.agent/turn against its budget, which root passes from the agent's own on main).
-  Answers the end ({:outcome :turns :model-calls :tokens :ms}); the same end is written on
-  the branch. It first merges main into the branch (my.branch/merge-main!), as a merge task
-  does again at each green."
-  {:malli/schema [:=> [:cat [:map [:task :seon.task/id] [:model {:optional true} :string]
-                             [:max-turns pos-int?]]]
-                  :seon.turn/end]}
-  [{:keys [task model] :as arg}]
+;; ---- a turn as Flow steps (docs/flow.md#the-step-fn-contract-every-proc-follows) ----------------------------------
+;; A turn waits twice, on its verdict and on its model call, and each is an output, never a wait inside a step: turn-begin and
+;; turn-verdict answer [st' {:prove request}] or [st' {:model request}], and the answer comes back as turn-verdict's or turn-end's
+;; argument. A step that needs neither answers [::next st] (the next turn begins) or [::end st outcome reason error] (end! writes
+;; it). The run's state st is plain data: :task :model-name :max-turns :merge? :merge-step? :merge-cfg :turn :merge-turns :t0, the
+;; counts :threw and :thrown and the :error a turn's error left, and :pending, what the step that asked left for its answer.
+
+(defn- threw
+  "A turn of run state st that threw e (root's interrupt, a ThreadDeath, passes: it ends the work, never a turn's error): the
+  agent's to read (turn-error!), counted against the cap, which the next turn checks. The second in a row with no model turn
+  between ends the work with that error; called?, the turn's model call answered before it threw, makes it the agent's turn,
+  so the count starts again. See docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map."
+  {:malli/schema [:=> [:cat :map :any :boolean] [:vector :any]]}
+  [st e called?]
+  (let [st' (cond-> (-> (turn-error! st (cond-> (agent/error-map e 'seon.turn/work!) (err/thrown-in e) (assoc :seon.error/in (err/thrown-in e))))
+                        (update :turn inc) (update :thrown (fnil inc 0)))
+              called? (assoc :threw 1))]
+    (if (< 1 (:threw st'))
+      [::end st' :error (str "two turns in a row threw: " (:seon.error/message (:error st'))) (:error st')]
+      [::next st'])))
+
+(defn- next-of
+  "What follows a turn of run state st whose model call was acted on (act!'s answer, st'). A model call's typed error that a next
+  turn can change (its reasoning spent the budget, the provider refused, was rate-limited or unreachable) is a turn's error the
+  next turn reads, as a throw is: the agent can reason less, or the provider can answer next time; two in a row with no answered
+  call between end the work, as two throws do. One no turn can change (no provider, no script, a script's invalid reply: the
+  config's) ends the work at once, naming it. See docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error."
+  {:malli/schema [:=> [:cat :map :map] [:vector :any]]}
+  [st st']
+  (cond (and (contract/valid? :seon.model/failure st') (turn-can-change (:seon.error/type st')))
+        (let [st2 (-> (model-failed! st st') (update :turn inc))]
+          (if (< 1 (:threw st2))
+            [::end st2 :error (str "two model calls in a row failed: " (:seon.error/message st')) st']
+            [::next st2]))
+        (contract/error? st') [::end st :error (:seon.error/message st') st']
+        :else [::next (dissoc st' :threw :error)]))
+
+(defn- decide
+  "The end checks of a turn of run state st, with t the task as it observed and s its status (judged when clear), and else its model
+  call made ready: [::end ...], [::next st] when a green merge of main brought something, or [st' {:model request}]. See
+  docs/turn.md#work-from-release-to-judge."
+  {:malli/schema [:=> [:cat :map :map [:or :map :seon.error/base]] [:vector :any]]}
+  [{:keys [task merge? merge-cfg max-turns model-name] :as st} t s]
+  (let [no-status? (contract/error? s)
+        ;; the first red of one of its proofs is when the task was specified: written once, as observed
+        _ (when-not no-status? (some-> (specified-tx (agent/db) task (:key @agent/state) s) agent/transact!))
+        reasons (:reasons s)
+        stop (get-in @agent/state [:turn :stop])
+        ;; what the task references, as facts (its proofs, its plan's cites): never its plan re-parsed
+        ;; here, by a seon.ref/scan the agent may have broken (a broken scan would end the run :error)
+        hairy (when (and merge? (not no-status?))
+                (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :merge-turns (:merge-turns st)
+                                           :refs (into (set (:proofs (:seon.task/accumulated t)))
+                                                       (keep #(get-in % [:seon.cite/target :var/name]))
+                                                       (task/task-cites (agent/db) task))})))
+        ;; the model call made ready, from act-st (st, or st after its status's error), and left pending with what its answer
+        ;; is acted on with
+        ask (fn [act-st] (let [call (model-request! act-st t model-name)]
+                           [(assoc st :pending (assoc call :st act-st :task t :unmerged (:unmerged s))) {:model (:request call)}]))]
+    (cond
+      ;; the agent's own fail! is its verdict, on green proofs and at the cap too, as at a hand-back
+      ;; (hand-back-end); a wait on the last turn is the budget spent, so the run is :cap, never :waiting
+      (= :failed (:outcome stop)) [::end st :failed (:reason stop) nil]
+      ;; git's CI after the merge: green on the combined program; merge main again until
+      ;; it brings nothing new, a work task's run as a merge's, so it ends on main as main is
+      ;; (a green run that ended behind main's newer merges was judged behind: swarm's s9)
+      (and (not no-status?) (empty? reasons))
+      (let [m (branch/merge-main!)]
+        (if (and (empty? (:applied m)) (empty? (:conflicts m))) [::end st :green (unjudged-reason s) nil] [::next st]))
+      hairy [::end st :merge-failed (:reason hairy) nil]
+      ;; the one check of the cap, before any model call: every turn reaches it, one with no
+      ;; status and one after a turn that threw included (a change that broke
+      ;; the status would otherwise let the run make model calls past the cap)
+      (>= (+ (agent/turn-now) (:thrown st 0)) max-turns) (if no-status?
+                                                          [::end st :cap (str "no status at the cap: " (:seon.error/message s)) s]
+                                                          [::end st :cap (r/explain-text reasons) nil])
+      stop [::end st (:outcome stop) (:reason stop) nil]
+      ;; its status threw (the agent's program broke it): the agent reads why, this turn
+      no-status? (ask (turn-error! st s))
+      :else (ask st))))
+
+(defn turn-begin
+  "A turn of run state st begins: main merged in when it moved since the last turn, so the agent works on main's program and wiki
+  as they are and a conflict is an unmerged entry it sees and resolves before it can merge (the owner, 2026-10-30: \"updates as
+  often as we can\"); its proofs observed (observe) and how the work stands read (status-now). A clear status asks its verdict,
+  [st' {:prove request}] (seon.agent/judge!'s names and reach?), answered to turn-verdict; else the end checks, and the model call
+  made ready and never sent, [st' {:model request}] (root's :model owner's request), answered to turn-end; or [::end st outcome
+  reason error], or [::next st]. Each step runs Seon's code with the program on the agent's branch, Seon's own code included,
+  which the agent may change (a registered :seon.ref/block re-armed seon.ref/scan's contract, which the request's own scan then
+  broke), so a throw is the agent's to read, as data, and the run goes on (threw). See docs/flow.md#the-step-fn-contract-every-proc-follows."
+  {:malli/schema [:=> [:cat :map] [:or [:tuple [:= ::next] :map] [:tuple [:= ::end] :map :seon.agent/outcome [:maybe :string] [:maybe :map]]
+                      [:tuple :map [:map [:prove {:optional true} [:map [:names [:set :symbol]] [:reach? :boolean]]] [:model {:optional true} :map]]]]]}
+  [st]
+  (let [st (dissoc st :pending)]
+    (try
+      (when (agent/main-moved? (:base @agent/state) (agent/heard-main)) (branch/merge-main!))
+      (let [obs (observe (:task st))
+            ;; how the work stands (one computation a turn, the page's component draws its own)
+            s (status-now)]
+        (if (clear? s)
+          [(assoc st :pending {:task (:task obs)}) {:prove judge-request}]
+          (decide st (:task obs) s)))
+      (catch Exception e (threw st e false)))))
+
+(defn turn-verdict
+  "Turn-begin's :prove answered: verdict, seon.agent/judge!'s answer, written as the run's test error when the run failed as a
+  whole (test-error!), the status read again from the branch, then the end checks and the model call made ready, as turn-begin
+  answers them. See docs/flow.md#the-step-fn-contract-every-proc-follows."
+  {:malli/schema [:=> [:cat :map :map] [:or [:tuple [:= ::next] :map] [:tuple [:= ::end] :map :seon.agent/outcome [:maybe :string] [:maybe :map]]
+                      [:tuple :map [:map [:prove {:optional true} [:map [:names [:set :symbol]] [:reach? :boolean]]] [:model {:optional true} :map]]]]]}
+  [st verdict]
+  (let [t (get-in st [:pending :task]) st (dissoc st :pending)]
+    (try (test-error! verdict)
+         (decide st t (status-now))
+         (catch Exception e (threw st e false)))))
+
+(defn turn-end
+  "A :model request answered: answer, the model call's outcome ({:value completion} or its typed :seon.model/failure), acted on
+  (act!: the reply's evals run, the turn recorded) and folded (next-of): [::next st'] or [::end st outcome reason error]. See
+  docs/flow.md#the-step-fn-contract-every-proc-follows."
+  {:malli/schema [:=> [:cat :map :map] [:or [:tuple [:= ::next] :map] [:tuple [:= ::end] :map :seon.agent/outcome [:maybe :string] [:maybe :map]]
+                      [:tuple :map [:map [:prove {:optional true} [:map [:names [:set :symbol]] [:reach? :boolean]]] [:model {:optional true} :map]]]]]}
+  [st answer]
+  (let [{act-st :st :as pending} (:pending st)
+        st (dissoc st :pending)
+        ;; the request the last answered model call sent: a turn whose own call answered replaces it
+        asked (:requests @agent/state)]
+    (try (next-of st (act! act-st pending answer))
+         (catch Exception e (threw st e (not (identical? asked (:requests @agent/state))))))))
+
+(defn start!
+  "A run of task `task` begun (the model `model` when set, else root's; max-turns agent-wide: its :seon.agent/turn against its
+  budget, which root passes from the agent's own on main): the turn state begun, main merged into the branch
+  (my.branch/merge-main!) and the main and merge base it heard recorded. Answers the run's state before its first turn, which
+  turn-begin takes. See docs/turn.md#work-from-release-to-judge."
+  {:malli/schema [:=> [:cat [:map [:task :seon.task/id] [:model {:optional true} :string] [:max-turns pos-int?]]] :map]}
+  [{:keys [task model max-turns]}]
   (let [;; each wake begins its turn state; the page it last showed stands, so a wake is told only what moved since
         _ (swap! agent/state assoc :turn {} :requests nil)
         _ (agent/clear-end!)
         _ (begin! task)
         ;; the agent's own budget (:seon.agent/max-turns on main, raised to extend it; root passes it) bounds the loop, and is
         ;; the cap its page's turn line reads (seon.render.ui/agent-state)
-        max-turns (:max-turns arg)
         _ (when-not (= max-turns (:seon.agent/max-turns (d/entity (agent/db) [:seon.agent/key (:key @agent/state)])))
             (agent/transact! [{:seon.agent/key (:key @agent/state) :seon.agent/max-turns max-turns}]))
         t0-task (task/task (agent/db) task)
@@ -500,88 +646,36 @@
     ;; the main and merge base this run heard, on the agent before its first check: its status measures the branch's change from
     ;; that base (seon.reconcile/changed?), so a branch at main's head that merged nothing is unchanged at turn 0, never unmeasured
     (when-let [tx (not-empty (main-base-tx))] (agent/transact! tx) (agent/commit!))
-    (loop [st {:turn 0 :merge-turns 0 :t0 (profile/now-ns) :merge-step? (task/merge-step-on? (agent/db) task)
-               :max-turns max-turns :merge? merge?}]
-      ;; each turn checks against the branch's schemas as they are now, this process's registry (seon.program/hold-registry!):
-      ;; a schema the agent registers mid-loop is in force at once; a turn answers its end, or [::next st] to go on
-      ;; the turn answers what comes next, [::next st] or [::end st outcome reason error]: its draw, its model call
-      ;; and its evals are inside the boundary, since every one runs Seon's code with the program on the
-      ;; agent's branch, Seon's own code included, which the agent may change (a registered
-      ;; :seon.ref/block re-armed seon.ref/scan's contract, which the request's own scan then broke); a throw is
-      ;; the agent's to read, as data, and the loop goes on (turn-error!), root's interrupt passing as a stop.
-      ;; end! is outside it, run once on the turn's answer, so a failing end is never taken for a turn
-      (let [ended (fn [st outcome reason err] [::end st outcome reason err])
-            ;; a model call's typed error that a next turn can change (its reasoning spent the budget, the provider refused, was
-            ;; rate-limited or unreachable) is a turn's error the next turn reads, as a throw is: the agent can reason less, or the
-            ;; provider can answer next time; two in a row with no answered call between end the work, as two throws do. One no
-            ;; turn can change (no provider, no script, a script's invalid reply: the config's) ends the work at once, naming it
-            next-of (fn [st'] (cond (and (contract/valid? :seon.model/failure st') (turn-can-change (:seon.error/type st')))
-                                    (let [st2 (-> (model-failed! st st') (update :turn inc))]
-                                      (if (< 1 (:threw st2))
-                                        [::end st2 :error (str "two model calls in a row failed: " (:seon.error/message st')) st']
-                                        [::next st2]))
-                                    (contract/error? st') [::end st :error (:seon.error/message st') st']
-                                    :else [::next (dissoc st' :threw :error)]))
-            ;; the request the last answered model call sent: a turn whose own call answered replaces it
-            asked (:requests @agent/state)
-            ;; root is stopping (its :stop, read at once by the transport): the turn in flight finished, so the run ends here,
-            ;; between turns, its work committed by end!, and nothing is cut (the one stop's drain)
-            step (if (:draining @agent/state)
-                   (ended st :waiting "root is stopping: the run ended between turns, its work committed" nil)
-                   (do
-                     (try
-                       ;; main moved since the last turn: merge it in now, so the agent works on main's program and
-                       ;; wiki as they are and a conflict is an unmerged entry it sees and resolves before it can
-                       ;; merge (the owner, 2026-10-30: "updates as often as we can")
-                       (when (agent/main-moved? (:base @agent/state) (agent/heard-main)) (branch/merge-main!))
-                       (let [obs (observe task)
-                             ;; how the work stands (one computation a turn, the page's component draws its own)
-                             s (status-now)
-                             s (judged s)
-                             no-status? (contract/error? s)
-                             ;; the first red of one of its proofs is when the task was specified: written once, as observed
-                             _ (when-not no-status? (some-> (specified-tx (agent/db) task (:key @agent/state) s) agent/transact!))
-                             reasons (:reasons s)
-                             stop (get-in @agent/state [:turn :stop])
-                             ;; what the task references, as facts (its proofs, its plan's cites): never its plan re-parsed
-                             ;; here, by a seon.ref/scan the agent may have broken (a broken scan would end the run :error)
-                             hairy (when (and merge? (not (contract/error? s)))
-                                     (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :merge-turns (:merge-turns st)
-                                                                :refs (into (set (:proofs (:seon.task/accumulated (:task obs))))
-                                                                            (keep #(get-in % [:seon.cite/target :var/name]))
-                                                                            (task/task-cites (agent/db) task))})))]
-                         (cond
-                           ;; the agent's own fail! is its verdict, on green proofs and at the cap too, as at a hand-back
-                           ;; (hand-back-end); a wait on the last turn is the budget spent, so the run is :cap, never :waiting
-                           (= :failed (:outcome stop)) (ended st :failed (:reason stop) nil)
-                           ;; git's CI after the merge: green on the combined program; merge main again until
-                           ;; it brings nothing new, a work task's run as a merge's, so it ends on main as main is
-                           ;; (a green run that ended behind main's newer merges was judged behind: swarm's s9)
-                           (and (not no-status?) (empty? reasons))
-                           (let [m (branch/merge-main!)]
-                             (if (and (empty? (:applied m)) (empty? (:conflicts m))) (ended st :green (unjudged-reason s) nil) [::next st]))
-                           hairy (ended st :merge-failed (:reason hairy) nil)
-                           ;; the one check of the cap, before any model call: every turn reaches it, one with no
-                           ;; status and one after a turn that threw included (a change that broke
-                           ;; the status would otherwise let the run make model calls past the cap)
-                           (>= (+ (agent/turn-now) (:thrown st 0)) max-turns) (if no-status?
-                                                       (ended st :cap (str "no status at the cap: " (:seon.error/message s)) s)
-                                                       (ended st :cap (r/explain-text reasons) nil))
-                           stop (ended st (:outcome stop) (:reason stop) nil)
-                           ;; its status threw (the agent's program broke it): the agent reads why, this turn
-                           no-status? (next-of (act! (turn-error! st s) obs s model))
-                           :else (next-of (act! st obs s model))))
-                       ;; root's interrupt (a ThreadDeath, seon.intr) passes: it ends the work, never a turn's error
-                       (catch Exception e
-                         ;; the second in a row with no model turn between ends its work with that error: a turn
-                           ;; whose model call answered before it threw was the agent's turn, so the count starts again
-                           (let [called? (not (identical? asked (:requests @agent/state)))
-                                 st' (cond-> (-> (turn-error! st (cond-> (agent/error-map e 'seon.turn/work!) (err/thrown-in e) (assoc :seon.error/in (err/thrown-in e)))) (update :turn inc) (update :thrown (fnil inc 0)))
-                                       called? (assoc :threw 1))]
-                             ;; a turn that threw counts against the cap, which the next turn checks
-                             (if (< 1 (:threw st'))
-                               (ended st' :error (str "two turns in a row threw: " (:seon.error/message (:error st'))) (:error st'))
-                               [::next st']))))))]
-        (case (first step)
-          ::next (recur (second step))
-          ::end (let [[_ st outcome reason err] step] (end! st outcome reason err)))))))
+    (cond-> {:task task :turn 0 :merge-turns 0 :t0 (profile/now-ns) :merge-step? (task/merge-step-on? (agent/db) task)
+             :max-turns max-turns :merge? merge? :merge-cfg merge-cfg}
+      model (assoc :model-name model))))
+
+(defn work!
+  "Work task `task` (the model `model` when set, else root's), until the agent's turn reaches
+  max-turns (agent-wide: its :seon.agent/turn against its budget, which root passes from the agent's own on main).
+  Answers the end ({:outcome :turns :model-calls :tokens :ms}); the same end is written on
+  the branch. It first merges main into the branch (start!), as a merge task
+  does again at each green. It drives the turn's steps in this process (turn-begin, turn-verdict, turn-end), doing each
+  output's effect where it is asked (the judge, the model call) and giving the step its answer; each step is called through its
+  var, so a redefined step takes effect at the next turn. See docs/flow.md#flow-inside-an-agent."
+  {:malli/schema [:=> [:cat [:map [:task :seon.task/id] [:model {:optional true} :string]
+                             [:max-turns pos-int?]]]
+                  :seon.turn/end]}
+  [arg]
+  (loop [st (start! arg)]
+    (let [;; an output's effect done here; its throw is the turn's, as a throw inside a step is
+          answered (fn [st' effect step] (let [a (try {:answer (effect)} (catch Exception e {:threw e}))]
+                                           (if-let [e (:threw a)] (threw (dissoc st' :pending) e false) (step st' (:answer a)))))
+          ;; root is stopping (its :stop, read at once by the transport): the turn in flight finished, so the run ends here,
+          ;; between turns, its work committed by end!, and nothing is cut (the one stop's drain)
+          step (if (:draining @agent/state)
+                 [::end st :waiting "root is stopping: the run ended between turns, its work committed" nil]
+                 (loop [step (turn-begin st)]
+                   (if (keyword? (first step))
+                     step
+                     (let [[st' {:keys [prove model]}] step]
+                       (cond prove (recur (answered st' #(agent/judge! (:names prove) (:reach? prove)) turn-verdict))
+                             model (answered st' #(agent/fx! :model model {}) turn-end))))))]
+      (case (first step)
+        ::next (recur (second step))
+        ::end (let [[_ st outcome reason err] step] (end! st outcome reason err))))))

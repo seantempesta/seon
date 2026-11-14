@@ -824,7 +824,7 @@
         m (some-> e pull)]
     (when (or to-come? (:seon.model-call/basis m))
       (let [[tdb b swept?] (if to-come?
-                      ;; as seon.turn/act! draws it: the turn's number first, then the request at the head
+                      ;; as seon.turn/model-request! draws it: the turn's number first, then the request at the head
                       (let [n (inc (:turn lb)) b (assoc lb :commit (d/commit-id db) :turn n)]
                         [db b])
                       (let [b (:seon.model-call/basis m)]

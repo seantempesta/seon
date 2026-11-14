@@ -1818,7 +1818,7 @@
   each read from the branch where the gate already judged it at its digest and never asked again. Their verdicts are facts on this
   branch (seon.proofs/gate-tx), so a red reads on its status and page with a turn to fix it, and the answer counts them. The task's own
   proofs and the tests named come first, ahead of other agents' longer runs (:prio); a red among them answers now. The rest, the tests
-  its change only reaches, run when reach? is true, which is when its status is clear and it has nothing else to do (seon.turn/judged);
+  its change only reaches, run when reach? is true, which is when its status is clear and it has nothing else to do (seon.turn/turn-begin's :prove; seon.turn/judged at a hand-back);
   (my.agent/prove), reach? false, leaves them :deferred and says so, so an eval never sits behind them. What no gate will run
   (seon.task/unjudged) stays :deferred, said under :unjudged and on the status. A failed gate, or a changed namespace with no file on
   the branch, is the answer: no verdict. Committed first: the gate reads the committed head, and the verdicts are held at its digests. See

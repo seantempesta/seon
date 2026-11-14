@@ -53,3 +53,44 @@
     (is (nil? (turn/specified-tx (t/with db [{:seon.task/id task :seon.task/specified-turn 2}]) task "k1" red)) "written once")
     (is (nil? (turn/specified-tx (t/with db [{:seon.agent/key "k0" :seon.agent/task [:seon.task/id task]}]) task "k0" red)) "an agent with no turn yet writes nothing: unknown is never 0")))
 
+;; Estimate: in-agent's own setup and teardown (~1.5M: the task file, attach, kill and its branches' deletes) + 1 ask of the test's own
+;; at ~0.25M (an eval's recorded answer decoded); the turn's observe, status and draw run in the agent's process, not this one = 2000000;
+;; bytes: the answer's decode and the harness's maps, ~2 MB; seconds: the agent's attach and its eval round trip, ~2 s of waiting
+(deftest ^{:seon.test/estimate {:ticks 2000000 :bytes 2000000 :asks 1}} a-turn-sends-its-model-call-and-returns
+  ;; task seon.turn/a-turn-is-a-flow-step (docs/flow.md#the-step-fn-contract-every-proc-follows: a call out is an output, its answer a
+  ;; message): turn-begin, on a run whose status asks the model (a task with no proofs: its reason :no-proofs), answers the model call's
+  ;; request as its output and returns. The call is opened and its request drawn (its sent hash written), and nothing is sent: no
+  ;; effect is out and no reply or error is recorded on it
+  (let [[r] (at/in-agent (fn [{:keys [task]}]
+                           [(str "(let [[st out] (seon.turn/turn-begin (seon.turn/start! {:task " (pr-str task) " :max-turns 3}))"
+                                 "      call (:call (:model out))"
+                                 "      m (datahike.api/pull (seon.agent/db) [:seon.model-call/sent-hash] [:seon.model-call/id call])]"
+                                 "  {:out (set (keys out)) :messages (count (:messages (:model out))) :pending (= call (:id (:pending st)))"
+                                 "   :sent-hash? (some? (:seon.model-call/sent-hash m))"
+                                 "   :answered (datahike.api/q '[:find [?m ...] :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a] [?m :seon.model-call/ms _]] (seon.agent/db) (:key @seon.agent/state))"
+                                 "   :fx (count (:fx-pending @seon.agent/state))})")])
+                         {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
+        v (:value r)]
+    (is (= #{:model} (:out v)) (str "the model call is the output: " (pr-str r)))
+    (is (pos? (:messages v 0)) "its request drawn")
+    (is (true? (:pending v)) "and left pending on the run's state, for its answer")
+    (is (true? (:sent-hash? v)) "the call opened, its request's bytes hashed")
+    (is (= [] (:answered v)) "no call of the agent's has an answer's time (a reply's or an error's): none was made")
+    (is (zero? (:fx v -1)) "no effect is out")))
+
+;; Estimate: as seon.agent-test's work-with siblings: the world, built once a process (~3.2M), and one work! loop of 2 turns on it
+;; (its start's reads and writes ~0.2M, a turn of a few datoms) = ~4M: 4000000; bytes: the world's seek and the two turns' facts,
+;; ~4 MB; seconds: in-process work only, ~10 ms
+(deftest ^{:seon.test/estimate {:ticks 4000000 :bytes 4000000}} a-redefined-turn-begin-takes-effect-at-the-next-turn
+  ;; task seon.turn/a-turn-is-a-flow-step: work! drives a turn's steps through their vars, so a turn-begin redefined while a run is
+  ;; under way (here inside its first turn's model call) is the one the next turn calls, with no restart: the turn boundary is where
+  ;; a run's program changes (docs/flow.md#the-step-fn-contract-every-proc-follows)
+  (let [orig turn/turn-begin
+        end (try (@#'at/work-with (fn [st called!]
+                                    (called!)
+                                    (alter-var-root #'turn/turn-begin (constantly (fn [st] [:seon.turn/end st :waiting "the redefined turn-begin" nil])))
+                                    (update st :turn inc))
+                                  (constantly {:reasons [{:reason :proof-red}]}))
+                 (finally (alter-var-root #'turn/turn-begin (constantly orig))))]
+    (is (= "the redefined turn-begin" (:reason end)) (str "the second turn began with the redefinition: " (pr-str end)))
+    (is (= 1 (:model-calls end)) "the first turn ran the turn-begin the run started with")))

@@ -1524,7 +1524,7 @@
 
 (defn- work-with
   "seon.turn/work! of the world's task for 3 turns, in this process as an agent's test fork on the world (my.test/eval-in's state),
-  its turn's draw and model call (seon.turn/act!) answered by (act st), its status by (status): what the loop decides from what
+  its turn's model call (seon.turn/model-request!, the request made ready; seon.turn/act!, its answer acted on) answered by (act st), its status by (status): what the loop decides from what
   a turn answers. What reads a store or root stands in (main, the proofs, the end's write), the decisions of the loop are its
   own. Answers its end, with the model calls act made (:model-calls)."
   [act status]
@@ -1541,7 +1541,8 @@
                        seon.turn/observe (fn [id] {:task (task/task (agent/db) id)})
                        seon.turn/status-now status
                        seon.turn/tell-error! (constantly nil)
-                       seon.turn/act! (fn [st _ _ _] (act st called!))
+                       seon.turn/model-request! (fn [_ _ _] {:id "test-agent/call" :t1 (seon.profile/now-ns) :request {}})
+                       seon.turn/act! (fn [st _ _] (act st called!))
                        seon.turn/end! (fn [{:keys [turn]} outcome reason _]
                                         (cond-> {:outcome outcome :results {} :uncontracted #{} :turns turn :model-calls @calls} reason (assoc :reason reason)))]
            (seon.turn/work! {:task "app.calc/total-is-exact" :max-turns 3}))
@@ -1616,7 +1617,7 @@
   ;; the green status first, so a model agent that failed its task on green proofs ended :green and its task merged. One order:
   ;; the agent's own verdict first, in the loop as at a hand-back
   (let [acted (volatile! false)
-        end (with-redefs [seon.turn/judged identity]
+        end (with-redefs [agent/judge! (constantly {})]
               (work-with (fn [st called!] (called!) (vreset! acted true) (seon.turn/request-stop! :failed "the plan is wrong") (update st :turn inc))
                          #(if @acted {:reasons []} {:reasons [{:reason :proof-red}]})))]
     (is (= :failed (:outcome end)) (pr-str end))

@@ -241,7 +241,7 @@
       (seq cs) (into (seon.task/config-tx cs {})))))
 
 (defn turn-tx
-  "Model turn n of agent k (a key) as seon.turn/act! writes it first: the agent's number n and its model call
+  "Model turn n of agent k (a key) as seon.turn/model-request! writes it first: the agent's number n and its model call
   <k>/<n> (origin :model), with more, the call's other attributes. A record the test writes
   in that turn names that call (:seon.eval/call, seon.task/call-ref). See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :string pos-int? :map] [:vector :map]]}
