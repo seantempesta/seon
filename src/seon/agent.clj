@@ -267,11 +267,7 @@
   [] (when-let [c (get-in @state [:program :seon.db/commit])] (pdb/at-commit (:store-conn @state) c)))
 
 (defn take-branch-program!
-  "Bring this running process's program to its branch's, in place: the forms that differ between the program it holds
-  (program-db) and its branch's head load (seon.program/load-diff!, the one start's loader), and :program names the head.
-  For an outside agent, whose replies have no run the reconciler can end at a boundary and fork again: a model's run re-forks
-  instead (seon.turn's :refork), loading only its branch's own forms. Costs what differs, main's moves included. Answers the
-  load errors. See docs/merging.md#a-branch-merges-main-in."
+  "Bring this process's program to its branch's in place (seon.program/load-diff! from program-db) and name the head as :program: an outside agent's way, since it has no run to fork again. Answers the load errors. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat] [:sequential :map]]}
   []
   (let [p (program-db) db (db)

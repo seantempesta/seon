@@ -249,11 +249,7 @@
 (defchecked ^:private non-static-bytes [:=> [:cat] :int] (scm/proc "proto-non-static-bytes"))
 
 (defn non-static-live!
-  "The bytes live outside the static generation after a full collection, asked from any thread: Jolt's System/gc collects the
-  maximum generation, and when Chez refuses because other threads are active it asks a collect-rendezvous that its
-  collect-request-handler answers with that full collection (Jolt's sa-gc-collect), so every thread pauses at a safe point and
-  the answer comes from a process running several (a raw (collect) here refused, and root never collected in full). See
-  docs/machine.md#what-a-process-owns-in-memory."
+  "The bytes live outside the static generation after a full collection, from any thread: Jolt's System/gc rendezvouses every thread when Chez refuses a collect beside others. See docs/machine.md#what-a-process-owns-in-memory."
   {:malli/schema [:=> [:cat] :int]}
   [] (System/gc) (non-static-bytes))
 (defchecked ^:private fork-alone* [:=> [:cat nat-int?] :seon.lib/pid] jolt.host/fork-alone)

@@ -191,11 +191,7 @@
              {:taken #{} :db main :members []} branches))))
 
 (defn merge-main-into
-  "Main merged into branch b, decided here on main's program (seon.merge/merge-main), never on the branch's own code: a conflict
-  writes only its unmerged entries on b, answering {:ok false :conflicts :main}; clean, b becomes main's head plus its own datoms, one
-  commit with parents b's head and main, only while b is still at that head, answering {:ok true :commit :keys :t :main}, :main the
-  commit of main merged (its agent's new base). The writer's :merge-main, which an agent's seon.agent/merge-main! asks. See
-  docs/merging.md#a-branch-merges-main-in."
+  "Main merged into branch b on main's program (seon.merge/merge-main): a conflict writes only its unmerged entries; clean, one force-branch! onto b while b is at its head. Answers {:ok :conflicts :commit :t :main}, :main the commit merged. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :any :map :seon.db/branch] :map]}
   [conn cfg b]
   (let [main-b (pdb/conn-main conn) main @conn head (pdb/head conn b)

@@ -35,6 +35,8 @@ A minimal reader, at root's REPL:
 
 ## What it costs [M, at root's REPL on main, 434k datoms]
 
+Each number below was measured on real data, beside an estimate written first.
+
 | Path | Measured | Grows with |
 |---|---|---|
 | Today's `commit!` (every reader checked) | 1.25M ticks for a commit no reader read, at 1,489 readers (trial A1); ~6.4k ticks a reader (T1) | readers × d |
@@ -44,6 +46,8 @@ A minimal reader, at root's REPL:
 | A health class as a reaction (web T2) | first run 247 ms, 1,522 keys; an untouched commit 0 ms | what moved |
 
 ## Rules every reader follows
+
+Three rules keep a reader exact and cheap.
 
 - **Read the store through the recorder.** A read with Datahike's recorder bound to `nil` (``datahike.index.interface/*reads*``) escapes the core: it is never re-run for. Each such site is a known gap until it moves onto the core.
 - **Diff two plain heads, once a commit.** Never `d/history` or another view as a diff input: a view merges its whole range, and a history seek per retraction cost 2.25M ticks for 60 datoms (tests-4).
