@@ -152,7 +152,7 @@
   {:malli/schema [:=> [:cat :map] [:maybe [:map [:task :map] [:proved [:map-of :qualified-symbol :map]]]]]}
   [c]
   (when-let [t (:seon.agent/task c)]
-    (let [own (fn [x] (into {} (for [k [:seon.task/id :seon.task/kind :seon.task/plan :seon.task/proofs] :let [v (get x k)] :when (some? v)] [k (ratom/realize v)])))
+    (let [own (fn [x] (into {} (for [k [:seon.task/id :seon.task/kind :seon.task/plan :seon.task/proofs :seon.task/specified-turn] :let [v (get x k)] :when (some? v)] [k (ratom/realize v)])))
           needs (vals (:seon.task/needs t))]
       {:task (assoc (own t) :seon.task/needs (into {} (map-indexed (fn [i n] [i (own n)])) needs))
        :proved (into {} (for [ps (cons (:proved t) (map :proved needs)) v (vals ps) :let [n (:var/name v)] :when n]
@@ -300,6 +300,8 @@
         blockers (refused reasons reds #(doc/source-of db %) #(ctx/callees db %)
                           #(or (nil? base) (not= (doc/source-of db %) (doc/source-of base %))))]
     (cond-> {:reasons reasons
+             ;; whether one of its proofs has been red on its branch (seon.turn/specified-tx writes it, once)
+             :specified? (some? (:seon.task/specified-turn t))
              ;; each proof as :proved holds its var: its verdict (green :pass, red and flaky :fail, as `verdicts`), its source
              :proofs (vec (for [p (sort-by str proofs)
                                 :let [v (get proved p)

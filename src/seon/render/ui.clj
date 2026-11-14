@@ -1135,7 +1135,7 @@
   not block (stale sections, process tests the merge runs, tests no gate judges) is said apart, as not blocking.
   See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [_opts {:keys [reasons proofs refused test-run unmerged attention merge unjudged also-red-on-main main-moved]}]
+  [_opts {:keys [reasons proofs refused test-run unmerged attention merge unjudged also-red-on-main main-moved specified?]}]
   (let [state #(:status %)
         named (set (keep :symbol reasons))
         unwritten (filter #(= :undefined (state %)) proofs)
@@ -1155,6 +1155,12 @@
                 unjudged (conj (str "Not judged, so these say nothing about your change: " (str/join ", " (:tests unjudged)) ". " (:why unjudged) ".")))]
     [:section
      [:h2 "What your task still needs"]
+     ;; until one of its proofs has been red on its branch (:seon.task/specified-turn): its first proof is its specification
+     (when (false? specified?)
+       [:p {:key :unspecified}
+        "Your task isn't specified yet. Its first proof is the specification: write it where it goes, run " [:code "(prove)"]
+        ", and see it red for the reason the plan gives. If the plan doesn't match the code you read, fix the plan first: "
+        [:code "(swap! ctx assoc-in [:seon.agent/task :seon.task/plan] ...)"] "."])
      [:p {:key :rule} (if open? "Your task is done when every box is checked, then it merges." "Every box is checked: nothing blocks your merge.")]
      (when test-run [:p {:key :test-run} "The tests could not run: " (str/join "; " (:failed test-run))])
      (into [:ul {:key :needs}]
