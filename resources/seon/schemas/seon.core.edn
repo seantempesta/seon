@@ -50,10 +50,7 @@
  :seon.reads/key [:or {:description "A read's key, as datahike.reads/range-key makes it."} [:= :any] [:tuple [:= :e] :seon.db/eid] [:tuple [:= :ea] :seon.db/eid :keyword]
                   [:tuple [:= :a] :keyword] [:tuple [:= :av] :keyword :any]]
  :seon.reads/keys [:set :seon.reads/key]
- ;; the one stored index of who read what (docs/plan.md#the-root-concept-one-reaction-over-the-store): a moved datom's keys (datahike.reads/datom-keys, each its pr-str) find its readers, one AVET seek each
- :seon.reads/key-set [:set {:seon.db/index true :description "The read keys a derived entity's run recorded (datahike.reads/range-key, each its pr-str): what a moved datom finds it by."} :string]
- :seon.reads/reader [:map {:seon.db/attributes true :description "A derived entity (a test's result, a page part, a reaction's value) as what its run read: held beside its own schema's attributes, so any entity can be one."}
-                     [:seon.reads/key-set :seon.reads/key-set]]
+ :seon.reads/index [:map-of {:description "Each read key to the readers that recorded it (a reader is any value its holder names it by)."} :seon.reads/key [:set :any]]
  :seon.reads/branch [:and {:description "The branch a read set was read on."} :seon.db/branch]
  :seon.reads/commit [:uuid {:description "The commit a read set was read at."}]
  :seon.reads/outside [:set {:description "The reads outside the store, as effects answered them."} :seon.fx/read]
