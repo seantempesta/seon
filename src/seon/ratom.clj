@@ -103,15 +103,17 @@
 
 (defn- deref-capture
   "(f) in r's context: its derefs become r's sources (watched when they differ from the last
-  run's), and its reads of the store, recorded by Datahike's recorder, r's key set. Clears r's
-  dirty flag. Reagent's, with the store's reads recorded."
+  run's), and every read of a db it made, recorded by Datahike's recorder, r's key set (the
+  recorder is bound before the run, since a read follows the deref that gave its db). Clears
+  r's dirty flag. Reagent's, with the reads recorded."
   {:malli/schema [:=> [:cat :seon.host/fn :any] :any]}
   [f r]
   (-set! r :captured nil)
   (let [[res rs] (reads/with-reads #(binding [*ratom-context* r] (f)))
         c (-get r :captured)]
     (-set! r :dirty? false)
-    (-set! r :key-set (when (some #(instance? Store %) c) (reads/reads-index rs)))
+    ;; every read the run made is a dependency, however it reached the db: the one recorder (docs/plan.md#the-root-concept-one-reaction-over-the-store)
+    (-set! r :key-set (when (seq rs) (reads/reads-index rs)))
     (when-not (= c (-get r :last)) (-update-watching r c))
     res))
 
@@ -552,21 +554,26 @@
 
 ;;; --- Track: reagent.ratom's (fa4dc05 ratom.cljs 182-244) --------------------------------------
 
-;; Reagent keeps the cache on f itself (.-reagReactionCache); a JVM fn has no field to set, so the cache is keyed by [f args]
-(defonce ^:private track-cache (volatile! {}))
+;; Reagent keeps the cache on f itself (.-reagReactionCache), one per JavaScript thread; here the cache is its owner's, keyed by
+;; [f args]: a walk (or any owner of reactions) binds *tracks* to the cache its value holds, so no process-wide state is shared
+(def ^:dynamic *tracks*
+  "The track cache of the owner whose reactions run now, {[f args] reaction} in a volatile its value holds; nil: none, and a
+  track runs its f at each deref."
+  nil)
 
 (defn- cached-reaction
-  "The value of f, the reaction cached under k: an existing one derefed; outside a reaction, (f); else a new reaction,
-  cached while anything watches it. Reagent's."
+  "The value of f, the reaction cached under k in the owner's *tracks*: an existing one derefed; outside a reaction or with no
+  owner's cache, (f); else a new reaction, cached while anything watches it. Reagent's."
   {:malli/schema [:=> [:cat :seon.host/fn :any] :any]}
   [f k]
-  (let [r (get @track-cache k)]
+  (let [cache *tracks*
+        r (some-> cache deref (get k))]
     (cond
       (some? r) (deref r)
-      (nil? *ratom-context*) (f)
-      :else (let [r (make-reaction f :on-dispose (fn [_] (vswap! track-cache dissoc k)))
+      (or (nil? *ratom-context*) (nil? cache)) (f)
+      :else (let [r (make-reaction f :on-dispose (fn [_] (vswap! cache dissoc k)))
                   v (deref r)]
-              (vswap! track-cache assoc k r)
+              (vswap! cache assoc k r)
               v))))
 
 (deftype Track [f args]

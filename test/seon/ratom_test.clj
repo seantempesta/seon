@@ -385,18 +385,22 @@
         s (rv/store db0)
         calls (volatile! 0)
         text (fn [e] (vswap! calls inc) (:v (first (d/datoms @s :eavt e :note/text))))
-        r (run! [@(rv/track text ea) @(rv/track text ea)])]
+        tracks (volatile! {})
+        r (binding [rv/*tracks* tracks] (run! [@(rv/track text ea) @(rv/track text ea)]))]
     (is (= (rv/track text ea) (rv/track text ea)) "= by f and args, as Reagent's")
     (is (not= (rv/track text ea) (rv/track text eb)))
     (is (= ["a" "a"] @r))
     (is (= 1 @calls) "two derefs of equal tracks in one reaction: one run")
-    (let [rep (pdb/with @s [[:db/add eb :note/text "b2"]])] (rv/commit! s (:db-after rep) (:tx-data rep))) (flush!)
+    (binding [rv/*tracks* tracks]
+      (let [rep (pdb/with @s [[:db/add eb :note/text "b2"]])] (rv/commit! s (:db-after rep) (:tx-data rep))) (flush!))
     (is (= 1 @calls) "nothing it read moved: its cached value")
-    (let [rep (pdb/with @s [[:db/add ea :note/text "a2"]])] (rv/commit! s (:db-after rep) (:tx-data rep))) (flush!)
+    (binding [rv/*tracks* tracks]
+      (let [rep (pdb/with @s [[:db/add ea :note/text "a2"]])] (rv/commit! s (:db-after rep) (:tx-data rep))) (flush!))
     (is (= 2 @calls) "what it read moved: run once again")
     (is (= ["a2" "a2"] @r))
-    (is (= "a2" @(rv/track text ea)) "outside a reaction while its reaction lives: the cached value")
+    (is (= "a2" (binding [rv/*tracks* tracks] @(rv/track text ea))) "outside a reaction while its reaction lives: the cached value")
     (is (= 2 @calls))
     (dispose! r)
+    (is (empty? @tracks) "disposed: its owner's cache lets it go")
     (is (= "a2" @(rv/track text ea)) "and once nothing watches it, Reagent's: f called")
     (is (= 3 @calls))))
