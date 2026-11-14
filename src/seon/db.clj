@@ -210,7 +210,8 @@
 (defn implied-pattern
   "The pull entity schema s implies: its own attributes, each ref it names followed to its first target and each ref that reaches it
   followed back to the schema that owns it. Each schema is joined in full once, where it is nearest s (its depth breadth first, the
-  first join there), and every other join to it holds its own attributes alone, so the pattern grows with the schemas and refs it
+  first join there), and every other join to it holds its own attributes alone (what lies past it is read under its nearest join,
+  never through a second path), so the pattern grows with the schemas and refs it
   reaches, never with the paths to them, and no join loops. What can relate to an s; an entity's :seon.ctx/pattern chooses from it.
   See docs/data-modeling.md#things-relate-by-refs."
   {:malli/schema [:=> [:cat :map :qualified-keyword] [:vector :any]]}
@@ -225,14 +226,14 @@
                     (recur (into d (map vector new (repeat (inc (d t))))) (into (pop q) new)))
                   d))
         own (fn [t] (vec (remove targets (attributes-of ix t))))
-        claimed (volatile! #{s})
-        walk (fn walk [t dt]
-               (into (own t)
-                     (map (fn [[k u]] {k (if (and (= (depth u) (inc dt)) (not (contains? @claimed u)))
-                                           (do (vswap! claimed conj u) (walk u (inc dt)))
-                                           (own u))}))
-                     (joins t)))]
-    (walk s 0)))
+        ;; [t's pattern, the schemas joined in full so far]: claimed threads through the walk in order, a value
+        walk (fn walk [t dt claimed]
+               (reduce (fn [[out claimed] [k u]]
+                         (if (and (= (depth u) (inc dt)) (not (contains? claimed u)))
+                           (let [[sub claimed] (walk u (inc dt) (conj claimed u))] [(conj out {k sub}) claimed])
+                           [(conj out {k (own u)}) claimed]))
+                       [(own t) claimed] (joins t)))]
+    (first (walk s 0 #{s}))))
 
 (defn extends?
   "Does schema a extend schema b, itself or through the schemas it extends (`parents`, in the entity index ix)? See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
