@@ -464,9 +464,12 @@
   (-handle-change [this sender oldval newval]
     ;; the store reaches it only by a commit touching a key its run read; every other source by Reagent's own watch
     (when-not (or (identical? oldval newval) dirty? (and (instance? Store sender) (not (reads/reads-touched? key-set (-moved sender)))))
-      (if (nil? auto-run)
-        (do (set! dirty? true) (rea-enqueue this owner))
-        (if (true? auto-run) (-run this false) (auto-run this)))))
+      ;; run at once only in its owner's own step (or with no owner): in another owner's step it is dirtied and reaches its owner as
+      ;; a message, an auto-run one too, so no reaction runs under another owner's bindings. The dirty? guard above keeps at most one
+      ;; message outstanding a reaction, so an owner's port holds at most as many as the reactions it owns
+      (if (and (some? auto-run) (or (nil? owner) (identical? owner *owner*)))
+        (if (true? auto-run) (-run this false) (auto-run this))
+        (do (set! dirty? true) (rea-enqueue this owner)))))
   (-update-watching [this derefed]
     ;; a reactive object is watched (Reagent's); a read through a view is no source: a walk kept as a value keeps it (`reads-of`)
     (let [new (set (remove vector? derefed))
@@ -475,7 +478,11 @@
       (set! watching (zipmap new (repeat true)))
       (doseq [w new :when (not (contains? old w))] (add-watch w this handle-reaction-change))
       (doseq [w old :when (not (contains? new w))] (remove-watch w this))))
-  (-queued-run [this] (when (and dirty? (some? watching)) (-run this true)))
+  (-queued-run [this]
+    (when (and dirty? (some? watching))
+      (cond (nil? auto-run) (-run this true)
+            (true? auto-run) (do (set! dirty? false) (-run this false))
+            :else (do (set! dirty? false) (auto-run this)))))
   (-run [this check]
     (let [oldstate state
           res (if check

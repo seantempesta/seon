@@ -35,6 +35,23 @@
     (is (= 2 @runs) "and ran in A's own step")
     (binding [rv/*owner* a] (dispose! w))))
 
+;; Estimate: two owners, one atom, one auto-run reaction, three steps: ~100k ticks
+(deftest ^{:seon.test/estimate {:ticks 100000}} an-auto-run-reaction-runs-only-in-its-owners-step
+  ;; runtime-2's review of seon.ratom/a-reaction-queue-is-its-owners: an auto-run reaction (run!) of owner A whose source changes in owner
+  ;; B's step does not fire in B's step, under B's bindings; it reaches A as a message on A's port and runs in A's step. Red before:
+  ;; it ran at once inside B's reset!
+  (let [port (clojure.core.async/chan 4)
+        a (rv/owner port) b (rv/owner)
+        x (rv/atom 0) seen (rv/atom [])
+        w (binding [rv/*owner* a] (run! (swap! seen conj [@x (some? rv/*owner*) (identical? a rv/*owner*)])))]
+    (binding [rv/*owner* b] (reset! x 1) (flush!))
+    (is (= [[0 true true]] @seen) "B's step changed what A's run! reads, and it did not fire in B's step")
+    (let [m (clojure.core.async/poll! port)]
+      (is (some? m) "it reached A as a message on its port")
+      (binding [rv/*owner* a] (rv/take-dirty! m) (flush!)))
+    (is (= [[0 true true] [1 true true]] @seen) "and fired in A's own step, under A")
+    (binding [rv/*owner* a] (dispose! w))))
+
 (deftest basic-ratom
   (let [runs (running) start (rv/atom 0) sv (reaction @start) comp (reaction @sv (+ 2 @sv)) c2 (reaction (inc @comp))
         count (rv/atom 0) out (rv/atom 0)
