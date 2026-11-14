@@ -1490,6 +1490,22 @@
 ;; Estimate: the world, built once a process (~3.2M measured here; my.test/world's docstring says ~0.6M), and three work! loops of
 ;; at most 3 turns on it (each: its start's reads and writes on the value ~0.2M, ~3 turns of a few datoms and an error map,
 ;; agent/error-map ~0.3M each; first put at 50k a turn, which missed the error map and the world) = ~6M: 6,000,000
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-reasoning-overrun-is-the-next-turns-to-read
+  ;; docs/failure-points.md (a turn of the agent's loop): a model call whose reasoning spent its whole token budget answers
+  ;; :seon.model/reasoning-ate-reply, and the run ended :error at that turn, though the agent could reason less and go on
+  ;; (root's Stage 0.3, 2026-11-14). A model call's typed error (:seon.model/failure) is a turn's error the next turn reads,
+  ;; as a throw is; two in a row with no answered call between end the work. Estimate: as its sibling below, the world and
+  ;; two work! loops of at most 3 turns
+  (let [red {:reasons [{:reason :proof-red}]}
+        overrun (seon.contract/error :seon.model/reasoning-ate-reply #'seon.model/reply-of
+                                     "the reply is empty: reasoning took 8192 tokens of a 8192-token budget" {:reasoning-chars 30000 :reasoning-tokens 8192 :max-tokens 8192})
+        n (volatile! 0)
+        end (work-with (fn [st called!] (if (= 1 (vswap! n inc)) overrun (do (called!) st))) (constantly red))]
+    (is (= :cap (:outcome end)) (str "the overrun was a turn the next one read, and the work went on to its cap: " (pr-str end)))
+    (let [end (work-with (fn [_ _] overrun) (constantly red))]
+      (is (= :error (:outcome end)) (pr-str end))
+      (is (str/includes? (str (:reason end)) "reasoning took 8192 tokens") "two in a row end the work, naming the error"))))
+
 (deftest ^{:seon.test/estimate {:ticks 6000000}} a-turn-that-throws-is-the-agents-to-read-and-the-second-ends-its-work
   ;; docs/failure-points.md (a turn of the agent's loop): md-scan #16 registered :seon.ref/block with list keys its
   ;; scan did not make yet, the registration re-armed seon.ref/scan, and the request's own scan threw after the
