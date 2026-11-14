@@ -27,9 +27,9 @@ What allowed it: a read that has an effect, chosen by the agent's settings rathe
 
 The change: a read never writes. :context only looks for every client (the request it would send now, made at the branch head without taking or recording), and an outside agent takes its messages when its turn opens, which seon.turn/outside-reply! already does (seon.turn/open-turn! delivers). A :context naming a task with no agent answers what attaching would show and attaches nothing (attach is its own op). Deletes: context-block's take? argument and its effects (deliver!, main-base-tx, the read's model call), and the read's recorded entity. The owner ruled (2026-11-10, Sean: \"A read never writes.\"): no record of a read is kept, on the agent's side or the reader's; the task that would have recorded reads as turns is removed.
 
-Proofs, red first: a read by a client that does not hold the agent leaves its branch's datoms unchanged (no model call, no delivery, turn number the same); a message sent between two reads is taken by the next reply's turn and appears in the context after it; a :context naming an unattached task creates no agent. Web builds it after 2a; Context reviews what the model reads."
+Proofs, red first: a read by a client that does not hold the agent leaves its branch's datoms unchanged (no model call, no delivery, turn number the same); a message sent between two reads is taken by the next reply's turn and appears in the context after it; a :context naming an unattached task creates no agent. Web builds it after 2a; Context reviews what the model reads. Absorbed in curation 2026-11-14 (same subject and evidence): seon.turn/an-outside-read-opens-its-turn-as-a-model-turn-does (Found by context's duplication audit, 2026-11-14 (the owner: no duplicated effort; plan item 7), both ends read [M])."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.server-test/a-read-by-a-client-not-holding-the-agent-leaves-its-branch-unchanged
+  :seon.task/proofs #{seon.turn-test/an-outside-read-opens-its-turn-as-a-model-turn-does seon.server-test/a-read-by-a-client-not-holding-the-agent-leaves-its-branch-unchanged
                       seon.server-test/a-message-between-two-reads-reaches-the-next-turn
                       seon.server-test/a-context-read-of-an-unattached-task-makes-no-agent}}
  {:seon.task/name "a-reads-bytes-are-its-own"
