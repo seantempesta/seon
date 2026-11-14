@@ -70,7 +70,7 @@
    (if (vector? sym)
      (let [k sym entry (first (filter #(= k (:key %)) (pm/entries (agent/db))))]
        (when (and entry (not= :ours side))
-         (agent/transact! (pm/content-tx (agent/db) k (get entry side))))
+         (agent/transact! (pm/side-tx (agent/db) k (get entry side))))
        (agent/transact! (pm/resolve-tx (agent/db) k))
        (unmerged))
    (let [k [:var sym]

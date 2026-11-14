@@ -596,7 +596,17 @@
         (is (empty? (pm/merge-tx main base newer [[:task "demo/y"]] #{})))))
     (testing "an unmerged task entry is settled by writing a side's content (my.branch/resolve! of [:task ...])"
       (let [settled (d/db-with main (pm/content-tx main [:task "demo/x"] {:plan "Make x, settled." :proofs #{'demo-test/x-test}}))]
-        (is (= ["Make x, settled." #{'demo-test/x-test}] ((juxt :seon.task/plan (comp set :seon.task/proofs)) (d/entity settled [:seon.task/id "demo/x"]))))))))
+        (is (= ["Make x, settled." #{'demo-test/x-test}] ((juxt :seon.task/plan (comp set :seon.task/proofs)) (d/entity settled [:seon.task/id "demo/x"]))))))
+    (testing "an unmerged datum entry is settled by writing that side's value (my.branch/resolve! of [:datum e a]: Stage 0's lb76, whose
+              five old records content-tx refused as no map)"
+      (let [t (d/entity main [:seon.task/id "demo/x"])
+            e (:db/id t)
+            was (:seon.task/plan t)
+            set-to (d/db-with main (pm/side-tx main [:datum e :seon.task/plan] "Make x, main's."))
+            none (d/db-with main (pm/side-tx main [:datum e :seon.task/plan] nil))]
+        (is (some? was) "the world's task holds a plan to replace")
+        (is (= "Make x, main's." (:seon.task/plan (d/entity set-to e))) "a side's value is the datum's")
+        (is (nil? (:seon.task/plan (d/entity none e))) "a side holding none retracts it")))))
 
 ;; Estimate: the world 0.5M (cached) + 4 small transactions + one delta three-way at :all over a few keys ~5M = 10000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 10000000}} a-fact-a-branch-holds-only-because-main-wrote-it-is-mains
