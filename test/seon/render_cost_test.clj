@@ -721,10 +721,10 @@
                ;; not at the db's own point at every request (fixed -800 calls, -450 KB). Measured on jolt/context: 2,539 / 4,179 / 7,552 calls,
                ;; 2.93 / 4.21 / 6.47 MB at 10 / 20 / 40. The old figures measured an input whose calls had no basis, read at the store's parent commit,
                ;; where the agent was not yet (seon.ctx.wire/db-at): its pages were empty
-               ;; restated 2026-11-14 (deps, the owner: "anything close is fine"; web reviews): measured on the pin build of jolt/deps,
-               ;; 2,533 / 4,173 / 7,545 calls, 3.38 / 4.96 / 8.07 MB at 10 / 20 / 40, 156 KB a turn, at the old 115 KB's 1.25x bound
-               :per-n {:calls 170 :bytes 156000}
+               :per-n {:calls 170 :bytes 115000}
                :fixed {:calls 850 :bytes 1850000}
+               ;; over by the re-listing of every turn a request made again does (~161 KB a turn, measured 2026-11-14 at 40: 8.05 MB, 7,545 calls): waste, task seon.ctx.wire/a-turn-is-a-component-of-the-request
+               :overrun {:task "seon.ctx.wire/a-turn-is-a-component-of-the-request" :n 40 :measured {:calls 7545.0 :bytes 8045248.0}}
                :sizes [10 20 40]})
   (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/walk-same-of
                :n "turns of the agent, an eval each"
