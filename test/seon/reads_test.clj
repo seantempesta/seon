@@ -1,6 +1,6 @@
 (ns seon.reads-test
   "One index from a read key to its readers, matched against moved datoms. See docs/storage.md#what-a-read-scanned."
-  (:require [clojure.test :refer [deftest is]] [seon.db :as pdb] [seon.contract :as contract] [datahike.datom :as dd]))
+  (:require [clojure.test :refer [deftest is]] [seon.db :as pdb] [seon.contract :as contract] [datahike.datom :as dd] [datahike.api :as d] [seon.test-store :as ts] [seon.lib] [seon.task]))
 
 ;; See docs/storage.md#what-a-read-scanned
 (deftest ^{:seon.test/estimate {:ticks 300000}} a-moved-datom-reaches-exactly-the-readers-of-its-keys
@@ -35,4 +35,50 @@
     (is (contract/valid? :seon.fx/answer {:seon.error/type :seon.fx/io-error :seon.error/operation 'seon.fx/shell! :seon.error/message "killed"
                                           :seon.fx/indeterminate true :seon.bound/spent {:seon.bound/ms 50}}))
     (is (contract/valid? :seon.proof/proof-fact {:seon.proof/id "0123456789abcdef" :seon.proof/test 'seon.x-test/t :seon.proof/reads-digest "0123456789abcdef"
-                                                 :seon.proof/reads rs :seon.proof/status :pass :seon.proof/route :live :seon.bound/spent {:seon.bound/ticks 5}}))))
+                                                 :seon.proof/reads (set (map pr-str (:seon.reads/keys rs))) :seon.proof/status :pass :seon.proof/route :live
+                                                 :seon.proof/basis {:seon.db/branch :main :seon.db/commit #uuid "00000000-0000-0000-0000-000000000001" :seon.db/t 7}
+                                                 :seon.proof/outside (:seon.reads/outside rs) :seon.bound/spent {:seon.bound/ticks 5}}))))
+
+(defn- proof
+  "A result of test t that read keys ks, at db's basis, as tests' T-1 writes one."
+  [db t ks status]
+  {:seon.proof/id (seon.lib/digest (str t ks)) :seon.proof/test t :seon.proof/reads-digest (pdb/reads-digest db (set (map pr-str ks)) nil)
+   :seon.proof/reads (set (map pr-str ks)) :seon.proof/status status :seon.proof/route :live
+   :seon.proof/basis {:seon.db/branch :db :seon.db/commit #uuid "00000000-0000-0000-0000-000000000001" :seon.db/t (:max-tx db)}})
+
+;; See docs/storage.md#what-a-read-scanned: a result is read back by seek from what moved, and its status is written once
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-result-is-found-by-what-moved-and-its-status-is-written-once
+  (let [db0 (pdb/db-with (ts/test-db) [{:note/text "read" :note/agent :t}])
+        e (:e (first (d/datoms db0 :avet :note/text "read")))
+        k-ea [:ea e :note/text] k-a [:a :seon.task/plan]
+        db (pdb/db-with db0 [(proof db0 'app-test/one #{k-ea} :pass) (proof db0 'app-test/two #{k-a} :pass)])
+        id-of #(:seon.proof/test (d/entity db %))
+        moved (fn [& ds] (set (map id-of (pdb/results-moved db (map #(apply dd/datom %) ds)))))]
+    (is (= #{'app-test/one} (moved [e :note/text "x" 9])) "an entity's attribute it read: its result, by one seek")
+    (is (= #{'app-test/two} (moved [77 :seon.task/plan "p" 9])) "an attribute it read whole")
+    (is (= #{} (moved [77 :seon.task/kind :work 9])) "an attribute no result read")
+    (is (= '#{app-test/one} (set (map :seon.proof/test (d/q '[:find [(pull ?r [:seon.proof/test]) ...] :in $ ?s :where [?r :seon.proof/reads ?s]] db (pr-str k-ea)))))
+        "pulled back by what it read")
+    (let [r (try (pdb/with db [{:seon.proof/id (seon.lib/digest (str 'app-test/one #{k-ea})) :seon.proof/status :fail}]) (catch clojure.lang.ExceptionInfo x (ex-data x)))]
+      (is (= :seon.db/write-once (:seon.error/type r)) "a second, different status is refused, never written")
+      (is (= [:pass :fail] [(:held r) (:new r)])))))
+
+;; See docs/storage.md#what-a-read-scanned: equal content, one digest, whatever the basis
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-reads-digest-is-the-content-read-not-the-basis
+  (let [db0 (pdb/db-with (ts/test-db) [{:note/text "read" :note/agent :t}])
+        e (:e (first (d/datoms db0 :avet :note/text "read")))
+        ks #{(pr-str [:ea e :note/text])}
+        later (pdb/db-with db0 [{:note/text "unrelated" :note/agent :t}])]
+    (is (= (pdb/reads-digest db0 ks nil) (pdb/reads-digest later ks nil)) "a commit that moved nothing it read: one digest")
+    (is (not= (pdb/reads-digest db0 ks nil) (pdb/reads-digest db0 #{(pr-str [:ea e :note/agent])} nil)) "another read, another digest")))
+
+;; docs/plan.md stage 1.8: a task's causes are tags, several true at once, each held to its tag's schema
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-tasks-causes-are-tags-each-held-to-its-schema
+  (let [db0 (ts/test-db)
+        db (pdb/db-with db0 (seon.task/create-tx db0 [{:seon.task/ns 'zz :seon.task/name "blocked" :seon.task/plan "Make it." :seon.task/proofs #{'zz-test/blocked}}]))
+        cause! (fn [cs] (try (pdb/db-with db [{:seon.task/id "zz/blocked" :seon.task/causes cs}]) (catch clojure.lang.ExceptionInfo x (ex-data x))))
+        stale {:seon.db/tag :seon.cause/stale-program :seon.cause/var 'seon.x/f :seon.cause/held "f-1" :seon.cause/expected "f-2"}
+        pin {:seon.db/tag :seon.cause/pin-off :seon.fx.read/pin "reference-code/jolt" :seon.cause/held "a" :seon.cause/expected "b"}]
+    (is (= [stale pin] (:seon.task/causes (d/entity (cause! [stale pin]) [:seon.task/id "zz/blocked"]))) "two causes true at once")
+    (is (= :seon.db/invalid-datom (:seon.error/type (cause! [(dissoc stale :seon.cause/var)]))) "a cause short of its tag's evidence is refused")
+    (is (= :seon.db/invalid-datom (:seon.error/type (cause! [{:seon.db/tag :seon.cause/no-such :x 1}]))) "a tag no schema registers is refused")))
