@@ -43,6 +43,14 @@
         (:holding st) (update st :held (fnil conj []) m)
         :else (do (a/put! (:out (:end st)) m) st)))
 
+(defn- end-hold
+  "St with the clone handshake of request rid ended, whatever ended it (its fd sent, the clone answered or failed, the request
+  never sent): what waited behind it (:held) goes out in order. A hold ended only by :fd-ready waited for good when a clone
+  failed before asking for its descriptor (a fork refused at its bound), and every later message to the agent with it."
+  {:malli/schema [:=> [:cat :map :any] :map]}
+  [st rid]
+  (if (= rid (:holding st)) (reduce to-proc! (dissoc st :holding :held) (:held st)) st))
+
 (defn- send-fd!
   "The descriptor fd to the agent, in a frame of its own ({:op :fd :k k}, SCM_RIGHTS). The
   agent asked for it ({:op :fd-ready}) after taking the request before it, and nothing was
@@ -51,7 +59,7 @@
   {:malli/schema [:=> [:cat :map :int :seon.lib/fd] :map]}
   [st k fd]
   (sock/send! (:fd (:end st)) {:op :fd :k k} fd)
-  (reduce to-proc! (dissoc st :holding :held) (:held st)))
+  (end-hold st k))
 
 (defn- hang-up!
   "Close root's end: the agent (if any) reads the end frame; this proc's :from closes."
@@ -191,6 +199,9 @@
       ;; its eval's record could not be written on its branch (its entity ids are spent):
       ;; the typed error is recorded on main as its problem
       :fd-ready (send-fd! st (:k m) (get-in st [:inflight (:k m) :pass-fd]))
+      ;; merge main into this agent's branch, on main's program: root's writer decides and writes it (seon.writer's :merge-main), and
+      ;; its answer is the agent's wait's (seon.agent/merge-main!)
+      :merge-main (do (step/out! o :to-writer {:op :merge-main :branch (:branch st) :dest {:agent id :op :reply :k (:k m)}}) st)
       :branch-me (let [branch (get-in st [:inflight (:k m) :branch])]
                    (step/out! o :to-writer {:op :clone-branch :from (:branch st) :branch branch
                                        :dest {:agent id :op :branched :k (:k m)}})
@@ -199,14 +210,14 @@
       (let [{:keys [new pass-fd]} (get-in st [:inflight (:k m)])
             ;; the clone's socket end: the parent has it (or failed), root's copy closes now
             _ (some-> pass-fd sock/close!)
-            st (answer-rid st o (:k m) (if (= :cloned (:op m)) {:ok true :id new} (:error m)))]
+            st (answer-rid (end-hold st (:k m)) o (:k m) (if (= :cloned (:op m)) {:ok true :id new} (:error m)))]
         (when (= :clone-failed (:op m)) (step/out! o :to-api {:op :clone-failed :agent new :error (:error m)}))
         (step/out! o :to-api (status st {:status (busy st)}))
         st)
       ;; a request of root's the end's codec could not encode (unencodable): never sent, so answered here
       :unsendable (let [{:keys [pass-fd]} (get-in st [:inflight (:rid m)])
                         _ (some-> pass-fd sock/close!)
-                        st (answer-rid st o (:rid m) (:error m))]
+                        st (answer-rid (end-hold st (:rid m)) o (:rid m) (:error m))]
                     (step/out! o :to-api (status st {:status (busy st)}))
                     st)
       :synced (do (step/out! o :to-api (status st {:t (:t m) :load-errors (:load-errors m)})) st)
