@@ -792,19 +792,76 @@
   {:malli/schema [:=> [:cat :string] :any]}
   [text] (edn/read-string {:default tagged-literal} text))
 
+(def ^:private entry-lead
+  "The members a new task entry states first, in this order; the rest follow by key (entry-text)."
+  [:seon.task/name :seon.task/plan :seon.task/instructions])
+
+(defn- entry-text
+  "A new task entry's text from decl, a declaration: one member a line, `entry-lead` first. See docs/tasks.md#task-files."
+  {:malli/schema [:=> [:cat :seon.task/declaration] :string]}
+  [decl]
+  (let [decl (dissoc decl :seon.task/ns)
+        ks (concat (filter #(contains? decl %) entry-lead) (sort-by str (remove (set entry-lead) (keys decl))))]
+    (str "{" (str/join "\n  " (for [k ks] (str k " " (pr-str (get decl k))))) "}")))
+
+(defn- entry-edit
+  "Task entry node n with its members as decl states them: each member whose value differs set, one decl lacks removed,
+  a new one appended (schema-entry-edit), a namespaced map's prefix kept; n itself when none differs. Its namespace is the
+  file's, never a member."
+  {:malli/schema [:=> [:cat :any :seon.task/declaration] :any]}
+  [n decl]
+  (let [decl (dissoc decl :seon.task/ns)
+        held (read-raw (node/string n))
+        edits (vec (for [k (sort-by str (distinct (concat (keys held) (keys decl))))
+                         :when (not= (get held k ::absent) (get decl k ::absent))]
+                     [k (when (contains? decl k) (pr-str (get decl k)))]))
+        ns? (= :namespaced-map (node/tag n))
+        cs (vec (node/children n))
+        mi (when ns? (first (keep-indexed (fn [i c] (when (= :map (node/tag c)) i)) cs)))
+        m (if ns? (nth cs mi) n)
+        m' (node/replace-children m (reduce (fn [children [k form]] (schema-entry-edit children (when ns? (:prefix (first cs))) k form))
+                                            (vec (node/children m)) edits))]
+    (cond (empty? edits) n
+          ns? (node/replace-children n (assoc cs mi m'))
+          :else m')))
+
 (defn task-file-text
-  "text, a task file (a vector of task entries, docs/tasks.md#task-files), with each entry whose :seon.task/name is in names
-  removed with its lead, the whitespace and comments before it (the file's first, with the whitespace after it); every other node keeps its text, as
-  schema-file-text keeps it. What a reviewed sync writes, so its landing completes the tasks. See
-  docs/source.md#a-merged-task-reaches-mains-files."
-  {:malli/schema [:=> [:cat :string [:set :string]] :string]}
-  [text names]
+  "text, a task file (a vector of task entries, docs/tasks.md#task-files), with edits ({name decl-or-nil}) applied: an entry
+  whose :seon.task/name maps to nil removed with its lead, the whitespace and comments before it (the file's first, with the
+  whitespace after it); one mapping to a declaration has its changed members rewritten in place (entry-edit); a declaration no
+  entry names appended, separated as the file's last two entries are. Every other node keeps its text, as schema-file-text
+  keeps it. What a reviewed sync writes: main's tasks as main holds them. See docs/source.md#a-merged-task-reaches-mains-files."
+  {:malli/schema [:=> [:cat :string [:map-of :string [:maybe :seon.task/declaration]]] :string]}
+  [text edits]
   (let [v (z/find (z/of-string text) z/right #(= :vector (z/tag %)))
         cs (node/children (z/node v))
         space? #(contains? #{:whitespace :newline :comma} (node/tag %))
-        gone? #(and (not (node/whitespace-or-comment? %)) (contains? names (:seon.task/name (read-raw (node/string %)))))
-        kept (reduce (fn [acc n] (if (gone? n) (vec (reverse (drop-while node/whitespace-or-comment? (reverse acc)))) (conj acc n))) [] cs)]
-    (z/root-string (z/replace v (node/replace-children (z/node v) (if (space? (first cs)) kept (drop-while space? kept)))))))
+        name-of #(when-not (node/whitespace-or-comment? %) (:seon.task/name (read-raw (node/string %))))
+        kept (reduce (fn [acc n]
+                       (let [nm (name-of n)]
+                         (cond (not (contains? edits nm)) (conj acc n)
+                               (nil? (edits nm)) (vec (reverse (drop-while node/whitespace-or-comment? (reverse acc))))
+                               :else (conj acc (entry-edit n (edits nm))))))
+                     [] cs)
+        kept (vec (if (space? (first cs)) kept (drop-while space? kept)))
+        held (set (keep name-of kept))
+        significant #(vec (keep-indexed (fn [i n] (when-not (node/whitespace-or-comment? n) i)) %))
+        ;; the gap before the last entry, from its last comment on (a comment ends its line), as schema-entry-edit separates
+        separator (fn [children]
+                    (let [s (significant children)]
+                      (if (< 1 (count s))
+                        (let [gap (subvec children (inc (peek (pop s))) (peek s))
+                              c (last (keep-indexed (fn [i n] (when (node/comment? n) i)) gap))]
+                          (if c (into [(node/newlines 1)] (subvec gap (inc c))) gap))
+                        [(node/newlines 1) (node/spaces 1)])))
+        out (reduce (fn [children decl]
+                      (let [s (significant children)
+                            end (if (seq s) (inc (peek s)) 0)
+                            nodes (cond-> [(parser/parse-string (entry-text decl))] (seq s) (->> (into (separator children))))]
+                        (into (into (subvec children 0 end) nodes) (subvec children end))))
+                    kept
+                    (for [[nm decl] (sort-by key edits) :when (and decl (not (held nm)))] decl))]
+    (z/root-string (z/replace v (node/replace-children (z/node v) out)))))
 
 (defn- entries-file-text
   "The file of entries at path as db holds it, its entries named by key-attr, form-attr and file-attr: its imported text (an empty map for a new

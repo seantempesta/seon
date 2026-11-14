@@ -881,17 +881,17 @@
   ;; differently has its changed members rewritten in place, an entry the file lacks is appended, as the last two are
   ;; separated; every other node, comments and a namespaced map's layout too, keeps its text
   (let [text "[#:seon.task{:name \"a\",\n             :plan \"one\"}\n ;; b is next\n {:seon.task/name \"b\" :seon.task/plan \"two\" :seon.task/proofs #{x/y}}\n {:seon.task/name \"c\" :seon.task/plan \"three\"}]\n"
-        d {:seon.task/name "d" :seon.task/plan "four" :seon.task/kind :work}
-        out (source/task-file-text text {"a" {:seon.task/name "a" :seon.task/plan "uno"}
-                                         "b" {:seon.task/name "b" :seon.task/plan "two"}
-                                         "c" {:seon.task/name "c" :seon.task/plan "three" :seon.task/proofs '#{p/q}}
+        d {:seon.task/ns 'x :seon.task/name "d" :seon.task/plan "four" :seon.task/kind :work}
+        out (source/task-file-text text {"a" {:seon.task/ns 'x :seon.task/name "a" :seon.task/plan "uno"}
+                                         "b" {:seon.task/ns 'x :seon.task/name "b" :seon.task/plan "two"}
+                                         "c" {:seon.task/ns 'x :seon.task/name "c" :seon.task/plan "three" :seon.task/proofs '#{p/q}}
                                          "d" d})]
     (is (= (str "[#:seon.task{:name \"a\",\n             :plan \"uno\"}\n ;; b is next\n {:seon.task/name \"b\" :seon.task/plan \"two\"}\n"
                 " {:seon.task/name \"c\" :seon.task/plan \"three\" :seon.task/proofs #{p/q}}\n"
                 " {:seon.task/name \"d\"\n  :seon.task/plan \"four\"\n  :seon.task/kind :work}]\n")
            out))
-    (is (= d (last (edn/read-string out))) "the new entry reads back as main holds it")
-    (is (= text (source/task-file-text text {"c" {:seon.task/name "c" :seon.task/plan "three"}}))
+    (is (= (dissoc d :seon.task/ns) (last (edn/read-string out))) "the new entry reads back as main holds it, its namespace the file's")
+    (is (= text (source/task-file-text text {"c" {:seon.task/ns 'x :seon.task/name "c" :seon.task/plan "three"}}))
         "an entry main holds as the file does: no byte moves")))
 
 ;; Estimate: import of seon.facts.edn (~300 entries x 4 datoms x 5k) 6M + all 34 schema files imported and written back ~25M + 3 edits x (db-with + 91 KB file rewrite) 9M = 40000000 ticks

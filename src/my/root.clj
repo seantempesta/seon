@@ -204,7 +204,7 @@
         entries (into {} (for [[nsym names] (group-by #(:seon.task/ns (d/pull db [:seon.task/ns] %)) es)]
                            [(str (config/value :seon.config.source/tasks-dir) "/" nsym ".edn")
                             (source/task-file-text (slurp (io/file tasks-dir (str nsym ".edn")))
-                                                   (set (map #(:seon.task/name (d/pull db [:seon.task/name] %)) names)))]))
+                                                   (into {} (map #(vector (:seon.task/name (d/pull db [:seon.task/name] %)) nil)) names))]))
         files (merge (doc/files db paths) entries)]
     {:tasks ts :paths paths
      :not-unsynced (vec (for [id ids :when (not-any? #{id} ts)]
