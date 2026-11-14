@@ -20,20 +20,21 @@ Context runs one watched task now, random rounds after the model call's bound. O
 
 ### Store or derive; render the system from itself
 
-"I was thinking as a general rule when deciding whether to store data on the agents record or anywhere really or to render it from another trigger matching the pull pattern via a render schema we really should be asking what do we need to store and what can be derived. If it doesn't need to be stored and can be derived then that should be cheap or we may need to store some additional data to make it cheap. I want a balance, but it's very important that we render the system from itself. This is a data driven system. If you or any agents see departures from this and don't of data being stored that has no consumer we need to evaluate it and look at the perf from both sides." Stated in [AGENTS.md](../AGENTS.md#4-the-principles-everything-is-data-flowing-through-the-system).
+"I was thinking as a general rule when deciding whether to store data on the agents record or anywhere really or to render it from another trigger matching the pull pattern via a render schema we really should be asking what do we need to store and what can be derived. If it doesn't need to be stored and can be derived then that should be cheap or we may need to store some additional data to make it cheap. I want a balance, but it's very important that we render the system from itself. This is a data driven system. If you or any agents see departures from this and don't of data being stored that has no consumer we need to evaluate it and look at the perf from both sides." Stated in `AGENTS.md` §4.
 
 ### Estimate first; 90% for 10%
 
-"For all work agents must create estimates for their solutions algorithmically before implementation and to reject inefficient designs. Find the balance between simple to express and to get right. 100% efficiency isn't desireable if 90% can be achieve with 10% of the effort and the codebase is simpler (also smaller and less code). That's a rough metric to follow." Stated in [AGENTS.md](../AGENTS.md#3-how-work-moves).
+"For all work agents must create estimates for their solutions algorithmically before implementation and to reject inefficient designs. Find the balance between simple to express and to get right. 100% efficiency isn't desireable if 90% can be achieve with 10% of the effort and the codebase is simpler (also smaller and less code). That's a rough metric to follow." Stated in `AGENTS.md` §3.
 
 ### One way, made optimal
 
-"Make all hot paths optimal and make everything that can be into hot paths. No more 4 ways of doing the same thing. 2 ways of doing the same thing even has to justify itself." Every job routes through its one path, each path has one specialist who holds it to its lower bound, and a second way is a problem until justified. Stated in [AGENTS.md](../AGENTS.md#4-the-principles-everything-is-data-flowing-through-the-system).
+"Make all hot paths optimal and make everything that can be into hot paths. No more 4 ways of doing the same thing. 2 ways of doing the same thing even has to justify itself." Every job routes through its one path, each path has one specialist who holds it to its lower bound, and a second way is a problem until justified. Stated in `AGENTS.md` §4.
 
 
 Then: "I think the perf readings are mostly a canary in the coal mine for us. If we get a crazy number like 10 seconds to write a transaction and we know it should be ms we don't allow it. Hot paths should make it so damn easy to do the right thing that agents want to use it." A cost far over its lower bound stops the work (AGENTS §3, 10x); a hot path's API is the easiest way to do its job.
 
 The why, in his words: "Clojure is kind of like this. It's very hard to write clojure that is stateful or even imperative. You are given great tools that always refocus on a few solid ways to thread through them so you end up building with tools that are optimized for their execution rather than supporting everything. This is what we are doing. We are adding constraints to our system to optimize. I want one best way of doing things reused everywhere." To be folded into [principles](principles.md#4-one-mechanism-per-job) at the next retrospective.
+
 ### No timeouts in tests
 
 "Why are we having timeouts in our tests? That's not allowed." A test ends by its result or by a deadlock event (Jolt's quiescence, with every fiber's dump), never by a clock; an effect a test does not provide answers its typed error at once.
@@ -80,19 +81,19 @@ At 21:20: "Should we have them be the expert for reactive everything? That sound
 
 ### Hand-made lists: case by case
 
-"I want a case by case basis for judging if we should keep the hand lists or fix the problem they are trying to solve at their root. max-workers and all of those config dials are there for a reason." A dial is kept as spec'd config; a list patching a missing mechanism is fixed at its root; a list restating held data is derived. Stated in [AGENTS.md](../AGENTS.md#5-laws).
+"I want a case by case basis for judging if we should keep the hand lists or fix the problem they are trying to solve at their root. max-workers and all of those config dials are there for a reason." A dial is kept as spec'd config; a list patching a missing mechanism is fixed at its root; a list restating held data is derived. Stated in `AGENTS.md` §5.
 
 ### No functionality removed; dependencies defined as data and validated
 
-"You are not to remove any functionality through these changes. The goal is make all of our dependencies clearly defined with data and validated. Not to break the system." Every `Deletes:` line names, per item, what now does its job. Stated in [AGENTS.md](../AGENTS.md#3-how-work-moves).
+"You are not to remove any functionality through these changes. The goal is make all of our dependencies clearly defined with data and validated. Not to break the system." Every `Deletes:` line names, per item, what now does its job. Stated in `AGENTS.md` §3.
 
 ### Explicit, not deleted
 
-"Why are you removing the max-workers max-load and load-average keys? I want those. I'm not saying delete features. I'm saying make them explicit not implicitly in the code." Deduplication deletes the second mechanism, never a feature or a knob the owner uses; a knob becomes a spec'd config entry the one mechanism reads. Any key or feature a change removes is listed to root (and to the owner, as an audit) before it goes. Stated in [AGENTS.md](../AGENTS.md#3-how-work-moves).
+"Why are you removing the max-workers max-load and load-average keys? I want those. I'm not saying delete features. I'm saying make them explicit not implicitly in the code." Deduplication deletes the second mechanism, never a feature or a knob the owner uses; a knob becomes a spec'd config entry the one mechanism reads. Any key or feature a change removes is listed to root (and to the owner, as an audit) before it goes. Stated in `AGENTS.md` §3.
 
 ### No hand-made lists; a list that must stay is spec'ed config
 
-"Yeah get rid of all hand made lists. Another decree -- all hand made lists need to justify themselves and they need to be config options that are clearly spec'ed." Stated in [AGENTS.md](../AGENTS.md#5-laws).
+"Yeah get rid of all hand made lists. Another decree -- all hand made lists need to justify themselves and they need to be config options that are clearly spec'ed." Stated in `AGENTS.md` §5.
 
 ### A merge takes everything that does not conflict
 
@@ -100,31 +101,31 @@ At 21:20: "Should we have them be the expert for reactive everything? That sound
 
 ### Seon-centric only; Claude sessions are not special
 
-"All solutions must be seon centric from now on. We are not agents working in git worktrees. There is data we are importing into seon's db when we write an update to a file so I want a simple wrapper around the hooks to insert the updates in the database and for seon procedures with seon designs to handle it from there. The db is the source of truth and it is to be queried for truth not reading git for a secondary truth. Fixes need to be written to disk and checked into git without ceremony and complex machinery. The focus needs to be on designs that work with within seon. No more solutions outside of it. Tell me whenever you see it and shut that shit down." Then: "The same tools that seon agents will have ... Claude agents are not special, they need to fit into this system. I don't give a shit if your claude agents continue to use the worktrees, but I want at most one branch for each agent and for them to have that branch be mirrored in seon and for them to work more within the repl and through thin scripts translating their file updates if they can't work efficiently in the repl like native seon agents." On bin/land: finish what is in flight, then freeze. On the existing system: "I'm not saying throw out the existing system, I'm saying the plan must be to replace these wrong solutions that have plagued the project since the start." Stated in [AGENTS.md](../AGENTS.md#0-start-here) and [the plan](plan.md#the-order-of-work-now).
+"All solutions must be seon centric from now on. We are not agents working in git worktrees. There is data we are importing into seon's db when we write an update to a file so I want a simple wrapper around the hooks to insert the updates in the database and for seon procedures with seon designs to handle it from there. The db is the source of truth and it is to be queried for truth not reading git for a secondary truth. Fixes need to be written to disk and checked into git without ceremony and complex machinery. The focus needs to be on designs that work with within seon. No more solutions outside of it. Tell me whenever you see it and shut that shit down." Then: "The same tools that seon agents will have ... Claude agents are not special, they need to fit into this system. I don't give a shit if your claude agents continue to use the worktrees, but I want at most one branch for each agent and for them to have that branch be mirrored in seon and for them to work more within the repl and through thin scripts translating their file updates if they can't work efficiently in the repl like native seon agents." On bin/land: finish what is in flight, then freeze. On the existing system: "I'm not saying throw out the existing system, I'm saying the plan must be to replace these wrong solutions that have plagued the project since the start." Stated in `AGENTS.md` §0 and [the plan](plan.md#the-order-of-work-now).
 
 ### A fix deletes the other implementations
 
-"Find fixes and you must delete the other implementations. This is how our code base shrinks and we get better code and faster and more correct code." Stated in [AGENTS.md](../AGENTS.md#3-how-work-moves).
+"Find fixes and you must delete the other implementations. This is how our code base shrinks and we get better code and faster and more correct code." Stated in `AGENTS.md` §3.
 
 ### Reference code needs no asking
 
-"You never need to ask to checkout reference code into reference-code/. I strongly encourage always reading good clojure code as it helps correct mistakes we make in our own code." Stated in [AGENTS.md](../AGENTS.md#3-how-work-moves) (Learn).
+"You never need to ask to checkout reference code into reference-code/. I strongly encourage always reading good clojure code as it helps correct mistakes we make in our own code." Stated in `AGENTS.md` §3 (Learn).
 
 ### No new process before the existing one is found
 
-"Do not create any new processes until you have verified we don't have an existing solution that needs to updated or deleted by this implementation. I will say that is a standing rule for all agents." Stated in [AGENTS.md](../AGENTS.md#3-how-work-moves) (the gate).
+"Do not create any new processes until you have verified we don't have an existing solution that needs to updated or deleted by this implementation. I will say that is a standing rule for all agents." Stated in `AGENTS.md` §3 (the gate).
 
 ### A session lands when green; agents merge themselves
 
-"I want only one worktree and one branch per agent and subagents still need to share the same branch. No more creating hundreds of tiny branches and then waiting hours with them queued up so nothing is merging. Agents are to figure shit out on their own and ideally self merge. I want this done through the seon system though so we may need to wait on some more components for the full flow tests work which should be prioritized." Chosen: a session runs `bin/land` when its check is green, with no release from root; root reads each landed diff. The components that let `seon_done` carry it (proving as Flow) go first. Stated in [AGENTS.md](../AGENTS.md#3-how-work-moves) and [the plan](plan.md#the-order-of-work-now).
+"I want only one worktree and one branch per agent and subagents still need to share the same branch. No more creating hundreds of tiny branches and then waiting hours with them queued up so nothing is merging. Agents are to figure shit out on their own and ideally self merge. I want this done through the seon system though so we may need to wait on some more components for the full flow tests work which should be prioritized." Chosen: a session runs `bin/land` when its check is green, with no release from root; root reads each landed diff. The components that let `seon_done` carry it (proving as Flow) go first. Stated in `AGENTS.md` §3 and [the plan](plan.md#the-order-of-work-now).
 
 ### Overruns: 2x audit, 3x reset
 
-Chosen 2026-11-14 after a root session went badly and was restarted to audit "the true lay of the land": each item a session works has an expected finish; past 2x root reads the session's transcript and corrects it; past 3x, or on a repeated wrong turn, the session writes its state and a fresh one starts with an audit brief. Stated in [AGENTS.md](../AGENTS.md#2-who-does-what).
+Chosen 2026-11-14 after a root session went badly and was restarted to audit "the true lay of the land": each item a session works has an expected finish; past 2x root reads the session's transcript and corrects it; past 3x, or on a repeated wrong turn, the session writes its state and a fresh one starts with an audit brief. Stated in `AGENTS.md` §2.
 
 ### Bounds are worked out, never waived or restated from a run
 
-On a cost proof whose estimate was restated from measurements three times and then waived: "Find out why and pressure them to justify it algorithmically and to think about the problem differently. How can they have no idea what the bounds are?" A cost proof's estimate is the lower bound as arithmetic; no `:overrun` waiver; past 2x the design is what changes, or the estimate's missed work is named. Stated in [AGENTS.md](../AGENTS.md#3a-design-to-the-lower-bound).
+On a cost proof whose estimate was restated from measurements three times and then waived: "Find out why and pressure them to justify it algorithmically and to think about the problem differently. How can they have no idea what the bounds are?" A cost proof's estimate is the lower bound as arithmetic; no `:overrun` waiver; past 2x the design is what changes, or the estimate's missed work is named. Stated in `AGENTS.md` §3a.
 
 ### Config changes reach running procs live
 
@@ -132,7 +133,7 @@ On a cost proof whose estimate was restated from measurements three times and th
 
 ### Growth: one shape, processed once
 
-"I am not going to set arbitrary amounts. I want us to keep looking for duplication in the data model and then duplication in processing the data model. Fixing the two so we only process things once and it's done well." Stated in [AGENTS.md](../AGENTS.md#3-how-work-moves) and [the plan](plan.md#the-order-of-work-now).
+"I am not going to set arbitrary amounts. I want us to keep looking for duplication in the data model and then duplication in processing the data model. Fixing the two so we only process things once and it's done well." Stated in `AGENTS.md` §3 and [the plan](plan.md#the-order-of-work-now).
 
 ### The landed change enters the store through the one import
 

@@ -57,7 +57,7 @@ system, working, proving and merging as Seon agents do. Everything else in this 
 ## The order of work now
 
 Agreed 2026-11-14 by every area and the owner ([decisions](decisions.md#2026-11-14-rulings)). Each session works its items
-in this order, on its one branch, and lands when green ([AGENTS.md](../AGENTS.md#3-how-work-moves)). Every item names its
+in this order, on its one branch, and lands when green (`AGENTS.md` §3). Every item names its
 expected finish to root; root holds it to 2x and 3x. Correct and simple first; cost later (owner: "Right now we dedupe and
 upgrade everyone").
 
