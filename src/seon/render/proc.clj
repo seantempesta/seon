@@ -652,8 +652,8 @@
       :else
       (let [{:keys [a]} rw
             ;; root's process (process!) is root's own data beside the pull: kept across a move of main
-            p (:process @a) h (:health @a)
-            rw (advance-walk! rw db :main #(cond-> % p (assoc :process p) h (assoc :health h)) {:from held :moved moved})]
+            p (:process @a) h (:health @a) ts (:turns @a)
+            rw (advance-walk! rw db :main #(cond-> % p (assoc :process p) h (assoc :health h) ts (assoc :turns ts)) {:from held :moved moved})]
         (update (assoc st :root-walk rw) :dirty (fnil conj #{}) :root)))))
 
 (defn- process!
@@ -670,6 +670,44 @@
           (render/flush! w nil)
           (update st :dirty (fnil conj #{}) :root)))
     st))
+
+(defn- turns!
+  "St with turns ts ({agent-key turn}) kept and, when they differ from what root's walk holds, assoc'd into root's ctx and flushed, so
+  the one component that reads them (seon.render.ui/turns-tile) runs again. Derived data, never written to main. See
+  seon.render.proc/roots-page-shows-turns-to-merged's plan."
+  {:malli/schema [:=> [:cat :map [:map-of :string nat-int?]] :map]}
+  [st ts]
+  (let [st (assoc st :turns ts)]
+    (if-let [{:keys [w a]} (:root-walk st)]
+      (if (= ts (:turns @a))
+        st
+        (do (reset! a (assoc @a :turns ts))
+            (render/flush! w nil)
+            (update st :dirty (fnil conj #{}) :root)))
+      st)))
+
+(defn- view-turns
+  "Turns ts with each agent's turn root's view holds (an agent's status carries :turn when it moved, seon.agent-proc), the higher
+  kept."
+  {:malli/schema [:=> [:cat [:map-of :string nat-int?] :map] [:map-of :string nat-int?]]}
+  [ts view]
+  (reduce-kv (fn [ts id a] (if-let [n (:turn a)] (update ts (name id) (fnil max 0) n) ts)) ts (:agents view {})))
+
+(defn- branch-turn
+  "Agent k's turn on its branch db bdb: its highest :seon.model-call/n there, where its turn loop writes it (nil: no model call)."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe nat-int?]]}
+  [bdb k] (d/q '[:find (max ?n) . :in $ ?k :where [?a :seon.agent/key ?k] [?c :seon.model-call/agent ?a] [?c :seon.model-call/n ?n]] bdb k))
+
+(defn- ask-turns
+  "St having asked, once, for the branch db of each agent main says worked a task, to read its turn there: an agent whose run
+  ended commits no more, and its turn is on its branch (the highest :seon.model-call/n of its own)."
+  {:malli/schema [:=> [:cat :map :seon.host/volatile] :map]}
+  [st o]
+  (if (or (:turns-asked st) (nil? (:main-db st)))
+    st
+    (reduce (fn [st [k b]] (ask st o [:turns b k] {:op :write :req {:op :branch-db :branch b}}))
+            (assoc st :turns-asked true)
+            (d/q '[:find ?k ?b :where [?a :seon.agent/task _] [?a :seon.agent/key ?k] [?a :seon.agent/branch ?b]] (:main-db st)))))
 
 (defn- health!
   "St with main's health (the report the problems tile draws) in root's walk, beside root's process, as
@@ -1106,11 +1144,17 @@
     ;; an agent whose process ended keeps no parts (a later process of its id draws its own)
     (let [st (-> (assoc st :view r)
                  (update :parts #(into {} (filter (fn [[id]] (live? {:view r} id))) %)))
+          st (turns! st (view-turns (:turns st {}) r))
           ;; main's first read; after it, main comes in the writer's commits (:main)
           st (if (and (nil? (:main-db st)) (not (some #{:main} (vals (:pending st))))) (ask st o :main {:op :write :req {:op :branch-db :branch :db}}) st)]
       ;; a watched agent's branch moved: read its branch db (its turns, evaluations and task)
       (pass (ask-branches st o) o))
-    (= :main kind) (pass (ask-branches (advance-main st (:db r)) o) o)
+    (= :main kind) (pass (ask-turns (ask-branches (advance-main st (:db r)) o) o) o)
+    ;; an agent's branch db, read once for its turn (`ask-turns`)
+    (and (vector? kind) (= :turns (first kind)))
+    (let [[_ _ k] kind
+          n (some-> (:db r) (branch-turn k))]
+      (pass (cond-> st n (turns! (update (:turns st {}) k (fnil max 0) n))) o))
     ;; an agent drew its page's parts (or did not: gone, refused): held for its view, which renders again
     (and (vector? kind) (= :parts (first kind)))
     (let [id (second kind)
