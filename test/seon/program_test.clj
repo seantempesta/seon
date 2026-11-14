@@ -1781,6 +1781,22 @@
     (is (not= (get a 'app.rd/g) (get b 'app.rd/g)) "and g moves")
     (is (not= (get a 'app.rd/f) (get c 'app.rd/f)) "the data def f reads without calling moves f")))
 
+;; Estimate: three worlds of two small namespaces (~15M each, as a-vars-read-digest-moves-with-what-a-call-of-it-uses) = ~50000000.
+(deftest ^{:seon.test/estimate {:ticks 50000000}} a-schema-no-contract-arms-is-no-contract
+  ;; docs/source.md#tests-run-by-reach, task seon.proofs/a-verdict-reused-by-its-reads-covers-every-var-it-reaches: a run records the
+  ;; calls of the vars seon.contract/defn armed, so only those are contracted in the reach; a clojure.core/defn carrying a
+  ;; :malli/schema map is a plain helper, followed by its caller's read digest (test-runner/kept-report?'s test was reused while
+  ;; it changed: the reach stopped at its schema as if a run recorded it)
+  (let [w (fn [h-body] (program/reach-graph (mt/with (mt/world)
+                                                     (mt/code 'app.rp (str "(ns app.rp)\n"
+                                                                           "(defn h {:malli/schema [:=> [:cat :int] :int]} [x] (+ x " h-body "))\n"))
+                                                     (mt/code 'app.rc (str "(ns app.rc (:require [seon.contract :refer [defn]] [app.rp]))\n"
+                                                                           "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (app.rp/h x))\n")))
+                                            nil))
+        rd (fn [g] (program/reads-index g {:env "e" :tree "t" :config {}} {}))
+        a (rd (w "1")) b (rd (w "2"))]
+    (is (not= (get a 'app.rc/f) (get b 'app.rc/f)) "a plain defn's schema arms nothing: its caller's digest moves with it")))
+
 (defn- test-ns-text
   "A test namespace app.kind-test whose deftests state metas (a vector of metadata maps, nil for none), named t0, t1, ..."
   [metas]
