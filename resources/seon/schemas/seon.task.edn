@@ -221,7 +221,7 @@
                          [:reasoning-tokens {:optional true} :int] [:cache-hit-tokens {:optional true} :int] [:cache-miss-tokens {:optional true} :int]
                          ;; how the reply stopped (the provider's finish_reason), the model that made it, its reasoning
                          [:finish-reason {:optional true} :string] [:model {:optional true} :string] [:reasoning {:optional true} :string]]
- :seon.model/provider-error [:map [:seon.error/type [:= :seon.model/provider-error]]
+ :seon.model/provider-error [:map {:seon.model/retryable "the provider may answer next time"} [:seon.error/type [:= :seon.model/provider-error]]
                              [:seon.error/operation :qualified-symbol] [:seon.error/message :string]
                              [:status {:optional true} :int] [:body {:optional true} :string]]
  ;; ---- the turn loop's end, as the agent writes it on its branch ----
