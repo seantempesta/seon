@@ -532,7 +532,7 @@
  ;; :git effect), or why the commit was refused; recorded by its asker, the reconciler
  :seon.task/commit [:string {:description "The merges-branch commit holding the source files a merge rewrote, or why the commit was refused."}]
  :seon.task/merged-t [:int {:description "The t at which the task's branch was merged."}]
- :seon.task/specified-turn [:int {:description "The turn at which one of the task's proofs was first red on its branch: its specification was written then (seon.turn/specified-tx). See docs/render.md#how-the-work-stands."}]
+ :seon.task/specified-turn [:and {:description "The turn at which one of the task's proofs was first red on its branch: its specification was written then (seon.turn/specified-tx). See docs/render.md#how-the-work-stands."} nat-int?]
  ;; the process tests its change reaches, which its merge runs on a checkout (root's ruling, 2026-10-22), never an agent's fork;
  ;; the gate's run of them (each test's status); the changed namespaces the gate could not read from the branch, each with why:
  ;; it tested another tree than the one that merges, so none of its results counts as a pass

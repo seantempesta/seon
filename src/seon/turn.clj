@@ -406,14 +406,16 @@
 
 (defn specified-tx
   "The write that marks task task specified on branch db, or nil: the first status s a turn reads in which one of its proofs is red
-  (or threw) writes :seon.task/specified-turn, the turn of agent k (its :seon.agent/turn) then, once. A verdict keeps no history, so the
+  (or threw) writes :seon.task/specified-turn, the turn of agent k (its :seon.agent/turn) then, once; an agent with no turn yet writes nothing. A verdict keeps no history, so the
   moment it is observed is when it is written; a branch cut from main does not hold it. Nothing when no proof is red, or when the task
   holds it already. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :string :map] [:maybe :seon.db/tx-data]]}
   [db task k s]
-  (when (and (some #(#{:fail :error} (:status %)) (:proofs s))
-             (nil? (:seon.task/specified-turn (d/entity db [:seon.task/id task]))))
-    [{:seon.task/id task :seon.task/specified-turn (or (:seon.agent/turn (d/entity db [:seon.agent/key k])) 0)}]))
+  (let [n (:seon.agent/turn (d/entity db [:seon.agent/key k]))]
+    ;; a turn not known is no turn written (unknown is never 0)
+    (when (and n (some #(#{:fail :error} (:status %)) (:proofs s))
+               (nil? (:seon.task/specified-turn (d/entity db [:seon.task/id task]))))
+      [{:seon.task/id task :seon.task/specified-turn n}])))
 
 (defn hand-back-end
   "How an outside agent's run ends: [outcome reason] from the stop its agent requested
