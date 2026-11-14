@@ -128,7 +128,7 @@ infrastructure this replaces is cut, each removal brought to the owner as an aud
    typical change and N ≈ 2,000 in all: a typical change proves in about 1.3 s on 18 cores (1.6 s on the 8-core target),
    and a pin change that reuses nothing in about 25 s, one shared boot for the few genuine boot tests included. Each
    test's declared work stays within its estimate (median 10 ms), its fixtures warm before timing, and only a test of
-   booting boots. Today: 85 ms a test in a warm prove, and 223 tests booting a system for 1,541 s.
+   booting boots. Within 2x of this is met (owner: "pretty close ... is good enough"); past it, the cause is found and fixed. Today: 85 ms a test in a warm prove, and 223 tests booting a system for 1,541 s.
 6. **Merging is Seon's:** `seon_done` runs the gate and Seon's three-way merge on main's program; conflicts go back to the
    branch; one three-way merge, not two (`seon.task/carry-tx` goes); a merge costs what moved (today one merge of main
    costs 62 s, 9.9B ticks and 47.5 GB, measured) (data, runtime).
