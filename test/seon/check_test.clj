@@ -673,8 +673,8 @@
   (let [dir (str (System/getProperty "java.io.tmpdir") "/evidence-" (random-uuid))
         ;; the leader is disowned (zsh waits on none of it) and says its pid on a fifo once its member has exec'd
         leader (str/trim (:out (clojure.java.shell/sh
-                                "zsh" "-c" (str "mkdir -p " dir " && mkfifo " dir "/leader && "
-                                                "{ perl -e 'setpgrp(0,0); pipe(R,W); if (!fork) { if (!fork) { close R; open STDOUT, \">/dev/null\"; "
+                                "zsh" "-c" (str "mkdir -p " dir "/runs && mkfifo " dir "/leader && "
+                                                "{ perl -e 'setpgrp(0,0); pipe(R,W); if (!fork) { if (!fork) { close R; open STDOUT, \">" dir "/runs/probe.log\"; $|=1; print \"probe-line\\n\"; "
                                                 "exec {\"sleep\"} \"jolt-evidence-probe\", \"30\" } exit 0 } close W; my $x = <R>; wait; "
                                                 "print \"$$\\n\"; close STDOUT; sleep 30' > " dir "/leader 2>/dev/null </dev/null &! }; "
                                                 "read -r p < " dir "/leader; print -r -- $p"))))]
@@ -685,7 +685,12 @@
         (is (zero? (:exit r)) (:err r))
         (is (seq signalled) "the member that left the tree is signalled through its group")
         (is (every? #(.exists (java.io.File. (str dir "/sample-" % ".txt"))) signalled)
-            (str "every process signalled has its sample: " (vec signalled) " " (vec (.list (java.io.File. dir))))))
+            (str "every process signalled has its sample: " (vec signalled) " " (vec (.list (java.io.File. dir)))))
+        ;; and the log it writes under a runs directory, which its shard's hook removes when the shard ends (deps' run14 lost the
+        ;; shared root's log that way): kept beside the samples
+        (is (some #(and (str/ends-with? % "probe.log") (str/includes? (slurp (str dir "/logs/" %)) "probe-line"))
+                  (seq (.list (java.io.File. (str dir "/logs")))))
+            (str "the log a signalled process writes is kept: " (vec (.list (java.io.File. (str dir "/logs")))))))
       (finally
         ;; the group this test made, led by the process it started (AGENTS.md section 8: a verified pid)
         (when (re-matches #"\d+" leader) (clojure.java.shell/sh "kill" "-TERM" (str "-" leader)))
