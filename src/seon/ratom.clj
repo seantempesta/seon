@@ -48,15 +48,14 @@
 ;; runs now), so no process-wide state is shared: preempted fibers lost 267,087 of 400,000 enqueues on the shared queue (flow-lab
 ;; e18), and a fork copied a non-empty one. docs/flow.md#the-five-rules.
 (def ^:dynamic *owner*
-  "The owner of reactions whose step runs now (`owner`): a reaction made under it is its, queued only in its steps and run by its
-  `flush!`; nil: none, a dirtied reaction stays dirty and runs at its next deref (Reagent's lazy path)."
+  "The owner of reactions whose step runs now (`owner`), whose flush! alone runs them; nil: a dirtied reaction runs at its next
+  deref. See docs/reactive.md#how-a-commit-reaches-its-readers-today."
   nil)
 
 (defn owner
-  "A fresh owner of reactions, held in its proc's state and bound as *owner* around each of its steps: its queue (Reagent's
-  rea-queue), its running count (Reagent's debug counter) and its port, a channel a reaction of its dirtied in another owner's step
-  is put on as {:seon.ratom/dirty r} (`take-dirty!` queues it in this owner's next step); nil: no port, such a reaction stays dirty
-  to its next deref."
+  "A fresh owner of reactions {:queue :running :port}, held in its proc's state and bound as *owner* around its steps; port, where
+  another owner's step sends its dirtied reactions (nil: they wait for their next deref). See
+  docs/reactive.md#how-a-commit-reaches-its-readers-today."
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:maybe :seon.host/chan]] :map]]}
   ([] (owner nil))
   ([port] {:queue (volatile! nil) :running (volatile! 0) :port port}))
@@ -360,7 +359,8 @@
   nil)
 
 (defn take-dirty!
-  "Message m, {:seon.ratom/dirty r} on the bound owner's port, taken in its step: r queued for this owner's flush!. nil."
+  "Message m, {:seon.ratom/dirty r} on the bound owner's port, taken in its step: r queued for this owner's flush!. nil. See
+  docs/reactive.md#how-a-commit-reaches-its-readers-today."
   {:malli/schema [:=> [:cat :map] :nil]}
   [m] (when-let [o *owner*] (vswap! (:queue o) (fnil conj []) (:seon.ratom/dirty m))) nil)
 

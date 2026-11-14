@@ -2096,7 +2096,8 @@
   "Hand an outside agent's task to the reconciler for judgement, as a turn loop's end
   is: proofs in a fork, the branch read, the agent retired. work {:task :env
   :agent}. nil."
-  {:malli/schema [:=> [:cat :seon.system/sys :map] :nil]}
+  {:seon.flow/edge "an outside caller's put into the graph (the server's op): its wait is the :judge in-port's back-pressure, the point"
+   :malli/schema [:=> [:cat :seon.system/sys :map] :nil]}
   [sys work] (a/>!! (:judge sys) (assoc work :op :judge)) nil)
 
 (defn await-db

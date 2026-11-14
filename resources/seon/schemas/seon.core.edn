@@ -303,6 +303,7 @@
  :seon.program/unbound [:= {:description "What a var's root answers when the var has none (seon.program/root-of), so a readback compares it by identity."} :seon.program/unbound]
  :seon.ratom/paths [:= {:description "The key of the watch a source ref holds while a reaction reads paths of it."} :seon.ratom/paths]
  :seon.ratom/reached [:= {:description "The reason a handle is told a source changed: a path it read was reached by the change."} :seon.ratom/reached]
+ :seon.ratom/dirty [:any {:description "A reaction an owner's port is sent, as {:seon.ratom/dirty r}: dirtied in another owner's step, it runs in its own owner's next step (seon.ratom/take-dirty!). See docs/reactive.md#how-a-commit-reaches-its-readers-today."}]
  :seon.value/gone [:map {:description "The marker in place of a value too large to keep (or a copy cannot rebuild): its type name and the bound it was over."} [:type :string] [:over {:optional true} nat-int?]]
  :seon.value/type [:string {:description "The class name of a host object plain data stands for (a fn, an atom, a db, a throwable)."}]
  :seon.value/message [:string {:description "A throwable's message, beside its type, when it is a string."}]
