@@ -506,7 +506,11 @@
                                     :else [::next (dissoc st' :threw :error)]))
             ;; the request the last answered model call sent: a turn whose own call answered replaces it
             asked (:requests @agent/state)
-            step (do
+            ;; root is stopping (its :stop, read at once by the transport): the turn in flight finished, so the run ends here,
+            ;; between turns, its work committed by end!, and nothing is cut (the one stop's drain)
+            step (if (:draining @agent/state)
+                   (ended st :waiting "root is stopping: the run ended between turns, its work committed" nil)
+                   (do
                      (try
                        ;; main moved since the last turn: merge it in now, so the agent works on main's program and
                        ;; wiki as they are and a conflict is an unmerged entry it sees and resolves before it can
@@ -557,7 +561,7 @@
                              ;; a turn that threw counts against the cap, which the next turn checks
                              (if (< 1 (:threw st'))
                                (ended st' :error (str "two turns in a row threw: " (:seon.error/message (:error st'))) (:error st'))
-                               [::next st'])))))]
+                               [::next st']))))))]
         (case (first step)
           ::next (recur (second step))
           ::end (let [[_ st outcome reason err] step] (end! st outcome reason err)))))))

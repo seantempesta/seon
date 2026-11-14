@@ -2342,7 +2342,7 @@
 
 (defn stop!
   "Stop root by letting the flow drain: the api closes (later calls answer \"root
-  stopped\"); every agent is interrupted and sent :stop, and exits after the requests before
+  stopped\"); every agent is sent :stop, never interrupted: its run ends between turns and it exits after the requests before
   it (seon.agent-proc/stop!); the writer's in-port closes, it commits and flushes what it
   took; the fork server is killed and reaped; then flow/stop (every proc exited) and the
   reader. Every wait ends on its answer, none on a clock. Nothing accepted is lost.
