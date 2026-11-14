@@ -1,6 +1,6 @@
 # The reactive core: one way to keep a derived value current
 
-Almost everything Seon keeps is derived: a page, a model request, health, a task's readiness, a test's verdict, the program a process runs. Each is a function of what it read. The reactive core is the one mechanism that records what a computation read and runs it again only when a commit moved something it read. Runtime owns it; every area moves its own "did this change?" code onto it and deletes that code ([the plan](plan.md#the-root-concept-one-reaction-over-the-store)).
+Almost everything Seon keeps is derived: a page, a model request, health, a task's readiness, a test's verdict, the program a process runs. Each is a function of what it read. The reactive core is the one mechanism that records what a computation read and runs it again only when a commit moved something it read. Runtime owns it; every area moves its own "did this change?" code onto it and deletes that code ([the plan](plan.md)).
 
 ## The idea in one paragraph
 
@@ -45,7 +45,7 @@ A minimal reader, at root's REPL:
 
 ## Rules every reader follows
 
-- **Read the store through the recorder.** A read with Datahike's recorder bound to `nil` (``datahike.index.interface/*reads*``) escapes the core: it is never re-run for. Each such site is a known gap, named in [the survey](plan.md#the-root-concept-one-reaction-over-the-store).
+- **Read the store through the recorder.** A read with Datahike's recorder bound to `nil` (``datahike.index.interface/*reads*``) escapes the core: it is never re-run for. Each such site is a known gap until it moves onto the core.
 - **Diff two plain heads, once a commit.** Never `d/history` or another view as a diff input: a view merges its whole range, and a history seek per retraction cost 2.25M ticks for 60 datoms (tests-4).
 - **A derived value is a reader, never a copy kept by hand.** If it must outlive a process (a verdict reused across branches), its key set is stored on its entity (``:seon.reads/key-set``, agreed with data and tests) and found by the reverse query: the readers whose keys a commit moved.
 
