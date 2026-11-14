@@ -49,7 +49,7 @@
 
 ;; Estimate: one root booted for the shard (shared, ~0 to this test) and in-agent's setup and teardown (~1.5M), two root evals
 ;; through the server (~0.25M each): ~2M; 2,000,000 ticks, worked from the work.
-(deftest ^{:seon.test/estimate {:ticks 2000000}} an-ops-stdin-is-its-requests-input
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} an-ops-stdin-is-its-requests-input
   ;; task seon.server/connections-park-on-fibers-and-ops-run-bounded (docs/server.md#ops): a root eval's *in* is its request's own
   ;; input, empty when none is sent, never the process's stdin: (slurp *in*) once held its connection 30 min. Read with .ready
   ;; first, so the red never hangs
