@@ -332,9 +332,14 @@
           (swap! state #(-> % (assoc :db (:db c)) (dissoc :dirty? :tx)))
           ;; the eval errors folded since the last commit ride it (seon.error/note): root counts
           ;; them across agents
-          (let [errs (:errors @state)]
+          ;; and its turn, when it moved since the last commit (root's render proc keeps each agent's turn: turns to merged on
+          ;; root's page, derived data never written to main: seon.render.proc/roots-page-shows-turns-to-merged)
+          (let [errs (:errors @state) n (turn-now) moved? (not= n (:sent-turn @state))]
             (when errs (swap! state dissoc :errors))
-            (send! (cond-> {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c) :mem-mb (mem-mb)} errs (assoc :errors (vec (vals errs))))))))))
+            (when moved? (swap! state assoc :sent-turn n))
+            (send! (cond-> {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c) :mem-mb (mem-mb)}
+                     errs (assoc :errors (vec (vals errs)))
+                     moved? (assoc :turn n))))))))
 
 (defn- with-citations
   "tx-data, which writes a task's plan or instructions, with what that text cites derived in it
@@ -1330,6 +1335,7 @@
         {:keys [plan ticks ends]} st
         forked (rflow/fork! (:flow @state) cpid #(test-child-runs! % plan ticks todo)
                             {:in :seon.link/down :out :seon.link/up :pump :fiber :codec (child-codec cpid)
+                             :fork-wait-ms (cfg/value :seon.config.agent/fork-wait-ms)
                              :conns [[[cpid :seon.link/up] [(:pid st) :seon.link/up]]]})]
     (if-let [os (:pid forked)]
       (do (a/io-thread (a/<!! (poller/exit-chan os)) (a/>!! ends {:seon.process/pid os :seon.process/exit (lib/wait-status os)}))
@@ -1338,10 +1344,10 @@
           (-> st (assoc :n n)
               (assoc-in [:children cpid] {:shard i :os os :acc {:streamed [] :ended #{} :fns {} :heap {} :measured {}}})
               (assoc-in [:by-os os] cpid)))
-      (let [k (lib/active-threads)]
+      (let [k (lib/active-threads) hs (vec (:holders forked))]
         (assoc-in st [:shards i :error]
                   (contract/error :seon.test/fork-refused #'seon.agent/fork-test-child
-                                  (str "cannot fork the tests: " k " Chez threads active (a running future?)") {:active-threads k}))))))
+                                  (str "cannot fork the tests: " k " Chez threads active (the holders are in :holders)") {:active-threads k :holders hs}))))))
 
 (defn- run-answered
   "st with its run's answer put on its :answer, once, as [x dirs]: dirs, the run directories of
@@ -2053,7 +2059,10 @@
         (do (sock/close! fd) (send! {:op :clone-failed :k k :error (:error r)}))
         (lib/fork!
           {:fd fd :double? true
-           :refused (fn [n] (send! {:op :clone-failed :k k :error (contract/error :seon.agent/failed #'seon.agent/clone! (str "cannot fork: " n " Chez threads active (a running future?)") {:agent (:agent m)})}))
+           :refused (fn [{:keys [active-threads holders bound-ms]}]
+                      (send! {:op :clone-failed :k k :error (contract/error :seon.agent/failed #'seon.agent/clone!
+                                                                            (str "cannot fork: " active-threads " Chez threads active after " bound-ms " ms (the holders are in :holders)")
+                                                                            {:agent (:agent m) :holders holders})}))
            :parent (fn [_] (send! {:op :cloned :k k :clone (:agent m)}))
            :child (fn []
                     (let [parent (:id @state)]

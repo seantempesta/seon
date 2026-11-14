@@ -291,7 +291,7 @@
  :seon.contract/checked-at [:= {:description "In a var's metadata, :definition when its contract is checked from the definition on."} :definition]
  :seon.contract/var [:qualified-symbol {:description "On a contract error, the var whose contract was refused."}]
  :seon.lib/sysmem-refused [:and {:description "The error when the OS refuses the machine's memory figures (host_statistics64)."} :seon.error/base [:map [:seon.error/type [:= :seon.lib/sysmem-refused]]]]
- :seon.fork-server/not-single-threaded [:and {:description "The error data when the fork server cannot fork because root boots with more than one thread: how many are active."} :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/not-single-threaded]] [:active-threads :int]]]
+ :seon.fork-server/not-single-threaded [:and {:description "The error data when the fork server cannot fork because root boots with more than one thread: how many are active."} :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/not-single-threaded]] [:active-threads :int] [:holders {:optional true} [:maybe [:sequential [:map [:id :int] [:name :string]]]]]]]
  :seon.warm/tidy [:= {:description "The name of the held task the warm boot makes to pull a var's refs, so a first pull is warm."} :seon.warm/tidy]
  :seon.program/expr [:= {:description "What a node's literal value answers when the node is neither a constant nor a quote."} :seon.program/expr]
  :seon.program/unbound [:= {:description "What a var's root answers when the var has none (seon.program/root-of), so a readback compares it by identity."} :seon.program/unbound]
