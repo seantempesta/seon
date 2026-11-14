@@ -496,10 +496,10 @@
                 :stale-section 2       ; the read datoms and the vars' forms, one scan each
                 :stale-plan 3          ; task-reads, and a seon.db/eid per cited var of a ready task
                 :waived-proof 1        ; the test forms' cost proofs passing by :overrun, one scan (Deep fixes' class)
-                ;; its own and unsynced-candidates' contracts, and per task that may differ from its file at most 3: unsynced?,
-                ;; derived? and its seon.db/eid of the refine section; a filed one's edit and a refine's cite are seeks, no call
-                ;; (data, 2026-11-14: the store is the source, so every live task is judged)
-                :unsynced (+ 2 (* 3 (count (#'problems/unsynced-candidates db (mapv :e (d/datoms db :aevt :seon.task/id))))))
+                ;; its own and unsynced-candidates' contracts, and per task that may differ from its file at most 4: unsynced?,
+                ;; derived? and its seon.db/eid of the refine section, and its row (derived-row) when it differs; a filed one's
+                ;; edit and a refine's cite are seeks, no call (data, 2026-11-14: the store is the source, so every live task is judged)
+                :unsynced (+ 2 (* 4 (count (#'problems/unsynced-candidates db (mapv :e (d/datoms db :aevt :seon.task/id))))))
                 :fixed 52              ; (50 -> 52, data 11-14: this world's own store-made tasks give :unsynced rows, so problem-unlinked seeks its section, seon.db/eid, and writes its row, derived-row) answers, report-with (every recorded class), health-with (problem-unlinked over all of them, the derived rows as health hands them)
                 :wrappers 2}]         ; health's and other-derived's own contracts
     (is (seq rows) "the db has unlinked classes to judge")
