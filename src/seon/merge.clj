@@ -734,6 +734,20 @@
                              (seq held) [[:db/retract ref a (first held)]]))))
                  stated))))
 
+(defn side-tx
+  "The facts that make db hold side c of the unmerged entry for key k: a datum's value written ([:datum e a]: [:db/add e a c], or
+  each value of e's a retracted when c is nil; [:datum e a v]: v added when c holds it, retracted when not), any other key's content
+  written (`content-tx`). What my.branch/resolve! writes for :theirs or :base. One transaction, the datums of one key: O(1) a datum,
+  the stated attributes a key. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key :any] :seon.db/tx-data]}
+  [db k c]
+  (if (= :datum (first k))
+    (let [[_ e a v] k]
+      (cond (= 4 (count k)) [[(if c :db/add :db/retract) e a v]]
+            (some? c) [[:db/add e a c]]
+            :else (mapv (fn [d] [:db/retract e a (:v d)]) (d/datoms db :eavt e a))))
+    (content-tx db k c)))
+
 (defn resolve-tx
   "Mark the entry for key resolved (git add): the branch keeps what it holds now."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key] :seon.db/tx-data]}

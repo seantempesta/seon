@@ -198,7 +198,7 @@
 
 (defn latest-of
   "The input of size n: the render proc's state holding agent a1's debug page on latest after a pass, over a
-  session of n earlier evals and one model turn (its basis recorded as seon.turn/act! writes it), with one eval
+  session of n earlier evals and one model turn (its basis recorded as seon.turn/model-request! writes it), with one eval
   more on the branch since: what the next pass draws (the turn to come's request, made at the head); and the view."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
