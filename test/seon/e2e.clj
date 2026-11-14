@@ -179,10 +179,9 @@
                   (= 1 (count commits)) (empty? commit-errors)
                   (= "src/seon/generation.clj" files)
                   (= ["-  [] 1)" "+  [] 2)"] changed)
-                  ;; git follows the store: the commit is on the branch the tree was imported from, one on its head
-                  ;; (seon.reconcile's write-back, seon.fx/git-commit :expect), and the checked-out tree moved with it
-                  (= head (git "rev-parse" "HEAD~1"))
-                  (= sha (git "rev-parse" "HEAD"))
+                  ;; the root's merges branch, never the branch the clone checked out (seon.reconcile/write-back-target)
+                  (= head (git "rev-parse" "jolt/seon-merges~1"))
+                  (= head (git "rev-parse" "HEAD"))
                   (= 2 root) (= "2" agent) (nil? (r/generation d)))]
       (doseq [[id s] (server/task-summaries d)] (println :task id s))
       (println :commits commits :commit-errors commit-errors :files files :changed changed)
