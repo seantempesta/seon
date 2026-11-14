@@ -421,6 +421,15 @@
   "[{var calls} of the contracted functions thunk called, and thunk's answer]."
   [thunk] (profile/begin!) (let [r (thunk)] [(into {} (map (juxt :var :calls)) (profile/touched)) r]))
 
+;; docs/testing.md#testing-in-the-world: the world (my.test/world) is built before any test, never inside the first one's budget.
+;; seon.program-test/a-config-entry-moves-the-program-digest measured 91,663 ticks and 3,306,725 at one digest, both under bin/test:
+;; the run in which it was the first to read the world built it (~3.2M) inside its 300k estimate's budget, red on main. Cost: the two
+;; worlds' builds once a process, ~3.2M each, which every test that reads them no longer pays.
+(deftest ^{:seon.test/estimate {:ticks 8000000}} the-world-is-built-before-any-test-reads-it
+  (proofs/warm-fixtures!)
+  (is (every? realized? [@#'my.test/plain-world @#'my.test/history-world])
+      "both worlds are fixtures: an agent forces them before its first test fork, a shard before its first test"))
+
 ;; docs/merging.md#verdicts-are-a-cache: the kept program store is the repository's, read by every checkout's plans and shards at
 ;; once, so one past its bound is moved aside whole (an atomic rename) for a new one, never removed in place: a removal under
 ;; another process's reader left an empty data file its next connect read as "Database does not exist" (data's, runtime's and
