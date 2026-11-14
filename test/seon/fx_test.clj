@@ -27,6 +27,33 @@
     (is (= [3] (map #(get-in % [:req :k]) (:to-workers o))) "the higher priority runs next")
     (is (= 1 (:busy st)))))
 
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-lowered-core-share-admits-less-at-the-next-admission
+  ;; docs/flow.md#effects-one-owner-and-its-workers-per-kind: admission is a pure fn of the config and the owner's state; a
+  ;; request weighs its class's peak processes (a class never measured weighs the whole budget, so it runs alone), a plain one 1
+  (is (= 18 (fx/budget {:cores 18})) "no share set: the cores")
+  (is (= 9 (fx/budget {:cores 18 :max-cores 0.5})) "half of eighteen")
+  (is (= 1 (fx/budget {:cores 1 :max-cores 0.2})) "at least one")
+  (let [st {:held 8 :busy 2 :peaks {:root 6 :test 1}}]
+    (is (fx/admits? 18 st {:seon.fx/class :test}) "8 held and 1 more, under 18")
+    (is (fx/admits? 8 st {}) "a request of no class (a model call) holds no process: admitted at the bound")
+    (is (not (fx/admits? 9 st {:seon.fx/class :root})) "the same state at half the cores: a root's 6 more is past 9")
+    (is (fx/admits? 18 st {:seon.fx/class :root}) "14 under 18")
+    (is (not (fx/admits? 18 st {:seon.fx/class :unread})) "a class never measured weighs the whole budget")
+    (is (fx/admits? 18 (assoc st :held 0 :busy 0) {:seon.fx/class :unread}) "and runs when nothing else is in flight")))
+
+(deftest owner-holds-a-requests-weight-until-its-outcome
+  (let [o (fx/owner-proc {:kind :t :workers 4 :budget 3 :work nil :back nil})
+        [st out] (fx/owner-proc o :in (req 1 :seon.fx/class :root))
+        _ (is (= 1 (count (:to-workers out))) "nothing in flight: an unread class runs alone")
+        sent (first (:to-workers out))
+        [st out] (fx/owner-proc st :in (req 2 :seon.fx/class :root))
+        _ (is (empty? (:to-workers out)) "the unread class holds the whole budget")
+        [st out] (fx/owner-proc st :done {:dest (:dest (req 1)) :request sent
+                                          :outcome {:value 1 :seon.fx/peak-processes 2}})]
+    (is (= {:root 2} (:peaks st)) "the outcome's peak is the class's weight from now on")
+    (is (= [2] (map #(get-in % [:req :k]) (:to-workers out))) "the next runs once the weight is given back")
+    (is (= 2 (:held st)) "at its class's measured peak, no longer the whole budget")))
+
 (deftest owner-refuses-a-spent-budget
   (let [[st _] (fx/owner-proc (owner 1) :in (req 1 :budget 10 :budget-key :task-a))
         [st _] (fx/owner-proc st :done {:dest {:agent "boot/1" :op :fx-reply :k 1} :outcome {:value 1} :budget-key :task-a :cost 10})

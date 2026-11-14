@@ -1485,6 +1485,34 @@
   {:malli/schema [:=> [:cat :map :map] :boolean]}
   [st {:keys [budget budget-key]}] (boolean (and budget (>= (get-in st [:spent budget-key] 0) budget))))
 
+(defn budget
+  "The processes an owner's requests may hold at once: a share :max-cores of the machine's :cores, rounded down and at least
+  one; the cores when no share is set. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat [:map [:cores pos-int?] [:max-cores {:optional true} [:maybe number?]]]] pos-int?]}
+  [{:keys [cores max-cores]}]
+  (if max-cores (max 1 (long (Math/floor (* max-cores cores)))) cores))
+
+(defn- config-budget
+  "budget of the config this process holds, read at each admission, so a lowered share admits less at the next one."
+  {:malli/schema [:=> [:cat] pos-int?]}
+  []
+  (budget {:cores (cfg/value :seon.config.machine/cores) :max-cores (:seon.config.proofs/max-cores (:config (cfg/in-force)))}))
+
+(defn- weight
+  "The processes request m holds at its peak, under budget b: its class's (:seon.fx/class) most measured; b for a class never
+  measured, so it runs alone until it is; none for a request of no class (a model call, a read: no process of this machine)."
+  {:malli/schema [:=> [:cat pos-int? :map :map] nat-int?]}
+  [b st m]
+  (if-let [c (:seon.fx/class m)] (get-in st [:peaks c] b) 0))
+
+(defn admits?
+  "Whether request m fits under budget b beside what st's requests in flight hold (:held): always when nothing is in flight,
+  so the queue never stalls. A pure fn of the config's budget and the owner's state. See
+  docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat pos-int? :map :map] :boolean]}
+  [b st m]
+  (boolean (or (zero? (:busy st 0)) (<= (+ (:held st 0) (weight b st m)) b))))
+
 (defn- admit
   "What the owner does with a queued request at now-ms: :run, :wait (no free worker, or its
   bucket holds fewer tokens than the request's estimate :est: a :tick or a worker's :done
@@ -1496,6 +1524,7 @@
     (spent? st m)
     (error #'seon.fx/admit :seon.fx/budget-spent "the request's budget is spent" {:budget budget :spent (get-in st [:spent budget-key])})
     (>= (:busy st) (:workers st)) :wait
+    (not (admits? (or (:budget st) (config-budget)) st m)) :wait
     (and (:bucket st) (< (:tokens (refill (:bucket st) now-ms)) (or est 0))) :wait
     :else :run))
 
@@ -1536,7 +1565,10 @@
     (when (and (contract/error? (:outcome r)) (get-in r [:dest :agent]))
       (step/out! o :out {:op :problem :class :effect :error (dissoc (:outcome r) :seon.fx/us :seon.fx/queue-us :seon.fx/at-ms)
                          :agent (get-in r [:dest :agent])}))
-    (let [st (charge st r)]
+    (let [st (cond-> (charge st r)
+               (::weight (:request r)) (update :held #(max 0 (- % (::weight (:request r)))))
+               (and (:seon.fx/class (:request r)) (:seon.fx/peak-processes (:outcome r)))
+               (update-in [:peaks (:seon.fx/class (:request r))] (fnil max 0) (:seon.fx/peak-processes (:outcome r))))]
       (if (and limited? (:request r))
         (let [q (:request r)
               qk (or (::qk q) [(- (:prio q 0)) (inc (:seq st))])]
@@ -1579,6 +1611,9 @@
         (cond
           (= :wait d) (wake-later st m now)
           (= :run d) (let [[st ms] (batch (update st :queue dissoc qk) (assoc m ::qk qk))
+                           b (or (:budget st) (config-budget))
+                           ms (mapv #(assoc % ::weight (weight b st %)) ms)
+                           st (update st :held (fnil + 0) (transduce (map ::weight) + ms))
                            t (profile/now-ns)]
                        (step/out! o :to-workers (if (:batch st) {:batch (mapv #(assoc % :taken-ns t) ms)} (assoc (first ms) :taken-ns t)))
                        (recur (cond-> (update st :busy inc)
@@ -1605,12 +1640,13 @@
                 :rate "tokens per second the provider admits (nil: no bucket)"
                 :batch "the most requests one worker step takes from the queue (nil: one, as itself)"
                 :close? "the kind has a :close: when the queue is empty and nothing is in flight, its worker is told {:idle true}"
-                :tick "its clock's channel (external in-port, with :rate): a :tick when the bucket refilled"}
+                :tick "its clock's channel (external in-port, with :rate): a :tick when the bucket refilled"
+                :budget "the processes its requests may hold at once (nil: fx/budget of the config, read at each admission)"}
        :ins {:in "requests, addressed [:fx/<kind> :in] by any proc" :ask "root's own requests, never held back by the bound" :done "its workers' outcomes"} :outs {}
        ;; admission and routing only: never blocks, never computes long
        :workload :io
-       :ping-map-fn (fn [st] (-> (select-keys st [:kind :workers :busy :done]) (assoc :queued (count (:queue st)) :spent (:spent st))))})
-  ([args] (assoc (select-keys args [:kind :workers :batch :close?]) :busy 0 :done 0 :seq 0 :queue (sorted-map) :spent {}
+       :ping-map-fn (fn [st] (-> (select-keys st [:kind :workers :busy :held :peaks :done]) (assoc :queued (count (:queue st)) :spent (:spent st))))})
+  ([args] (assoc (select-keys args [:kind :workers :batch :close? :budget]) :busy 0 :held 0 :peaks {} :done 0 :seq 0 :queue (sorted-map) :spent {}
                  :bucket (when-let [r (:rate args)]
                            {:tokens (double r) :cap (double r) :per-ms (/ r 1000.0) :rate-ms (/ r 1000.0) :at (quot (profile/now-ns) 1000000)})
                  :tick (:tick args)
