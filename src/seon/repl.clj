@@ -419,24 +419,42 @@
   (boolean (and (seq? form) (symbol? (first form)) (= #'clojure.core/ns (ns-resolve nsx (first form))))))
 
 (defn- unmapped
-  "The vars form removed with clojure.core/ns-unmap, as this branch records them: each
-  (ns-unmap 'n 's) it calls (its namespace quoted, or *ns*, read in ns, where the form ran), whose var
-  db records with a definition and n no longer interns, {var its-entity form-entity}. What the eval
-  records as removed: Clojure's ns-unmap, observed, as v1's REPL recorded it (my.program/unmap-subject!;
-  docs/source.md#an-agent-changes-code-at-its-repl). An unmapped scratch helper is no longer program, so
-  the done rule does not see it as an uncontracted one."
-  {:malli/schema [:=> [:cat :seon.host/db :any :seon.host/namespace] [:vector [:tuple :qualified-symbol :int :int]]]}
+  "The definitions form removed, as this branch records them: each (ns-unmap 'n 's) it calls (its namespace quoted, or *ns*, read
+  in ns) whose var n no longer interns, and each (remove-method m d) (d a literal) whose multimethod no longer has the method, as
+  [name its-entity form-entity]. Only what the eval did, observed, as v1's REPL recorded it (my.program/unmap-subject!): never a
+  removal inferred from what this process lacks, which a process behind its branch would record as its own. See
+  docs/source.md#an-agent-changes-code-at-its-repl."
+  {:malli/schema [:=> [:cat :seon.host/db :any :seon.host/namespace] [:vector [:tuple :any :int :int]]]}
   [db form ns]
-  (let [quoted (fn [x] (when (and (seq? x) (= 'quote (first x)) (symbol? (second x))) (second x)))]
-    (vec (for [x (tree-seq coll? seq form)
-               :when (and (seq? x) (symbol? (first x)) (= #'clojure.core/ns-unmap (ns-resolve ns (first x))))
-               :let [[_ a b] x
-                     n (if (= '*ns* a) (ns-name ns) (quoted a))
-                     s (quoted b)]
-               :when (and n s (find-ns n) (not (contains? (ns-interns (find-ns n)) s)))
-               :let [v (symbol (str n) (str s)) e (pdb/eid db :var/name v) f (some-> e (#(d/entity db %)) :var/form :db/id)]
-               :when f]
-           [v e f]))))
+  (let [quoted (fn [x] (when (and (seq? x) (= 'quote (first x)) (symbol? (second x))) (second x)))
+        ;; a dispatch value written as a literal, [value], or nil when the form computes it
+        literal (fn [x] (cond (and (seq? x) (= 'quote (first x))) [(second x)] (or (keyword? x) (string? x) (number? x)) [x]))
+        calls (fn [f] (filter #(and (seq? %) (symbol? (first %)) (= f (ns-resolve ns (first %)))) (tree-seq coll? seq form)))]
+    (vec (concat
+           (for [[_ a b] (calls #'clojure.core/ns-unmap)
+                 :let [n (if (= '*ns* a) (ns-name ns) (quoted a)) s (quoted b)]
+                 :when (and n s (find-ns n) (not (contains? (ns-interns (find-ns n)) s)))
+                 :let [v (symbol (str n) (str s)) e (pdb/eid db :var/name v) f (some-> e (#(d/entity db %)) :var/form :db/id)]
+                 :when f]
+             [v e f])
+           (for [[_ m d] (calls #'clojure.core/remove-method)
+                 :let [v (when (symbol? m) (ns-resolve ns m)) [dv :as lit] (literal d)]
+                 :when (and (var? v) lit (instance? clojure.lang.MultiFn @v) (not (contains? (methods @v) dv)))
+                 :let [multi (symbol (str (.-ns ^clojure.lang.Var v)) (str (.-sym ^clojure.lang.Var v)))
+                       e (pdb/eid db :method/key (program/method-key multi (pr-str dv))) f (some-> e (#(d/entity db %)) :method/form :db/id)]
+                 :when f]
+             [[multi dv] e f])))))
+
+(defn removal-tx
+  "The tx-data retracting definitions gone ([name entity form] each, as `unmapped` reads them) whole, and each form once every
+  definition it makes is gone (a defprotocol makes several): no dead form keeps its :form/refs. See
+  docs/source.md#an-agent-changes-code-at-its-repl."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential [:tuple :any :int :int]]] :seon.db/tx-data]}
+  [db gone]
+  (let [es (set (map second gone))]
+    (into (mapv (fn [[_ e _]] [:db/retractEntity e]) gone)
+          (for [f (distinct (map peek gone)) :when (every? es (map :v (d/datoms db :eavt f :form/defines)))]
+            [:db/retractEntity f]))))
 
 (defn wrap-record
   "What a form leaves that is program becomes facts on this branch (agent mode) as it runs
@@ -478,14 +496,10 @@
                        ;; a def beside calls stays this eval (seon.program/definition-form?), and says so
                        nested? (and acct (not (program/definition-form? (:repl/form m) (the-ns (:ns l)))))
                        acct (when-not nested? acct)]
-                   ;; a var the form unmapped is no longer program on this branch: its definition retracted
+                   ;; a var or method the form removed is no longer program on this branch: its definition retracted
                    (let [gone (when (and l (records-as-agent?) contract/record? (contains? m :repl/value))
                                 (not-empty (unmapped (agent/db) (:repl/form m) (the-ns (:ns l)))))
-                         ;; the definition and its form, whole (seon.stage/stage-tx's rule): no dead form keeps its :form/refs
-                         _ (when gone (agent/transact! (into (mapv (fn [[_ e _]] [:db/retractEntity e]) gone)
-                                                             (for [f (distinct (map peek gone))
-                                                                   :when (every? (set (map second gone)) (map :v (d/datoms (agent/db) :eavt f :form/defines)))]
-                                                               [:db/retractEntity f]))))
+                         _ (when gone (agent/transact! (removal-tx (agent/db) gone)))
                          m (cond-> m gone (assoc :unmapped (mapv first gone)))]
                    (if acct
                      (let [;; the vars this form makes that the branch did not hold before it (read before its transaction)

@@ -258,6 +258,19 @@
     (is (str/includes? (:text gone) ":unmapped") (str "the answer says what it removed: " (pr-str gone)))
     (is (nil? (:value branch)) (str "the branch records no definition of it: " (pr-str branch)))))
 
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} a-removed-method-is-no-longer-the-branchs-program
+  ;; docs/source.md#an-agent-changes-code-at-its-repl: a stage inferred every removal from what the process didn't hold, so a process
+  ;; behind its branch recorded main's deletions as its own (agent lb76); only what an eval does is recorded: Clojure's remove-method,
+  ;; observed, retracts the method's definition as ns-unmap does a var's
+  (let [[_ _ gone branch] (at/in-agent (fn [{:keys [ns task]}]
+                                         [(str "(ns " ns ".rm) (defmulti area :shape)")
+                                          "(defmethod area :circle [{:keys [r]}] (* 3 r r))"
+                                          "(remove-method area :circle)"
+                                          (fn [{:keys [root]}] (d/q '[:find [?f ...] :in $ ?m :where [?e :method/multi ?m] [?e :method/form ?f]]
+                                                                    (ts/read-task-branch root task) (symbol (str ns ".rm/area"))))]))]
+    (is (str/includes? (:text gone) ":unmapped") (str "the answer says what it removed: " (pr-str gone)))
+    (is (empty? (:value branch)) (str "the branch records no definition of the method: " (pr-str branch)))))
+
 (deftest an-eval-that-printed-answers-its-value
   ;; since an eval's :out is shown verbatim (md-scan #20), the printed answer is no EDN once it printed, and a reader
   ;; that read the value back from the text got nil (seon.source-test's restart read nil of a turn that printed); the

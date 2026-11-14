@@ -213,7 +213,7 @@
                       [:unrecorded {:optional true :description "Your result was not recorded on your branch, and why."} :seon.error/base]
                       [:text {:optional true} :string] [:record {:optional true} :string]
                       [:recorded {:optional true :description "The vars this eval made program on your branch (a method as [multi dispatch]); they merge with your task. If you only meant to try something, take it back with (ns-unmap 'the.ns 'the-name) and define such things in your own namespace."} [:vector [:or :symbol [:vector :any]]]]
-                      [:unmapped {:optional true :description "The vars it removed from your branch's program."} [:vector :qualified-symbol]] [:fns {:optional true} [:vector :map]]
+                      [:unmapped {:optional true :description "The definitions it removed from your branch's program: a var by its name, a method by [multimethod dispatch-value]."} [:vector [:or :qualified-symbol [:tuple :qualified-symbol :any]]]] [:fns {:optional true} [:vector :map]]
                       ;; seon.repl/edit!'s: the var it changed and the lines around the change, [line text] each
                       [:edited {:optional true :description "What an edit changed: the var and the lines around the change."} [:map [:var :symbol] [:lines [:vector [:tuple pos-int? :string]]]]]]
  ;; what an eval changed of an existing var's meaning (seon.program/meaning: its contract, its
