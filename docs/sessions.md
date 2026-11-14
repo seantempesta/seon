@@ -19,6 +19,7 @@ Each named session owns one area and knows all of it:
 - A session reads the code a helper changes, takes the measurements that decide a design itself, and never answers for code it has not read.
 - Taking over an area starts with a list of what exists: each piece with its file and line, and whether to keep, extend or delete it.
 - A session lands its own change and tells root the sha. What a session takes is on the schedule, so nothing is done twice.
+- A time a session states is read from `date`, never from its own sense of the hour (2026-11-14: sessions ran 30 minutes ahead, and a waiter filtered `--since` a time still in the future). A wait on another session's work keys on git ancestry or a message (`git log <sha>..main --grep=...`), never on a time.
 
 ## The managing session
 
