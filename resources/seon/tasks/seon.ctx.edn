@@ -123,4 +123,8 @@ Proof: an agent whose change stales a section reads, in its status, each section
   :seon.task/plan "Found by context's duplication audit, 2026-11-14 (the owner: no duplicated effort; plan item 7), both ends read [M]. Which model calls are an agent's turns is derived twice: seon.ctx/turns (ctx.clj:1062: a call with no :seon.model-call/n is turn 0) and seon.ctx.wire's own filter (wire.clj:585: a call with no n is left out), so the chat and the request can walk different turns. Change: wire reads seon.ctx/turns, which decides the no-n case once (left out: a call with no number is no turn yet). Deletes: wire.clj's filter. Proof: a call with no n is in neither the chat nor the request."
   :seon.task/kind :work
   :seon.task/proofs #{seon.ctx-test/the-turns-of-an-agent-are-read-one-way}}
+ {:seon.task/name "the-ctx-caches-are-reactions"
+  :seon.task/plan "Found by runtime's Flow survey (notes runtime-flow-survey-2026-11-14.md, H6) [M]: seon.ctx keeps two process-global caches, held (src/seon/ctx.clj ~508, a defonce volatile) and moved-since (~907), derived data kept outside the one reaction (docs/plan.md#the-root-concept-one-reaction-over-the-store). Each becomes a reaction (or a track) over the store, its reads recorded as its key set, re-run by the commits that move them, its value its owner's; the volatiles go. No behaviour changes: what each answers stays. Proof: each answers what it did, and a commit that touches none of what it read leaves it unrun."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.ctx-test/the-ctx-caches-are-reactions}}
 ]

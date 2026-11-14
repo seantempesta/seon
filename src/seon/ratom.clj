@@ -75,7 +75,9 @@
 (defprotocol IStore
   "The store as a source a reaction derefs (docs/plan.md#the-root-concept-one-reaction-over-the-store)."
   (-moved [s] "The datoms of the commit that made its db, which its watchers are matched against.")
-  (commit! [s db datoms] "s at db, made by a commit of datoms: each reaction that read one of their keys runs again."))
+  (commit! [s db datoms] "s at db, made by a commit of datoms: each reaction that read one of their keys runs again, in the caller (an
+  auto-run one at once, the rest at the next flush!). Its caller is the readers' owner proc, taking the commit's datoms as work with a
+  declared bound, never the writer's step (docs/flow.md#flow-inside-an-agent)."))
 
 (deftype Store [^:volatile-mutable db ^:volatile-mutable moved ^:volatile-mutable watches]
   clojure.lang.IDeref
