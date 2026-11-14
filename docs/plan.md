@@ -95,7 +95,9 @@ of landings with no restart except for a pin, native code or `deps.edn`, and no 
 1. Every stored, synced or public shape a named schema; the schema graph chooses what an agent is shown, each item
    explained; duplicate schemas and unnamed public shapes flagged on change (data, context).
 2. What an agent reads: a cache-stable prefix and a fresh tail; one walk gives the page and the request; "What your task
-   still needs" every turn (built); reference sessions in the native wire format (context, web).
+   still needs" every turn (built); reference sessions in the native wire format; compaction: deleting, editing, compacting
+   or forgetting an eval is a change of data the next request is rendered from, with page controls for each (only
+   unlinking has a test today) (context, web).
 3. REPL redefinitions: the REPL may do anything; only definitions become program; each eval's answer says what was saved;
    test children fork from a clean branch-program process (runtime, context).
 4. The loop closes at a task's end: work, then refine (the worker's conversation continued, curating its own task and the
