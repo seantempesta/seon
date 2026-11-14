@@ -52,7 +52,7 @@ A session runs Seon agents on real tasks to find what in the system cost the age
 
 ## Messages
 
-Sessions talk to root only, through the app's session messages, and rarely: to say a branch landed, when blocked, or with a finding another area owns. They never talk to each other (owner, 2026-11-12: agents "spent more time talking to each other than working"). A message is 10 lines or fewer: the evidence read, the hypothesis, the one decision needed. A message is the home of no fact: what it teaches goes into the wiki section or task entry that owns it.
+Work that blocks another area is a task in that area's namespace, with its evidence, named in the blocked task's `:seon.task/needs` ([the plan](plan.md#stage-1-the-work-lives-in-seon-as-tasks-and-the-wiki)). A session messages the owning session directly, through the app's session messages, only to block, unblock or agree an interface: 6 lines or fewer, the evidence and one ask, no acknowledgements ([decisions](decisions.md#blockers-are-tasks-sessions-message-the-owning-session-directly)). A message is the home of no fact: what it teaches goes into the wiki section or task entry that owns it.
 
 ## No fan-out
 
