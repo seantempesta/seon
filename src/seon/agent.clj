@@ -2202,6 +2202,13 @@
                 (when (seq tx) (d/transact store-conn {:tx-data tx :tx-meta (pdb/tx-meta branch)}))))
           ;; what did not load in the program it was forked with (seon.fork-server/stood: main's, held by the server), then what of its
           ;; resumed branch's does not load here: both go to root with its hello, each a recorded problem of this agent, never a silent start
+          ;; the one start's first check (seon.fx/runtime-for): this process runs the binary its branch names, by the build
+          ;; inputs and pins of the tree the branch was imported from; a mismatch goes to root with the hello, which ends the
+          ;; spawn, never a silent run of another runtime (docs/source.md#the-binary-records-its-program)
+          env-mismatch (let [tree (get-in (d/pull @store-conn [:seon.system/source] [:seon.system/id :root]) [:seon.system/source :tree])
+                             r (when tree (fx/runtime-for tree))]
+                         (when (contract/error? r) r))
+          _ (mark! :runtime-for)
           load-errors (concat program-errors (when resumed (program/load-diff! base @store-conn)))
           _ (mark! :base)
           misaligned (when-not resumed (misaligned commit t @store-conn db0))
@@ -2216,7 +2223,7 @@
                    ;; loaded it at its start (program-db reads it)
                    :program {:seon.db/branch branch :seon.db/commit (d/commit-id @store-conn) :seon.db/t (:max-tx @store-conn)}
                    :base base :main db0 :store-conn store-conn :cfg cfg :results {} :n 0
-                   :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
+                   :load-errors (vec load-errors) :misaligned misaligned :env-mismatch env-mismatch :unwatched (sock/signal-at-input! fd)
                    :waits {} :inbox [] :tx-seq 0 :mode :agent
                    :ns (start-ns @store-conn task nsx) :interrupt-ok intr-ok :serve serve :inherited-bytes inherited}
                    ;; main's reach graph as the fork server keeps it, for db0: test-plan's base

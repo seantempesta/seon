@@ -3635,6 +3635,29 @@
     (is (nil? (:value (:bad v))) (str "a config the branch cannot hold is refused at its write, never reaching a branch an agent starts on: " (pr-str v)))
     (is (some? (:ex (:bad v))) (pr-str v))))
 
+;; docs/source.md#the-binary-records-its-program, plan Stage 0.5 slice B (deps' seon.fx/runtime-for, called at init!): an agent whose
+;; branch was imported from a tree another runtime's build inputs name (here the tree before the last Chez pin moved) is refused at
+;; its one start: its hello carries :seon.process/env-mismatch, root answers the spawn with it and tells the agent it failed, so it
+;; serves nothing on a binary its branch doesn't name. Red before: the agent started on root's binary, whatever its tree's pins.
+;; Estimate: in-agent's setup ~1.5M, one root eval: two git reads, one write and commit, one spawn (~0.5M) = ~2.5M
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2500000 :asks 1} :seon.test/execs ["git"]} an-agent-on-another-runtimes-tree-is-refused-at-its-start
+  (let [[r] (in-agent (fn [{:keys [agent ns]}]
+                        [{:op :eval :agent "root"
+                          :code (str "(let [sub (fn [a code] (:value @(c/submit! sys a code {:origin :outside})))"
+                                     "      a :" agent
+                                     "      git (fn [& args] (clojure.string/trim (:out (apply seon.lib/sh \"git\" \"-C\" (seon.config/checkout) args))))"
+                                     "      moved (git \"log\" \"-1\" \"--format=%H\" \"--\" \"reference-code/chez\")"
+                                     "      before (git \"rev-parse\" (str moved \"^^{tree}\"))"
+                                     "      cid (sub a (str \"(let [s (:seon.system/source (datahike.api/pull (seon.agent/db) [:seon.system/source] [:seon.system/id :root]))]"
+                                     "                      (seon.agent/transact! [{:seon.system/id :root :seon.system/source (assoc s :tree \" (pr-str before) \")}])"
+                                     "                      (seon.agent/commit!) (datahike.api/commit-id (seon.agent/db)))\"))"
+                                     "      r @(seon.system/call! sys {:op :spawn :opts {:branch :task-" ns "-other-runtime :commit cid}})]"
+                                     "  (when (:id r) (c/kill! sys (:id r)))"
+                                     "  {:type (:seon.error/type r) :id (:id r) :tree before})")}]))
+        v (:value r)]
+    (is (= :seon.process/env-mismatch (:type v)) (str "the spawn is answered with the refusal: " (pr-str v)))
+    (is (nil? (:id v)) "and no agent is handed back to serve")))
+
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-session-restored-at-an-older-commit-runs-that-commits-definitions
   ;; docs/storage.md#compiled-code: a spawn with {:branch b :commit C}
   ;; makes b from the session's commit C and forks it from main's image with the program at C loaded over it, the way a resumed
