@@ -1193,7 +1193,9 @@
          fresh (keyword (str (name (default-branch id)) "-r" (or ending (:max-tx db))))]
      {:branch fresh
       :left {:agent (some-> t :seon.task/agent :seon.agent/key) :branch (or (:seon.task/branch t) (default-branch id))}
-      :tx (into [{:seon.task/id id :seon.task/branch fresh}] (end-retracts db id))})))
+      ;; and when it was specified: its next run starts from main, unspecified until one of its proofs is red there again
+     :tx (cond-> (into [{:seon.task/id id :seon.task/branch fresh}] (end-retracts db id))
+           (some? (:seon.task/specified-turn t)) (conj [:db.fn/retractAttribute [:seon.task/id id] :seon.task/specified-turn]))})))
 
 (defn- unacted?
   "Whether refine rid is one nobody acted on, read from its own facts: cancelled, or held at an outcome that ended its run without

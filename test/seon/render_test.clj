@@ -2097,6 +2097,19 @@
               (tree-seq coll? seq (ui/status-hiccup {} {:unmerged [{:key [:task "app/t"] :ours {:seon.task/plan "a"} :theirs {:seon.task/plan "b"}}]})))
         "a task's, by its key, as the code it runs")))
 
+(deftest ^{:seon.test/estimate {:ticks 1000000}} an-unspecified-task-is-told-specifying-is-first
+  ;; plan Stage 1.2 (task seon.ctx.status/a-task-is-specified-once-a-proof-was-red): until one of its proofs has been red on its branch
+  ;; (:seon.task/specified-turn), the agent is told first that its first proof is its specification, and to fix the plan when it does
+  ;; not match the code. Random round 1: an agent spent 13 turns on a plan the code no longer matched and never wrote its proof
+  (let [s {:specified? false :reasons [{:reason :proof-unknown :symbol 'demo/a-test}] :proofs [{:test 'demo/a-test :status :undefined}]}
+        h (h/html (ui/status-hiccup {} s))
+        at #(str/index-of h %)]
+    (is (str/includes? h "isn't specified yet") (str "said: " h))
+    (is (< (at "isn't specified yet") (at "[ ]")) "before the boxes")
+    (is (str/includes? h "fix the plan first") "and the plan when it doesn't match the code")
+    (is (not (str/includes? (h/html (ui/status-hiccup {} (assoc s :specified? true))) "isn't specified yet")) "gone once a proof was red")
+    (is (not (str/includes? (h/html (ui/status-hiccup {} (dissoc s :specified?))) "isn't specified yet")) "and said of no task the status doesn't judge")))
+
 (deftest the-models-page-holds-the-plan-whole
   ;; the blind agent's plan was cut "+86 chars" at a part's budget: the task itself took an eval to read
   (let [[_ branch _] (paged-dbs)
@@ -4439,7 +4452,7 @@
       (is (str/includes? (at replied) streaming) "beside the element, until its evals have run")
       (is (not (str/includes? (at (d/db-with replied [{:seon.model-call/id cid :seon.model-call/forms 1}])) streaming))
           ":forms ends it"))
-    (is (not (str/includes? (str (at (d/db-with open [{:seon.model-call/id cid :seon.model-call/error {:seon.error/type :seon.model/transport :seon.error/message "gone"}}]))) streaming))
+    (is (not (str/includes? (str (at (d/db-with open [{:seon.model-call/id cid :seon.model-call/error {:seon.error/type :seon.model/transport :seon.error/operation 'seon.model/call :seon.error/message "gone"}}]))) streaming))
         "an error committed ends it too")
     (is (not (str/includes? (str (at (d/db-with open [{:seon.model-call/id cid :seon.model-call/origin :outside}]))) streaming))
         "an outside agent's call streams nothing")))

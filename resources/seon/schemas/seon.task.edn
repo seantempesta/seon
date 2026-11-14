@@ -61,7 +61,7 @@
                  ;; how its work stands and ended (judged by root, docs/reconcile.md#a-task-holds-how-its-work-ended), the agent as its key
                  [:seon.task/agent {:optional true} :string] [:seon.task/outcome {:optional true} :seon.task/outcome]
                  [:seon.task/reason {:optional true} :seon.task/reason] [:seon.task/reasons {:optional true} :seon.task/reasons]
-                 [:seon.task/commit {:optional true} :seon.task/commit] [:seon.task/merged-t {:optional true} :seon.task/merged-t]
+                 [:seon.task/commit {:optional true} :seon.task/commit] [:seon.task/merged-t {:optional true} :seon.task/merged-t] [:seon.task/specified-turn {:optional true} :seon.task/specified-turn]
                  [:seon.task/error {:optional true} :seon.task/error]
                  [:seon.task/deferred {:optional true} :seon.task/deferred] [:seon.task/deferred-results {:optional true} :seon.task/deferred-results]
                  [:seon.task/gate-unread {:optional true} :seon.task/gate-unread] [:seon.task/changed {:optional true} :seon.task/changed]

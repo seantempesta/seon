@@ -149,6 +149,12 @@
   docs/source.md#the-next-generation."
   (mapv second (filter #(= "-u" (first %)) (partition 2 1 child-env-scrub))))
 
+(def root-variables
+  "The variables only a root's own process has, bin/system's for the standing system: its source root, runs and ports. A
+  process forked from root that is not root drops them (seon.agent/hold-env!), so its config never reads root's source tree
+  (:seon.config.source/root is #env SEON_SOURCE_ROOT). See docs/source.md#the-next-generation."
+  ["SEON_SOURCE_ROOT" "SEON_RUNS" "SEON_WEB_PORT" "SEON_SERVER_PORT"])
+
 (defn checkout-env!
   "This process's environment made checkout's own, as bin/test starts a shard of it: child-env-variables removed, then
   SEON_CHECKOUT, HOME, JOLT_PWD and JOLT_LMDB_LIB set from checkout as bin/env and bin/test set them. For a process forked from another checkout's (a test child of the
@@ -257,6 +263,19 @@
                                  [p (if (.canExecute (java.io.File. (str root "/" p))) "100755" "100644")]))}
         (seq ps) (assoc :tree (tree-id root) :commit (git-try root ["rev-parse" "--verify" "--quiet" "HEAD"]))))
     (catch Throwable e (error #'seon.fx/changed-since :seon.fx/io-error (step/error-msg e) {:path root}))))
+
+(defn files-at
+  "The files paths name (relative to root) as they are on disk, read as changed-since reads the files that changed: {:value {path
+  text} :modes {path mode}}, a text nil when the file is gone, a mode for each the allow-list names. What a session's import
+  reads (my.branch/import!): the files it names, never the tree's diff. See docs/source.md#a-boot-catches-up-with-its-checkout."
+  {:malli/schema [:=> [:cat :string [:sequential :string]] :map]}
+  [root paths]
+  (try
+    (let [texts (into (sorted-map) (for [p paths :let [f (java.io.File. (str root "/" p))]] [p (when (.isFile f) (slurp f))]))]
+      {:value texts
+       :modes (into {} (for [[p t] texts :when (and t (cfg/file-kind p))]
+                         [p (if (.canExecute (java.io.File. (str root "/" p))) "100755" "100644")]))})
+    (catch Throwable e (error #'seon.fx/files-at :seon.fx/io-error (step/error-msg e) {:path root}))))
 
 (defn- env-input?
   "Is the file at relative path p an input of every test: everything git tracks or would

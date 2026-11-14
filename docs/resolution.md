@@ -40,10 +40,12 @@ The sites that resolve a name held in data to a var by design.
 - `my.agent/asked`, `my.agent/no-var`, `my.agent/ns-named?`: a name an agent asks `callers`, `callees` or `source` about is read as its REPL reads it, and one that resolves to nothing answers `:my.agent/no-var`, never "no callers". A bare name is a namespace only when one of that name exists and no var of the agent's namespace resolves from it: `'seon.task` is the namespace, `'map` stays `clojure.core/map`.
 - `my.agent/help`: reads its own namespace's docstring by name.
 - `seon.repl/eval-string`: each response's handle (``result/a3f9c1d2``), the agent REPL's own `*1`, defined as it answers.
-- `seon.config/hold-checkout!`: a test child of another checkout, a fork of root's agent, holds the config a test process of that checkout loads, its own namespace's `config` and `sources` included, since readers take them as loaded: a test environment.
+- `seon.config/hold-args!`: a process's own layers stated by its role (a test child's, at its start: `seon.agent/hold-env!`), over its branch's config entries, its own namespace's `config`, `sources` and `built-layers` included, since readers take them as loaded: a test child holds its branch's config, never its parent's.
 
 ## Owed its owner's fix
 
 The sites that fill a gap in another namespace, each owed a fix in that namespace's owner.
+
+- `my.branch/import!`: resolves `seon.system/catch-up` at its call, since `seon.system` requires `my.branch`. Owed: `catch-up` (a function of a db and files) moves below both callers with the readers it uses, and the require is direct.
 
 - `my.agent` (its last form): interns `source`, `source-fn`, `pst`, `doc` and `dir` into Jolt's `clojure.repl` in every process. Jolt's `clojure.repl` carrying them deletes the intern.

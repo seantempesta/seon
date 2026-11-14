@@ -598,7 +598,8 @@
         (is (some #{'seon.system/held-inputs} (:reaches (at-root "(seon.system/stale-binary @(:conn sys))")))
             "what the binary lacks is a form root runs: the case restart-for once restarted for")
         (let [kept (at-root (str "(my.root/landed! sys " (pr-str tree) ")"))]
-          (is (= {:kept boot :tree tree} kept) (str "landed! keeps the system running: " (pr-str kept))))
+          ;; and, the binary lacking a form root runs, asks bin/update to build it for the next boot, with no restart
+          (is (= {:kept boot :tree tree :build true} kept) (str "landed! keeps the system running, its binary built for the next boot: " (pr-str kept))))
         (is (= [tree boot] ((juxt :tree :boot) (at-root "(:seon.system/source (datahike.api/pull @(:conn sys) [:seon.system/source] [:seon.system/id :root]))")))
             "main's source fact is at the landed tree, under the same boot")
         (is (= root-pid (at-root "(seon.lib/c-getpid)")) "root is the same process")

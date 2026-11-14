@@ -43,6 +43,7 @@ The failure points whose edge catches, each with the variant it declares and who
 | The filesystem refuses a write-back | `seon.fx/write-file` | `:seon.fx/io-error` | the asker's `my.fx/call` answer |
 | Seon's source cannot be read when indexed | `seon.fx/read-source` | `:seon.fx/io-error` | the index writes nothing; a boot reads no source |
 | git cannot say what a checkout changed since main's last index | `seon.fx/changed-since` | `:seon.fx/io-error` (`:path`) | `seon.system/catch-up` writes nothing; the boot resumes main as it is |
+| a file a session's import names cannot be read | `seon.fx/files-at` | `:seon.fx/io-error` (`:path`) | `my.branch/import!` answers the error and writes nothing on the branch |
 | git cannot name the health step's base or extract its tree | `seon.fx/base-commit`, `seon.fx/checkout-at` (no `try`: they throw git's stderr) | thrown to `seon.check/run-check` | `HEALTH FAILED` with git's words ([health](health.md#checks-are-callers-of-seon)) |
 | A stalled agent's process is gone before its evidence is taken | `seon.fx/stall-evidence` | `:seon.fx/io-error` | root records it as the agent's problem |
 | git refuses the merges commit, or a file does not read as its reader reads it | `seon.fx/git-commit`, `seon.fx/unread-text` | `:seon.fx/io-error` | the reconciler writes `:seon.git/commit-failed` on each merged task (`seon.reconcile/commit-tx`); a later commit clears it; main's merge stands |

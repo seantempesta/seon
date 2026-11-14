@@ -169,6 +169,7 @@
   [:seon.config.render/width {:optional true} :seon.config.render/width]
   [:seon.config.render/agent-tree-depth {:optional true} :seon.config.render/agent-tree-depth]
   [:seon.config.render/part-budget {:optional true} :seon.config.render/part-budget]
+  [:seon.config.render/recent-errors {:optional true} :seon.config.render/recent-errors]
   [:seon.config.render/form-budget {:optional true} :seon.config.render/form-budget]
   [:seon.config.render/context-budget {:optional true} :seon.config.render/context-budget]
   [:seon.config.ctx/window {:optional true} :seon.config.ctx/window]
