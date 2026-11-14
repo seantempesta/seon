@@ -703,27 +703,28 @@
 (deftest ^{:seon.test/estimate {:ticks 1000000} :seon.test/execs ["perl" "bin/evidence"]} bin-evidence-asks-each-listening-process-and-keeps-every-log
   (let [dir (str (System/getProperty "java.io.tmpdir") "/evidence-" (random-uuid))
         _ (.mkdirs (java.io.File. (str dir "/runs")))
-        ;; a log its command names and it never holds open, as bin/held --log P writes a root's stderr a write at a time
+        ;; a log its parent's command names with --log and no process holds open, as bin/held --log P writes a root's stderr a
+        ;; write at a time; the parent (the held) is above the process handed in, so it is no member of the run's tree
         _ (spit (str dir "/runs/held.log") "held-line\n")
-        p (.start (ProcessBuilder. ^java.util.List
-                                   ["perl" "-MIO::Socket::INET" "-e"
-                                    (str "open(my $log, \">\", \"" dir "/runs/listener.log\"); $log->autoflush(1); print $log \"listener-line\\n\"; "
-                                         "my $l = IO::Socket::INET->new(Listen => 1, LocalAddr => \"127.0.0.1:0\") or die; $| = 1; print $l->sockport, \"\\n\"; "
-                                         "my $c = $l->accept; my $q = <$c>; print $c \"{:probe-state true}\\n\"; close $c; sleep 30")
-                                    "--" "--log" (str dir "/runs/held.log")]))
-        pid (str (.pid p))
-        port (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream p))))]
+        listener (str "open(my $log, \">\", \"" dir "/runs/listener.log\"); $log->autoflush(1); print $log \"listener-line\\n\"; "
+                      "my $l = IO::Socket::INET->new(Listen => 1, LocalAddr => \"127.0.0.1:0\") or die; $| = 1; print $l->sockport, \"\\n\"; "
+                      "my $c = $l->accept; my $q = <$c>; print $c \"{:probe-state true}\\n\"; close $c; sleep 30")
+        held (.start (ProcessBuilder. ^java.util.List
+                                      ["perl" "-e" "$| = 1; my $k = fork; if (!$k) { exec @ARGV[0..3] } print \"$k\\n\"; sleep 30"
+                                       "perl" "-MIO::Socket::INET" "-e" listener "--log" (str dir "/runs/held.log")]))
+        out (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream held)))
+        pid (.readLine out)
+        port (.readLine out)]
     (try
       (is (re-matches #"\d+" (str port)) (str "the listener's port: " port))
-      (let [r (clojure.java.shell/sh (str (seon.config/checkout) "/bin/evidence") dir pid)]
+      (let [r (clojure.java.shell/sh (str (seon.config/checkout) "/bin/evidence") dir pid)
+            logs (seq (.list (java.io.File. (str dir "/logs"))))]
         (is (zero? (:exit r)) (:err r))
         (is (str/includes? (str (slurp (str dir "/seon-state-" pid ".edn"))) ":probe-state") "the listening process is asked for its state")
-        (is (some #(and (str/ends-with? % "listener.log") (str/includes? (slurp (str dir "/logs/" %)) "listener-line"))
-                  (seq (.list (java.io.File. (str dir "/logs")))))
-            (str "and the log it writes is kept, though it is never signalled: " (vec (.list (java.io.File. (str dir "/logs"))))))
-        (is (some #(str/ends-with? % "held.log") (seq (.list (java.io.File. (str dir "/logs")))))
-            "and the log its command names with --log, which it never holds open"))
-      (finally (.destroy p) (seon.lib/remove-tree! dir)))))
+        (is (some #(and (str/ends-with? % "listener.log") (str/includes? (slurp (str dir "/logs/" %)) "listener-line")) logs)
+            (str "and the log it writes is kept, though it is never signalled: " (vec logs)))
+        (is (some #(str/ends-with? % "held.log") logs) (str "and the log its parent's command names with --log: " (vec logs))))
+      (finally (seon.lib/c-kill (parse-long (str pid)) 15) (.destroy held) (seon.lib/remove-tree! dir)))))
 
 ;; bin/laws defs (AGENTS.md section 5, every definition happens once): a namespace defining one name twice keeps only the second, silently
 ;; (runtime found its shell test had replaced deps' of one name). The law reads the files' text, so it is proved
