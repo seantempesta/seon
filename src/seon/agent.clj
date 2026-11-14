@@ -1636,6 +1636,14 @@
         :else (or (item-selection held items)
                   (let [sel (plan)] (if (:unread sel) sel (granted-selection sel items))))))
 
+(defn child-count
+  "How many test children a run of total-ms of measured work forks: one when the test service granted it (granted?: asked with its
+  items), since the service weighed it as one and is the one scheduler; else what the work is worth, a child per
+  :seon.config.proofs/child-min-ms, at most :seon.config.proofs/jobs (a run of the agent's own). See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat nat-int? :boolean] pos-int?]}
+  [total-ms granted?]
+  (if granted? 1 (-> (quot total-ms (cfg/value :seon.config.proofs/child-min-ms)) (max 1) (min (cfg/value :seon.config.proofs/jobs)))))
+
 (defn run-tests-forked
   "Fork this agent; the child runs what test-plan runs for proofs (the selected tests with no
   green held at their digest), each test within ticks engine ticks of work of its own, writing
@@ -1695,7 +1703,7 @@
         t0 (profile/now-ns)
         ;; every selected test green at its digest (a turn's run of the same tree, a session's): nothing to run, so no
         ;; child is forked. Else the tests are dealt by the one deal bin/test uses (proofs/shards, by each test's
-        ;; median measured ms) into at most :seon.config.proofs/jobs children, each a proc of this agent's graph, folded
+        ;; median measured ms) into child-count's children (one for a batch the service granted), each a proc of this agent's graph, folded
         ;; by one proc of the run's (run-children!, test-run-step); a child that dies loses the test it was running and
         ;; the rest of its shard runs in a new child; one child is the 1-child case
         run-all (fn [say]
@@ -1704,7 +1712,9 @@
               (let [;; each test's measured ms, or its class's configured estimate (seon.proofs/estimated-ms)
                     ms (proofs/estimated-ms run (fx/typical-ms run) (:process plan))
                     ;; no more children than the work needs: each is worth at least what a fork and a child's start cost
-                    n (-> (quot (reduce + (vals ms)) (cfg/value :seon.config.proofs/child-min-ms)) (max 1) (min (cfg/value :seon.config.proofs/jobs)))
+                    ;; a batch the service granted (asked with its items) runs in one child, as it was weighed: the service is the
+                    ;; one scheduler; the agent's own run deals what its work is worth (child-count)
+                    n (child-count (long (reduce + (vals ms))) (some? items))
                     res (run-children! plan ticks (proofs/shards run n ms) forked say)]
                 (cond (::threw res) (throw (::threw res))
                       (contract/error? res) res
@@ -2202,6 +2212,13 @@
                 (when (seq tx) (d/transact store-conn {:tx-data tx :tx-meta (pdb/tx-meta branch)}))))
           ;; what did not load in the program it was forked with (seon.fork-server/stood: main's, held by the server), then what of its
           ;; resumed branch's does not load here: both go to root with its hello, each a recorded problem of this agent, never a silent start
+          ;; the one start's first check (seon.fx/runtime-for): this process runs the binary its branch names, by the build
+          ;; inputs and pins of the tree the branch was imported from; a mismatch goes to root with the hello, which ends the
+          ;; spawn, never a silent run of another runtime (docs/source.md#the-binary-records-its-program)
+          env-mismatch (let [tree (get-in (d/pull @store-conn [:seon.system/source] [:seon.system/id :root]) [:seon.system/source :tree])
+                             r (when tree (fx/runtime-for tree))]
+                         (when (contract/error? r) r))
+          _ (mark! :runtime-for)
           load-errors (concat program-errors (when resumed (program/load-diff! base @store-conn)))
           _ (mark! :base)
           misaligned (when-not resumed (misaligned commit t @store-conn db0))
@@ -2216,7 +2233,7 @@
                    ;; loaded it at its start (program-db reads it)
                    :program {:seon.db/branch branch :seon.db/commit (d/commit-id @store-conn) :seon.db/t (:max-tx @store-conn)}
                    :base base :main db0 :store-conn store-conn :cfg cfg :results {} :n 0
-                   :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
+                   :load-errors (vec load-errors) :misaligned misaligned :env-mismatch env-mismatch :unwatched (sock/signal-at-input! fd)
                    :waits {} :inbox [] :tx-seq 0 :mode :agent
                    :ns (start-ns @store-conn task nsx) :interrupt-ok intr-ok :serve serve :inherited-bytes inherited}
                    ;; main's reach graph as the fork server keeps it, for db0: test-plan's base
