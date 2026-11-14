@@ -39,3 +39,15 @@
   (is (= [:green nil] (turn/hand-back-end nil {:reasons []})) "a clear status ends green")
   (is (= [:red "proof-red app.x-test/t"] (turn/hand-back-end nil {:reasons [{:reason :proof-red :symbol 'app.x-test/t}]})) "a run that didn't fail says only its reasons")
   (is (= [:failed "gave up"] (turn/hand-back-end {:outcome :failed :reason "gave up"} {:reasons []})) "a failed task ends as it said"))
+
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-proof-first-red-specifies-its-task
+  ;; plan Stage 1.2 (task seon.ctx.status/a-task-is-specified-once-a-proof-was-red): the first status a turn reads in which one of the task's
+  ;; proofs is red writes the task's :seon.task/specified-turn, that turn's number, once: a verdict keeps no history, so the moment it is
+  ;; observed is when it is written. No red proof writes nothing; a task that holds it already writes nothing again
+  (let [task "app.calc/total-is-exact"
+        db (t/with (t/world) [{:seon.agent/key "k1" :seon.agent/task [:seon.task/id task] :seon.agent/turn 3}])
+        red {:proofs [{:test 'app.calc-test/total-sums :status :fail} {:test 'app.calc-test/add-adds :status :pass}]}]
+    (is (= [{:seon.task/id task :seon.task/specified-turn 3}] (turn/specified-tx db task "k1" red)) "red at turn 3: specified then")
+    (is (nil? (turn/specified-tx db task "k1" {:proofs [{:test 'app.calc-test/total-sums :status :undefined}]})) "not written: nothing")
+    (is (nil? (turn/specified-tx db task "k1" {:proofs [{:test 'app.calc-test/total-sums :status :pass}]})) "green: nothing")
+    (is (nil? (turn/specified-tx (t/with db [{:seon.task/id task :seon.task/specified-turn 2}]) task "k1" red)) "written once")))

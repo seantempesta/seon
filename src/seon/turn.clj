@@ -404,6 +404,17 @@
     (print (sedn/encode (mapv agent/on-the-wire (map :response rs))))
     nil))
 
+(defn specified-tx
+  "The write that marks task task specified on branch db, or nil: the first status s a turn reads in which one of its proofs is red
+  (or threw) writes :seon.task/specified-turn, the turn of agent k (its :seon.agent/turn) then, once. A verdict keeps no history, so the
+  moment it is observed is when it is written; a branch cut from main does not hold it. Nothing when no proof is red, or when the task
+  holds it already. See docs/render.md#how-the-work-stands."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :string :map] [:maybe :seon.db/tx-data]]}
+  [db task k s]
+  (when (and (some #(#{:fail :error} (:status %)) (:proofs s))
+             (nil? (:seon.task/specified-turn (d/entity db [:seon.task/id task]))))
+    [{:seon.task/id task :seon.task/specified-turn (or (:seon.agent/turn (d/entity db [:seon.agent/key k])) 0)}]))
+
 (defn hand-back-end
   "How an outside agent's run ends: [outcome reason] from the stop its agent requested
   (my.task/fail! makes it :failed, with the reason it gave) and its status s (seon.ctx.status/status: the done rule's :reasons, and
@@ -453,6 +464,7 @@
         _ (branch/merge-main!)
         _ (observe task)
         s (judged (status-now))
+        _ (when-not (contract/error? s) (some-> (specified-tx (agent/db) task (:key @agent/state) s) agent/transact!))
         [outcome reason] (if (contract/error? s) [:error (:seon.error/message s)] (let [[o why] (hand-back-end stop s)] [o (or why (unjudged-reason s))]))]
     (end! {} outcome reason (when (contract/error? s) s))))
 
@@ -520,6 +532,8 @@
                              s (status-now)
                              s (judged s)
                              no-status? (contract/error? s)
+                             ;; the first red of one of its proofs is when the task was specified: written once, as observed
+                             _ (when-not no-status? (some-> (specified-tx (agent/db) task (:key @agent/state) s) agent/transact!))
                              reasons (:reasons s)
                              stop (get-in @agent/state [:turn :stop])
                              ;; what the task references, as facts (its proofs, its plan's cites): never its plan re-parsed
