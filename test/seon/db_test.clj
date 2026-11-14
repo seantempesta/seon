@@ -1725,14 +1725,22 @@
             (let [nsym (symbol (str "app.c" i))]
               (d/transact main (vec ((mt/code nsym (str "(ns " nsym ")\n(defn f [] " i ")\n")) @main)))
               (merge!)))
-          (d/transact br [{:note/agent :t :note/text "the branch's own"}])
-          (let [[own total] (private)]
+          (let [[own-before _] (private)
+                before (addrs @br)
+                _ (d/transact br [{:note/agent :t :note/text "the branch's own"}])
+                ;; the nodes its one write made: the path it rewrote, whatever the layout around it
+                made (count (remove before (addrs @br)))
+                [own total] (private)]
             (is (:crypto-hash? (:config @br)) "the store's nodes are addressed by their content")
-            ;; the branch's own nodes are its one write's path and a few leaves, under a tenth of the tree (Sean, 2026-11-10; measured 9 of
-            ;; 156 on a seed of 2000, 5 of 85 on this one): persistent-sorted-set is a plain B-tree whose leaf cut depends on insertion order, and seon.merge/merge-tx inserts
-            ;; main's datoms in another order than main did, so a branch can own leaves holding only main's datoms (the literal 8 passed
-            ;; by luck). Random addresses kept 76 of 157 (48%) after the same 20 merges, red here; docs/sharing.md#what-a-branchs-nodes-are
-            (is (<= own (quot total 10)) (str own " of " total " nodes are the branch's own after 20 merges and one write of its own")))
+            ;; what a branch's own write adds to its own nodes is the path that write rewrote, and nothing of main's: asserted from the
+            ;; write's own nodes, never from where a split falls (a bound of a tenth of the tree went red twice on one config key added
+            ;; to main moving a leaf cut, 2026-11-10 and 11-14). How many merged leaves a branch owns depends on insertion order
+            ;; (seon.merge/merge-tx inserts main's datoms in another order than main did): task
+            ;; seon.db/a-merged-node-is-mains-node-whatever-the-insertion-order; docs/sharing.md#what-a-branchs-nodes-are
+            (is (pos? made) "the write made nodes of its own")
+            (is (<= own (+ own-before made)) (str "its one write added " (- own own-before) " own nodes, more than the " made " it made"))
+            ;; a path, not a rebuild: one datom rewrites a node a level of the tree, a handful in a tree of a few hundred nodes
+            (is (< made (quot total 10)) (str "one datom made " made " of " total " nodes")))
           (finally (d/release br) (d/release main) (seon.lib/remove-tree! path))))))
 
 (deftest a-branchs-own-entity-schema-is-the-one-its-writes-are-held-to
