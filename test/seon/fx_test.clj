@@ -820,3 +820,18 @@
         (is (= :seon.bound/reached (get-in done [:outcome :seon.error/type])) (pr-str done))
         (is (= {:seon.bound/ms 50} (get-in done [:outcome :seon.bound/bound])))
         (is (nil? (:call st)) "the worker is free for its next item")))))
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-process-on-another-runtime-answers-env-mismatch
+  ;; task seon.fx/runtime-for-reads-the-pins-from-the-branch: the one check of which runtime a branch needs. target/seon's
+  ;; identity (target/seon.digest, bin/build's record of bin/binary-digest) answers the binary for the tree it was built
+  ;; from, and a tree from before the last Chez pin moved (another runtime) answers :seon.process/env-mismatch naming both
+  ;; digests, for its caller to build once. The estimate: two git ls-trees of the build inputs, ~30 ms each.
+  (let [root (cfg/checkout)
+        git (fn [& args] (clojure.string/trim (:out (apply seon.lib/sh "git" "-C" root args))))
+        built (clojure.string/trim (:out (seon.lib/sh (str root "/bin/tree") root)))
+        moved (git "log" "-1" "--format=%H" "--" "reference-code/chez")
+        before (git "rev-parse" (str moved "^^{tree}"))
+        same (fx/runtime-for built)
+        other (fx/runtime-for before)]
+    (is (= (str root "/target/seon") (:binary same)) (str "answered " same))
+    (is (= :seon.process/env-mismatch (:seon.error/type other)) (str "answered " other))
+    (is (not= (:seon.process/binary-digest other) (:seon.process/branch-digest other)))))

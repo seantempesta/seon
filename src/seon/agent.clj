@@ -1347,6 +1347,7 @@
         {:keys [plan ticks ends]} st
         forked (rflow/fork! (:flow @state) cpid #(test-child-runs! % plan ticks todo)
                             {:in :seon.link/down :out :seon.link/up :pump :fiber :codec (child-codec cpid)
+                             :fork-wait-ms (cfg/value :seon.config.agent/fork-wait-ms)
                              :conns [[[cpid :seon.link/up] [(:pid st) :seon.link/up]]]})]
     (if-let [os (:pid forked)]
       (do (a/io-thread (a/<!! (poller/exit-chan os)) (a/>!! ends {:seon.process/pid os :seon.process/exit (lib/wait-status os)}))
@@ -1355,10 +1356,10 @@
           (-> st (assoc :n n)
               (assoc-in [:children cpid] {:shard i :os os :acc {:streamed [] :ended #{} :fns {} :heap {} :measured {}}})
               (assoc-in [:by-os os] cpid)))
-      (let [k (lib/active-threads)]
+      (let [k (lib/active-threads) hs (vec (:holders forked))]
         (assoc-in st [:shards i :error]
                   (contract/error :seon.test/fork-refused #'seon.agent/fork-test-child
-                                  (str "cannot fork the tests: " k " Chez threads active (a running future?)") {:active-threads k}))))))
+                                  (str "cannot fork the tests: " k " Chez threads active (the holders are in :holders)") {:active-threads k :holders hs}))))))
 
 (defn- run-answered
   "st with its run's answer put on its :answer, once, as [x dirs]: dirs, the run directories of
@@ -2070,7 +2071,10 @@
         (do (sock/close! fd) (send! {:op :clone-failed :k k :error (:error r)}))
         (lib/fork!
           {:fd fd :double? true
-           :refused (fn [n] (send! {:op :clone-failed :k k :error (contract/error :seon.agent/failed #'seon.agent/clone! (str "cannot fork: " n " Chez threads active (a running future?)") {:agent (:agent m)})}))
+           :refused (fn [{:keys [active-threads holders bound-ms]}]
+                      (send! {:op :clone-failed :k k :error (contract/error :seon.agent/failed #'seon.agent/clone!
+                                                                            (str "cannot fork: " active-threads " Chez threads active after " bound-ms " ms (the holders are in :holders)")
+                                                                            {:agent (:agent m) :holders holders})}))
            :parent (fn [_] (send! {:op :cloned :k k :clone (:agent m)}))
            :child (fn []
                     (let [parent (:id @state)]

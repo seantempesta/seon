@@ -17,6 +17,9 @@ cmd() { [[ -s $DIR/held.pids ]] && awk '{print $2}' "$DIR/held.pids" }
   "$HERE/evidence" "$DIR" ${c:-$H} > /dev/null 2>&1
   print -r -- "$MS" > "$DIR/overran"
   [[ -n $c ]] && { "$HERE/end-tree" $c; kill -KILL -$c 2>/dev/null } ) & W=$!
+# ended itself (its caller's group stopped): the group it holds ends with it, never left running (bin/jolt-gates' workers
+# outlived a stopped run, 2026-11-14)
+trap 'c=$(cmd); [[ -n $c ]] && kill -KILL -$c 2>/dev/null; kill $W $H 2>/dev/null; exit 143' TERM INT HUP
 wait $H; st=$?
 kill $W 2>/dev/null; wait $W 2>/dev/null
 # what CMD left in its group when it ended (a daemon, a forked child) is ended too: it holds CMD's output open, so a caller

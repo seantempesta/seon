@@ -82,7 +82,7 @@
  ;; a step of the fork server that threw (seon.fork-server/server-step): docs/processes.md#a-step-that-throws
  :seon.fork-server/step-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/step-failed]] [:op {:optional true} [:maybe :keyword]]]]
  ;; the fork server made no standby (seon.system/back-op): a platform problem, and root's view shows it has none (docs/processes.md#a-step-that-throws)
- :seon.fork-server/standby-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/standby-failed]] [:active-threads {:optional true} [:maybe :int]] [:gen {:optional true} [:maybe :int]]]]
+ :seon.fork-server/standby-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/standby-failed]] [:active-threads {:optional true} [:maybe :int]] [:gen {:optional true} [:maybe :int]] [:holders {:optional true} [:maybe [:sequential [:map [:id :int] [:name :string]]]]]]]
  ;; a release (my.root/run!) of a task that is not held: unknown (execution nil), already
  ;; running, or cancelled; the held ids of the same call are released
  :seon.system/not-held [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/not-held]] [:task :string]
@@ -143,7 +143,7 @@
  ;; a form that allocated past its byte budget (seon.intr/run): what it allocated, its budget
  :seon.repl/bytes-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.repl/bytes-spent]] [:bytes :int] [:budget :int]]]
  ;; the agent could not fork its test run (threads were active): no proof ran
- :seon.test/fork-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/fork-refused]] [:active-threads :int]]]
+ :seon.test/fork-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/fork-refused]] [:active-threads :int] [:holders {:optional true} [:maybe [:sequential [:map [:id :int] [:name :string]]]]]]]
  ;; a value the agent's test process sent does not read (a value that prints as no EDN in it): its test
  ;; ends :error with the value's head, and the agent goes on (seon.agent/child-codec)
  :seon.test/unreadable-line [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/unreadable-line]]]]
@@ -154,6 +154,10 @@
  :seon.test/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int]
                                                 [:test {:optional true} :string]]]
  :seon.fx/io-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/io-error]]]]
+ :seon.process/binary-digest [:maybe {:description "target/seon's identity as bin/build recorded it (target/seon.digest), or nil when none was recorded."} :string]
+ :seon.process/branch-digest [:string {:description "A branch tree's binary identity (bin/binary-digest at that tree)."}]
+ :seon.process/tree [:string {:description "A git tree id, as bin/tree and the import name it."}]
+ :seon.process/env-mismatch [:and {:description "A process's binary is not its branch's: target/seon's identity (bin/binary-digest) differs from the branch tree's; its caller builds once (seon.fx/runtime-for)."} :seon.error/base [:map [:seon.error/type [:= :seon.process/env-mismatch]] [:seon.process/binary-digest [:maybe :string]] [:seon.process/branch-digest :string] [:seon.process/tree :string]]]
  :seon.fx/tree-unmoved [:and {:description "A commit moved git's main but its checked-out tree could not follow: the commit stands, the tree is brought in by hand."}
                         :seon.error/base [:map [:seon.error/type [:= :seon.fx/tree-unmoved]] [:sha :string]]]
  :seon.fx/ref-moved [:and {:description "A commit asked to move a branch only from the commit it expected found the branch elsewhere: nothing written; the caller reads what moved it and asks again."}

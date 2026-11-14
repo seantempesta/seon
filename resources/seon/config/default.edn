@@ -347,6 +347,12 @@
  ;; guessed tolerance the agent proc held as a var (30 s; a model call answers or streams within
  ;; it). Past it nothing is ended. 0: no check.
  :seon.config.agent/stall-ms 30000
+ ;; Unit: ms. How long a fork waits for every other thread to park (seon.lib/fork!, the test child's
+ ;; remote.flow/fork!; Chez fork_alone) before it answers refused, naming the threads that held it. A thread in a C
+ ;; call that is not collect-safe never parks, and with no bound such a fork waited for good (a test child,
+ ;; 2026-11-14). Provenance: 100 forks right after a wake waited 3.9-4.6 ms median, 6.4 ms at most, fork(2)
+ ;; included (load 15, a small process, 2026-11-14); root's fork(2) alone is 65 ms (docs/cost.md); about ten times that.
+ :seon.config.agent/fork-wait-ms 1000
  ;; Unit: bytes. How much of a stalled agent's stderr file its stall evidence keeps as the fiber dump
  ;; (seon.fx/stall-evidence; seon.lib/tail-bytes says how many earlier bytes were left out). Provenance:
  ;; the literal 262144 (256 KiB) the evidence script's `tail -c` held; a dump of a few hundred fibers fits.
@@ -385,6 +391,13 @@
  ;; measured 2026-10-23). Read by bin/env from this line, so it stays one line of text. At the
  ;; bound: none; a value that is no EDN map stops every Jolt process at start, naming it.
  :seon.config.build/jolt-compiler-options "{:image-fn-forms false}"
+ ;; What only a build can change: the paths bin/build compiles or bakes into target/seon, besides every
+ ;; pin (a gitlink, read from the tree). The binary's identity is the digest of these at a commit
+ ;; (bin/binary-digest, the one implementation; target/seon.digest beside the binary); a process whose
+ ;; branch's digest differs is built for, once (seon.fx/runtime-for). The program (src/'s forms) is not
+ ;; here: a process loads it from its branch as a diff (docs/source.md#the-binary-records-its-program).
+ ;; Read by bin/binary-digest from this line, so it stays one line of text. A path or prefix ending in /.
+ :seon.config.build/inputs ["deps.edn" "bin/build" ".gitmodules" "native/" "resources/seon/config/" "resources/seon/schemas/" "resources/seon/system.edn" "resources/public/"]
  ;; Unit: megabytes: the byte budget of Jolt's compiled-code cache (target/cache/aot of the main tree, shared
  ;; by every checkout), least recently used first (docs/source.md#shared-build-caches). bin/env exports it
  ;; as JOLT_CACHE_MB, which Jolt's loader reads when a process that published an artifact prunes. 32768
