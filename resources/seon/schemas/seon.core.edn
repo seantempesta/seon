@@ -273,6 +273,7 @@
  :seon.db/attributes [:boolean {:description "On a schema's properties, true when it is an entity schema: the keys of its map are attributes, and an entity holding one is checked against its required keys. See docs/storage.md#the-write-checks-every-entity-it-touches."}]
  :seon.db/identity [:boolean {:description "On an attribute's schema, true when its value identifies its entity, a lookup ref (Datahike's :db.unique/identity)."}]
  :seon.db/index [:boolean {:description "On an attribute's schema, true when its values are indexed for lookup by value (Datahike's :db/index)."}]
+ :seon.db/tagged [:boolean {:description "On an attribute's schema, true when each of its values names the schema it satisfies by :seon.db/tag and is held to it at the write (seon.db/invalid-datom)."}]
  :seon.db/to [:vector {:description "On a ref attribute's schema, the entity schemas the entity it refers to may be."} :qualified-keyword]
  :seon.db/component [:boolean {:description "On an attribute's schema, true when it is a component: what its entity references is owned by it (Datahike's :db/isComponent)."}]
  :seon.db/content-id [:boolean {:description "On the schema of an identity attribute, true when its value names its entity's id in every branch (Datahike's :db/contentId)."}]

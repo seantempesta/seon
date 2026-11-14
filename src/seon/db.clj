@@ -47,7 +47,7 @@
         valid-of (fn [a] (or (get @seen a) (let [f (m/validator (schema-of a))] (vswap! seen assoc a f) f)))
         ;; and whether it is tagged, once an attribute
         tagged (volatile! {})
-        tagged? (fn [a] (let [t (get @tagged a ::unread)] (if (= ::unread t) (let [t (boolean (:seon.db/tagged (contract/properties a)))] (vswap! tagged assoc a t) t) t)))]
+        tagged? (fn [a] (if (contains? @tagged a) (get @tagged a) (let [t (boolean (:seon.db/tagged (contract/properties a)))] (vswap! tagged assoc a t) t)))]
     (letfn [(refused [a v]
               (if-not ((valid-of a) v)
                 (let [ps (contract/problems (schema-of a) v)]
