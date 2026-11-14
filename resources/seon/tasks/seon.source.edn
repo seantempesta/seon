@@ -86,5 +86,4 @@ Won't do: worktrees, isolated trees, refused writes, a virtual filesystem, a dir
  {:seon.task/name "defining-heads-and-identities-are-derived"
   :seon.task/plan "seon.source's defining-heads (src/seon/source.clj:61, def defn ... deftest) and identities (:386, the attributes naming a program entity) are hand-kept. Derive identities from the entity schemas' :seon.db/identity attributes; this is the same derivation the one merge gives seon.merge/stated-keys, so use that one. Derive defining-heads from what the analyzer records a form defines (:form/defines). Delete both defs. Root approved, 2026-11-14 (data's hand-made-lists inventory)."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.source-test/a-new-defining-macro-is-imported-without-a-list}
-  :seon.task/needs #{"seon.merge/a-tasks-content-is-a-key-of-the-one-merge"}}]
+  :seon.task/proofs #{seon.source-test/a-new-defining-macro-is-imported-without-a-list}}]
