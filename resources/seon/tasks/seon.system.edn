@@ -145,4 +145,10 @@ Proofs, once ruled: a task file's declaration loads with the kind the ruling say
   :seon.task/kind :work
   :seon.task/proofs #{seon.system-test/a-proc-whose-ports-change-is-swapped seon.system-test/a-pin-change-is-the-one-binary-restart}
   :seon.task/needs #{}}
+
+ {:seon.task/name "a-landings-handoff-is-one-map-any-root-reads"
+  :seon.task/plan "Found 2026-11-14 [M, deps-2]: a pin landing's handoff was refused by the running root's old code, so root was not brought up to date. Cause [M]: bin/land:62 evals seon.system/landed-tx positionally in the running root, so any new argument (the pin changes, a 6th) breaks a root running the code before it. The fix: the handoff calls one stable entry, my.root/landed! with one map. A root ignores keys it doesn't know, and landed-tx reads the landed commit's gitlinks itself (seon.fx), so the bridge sends no pins. A pin or native change answers :restart (seon.system/restart-for's :binary class), and bin/update restarts onto the new binary; a restart writes the new program's facts about the tree (seon.source/a-file-class-is-derived-again-when-its-deriving-code-moves). Paths that run it: bin/land, bin/update, a landing onto a root one version behind. Proof, red first: seon.system-test/an-old-roots-handoff-is-answered, a handoff map with a key the root's code lacks is answered (landed or :restart), never refused. Estimate: one eval, as today. Builder runtime, reviewer deps-2."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.system-test/an-old-roots-handoff-is-answered}
+  :seon.task/needs #{}}
 ]
