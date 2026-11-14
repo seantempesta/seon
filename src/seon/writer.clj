@@ -190,6 +190,22 @@
                      (cond-> (nil? why-not) (-> (update :taken into (keys (:ours r))) (assoc :db db'))))))
              {:taken #{} :db main :members []} branches))))
 
+(defn merge-main-into
+  "Main merged into branch b on main's program (seon.merge/merge-main): a conflict writes only its unmerged entries; clean, one force-branch! onto b while b is at its head. Answers {:ok :conflicts :commit :t :main}, :main the commit merged. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :any :map :seon.db/branch] :map]}
+  [conn cfg b]
+  (let [main-b (pdb/conn-main conn) main @conn head (pdb/head conn b)
+        base (pdb/branch-base conn main-b b)
+        r (pm/merge-main base head main)]
+    (if (:conflicts r)
+      (let [bc (pdb/connect (assoc cfg :branch b))]
+        (try (d/transact bc {:tx-data (pm/unmerged-tx head (vec (:conflicts r)) (:max-tx main)) :tx-meta (pdb/tx-meta b)})
+             (finally (d/release bc)))
+        {:ok false :conflicts (:conflicts r) :main (d/commit-id main)})
+      (let [merged (:db-after (d/with main {:tx-data (:tx r) :tx-meta (pdb/tx-meta b {:seon.tx/merged main-b})}))
+            cid (d/force-branch! merged b #{(d/commit-id head) (d/commit-id main)} {:expected-current-commit (d/commit-id head)})]
+        {:ok true :commit cid :keys (count (:keys r)) :t (:max-tx merged) :main (d/commit-id main)}))))
+
 (defn- octopus-merge
   "Merge branches into main in ONE commit (an octopus merge, session R3, as git's, every
   member a parent): each member that holds main's program head and is not refused merges, in
@@ -335,22 +351,10 @@
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
                         (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st)}))
       :octopus-merge (let [[st r] (octopus-merge st o (vec (:branches m)) (:data-attrs m :all))] (reply st r))
-      ;; main merged into branch b, decided here on main's program (seon.merge/merge-main), never on the branch's own code: a
-      ;; conflict writes only its unmerged entries on b; clean, b becomes main's head plus its own datoms, one commit with parents
-      ;; b's head and main, only while b is still at that head (docs/merging.md#a-branch-merges-main-in). Its agent waits meanwhile.
+      ;; main merged into branch b on main's program (merge-main-into); its agent waits meanwhile
       :merge-main (reply st (if-not (exists? (:branch m))
                               (refused (str "no branch " (:branch m)) {})
-                              (let [b (:branch m) main-b (pdb/conn-main conn) main @conn head (pdb/head conn b)
-                                    base (pdb/branch-base conn main-b b)
-                                    r (pm/merge-main base head main)]
-                                (if (:conflicts r)
-                                  (let [bc (pdb/connect (assoc (:cfg st) :branch b))]
-                                    (try (d/transact bc {:tx-data (pm/unmerged-tx head (vec (:conflicts r)) (:max-tx main)) :tx-meta (pdb/tx-meta b)})
-                                         (finally (d/release bc)))
-                                    {:ok false :conflicts (:conflicts r)})
-                                  (let [merged (:db-after (d/with main {:tx-data (:tx r) :tx-meta (pdb/tx-meta b {:seon.tx/merged main-b})}))
-                                        cid (d/force-branch! merged b #{(d/commit-id head) (d/commit-id main)} {:expected-current-commit (d/commit-id head)})]
-                                    {:ok true :commit cid :keys (count (:keys r)) :t (:max-tx merged)})))))
+                              (merge-main-into conn (:cfg st) (:branch m))))
       ;; the merge gate's candidate: branch b merged over main as the octopus merge would merge it, applied to
       ;; a value and never committed, and the files that merge would write, with their text as it holds them
       ;; (written, source/files): what the gate tests is what the merge writes, schema resources included

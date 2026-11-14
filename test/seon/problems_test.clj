@@ -145,6 +145,21 @@
     (is (= 'seon.system/api-proc (:seon.error/operation (first w))) "the failed proc is the producer")
     (is (= [] (writes o3)) "the answered write is followed by nothing: 500 repeats of a written signature are counted in the fold")))
 
+;; Estimate: 3 api steps on a map, ~0.3M each, with one problem's write = ~1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-drop-to-an-agent-stopped-on-purpose-is-no-problem
+  ;; deps' evidence (e2e-calc, 2026-11-14 19:11): a message in flight to an agent its cancel had just stopped was dropped by Flow
+  ;; (its proc left the graph) and read as :seon.system/undeliverable, a defect. The cancel meant to drop it: a drop to an agent the
+  ;; api stopped on purpose (:seon.status/stopped, :ended or :killed) is no problem; to any other pid it still is
+  (let [report->error @#'seon.system/flow-report
+        drop-to (fn [id] (report->error {:clojure.core.async.flow/undeliverable [id :in] :clojure.core.async.flow/pid :api}))
+        st (api {:agents {:a1 {:status :killed :ended-ms 1} :a2 {:status :busy}}})
+        [_ o1] (step st :back (drop-to :a1))
+        [_ o2] (step st :back (drop-to :a2))
+        [_ o3] (step st :back (drop-to :nobody))]
+    (is (= [] (writes o1)) "to an agent its cancel stopped: expected, nothing written")
+    (is (= :seon.system/undeliverable (:seon.error/type (ffirst (writes o2)))) "to a live agent: a problem")
+    (is (= :seon.system/undeliverable (:seon.error/type (ffirst (writes o3)))) "to a pid nothing knows: a problem")))
+
 (deftest ^{:seon.test/estimate {:ticks 1000000}} an-agent-death-is-recorded-with-its-cause
   (let [dir (str (System/getProperty "java.io.tmpdir") "/d2-death-" (random-uuid))
         _ (.mkdirs (java.io.File. (str dir "-agents")))

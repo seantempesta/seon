@@ -6,6 +6,143 @@ The owner's standing rulings, one entry each: his words and date, and where the 
 
 The owner's rulings of this day and the night before, each with his words where recorded and where it is now stated.
 
+### Main is kept clean
+
+Asked whether an agent's merge should be judged only on what it changed, since the first backlog task's merge was refused for main's own stray reds: "Main must be clean." A red or open problem on main is its owner's first item. Stated in [the plan](plan.md#the-order-of-work-now).
+
+### One watched agent now; the reasoning budget raised
+
+Context runs one watched task now, random rounds after the model call's bound. On `:seon.config.ai/max-tokens`: "I don't care raise it whatever it needs to be. Let me know if it starts getting crazy but if it's cheap I don't care." Set to 65,536 in `resources/seon/config/default.edn`.
+
+### One reaction over the store; dedupe and upgrade everyone
+
+"Your job is see waste and that's how you find what to delete. Unify the concept at the root of all of our problems and the other problems should go away because they aren't possible anymore." On the survey: "If we have many ways what is the best way? Don't we have a way of auto tracking what reads have changed in ratoms and datahike reads ... I want the optimal solution not the first one that each agent came up with." On recording's switch-offs: "Assume agents did stupid shit ... we shouldn't just accept the bad ideas that are easily fixable." On cost: "Don't worry about a few ms. Focus on what is the best mechanism that our agents can use that's simple and the most expressive and powerful. We can optimize it later. Right now we dedupe and upgrade everyone." Then: "Can we make the ratom do the reaction work but in the way that agents are expecting when writing hiccup components? Most agents are trained on reagent and I don't want to teach a foreign concept. I don't care if we have two interfaces if it's the same system and we are computing things efficiently." Agreed by every area: one reaction over the store, one tracker, one stored index. Stated in [the plan](plan.md#the-root-concept-one-reaction-over-the-store).
+
+### Store or derive; render the system from itself
+
+"I was thinking as a general rule when deciding whether to store data on the agents record or anywhere really or to render it from another trigger matching the pull pattern via a render schema we really should be asking what do we need to store and what can be derived. If it doesn't need to be stored and can be derived then that should be cheap or we may need to store some additional data to make it cheap. I want a balance, but it's very important that we render the system from itself. This is a data driven system. If you or any agents see departures from this and don't of data being stored that has no consumer we need to evaluate it and look at the perf from both sides." Stated in `AGENTS.md` §4.
+
+### Estimate first; 90% for 10%
+
+"For all work agents must create estimates for their solutions algorithmically before implementation and to reject inefficient designs. Find the balance between simple to express and to get right. 100% efficiency isn't desireable if 90% can be achieve with 10% of the effort and the codebase is simpler (also smaller and less code). That's a rough metric to follow." Stated in `AGENTS.md` §3.
+
+### One way, made optimal
+
+"Make all hot paths optimal and make everything that can be into hot paths. No more 4 ways of doing the same thing. 2 ways of doing the same thing even has to justify itself." Every job routes through its one path, each path has one specialist who holds it to its lower bound, and a second way is a problem until justified. Stated in `AGENTS.md` §4.
+
+
+Then: "I think the perf readings are mostly a canary in the coal mine for us. If we get a crazy number like 10 seconds to write a transaction and we know it should be ms we don't allow it. Hot paths should make it so damn easy to do the right thing that agents want to use it." A cost far over its lower bound stops the work (AGENTS §3, 10x); a hot path's API is the easiest way to do its job.
+
+The why, in his words: "Clojure is kind of like this. It's very hard to write clojure that is stateful or even imperative. You are given great tools that always refocus on a few solid ways to thread through them so you end up building with tools that are optimized for their execution rather than supporting everything. This is what we are doing. We are adding constraints to our system to optimize. I want one best way of doing things reused everywhere." To be folded into [principles](principles.md#4-one-mechanism-per-job) at the next retrospective.
+
+### No timeouts in tests
+
+"Why are we having timeouts in our tests? That's not allowed." A test ends by its result or by a deadlock event (Jolt's quiescence, with every fiber's dump), never by a clock; an effect a test does not provide answers its typed error at once.
+
+### Writes through Flow, for sameness
+
+On whether one writer per branch was fine: "I like the idea of flow processing it in terms of monitoring and keeping things the same for interface with long running stateful processes so I'll pay a reasonable overhead for the sameness." Then, on flow's measurement (the LMDB write lock is ~2% of a commit, one writer would serialize the rest; a per-branch writer proc would be a second queue beside the :repl in-port): "if it's a pain ... just leave direct writers". Each agent keeps writing its own branch; pause and visibility come from Flow's pause relayed to every graph and the ping's in-port fill and park site.
+
+### Sessions land themselves under load 18; a resolved conflict re-conflicts if main moves
+
+Asked at 20:55 who starts a land: "Self-land under load 18." A session lands when green without a release while the 1-minute load is under 18; root orders priority only when several are ready. Asked what happens when main changes a key again after an agent resolved it: "Conflict again." A resolution holds only while main's side is what the agent saw. On tests reading other tests' facts: "We apparently have terrible hashing and test reuse because of this so fix that asap. I want as much sharing as possible. We should be learning with the reactive work too." Tests keep the shared world; a verdict is reused only by what it read, recorded as the reaction core records reads. Stated in `AGENTS.md` §3 and [merging](merging.md).
+
+### Tests work on branches of the standing system; rounds start after Stage 0; a peer wait ends by the peer's answer
+
+At 21:00 the owner chose: tests that use a root work on their own branches of the standing system and fork their agents from its fork server, with no root booted per shard (never its main); and the random rounds start as soon as the first task merges through Seon. Asked how a test's wait on a root should end: "I don't know and neither seems clear. research it more and learn." Root found at the REPL that the wait is inside the root (its api waiting on a proc stuck in one step), so a step that burns past its declared ticks ends as a typed error the asker receives: work, not a clock, and no deadline at the test's edge. Stated in [flow](flow.md) and [testing](testing.md).
+
+### Everyone moves onto the reactive core; it is stress-tested before victory
+
+At 21:00: "If the reactive core is built make sure everyone is moving onto it we stress test it and tune it before claiming victory." Then: "It should make incremental rendering cheap and easy to use." The core is done when every area's copy is deleted onto it (plan item 5), its cost per change is proved O(d) and constant in the store, the number of tracks and the context size, and an incremental render is plain hiccup that derefs tracks, with no invalidation or bookkeeping written by its author. Then: "we need to go through a learning phase where we test ideas for using it in the repl and find the best solutions, confirm it with agents to make sure it works, iterate if we need to." Then (21:40): "We can rebuild components to be written to properly take advantage of the architecture and minimal rerunning." A component is rewritten for the core, not wrapped: it reads exactly the attributes it shows, a list renders one child per entity keyed by id, and shared derivations are tracks; the measure is that a commit reruns only the components that show what it moved. Each move onto the core is first tried at the REPL on real data, measured beside its estimate, and confirmed by a Seon agent using it unaided before it is built. Stated in [the plan](plan.md#the-order) and [render](render.md).
+
+### Algorithmic analysis first; no large overruns in ticks, memory or time
+
+At 21:45: "Just make sure all agents are doing algorithmic analysis first. I want clear eyes going into projects and we don't accept large overruns for ticks, mem or time." Every plan states n, the big-O, and the ticks, bytes and seconds expected before any code; every proof carries all three budgets; a measured overrun in any of them stops the work until its cause is found (§3a). Root checks each land message for the three numbers beside their estimates. Stated in `AGENTS.md` §3 and [cost](cost.md#what-is-measured).
+
+### Docs as you go; bad docs cleaned; replaced code removed
+
+At 21:38: "Make sure you are telling agents to write up docs as the go and to clean up bad docs and to remove code when they have a replacement done." Each landing updates the wiki section of what it changed, fixes or deletes any wrong text it finds there, and deletes the code its replacement made redundant, named on its `Deletes:` line. Stated in `AGENTS.md` §3 and §7.
+
+### Restart when needed; fix what made an update impossible
+
+At 21:50, on root's render step stuck since boot on old code: "Don't be dogmatic. If we fucked up and need to restart do so. Just warn the agents and fix the problem that made it so you couldn't just update the env. Lisps are a live runtime. It's not wrong to eval and sync code to bring it up to speed as long as we have it structured safely for eval of code." A restart is allowed, with the agents warned first; the cause of needing it (here, a step that never ends cannot take a redefinition) becomes a task: every long step ends at its declared tick budget, so the next step runs the new code. Stated in [flow](flow.md).
+
+### Overnight: nobody waits for the owner
+
+At 21:40: "I want you to go autonomous and don't have you or any agents wait for me. If you know what to do and I think there's a lot to do so do it. Learn as you go and it's okay to revisit ideas once we find better symmetries." Root decides what would have gone to him and lists each ruling for him to reverse; sessions ask root. Stated in [sessions](sessions.md#the-managing-session).
+
+### Runtime owns the reactive core; context drives agents end to end
+
+At 21:20: "Should we have them be the expert for reactive everything? That sounds runtime'ish? I want context to resume their experiments with agents and getting tasks finished and merged end to end." Runtime owns `seon.ratom` and every move onto it (the feed from commits, the stress proofs, the API's ease, the learning phase's trials), with flow reviewing the Flow side; context owns what an agent reads, Stage 0 and the random rounds. Then (21:35): context builds the whole context pipeline, html and model outputs, on the reactive render with runtime; context finishes Stage 0, and root drives the random rounds; web-2 builds its render pieces (proc, walk entry, health tracks, server and pages) to context's design. Clarified: "web is still totally involved, I just want someone familiar with the system to write the first pass": context writes the first pass, web reviews and builds alongside. Stated in [sessions](sessions.md#sessions-own-their-areas).
+
+### After boot, only Flow; one specialist ports every holdout
+
+"No timers. We must take anything that needs a timer and port the code to work with flow." Then: "Well no timers once the system has booted I guess. Once the flow system is up and running the core platform is there then we must only use flow based systems for stateful processes. If we still have holdouts we need to port them. We've done enough implementations an agent should specialize in their use and handle all related work requests." Boot is the one exception; after it, every stateful process and every wait is a Flow proc, its deadline a message from the one clock (`seon.step/put-after!`). Flow, the Flow specialist, owns every port. Stated in [the plan](plan.md#the-order). Later (20:45): "Once our system is booted and the flow system is running seriously question timer use. We want to be waiting from channels so we have proper backpressure and flow control." A deadline, even `put-after!` at an edge, must show why no channel can say the outcome; a wait on a process of our own (a peer root, a child, a proc) ends by that process's message, its answer or its own deadlock, never a deadline. Stated in [flow](flow.md).
+
+### Hand-made lists: case by case
+
+"I want a case by case basis for judging if we should keep the hand lists or fix the problem they are trying to solve at their root. max-workers and all of those config dials are there for a reason." A dial is kept as spec'd config; a list patching a missing mechanism is fixed at its root; a list restating held data is derived. Stated in `AGENTS.md` §5.
+
+### No functionality removed; dependencies defined as data and validated
+
+"You are not to remove any functionality through these changes. The goal is make all of our dependencies clearly defined with data and validated. Not to break the system." Every `Deletes:` line names, per item, what now does its job. Stated in `AGENTS.md` §3.
+
+### Explicit, not deleted
+
+"Why are you removing the max-workers max-load and load-average keys? I want those. I'm not saying delete features. I'm saying make them explicit not implicitly in the code." Deduplication deletes the second mechanism, never a feature or a knob the owner uses; a knob becomes a spec'd config entry the one mechanism reads. Any key or feature a change removes is listed to root (and to the owner, as an audit) before it goes. Stated in `AGENTS.md` §3.
+
+### No hand-made lists; a list that must stay is spec'ed config
+
+"Yeah get rid of all hand made lists. Another decree -- all hand made lists need to justify themselves and they need to be config options that are clearly spec'ed." Stated in `AGENTS.md` §5.
+
+### A merge takes everything that does not conflict
+
+"Wait why aren't we merging everything that's not a conflict with main? Everything else is hand written lists and we shouldn't be recording data that isn't true. Facts are facts at a certain tx time." (On `seon.merge/carried-platform-attrs`, the list of what a merge carries.) The one merge takes every datom main wrote that the branch did not also change at the same entity and attribute; only that conflict stops it; no attribute list decides. Stated in [the plan](plan.md#the-order).
+
+### Seon-centric only; Claude sessions are not special
+
+"All solutions must be seon centric from now on. We are not agents working in git worktrees. There is data we are importing into seon's db when we write an update to a file so I want a simple wrapper around the hooks to insert the updates in the database and for seon procedures with seon designs to handle it from there. The db is the source of truth and it is to be queried for truth not reading git for a secondary truth. Fixes need to be written to disk and checked into git without ceremony and complex machinery. The focus needs to be on designs that work with within seon. No more solutions outside of it. Tell me whenever you see it and shut that shit down." Then: "The same tools that seon agents will have ... Claude agents are not special, they need to fit into this system. I don't give a shit if your claude agents continue to use the worktrees, but I want at most one branch for each agent and for them to have that branch be mirrored in seon and for them to work more within the repl and through thin scripts translating their file updates if they can't work efficiently in the repl like native seon agents." On bin/land: finish what is in flight, then freeze. On the existing system: "I'm not saying throw out the existing system, I'm saying the plan must be to replace these wrong solutions that have plagued the project since the start." Stated in `AGENTS.md` §0 and [the plan](plan.md#the-order-of-work-now).
+
+### A fix deletes the other implementations
+
+"Find fixes and you must delete the other implementations. This is how our code base shrinks and we get better code and faster and more correct code." Stated in `AGENTS.md` §3.
+
+### Reference code needs no asking
+
+"You never need to ask to checkout reference code into reference-code/. I strongly encourage always reading good clojure code as it helps correct mistakes we make in our own code." Stated in `AGENTS.md` §3 (Learn).
+
+### No new process before the existing one is found
+
+"Do not create any new processes until you have verified we don't have an existing solution that needs to updated or deleted by this implementation. I will say that is a standing rule for all agents." Stated in `AGENTS.md` §3 (the gate).
+
+### A session lands when green; agents merge themselves
+
+"I want only one worktree and one branch per agent and subagents still need to share the same branch. No more creating hundreds of tiny branches and then waiting hours with them queued up so nothing is merging. Agents are to figure shit out on their own and ideally self merge. I want this done through the seon system though so we may need to wait on some more components for the full flow tests work which should be prioritized." Chosen: a session runs `bin/land` when its check is green, with no release from root; root reads each landed diff. The components that let `seon_done` carry it (proving as Flow) go first. Stated in `AGENTS.md` §3 and [the plan](plan.md#the-order-of-work-now).
+
+### Overruns: 2x audit, 3x reset
+
+Chosen 2026-11-14 after a root session went badly and was restarted to audit "the true lay of the land": each item a session works has an expected finish; past 2x root reads the session's transcript and corrects it; past 3x, or on a repeated wrong turn, the session writes its state and a fresh one starts with an audit brief. Stated in `AGENTS.md` §2.
+
+### Bounds are worked out, never waived or restated from a run
+
+On a cost proof whose estimate was restated from measurements three times and then waived: "Find out why and pressure them to justify it algorithmically and to think about the problem differently. How can they have no idea what the bounds are?" A cost proof's estimate is the lower bound as arithmetic; no `:overrun` waiver; past 2x the design is what changes, or the estimate's missed work is named. Stated in `AGENTS.md` §3a.
+
+### Config changes reach running procs live
+
+"Flow processes can be updated live and a config update should update live to all relevant branches. If branches have their own overrides we can message the agents and instruct them to merge in the config changes to their git and merge it in." Stated in [the plan](plan.md#the-order-of-work-now).
+
+### Growth: one shape, processed once
+
+"I am not going to set arbitrary amounts. I want us to keep looking for duplication in the data model and then duplication in processing the data model. Fixing the two so we only process things once and it's done well." Stated in `AGENTS.md` §3 and [the plan](plan.md#the-order-of-work-now).
+
+### The landed change enters the store through the one import
+
+"I think the one import path if that's a seon focused solution." `bin/land` tells root main's new commit; root imports it with its one import and answers `:restart` for a pin or binary change; the bridge's code string goes. Stated in [the plan](plan.md#the-order-of-work-now).
+
+### The backlog is curated before a random round
+
+Chosen 2026-11-14: duplicates (same evidence or proof) merged and superseded tasks deleted before the next round. Stated in [the plan](plan.md#the-order-of-work-now).
+
 ### One merge: everything that doesn't conflict, both directions
 
 On why a merge of main kept main's task lifecycle off a branch: "Wait why aren't we merging everything that's not a conflict with main? Everything else is hand written lists and we shouldn't be recording data that isn't true. Facts are facts at a certain tx time." On merging a branch's records into main: "If there are no conflicts I don't see any reason to not merge everything. What's the issue?" Then: "The merge doesn't happen while there are conflicts and the merging costs should be incremental." Every fact merges by its key in both directions, a conflict stops the merge, and the merge reads only what moved since its base. It supersedes "an agent's own records never merge" (merging.md's reading of the 2026-11-04 ruling; branches are still kept and queried). Stated in [merging](merging.md#a-branch-merges-main-in).
