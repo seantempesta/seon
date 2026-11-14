@@ -6,9 +6,9 @@ The owner's standing rulings, one entry each: his words and date, and where the 
 
 The owner's rulings of this day and the night before, each with his words where recorded and where it is now stated.
 
-### Sessions message the owning session directly; the blockers board holds the state
+### Blockers are tasks; sessions message the owning session directly
 
-Set the night of 2026-11-13 (quote not recorded), after many back-and-forth messages. It replaces "sessions talk to root only" (2026-11-12). A blocker or a bug in another area is a row on the board; a message goes to the owning session only to block, unblock or agree an interface, in 6 lines or fewer, with evidence and one ask, one thread per problem, no acknowledgements. Root keeps releases and the owner's decisions. Stated in `AGENTS.md` §2.
+Set the night of 2026-11-13 (quote not recorded), after many back-and-forth messages; it replaces "sessions talk to root only" (2026-11-12). On 2026-11-14: "The board and ledgers and however you are communciating with your agents needs to folded into seon from a db centric standpoint. Agents acting within seon need to get shit done ... Wiki and tasks for sure." A blocker or a bug in another area is a task in the owning area's namespace, named in the blocked task's `:seon.task/needs`; a message goes to the owning session only to block, unblock or agree an interface, in 6 lines or fewer, with evidence and one ask, one thread per problem, no acknowledgements. Root keeps releases and the owner's decisions. Stated in `AGENTS.md` §2 and [the plan](plan.md#stage-1-the-work-lives-in-seon-as-tasks-and-the-wiki), which folds the board, the ledgers, the landing queue and the turns ledger into tasks, queries and this page.
 
 ### Main is pushed to GitHub
 
@@ -20,11 +20,11 @@ Set the night of 2026-11-13 (quote not recorded), after many back-and-forth mess
 
 ### Docs changes are proved by reach
 
-He owned "telling agents not to check doc updates" as a bad decision (quote as recorded by root). A docs-and-tasks change reruns every test that reads the changed docs; narrowing to the tests that read the changed section follows. It replaces "a docs-and-tasks change is never proved". Stated in `AGENTS.md` §3 and [tests run by reach](source.md#tests-run-by-reach).
+"Yeah that was my mistake. Docs are indexed and should trigger checks." (2026-11-14; earlier, "prove by reach, narrow later"). A docs-and-tasks change reruns every test that reads the changed docs, as any change does; a docs landing broke main (4af7a1f2ae) when `seon.repl-test/the-template-instructions-and-the-help-page-run`, which reads the help page, did not run; narrowing to the tests that read the changed section follows. It replaces "a docs-and-tasks change is never proved". Stated in `AGENTS.md` §3 and [tests run by reach](source.md#tests-run-by-reach).
 
 ### Process fixes from the retrospectives
 
-Approved with the retrospectives' working theory: every claim is marked measured or hypothesis; `bin/land --check` before any release ask; a landing's `Deletes:` line matches the deletions ledger, and a replacement lands with its old path deleted; a session updates its resume note before any landing or long run. Quote not recorded. Stated in `AGENTS.md` §2 and §3, and in [principles](principles.md#measured-or-hypothesis).
+Approved with the retrospectives' working theory: every claim is marked measured or hypothesis; `bin/land --check` before any release ask; a landing's `Deletes:` line names what it deletes (a proof that the old path is gone, per the plan's Stage 1), and a replacement lands with its old path deleted; a session updates its resume note before any landing or long run. Quote not recorded. Stated in `AGENTS.md` §2 and §3, and in [principles](principles.md#7-say-what-you-know-and-say-it-when-it-is-wrong).
 
 ## 2026-11-13 rulings
 
