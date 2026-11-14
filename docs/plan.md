@@ -54,6 +54,112 @@ task must take. The priority (owner,
 2026-11-14) is one view: fix the broken processes that slow us down, and move Claude sessions off files and git onto the
 system, working, proving and merging as Seon agents do. Everything else in this plan stays, in order behind it.
 
+## The order of work now
+
+Agreed 2026-11-14 by every area and the owner ([decisions](decisions.md#2026-11-14-rulings)). Each session works its items
+in this order, on its one branch, and lands when green (`AGENTS.md` §3). Every item names its
+expected finish to root; root holds it to 2x and 3x. Correct and simple first; cost later (owner: "Right now we dedupe and
+upgrade everyone").
+
+### The root concept: one reaction over the store
+
+Almost everything Seon keeps is derived: a test's verdict, a page and a request, health, readiness, a task's status, the
+store's copy of the files. Each subsystem built its own cache, key, index and "did it move?" check (a survey of main found
+6+ read recorders, 4 dependency graphs, 3 who-read-what indexes, 5 hand-kept "moved?" lists, 4 import paths, 5 stores for
+one test result, 73 staleness functions), and the bugs are those copies disagreeing. They become one mechanism:
+- **Reagent's own API, nothing foreign** (owner: "Most agents are trained on reagent and I don't want to teach a foreign
+  concept"): `seon.ratom` already ports Reagent's `atom`, `Reaction`, `make-reaction`, `reaction` and `run!`, and gains
+  Reagent's `track` (a reaction cached by function and arguments, compared by `=`). A component is written as in Reagent:
+  it derefs a reaction or `@(track f args)`, and the store is a source it derefs. What changes is only the tracking: a
+  deref of the store records its datom keys through Datahike's recorder, so a reaction re-runs when a datom it read moves.
+  Values that are not datoms (an agent's live values, streaming output, root's runtime values) are ratoms or `track`
+  arguments, as in Reagent.
+- **One tracker:** Datahike's recorder (`di/record-read!`). Every read records through it as a datom key: a store read; a
+  slice a component reads of a pulled value (`[:ea e a]`); a code read as its form's datom (once per var per run, at
+  Jolt's var read, macros at load); config, files and pins as their entities. `seon.profile`'s set and ratom's path
+  tracking stop being trackers.
+- **One index, stored:** `:seon.reads/key-set` (indexed), the rename of `:seon.proof/read-keys` (on main with
+  `seon.db/results-moved`, but written and read by nothing in src), on every durable derived entity; a page component's
+  key set lives in its walk value; one match, `(touches? key-set datoms)`. It deletes the four live in-process indexes:
+  the walk's `:readers` and `:tree-readers`, the render proc's `:read-index`, and ratom's `sources`. A reaction's identity
+  is a content id of [fn, reads digest, program].
+- **Re-run by the commit:** the writer sends each commit's datoms once; the readers of moved keys re-run as effects on
+  their kind's owner, bounded and admitted (never inside the writer's step). A pin change answers `:restart`.
+- **The outside enters by one catch-up:** seed = catch-up from empty; import = catch-up of paths; landing = catch-up after
+  `bin/update` moves root's tree; pins stated as the whole set. Inside, every read is a datom read.
+
+### Claude sessions move onto the Seon path (Stage 1, now)
+
+A session works as a Seon agent: one branch mirrored in Seon, REPL first, file edits imported by a thin hook
+(`my.branch/import!` on each write; runtime builds it and proves it on one edit end to end: file, branch, `seon_prove`,
+`seon_done`, main, disk and git), proving and merging with `seon_prove`/`seon_done` once admission (item 2) and the one
+start path (Stage 0.5, tests with runtime) are on main. `bin/land` lands what is in flight, then only the tasks that build
+this path, and is deleted when the path carries a week of landings.
+
+### The self-merge path (owner: "make merging as simple as a passing proofs")
+
+The steps by which an agent merges its own branch once its proofs pass, with no release and no human in the loop, each owned by the area named.
+
+1. A verdict reads only its own work: a red that depended on load, a cold fixture or a shared file is a platform problem,
+   never a verdict against a change, so main is never shown red by another run's measurement
+   (`seon.prove/a-verdict-reads-only-its-own-work`, tests).
+2. Proving goes through the one effects owner, admitted by the owner's dials (tests; root shepherds landings by hand until
+   then).
+3. One merge (`seon.merge/merge-main`): a conflict at any entity and attribute applies nothing; it costs what changed
+   (data, runtime, deps).
+4. The merge's check is a prove of the candidate (the branch with main merged), reusing every green whose reads did not
+   move: all green and no conflict merges, with no release (`seon.reconcile/the-gate-proves-the-candidate-branch`, tests).
+5. Code loads live (load-diff at the one start, O(d)); a binary is swapped only when a build input changes (pins,
+   native code, `deps.edn`), once, through root's online takeover (deps, runtime).
+6. Agents self-merge with `seon_done`; `bin/land` is deleted.
+
+The goal is boring, continuous integration (owner: "make merging boring so it happens more and agents are just always
+integrating with main"): every turn syncs main down (cost O(d)); every green, conflict-free change merges up at once,
+never batched; a code change loads live. The test is each branch's drift from main (time and changes since its last
+sync), shown on the dashboard: drift is a problem, not a merge-time surprise.
+
+### The order
+
+The order the areas work in now, each item with its owner; a later item starts when what it needs has landed.
+
+1. **Stage 0's merge.** "Main's reds" were on the agent's branch: merging main into it lost main's task lifecycle datoms
+   and kept callers of definitions main deleted. Data's one merge (`seon.merge/a-tasks-content-is-a-key-of-the-one-merge`) fixes it: it takes every
+   datom main wrote that the branch did not also change at the same entity and attribute, and only that conflict stops it
+   (owner: "Facts are facts at a certain tx time"); `carried-platform-attrs` and `carry-tx` are deleted; then context runs the first task's `seon_done` again, watched, alone. Main stays clean:
+   a red on main is its owner's first item.
+2. **Load within the machine:** proving goes through the one effects owner (`seon.fx/owner-proc`, a `:process` kind,
+   admission from the cores) and `bin/prove` becomes its client; per-checkout shard sizing goes (tests; runtime reviews).
+   Until it lands, no session starts a prove while the 1-minute load is over 18.
+3. **After boot, only Flow; nothing hangs** (owner: "once the flow system is up and running ... we must only use flow based systems for stateful processes. If we still have holdouts we need to port them"; runtime, the Flow specialist, ports every holdout: `seon.step/every-wait-past-a-bound-is-a-flow-message-from-the-one-timer`): every wait passes its declared bound and ends with `:seon.bound/reached` or a typed error:
+   the fork (deps), the model call and the stalled eval (runtime's deadline slice; context's turn records the stall). Seven
+   deadline mechanisms become this one.
+3a. **A process never runs a binary its branch doesn't name** (owner, 2026-11-14: "this shouldn't be possible"): a
+   binary's identity is the digest of what only a build can change (pins, `deps.edn`, native code, `bin/build`, shipped
+   schemas and config): a mismatch builds, once. Its program is a second identity, the branch's forms: at the one start
+   a process loads exactly the forms its binary's recorded program differs by (load-diff, O(d)), so it always runs its
+   branch's program, with no guess. "Current by reach" (`seon.system/stale-binary`,
+   `binary-current`'s reach) and `seon.problems/stale-binary`'s own check are deleted; `bin/land`, `bin/prove`,
+   `bin/update`, `restart-for` and the test service ask the one answer (deps, as `runtime-for`'s core; runtime reviews).
+4. **The reaction's core** (context builds it as one tip with its first production writer, the index and Reagent's
+   `reaction`/`track` over it; data reviews the schema; deps the recorder): the lazy-read gap and the
+   planner's two seeks recorded (deps); one stored index; the writer's commit datoms; the 8 `*reads* nil` bypasses removed.
+5. **Each area moves onto it, deleting its copy in the same landing** (in parallel):
+   - tests: verdict files, `.recent`, `reads.edn`, `:seon.test/*` facts, the two flaky judges; reuse is "no read key
+     moved". The static reach graph stays only for a test with no recorded reads, and goes in the landing whose mutation
+     proof shows recording is complete;
+   - web: the walk's `:readers`, the proc's `read-index`, `render-reach`, the reactive holder, the second drawer;
+   - context: status computed twice, turns derived twice, waste folded three ways, wire's second walk, `placed-messages`;
+   - data: the five "moved?" lists, the program's reach flags, the loaders, `:seon.task/cause`, the readers atom;
+   - runtime: the one catch-up (the `bin/land` bridge, `landed-tx`'s 6-arity, `import-of`'s pins, `my.root/import!`,
+     `load-changes!`/`load-diff!`, `restart-for`'s classes);
+   - deps: Datahike's search memo and q result cache, once reactions hold results.
+6. **Stage 0.6:** an agent's redefinition never breaks its own turn: deps routes only the vars a run redefines (Jolt), and
+   context's turn runs on it.
+7. **The backlog curated** before the next random round (context).
+
+Waits: the cost work (recorder with the cache on, merge cost, page search, konserve's read cost), W-3 and one drawer per
+page beyond what item 5 deletes, the hand-written lists class, `runtime-for`, `hold-env!` slice 2, the judge's re-index.
+
 ## Stage 0: one happy path (now)
 
 **Goal:** one real backlog task merged by an agent. **Done when:** a task drawn from the backlog is on main, with its turns
