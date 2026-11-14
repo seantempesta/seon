@@ -389,6 +389,42 @@
         (when-let [e (or (key-entity side k) (key-entity base k))]
           (some #(attr-owned? e % nil) (keys (:stated (stated-keys kind)))))))))
 
+(defn- overtaken
+  "The db side held just before its own write at key k, when base's value at k was written after that write: other rewrote the key
+  after side did, and a merge that moved side's base past other's write without taking it (an older path carried only some
+  attributes) never decided between them, so both changed k since the value side replaced. nil otherwise. Ordered by the
+  transactions' instants, the one order two branches share (docs/merging.md#a-branch-merges-main-in). Cost: the datoms of k's
+  attributes on side and base, and an entity read per datom side wrote."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/program-key] [:maybe :seon.host/db]]}
+  [base side other [kind x a & vs :as k]]
+  (let [others (tx-branch other (:max-tx other))
+        own-datom? (fn [d] (not (and others (= others (tx-branch side (:tx d))))))
+        inst (fn [db tx] (:db/txInstant (d/entity db tx)))
+        attrs (if (= :datum kind)
+                [[x a vs]]
+                (when-let [e (or (key-entity side k) (key-entity base k))] (for [a (keys (:stated (stated-keys kind)))] [e a nil])))
+        stale (for [[e a vs] attrs
+                    :let [dts (fn [db] (if (seq vs) (d/datoms db :eavt e a (first vs)) (d/datoms db :eavt e a)))
+                          bs (vec (dts base))
+                          held (into #{} (map :v) bs)]
+                    ds (dts side)
+                    :when (and (not (held (:v ds))) (own-datom? ds) (not (shared? base ds))
+                               (some #(pos? (compare (inst base (:tx %)) (inst side (:tx ds)))) bs))]
+                (:tx ds))]
+    (when (seq stale) (d/as-of side (dec (apply min stale))))))
+
+(defn- overtaken-base
+  "Base's program b with each key of ks a side wrote before other's later write there (`overtaken`) set to the value side replaced:
+  so a three-way of b reads both sides as changing it, a conflict, never side's older value taken over other's newer one. sides:
+  [side other side's program] each."
+  {:malli/schema [:=> [:cat :map :seon.host/db [:sequential [:tuple :seon.host/db :seon.host/db :map]] [:sequential :any]] :map]}
+  [b base sides ks]
+  (reduce (fn [b k]
+            (if-let [before (some (fn [[side other p]] (when (not= (get p k) (get b k)) (overtaken base side other k))) sides)]
+              (let [v (get (program-of before [k] :all) k)] (if (some? v) (assoc b k v) (dissoc b k)))
+              b))
+          b (filter #(or (= :datum (first %)) (stated-keys (first %))) ks)))
+
 (defn delta-three-way
   "`three-way` of base, ours and theirs read only where they differ (touched-keys): the
   same answer, at the cost of what changed on each side since base, not of the program. With ours-moved, the datoms that differ
@@ -405,7 +441,8 @@
                                                    (if (contains? b k) (assoc p k (get b k)) (dissoc p k))
                                                    p))
                                         p ks))]
-     (three-way b (own ours theirs (program-of ours ks data-attrs)) (own theirs ours (program-of theirs ks data-attrs))))))
+     (let [po (own ours theirs (program-of ours ks data-attrs)) pt (own theirs ours (program-of theirs ks data-attrs))]
+       (three-way (overtaken-base b base [[ours theirs po] [theirs ours pt]] ks) po pt)))))
 
 (defn readiness
   "Whether branch db ours can merge into main theirs now, as a merge of main would find it, read
@@ -579,7 +616,7 @@
         o (reduce (fn [p k] (if (and (or (= :datum (first k)) (stated-keys (first k))) (not= (get p k) (get b k)) (not (owned? base head main k)))
                               (if (contains? b k) (assoc p k (get b k)) (dissoc p k)) p))
                   (program-of head ks :all) ks)
-        r (three-way b o m)
+        r (three-way (overtaken-base b base [[head main o] [main head m]] ks) o m)
         ;; a conflict the branch has decided (git add): its entry is resolved, or the branch redefined the key since, and main's content
         ;; there is still the entry's theirs, so the branch's value stands; main moving the key again is a new conflict
         held (into {} (map (juxt :key identity)) (entries head))
