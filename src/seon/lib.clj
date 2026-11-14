@@ -169,27 +169,7 @@
          (define (proto-static!) (collect (collect-maximum-generation) 'static))
          (define (proto-generation-bytes) (+ (bytes-allocated 1) (bytes-allocated 2) (bytes-allocated 3) (bytes-allocated 4)))
          (define (proto-non-static-live!) (collect (collect-maximum-generation)) (- (bytes-allocated) (bytes-allocated 'static)))
-         ;; fork only while this is the one active Chez thread, checked once under the thread
-         ;; mutex; -2 when another is active (an agent's second thread is a defect, never waited out).
-         ;; Read through jolt-active-threads: a thread in a collect-safe call (a read) is parked, which
-         ;; our Chez counts only once converted (docs/forks.md, jolt/a-thread-in-c-is-not-active).
-         ;; Parked threads are not active, so the fork can leave jolt's carriers, timer and shutdown
-         ;; watcher behind: the child drops their bookkeeping first (jolt-after-fork-child!), and
-         ;; they start afresh on first use there
-         (define proto-fork-alone
-           (let ([fork (foreign-procedure \"fork\" () int)])
-             (lambda ()
-               (disable-interrupts)
-               (mutex-acquire #%$tc-mutex)
-               (let ([pid (if (= (jolt-active-threads) 1) (fork) -2)])
-                 (mutex-release #%$tc-mutex)
-                 ;; the child drops the parent's fibers and run queue before interrupts are enabled: a
-                 ;; preemption between the fork and that reset switched the child to the scheduler over
-                 ;; the parent's queue, which ran the parent's ready fibers in the child, or, once the
-                 ;; reset had marked them, died of \"fiber in unexpected state forked\"
-                 (when (= pid 0) (jolt-after-fork-child!))
-                 (enable-interrupts)
-                 pid))))")
+         ")
       true))
 
 (defn heap-cap!
@@ -260,7 +240,7 @@
 ;; bytes in Chez's collected generations 1-4 (outside static): what a forked agent inherits of its parent's heap, read at its start (seon.agent/init!), before its own allocation is promoted into them
 (defchecked generation-bytes [:=> [:cat] :int] (scm/proc "proto-generation-bytes"))
 (defchecked non-static-live! [:=> [:cat] :int] (scm/proc "proto-non-static-live!"))
-(defchecked ^:private fork-alone* [:=> [:cat] :seon.lib/pid] (scm/proc "proto-fork-alone"))
+(defchecked ^:private fork-alone* [:=> [:cat] :seon.lib/pid] jolt.host/fork-alone)
 
 (defn wait-status
   "Reap child pid (blocking waitpid): its decoded exit status."
@@ -268,8 +248,10 @@
   [pid] (let [b (ffi/alloc 4)] (c-waitpid pid b 0) (decode-status (ffi/read b :int))))
 
 (defn fork!
-  "The one spawning skeleton (docs/failure-points.md#physics-who-may-run-threads): fork only while this is the one active Chez
-  thread (E11/E13: a fork beside a running thread breaks the child), checked once. The child closes every stream descriptor
+  "The one spawning skeleton (docs/failure-points.md#physics-who-may-run-threads): fork once this is the one active Chez
+  thread (E11/E13: a fork beside a running thread breaks the child): jolt.host/fork-alone waits for the others to park,
+  woken by each one that does, so a thread finishing the turn that woke this one is waited out, never a refusal; (refused n)
+  comes only from jolt.host/fork-alone-cancel!, the caller's bound. The child closes every stream descriptor
   but 0-2, fd and keep (jolt.async.remote/close-streams-but!, the one rule, docs/processes.md#a-child-holds-what-it-is-given),
   once, before anything else runs in it. Then
   (child) in the child, exiting 0 if it returns and 1 however else it ends (a throw, said on
