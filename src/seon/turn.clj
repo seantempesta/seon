@@ -550,15 +550,15 @@
                                                                             (keep #(get-in % [:seon.cite/target :var/name]))
                                                                             (task/task-cites (agent/db) task))})))]
                          (cond
+                           ;; the agent's own fail! is its verdict, on green proofs and at the cap too, as at a hand-back
+                           ;; (hand-back-end); a wait on the last turn is the budget spent, so the run is :cap, never :waiting
+                           (= :failed (:outcome stop)) (ended st :failed (:reason stop) nil)
                            ;; git's CI after the merge: green on the combined program; merge main again until
                            ;; it brings nothing new, a work task's run as a merge's, so it ends on main as main is
                            ;; (a green run that ended behind main's newer merges was judged behind: swarm's s9)
                            (and (not no-status?) (empty? reasons))
                            (let [m (branch/merge-main!)]
                              (if (and (empty? (:applied m)) (empty? (:conflicts m))) (ended st :green (unjudged-reason s) nil) [::next st]))
-                           ;; the agent's own fail! is its verdict, at the cap too; a wait on the last turn is
-                           ;; the budget spent, so the run is :cap, never :waiting (its session parks either way)
-                           (= :failed (:outcome stop)) (ended st :failed (:reason stop) nil)
                            hairy (ended st :merge-failed (:reason hairy) nil)
                            ;; the one check of the cap, before any model call: every turn reaches it, one with no
                            ;; status and one after a turn that threw included (a change that broke

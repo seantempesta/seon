@@ -1590,6 +1590,17 @@
       (is (= :cap (:outcome end)) (pr-str end))
       (is (<= (:model-calls end) 3) (str "no model call past the cap: " (pr-str end))))))
 
+(deftest ^{:seon.test/estimate {:ticks 6000000}} an-agents-fail-is-its-verdict-though-its-proofs-are-green
+  ;; seon.turn/hand-back-end ends a run :failed when its agent called my.task/fail!, whatever its proofs say; the turn loop checked
+  ;; the green status first, so a model agent that failed its task on green proofs ended :green and its task merged. One order:
+  ;; the agent's own verdict first, in the loop as at a hand-back
+  (let [acted (volatile! false)
+        end (with-redefs [seon.turn/judged identity]
+              (work-with (fn [st called!] (called!) (vreset! acted true) (seon.turn/request-stop! :failed "the plan is wrong") (update st :turn inc))
+                         #(if @acted {:reasons []} {:reasons [{:reason :proof-red}]})))]
+    (is (= :failed (:outcome end)) (pr-str end))
+    (is (= "the plan is wrong" (:reason end)) "with the reason it gave")))
+
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-broken-parser-reaches-the-model
   ;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: two DeepSeek runs of md-scan
