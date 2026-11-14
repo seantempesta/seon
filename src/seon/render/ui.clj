@@ -1256,20 +1256,40 @@
      (when running [:p "running " [:code running]])
      (when (seq verdicts) [:p (str (count (filter #{:green} verdicts)) " of " (count verdicts) " proofs green at their last run")])]))
 
+(defn- recent-errors
+  "Agent pull c's newest failures, newest first, at most n: [label error] for each model call holding :seon.model-call/error and each
+  eval whose result holds :seon.result/ex, from the members the pull holds (its window). See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :map nat-int?] [:vector [:tuple :string :map]]]}
+  [c n]
+  ;; each member's error path read alone (a view's tracked read), so opening an eval or a new reply moves none of it
+  (->> (concat (for [e (keys (get c :seon.model-call/_agent)) :let [x (ratom/realize (get-in c [:seon.model-call/_agent e :seon.model-call/error]))] :when x]
+                 [e (str "Model call " (ratom/realize (get-in c [:seon.model-call/_agent e :seon.model-call/n]))) x])
+               (for [e (keys (get c :seon.eval/_agent)) :let [x (ratom/realize (get-in c [:seon.eval/_agent e :seon.eval/result :seon.result/ex]))] :when x]
+                 [e (str "Eval " (ratom/realize (get-in c [:seon.eval/_agent e :seon.eval/id]))
+                         (when-let [i (ratom/realize (get-in c [:seon.eval/_agent e :seon.eval/intent]))] (str ": " i))) x]))
+       (sort-by first >)
+       (take n)
+       (mapv (fn [[_ label x]] [label x]))))
+
 (defn own-problems
   "The open problems of the agent (a component over its branch db, seon.problems/own: its newest run's,
   its task's failure and the errors raised in its task), each class with its count and each of its rows a line, as `problems-model`
-  makes them: its count, type, first line and the form that reads it whole. Nothing when none is open. See docs/render.md#components."
+  makes them: its count, type, first line and the form that reads it whole; then its newest failures with their causes (`recent-errors`,
+  each by `error-box`). Nothing when there are neither. See docs/render.md#components."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
-  (let [r (problems/own db (:db/id c))]
-    (when (seq (:classes r))
-      (into [:section [:h2 "Your open problems"]]
-            (for [[c {:keys [n rows]}] (:classes (problems-model {} r))]
-              [:div {:key c} [:h3 (str (kname c) " " n)]
-               (into [:ul]
-                     (for [{:keys [count type message read open?]} rows]
-                       [:li (str count " x") (when type [:code (str type)]) (when message (str " " message)) (when (false? open?) " (closed)") (when read [:code (print/text read)])]))])))))
+  (let [r (problems/own db (:db/id c))
+        errs (recent-errors c (config/value :seon.config.render/recent-errors))]
+    (when (or (seq (:classes r)) (seq errs))
+      (-> [:section [:h2 "Your open problems"]]
+          (into (for [[c {:keys [n rows]}] (:classes (problems-model {} r))]
+                  [:div {:key c} [:h3 (str (kname c) " " n)]
+                   (into [:ul]
+                         (for [{:keys [count type message read open?]} rows]
+                           [:li (str count " x") (when type [:code (str type)]) (when message (str " " message)) (when (false? open?) " (closed)") (when read [:code (print/text read)])]))]))
+          (into (when (seq errs)
+                  [[:div {:key "recent"} [:h3 "Recent errors"]
+                    (for [[label x] errs] [:div {:key label} [:p label] (error-box {} x)])]]))))))
 
 (defn ctx-key
   "A key the agent added to its ctx (a component over ctx), named by that key, which is its schema:

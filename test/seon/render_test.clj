@@ -4439,7 +4439,7 @@
       (is (str/includes? (at replied) streaming) "beside the element, until its evals have run")
       (is (not (str/includes? (at (d/db-with replied [{:seon.model-call/id cid :seon.model-call/forms 1}])) streaming))
           ":forms ends it"))
-    (is (not (str/includes? (str (at (d/db-with open [{:seon.model-call/id cid :seon.model-call/error {:seon.error/type :seon.model/transport :seon.error/message "gone"}}]))) streaming))
+    (is (not (str/includes? (str (at (d/db-with open [{:seon.model-call/id cid :seon.model-call/error {:seon.error/type :seon.model/transport :seon.error/operation 'seon.model/call :seon.error/message "gone"}}]))) streaming))
         "an error committed ends it too")
     (is (not (str/includes? (str (at (d/db-with open [{:seon.model-call/id cid :seon.model-call/origin :outside}]))) streaming))
         "an outside agent's call streams nothing")))
