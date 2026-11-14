@@ -365,7 +365,12 @@
 ;; An agent pulled by the joins its schema implies, with no :as and no *, holds its task, evals, model calls and messages
 ;; under their attributes, and validates against the schema derived from the refs; a value that breaks its attribute's
 ;; schema anywhere in it does not (docs/data-modeling.md#things-relate-by-refs)
-(deftest an-agent-pulled-by-its-implied-joins-validates
+;; Estimate, from its parts: the ctx built (~15.5M ticks), the schema derived (~18M), malli's compile and two validations of a tree of a few
+;; dozen values (~5M), the implied pattern (<1M: each of ~40 schemas joined once, its ancestors and reaching refs one lookup each,
+;; seon.db/entity-index) = ~40M ticks, ~200 MB, ~0.1 s (measured 36M, 169 MB, 109 ms). A first estimate of 140M took the old run's
+;; remainder for malli's; it was the per-path pattern's own attributes-of and owners calls. It was 5.4G and 10 GB while the pattern was
+;; walked per path (9,783 joins) and each step re-walked the schemas' parents.
+(deftest ^{:seon.test/estimate {:ticks 40000000 :bytes 200000000}} an-agent-pulled-by-its-implied-joins-validates
   (let [focus #{:seon.agent/task :seon.eval/_agent :seon.model-call/_agent :seon.message/_to}
         pattern (vec (filter #(or (keyword? %) (focus (ffirst %))) (pdb/implied-pattern (pdb/index) :seon.db/agent-fact)))
         db (:db-after (d/with (ts/test-db)
