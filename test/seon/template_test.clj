@@ -6,7 +6,7 @@
   Run: bin/test seon.template-test"
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]] [clojure.edn] [my.test :as t] [my.root] [seon.program :as program] [seon.agent]
             [datahike.api :as d]
-            [seon.db :as pdb] [seon.task :as task] [seon.reconcile :as r] [seon.template :as tpl] [seon.fixtures :as fx] [clojure.string :as str] [seon.config]))
+            [seon.db :as pdb] [seon.task :as task] [seon.reconcile :as r] [seon.template :as tpl] [seon.fixtures :as fx] [clojure.string :as str] [seon.config] [seon.contract]))
 
 (defn- working-a-task
   "The help page's section on how a task is worked, as the checkout holds it: what :work and :whole instructions cite whole."
@@ -181,3 +181,12 @@
     (is (re-find #"`app.x-test/waits` measured 9000 ms, at or over the bound of 5000" (:seon.task/plan tk)) "its plan names its measure and the bound")
     (is (= :held (:seon.task/execution tk)) "held until released")
     (is (= [] (filterv :seon.task/id (my.root/slow-tests-tx (datahike.core/db-with db tx) '{app.x-test/waits 9000} 5000))) "filed once")))
+
+;; docs/health.md#an-unfocused-docstring: one task a var, naming its measure and how it is done
+(deftest ^{:seon.test/estimate {:ticks 300000}} an-unfocused-docstring-becomes-a-task-that-says-how-it-is-done
+  (let [d (tpl/focus-docstring 'seon.task/entity-value 74 [:words :measurement])]
+    (is (seon.contract/valid? :seon.task/declaration d))
+    (is (= ['seon.task "focus-entity-value"] [(:seon.task/ns d) (:seon.task/name d)]) "one task a var, in its namespace")
+    (is (re-find #"is 74 words \(words, measurement\)" (:seon.task/plan d)) "its plan names its measure")
+    (is (re-find #"Change no code\. Done when \(seon\.problems/unfocused-docstrings \(my\.db/db\) \{\} #\{'seon\.task/entity-value\}\) answers \[\]" (:seon.task/plan d))
+        "and the one eval that says it is done")))
