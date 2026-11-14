@@ -110,7 +110,7 @@ The owner, 2026-11-12: "We are never to design systems that are so inefficient a
 A check or a test reads each law, and its section says how.
 
 - **Data is entities, refs and indexes;** there are no kinds ([data modeling](docs/data-modeling.md)).
-- **Only documented config:** every limit or default is a key read through the one resolver, and reaching a bound is a typed error ([config](docs/config.md#constants)).
+- **Only documented config:** every limit or default is a key read through the one resolver, and reaching a bound is a typed error ([config](docs/config.md#constants)). **No hand-made lists in code** (owner, 2026-11-14: "get rid of all hand made lists ... all hand made lists need to justify themselves and they need to be config options that are clearly spec'ed"): a set or vector naming attributes, namespaces, vars, files or classes is derived from data (a schema, a pull, the program) or deleted; one that must stay is a config entry with a schema entry and its justification, read through the resolver. Health's `:hand-written-list` class reads this law.
 - **One store, many branches** ([testing](docs/testing.md#testing-in-the-world)).
 - **Every write passes the one path,** checked against the entity's schema ([storage](docs/storage.md#the-write-checks-every-entity-it-touches)).
 - **Contracts on every function,** and every contract generates ([checks](docs/checks.md#contracts-armed-at-definition)).
