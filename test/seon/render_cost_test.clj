@@ -549,16 +549,21 @@
                        :n "evals of the agent (and a message for every other)"
                        :work "the task's list drawn once, a component for each turn, message and eval, each eval's response printed once"
                        :growth :linear
-                       ;; set by this proof's first measure, for the owner's word: the old proof's flat 1,050 calls drew one list, and this draws the conversation. An eval's response is printed
-                       ;; here once, under the armed printer, 197 calls: seon.ctx.wire/request's old cold cost was 546 a record
-                       :per-n {:calls 200 :bytes 120000}
-                       :fixed {:calls 700 :bytes 1300000}
-                       ;; owner's yes, 2026-11-10 ("Land now, three waivers", docs/decisions.md#three-request-cost-proofs-land-waived-owner-2026-11-10): a cold request draws
-                       ;; the page at the first turn's basis and advances one walk through every later basis (~6k calls), and each history record is drawn
-                       ;; by its own model render (~3k, an eval's print the most); the rest is outside the model render. The waiver comes off with that task.
-                       ;; Measured on jolt/pages 2026-11-10 at its largest size, 66.3k calls and 127.2 MB at 80 (its bound: 16.7k calls, 10.9 MB).
-                       :overrun {:task "seon.render/a-model-render-draws-each-turns-diff" :n 80 :measured {:calls 66300.0 :bytes 127170000.0}}
-                       :sizes [10 40 80]}))))))
+                       ;; derived from the work, item by item (each item's calls read off its own code path, web 2026-11-14):
+                       ;; - a turn: its eval component (~60 calls of the walk's own and the tree tracking's views of its members:
+                       ;;   wrap, view?, notify-deref-watcher!, ~25 each) and its response printed once by the armed printer
+                       ;;   (seon.print.select/emit, ~600 calls: classify, more?, member-indent, child, sized, node-of), its reply, and
+                       ;;   a message every other turn (~80): ~840 calls and ~1.17 MB a turn (the printer's text and the views, the
+                       ;;   print cache filling: a cold request's first draw, which is what one is)
+                       ;; - fixed: the task's list, the system message (the doc's markdown) and the page's head: ~6.6k calls, ~12.3 MB
+                       ;; Measured on jolt/web 2026-11-14, a first draw at 10 / 20 / 40: 15,057 / 23,343 / 40,207 calls, 24.1 / 33.8 /
+                       ;; 59.2 MB (a second draw allocates 15-25% less, its prints cached). The
+                       ;; old estimate (200 a turn, 700 fixed) left every size over, so each was measured again 18-43 times: the
+                       ;; proof cost ~1.0B ticks for ~63M of draws and ~155M of building its input. The tree tracking of a draw no
+                       ;; one advances (~30% of the calls) is the cost to cut next: task seon.render/a-model-render-draws-each-turns-diff
+                       :per-n {:calls 850 :bytes 1200000}
+                       :fixed {:calls 6700 :bytes 12500000}
+                       :sizes [10 20 40]}))))))
 
 (defn- session-eval
   "Eval id of agent a1's turn n, as its REPL records it (seon.repl/record-tx), its call that turn's."
@@ -685,11 +690,12 @@
 (deftest ^{:seon.test/estimate {:ticks 2000000}} the-rules-cost-their-namespaces-vars-read-once
   (cost/proof {:of 'seon.render/rules :input 'seon.render-cost-test/rules-of
                :n "renders drawn, of one namespace"
-               :work (str "the namespace's 163 vars read once (ns-interns ~7k ticks, 93 KB; a meta read and css? each, ~200 ticks and ~700 B), "
-                          "the 24 that state rules sorted (~3k): constant in the renders drawn. It sorted all 162 vars by symbol: 124k ticks, 492 KB")
+               :work (str "the namespace's vars (" (count (ns-interns 'seon.render.ui)) " now) read once (ns-interns ~7k ticks, 93 KB; a meta read and css? each, ~200 ticks and ~700 B), "
+                          "the 24 that state rules sorted (~3k): constant in the renders drawn. It sorted every var by symbol: 124k ticks, 492 KB")
                :growth :constant
-               ;; calls: rules and a css? a var of seon.render.ui; 163 since recent-errors (web, ed4ebcf766) added the 163rd var
-               :fixed {:calls 164 :bytes 240000 :ticks 45000}
+               ;; calls: rules, and css? once for each var of seon.render.ui, counted from the namespace itself: a restated count went red
+               ;; at each new render (163, then 164 with turns-tile)
+               :fixed {:calls (inc (count (ns-interns 'seon.render.ui))) :bytes 240000 :ticks 45000}
                :sizes [1 4 16]}))
 
 ;; See docs/render.md#a-page-is-a-kept-walk

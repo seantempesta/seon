@@ -2258,6 +2258,33 @@
         (is (str/includes? (out p2) ":h2") (str "with the new definition: " (out p2))))
       (finally (alter-var-root #'lab-child (constantly was))))))
 
+;; See docs/render.md#the-page
+(deftest ^{:seon.test/estimate {:ticks 5000000}} roots-page-shows-turns-to-merged
+  ;; estimate: a test db with two tasks and three agents (~1M), the tile drawn once (~0.1M), an agent entry's facts read (~0.1M)
+  ;; the number one metric on root's page (owner, 2026-11-13; plan seon.render.proc/roots-page-shows-turns-to-merged): each task an
+  ;; agent worked, its runs' turns from root's ctx's :turns (the render proc's, from each agent's commit), merged or not
+  (let [db (d/db-with (ts/test-db)
+                      (into (seon.task/create-tx (ts/test-db) [{:seon.task/ns 'demo :seon.task/name "won" :seon.task/plan "Win." :seon.task/proofs #{}}
+                                                               {:seon.task/ns 'demo :seon.task/name "lost" :seon.task/plan "Lose." :seon.task/proofs #{}}])
+                            [{:seon.agent/key "w1" :seon.agent/task {:seon.task/id "demo/won"} :seon.agent/started-ms 1}
+                             {:seon.agent/key "l1" :seon.agent/task {:seon.task/id "demo/lost"} :seon.agent/started-ms 2}
+                             {:seon.agent/key "l2" :seon.agent/task {:seon.task/id "demo/lost"} :seon.agent/started-ms 3}]))
+        db (d/db-with db [{:seon.task/id "demo/won" :seon.task/merged-t 7}])
+        page (pr-str (ui/turns-tile {:seon.ctx/ctx {:turns {"w1" 12 "l1" 40 "l2" 9}} :seon.db/db db}))]
+    (is (str/includes? page "demo/won") (str "a merged task's row: " page))
+    (is (re-find #"demo/won.*12 turns, merged" page) "its turns, merged")
+    (is (re-find #"demo/lost.*49 turns, not merged" page) "a task's turns are its runs', summed, and it is not merged")
+    (is (str/includes? page "l1: 40, l2: 9") "each run's turns, in the order they started")
+    (is (str/includes? page "2 tasks, 61 turns, 1 merged") "and the totals")
+    ;; a turn is derived data the render proc keeps: never one of what root records of an agent on main
+    (is (not (contains? (#'seon.system/observed {:status :idle :mem-mb 10 :turn 12}) :turn)) "an agent's :turn is no fact on main")
+    (is (= {"w1" 13 "l1" 40} (#'seon.render.proc/view-turns {"w1" 12 "l1" 40} {:agents {:w1 {:turn 13} :l1 {:turn 39} :x {:status :idle}}}))
+        "the render proc takes each agent's turn its status carried, the higher kept")
+    ;; an agent whose run ended commits no more: its turn is read once from its branch, its highest model-call number there
+    (let [bdb (d/db-with db (for [n [1 2 3]] {:seon.model-call/id (str "l1/" n) :seon.model-call/agent [:seon.agent/key "l1"] :seon.model-call/n n}))]
+      (is (= 3 (#'seon.render.proc/branch-turn bdb "l1")) "a branch's turn is its agent's highest call there")
+      (is (nil? (#'seon.render.proc/branch-turn bdb "w1")) "an agent with no call there has none"))))
+
 (deftest a-change-below-a-unit-moves-its-revision
   ;; docs/render.md#a-layout-places-its-lists: every component is a unit, at any depth; one nested in another (a key the agent
   ;; added, under ctx-keys) changing moves its own revision alone, so the render proc sends that unit and not its parent
@@ -3630,7 +3657,7 @@
 (deftest ^{:seon.test/estimate {:ticks 6000000}} a-plain-call-that-throws-is-drawn-and-recorded-as-a-component-defect
   ;; estimate: a walk of two components (~0.4M) and one error drawn by its render (~5M, the printer over the error as data)
   ;; one boundary for a render that throws: a plain call the writer makes is drawn by the error's render, never a bare span, and the
-  ;; walk records it as it records a component's (take-defects!), so health and the model see it
+  ;; walk records it as it records a component's (the walk's :defects), so health and the model see it
   (let [w (walk-of #'plain-call-layout)
         html (apply str (map :html (:units w)))]
     (is (str/includes? html "drawn") "the part beside it draws")

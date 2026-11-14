@@ -356,7 +356,7 @@
   (vswap! (:ledger w) update (symbol f) #(-> (or % {}) (update k (fnil inc 0)) (update :ticks (fnil + 0) (or ticks 0)) (update :bytes (fnil + 0) (or bytes 0))))
   nil)
 
-(declare emit unmount!)
+(declare emit unmount! render!)
 
 (defn- css?
   "Whether a render's :seon.render/style is CSS rules rather than Tailwind classes. See docs/render.md#style."
@@ -467,6 +467,17 @@
     (= (.-path a) (.-path b))
     (= a b)))
 
+(defn- defect-of!
+  "The :seon.render/component-defect of render sym (nil: a fn value, which has no name) throwing e, recorded with walk w's defects for
+  whoever records a problem (the walk's :defects): what threw, its message and the thrown error's own data. The one builder of a
+  component's defect, wherever a render throws. See docs/failure-points.md."
+  {:malli/schema [:=> [:cat :map [:maybe :symbol] :any] :map]}
+  [w sym e]
+  (let [defect (contract/error :seon.render/component-defect #'render! (thrown-line (or sym 'a-render) e)
+                               (cond-> {} sym (assoc :seon.error/in sym) (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
+    (vswap! (:defects w) conj defect)
+    defect))
+
 (defn render!
   "Component [f opts & children] drawn in walk w: its marker [::child key], its output kept in w's
   cache. Skipped when its children are the same as last time's (`same-arg?`: views by path), its render the same fn, and
@@ -536,13 +547,8 @@
             ;; throws) only when it is drawn, and a db render's reads are all of what it drew
             ;; what a component that throws draws in its place: a call of the error's render on the error as data (what threw, and the
             ;; thrown error's own data), recorded for health (the walk's :defects)
-            drawn-defect (fn [e] (let [defect (contract/error :seon.render/component-defect #'render!
-                                                     (thrown-line (symbol f) e)
-                                                     (cond-> {:seon.error/in (symbol f)}
-                                                       (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
+            drawn-defect (fn [e] (let [defect (defect-of! w (symbol f) e)]
                           (vreset! kept nil)
-                          ;; health sees it (the walk's :defects)
-                          (vswap! (:defects w) conj defect)
                           ;; a call placed to answer an output (opts' :seon.render/as: wire's task-msgs in the request) answers that output
                           ;; with the error, as an entity's model render that throws does above: by the render the error's schema names for
                           ;; it, so the model reads that its context lost a part, never a gap
@@ -569,10 +575,7 @@
                         ;; (health, the walk's :defects) and, in its place in the output, what the error schema's own render for that output answers
                         (doseq [[op of] fs :when (not= op as)]
                           (vswap! outs assoc op
-                                  (let [model-defect (fn [e] (let [defect (contract/error :seon.render/component-defect #'render!
-                                                                      (thrown-line (symbol of) e)
-                                                                      (cond-> {:seon.error/in (symbol of)} (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
-                                           (vswap! (:defects w) conj defect)
+                                  (let [model-defect (fn [e] (let [defect (defect-of! w (symbol of) e)]
                                            ;; the error answers this output by the render its schema names for it (a model render of an error, as
                                            ;; every model render is a schema's), else nothing beside the problem
                                            (if-let [ef (some-> (render-for ix :seon.render/component-defect op) requiring-resolve)]
@@ -854,10 +857,7 @@
   [w]
   (fn [f e]
     ;; a var names where it threw; a fn value has no name to give (:seon.error/in is a var's qualified symbol)
-    (let [sym (when (var? f) (symbol f))
-          defect (contract/error :seon.render/component-defect #'render! (thrown-line (or sym 'a-render) e)
-                                 (cond-> {} sym (assoc :seon.error/in sym) (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
-      (vswap! (:defects w) conj defect)
+    (let [defect (defect-of! w (when (var? f) (symbol f)) e)]
       [:section {:class "err"} [:p (:seon.error/message defect)]
        [#'hiccup {:schema :seon.render/component-defect :as :block :seon.render/index @(:index w)} defect]])))
 
