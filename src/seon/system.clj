@@ -639,6 +639,9 @@
                     :tests (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m)) (:names m) (assoc :names (:names m)) (:mode m) (assoc :mode (:mode m)) (:plan? m) (assoc :plan? true) (:process? m) (assoc :process? true) (:items m) (assoc :items (:items m))
                                             ;; a session's or a landing's checkout: its granted items' test children read its files and its process store
                                             (:checkout m) (assoc :checkout (:checkout m))
+                                            ;; the batch's tag: its test child and what that starts carry it, so the :process owner reads
+                                            ;; what each running batch holds (seon.fx/held-processes)
+                                            (:seon.prove/batch m) (assoc :seon.prove/batch (:seon.prove/batch m))
                                             (get-in st [:view :agents id :task]) (assoc :task (get-in st [:view :agents id :task])))
                     :judge {:op :judge}
                     :stats {:op :stats}
@@ -699,7 +702,7 @@
       :fx (let [owner (keyword "fx" (name (:kind m)))]
             (if (contains? (graph/fx-owners (get-in st [:system :procs])) owner)
               (let [[st rid] (pend st p :fx nil)]
-                (step/out! o [owner :ask] (merge {:prio 0} (select-keys m [:prio :seon.fx/class :seon.fx/processes]) {:req (:req m) :dest {:rid rid}}))
+                (step/out! o [owner :ask] (merge {:prio 0} (select-keys m [:prio :seon.fx/class :seon.fx/processes :seon.prove/askers]) {:req (:req m) :dest {:rid rid}}))
                 st)
               (reply! st o p (contract/error :seon.fx/unknown-kind #'seon.system/ext-op (str "no effect kind " (:kind m))))))
       :fs (let [[st rid] (pend st p :fs nil)]
@@ -863,6 +866,8 @@
       :prove-answer (deliver-rid st o (:rid m) (:r m))
       ;; a verdict as it lands, for the run keyed :key: on root's events, which a streaming :prove writes as a line
       :prove-verdict (do (step/out! o :events (step/event (-> m (dissoc :op) (assoc :type :prove-verdict)))) st)
+      ;; a run's items held for the machine's load, and resumed (the :process owner, seon.fx/admits?): its streaming client says so
+      :prove-held (do (step/out! o :events (step/event (-> m (dissoc :op) (assoc :type :prove-held)))) st)
       ;; the render proc's health of main (:health): its value, held at the counts this api's fold put it at
       ;; (the fold it was asked with, and which it keeps), so it is the same count as root's page's
       :health-answer (deliver-rid st o (:rid m) (:r m))
@@ -1867,7 +1872,7 @@
                          :cron-tick (a/chan 1) :full-run-at (cfg/value :seon.config.proofs/full-run-at)
                          :stall-ms (or stall-ms (cfg/value :seon.config.agent/stall-ms)) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1) :web-streams-buf (a/sliding-buffer (cfg/value :seon.config.web/streams-buf))
                          :prove-tree (fn [on] (prove-tree! @sys-p on))
-                         :process-workers (fx/budget {:cores (cfg/value :seon.config.machine/cores) :max-cores (:seon.config.proofs/max-cores (:config (cfg/in-force)))})
+                         :process-workers (cfg/value :seon.config.machine/cores)
                          ;; a test batch the :process owner admitted, asked of the agent holding its branch (the api's :tests op)
                          :ask-tests (fn [msg] @(call! @sys-p msg)) :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
                          :web-port (cfg/value :seon.config.web/port)

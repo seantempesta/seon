@@ -596,14 +596,14 @@
   (seon.cost/proof
     {:of 'seon.prove/grant :input 'seon.prove-test/queue-of
      :n "items queued, a budget of one"
-     :work "one pass over the queued items for the most valuable (item-value, its age read from the grant it was queued at, and its waiters read only when an asker is a turn's), and its batch (batch-of): a budget of one, its share is every queued item, so two passes more (count, take) and each item's status, its place in the batch and in the request written; with two askers or more, one pass summing each asker's work left (an update a waiter) (linear in reads and writes)"
+     :work "one pass over the queued items for the most valuable (item-value, its age read from the grant it was queued at, and its waiters read only when an asker is a turn's), and its batch (batch-of): a budget of one, its share is every queued item, so two passes more (count, take) and each item's status, its place in the batch and in the request written; one pass more over the batch for its askers (a sorted set of each item's waiters, which the owner tells when the load holds it: an insert an item, ~130 ticks and 1 KB, the work the estimate before it missed); with two askers or more, one pass summing each asker's work left (an update a waiter) (linear in reads and writes)"
      :growth :linear
      ;; measured 2026-11-11 at 100 queued: 6,261 ticks and 19.0 KB a grant of one item, where aging every item it passed over, by
      ;; a lazy filter and apply max-key, took 43.2k ticks and 355.9 KB. A grant of a batch (2026-11-12) writes each item it takes
      ;; (its status, its place in the batch and the request: ~1.5 KB) and walks the queue twice more (a filter's seq, then a
      ;; destructured seq of entries: ~1.5 KB), and the askers' work left (one map update a waiter, ~1 KB); measured 588 ticks and
      ;; 4.2 KB an item at 100
-     :per-n {:ticks 500 :bytes 4000}
+     :per-n {:ticks 650 :bytes 5200}
      :fixed {:ticks 2000 :bytes 2000}
      :sizes [100 300 1000]}))
 
@@ -727,7 +727,7 @@
     (is (empty? (run-answers o3)) "asked again, it is not answered from a remembered green")
     (is (= 1 (count (filter #(get-in % [:req :plan?]) (asks o3 :tests)))) "it is planned again")))
 
-;; ---- admission is the :process owner's (docs/config.md#the-processes-proving-may-hold) --------------------------------------
+;; ---- admission is the :process owner's (docs/config.md#the-test-services-three-limits) --------------------------------------
 
 ;; docs/merging.md#the-test-service: the service holds no admission: every grantable item is asked of root's :process effect owner
 ;; at once, with its class, so the owner admits it by the processes that class holds (seon.fx/admits?); a plain test's batch
@@ -743,12 +743,12 @@
     (is (= #{1} (set (keep #(get-in % [:req :seon.fx/processes]) sent))) "a plain batch declares its one child")
     (is (= 5 (count (keep #(get-in % [:req :seon.fx/processes]) sent))) "a root-booting class declares nothing: alone until read")))
 
-;; docs/merging.md#the-test-service: the service deals an agent's queued tests over the owner's budget (seon.fx/budget of the
+;; docs/merging.md#the-test-service: the service deals an agent's queued tests over the owner's max-workers (seon.fx/limits of the
 ;; config in force), a share a fork
 (deftest ^{:seon.test/estimate {:ticks 500000}} the-queue-is-dealt-over-the-owners-budget
   (let [init (prove/prove-proc {:conn nil})
         [_ outs] (prove/ask-items (proc0) 1 :batch (into {} (for [i (range 10)] [[(symbol "app.s-test" (str "t" i)) (str "d" i)] {:agent :a1 :ms 5}])))]
-    (is (= (fx/budget {:cores (seon.config/value :seon.config.machine/cores)}) (:budget init)) "the shipped config: all the cores")
+    (is (= (:max-workers (fx/config-limits)) (:budget init)) "the config in force: its max-workers (the shipped one, the cores)")
     (is (= (min 10 (:budget init)) (count (batches outs))) "ten items over that budget, a share each")
     (is (= 10 (count (mapcat #(get-in % [:req :names]) (batches outs)))) "every item asked")))
 

@@ -307,6 +307,7 @@
  :seon/args [:map {:description "On a hiccup element, the arguments its :seon/call is made with."}]
  :seon/callable [:boolean {:description "On a var's metadata, true when the page may call it by name (seon.web/ui-call)."}]
  ;; the effect owner's outcome stamps and queue key (seon.fx)
+ :seon.lib/load-refused [:and {:description "The error when the OS refuses the machine's load average (getloadavg)."} :seon.error/base [:map [:seon.error/type [:= :seon.lib/load-refused]]]]
  :seon.fx/us [:int {:min 0 :description "On an effect's outcome, the microseconds it ran."}]
  :seon.fx/queue-us [:int {:min 0 :description "On an effect's outcome, the microseconds it waited in its owner's queue."}]
  :seon.fx/class [:any {:description "On an effect's request, what its processes are measured by (a process test, a check step): its owner admits it at that class's peak, the whole budget until one is read (seon.fx/admits?)."}]

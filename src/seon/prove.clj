@@ -76,7 +76,7 @@
 ;; has no verdict for; each item is queued once with every asker waiting on it, granted in batches to the agent holding
 ;; its branch as requests to root's :process effect owner, which admits them by the processes each class holds (seon.fx/admits?),
 ;; and each asker is answered at its first red or its last green. State: :items {[test digest] {:status :waiters :agent :ms :mode
-;; :at}}, :askers {rid {:left :prio :results}}, :batches {bid #{item}} (the items asked), :budget n (seon.fx/budget, the share
+;; :at}}, :askers {rid {:left :prio :results}}, :batches {bid #{item}} (the items asked), :budget n (the owner's max-workers, seon.fx/limits: the share
 ;; batch-of deals a queue over). No clock: an item passed over is aged in skips.
 
 (defn- item-class
@@ -131,7 +131,7 @@
 ;; so the queue goes to the workers in shares, never one test a fork (measured 2026-11-12, docs/merging.md#the-test-service)
 (defn- batch-of
   "The batch granted with queued item k (it, its state): k and, for a test item of no turn, other queued test items of the same
-  agent, mode and checkout that one of its askers waits on and whose needs are met, up to its share of them over free, the batches this grant may still deal (the :process owner's budget, seon.fx/budget, less
+  agent, mode and checkout that one of its askers waits on and whose needs are met, up to its share of them over free, the batches this grant may still deal (the :process owner's max-workers, seon.fx/limits, less
   those it dealt). One pass that stops when full. A set of items. See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :map :any :map pos-int?] [:set :any]]}
   [st k it free]
@@ -183,14 +183,17 @@
               c (item-class it)
               [st m] (step/ask st [:prove :answers] [:batch (str bid)]
                                (cond-> {:op :fx :kind :process :prio v :seon.fx/class c
+                                        ;; who waits on it: told when the owner holds it for the machine's load
+                                        :seon.prove/askers (into (sorted-set) (mapcat #(get-in st [:items % :waiters])) batch)
                                         :req (if (= :test (:kind it :test))
-                                               {:kind :test
-                                                :msg (cond-> {:op :tests :id (:agent it) :mode (:mode it :judge) :names (into #{} (map first) batch) :items (into {} batch)}
+                                               {:kind :test :seon.prove/batch (fx/batch-tag bid)
+                                                :msg (cond-> {:op :tests :id (:agent it) :mode (:mode it :judge) :names (into #{} (map first) batch) :items (into {} batch)
+                                                              :seon.prove/batch (fx/batch-tag bid)}
                                                        (:checkout it) (assoc :checkout (:checkout it)))}
                                                ;; a build, a seed or a check step: run on the run's checkout
                                                {:kind (:kind it) :tree (:tree it) :checkout (:checkout it)
                                                 :name (if (#{:build :seed} (:kind it)) (:kind it) (first k)) :digest (second k)
-                                                :binary? (boolean (:binary? it)) :bound (:bound it)})}
+                                                :binary? (boolean (:binary? it)) :bound (:bound it) :seon.prove/batch (fx/batch-tag bid)})}
                                  (= plain c) (assoc :seon.fx/processes 1)))]
           (recur st (conj outs m) (inc sent)))))))
 
@@ -591,7 +594,7 @@
        :ping-map-fn (fn [st] {:runs (count (:runs st)) :full (some-> st :full :key) :queued (count (:items st))
                               :main-t (:main-t st) :stale-answers (:stale st 0)})})
   ([args] {:rid 0 :pending {} :runs {} :done {} :items {} :askers {} :batches {} :conn (:conn args)
-           :budget (fx/budget {:cores (cfg/value :seon.config.machine/cores) :max-cores (:seon.config.proofs/max-cores (:config (cfg/in-force)))})})
+           :budget (:max-workers (fx/config-limits))})
   ([st _tr] st)
   ([st0 in m]
    (let [st st0

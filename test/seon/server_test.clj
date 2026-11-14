@@ -635,7 +635,9 @@
                                     {:exit @exit :out out :lines (clojure.string/split-lines out)})))
         before? (fn [lines a b] (let [i (.indexOf ^java.util.List lines a) j (.indexOf ^java.util.List lines b)] (and (<= 0 i) (< i j))))]
     (with-redefs [seon.fx/tree-id (constantly "t1")]
-      (let [green (prove (stream [{:type :prove-verdict :test 'a.x-test/a-green :status :pass :ms 12.4}]
+      (let [green (prove (stream [{:type :prove-verdict :test 'a.x-test/a-green :status :pass :ms 12.4}
+                                  {:type :prove-held :held true :load 20 :max-load 18 :queued 3}
+                                  {:type :prove-held :held false}]
                                  {:key "tree-t1@1" :selected ['a.x-test/a-green] :ran 1 :pass 1})
                          "a.x-test")
             red (prove (stream [{:type :prove-verdict :test 'a.x-test/a-red :status :fail :failures [{:message "expected 1"}]}]
@@ -649,8 +651,9 @@
         (is (not (contains? (second (second @asked)) :names)) "and names nothing when given nothing")
         (is (= 0 (:exit green)) (:out green))
         (is (= "PROVE OK" (last (:lines green))) (:out green))
-        (is (before? (:lines green) "PASS a.x-test/a-green 12 ms" "PROVE OK")
-            (str "the green's verdict printed as it landed, before the answer: " (:out green)))
+        (is (before? (:lines green) "PASS a.x-test/a-green 12 ms" "HELD: load 20 >= max-load 18, 3 items waiting")
+            (str "the green's verdict printed as it landed, then the hold, never a silent wait: " (:out green)))
+        (is (some #{"RESUMED"} (:lines green)) (:out green))
         (let [refused (prove (stream [] (contract/error :seon.system/binary-not-current 'seon.system/tree-refusal
                                                         "this tree can't be proved on the running system: it changes what the running binary bakes (reference-code/jolt); its tests would run on the system's build of them. Prove it on its own build: bin/prove --out DIR"
                                                         {:binary "b0" :tree "t1" :baked ["reference-code/jolt"]})))]

@@ -623,14 +623,25 @@
  ;; Unit: shards. How many runner processes bin/test starts at once (seon.proofs/shards), and how many steps bin/check runs
  ;; at once. 4, not the cores: each shard boots a test root of its own (its fork server warms ~1e9 ticks before its first agent),
  ;; and 18 at once under other proves ran the system tests' roots past their bound (measured 2026-11-12: CPU 0.0 s, waiting on
- ;; their roots). The service's items are admitted by the :process owner (seon.fx/admits?); this shard path goes with one-root and the service.
+ ;; their roots). The service's items follow max-workers; this shard path goes with one-root and the service.
  ;; SEON_PROOF_JOBS is bin/test's own hand-off to its child steps. At the bound: a run never has more shards.
  :seon.config.proofs/jobs #long #or [#env SEON_PROOF_JOBS 4]
- ;; Unit: a share of :seon.config.machine/cores in (0,1] (rounded down, at least 1). The processes the :process effect owner's
- ;; requests may hold at once (seon.fx/budget, read at each admission, docs/flow.md#effects-one-owner-and-its-workers-per-kind):
- ;; each request weighs its class's measured peak, a class never measured the whole budget. Unset: all the cores. At the
- ;; bound: a request waits in the owner's queue until one in flight gives its processes back.
+ ;; The :process owner's admission of proving (seon.fx/limits, read at each admission, docs/config.md#the-test-services-three-limits): three optional bounds, any
+ ;; combination (the owner: "a fixed max number and a load max and core max ... any combination has a solution"). An unset
+ ;; key binds nothing; with neither count set, the machine's cores (:seon.config.machine/cores) bound the items at once.
+ ;; Unit: items. The most items (a batch of tests in one fork, a check step, a build or seed) running at once on this
+ ;; machine: its cores (#seon/cores; a forked test child is 16-35 MB of its own and about a core while it runs). At the
+ ;; bound: an item waits in the queue for a running one to end.
+ :seon.config.proofs/max-workers #seon/cores nil
+ ;; Unit: a share of :seon.config.machine/cores in (0,1] (rounded down, at least 1); a count of items is max-workers. Unset:
+ ;; no core bound. At the bound: as max-workers; the least of the two set holds.
  ;; :seon.config.proofs/max-cores 0.5
+ ;; Unit: the machine's 1-minute load average. Unset: the load admits everything. Set, an item is granted only while the
+ ;; load (read in a step the service already takes: an ask arrived, an item ended; never polled) is under it, except that
+ ;; with nothing running one item is always granted, so the queue never stalls with nothing to wake it. Admission only,
+ ;; never a verdict (docs/clocks.md#the-machines-load-admits-work).
+ ;; Set per machine (config/local.edn), never shipped: a load is absolute.
+ ;; :seon.config.proofs/max-load 12.0
  ;; Unit: ms. The least work a shard of an incremental run is worth (seon.proofs/worth-shards). Provenance: a shard's start
  ;; costs about 5 s, and 8 s more for its process tests' root (docs/testing.md#a-root-costs-what-it-boots), so it saves its cost past
  ;; about twice that on each side. At the bound: a run of less work than this runs in one shard, as the owner ruled 2026-10-30.

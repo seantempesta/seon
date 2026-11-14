@@ -75,7 +75,7 @@
   :tests {:perform seon.fx/run-tests :workers 1 :ctx {:prove-tree :bind/prove-tree}}
   ;; a prove's items (seon.prove asks them all): a test batch, asked of the agent holding its branch, or a build, one process test, one
   ;; check step on the session's own checkout (docs/merging.md#a-session-proves-through-root); admitted by the processes each class
-  ;; holds under the cores' share (seon.fx/admits?), one performer per process the budget allows
+  ;; holds under the config's dials (seon.fx/admits?, read live), one performer a core
   :process {:perform seon.fx/run-item :workers :bind/process-workers :ctx {:ask-tests :bind/ask-tests}}
   ;; the wiki's history from git: what each section was last written against (seon.doc/baseline-plan)
   :history {:perform seon.fx/wiki-history :workers 1}
