@@ -1207,7 +1207,15 @@
       ;; (seon.program/load-changes!), so nothing is built (BUILD plan P4)
       ;; and main's source fact moves to the commit, in the same write: main was imported from it now (catch-up reads from there)
       :committed (if-let [tx (commit-tx (:db st) r (:members (:writeback f)) (:files (:writeback f)) (:written (:writeback f)))]
-                   (one (write st id :done (into tx (source-moved-tx (:db st) r))))
+                   (let [[st o] (write st id :done (into tx (source-moved-tx (:db st) r)))]
+                     ;; git's main moved but its checked-out tree could not follow: a platform problem someone reads, not only the answer
+                     [st (cond-> [o]
+                           (get-in r [:value :tree-unmoved])
+                           (conj {:op :problem :class :platform
+                                  :error (contract/error :seon.fx/tree-unmoved #'seon.reconcile/source-moved-tx
+                                                         (str "git's main moved to " (get-in r [:value :sha]) " but its checked-out tree did not follow: "
+                                                              (get-in r [:value :tree-unmoved]) "; bring the tree in (git read-tree -m -u)")
+                                                         {:sha (get-in r [:value :sha])})}))])
                    (done st)))))
 
 (defn- quiet

@@ -153,6 +153,8 @@
  :seon.test/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int]
                                                 [:test {:optional true} :string]]]
  :seon.fx/io-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/io-error]]]]
+ :seon.fx/tree-unmoved [:and {:description "A commit moved git's main but its checked-out tree could not follow: the commit stands, the tree is brought in by hand."}
+                        :seon.error/base [:map [:seon.error/type [:= :seon.fx/tree-unmoved]] [:sha :string]]]
  :seon.fx/ref-moved [:and {:description "A commit asked to move a branch only from the commit it expected found the branch elsewhere: nothing written; the caller reads what moved it and asks again."}
                      :seon.error/base [:map [:seon.error/type [:= :seon.fx/ref-moved]] [:expected :string] [:found [:maybe :string]] [:path :string]]]
  ;; a merged task's write-back the git effect refused (seon.reconcile/commit-tx): held in the task's :seon.task/error
