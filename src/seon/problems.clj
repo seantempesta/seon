@@ -230,8 +230,8 @@
                           {:kind :stale-pin :section a :path path :stated sha :recorded g} {:section a :path path :stated sha :recorded g}))))))
 
 (def stale-binary-acts
-  "What brings a root's binary and its main into agreement, each then a restart of root: what the :stale-binary row, root's
-  refused spawn and the last line of bin/system start and bin/update say. See docs/source.md#files-and-the-db-two-directions."
+  "What brings a root's binary and its main into agreement, each then a restart of root: what the :stale-binary row and the
+  last line of bin/system start and bin/update say. See docs/source.md#files-and-the-db-two-directions."
   (str "Bring them into agreement, then restart root: erase the store and seed it from the tree (bin/system stop; bin/system start --reindex, "
        "which is bin/remove-tree runs/store and bin/system start), or reindex main from disk at root ((my.root/import! sys), (my.root/load-docs! sys), "
        "(my.root/load-tasks! sys); then bin/system stop and bin/system start), or start the binary main's program was built from (bin/system next)"))
@@ -241,7 +241,8 @@
   root's :seon.system/source fact (:stale-binary, seon.system/booted-source), naming the binary's tree, main's and what between
   them reaches root's own code or a build input (or what is missing). What agents merged into main since is main's own, never a
   row. None on a boot whose binary is current, or with no source fact; gone at the next boot on a current binary. While it
-  shows, root forks no agent. Derived from the fact, never computed here, no clock; its message names the acts
+  shows, root runs main's program loaded over its binary at each boot (seon.program/load-all!), and a build input the binary
+  bakes is the binary's, not main's. Derived from the fact, never computed here, no clock; its message names the acts
   (`stale-binary-acts`). Cost: one pull. See docs/health.md#a-stale-binary."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
   [db ans]
@@ -254,7 +255,7 @@
                          (cond missing (str ": " (name missing) " is unknown")
                                error (str ": " error)
                                :else (str ", and what differs reaches root's own code: " (str/join ", " reaches)))
-                         ". Root forks no agent. " stale-binary-acts)
+                         ". Root runs main's program loaded over it; what differs in a build input is the binary's. " stale-binary-acts)
                     {:kind :stale-binary :binary binary :tree tree} {:binary binary :tree tree})]
       [])))
 
