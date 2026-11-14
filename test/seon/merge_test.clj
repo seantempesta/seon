@@ -597,3 +597,19 @@
     (testing "an unmerged task entry is settled by writing a side's content (my.branch/resolve! of [:task ...])"
       (let [settled (d/db-with main (pm/content-tx main [:task "demo/x"] {:plan "Make x, settled." :proofs #{'demo-test/x-test}}))]
         (is (= ["Make x, settled." #{'demo-test/x-test}] ((juxt :seon.task/plan (comp set :seon.task/proofs)) (d/entity settled [:seon.task/id "demo/x"]))))))))
+
+;; Estimate: the world 0.5M (cached) + 4 small transactions + one delta three-way at :all over a few keys ~5M = 10000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-fact-a-branch-holds-only-because-main-wrote-it-is-mains
+  ;; agent lb76's branch (2026-11-14): 6,907 conflicts, nearly all facts main wrote that the branch held stale (carried before its
+  ;; base moved, never written by it), and embeddings each side computes. Facts are facts at the transaction that wrote them: a
+  ;; side changed [e a] only if its own transaction wrote it; a derived entity ({:seon.db/derived true}) never merges
+  (let [as (fn [db branch tx] (:db-after (d/with db {:tx-data tx :tx-meta {:seon.tx/branch branch}})))
+        w (as (base) :main [{:seon.agent/key "a1" :seon.agent/status :busy}])
+        branch (as w :main/b ((var-tx "f" "(inc x)") w))
+        base' (as w :main [[:db/retract [:seon.agent/key "a1"] :seon.agent/status :busy]])
+        main (as base' :main [[:db/add [:seon.agent/key "a1"] :seon.agent/status :idle]])
+        r (pm/delta-three-way base' branch main :all)
+        merged (d/db-with branch (pm/merge-tx branch base' main (:apply r) :all))]
+    (is (empty? (:conflicts r)) (str "a stale value of main's is no conflict: " (pr-str (:conflicts r))))
+    (is (= :idle (:seon.agent/status (d/entity merged [:seon.agent/key "a1"]))) "main's fact")
+    (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch keeps its own change")))
