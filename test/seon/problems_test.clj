@@ -507,7 +507,9 @@
                 ;; the owner's decree (2026-11-14): per var with a form, its read (scan-form, seon.source/read-forms and the reader's two
                 ;; contracted helpers) and its walk (literal-lists), and the class's own. At import the form is read once already: keeping its
                 ;; literals there makes this a seek a var (seon.problems/a-forms-hand-made-lists-are-read-at-its-import)
-                :hand-written-list (+ 1 (* 5 (count (d/datoms db :aevt :var/form))))
+                :hand-written-list (+ 1 (* 5 (count (d/datoms db :aevt :var/form)))
+                                       ;; and one unaliased per form whose text holds an auto keyword
+                                       (count (filter #(some-> (:v %) str (.contains "::")) (d/datoms db :aevt :form/src))))
                 :wrappers 2}]         ; health's and other-derived's own contracts
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
@@ -1733,3 +1735,22 @@
     (is (= [{:kind :hand-written-list :var (v 8) :members [:zz/a :zz/b :zz/c]}] (rows #{(v 8)}))
         "a form whose namespace this process never loaded is read all the same: an unloaded alias keeps its text")
     (is (= [(v 1) (v 8)] (mapv :var (rows nil))) "the whole program's: every form on the db")))
+
+(defn scan-input
+  "The proof's input at n: a form's text of about 10n characters whose keywords are auto keywords of an alias no process loaded
+  (::zz/kI), as the class reads every form of the program: [nsym src]."
+  [n] ['app.scan (str "(defn v [k] (case k " (apply str (map #(str "::zz/k" % " " % " ") (range (quot (* 10 n) 12)))) "nil))")])
+
+;; See docs/health.md#a-hand-written-list. Estimate, from the work: one pass over the characters to make each :: one colon
+;; (~5 ticks, ~36 B a character, measured on main's 158 forms holding one: 1.9M ticks over 365k characters) and the read
+;; (~17 ticks a character, seon.source/read-forms on 295 of main's forms), ~25 ticks a character (250 an n of ten); its fixed part a read's setup
+;; and five contracted calls in a test process (scan-form, unaliased, read-forms and the reader's two helpers; root counts 3, its private contracts unchecked). The lookbehind regex it replaced
+;; cost ~4,500 ticks and ~89 KB a character: the 77 s :hand-written-list read of main (context, 2026-11-14).
+(deftest ^{:seon.test/estimate {:ticks 20000000}} reading-a-form-for-its-lists-costs-its-characters
+  (cost/proof {:of 'seon.problems/scan-form :input 'seon.problems-test/scan-input
+               :n "tens of characters of a form's text holding auto keywords"
+               :work "one pass over the characters rewriting each :: (no regex), then one read of the text"
+               :growth :linear
+               :per-n {:ticks 250 :bytes 1000 :calls 0}
+               :fixed {:ticks 20000 :bytes 60000 :calls 5}
+               :sizes [50 150 450]}))
