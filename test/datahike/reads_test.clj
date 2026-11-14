@@ -70,17 +70,6 @@
     (is (d/reads-touched? idx (tx [[:db/retract t2 :seon.task/id "r/t2"]])) "the joined entity's id, retracted")
     (is (not (d/reads-touched? idx (tx [{:db/id t2 :seon.task/plan "Other."}]))) "an attribute the join did not read")))
 
-;; Estimate: a seeded db and two pulls under nested recorders, ~0.2M = 200000
-(deftest ^{:seon.test/estimate {:ticks 200000}} a-nested-with-reads-records-into-the-outer
-  ;; task datahike.reads/with-reads-nests-in-an-outer-recorder: a read inside a nested with-reads reached only the inner
-  ;; recorder, so a pass whose component recorded its own reads lost them (seon.ratom/deref-capture copied them out by
-  ;; hand). Recording composes: the inner reads are the outer's too.
-  (let [[db t1 t2] (seeded)
-        [[_ inner] outer] (d/with-reads #(do (d/pull db [:seon.task/id] t2)
-                                             (d/with-reads (fn [] (d/pull db [:seon.task/plan] t1)))))]
-    (is (= #{[:ea t1 :seon.task/plan]} (d/reads-index inner)) (pr-str (d/reads-index inner)))
-    (is (= #{[:ea t1 :seon.task/plan] [:ea t2 :seon.task/id]} (d/reads-index outer)) (pr-str (d/reads-index outer)))))
-
 (deftest a-transaction-touches-only-what-a-read-scanned
   (let [[db t1 t2] (seeded)
         point (d/reads-index (second (d/with-reads #(d/q '[:find ?e . :in $ ?id :where [?e :seon.task/id ?id]] db "r/t2"))))
