@@ -45,11 +45,19 @@
 
 (defn- end-hold
   "St with the clone handshake of request rid ended, whatever ended it (its fd sent, the clone answered or failed, the request
-  never sent): what waited behind it (:held) goes out in order. A hold ended only by :fd-ready waited for good when a clone
-  failed before asking for its descriptor (a fork refused at its bound), and every later message to the agent with it."
+  never sent): what waited behind it (:held) goes out in order, up to a clone request held behind it, which goes out and holds
+  in turn. A hold ended only by :fd-ready waited for good when a clone failed first, and a second clone sent while one held
+  overwrote the first's hold, so neither's end released it (docs/processes.md#the-socket-and-the-agent-proc)."
   {:malli/schema [:=> [:cat :map :any] :map]}
   [st rid]
-  (if (= rid (:holding st)) (reduce to-proc! (dissoc st :holding :held) (:held st)) st))
+  (if (not= rid (:holding st))
+    st
+    (loop [xs (seq (:held st)) st (dissoc st :holding :held)]
+      (if-let [[x & more] xs]
+        (if-let [c (::clone x)]
+          (-> st (to-proc! c) (assoc :holding (::rid x) :held (vec more)))
+          (recur more (to-proc! st x)))
+        st))))
 
 (defn- send-fd!
   "The descriptor fd to the agent, in a frame of its own ({:op :fd :k k}, SCM_RIGHTS). The
@@ -109,9 +117,12 @@
            (contains? (:gates st) (:tag m)) (-> (update :gates disj (:tag m)) (update :fx-out (fnil dec 1)))) nil]
     :req (let [{:keys [rid msg kind]} m
                read? (= :context (:origin msg))]
-           (let [st (cond-> (to-proc! st (assoc msg (if (= kind :clone) :k :id) rid))
+           (let [out (assoc msg (if (= kind :clone) :k :id) rid)
+                 ;; a clone sent while another clone's handshake holds waits behind it as a request, and holds when it goes out
+                 queued? (and (= kind :clone) (:holding st))
+                 st (cond-> (if queued? (update st :held (fnil conj []) {::clone out ::rid rid}) (to-proc! st out))
                       ;; a clone's socket follows in its own frame once the agent asks
-                      (= kind :clone) (assoc :holding rid)
+                      (and (= kind :clone) (not queued?)) (assoc :holding rid)
                       true (update :inflight assoc rid (cond-> (assoc (select-keys m [:kind :branch :new :pass-fd]) :read? read?)
                                                          ;; an eval's text, for its :started event
                                                          (string? (:forms msg)) (assoc :form (:forms msg))))
@@ -218,7 +229,7 @@
       :unsendable (let [{:keys [pass-fd]} (get-in st [:inflight (:rid m)])
                         _ (some-> pass-fd sock/close!)
                         st (answer-rid (end-hold st (:rid m)) o (:rid m) (:error m))]
-                    (step/out! o :to-api (status st {:status (busy st)}))
+                    (step/out! o :to-api (status st {:status (busy st) :running nil}))
                     st)
       :synced (do (step/out! o :to-api (status st {:t (:t m) :load-errors (:load-errors m)})) st)
       ;; the back-pressure check's flood: counted, in order
