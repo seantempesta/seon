@@ -1133,7 +1133,7 @@
   "What stopped a runner, joined: the error's own head wherever it falls (an exception's \"Unhandled exception\" line or the
   analyzer's \"error[\" line, up to its trace, at most 4 lines), then its last 6 lines (where it ended and the verdicts). A
   count of last lines alone lost the error twice: three left where and two verdicts, six left a long trace's frames alone (a
-  base's runner that threw: \"made no plan\" with no why, deps' land 2026-11-14)."
+  base's runner that threw: \"made no plan\" with no why)."
   {:malli/schema [:=> [:cat :string] :string]}
   [text]
   (let [ls (vec (remove str/blank? (str/split-lines text)))
