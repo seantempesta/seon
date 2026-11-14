@@ -102,12 +102,14 @@
   budget: a whole-program load allocates tens of GB, and the agent's per-form
   budget stopped it); its response recorded on main as root's eval, by the user (seon.repl/record-tx). The record's write is
   sent and not waited on: nothing reads it before the answer, and root's writer keeps its order before any later write
-  (it cost 6-30 ms of every root eval's 45-54 ms). See docs/server.md#ops."
-  {:malli/schema [:=> [:cat :seon.system/sys :string] :seon.repl/answer]}
-  [sys code]
+  (it cost 6-30 ms of every root eval's 45-54 ms). Its *in* is input, the request's own (empty when none). See docs/server.md#ops."
+  {:malli/schema [:=> [:cat :seon.system/sys :string [:maybe :string]] :seon.repl/answer]}
+  [sys code input]
   (when-not (find-ns 'root.repl)
     (binding [*ns* (create-ns 'root.repl)] (refer-clojure) (require '[my.root :as root] '[seon.system :as c] '[datahike.api :as d])))
-  (let [r (binding [*sys* sys]
+  ;; *in* is this request's own input (empty unless it sent some), never the process's stdin: a read of stdin answers EOF at once,
+  ;; where it once held its connection 30 min (docs/server.md#ops)
+  (let [r (binding [*sys* sys *in* (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. (or input "")))]
             (repl/eval-string code {"ns" "root.repl" :origin :outside :ticks 0 :bytes 0
                                     :repl/eval-fn (fn [form] (eval (list 'let '[sys seon.server/*sys*] form)))}))]
     (c/transact-main! sys (repl/record-tx {:seon.system/id :root} (str "root-outside-" (profile/now-ns)) (task/sender (cfg/value :seon.config.root/user-name))
@@ -260,6 +262,7 @@
                          :items {:type "object" :properties (array-map :intent {:type "string" :description "What this eval is about to do. A sentence is fine."} :code {:type "string" :description "Clojure to evaluate."})
                                  :required ["intent" "code"]}}
                  :code {:type "string" :description "root only: Clojure forms"}
+                 :input {:type "string" :description "root only: what the forms read as *in* (stdin), empty when none is sent"}
                  :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}}
           :required ["agent"]}
    :context {:doc "The request of the task an agent works as a model is sent it now: system prompt, its conversation and its page. Name the agent, or a task (ns/name): the agent working it, else one attached to it now (attach), so one request reads a task's context. wire: the request body as JSON, as a provider is sent it (roles, call ids, tools; a root with no --profile has no model or max_tokens in it). No model is called."
@@ -336,7 +339,7 @@
 
 (defmethod op-answer :eval [sys ag req]
   (if (= :root ag)
-    (let [r (root-eval sys (:code req))]
+    (let [r (root-eval sys (:code req) (:input req))]
       ;; its value as data beside its printed text when it is plain data (seon.contract/plain?: what the wire's EDN carries):
       ;; a reader of the answer reads the value, never the text back (an eval that printed has its :out verbatim in the
       ;; text, which is no EDN since out-verbatim). The model reads the text alone (tools/call)
