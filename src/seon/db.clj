@@ -45,9 +45,9 @@
         ;; an attribute's validator is found once a transaction: a transaction writes many datoms of few attributes
         seen (volatile! {})
         valid-of (fn [a] (or (get @seen a) (let [f (m/validator (schema-of a))] (vswap! seen assoc a f) f)))
-        ;; and whether it is tagged, once an attribute
-        tagged (volatile! {})
-        tagged? (fn [a] (if (contains? @tagged a) (get @tagged a) (let [t (boolean (:seon.db/tagged (contract/properties a)))] (vswap! tagged assoc a t) t)))]
+        ;; and whether it is tagged: its form's properties read in place, no call a datom or an attribute
+        tagged? (fn [a] (let [f (if (contains? forms a) (get forms a) (get contract/forms a))]
+                          (boolean (and (vector? f) (map? (second f)) (:seon.db/tagged (second f))))))]
     (letfn [(refused [a v]
               (if-not ((valid-of a) v)
                 (let [ps (contract/problems (schema-of a) v)]
@@ -58,8 +58,8 @@
                   (some (fn [x] (let [t (:seon.db/tag x)]
                                   (when-not (and (known? t) ((valid-of t) x))
                                     (contract/error :seon.db/invalid-datom #'invalid-datom
-                                                    (if (known? t) (str a "'s value tagged " t " is not what " t " says: " (pr-str (contract/problems (schema-of t) x)))
-                                                        (str a "'s value is tagged " (pr-str t) ", which no schema registers"))
+                                                    (if (known? t) (str a "'s value tagged " t " is not what " t " says: " (print/text (contract/problems (schema-of t) x) (:part print/budgets)))
+                                                        (str a "'s value is tagged " (print/text t) ", which no schema registers"))
                                                     {:attribute a :seon.error/problems (if (known? t) (contract/problems (schema-of t) x) [])}))))
                         (if (or (set? v) (sequential? v)) v [v])))))
             (value [a v]
@@ -325,12 +325,13 @@
   docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :seon.db/tx-report :seon.db/entity-index] [:maybe :seon.db/write-once]]}
   [r ix]
-  (let [once? (memoize #(boolean (:seon.db/write-once (form-props (:forms ix) %))))]
+  ;; an attribute's properties read in place from its form, no call a datom or an attribute
+  (let [once? #(let [f (get (:forms ix) %)] (boolean (and (vector? f) (map? (second f)) (:seon.db/write-once (second f)))))]
     (some (fn [[[e a] ds]]
             (let [held (some #(when-not (:added %) (:v %)) ds) new (some #(when (:added %) (:v %)) ds)]
               (when (and (some? held) (some? new) (not= held new))
                 (contract/error :seon.db/write-once #'write-once-refusal
-                                (str a " is written once: it holds " (pr-str held) " and this write would make it " (pr-str new) " (a second status is a defect, filed as one)")
+                                (str a " is written once: it holds " (print/text held (:part print/budgets)) " and this write would make it " (print/text new (:part print/budgets)) " (a second status is a defect, filed as one)")
                                 {:attribute a :entity e :held held :new new}))))
           (group-by (juxt :e :a) (filter #(once? (:a %)) (:tx-data r))))))
 
