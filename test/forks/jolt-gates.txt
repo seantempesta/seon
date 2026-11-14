@@ -18,6 +18,7 @@ lazyretain
 compilescaling
 applyscaling
 recordctoralloc
+rootchange
 lazyscaling
 vecscaling
 pipescaling
