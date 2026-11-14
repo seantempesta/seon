@@ -877,12 +877,12 @@
 (defn health-input "The cost proof's input at n: the db of n unnamed catch sites." [n] [(catch-forms (world) n)])
 
 (defn pins-input
-  "The cost proof's input at n: docs/forks.md of n sections each stating a pin, root's import
-  recording a different gitlink for every one (so each is a :stale-pin)."
+  "The cost proof's input at n: docs/forks.md of n sections each stating a pin, the branch's pins
+  (seon.source/pins-of) holding a different gitlink for every one (so each is a :stale-pin)."
   [n] (let [db0 (world)
             page (apply str "# Forks\n\nThe pins.\n" (for [i (range n)] (str "\n## F" i "\n\n`reference-code/lib" i "` pinned at `abc" i "`.\n")))
             db (d/db-with db0 (seon.doc/load-tx db0 "docs" {"docs/forks.md" page}))]
-        [(d/db-with db [{:seon.system/id :root :seon.system/source {:pins (into {} (for [i (range n)] [(str "reference-code/lib" i) (str "def" i)]))}}]) {}]))
+        [(d/db-with db (for [i (range n)] {:seon.pin/path (str "reference-code/lib" i) :seon.pin/commit (str "def" i)})) {}]))
 
 (deftest ^{:seon.test/estimate {:ticks 20000000}} unnamed-sites-follow-the-catch-forms
   (cost/proof {:of 'seon.problems/unnamed-sites :input 'seon.problems-test/catch-input
