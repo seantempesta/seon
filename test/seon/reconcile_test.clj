@@ -2126,6 +2126,29 @@
     (is (= :running (:seon.task/execution a)) "released")
     (is (some #(and (= :spawn (:op %)) (= "demo/a" (:task %))) (actions-for db2)) "its next action is a new agent")))
 
+(deftest ^{:seon.test/estimate {:ticks 3000000}} the-turns-ledger-is-one-read-of-the-store
+  ;; docs/plan.md's measure (the owner, 2026-11-14): one row per task an agent worked, its runs' turns, merged or not and why, read from
+  ;; the store, never kept by hand. A run's turns are its agent's highest model-call number on its own branch, where the turn loop
+  ;; writes them; a task merged holds :seon.task/merged-t; one not merged, the done rule's reasons. Estimate: two branches read once each
+  (let [db (-> (mdb [(decl "a") (decl "b")])
+               (d/db-with [{:seon.agent/key "k1" :seon.agent/task [:seon.task/id "demo/a"] :seon.agent/branch :ba :seon.agent/started-ms 1}
+                           {:seon.agent/key "k2" :seon.agent/task [:seon.task/id "demo/a"] :seon.agent/branch :ba2 :seon.agent/started-ms 2}
+                           {:seon.agent/key "k3" :seon.agent/task [:seon.task/id "demo/b"] :seon.agent/branch :bb :seon.agent/started-ms 3}
+                           {:seon.task/id "demo/a" :seon.task/reasons [{:reason :proof-red :symbol (t "a")}]}
+                           {:seon.task/id "demo/b" :seon.task/merged-t 42}]))
+        calls (fn [k ns] (for [n ns] {:seon.model-call/id (str k "/" n) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n n}))
+        ;; each branch holds only its own agent's calls, as an agent's branch does
+        branches {:ba (d/db-with db (calls "k1" [1 2 3])) :ba2 (d/db-with db (calls "k2" [1 2])) :bb (d/db-with db (calls "k3" [1 2 3 4]))}
+        read (volatile! [])
+        rows (my.root/turns-of db (fn [b] (vswap! read conj b) (branches b)))
+        by (into {} (for [r rows] [(:seon.task/id r) r]))]
+    (is (= ["demo/a" "demo/b"] (mapv :seon.task/id rows)) "one row per task an agent worked")
+    (is (= [["k1" 3] ["k2" 2]] (mapv (juxt :seon.agent/key :seon.agent/turn) (:seon.agent/_task (by "demo/a")))) "its runs in the order they started, each its turns")
+    (is (= [:proof-red] (map :reason (:seon.task/reasons (by "demo/a")))) "not merged: why, the done rule's reasons")
+    (is (= 42 (:seon.task/merged-t (by "demo/b"))) "merged: when")
+    (is (= #{:ba :ba2 :bb} (set @read)) "each branch read")
+    (is (= 3 (count @read)) "once")))
+
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-cap-ends-the-run-held-and-gets-its-refine
   ;; docs/tasks.md#a-refine-curates-its-own-task (Optimization's restated claim, 2026-11-12): a cap ends the run, failed in its number
   ;; of turns; nothing parks at a cap; it is held, its release runs it again from its branch's head, and it gets its refine as any end
