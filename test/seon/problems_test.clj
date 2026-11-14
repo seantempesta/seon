@@ -203,17 +203,18 @@
         st (#'ap/agent-proc {:id :a1 :end end :branch :b1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4) :fx-kinds #{:fx/model}})
         [st _] (#'ap/agent-proc st :in {:op :req :rid 1 :kind :eval :msg {:op :eval :forms "(deref (promise))"}})
         st (assoc st :last-frame-ms (- (System/currentTimeMillis) 4000))]
-    (testing "the agent's :stalled frame: its stall, with the dump and how long it has been quiet, once"
-      (let [[st outs] (#'ap/agent-proc st :from {:op :stalled :dump "fiber 3 parked: deref"})
+    (testing "the agent's :stalled frame: its stall and how long it has been quiet, once; the stall is no frame of progress"
+      (let [before (:last-frame-ms st)
+            [st outs] (#'ap/agent-proc st :from {:op :stalled})
             s (first (filter #(= :stalled (:op %)) (:to-api outs)))]
         (is (= :seon.agent/stalled (get-in s [:error :seon.error/type])))
         (is (<= 4000 (get-in s [:error :quiet-ms])) "quiet since the frame before it")
-        (is (= "fiber 3 parked: deref" (get-in s [:error :dump])) "every fiber's dump, for whoever fixes it")
+        (is (= before (:last-frame-ms st)) "the evidence never reads the stall as the agent speaking")
         (is (contract/valid? :seon.agent/stalled (:error s)))
-        (is (empty? (:to-api (second (#'ap/agent-proc st :from {:op :stalled :dump "again"})))) "said once per quiet spell")))
+        (is (empty? (:to-api (second (#'ap/agent-proc st :from {:op :stalled})))) "said once per quiet spell")))
     (testing "a test of its run that started is what a stall names; its first frame after the stall ends it"
       (let [[st _] (#'ap/agent-proc st :from {:op :testing :test "#'app.t/hangs"})
-            [st outs] (#'ap/agent-proc st :from {:op :stalled :dump ""})
+            [st outs] (#'ap/agent-proc st :from {:op :stalled})
             [_ outs2] (#'ap/agent-proc st :from {:op :testing :test "#'app.t/next"})]
         (is (= {:kind :tests :form "#'app.t/hangs"} (get-in (first (:to-api outs)) [:error :last-op])) "the stall names the test")
         (is (some #(= {:op :spoke :agent :a1} %) (:to-api outs2)) "its next frame: it spoke")))))

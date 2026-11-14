@@ -61,4 +61,8 @@
   :seon.task/kind :work
   :seon.task/proofs #{jolt.host-test/every-var-read-and-macro-expansion-records-its-forms-key}
   :seon.task/needs #{"jolt.host/a-runs-redefinition-is-its-threads-alone"}}
+ {:seon.task/name "a-blocking-call-on-a-main-carrier-parks"
+  :seon.task/plan "Owner: deps (Jolt), reviewed by flow. What exists [M, read 2026-11-14]: an agent runs on one main carrier (seon.repl/run!, jolt.host/main-carrier-run!), and its stall is now said by its source, Jolt's quiescence event (seon.agent/quiescent!, docs/flow.md#the-five-rules rule 3), with root's stall poll deleted (jolt/flow 9ff289554e). An eval pinned in a blocking foreign call (context's refine, 2026-11-13: an open(2) that blocked 80 minutes) holds the carrier in C: no fiber runs, so nothing is told and no frame goes to root, and the stall is no longer recorded (the poll recorded it as 'sent nothing for N ms'). Rule 5: the residue is closed at its source, never timed. Correct: every blocking call Jolt makes on a main carrier for a file, FIFO or socket (open, read, write of a non-socket descriptor) either parks on the poller (O_NONBLOCK and readiness, as jolt.socket does) or runs on a declared thread that parks its fiber meanwhile; then a stuck one is a fiber parked on the poller, which the quiescence check counts as awaited work, and the eval's wait is visible in the fiber dump. Estimate: per call one fcntl and one poller registration (~2 us) only when the call would block. Proof, red first: on a main carrier, an eval that opens a FIFO nobody writes leaves another fiber running (ticks) and the dump names the open."
+  :seon.task/kind :work
+  :seon.task/proofs #{jolt.host/a-fifo-open-on-a-main-carrier-parks-its-fiber}}
 ]

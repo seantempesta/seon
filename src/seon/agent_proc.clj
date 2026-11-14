@@ -137,13 +137,13 @@
   (let [id (:id st)]
     (case (:op m)
       ;; the agent deadlocked (seon.agent/quiescent!: no fiber can run, nothing it asked root owed): its stall, said by its
-      ;; source, once per quiet spell, with every fiber's dump; quiet since the frame before this one
+      ;; source, once per quiet spell (its evidence, the fiber dump among it, root's stall task captures); quiet since the frame before it
       :stalled (let [quiet (- (System/currentTimeMillis) (:last-frame-ms st (System/currentTimeMillis)))]
                  (when-not (:stall-seen st)
                    (step/out! o :to-api {:op :stalled :agent id
                                          :error (contract/error :seon.agent/stalled #'seon.agent-proc/agent-frame
                                                                 (str "agent " (name id) " deadlocked with a request in flight: no fiber can run, and it waits on nothing root owes it")
-                                                                {:agent id :quiet-ms quiet :last-op (:last-op st) :dump (:dump m)})}))
+                                                                {:agent id :quiet-ms quiet :last-op (:last-op st)})}))
                  (assoc st :stall-seen true))
       ;; a test of its run started (seon.agent/run-tests-forked): what it waits on now, which a
       ;; stall names
@@ -332,5 +332,6 @@
                  progress? (and (some? m) (not= :stalled (:op m)))
                  _ (when (and (:stall-seen st) progress?) (step/out! o :to-api {:op :spoke :agent (:id st)}))
                  st (agent-frame (cond-> st progress? (assoc :stall-seen false)) o (if (nil? m) {:op :dead} m))]
-             [(assoc st :last-frame-ms (System/currentTimeMillis)) @o])
+             ;; progress, or its end, is a frame the stall evidence reads as the agent speaking; the stall itself is not
+             [(cond-> st (or progress? (nil? m)) (assoc :last-frame-ms (System/currentTimeMillis))) @o])
      [st nil])))

@@ -79,17 +79,20 @@
 (declare commit!)
 
 (defn quiescent!
-  "This process's quiescence handler (jolt.host/on-quiescent!, set by seon.repl/serve!): told, with every fiber's dump, the moment
-  no fiber can run and no timer is pending. With a request in flight (:busy) and nothing it asked root still owed (:waits,
-  :fx-pending: a wait on root is root's turn, ended by root's answer or the request's declared bound), nothing can ever move it:
-  a deadlock, said to root once per request as {:op :stalled :dump}, which root records as the agent's stall. No clock: the
-  stall is an event from its source (docs/flow.md#the-five-rules, rule 3). nil."
+  "This process's quiescence handler (jolt.host/on-quiescent!, set by seon.repl/serve!): told the moment no fiber can run and no
+  timer is pending. With a request in flight (:busy) and nothing it asked root still owed (:waits, :fx-pending: a wait on root is
+  root's turn, ended by root's answer or the request's declared bound), nothing can ever move it: a deadlock, said to root once
+  per request as {:op :stalled}, which root records as the agent's stall and whose evidence (every fiber's dump among it,
+  seon.fx/stall-evidence) root captures. No clock: the stall is an event from its source (docs/flow.md#the-five-rules, rule 3).
+  What it never sees, and what ends each: a loop that never parks (its eval's tick budget, counted work); a fiber pinned in a
+  blocking foreign call (no fiber can be told while its carrier is in C: rule 5, a blocking call is an effect with its bound or
+  runs on a declared thread; task jolt.host/a-blocking-call-on-a-main-carrier-parks). nil."
   {:malli/schema [:=> [:cat :string] :nil]}
-  [dump]
+  [_dump]
   (let [s @state]
     (when (and (:busy s) (not (:stall-told s)) (empty? (:waits s)) (empty? (:fx-pending s)))
       (swap! state assoc :stall-told true)
-      (send! {:op :stalled :dump dump})))
+      (send! {:op :stalled})))
   nil)
 
 ;; ---- the agent's own API ------------------------------------------------------

@@ -237,7 +237,7 @@
         st (#'ap/agent-proc {:id :a1 :end {:out out :in (a/chan)} :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
         [st _] (step #'ap/agent-proc st :in {:op :req :rid 5 :kind :eval :msg {:op :eval :forms "(open-a-fifo)"}})
         [st _] (step #'ap/agent-proc st :in {:op :req :rid 6 :kind :eval :msg {:op :eval :forms "(+ 1 2)"}})
-        [_ outs] (step #'ap/agent-proc (assoc st :last-frame-ms 0) :from {:op :stalled :dump ""})]
+        [_ outs] (step #'ap/agent-proc (assoc st :last-frame-ms 0) :from {:op :stalled})]
     (is (= [:stalled] (map :op (:to-api outs))) "the proc takes the agent's :stalled and records the stall")
     (is (= [5 6] [(:id (a/poll! out)) (:id (a/poll! out))]) "and its frames wait for the agent, in order")))
 
