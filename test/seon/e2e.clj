@@ -179,6 +179,7 @@
                   (= 1 (count commits)) (empty? commit-errors)
                   (= "src/seon/generation.clj" files)
                   (= ["-  [] 1)" "+  [] 2)"] changed)
+                  ;; the root's merges branch, never the branch the clone checked out (seon.reconcile/write-back-target)
                   (= head (git "rev-parse" "jolt/seon-merges~1"))
                   (= head (git "rev-parse" "HEAD"))
                   (= 2 root) (= "2" agent) (nil? (r/generation d)))]
