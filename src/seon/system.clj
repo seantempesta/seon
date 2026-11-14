@@ -1526,6 +1526,28 @@
                (str/starts-with? p "resources/seon/config/")
                (#{:seon.env/schemas :seon.env/system :seon.env/deps} (fx/env-class p)))))
 
+(defn- elsewhere?
+  "Does changed path p run from the checkout or from main, never the binary: tests, the wiki, task files, bin/'s scripts (but
+  bin/build), or a path the tree's id leaves out (:seon.config.source/tree-excludes, which no build reads)?"
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [p]
+  (boolean (or (str/starts-with? p "test/") (str/ends-with? p ".md") (str/starts-with? p "resources/seon/tasks/")
+               (and (str/starts-with? p "bin/") (not= p "bin/build"))
+               (some #(or (= p %) (str/starts-with? p (str % "/"))) (cfg/value :seon.config.source/tree-excludes)))))
+
+(defn baked-changes
+  "Of changed ([[path old-mode new-mode] ...], seon.fx/tree-diff's), the paths a binary bakes and no load of the db brings: every
+  build input (build-input?: a pin, native code, deps.edn, bin/build, the schemas, system.edn, the shipped config) and every
+  path no rule places (not src's .clj, nor run from the checkout or main: elsewhere?), such as the web assets the build compiles.
+  The one answer to \"what of this change can only a build of it run\": binary-current's, and prove-tree!'s refusal. See
+  docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat [:vector [:tuple :string :string :string]]] [:vector :string]]}
+  [changed]
+  (vec (for [[p om nm] changed
+             :when (or (build-input? p om nm)
+                       (not (or (and (str/starts-with? p "src/") (str/ends-with? p ".clj")) (elsewhere? p))))]
+         p)))
+
 (defn- judged-path
   "Where binary-current's answer for a binary built from tree from, judged for tree to over to's own program, is kept beside the
   checkout's builds: target/binary-current/FROM-TO.edn for scope :root, FROM-TO.all.edn for :all (derived data, as
@@ -1571,15 +1593,9 @@
          (if (contract/error? changed)
            ;; a diff git cannot make is no answer of current: the error, which a caller reads as not current
            changed
-           (let [inputs (vec (for [[p om nm] changed :when (build-input? p om nm)] p))
+           (let [;; what the binary bakes: the build inputs and every path the rule cannot place (baked-changes)
+                 baked (baked-changes changed)
                  src (for [[p] changed :when (and (str/starts-with? p "src/") (str/ends-with? p ".clj"))] p)
-                 ;; what runs from the checkout or from main, never the binary: tests, the wiki, task files, bin/'s scripts
-                 elsewhere? (fn [p] (or (str/starts-with? p "test/") (str/ends-with? p ".md") (str/starts-with? p "resources/seon/tasks/")
-                                        (and (str/starts-with? p "bin/") (not= p "bin/build"))
-                                        ;; a path the tree's id leaves out (:seon.config.source/tree-excludes): no build reads it
-                                        (some #(or (= p %) (str/starts-with? p (str % "/"))) (cfg/value :seon.config.source/tree-excludes))))
-                 ;; a changed path the rule cannot place (the web assets the build compiles, anything else) is not current
-                 unplaced (vec (for [[p om nm] changed :when (not (or (build-input? p om nm) (some #{p} src) (elsewhere? p)))] p))
                  given-g (some? g)
                  g (or g (program/reach-graph db (fx/declared-refs graph/built-text)))
                  reach (program/root-reach g cfg/config)
@@ -1592,7 +1608,7 @@
                  ;; per changed file: its changed vars, or its path when db holds no namespace of it
                  files (vec (for [p src :let [n (ns-of p)]] (if n {:vars (changed-vars n p)} {:path (symbol p)})))
                  ;; the vars in scope (root's: root-reach; :all, every one) and every unheld path
-                 answer (fn [in?] (let [reaches (-> inputs (into unplaced) (into (for [{:keys [vars path]} files v (if path [path] (filter in? vars))] v)))]
+                 answer (fn [in?] (let [reaches (-> baked (into (for [{:keys [vars path]} files v (if path [path] (filter in? vars))] v)))]
                                     (when (seq reaches) {:binary from :tree tree :reaches reaches})))
                  r {:root (answer reach) :all (answer any?)}]
              ;; a caller holding the tree's own graph (the plan's, bin/test) judged over the tree's program, so its answers are
@@ -2165,17 +2181,24 @@
   {:malli/schema [:=> [:cat :string] :keyword]}
   [tree] (keyword (str "tree-" tree)))
 
-(defn baked-paths
-  "Of a checkout's changed paths, those a build bakes into the binary, so a process forked from the system's binary holds the
-  system's value of them however the tree's branch states it: the schema resources (seon.config/baked-schema-forms), the
-  shipped config (baked-shipped-text), system.edn (seon.graph/baked-decl-text) and deps.edn (seon.fork-server/baked-deps-text).
-  A tree's run that changes one says so (prove-tree!'s :baked): its in-process verdicts read main's bake for them, until the
-  one call holds the runtime invariant for bakes. See docs/merging.md#a-session-proves-through-root."
-  {:malli/schema [:=> [:cat [:sequential :string]] [:vector :string]]}
-  [paths]
-  (filterv #(or (str/starts-with? % "resources/seon/schemas/") (= % cfg/shipped-file)
-                (= % "resources/seon/system.edn") (= % "deps.edn"))
-           paths))
+(defn- tree-refusal
+  "Why the running binary can't prove checkout tree, or nil: what the tree changes that the binary bakes (baked-changes, against
+  the tree the binary was built from), whose tests would run on this binary's build of them, never the tree's, and be stored at the
+  tree's digests (deps' pin branch: a seek measured 3.2 KB on main's build against 1.76 KB on its own). Such a tree
+  is proved by a build of its own (bin/prove --out DIR). A binary that recorded no tree, or a diff git can't make, is unknown,
+  never current. See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat [:maybe :string] :string] [:maybe :seon.error/base]]}
+  [built tree]
+  (let [changed (when built (fx/tree-diff (cfg/checkout) built tree))
+        why (cond (nil? built) "the running binary recorded no tree it was built from"
+                  (contract/error? changed) (str "git can't diff the binary's tree " built " against " tree ": " (:seon.error/message changed))
+                  :else (when-let [baked (seq (baked-changes changed))]
+                          (str "it changes what the running binary bakes (" (str/join " " baked) ")")))]
+    (when why
+      (contract/error :seon.system/binary-not-current #'tree-refusal
+                      (str "this tree can't be proved on the running system: " why
+                           "; its tests would run on the system's build of them. Prove it on its own build: bin/prove --out DIR")
+                      {:binary built :tree tree :baked (if (vector? changed) (baked-changes changed) [])}))))
 
 (defn prove-tree!
   "Prove the files of checkout (a worktree of this root's repository) at tree, its tree id (seon.fx/tree-id, what bin/build records):
@@ -2188,8 +2211,10 @@
   {:malli/schema [:=> [:cat :seon.system/sys [:map [:checkout :string] [:tree :string]]] :map]}
   [sys {:keys [checkout tree names mode]}]
   (let [b (tree-branch tree)
-        c (catch-up @(:conn sys) checkout {:fact? false})]
+        refusal (tree-refusal (get-in (program/binary-program) [:inputs :tree]) tree)
+        c (when-not refusal (catch-up @(:conn sys) checkout {:fact? false}))]
     (cond
+      refusal refusal
       (nil? c) (refused 'seon.system/prove-tree! "main holds no tree of its checkout to diff a session's files from" {:checkout checkout})
       (contract/error? c) c
       (seq (:skipped c)) (contract/error :seon.system/catch-up-skipped #'prove-tree!
@@ -2212,10 +2237,7 @@
               _ (vreset! ag-of ag)]
           (cond (contract/error? w) w
                 (nil? ag) s
-                ;; a verdict partly another program's says so: the baked files the tree changed (baked-paths), never silence
-                :else (let [r @(prove! sys {:branch full} (set (map symbol names)) (or mode :judge) {:checkout checkout :tree tree})
-                            baked (baked-paths (:paths c))]
-                        (cond-> r (and (seq baked) (map? r) (not (contract/error? r))) (assoc :baked baked)))))
+                :else @(prove! sys {:branch full} (set (map symbol names)) (or mode :judge) {:checkout checkout :tree tree})))
          (finally (tree-leave! sys b @ag-of))))))))
 
 (defn store-clean!

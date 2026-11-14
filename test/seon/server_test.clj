@@ -151,7 +151,7 @@
                                               {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 1)"}]}]))]
     (is (keyword? (:agent reset)) (pr-str reset))
     (is (contract/error? old) (str "the agent on the old branch ended: " (pr-str old)))
-    (is (re-find #"-r[0-9a-f-]{36}$" (name (:value branch))) "the task's branch is a new one")
+    (is (re-find #"-r[0-9]+$" (name (:value branch))) "the task's branch is a new one, named by its ending (seon.task/restart-tx)")
     (is (= [nil 0] (:value seen)) "whose agent holds nothing the old one defined, and no conversation")))
 
 (deftest a-fork-goes-on-from-an-agents-head
@@ -637,7 +637,7 @@
       (let [green (prove (stream [{:type :prove-verdict :test 'a.x-test/a-green :status :pass :ms 12.4}
                                   {:type :prove-held :held true :load 20 :max-load 18 :queued 3}
                                   {:type :prove-held :held false}]
-                                 {:key "tree-t1@1" :selected ['a.x-test/a-green] :ran 1 :pass 1 :baked ["resources/seon/schemas/x.edn"]})
+                                 {:key "tree-t1@1" :selected ['a.x-test/a-green] :ran 1 :pass 1})
                          "a.x-test")
             red (prove (stream [{:type :prove-verdict :test 'a.x-test/a-red :status :fail :failures [{:message "expected 1"}]}]
                                {:key "tree-t1@2" :selected ['a.x-test/a-red] :ran 1 :fail 1 :red ['a.x-test/a-red]}))
@@ -653,8 +653,11 @@
         (is (before? (:lines green) "PASS a.x-test/a-green 12 ms" "HELD: load 20 >= max-load 18, 3 items waiting")
             (str "the green's verdict printed as it landed, then the hold, never a silent wait: " (:out green)))
         (is (some #{"RESUMED"} (:lines green)) (:out green))
-        (is (some #(clojure.string/includes? % "this tree changes baked values (resources/seon/schemas/x.edn)") (:lines green))
-            (str "a tree that changes a baked value is told so, never silently judged on main's: " (:out green)))
+        (let [refused (prove (stream [] (contract/error :seon.system/binary-not-current 'seon.system/tree-refusal
+                                                        "this tree can't be proved on the running system: it changes what the running binary bakes (reference-code/jolt); its tests would run on the system's build of them. Prove it on its own build: bin/prove --out DIR"
+                                                        {:binary "b0" :tree "t1" :baked ["reference-code/jolt"]})))]
+          (is (= [1 "PROVE FAILED"] [(:exit refused) (last (:lines refused))]) (:out refused))
+          (is (clojure.string/includes? (:out refused) "bin/prove --out") "a tree the system can't run is refused, pointing at its own build"))
         (is (= 1 (:exit red)) (:out red))
         (is (= "PROVE FAILED" (last (:lines red))) (:out red))
         (is (before? (:lines red) "RED a.x-test/a-red (fail)" "prove: red a.x-test/a-red")

@@ -39,16 +39,44 @@
 ;; docs/source.md): kept as a branch named by the tree's id, a content key
 ;; that is never updated, in one LMDB store per checkout (:seon.config.proofs/program-store).
 
+(defn- requires-of
+  "The namespaces the ns form of a file's text requires (each lib of its :require clauses, :as or :refer or bare), or none."
+  [file-text]
+  (when file-text
+    (let [form (binding [*read-eval* false] (read-string file-text))]
+      (when (and (seq? form) (= 'ns (first form)))
+        (for [clause (rest form) :when (and (seq? clause) (= :require (first clause)))
+              lib (rest clause)
+              :let [n (if (sequential? lib) (first lib) lib)] :when (symbol? n)]
+          n)))))
+
+(defn- importer-files
+  "The relative paths of the importer's code, the files a program's facts are derived by: seon.source and seon.program and
+  every namespace they require, transitively, whose file is under src/ (read by text, a function of a relative path).
+  Derived from the ns forms, never listed; a library's code is its pin's, which the store's own key takes."
+  [text]
+  (let [path #(str "src/" (-> (str %) (str/replace "-" "_") (str/replace "." "/")) ".clj")]
+    (loop [seen #{} todo ['seon.source 'seon.program]]
+      (if-let [n (first todo)]
+        (if (seen n)
+          (recur seen (rest todo))
+          (let [t (text (path n))]
+            (recur (conj seen n) (into (vec (rest todo)) (when t (requires-of t))))))
+        (sort (filter #(text %) (map path seen)))))))
+
 (defn- prefix-of
   "The prefix of the branches a tree's program is kept on, as :seon.config.source/dirs and an importer import it: text, a function
-  of a relative path, answers the importer's files, the code that derives a program's facts from its files (seon.source,
-  seon.program), since a form's :form/refs are its answer and a kept tree's unchanged files are not read again, so a store's
-  branches made under other dirs or other code (another import) are none of this one's. See docs/source.md#tests-run-by-reach."
+  of a relative path (nil for none), answers the importer's files (importer-files: seon.source, seon.program and what they
+  require, the code that derives a program's facts from its files), since a form's :form/refs are its answer and a kept
+  tree's unchanged files are not read again, so a store's branches made under other dirs or other code (another import) are
+  none of this one's. A fix anywhere in that code moves it. See docs/source.md#tests-run-by-reach."
   [text]
-  (str "tree-" (lib/digest (str (pr-str (config/value :seon.config.source/dirs))
-                                (lib/digest (str/join "\n" (map text ["src/seon/source.clj" "src/seon/program.clj"]))))) "-"))
+  (let [files (importer-files text)]
+    (str "tree-" (lib/digest (str (pr-str (config/value :seon.config.source/dirs))
+                                  (lib/digest (str/join "\n" (map #(str % "\n" (text %)) files))))) "-")))
 
-(def ^:private own-prefix "prefix-of this process's checkout, read once." (delay (prefix-of #(slurp (io/file (config/checkout) %)))))
+(def ^:private own-prefix "prefix-of this process's checkout, read once."
+  (delay (prefix-of #(let [f (io/file (config/checkout) %)] (when (.isFile f) (slurp f))))))
 
 (defn- tree-prefix "The prefix of the branches this process's code keeps a tree's program on (prefix-of, docs/source.md#tests-run-by-reach)." [] @own-prefix)
 
@@ -190,6 +218,18 @@
                      ;; and the config the graph's rows and flags are read under
                      (pr-str (map #(config/value %) [:seon.config.source/pin-namespaces :seon.config.source/process-vars :seon.config.source/binary-vars])))))
 
+(declare reach-graph-of)
+
+(def ^:seon.test/program-fixture kept-program
+  "The checkout's tree as the plan kept it (program-db of seon.config/checkout in seon.test-store/kept-program-store), with its
+  reach graph brought to date and stored (reach-graph-of): made once a shard, before its first test, by the shard (warm-by:
+  only a shard warms a :seon.test/program-fixture; an agent's test child reads its own branch's db). A tree the store keeps no
+  branch of yet is imported here, so no test pays an import inside its own budget (a key change once cost a test its 400M).
+  See docs/merging.md#a-tests-tick-budget."
+  (delay (let [store (ts/kept-program-store) db (program-db (config/checkout) store)]
+           (reach-graph-of db (fx/declared-refs seon.graph/built-text) store)
+           db)))
+
 (defn program
   "The program this process judges, as a db: in a process that holds a branch (an agent's test child, a fork of the
   agent: seon.agent/state's :db) that branch's db, which holds the program as facts already, so nothing is imported
@@ -199,7 +239,7 @@
   itself imported the whole program inside an agent's prove, where no plan had kept the tree: 3.87 G ticks, cut at
   the test's 4.0 G budget, and it judged root's checkout, never the branch (the stray reds of 2026-11-10). The
   second arm goes when a session's tree is a branch of the store. docs/merging.md#a-merge-runs-what-the-change-reaches."
-  [] (or (:db @seon.agent/state) (program-db (config/checkout) (ts/kept-program-store))))
+  [] (or (:db @seon.agent/state) @kept-program))
 
 (defn reach-graph-of
   "The reach graph of db: the one stored in the program store at store (reach-graph.fasl, jfasl:
@@ -262,7 +302,7 @@
     {:graph g :inputs in
      ;; the tests that reach each type of fixture (a var marked ^:seon.test/fixture, the test store, or
      ;; ^:seon.test/shard-fixture, the shared root), as their reach says: {type #{test}} (warm-by decides what a shard warms)
-     :fixture-tests (into {} (for [t [:seon.test/fixture :seon.test/shard-fixture]]
+     :fixture-tests (into {} (for [t [:seon.test/fixture :seon.test/shard-fixture :seon.test/program-fixture]]
                                [t (into #{} (mapcat #(program/tests-reaching g %))
                                         (d/q '[:find [?n ...] :in $ ?t :where [?v :var/meta ?t] [?v :var/name ?n]] db t))]))
      :rd (delay (reads-index-of root store tree g in))
@@ -351,7 +391,9 @@
   warmed a root whose store the plan never made, and died before its first test). See docs/merging.md#the-test-service."
   [fixture-tests binary]
   {:seon.test/fixture (get fixture-tests :seon.test/fixture #{})
-   :seon.test/shard-fixture (into #{} (filter (set binary)) (get fixture-tests :seon.test/shard-fixture))})
+   :seon.test/shard-fixture (into #{} (filter (set binary)) (get fixture-tests :seon.test/shard-fixture))
+   ;; the kept program and its reach graph, for every test that reads them (test-runner/program): a shard's, never an agent's
+   :seon.test/program-fixture (get fixture-tests :seon.test/program-fixture #{})})
 
 (defn- write-shards!
   "tests (var symbols) dealt into at most jobs shards (shards: :seon.config.proofs/jobs for a full run or a merge's
@@ -756,6 +798,18 @@
       (when (try (pdb/branch? c b) (finally (d/release c)))
         @(pdb/connect (assoc cfg :branch b))))))
 
+(defn- read-tree-branch
+  "The db of the branch keeping git tree id tree in the LMDB store at path, read only, whatever importer prefix names it, or nil:
+  a health-base store holds only branches the base's own code made (make-base-tree!), and a tree's code is its files, so a branch
+  there ending in tree was made by that tree's own importer. Never a name this code derives from the base's files: a change to how
+  the prefix is derived (prefix-of) would name the base's branch as the base's code never did. See docs/health.md#checks-are-callers-of-seon."
+  [path tree]
+  (when (pdb/store? path)
+    (let [cfg (pdb/store-cfg :lmdb path)
+          c (pdb/connect cfg)
+          b (try (some #(when (str/ends-with? (name %) (str "-" tree)) %) (d/branches c)) (finally (d/release c)))]
+      (when b @(pdb/connect (assoc cfg :branch b))))))
+
 (defn- base-products
   "The checkout whose built products (target/: the runtime, the libraries, the binary) a checkout of commit base of the
   repository at root clones (bin/worktree --at's FROM): checkout when its Jolt and Chez were built for base's own pins (each
@@ -810,20 +864,19 @@
   (let [;; the base's tree as a plan of its checkout names it (seon.fx/tree-id: less :seon.config.source/tree-excludes), by bin/tree
         tree (let [r (lib/sh (str (config/checkout) "/bin/tree") root base)]
                (if (zero? (:exit r)) (str/trim (:out r)) (throw (ex-info (str "bin/tree " root " " base ": " (:err r)) {}))))
-        b (keyword (str (prefix-of #(fx/tree-file root base %)) tree))
         path (str stem "-" @ts/kept-program-digest)
         ;; the base's own runner names its store by its own key (seon.test-store/program-store-key: its runtime and pins may be
         ;; another's), so its branch is read from whichever store of the stem holds it, never only this code's
         stems (fn [] (let [d (.getParentFile (io/file stem)) n (.getName (io/file stem))]
                        (for [f (sort (or (.list d) (make-array String 0))) :when (re-matches (re-pattern (str "\\Q" n "\\E-[0-9a-f]{8}")) f)]
                          (str d "/" f))))
-        any (fn [] (some #(read-branch % b) (stems)))]
+        any (fn [] (some #(read-tree-branch % tree) (stems)))]
     (or (read-branch store (tree-branch tree))
         (any)
         (make-base-tree! root base tree store stem path at)
         (any)
         (contract/error :seon.fx/io-error #'test-runner/base-program
-                        (str "the base's program store " path " keeps no branch " b ": the base's program schema or importer is not this code's") {:path path}))))
+                        (str "the base's program store " path " keeps no branch of its tree " tree ": the base's program schema is not this code's") {:path path}))))
 
 (defn unestimated
   "The tests of program db that state no estimate (a test var with no :seon.test/estimate fact), each {:test :ns :ticks}, its
