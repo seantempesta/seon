@@ -4,7 +4,7 @@
   full-run request for main on the test service's queue (seon.prove, :full mode), and arms the
   next day's. It decides nothing: the service runs the tests, and their verdicts are cached by
   digest as any run's are.
-  The wait is one core.async timeout to the next time (docs/core-async.md, a delayed message):
+  The wait is one core.async timeout to the next time (docs/flow.md#channel-idioms, a delayed message):
   no poll, no ping, nothing runs while it waits. A root started after the time waits for the
   next one (a missed day is not made up: the daily run is the net, and the next one is a day
   away); its request names the day (\"full-yyyy-mm-dd\"), so one day's request that the

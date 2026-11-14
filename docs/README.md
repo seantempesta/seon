@@ -23,8 +23,7 @@ Each page of the wiki, in one line.
 - [server](server.md): root's request server, its ops and MCP's `seon_*` tools.
 - [dashboard](dashboard.md): the live web page: the render proc, the web proc, callbacks as data.
 - [errors](errors.md): the one error map, recorded once per cause, and every problem read by one report.
-- [core-async](core-async.md): channels, buffers, `go` and fibers as Jolt implements them.
-- [flow](flow.md): core.async.flow on Jolt and the proc contract every component follows.
+- [flow](flow.md): core.async and Flow on Jolt, one primer read whole: channels and buffers, the proc contract every component follows, its hazards and idioms, and changing a running graph.
 - [config](config.md): every limit, bound and default as one documented key, read through one resolver.
 - [vectors](vector.md): semantic search in the store, fused with the call graph.
 - [data modeling](data-modeling.md): entities, refs and index seeks: how to design data and read it cheaply.
