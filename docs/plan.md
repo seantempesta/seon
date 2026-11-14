@@ -17,7 +17,9 @@ reported to the owner daily. A task that never merges is a failure, not a low nu
 A process often runs on state its branch doesn't name (stale code, pins, schema registry, config, caches), so verdicts are
 wrong or flaky, landings fail on what the change didn't touch, and the merge a task needs runs on that stale state. Around
 it, the work itself lives outside Seon: blockers, deletions, the landing queue, the turns ledger and the owner's rulings are
-files in root's notes and messages between sessions, which no agent reads and nothing checks. The priority (owner,
+files in root's notes and messages between sessions, which no agent reads and nothing checks. Since 2026-11-12 the
+sessions have landed 82 times through `bin/land` and git, and no task through Seon's merge, the one path every agent's
+task must take. The priority (owner,
 2026-11-14) is one view: fix the broken processes that slow us down, and move Claude sessions off files and git onto the
 system, working, proving and merging as Seon agents do. Everything else in this plan stays, in order behind it.
 
@@ -25,12 +27,19 @@ system, working, proving and merging as Seon agents do. Everything else in this 
 
 **Goal:** one real backlog task merged by an agent. **Done when:** a task drawn from the backlog is on main, with its turns
 recorded.
-1. A test child holds exactly the config its checkout's shard loads (shipped file only, no local layers), so a result's key
-   names the environment it really ran in, and the runner digest moves with it (tests).
+1. Landed 579d62547d: a test child holds the config its checkout's shard loads, and every runner digest moved (tests).
 2. One schema registry per process, and a schema entry main deleted merges as its deletion; the memory gauge's proof reads
-   its block alone (runtime, one landing).
-3. `seon.repl/an-uncited-public-defn-is-told-at-its-eval` (proof green at turn 48, its agent now lost) restarted on a fresh
-   agent, or the first of the random round's tasks to reach green, merged (context).
+   its block alone, completing `seon.lib/the-memory-gauges-proof-measures-the-block-alone` (runtime, one landing). The
+   cause behind both, a process running state its branch doesn't name, is `seon.program/a-process-runs-its-branchs-program`
+   (Stage 2.1).
+3. A reasoning overrun is the model call's typed error, not the end of the run: the effect answers it as data, the system
+   reads it for the agent on its next turn, and the agent's page shows its recent errors with their causes, one render
+   (owner, 2026-11-14). `:seon.config.ai/max-tokens` holds reasoning and reply together; one run of two died of it this
+   round (runtime for the effect, context and web for the render).
+4. A fork waits for other threads to park, never races them: a refusal agents hit in production, built and pinned on
+   jolt/deps, landing after item 2 because a pin change reruns everything (deps; moved from Stage 3).
+5. `seon.repl/an-uncited-public-defn-is-told-at-its-eval` (proof green at turn 48, its agent now lost) restarted on a fresh
+   agent, or the first of the random round's tasks to reach green, merged by `seon_done` (context).
 
 ## Stage 1: Claude sessions work through the system (the priority)
 
@@ -49,15 +58,17 @@ infrastructure this replaces is cut, each removal brought to the owner as an aud
    the change may differ (a pin, native code, `deps.edn`); results are entities in the store keyed by what each run read,
    through Datahike's read recorder, the one the query cache uses (tests, data).
 4. **Merging is Seon's:** `seon_done` runs the gate and Seon's three-way merge on main's program; conflicts go back to the
-   branch; a merge costs what moved (today one merge of main costs 62 s, 9.9B ticks and 47.5 GB, measured) (runtime,
-   tests).
+   branch; one three-way merge, not two (`seon.task/carry-tx` goes); a merge costs what moved (today one merge of main
+   costs 62 s, 9.9B ticks and 47.5 GB, measured) (data, runtime).
 5. **Git follows the store:** a merge is written back, and git's main moves after root reads its diff (`my.root/sync!`);
    main is pushed to GitHub (runtime, root).
-6. **The work lives in Seon:** a blocker is a task in the owning area's namespace with its `:seon.task/evidence` and
-   `:seon.task/cause`, named in the blocked task's `:seon.task/needs`; a deletion is a proof that the old path is gone; the
+6. **The work lives in Seon:** a blocker is a task in the owning area's namespace with its causes (`:seon.task/causes`,
+   a set of schema keys each with its evidence, re-derived, owed a schema entry by data), named in the blocked task's `:seon.task/needs`; a deletion is a proof that the old path is gone; the
    merge queue is tasks waiting to merge, in `:seon.task/needs` order; turns to merged is a query shown on the task and the
    dashboard; the owner's rulings are in [decisions](decisions.md); a message between sessions is about a task and is
-   written there, and one that names no task becomes one (context, tests, root).
+   written there, and one that names no task becomes one; when a landing completes what a task needed, the sessions waiting on
+   it are told (`my.root/landed!` sends `seon_message`); a flaky result is a derived problem class, never a hand-filed row
+   (context, tests, root).
 7. **Pilot, then all:** one area moves first after two or three merged tasks; then the rest. The audit to cut follows:
    worktrees, per-checkout systems and ports, `checkout-env!`, `bin/land`'s local prove and git bridge, the shell test
    runner and its shards, the result files, the boards as files (root, with each owner).
@@ -80,14 +91,14 @@ the one start path, and no failure in a week comes from a stale or mismatched en
 of landings with no restart except for a pin, native code or `deps.edn`, and no hang.
 1. Every restart reason classified: forms load in place, procs swap through Flow's `update!`, schemas and config reload,
    boot-only code waits for the next build; a pin change goes through an online takeover, with a clean shutdown, resume, and
-   a path back after a crash that reports what was lost (runtime, deps, data).
+   a path back after a crash that reports what was lost; a stop that waits on `held --end` ends with a typed error
+   (runtime, deps, data).
 2. One effects system: each effect's bound declared on its request schema (malli `:default`, overridden by config), a call
    only shortens it, Flow enforces ticks and bytes and the effects owner wall time and child memory; effects routed at
    Jolt's host primitives; concurrency admitted from cores and memory; every outside read (a file, an env var) recorded as a
    read (runtime, deps, data).
 3. Time is data on channels: no polling; the only clock is an effect's deadline, arriving as a message. The Flow standard
    and its examples; the ten parts that should be procs become procs (runtime).
-4. A fork waits for other threads to park, never races them (deps, pinned on jolt/deps).
 
 ## Stage 4: agents finish in few turns
 
@@ -95,7 +106,8 @@ of landings with no restart except for a pin, native code or `deps.edn`, and no 
 1. Every stored, synced or public shape a named schema; the schema graph chooses what an agent is shown, each item
    explained; duplicate schemas and unnamed public shapes flagged on change (data, context).
 2. What an agent reads: a cache-stable prefix and a fresh tail; one walk gives the page and the request; "What your task
-   still needs" every turn (built); reference sessions in the native wire format; compaction: deleting, editing, compacting
+   still needs" (built as edits after one whole page; the whole list every turn is a trial); assembly costs what changed at
+   1M-token pages, and the reactive walker is deleted; reference sessions in the native wire format; compaction: deleting, editing, compacting
    or forgetting an eval is a change of data the next request is rendered from, with page controls for each (only
    unlinking has a test today) (context, web).
 3. REPL redefinitions: the REPL may do anything; only definitions become program; each eval's answer says what was saved;
@@ -137,4 +149,5 @@ What holds in every stage.
 - Every claim is marked measured or hypothesis; a research round lands a fix or stops for review.
 - The code shrinks as mechanisms merge until it reaches a healthy weight; every landing reports its `src` delta, and useful
   functionality is removed only after an audit to the owner.
-- A retrospective closes each stage; the principles and this plan are pruned then, never appended to between.
+- A retrospective closes each stage; the principles and this plan are pruned then, never appended to between. A rule is
+  removed only with its reason: the incident or ruling behind it, what holds it now, and why it no longer earns its place.

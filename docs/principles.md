@@ -6,11 +6,11 @@ Every agent reads this page whole before any work: Claude sessions directly, Seo
 
 **A user's request, however rough, becomes a task, an agent works it, and the only finish is its change merged into main.**
 
-*Why.* Seon is an assembly line for software. Every Seon agent has a task, and every task a plan, however sparse ("fix it": first find what it is). Agents differ only by their task and the data on their record, which is their context. A stuck session is read by a refine agent, which fixes the plan; a session that went well is kept as a precedent; formulaic work becomes a template. Each exists to remove turns.
+*Why.* Seon is an assembly line for software. Every Seon agent has a task, and every task a plan, however sparse ("fix it": first find what it is). Agents differ only by their task and the data their pull reads, which is their context. A stuck session is read by a refine agent, which fixes the plan; a session that went well is kept as a precedent; formulaic work becomes a template. Each exists to remove turns.
 
 *Rules out.* Counting landings, tests or lines as progress. Reading a task that never merged as a small number: it is a failure. Work that removes no turn while no agent can merge: then everything goes to the one path through. Carrying on over a failure of the system itself: it stops the work loudly and is fixed at its cause first.
 
-*Enforced by:* not yet enforced (turns are counted by hand).
+*Enforced by:* not yet enforced; owed `my.root/turns`, the query context runs by hand.
 
 ## 2. There is only the Seon agent
 
@@ -38,7 +38,7 @@ Every agent reads this page whole before any work: Claude sessions directly, Seo
 
 *Why.* With two, every reader learns both, and a fix reaches one of them. A need is met in order: what exists; the library, read in its source and fixed in our fork so every caller gains; only then something new. Schemas are the vocabulary: contracts name the malli schemas a function takes and returns, so the program index joins a function to the functions that produce or consume its schemas and to their tests, and that is what an agent is shown. A bug is a class: the fix changes what allowed it.
 
-*Rules out.* A second mechanism, a special case, a hand-kept list, a duplicate schema. Our own layer over a library that could be fixed. A replacement landed beside what it replaces. A capability landed with nothing using it. A rule written for one incident. Removing useful functionality: a removal comes to the owner as an audit of why it is not needed, what supersedes it and how its users migrate.
+*Rules out.* A second mechanism, a special case, a hand-kept list, a duplicate schema. Our own layer over a library that could be fixed. A replacement landed beside what it replaces. A capability landed with nothing using it. A fact, an approved design or a blocker kept only in a notes folder, a message or a memory file. A rule written for one incident. Removing useful functionality: a removal comes to the owner as an audit of why it is not needed, what supersedes it and how its users migrate.
 
 *Enforced by:* health's `:unschemed-key` ([health](health.md#a-key-with-no-schema)); `seon.main-test/every-name-a-form-uses-is-a-var`. Not yet enforced: a duplicate schema or an unnamed public shape seen twice; `Deletes:` checked against the deletions ledger.
 
@@ -58,7 +58,7 @@ Every agent reads this page whole before any work: Claude sessions directly, Seo
 
 *Rules out.* A guard, retry or special case at a caller. An atom, a lock, a poll, a wait on a clock. An effect outside the effects system; a catch outside a named edge ([failure points](failure-points.md)). A caller's own guess at the binary, registry or pin it holds. Switching off, sampling or waiving a mechanism because it has a bug.
 
-*Enforced by:* `bin/laws` (catch, clocks, measures, resolution, transactions); contracts armed at definition ([checks](checks.md#contracts-armed-at-definition)); the test service's `:seon.agent/program-differs` refusal. Not yet enforced: effects routed at Jolt's host primitives; a law that no program loads outside the one start; atoms.
+*Enforced by:* `bin/laws` (catch, clocks, measures, resolution, transactions); contracts armed at definition ([checks](checks.md#contracts-armed-at-definition)); the test service's `:seon.agent/program-differs` refusal, which compares forms only. Not yet enforced: effects routed at Jolt's host primitives; a law that no program loads outside the one start; atoms; config, environment and libraries checked at a child's start; one merge on main's program (today a branch's merge runs on the branch's own program, `seon.agent/merge-main!`); one writer per branch (agents and root run separate Datahike writers on one LMDB, unmeasured).
 
 ## 6. Nothing changed, nothing runs; a change costs what it touched
 
