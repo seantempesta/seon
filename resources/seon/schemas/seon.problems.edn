@@ -160,6 +160,8 @@
  :seon.lib/starter-unwatched [:and :seon.error/base [:map [:seon.error/type [:= :seon.lib/starter-unwatched]] [:pid [:maybe :int]]]]
  :seon.test/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int]
                                                 [:test {:optional true} :string]]]
+ :seon.test/bytes-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/bytes-spent]] [:bytes :int] [:budget :int]
+                                                [:test {:optional true} :string]]]
  :seon.fx/io-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/io-error]]]]
  :seon.process/binary-digest [:maybe {:description "target/seon's identity as bin/build recorded it (target/seon.digest), or nil when none was recorded."} :string]
  :seon.process/branch-digest [:string {:description "A branch tree's binary identity (bin/binary-digest at that tree)."}]
