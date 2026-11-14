@@ -62,6 +62,10 @@ At 21:45: "Just make sure all agents are doing algorithmic analysis first. I wan
 
 At 21:38: "Make sure you are telling agents to write up docs as the go and to clean up bad docs and to remove code when they have a replacement done." Each landing updates the wiki section of what it changed, fixes or deletes any wrong text it finds there, and deletes the code its replacement made redundant, named on its `Deletes:` line. Stated in `AGENTS.md` §3 and §7.
 
+### Restart when needed; fix what made an update impossible
+
+At 21:50, on root's render step stuck since boot on old code: "Don't be dogmatic. If we fucked up and need to restart do so. Just warn the agents and fix the problem that made it so you couldn't just update the env. Lisps are a live runtime. It's not wrong to eval and sync code to bring it up to speed as long as we have it structured safely for eval of code." A restart is allowed, with the agents warned first; the cause of needing it (here, a step that never ends cannot take a redefinition) becomes a task: every long step ends at its declared tick budget, so the next step runs the new code. Stated in [flow](flow.md).
+
 ### Overnight: nobody waits for the owner
 
 At 21:40: "I want you to go autonomous and don't have you or any agents wait for me. If you know what to do and I think there's a lot to do so do it. Learn as you go and it's okay to revisit ideas once we find better symmetries." Root decides what would have gone to him and lists each ruling for him to reverse; sessions ask root. Stated in [sessions](sessions.md#the-managing-session).
