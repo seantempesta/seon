@@ -1342,9 +1342,8 @@
           (contract/error? tasks) (assoc :tasks tasks))))))
 
 (defn- landed-completes
-  "The task ids the commits a landing brought say they complete (seon.task/completes of their messages, seon.fx/messages-since):
-  from the commit held, the last landed or imported, to commit, in the checkout (:seon.config.source/root). None when nothing is
-  held or no checkout is declared; git's refusal throws, as a refused task file does (changed-tx). See docs/source.md#a-landing-enters-main-as-data."
+  "The task ids the commits from the held commit to commit say they complete (seon.task/completes of seon.fx/messages-since); none
+  with no held commit or checkout, and git's refusal throws. See docs/source.md#a-landing-enters-main-as-data."
   {:malli/schema [:=> [:cat [:maybe :map] [:maybe :string]] [:set :seon.task/id]]}
   [held commit]
   (let [root (get cfg/config :seon.config.source/root)

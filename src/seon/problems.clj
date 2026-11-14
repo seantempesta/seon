@@ -780,11 +780,9 @@
    {:seon.task/agent [:seon.agent/key :seon.agent/ended-ms]}])
 
 (defn unsynced?
-  "Whether task entity e on db differs from its file: merged with main's files still declaring it (its :seon.task/declared, which
-  a landing that removes its entry retracts: seon.task/load-tx), or live, stated (not seon.task/derived?) and either never filed
-  (no declared) or changed on main since its file was read: load-tx writes a task's members (seon.task/stated-attributes, its
-  needs) in the transaction that writes :seon.task/declared, so a member datom newer than it is an edit made since. Seeks only,
-  no member read or decoded. The store is the source and its files follow. See docs/source.md#a-merged-task-reaches-mains-files."
+  "Whether task entity e on db differs from its file: merged and still declared, or live, stated (not seon.task/derived?) and never
+  filed or edited since its file was read (a member datom newer than :seon.task/declared, which load-tx writes beside them). Seeks
+  only. See docs/source.md#a-merged-task-reaches-mains-files."
   {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
   [db e]
   (let [declared (first (d/datoms db :eavt e :seon.task/declared))]

@@ -979,11 +979,8 @@
         (re-seq #"Completes:\s*([\w.\-]+/[\w.!?*+<>=\-]*[\w!?*+<>=\-](?:\s*,\s*[\w.\-]+/[\w.!?*+<>=\-]*[\w!?*+<>=\-])*)" text)))
 
 (defn load-tx
-  "The transaction reconciling task files into main db. files: {owning-ns declarations or
-  error}, every file read (a file not given is not judged). completed, the ids the landing's messages say it completes
-  (`completes`): such a task whose entry went is done, never cancelled, and one main holds live that no file ever declared (made
-  in the store) is done too; a finished one only forgets its declaration. Answers the tx-data, or the
-  first error: a file's own, or needs that name no task or form a cycle."
+  "The transaction reconciling task files ({owning-ns declarations or error}, each file read) into main db, or the first error.
+  A task completed names (`completes`) is done, never cancelled, filed or made in the store. See docs/source.md#a-landing-enters-main-as-data."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:map-of :symbol :any]] [:or :seon.db/tx-data :seon.error/base]]
                   [:=> [:cat :seon.host/db [:map-of :symbol :any] [:set :seon.task/id]] [:or :seon.db/tx-data :seon.error/base]]]}
   ([db files] (load-tx db files #{}))
