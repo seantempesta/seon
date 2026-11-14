@@ -346,6 +346,7 @@ Text for the wire, storage, a digest, a file, a URL, a command line or code to e
 - `seon.edn/encode`: EDN for storage and the wire, whole.
 - `seon.db/reads-digest`, `seon.db/results-moved`: a read key as `:seon.proof/read-keys` stores it (its pr-str), storage.
 - `seon.program/form-ids`: a form's code digest text, under `seon.edn/encode`'s bindings ([source](source.md#what-a-test-takes-of-a-forms-text)).
+- `seon.repl/unmapped`: a removed method's dispatch value as its stored `:method/key` holds it (its pr-str, ```seon.program/method-key```), storage.
 - `seon.render.ui/table-cells`: telling a Markdown table's rule row from its rows; a cut of data, not output.
 - `seon.render.ui/recent-errors`: an agent's newest failures, the first `:seon.config.render/recent-errors` of its pull's window; a cut of data by a documented key, not of output.
 - `my.agent/help-nearest`: a doc miss's nearest addresses, the best `:seon.config.render/search` of them as a search's hits are; a cut of data, not output.
