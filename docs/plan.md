@@ -58,40 +58,59 @@ system, working, proving and merging as Seon agents do. Everything else in this 
 
 Agreed 2026-11-14 by every area and the owner ([decisions](decisions.md#2026-11-14-rulings)). Each session works its items
 in this order, on its one branch, and lands when green ([AGENTS.md](../AGENTS.md#3-how-work-moves)). Every item names its
-expected finish to root; root holds it to 2x and 3x.
+expected finish to root; root holds it to 2x and 3x. Correct and simple first; cost later (owner: "Right now we dedupe and
+upgrade everyone").
 
-1. **Main clean, then Stage 0's merge.** An agent's merge is judged against main's problems too, so main is kept clean
-   (owner, 2026-11-14): a red or open problem on main is its owner's first item, ahead of all else. Then context retries the
-   first backlog task's `seon_done`, watched, alone (the fork fix live since 14:56); random rounds of 2-3 start once the
-   model call has its bound (item 2).
-2. **Nothing hangs, one rule:** every wait passes its declared bound (`:seon.bound/bound`) and ends with
-   `:seon.bound/reached` or a typed error the stall check reads. The fork's wait (deps: Chez, Jolt, `seon.lib/fork!`;
-   runtime reviews); the model call's await and the stall check's effect exemption, agent_proc.clj:123 (runtime's deadline
-   slice; context's turn records the stall); the stalled eval (runtime).
-3. **Running code meets new code, one class:** a process keeps the program it started on until its next start.
-   - The landed change enters the store through the one import: `bin/land` tells root main's new commit, root imports it
-     with its own import (reading git and gitlinks itself), and a pin or binary change answers `:restart`. The bridge's
-     code string and the second import path are deleted (runtime; deps and data review).
-   - An agent's run keeps its program through its own redefinitions and a landing (Stage 0.6: context builds the turn,
-     runtime the `on-root-change` hook).
-   - A restart waits for nothing in flight, so a green session can land at any time (web, runtime).
-4. **Proving as Flow,** the components `seon_done` needs: the effects proc's first slice, deleting `seon.prove`'s grant
-   and admission (tests builds, runtime reviews); the `:ms` deadline and env route (runtime); the merge's check as a prove
-   of the candidate branch; then the harness. The test fork of the running root on a test branch is runtime's, filed.
-   Config reaches running procs live: a main commit that moves a config entry is a message to the procs that read it, and
-   an agent whose branch overrides it is told to merge main.
-5. **The land check runs in seconds:** results reused by reads (data, tests); a cost proof's call counts from the class
-   registry, never a hand sum (tests).
-6. **Merge cost:** re-fork plus load-diff, 8.22B ticks a merge toward ~1.5B (runtime), then the one three-way merge,
-   deleting `carry-tx` (data).
-7. **Duplication, standing:** each session lists, in its area, two shapes for one thing and two passes over one shape,
-   and files each as a task naming what it deletes. Known now: two import paths, two page walks (W-2), two three-way
-   merges, three hiccup walkers.
-8. **The backlog curated** before the next random round: duplicates (same evidence or proof) merged, superseded tasks
-   deleted, and health flags two tasks citing the same evidence or proof (context).
+### The root concept: one reaction over the store
 
-Waits until 1–4 are on main: page assembly cost (W-3), one drawer per page, page search under 8M ticks, the hand-written
-lists class, konserve's read cost, the rest of the errno class, `runtime-for`, `hold-env!` slice 2, the judge's re-index.
+Almost everything Seon keeps is derived: a test's verdict, a page and a request, health, readiness, a task's status, the
+store's copy of the files. Each subsystem built its own cache, key, index and "did it move?" check (a survey of main found
+6+ read recorders, 4 dependency graphs, 3 who-read-what indexes, 5 hand-kept "moved?" lists, 4 import paths, 5 stores for
+one test result, 73 staleness functions), and the bugs are those copies disagreeing. They become one mechanism:
+- **`(reaction (fn [db] ...))`:** any Clojure over a db; what it reads is recorded as it runs; the system keeps it and
+  re-runs it when a datom it read moves. Arguments that are not datoms (an agent's live values, streaming output, root's
+  runtime values) are plain arguments, compared by `=`.
+- **One tracker:** Datahike's recorder (`di/record-read!`). Every read records through it as a datom key: a store read; a
+  slice a component reads of a pulled value (`[:ea e a]`); a code read as its form's datom (once per var per run, at
+  Jolt's var read, macros at load); config, files and pins as their entities. `seon.profile`'s set and ratom's path
+  tracking stop being trackers.
+- **One index, stored:** `:seon.reads/key-set` (indexed) on every derived entity, replacing `:seon.proof/read-keys`; an
+  in-process view is at most a cache of it. A reaction's identity is a content id of [fn, reads digest, program].
+- **Re-run by the commit:** the writer sends each commit's datoms once; the readers of moved keys re-run as effects on
+  their kind's owner, bounded and admitted (never inside the writer's step). A pin change answers `:restart`.
+- **The outside enters by one catch-up:** seed = catch-up from empty; import = catch-up of paths; landing = catch-up after
+  `bin/update` moves root's tree; pins stated as the whole set. Inside, every read is a datom read.
+
+### The order
+
+1. **Stage 0's merge.** "Main's reds" were on the agent's branch: merging main into it lost main's task lifecycle datoms
+   and kept callers of definitions main deleted. Data's one merge (`seon.merge/a-tasks-content-is-a-key-of-the-one-merge`,
+   deleting `carry-tx`) fixes it; then context runs the first task's `seon_done` again, watched, alone. Main stays clean:
+   a red on main is its owner's first item.
+2. **Load within the machine:** proving goes through the one effects owner (`seon.fx/owner-proc`, a `:process` kind,
+   admission from the cores) and `bin/prove` becomes its client; per-checkout shard sizing goes (tests; runtime reviews).
+   Until it lands, no session starts a prove while the 1-minute load is over 18.
+3. **Nothing hangs, one rule:** every wait passes its declared bound and ends with `:seon.bound/reached` or a typed error:
+   the fork (deps), the model call and the stalled eval (runtime's deadline slice; context's turn records the stall). Seven
+   deadline mechanisms become this one.
+4. **The reaction's core** (context and web build; data the index and schema; deps the recorder): the lazy-read gap and the
+   planner's two seeks recorded (deps); one stored index; the writer's commit datoms; the 8 `*reads* nil` bypasses removed.
+5. **Each area moves onto it, deleting its copy in the same landing** (in parallel):
+   - tests: verdict files, `.recent`, `reads.edn`, `:seon.test/*` facts, the two flaky judges; reuse is "no read key
+     moved". The static reach graph stays only for a test with no recorded reads, and goes in the landing whose mutation
+     proof shows recording is complete;
+   - web: the walk's `:readers`, the proc's `read-index`, `render-reach`, the reactive holder, the second drawer;
+   - context: status computed twice, turns derived twice, waste folded three ways, wire's second walk, `placed-messages`;
+   - data: the five "moved?" lists, the program's reach flags, the loaders, `:seon.task/cause`, the readers atom;
+   - runtime: the one catch-up (the `bin/land` bridge, `landed-tx`'s 6-arity, `import-of`'s pins, `my.root/import!`,
+     `load-changes!`/`load-diff!`, `restart-for`'s classes);
+   - deps: Datahike's search memo and q result cache, once reactions hold results.
+6. **Stage 0.6:** an agent's redefinition never breaks its own turn: deps routes only the vars a run redefines (Jolt), and
+   context's turn runs on it.
+7. **The backlog curated** before the next random round (context).
+
+Waits: the cost work (recorder with the cache on, merge cost, page search, konserve's read cost), W-3 and one drawer per
+page beyond what item 5 deletes, the hand-written lists class, `runtime-for`, `hold-env!` slice 2, the judge's re-index.
 
 ## Stage 0: one happy path (now)
 

@@ -14,6 +14,10 @@ Asked whether an agent's merge should be judged only on what it changed, since t
 
 Context runs one watched task now, random rounds after the model call's bound. On `:seon.config.ai/max-tokens`: "I don't care raise it whatever it needs to be. Let me know if it starts getting crazy but if it's cheap I don't care." Set to 65,536 in `resources/seon/config/default.edn`.
 
+### One reaction over the store; dedupe and upgrade everyone
+
+"Your job is see waste and that's how you find what to delete. Unify the concept at the root of all of our problems and the other problems should go away because they aren't possible anymore." On the survey: "If we have many ways what is the best way? Don't we have a way of auto tracking what reads have changed in ratoms and datahike reads ... I want the optimal solution not the first one that each agent came up with." On recording's switch-offs: "Assume agents did stupid shit ... we shouldn't just accept the bad ideas that are easily fixable." On cost: "Don't worry about a few ms. Focus on what is the best mechanism that our agents can use that's simple and the most expressive and powerful. We can optimize it later. Right now we dedupe and upgrade everyone." Agreed by every area: one reaction over the store, one tracker, one stored index. Stated in [the plan](plan.md#the-root-concept-one-reaction-over-the-store).
+
 ### No new process before the existing one is found
 
 "Do not create any new processes until you have verified we don't have an existing solution that needs to updated or deleted by this implementation. I will say that is a standing rule for all agents." Stated in [AGENTS.md](../AGENTS.md#3-how-work-moves) (the gate).
