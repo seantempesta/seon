@@ -1130,10 +1130,16 @@
     (when (.isFile f) (parse-long (str/trim (slurp f))))))
 
 (defn runner-end
-  "The last lines of what a runner said, joined, enough to hold what stopped it: its error, where, and the verdict lines after them. Three lost the error, leaving
-  only where and the two verdicts."
+  "What stopped a runner, joined: the error's own head wherever it falls (an exception's \"Unhandled exception\" line or the
+  analyzer's \"error[\" line, up to its trace, at most 4 lines), then its last 6 lines (where it ended and the verdicts). A
+  count of last lines alone lost the error twice: three left where and two verdicts, six left a long trace's frames alone (a
+  base's runner that threw: \"made no plan\" with no why)."
   {:malli/schema [:=> [:cat :string] :string]}
-  [text] (str/join " | " (take-last 6 (remove str/blank? (str/split-lines text)))))
+  [text]
+  (let [ls (vec (remove str/blank? (str/split-lines text)))
+        i (first (keep-indexed (fn [i l] (when (re-find #"^\s*(Unhandled exception|error\[)" l) i)) ls))
+        head (when i (take 4 (take-while #(not (re-find #"^\s*trace:" %)) (subvec ls i))))]
+    (str/join " | " (distinct (concat head (take-last 6 ls))))))
 
 (defn build-failure
   "What a checkout's failed build says, for whoever asked: the exception it names, where, and when the candidate's files ({path text})
