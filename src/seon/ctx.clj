@@ -529,7 +529,7 @@
 (defn- registered?
   "Has attribute a a schema: the platform's, or one this branch registered (the REPL binds it)?"
   {:malli/schema [:=> [:cat :any] :boolean]}
-  [a] (boolean (and (qualified-keyword? a) (or (contains? contract/forms a) (some-> (mr/registry mr/*registry*) (mr/schema a))))))
+  [a] (boolean (and (qualified-keyword? a) (or (contains? contract/forms a) (mr/schema contract/layers a)))))
 
 (defn- why
   "Why value v cannot be attribute a, or nil when it can: a's schema's explanation, or that a has none."

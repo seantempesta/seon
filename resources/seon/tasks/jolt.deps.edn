@@ -1,1 +1,2 @@
-[]
+[
+ {:seon.task/name "dependency-downloads-are-one-cache-for-every-checkout", :seon.task/plan "Deletions ledger row (deps, 2026-11-13). What exists: HOME=<checkout>/target/home (bin/env:23), so each checkout keeps its own .m2 and .jolt/gitlibs (25-78 MB in each of 8 worktrees, measured). Change: one dependency cache in the main tree's target, shared as the AOT cache is (gitlibs by sha, .m2 by version). bin/env is shared machinery: run end to end through bin/land, bin/prove and bin/update first. Deletes: the per-checkout downloads. docs/source.md#shared-build-caches.", :seon.task/proofs #{seon.fx-test/every-checkout-reads-one-dependency-cache}}]
