@@ -395,9 +395,12 @@
  ;; pin (a gitlink, read from the tree). The binary's identity is the digest of these at a commit
  ;; (bin/binary-digest, the one implementation; target/seon.digest beside the binary); a process whose
  ;; branch's digest differs is built for, once (seon.fx/runtime-for). The program (src/'s forms) is not
- ;; here: a process loads it from its branch as a diff (docs/source.md#the-binary-records-its-program).
+ ;; here: a process loads it from its branch as a diff (docs/source.md#the-binary-records-its-program). Nor are the
+ ;; config and schemas (a process holds its branch's: seon.program/hold-config!, seon.agent/schema-moved) or
+ ;; system.edn (root reads it live, apply!): only the config keys a schema marks :seon.config/at-load or
+ ;; :seon.config/place, whose values a rebuild alone changes, enter the digest, by their stated line.
  ;; Read by bin/binary-digest from this line, so it stays one line of text. A path or prefix ending in /.
- :seon.config.build/inputs ["deps.edn" "bin/build" ".gitmodules" "native/" "resources/seon/config/" "resources/seon/schemas/" "resources/seon/system.edn" "resources/public/"]
+ :seon.config.build/inputs ["deps.edn" "bin/build" ".gitmodules" "native/" "resources/public/"]
  ;; Unit: megabytes: the byte budget of Jolt's compiled-code cache (target/cache/aot of the main tree, shared
  ;; by every checkout), least recently used first (docs/source.md#shared-build-caches). bin/env exports it
  ;; as JOLT_CACHE_MB, which Jolt's loader reads when a process that published an artifact prunes. 32768
@@ -950,6 +953,20 @@
  :seon.config.render.agent/sort-bound 64
  ;; Unit: characters per printed line (session P1's printer, matching v1's corpus output).
  :seon.config.render/width 72
+ ;; The one-printer law (docs/render.md#one-printer; owner: "Do not create more than one value printer and no clipping happens
+ ;; before then"), read by seon.problems/unnamed-sites over the compiler's :form/refs. Why dials: they are the law's definition,
+ ;; the host's printers and cutters no fact of ours can name, and the namespaces where output is made for a person or a model.
+ ;; Unit: vars. What turns a value into text beside the one printer: a src var referencing one is a site docs/render.md names.
+ :seon.config.render/printer-vars #{clojure.core/pr-str clojure.core/prn-str clojure.core/print-str clojure.core/with-out-str
+                                    clojure.core/pr clojure.core/prn clojure.core/printf clojure.pprint/pprint clojure.pprint/pp
+                                    clojure.pprint/write clojure.pprint/cl-format}
+ ;; Unit: vars. What shortens what is shown: a site where a display namespace references one.
+ :seon.config.render/cut-vars #{clojure.core/subs clojure.core/take clojure.core/take-last clojure.core/drop-last}
+ ;; Unit: vars. The printer's calls that cut to a budget: a site where a namespace outside the display ones references one.
+ :seon.config.render/budgeted-vars #{seon.print/text seon.print/line seon.print/plain}
+ ;; Unit: namespaces, each with the ones under it. Where output is made for a person or a model.
+ :seon.config.render/display-namespaces #{my seon.render seon.web seon.ctx.search seon.ctx.status seon.ctx.wire seon.ctx.session
+                                          seon.mcp seon.server seon.cost seon.repl seon.agent seon.problems}
  ;; Unit: levels. The agents list (every page's) is the signed-in user's pull of the agents it started, each with the ones it
  ;; started, to this many levels; the last level's agents show how many they started (seon.render.ui/agent's entry), never cut silently.
  :seon.config.render/agent-tree-depth 3

@@ -1357,13 +1357,13 @@
         digests (fn [inputs roots] (update-vals (program/graph-index g inputs roots) :digest))
         a (digests (in "t1") nil)
         b (digests (in "t2") nil)
-        step #(digests (in %) {"step" ['seon.render-test/one-printer-and-no-cut-before-it]})]
+        step #(digests (in %) {"step" ['seon.render-test/a-site-the-one-printer-section-names-still-prints]})]
     (is (< 20 (count a)) "a sample of the suite, not an empty tree")
     ;; the one exception: a test whose test namespace reads the checkout's files itself judges the files
     ;; themselves, so it takes the tree
     (let [moved (set (for [[t d] a :when (not= d (b t))] t))]
       ;; a test calling a file reader from its own namespace (slurp, seon.doc/load-dir-tx): each was reused over an edit to the files it judges (web-ui, 2026-10-28)
-      (is (contains? moved 'seon.render-test/one-printer-and-no-cut-before-it) "a test slurping a doc takes the tree")
+      (is (contains? moved 'seon.render-test/a-site-the-one-printer-section-names-still-prints) "a test slurping a doc takes the tree")
       (is (not (contains? moved 'seon.doc-test/every-section-of-the-wiki-has-a-lead)) "a test loading the wiki through its reader takes no tree")
       (is (contains? moved 'seon.repl-test/the-template-instructions-and-the-help-page-run) "a test reading the wiki through seon.doc/pages takes the tree (it was reused over edits to the help page)")
       (is (not (contains? moved 'seon.task-files-test/no-shipped-task-is-merged-work)) "nor one reading the task files through seon.system/task-files")

@@ -234,20 +234,6 @@
 
 ;;; --- the law, from the compiler's facts: one printer, and no cut before it -------------
 
-(def ^:private printer-vars
-  "The vars that turn a value into text beside the one printer."
-  '#{clojure.core/pr-str clojure.core/prn-str clojure.core/print-str clojure.core/with-out-str
-     clojure.core/pr clojure.core/prn clojure.core/printf clojure.pprint/pprint clojure.pprint/pp
-     clojure.pprint/write clojure.pprint/cl-format})
-
-(def ^:private budgeted-vars
-  "The printer's calls that cut to a budget: a cut where a value is made, outside a render."
-  '#{seon.print/text seon.print/line seon.print/plain})
-
-(def ^:private cut-vars
-  "The vars that shorten what is shown, where output is made for a person or a model."
-  '#{clojure.core/subs clojure.core/take clojure.core/take-last clojure.core/drop-last})
-
 (defn- src-program
   "The checkout's program as facts, src and test (analyzed, never run): the kept program db the plan
   imported once for this tree (test-runner/program-db, ts/kept-program-store), so a test reads it and
@@ -278,44 +264,23 @@
     (is (= {"agent" false "root" false} (update-vals idx :process?))
         "no render reaches a process var (:seon.config.source/process-vars)")))
 
-(defn- sites
-  "The vars of src whose forms reference one of marks (the compiler's :form/refs), in
-  namespaces ns? holds."
-  [forms marks ns?]
-  (sort (distinct (for [f forms :when (and (ns? (:ns f)) (some marks (:refs f)))
-                        ;; a var's form, or a method's (named by its multi)
-                        [k sym] (:defines f) :when (#{:var :method} k)]
-                    sym))))
-
-(deftest one-printer-and-no-cut-before-it
-  ;; owner, 2026-10-22: "Do not create more than one value printer and no clipping happens
-  ;; before then". Every var of src that prints beside seon.print, and every var of a
-  ;; display namespace that cuts, is named in docs/render.md#one-printer with its reason
-  ;; (the wire, storage, code text, or a cut of data, not of output); a new one is red.
+(deftest ^{:seon.test/estimate {:ticks 100000000} :seon.test/execs ["git"]} a-site-the-one-printer-section-names-still-prints
+  ;; docs/render.md#one-printer: a new site the section does not name is the law's (seon.problems/printer-law, in health before any
+  ;; prove); what stays a test is the other way: a site the section names that no longer prints or cuts is gone from the page too.
+  ;; The site rule is the law's own, so the two never disagree. Estimate: the program read once (~70M) and one pass of its marked forms.
   (let [db (src-program)
+        {:keys [marks site?]} (seon.problems/printer-law)
         nss (src-nss db)
-        marks (clojure.set/union printer-vars cut-vars budgeted-vars)
-        ;; only the forms of src that reference a mark are read as rows (a row of every form was 200 M ticks)
-        forms (->> (d/datoms db :aevt :form/refs) (keep #(when (marks (:v %)) (:e %))) distinct sort
-                   (map #(seon.program/form-row db %)) (filter (comp nss :ns)) vec)
+        sites (set (for [m marks {e :e} (d/datoms db :avet :form/refs m)
+                         :let [f (d/entity db e) n (:ns/name (:form/ns f))]
+                         :when (and (nss n) (site? f n))
+                         d (:form/defines f) :let [v (or (:var/name d) (:method/multi d))] :when v]
+                     v))
         doc (let [t (slurp (str (seon.config/checkout) "/docs/render.md"))] (subs t (str/index-of t "## One printer") (or (str/index-of t "\n## " (+ 3 (str/index-of t "## One printer"))) (count t))))
         ;; a site is named by a list item, before its reason (`- `ns/f`, `ns/g`: why`)
-        named (set (for [[_ head] (re-seq #"(?m)^- (.*?): " doc) [_ n] (re-seq #"`([a-z][\w.\-]*/[^`\s]+)`" head)] (symbol n)))
-        printer? #(not (str/starts-with? (str %) "seon.print"))
-        display? #(re-find #"^(my\.|seon\.(render|web|ctx\.(search|status|wire|session)|mcp|server|cost|repl|agent|problems)($|\.))" (str %))]
-    (testing "src is imported: the check reads facts, not nothing"
-      (is (< 40 (count nss)))
-      (is (< 100 (count forms))))
-    (testing "every var printing beside the one printer is named with its reason"
-      (is (= [] (remove named (sites forms printer-vars printer?))) "each var listed is a new site: print through seon.print/text, or name it in docs/render.md#one-printer as a list item, - `ns/f`: its reason (the wire, storage, code text, or a cut of data, not of output)"))
-    (testing "every var cutting in a display namespace is named with its reason"
-      (is (= [] (remove named (sites forms cut-vars display?))) "each var listed is a new site: print through seon.print/text, or name it in docs/render.md#one-printer as a list item, - `ns/f`: its reason (the wire, storage, code text, or a cut of data, not of output)"))
-    (testing "every var cutting to a budget where a value is made, outside a display namespace, is named"
-      (is (= [] (remove named (sites forms budgeted-vars #(and (printer? %) (not (display? %)))))) "each var listed is a new site: print through seon.print/text, or name it in docs/render.md#one-printer as a list item, - `ns/f`: its reason (the wire, storage, code text, or a cut of data, not of output)"))
-    (testing "a site named that no longer prints or cuts is gone from the page too"
-      (is (= [] (remove (set (concat (sites forms printer-vars printer?) (sites forms cut-vars display?)
-                                     (sites forms budgeted-vars #(and (printer? %) (not (display? %))))))
-                        (sort named)))))))
+        named (set (for [[_ head] (re-seq #"(?m)^- (.*?): " doc) [_ n] (re-seq #"`([a-z][\w.\-]*/[^`\s]+)`" head)] (symbol n)))]
+    (is (< 20 (count sites)) "src is imported: the check reads facts, not nothing")
+    (is (= [] (sort (remove sites named))) "every site the section names still prints or cuts")))
 
 ;; docs/render.md#one-path-to-the-model: what the compiler's facts and a form's read say of who makes what the model is sent
 (def ^:private the-path
