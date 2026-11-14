@@ -9,7 +9,6 @@
                    [:tuple [:= :form] :string]
                    [:tuple [:= :schema] :qualified-keyword]
                    [:tuple [:= :section] :string]
-                   [:tuple [:= :task] :seon.task/id]
                    [:tuple [:= :config] :qualified-keyword]
                    [:tuple [:= :script] :string]
                    [:tuple [:= :datum] :int :keyword]

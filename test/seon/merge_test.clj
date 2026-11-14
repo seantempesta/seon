@@ -260,8 +260,7 @@
         tasked (with (base) [{:seon.task/id "t/x" :seon.task/plan "better"}])
         p #(pm/program % :all)]
     (is (empty? (:theirs (pm/three-way (p (base)) (p (base)) (p rooted)))))
-    (is (some (fn [[k]] (= [:task "t/x"] k)) (:ours (pm/three-way (p (base)) (p tasked) (p (base)))))
-        "a task's content is one key, by its id (seon.merge's :task row)")))
+    (is (some (fn [[k]] (= [:datum :seon.task/plan] [(first k) (nth k 2)])) (:ours (pm/three-way (p (base)) (p tasked) (p (base))))))))
 
 (deftest declared-data-merges-by-key
   ;; the data part, used by core's generic merge (every non-program, non-observation attribute)
@@ -304,6 +303,23 @@
         src (d/db-with base (source/refresh-tx base {file "{:app.shape/name :string}"}))
         onto (d/db-with base (pm/merge-tx base base src [[:schema :app.shape/size]] #{}))]
     (is (= #{:app.shape/name} (set (keys (program/schema-changes onto)))) "the merge deletes the entry, as the source did")))
+
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-merge-speculates-only-its-schema-entries
+  ;; docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program: merge-tx reads the merged registry for the schema keys it
+  ;; carries, and speculated the whole merge tx to get it, so a merge committed its datoms twice (2.11B ticks and 4.7 GB of a
+  ;; 10.3B merge of main, measured 2026-11-14). Only the schema entries' datoms are speculated. Estimate: a test db 1M, a
+  ;; registration 3M, two definitions 1M, merge-tx 3M (first measured 32M with three whole programs diffed for its keys)
+  (let [b (empty-db)
+        src (with (registered b :app.shape/size :int) (var-tx "f" "x") (var-tx "g" "x"))
+        ;; its keys named, not diffed: a whole program of a test db reads every schema entry it ships with
+        ks (into [[:schema :app.shape/size]] (for [nm ["f" "g"] k [[:form (fid nm "x")] [:var (symbol "app" nm)]]] k))
+        seen (atom nil)
+        speculate pdb/speculate-db]
+    (with-redefs [pdb/speculate-db (fn [db tx] (reset! seen tx) (speculate db tx))]
+      (pm/merge-tx b b src ks #{}))
+    (is (some #{[:schema :app.shape/size]} ks) "the merge carries a schema key beside the definitions")
+    (is (and (seq @seen) (every? #(#{:schema/key :schema/form :schema/file} (:a %)) @seen))
+        (str "only schema entries' datoms are speculated: " (vec (distinct (map :a @seen)))))))
 
 (deftest a-tree-the-binary-was-built-from-states-no-schema-change
   ;; docs/source.md#a-program-file: the shipped schema resources, imported as the import reads them (seon.source/file-tx), are no change against the binary built

@@ -66,14 +66,7 @@
         {:keys [tx outcome]} (#'r/judge-tx (st-of db) {:act {:op :spawn :task id :env {:branch (task/default-branch id)}} :deferred deferred
                                                     :run-problems run-problems :worked-error worked-error}
                                         (or results {})
-                                        (merge {:db branch :base db :base-t (:max-tx db) :uncontracted [] :unmerged [] :caused [] :theirs 0
-                                                ;; the writer's :ours names the tasks the branch changed as [:task id] keys, as its three-way does
-                                                :ours (into [[:var 'demo/worked]]
-                                                            (if branch
-                                                              ;; a branch given whole: its task keys as the writer's three-way finds them
-                                                              (filterv #(= :task (first %)) (keys (seon.merge/delta-changes db branch #{})))
-                                                              (distinct (keep #(when-let [i (and (map? %) (:seon.task/id %))] [:task i]) on-branch))))}
-                                               diff))]
+                                        (merge {:db branch :base db :base-t (:max-tx db) :ours [[:var 'demo/worked]] :uncontracted [] :unmerged [] :caused [] :theirs 0} diff))]
     {:db (d/db-with db tx) :outcome outcome :tx tx}))
 
 (defn- judgment-of
