@@ -60,6 +60,13 @@
   "The attribute namespaces outside the program's that stated-keys carry (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
   (into #{} (keep :carries) (vals stated-keys)))
 
+(defn- derived?
+  "Whether attribute a, or the entity schema it belongs to, is marked {:seon.db/derived true}: a cache each branch computes from other
+  facts (an embedding, a cite, what a task file last stated), never merged. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :keyword] :boolean]}
+  [a] (boolean (or (:seon.db/derived (contract/properties a))
+                   (some-> (get-in (pdb/index) [:entity-schemas a]) contract/properties :seon.db/derived))))
+
 (defn- data-attr?
   "Whether an attribute of db is data that data-attrs (a set, or :all) names, as a predicate:
   the set itself, or for :all one that asks of an attribute alone whether db's own schema entry
@@ -72,7 +79,7 @@
   (if (= :all data-attrs)
     (let [schema (:schema db)]
       (fn [a] (boolean (and (keyword? a) (:db/valueType (get schema a))
-                            (not (or (program/attr-namespaces (namespace a)) (stated-attr? a)))))))
+                            (not (or (program/attr-namespaces (namespace a)) (stated-attr? a) (derived? a)))))))
     data-attrs))
 
 (defn- data-attr-set
@@ -344,6 +351,37 @@
   [base dbs data-attrs]
   (into #{} (mapcat (fn [db] (touched-by base db data-attrs (content-datoms base db data-attrs)))) dbs))
 
+(declare key-entity)
+
+(defn- tx-branch
+  "The branch transaction tx was written on, as db holds its facts (:seon.tx/branch, seon.db/tx-meta)."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :keyword]]}
+  [db tx] (:seon.tx/branch (d/entity db tx)))
+
+(defn- owned?
+  "Whether side's fact at key k (a datum, [:datum e a] or [:datum e a v], or a stated key, by the attributes it states) differs from
+  base's because side wrote it: a datom side holds
+  and base lacks written on side (its transaction names no branch of other's, the side db's own last writer), or a datom base holds
+  that side once held and let go. A value side holds only because other wrote it (carried before its base moved), or lacks because it
+  never held it, is other's: facts are facts at the transaction that wrote them (docs/merging.md#a-branch-merges-main-in). Cost: the
+  datoms of [e a] on side and base, and a history seek per datom side lacks."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/program-key] :boolean]}
+  [base side other [kind x a & vs :as k]]
+  (let [others (tx-branch other (:max-tx other))
+        attr-owned? (fn [e a vs]
+                      (let [dts (fn [db] (if (seq vs) (d/datoms db :eavt e a (first vs)) (d/datoms db :eavt e a)))
+                            held (into #{} (map :v) (dts base))
+                            now (dts side)]
+                        ;; foreign only when its transaction names the other side's branch: one that names none is the side's own
+                        (or (some #(and (not (held (:v %))) (not (and others (= others (tx-branch side (:tx %)))))) now)
+                            (some #(seq (d/datoms (d/history side) :eavt e a %)) (remove (into #{} (map :v) now) held)))))]
+    (boolean
+      (if (= :datum kind)
+        (attr-owned? x a vs)
+        ;; a stated key (a task's content, a section, a schema entry): owned when any attribute it states is
+        (when-let [e (or (key-entity side k) (key-entity base k))]
+          (some #(attr-owned? e % nil) (keys (:stated (stated-keys kind)))))))))
+
 (defn delta-three-way
   "`three-way` of base, ours and theirs read only where they differ (touched-keys): the
   same answer, at the cost of what changed on each side since base, not of the program. With ours-moved, the datoms that differ
@@ -352,8 +390,15 @@
                   [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/data-attrs :seon.merge/moved] :seon.merge/result]]}
   ([base ours theirs data-attrs] (delta-three-way base ours theirs data-attrs (content-datoms base ours data-attrs)))
   ([base ours theirs data-attrs ours-moved]
-   (let [ks (vec (into (touched-by base ours data-attrs ours-moved) (touched-keys base [theirs] data-attrs)))]
-     (three-way (program-of base ks data-attrs) (program-of ours ks data-attrs) (program-of theirs ks data-attrs)))))
+   (let [ks (vec (into (touched-by base ours data-attrs ours-moved) (touched-keys base [theirs] data-attrs)))
+         b (program-of base ks data-attrs)
+         ;; a fact one side holds otherwise than base only because the other side wrote it is no change of its own (owned)
+         own (fn [side other p] (reduce (fn [p k] (if (and (or (= :datum (first k)) (stated-keys (first k))) (not= (get p k) (get b k))
+                                                          (not (owned? base side other k)))
+                                                   (if (contains? b k) (assoc p k (get b k)) (dissoc p k))
+                                                   p))
+                                        p ks))]
+     (three-way b (own ours theirs (program-of ours ks data-attrs)) (own theirs ours (program-of theirs ks data-attrs))))))
 
 (defn readiness
   "Whether branch db ours can merge into main theirs now, as a merge of main would find it, read
@@ -537,10 +582,12 @@
   and a run's evidence alike."
   {:malli/schema [:=> [:cat :seon.merge/conflict] :seon.db/tx-map]}
   [{:keys [key base ours theirs]}]
-  (cond-> {:seon.merge/key key}
-    base (assoc :seon.merge/base base)
-    ours (assoc :seon.merge/ours ours)
-    theirs (assoc :seon.merge/theirs theirs)))
+  ;; a value no store holds as plain data (a byte array) is stored as its length and digest, so a conflict is recorded, never refused
+  (let [plain (fn [v] (if (bytes? v) (str "#bytes[" (alength ^bytes v) " " (Integer/toHexString (java.util.Arrays/hashCode ^bytes v)) "]") v))]
+    (cond-> {:seon.merge/key key}
+      base (assoc :seon.merge/base (plain base))
+      ours (assoc :seon.merge/ours (plain ours))
+      theirs (assoc :seon.merge/theirs (plain theirs)))))
 
 (defn unmerged-tx
   "The branch's unmerged entries for conflicts, against main at t main-t: an earlier entry
