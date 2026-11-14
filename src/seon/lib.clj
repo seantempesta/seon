@@ -175,7 +175,7 @@
          (define (proto-bytes-in-heap) (bytes-allocated))
          (define (proto-static!) (collect (collect-maximum-generation) 'static))
          (define (proto-generation-bytes) (+ (bytes-allocated 1) (bytes-allocated 2) (bytes-allocated 3) (bytes-allocated 4)))
-         (define (proto-non-static-live!) (collect (collect-maximum-generation)) (- (bytes-allocated) (bytes-allocated 'static)))
+         (define (proto-non-static-bytes) (- (bytes-allocated) (bytes-allocated 'static)))
          ")
       true))
 
@@ -246,7 +246,12 @@
 (defchecked static! [:=> [:cat] :any] (scm/proc "proto-static!"))
 ;; bytes in Chez's collected generations 1-4 (outside static): what a forked agent inherits of its parent's heap, read at its start (seon.agent/init!), before its own allocation is promoted into them
 (defchecked generation-bytes [:=> [:cat] :int] (scm/proc "proto-generation-bytes"))
-(defchecked non-static-live! [:=> [:cat] :int] (scm/proc "proto-non-static-live!"))
+(defchecked ^:private non-static-bytes [:=> [:cat] :int] (scm/proc "proto-non-static-bytes"))
+
+(defn non-static-live!
+  "The bytes live outside the static generation after a full collection, from any thread: Jolt's System/gc rendezvouses every thread when Chez refuses a collect beside others. See docs/machine.md#what-a-process-owns-in-memory."
+  {:malli/schema [:=> [:cat] :int]}
+  [] (System/gc) (non-static-bytes))
 (defchecked ^:private fork-alone* [:=> [:cat nat-int?] :seon.lib/pid] jolt.host/fork-alone)
 (defchecked ^:private fork-holders [:=> [:cat] [:sequential [:map [:id :int] [:name :string]]]] jolt.host/fork-holders)
 

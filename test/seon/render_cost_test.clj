@@ -236,19 +236,17 @@
                 "(seon.model/request-body) and drawn once (seon.render.ui/debug-turn: an entry a message), and the timeline's "
                 "strip (a pull of each model call's basis). Linear in the evals: the page's rows, and the cold draw's ctx")
      :growth :linear
-     ;; measured 2026-11-03: 3,888 / 8,488 / 24.6k calls and 10.4 / 16.8 / 39.5 MB at 10 / 30 / 100 evals (before the
-     ;; print cache and the task's list drawn alone: 8,708 / 21,668 / 67,028 and 16.6 / 33.2 / 92.7 MB); what grows is
-     ;; the page's html, an entry a message, and the cold draw's ctx (seon.ctx/build), each about a third
-     ;; measured 2026-11-06, a debug read's cold request, no print handed to it: 5,040 / 11.4k / 33.6k calls and 8.77 / 14.4 / 34.3 MB at
-     ;; 10 / 30 / 100 evals.
-     :per-n {:calls 317 :bytes 280000}
-     :fixed {:calls 1900 :bytes 6600000}
-     ;; owner's yes, 2026-11-10 ("Land now, three waivers", docs/decisions.md#three-request-cost-proofs-land-waived-owner-2026-11-10): a cold request draws
-     ;; the page at the first turn's basis and advances one walk through every later basis (~6k calls), and each history record is drawn
-     ;; by its own model render (~3k, an eval's print the most); the rest is outside the model render. The waiver comes off with that task.
-     ;; Measured on jolt/pages 2026-11-10 at its largest size, re-taken at Tests' sizes [3 10 30] after Context's kept page walk: 14.8k calls
-     ;; and 14.52 MB at 30 (its bound: 11.4k calls, 15.0 MB; bytes now under it, calls 1.30x). Before, at 100: 42.1k calls, 42.8 MB.
-     :overrun {:task "seon.render/a-model-render-draws-each-turns-diff" :n 30 :measured {:calls 14800.0 :bytes 14520000.0}}
+     ;; 2026-11-14 (web): restated in ticks and bytes, the owner's measure (ticks, bytes, seconds; calls retired: they count private
+     ;; helpers production does not check, W-5's marker tests among them). Ticks = the work's calls above x ~1.4k ticks a contracted call
+     ;; on this render path (seon.render-cost-test/a-request-made-again-costs-what-moved: 3.65M ticks over 2,598 calls, 2026-11-14).
+     ;; bytes from the bound, never a run (root, 2026-11-14): an eval is its message text (~1 KB), its html entry (~3 KB), its wire JSON
+     ;; (~2 KB) and its pulled entity (~2 KB): ~8 KB, 20 KB with slack; fixed, the system prompt (~20 KB), the agent's ctx (~200 KB),
+     ;; the page's skeleton (~50 KB) and the request body (~50 KB): ~0.35 MB, 1 MB with slack
+     :per-n {:ticks 444000 :bytes 20000}
+     :fixed {:ticks 2660000 :bytes 1000000}
+     ;; measured 8.2 / 11.0 / 19.2 MB at 3 / 10 / 30: ~8x the fixed bound and ~20x the per-eval one, waste, its task
+     ;; seon.render/a-debug-entry-allocates-what-it-shows
+     :overrun {:task "seon.render/a-debug-entry-allocates-what-it-shows" :n 30 :measured {:ticks 6210000.0 :bytes 19230000.0}}
      :sizes [3 10 30]}))
 
 (deftest a-transaction-renders-what-it-touched

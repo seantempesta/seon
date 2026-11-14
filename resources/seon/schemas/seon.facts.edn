@@ -285,7 +285,7 @@
  :seon.agent/test-error [:and {:description "The error, as data, of a test run that failed as a whole; present only while it is so."} :seon.error/base]
  ;; how its work ended, as the agent writes it on its branch (seon.agent/write-end!), naming its turn: root reads it at judging
  ;; (seon.reconcile/pull-end), and an end whose turn is not past the wake's is none (:no-end)
- :seon.agent/outcome [:enum {:description "How the agent's work ended, as the agent writes it on its branch."} :green :red :waiting :cap :failed :merge-failed :error]
+ :seon.agent/outcome [:enum {:description "How the agent's work ended, as the agent writes it on its branch; :refork, a run that merged main and goes on in a process forked on main's program (seon.turn)."} :green :red :waiting :cap :failed :merge-failed :error :refork]
  :seon.agent/reason [:string {:description "Why the agent's work ended as its outcome says."}]
  :seon.agent/ended-turn [:int {:description "The turn that the agent's end names."}]
  ;; an entity's own pattern, stored with it from its first change; before that it reads its schema's (its role's). The
