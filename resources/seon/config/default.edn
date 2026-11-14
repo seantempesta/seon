@@ -924,6 +924,9 @@
  ;; Unit: tokens for a value shown inside another: a refused argument, a test's expected and
  ;; actual, ex-data (session P1).
  :seon.config.render/part-budget 256
+ ;; Unit: errors. An agent's newest failures its open problems show, each with its cause (plan Stage 0.3): enough to see a run of one
+ ;; kind and the one before it, never the whole history.
+ :seon.config.render/recent-errors 5
  ;; Unit: tokens for a form echoed back (session P1).
  :seon.config.render/form-budget 600
  ;; Unit: tokens for the context block the model reads (the task, its proofs, what it cites),
