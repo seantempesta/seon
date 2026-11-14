@@ -92,7 +92,9 @@ build_chez() {
   say "chez: copying reference-code/chez at $CHEZ_PIN"
   copy_tree "$RC/chez" "$T/src/chez"
   say "chez: configure + make -j$JOBS + install into target/chez"
-  ( cd "$T/src/chez"
+  # every command's status counts (set -e): a failed make with an install after it reported success, and the old
+  # libkernel.a stayed under the new pin's stamp (Chez f7716d17 did not compile and no tree noticed, 2026-11-14)
+  ( set -e; cd "$T/src/chez"
     # --threads: Jolt requires a threaded Chez. -fPIC: jolt build --library folds
     # libkernel.a into a shared object (as reference-code/jolt's own provisioning does).
     ./configure --threads --disable-x11 --disable-curses --installprefix="$T/chez" CFLAGS+=-fPIC
@@ -112,7 +114,7 @@ build_jolt() {
   copy_tree "$RC/jolt" "$T/src/jolt"
   say "jolt: build-jolt.ss release -> target/jolt/jolt"
   mkdir -p "$T/jolt"
-  ( cd "$T/src/jolt"
+  ( set -e; cd "$T/src/jolt"
     HOME=$T/home JOLT_VERSION=$version JOLT_CHEZ=$CHEZ \
       "$CHEZ" --script host/chez/build-jolt.ss release "$T/jolt/jolt" ) > "$T/jolt-build.log" 2>&1 ||
     die "jolt build failed; see target/jolt-build.log"
@@ -139,7 +141,7 @@ build_hello() {
   if [ -n "$key" ] && fresh hello "$key" && [ -x "$T/hello" ]; then say "hello up to date (tree $TREE)"; return; fi
   rm -f "$T/hello.stamp"
   say "hello: jolt build -m build.hello (Datahike from reference-code/) -> target/hello"
-  ( cd "$ROOT"
+  ( set -e; cd "$ROOT"
     HOME=$T/home JOLT_PWD=$ROOT "$JOLT" -A:hello build -m build.hello -o "$T/hello" ) > "$T/hello-build.log" 2>&1 ||
     die "hello build failed; see target/hello-build.log"
   [ -z "$key" ] || echo "$key" > "$T/hello.stamp"
@@ -334,7 +336,7 @@ build_seon() {
   # (seon.check, in test/, outside src) from the checkout's
   # source for every other mode, so the release binary holds only the program
   say "seon: jolt build -m seon.main -> target/seon"
-  ( cd "$ROOT"
+  ( set -e; cd "$ROOT"
     HOME=$T/home JOLT_PWD=$ROOT "$JOLT" build -m seon.main -o "$T/seon.$ID.new" ) > "$T/seon-build.$ID.log" 2>&1 ||
     { tail -30 "$T/seon-build.$ID.log" >&2; rm -rf "$T/seon.$ID.new" "$T/seon.$ID.new.build"; die "seon build failed; see target/seon-build.$ID.log"; }
   # jolt's intermediate files for this output (flat.ss, boot data, main.c): this run's alone, 386 MB, removed once it is built
@@ -350,6 +352,8 @@ build_seon() {
   mv -f "$T/seon.program.$ID.new" "$T/seon.program"
   mv -f "$T/seon.$ID.new" "$T/seon"
   [ -n "$tree" ] && { echo "$tree" > "$T/seon.tree.$ID.new" && mv -f "$T/seon.tree.$ID.new" "$T/seon.tree"; }
+  # the binary's identity (bin/binary-digest: what only a build can change), which seon.fx/runtime-for compares at the one start
+  [ -n "$tree" ] && { "$ROOT/bin/binary-digest" "$ROOT" "$tree" > "$T/seon.digest.$ID.new" && mv -f "$T/seon.digest.$ID.new" "$T/seon.digest"; }
   [ -z "$key" ] || { echo "$key" > "$T/seon.stamp.$ID.new" && mv -f "$T/seon.stamp.$ID.new" "$T/seon.stamp"; }
   say "seon: built target/seon (tree ${tree:-unknown})"
   # this binary's compile cache warmed with the test namespaces, here at the build, so no agent compiles them at its first fork (seon.check/warm-tests)
