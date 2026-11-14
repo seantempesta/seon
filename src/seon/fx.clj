@@ -598,9 +598,13 @@
           (let [found (git-try dir ["rev-parse" "--verify" "--quiet" ref])]
             (error #'seon.fx/git-commit :seon.fx/ref-moved (str ref " is at " found ", not " expect ", the commit this write was read from: nothing written")
                    {:path dir :expected expect :found found}))
-          (do (when wt (git! {} wt ["read-tree" "-m" "-u" expect sha] nil))
-              ;; the commit it was made from, and the checked-out tree's id now (tree-id): what main's source fact moves to
-              {:value (cond-> {:sha sha :files (count files) :expected expect} wt (assoc :tree (tree-id wt)))})))))
+          ;; the ref moved: the commit is made whatever follows, so it is answered as one; a tree that could not follow is named
+          ;; beside it (:tree-unmoved, a tree to bring in by hand), never an error that leaves the commit unrecorded
+          (let [moved (when wt (try (git! {} wt ["read-tree" "-m" "-u" expect sha] nil) nil (catch Throwable e (step/error-msg e))))]
+            ;; the commit it was made from, and the checked-out tree's id now (tree-id): what main's source fact moves to
+            {:value (cond-> {:sha sha :files (count files) :expected expect}
+                      (and wt (nil? moved)) (assoc :tree (tree-id wt))
+                      moved (assoc :tree-unmoved (str wt ": " moved)))})))))
 
 (defn- commit-in-tree!
   "Commit files on the branch worktree wt has checked out, through that tree: each file written there, added to its own

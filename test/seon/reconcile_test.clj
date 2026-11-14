@@ -2296,4 +2296,5 @@
     (is (= [{:seon.system/id :root :seon.system/source {:tree "t1" :commit "c1" :dirs ["src"]}}]
            (r/source-moved-tx db {:value {:sha "c1" :files 1 :expected "c0" :tree "t1"}})))
     (is (= [] (r/source-moved-tx db {:value {:sha "c1" :files 1}})) "the merges branch: main's files are not in git's main")
+    (is (= [] (r/source-moved-tx db {:value {:sha "c1" :files 1 :expected "c9" :tree "t1"}})) "a catch-up moved main's fact in between: never written over")
     (is (= [] (r/source-moved-tx db {:seon.error/type :seon.fx/ref-moved :expected "c0" :found "c2"})) "refused: nothing moved")))

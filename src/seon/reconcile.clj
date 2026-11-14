@@ -606,12 +606,14 @@
 
 (defn source-moved-tx
   "Main's source fact moved to the commit r (the :git effect's answer) made on git's main, when it was one made from the commit main
-  was imported from (seon.fx/git-commit :expect): main holds that commit's files now, so a catch-up reads from it. Its :tree is the
-  commit's, git's tree id of it. None for any other answer. See docs/source.md#commit-the-merges-branch."
+  was imported from (seon.fx/git-commit :expect) and main's fact still names that commit: main holds the commit's files now, so a
+  catch-up reads from it. Its :tree is the tree's id when the tree followed. None for any other answer. See docs/source.md#commit-the-merges-branch."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
   [db r]
   (let [held (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))]
-    (if-let [{:keys [sha tree]} (when (and (:commit held) (get-in r [:value :expected])) (:value r))]
+    ;; a compare-and-swap in the store as in git: only while main's fact still names the commit the write was made from, so a
+    ;; catch-up written in between is never written over
+    (if-let [{:keys [sha tree]} (when (and (:commit held) (= (:commit held) (get-in r [:value :expected]))) (:value r))]
       [{:seon.system/id :root :seon.system/source (cond-> (assoc held :commit sha) tree (assoc :tree tree))}]
       [])))
 
