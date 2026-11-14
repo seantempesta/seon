@@ -634,6 +634,24 @@
         (is (seq (:conflicts (pm/merge-main b0 head main'))) "a conflict, and no tx")))))
 
 
+;; Estimate: the world 0.5M (cached) + 4 small transactions ~1M + one merge-main (a diff of a few datoms, one history seek each, program-of
+;; on 2 keys of three dbs) ~3M + one db-with ~0.5M = 10000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-fact-from-before-the-base-is-neither-sides-change
+  ;; agent lb76's branch (2026-11-15): root's :seon.system/retained, written unstamped before the branch parted, was a conflict: the
+  ;; branch's base had moved to a newer main commit (an older merge path carried only some attributes), so the branch still held the old
+  ;; value, and an unstamped transaction counted as the branch's own. A fact base's history asserted in the same transaction is shared
+  ;; history (docs/merging.md#a-branch-merges-main-in)
+  (let [as (fn [db branch tx] (:db-after (d/with db {:tx-data (if (fn? tx) (tx db) tx) :tx-meta {:seon.tx/branch branch}})))
+        w (d/db-with (base) [{:seon.agent/key "root" :seon.agent/status :busy}])
+        head (as w :main/b (var-tx "f" "(inc x)"))
+        b0 (d/db-with w [[:db/add [:seon.agent/key "root"] :seon.agent/status :idle]])
+        main (d/db-with b0 [[:db/add [:seon.agent/key "root"] :seon.agent/status :stopped]])
+        {:keys [tx conflicts]} (pm/merge-main b0 head main)
+        merged (d/db-with main tx)]
+    (is (nil? conflicts) (str "a fact the branch holds from before its base is no change of its: " (pr-str conflicts)))
+    (is (= :stopped (:seon.agent/status (d/entity merged [:seon.agent/key "root"]))) "main's fact, never the shared old value")
+    (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch keeps its own change")))
+
 ;; Estimate: the world 0.5M (cached) + 5 small transactions + 3 merge-mains (each a diff of a few datoms, program-of on ~3 keys of three
 ;; dbs) ~10M = 15000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 15000000}} a-conflict-the-branch-resolved-merges-the-next-time
