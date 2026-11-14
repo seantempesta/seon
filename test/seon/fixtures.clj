@@ -262,9 +262,8 @@
     (calls "Add twenty and twenty-one." "(+ 20 21)")))
 
 (defn redefines-response
-  "The scripted model of an agent that redefines how every eval answers in the middle of its run (seon.turn-test, Stage 0.6:
-  agent o8c24b62 edited seon.repl/response at turn 24 and its turn loop hung): its first reply keeps the original and wraps
-  seon.repl/response so every answer it builds carries :seon.test/by; every later reply adds one and one."
+  "The scripted model of an agent that redefines how every eval answers mid-run (seon.turn-test): its first reply wraps
+  seon.repl/response so each answer carries :seon.test/by, keeping the original; later replies add one and one."
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [{:keys [turn]}]
   (if (zero? turn)

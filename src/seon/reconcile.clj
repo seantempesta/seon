@@ -387,10 +387,9 @@
                      [:db/add (:e dt) a]))))
 
 (defn input
-  "The done rule's input (seon.reconcile/done-explain's) for task t, {:proofs :kind :plan :plan-before} (its accumulated proofs and,
-  for a :design task, its plans), with results, uncontracted, unmerged and deferred as `done-input` takes them; green? and red? say
-  of a test whether main holds it green (a task merged by the basis claims it) and whether it may be red (one not yet merged does):
-  the one producer the judge's `done-input` and the agent's status (seon.ctx.status/status) both call. See docs/tasks.md#the-done-rule."
+  "The done rule's input for task t ({:proofs :kind :plan :plan-before}) and its results; green? and red? say whether main holds a
+  test green and whether it may be red. The one producer the judge's `done-input` and seon.ctx.status/status call. See
+  docs/tasks.md#the-done-rule."
   {:malli/schema [:=> [:cat :map :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:set :qualified-symbol] fn? fn?] :seon.reconcile/done-input]}
   [{:keys [proofs kind plan plan-before]} results uncontracted unmerged deferred green? red?]
   (cond-> {:proofs (or proofs #{})

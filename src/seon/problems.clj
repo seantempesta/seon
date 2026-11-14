@@ -479,10 +479,8 @@
                    arities))))
 
 (defn hand-written-lists
-  "Each page list (a render whose var carries :seon.render/list) among names, the vars a branch changed (nil: every list on db,
-  one :var/meta seek), whose form names a component other than itself (`component?`), as a :hand-written-list row naming them:
-  a page's parts are what its pull holds, each drawn by its schema's render, never named in a list's code. Closed when the list
-  names none. Cost: one seek a list and one a ref. See docs/health.md#a-hand-written-list."
+  "A :hand-written-list row for each page list (:seon.render/list) among names (nil: every list on db) whose form names a
+  component other than itself (`component?`), with the parts it names. See docs/health.md#a-hand-written-list."
   {:malli/schema [:=> [:cat :seon.host/db :map [:maybe [:set :symbol]]] [:vector :seon.problems/row]]}
   [db ans names]
   (let [lists (if names
