@@ -127,23 +127,22 @@
                :sizes [10 100 1000]}))
 
 (defn request-of
-  "The input at n: the live walk of the agent's tree after n earlier turns, each production-shaped (`turn-tx`), read once by a request, then one new turn written, ctx patched by its datoms and the walk flushed:
-  so the proof's request prints that one new record against the n read before, as a turn's does."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
+  "The input at n: the agent's walk value after n earlier turns, each production-shaped (`turn-tx`), read once by a request, then one new
+  turn written, ctx patched by its datoms and the walk advanced by them (seon.render/walk), and the db after: so the proof's request
+  reads that one new record against the n read before, as a turn's does."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db]]}
   [n]
   (let [[db0 a] (agent-named (inc n))
         db (reduce (fn [db i] (d/db-with db (turn-tx i))) db0 (range n))
-        cell (volatile! db)
-        c (seon.ctx/build (seon.db/index) db a :b)
-        src (seon.ratom/atom (:tree c))
-        w (assoc (seon.render/walker {:ref src :changes seon.ctx/changes} #(deref cell) [#'seon.render.ui/agent {} (seon.ratom/ref-view src seon.ctx/changes)]) :model-only true :outputs #{:seon.render/hiccup :seon.render/openai-compat})]
-    (seon.render/flush! w nil)
-    (seon.ctx.wire/request w)
-    (let [r (d/with db (conj (turn-tx n) {:seon.agent/key "b/a1" :seon.agent/turn (inc n)}))]
-      (vreset! cell (:db-after r))
-      (reset! src (:tree (seon.ctx/patch c (:db-after r) (:tx-data r) :b)))
-      (seon.render/flush! w (:tx-data r)))
-    [w]))
+        ix (seon.db/index)
+        c (seon.ctx/build ix db a :b)
+        opts (fn [db c] {:db db :tree (:tree c) :root #'seon.render.ui/agent :index ix :changes seon.ctx/changes :model-only true
+                         :outputs #{:seon.render/hiccup :seon.render/openai-compat}})
+        p (seon.render/walk nil (opts db c))
+        _ (seon.ctx.wire/request p db)
+        r (d/with db (conj (turn-tx n) {:seon.agent/key "b/a1" :seon.agent/turn (inc n)}))
+        db1 (:db-after r)]
+    [(seon.render/walk p (assoc (opts db1 (seon.ctx/patch c db1 (:tx-data r) :b)) :moved (:tx-data r))) db1]))
 
 (deftest a-requests-cost-is-its-records
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: a request is a reading of the tree, each component's messages kept on it by its

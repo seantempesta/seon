@@ -2196,30 +2196,34 @@
     (is (= [{} {}] (both)) "a key no render read: nothing")
     (r/dispose-walk! w) (r/dispose-walk! inline)))
 
+(defn lab-page-root
+  "A walk's root over its ctx view, placing lab-page: the root the test below walks."
+  {:malli/schema [:=> [:cat :map :any] :any]}
+  [_ _] [:main [#'lab-page {}]])
+
 (deftest a-walk-says-what-draws-what
   ;; docs/render.md#what-draws-what: seon.render/tree is a walk's cache read as data that chains, from its root: each entry
   ;; {:render :args :id :tokens :children}, :tokens its own output's (the one sizer over it, a child standing as its marker),
-  ;; :reads? only for an entry that read the db. A walk is a walk: an agent's own (my.render/tree) and one root
-  ;; draws of a branch (r/draw) answer alike.
+  ;; :reads? only for an entry that read the db. It reads a walk value (seon.render/walk), an agent's own (my.render/tree) among them.
   (let [long-code (apply str (repeat 2000 "x"))
-        rec (seon.ratom/atom {:db/id 1 :t 5 :task {:db/id 2 :seon.task/plan "write the test"}
-                              :evals (#'seon.ctx/members-map [[12 {:db/id 12 :seon.eval/code long-code}]
-                                                             [11 {:db/id 11 :seon.eval/code "(inc 1)"}]])})
-        w (doto (r/walker {:ref rec :changes seon.ctx/changes} (constantly nil) [#'lab-page {}] (seon.db/index)) (flush! nil))
-        t (r/tree w)
+        rec {:db/id 1 :t 5 :task {:db/id 2 :seon.task/plan "write the test"}
+             :evals (#'seon.ctx/members-map [[12 {:db/id 12 :seon.eval/code long-code}]
+                                            [11 {:db/id 11 :seon.eval/code "(inc 1)"}]])}
+        p (r/walk nil {:db (ts/test-db) :tree rec :root #'lab-page-root :index (seon.db/index) :changes seon.ctx/changes :outputs #{:seon.render/hiccup}})
+        ;; lab-page, the root's one child
+        t (first (:children (r/tree p)))
         kid (fn [f id] (first (filter #(and (= f (:render %)) (= [id] (:args %))) (:children t))))]
-    (try
+    (do
       (is (= {:render `lab-page :args []} (select-keys t [:render :args])) "from the root")
       (is (= #{[`lab-row 12] [`lab-row 11] [`lab-length 12] [`lab-length 11]} (set (map (juxt :render (comp first :args)) (:children t)))) "each component it drew, with its args")
-      (is (= (:id (get @(:cache w) [`lab-row 12])) (:id (kid `lab-row 12))) "named by its element id")
+      (is (= (:id (get (:cache p) [`lab-row 12])) (:id (kid `lab-row 12))) "named by its element id")
       (is (every? #(and (empty? (:children %)) (nat-int? (:tokens %))) (:children t)) "leaves have none")
       (is (<= (seon.print.select/estimate long-code) (:tokens (kid `lab-row 12)) (* 2 (seon.print.select/estimate long-code)))
           "its tokens are the one sizer's over the characters of its own output: the 2,000 it shows")
       (is (< (:tokens t) (:tokens (kid `lab-row 12))) "the root's are its own: the 2,000 characters are its child's, not counted in it")
       (is (not-any? :reads? (cons t (:children t))) "no db read, no flag")
       (is (= t (clojure.edn/read-string (pr-str t))) "plain data: it reads back from its print, so it chains")
-      (is (seon.contract/valid? (seon.contract/schema :seon.render/tree) t) "and its schema")
-      (finally (r/dispose-walk! w)))))
+      (is (seon.contract/valid? (seon.contract/schema :seon.render/tree) t) "and its schema"))))
 
 (defn lab-said
   "A line of text, a render redefined by the test below."
@@ -2243,6 +2247,40 @@
       (r/dispose-walk! w)
       (is (empty? (.getWatches #'lab-said)) "a disposed walk watches nothing")
       (finally (alter-var-root #'lab-said (constantly was))))))
+
+(defn lab-child
+  "A line of text over ctx, the nested render the test below redefines."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}] [:p (str "plan " (:db/id c))])
+
+(defn lab-root
+  "A walk's root over its ctx view: a section holding lab-child."
+  {:malli/schema [:=> [:cat :map :any] :any]}
+  [_ _] [:section [#'lab-child {}]])
+
+;; See docs/render.md#a-page-is-a-kept-walk
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-redefined-render-redraws-in-the-walk-value
+  ;; estimate: a test db and two transactions (~1M), three walks of two components (~0.1M each)
+  ;; the walk kept as a value takes a redefinition as the eval records it, its :var/form datom moved (no watch): the render's
+  ;; components draw again with the new definition; one that wrote no datom is seen only where the walk visits it again
+  (let [db0 (d/db-with (ts/test-db) [{:db/id "v" :var/name `lab-child :var/form "f"}
+                                     {:db/id "f" :form/id "lab-child-1" :form/src "(defn lab-child ...)" :form/defines #{"v"}}])
+        db1 (d/db-with db0 [{:db/id "f" :form/id "lab-child-2" :form/src "(defn lab-child ... :h2)" :form/defines #{[:var/name `lab-child]}}
+                            {:var/name `lab-child :var/form "f"}])
+        opts (fn [db] {:db db :tree {:db/id 1} :root #'lab-root :index (seon.db/index) :changes seon.ctx/changes :outputs #{:seon.render/hiccup}})
+        k [`lab-child {}]
+        out (fn [p] (pr-str (some (fn [[ck e]] (when (= #'lab-child (:f e)) (:out e))) (:cache p))))
+        ran? (fn [p] (some (fn [[ck v]] (when (= `lab-child (first ck)) v)) (:ran p)))
+        was @#'lab-child
+        p0 (r/walk nil (opts db0))]
+    (try
+      (alter-var-root #'lab-child (fn [f] (fn [& a] (assoc (apply f a) 0 :h2))))
+      (let [p1 (r/walk p0 (assoc (opts db0) :moved []))
+            p2 (r/walk p1 (assoc (opts db1) :moved (seon.ctx/moved db0 db1 nil)))]
+        (is (and (nil? (ran? p1)) (not (str/includes? (out p1) ":h2"))) (str "no :var/form moved: the child is not drawn again " (out p1)))
+        (is (= :miss (ran? p2)) "its :var/form moved: its component runs")
+        (is (str/includes? (out p2) ":h2") (str "with the new definition: " (out p2))))
+      (finally (alter-var-root #'lab-child (constantly was))))))
 
 (deftest a-change-below-a-unit-moves-its-revision
   ;; docs/render.md#a-layout-places-its-lists: every component is a unit, at any depth; one nested in another (a key the agent
@@ -4879,11 +4917,13 @@
         db (d/db-with db (seon.doc/load-tx db "docs" {seon.doc/system-page "# A stub of the system prompt\n\nBe brief."}))
         ix (seon.program/index-of-db db)
         c (:tree (seon.ctx/build ix db (seon.db/eid db :seon.agent/key "lab/a1") :b))
-        w (draw c seon.ctx/changes db #'ui/agent {:index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
-    (try {:c c :ix ix :page (apply str (map :html (seon.fixtures/page-units w))) :msgs (pr-str (:messages (seon.ctx.wire/request w))) :parts (:parts (seon.ctx.wire/request w))
-          ;; the conversation as the page shows it: the units its list holds (container #c-rows, seon.render.ui/conversation-list)
-          :rows (apply str (keep #(when (= "#c-rows" (:container %)) (:html %)) (seon.fixtures/page-units w)))}
-         (finally (r/dispose-walk! w))))))
+        p (r/walk nil {:db db :tree c :root #'ui/agent :index ix :changes seon.ctx/changes :units true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})
+        units (seon.fixtures/composed (:units p))
+        req (seon.ctx.wire/request p db)]
+    (seon.fixtures/no-error-render (:defects p))
+    {:c c :ix ix :page (apply str (map :html units)) :msgs (pr-str (:messages req)) :parts (:parts req)
+     ;; the conversation as the page shows it: the units its list holds (container #c-rows, seon.render.ui/conversation-list)
+     :rows (apply str (keep #(when (= "#c-rows" (:container %)) (:html %)) units))})))
 
 (deftest a-joined-entity-of-a-registered-schema-reaches-the-page
   ;; docs/render.md#the-page: what an agent's pull joins reaches the page by its schema's html render, no code naming it.

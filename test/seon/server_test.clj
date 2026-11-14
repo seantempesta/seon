@@ -427,16 +427,17 @@
                              " m (fn [] (let [v (seon.profile/measure! #(count (seon.turn/context-block t true)))]"
                              "           {:ticks (:ticks v) :bytes (:bytes v)"
                              "            :main (let [_ (seon.repl/page-walk) db (seon.agent/db)] (:seon.agent/main-commit (datahike.api/entity db (seon.db/eid db :seon.agent/key (:key @seon.agent/state)))))"
-                             "            :pages (some (fn [f] (when (= 'seon.render/draw (:var f)) (:calls f))) (seon.profile/touched))}))]"
+                             "            :cold? (let [w (:walk @seon.agent/state)] (not (< (count (:ran w)) (count (:cache w)))))}))]"
                              "  {:reads (vec (repeatedly 9 m))"
-                             "   :live=cold (let [pw (seon.repl/page-walk) db (seon.agent/db) page (seon.render/placed-hiccup pw (seon.render/page-lists pw)) a (seon.db/eid db :seon.agent/key (:key @seon.agent/state))"
-                             "                    w (seon.render/draw (:tree (seon.ctx/build (seon.db/index) db a (:seon.agent/branch (datahike.api/entity db a)))) seon.ctx/changes db #'seon.render.ui/agent {:model-only true})"
-                             "                    cold (seon.render/placed-hiccup w (seon.render/page-lists w))]"
-                             "                (or (= page cold) (vec (for [k (distinct (concat (keys page) (keys cold))) :when (not= (get page k) (get cold k))] k))))})")]))
+                             "   :live=cold (let [pw (seon.repl/page-walk) db (seon.agent/db) a (seon.db/eid db :seon.agent/key (:key @seon.agent/state))"
+                             "                    ix (seon.program/index-of-db db) t (:tree (seon.ctx/build ix db a (:seon.agent/branch (datahike.api/entity db a))))"
+                             "                    cw (seon.render/walk nil {:db db :tree t :root (seon.render/render-var-of ix (merge {:seon.agent/key (:key @seon.agent/state)} t)) :index ix :changes seon.ctx/changes :model-only true :once true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})"
+                             "                    msgs (fn [w] (mapv first (get-in w [:answers :seon.render/openai-compat])))]"
+                             "                (or (= (msgs pw) (msgs cw)) (vec (remove (set (msgs cw)) (msgs pw)))))})")]))
         later (rest (:reads (:value reads)))]
     (is (= 9 (count (:reads (:value reads)))))
-    (is (true? (:live=cold (:value reads))) (str "the live walk's page is the cold draw's on the db it is drawn to; differing: " (pr-str (:live=cold (:value reads)))))
-    (is (every? #(nil? (:pages %)) later) (str "each later read draws no page cold, its page the live walk's: " (pr-str (map :pages later))))
+    (is (true? (:live=cold (:value reads))) (str "the live walk's request is a cold walk's on the db it is drawn to; live only: " (pr-str (:live=cold (:value reads)))))
+    (is (not-any? :cold? later) (str "each later read draws no page cold: its walk ran fewer components than it holds " (pr-str (map :cold? later))))
     ;; a read costs what changed (the render's views, docs/render.md): main's commit moving between two reads
     ;; (an earlier test's task merging in this root) redraws the branch views, which the task's render
     ;; keys by it (seon.render.ui/render-ctx), so only reads beside the same main are compared; measured 2026-10-29:
