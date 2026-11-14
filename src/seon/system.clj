@@ -932,7 +932,7 @@
       ;; frame (:spoke) or its end retracts it
       :stalled (let [s (cond-> {:quiet-ms (:quiet-ms (:error m))} (get-in m [:error :last-op]) (assoc :last-op (get-in m [:error :last-op])))]
                  ;; while root stops, a stalled agent is one that does not exit on :stop: the stall, a recorded fact,
-                 ;; ends it (no clock of the stop's own: task seon.system/shutdown-and-death-are-dataflow)
+                 ;; ends it (no clock of the stop's own: task seon.system/a-stop-or-crash-resumes-from-one-resume-point-and-says-what-it-lost)
                  (cond-> (-> st (set-agent o (:agent m) {:stalled s}) (stall-task o (:agent m) s))
                    (:closing st) (to-agent o (:agent m) {:op :kill})))
       :spoke (set-agent st o (:agent m) {:stalled nil})
@@ -2427,7 +2427,7 @@
     (a/close! (:judge sys))
     ;; parked on the drain, no bound: each agent interrupted and stopped exits (seon.agent-proc/stop!), the
     ;; writer flushes, the fork server ends; one that never does is a stall, recorded (task
-    ;; seon.system/shutdown-and-death-are-dataflow)
+    ;; seon.system/a-stop-or-crash-resumes-from-one-resume-point-and-says-what-it-lost)
     (let [drained @p
           graph (flow/stop (:graph sys))]
       ;; a wait put on :judge that the stopped reconciler never took is answered here

@@ -1483,7 +1483,7 @@
       res)))
 
 (defn- record-results!
-  "Record a test run's results on this branch (task seon.proofs/test-results-are-a-few-facts, seon.proofs/result-tx: only what differs from the
+  "Record a test run's results on this branch (task seon.proofs/a-verdict-is-an-entity-that-names-its-environment, seon.proofs/result-tx: only what differs from the
   facts the branch holds, so a run that changes nothing writes nothing): ran, failures and the
   cached results reused, as seon.proofs/result-tx takes them, of the tests the branch holds a var
   entity for, deferred (the process tests the run left to root's gate) as :deferred at their digest,

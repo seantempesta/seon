@@ -197,7 +197,7 @@ The store is the source of the task files too (owner, 2026-11-14), so a task mad
 
 ## What isn't in the program yet
 
-What `:seon.config.source/dirs` names moves by branch, with the wiki beside it; a `spit` writes the disk, which a branch holds nothing of until an import (task `seon.source/seon-files-move-by-branch`).
+What `:seon.config.source/dirs` names moves by branch, with the wiki beside it; a `spit` writes the disk, which a branch holds nothing of until an import (task `seon.source/the-trees-commit-merges-three-way`).
 
 ## The next generation
 

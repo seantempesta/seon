@@ -40,7 +40,7 @@ Tests whose subject is itself a timeout or a measurement window.
 ## Time decides, owed its owner's fix
 
 Each is a defect named with the task that removes it; a new site is red, and a fixed one leaves this list in the fix's commit.
-- `seon.system/start!` (Flow's `:stop-timeout-ms`, `:seon.config.root/flow-stop-ms`; a proc still running is named in stop!'s `:graph`): task `seon.system/shutdown-and-death-are-dataflow`. An agent with an eval in flight is interrupted first (`seon.agent-proc/stop!`).
+- `seon.system/start!` (Flow's `:stop-timeout-ms`, `:seon.config.root/flow-stop-ms`; a proc still running is named in stop!'s `:graph`): task `seon.system/a-stop-or-crash-resumes-from-one-resume-point-and-says-what-it-lost`. An agent with an eval in flight is interrupted first (`seon.agent-proc/stop!`).
 - `seon.system/api-proc` (the stall timer): with `seon.system/back-op` (its `:stall-check`) and `seon.agent-proc/agent-proc` (the `:last-frame-ms` it compares), task `seon.system/a-stall-is-past-the-requests-own-bound`.
 - `bin/check`'s one capture of its steps at 600 s (`bin/evidence`): an observation that ends nothing.
 - `bin/stalls`' stall bound: every second it reads each running shard's last `started` line, and past `:seon.config.proofs/stall-factor` times the test's last recorded run (floored at `:seon.config.agent/stall-ms`) records `STALLED <test> <ms>` once; it ends nothing. Same task.
