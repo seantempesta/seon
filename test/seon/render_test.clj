@@ -2201,7 +2201,9 @@
   {:malli/schema [:=> [:cat :map :any] :any]}
   [_ _] [:main [#'lab-plan {}]])
 
-(deftest every-output-reader-splits-an-element-one-way
+;; Estimate: two part-forms, one places and one misfits over a three-node output, each a few contracted calls (~5k ticks): ~50k;
+;; 100,000 ticks, worked from the work.
+(deftest ^{:seon.test/estimate {:ticks 100000}} every-output-reader-splits-an-element-one-way
   ;; task seon.render/one-hiccup-walk-reads-every-output (docs/render.md#a-part-prints-as-its-render): an element's second place is its
   ;; attributes only when it is a map that is not raw html (seon.web.html/raw?), for every reader of an output: raw html there is a
   ;; child, as text is, so a part whose output wraps either prints them in one shape
@@ -2213,7 +2215,9 @@
     (is (= [[nil k]] (#'r/places [:div raw [::r/child k]])) "raw html in second place names no selector")
     (is (= {} (r/misfits [:div raw [::r/child k]])) "nor is it counted as attributes")))
 
-(deftest a-view-of-a-pulled-entity-is-matched-by-its-datom-keys
+;; Estimate: the test store's db (a fork of the kept seed, ~1M), three one-entity transactions (~0.1M each) and three walks of a
+;; one-component page over the seon.db/index (~0.2M each, mostly the root's first draw): ~2M; 2,000,000 ticks, worked from the work.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-view-of-a-pulled-entity-is-matched-by-its-datom-keys
   ;; docs/plan.md#the-root-concept-one-reaction-over-the-store, task seon.ratom/a-view-of-a-pulled-entity-records-its-datom-keys:
   ;; a component that read attribute a of a pulled entity e (one carrying :db/id) through the ctx view records [:ea e a], so a
   ;; commit of e's a re-runs it and a commit of a sibling attribute does not, matched by the commit's datom keys alone: the
