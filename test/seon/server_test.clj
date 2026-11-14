@@ -2,7 +2,7 @@
   "Root's server as an outside agent reaches it (seon.server, through the built root:
   seon.agent-test/in-agent). Run: bin/test seon.server-test"
   (:require [clojure.test :refer [deftest is]] [jolt.fibers] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]
-            [seon.test-store :as ts] [seon.task :as task] [seon.main] [seon.fx] [seon.lib] [datahike.api :as d] [clojure.java.shell] [clojure.core.async :as a]))
+            [seon.test-store :as ts] [seon.task :as task] [seon.main] [seon.fx] [seon.lib] [datahike.api :as d] [clojure.java.shell] [clojure.core.async :as a] [my.root]))
 
 (deftest each-op-has-its-answer
   ;; the ops table (each op's doc and args, the MCP tool list) and op-answer's methods are one set of
@@ -778,3 +778,18 @@
                (#'seon.server/prove-streamed sys :tree-x (fn [] (throw (ex-info "the run broke" {})))))]
        (is (= :seon.server/defect (:seon.error/type r)) (pr-str r))
        (is (re-find #"the run broke" (str (:seon.error/message r))))))))
+
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-checkout-names-the-agent-it-holds
+  ;; docs/server.md#working-a-task-from-a-worktree: a session's edit hook (bin/seon-import) imports onto the agent its checkout
+  ;; attached (seon.server/attach!'s :holder): the live one and its task; an ended one, or another client's, is none
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [decl (fn [nm] {:seon.task/ns 'demo :seon.task/name nm :seon.task/plan (str "Make " nm " true.") :seon.task/proofs #{(symbol "demo-test" nm)}})]
+       (d/transact conn (task/create-tx @conn [(decl "old") (decl "a") (decl "b")]))
+       (d/transact conn (ts/work-tx "demo/old" :running {:agent :k0 :holder "checkout-/w"}))
+       (d/transact conn [{:seon.agent/key "k0" :seon.agent/ended-ms 1}])
+       (d/transact conn (ts/work-tx "demo/a" :running {:agent :k1 :holder "checkout-/w"}))
+       (d/transact conn (ts/work-tx "demo/b" :running {:agent :k2 :holder "mcp-1-2"}))
+       (let [sys {:graph nil :ext (a/chan) :conn conn}]
+         (is (= {:agent :k1 :task "demo/a"} (my.root/held-agent sys "checkout-/w")) "the checkout's live agent, its task")
+         (is (nil? (my.root/held-agent sys "checkout-/elsewhere")) "a checkout that attached none holds none"))))))

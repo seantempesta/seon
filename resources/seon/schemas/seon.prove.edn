@@ -5,6 +5,7 @@
  :seon.proofs/unread [:and :seon.error/base [:map [:seon.error/type [:= :seon.proofs/unread]] [:why :any]]]
  ;; the request a session or an agent's turn makes of the service, and its answer
  :seon.prove/request [:map [:branch :keyword] [:t :int] [:agent {:optional true} [:maybe :keyword]] [:proofs {:optional true} [:set :qualified-symbol]]]
- ;; a batch's tag: what every process it starts carries as SEON_PROVE_BATCH (seon.prove/batch-tag)
- :seon.prove/batch [:string {:description "The test service's tag of a batch it granted, its process's pid and the batch's number: every process the batch starts carries it as SEON_PROVE_BATCH, so seon.prove/held-processes counts what each running batch holds. See docs/merging.md#the-test-service."}]
+ ;; a batch's tag: what every process it starts carries as SEON_PROVE_BATCH (seon.fx/batch-tag)
+ :seon.prove/batch [:string {:description "The test service's tag of a batch it granted, its process's pid and the batch's number: every process the batch starts carries it as SEON_PROVE_BATCH, so seon.fx/held-processes counts what each request in flight holds. See docs/merging.md#the-test-service."}]
+ :seon.prove/askers [:set {:description "On a :process request of the test service, the askers waiting on its items: told when the owner holds it for the machine's load (seon.fx/held-told). See docs/merging.md#the-test-service."} :any]
  :seon.prove/answer [:map [:key :string] [:ran :boolean] [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]}

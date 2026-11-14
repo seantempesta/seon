@@ -66,7 +66,10 @@
         {:keys [tx outcome]} (#'r/judge-tx (st-of db) {:act {:op :spawn :task id :env {:branch (task/default-branch id)}} :deferred deferred
                                                     :run-problems run-problems :worked-error worked-error}
                                         (or results {})
-                                        (merge {:db branch :base db :base-t (:max-tx db) :ours [[:var 'demo/worked]] :uncontracted [] :unmerged [] :caused [] :theirs 0} diff))]
+                                        ;; :ours as the writer's branch read gives it: the worked key and the tasks the branch changed ([:task id] keys)
+                                        (merge {:db branch :base db :base-t (:max-tx db) :uncontracted [] :unmerged [] :caused [] :theirs 0
+                                                :ours (into [[:var 'demo/worked]] (filter #(= :task (first %))) (keys (pm/delta-changes (:base diff db) branch #{})))}
+                                               diff))]
     {:db (d/db-with db tx) :outcome outcome :tx tx}))
 
 (defn- judgment-of
@@ -1777,16 +1780,20 @@
         branch (d/db-with base [{:seon.task/id "demo/b" :seon.task/plan "b, as a's agent learned it"}
                                 {:seon.task/id "demo/c" :seon.task/plan "c, the branch's"}])
         main (d/db-with base [{:seon.task/id "demo/c" :seon.task/plan "c, main's"}])
-        judged (:db (judge! main "a" nil :branch branch :diff {:base base}))
-        conflict {:task "demo/c" :attr :seon.task/plan :base "Make c true." :ours "c, the branch's" :theirs "c, main's"}]
+        ;; the keys the writer's branch read says it changed (:ours): its tasks are [:task id] keys of the one merge
+        judged (:db (judge! main "a" nil :branch branch :diff {:base base :ours [[:var 'demo/worked] [:task "demo/b"] [:task "demo/c"]]}))
+        conflict (first (filter #(= [:task "demo/c"] (:key %)) (:seon.task/conflicts (task/task judged "demo/a"))))]
     (is (= "b, as a's agent learned it" (:seon.task/plan (task/task judged "demo/b"))) "another task's edit reaches main at the agent's end")
     (is (= "Make a true." (:seon.task/plan (task/task judged "demo/a"))) "an unchanged task stays as main holds it")
     (is (= "c, main's" (:seon.task/plan (task/task judged "demo/c"))) "a two-sided edit is never resolved here")
-    (is (= [conflict] (:seon.task/task-conflicts (task/task judged "demo/a"))))
-    (is (= [(assoc conflict :from "demo/a")] (map :evidence (get-in (problems/report judged) [:classes :task-conflict :rows])))
-        "root sees it among the problems")
-    (testing "main's task plans never put a merge behind: merging merges the program, no task data"
-      (is (empty? (:theirs (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program main #{}))))))))
+    (is (= ["Make c true." "c, main's" "c, the branch's"] [(:plan (:base conflict)) (:plan (:ours conflict)) (:plan (:theirs conflict))])
+        "it is among the task's conflicts, each side's content, as any key's (one three-way merge)")
+    (let [member {:task "demo/c" :attr :seon.task/plan :base "Make c true." :ours "c, the branch's" :theirs "c, main's"}]
+      (is (= [member] (:seon.task/task-conflicts (task/task judged "demo/a"))) "and shown on the task, member by member (a feature: kept)")
+      (is (= [(assoc member :from "demo/a")] (map :evidence (get-in (problems/report judged) [:classes :task-conflict :rows])))
+          "root sees it among the problems"))
+    (testing "main's task edit is content a branch takes when it merges main (seon.merge's :task key)"
+      (is (contains? (set (keys (:theirs (pm/delta-three-way base branch main #{})))) [:task "demo/c"])))))
 
 ;; Estimate: 11 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 11 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 4 judgings x 0.7M (the index and the judge-tx); 1 transacts or db-withs x 50k ~ 20,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-waiting-agent-parks-its-task-and-a-message-wakes-it
@@ -1908,11 +1915,12 @@
           (is (= #{'demo-test/a-design-wrote-test} (get-in (r/index judged2) [:acc "demo/c"]))))))
     (testing "a proof set main changed too, differently, is a conflict for root"
       (let [main (d/db-with base [[:db/add [:seon.task/id "demo/b"] :seon.task/proofs 'demo-test/mains-test]])
-            {:keys [tx conflicts]} (task/carry-tx base branch main)]
-        (is (not-any? #(= [:seon.task/id "demo/b"] (second %)) tx))
-        (is (= [{:task "demo/b" :attr :seon.task/proofs :base #{'demo-test/kept-test 'demo-test/dropped-test}
-                 :ours #{'demo-test/kept-test} :theirs #{'demo-test/kept-test 'demo-test/dropped-test 'demo-test/mains-test}}]
-               (filter #(= "demo/b" (:task %)) conflicts)))))))
+            {:keys [apply conflicts]} (pm/delta-three-way base main branch #{})
+            c (first (filter #(= [:task "demo/b"] (:key %)) conflicts))]
+        (is (not-any? #{[:task "demo/b"]} apply) "never applied")
+        (is (= [#{'demo-test/kept-test 'demo-test/dropped-test} #{'demo-test/kept-test 'demo-test/dropped-test 'demo-test/mains-test} #{'demo-test/kept-test}]
+               [(:proofs (:base c)) (:proofs (:ours c)) (:proofs (:theirs c))])
+            "a conflict, each side's proofs")))))
 
 ;; Estimate: pure data in, pure data out, a few 10k ticks ~ 50,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 50000}} a-refused-merge-candidate-is-the-gates-error
@@ -2231,9 +2239,9 @@
            merge-main! (fn [b bc]
                          (let [main @conn head @bc
                                base (pdb/branch-base conn (pdb/main-branch cfg) b)
-                               r (pm/delta-three-way base head main #{})]
+                               r (pm/delta-three-way base head main :all)]
                            (d/merge-db bc #{(d/commit-id main)}
-                                       (-> (pm/merge-tx head base main (:apply r) #{}) (into (pm/unmerged-tx head (:conflicts r) (:max-tx main))))
+                                       (-> (pm/merge-tx head base main (:apply r) :all) (into (pm/unmerged-tx head (:conflicts r) (:max-tx main))))
                                        (pdb/tx-meta b))
                            (doseq [e (pm/unmerged @bc)] (d/transact bc (pm/resolve-tx @bc (:key e))))
                            (count (:conflicts r))))

@@ -354,7 +354,9 @@
     :else
     (let [bdb (get-in st [:branches view :db])
           ;; in the order written: entity ids are issued so
-          calls (vec (sort (d/q '[:find [?e ...] :where [?e :seon.model-call/basis _]] bdb)))
+          ;; its agent's calls: a branch holds every agent's records once it merges main (docs/merging.md#a-branch-merges-main-in)
+          calls (vec (sort (d/q '[:find [?e ...] :in $ ?a :where [?e :seon.model-call/agent ?a] [?e :seon.model-call/basis _]]
+                                bdb (location (:main-db st) view))))
           pulled (mapv #(d/pull bdb [:seon.model-call/basis :seon.model-call/tokens :seon.model-call/cache-hit-tokens] %) calls)
           bases (mapv :seon.model-call/basis pulled)
           chosen (get-in st [:tab view :at] :latest)

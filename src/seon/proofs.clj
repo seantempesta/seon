@@ -278,17 +278,16 @@
   [r] (and (some? r) (not (red? r))))
 
 (defn flaky
-  "The result of a digest that judged both green and red: red (red's counts and failures), with
-  :flaky true and one more failure saying so. A test's verdict is a function of its digest, so
-  one that differs is a defect at its cause (a clock, a race, an input the digest misses): it is
-  judged red, never reused as green, and never run again until a change moves its digest."
-  {:malli/schema [:=> [:cat :string :map] :map]}
-  [dg red]
-  (-> red
-      (assoc :flaky true :digest dg)
-      ;; first, so it leads the test's failures
-      (update :failures #(into [{:type :fail :flaky true :message (str "flaky: green and red at digest " dg " (seon.proofs/flaky)")}]
-                               (remove :flaky) %))))
+  "The result of a digest that judged both green and red: no verdict, a :platform problem (seon.prove/flaky-problems files it
+  once a digest), never a red that holds a landing or main: a test's verdict is a function of its digest, so one that differs
+  read something its digest misses (load, a cold fixture, a shared file), the platform's defect, never the
+  change's. It counts no failure, keeps the red run's failures and both runs' ticks as the evidence (:seon.proofs/red-failures,
+  :seon.proofs/ticks), and is not run again until a change moves its digest. See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :string :map :map] :map]}
+  [dg green red]
+  (cond-> (assoc green :flaky true :digest dg :fail 0 :error 0 :failures []
+                 :seon.proofs/red-failures (vec (remove :flaky (:failures red))))
+    (and (:ticks green) (:ticks red)) (assoc :seon.proofs/ticks {:green (:ticks green) :red (:ticks red)})))
 
 (defn verdict
   "The one result of digest dg from what it judged: green and red, flaky (red); either alone, it."
@@ -296,7 +295,7 @@
   [dg green red]
   (cond (:flaky red) red
         (:flaky green) green
-        (and green red) (flaky dg red)
+        (and green red) (flaky dg green red)
         :else (or green red)))
 
 (defn status-of
@@ -485,7 +484,7 @@
   holds: what judges the change. With none (a worktree session's or root's tree), the proofs and every key
   with no green at its digest. run is the selected with no result at their digest (sorted), what
   runs; reused {key result} every key with a result at its digest, green or red (a red reused
-  judges red again, with its failures; a flaky one is red, so it is selected and never run). So an
+  judges red again, with its failures; a flaky one is selected, so its evidence is reported and filed as a :platform problem, and never run). So an
   unchanged tree runs nothing.
   Cost: one lookup per key, then a sort of what is selected."
   {:malli/schema [:=> [:cat [:maybe [:map-of {:gen/max 4} :any :string]] [:map-of {:gen/max 4} :any :string] [:map-of {:gen/max 4} :string :map] [:set {:gen/max 4} :any]]
@@ -494,7 +493,7 @@
   (let [selected (vec (sort-by str (distinct (concat (filter cand proofs)
                                                     (if base
                                                       (remove #(= (base %) (cand %)) (keys cand))
-                                                      (remove #(green? (found (cand %))) (keys cand)))))))]
+                                                      (remove #(let [r (found (cand %))] (and (green? r) (not (:flaky r)))) (keys cand)))))))]
     {:selected selected
      :run (filterv #(not (found (cand %))) selected)
      :reused (into {} (for [[k dg] cand :let [r (found dg)] :when r] [k r]))}))

@@ -20,7 +20,7 @@ A red test is a verdict, not a problem fact: verdicts are derived data cached by
 
 ## A flaky test
 
-A verdict is a function of its reach digest, so a test judged both green and red at one digest is a defect at its cause (a clock, a race, an input its digest misses), never a reason to run it again. The cache keeps `<digest>.pass.edn` and `<digest>.red.edn`, each written once (```seon.fx/write-verdicts!```), and never evicts a digest with a red file. ```seon.proofs/verdict``` judges a digest holding both as ```seon.proofs/flaky```: red, led by a failure saying so, never reused and never run again until a change moves the digest. `bin/test` and `bin/prove` print `FLAKY test digest` and end red. A test that never reported and a `bin/check` step's red are not kept, so neither is flaky.
+A verdict is a function of its reach digest, so a test judged both green and red at one digest is a defect at its cause (a clock, a race, an input its digest misses), never a reason to run it again. The cache keeps `<digest>.pass.edn` and `<digest>.red.edn`, each written once (```seon.fx/write-verdicts!```), and never evicts a digest with a red file. ```seon.proofs/verdict``` judges a digest holding both as ```seon.proofs/flaky```: no verdict, a `:platform` problem filed once a digest (```seon.prove/flaky-problems```) with the red run's failures and both runs' ticks, never a red that holds a landing or shows main red (owner, 2026-11-14: one run's measurement never blocks another landing), and never run again until a change moves the digest. `bin/test` and `bin/prove` print `FLAKY test digest` and go on. A test that never reported and a `bin/check` step's red are not kept, so neither is flaky.
 
 ## A stale section
 

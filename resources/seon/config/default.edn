@@ -636,10 +636,10 @@
  ;; Unit: shards. How many runner processes bin/test starts at once (seon.proofs/shards), and how many steps bin/check runs
  ;; at once. 4, not the cores: each shard boots a test root of its own (its fork server warms ~1e9 ticks before its first agent),
  ;; and 18 at once under other proves ran the system tests' roots past their bound (measured 2026-11-12: CPU 0.0 s, waiting on
- ;; their roots). The service's workers follow the cores (max-workers); this shard path goes with one-root and the service.
+ ;; their roots). The service's items follow max-workers; this shard path goes with one-root and the service.
  ;; SEON_PROOF_JOBS is bin/test's own hand-off to its child steps. At the bound: a run never has more shards.
  :seon.config.proofs/jobs #long #or [#env SEON_PROOF_JOBS 4]
- ;; The test service's admission (seon.prove/admission, docs/merging.md#the-test-service): three optional bounds, any
+ ;; The :process owner's admission of proving (seon.fx/limits, read at each admission, docs/config.md#the-test-services-three-limits): three optional bounds, any
  ;; combination (the owner: "a fixed max number and a load max and core max ... any combination has a solution"). An unset
  ;; key binds nothing; with neither count set, the machine's cores (:seon.config.machine/cores) bound the items at once.
  ;; Unit: items. The most items (a batch of tests in one fork, a check step, a build or seed) running at once on this
@@ -729,6 +729,12 @@
  ;; recently used of the others, which checkouts on another Jolt pin or program schema share at once. 3: main's, a branch with a
  ;; new pin, and one more. At the bound: the least recently used other key's store is removed (made again on its next plan).
  :seon.config.proofs/program-stores-kept 3
+ ;; Unit: files a kind. The trees whose reach graph and reads index the program store keeps, one file each (test-runner/tree-file):
+ ;; the most recently written. Why a dial: each tree a prove is planning or testing at once needs its own (one slot for every
+ ;; tree let one checkout's plan rewrite the graph another's tests then read, so a test's ticks were the last writer's: 61.7M
+ ;; against 200M, runtime's land, 2026-11-14); the sessions' checkouts and the standing system's branches in flight are about
+ ;; ten, and a graph is ~22 MB. At the bound: the oldest is removed and made again by its tree's next plan.
+ :seon.config.proofs/tree-files-kept 12
  ;; Unit: bytes. The kept program dbs' store on disk (its data.mdb). Measured 2026-10-23: 12 MB
  ;; for the whole program (118 files), about 2 MB more a kept tree that changed a file. At the
  ;; bound: the store is removed before it is opened and starts again from the run's tree (one
@@ -800,6 +806,14 @@
  ;; agent has at most one synchronous effect in flight, so beyond the live agents only async
  ;; sends queue. At the bound agent procs park (back-pressure). Session FX1.
  :seon.config.fx/buf 1024
+
+ ;; Unit: each effect kind's declared bound (:seon.bound/bound). The model's is ten times the slowest
+ ;; of 120 model calls on 30 agent branches, measured 2026-11-14 (p50 2.9 s, p90 12.5 s, max 23.6 s):
+ ;; a call that answers nothing for 240 s ends as :seon.bound/reached, never a wait for good. A streamed
+ ;; call's bound is of quiet, re-armed by each chunk (seon.fx/stream-due), so a long reasoning reply
+ ;; that keeps streaming is never cut; a call that does not stream waits this long in all. A kind not
+ ;; named waits unbounded until its bound is measured (seon.agent/fx!).
+ :seon.config.fx/bounds {:model {:seon.bound/ms 240000}}
 
  ;; Who answers agents' turns. With no profile, none: the first turn answers the typed
  ;; :seon.model/no-provider and the run ends on it (root's ruling 2026-10-22: production

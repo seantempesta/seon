@@ -22,7 +22,7 @@
 (defn put-after!
   "Puts m on channel ch once ms milliseconds pass: the one timer of the system (the cron's
   tick, the delayed insert, root's stall check; docs/clocks.md#time-decides-the-owners-exceptions).
-  A go block parks on the timeout, since Jolt's callback take! forks a thread per pending take.
+  A go block parks on the timeout channel (one heap entry and a parked fiber; a timeout channel can't be cancelled, it closes).
   Answers nil."
   {:malli/schema [:=> [:cat :seon.host/chan :int :any] :nil]}
   [ch ms m]

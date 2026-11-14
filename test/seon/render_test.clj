@@ -272,7 +272,7 @@
   ;; as reaching a process and was left out of bin/prove. A render runs no process
   (let [db (src-program)
         in (seon.fx/inputs (seon.config/checkout))
-        g (runner/reach-graph-of db (:data-refs in) (ts/kept-program-store))
+        g (runner/reach-graph-of db (:data-refs in) (ts/kept-program-store) (seon.fx/tree-id (seon.config/checkout)))
         idx (seon.program/graph-index g in
                                       {"agent" '[seon.render.ui/agent] "root" '[seon.render.ui/root] "root-ctx" '[seon.render.ui/root-ctx] "render-ctx" '[seon.render.ui/render-ctx]})]
     (is (= {"agent" false "root" false} (update-vals idx :process?))
@@ -1617,7 +1617,9 @@
   (ts/test-branch!
     (fn [_ conn]
       (let [[st _ [e0 e1]] (debug-state conn)
-            db (d/db-with (:main-db st) [{:seon.agent/key "root" :seon.agent/branch :main/task-request-root}])
+            db (d/db-with (:main-db st) [{:db/id "root" :seon.agent/key "root" :seon.agent/branch :main/task-request-root}
+                                         ;; root's own requests: its page shows its agent's calls, never another's on its branch
+                                         [:db/add e0 :seon.model-call/agent "root"] [:db/add e1 :seon.model-call/agent "root"]])
             st (assoc st :main-db db :branches {[:debug :root] {:db db}} :context {:text "{:seon-root \"the whole system\"}" :tokens 7})
             l (#'p/debug-value st [:debug :root])
             ids (set (map :id (:seon.render/units l)))]
