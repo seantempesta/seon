@@ -109,10 +109,15 @@ print "built $(ls -l target/seon | awk '{print $6, $7, $8}')"
 # the stop and the start are one act in a session of its own (setsid, as bin/held --detach): this process can end
 # between them (its caller's session gone, which ends its process group), and a stop with no start leaves the
 # system down. It runs to its end whoever waits on it; its output is a file, which survives this process too
-restart=target/update-restart.log
-perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' zsh -c 'bin/system stop >/dev/null 2>&1; bin/system start "$@"' _ "$@" > $restart 2>&1 &
+# The stop is root's own: it admits nothing new and ends what is in flight by its own bounds (seon.system/stop!), then exits;
+# past :seon.config.root/stop-ms it answers STOP OVERRAN with status 3, so this never hangs. Its status is kept: the system is
+# started either way (never left down), and an overran stop makes this update a failed one, with the stop's evidence
+restart=target/update-restart.log stopped=target/update-stop.log
+rm -f $stopped.status
+perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' zsh -c 'bin/system stop > target/update-stop.log 2>&1; print $? > target/update-stop.log.status; bin/system start "$@"' _ "$@" > $restart 2>&1 &
 wait $! || fail "the standing root did not start (runs/root.log, $restart)"
 out=$(<$restart)
+[[ $(<$stopped.status) != 3 ]] || { print -r -- "UPDATE FAILED: $(grep -m1 'STOP OVERRAN' $stopped) (the system was started again)"; exit 1 }
 # a root whose binary is another program than its main's forks no agent: the update's last line says so, with its acts
 stale=$(print -r -- "$out" | grep -m1 '^ROOT STALE BINARY')
 [[ -n $stale ]] || print -r -- "${out##*$'\n'}"

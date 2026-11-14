@@ -744,7 +744,8 @@
   resumed branch's older one) is the graph held updated to it (seon.program/reach-update, in
   either direction), never built again: the graph held is the one this process was forked
   with, main's, kept by the fork server (:graph) with its index (seon.program/reach-indexed), and built
-  here only when there is none or its :data-refs are not inputs'. The graph held keeps its index
+  here only when there is none, its :data-refs are not inputs', or base is no store's value (no commit: a test's world, graphed
+  whole at its own size). The graph held keeps its index
   across the update, so the base's is the answers of the tests the move touched, never of every test
   (docs/source.md#tests-run-by-reach)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.program/inputs] :map]}
@@ -755,6 +756,9 @@
     (if (and w (first at) (= at w-at) (= inputs (:inputs w)))
       (:value w)
       (let [g (cond (not (and g0 (= (:data-refs inputs) (:data-refs g0)))) (program/reach-graph base (:data-refs inputs))
+                    ;; a db no store commit names (a test's world) shares nothing with the graph held: graphed whole, at its own
+                    ;; size, never main's whole program updated down to it (40M ticks in a test child)
+                    (nil? (first at)) (program/reach-graph base (:data-refs inputs))
                     (and (first at) (= at w-at)) g0
                     :else (program/reach-update g0 base))
             g (program/reach-indexed g inputs)
@@ -1279,10 +1283,8 @@
         ;; and as a test process: a private function's contract is checked on each call here, whatever its agent's
         ;; setting (the owner, 2026-11-10: "Private helpers: tests only"; docs/checks.md#contracts-armed-at-definition)
         (contract/check-private! true)
-        ;; nor the agent's walk: a fork holds its reactions on @ctx, which would run at a test's every write of a
-        ;; record of its own (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
-        (some-> (:walk @state) render/dispose-walk!)
-        (swap! state #(-> % (dissoc :walk) (assoc :mode :test :evaluating false)))
+        ;; nor the agent's walk, a value its test has no use for (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
+        (swap! state #(-> % (dissoc :walk :walk-whole?) (assoc :mode :test :evaluating false)))
         ;; the test's own working directory: what a test writes relative to it is this run's, removed
         ;; when the child has ended (docs/failure-points.md, a directory walk)
         (let [run-dir (fx/run-dir (lib/c-getpid))] (.mkdirs (java.io.File. ^String run-dir)) (lib/c-chdir run-dir))
