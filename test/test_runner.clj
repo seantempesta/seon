@@ -161,6 +161,13 @@
               (catch Throwable t (when-not (= :branch-already-exists (:type (ex-data t))) (throw t))))
          (finally (d/delete-branch! conn stage)))))
 
+(defn kept-report?
+  "Is clojure.test report m one a run keeps with its test's result: a failing assertion, or a cost proof that passed by its waiver
+  (its verdict :accepted, seon.cost/judge): its rows are the numbers its waiver is read by, kept on the green's verdict (:cost), so
+  the waiver is read without being taken off. See docs/cost.md#an-accepted-overrun-and-its-ratchet."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [m] (boolean (or (#{:fail :error} (:type m)) (and (= :pass (:type m)) (get-in m [:actual :verdict :accepted])))))
+
 (defn program-db
   "The db holding :seon.config.source/dirs of the checkout at root as program facts (seon.source: analyzed,
   not run), kept in the LMDB store at store on a branch named by root's git tree id (seon.fx/
@@ -534,7 +541,9 @@
                                                (:seon.test/output x) (print (:seon.test/output x))
                                                (:seon.test/report x) (let [m (:seon.test/report x)]
                                                                         ;; a failing assertion, as the results keep it (seon.proofs/failures): the agent's one reading of a report
-                                                                        (when (#{:fail :error} (:type m))
+                                                                        ;; and a cost proof that passes by its waiver (its verdict :accepted): its rows are the numbers
+                                                                        ;; the waiver is read by, kept on its green's verdict (:cost), never only on a red's
+                                                                        (when (kept-report? m)
                                                                           (vswap! reports conj (seon.agent/test-report m (str "#'" (:test x))))))
                                                ;; a test's end, so bin/stalls never names one that finished
                                                ;; and its cost, the work it did (a green test's is read nowhere else)
