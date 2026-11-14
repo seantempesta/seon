@@ -22,6 +22,8 @@ Context runs one watched task now, random rounds after the model call's bound. O
 
 "Make all hot paths optimal and make everything that can be into hot paths. No more 4 ways of doing the same thing. 2 ways of doing the same thing even has to justify itself." Every job routes through its one path, each path has one specialist who holds it to its lower bound, and a second way is a problem until justified. Stated in [AGENTS.md](../AGENTS.md#4-the-principles-everything-is-data-flowing-through-the-system).
 
+
+Then: "I think the perf readings are mostly a canary in the coal mine for us. If we get a crazy number like 10 seconds to write a transaction and we know it should be ms we don't allow it. Hot paths should make it so damn easy to do the right thing that agents want to use it." A cost far over its lower bound stops the work (AGENTS §3, 10x); a hot path's API is the easiest way to do its job.
 ### After boot, only Flow; one specialist ports every holdout
 
 "No timers. We must take anything that needs a timer and port the code to work with flow." Then: "Well no timers once the system has booted I guess. Once the flow system is up and running the core platform is there then we must only use flow based systems for stateful processes. If we still have holdouts we need to port them. We've done enough implementations an agent should specialize in their use and handle all related work requests." Boot is the one exception; after it, every stateful process and every wait is a Flow proc, its deadline a message from the one clock (`seon.step/put-after!`). Runtime, the Flow specialist, owns every port. Stated in [the plan](plan.md#the-order).
