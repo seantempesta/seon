@@ -897,7 +897,11 @@
           planned (let [f (io/file out "tests.edn")] (when (.isFile f) (:tree (edn/read-string (slurp f)))))]
       (cond (not (zero? (:exit made))) (fail (str "bin/worktree --at " at " " base " exited " (:exit made)) made)
             (nil? planned) (fail (str "the base's runner made no plan in " out " (exit " (:exit r) ")") r)
-            (not= tree planned) (fail (str "the base's runner planned tree " planned ", not the base's " tree) r)))
+            ;; the evidence of what moved the checkout's tree off its commit's: the files git sees changed or untracked in it (a
+            ;; red seen only under concurrent proves, deps' and runtime's lands 2026-11-14, green alone)
+            (not= tree planned) (fail (str "the base's runner planned tree " planned ", not the base's " tree "; the checkout's files off its commit: "
+                                           (str/trim (:out (lib/sh "git" "-C" at "status" "--porcelain" "--untracked-files=all"))))
+                                      r)))
     (finally (remove-checkout! at))))
 
 (defn base-program
