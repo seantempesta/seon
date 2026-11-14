@@ -16,18 +16,15 @@
     (.join spin)
     (is (= [:forked {:exit 3}] r) (str "answered " r))))
 
-(def ^:private hold-in-a-plain-read
-  ;; a thread named "holder" blocked in a read(2) that is not collect-safe: it never parks, so it holds every fork
-  (scm/eval-string "(let ([rd (foreign-procedure \"read\" (int uptr size_t) ssize_t)])
-                      (lambda (fd) (rd fd (foreign-alloc 16) 16)))"))
-
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-forks-wait-ends-at-its-bound-naming-its-holders
   ;; task seon.lib/a-forks-wait-ends-at-its-declared-bound-naming-its-holders: a thread in a C call that is not
   ;; collect-safe never parks, and a fork beside it waited for good (a test child, 2026-11-14). fork! waits at most
   ;; :seon.config.agent/fork-wait-ms and answers refused naming the thread that held it. The estimate: the bound's
   ;; wait parked (no ticks) and one walk of the thread list, a few million ticks.
-  (let [[rfd w] (sock/socketpair) started (promise)
-        holder (doto (Thread. #(do (deliver started true) (hold-in-a-plain-read rfd)) "holder") (.setDaemon true) (.start))]
+  ;; the holder runs Scheme and never parks (it holds every fork), reaching safe points (a holder blocked in a plain C call
+  ;; would wedge a collection meanwhile, and this test with it)
+  (let [stop (atom false) started (promise)
+        holder (doto (Thread. #(do (deliver started true) (loop [] (when-not @stop (recur)))) "holder") (.setDaemon true) (.start))]
     (try
       @started
       (let [r (lib/fork! {:child #(lib/c-exit 3) :parent (fn [pid] [:forked (lib/wait-status pid)]) :refused (fn [m] [:refused m])})
@@ -36,8 +33,7 @@
         (is (= (seon.config/value :seon.config.agent/fork-wait-ms) bound-ms))
         (is (<= 2 active-threads))
         (is (some #(= "holder" (:name %)) holders) (str "holders " holders)))
-      ;; the holder's read ends, so no later fork in this process waits on it
-      (finally (sock/write-line! w "go") (.join holder) (lib/c-close rfd) (lib/c-close w)))))
+      (finally (reset! stop true) (.join holder)))))
 
 (deftest ^{:seon.test/estimate {:ticks 60000000}} a-shell-call-answers-its-output-or-says-why-not
   ;; seon.lib/sh, the one shell, answered exit 0 with no output (`git status`, 2026-11-12): Jolt's pipe port read errno in a
@@ -203,3 +199,14 @@
         (is (contains? held kw) "and what it was given to keep")
         (is (not-any? held [r xr xw kr]) (str "and none of its parent's other descriptors: held " (pr-str held))))
       (finally (run! lib/c-close [r xr xw kr kw])))))
+
+(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["sh"]} a-shell-call-that-cannot-read-its-output-is-a-typed-error-naming-the-command
+  ;; a shell call answers its whole output, or a typed error naming the command, never an empty answer; the read failure is
+  ;; raised as Jolt's pipe port raises it since a5a3a89d (a Scheme error naming the errno). See docs/failure-points.md
+  (is (= {:exit 0 :out "late\n" :err ""} (lib/sh "sh" "-c" "sleep 0.05; echo late")) "a child that writes after a wait answers its text")
+  (let [e (with-redefs [clojure.java.shell/sh (fn [& _] (scm/eval-string "(error 'read \"failed: errno 9\")"))]
+            (try (lib/sh "git" "status" "--porcelain=v2" :dir "/tmp") nil (catch Throwable e e)))
+        d (ex-data e)]
+    (is (= :seon.lib/shell-unanswered (:seon.error/type d)) (str "typed, not " (pr-str (type e)) " " (ex-message e)))
+    (is (= ["git" "status" "--porcelain=v2"] (:seon.lib/command d)) "names the command, its options apart")
+    (is (str/includes? (str (:seon.error/message d)) "errno 9") "says why: the read's own words")))

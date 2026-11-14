@@ -122,6 +122,7 @@ A test runs only when something it reaches changed since it was last green, in a
 - every schema entry a reached contract names, and what that entry's form names on (the renders its properties declare: `seon.program-test/a-render-a-schema-entry-declares-is-in-its-tests-reach`);
 - the checkout's inputs with no program facts (`:env`, ```seon.fx/inputs```) and the values of the config keys its reach reads (```seon.program/config-reads```, ```seon.fx/config-input```), below;
 - the vars data names that root resolves by name (`seon.fx/declared-refs`: system.edn's procs);
+- every var of a namespace a reached form enumerates by a literal name (`(ns-interns 'n)`, `ns-publics`, `ns-map`: recorded as `:seon.ns-vars/n`), so a var added there moves the digest (`seon.program-test/a-namespace-enumerated-by-a-test-is-reached-whole`);
 - the whole tree only when what it reaches reads the checkout's files (```seon.program/file-readers```: `slurp`, `file-seq`, `io/resource`, `seon.fx/read-source`, `seon.doc/load-dir-tx`; ```seon.program/tree-readers```).
 
 **A green records what its run read** (```seon.proofs/reads-key```): the functions it called (```seon.profile/reads```), and, until reads of config, files and schema are recorded as they happen, the reads besides code its reach digest takes (graph-index's `:reads`), each at its digest in the plan's reads index (```seon.program/reads-index```), beside the verdict as `reads.edn`. A later plan reuses the green while every read still has its digest, whatever else moved (```seon.proofs/read-digests```). `bin/test`'s plan hands its shards the reads index and each test's static reads (```test-runner/write-reads!```).
@@ -196,7 +197,7 @@ The store is the source of the task files too (owner, 2026-11-14), so a task mad
 
 ## What isn't in the program yet
 
-What `:seon.config.source/dirs` names moves by branch, with the wiki beside it; a `spit` writes the disk, which a branch holds nothing of until an import (task `seon.source/seon-files-move-by-branch`).
+What `:seon.config.source/dirs` names moves by branch, with the wiki beside it; a `spit` writes the disk, which a branch holds nothing of until an import (task `seon.source/the-trees-commit-merges-three-way`).
 
 ## The next generation
 

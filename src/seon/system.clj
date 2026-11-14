@@ -639,7 +639,8 @@
                     :tests (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m)) (:names m) (assoc :names (:names m)) (:mode m) (assoc :mode (:mode m)) (:plan? m) (assoc :plan? true) (:process? m) (assoc :process? true) (:items m) (assoc :items (:items m))
                                             ;; a session's or a landing's checkout: its granted items' test children read its files and its process store
                                             (:checkout m) (assoc :checkout (:checkout m))
-                                            ;; the test service's batch: its test child and what that starts carry it (seon.prove/held-processes)
+                                            ;; the batch's tag: its test child and what that starts carry it, so the :process owner reads
+                                            ;; what each running batch holds (seon.fx/held-processes)
                                             (:seon.prove/batch m) (assoc :seon.prove/batch (:seon.prove/batch m))
                                             (get-in st [:view :agents id :task]) (assoc :task (get-in st [:view :agents id :task])))
                     :judge {:op :judge}
@@ -679,7 +680,7 @@
               (if-not (and checkout (:branch (:source st)))
                 (reply! st o p (contract/error :seon.system/no-gate-checkout #'seon.system/ext-op "this root has no checkout to run process tests on (:seon.config.source/gate-checkout, or a source root)"))
                 (let [[st rid] (pend st p :gate nil)]
-                  (step/out! o :to-writer {:op :merge-candidate :branch (:branch m) :data-attrs #{} :dest {:gate rid :tests (:tests m) :base (:base m) :repo checkout :prio (:prio m 0)}})
+                  (step/out! o :to-writer {:op :merge-candidate :branch (:branch m) :data-attrs :all :dest {:gate rid :tests (:tests m) :base (:base m) :repo checkout :prio (:prio m 0)}})
                   st)))
       ;; the test service (seon.prove): the request goes to its proc, the caller (a session, or an
       ;; agent's turn through its proc) is answered when the run it joined ends
@@ -701,7 +702,7 @@
       :fx (let [owner (keyword "fx" (name (:kind m)))]
             (if (contains? (graph/fx-owners (get-in st [:system :procs])) owner)
               (let [[st rid] (pend st p :fx nil)]
-                (step/out! o [owner :ask] {:req (:req m) :prio 0 :dest {:rid rid}})
+                (step/out! o [owner :ask] (merge {:prio 0} (select-keys m [:prio :seon.fx/class :seon.fx/processes :seon.prove/askers]) {:req (:req m) :dest {:rid rid}}))
                 st)
               (reply! st o p (contract/error :seon.fx/unknown-kind #'seon.system/ext-op (str "no effect kind " (:kind m))))))
       :fs (let [[st rid] (pend st p :fs nil)]
@@ -806,14 +807,19 @@
     (case (:ev m)
       :forked (do (step/out! o :events (step/event {:type :spawned :agent (:agent m) :pid (:pid m) :fork-ms (:fork-ms m)}))
                   (when (stopped-statuses (get-in st [:view :agents (:agent m) :status])) (lib/kill! (:pid m) 9))
-                  (-> st (set-agent o (:agent m) {:pid (:pid m)})
+                  ;; the most processes this root held at once: itself, its boot fork server and its live agents (a fold of
+                  ;; their forks and exits, read with no ps), said on its stop (task seon.lib/a-process-reports-the-most-processes-it-held-at-once)
+                  (-> st (update ::live (fnil conj #{}) (:pid m))
+                      (as-> st (update st ::peak (fnil max 2) (+ 2 (count (::live st)))))
+                      (set-agent o (:agent m) {:pid (:pid m)})
                       (view! update-in [:fork-server :agents-forked] (fnil inc 0))
                       (view! update-in [:stats :fork-ms] lib/push-window (:fork-ms m) 500)
                       (to-agent o (:agent m) {:op :forked :pid (:pid m)})))
       ;; the agent the exit is of: the death waiting on its pid, a live agent with it, or the last
       ;; one to end with it and no exit yet (stopped: none waits); never an entry whose exit is
       ;; recorded, whose pid the OS has given again
-      :exit (let [mine (filter (fn [[_ a]] (= (:pid m) (:pid a))) (get-in st [:view :agents]))
+      :exit (let [st (update st ::live disj (:pid m))
+                  mine (filter (fn [[_ a]] (= (:pid m) (:pid a))) (get-in st [:view :agents]))
                   st (if-let [aid (or (first (get-in st [::dying (:pid m)]))
                                       (some (fn [[aid]] (when (get-in st [:agents aid]) aid)) mine)
                                       (some->> (remove (fn [[_ a]] (:exit a)) mine) seq (apply max-key (fn [[_ a]] (:ended-ms a 0))) key))]
@@ -865,7 +871,7 @@
       :prove-answer (deliver-rid st o (:rid m) (:r m))
       ;; a verdict as it lands, for the run keyed :key: on root's events, which a streaming :prove writes as a line
       :prove-verdict (do (step/out! o :events (step/event (-> m (dissoc :op) (assoc :type :prove-verdict)))) st)
-      ;; a run's items held for the machine's load, and resumed (seon.prove/grant): its streaming client says so
+      ;; a run's items held for the machine's load, and resumed (the :process owner, seon.fx/admits?): its streaming client says so
       :prove-held (do (step/out! o :events (step/event (-> m (dissoc :op) (assoc :type :prove-held)))) st)
       ;; the render proc's health of main (:health): its value, held at the counts this api's fold put it at
       ;; (the fold it was asked with, and which it keeps), so it is the same count as root's page's
@@ -893,7 +899,7 @@
                                     (update-in [:stats :batched-tx] (fnil + 0) (:n-tx m)))))
       ;; the end of the flow: the writer has drained; the fork server goes last
       :drained (do (step/out! o :to-fs {:op :shutdown}) st)
-      :fs-down (do (some-> (:shutdown-p st) (deliver {:drained true :fork-server (:pid m) :ended (:ended m)})) st)
+      :fs-down (do (some-> (:shutdown-p st) (deliver {:drained true :fork-server (:pid m) :ended (:ended m) :peak-processes (::peak st 2)})) st)
       ;; a defect in a root proc: recorded as data (its error map when it carries one), and
       ;; the message the step took answered with it (Flow's catch dropped the step's outputs):
       ;; the api's own throw answers every message its step took (::lost)
@@ -926,7 +932,7 @@
       ;; frame (:spoke) or its end retracts it
       :stalled (let [s (cond-> {:quiet-ms (:quiet-ms (:error m))} (get-in m [:error :last-op]) (assoc :last-op (get-in m [:error :last-op])))]
                  ;; while root stops, a stalled agent is one that does not exit on :stop: the stall, a recorded fact,
-                 ;; ends it (no clock of the stop's own: task seon.system/shutdown-and-death-are-dataflow)
+                 ;; ends it (no clock of the stop's own: task seon.system/a-stop-or-crash-resumes-from-one-resume-point-and-says-what-it-lost)
                  (cond-> (-> st (set-agent o (:agent m) {:stalled s}) (stall-task o (:agent m) s))
                    (:closing st) (to-agent o (:agent m) {:op :kill})))
       :spoke (set-agent st o (:agent m) {:stalled nil})
@@ -1745,6 +1751,18 @@
       ;; a transition's throw (init, resume: Flow names no step op): the proc stays paused for good, reading no in-port
       (and ex (nil? (::flow/op e))) (assoc :down true))))
 
+(defn- flow-report
+  "Flow's report r as the api's :error message, typed :seon.system/undeliverable, when it says an output was lost (undeliverable,
+  or dropped by a stop); nil for any other report. See docs/flow.md#the-api."
+  {:malli/schema [:=> [:cat :map] [:maybe :map]]}
+  [r]
+  (when-let [coord (or (::flow/undeliverable r) (::flow/dropped-on-stop r))]
+    ;; the coord as the error stores it: EDN that reads back, whole (seon.edn/encode, the wire's printer)
+    (let [c (sedn/encode coord)
+          msg (str "an output was lost: " c (if (::flow/dropped-on-stop r) ", dropped by a stop" ", which nothing in the graph takes"))]
+      {:op :error :pid (::flow/pid r) :message msg
+       :data (contract/error :seon.system/undeliverable #'seon.system/flow-report msg {:coord c})})))
+
 (defonce ^:private uncaught
   ;; where an error no thread, fiber or go body caught goes (uncaught!): kept under :early until this process's root listens,
   ;; which start! fails on; then root's :back, as a defect the api records on main
@@ -1871,7 +1889,9 @@
                          :cron-tick (a/chan 1) :full-run-at (cfg/value :seon.config.proofs/full-run-at)
                          :stall-ms (or stall-ms (cfg/value :seon.config.agent/stall-ms)) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1) :web-streams-buf (a/sliding-buffer (cfg/value :seon.config.web/streams-buf))
                          :prove-tree (fn [on] (prove-tree! @sys-p on))
-                         :item-workers (:workers (seon.prove/config-admission)) :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
+                         :process-workers (cfg/value :seon.config.machine/cores)
+                         ;; a test batch the :process owner admitted, asked of the agent holding its branch (the api's :tests op)
+                         :ask-tests (fn [msg] @(call! @sys-p msg)) :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
                          :web-port (cfg/value :seon.config.web/port)
                          :vectors-main-buf (a/sliding-buffer 1) :embed-batch (cfg/value :seon.config.vector/batch)
                          :embed-model (vector/model-id (cfg/value :seon.config.vector/model))
@@ -1882,11 +1902,14 @@
         _ (deliver root-procs-p built)
         g (flow/create-flow {:procs root-procs :conns root-conns :stop-timeout-ms (cfg/value :seon.config.root/flow-stop-ms)})
         _ (deliver graph-p g)
-        {root-errors :error-chan} (flow/start g)
+        {root-errors :error-chan root-reports :report-chan} (flow/start g)
         ;; Flow's error channel (every proc's, agents included) piped into :back, each defect
         ;; fed to the api as data, with the message the step took (:msg), which the api
         ;; answers; :back outlives it
         _ (a/pipe (a/pipe root-errors (a/chan 1 (map flow-error))) (:back chans) false)
+        ;; and its report channel: an output Flow could not deliver, or a stop dropped, is a problem (flow-report); the
+        ;; report chan slides at 100, so it is read, never left to lose what it says
+        _ (a/pipe (a/pipe root-reports (a/chan 1 (keep flow-report))) (:back chans) false)
         sys (merge chans {:cfg store-cfg :conn conn :graph g :t0 t0
                           :store-path path :boot boot
                           :bindings bindings
@@ -2389,7 +2412,8 @@
   First the end is a fact on main, durable (:seon.system/stopped {:boot :cause :at-ms}; cause
   :stop! unless the caller names it: :stdin-eof, :signal), so every clean end says why; a
   refused stop fact still stops root, and the answer carries it (:stop-fact-refused).
-  Answers {:stopped true :cause :drained .. :graph true|{::flow/running #{pids}} :ms}."
+  Answers {:stopped true :cause :drained .. :graph true|{::flow/running #{pids}} :ms :peak-processes}, the last the most processes
+  the root held at once (itself, its boot fork server, its live agents)."
   {:malli/schema [:function [:=> [:cat :seon.system/sys] :map] [:=> [:cat :seon.system/sys :keyword] :map]]}
   ([sys] (stop! sys :stop!))
   ([sys cause]
@@ -2403,7 +2427,7 @@
     (a/close! (:judge sys))
     ;; parked on the drain, no bound: each agent interrupted and stopped exits (seon.agent-proc/stop!), the
     ;; writer flushes, the fork server ends; one that never does is a stall, recorded (task
-    ;; seon.system/shutdown-and-death-are-dataflow)
+    ;; seon.system/a-stop-or-crash-resumes-from-one-resume-point-and-says-what-it-lost)
     (let [drained @p
           graph (flow/stop (:graph sys))]
       ;; a wait put on :judge that the stopped reconciler never took is answered here
@@ -2412,5 +2436,6 @@
       ;; the store is released and kept, whoever gave its path
       (d/release (:conn sys))
       (when (= :lmdb (:backend (:store (:cfg sys)))) (klmdb/close-env! (:store-path sys)))
-      (cond-> {:stopped true :cause cause :drained drained :graph graph :agents-left 0 :ms (lib/r2 (profile/ms-since t0))}
+      (cond-> {:stopped true :cause cause :drained drained :graph graph :agents-left 0 :ms (lib/r2 (profile/ms-since t0))
+               :peak-processes (:peak-processes drained)}
         (contract/error? fact) (assoc :stop-fact-refused fact))))))

@@ -2,7 +2,7 @@
 
 A name resolves at run time, or a Var is defined outside its definition form, only where this page names the function and its reason; `bin/laws resolution` lists every such site in `src/`.
 
-Every definition happens once, where it is defined: code names what it calls through its namespace's requires, and behaviour varies through the environment or through data. A name is resolved at run time only where data names it (a declaration, a schema's render, a cost estimate) or where the compiler's facts are read; a Var's root changes only when its contract is armed.
+Every definition happens once, where it is defined (`bin/laws defs` refuses a namespace naming one twice, since the second silently replaces the first): code names what it calls through its namespace's requires, and behaviour varies through the environment or through data. A name is resolved at run time only where data names it (a declaration, a schema's render, a cost estimate) or where the compiler's facts are read; a Var's root changes only when its contract is armed.
 
 `intern`, `alter-var-root` and `with-redefs` are code smells, not banned. A legitimate use builds vars in a namespace you own where no definition form exists (a REPL harness, a test environment), and its docstring says why. A gap in another namespace is filled in that namespace's owner.
 
@@ -35,7 +35,7 @@ The sites that resolve a name held in data to a var by design.
 - `seon.repl/defines-program?`: a form's head is resolved in its namespace, or among the REPL's names, to know a definition of the program: a lookup.
 - `seon.agent/repl-name`: a symbol nothing in its namespace resolves is looked up among the REPL's names and named qualified for Jolt's analyzer (``jolt.host/*resolve-unresolved*``, bound by `seon.repl/eval-string`): a lookup.
 - `seon.repl/shadowed`: clojure.repl helpers an agent's namespace shadows are looked up to name that var in the `:helper-shadowed` finding.
-- `seon.repl/unmapped`: a form's `ns-unmap` calls are known by resolving their head, the var gone by `ns-interns`: a lookup to record the removal.
+- `seon.repl/removal-scope`: a form's `ns-unmap` and `remove-method` calls are known by resolving their heads, and what they could remove is read before the eval (`ns-interns`, `methods`), so `seon.repl/unmapped` records what the eval removed: a lookup to record the removal.
 - `seon.main/driver!`: the check driver (`seon.check`, in `test/`, outside the release binary) is loaded from source when a check mode runs, its `-main` resolved by name.
 - `my.agent/asked`, `my.agent/no-var`, `my.agent/ns-named?`: a name an agent asks `callers`, `callees` or `source` about is read as its REPL reads it, and one that resolves to nothing answers `:my.agent/no-var`, never "no callers". A bare name is a namespace only when one of that name exists and no var of the agent's namespace resolves from it: `'seon.task` is the namespace, `'map` stays `clojure.core/map`.
 - `my.agent/help`: reads its own namespace's docstring by name.

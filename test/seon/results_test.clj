@@ -31,8 +31,8 @@
      (rec! dir {'a/t {:test 'a/t :digest "d-flip" :pass 0 :fail 1 :error 0}} {'a/t [{:type :fail :message "boom" :expected "1" :actual "2"}]})
      (let [r (get (fx/stored-results dir '{a/t "d-flip"}) "d-flip")]
        (is (:flaky r) (pr-str r))
-       (is (not (proofs/green? r)) "flaky is red, never reused as green")
-       (is (some #(= "boom" (:message %)) (:failures r)) "with the failures its red run recorded"))
+       (is (zero? (+ (:fail r) (:error r))) "flaky is no verdict, never a red that holds a landing (owner, 2026-11-14)")
+       (is (some #(= "boom" (:message %)) (:seon.proofs/red-failures r)) "with the failures its red run recorded, as the evidence"))
      (rec! dir {'a/t {:test 'a/t :digest "d-flip" :pass 1 :fail 0 :error 0}})
      (is (:flaky (get (fx/stored-results dir '{a/t "d-flip"}) "d-flip")) "a green after the red leaves it flaky"))))
 

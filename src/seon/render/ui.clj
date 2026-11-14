@@ -3,7 +3,7 @@
   the agent UI and context\"; W1's proto.render.ui). Ported from proto/web's
   proto.web.view (session L2's dashboard and L4's polish).
 
-  Every page is the render of a ctx through the one walk (seon.render/walker): root's
+  Every page is the render of a ctx through the one walk (seon.render/walk, a value kept across moves): root's
   (`root-ctx`), an agent's (`render-ctx`), each a layout of components ([f opts & children]) over
   its ctx, placed in root's chrome (`page-chrome`) as units. The render proc (seon.render.proc)
   sends a unit only when its revision moved. A value draws by its schema's declared :html render
@@ -1579,13 +1579,15 @@
                     [:span {:class "text-text-400"} line])]))]])]))))
 
 (defn system-message
-  "The agent's system message (a component over ctx and the db): the doc sections it links (:seon.agent/system), else the system prompt (seon.ctx.wire/agent-system-text), for the person a fold. See
+  "The agent's system message (a component over ctx and the db): the doc sections it links (:seon.agent/system), else the system prompt (seon.ctx.wire/agent-system-text), for the person a fold; nothing when the db holds neither. See
   docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
-  [:details {}
-   [:summary {:class "muted" :wire/for "page"} "system message"]
-   [#'markdown (wire/agent-system-text db c)]])
+  ;; a db with no system prompt (a fresh world) has no message to show
+  (when-let [t (wire/agent-system-text db c)]
+    [:details {}
+     [:summary {:class "muted" :wire/for "page"} "system message"]
+     [#'markdown t]]))
 
 (defn example
   "Example session k (a component over the db, named by its key), as the model reads it and, folded, the person: its opening, what it asked, its records by the same hiccup as the agent's own, drawn as of its last t (the session never changes after it). See

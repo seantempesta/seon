@@ -502,6 +502,7 @@
                  :leadless-section #(problems/leadless-sections db ans) :uncited-task #(problems/uncited-tasks db ans)
                  :unnamed-site #(problems/unnamed-sites db ans) :stale-section #(problems/stale-sections db ans)
                  :stale-plan #(problems/stale-plans db ans) :waived-proof #(problems/waived-proofs db ans)
+                 :hand-written-list #(problems/hand-written-lists db ans nil)
                  :unsynced #(problems/unsynced-tasks db ans (mapv :e (d/datoms db :aevt :seon.task/id)))
                  ;; the remainder: answers, report-with, health-with (and problem-unlinked inside it, over the derived rows as health hands them), and the folds
                  :fixed (let [derived (#'problems/other-derived db ans (mapv :e (d/datoms db :aevt :seon.task/id)))]
@@ -524,6 +525,10 @@
                 ;; edit and a refine's cite are seeks, no call (data, 2026-11-14: the store is the source, so every live task is judged)
                 :unsynced (+ 2 (* 4 (count (#'problems/unsynced-candidates db (mapv :e (d/datoms db :aevt :seon.task/id))))))
                 :fixed 52              ; (50 -> 52, data 11-14: this world's own store-made tasks give :unsynced rows, so problem-unlinked seeks its section, seon.db/eid, and writes its row, derived-row) answers, report-with (every recorded class), health-with (problem-unlinked over all of them, the derived rows as health hands them)
+                ;; the owner's decree (2026-11-14): per var with a form, its read (scan-form, seon.source/read-forms and the reader's two
+                ;; contracted helpers) and its walk (literal-lists), and the class's own. At import the form is read once already: keeping its
+                ;; literals there makes this a seek a var (seon.problems/a-forms-hand-made-lists-are-read-at-its-import)
+                :hand-written-list (+ 1 (* 5 (count (d/datoms db :aevt :var/form))))
                 :wrappers 2}]         ; health's and other-derived's own contracts
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
@@ -942,11 +947,13 @@
                :n "unnamed catch sites (the derived classes dominate; the recorded part is the seed's)"
                :work "report once, then the three derived reads; the sites dominate"
                :growth :linear
-               :per-n {:ns 80000 :bytes 80000 :calls 3}
+               ;; calls 3 -> 8 a site and 62 -> 91 fixed (context, 2026-11-14, the owner's hand-list decree): every var's form read and
+               ;; walked for its literal lists (scan-form, seon.source/read-forms and its two helpers, literal-lists), each site a var's form
+               :per-n {:ns 80000 :bytes 80000 :calls 8}
                ;; fixed bytes re-derived 2026-10-23 (jolt/similar-finds-helpers-by-embedding): 3.01 MB at 10,
                ;; 10.0 MB at 100, 80.2 MB at 1,000 sites; a fixed part near the smallest size's whole cost read
                ;; as steeper growth (task seon.cost/a-speedup-never-reads-as-steeper)
-               :fixed {:ns 19500000 :bytes 17500000 :calls 62}
+               :fixed {:ns 19500000 :bytes 17500000 :calls 91}
                :sizes [10 30 100]}))
 
 ;; ---- caused reads what changed (diff by value), and agrees with the full reading ---------------
@@ -1028,7 +1035,9 @@
                ;; and a row for each changed Seon var the tree holds
                ;; and 4 for :hand-written-list (context, measured 85 -> 89): its reader on base and head, and on each side the seek of
                ;; each changed var's metadata
-               :fixed {:ticks 460000 :bytes 1800000 :calls 90} ; 90: and retyped-attributes' own contract, once a read (data, 2026-11-14)
+               ;; 97 (context, 2026-11-14, the owner's hand-list decree): each changed var's form read and walked for its literal lists
+               ;; (scan-form, seon.source/read-forms, literal-lists) on base and head
+               :fixed {:ticks 460000 :bytes 1800000 :calls 97} ; 90: and retyped-attributes' own contract, once a read (data, 2026-11-14)
                :sizes [10 30 100]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
@@ -1693,6 +1702,32 @@
     (is (= [] (problems/hand-written-lists head {} #{(v 2) (v 3)})) "a component or a helper is no list")
     (is (= [] (problems/hand-written-lists (named #{(v 3)}) {} nil)) "a list that draws its parts from the pull, calling helpers, has none")
     (let [split (problems/caused-split (named #{(v 3)}) head)]
-      (is (some #(re-find #"names its parts" %) (map str (:caused split))) (str "a branch that adds one is refused done: " (pr-str split))))
-    (is (contains? seon.problems/caused-classes :hand-written-list))
-    (is (not (contains? (:seon.problems/attention (contract/properties :seon.problems/class)) :hand-written-list)) "a reason to refuse, not attention")))
+      ;; the owner, 2026-11-14 (AGENTS.md section 5): each list is shown with its owner for judgement, never refused at done
+      (is (some #(re-find #"names its parts" %) (map str (:attention split))) (str "a branch that adds one is shown it: " (pr-str split)))
+      (is (not-any? #(re-find #"names its parts" %) (map str (:caused split))) "and is not refused done"))
+    (is (contains? seon.problems/caused-classes :hand-written-list) "judged on what a branch moved")
+    (is (contains? (:seon.problems/attention (contract/properties :seon.problems/class)) :hand-written-list) "shown, never a reason to refuse")))
+
+;; See docs/health.md#a-hand-written-list: the owner's decree (2026-11-14, AGENTS.md section 5), each hand-made list shown with its
+;; owner for judgement (a dial, a patch over a missing mechanism, or a restatement of held data)
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-literal-enumeration-is-a-hand-written-list
+  ;; estimate: one small world (~2M), six forms read and walked (~50k each), the rows derived (~0.5M)
+  (let [nsym (cite-ns (world))
+        v #(symbol nsym (str "v" %))
+        srcs {1 "(defn v1 [k] (contains? #{:app.x/a :app.x/b :app.x/c} k))"
+              2 "(defn v2 [db e] (d/pull db [:app.x/a :app.x/b :app.x/c] e))"
+              3 "(def v3 [:enum :one :two :three])"
+              4 "(defn v4 [m] (select-keys m [:app.x/a :app.x/b :app.x/c]))"
+              5 "(defn v5 [] (cfg/value :seon.config.x/y))"
+              6 "(defn v6 [m] (get-in m [:a :b :c]))"
+              7 "(defn v7 [root] (git! {} root [\"rev-parse\" \"--verify\" \"HEAD\"] nil))"
+              8 "(defn v8 [k] (contains? #{::zz/a ::zz/b ::zz/c} k))"}
+        head (var-forms (world) 8 (fn [i] {:src (srcs (int i))}))
+        rows (fn [names] (mapv :evidence (problems/hand-written-lists head {} names)))]
+    (is (= [{:kind :hand-written-list :var (v 1) :members [:app.x/a :app.x/b :app.x/c]}] (rows #{(v 1)}))
+        "a set of three attributes a function tests membership in is a row naming its members, its owner the var's namespace")
+    (is (= [] (rows #{(v 2) (v 3) (v 4) (v 5) (v 6) (v 7)}))
+        "not a pull pattern, a malli enum, the keys a select takes, a config read, a path or a command's argv: each names what its call takes")
+    (is (= [{:kind :hand-written-list :var (v 8) :members [:zz/a :zz/b :zz/c]}] (rows #{(v 8)}))
+        "a form whose namespace this process never loaded is read all the same: an unloaded alias keeps its text")
+    (is (= [(v 1) (v 8)] (mapv :var (rows nil))) "the whole program's: every form on the db")))

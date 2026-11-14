@@ -3,7 +3,7 @@
   unmerged, resolve an entry. The writer does the merge (seon.merge/three-way, the one
   derivation); this branch sees main's changes only through these functions."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.fx :as fx] [seon.source :as source] [seon.config :as cfg] [seon.agent :as agent] [seon.repl :as repl] [seon.merge :as pm] [seon.stage :as stage] [seon.program :as program]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.fx :as fx] [seon.source :as source] [seon.config :as cfg] [seon.agent :as agent] [seon.repl :as repl] [seon.merge :as pm] [seon.program :as program] [seon.db :as pdb] [datahike.api :as d]))
 
 (defn merged-summary
   "A merge of main as its eval answers it (seon.render/model, the schema :seon.branch/merged): how many keys it applied, and all the rest as it is, since a
@@ -48,8 +48,7 @@
   value stays under the eval's handle."
   {:malli/schema [:=> [:cat] [:map [:ok :boolean]]]}
   []
-  (stage/stage!)
-  (let [r (agent/merge-main! #{})
+  (let [r (agent/merge-main! :all)
         db (agent/db)]
     (with-meta (assoc r :unmerged (pm/unmerged db)) {:seon.render/schema :seon.branch/merged})))
 
@@ -61,13 +60,19 @@
   (pm/unmerged (agent/db)))
 
 (defn resolve!
-  "Settle the unmerged entry of var sym (git add). With no side the branch keeps what it
-  holds now; :theirs or :base loads that side's definition (or unmaps the var when that
-  side deleted it) and records it. Answers the entries still unmerged."
-  {:malli/schema [:function [:=> [:cat :qualified-symbol] [:vector :seon.merge/entry-value]]
-                  [:=> [:cat :qualified-symbol [:enum :ours :theirs :base]] [:vector :seon.merge/entry-value]]]}
+  "Settle the unmerged entry of var sym, or of program key k (a task's: [:task \"ns/name\"]) (git add). With no side the branch
+  keeps what it holds now; :theirs or :base takes that side: a var's definition loaded (or the var unmapped when that side
+  deleted it) and recorded, a task's content written. Answers the entries still unmerged."
+  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :seon.merge/program-key]] [:vector :seon.merge/entry-value]]
+                  [:=> [:cat [:or :qualified-symbol :seon.merge/program-key] [:enum :ours :theirs :base]] [:vector :seon.merge/entry-value]]]}
   ([sym] (resolve! sym :ours))
   ([sym side]
+   (if (vector? sym)
+     (let [k sym entry (first (filter #(= k (:key %)) (pm/entries (agent/db))))]
+       (when (and entry (not= :ours side))
+         (agent/transact! (pm/content-tx (agent/db) k (get entry side))))
+       (agent/transact! (pm/resolve-tx (agent/db) k))
+       (unmerged))
    (let [k [:var sym]
          entry (first (filter #(= k (:key %)) (pm/entries (agent/db))))
          content (get entry side)
@@ -76,10 +81,12 @@
        (if-let [src (:src content)]
          (let [cur (ns-name *ns*)]
            (repl/eval-string (str "(in-ns '" nsym ")\n" src "\n(in-ns '" cur ")")))
-         (do (ns-unmap (find-ns nsym) (symbol (name sym)))
-             (stage/stage!))))
+         ;; main's side removed it: unmapped here, and its definition retracted as an eval's ns-unmap retracts it (seon.repl/removal-tx)
+         (let [db (agent/db) e (pdb/eid db :var/name sym) f (some-> e (#(d/entity db %)) :var/form :db/id)]
+           (ns-unmap (find-ns nsym) (symbol (name sym)))
+           (when f (agent/transact! (repl/removal-tx db [[sym e f]]))))))
      (agent/transact! (pm/resolve-tx (agent/db) k))
-     (unmerged))))
+     (unmerged)))))
 
 (defn changes
   "git diff main...: what this branch's merge will carry to main, the vars it added, changed

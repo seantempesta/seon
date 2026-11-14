@@ -103,6 +103,7 @@
   [:seon.config.source/tests-dir {:optional true} :seon.config.source/tests-dir]
   [:seon.config.proofs/jobs {:optional true} :seon.config.proofs/jobs]
   [:seon.config.proofs/max-workers {:optional true} :seon.config.proofs/max-workers]
+  [:seon.config.proofs/tree-files-kept {:optional true} :seon.config.proofs/tree-files-kept]
   [:seon.config.proofs/program-stores-kept {:optional true} :seon.config.proofs/program-stores-kept]
   [:seon.config.proofs/max-cores {:optional true} :seon.config.proofs/max-cores]
   [:seon.config.proofs/max-load {:optional true} :seon.config.proofs/max-load]
@@ -116,6 +117,7 @@
   [:seon.config.proofs/stall-factor {:optional true} :seon.config.proofs/stall-factor]
   [:seon.config.proofs/slow-test-ms {:optional true} :seon.config.proofs/slow-test-ms]
   [:seon.config.proofs/error-frames {:optional true} :seon.config.proofs/error-frames]
+  [:seon.config.build/inputs {:optional true} :seon.config.build/inputs]
   [:seon.config.build/jolt-compiler-options {:optional true} :seon.config.build/jolt-compiler-options]
   [:seon.config.build/jolt-cache-mb {:optional true} :seon.config.build/jolt-cache-mb]
   [:seon.config.proofs/results-dir {:optional true} :seon.config.proofs/results-dir]
@@ -145,6 +147,7 @@
   [:seon.config.proofs/tick-quantum {:optional true} :seon.config.proofs/tick-quantum]
   [:seon.config.proofs/seeds {:optional true} :seon.config.proofs/seeds]
   ;; effects and the model
+  [:seon.config.fx/bounds {:optional true} :seon.config.fx/bounds]
   [:seon.config.fx/buf {:optional true} :seon.config.fx/buf]
   [:seon.config.ai/provider {:optional true} :seon.config.ai/provider]
   [:seon.config.ai/script {:optional true} :seon.config.ai/script]
