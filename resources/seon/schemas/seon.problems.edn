@@ -114,7 +114,7 @@
                                                  [:digest {:optional true} :string] [:reported {:optional true} [:vector :qualified-symbol]]]]
  ;; a green and a red at one digest (seon.prove/flaky-problems): an input the digest misses
  :seon.proofs/flaky [:and {:description "A test green and red at one digest (seon.proofs/flaky): no verdict, a :platform problem naming what its digest misses (seon.prove/flaky-problems). See docs/merging.md#verdicts-are-a-cache."}
-                     :seon.error/base [:map [:seon.error/type [:= :seon.proofs/flaky]] [:test :qualified-symbol] [:digest :string]
+                     :seon.error/base [:map [:seon.error/type [:= :seon.proofs/flaky]] [:test :qualified-symbol] [:digest :string] [:owner :symbol]
                                        [:red-failures [:vector :seon.problems/assertion]] [:ticks {:optional true} :seon.proofs/ticks]]]
  :seon.proofs/red-failures [:vector {:description "On a flaky result, the red run's failures, kept as the evidence (seon.proofs/flaky)."} :seon.problems/assertion]
  ;; the ticks the green and the red at one digest spent (seon.proofs/flaky), on its flaky failure

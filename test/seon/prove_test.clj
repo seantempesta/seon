@@ -581,6 +581,7 @@
             [:platform :seon.proofs/flaky 'app.x-test/u "d2" {:green 1000000 :red 9000000}]] (problems o1))
         "every flaky digest is a problem naming the test, its digest and both ticks; a red alone is a red, not a problem")
     (is (clojure.string/includes? (-> (filter #(= :problem (:op %)) o1) first :error :seon.error/message) "over ten times apart") "30x apart says so")
+    (is (= 'app.x (-> (filter #(= :problem (:op %)) o1) first :error :owner)) "named for the namespace whose task file holds its work")
     (is (= [] (problems o2)) "the same digest read by the next run is not filed again")))
 
 (defn queue-of

@@ -525,7 +525,8 @@
 
 (defn flaky-problems
   "[st problems]: a :platform problem for each flaky reused report of plan r (seon.proofs/flaky: green and red at one digest),
-  once a digest (st's :flaky): its test, digest, the red run's failures and both runs' ticks, saying when they are over ten times
+  once a digest (st's :flaky): its test, its owner (the namespace whose task file holds its work), digest, the red run's failures
+  and both runs' ticks, saying when they are over ten times
   apart (the runs did different work for one input). A flaky digest is no verdict, so it holds no landing; this is where it is
   seen. See docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
@@ -533,17 +534,19 @@
   (reduce (fn [[st ps] {:keys [var] :as f}]
             (let [{:keys [green red] :as ticks} (:seon.proofs/ticks f)
                   t (some-> var (subs 2) symbol)
-                  dg (or (:digest f) (get (:digests r) t))]
+                  dg (or (:digest f) (get (:digests r) t))
+                  ;; its owner: the namespace whose task file holds the test's work (app.x-test's is app.x), as an :unsynced row names it
+                  owner (some-> t namespace (str/replace #"-test$" "") symbol)]
               (if (and (:flaky f) t dg (not (contains? (:flaky st) dg)))
                 (let [apart? (and green red (pos? (min green red)) (> (max green red) (* 10 (min green red))))]
                   [(update st :flaky (fnil conj #{}) dg)
                    (conj ps {:op :problem :class :platform
                              :error (contract/error :seon.proofs/flaky #'seon.prove/flaky-problems
-                                                    (str t " was green and red at digest " dg
+                                                    (str t " was green and red at digest " dg ", for " owner " to fix at its cause"
                                                          (if apart? (str ", with ticks " green " and " red " over ten times apart: its runs did different work for one input")
                                                              ": its result reads something its digest misses")
                                                          " (load, a cold fixture, a shared file); no verdict, never a red that holds a landing")
-                                                    (cond-> {:test t :digest dg :red-failures (vec (:seon.proofs/red-failures f))}
+                                                    (cond-> {:test t :digest dg :owner owner :red-failures (vec (:seon.proofs/red-failures f))}
                                                       ticks (assoc :ticks ticks)))})])
                 [st ps])))
           [st []] (:reused-reports r)))
