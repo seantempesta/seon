@@ -319,12 +319,14 @@
   "What an agent's test run answer ({:reports :digests :fns}, seon.agent/run-tests-forked's) ran:
   {:ran {test result} :failures {test [assertion]}}, seon.fx/write-verdicts!'s arguments. A test reused at its
   digest ran nothing, and one whose child died while it ran (a report with its :exit) has no
-  verdict: a death is unknown, and a result at a digest is reused, so it would never run again. Nor has a granted test its
+  verdict: a death is unknown, and a result at a digest is reused, so it would never run again. Nor has a test ended at its wall
+  bound (:seon.test/wall-spent): wall time reads the machine, never the test's own work. Nor has a granted test its
   child could not run (a report :not-run: seon.agent/granted-selection), which is answered red with why and never cached."
   {:malli/schema [:=> [:cat :map] [:map [:ran :map] [:failures :map]]]}
   [answer]
   (let [reports {:reports (vec (:reports answer))}
-        died (set (keep #(when (:exit %) (test-symbol (:var %))) (:reports answer)))
+        ;; a child that died, and a test ended at its wall bound, which read the machine's load, not its own work: no verdict
+        died (set (keep #(when (or (:exit %) (= :seon.test/wall-spent (:seon.error/type %))) (test-symbol (:var %))) (:reports answer)))
         reused (set (keep #(when (or (:reused %) (:not-run %)) (test-symbol (:var %))) (:reports answer)))
         cost-of (costs reports)]
     {:ran (into {} (for [[t s] (results reports) :let [dg (get-in answer [:digests t])] :when (and dg (not (died t)) (not (reused t)))]
