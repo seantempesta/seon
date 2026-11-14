@@ -3,19 +3,34 @@
   (:require [clojure.test :refer [deftest is]] [seon.lib :as lib] [seon.sock :as sock] [jolt.scheme :as scm]
             [seon.test-store :as ts] [seon.config :as config] [clojure.edn :as edn] [clojure.string :as str] [clojure.core.async] [jolt.io-poller]))
 
-(deftest a-fork-beside-a-running-thread-is-refused-and-says-how-many-run
-  ;; lib/fork! is the one spawning skeleton: a second active Chez thread breaks a forked
-  ;; child (E11/E13), so it forks nothing and answers its refused branch with the count
-  ;; the fork waits for the spinning thread to be running: under load a thread just started may not be
-  ;; active yet, and the fork beside it was a fork beside no thread (green alone, red in a busy shard)
-  (let [stop (promise) running (promise)
-        spin (doto (Thread. #(do (deliver running true) (loop [] (when-not (realized? stop) (recur))))) (.start))
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-fork-beside-a-running-thread-waits-for-it-to-park
+  ;; lib/fork! is the one spawning skeleton: a second thread running Scheme at the fork breaks the child (E11/E13), so
+  ;; jolt.host/fork-alone waits for every other thread to park, woken as each does (Chez fork_alone), then forks. The other
+  ;; thread here spins a counted amount of work and ends; the fork started beside it waits it out and forks: never a
+  ;; refusal (before, it refused, and 2-3 forks in 100 right after a timeout were refused in production's clone!). The
+  ;; estimate: the spin, 2e7 iterations at ~2 ticks, ~40M; the fork and the child's exit ~1M.
+  (let [running (promise)
+        spin (doto (Thread. #(do (deliver running true) (loop [i 0] (when (< i 20000000) (recur (inc i)))))) (.start))
+        _ @running
+        r (lib/fork! {:child #(lib/c-exit 3) :parent (fn [pid] [:forked (lib/wait-status pid)]) :refused (fn [n] [:refused n])})]
+    (.join spin)
+    (is (= [:forked {:exit 3}] r) (str "answered " r))))
+
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-fork-whose-wait-is-cancelled-says-how-many-run
+  ;; a thread that never parks is one no fork is safe beside, so the fork's wait ends only by its caller's bound
+  ;; (jolt.host/fork-alone-cancel!): the fork forks nothing and answers its refused branch with the active count. The
+  ;; spinning thread here is that bound: it cancels until the fork has answered. The estimate: the spin until the
+  ;; fork's answer, a few million ticks.
+  (let [answered (promise) running (promise)
+        spin (doto (Thread. #(do (deliver running true)
+                                 (loop [] (when-not (realized? answered) (jolt.host/fork-alone-cancel!) (recur)))))
+               (.start))
         _ @running
         r (lib/fork! {:child #(lib/c-exit 3) :parent (fn [pid] [:forked pid]) :refused (fn [n] [:refused n])})]
-    (deliver stop true)
+    (deliver answered true)
     (.join spin)
     (is (= :refused (first r)) (str "answered " r))
-    (is (<= 2 (second r)) (str "active threads " (second r)))))
+    (is (<= 1 (second r)) (str "active threads " (second r)))))
 
 (def ^:private park-in-a-read
   ;; a raw Chez thread (no Jolt lock taken to start it) blocked in a collect-safe read of fd
