@@ -952,17 +952,27 @@
                             (lib/wait-status pid))}))
    "memory-gauge"
    ;; the largest block a test allocates (one process, no fan-out: docs/machine.md#processes); Chez keeps a
-   ;; bytevector this large in place (a large object is never copied by a collection)
-   #(let [before (lib/real-mb)
-          block (byte-array (* 64 1024 1024))]
-      ;; bytes macOS cannot compress: one byte repeated was compressed under the machine's pressure, and the
-      ;; charge read 206 MB of the 300 written (a 300 MB block then; 64 MB resolves above the gauge's noise) (run 29's gate, 2026-10-30)
-      (.nextBytes (java.util.Random. 42) block)
+   ;; bytevector this large in place (a large object is never copied by a collection). Each reading window
+   ;; holds only page writes: Jolt sizes its nursery from the share of wall time spent collecting, so a
+   ;; window with collections in it read what the machine's load did to the rest of the heap (Random's
+   ;; nextBytes over the block ran 61 collections, and read 49.7 MB of 64 under a land's load). One
+   ;; collection runs in it, the block's own trip, counted in bytes, after a full one left nothing to free.
+   ;; Random bytes, which macOS cannot compress (one byte repeated was compressed under pressure: 206 MB of 300)
+   #(let [mb (* 1024 1024)
+          src (byte-array mb)
+          _ (.nextBytes (java.util.Random. 42) src)
+          _ (jolt.host/gc-full!)
+          g0 (jolt.host/gc-count)
+          before (lib/real-mb)
+          block (byte-array (* 64 mb))]
+      (dotimes [i 64] (System/arraycopy src 0 block (* i mb) mb))
       (let [held (lib/real-mb)
+            collections (- (jolt.host/gc-count) g0)
+            ;; the child writes one byte of each of 8 MB's pages: each is copied, and charged to it alone
             child (in-child-bounded (fn [] (let [b0 (lib/real-mb)]
-                                          (doseq [i (range 0 (* 8 1024 1024) 16384)] (aset block i (byte 1)))
-                                          (< 7 (- (lib/real-mb) b0) 20))))]
-        {:before before :held held :child child :after (lib/real-mb) :kept (aget block 0)}))
+                                          (dotimes [p 512] (aset block (* p 16384) (byte 1)))
+                                          (< 7.9 (- (lib/real-mb) b0) 9))))]
+        {:before before :held held :collections collections :child child :after (lib/real-mb) :kept (aget block 0)}))
    "touch-gauge"
    ;; a parent holds 200 MB it wrote; one child only reads every page, another writes every page. Each
    ;; sends its footprint growth and the machine's drop in free plus inactive MB (lib/sysmem) on a
@@ -972,12 +982,16 @@
           _ (java.util.Arrays/fill block (byte 7))
           [r w] (sock/socketpair)
           touch (fn [write?]
-                  (let [pid (lib/fork! {:keep #{w}
+                  ;; a collection in the child copies heap pages and charges them to it: one in the parent first leaves
+                  ;; the child's few small allocations far from a trip
+                  (let [_ (jolt.host/gc-full!)
+                        pid (lib/fork! {:keep #{w}
                                         :child (fn []
                                                  (let [f0 (lib/real-mb) m0 (:available-mb (lib/sysmem))
                                                        sum (volatile! 0)]
-                                                   (doseq [i (range 0 (* mb 1024 1024) 16384)]
-                                                     (if write? (aset block i (byte 1)) (vswap! sum + (aget block i))))
+                                                   ;; dotimes, not a seq: the window allocates nothing (the memory-gauge case)
+                                                   (dotimes [p (* mb 64)]
+                                                     (let [i (* p 16384)] (if write? (aset block i (byte 1)) (vswap! sum + (aget block i)))))
                                                    (sock/write-line! w (pr-str {:charged (- (lib/real-mb) f0)
                                                                                 :machine-drop (- m0 (:available-mb (lib/sysmem)))
                                                                                 :sum @sum}))
