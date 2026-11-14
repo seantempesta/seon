@@ -252,6 +252,8 @@
  ;; the api proc's state keys (seon.system; keys-schemas sweep): in the proc's memory, never stored. A caller is a promise or a proc's reply route {:route :tag}
  :seon.system/backing [:map-of {:description "The agents going back to an earlier point (back!), each with its caller and the branch asked for."} :keyword [:map [:p [:or :seon.host/promise :map]] [:branch :seon.db/branch]]]
  :seon.system/busy [:set {:description "The agents with an eval in flight: the stall check's set (a gone one never)."} :keyword]
+ :seon.system/live [:set {:description "The pids of the agents a root forked and has not seen exit: what its peak counts."} :seon.lib/pid]
+ :seon.system/peak [:int {:min 2 :description "The most processes a root held at once: itself, its boot fork server and its live agents, said on its stop."}]
  :seon.system/dying [:map-of {:description "A killed agent's process by pid, with the agent, its end as it will be recorded, and the requests it died in, until the fork server reports its exit."} :seon.lib/pid [:tuple :keyword :map :any]]
  :seon.system/errors [:map-of {:description "The error occurrences folded by cause (seon.error/fold), each cause's entry, until flushed to the store."} :any :seon.error/entry]
  :seon.system/errors-dirty [:boolean {:description "True when the folded errors hold an entry not yet written to the store."}]
@@ -290,6 +292,8 @@
  :seon.contract/raw [:and {:description "In a var's metadata, the fn the var held before instrument! wrapped it; a var with it has its source read from the recorded form."} :seon.host/fn]
  :seon.contract/checked-at [:= {:description "In a var's metadata, :definition when its contract is checked from the definition on."} :definition]
  :seon.contract/var [:qualified-symbol {:description "On a contract error, the var whose contract was refused."}]
+ :seon.lib/command [:vector {:description "A shell command as run: the program and its arguments, its options (:in, :dir, :env) apart."} :string]
+ :seon.lib/shell-unanswered [:and {:description "A shell call that could not answer its child's output: a pipe whose read failed (Jolt raises its errno) or a command that could not start (seon.lib/sh)."} :seon.error/base [:map [:seon.error/type [:= :seon.lib/shell-unanswered]] [:seon.lib/command :seon.lib/command]]]
  :seon.lib/sysmem-refused [:and {:description "The error when the OS refuses the machine's memory figures (host_statistics64)."} :seon.error/base [:map [:seon.error/type [:= :seon.lib/sysmem-refused]]]]
  :seon.fork-server/not-single-threaded [:and {:description "The error data when the fork server cannot fork because root boots with more than one thread: how many are active."} :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/not-single-threaded]] [:active-threads :int] [:holders {:optional true} [:maybe [:sequential [:map [:id :int] [:name :string]]]]]]]
  :seon.warm/tidy [:= {:description "The name of the held task the warm boot makes to pull a var's refs, so a first pull is warm."} :seon.warm/tidy]
