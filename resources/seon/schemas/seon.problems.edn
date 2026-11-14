@@ -155,7 +155,6 @@
  ;; ends :error with the value's head, and the agent goes on (seon.agent/child-codec)
  :seon.test/unreadable-line [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/unreadable-line]]]]
  ;; a test that never returned within its wall bound (seon.agent/wall-bound-ms): ended after its evidence, Jolt's dump of every fiber
- :seon.test/wall-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/wall-spent]] [:test :string] [:bound-ms pos-int?] [:dump :string]]]
  :seon.test/deadlock [:and {:description "A test whose child could never move again (Jolt's quiescence event, owed nothing by its agent): its verdict, red, with every fiber's dump (docs/testing.md#a-test-waits-without-a-clock)."} :seon.error/base [:map [:seon.error/type [:= :seon.test/deadlock]] [:test :string] [:dump :string]]]
  ;; the OS refused the thread that ends a process with its starter (seon.lib/end-with!)
  :seon.lib/starter-unwatched [:and :seon.error/base [:map [:seon.error/type [:= :seon.lib/starter-unwatched]] [:pid [:maybe :int]]]]

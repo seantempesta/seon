@@ -2697,14 +2697,14 @@
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 2}} a-test-that-waits-for-good-is-ended-by-a-bound-as-its-own-error
   ;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a test that waits for good (here after work on core.async's thread pool,
   ;; whose idle worker once kept a quiescence check from ever firing) is ended by its wall bound: ten times its estimate at the slowest
-  ;; measured rate (~2 s for the 30,000 ticks it states: an a/thread call, then a wait), its dump first, the typed :seon.test/wall-spent its own :error. Replaces the
+  ;; measured rate (~2 s for the 30,000 ticks it states: an a/thread call, then a wait), its dump first, typed as its own :error (now its deadlock, seon.agent/child-quiescent!). Replaces the
   ;; quiescence end, which could not tell a deadlock from a wait on a peer. Estimate: one agent eval and one test child's run of one
   ;; test, a few million ticks of the test process
   (let [t 'seon.problems-test/a-test-that-waits-for-good-after-an-a-thread
         write "(do (in-ns 'seon.problems-test) (clojure.test/deftest ^{:seon.test/estimate {:ticks 30000}} a-test-that-waits-for-good-after-an-a-thread (clojure.test/is (= 1 (clojure.core.async/<!! (clojure.core.async/thread 1)))) (let [p (promise)] (clojure.test/is (= 1 @p)))) (in-ns 'user) :ok)"
         [_ proved] (in-agent (fn [_] [write "(let [r (my.agent/prove)] {:proofs (:proofs r) :error (:error r) :failures (mapv (juxt :seon.error/type :message) (filter #(= :error (:type %)) (:reports r)))})"]) {:proofs #{t}})]
     (is (= {t :error} (:proofs (:value proved))) (pr-str proved))
-    (is (some #(#{:seon.test/deadlock :seon.test/wall-spent :seon.test/ticks-spent} (first %)) (:failures (:value proved))) (str "ended by its deadlock or a bound, typed: " (pr-str proved)))))
+    (is (some #(#{:seon.test/deadlock :seon.test/ticks-spent} (first %)) (:failures (:value proved))) (str "ended by its deadlock or a bound, typed: " (pr-str proved)))))
 
 ;; Estimate: one agent eval and one test child's run of one test that parks at once; its deadlock told by Jolt as soon as nothing can
 ;; move (no clock): a few million ticks of the test process. The inner test states no estimate (the config's test-ticks), as a child's
@@ -2712,7 +2712,7 @@
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 2}} a-test-that-can-never-move-again-is-its-own-deadlock
   ;; docs/testing.md#a-test-waits-without-a-clock: a test that waits on what nothing will ever give it ends by its child's quiescence
   ;; (seon.agent/child-quiescent!), the typed :seon.test/deadlock its own red, with every fiber's dump: a verdict, never a wall bound.
-  ;; Red before: no handler, so it ran to its wall bound and was no verdict (:seon.test/wall-spent)
+  ;; Red before: no handler, so it ran to its wall bound and was no verdict
   (let [t 'seon.problems-test/a-test-that-parks-on-nothing
         write "(do (in-ns 'seon.problems-test) (clojure.test/deftest a-test-that-parks-on-nothing (clojure.test/is (= 1 (clojure.core.async/<!! (clojure.core.async/chan)))))  (in-ns 'user) :ok)"
         [_ proved] (in-agent (fn [_] [write "(let [r (my.agent/prove)] {:proofs (:proofs r) :failures (mapv (juxt :seon.error/type :message) (filter #(= :error (:type %)) (:reports r)))})"]) {:proofs #{t}})]
