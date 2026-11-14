@@ -557,6 +557,55 @@
                       (when (some #{(str "branch " ref)} ls) path)))
         (str/split (git! {} dir ["worktree" "list" "--porcelain"] nil) #"\n\n")))
 
+(defn- tree-commit
+  "The commit, by git's plumbing in an index of its own (no tree's files touched), of files ({path text}, modes {path mode}) on
+  parent's tree with message: its sha. See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat :string [:map-of :string :string] :string [:map-of :string :string] [:maybe [:map-of :string :string]] :string] :string]}
+  [dir env parent files modes message]
+  (let [gp (git! {} dir ["rev-parse" "--git-path" (str "seon-index-" (lib/c-getpid))] nil)
+        index (if (str/starts-with? gp "/") gp (str dir "/" gp))]
+    (try
+      (git! {"GIT_INDEX_FILE" index} dir ["read-tree" parent] nil)
+      (doseq [[path text] (sort files)]
+        (git! {"GIT_INDEX_FILE" index} dir ["update-index" "--add" "--cacheinfo" (str (get modes path "100644") "," (git! {} dir ["hash-object" "-w" "--stdin"] text) "," path)] nil))
+      (git! env dir ["commit-tree" (git! {"GIT_INDEX_FILE" index} dir ["write-tree"] nil) "-p" parent "-m" message] nil)
+      (finally (.delete (java.io.File. ^String index))))))
+
+(defn- tree-refusal
+  "Why the worktree wt can't take a commit of paths, or nil: a change staged there that its HEAD does not hold, or a file to
+  write that differs there from HEAD (an edit of the tree's own, never overwritten). See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat :string [:vector :string]] [:maybe :seon.error/base]]}
+  [wt paths]
+  (let [staged? (not (zero? (:exit (git-run {} wt ["diff-index" "--cached" "--quiet" "HEAD" "--"] nil))))
+        edited (when (seq paths)
+                 (not-empty (str/trim (git! {} wt (into ["status" "--porcelain" "--untracked-files=all" "--"] paths) nil))))]
+    (cond
+      staged? (error #'seon.fx/git-commit :seon.fx/io-error (str "refused, nothing committed: " wt " has changes staged that its HEAD does not hold") {:path wt})
+      edited (error #'seon.fx/git-commit :seon.fx/io-error (str "refused, nothing committed: files the write-back writes differ in " wt " from its HEAD: " (str/replace edited "\n" "; ")) {:path wt}))))
+
+(defn- expected-commit!
+  "Commit files on branch ref of the repository at dir as one compare-and-swap from expect, the commit its caller read (the store's
+  main was imported from): the commit is made on expect's tree (tree-commit), and the ref moved by git update-ref NEW EXPECT, which
+  refuses atomically when the ref is anywhere else: :seon.fx/ref-moved {:expected :found}, nothing written. A branch worktree wt
+  has checked out (git's main in the main tree) takes the tree's refusals first (tree-refusal), and its index and files follow
+  the ref (read-tree -m -u), and the answer names its tree id. Never a retry: the caller reads what moved it and asks again. See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat :string :string [:maybe :string] [:map-of :string :string] :string :map] :map]}
+  [dir ref wt env expect {:keys [files modes message]}]
+  (or (when wt (tree-refusal wt (vec (sort (keys files)))))
+      (let [sha (tree-commit dir env expect files modes message)
+            r (git-run {} dir ["update-ref" ref sha expect] nil)]
+        (if-not (zero? (:exit r))
+          (let [found (git-try dir ["rev-parse" "--verify" "--quiet" ref])]
+            (error #'seon.fx/git-commit :seon.fx/ref-moved (str ref " is at " found ", not " expect ", the commit this write was read from: nothing written")
+                   {:path dir :expected expect :found found}))
+          ;; the ref moved: the commit is made whatever follows, so it is answered as one; a tree that could not follow is named
+          ;; beside it (:tree-unmoved, a tree to bring in by hand), never an error that leaves the commit unrecorded
+          (let [moved (when wt (try (git! {} wt ["read-tree" "-m" "-u" expect sha] nil) nil (catch Throwable e (step/error-msg e))))]
+            ;; the commit it was made from, and the checked-out tree's id now (tree-id): what main's source fact moves to
+            {:value (cond-> {:sha sha :files (count files) :expected expect}
+                      (and wt (nil? moved)) (assoc :tree (tree-id wt))
+                      moved (assoc :tree-unmoved (str wt ": " moved)))})))))
+
 (defn- commit-in-tree!
   "Commit files on the branch worktree wt has checked out, through that tree: each file written there, added to its own
   index and committed as git commit does, so its HEAD, index and files move together. Refused, committing nothing, when
@@ -564,14 +613,8 @@
   tree's own): {:value {:sha :files n}} or :seon.fx/io-error. See docs/source.md#commit-the-merges-branch."
   {:malli/schema [:=> [:cat :string :map :map] :map]}
   [wt env {:keys [files message allow-empty? modes]}]
-  (let [paths (vec (sort (keys files)))
-        staged? (not (zero? (:exit (git-run {} wt ["diff-index" "--cached" "--quiet" "HEAD" "--"] nil))))
-        edited (when (seq paths)
-                 (not-empty (str/trim (git! {} wt (into ["status" "--porcelain" "--untracked-files=all" "--"] paths) nil))))]
-    (cond
-      staged? (error #'seon.fx/git-commit :seon.fx/io-error (str "refused, nothing committed: " wt " has changes staged that its HEAD does not hold") {:path wt})
-      edited (error #'seon.fx/git-commit :seon.fx/io-error (str "refused, nothing committed: files the write-back writes differ in " wt " from its HEAD: " (str/replace edited "\n" "; ")) {:path wt})
-      :else
+  (let [paths (vec (sort (keys files)))]
+    (or (tree-refusal wt paths)
       (do (doseq [[p text] files :let [f (java.io.File. ^String wt ^String p)]]
             (.mkdirs (.getParentFile f))
             (spit f text))
@@ -588,12 +631,13 @@
   commit the running generation's tree checks out), and the ref moved only from that head, so no
   tree's files are touched. A branch a worktree has checked out (the standing root's jolt/merges in .worktrees/merges) is
   committed through that tree instead (commit-in-tree!): its files, index and HEAD move together, and a change of that
-  tree's own refuses the commit; moved by plumbing, its HEAD left its index behind. See docs/source.md#commit-the-merges-branch.
+  tree's own refuses the commit; moved by plumbing, its HEAD left its index behind. With :expect (a sha), the commit is made on
+  that commit and the ref moves only from it, one compare-and-swap (expected-commit!: :seon.fx/ref-moved when it moved). See docs/source.md#commit-the-merges-branch.
   With :allow-empty? and no files it commits the branch's own tree again (an empty commit: a review,
   seon.doc/review-message). Each file is first read as its reader reads it (unreadable), and one that doesn't refuses the commit. :modes ({path git mode}) gives a file's mode, 100644 otherwise. Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing
   to write), or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [dir branch files message allow-empty? modes base]} :req}]
+  [{{:keys [dir branch files message allow-empty? modes base expect]} :req}]
   (if (and (empty? files) (not allow-empty?))
     {:value {:sha nil :files 0}}
     (try
@@ -604,23 +648,20 @@
             id-env {"GIT_AUTHOR_NAME" who "GIT_AUTHOR_EMAIL" mail "GIT_COMMITTER_NAME" who "GIT_COMMITTER_EMAIL" mail}]
         ;; a branch a worktree has checked out moves with that tree's index and files, through the tree (commit-in-tree!):
         ;; moved by plumbing, the tree's HEAD left its index behind, each merged file a staged deletion
-        (if-let [wt (checked-out-at dir ref)]
-          (commit-in-tree! wt id-env {:files files :message message :allow-empty? allow-empty? :modes modes})
-       (let [have? (some? (git-try dir ["rev-parse" "--verify" "--quiet" ref]))
-            parent (git! {} dir ["rev-parse" "--verify" (if have? ref (or base "HEAD"))] nil)
-            gp (git! {} dir ["rev-parse" "--git-path" (str "seon-index-" (lib/c-getpid))] nil)
-            index (if (str/starts-with? gp "/") gp (str dir "/" gp))]
-        (try
-          (git! {"GIT_INDEX_FILE" index} dir ["read-tree" parent] nil)
-          (doseq [[path text] (sort files)]
-            (git! {"GIT_INDEX_FILE" index} dir ["update-index" "--add" "--cacheinfo" (str (get modes path "100644") "," (git! {} dir ["hash-object" "-w" "--stdin"] text) "," path)] nil))
-          ;; Seon is the committer and author of its merges (the config's identity): a
-          ;; root's HOME is its checkout's target/home, which holds no git identity
-          (let [sha (git! id-env dir ["commit-tree" (git! {"GIT_INDEX_FILE" index} dir ["write-tree"] nil) "-p" parent "-m" message] nil)]
+        (cond
+          ;; the ref moves only from the commit the caller read: one compare-and-swap (expected-commit!)
+          expect (expected-commit! dir ref (checked-out-at dir ref) id-env expect {:files files :modes modes :message message})
+          (checked-out-at dir ref)
+          (commit-in-tree! (checked-out-at dir ref) id-env {:files files :message message :allow-empty? allow-empty? :modes modes})
+          :else
+          (let [have? (some? (git-try dir ["rev-parse" "--verify" "--quiet" ref]))
+                parent (git! {} dir ["rev-parse" "--verify" (if have? ref (or base "HEAD"))] nil)
+                ;; Seon is the committer and author of its merges (the config's identity): a
+                ;; root's HOME is its checkout's target/home, which holds no git identity
+                sha (tree-commit dir id-env parent files modes message)]
             ;; only from the head read above; a new branch only if none appeared meanwhile
             (git! {} dir ["update-ref" ref sha (if have? parent "0000000000000000000000000000000000000000")] nil)
-            {:value {:sha sha :files (count files)}})
-          (finally (.delete (java.io.File. ^String index))))))))
+            {:value {:sha sha :files (count files)}}))))
       (catch Throwable e (error #'seon.fx/git-commit :seon.fx/io-error (step/error-msg e) {:path dir})))))
 
 ;; ---- the wiki's history: what each section was last written against -----------------------
