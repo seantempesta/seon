@@ -782,18 +782,20 @@
 (defn unsynced?
   "Whether task entity e on db differs from its file: merged with main's files still declaring it (its :seon.task/declared, which
   a landing that removes its entry retracts: seon.task/load-tx), or live, stated (not seon.task/derived?) and either never filed
-  (no declared) or changed on main since its file was read (seon.task/declaration differs from it). The store is the source and
-  its files follow. See docs/source.md#a-merged-task-reaches-mains-files."
+  (no declared) or changed on main since its file was read: load-tx writes a task's members (seon.task/stated-attributes, its
+  needs) in the transaction that writes :seon.task/declared, so a member datom newer than it is an edit made since. Seeks only,
+  no member read or decoded. The store is the source and its files follow. See docs/source.md#a-merged-task-reaches-mains-files."
   {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
   [db e]
-  (let [declared (:v (first (d/datoms db :eavt e :seon.task/declared)))]
+  (let [declared (first (d/datoms db :eavt e :seon.task/declared))]
     (boolean
       (if (= :merged (:v (first (d/datoms db :eavt e :seon.task/outcome))))
         (some? declared)
         (and (not (task/finished (:v (first (d/datoms db :eavt e :seon.task/outcome)))))
              (not (#{:done :cancelled} (:v (first (d/datoms db :eavt e :seon.task/execution)))))
-             (not (task/derived? db e))
-             (or (nil? declared) (not= (task/declaration db e) (task/stated (assoc (sedn/decode declared) :seon.task/ns (:v (first (d/datoms db :eavt e :seon.task/ns))))))))))))
+             (or (nil? declared)
+                 (some (fn [a] (some #(> (:tx %) (:tx declared)) (d/datoms db :eavt e a))) (conj task/stated-attributes :seon.task/needs)))
+             (not (task/derived? db e)))))))
 
 (defn- task-reads
   "The one reading of which tasks are ready and what they cite, on db: {:ready? :cited}, `ready?` a function of a task

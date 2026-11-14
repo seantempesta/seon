@@ -1294,8 +1294,10 @@
   (bin/land's bridge, a temporary one). tasks-dir: the tree's task files' directory, relative to the tree (the files' paths
   are; nil: the tree holds no task files this root reads), so what a path is follows the tree, not this process's own task dir (a test root's is under its runs).
   See docs/source.md#a-landing-enters-main-as-data."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string :string] [:maybe :string]] :seon.db/tx-data]}
-  [db changed modes tasks-dir]
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string :string] [:maybe :string]] :seon.db/tx-data]
+                  [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string :string] [:maybe :string] [:set :seon.task/id]] :seon.db/tx-data]]}
+  ([db changed modes tasks-dir] (changed-tx db changed modes tasks-dir #{}))
+  ([db changed modes tasks-dir completed]
   (let [under? (fn [p d] (if (= "." d) (not (str/includes? p "/")) (and (str/starts-with? p (str d "/")) (not (str/includes? (subs p (inc (count d))) "/")))))
         program? (fn [p] (and (fx/source-file? p) (some #(str/starts-with? p (str % "/")) (cfg/value :seon.config.source/dirs))))
         wiki (cfg/value :seon.config.root/wiki-dirs)
@@ -1308,10 +1310,10 @@
         db2 (pdb/speculate-db db1 docs)
         task-texts (into {} (for [[p t] changed :when (and tasks-dir (str/ends-with? p ".edn") (under? p tasks-dir))]
                               [(subs p (inc (count tasks-dir))) (or t "[]")]))
-        tasks (if (seq task-texts) (task/load-tx db2 (tasks-of task-texts)) [])]
+        tasks (if (or (seq task-texts) (seq completed)) (task/load-tx db2 (tasks-of task-texts) completed) [])]
     (if (contract/error? tasks)
       (throw (ex-info (str "the landed task files were refused: " (:seon.error/message tasks)) tasks))
-      (vec (concat code docs tasks)))))
+      (vec (concat code docs tasks))))))
 
 (defn- seed!
   "Index the checkout into conn's branch while this is the store's only process: the source tree {:root :dirs}'s program
@@ -1333,6 +1335,16 @@
         (cond-> (assoc r :forms (count (d/datoms db :aevt :form/id)))
           (contract/error? tasks) (assoc :tasks tasks))))))
 
+(defn- landed-completes
+  "The task ids the commits a landing brought say they complete (seon.task/completes of their messages, seon.fx/messages-since):
+  from the commit held, the last landed or imported, to commit, in the checkout (:seon.config.source/root). None when nothing is
+  held or no checkout is declared; git's refusal throws, as a refused task file does (changed-tx). See docs/source.md#a-landing-enters-main-as-data."
+  {:malli/schema [:=> [:cat [:maybe :map] [:maybe :string]] [:set :seon.task/id]]}
+  [held commit]
+  (let [root (cfg/value :seon.config.source/root)
+        m (if (and root (:commit held) commit) (fx/messages-since root (:commit held) commit) "")]
+    (if (string? m) (task/completes m) (throw (ex-info (str "the landed commits' messages could not be read: " (:seon.error/message m)) m)))))
+
 (defn landed-tx
   "What root writes on main for a change git landed (bin/land's bridge, docs/source.md#a-landing-enters-main-as-data):
   changed-tx of its changed files and modes, and root's :seon.system/source fact moved to the landed tree (its :tree,
@@ -1341,8 +1353,9 @@
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string :string] :string :string] :seon.db/tx-data]}
   [db changed modes tree commit]
   (let [held (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))]
-    ;; the tree's task files where the tree keeps them (its layout, :seon.config.source/tasks-dir), never this root's own task dir
-    (cond-> (changed-tx db changed modes (cfg/value :seon.config.source/tasks-dir))
+    ;; the tree's task files where the tree keeps them (its layout, :seon.config.source/tasks-dir), never this root's own task dir;
+    ;; the tasks the landed commits say they complete, done (landed-completes)
+    (cond-> (changed-tx db changed modes (cfg/value :seon.config.source/tasks-dir) (landed-completes held commit))
       held (conj {:seon.system/id :root
                   :seon.system/source (assoc held :tree tree :commit commit :digest (source-digest {:tree tree :pins (:pins held)} (:dirs held [])))}))))
 

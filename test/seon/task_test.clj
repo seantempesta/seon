@@ -523,3 +523,23 @@
     (testing "a slow test's task is the system's, made again from the verdict cache: never filed"
       (let [db (d/db-with db (task/create-tx db [(template/slow-test 'demo-test/slow 6000 5000)]))]
         (is (not (problems/unsynced? db (e db "demo-test/fast-slow"))))))))
+
+;; Estimate: 4 task writes on a test db (two load-tx of a two-entry file, a create-tx, a load-tx of an empty one: ~1.5M each)
+;; + one completes of a message (~50k) = 6000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-task-a-landing-completes-is-done-in-the-store
+  ;; docs/source.md#a-landing-enters-main-as-data (the owner, 2026-11-14: "If the task is done mark it as complete and delete it from
+  ;; disk so it doesn't get resynced"): a landing whose message says Completes: ns/name marks that task done as its file loses
+  ;; it, and a task made in the store, in no file, too; an entry removed with no such line is cancelled, as before
+  (let [two "[{:seon.task/name \"a\" :seon.task/plan \"p\" :seon.task/kind :work}\n {:seon.task/name \"b\" :seon.task/plan \"q\" :seon.task/kind :work}]\n"
+        db0 (ts/test-db)
+        db1 (d/db-with db0 (task/load-tx db0 {'demo (task/file-declarations 'demo two)}))
+        db1 (d/db-with db1 (task/create-tx db1 [{:seon.task/ns 'demo :seon.task/name "s" :seon.task/plan "made in the store"}]))
+        done (task/completes "Merge jolt/x: the work\n\n- what it did\nCompletes: demo/a, demo/s\n")
+        db2 (d/db-with db1 (task/load-tx db1 {'demo (task/file-declarations 'demo "[{:seon.task/name \"b\" :seon.task/plan \"q\" :seon.task/kind :work}]\n")} done))
+        e (fn [db id] (d/entity db [:seon.task/id id]))]
+    (is (= #{"demo/a" "demo/s"} done) "the ids its message names")
+    (is (= [:done :held] ((juxt :seon.task/outcome :seon.task/execution) (e db2 "demo/a"))) "its entry went with a landing that completes it: done, never cancelled")
+    (is (= :done (:seon.task/outcome (e db2 "demo/s"))) "made in the store, in no file, completed: done")
+    (is (nil? (:seon.task/declared (e db2 "demo/a"))) "and it forgets the declaration its file no longer states")
+    (let [db3 (d/db-with db2 (task/load-tx db2 {'demo (task/file-declarations 'demo "[]\n")}))]
+      (is (= :cancelled (:seon.task/execution (e db3 "demo/b"))) "an entry removed with no Completes: line is cancelled, as before"))))

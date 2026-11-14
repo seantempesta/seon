@@ -220,6 +220,15 @@
                                         [p (if (.canExecute (java.io.File. (str base "/" p))) "100755" "100644")]))))
     (catch Throwable e (error #'seon.fx/read-source :seon.fx/io-error (step/error-msg e) {:path root}))))
 
+(defn messages-since
+  "The messages of the commits git at root holds from commit from (excluded) to commit to: what a landing brought, read for the
+  tasks it says it completes (seon.task/completes). \"\" when from is to; :seon.fx/io-error when git cannot read either. See
+  docs/source.md#a-landing-enters-main-as-data."
+  {:malli/schema [:=> [:cat :string :string :string] [:or :string :seon.error/base]]}
+  [root from to]
+  (try (if (= from to) "" (git! {} root ["log" "--format=%B" (str from ".." to)] nil))
+       (catch Throwable e (error #'seon.fx/messages-since :seon.fx/io-error (step/error-msg e) {:path root}))))
+
 (defn changed-since
   "The files of the tree at root as it is on disk that differ from tree (a tree id seon.fx/tree-id made): git's diff of tree
   against the files, submodules left out (a pin is a build input, which seon.system/binary-current judges), and each untracked
