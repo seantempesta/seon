@@ -246,7 +246,8 @@
       ;; the agent committed its branch (it owns the branch's writes): the writer's next flush
       ;; covers it
       :committed (do (step/out! o :to-writer {:op :agent-commit :branch (:branch st) :t (:t m)})
-                     (when (:mem-mb m) (step/out! o :to-api (status st {:mem-mb (:mem-mb m)})))
+                     ;; its memory and its turn (when it moved) in one status; :turn is kept in root's view, never a fact on main
+                     (when (or (:mem-mb m) (:turn m)) (step/out! o :to-api (status st (select-keys m [:mem-mb :turn]))))
                      ;; its eval errors since its last commit: root counts them (seon.error)
                      (when (:errors m) (step/out! o :to-api {:op :errors :agent id :entries (:errors m)}))
                      (step/out! o :events (step/event {:type :commit :agent id :branch (:branch st) :t (:t m) :txs (:txs m)}))
