@@ -615,6 +615,17 @@
                  {:task id :blocks []
                   :cause (str "write-back lost: " (:seon.error/message e) " [" (str/join ", " (:seon.git/files e)) "]; (my.root/write-back! sys [\"" id "\"]) writes it again")}))))
 
+(defn write-back-target
+  "Where the write-back commits main's files, from main's source fact held and the root's merges branch (:seon.config.source/branch,
+  its source's :branch): {:branch} that branch, and :expect held's commit when main was imported from a commit on it, so the ref
+  moves only from that commit (git follows the store, seon.fx/git-commit :expect). See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat [:maybe :map] :string] [:map [:branch :string] [:expect {:optional true} :string]]]}
+  [held branch]
+  ;; never the branch the checkout has checked out when it is another: a test root sourced from a session's worktree committed its
+  ;; scratch task's file onto that session's branch (seon.reconcile-test/a-write-back-commits-only-its-roots-merges-branch)
+  (let [{imported :commit from :branch} held]
+    (cond-> {:branch branch} (and imported (= branch from)) (assoc :expect imported))))
+
 (defn source-moved-tx
   "Main's source fact moved to the commit r (the :git effect's answer) made on git's main, when it was one made from the commit main
   was imported from (seon.fx/git-commit :expect) and main's fact still names that commit: main holds the commit's files now, so a
@@ -1209,13 +1220,11 @@
                      ;; (:expect, one compare-and-swap; a landing that moved it since answers :seon.fx/ref-moved, nothing written);
                      ;; a main imported from no commit writes the merges branch, as before
                      ;; the branch main was imported from (its source fact's :branch, git's main for the standing root), from its :commit
-                     (let [{imported :commit from :branch} (:seon.system/source (d/pull (:db r) [:seon.system/source] [:seon.system/id :root]))
-                           imported (when from imported)]
-                       (one (request (assoc-in st [:flights id :writeback :written] (vec (keys files))) id :committed
-                                     {:op :fx :kind :git :req (cond-> {:dir (:root (:source st)) :files files :modes (source/modes (:db r) (keys files))
-                                                                       :message (source/commit-message members)
-                                                                       :branch (if imported from (:branch (:source st)))}
-                                                                imported (assoc :expect imported))})))))
+                     (one (request (assoc-in st [:flights id :writeback :written] (vec (keys files))) id :committed
+                                   {:op :fx :kind :git :req (merge {:dir (:root (:source st)) :files files :modes (source/modes (:db r) (keys files))
+                                                                    :message (source/commit-message members)}
+                                                                   (write-back-target (:seon.system/source (d/pull (:db r) [:seon.system/source] [:seon.system/id :root]))
+                                                                                      (:branch (:source st))))}))))
       ;; the sha on each merged task; the merge already runs where main's program runs
       ;; (seon.program/load-changes!), so nothing is built (BUILD plan P4)
       ;; and main's source fact moves to the commit, in the same write: main was imported from it now (catch-up reads from there)
