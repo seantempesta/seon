@@ -2,7 +2,7 @@
   "The effect owner and worker step-fns as plain functions (no graph): admission by workers,
   priority order, budget refused, the queue bound, and a worker answering a defect."
   (:require [seon.lib] [clojure.test :refer [deftest is testing]] [jolt.deps] [seon.fx :as fx] [seon.config :as cfg] [seon.contract :as contract] [seon.proofs :as proofs]
-            [clojure.core.async.flow :as flow] [clojure.core.async :as a] [seon.model :as model]))
+            [clojure.core.async.flow :as flow] [clojure.core.async :as a] [seon.model :as model] [clojure.java.shell]))
 
 (defn- owner [workers] (fx/owner-proc {:kind :t :workers workers :work nil :back nil}))
 (defn- req [k & {:as more}] (merge {:req {:k k} :dest {:agent "boot/1" :op :fx-reply :k k}} more))
@@ -159,6 +159,24 @@
       (when (seq a)   ; a machine whose git on PATH is already the binary makes no link
         (is (not (clojure.string/ends-with? a "/nonexistent/git")) (str "a wrong link is replaced: " a))
         (is (= a b) "a right link is left as it is: the same inode, never unlinked under a running spawn")))))
+
+;; docs/source.md#the-next-generation: a test child of the service is a fork of root's agent, and held root's environment: its
+;; SEON_SOURCE_ROOT named the main tree, so a test's root it started seeded main's tree under the branch's binary and refused
+;; every spawn (runtime's tree 5a37b7bd28 on 04592fd982). Cost: about 10 setenv calls and four processes (printenv, pwd), ~0.3M ticks.
+(deftest ^{:seon.test/estimate {:ticks 1000000} :seon.test/execs ["printenv" "pwd"]} a-run-of-another-checkout-holds-none-of-roots-environment
+  (let [co "/tmp" ; a directory that exists: a process starts in JOLT_PWD
+        saved (into {} (for [v (conj fx/child-env-variables "SEON_CHECKOUT")] [v (System/getenv v)]))]
+    (try
+      (seon.lib/c-setenv "SEON_SOURCE_ROOT" "/the/roots/checkout" 1)
+      (seon.lib/c-setenv "SEON_RUNS" "/the/roots/runs" 1)
+      (fx/checkout-env! co)
+      (is (= "" (:out (clojure.java.shell/sh "printenv" "SEON_SOURCE_ROOT" "SEON_RUNS")))
+          "a process it starts (bin/system start) takes its source root and runs from checkout, not root's")
+      (is (= [co (str co "/target/home")] (mapv #(clojure.string/trim (:out (clojure.java.shell/sh "printenv" %))) ["SEON_CHECKOUT" "HOME"]))
+          "and its checkout and home are checkout's, as bin/test starts a shard")
+      (is (= (.getCanonicalPath (java.io.File. co)) (clojure.string/trim (:out (clojure.java.shell/sh "pwd" "-P"))))
+          "and it starts in checkout (JOLT_PWD, which Jolt keeps to itself)")
+      (finally (doseq [[v x] saved] (if x (seon.lib/c-setenv v x 1) (seon.lib/c-unsetenv v)))))))
 
 ;; docs/source.md#tests-run-by-reach: the kept program store is the repository's, as the verdict cache is: a tree any checkout
 ;; analyzed is every checkout's, so health's base after a merge (the landing's tree) is read, not imported again in a new

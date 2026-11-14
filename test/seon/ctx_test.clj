@@ -1023,7 +1023,7 @@
         page (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))
         text (fn [id] (pr-str (get page id)))]
     (is (str/includes? (text "turn") "You're in app.x.") (str "its turn: " (pr-str page)))
-    (is (str/includes? (text "status") "Your proofs") "how its work stands")
+    (is (str/includes? (text "status") "What your task still needs") "how its work stands")
     (is (str/includes? (text "task-view-lab_2Fctx") (str "task · lab · " (:text (seon.render.ui/standing nil {:seon.task/outcome :gate}))))
         (str "its task's outcome, on its task's line: " (text "task-view-lab_2Fctx")))
     (is (str/includes? (text "own-problems") "[:h3 \"red 1\"]") (str "its open problems, the red proof among them: " (text "own-problems")))

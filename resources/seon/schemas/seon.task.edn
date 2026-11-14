@@ -47,7 +47,7 @@
  ;; a task as the reconciler reads it (needs as ids)
  :seon.task/own [:map
                  [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
-                 [:seon.task/plan :seon.task/plan] [:seon.task/execution [:enum :held :running :cancelled]]
+                 [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                  [:seon.task/branch :seon.task/branch] [:seon.task/proofs :seon.task/proofs]
                  [:seon.task/needs :seon.task/need-ids]
                  [:seon.task/after {:optional true} :seon.task/need-ids]
@@ -59,15 +59,26 @@
                  [:seon.task/failure {:optional true} :seon.task/failure]
                  ;; how its work stands and ended (judged by root, docs/reconcile.md#a-task-holds-how-its-work-ended), the agent as its key
                  [:seon.task/agent {:optional true} :string] [:seon.task/outcome {:optional true} :seon.task/outcome]
-                 [:seon.task/reason {:optional true} :string] [:seon.task/reasons {:optional true} :seon.task/reasons]
-                 [:seon.task/commit {:optional true} :string] [:seon.task/merged-t {:optional true} :int]
-                 [:seon.task/error {:optional true} :map]
-                 [:seon.task/deferred {:optional true} :seon.task/deferred] [:seon.task/deferred-results {:optional true} :seon.proof/results]
+                 [:seon.task/reason {:optional true} :seon.task/reason] [:seon.task/reasons {:optional true} :seon.task/reasons]
+                 [:seon.task/commit {:optional true} :seon.task/commit] [:seon.task/merged-t {:optional true} :seon.task/merged-t]
+                 [:seon.task/error {:optional true} :seon.task/error]
+                 [:seon.task/deferred {:optional true} :seon.task/deferred] [:seon.task/deferred-results {:optional true} :seon.task/deferred-results]
                  [:seon.task/gate-unread {:optional true} :seon.task/gate-unread] [:seon.task/changed {:optional true} :seon.task/changed]
-                 [:seon.task/conflicts {:optional true} [:vector :seon.merge/conflict]] [:seon.task/unmerged {:optional true} [:set :string]]]
+                 [:seon.task/conflicts {:optional true} :seon.task/conflicts] [:seon.task/unmerged {:optional true} :seon.task/unmerged]]
  ;; its plan and proofs accumulated along :needs (derived by the reader)
- :seon.task/task [:and {:seon.render/hiccup seon.render.ui/task-box} :seon.task/own [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]
+ :seon.task/task [:and {:seon.render/hiccup seon.render.ui/task-box} :seon.task/own [:map [:seon.task/accumulated :seon.task/accumulated]]]
  ;; the environment an agent works in; desired (the task's) = observed (the agent's), or restart
+ ;; a task as many readers take it: any map holding its id
+ :seon.task/keyed [:map [:seon.task/id :seon.task/id]]
+ ;; a running task as the reconciler and the server list it (seon.task/running)
+ :seon.task/running [:map [:task :seon.task/id] [:agent {:optional true} :seon.agent/id] [:key {:optional true} :seon.agent/key] [:env {:optional true} :seon.task/env]]
+ ;; root's boot and the config keys it reads (seon.task/root)
+ :seon.task/root [:map [:boot :seon.agent/boot] [:max-running {:optional true} :int] [:max-merging {:optional true} :int]
+                  [:gate-checkout {:optional true} :string] [:started-by {:optional true} :string]]
+ ;; the process tests no gate will run for a task, and why (seon.task/unjudged)
+ :seon.task/unjudged [:map [:tests [:vector :qualified-symbol]] [:why :string]]
+ ;; a message to an agent as its reader takes it (seon.task/undelivered, my.agent/messages)
+ :seon.task/message [:map [:id :string] [:from :map] [:body :string] [:sent-ms :int]]
  :seon.task/env [:map {:closed true} [:branch :keyword] [:model [:maybe :string]] [:max-turns pos-int?]
                  ;; an outside run's: the client that attached it (seon.server/held)
                  [:holder {:optional true} :string]]
@@ -121,7 +132,7 @@
  :seon.reconcile/step [:enum :ignored :done :dead-read :spawned :started :briefed :worked :tested :read :diffed :merged :octopus-merged :write-back :main-read :committed :commit-recorded :built :gate-read :gated]
  ;; a task as Datahike pulls it (the readers' input)
  :seon.task/pulled [:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
-                    [:seon.task/plan :seon.task/plan] [:seon.task/execution [:enum :held :running :cancelled]]
+                    [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                     [:seon.task/branch :seon.task/branch]]
  :seon.reconcile/done-input [:map {:closed true}
                              [:proofs :seon.task/proofs] [:results :seon.proof/results]

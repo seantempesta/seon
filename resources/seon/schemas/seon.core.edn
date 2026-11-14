@@ -11,13 +11,66 @@
  :seon.lib/sysmem [:map [:free-mb number?] [:inactive-mb number?] [:compressed-mb number?] [:available-mb number?]]
  :seon.lib/exit-status [:or [:map [:exit :int]] [:map [:signal :int]]]
  :seon.lib/pipe [:tuple :seon.lib/fd :seon.lib/fd]
+ ;; ---- bounds: one shape for ticks, bytes, memory, wall time and counts, declared where a limit is needed and answered when
+ ;; reached (docs/clocks.md#time-decides; runtime's effects owner and bound/run enforce it)
+ :seon.bound/ticks [:int {:min 0 :description "Engine ticks of work, in this process (Chez engine fuel)."}]
+ :seon.bound/bytes [:int {:min 0 :description "Bytes allocated, in this process."}]
+ :seon.bound/rss [:int {:min 0 :description "A child process's resident bytes: a Jolt child's heap cap; another's measured at its exit."}]
+ :seon.bound/ms [:int {:min 0 :description "Wall time, waiting included, kept by the one timer."}]
+ :seon.bound/items [:int {:min 0 :description "A count: turns, tokens, agents."}]
+ :seon.bound/bound [:map {:closed true :description "A limit, or what was spent against one: each measure it names."}
+                    [:seon.bound/ticks {:optional true} :seon.bound/ticks] [:seon.bound/bytes {:optional true} :seon.bound/bytes]
+                    [:seon.bound/rss {:optional true} :seon.bound/rss] [:seon.bound/ms {:optional true} :seon.bound/ms]
+                    [:seon.bound/items {:optional true} :seon.bound/items]]
+ :seon.bound/spent [:and {:description "What a bounded call spent, whether or not it reached its bound."} :seon.bound/bound]
+ :seon.bound/at [:or {:description "The function, test or effect a bound was declared on."} :qualified-symbol :qualified-keyword]
+ :seon.bound/reached [:and {:description "The one error of a reached bound: what was declared, what was spent, and where."} :seon.error/base
+                      [:map [:seon.error/type [:= :seon.bound/reached]] [:seon.bound/bound :seon.bound/bound] [:seon.bound/spent :seon.bound/spent]
+                       [:seon.bound/at :seon.bound/at]]]
+ ;; ---- effects: the one answer every effect gives (runtime's effects owner; docs/flow.md#effects-one-owner-and-its-workers-per-kind)
+ :seon.fx/value [:any {:description "What an effect answered."}]
+ :seon.fx/indeterminate [:boolean {:description "True when a killed effect may have happened."}]
+ :seon.fx.read/path [:string {:description "A file an effect read, outside the store."}]
+ :seon.fx.read/digest [:string {:description "That file's content id (its git blob id)."}]
+ :seon.fx.read/env [:string {:description "An environment variable an effect read."}]
+ :seon.fx.read/value [:string {:description "That variable's value."}]
+ :seon.fx/read [:or {:description "One read outside the store: a file and its content id, or an env var and its value."}
+                [:map [:seon.fx.read/path :seon.fx.read/path] [:seon.fx.read/digest :seon.fx.read/digest]]
+                [:map [:seon.fx.read/env :seon.fx.read/env] [:seon.fx.read/value :seon.fx.read/value]]]
+ :seon.fx/reads [:vector {:description "The reads outside the store an effect made."} :seon.fx/read]
+ :seon.fx/answer [:or {:description "The one answer every effect gives: its value and what it spent and read, or its error."}
+                  [:map [:seon.fx/value :seon.fx/value] [:seon.bound/spent :seon.bound/spent] [:seon.fx/reads {:optional true} :seon.fx/reads]]
+                  [:and :seon.error/base [:map [:seon.fx/indeterminate {:optional true} :seon.fx/indeterminate] [:seon.bound/spent :seon.bound/spent]]]]
+ ;; ---- reads: what a run read, as keys a moved datom is matched against (seon.reads; docs/storage.md#what-a-read-depends-on)
+ :seon.reads/key [:or {:description "A read's key, as datahike.reads/range-key makes it."} [:= :any] [:tuple [:= :e] :seon.db/eid] [:tuple [:= :ea] :seon.db/eid :keyword]
+                  [:tuple [:= :a] :keyword] [:tuple [:= :av] :keyword :any]]
+ :seon.reads/keys [:set :seon.reads/key]
+ :seon.reads/index [:map-of {:description "Each read key to the readers that recorded it (a reader is any value its holder names it by)."} :seon.reads/key [:set :any]]
+ :seon.reads/branch [:and {:description "The branch a read set was read on."} :seon.db/branch]
+ :seon.reads/commit [:uuid {:description "The commit a read set was read at."}]
+ :seon.reads/outside [:set {:description "The reads outside the store, as effects answered them."} :seon.fx/read]
+ :seon.reads/unreusable [:set {:description "The effects a run used whose answer its inputs don't decide (clock, network, model: :seon.fx/reuse :never). A run with any is recorded, never reused."} :qualified-keyword]
+ :seon.reads/set [:map {:description "What a run read: its basis, its keys, and its reads outside the store."}
+                  [:seon.reads/branch :seon.reads/branch] [:seon.reads/commit :seon.reads/commit] [:seon.reads/keys :seon.reads/keys]
+                  [:seon.reads/outside {:optional true} :seon.reads/outside] [:seon.reads/unreusable {:optional true} :seon.reads/unreusable]]
  ;; the store and its values
  :seon.db/branch :keyword
  :seon.db/t :int
  :seon.db/cfg [:map [:store :map]]
- :seon.db/tx-data [:sequential :any]
+ ;; transaction data, as datahike.api/transact takes it: entity maps and the ops src writes (docs/storage.md#the-write-checks-every-entity-it-touches)
+ :seon.db/tx-data [:sequential [:or :seon.db/tx-map :seon.db/tx-op :seon.host/datom]]
+ :seon.db/tx-map [:map-of :keyword :any]
+ ;; the entity an op names: an entity id, a lookup ref, a tempid string the same transaction names, or an ident (:db/current-tx)
+ :seon.db/tx-entity [:or :seon.db/entity :string :keyword]
+ :seon.db/tx-op [:or [:tuple [:enum :db/add :db/retract] :seon.db/tx-entity :keyword :any]
+                 [:tuple [:= :db/retract] :seon.db/tx-entity :keyword]
+                 [:tuple [:enum :db/retractEntity :db.fn/retractEntity] :seon.db/tx-entity]
+                 [:tuple [:= :db.fn/retractAttribute] :seon.db/tx-entity :keyword]
+                 [:tuple [:= :db/cas] :seon.db/tx-entity :keyword :any :any]]
  ;; an entity as history and at read it: its id, or a lookup ref of a unique attribute (seon.db/history)
- :seon.db/entity [:or :int [:tuple :keyword :any]]
+ :seon.db/entity [:or :seon.db/eid [:tuple :keyword :any]]
+ :seon.db/eid [:int {:description "An entity id of the store (ids are issued once across branches, docs/storage.md#ids)."}]
+ :seon.lib/digest [:string {:min 16 :max 16 :description "A content identity: the first 16 hex digits of a SHA-256 (seon.lib/digest)."}]
  ;; one datom of an entity's history: attribute :a, value :v (a pulled map under :pull, ref attributes only), :added? false for a
  ;; retraction, :t its transaction, :at that transaction's :db/txInstant (docs/storage.md#history)
  :seon.db/history-row [:map [:a :keyword] [:v :any] [:added? :boolean] [:t :int] [:at inst?]]
@@ -27,7 +80,16 @@
                    [:map {:closed true} [:branch {:optional true} :seon.db/branch] [:t {:optional true} :int]]]
  :seon.db/op [:tuple [:enum :db/add :db/retract] :int :keyword :any]
  :seon.db/resolved-tx [:vector :seon.db/op]
- :seon.db/tx-report [:map [:tx-data :any] [:db-after :seon.host/db]]
+ :seon.db/tx-report [:map [:tx-data [:sequential :seon.host/datom]] [:db-before {:optional true} :seon.host/db] [:db-after :seon.host/db]]
+ ;; a branch's own schema changes, as the write check takes them (seon.db/checked): their forms and the registry they compile to
+ :seon.db/branch-schemas [:map [:forms [:map-of :qualified-keyword :any]] [:registry {:optional true} [:maybe :seon.host/registry]]]
+ ;; the writer's transact arguments (datahike.writing/transact!), through seon.db/transact-checked
+ :seon.db/transact-args [:map [:tx-data :seon.db/tx-data] [:tx-meta {:optional true} [:maybe :map]] [:seon.db/schemas {:optional true} [:maybe :seon.db/branch-schemas]]]
+ ;; what schema forms say an entity is (seon.db/entity-index): the one value every reader of what an entity is takes first
+ :seon.db/entity-index [:map [:forms :map] [:entity-schemas [:map-of :keyword :qualified-keyword]] [:identity-schemas [:map-of :keyword :qualified-keyword]]
+                        [:schema-identities [:map-of :qualified-keyword :keyword]] [:drawn-schemas [:set :qualified-keyword]] [:history-schemas [:set :qualified-keyword]]
+                        [:required-keys [:map-of :qualified-keyword [:vector :keyword]]] [:own-required [:map-of :qualified-keyword [:vector :keyword]]]
+                        [:targets [:map-of :keyword [:vector :qualified-keyword]]] [:required-refs [:vector :qualified-keyword]] [:specs {:optional true} :any]]
  :seon.db/open [:map [:cfg :seon.db/cfg] [:conn :seon.host/conn] [:recovered? :boolean]]
  ;; the program as facts
  ;; a checkout's inputs with no program facts (seon.fx/inputs): what every reach digest holds
@@ -264,7 +326,9 @@
  :seon.test/started [:string {:description "On a test run's line, the test (as #'ns/name) that has just started."}]
  :seon.test/ended [:string {:description "On a test run's line, the test (as #'ns/name) that has just ended, beside its reports and measures."}]
  :seon.test/output [:string {:description "On a test run's note, what the run printed, kept when it threw or a test was not green."}]
+ :seon.test/runner [:boolean {:description "On a var's metadata, true on the one entry of what decides a test's outcome (seon.agent/run-children!: it forks the test children, which run seon.proofs/run-tests!, and folds their stream). Every test's digest takes what it reaches (seon.program/index-answer's runner), so a fix to how outcomes are decided reruns every test. See docs/source.md#tests-run-by-reach."}]
  :seon.test/fixture [:boolean {:description "On a var's metadata, true when it is a delay a test realizes on first use (the test store), forced once before tests run: in an agent before its first test fork, in a bin/test shard whose tests reach it."}]
+ :seon.test/program-fixture [:boolean {:description "On a var's metadata, true when it is a delay of the checkout's kept program and reach graph (test-runner/kept-program): a bin/test shard forces it before its first test when one of its tests reads it, so no test pays the import of a tree inside its own budget; an agent's test child never does (it reads its own branch's db). See docs/merging.md#a-tests-tick-budget."}]
  :seon.test/shard-fixture [:boolean {:description "On a var's metadata, true when it is a delay a test realizes on first use that only a bin/test shard makes before its tests (the shard's shared test root), never an agent: one forced in an agent would boot a test root inside it."}]
  :seon.test/pipe-held [:map {:description "The report a test run adds when its process ended and a process it forked still holds its pipe."} [:type [:= :error]] [:seon.error/type [:= :seon.test/pipe-held]] [:message :string]]
  ;; the file classes of a checkout (seon.fx/env-class): each a key of a program's :config (keys-schemas sweep; docs/source.md#tests-run-by-reach)

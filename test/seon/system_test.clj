@@ -16,7 +16,7 @@
   (delay
     (let [main (str "root-test-" (random-uuid))
           r (ts/binary-sh "env" "SEON_WEB_PORT=0" (str "SEON_STORE=" (test-store)) (str "SEON_MAIN=" main)
-                          "./seon" "boot-twice" "--profile" (name (config/profile)) :dir "target")]
+                          "./seon" "boot-twice" "--profile" ts/root-profile :dir "target")]
       (ts/drop-main! (test-store) main)
       (assoc r :res (edn/read-string (last (str/split-lines (:out r))))))))
 
@@ -109,7 +109,7 @@
   ;; collections in a fresh binary; Chez starts a sweeper per waiting thread and never stops one, so a
   ;; pool not fixed first ends at 6 (measured) and root-threads-are-what-root-declares reads whatever
   ;; its boot happened to start. seon.main/-main fixes the pool at 0 before anything runs: 0 sweepers.
-  (let [{:keys [exit out err]} (ts/binary-sh "./seon" "sweepers-held" "--profile" (name (config/profile)) :dir "target")
+  (let [{:keys [exit out err]} (ts/binary-sh "./seon" "sweepers-held" "--profile" ts/root-profile :dir "target")
         res (edn/read-string (last (str/split-lines out)))]
     (is (= 0 exit) (str out err))
     (is (<= 30 (:collections res)) "the workers collect on until joined: at least the 30 waited for")
@@ -388,7 +388,7 @@
        (spit (str tree "/" path) seeded)
        (git "add" "-A")
        (git "commit" "-q" "-m" "seeded")
-       (into [(:out (apply ts/binary-sh (concat ["./seon" "seed-program" store] args ["--profile" (name (config/profile)) :dir "target"])))]
+       (into [(:out (apply ts/binary-sh (concat ["./seon" "seed-program" store] args ["--profile" ts/root-profile :dir "target"])))]
              (for [text texts]
                (let [_ (spit (str tree "/" path) text)
                      _ (git "add" "-A")
@@ -606,3 +606,32 @@
       (finally
         (when (keyword? ag) (at-root (str "(seon.system/kill! sys " (pr-str ag) ")")))
         (ts/stop-root! root) (ts/drop-main! path main) (seon.lib/remove-tree! runs)))))
+
+;; docs/merging.md#a-session-proves-through-root: a tree that changes what the running binary bakes is refused before anything runs,
+;; never proved on the system's build of it. Found 2026-11-13 (deps): bin/prove of a branch moving the Jolt, konserve and
+;; persistent-sorted-set pins ran its tests on main's runtime and stored reds at the branch's digests (a seek 3.2 KB on main's
+;; build, 1.76 KB on its own). Red before: prove-tree! asked baked-paths, which names no pin, and ran. Each tree is this checkout's
+;; with one change, by a git index of its own, its text read from git, never the checkout's files (a test in this namespace
+;; takes no tree: seon.program-test/no-test-takes-the-tree-in-its-digest). Estimate: three tree writes and two diffs, git's
+;; work outside the engine, ~0.5M ticks.
+(deftest ^{:seon.test/estimate {:ticks 500000} :seon.test/execs ["git"]} a-tree-the-binary-cant-run-is-refused-before-it-runs
+  (let [here (seon.config/checkout)
+        tree (seon.fx/tree-id here)
+        git (fn [env & args] (:out (apply seon.lib/sh (concat ["env"] (for [[k v] env] (str k "=" v)) ["git" "-C" here] args))))
+        with (fn [path change]
+               (let [idx (str here "/target/tmp/refusal-" (random-uuid) ".index") env {"GIT_INDEX_FILE" idx}]
+                 (.mkdirs (java.io.File. (str here "/target/tmp")))
+                 (git env "read-tree" tree)
+                 (if (= :pin change)
+                   (git env "update-index" "--cacheinfo" (str "160000," (apply str (repeat 40 "3")) "," path))
+                   (let [text (:out (seon.lib/sh "git" "-C" here "show" (str tree ":" path)))
+                         blob (clojure.string/trim (:out (seon.lib/sh "git" "-C" here "hash-object" "-w" "--stdin" :in (str text "\n;; changed\n"))))]
+                     (git env "update-index" "--add" "--cacheinfo" (str "100644," blob "," path))))
+                 (let [t (clojure.string/trim (git env "write-tree"))] (.delete (java.io.File. idx)) t)))
+        refusal #(#'root/tree-refusal tree %)]
+    (let [r (refusal (with "reference-code/jolt" :pin))]
+      (is (= :seon.system/binary-not-current (:seon.error/type r)) (pr-str r))
+      (is (= ["reference-code/jolt"] (:baked r)) "it names the pin the binary bakes")
+      (is (clojure.string/includes? (:seon.error/message r) "bin/prove --out") "and points at the tree's own build"))
+    (is (nil? (refusal (with "src/seon/agent.clj" :src))) "a src change loads live: the system proves it")
+    (is (= :seon.system/binary-not-current (:seon.error/type (#'root/tree-refusal nil tree))) "a binary of no recorded tree is unknown, never current")))

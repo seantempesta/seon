@@ -2000,14 +2000,14 @@
         "then the agent's own state, from its own attributes (open problems and added keys only when there are some)")
     (let [h (:html (unit-of task "status"))]
       (is (str/includes? h "demo/f-test") "each proof as its var entity holds its verdict, (my.task/status)'s")
-      (is (str/includes? h "demo/f-test</code> fails") "the failing proof's verdict is the status's")
+      (is (str/includes? h "demo/f-test</code>: red") "the failing proof's verdict is the status's")
       (is (str/includes? h "(= 4 5)") "and what its assertion got"))
     (let [h (:html (unit-of task "task"))]
       (is (str/includes? h "task · demo") "the task's part, its namespace above its plan")
       ;; how a proof runs is the status's (its verdict, its source, the form that runs it), not repeated in the task's
       ;; part; this fixture's proof has no source, so the part says what to write (seon.ctx/not-written)
       (is (not (str/includes? h "my.agent/prove")) "no proof's run form, which the status shows"))
-    (is (str/includes? (:html (unit-of task "status")) "Your proofs") "how the work stands is the status's")
+    (is (str/includes? (:html (unit-of task "status")) "What your task still needs") "how the work stands is the status's")
     (is (= ["system-message" "chat-ask" "conversation-turn-1" "chat-end"]
            (mapv :id conv))
         "the conversation by turn number, each turn a component keyed by the agent and its number (turn 0 took no record, and the agent's turn 2 said and ran nothing: no element), then how the agent stands")
@@ -2038,11 +2038,11 @@
                               {:var/name 'demo/f-test :seon.test/digest "digest-2" :seon.test/status :green}])]
     (is (not (str/includes? (draw written) "digest-1")) "a proof not yet run shows no result")
     (let [h (draw red)]
-      (is (str/includes? h "demo/f-test</code> fails") (str "the recorded status, red: " h))
+      (is (str/includes? h "demo/f-test</code>: red") (str "the recorded status, red: " h))
       (is (str/includes? h "it doubles") "and its failing assertion")
       (is (str/includes? h "(= 4 5)") "as the assertion it got, printed as code"))
     (let [h (draw green)]
-      (is (str/includes? h "Every proof passes and nothing blocks merging") "green is the status's word")
+      (is (str/includes? h "Every box is checked: nothing blocks your merge") "green is the status's word")
       (is (not (str/includes? h "it doubles")) "a green keeps no failure"))))
 
 (deftest the-status-is-drawn-from-facts-with-no-turn-of-the-reader
@@ -2056,8 +2056,33 @@
         standing (try (unit-of (seon.fixtures/page-units w) "status") (finally (r/dispose-walk! w)))
         h (:html standing)]
     (is (some? standing) "the status is drawn")
-    (is (str/includes? h "Every proof passes") (str "the verdict the branch holds: " h))
+    (is (str/includes? h "[x] <code>demo/f-test</code>") (str "the verdict the branch holds: " h))
     (is (not (str/includes? h "Turn")) "and has no turn count")))
+
+(deftest ^{:seon.test/estimate {:ticks 3000000}} the-boxes-are-the-done-rules-reasons
+  ;; the owner (2026-11-14): each turn the agent sees what its task still needs, merge needs only, as boxes. A backlog run's
+  ;; proof went green at turn 48 and turns 48-80 went on what the page listed under "can't merge yet", stale sections among
+  ;; them, which never refuse a merge (seon.problems/caused-split's :attention). The boxes are the done rule's reasons, the
+  ;; judge's one function (seon.reconcile/done-explain), and nothing else; what does not block is said apart, as not blocking
+  (let [s {:reasons [{:reason :proof-red :symbol 'demo/b-test} {:reason :stray-red :symbol 'demo/other-test} {:reason :contract-gap :symbol 'demo/g}]
+           :proofs [{:test 'demo/a-test :status :pass}
+                    {:test 'demo/b-test :status :fail :failures [{:assert "(= 4 (f 2))" :got "(= 4 5)"}]}]
+           :refused [{:reason :stray-red :test 'demo/other-test} {:reason :contract-gap :vars ['demo/g]}]
+           :without-a-contract ['demo/g]
+           :attention ["docs/demo.md#f cites demo/f, which changed"]}
+        h (h/html (ui/status-hiccup {} s))
+        at #(str/index-of h %)
+        not-blocking (at "don't block your merge")]
+    (is (str/includes? h "What your task still needs") (str "headed by what remains: " h))
+    (is (str/includes? h "done when every box is checked") "and says when it is done")
+    (is (= 1 (count (re-seq #"\[x\]" h))) "the green proof is a checked box")
+    (is (= 3 (count (re-seq #"\[ \]" h))) "one open box per reason: the red proof, the stray red, the contract gap")
+    (is (every? #(str/includes? h %) ["demo/b-test" "demo/other-test" "demo/g"]) "each named")
+    (is (and not-blocking (< (at "[ ]") not-blocking (at "docs/demo.md#f"))) "a stale section is said after the boxes, as not blocking")
+    (is (not (str/includes? h "can't merge yet")) "no list beside the boxes says the same again"))
+  (let [h (h/html (ui/status-hiccup {} {:reasons [] :proofs [{:test 'demo/a-test :status :pass}] :attention ["docs/demo.md#f cites demo/f, which changed"]}))]
+    (is (not (re-find #"\[ \]" h)) "nothing open when the reasons are none, a stale section included")
+    (is (str/includes? h "Every box is checked") (str "and it says so: " h))))
 
 (deftest the-models-page-holds-the-plan-whole
   ;; the blind agent's plan was cut "+86 chars" at a part's budget: the task itself took an eval to read
@@ -2448,7 +2473,7 @@
         (is (= (seon.merge/readiness b ours (d/commit-as-db (:store ours) main)) (:merge st))
             "the merge's readiness, as its own function answers it")
         (is (= (seon.merge/divergence ch) (:its-merge-carries st)) "and what the branch's merge carries, from the one diff")
-        (let [html (h/html (ui/status-hiccup {} (select-keys st [:merge :its-merge-carries :without-a-contract])))
+        (let [html (h/html (ui/status-hiccup {} (select-keys st [:merge :its-merge-carries :reasons :refused])))
               merge-line (h/html (ui/status-hiccup {} {:merge (:merge st)}))]
           (is (str/includes? (pr-str (:main-moved (:merge st))) "demo/k") "what main changed since the base (the model reads it in the data)")
           (is (not (re-find #"Main has moved" html)) "main's move reaches the branch between turns: the agent is told only what conflicts")
@@ -2513,7 +2538,8 @@
 (deftest what-blocks-a-merge-is-named-and-said-once
   (let [names (fn [n] (mapv #(symbol "app.m" (str "problem-" %)) (range n)))
         st (fn [n] {:proofs [{:test 'a/t :status :pass}] :caused (names n) :without-a-contract '[app.m/f]
-                    :refused [{:reason :contract-gap :vars '[app.m/f]}]})
+                    :reasons (into [{:reason :contract-gap :symbol 'app.m/f}] (for [k (names n)] {:reason :open-problem :key k}))
+                    :refused [{:reason :contract-gap :vars '[app.m/f]} {:reason :open-problem :problems (names n)}]})
         form (fn [n] (into ['seon.render.ui/status {}] (filter some?) (next (seon.render.ui/status-hiccup {} (st n)))))
         es (r/page-edits (seon.db/index) (r/forms-moved {"status" (form 100)} {"status" (form 101)}))]
     (is (= 1 (count es)) (pr-str es))
@@ -4153,7 +4179,7 @@
 (deftest the-status-is-one-hiccup-with-its-proofs-failures-and-next-form
   ;; owner, 2026-11-05 (render-audit.md, how the work stands): the status read cold says what it is, what finishes the task,
   ;; each proof, each failure in a line, what blocks merging, and the next form to run; no :tokens-sent
-  (let [st {:reasons [{:reason :proof-red}]
+  (let [st {:reasons [{:reason :proof-red :symbol 'seon.program-test/a-vars-history} {:reason :proof-unknown :symbol 'seon.program-test/b}]
             :proofs [{:test 'seon.program-test/a-vars-history :status :fail :source {:seon.print/code "(deftest a-vars-history\n  (is (= 1 (history 'a))))"}
                       :failures [{:assert {:seon.print/code "(= 1 (history 'a))"} :got {:seon.print/code "Unknown class program"} :message "Uncaught exception, not in assertion."}]}
                      {:test 'seon.program-test/b :status :undefined}]
@@ -4162,13 +4188,12 @@
         h (ui/status-hiccup {} st)
         t (h/html h)]
     (is (= :h2 (first (second h))) "headed")
-    (is (str/includes? t "Your proofs") "headed to the agent")
-    (is (str/includes? t "<ul><li><code>seon.program-test/a-vars-history</code>") "several proofs: a list of their states")
+    (is (str/includes? t "What your task still needs") "headed to the agent by what remains")
+    (is (str/includes? t "<li>[ ] <code>seon.program-test/a-vars-history</code>") "each proof a box with its state")
     (is (str/includes? t (:undefined (:seon.status/title (seon.contract/properties :seon.ctx.status/proof-state)))) "each proof's state, its schema's title")
     (is (str/includes? t "Unknown class program") "a failure in a line")
     (is (not (str/includes? t "(deftest a-vars-history")) "the failing proof's source is the agent's own: not repeated")
-    (is (str/includes? t "seon.program/history is public") "what blocks merging")
-    (is (re-find #"blocking merging" t) "what blocks merging, and below it the form to run")
+    (is (< (str/index-of t "don't block your merge") (str/index-of t "seon.program/history is public")) "a stale section, said as not blocking (the owner, 2026-11-14)")
     (is (not (str/includes? t "(do ")) "separate top-level forms, never a do")
     (is (not (str/includes? t "tokens")) "no tokens sent")
     (is (not (str/includes? t "conflict")) "no merge line with nothing to merge")

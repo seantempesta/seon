@@ -10,6 +10,17 @@
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
+(deftest ^{:seon.test/estimate {:ticks 300000}} transaction-data-is-the-ops-the-store-takes
+  ;; docs/storage.md#the-write-checks-every-entity-it-touches: every *-tx function answers :seon.db/tx-data, so a malformed op is
+  ;; its contract's error at the function that made it, not a write that fails later
+  (is (contract/valid? :seon.db/tx-data [{:db/id "t" :seon.task/id "x/y"} [:db/add "t" :seon.task/plan "p"] [:db/retract 5 :seon.task/plan]
+                                         [:db/retract [:seon.task/id "x/y"] :seon.task/proofs 'a/b] [:db/retractEntity 5] [:db.fn/retractEntity 5]
+                                         [:db.fn/retractAttribute 5 :seon.task/plan] [:db/cas 5 :seon.task/plan "p" "q"]]))
+  (is (not (contract/valid? :seon.db/tx-data [[:db/add 1 "seon.task/plan" "p"]])) "an attribute is a keyword")
+  (is (not (contract/valid? :seon.db/tx-data [[:db/assert 1 :seon.task/plan "p"]])) "an op src does not write")
+  (is (not (contract/valid? :seon.db/tx-data [[:db/add 1.5 :seon.task/plan "p"]])) "an entity is an id, a lookup ref or a tempid")
+  (is (not (contract/valid? :seon.db/tx-data [nil]))))
+
 (deftest eid-is-the-entity-of-a-unique-value
   (let [db (ts/test-db)]
     (testing "a unique attribute's value names its entity: the one a query finds"
