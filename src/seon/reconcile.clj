@@ -1094,7 +1094,15 @@
                              [st [o1 o2]]))]
     (case step
       :ignored [st []]
-      :done (done st)
+      ;; the flight's last write; refused, the task is still :running with no flight, live for good: never a silent end
+      ;; but the reconciler's :platform problem, which a wait on the task reads (seon.server's done-settled?, seon.system/defect)
+      :done (if (contract/error? r)
+              [(update st :flights dissoc id)
+               [{:op :problem :class :platform
+                 :error (contract/error :seon.reconcile/write-refused #'seon.reconcile/advance
+                                        (str "the last write of " id "'s flight was refused, so its task stays " (name (or (:seon.task/outcome (d/entity (:db st) [:seon.task/id id])) :running)) ": " (:seon.error/message r))
+                                        {:task id :refused r})}]]
+              (done st))
       :dead-read (one (write st id :done (dead-tx st id (:died f) (let [k (:key (agent-of (:db st) id))] (when (and k (:db r)) (pull-end (:db r) k))))))
       ;; root answers a spawn at its agent's hello, or at the end the agent met first: a death,
       ;; a failed spawn or a stop (each names the agent) is this task's death, its start

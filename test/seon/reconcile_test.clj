@@ -2378,3 +2378,18 @@
            (is (= :busy (:seon.agent/status (d/entity merged [:seon.agent/key "mm-own"]))) "the branch's own fact")
            (is (= :idle (:seon.agent/status (d/entity merged [:seon.agent/key "mm-main"]))) "and main's"))
          (finally (d/release bc)))))))
+
+;; docs/errors.md#nothing-crashes-and-nothing-hangs: a flight's last write (its :done step) that the writer refused left the task
+;; :running with no flight and no problem: it stayed live, the reconciler never went quiet, and seon_done's await-db waited for
+;; good (root's read, 2026-11-15: reconcile.clj's :done dropped the flight whatever its answer). Now a refused :done is the
+;; reconciler's :platform problem, which done-settled?'s defect branch reads. Red before: no output. Estimate: one step of a map, ~0.1M
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-flights-refused-last-write-is-a-problem-never-a-silent-end
+  (let [st {:db (seon.db/empty-db false) :boot "b" :flights {"t/a" {:act {:op :spawn :task "t/a"} :agent :a1}} :pending {} :rid 0}
+        refused (seon.contract/error :seon.writer/refused #'seon.writer/commit-batch "the cas found :ready, not :running" {})
+        [st' outs] (#'seon.reconcile/advance st "t/a" :done refused)
+        p (first outs)]
+    (is (nil? (get-in st' [:flights "t/a"])) "the flight ends")
+    (is (= [:problem :platform :seon.reconcile/write-refused] [(:op p) (:class p) (get-in p [:error :seon.error/type])]) (pr-str outs))
+    (is (= "t/a" (get-in p [:error :task])) "naming the task")
+    (is (= refused (get-in p [:error :refused])) "and the refusal")
+    (is (= [] (second (#'seon.reconcile/advance st "t/a" :done {:ok true :t 5}))) "an answered write ends it with nothing to say")))
