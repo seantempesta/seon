@@ -736,7 +736,7 @@
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 7 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3250k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 7}} a-test-run-writes-its-results-on-the-branch
-  ;; task seon.proofs/test-results-are-a-few-facts (R2a): an agent's run of its proofs records each
+  ;; task seon.proofs/a-verdict-is-an-entity-that-names-its-environment (R2a): an agent's run of its proofs records each
   ;; result as facts on the test's var entity on its branch (seon.proofs/result-tx, beside the cache):
   ;; red with its digest and its failing assertions as data, main holding none of it; fixed and run again, green with no
   ;; failure and the sums started over at the new digest; a run that changes nothing writes nothing

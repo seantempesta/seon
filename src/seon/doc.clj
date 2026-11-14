@@ -639,7 +639,7 @@
   text (`terms`), in their order: each [counts length], counts each term to how often the text holds it and length how many terms it holds. Kept
   beside the text index's row of that text (`text-index`), counted the first time a reader asks and kept until a move writes
   that text (`carry-index!`) or the index is built again, so a reader that ranks a text's words pays a lookup, never its length
-  (task seon.ctx.search/a-search-costs-what-it-ranks: tokenizing 40 texts was 2.5M ticks of a search's 8.7M). Not counted when
+  (task seon.ctx.search/the-pages-search-names-only-the-hits-it-shows: tokenizing 40 texts was 2.5M ticks of a search's 8.7M). Not counted when
   the index is built: the program's texts are millions of characters, seconds of a fork server's warm start, for the few dozen a
   search ranks. Derived data, never relied on. See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential [:tuple :int [:maybe :qualified-keyword]]]] [:vector [:tuple [:map-of :string :int] :int]]]}

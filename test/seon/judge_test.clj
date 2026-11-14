@@ -98,7 +98,7 @@
   ;; the shard's shared root and its config are untouched (docs/config.md#the-resolver)
   (let [names (volatile! nil)
         ;; the pass runs in root, named only in the code sent there: its reach edge, so a change to it reruns this
-        ;; (a stopgap until a test's digest reads what it ran: task seon.program/a-tests-digest-reads-what-it-ran)
+        ;; (a stopgap until a test's digest reads what it ran: task seon.proofs/a-process-tests-reads-hold-what-its-agent-ran)
         _ 'my.root/first-moves!
         [r] (at/in-agent (fn [{:keys [task] :as n}]
                            (vreset! names n)

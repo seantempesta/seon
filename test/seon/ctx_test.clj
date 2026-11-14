@@ -1177,7 +1177,7 @@
       (is (= #{'app.x/f0 'clojure.test/is} (:form/refs t0)) "D5: what the proof calls, each var by its name"))))
 
 (deftest an-agents-record-holds-its-proofs-status
-  ;; task seon.proofs/test-results-are-a-few-facts (R2a): the status an agent's test run recorded on a proof's
+  ;; task seon.proofs/a-verdict-is-an-entity-that-names-its-environment (R2a): the status an agent's test run recorded on a proof's
   ;; var entity (seon.proofs/result-tx) is in the agent's record under the task's :proved, where the
   ;; one layout renders it from: the pattern names the attributes the status reads (not the digest: nothing reads it)
   (let [db (seeded 3 nil)
