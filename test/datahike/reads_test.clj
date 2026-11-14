@@ -86,14 +86,15 @@
   ;; task datahike.reads/a-cached-read-records-what-it-read: recording switched the q result cache off, so every recorded
   ;; read recomputed what an unrecorded one served cached. A recorded q the cache holds is served by it and records what
   ;; its computation read: the same keys as an uncached recorded run.
-  (let [[db t1 t2] (seeded)
-        q '[:find ?id :in $ ?e :where [?e :seon.task/needs ?n] [?n :seon.task/id ?id]]
+  ;; a committed value: the result cache admits only those (datahike.query/db-cache-key)
+  (let [db (ts/test-db)
+        q '[:find ?a :where [?e :db/ident ?a] [?e :db/cardinality :db.cardinality/many]]
         ticks (fn [f] (let [t (jolt.host/ticks)] (f) (- (jolt.host/ticks) t)))
-        cold (d/reads-index (second (d/with-reads #(binding [datahike.query/*query-result-cache?* false] (d/q q db t1)))))
-        _ (d/q q db t1)
-        [[v warm] dt] (let [t (jolt.host/ticks) r (d/with-reads #(d/q q db t1))] [r (- (jolt.host/ticks) t)])
-        uncached-dt (ticks #(d/with-reads (fn [] (binding [datahike.query/*query-result-cache?* false] (d/q q db t1)))))]
-    (is (= #{["r/t2"]} v))
+        cold (d/reads-index (second (d/with-reads #(binding [datahike.query/*query-result-cache?* false] (d/q q db)))))
+        _ (d/q q db)
+        [[v warm] dt] (let [t (jolt.host/ticks) r (d/with-reads #(d/q q db))] [r (- (jolt.host/ticks) t)])
+        uncached-dt (ticks #(d/with-reads (fn [] (binding [datahike.query/*query-result-cache?* false] (d/q q db)))))]
+    (is (seq v) "the seed holds cardinality-many attributes")
     (is (= cold (d/reads-index warm)) (str "a cached recorded read records what it read: " (pr-str (d/reads-index warm)) " vs " (pr-str cold)))
     (is (< (* 3 dt) uncached-dt) (str "and the cache served it: " dt " ticks against " uncached-dt " uncached"))))
 
