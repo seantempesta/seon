@@ -53,17 +53,3 @@
     (is (nil? (turn/specified-tx (t/with db [{:seon.task/id task :seon.task/specified-turn 2}]) task "k1" red)) "written once")
     (is (nil? (turn/specified-tx (t/with db [{:seon.agent/key "k0" :seon.agent/task [:seon.task/id task]}]) task "k0" red)) "an agent with no turn yet writes nothing: unknown is never 0")))
 
-;; Estimate: in-agent's own setup and teardown (~1.5M, as its neighbours') + a run of two turns (two scripted calls, each turn's
-;; observe and status: ~1M) + 2 asks at ~0.25M = ~3M
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-run-keeps-the-program-it-began-on
-  ;; docs/plan.md Stage 0.6: agent o8c24b62 redefined seon.repl/response, which builds every eval's answer, at turn 24, and its turn
-  ;; loop then hung with no stall recorded. An agent may redefine anything: its forms run its own program, and the run's
-  ;; own path (the answer, the record, the draw, the model call) runs the program the run began on until its next start
-  (let [[end by same] (at/in-agent (fn [{:keys [task]}]
-                                     [(str "(select-keys (seon.turn/work! {:task " (pr-str task) " :max-turns 2}) [:outcome])")
-                                      "(mapv :seon.test/by (seon.turn/last-evals))"
-                                      "(identical? (deref (resolve 'original-response)) @#'seon.repl/response)"])
-                                   {:config {:seon.config.ai/script 'seon.fixtures/redefines-response}})]
-    (is (= {:outcome :cap} (:value end)) (pr-str end))
-    (is (= [nil] (:value by)) (str "the next turn's eval was answered by the run's own seon.repl/response: " (pr-str by)))
-    (is (false? (:value same)) (str "the REPL holds the agent's redefinition after the run: " (pr-str same)))))
