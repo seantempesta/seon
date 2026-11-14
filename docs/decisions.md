@@ -88,7 +88,7 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 ### A layout is a render over the same pulled data
 
-"I don't want to lose our data driven UI rendering and don't want any hand rolled systems. This a design goal." Stated in [the plan](plan.md#the-plan), part 3; not built.
+"I don't want to lose our data driven UI rendering and don't want any hand rolled systems. This a design goal." Stated in [the plan](plan.md#stage-5-the-users-system); not built.
 
 ### An agent reads what it can read; a question goes to its parent
 
@@ -100,19 +100,19 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 ### An agent may hold a set of tasks
 
-"These fork and improve sessions should reuse the same task system." "maybe we need to differentiate between start now and start when the system is free." Stated in [the plan](plan.md#the-plan), parts 1 and 2; not built.
+"These fork and improve sessions should reuse the same task system." "maybe we need to differentiate between start now and start when the system is free." Stated in [the plan](plan.md#stage-4-agents-finish-in-few-turns), stages 4 and 5; not built.
 
 ### Tasks chain by needs
 
-"make sure we aren't hard coding in "example" or whatever when they get turned into openai-compat formats." Stated in [the plan](plan.md#the-plan), part 2, and [tasks](tasks.md#a-task-names-examples).
+"make sure we aren't hard coding in "example" or whatever when they get turned into openai-compat formats." Stated in [the plan](plan.md#stage-4-agents-finish-in-few-turns), and [tasks](tasks.md#a-task-names-examples).
 
 ### The data model is worked through live
 
-"Is a session just an agent if so then we don't need session-open/example-open." "What's the next step that will strain our data model". Stated in [the plan](plan.md#the-plan), part 1.
+"Is a session just an agent if so then we don't need session-open/example-open." "What's the next step that will strain our data model". Stated in [the plan](plan.md#stage-5-the-users-system).
 
 ### A message's turn is not asked
 
-"In general I think the message shouldn't matter what turn it arrived on". Stated in [the plan](plan.md#the-plan), part 1.
+"In general I think the message shouldn't matter what turn it arrived on". Stated in [the plan](plan.md#stage-5-the-users-system).
 
 ### Ids are unique across branches; order by time, not by transaction id (owner, 2026-11-11)
 
@@ -128,7 +128,7 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 ### A sync merges everything that does not conflict
 
-"I don't want a hand made list of attributes to sync. I want all non conflicting data to merge and conflicts to be fixed before we merge anything else." Stated in [the plan](plan.md#the-plan), part 1; not built.
+"I don't want a hand made list of attributes to sync. I want all non conflicting data to merge and conflicts to be fixed before we merge anything else." Stated in [the plan](plan.md#stage-5-the-users-system); not built.
 
 ### An unread attribute gets a render or goes
 
@@ -144,7 +144,7 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 ### A merge replays the source's transactions
 
-"We should never record two transaction times that are the same". Each source transaction becomes a new, later transaction of the receiving branch. Stated in [the plan](plan.md#the-plan), part 1; not built.
+"We should never record two transaction times that are the same". Each source transaction becomes a new, later transaction of the receiving branch. Stated in [the plan](plan.md#stage-5-the-users-system); not built.
 
 ### No derived value is stored
 
@@ -152,15 +152,15 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 ### Work, then refine, then review
 
-"And then we can test those refinements without losing the previous one because we have db history." Stated in [the plan](plan.md#the-plan), part 2; not built.
+"And then we can test those refinements without losing the previous one because we have db history." Stated in [the plan](plan.md#stage-4-agents-finish-in-few-turns); not built.
 
 ### Reviewed sessions are kept in the repository
 
-"Make it a general import area like tasks and it's in the repo". Stated in [the plan](plan.md#the-plan), part 2; not built.
+"Make it a general import area like tasks and it's in the repo". Stated in [the plan](plan.md#stage-4-agents-finish-in-few-turns); not built.
 
 ### Measures accumulate from use; a measurement is one call
 
-"I wanted results to accumulate and become more precise over time naturally as they are exercised in the system." Stated in [cost](cost.md#how-we-measure) and [the plan](plan.md#the-plan), part 6.
+"I wanted results to accumulate and become more precise over time naturally as they are exercised in the system." Stated in [cost](cost.md#how-we-measure) and [the plan](plan.md#stage-4-agents-finish-in-few-turns).
 
 ### Before a compaction a session reports up
 
@@ -184,7 +184,7 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 ### When lines of work collide: proving, the product loop, renders as data, Jolt fiber safety (owner, 2026-11-11)
 
-"B, A, D, C": proving through the system, the product loop, renders as data, Jolt fiber safety. Stated in [the plan](plan.md#now).
+"B, A, D, C": proving through the system, the product loop, renders as data, Jolt fiber safety. Stated in [the plan](plan.md#the-plan).
 
 ### A stuck agent is stopped and analyzed
 
@@ -872,7 +872,7 @@ Approved: a changed part sends `clojure.data/diff` of its value; a cited var at 
 
 ### Simplify by constraint; the test suite must be trusted
 
-"I'm okay with adding constraints to the system to simplify the solutions"; "I want all correctness issues solved with our test suite. We need to trust it as much as possible." Stated in [the plan](plan.md#now).
+"I'm okay with adding constraints to the system to simplify the solutions"; "I want all correctness issues solved with our test suite. We need to trust it as much as possible." Stated in [the plan](plan.md#the-plan).
 
 ## 2026-10-29 rulings
 
