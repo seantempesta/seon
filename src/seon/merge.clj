@@ -60,13 +60,6 @@
   "The attribute namespaces outside the program's that stated-keys carry (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
   (into #{} (keep :carries) (vals stated-keys)))
 
-(defn- derived?
-  "Whether attribute a, or the entity schema it belongs to, is marked {:seon.db/derived true}: a cache each branch computes from other
-  facts (an embedding, a cite, what a task file last stated, a section's read forms), never merged. See docs/merging.md#a-branch-merges-main-in."
-  {:malli/schema [:=> [:cat :qualified-keyword] :boolean]}
-  [a] (boolean (or (:seon.db/derived (contract/properties a))
-                   (some-> (get-in (pdb/index) [:entity-schemas a]) contract/properties :seon.db/derived))))
-
 (defn- data-attr?
   "Whether an attribute of db is data that data-attrs (a set, or :all) names, as a predicate:
   the set itself, or for :all one that asks of an attribute alone whether db's own schema entry
@@ -77,9 +70,10 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/data-attrs] ifn?]}
   [db data-attrs]
   (if (= :all data-attrs)
-    (let [schema (:schema db)]
+    ;; the derived attributes, as the entity index holds them (made once with it), never asked per attribute
+    (let [schema (:schema db) derived (:derived-attrs (pdb/index))]
       (fn [a] (boolean (and (keyword? a) (:db/valueType (get schema a))
-                            (not (or (program/attr-namespaces (namespace a)) (stated-attr? a) (and (qualified-keyword? a) (derived? a))))))))
+                            (not (or (program/attr-namespaces (namespace a)) (stated-attr? a) (derived a)))))))
     data-attrs))
 
 (defn- data-attr-set
@@ -539,15 +533,16 @@
 (defn own-datoms
   "The datoms head wrote since base, as [gone added] (datahike.api/datoms-diff of base and head, one read of what differs): each a
   fact head owns (`owned?`: its transaction names no branch of main's, or head held and let go of it), of no derived attribute
-  (`derived?`) and no transaction's own facts. A value head holds only because main wrote it, or lacks because it never held it, is
+  (the entity index's :derived-attrs) and no transaction's own facts. A value head holds only because main wrote it, or lacks because it never held it, is
   main's and left out. What seon.merge/merge-main writes onto main's head. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:tuple [:vector :seon.host/datom] [:vector :seon.host/datom]]]}
   [base head main]
   (let [mains (tx-branch main (:max-tx main))
         tx? (fn [e] (some? (first (d/datoms head :eavt e :db/txInstant))))
         [gone added] (d/datoms-diff base head :eavt [])
-        ;; derived? once per attribute the diff holds, never per datom
-        kept (into #{} (filter #(and (keyword? %) (not= "db" (namespace %)) (not (and (qualified-keyword? %) (derived? %)))))
+        ;; the derived attributes, as the entity index holds them (seon.db's :derived-attrs, made once), never asked per datom
+        derived (:derived-attrs (pdb/index))
+        kept (into #{} (filter #(and (keyword? %) (not= "db" (namespace %)) (not (derived %))))
                    (into #{} (map :a) (concat gone added)))
         fact? (fn [{:keys [e a]}] (and (kept a) (not (tx? e))))]
     [(filterv #(and (fact? %) (seq (d/datoms (d/history head) :eavt (:e %) (:a %) (:v %)))) gone)
