@@ -346,8 +346,11 @@
                 "Linear in the children in bytes and flat in contracted calls, whatever the rest of the page holds; ticks 27k at 10 children, 326k at 100, "
                 "17.6M at 1,000, the map reads being an array map's")
      :growth :linear
-     :per-n {:calls 0 :bytes 12500}
-     :fixed {:calls 9 :bytes 60000}
+     :per-n {:calls 12 :bytes 12500}
+     ;; 2026-11-14 (web, W-5): every reader of an output asks one marker test a node and one element split an element (seon.render/marker-key,
+     ;; element-parts, private: checked in tests, not on a production call), contracted calls the inline tests were not: +12 a member (the edited component's
+     ;; output holds a row a member, each row's markers tested and elements split; the inline tests counted none) and +22 fixed
+     :fixed {:calls 31 :bytes 60000}
      :sizes [10 30 100 300]}))
 
 ;; See docs/render.md#components
@@ -671,9 +674,10 @@
                ;; - the printer over the 36 nodes the components print (system message, examples, state), ~32 calls and ~7k ticks a node = 1,150 calls
                ;; - the system page as markdown (seon.doc, 4 sections): ~125k ticks, ~660 KB
                ;; - the db, ctx and config reads (members, parents, watch, config values): ~190 calls, ~90k ticks, ~300 KB
-               ;; sum: ~2,440 calls, ~0.78M ticks, ~3.3 MB. Measured 2026-11-13 at 2 / 4 / 8: 2,429 calls, 0.82M ticks, 3.54 MB at every size
+               ;; - 2026-11-14 (web): one seon.render/entity-read-keys per component run, its tree reads as datom keys: 15 calls
+               ;; sum: ~2,455 calls, ~0.78M ticks, ~3.3 MB. Measured 2026-11-13 at 2 / 4 / 8: 2,429 calls, 0.82M ticks, 3.54 MB at every size
                ;; (1.01M and 4.17 MB when rules sorted all 162 vars). None of it reads the parent's history
-               :fixed {:calls 2440 :bytes 3500000 :ticks 800000}
+               :fixed {:calls 2455 :bytes 3500000 :ticks 800000}
                :sizes [2 4 8]}))
 
 (defn rules-of
@@ -717,7 +721,9 @@
                ;; every turn, seon.db/owners via schema-of 42 KB, ratom reads-of 24 KB, wire/turn-entities 18 KB, the ratom's wrap, notify and
                ;; view ~28 KB), which task seon.ctx.wire/a-turn-is-a-component-of-the-request removes: back to ~115 KB a turn when it lands.
                ;; A waiver (:overrun) was refused by health's :no-waived-proof.
-               :per-n {:calls 170 :bytes 156000}
+               ;; 2026-11-14 (web, W-5): every reader of an output asks one marker test a node and one element split an element (seon.render/marker-key,
+               ;; element-parts, private: checked in tests, not on a production call), contracted calls the inline tests were not: +6 a turn (its output's nodes)
+               :per-n {:calls 176 :bytes 156000}
                :fixed {:calls 850 :bytes 1850000}
                :sizes [10 20 40]})
   (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/walk-same-of
@@ -799,7 +805,9 @@
      ;; measured 2026-11-10: 81 calls at 10, 40 and 160; 99 KB, 124 KB, 217 KB. 2026-11-12: 87 at 10, 88 KB: the reactions' read index
      ;; is the one value index a walk kept as a value reads too (seon.ratom/read-index, reached), a call each where it was inline
      :per-n {:calls 0 :bytes 900}
-     :fixed {:calls 88 :bytes 100000}
+     ;; 2026-11-14 (web): +3, the changed member's two runs each derive their tree reads' datom keys (seon.render/entity-read-keys), and
+     ;; its re-run takes the entity keys it held out of the walk's index (forget-readers!), which a tree-only reader never held before
+     :fixed {:calls 91 :bytes 100000}
      :sizes [10 40 160]}))
 
 (defn big-member
@@ -838,7 +846,9 @@
      ;; measured a page already laid out. Over a walk value each call does the work: placed-units, placed, places of the changed member,
      ;; styled and thrown-in (5), and its one <li> written by seon.web.html (html, write!, write-attrs!, callback, an attr-name per
      ;; attribute's part and an escape per text: ~23), ~28 calls; its html, its placements and the value's new cache entries, ~35 KB
-     :fixed {:calls 30 :bytes 40000}
+     ;; 2026-11-14 (web, W-5): every reader of an output asks one marker test a node and one element split an element (seon.render/marker-key,
+     ;; element-parts, private: checked in tests, not on a production call), contracted calls the inline tests were not: +8 (the placed list's nodes)
+     :fixed {:calls 38 :bytes 40000}
      :sizes [10 100 1000]}))
 
 
@@ -856,6 +866,8 @@
      :work "each element's attributes checked once against the schema, a misfit counted by kind; a child's marker skipped"
      :growth :linear
      ;; measured 2026-11-11: 41 calls and 26.4 KB at 10, within 4 calls and 3 KB an element at 100 and 1000 (seon.contract/fits? an element)
-     :per-n {:calls 4 :bytes 3000}
+     ;; 2026-11-14 (web, W-5): every reader of an output asks one marker test a node and one element split an element (seon.render/marker-key,
+     ;; element-parts, private: checked in tests, not on a production call), contracted calls the inline tests were not: +3 a member (its row's nodes)
+     :per-n {:calls 7 :bytes 3000}
      :fixed {:calls 5 :bytes 5000}
      :sizes [10 100 1000]}))
