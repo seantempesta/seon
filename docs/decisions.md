@@ -56,7 +56,7 @@ At 21:00: "If the reactive core is built make sure everyone is moving onto it we
 
 ### Runtime owns the reactive core; context drives agents end to end
 
-At 21:20: "Should we have them be the expert for reactive everything? That sounds runtime'ish? I want context to resume their experiments with agents and getting tasks finished and merged end to end." Runtime owns `seon.ratom` and every move onto it (the feed from commits, the stress proofs, the API's ease, the learning phase's trials), with flow reviewing the Flow side; context owns what an agent reads, Stage 0 and the random rounds. Stated in [sessions](sessions.md#sessions-own-their-areas).
+At 21:20: "Should we have them be the expert for reactive everything? That sounds runtime'ish? I want context to resume their experiments with agents and getting tasks finished and merged end to end." Runtime owns `seon.ratom` and every move onto it (the feed from commits, the stress proofs, the API's ease, the learning phase's trials), with flow reviewing the Flow side; context owns what an agent reads, Stage 0 and the random rounds. Then (21:35): context builds the whole context pipeline, html and model outputs, on the reactive render with runtime; context finishes Stage 0, and root drives the random rounds; web-2 builds its render pieces (proc, walk entry, health tracks, server and pages) to context's design. Stated in [sessions](sessions.md#sessions-own-their-areas).
 
 ### After boot, only Flow; one specialist ports every holdout
 
