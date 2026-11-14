@@ -8,6 +8,7 @@
  :seon.config.render.agent/sort-bound [:int {:seon.config/at-load true :min 1 :seon.config/unit "keys" :description "A keyword map or set of at most this many is shown sorted."}]
  :seon.config.render/width [:int {:min 16 :seon.config/unit "chars" :description "The printed line width."}]
  :seon.config.render/agent-tree-depth [:int {:min 1 :max 16 :seon.config/unit "levels" :description "How many levels of the agents each one started a user's pull joins (its agents list): an agent at the last level shows how many it started, never a silent cut. See docs/users.md#whats-on-screen."}]
+ :seon.config.render/recent-errors [:int {:min 0 :seon.config/unit "errors" :description "How many of an agent's newest failures (a model call's error, an eval's) its open problems show, with their causes."}]
  :seon.config.render/part-budget [:int {:seon.config/at-load true :min 1 :seon.config/unit "tokens" :description "A value shown inside another (a refused argument, a test's expected and actual)."}]
  :seon.config.render/form-budget [:int {:seon.config/at-load true :min 1 :seon.config/unit "tokens" :description "A form echoed back."}]
  :seon.config.render/context-budget [:int {:seon.config/at-load true :min 1 :seon.config/unit "tokens" :description "The whole context block the model reads."}]

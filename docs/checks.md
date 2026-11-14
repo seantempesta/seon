@@ -4,7 +4,7 @@ A check is an end-to-end proof run on the built binary against a real root, its 
 
 ## Running steps by hand
 
-`mkdir D; printf 'window\nids\n' > D/steps; bin/check --steps D` runs those steps by their own bodies in `bin/check` (`u-<step>`), each on a clone of the seeded store, writing greens to `D/green`. `D/steps-binary` is the plan's answer to whether the selection needs the binary and the seeded store (```seon.proofs/step-needs-binary?```); a directory without it seeds and uses the binary. Never write an empty `steps-binary` by hand: a step that needs the store would run on none (task `seon.check/a-selection-derives-what-it-needs-from-its-steps`).
+`mkdir D; printf 'window\nids\n' > D/steps; bin/check --steps D` runs those steps by their own bodies in `bin/check` (`u-<step>`), each on a clone of the seeded store, writing greens to `D/green`. `D/steps-binary` is the plan's answer to whether the selection needs the binary and the seeded store (```seon.proofs/step-needs-binary?```); a directory without it seeds and uses the binary. Never write an empty `steps-binary` by hand: a step that needs the store would run on none.
 
 `bin/check MODE ARGS` runs one mode on its own branch `check-<mode>` of the checks' store, seeded first and dropped before and after. It equals a step only where the step's body is that one mode with no arguments (smoke, ids); `laws`, `forks`, `health`, the `lmdb-*` steps, `window`, `orphan`, `resume` and the `e2e-*` steps have bodies of their own, and some steps pass arguments (`lifecycle 10`, `idle 2000`, `fx 20`).
 

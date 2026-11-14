@@ -135,4 +135,8 @@ Proofs, once ruled: a task file's declaration loads with the kind the ruling say
   :seon.task/kind :work
   :seon.task/proofs #{seon.system-test/a-stop-that-never-answers-ends-with-its-evidence seon.check-test/a-stop-that-never-answers-ends-at-its-bound}
   :seon.task/needs #{}}
+ {:seon.task/name "a-sessions-files-are-a-transaction-on-its-agents-branch"
+  :seon.task/plan "Plan Stage 1.4. `seon.system/prove-tree!`'s catch-up (catch-up :fact? false, the writer's :branch-for-tree) writes onto the session's persistent agent branch keyed by its area, not a tree branch dropped after the run, and the writer loads the changed forms into that agent. One function: data owns the transaction (`seon.source/tx-of`), runtime the op and the agent. Deletes tree-branch, tree-runs, tree-enter!, tree-leave!, :drop-tree-branch and prove!'s checkout argument after an audit to the owner; the import and the live route stay. Owners: runtime, data."
+  :seon.task/proofs #{seon.system-test/an-import-of-unchanged-files-writes-nothing seon.system-test/a-file-that-does-not-load-is-answered-and-nothing-is-written seon.system-test/an-edited-file-is-one-transaction-on-the-sessions-branch}
+  :seon.task/needs #{}}
 ]

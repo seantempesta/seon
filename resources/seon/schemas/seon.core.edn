@@ -33,10 +33,15 @@
  :seon.fx.read/path [:string {:description "A file an effect read, outside the store."}]
  :seon.fx.read/digest [:string {:description "That file's content id (its git blob id)."}]
  :seon.fx.read/env [:string {:description "An environment variable an effect read."}]
- :seon.fx.read/value [:string {:description "That variable's value."}]
+ :seon.fx.read/value [:string {:description "That variable's value, or a config value's digest."}]
+ :seon.fx.read/config [:qualified-keyword {:description "A config key a run resolved."}]
+ :seon.fx.read/pin [:string {:description "A dependency pin's path (a gitlink)."}]
+ :seon.fx.read/sha [:string {:description "That pin's commit."}]
  :seon.fx/read [:or {:description "One read outside the store: a file and its content id, or an env var and its value."}
                 [:map [:seon.fx.read/path :seon.fx.read/path] [:seon.fx.read/digest :seon.fx.read/digest]]
-                [:map [:seon.fx.read/env :seon.fx.read/env] [:seon.fx.read/value :seon.fx.read/value]]]
+                [:map [:seon.fx.read/env :seon.fx.read/env] [:seon.fx.read/value :seon.fx.read/value]]
+                [:map [:seon.fx.read/config :seon.fx.read/config] [:seon.fx.read/value :seon.fx.read/value]]
+                [:map [:seon.fx.read/pin :seon.fx.read/pin] [:seon.fx.read/sha :seon.fx.read/sha]]]
  :seon.fx/reads [:vector {:description "The reads outside the store an effect made."} :seon.fx/read]
  :seon.fx/answer [:or {:description "The one answer every effect gives: its value and what it spent and read, or its error."}
                   [:map [:seon.fx/value :seon.fx/value] [:seon.bound/spent :seon.bound/spent] [:seon.fx/reads {:optional true} :seon.fx/reads]]
@@ -56,6 +61,9 @@
  ;; the store and its values
  :seon.db/branch :keyword
  :seon.db/t :int
+ :seon.db/commit [:uuid {:description "A commit of the store."}]
+ ;; a kept db value as a reference, never the value (AGENTS §4), read back with datahike.api/commit-as-db
+ :seon.db/reference [:map {:description "A db value as a reference: its branch, commit and t."} [:seon.db/branch :seon.db/branch] [:seon.db/commit :seon.db/commit] [:seon.db/t :seon.db/t]]
  :seon.db/cfg [:map [:store :map]]
  ;; transaction data, as datahike.api/transact takes it: entity maps and the ops src writes (docs/storage.md#the-write-checks-every-entity-it-touches)
  :seon.db/tx-data [:sequential [:or :seon.db/tx-map :seon.db/tx-op :seon.host/datom]]
@@ -265,6 +273,7 @@
  :seon.db/attributes [:boolean {:description "On a schema's properties, true when it is an entity schema: the keys of its map are attributes, and an entity holding one is checked against its required keys. See docs/storage.md#the-write-checks-every-entity-it-touches."}]
  :seon.db/identity [:boolean {:description "On an attribute's schema, true when its value identifies its entity, a lookup ref (Datahike's :db.unique/identity)."}]
  :seon.db/index [:boolean {:description "On an attribute's schema, true when its values are indexed for lookup by value (Datahike's :db/index)."}]
+ :seon.db/tagged [:boolean {:description "On an attribute's schema, true when each of its values names the schema it satisfies by :seon.db/tag and is held to it at the write (seon.db/invalid-datom)."}]
  :seon.db/to [:vector {:description "On a ref attribute's schema, the entity schemas the entity it refers to may be."} :qualified-keyword]
  :seon.db/component [:boolean {:description "On an attribute's schema, true when it is a component: what its entity references is owned by it (Datahike's :db/isComponent)."}]
  :seon.db/content-id [:boolean {:description "On the schema of an identity attribute, true when its value names its entity's id in every branch (Datahike's :db/contentId)."}]

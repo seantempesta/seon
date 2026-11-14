@@ -25,3 +25,30 @@
                                     {:op :context :agent agent}
                                     "(mapv (fn [m] (:max-turns (:seon.model-call/basis (datahike.api/pull (seon.agent/db) [:seon.model-call/basis] m)))) (map first (datahike.api/q '[:find ?m :where [?m :seon.model-call/origin :outside]] (seon.agent/db))))"]))]
     (is (= [7] (:value bases)) (str "the read's basis names the run's max-turns: " (pr-str bases) (pr-str ctxr)))))
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-hand-back-says-a-failed-run-before-its-unknown-proofs
+  ;; docs/render.md#how-the-work-stands: while a test run has failed as a whole (:seon.agent/test-error) no verdict counts, so the done
+  ;; rule reads every proof unknown. Seen 11-14: seon_done told a session "ended red saying proof-unknown <proof>" of a proof green at its
+  ;; digest, the failed run (one test past its wall bound, the batch no verdict) unsaid. The end says the run first, then the reasons
+  (let [s {:reasons [{:reason :proof-unknown :symbol 'app.x-test/t}]
+           :test-run {:failed ["app.y-test/slow ended at its wall bound: no verdict"]}}
+        [o why] (turn/hand-back-end nil s)]
+    (is (= :red o))
+    (is (clojure.string/starts-with? why "the test run failed as a whole (app.y-test/slow ended at its wall bound: no verdict), so no verdict counts:")
+        (str "the run named first: " why))
+    (is (clojure.string/includes? why "proof-unknown app.x-test/t") "then the reasons as before"))
+  (is (= [:green nil] (turn/hand-back-end nil {:reasons []})) "a clear status ends green")
+  (is (= [:red "proof-red app.x-test/t"] (turn/hand-back-end nil {:reasons [{:reason :proof-red :symbol 'app.x-test/t}]})) "a run that didn't fail says only its reasons")
+  (is (= [:failed "gave up"] (turn/hand-back-end {:outcome :failed :reason "gave up"} {:reasons []})) "a failed task ends as it said"))
+
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-proof-first-red-specifies-its-task
+  ;; plan Stage 1.2 (task seon.ctx.status/a-task-is-specified-once-a-proof-was-red): the first status a turn reads in which one of the task's
+  ;; proofs is red writes the task's :seon.task/specified-turn, that turn's number, once: a verdict keeps no history, so the moment it is
+  ;; observed is when it is written. No red proof writes nothing; a task that holds it already writes nothing again
+  (let [task "app.calc/total-is-exact"
+        db (t/with (t/world) [{:seon.agent/key "k1" :seon.agent/task [:seon.task/id task] :seon.agent/turn 3}])
+        red {:proofs [{:test 'app.calc-test/total-sums :status :fail} {:test 'app.calc-test/add-adds :status :pass}]}]
+    (is (= [{:seon.task/id task :seon.task/specified-turn 3}] (turn/specified-tx db task "k1" red)) "red at turn 3: specified then")
+    (is (nil? (turn/specified-tx db task "k1" {:proofs [{:test 'app.calc-test/total-sums :status :undefined}]})) "not written: nothing")
+    (is (nil? (turn/specified-tx db task "k1" {:proofs [{:test 'app.calc-test/total-sums :status :pass}]})) "green: nothing")
+    (is (nil? (turn/specified-tx (t/with db [{:seon.task/id task :seon.task/specified-turn 2}]) task "k1" red)) "written once")
+    (is (nil? (turn/specified-tx (t/with db [{:seon.agent/key "k0" :seon.agent/task [:seon.task/id task]}]) task "k0" red)) "an agent with no turn yet writes nothing: unknown is never 0")))

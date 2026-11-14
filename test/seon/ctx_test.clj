@@ -1076,6 +1076,36 @@
     (is (= (:messages (seon.ctx.wire/request (cold db') db')) (:messages (seon.ctx.wire/request p1 db')))
         "its request after the write is the cold request of the same db")))
 
+;; See docs/render.md#the-page
+(deftest ^{:seon.test/estimate {:ticks 20000000}} an-agents-recent-errors-are-on-its-page-with-their-causes
+  ;; estimate: a seeded 3-eval agent (~5M), a failed call and a failed eval written (~1M), its page and request drawn once (~3M)
+  ;; plan Stage 0.3 (owner, 2026-11-14): a model call that failed (a reasoning overrun) and an eval that threw are the agent's to
+  ;; read on its next turn, and its page shows them with their causes: one render, the open problems', from what its pull holds
+  (let [err (fn [ty msg fix] {:seon.error/type ty :seon.error/operation 'seon.model/call :seon.error/message msg :seon.error/fix fix})
+        db (d/db-with (seeded 3 nil)
+                      (into [{:seon.model-call/id (str k "/9") :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n 9
+                              :seon.model-call/origin :model}
+                             {:seon.agent/key k :seon.agent/turn 9}
+                             {:seon.model-call/id (str k "/9")
+                              :seon.model-call/error (err :seon.model/reasoning-ate-reply "the reasoning used all 8192 tokens; no reply"
+                                                          "raise :seon.config.ai/max-tokens, or ask for less at once")}]
+                            ;; as the REPL keeps an answer: its error in the eval's result (seon.db/with-response, seon.repl's)
+                            (seon.repl/record-tx {:seon.agent/key k} "e-threw" (seon.task/sender "a1")
+                                                 (seon.db/with-response
+                                                   {:seon.eval/code "(app.x/f0 :x)" :seon.eval/intent "Call f0 with a keyword."
+                                                    :seon.eval/call (seon.task/call-ref k 9) :seon.eval/call-id "c-threw"}
+                                                   {:handle 'result/e-threw :ex (err :seon.agent/eval-error "app.x/f0 can't add :x" "pass a number")}))))
+        [page msgs] (try (enter-agent! {:db db :key k :branch :b})
+                         [(pr-str (seon.repl/render-ctx-hiccup)) (pr-str (:messages (seon.ctx.wire/request (seon.repl/page-walk) (seon.agent/db))))]
+                         (finally (end-agent!)))]
+    (is (str/includes? page "the reasoning used all 8192 tokens") "the page: the failed call's message")
+    (is (str/includes? page "raise :seon.config.ai/max-tokens") "and its fix")
+    (is (str/includes? page "app.x/f0 can't add :x") "the page: the eval's error")
+    (is (str/includes? page "pass a number") "and its fix")
+    (is (re-find #"Recent errors.*Eval e-threw: Call f0 with a keyword" page) "under the open problems, each failure named by what failed")
+    ;; the model reads the eval's error in its conversation, and the call's overrun on its next turn (seon.turn, runtime's)
+    (is (str/includes? msgs "app.x/f0 can't add :x") "the model's request: the eval's error")))
+
 (deftest the-page-reads-every-write-since-it-was-drawn
   ;; docs/render.md#reactive-renders: the agent's page walk is given every datom its db moved by since
   ;; it last drew (ctx's own diff of each move, seon.ctx/take-moved!), so a db component sees a write

@@ -95,7 +95,7 @@ The environment is read-only; everything else is writable, and history keeps wha
 
 ## Deleting, compacting and resetting are changes of data
 
-Deleting, editing, compacting or forgetting what an agent has read is a `swap!` on `@ctx`, and its next request is rendered from the pull as it then is, so the provider's cache breaks only where history changed: to compact, replace the first entity of a range with a summary and unlink the rest. Resetting to a point is a new branch from that commit under the same key ([an agent goes back to an eval](turn.md#an-agent-goes-back-to-an-eval)). Only unlinking has a test; page controls for the rest are in [the plan](plan.md#now).
+Deleting, editing, compacting or forgetting what an agent has read is a `swap!` on `@ctx`, and its next request is rendered from the pull as it then is, so the provider's cache breaks only where history changed: to compact, replace the first entity of a range with a summary and unlink the rest. Resetting to a point is a new branch from that commit under the same key ([an agent goes back to an eval](turn.md#an-agent-goes-back-to-an-eval)). Only unlinking has a test; page controls for the rest are in [the plan](plan.md#stage-4-agents-finish-in-few-turns).
 
 **The page is the agent's to change.** The page is the agent schema's `:seon.render/hiccup` (```seon.render.ui/agent```), composed of components ([render](render.md#components)); an agent overrides it or any part by registering its own on its branch, and its model reads the same output (```seon.repl/render-ctx-hiccup```).
 

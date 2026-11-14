@@ -219,28 +219,32 @@
       (seq not-lost) (assoc :not-lost not-lost)))))
 
 (defn sync-req
-  "What a reviewed sync of the merged tasks ids commits, read from db: each task's changed files (seon.problems/changed-paths) as
-  db holds them now, and its task file, read under tasks-dir (where root reads its tasks), with its entry removed
-  (seon.source/task-file-text), as the :git effect's request for root's source dir: on jolt/sync-<the first task's name>, a new
-  branch starting at git's main (:seon.config.source/main), its message naming each task as Completes:. A task that is no
-  merged task its files still declare (seon.problems/unsynced?) is :seon.system/nothing-to-sync under :not-unsynced. Answers
+  "What a reviewed sync of the tasks ids that differ from their files (seon.problems/unsynced?) commits, read from db: a merged
+  task's changed files (seon.problems/changed-paths) as db holds them now, and each task's file, read under tasks-dir (where root
+  reads its tasks), with a merged task's entry removed and any other's written as db holds it (seon.task/declaration, through
+  seon.source/task-file-text), as the :git effect's request for root's source dir: on jolt/sync-<the first task's name>, a new
+  branch starting at git's main (:seon.config.source/main), its message naming each task as Completes:. A task that does not
+  differ from its file is :seon.system/nothing-to-sync under :not-unsynced. Answers
   {:tasks :paths :req :not-unsynced}. See docs/source.md#a-merged-task-reaches-mains-files."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.task/id] :string] :map]}
   [db ids tasks-dir]
   (let [ts (filterv #(some->> (pdb/eid db :seon.task/id %) (problems/unsynced? db)) ids)
         es (mapv #(pdb/eid db :seon.task/id %) ts)
-        paths (vec (sort (distinct (mapcat #(problems/changed-paths db %) es))))
+        merged? #(= :merged (:seon.task/outcome (d/pull db [:seon.task/outcome] %)))
+        paths (vec (sort (distinct (mapcat #(problems/changed-paths db %) (filter merged? es)))))
         entries (into {} (for [[nsym names] (group-by #(:seon.task/ns (d/pull db [:seon.task/ns] %)) es)]
                            [(str (config/value :seon.config.source/tasks-dir) "/" nsym ".edn")
-                            (source/task-file-text (slurp (io/file tasks-dir (str nsym ".edn")))
-                                                   (zipmap (map #(:seon.task/name (d/pull db [:seon.task/name] %)) names) (repeat nil)))]))
+                            (source/task-file-text (let [f (io/file tasks-dir (str nsym ".edn"))] (if (.exists f) (slurp f) "[]\n"))
+                                                   (into {} (map #(vector (:seon.task/name (d/pull db [:seon.task/name] %))
+                                                                          (when-not (merged? %) (dissoc (task/declaration db %) :seon.task/ns))))
+                                                         names))]))
         files (merge (doc/files db paths) entries)]
     {:tasks ts :paths paths
      :not-unsynced (vec (for [id ids :when (not-any? #{id} ts)]
-                          (contract/error :seon.system/nothing-to-sync #'my.root/sync-req (str "task " id " is no merged task main's files still declare") {:task id})))
+                          (contract/error :seon.system/nothing-to-sync #'my.root/sync-req (str "task " id " is as its file states it, or no task") {:task id})))
      :req {:branch (str "jolt/sync-" (some-> (first ts) (str/split #"/" 2) second)) :base (config/value :seon.config.source/main)
-           :files files :modes (source/modes db (keys files))
-           :message (str "Sync: " (str/join ", " ts) "\n\n" (str/join (for [id ts] (str "Completes: " id "\n"))))}}))
+           :files files :modes (source/modes db (vec (keys files)))
+           :message (str "Sync: " (str/join ", " ts) "\n\n" (str/join (for [[id e] (map vector ts es) :when (merged? e)] (str "Completes: " id "\n"))))}}))
 
 (defn sync!
   "Write the merged tasks ids' work onto a branch for a session to review and land (sync-req), in one :git effect on root's source
@@ -433,18 +437,22 @@
   source fact, tree, the binary's answer for it and the inputs bin/update wrote), main's source fact is written again as a boot
   writes it (seon.system/booted-source: this boot, main's program digest now, the inputs of the files now), so agents key their
   results by the landed files and every agent keeps running. Answers {:kept boot :tree} or {:restart why}, which bin/update
-  restarts on. See docs/source.md#a-landing-enters-main-as-data."
+  restarts on; kept with a binary not current for the landed tree, :build true, which bin/update builds with no restart. See
+  docs/source.md#a-landing-enters-main-as-data."
   {:malli/schema [:=> [:cat :seon.system/sys :string] :map]}
   [sys tree]
   (let [db @(:conn sys)
         held (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))
         inputs (root/held-inputs)
-        why (root/restart-for held tree (when (= tree (:tree held)) (root/stale-binary db)) inputs)]
+        stale (when (= tree (:tree held)) (root/stale-binary db))
+        why (root/restart-for held tree stale inputs)]
     (if why
       {:restart why}
       (let [src (root/booted-source held (:boot sys) (program/binary-program) (program/program-digest db) (fx/config-input config/config (config/checkout)) nil inputs)
             r @(root/transact-main! sys [{:seon.system/id :root :seon.system/source src}])]
-        (if (contract/error? r) r {:kept (:boot sys) :tree tree})))))
+        ;; kept, but the binary is not current for the landed tree (forms, config or schema entries it bakes): bin/update builds
+        ;; it now, with no restart, so the next boot is on main's build, never a stale one
+        (if (contract/error? r) r (cond-> {:kept (:boot sys) :tree tree} (seq (:reaches stale)) (assoc :build true)))))))
 
 (defn build!
   "Build the next generation from main's last merges commit, for what cannot load in place

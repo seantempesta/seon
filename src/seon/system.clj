@@ -1295,24 +1295,32 @@
   (bin/land's bridge, a temporary one). tasks-dir: the tree's task files' directory, relative to the tree (the files' paths
   are; nil: the tree holds no task files this root reads), so what a path is follows the tree, not this process's own task dir (a test root's is under its runs).
   See docs/source.md#a-landing-enters-main-as-data."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string :string] [:maybe :string]] :seon.db/tx-data]}
-  [db changed modes tasks-dir]
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string :string] [:maybe :string]] :seon.db/tx-data]
+                  [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string :string] [:maybe :string] [:set :seon.task/id]] :seon.db/tx-data]]}
+  ([db changed modes tasks-dir] (changed-tx db changed modes tasks-dir #{}))
+  ([db changed modes tasks-dir completed]
   (let [under? (fn [p d] (if (= "." d) (not (str/includes? p "/")) (and (str/starts-with? p (str d "/")) (not (str/includes? (subs p (inc (count d))) "/")))))
         program? (fn [p] (and (fx/source-file? p) (some #(str/starts-with? p (str % "/")) (cfg/value :seon.config.source/dirs))))
         wiki (cfg/value :seon.config.root/wiki-dirs)
         pick (fn [f] (into {} (filter (comp f key)) changed))
         ;; a mode is a fact of a file the allow-list names (seon.source/modes-tx), as a read records it (seon.fx/read-source)
         code (into (source/refresh-tx db (pick program?)) (source/modes-tx db (into {} (filter #(and (program? (key %)) (cfg/file-kind (key %)))) modes)))
+        ;; a changed schema file may state new stored attributes: their declarations, which the registry after it derives and db
+        ;; lacks, ride this write first, as a merge carries them (seon.merge/merge-tx), so the landed main stores them at once
+        ;; with no restart (only a boot installed them, seon.db/install-missing!)
+        decls (when (some #(and (str/starts-with? % "resources/seon/schemas/") (str/ends-with? % ".edn")) (keys changed))
+                (let [after (pdb/speculate-db db code)] (program/schema-declarations db (program/schema-registry (program/schema-changes after)))))
+        code (into (vec decls) code)
         db1 (pdb/speculate-db db code)
         pages (update-vals (pick (fn [p] (and (str/ends-with? p ".md") (some #(under? p %) wiki)))) #(or % ""))
         docs (if (seq pages) (doc/load-tx db1 wiki pages) [])
         db2 (pdb/speculate-db db1 docs)
         task-texts (into {} (for [[p t] changed :when (and tasks-dir (str/ends-with? p ".edn") (under? p tasks-dir))]
                               [(subs p (inc (count tasks-dir))) (or t "[]")]))
-        tasks (if (seq task-texts) (task/load-tx db2 (tasks-of task-texts)) [])]
+        tasks (if (or (seq task-texts) (seq completed)) (task/load-tx db2 (tasks-of task-texts) completed) [])]
     (if (contract/error? tasks)
       (throw (ex-info (str "the landed task files were refused: " (:seon.error/message tasks)) tasks))
-      (vec (concat code docs tasks)))))
+      (vec (concat code docs tasks))))))
 
 (defn- seed!
   "Index the checkout into conn's branch while this is the store's only process: the source tree {:root :dirs}'s program
@@ -1334,6 +1342,15 @@
         (cond-> (assoc r :forms (count (d/datoms db :aevt :form/id)))
           (contract/error? tasks) (assoc :tasks tasks))))))
 
+(defn- landed-completes
+  "The task ids the commits from the held commit to commit say they complete (seon.task/completes of seon.fx/messages-since); none
+  with no held commit or checkout, and git's refusal throws. See docs/source.md#a-landing-enters-main-as-data."
+  {:malli/schema [:=> [:cat [:maybe :map] [:maybe :string]] [:set :seon.task/id]]}
+  [held commit]
+  (let [root (get cfg/config :seon.config.source/root)
+        m (if (and root (:commit held) commit) (fx/messages-since root (:commit held) commit) "")]
+    (if (string? m) (task/completes m) (throw (ex-info (str "the landed commits' messages could not be read: " (:seon.error/message m)) m)))))
+
 (defn landed-tx
   "What root writes on main for a change git landed (bin/land's bridge, docs/source.md#a-landing-enters-main-as-data):
   changed-tx of its changed files and modes, and root's :seon.system/source fact moved to the landed tree (its :tree,
@@ -1346,8 +1363,9 @@
   (let [held (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))
         ;; the landed tree's pins: main's, moved by the landing's gitlinks (a commit, or nil for a submodule removed)
         pins (into {} (remove (comp nil? val)) (merge (source/pins-of db) pin-changes))]
-    ;; the tree's task files where the tree keeps them (its layout, :seon.config.source/tasks-dir), never this root's own task dir
-    (cond-> (into (changed-tx db changed modes (cfg/value :seon.config.source/tasks-dir)) (source/pin-changes-tx db pin-changes))
+    ;; the tree's task files where the tree keeps them (its layout, :seon.config.source/tasks-dir), never this root's own task dir;
+    ;; the tasks the landed commits say they complete, done (landed-completes)
+    (cond-> (into (changed-tx db changed modes (cfg/value :seon.config.source/tasks-dir) (landed-completes held commit)) (source/pin-changes-tx db pin-changes))
       held (conj {:seon.system/id :root
                   :seon.system/source (assoc (dissoc held :pins) :tree tree :commit commit :digest (source-digest {:tree tree :pins pins} (:dirs held [])))})))))
 
@@ -1357,22 +1375,26 @@
   (landed-tx: code, pages and task files, the source fact moved to the tree now), less those left out and named under :skipped,
   which keep the fact at the tree it held, so the next catch-up reads them again: a file that does not read as its reader reads it
   (seon.fx/unreadable), a task file the changed task files are refused with (seon.task/load-tx), and a file a merged task main
-  holds unsynced also changed (seon.problems/unsynced?: the checkout's text would replace the merge's). Answers {:tx :paths
-  :skipped}, {:paths []} when nothing differs, nil when db holds no tree, or the read's error. Its caller writes :tx on the branch
-  it brings up to date (boot!: main). opts: :tree, the tree to read what differs from (default db's held one), and :fact? false,
-  which moves no source fact (changed-tx alone): a session's files written as a branch of the store, never main."
+  holds unsynced also changed (seon.problems/unsynced? of a merged task: the checkout's text would replace the merge's). Answers {:tx :paths
+  :skipped}, {:paths []} when nothing differs, nil when db holds no tree and no :paths are named, or the read's error. Its caller writes :tx on the branch
+  it brings up to date (boot!: main). opts: :tree, the tree to read what differs from (default db's held one), :fact? false,
+  which moves no source fact (changed-tx alone): a session's files written as a branch of the store, never main; and :paths,
+  the files to read in place of the tree's diff (seon.fx/files-at: a session's import, my.branch/import!)."
   {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:maybe :map]]
-                  [:=> [:cat :seon.host/db :string [:map [:tree {:optional true} :string] [:fact? {:optional true} :boolean]]] [:maybe :map]]]}
+                  [:=> [:cat :seon.host/db :string [:map [:tree {:optional true} :string] [:fact? {:optional true} :boolean] [:paths {:optional true} [:sequential :string]]]] [:maybe :map]]]}
   ([db root] (catch-up db root {}))
   ([db root {:keys [fact?] :or {fact? true} :as opts}]
-  (when-let [tree (or (:tree opts) (:tree (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))))]
-    (let [r (fx/changed-since root tree)
+  ;; :paths names the files to read (a session's import, my.branch/import!), which needs no held tree; else the tree's diff names
+  ;; them, from the tree db last indexed, and a db that holds none has nothing to diff from
+  (when-let [tree (or (:tree opts) (:tree (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))) (when (:paths opts) :paths))]
+    (let [r (if-let [ps (:paths opts)] (fx/files-at root ps) (fx/changed-since root tree))
           tasks-dir (cfg/value :seon.config.source/tasks-dir)]
       (cond
         (contract/error? r) r
         (empty? (:value r)) {:paths []}
         :else
-        (let [unsynced (into {} (for [{:keys [e]} (d/datoms db :aevt :seon.task/declared) :when (problems/unsynced? db e)
+        (let [unsynced (into {} (for [{:keys [e]} (d/datoms db :aevt :seon.task/declared)
+                                      :when (and (= :merged (:v (first (d/datoms db :eavt e :seon.task/outcome)))) (problems/unsynced? db e))
                                       p (problems/changed-paths db e)]
                                   [p (:v (first (d/datoms db :eavt e :seon.task/id)))]))
               task? #(and (str/ends-with? % ".edn") (str/starts-with? % (str tasks-dir "/")))
@@ -1498,6 +1520,15 @@
       stale (assoc :stale-binary stale)
       inputs (assoc :inputs (update inputs :config merge config-input)))))
 
+(defn- loads-in-place?
+  "Does changed path p (a build input the binary bakes) load into a running system by the landing's own commit, so it is no
+  restart: a config entry (resources/seon/config/: seon.program/hold-config!) or a schema entry (the env-class schemas: its
+  dependents re-armed and root's registry held, seon.program/load-changes! and seon.writer's main-commit). The binary is built
+  again for the next boot (my.root/landed!'s :build), never restarted for it. See docs/source.md#a-landing-enters-main-as-data."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [p]
+  (boolean (or (str/starts-with? p "resources/seon/config/") (= :seon.env/schemas (fx/env-class p)))))
+
 (defn restart-for
   "Why a landing must restart this system, or nil when it can keep running: held, main's :seon.system/source after the landing's
   bridge (seon.system/landed-tx moved its :tree); tree, the git tree of main's files now (bin/tree, where git runs); stale, the
@@ -1507,7 +1538,8 @@
   seon.program/load-changes!) and into the fork server, which forks every later agent, so only the source fact is written again
   with the new inputs (booted-source); the next boot builds. Each other case is the restart's reason: no source fact; main not at
   the files' tree (no bridge ran, so only a boot's catch-up reads them); a binary that was stale at its boot; what the binary
-  lacks holds a path no load brings (a build input, or a path no rule places), or is unknown (no tree recorded, a diff git
+  lacks holds a path no load brings (a build input, or a path no rule places, but a config or schema entry, which the landing's
+  commit loads: loads-in-place?), or is unknown (no tree recorded, a diff git
   could not make); no inputs written. See docs/source.md#a-landing-enters-main-as-data."
   {:malli/schema [:=> [:cat [:maybe :map] :string [:maybe :map] [:maybe :map]] [:maybe :string]]}
   [held tree stale inputs]
@@ -1515,7 +1547,7 @@
     (nil? held) "main holds no source fact"
     (not= tree (:tree held)) (str "main holds tree " (:tree held) ", not the files' " tree ": no landing brought it in as data")
     (:stale-binary held) "this system's binary was stale at its boot"
-    (and stale (or (:error stale) (:missing stale) (some string? (:reaches stale))))
+    (and stale (or (:error stale) (:missing stale) (some #(and (string? %) (not (loads-in-place? %))) (:reaches stale))))
     (str "the running binary is not current for " tree
                (if (:error stale) (str ": " (:error stale)) (str ": what differs reaches " (str/join ", " (or (seq (:reaches stale)) [(name (:missing stale :code))])))))
     (nil? inputs) "no inputs were written for the files (runs/root-inputs.edn)"))
@@ -2347,7 +2379,7 @@
 
 (defn stop!
   "Stop root by letting the flow drain: the api closes (later calls answer \"root
-  stopped\"); every agent is interrupted and sent :stop, and exits after the requests before
+  stopped\"); every agent is sent :stop, never interrupted: its run ends between turns and it exits after the requests before
   it (seon.agent-proc/stop!); the writer's in-port closes, it commits and flushes what it
   took; the fork server is killed and reaped; then flow/stop (every proc exited) and the
   reader. Every wait ends on its answer, none on a clock. Nothing accepted is lost.

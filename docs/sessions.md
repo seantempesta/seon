@@ -50,9 +50,25 @@ A lesson kept only in a session's memory is lost at its next compaction. Before 
 
 A session runs Seon agents on real tasks to find what in the system cost the agents turns, never to make one task go green. For each stretch where the agent lost turns, it names what allowed it and mails the owner of the cause. A fix is never for the run's task alone. What the agent refined reaches disk by review ([source](source.md#a-merged-task-reaches-mains-files)).
 
+## A session works through its Seon agent
+
+A Claude session does what a Seon agent does, through the same calls; each line is the agent action that replaces the session's own machinery once [Stage 1](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority) is safe to start.
+
+| A session's need | The agent action | Today |
+|---|---|---|
+| Change code, a doc, a task or a `bin/` script | `seon_attach` its area's agent, then `seon_eval` with ```seon.repl/edit!``` or a definition | built |
+| Change a file it edited on disk | its import, as a transaction on the agent's branch | not built (`seon.system/a-sessions-files-are-a-transaction-on-its-agents-branch`) |
+| Run its tests | `(my.agent/prove)`, by what the change reaches | built; its process tests wait on the gate (`seon.reconcile/the-gate-proves-the-candidate-branch`) |
+| Merge main in | `(my.branch/merge-main!)` | built; costs 8.2B ticks a merge (`seon.agent/a-merge-of-main-applies-every-change-main-made`) |
+| Land | `seon_done`: the judge, the check, Seon's merge into main | built, unused since 2026-11-12 |
+| Git follows | the write-back of main's changed files | commits to a side branch (`seon.source/a-merge-moves-gits-main-to-the-stores-files`) |
+| Learn that what it waits on merged | a message to its agent from the merge | built (```seon.task/landed-messages```) |
+
+Until then a session lands through its worktree and `bin/land`, and only the tasks that make this path work do.
+
 ## Messages
 
-Sessions talk to root only, through the app's session messages, and rarely: to say a branch landed, when blocked, or with a finding another area owns. They never talk to each other (owner, 2026-11-12: agents "spent more time talking to each other than working"). A message is 10 lines or fewer: the evidence read, the hypothesis, the one decision needed. A message is the home of no fact: what it teaches goes into the wiki section or task entry that owns it.
+Work that blocks another area is a task in that area's namespace, with its evidence, named in the blocked task's `:seon.task/needs` ([the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority)). A session messages the owning session directly, through the app's session messages, only to block, unblock or agree an interface: 6 lines or fewer, the evidence and one ask, no acknowledgements ([decisions](decisions.md#blockers-are-tasks-sessions-message-the-owning-session-directly)). A message is the home of no fact: what it teaches goes into the wiki section or task entry that owns it.
 
 ## No fan-out
 

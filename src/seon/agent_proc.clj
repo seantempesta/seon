@@ -77,18 +77,15 @@
   (loop [] (when (some? (a/<!! from)) (recur))))
 
 (defn- stop!
-  "Stop the agent: an eval in flight interrupted (SIGUSR1: it ends at its next safe point, a
-  blocking host call too, seon.system/interrupt!), then :stop, which the agent answers after the
-  requests before it by exiting; one its interrupt cannot reach, with an eval in flight, killed;
-  with no process, root's end hung up; a dead one, nothing. One that never exits is a stall,
-  which ends it while root stops (seon.system/back-op's :stalled). Answers st."
+  "Stop the agent by draining it: :stop, which its transport reads at once (the run in flight ends between turns,
+  seon.turn/work!) and its REPL answers after the requests before it by exiting, each ending by its own bound (an eval's
+  tick budget): nothing in flight is cut. With no process, root's end hung up; a dead one, nothing. One that never exits
+  is a stall, which ends it while root stops (seon.system/back-op's :stalled), and the stop's own bound
+  (:seon.config.root/stop-ms) ends root. See docs/processes.md#the-agent-process. Answers st."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
   (cond (or (:stop-sent st) (:dead? st)) st
-        ;; its interrupt never reaches it (the handler did not run at boot): an eval in flight can only be killed
-        (and (:pid st) (seq (:inflight st)) (:interrupt-unreachable st)) (do (lib/kill! (:pid st) 9) (assoc st :stop-sent true))
-        (:pid st) (do (when (seq (:inflight st)) (lib/kill! (:pid st) lib/SIGUSR1))
-                      (assoc (to-proc! st {:op :stop}) :stop-sent true))
+        (:pid st) (assoc (to-proc! st {:op :stop}) :stop-sent true)
         :else (do (hang-up! st) (assoc st :stop-sent true))))
 
 (declare agent-frame)
