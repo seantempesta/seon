@@ -67,9 +67,13 @@ Almost everything Seon keeps is derived: a test's verdict, a page and a request,
 store's copy of the files. Each subsystem built its own cache, key, index and "did it move?" check (a survey of main found
 6+ read recorders, 4 dependency graphs, 3 who-read-what indexes, 5 hand-kept "moved?" lists, 4 import paths, 5 stores for
 one test result, 73 staleness functions), and the bugs are those copies disagreeing. They become one mechanism:
-- **`(reaction (fn [db] ...))`:** any Clojure over a db; what it reads is recorded as it runs; the system keeps it and
-  re-runs it when a datom it read moves. Arguments that are not datoms (an agent's live values, streaming output, root's
-  runtime values) are plain arguments, compared by `=`.
+- **Reagent's own API, nothing foreign** (owner: "Most agents are trained on reagent and I don't want to teach a foreign
+  concept"): `seon.ratom` already ports Reagent's `atom`, `Reaction`, `make-reaction`, `reaction` and `run!`, and gains
+  Reagent's `track` (a reaction cached by function and arguments, compared by `=`). A component is written as in Reagent:
+  it derefs a reaction or `@(track f args)`, and the store is a source it derefs. What changes is only the tracking: a
+  deref of the store records its datom keys through Datahike's recorder, so a reaction re-runs when a datom it read moves.
+  Values that are not datoms (an agent's live values, streaming output, root's runtime values) are ratoms or `track`
+  arguments, as in Reagent.
 - **One tracker:** Datahike's recorder (`di/record-read!`). Every read records through it as a datom key: a store read; a
   slice a component reads of a pulled value (`[:ea e a]`); a code read as its form's datom (once per var per run, at
   Jolt's var read, macros at load); config, files and pins as their entities. `seon.profile`'s set and ratom's path
