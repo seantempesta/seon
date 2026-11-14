@@ -1051,8 +1051,9 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/fn] [:tuple :any :seon.host/db]]}
   [db f]
   (try (enter-agent! {:db db :key k :branch :b :mode :test})
-       ;; under the branch's schemas, as the agent's REPL evaluates a form
-       [(#'seon.repl/with-branch-schemas f) (:db @seon.agent/state)]
+       ;; under the branch's schemas, bound here: this test process is shared, so it binds the value it was given rather than set
+       ;; the process's registry, which an agent's own process holds (seon.program/hold-registry!)
+       [(binding [malli.registry/*registry* (:registry (seon.agent/branch-schemas))] (f)) (:db @seon.agent/state)]
        (finally (end-agent!))))
 
 ;; See docs/render.md#a-page-is-a-kept-walk

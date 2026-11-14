@@ -518,38 +518,6 @@
                        (and l (records-as-agent?) (not (program/scratch-ns? (the-ns (:ns l)))) (program/repl-act? l (:repl/form m)))
                        (assoc :not-program "This holds for your REPL and is not program: what a definition uses here it won't have on a checkout, so what it needs goes in its namespace's ns form."))))))))))))
 
-(defn- branch-registry
-  "The registry this agent's evaluation binds (seon.program/schema-registry of its branch's
-  schema changes), so what it defines next compiles against them; empty when no branch is
-  held (root, a scratch session). The one held (:schema-registry) answers until a write moves a
-  schema entry (seon.agent/transact!, the merge of main: seon.agent/schema-moved), which drops it;
-  a new agent holds main's from its fork (seon.fork-server/warm-start). Reading the changes is two
-  passes over every schema entry (1.08 MB a call: the commit that made it says), so no eval reads them while
-  none moved. See docs/machine.md#an-agents-first-write."
-  {:malli/schema [:=> [:cat] :any]}
-  []
-  (if (:db @agent/state)
-    (:registry (agent/branch-schemas))
-    {}))
-
-(defn with-branch-schemas
-  "f called with malli's dynamic registry bound to this branch's population (branch-registry),
-  read now: what a form compiles against, and the renders its values' schemas name
-  (seon.contract/properties reads it). Each eval binds it, and so does each turn of the turn loop
-  (seon.turn/work!), so Seon's own code checks the agent's values against the schemas the agent
-  registered since the loop began (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map)."
-  {:malli/schema [:=> [:cat :seon.host/fn] :any]}
-  [f] (binding [mr/*registry* (branch-registry)] (f)))
-
-(defn wrap-registry
-  "Each form evaluates with its branch's schemas bound (with-branch-schemas), read before the
-  form: a schema the previous form registered is in effect for this one."
-  {:malli/schema [:=> [:cat :seon.host/fn] :seon.host/fn]}
-  [h]
-  (fn [req]
-    (let [ef (:repl/eval-fn req eval)]
-      (h (assoc req :repl/eval-fn (fn [form] (with-branch-schemas #(ef form))))))))
-
 (defn- instrument
   "Instrument a definition by its contract (G1's proto.agent/admit!, Seon's rule): a function var
   with :malli/schema is armed and leaves the agent's uncontracted set; one without joins it.
@@ -574,16 +542,15 @@
   (fn [req]
     (h (around-reply req
          (fn [m]
-           ;; arming compiles the contract: against the branch's population, as its eval did
-           (binding [mr/*registry* (if (seq (:repl/defined m)) (branch-registry) {})]
-             (reduce (fn [m s] (if-let [i (some-> (find-var s) instrument)] (update m :instrumented (fnil conj []) i) m)) m (:repl/defined m))))))))
+           ;; arming compiles the contract against this process's registry, its branch's (seon.contract/layers)
+           (reduce (fn [m s] (if-let [i (some-> (find-var s) instrument)] (update m :instrumented (fnil conj []) i) m)) m (:repl/defined m)))))))
 
 (def middleware
   "Outermost first, as vars: what a program calls is what it now defines (`handler` composes them at each request, so an edit of one runs next). Answers pass innermost first: record, cost, instrument, caught. The
   eval fn is the registry's binding around record's around cost's around eval, so an eval's
   cost is the eval's (with the compiler's tap in it, as part of compiling); keying the
   branch's registry, read before each form, is not the form's (0.7 ms measured)."
-  [#'wrap-caught #'wrap-instrument #'wrap-cost #'wrap-record #'wrap-registry])
+  [#'wrap-caught #'wrap-instrument #'wrap-cost #'wrap-record])
 
 (defn handler
   "eval-code with the middleware composed over it, outermost first."
@@ -1285,20 +1252,19 @@
   docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :boolean] :map]}
   [whole?]
-  (with-branch-schemas
-    #(let [st @agent/state
-           whole? (or whole? (:walk-whole? st))
-           held (:walk st) l (layout) ix (agent/branch-index)
-           moved (ctx/take-moved!)
-           warm (when (and held (= l (:root held)) (identical? ix (:index held)) (= whole? (:whole? held))) held)
-           p (assoc (render/walk warm (cond-> {:db (agent/db) :tree @ctx/ctx :root l :index ix :changes ctx/changes
-                                                :outputs #{:seon.render/hiccup :seon.render/openai-compat} :model-only (not whole?)}
-                                        warm (assoc :moved (or moved []))
-                                        whole? (assoc :units true :place ["#p-task" "#c-rows"])))
-                    :whole? whole?)]
-       (doseq [d (:defects p)] (swap! agent/state update :errors err/note d :eval nil (System/currentTimeMillis)))
-       (swap! agent/state assoc :walk p :walk-whole? whole?)
-       p)))
+  (let [st @agent/state
+        whole? (or whole? (:walk-whole? st))
+        held (:walk st) l (layout) ix (agent/branch-index)
+        moved (ctx/take-moved!)
+        warm (when (and held (= l (:root held)) (identical? ix (:index held)) (= whole? (:whole? held))) held)
+        p (assoc (render/walk warm (cond-> {:db (agent/db) :tree @ctx/ctx :root l :index ix :changes ctx/changes
+                                             :outputs #{:seon.render/hiccup :seon.render/openai-compat} :model-only (not whole?)}
+                                     warm (assoc :moved (or moved []))
+                                     whole? (assoc :units true :place ["#p-task" "#c-rows"])))
+                 :whole? whole?)]
+    (doseq [d (:defects p)] (swap! agent/state update :errors err/note d :eval nil (System/currentTimeMillis)))
+    (swap! agent/state assoc :walk p :walk-whole? whole?)
+    p))
 
 (defn page-walk
   "This agent's walk up to now, as a value (`walk!`): what its model reads, and the whole page once a person's has asked."

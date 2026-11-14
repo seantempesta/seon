@@ -1219,6 +1219,15 @@
   {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :seon.host/registry]}
   [changes] (if (empty? changes) contract/registry (contract/registry-with changes)))
 
+(defn hold-registry!
+  "Make registry reg (schema-registry's) this process's: malli's default registry, which every contract
+  reads beneath a binding (seon.contract/options). Called by the act of holding main, nowhere else: root's boot
+  (seon.system/start!) and each main commit (seon.writer's main-commit), the fork server's warm start per main move. An agent's
+  branch is its slot's, read by seon.contract/layers; the loaders never set it, since tests call them on throwaway dbs.
+  Answers nil. See docs/source.md#schemas-at-the-repl."
+  {:malli/schema [:=> [:cat :seon.host/registry] :nil]}
+  [reg] (mr/set-default-registry! reg) nil)
+
 (defn schema-declarations
   "The Datahike declarations registry reg derives that db does not hold as declared (a
   registration or merge of a schema carries its attribute, so its facts can be stored)."
@@ -1231,9 +1240,12 @@
   "The attribute registered key k is, when no entity map lists it and its value is storable (an attribute is a registered key whose schema is its stored value: an agent's own datum, written on its own entity): [its declaration], when db does not hold it so; else []. A registration and a merge of the entry read it here, so the attribute travels with it. See docs/storage.md#the-write-checks-every-datom."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :seon.host/registry] [:vector :seon.schema/declaration]]}
   [db k reg]
-  (let [dcl (sd/declaration reg k)
-        entity? (:seon.db/attributes (m/properties (m/deref (m/schema k {:registry reg}))))]
-    (if (or (contract/error? dcl) entity? (= dcl (select-keys (get (d/schema db) k) (keys dcl)))) [] [dcl])))
+  ;; a key reg lacks (an entry the merge deletes) declares nothing: its declaration is an error, read before reg is asked for k
+  (let [dcl (sd/declaration reg k)]
+    (if (or (contract/error? dcl)
+            (:seon.db/attributes (m/properties (m/deref (m/schema k {:registry reg}))))
+            (= dcl (select-keys (get (d/schema db) k) (keys dcl))))
+      [] [dcl])))
 
 (defn- load-forms!
   "Load form rows of db in load order, compiling against db's schemas (malli's dynamic
@@ -1487,6 +1499,8 @@
     ;; every form the diff names is the branch's own: this process holds db-from's definition of it, never the branch's,
     ;; though its var is bound and the form was imported from a source tree (a tree branch's catch-up imports the checkout's
     ;; changed files: held? read those as the binary's own and kept main's code, and a --root run judged main's code, 2026-11-11)
+    ;; the schemas db-to moved are read by the agent's branch layer (seon.contract/layers), never set process-wide here: a
+    ;; loader is called on throwaway dbs too, and the default is the act of holding main (hold-registry!'s callers)
     (into (vec (load! db-to load schemas true)) (hold-config! db-to))))
 
 (defn load-changes!
@@ -1510,16 +1524,18 @@
             :let [x (d/entity db e)]]
       (cond (:var/name x) (remove-definition! [:var (:var/name x)])
             (:method/key x) (remove-definition! (into [:method] (sedn/decode (:method/key x))))))
-    (into (vec (load! db (vec (for [[op e a] ops
+    (let [schema-keys (set (for [[op e a] ops :when (and (= op :db/add) (= a :schema/form))
+                                 :when (schema-value db e)]
+                             (:schema/key (d/entity db e))))
+          errs (into (vec (load! db (vec (for [[op e a] ops
                                     :when (and (= op :db/add) (= a :form/src) (live? db e))
                                     :let [f (form-row db e)]
                                     :when (or (not (held? db binary f)) (some #(replaced (:v %)) (d/datoms db :eavt e :form/defines)))]
                                 f))
-                      (set (for [[op e a] ops :when (and (= op :db/add) (= a :schema/form))
-                                 :when (schema-value db e)]
-                             (:schema/key (d/entity db e))))
+                      schema-keys
                       tests?))
-          (when (some (fn [[_ _ a]] (= a :config/form)) ops) (hold-config! db))))))
+          (when (some (fn [[_ _ a]] (= a :config/form)) ops) (hold-config! db)))]
+      errs))))
 
 ;; ---- reach: which tests a change reaches ----------------------------------------------
 
