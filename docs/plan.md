@@ -96,6 +96,21 @@ A session works as a Seon agent: one branch mirrored in Seon, REPL first, file e
 start path (Stage 0.5, tests with runtime) are on main. `bin/land` lands what is in flight, then only the tasks that build
 this path, and is deleted when the path carries a week of landings.
 
+### The self-merge path (owner: "make merging as simple as a passing proofs")
+
+1. A verdict reads only its own work: a red that depended on load, a cold fixture or a shared file is a platform problem,
+   never a verdict against a change, so main is never shown red by another run's measurement
+   (`seon.prove/a-verdict-reads-only-its-own-work`, tests).
+2. Proving goes through the one effects owner, admitted by the owner's dials (tests; root shepherds landings by hand until
+   then).
+3. One merge (`seon.merge/merge-main`): a conflict at any entity and attribute applies nothing; it costs what changed
+   (data, runtime, deps).
+4. The merge's check is a prove of the candidate (the branch with main merged), reusing every green whose reads did not
+   move: all green and no conflict merges, with no release (`seon.reconcile/the-gate-proves-the-candidate-branch`, tests).
+5. Code loads live (load-diff at the one start, O(d)); a binary is swapped only when a build input changes (pins,
+   native code, `deps.edn`), once, through root's online takeover (deps, runtime).
+6. Agents self-merge with `seon_done`; `bin/land` is deleted.
+
 ### The order
 
 1. **Stage 0's merge.** "Main's reds" were on the agent's branch: merging main into it lost main's task lifecycle datoms
