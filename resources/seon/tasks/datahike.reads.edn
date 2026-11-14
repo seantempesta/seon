@@ -1,5 +1,1 @@
-[{:seon.task/name "with-reads-nests-in-an-outer-recorder"
-  :seon.task/plan "Found by web-2 reviewing context's reaction core (2026-11-14) [M by reading reads.cljc:19-24]: datahike.reads/with-reads binds a fresh recorder (di/*reads*), so a read made inside a nested with-reads never reaches the outer one. Seon's reactions record every run (seon.ratom/deref-capture), so a read inside a component of a walk drawn within the render proc's pass (seon.render.proc/pass-view's d/with-reads) would be lost to the pass, and a view would not be redrawn when what only that component read moved. Today seon.ratom/deref-capture appends its reads to the outer recorder by hand (a caller patching the library). Fix in the fork: with-reads, when a recorder is bound, also records into it on return (recording composes, as Reagent's derefs compose), and the line in deref-capture goes. Proof: (with-reads #(with-reads f)) answers the inner reads in both."
-  :seon.task/kind :work
-  :seon.task/proofs #{datahike.reads-test/a-nested-with-reads-records-into-the-outer}}
-]
+[]

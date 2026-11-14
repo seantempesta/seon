@@ -124,9 +124,6 @@
         ;; its child's value, not on what the child read (Reagent's rule); at the outermost run that is the binding already in force
         [res rs] (binding [*outer-reads* outer datahike.index.interface/*reads* outer]
                    (reads/with-reads #(binding [*ratom-context* r] (f))))
-        ;; until the pinned Datahike composes nested recorders (task datahike.reads/with-reads-nests-in-an-outer-recorder), the
-        ;; run's reads reach the outermost here; after it this adds the same keys again, and goes with the pin
-        _ (when (and outer (seq rs)) (swap! outer into rs))
         c (-get r :captured)]
     (-set! r :dirty? false)
     ;; every read the run made is a dependency, however it reached the db: the one recorder (docs/plan.md#the-root-concept-one-reaction-over-the-store)
