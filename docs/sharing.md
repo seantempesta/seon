@@ -11,7 +11,7 @@ There is no boundary between program and data: one db, one tree. Sharing comes f
 One question decides it: can two branches legitimately hold different values of it?
 
 - **Yes: on a branch, moved by a merge.** Forms, vars, files, config, tasks, a user's data, evals and their results.
-- **No: on main, and no merge carries it.** Any `seon.*` attribute but the task content an agent may improve (`seon.merge/carried-platform-attrs`): messages, what root records of an agent, UI facts. A message is one entity on main with `:seon.message/to`, from, body and sent-ms; an agent's next act writes the ones to it onto its own branch ([users](users.md#messages)).
+- **No: on main, and no merge carries it.** Any `seon.*` attribute but the task content an agent may improve (a `:task` key of `seon.merge`'s stated keys): messages, what root records of an agent, UI facts. A message is one entity on main with `:seon.message/to`, from, body and sent-ms; an agent's next act writes the ones to it onto its own branch ([users](users.md#messages)).
 - **Each attribute of an entity is set on one branch.** A branch has one writer, so a conflict is two branches setting the same attribute of one entity since their base. An agent's entity is set on main by root (status, process) and on its branch by its process (turn, namespace).
 
 A db value reads only its own branch's datoms: a ref to an entity only another branch holds is valid, but `d/pull` through it answers nothing.

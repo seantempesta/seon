@@ -527,7 +527,7 @@
   continue retracts (my.root/run!). See docs/reconcile.md#a-task-holds-how-its-work-ended."
   [:seon.task/reason :seon.task/commit :seon.task/merged-t :seon.task/error :seon.task/deferred
    :seon.task/deferred-results :seon.task/gate-unread :seon.task/changed :seon.task/conflicts :seon.task/unmerged
-   :seon.task/task-conflicts :seon.task/failures :seon.task/costs :seon.task/waste])
+   :seon.task/failures :seon.task/costs :seon.task/waste])
 
 (def end-attrs
   "Every attribute a task's end writes, defined once from what writes them: a judging's (judged-attrs), a hold's (held-attrs),
@@ -604,35 +604,6 @@
   (outcome-tx db id (:seon.task/outcome (d/entity db [:seon.task/id id])) :refused
               {:seon.task/reason (:seon.error/message e) :seon.task/error e}))
 
-(defn carry-tx
-  "The task content (seon.merge/carried-platform-attrs) branch changed since base, carried
-  onto main (DECISIONS, A task edited on two live branches is a conflict for root (D4)): a member
-  the branch changed and main did not overwrites
-  main's, so the next agents start from it; one main also changed since base, to another
-  value, is a conflict for root (never resolved here). Tasks main does not hold are left.
-  A set member (the proofs) is compared and written as a set. Answers {:tx :conflicts [{:task
-  :attr :base :ours :theirs}]}. Cost: the carried datoms of
-  the three dbs, read once."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:map [:tx :seon.db/tx-data] [:conflicts :seon.task/task-conflicts]]]}
-  [base branch main]
-  (let [many (fn [a] (dbu/multival? main a))
-        ;; each member's value: a set member's values as a set, a single member's value
-        vs (fn [db] (reduce (fn [m [k v]] (if (many (second k)) (update m k (fnil conj #{}) v) (assoc m k v))) {}
-                            (for [a (sort pm/carried-platform-attrs) dt (d/datoms db :aevt a)] [[(:e dt) a] (:v dt)])))
-        b (vs base) o (vs branch) m (vs main)
-        ;; the facts that make member a of task id hold ov where main holds mv
-        write (fn [id a ov mv] (if (many a)
-                                 (concat (for [v (sort-by str (remove (set ov) mv))] [:db/retract [:seon.task/id id] a v])
-                                         (for [v (sort-by str (remove (set mv) ov))] [:db/add [:seon.task/id id] a v]))
-                                 [(if (some? ov) [:db/add [:seon.task/id id] a ov] [:db/retract [:seon.task/id id] a mv])]))]
-    (reduce (fn [acc [e a :as k]]
-              (let [id (:seon.task/id (d/entity branch e)) bv (b k) ov (o k) mv (m k)]
-                (cond (or (nil? id) (nil? (pdb/eid main :seon.task/id id)) (= mv ov)) acc
-                      (= mv bv) (update acc :tx into (write id a ov mv))
-                      :else (update acc :conflicts conj {:task id :attr a :base bv :ours ov :theirs mv}))))
-            {:tx [] :conflicts []}
-            (sort (for [k (into (set (keys b)) (keys o)) :when (not= (b k) (o k))] k)))))
-
 (defn member-tx
   "The facts that make member of task t (as seon.task/task reads it) (apply f its value args), as
   my.task/update! writes them: a set member (:seon.task/proofs) its values added and retracted, a
@@ -657,7 +628,7 @@
   branch does not hold, onto branch: a kept branch resumed for a run starts from main's
   task. Root released it after holding it (seon.reconcile/hold-tx), so main's holds the
   failure and evidence the last run left, root's edits, and the branch's own carried at
-  its run's end (carry-tx); or the branch was forked before main held the task or its
+  its run's end (the judge's merge of its task keys, seon.reconcile/judge-tx); or the branch was forked before main held the task or its
   needs. Another task the branch holds is left as the branch has it. Empty when the branch
   holds them all as main does. Cost: the closure's tasks, pulled once each."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.task/id] :seon.db/tx-data]}

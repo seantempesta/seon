@@ -1727,12 +1727,12 @@
            (is (= [] (stale [:base :main])) "and after more of its own"))
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
-;; Estimate: test-branch! ~1M, 2 transacts ~0.5M, merge-main! ~3M, task read ~0.3M, carry-tx diff ~1M = ~6000000.
+;; Estimate: test-branch! ~1M, 2 transacts ~0.5M, merge-main! ~3M, task read ~0.3M, one three-way of the task keys ~1M = ~6000000.
 (deftest ^{:seon.test/estimate {:ticks 6000000}} merge-main-brings-the-task-content-main-carried
   ;; live finding F3 (pipeline 1): a session's merge-main! moved its base to main's head but
   ;; brought only the program, so the task content main had carried since the fork (another
   ;; session's design: its plan and registered proof) read at the agent's end as this branch
-  ;; reverting it, and seon.task/carry-tx wrote that revert onto main; the other session's
+  ;; reverting it, and the end's carry wrote that revert onto main; the other session's
   ;; implement was then judged :no-proofs
   (ts/test-branch!
    (fn [cfg conn]
@@ -1756,8 +1756,8 @@
          (let [x (task/task (agent/db) "demo/x")]
            (is (= #{'demo-test/x-design-wrote-test} (set (:seon.task/proofs x))) "main's carried proof is on the branch")
            (is (= "Make x. The design: f1 adds 100." (:seon.task/plan x)) "and its plan"))
-         (is (= [] (:tx (task/carry-tx (:base @agent/state) (agent/db) @conn)))
-             "so the agent's end carries nothing of it back onto main")
+         (is (not-any? #(= :task (first %)) (:apply (seon.merge/delta-three-way (:base @agent/state) @conn (agent/db) #{})))
+             "so the agent's end merges nothing of it back onto main")
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (defn- delivery-world

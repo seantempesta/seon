@@ -16,8 +16,6 @@
     :dead                           a run whose agent died or was lost
     :error                          a run the turn loop ended on an error (the model)
     :waste                          forms charged to the producer of what was shown
-    :task-conflict                  task content a branch and main both changed, differently,
-                                    recorded at its agent's end (seon.task/carry-tx)
     :failed                         a task held for root with a failure: a run refused, its
                                     agent dead or its merge refused (seon.reconcile/hold-tx), or
                                     marked failed (my.task/fail!, root or a check): its reason, a
@@ -38,7 +36,7 @@
 (def ^:private death-statuses task/failed)
 (def ended-classes
   "The classes of problem a task's ended work states (task-rows). See docs/reconcile.md#a-task-holds-how-its-work-ended."
-  [:red :cost :merge :dead :error :waste :task-conflict :unrun])
+  [:red :cost :merge :dead :error :waste :unrun])
 
 (defn- es
   "The entities carrying attribute a (its aevt index: only the entities that have it)."
@@ -775,7 +773,7 @@
 (def ^:private task-pull
   "What a problem row reads of how a task's work ended: one pull. See docs/reconcile.md#a-task-holds-how-its-work-ended."
   [:db/id :seon.task/id :seon.task/ns :seon.task/proofs :seon.task/execution :seon.task/outcome :seon.task/reason
-   :seon.task/unmerged :seon.task/failures :seon.task/costs :seon.task/error :seon.task/waste :seon.task/task-conflicts
+   :seon.task/unmerged :seon.task/failures :seon.task/costs :seon.task/error :seon.task/waste
    :seon.task/deferred :seon.task/gate-unread :seon.task/deferred-results :seon.task/conflicts
    {:seon.task/agent [:seon.agent/key :seon.agent/ended-ms]}])
 
@@ -954,9 +952,6 @@
                             :evidence (cond-> {:from id :conflicts conflicts :unmerged unmerged
                                                :red []}
                                         err (assoc :error err)))])
-      (seq (:seon.task/task-conflicts p))
-      (assoc :task-conflict (vec (for [c (:seon.task/task-conflicts p)]
-                                   (assoc base :task (:task c) :attr (:attr c) :evidence (assoc c :from id)))))
       (death-statuses status)
       (assoc :dead [(assoc base :error err :producer (:seon.error/operation err) :evidence (cond-> {:from id} err (assoc :error err)))])
       (and err (not merge?) (not (death-statuses status)))
@@ -1008,7 +1003,7 @@
                     (filter open-task?)
                     (or only
                         (concat (mapcat #(es db %) [:seon.task/failures :seon.task/costs :seon.task/error :seon.task/waste :seon.task/deferred
-                                                    :seon.task/conflicts :seon.task/unmerged :seon.task/task-conflicts])
+                                                    :seon.task/conflicts :seon.task/unmerged])
                                 (mapcat (fn [s] (map :e (d/datoms db :avet :seon.task/outcome s))) (conj death-statuses :behind)))))
         by-class (apply merge-with into (map #(task-rows db ans %) tasks))
         failed (mapv #(failed-row db ans %) (es db :seon.task/failure))]

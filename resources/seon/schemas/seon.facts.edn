@@ -534,7 +534,7 @@
                           [:seon.task/deferred {:optional true} :seon.task/deferred] [:seon.task/deferred-results {:optional true} :seon.task/deferred-results]
                           [:seon.task/gate-unread {:optional true} :seon.task/gate-unread] [:seon.task/changed {:optional true} :seon.task/changed]
                           [:seon.task/conflicts {:optional true} :seon.task/conflicts] [:seon.task/unmerged {:optional true} :seon.task/unmerged]
-                          [:seon.task/task-conflicts {:optional true} :seon.task/task-conflicts] [:seon.task/failures {:optional true} :seon.task/failures]
+                          [:seon.task/failures {:optional true} :seon.task/failures]
                           [:seon.task/costs {:optional true} :seon.task/costs] [:seon.task/waste {:optional true} :seon.task/waste]
                           [:seon.task/declared {:optional true} :seon.task/declared] [:seon.task/cites-digest {:optional true} :seon.task/cites-digest]
                      [:seon.task/causes {:optional true} :seon.task/causes]]
