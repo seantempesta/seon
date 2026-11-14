@@ -1549,7 +1549,7 @@
                        seon.turn/observe (fn [id] {:task (task/task (agent/db) id)})
                        seon.turn/status-now status
                        seon.turn/tell-error! (constantly nil)
-                       seon.turn/model-request! (fn [_ _ _] {:id "test-agent/call" :t1 (seon.profile/now-ns) :request {}})
+                       seon.turn/model-request! (fn [_ _ _] {:id "test-agent/call" :t1 0 :request {}})
                        seon.turn/act! (fn [st _ _] (act st called!))
                        seon.turn/end! (fn [{:keys [turn]} outcome reason _]
                                         (cond-> {:outcome outcome :results {} :uncontracted #{} :turns turn :model-calls @calls} reason (assoc :reason reason)))]
