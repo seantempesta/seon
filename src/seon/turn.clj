@@ -182,6 +182,22 @@
   (tell-error! em "your turn threw: Seon's code ran with the program on your branch as it stands now (Seon's own code and what you changed of it), so the cause may be either")
   (-> st (update :threw (fnil inc 0)) (assoc :error em)))
 
+(def ^:private turn-can-change
+  "The model call's typed errors a next turn or a next call can change (seon.turn/model-failed!): the agent reasons less, or the
+  provider answers next time. The rest of :seon.model/failure are the config's (no provider, no script, a script's invalid
+  reply), which no turn changes. See docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error."
+  #{:seon.model/reasoning-ate-reply :seon.model/rate-limited :seon.model/transport :seon.model/provider-error})
+
+(defn- model-failed!
+  "A model call that answered its typed error (em, a :seon.model/failure: the reasoning spent the whole token budget, the
+  provider refused or was unreachable) given to the agent as data, as a throw is (turn-error!): its next turn reads why this
+  one made no evals, counted in :threw, so a second in a row with no answered call between ends the work. Answers st after
+  it, :error em. See docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error."
+  {:malli/schema [:=> [:cat :map :seon.model/failure] :map]}
+  [st em]
+  (tell-error! em "your last model call answered an error, so that turn made no evals")
+  (-> st (update :threw (fnil inc 0)) (assoc :error em)))
+
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its
   basis, not its prompt): the commit it reads (the run-ahead writes committed now, as the
@@ -477,7 +493,17 @@
       ;; the agent's to read, as data, and the loop goes on (turn-error!), root's interrupt passing as a stop.
       ;; end! is outside it, run once on the turn's answer, so a failing end is never taken for a turn
       (let [ended (fn [st outcome reason err] [::end st outcome reason err])
-            next-of (fn [st'] (if (contract/error? st') [::end st :error (:seon.error/message st') st'] [::next (dissoc st' :threw :error)]))
+            ;; a model call's typed error that a next turn can change (its reasoning spent the budget, the provider refused, was
+            ;; rate-limited or unreachable) is a turn's error the next turn reads, as a throw is: the agent can reason less, or the
+            ;; provider can answer next time; two in a row with no answered call between end the work, as two throws do. One no
+            ;; turn can change (no provider, no script, a script's invalid reply: the config's) ends the work at once, naming it
+            next-of (fn [st'] (cond (and (contract/valid? :seon.model/failure st') (turn-can-change (:seon.error/type st')))
+                                    (let [st2 (-> (model-failed! st st') (update :turn inc))]
+                                      (if (< 1 (:threw st2))
+                                        [::end st2 :error (str "two model calls in a row failed: " (:seon.error/message st')) st']
+                                        [::next st2]))
+                                    (contract/error? st') [::end st :error (:seon.error/message st') st']
+                                    :else [::next (dissoc st' :threw :error)]))
             ;; the request the last answered model call sent: a turn whose own call answered replaces it
             asked (:requests @agent/state)
             step (do

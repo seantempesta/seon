@@ -88,7 +88,7 @@ if [[ ${1:-} == seed ]]; then
     JOLT_LZ4_LIB=$ROOT/target/lib/liblz4.dylib JOLT_ZSTD_LIB=$ROOT/target/lib/libzstd.dylib exec ./seon seed-program "${@:2}"
 fi
 mkdir -p "$SEON_RUNS"
-PIDS=$SEON_RUNS/root.pids LOG=$SEON_RUNS/root.log PORTF=$SEON_RUNS/root.port
+PIDS=$SEON_RUNS/root.pids LOG=$SEON_RUNS/root.log PORTF=$SEON_RUNS/root.port STOPMS=$SEON_RUNS/root.stop-ms
 READY=$SEON_RUNS/root.ready DONE=$SEON_RUNS/root.done
 read PORT WEB <<< "$("$ROOT/bin/ports")"
 running() { [[ -f $PIDS ]] && read T R < "$PIDS" && kill -0 $R 2>/dev/null }
@@ -109,9 +109,10 @@ launch() {
   # starter. (A `tail -f /dev/null | root` holder outlived every root that crashed or was killed.)
   "$ROOT/bin/held" --detach --drain --log "$LOG" --pids "$PIDS" --ready "$READY" --done "$DONE" \
     "$ROOT/bin/system" run "$1" "$PORT" "$WEB" "${@:2}"
-  read -r T R P < "$READY"
+  # the port, then the root's stop deadline as its one resolver answered it (:seon.config.root/stop-ms, ROOT LISTENING's second number)
+  read -r T R P S < "$READY"
   rm -f "$READY"
-  if [[ -n ${P:-} ]]; then print $P > "$PORTF"; "$ROOT/bin/system" status
+  if [[ -n ${P:-} ]]; then print $P > "$PORTF"; [[ -z ${S:-} ]] || print $S > "$STOPMS"; "$ROOT/bin/system" status
     # a binary of another program than main's: the root said so before listening, and start ends on it (its last line)
     s=$(grep -m1 '^ROOT STALE BINARY' "$LOG"); [[ -z $s ]] || print -r -- "$s"
   else print -u2 "root failed to start; its log:"; tail -20 "$LOG" >&2; exit 1; fi
@@ -120,11 +121,21 @@ launch() {
 # with the root's exit status. bin/held --end opens the done fifo before it signals and waits on it:
 # a holder that is gone or died without writing ends the wait at once ("unknown"). A root held
 # before the done fifo existed has no fifo: it is told to stop and nothing is awaited.
+# The wait for the exit has the stop's declared deadline, the root's :seon.config.root/stop-ms (runs/root.stop-ms): a root that
+# never exits (11-14: two threads spinning in a failing dlsym ignored TERM for 10 minutes) has its evidence taken (bin/evidence),
+# is killed by kill_root, and the stop answers STOP OVERRAN with status 3: every wait ends.
 stop() {
   read T R < "$PIDS"
   if [[ -p $DONE ]]; then
-    st=$("$ROOT/bin/held" --end TERM $T "$DONE" 1)
-    rm -f "$PIDS" "$PORTF" "$DONE"; print "root $R stopped (exit ${st:-unknown: its holder ended without a status})"
+    ms=$(cat "$STOPMS" 2>/dev/null)
+    st=$("$ROOT/bin/held" --end TERM $T "$DONE" 1 $ms); rc=$?
+    if (( rc == 4 )); then
+      ev=$SEON_RUNS/stop-overran-$R; "$ROOT/bin/evidence" "$ev" $R >/dev/null 2>&1
+      killed=$(kill_root); rm -f "$STOPMS"
+      print -u2 "STOP OVERRAN :seon.system/stop-overran root $R did not end within ${ms} ms of its TERM; evidence $ev; $killed"
+      return 3
+    fi
+    rm -f "$PIDS" "$PORTF" "$DONE" "$STOPMS"; print "root $R stopped (exit ${st:-unknown: its holder ended without a status})"
   else
     kill -TERM $T 2>/dev/null
     rm -f "$PIDS" "$PORTF"; print "root $R told to stop (exit unknown: its holder predates the status channel)"

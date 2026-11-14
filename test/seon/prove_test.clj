@@ -496,6 +496,20 @@
     (is (seon.contract/error? (get-in r [:results 'app.x-test/t])) "the asker holds the typed error for the item")
     (is (= 1 (free st)))))
 
+;; docs/principles.md#6-nothing-changed-nothing-runs-a-change-costs-what-it-touched: a wall-time end read the machine, so the service
+;; answers it as no verdict and a :platform problem (the core's own, loud), never a red its cache keeps (root.log 2026-11-14: 21 such)
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-wall-time-end-is-a-platform-problem-never-a-red
+  (let [[st o1] (prove/ask-items (items-st 1) 7 :batch {['app.x-test/t "d1"] {:agent :a1 :ms 5}})
+        b (first (batches o1))
+        [st v] (step/answered st (:tag b))
+        ended {:pass 0 :fail 0 :error 1
+               :reports [{:type :error :var "#'app.x-test/t" :seon.error/type :seon.test/wall-spent :message "Uncaught exception, not in assertion."
+                          :actual "the test ran past its wall bound of 36700 ms"}]}
+        [st o2] (prove/batch-ended st (parse-long (second v)) ended)
+        r (get-in (answers o2) [7 :results 'app.x-test/t])]
+    (is (= :seon.prove/no-verdict (:seon.error/type r)) (str "no verdict, never a red: " (pr-str r)))
+    (is (some #(and (= :problem (:op %)) (= :platform (:class %))) o2) "and a :platform problem, loud")))
+
 ;; docs/merging.md#the-test-service: each asker is told an item's verdict as it lands, before it is answered, so a session's
 ;; bin/prove prints each test as it ends; an item with no verdict is told as :no-verdict, never left out
 (deftest ^{:seon.test/estimate {:ticks 200000}} each-asker-is-told-a-verdict-as-it-lands
