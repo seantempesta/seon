@@ -827,7 +827,7 @@
       ;; (:fork-server-down): one already answered is not failed again
       :fork-failed (cond-> st
                      (get-in st [::spawning (:agent m)])
-                     (spawn-failed o (:agent m) (or (:reason m) (str "fork refused: " (:active-threads m) " active threads, held by " (pr-str (:holders m)))) nil))
+                     (spawn-failed o (:agent m) (or (:reason m) (str "fork refused: " (:active-threads m) " active threads (the holders are in the fork server's :fork-failed)")) nil))
       :applied (-> st (view! update-in [:stats :lag-ms] lib/push-window (:lag-ms m) 200)
                    (view! assoc-in [:fork-server :mismatch] (:mismatch m)))
       ;; a throw in a fork server step: an error fact on root, the server serving on (seon.fork-server/server-step)
@@ -838,7 +838,7 @@
       :standby-failed (-> st
                           (view! assoc-in [:fork-server :standby] false)
                           (problem (err/occurrence (contract/error :seon.fork-server/standby-failed #'back-op
-                                                                   (str "the fork server made no standby: " (:active-threads m) " active threads, held by " (pr-str (:holders m)))
+                                                                   (str "the fork server made no standby: " (:active-threads m) " active threads (the holders are in :holders)")
                                                                    {:active-threads (:active-threads m) :gen (:gen m) :holders (:holders m)})
                                                    :platform {} (System/currentTimeMillis))))
       :load-errors (view! st update-in [:fork-server :load-errors] (fnil into []) (:errors m))

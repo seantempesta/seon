@@ -1342,7 +1342,7 @@
       (let [k (lib/active-threads) hs (vec (:holders forked))]
         (assoc-in st [:shards i :error]
                   (contract/error :seon.test/fork-refused #'seon.agent/fork-test-child
-                                  (str "cannot fork the tests: " k " Chez threads active, held by " (pr-str hs)) {:active-threads k :holders hs}))))))
+                                  (str "cannot fork the tests: " k " Chez threads active (the holders are in :holders)") {:active-threads k :holders hs}))))))
 
 (defn- run-answered
   "st with its run's answer put on its :answer, once, as [x dirs]: dirs, the run directories of
@@ -2056,7 +2056,7 @@
           {:fd fd :double? true
            :refused (fn [{:keys [active-threads holders bound-ms]}]
                       (send! {:op :clone-failed :k k :error (contract/error :seon.agent/failed #'seon.agent/clone!
-                                                                            (str "cannot fork: " active-threads " Chez threads active after " bound-ms " ms, held by " (pr-str holders))
+                                                                            (str "cannot fork: " active-threads " Chez threads active after " bound-ms " ms (the holders are in :holders)")
                                                                             {:agent (:agent m) :holders holders})}))
            :parent (fn [_] (send! {:op :cloned :k k :clone (:agent m)}))
            :child (fn []
