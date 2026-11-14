@@ -537,9 +537,9 @@
                 :when src
                 :let [form (scan-form (symbol (namespace v)) src)]
                 m (literal-lists form)
-                :let [s (str "hand-written-list " v " " (pr-str m))]]
+                :let [ms (str "[" (str/join " " m) "]") s (str "hand-written-list " v " " ms)]]
             (derived-row ans s (some-> (namespace v) symbol)
-                         (str v " holds a hand-made list " (pr-str m) ": judge it a dial (spec'd config with its reason), a patch over a missing mechanism (fix the root) or held data restated (derive it)")
+                         (str v " holds a hand-made list " ms ": judge it a dial (spec'd config with its reason), a patch over a missing mechanism (fix the root) or held data restated (derive it)")
                          {:kind :hand-written-list :var v :members m} {:var v :members m})))))
 
 (defn unfocused-docstrings
