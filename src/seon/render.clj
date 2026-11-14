@@ -480,6 +480,20 @@
     (vswap! (:defects w) conj defect)
     defect))
 
+(defn entity-read-keys
+  "The datom keys tree reads rs (seon.ratom/reads-of's #{[path kind]}) made of the pulled entities in tree: a read of attribute a
+  of a map that carries :db/id e is [:ea e a], the key a store read of that slice records, so a commit of e's a reaches its
+  reader by the walk's datom index (:readers) and a commit of a sibling attribute does not. One get-in a read. See
+  docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :any [:maybe [:set :any]]] [:set :any]]}
+  [tree rs]
+  (into #{} (keep (fn [[path _]]
+                    (when (and (seq path) (qualified-keyword? (peek path)))
+                      (let [m (get-in tree (pop path))]
+                        (when-let [e (and (map? m) (:db/id m))]
+                          [:ea e (peek path)])))))
+        rs))
+
 (defn render!
   "Component [f opts & children] drawn in walk w: its marker [::child key], its output kept in w's
   cache. Skipped when its children are the same as last time's (`same-arg?`: views by path), its render the same fn, and
@@ -545,6 +559,8 @@
             id (str (:id-prefix w) (key-id k))
             reads (volatile! nil)
             tree-reads (volatile! nil)
+            ;; its reads of pulled entities in the tree, as datom keys (`entity-read-keys`), matched as its db reads are
+            entity-reads (volatile! nil)
             kept (volatile! nil)
             ;; its render and the drawing of its output in one: a lazy part of the hiccup reads (and
             ;; throws) only when it is drawn, and a db render's reads are all of what it drew
@@ -600,7 +616,7 @@
                   (binding [ratom/*ratom-context* nil] (one))
                   ;; what it read of the tree and of the store, recorded once (the one recorder, seon.ratom/reads-of): the tree's next
                   ;; diff and the next datoms moved are matched against them (`walk`)
-                  (let [[out rs ks] (ratom/reads-of (:ref (:src w)) one)] (vreset! tree-reads rs) (vreset! reads ks) out))
+                  (let [[out rs ks] (ratom/reads-of (:ref (:src w)) one)] (vreset! tree-reads rs) (vreset! reads ks) (vreset! entity-reads (entity-read-keys @(:ref (:src w)) rs)) out))
             bytes (- (profile/alloc-bytes) a0)
             ;; a child the hiccup and the model output both placed is held once
             children (if (seq others) (vec (distinct @kids)) @kids)
@@ -624,15 +640,15 @@
         ;; merged: its written html (placed-units) stays while its revision does
         (vswap! (:cache w) update k merge {:f f :opts opts :args args :out (if same? (:out prev) out) :children children
                                     :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0))) :kept @kept :outs @outs
-                                    :reads read-keys :fv (when (var? f) (var-get f)) :tree-reads @tree-reads :drawn? (contains? ks :seon.render/drawn)})
+                                    :reads read-keys :entity-reads @entity-reads :fv (when (var? f) (var-get f)) :tree-reads @tree-reads :drawn? (contains? ks :seon.render/drawn)})
         ;; who read what of the tree, as it reads its db (`walk`)
         (let [was (or (:tree-reads prev) #{}) now (or @tree-reads #{})]
           (when-not (= was now)
             (vswap! (:tree-readers w) ratom/move-reads k was now)))
         ;; the components that read the db: the ones a transaction's datoms are matched against
         (vswap! (:db-keys w) (if (seq read-keys) conj disj) k)
-        (when (:reads prev) (forget-readers! w k (:reads prev)))
-        (doseq [rk read-keys] (vswap! (:readers w) update rk (fnil conj #{}) k))
+        (when (or (:reads prev) (:entity-reads prev)) (forget-readers! w k (into (or (:reads prev) #{}) (:entity-reads prev))))
+        (doseq [rk (into (or read-keys #{}) @entity-reads)] (vswap! (:readers w) update rk (fnil conj #{}) k))
         [::child k]))))
 
 (defn kept-of
@@ -649,7 +665,7 @@
     (vswap! (:cache w) dissoc k)
     (vswap! (:queue w) disj k)
     (vswap! (:db-keys w) disj k)
-    (forget-readers! w k (:reads c))
+    (forget-readers! w k (into (or (:reads c) #{}) (:entity-reads c)))
     (when (:tree-reads c) (vswap! (:tree-readers w) ratom/read-index k (:tree-reads c) disj))
     (some->> (:form c) (vswap! (:forms w) dissoc))
     (doseq [ch (:children c) :when (contains? @(:cache w) ch)]
