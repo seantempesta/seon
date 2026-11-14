@@ -1302,6 +1302,12 @@
         pick (fn [f] (into {} (filter (comp f key)) changed))
         ;; a mode is a fact of a file the allow-list names (seon.source/modes-tx), as a read records it (seon.fx/read-source)
         code (into (source/refresh-tx db (pick program?)) (source/modes-tx db (into {} (filter #(and (program? (key %)) (cfg/file-kind (key %)))) modes)))
+        ;; a changed schema file may state new stored attributes: their declarations, which the registry after it derives and db
+        ;; lacks, ride this write first, as a merge carries them (seon.merge/merge-tx), so the landed main stores them at once
+        ;; with no restart (only a boot installed them, seon.db/install-missing!)
+        decls (when (some #(and (str/starts-with? % "resources/seon/schemas/") (str/ends-with? % ".edn")) (keys changed))
+                (let [after (pdb/speculate-db db code)] (program/schema-declarations db (program/schema-registry (program/schema-changes after)))))
+        code (into (vec decls) code)
         db1 (pdb/speculate-db db code)
         pages (update-vals (pick (fn [p] (and (str/ends-with? p ".md") (some #(under? p %) wiki)))) #(or % ""))
         docs (if (seq pages) (doc/load-tx db1 wiki pages) [])

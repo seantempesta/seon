@@ -1539,6 +1539,19 @@
         (when @root (ts/stop-root! @root))
         (seon.lib/remove-tree! dir)))))
 
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-landed-schema-file-installs-its-new-attributes
+  ;; docs/source.md#a-landing-enters-main-as-data: a landing that changes a schema file keeps root running (it loads in place), so
+  ;; its new stored attributes must be installed by the landing's own write: context's 1916c1b31c added :seon.task/specified-turn,
+  ;; the bridge's commit carried the entry but no declaration, and every branch proved in the system then refused the attribute
+  ;; until root restarted (2026-11-14). Only a boot installed it. Estimate: a test db ~1M, one schema file's refresh-tx and the
+  ;; registry it states ~3M, one storing write ~0.5M
+  (let [db (ts/test-db)
+        text "{:app.shape/entity [:map {:seon.db/attributes true} [:app.shape/size :int]]\n :app.shape/size :int}\n"
+        tx (seon.system/changed-tx db {"resources/seon/schemas/app.shape.edn" text} {} nil)]
+    (is (some #(= :app.shape/size (:db/ident %)) (filter map? tx)) "the new attribute's declaration rides the landing's write")
+    (is (= 3 (:app.shape/size (d/entity (d/db-with (d/db-with db tx) [{:db/id 900 :app.shape/size 3}]) 900)))
+        "and the landed main can store it at once")))
+
 (deftest ^{:seon.test/estimate {:ticks 3000000}} named-paths-catch-up-on-a-db-that-holds-no-tree
   ;; data's review of my.branch/import!: catch-up answered nil on a db that holds no :seon.system/source tree even when its
   ;; :paths named the files, and import! read that nil as every path unchanged, a wrong answer with no error. Named paths need no
