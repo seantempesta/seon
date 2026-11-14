@@ -687,7 +687,8 @@
         (is (= (get-in r [:value :sha]) (git "rev-parse" "HEAD")) (pr-str r))
         (is (= imported (git "rev-parse" "HEAD^")) "one commit on the commit the store was imported from")
         (is (= "" (git "status" "--short")) "the checked-out tree moved with it, clean")
-        (is (= "(ns demo.x)\n" (slurp (str dir "/src/demo/x.clj")))))
+        (is (= "(ns demo.x)\n" (slurp (str dir "/src/demo/x.clj"))))
+        (is (= [imported (fx/tree-id dir)] ((juxt :expected :tree) (:value r))) "the answer names the commit it was made from and the tree now"))
       (testing "a landing moved main after the store's import: refused, the landing kept"
         (let [stale (git "rev-parse" "HEAD")]
           (spit (str dir "/c.txt") "landed\n") (git "add" "-A") (git "commit" "-q" "-m" "a landing")

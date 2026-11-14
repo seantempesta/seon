@@ -588,7 +588,7 @@
   main was imported from): the commit is made on expect's tree (tree-commit), and the ref moved by git update-ref NEW EXPECT, which
   refuses atomically when the ref is anywhere else: :seon.fx/ref-moved {:expected :found}, nothing written. A branch worktree wt
   has checked out (git's main in the main tree) takes the tree's refusals first (tree-refusal), and its index and files follow
-  the ref (read-tree -m -u). Never a retry: the caller reads what moved it and asks again. See docs/source.md#commit-the-merges-branch."
+  the ref (read-tree -m -u), and the answer names its tree id. Never a retry: the caller reads what moved it and asks again. See docs/source.md#commit-the-merges-branch."
   {:malli/schema [:=> [:cat :string :string [:maybe :string] [:map-of :string :string] :string :map] :map]}
   [dir ref wt env expect {:keys [files modes message]}]
   (or (when wt (tree-refusal wt (vec (sort (keys files)))))
@@ -599,7 +599,8 @@
             (error #'seon.fx/git-commit :seon.fx/ref-moved (str ref " is at " found ", not " expect ", the commit this write was read from: nothing written")
                    {:path dir :expected expect :found found}))
           (do (when wt (git! {} wt ["read-tree" "-m" "-u" expect sha] nil))
-              {:value {:sha sha :files (count files)}})))))
+              ;; the commit it was made from, and the checked-out tree's id now (tree-id): what main's source fact moves to
+              {:value (cond-> {:sha sha :files (count files) :expected expect} wt (assoc :tree (tree-id wt)))})))))
 
 (defn- commit-in-tree!
   "Commit files on the branch worktree wt has checked out, through that tree: each file written there, added to its own
