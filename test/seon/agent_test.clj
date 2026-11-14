@@ -2400,14 +2400,17 @@
     (is (= [:closed :seon.model/no-provider [:seon.model/no-provider]] (:value r)) (pr-str r))))
 
 (defn- answers-gate
-  "Agent code that answers this agent's gate at its seam (seon.agent/ask-gate), each ask counted in user/gate-asks, with what user/gate-answer holds: a real
+  "Agent code that answers this agent's gate at its seams (seon.agent/ask-gate, and send-gate! whose answer arrives for the next prove), each ask counted in user/gate-asks, with what user/gate-answer holds: a real
   gate is a worktree, a build and a run, and the claim here is what the agent does with its answer."
   {:malli/schema [:=> [:cat :qualified-symbol] :string]}
   [t]
   (str "(do (in-ns 'user) (def gate-asks (atom 0)) (def gate-answer (atom :fail))"
-       " (alter-var-root #'seon.agent/ask-gate (constantly (fn [tests _] (swap! gate-asks inc)"
+       " (def gate-of (fn [tests] (swap! gate-asks inc)"
        "   {:value {:results (zipmap tests (repeat @gate-answer)) :digests (zipmap tests (repeat \"gate\"))"
-       "            :failures (if (= :fail @gate-answer) {'" t " [{:type :fail :message \"the gate's red\"}]} {})}})))"
+       "            :failures (if (= :fail @gate-answer) {'" t " [{:type :fail :message \"the gate's red\"}]} {})}}))"
+       " (alter-var-root #'seon.agent/ask-gate (constantly (fn [tests _] (gate-of tests))))"
+       ;; an eval's prove sends the gate and waits on nothing: its answer arrives as root's :reply does, for the next prove
+       " (alter-var-root #'seon.agent/send-gate! (constantly (fn [k tests _] (seon.agent/handle! {:op :reply :k k :result (gate-of tests)}) nil)))"
        " :ok)"))
 
 (defn- process-proof
@@ -2418,16 +2421,17 @@
        " (let [[r] (seon.agent-test/in-agent (fn [_] [\"(+ 1 1)\"]))] (clojure.test/is (= " n " (:value r))))) (in-ns 'user) :ok)"))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 9 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3750k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 9}} a-process-test-gets-its-verdict-while-the-agent-can-act
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4500000 :asks 11}} a-process-test-gets-its-verdict-while-the-agent-can-act
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches. The shape of seon.repl/a-docstring-redefinition-is-a-change's run (2026-11-06): the agent wrote
   ;; its proof as a process test and never ran it; deferred read as green, the run ended, and the judge found it red at the
   ;; merge with no turn left. Now its prove takes the gate's answer and the red is the agent's, on its status (the gate answered at its seam)
   (let [t 'seon.repl-test/a-process-proof-of-the-gate
         prove "(let [r (my.agent/prove)] {:proofs (:proofs r) :deferred (:deferred r) :ran (:ran r) :line (:seon.print/code (my.agent/prove-summary {} r))})"
         reasons "(mapv :reason (:reasons (seon.ctx.status/status (seon.agent/db) @seon.ctx/ctx {})))"
-        [_ _ red red-reasons _ _ green green-reasons again asks]
-        (in-agent (fn [_] [(answers-gate t) (process-proof "a-process-proof-of-the-gate" 3) prove reasons
-                           "(reset! user/gate-answer :pass)" (process-proof "a-process-proof-of-the-gate" 2) prove reasons prove "@user/gate-asks"])
+        ;; each change's first prove asks the gate and answers at once (an eval never waits on it); the next reads its answer
+        [_ _ _ red red-reasons _ _ _ green green-reasons again asks]
+        (in-agent (fn [_] [(answers-gate t) (process-proof "a-process-proof-of-the-gate" 3) prove prove reasons
+                           "(reset! user/gate-answer :pass)" (process-proof "a-process-proof-of-the-gate" 2) prove prove reasons prove "@user/gate-asks"])
                   {:proofs #{t}})]
     (is (= {t :fail} (:proofs (:value red))) (pr-str red))
     (is (str/starts-with? (:line (:value red)) "red: 1") "its prove says red")
