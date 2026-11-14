@@ -131,7 +131,8 @@
 (defn- verdicts
   "The verdicts on branch db of the tests the done rule reads (seon.proofs/result-tx: the verdict at its reach digest
   now): each of proofs, and every test whose verdict is not green, {test {:status :pass|:fail|:deferred :failures
-  [assertion]}}: green is :pass, red and flaky :fail (a flaky test is no green), deferred left to root's gate. A seek of
+  [assertion]}}: green is :pass, red :fail, deferred and flaky :deferred (a flaky digest is no verdict, a :platform problem,
+  never a red that holds done: seon.proofs/flaky), left to root's gate. A seek of
   :seon.test/status per value that is not green (indexed) and one per proof: the greens outside the proofs, which no
   reason reads, are never read. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-symbol]] [:map-of :qualified-symbol :map]]}
@@ -141,7 +142,7 @@
                          [:red :flaky :deferred])
                  :let [v (d/entity db e) st (:seon.test/status v)]
                  :when st]
-             [(:var/name v) (cond-> {:status (case st :green :pass :deferred :deferred :fail)}
+             [(:var/name v) (cond-> {:status (case st :green :pass (:deferred :flaky) :deferred :fail)}
                               (seq (:seon.test/failures v)) (assoc :failures (:seon.test/failures v)))])))
 
 (defn task-of
