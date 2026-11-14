@@ -369,7 +369,8 @@
   facts make true now (:unnamed-site, :stale-section). Reads main and the api's fold (the true counts of
   repeats not yet on main). The render proc's health, kept by what each move of main changed
   (seon.render.proc/health!), brought to main as this call reads it: a read costs what main changed
-  since the last, never the whole program (seon.problems/health). See docs/health.md#cost."
+  since the last, never the whole program (seon.problems/health). Its metadata names the point it was put at, {:db :fold}: a
+  reader comparing it with a whole read reads there. See docs/health.md#cost."
   {:malli/schema [:=> [:cat :seon.system/sys] :seon.problems/report]}
   [sys] @(root/call! sys {:op :health :db @(:conn sys)}))
 
