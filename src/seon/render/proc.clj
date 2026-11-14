@@ -340,7 +340,7 @@
 (defn- debug-value
   "View [:debug id]'s page: the timeline of agent id's requests on its branch as this proc last read it
   (its model calls, each with its basis), the one shown at the view's :at (a model call's eid; absent,
-  :latest), drawn by seon.render.ui/debug-turn over seon.render.ui/debug-input when its input changes: a past
+  :latest), drawn as units (seon.render.ui/debug-units: its frame, its head, a row a message) over seon.render.ui/debug-input, each when its own input changes: a past
   turn's is its eid (made again from its basis, it never changes), latest's the branch's newest transaction (drawn
   again each time the branch moves, and only while a tab watches the view). nil until the branch is read;
   an agent with no branch on main (the user's) or whose branch could not be read has no turn to show, and
@@ -378,9 +378,10 @@
                 (cond-> {:turns (mapv (fn [e {:seon.model-call/keys [basis tokens cache-hit-tokens]}]
                                                   (cond-> {:e e :turn (:turn basis) :origin (:origin basis)} tokens (assoc :tokens tokens) cache-hit-tokens (assoc :cached cache-hit-tokens)))
                                                 calls pulled) :at at :to-come? to-come?} gone (assoc :gone gone))
-                (when (seq calls)
-                  {:id "d-turn" :input [at (when (= :latest at) (:max-tx bdb)) opened]
-                   :draw (fn [_] [(ui/debug-turn {:unit "d-turn" :seon.render/index (program/index-of-db bdb)} (-> (ui/debug-input bdb at calls raw? (:p kw)) (assoc :view (ui/view-param view) :opened opened))) nil])})
+                ;; the turn's frame, head and each of its messages a unit (ui/debug-units), each drawn only when its own input moved: a move
+                ;; draws the messages it added (docs/render.md#the-debug-page-is-the-wire-request)
+                (when-let [in (when (seq calls) (some-> (ui/debug-input bdb at calls raw? (:p kw)) (assoc :view (ui/view-param view) :opened opened)))]
+                  (ui/debug-units {:unit "d-turn" :seon.render/index (program/index-of-db bdb)} in))
                 context)
         kw (assoc ::walks {:branch [b kw]}))))))
 
