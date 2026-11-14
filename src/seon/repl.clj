@@ -1531,5 +1531,6 @@
                                   (seq (:load-errors @agent/state)) (assoc :load-errors (:load-errors @agent/state))
                                   (seq missing) (assoc :seon.agent/missing-cites missing)
                                   (:misaligned @agent/state) (assoc :misaligned (:misaligned @agent/state))
+                                  (:env-mismatch @agent/state) (assoc :seon.process/env-mismatch (:env-mismatch @agent/state))
                                   (:unwatched @agent/state) (assoc :unwatched (:unwatched @agent/state)))))
       (serve!))))
