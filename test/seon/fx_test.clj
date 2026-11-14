@@ -671,7 +671,7 @@
 
 ;; Estimate: about 25 git processes (init, commits, rev-parse, status, update-ref, read-tree) at ~150k ticks of spawn and read each
 ;; = 4000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 4000000}} main-moves-only-from-the-commit-the-store-was-imported-from
+(deftest ^{:seon.test/estimate {:ticks 4000000} :seon.test/execs ["git"]} main-moves-only-from-the-commit-the-store-was-imported-from
   ;; docs/source.md#commit-the-merges-branch: git's main follows the store's main (task seon.source/a-merge-moves-gits-main-to-the-
   ;; stores-files): a commit carries :expect, the commit the store's main was imported from, and the ref moves only from it, as
   ;; one compare-and-swap (git update-ref NEW EXPECT). A landing that moved main since is never undone by the store's older text:
