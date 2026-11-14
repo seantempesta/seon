@@ -1197,20 +1197,16 @@
      :sizes [30 100 300]}))
 
 (deftest an-identity-costs-its-seek
-  ;; task datahike.transaction/an-identity-costs-its-seek: an identity adds its :avet insert,
+  ;; an identity adds its :avet insert,
   ;; the unique check's :avet descent and the entity's upsert seek, ~1.5x a plain datom's
-  ;; floor; a content id adds hashing [attribute value] once. The overruns below are what
-  ;; 1,000 datoms cost when the task was filed: :db/unique 11.5k ticks and 34 KB per datom,
-  ;; a content id 16.9k and 65 KB
+  ;; floor; a content id adds hashing [attribute value] once. Within bound since 2026-11-14 with no waiver (filed at
+  ;; 11.5k ticks and 34 KB a :db/unique datom, a content id 16.9k and 65 KB, at 1,000 datoms)
   (cost/proof
     {:of 'datahike.api/db-with :input 'seon.db-test/unique-datoms
      :n "datoms, half a :db/unique identity naming its entity map"
      :work "per datom: its inserts (:avet too for the identity), one descent for a card-one value, one :avet seek per identity"
      :growth :linear
      :per-n {:ticks 10000 :bytes 15000}
-     ;; the overruns' :measured are the proofs' at 100, their largest size, taken 2026-11-10: :db/unique 1.28x the bytes of its
-     ;; bound (8.3k ticks and 19 KB a datom), a content id 2.68x (12.9k ticks and 43 KB)
-     :overrun {:task "datahike.transaction/an-identity-costs-its-seek" :n 100 :measured {:ticks 834866.0 :bytes 1916704.0}}
      :sizes [10 30 100]})
   (cost/proof
     {:of 'datahike.api/db-with :input 'seon.db-test/content-id-datoms
@@ -1218,7 +1214,6 @@
      :work "per datom: as a :db/unique identity's, and the identity's [attribute value] hashed once to its entity id"
      :growth :linear
      :per-n {:ticks 11000 :bytes 16000}
-     :overrun {:task "datahike.transaction/an-identity-costs-its-seek" :n 100 :measured {:ticks 1289618.0 :bytes 4288032.0}}
      :sizes [10 30 100]}))
 
 (defn newest-evals
