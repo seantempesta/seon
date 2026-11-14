@@ -47,6 +47,31 @@
         "an error replies alike")
     (is (and (int? (:value own)) (= (:value own) (:value r-star))) "`sys` is this root: the agent it holds is the one answering")))
 
+;; Estimate: one root booted for the shard (shared, ~0 to this test) and in-agent's setup and teardown (~1.5M), two root evals
+;; through the server (~0.25M each): ~2M; 2,000,000 ticks, worked from the work.
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} an-ops-stdin-is-its-requests-input
+  ;; task seon.server/connections-park-on-fibers-and-ops-run-bounded (docs/server.md#ops): a root eval's *in* is its request's own
+  ;; input, empty when none is sent, never the process's stdin: (slurp *in*) once held its connection 30 min. Read with .ready
+  ;; first, so the red never hangs
+  (let [[sent none] (at/in-agent (fn [_] [{:op :eval :agent "root" :code "(when (.ready ^java.io.Reader *in*) (slurp *in*))" :input "abc"}
+                                          {:op :eval :agent "root" :code "(if (.ready ^java.io.Reader *in*) (slurp *in*) :not-ready)"}]))]
+    (is (= "abc" (:value sent)) "the request's input is what the forms read")
+    (is (= "" (:value none)) "with none sent, stdin is empty: a read answers at once")))
+
+;; Estimate: the shard's shared root (booted once, ~0 here), twelve sockets opened and closed (~10k ticks each) and two root evals
+;; (~0.25M each): ~0.6M; 1,000,000 ticks, worked from the work.
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 1000000} :seon.test/execs ["git"]} an-idle-connection-holds-no-os-thread
+  ;; task seon.server/connections-park-on-fibers-and-ops-run-bounded (docs/server.md): a connection is a fiber parked on its socket,
+  ;; ~6 KB, never an OS thread of its own (~87 KB, one per connection, unbounded): twelve idle connections leave root's thread count as it was
+  (let [root (ts/shared-root! [])
+        threads #(ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code "(seon.lib/nthreads)"})))
+        before (threads)
+        socks (vec (repeatedly 12 #(java.net.Socket. "127.0.0.1" (int (:port root)))))
+        ;; each accepted before the count: one request on a thirteenth connection is answered after the twelve were taken
+        during (threads)]
+    (run! #(.close ^java.net.Socket %) socks)
+    (is (<= (- during before) 1) (str "twelve idle connections added " (- during before) " OS threads (one is the asking connection's own, today)"))))
+
 (deftest a-server-refused-answer-is-the-one-error-map
   ;; task seon.render/one-owner-per-view-path (B2): the server refuses as root does, with the
   ;; one error map, never a second {:error "text"} shape
