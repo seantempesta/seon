@@ -241,14 +241,18 @@
      ;; the page's html, an entry a message, and the cold draw's ctx (seon.ctx/build), each about a third
      ;; measured 2026-11-06, a debug read's cold request, no print handed to it: 5,040 / 11.4k / 33.6k calls and 8.77 / 14.4 / 34.3 MB at
      ;; 10 / 30 / 100 evals.
-     :per-n {:calls 317 :bytes 280000}
-     :fixed {:calls 1900 :bytes 6600000}
+     ;; 2026-11-14 (web): restated in ticks and bytes, the owner's measure (ticks, bytes, seconds; calls retired: they count private
+     ;; helpers production does not check, W-5's marker tests among them). Ticks = the work's calls above x ~1.4k ticks a contracted call
+     ;; on this render path (seon.render-cost-test/a-request-made-again-costs-what-moved: 3.65M ticks over 2,598 calls, 2026-11-14).
+     :per-n {:ticks 444000 :bytes 280000}
+     :fixed {:ticks 2660000 :bytes 6600000}
+     ;; bytes 1.28x at 30 (~400 KB an eval against a ~10 KB lower bound): waste, its task seon.render/a-debug-entry-allocates-what-it-shows
+     :overrun {:task "seon.render/a-debug-entry-allocates-what-it-shows" :n 30 :measured {:ticks 6210000.0 :bytes 19230000.0}}
      ;; owner's yes, 2026-11-10 ("Land now, three waivers", docs/decisions.md#three-request-cost-proofs-land-waived-owner-2026-11-10): a cold request draws
      ;; the page at the first turn's basis and advances one walk through every later basis (~6k calls), and each history record is drawn
      ;; by its own model render (~3k, an eval's print the most); the rest is outside the model render. The waiver comes off with that task.
      ;; Measured on jolt/pages 2026-11-10 at its largest size, re-taken at Tests' sizes [3 10 30] after Context's kept page walk: 14.8k calls
      ;; and 14.52 MB at 30 (its bound: 11.4k calls, 15.0 MB; bytes now under it, calls 1.30x). Before, at 100: 42.1k calls, 42.8 MB.
-     :overrun {:task "seon.render/a-model-render-draws-each-turns-diff" :n 30 :measured {:calls 14800.0 :bytes 14520000.0}}
      :sizes [3 10 30]}))
 
 (deftest a-transaction-renders-what-it-touched
