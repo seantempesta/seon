@@ -40,7 +40,7 @@ The why, in his words: "Clojure is kind of like this. It's very hard to write cl
 
 ### Writes through Flow, for sameness
 
-On whether one writer per branch was fine: "I like the idea of flow processing it in terms of monitoring and keeping things the same for interface with long running stateful processes so I'll pay a reasonable overhead for the sameness." Every agent's write becomes a credited message to root's writer proc; the measured overhead per commit is held to a reasonable share of a turn.
+On whether one writer per branch was fine: "I like the idea of flow processing it in terms of monitoring and keeping things the same for interface with long running stateful processes so I'll pay a reasonable overhead for the sameness." Then, on flow's measurement (the LMDB write lock is ~2% of a commit, one writer would serialize the rest; a per-branch writer proc would be a second queue beside the :repl in-port): "if it's a pain ... just leave direct writers". Each agent keeps writing its own branch; pause and visibility come from Flow's pause relayed to every graph and the ping's in-port fill and park site.
 
 ### After boot, only Flow; one specialist ports every holdout
 
