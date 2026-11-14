@@ -847,6 +847,28 @@
                          (cond (contract/error? r) (reduced r) (map? r) (assoc acc t [r]) :else acc)))
            {} tests)))
 
+(defn store-reads
+  "{test {:seon.reads/key-set :seon.reads/written-keys}}: what each test's newest verdict in the cache at dir says its run read
+  of a shared store and wrote there (write-verdicts!), for seon.proofs/reading-others-writes; a test whose newest verdict
+  recorded neither is absent. Cost: the cache's listing by metadata, one read a test. dir: the cache's
+  (:seon.config.proofs/results-dir unless given). See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:function [:=> [:cat] [:or :map :seon.error/base]] [:=> [:cat :string] [:or :map :seon.error/base]]]}
+  ([] (store-reads (cfg/value :seon.config.proofs/results-dir)))
+  ([dir]
+   (let [newest (reduce (fn [m ^java.io.File f]
+                          (let [n (.getName f) p (.getParent f)]
+                            (if (and (or (str/ends-with? n ".red.edn") (str/ends-with? n ".pass.edn"))
+                                     (> (.lastModified f) (or (some-> ^java.io.File (get m p) .lastModified) -1)))
+                              (assoc m p f) m)))
+                        {} (files-under dir))]
+     (reduce (fn [acc [_ ^java.io.File f]]
+               (let [v (read-verdict (.getPath f))]
+                 (cond (contract/error? v) (reduced v)
+                       (and (map? v) (symbol? (:key v)) (or (seq (:seon.reads/key-set v)) (seq (:seon.reads/written-keys v))))
+                       (assoc acc (:key v) (select-keys v [:seon.reads/key-set :seon.reads/written-keys]))
+                       :else acc)))
+             {} newest))))
+
 (defn stored-results
   "{digest result} of the verdicts cached for cand ({key digest}): two file checks a key, and a red's file read. A green is
   {:digest :pass 1 :fail 0 :error 0}; a red its status counted once, with its failures and, for a cost
@@ -1025,6 +1047,9 @@
                         (:budget r) (assoc :budget (:budget r))
                         (seq (failures k)) (assoc :failures (vec (failures k)))
                         (:cost r) (assoc :cost (:cost r))
+                        ;; what it read of a shared store and wrote there (seon.proofs/reading-others-writes reads them back)
+                        (seq (:seon.reads/key-set r)) (assoc :seon.reads/key-set (:seon.reads/key-set r))
+                        (seq (:seon.reads/written-keys r)) (assoc :seon.reads/written-keys (:seon.reads/written-keys r))
                         (seq (:fns r)) (assoc :fns (into {} (for [{:keys [var calls ticks self-ticks bytes self-bytes]} (:fns r)] [var [calls ticks self-ticks bytes self-bytes]]))))
                     w (write-file {:req {:path (verdict-path dir k (:digest r) (if (= :pass st) :pass :red))
                                          :text (sedn/encode v)}})]

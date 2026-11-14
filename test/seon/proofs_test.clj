@@ -6,7 +6,7 @@
   stored."
   (:require [seon.lib] [seon.agent] [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d] [clojure.java.shell]
             [seon.test-store :as ts] [seon.db :as pdb] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
-            [seon.program-test :refer [record]] [seon.source :as source] [seon.fx :as fx] [seon.config] [seon.contract :as contract] [seon.profile :as profile] [test-runner :as runner] [konserve.jolt.lmdb :as klmdb]))
+            [seon.program-test :refer [record]] [seon.source :as source] [seon.fx :as fx] [seon.config] [seon.contract :as contract] [seon.profile :as profile] [test-runner :as runner] [konserve.jolt.lmdb :as klmdb] [seon.ratom] [seon.union]))
 
 (defn- prog []
   (record (ts/test-db)
@@ -861,3 +861,27 @@
                 :digests {'a.x-test/ran "d1" 'a.p-test/boots "d2"}}
         {:keys [ran]} (proofs/answer-ran answer)]
     (is (= #{'a.x-test/ran} (set (keys ran))) "only the test that ran is a verdict to cache")))
+
+;; Estimate: a test branch made and dropped (~2M), two transactions of ~3 datoms (~0.1M), a scan of one attribute and two
+;; entity reads under the recorder, the diff of the branch's head (~0.2M) = ~2500000.
+(deftest ^{:seon.test/estimate {:ticks 2500000}} a-test-reading-anothers-write-is-named
+  ;; docs/source.md#tests-run-by-reach: a test that reads beyond its own facts on a shared branch read the tests before it,
+  ;; and is named; one that reads only what it made is not, whatever else was written beside it
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [write! (fn [id] (let [before @conn]
+                             (d/transact conn {:tx-data [{:seon.agent/key id}]})
+                             (pdb/written-keys (seon.union/changes before @conn))))
+           reads (fn [f] (into #{} (map pr-str) (nth (seon.ratom/reads-of nil f) 2)))
+           ;; a: writes, reads nothing; c: writes its own fact and reads it back by its key; b: reads every agent's key
+           a {:seon.reads/written-keys (write! "a-write")}
+           c-w (write! "c-write")
+           c {:seon.reads/written-keys c-w
+              :seon.reads/key-set (reads #(:db/id (d/entity @conn [:seon.agent/key "c-write"])))}
+           b {:seon.reads/key-set (reads #(set (d/q '[:find [?k ...] :where [_ :seon.agent/key ?k]] @conn)))}
+           named (proofs/reading-others-writes {'t/a a 't/b b 't/c c})]
+       (is (= '#{t/a t/c} (named 't/b)) "a read of an attribute whole reads every test's writes of it")
+       (is (not (contains? named 't/c)) "a read of its own entity by its id reads no other test's writes")
+       (is (not (contains? named 't/a)) "a test that read nothing is no reader")
+       (is (= '{t/x #{t/a}} (proofs/reading-others-writes {'t/a {:seon.reads/written-keys #{":all"}} 't/x {:seon.reads/key-set #{"[:e 1]"}}}))
+           "a schema datom touches every read")))))

@@ -523,6 +523,22 @@
   (into {} (for [k (concat fns (map #(vector :schema %) entities) (map #(vector :config %) config) (map #(vector :file %) files) keys)]
              [k (get rd k)])))
 
+(defn reading-others-writes
+  "{reader #{writer}}: each test of worlds ({test {:seon.reads/key-set :seon.reads/written-keys}}, what its run read of a
+  shared store and wrote on it, each key its pr-str) whose reads hold a key another's writes touch (datahike.reads/reads-touched?
+  as a set intersection: a write's keys include :any, so an open read is every writer's, and a schema datom's \":all\" touches
+  every reader). Such a verdict followed what ran before it: its digest never held those facts. Cost: one lookup a read key.
+  See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat [:map-of :any [:map [:seon.reads/key-set {:optional true} [:set :string]] [:seon.reads/written-keys {:optional true} [:set :string]]]]]
+                  [:map-of :any [:set :any]]]}
+  [worlds]
+  (let [by-key (reduce (fn [m [t w]] (reduce #(update %1 %2 (fnil conj #{}) t) m (:seon.reads/written-keys w))) {} worlds)
+        schema (get by-key ":all" #{})]
+    (into {} (for [[t w] worlds
+                   :let [ws (disj (into schema (mapcat by-key) (:seon.reads/key-set w)) t)]
+                   :when (and (seq (:seon.reads/key-set w)) (seq ws))]
+               [t ws]))))
+
 (defn- covered?
   "Does rd (a reads index) hold every input of read key k's kind (a var, [:schema k], [:config k], [:file p]; rd's
   :seon.proofs/covers), so that k missing from it is a miss, not an input it cannot see?"
@@ -742,8 +758,11 @@
                                                          :begin-test-var (note! {:seon.test/started v})
                                                          (:pass :fail :error) (do (vswap! counts update-in [v (:type m)] (fnil inc 0))
                                                                                   (note! {:seon.test/report m :test v}))
+                                                         ;; what the test read of a shared store and wrote on it (a harness's, seon.agent-test/with-agent):
+                                                         ;; its result's, never clojure.test's to print
+                                                         :seon.test/store-reads (vswap! counts update v (partial merge-with into) (select-keys m [:seon.reads/key-set :seon.reads/written-keys]))
                                                          nil))
-                                                     (binding [t/*test-out* out] (report m)))]
+                                                     (when-not (= :seon.test/store-reads (:type m)) (binding [t/*test-out* out] (report m))))]
                                   (try (test-vars n (keep #(ns-resolve n (symbol (name %))) ts) ticks done!
                                                   ;; a green another run stored since this run's plan, looked up just before the test would
                                                   ;; start: reused, never run again (its result names the run that wrote it)

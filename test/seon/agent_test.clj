@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.reconcile :as r] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.program-test] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.agent-proc] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [my.branch] [seon.template :as tpl] [seon.stall-proofs] [seon.doc] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.async.remote :as remote] [jolt.async.remote.flow :as rflow] [jolt.io-poller :as poller]))
+            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.agent-proc] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [seon.union] [seon.ratom] [my.task] [my.agent] [my.branch] [seon.template :as tpl] [seon.stall-proofs] [seon.doc] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.async.remote :as remote] [jolt.async.remote.flow :as rflow] [jolt.io-poller :as poller]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -106,6 +106,10 @@
         ask (fn [m] (ts/ask root m))
         eval-root (fn [code] (ask {:op :eval :agent "root" :code code}))
         made (volatile! nil)
+        ;; what the test reads of the shared main and writes there (seon.proofs/reading-others-writes): its reads in this process,
+        ;; recorded by the one recorder (seon.ratom/reads-of), and main's datoms from before its setup to after its teardown
+        main-before (when (:port root) (ts/read-main root))
+        read-keys (volatile! nil)
         ;; what the test made goes with it, however it ended: its agent (killed, its end awaited), its tasks
         ;; (cancelled) and their branches
         end! (fn []
@@ -147,9 +151,14 @@
                :else (let [came (value-of (:response (eval-root (str "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (#{:ready :ended :dead :killed} (:type e)) (= :" agent " (:agent e))) (select-keys e [:type :error]) (recur))))"))))]
                        ;; the end whole, its died error with it (exit, stderr's tail): a death before the hello is named
                        (if (= :ready (:type came))
-                         (f {:names names :ask ask :eval-root eval-root :root root})
+                         (let [[v _ ks] (seon.ratom/reads-of nil #(f {:names names :ask ask :eval-root eval-root :root root}))]
+                           (vreset! read-keys ks)
+                           v)
                          {::agent-ended-before-ready {:agent agent :end came}}))))
           (finally (vreset! stopped (end!))))]
+    (when main-before
+      (clojure.test/do-report {:type :seon.test/store-reads :seon.reads/key-set (into #{} (map pr-str) @read-keys)
+                               :seon.reads/written-keys (pdb/written-keys (seon.union/changes main-before (ts/read-main root)))}))
     (when-let [a (and (map? out) (::attach-made-no-agent out))]
       (throw (ex-info (str "in-agent: the attach made no agent: " (pr-str a))
                       {:attach a})))
