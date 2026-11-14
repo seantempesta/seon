@@ -16,21 +16,28 @@
     (.join spin)
     (is (= [:forked {:exit 3}] r) (str "answered " r))))
 
-(deftest ^{:seon.test/estimate {:ticks 20000000}} a-fork-whose-wait-is-cancelled-says-how-many-run
-  ;; a thread that never parks is one no fork is safe beside, so the fork's wait ends only by its caller's bound
-  ;; (jolt.host/fork-alone-cancel!): the fork forks nothing and answers its refused branch with the active count. The
-  ;; spinning thread here is that bound: it cancels until the fork has answered. The estimate: the spin until the
-  ;; fork's answer, a few million ticks.
-  (let [answered (promise) running (promise)
-        spin (doto (Thread. #(do (deliver running true)
-                                 (loop [] (when-not (realized? answered) (jolt.host/fork-alone-cancel!) (recur)))))
-               (.start))
-        _ @running
-        r (lib/fork! {:child #(lib/c-exit 3) :parent (fn [pid] [:forked pid]) :refused (fn [n] [:refused n])})]
-    (deliver answered true)
-    (.join spin)
-    (is (= :refused (first r)) (str "answered " r))
-    (is (<= 1 (second r)) (str "active threads " (second r)))))
+(def ^:private hold-in-a-plain-read
+  ;; a thread named "holder" blocked in a read(2) that is not collect-safe: it never parks, so it holds every fork
+  (scm/eval-string "(let ([rd (foreign-procedure \"read\" (int uptr size_t) ssize_t)])
+                      (lambda (fd) (rd fd (foreign-alloc 16) 16)))"))
+
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-forks-wait-ends-at-its-bound-naming-its-holders
+  ;; task seon.lib/a-forks-wait-ends-at-its-declared-bound-naming-its-holders: a thread in a C call that is not
+  ;; collect-safe never parks, and a fork beside it waited for good (a test child, 2026-11-14). fork! waits at most
+  ;; :seon.config.agent/fork-wait-ms and answers refused naming the thread that held it. The estimate: the bound's
+  ;; wait parked (no ticks) and one walk of the thread list, a few million ticks.
+  (let [[rfd w] (sock/socketpair) started (promise)
+        holder (doto (Thread. #(do (deliver started true) (hold-in-a-plain-read rfd)) "holder") (.setDaemon true) (.start))]
+    (try
+      @started
+      (let [r (lib/fork! {:child #(lib/c-exit 3) :parent (fn [pid] [:forked (lib/wait-status pid)]) :refused (fn [m] [:refused m])})
+            [k {:keys [holders bound-ms active-threads]}] r]
+        (is (= :refused k) (str "answered " r))
+        (is (= (seon.config/value :seon.config.agent/fork-wait-ms) bound-ms))
+        (is (<= 2 active-threads))
+        (is (some #(= "holder" (:name %)) holders) (str "holders " holders)))
+      ;; the holder's read ends, so no later fork in this process waits on it
+      (finally (sock/write-line! w "go") (.join holder) (lib/c-close rfd) (lib/c-close w)))))
 
 (deftest ^{:seon.test/estimate {:ticks 60000000}} a-shell-call-answers-its-output-or-says-why-not
   ;; seon.lib/sh, the one shell, answered exit 0 with no output (`git status`, 2026-11-12): Jolt's pipe port read errno in a
