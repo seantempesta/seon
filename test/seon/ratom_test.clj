@@ -275,68 +275,51 @@
     (is (= @run-number 2))))
 
 (deftest inferred-paths
-  ;; the inferred cursor over ctx's shape (an entity map, a task under it, a collection of evals by
-  ;; id, newest first) and ctx's one diff (seon.ctx/changes): a render re-runs on a change reaching
-  ;; a path it read, and on no other
-  (let [runs (running)
-        tree {:db/id 1 :x 0 :task {:db/id 2 :plan "p" :n 1}
-              :evals (#'seon.ctx/members-map [[10 {:db/id 10 :v 1}] [11 {:db/id 11 :v 2}]])}
-        a (rv/atom tree)
+  ;; the inferred cursor over ctx's shape (an entity map, a task under it, a collection of evals by id, newest first) and ctx's one
+  ;; diff (seon.ctx/changes): what a run read through a view (seon.ratom/reads-of), in the one path index (read-index), is reached
+  ;; (reached) by a change to a path it read, and by no other: what a walk kept as a value runs again (docs/render.md#reactive-renders)
+  (let [a (rv/atom {:db/id 1 :x 0 :task {:db/id 2 :plan "p" :n 1}
+                    :evals (#'seon.ctx/members-map [[10 {:db/id 10 :v 1}] [11 {:db/id 11 :v 2}]])})
         v #(rv/ref-view a ctx/changes)
-        plan (rv/atom 0) n-evals (rv/atom 0) e10 (rv/atom 0)
-        r-plan (run! (swap! plan inc) (:plan (:task (v))))
-        r-count (run! (swap! n-evals inc) (count (:evals (v))))
-        r-e10 (run! (swap! e10 inc) (:v (get (:evals (v)) 10)))]
-    (swap! a assoc-in [:task :n] 2)
-    (flush!)
-    (is (= 1 @plan) "a sibling attribute's change does not re-run it")
-    (swap! a assoc :x 1)
-    (flush!)
-    (is (= 1 @plan) "an unread key's change does not re-run it")
-    (swap! a assoc-in [:task :plan] "q")
-    (flush!)
-    (is (= 2 @plan) "a read path's change re-runs it")
-    (swap! a assoc-in [:evals 11 :v] 7)
-    (flush!)
-    (is (= 1 @n-evals) "iterating reads the key set: a member's change does not re-run a count")
-    (is (= 1 @e10) "nor a read of another member")
-    (swap! a assoc-in [:evals 12] {:db/id 12 :v 3})
-    (flush!)
-    (is (= 2 @n-evals) "a member added re-runs the iteration")
-    (is (= 1 @e10) "not a read of another member")
-    (swap! a assoc-in [:evals 10 :v] 8)
-    (flush!)
-    (is (= 2 @e10) "its own member's change re-runs it")
-    (swap! a update :evals dissoc 10)
-    (flush!)
-    (is (= 3 @e10) "its member gone re-runs it")
-    (is (= 3 @n-evals) "and the iteration")
-    (dispose! r-plan) (dispose! r-count) (dispose! r-e10)
-    (is (= runs (running)))))
+        runs {:plan #(:plan (:task (v))) :count #(count (:evals (v))) :e10 #(:v (get (:evals (v)) 10))}
+        ix (reduce-kv (fn [ix k f] (rv/read-index ix k (second (rv/reads-of a f)) conj)) nil runs)
+        ;; the tree moved by f: the runs its diff reaches
+        moved (fn [f] (let [t0 @a] (swap! a f) (rv/reached ix (ctx/changes t0 @a))))]
+    (is (= #{} (moved #(assoc-in % [:task :n] 2))) "a sibling attribute's change reaches no read")
+    (is (= #{} (moved #(assoc % :x 1))) "nor an unread key's")
+    (is (= #{:plan} (moved #(assoc-in % [:task :plan] "q"))) "a read path's change reaches its reader")
+    (is (= #{} (moved #(assoc-in % [:evals 11 :v] 7))) "iterating reads the key set: a member's change reaches no count, nor a read of another member")
+    (is (= #{:count} (moved #(assoc-in % [:evals 12] {:db/id 12 :v 3}))) "a member added reaches the iteration, not a read of another member")
+    (is (= #{:e10} (moved #(assoc-in % [:evals 10 :v] 8))) "its own member's change reaches it")
+    (is (= #{:e10 :count} (moved #(update % :evals dissoc 10))) "its member gone reaches it, and the iteration")))
 
 (deftest a-rerun-indexes-only-the-reads-it-gained-or-lost
-  ;; docs/render.md#reactive-renders: a rerun that reads what it read before indexes none of it again (a layout
-  ;; over every row, rerun by one change, re-indexed each path with each prefix: one eval added at 100 evals was
-  ;; 37.7 MB, 13.0 MB after), and a read it gains or loses still decides what reruns it
-  (let [runs (running)
-        a (rv/atom {:db/id 1 :flag 0 :evals (#'seon.ctx/members-map (for [i (range 20)] [i {:db/id i :v i}]))})
+  ;; docs/render.md#reactive-renders: a walk moves a component's reads in the path index by what its rerun gained or lost (seon.render's
+  ;; render!: a layout over every row, rerun by one change, re-indexed each path with each prefix: one eval added at 100 evals was
+  ;; 37.7 MB, 13.0 MB after); the index so moved is the one built from the rerun's reads whole, and a read gained or lost decides what
+  ;; reaches it
+  (let [a (rv/atom {:db/id 1 :flag 0 :evals (#'seon.ctx/members-map (for [i (range 20)] [i {:db/id i :v i}]))})
         v #(rv/ref-view a ctx/changes)
-        n (rv/atom 0)
-        r (run! (swap! n inc) [(:flag (v)) (reduce + (map (fn [[_ e]] (:v e)) (:evals (v))))])
-        indexed (fn [f] (seon.profile/begin!) (f) (flush!)
-                  (or (some #(when (= 'seon.ratom/index-reads! (:var %)) (:calls %)) (seon.profile/touched)) 0))]
-    (is (zero? (indexed #(swap! a assoc :flag 1))) "the same reads, rerun: nothing indexed again (it was each read, removed and added)")
-    (is (= 2 @n))
-    (is (= 1 (indexed #(swap! a assoc-in [:evals 20] {:db/id 20 :v 20}))) "a member added: its reads indexed, once")
-    (is (= 3 @n))
-    (swap! a assoc-in [:evals 20 :v] 5) (flush!)
-    (is (= 4 @n) "the read it gained reruns it")
-    (swap! a update :evals dissoc 3) (flush!)
-    (is (= 5 @n))
-    (swap! a assoc-in [:evals 3] {:db/id 3 :v 1}) (flush!)
-    (is (= 6 @n) "a member gone and back: read again")
-    (dispose! r)
-    (is (= runs (running)))))
+        reads #(second (rv/reads-of a (fn [] [(:flag (v)) (reduce + (map (fn [[_ e]] (:v e)) (:evals (v))))])))
+        ;; as render! moves them: what it no longer reads out, what it newly reads in
+        move (fn [ix was now] (rv/move-reads ix :r was now))
+        whole #(rv/read-index nil :r % conj)
+        reached (fn [ix f] (let [t0 @a] (swap! a f) (rv/reached ix (ctx/changes t0 @a))))
+        r0 (reads)
+        ix0 (whole r0)]
+    (is (= #{:r} (reached ix0 #(assoc % :flag 1))))
+    (is (= r0 (reads)) "the same reads, rerun: nothing to move")
+    (is (= #{:r} (reached ix0 #(assoc-in % [:evals 20] {:db/id 20 :v 20}))) "a member added reaches the iteration")
+    (let [r1 (reads) ix1 (move ix0 r0 r1)]
+      (is (= #{[[:evals 20 :v] :deep]} (set (remove r0 r1))) "its rerun gained the new member's read alone")
+      (is (= (whole r1) ix1) "moved by it: the index built whole")
+      (is (= #{:r} (reached ix1 #(assoc-in % [:evals 20 :v] 5))) "the read it gained reaches it")
+      (is (= #{:r} (reached ix1 #(update % :evals dissoc 3))))
+      (let [r2 (reads) ix2 (move ix1 r1 r2)]
+        (is (= #{[[:evals 3 :v] :deep]} (set (remove r2 r1))) "a member gone: its read lost")
+        (is (= (whole r2) ix2) "moved by it: the index built whole")
+        (is (= #{:r} (reached ix2 #(assoc-in % [:evals 3] {:db/id 3 :v 1}))) "and back: the iteration")
+        (is (= {:pre {} :deep {} :keys {}} (move ix2 r2 #{})) "a reader that reads nothing is gone from it")))))
 
 (deftest a-view-is-a-map
   ;; the view passes as the value it views wherever a map is read, and the printer takes the real one

@@ -469,6 +469,27 @@
         (let [ms (:messages t)]
           (is (= (sort > (keys ms)) (keys ms)) "messages by id, as every collection (their ids are their content's)"))))))
 
+(deftest a-patch-builds-its-index-again-only-when-it-built-it-and-a-schema-entry-moves
+  ;; docs/ctx.md#kept-by-the-change-never-rebuilt: a pull holds the entity index its schemas are read in (:ix :index). One its caller
+  ;; handed (an agent's slot, the one copy) a patch never builds again, and takes the one it is handed; one its caller built for its own
+  ;; use (:own-index?, a kept walk's) a patch builds again when it moved a :schema/* datom, and any other patch keeps (O(moved))
+  (let [db (d/db-with (ts/test-db) [{:seon.agent/key k}])
+        a (pdb/eid db :seon.agent/key k)
+        form [:map {:seon.db/attributes true} [:lab.walk/name {:optional true}]]
+        schema-tx [{:schema/key :lab.walk/thing :schema/form (binding [*print-namespace-maps* false] (pr-str form))}]
+        other [{:seon.agent/key k :seon.agent/turn 1}]
+        ix-of #(get-in % [:ix :index])
+        known? #(contains? (:forms (ix-of %)) :lab.walk/thing)
+        step (fn [c tx] (let [r (d/with db tx)] (ctx/patch c (:db-after r) (:tx-data r) :b)))
+        given (ctx/build (pdb/index) db a :b)
+        own (assoc-in given [:ix :own-index?] true)]
+    (is (not (known? own)) "built in the index it was handed")
+    (is (identical? (ix-of given) (ix-of (step given schema-tx))) "a handed index is never built again, whatever moved")
+    (is (identical? (ix-of own) (ix-of (step own other))) "its own: a patch that moves no schema entry keeps it")
+    (is (known? (step own schema-tx)) "and one that moved a schema entry builds it again from the db")
+    (let [handed (pdb/index-of {:forms {:lab.walk/thing form}})]
+      (is (identical? handed (ix-of (ctx/patch given db [] :b handed))) "a patch handed an index holds it"))))
+
 (deftest any-entitys-record-follows-mains-commits
   ;; root's, the user's and a task's record are built over their entity and patched from the
   ;; writer's commits of main ({:t :ops :db}, explicit-id ops): equal to a build after each

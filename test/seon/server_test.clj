@@ -420,7 +420,7 @@
   ;; contracted calls, two pages drawn a read (the one before's again, to diff against). Each read after
   ;; the first draws the one page it tells and costs what the read before did: ticks and bytes are the
   ;; process's exact counts (seon.profile/measure!); its page is the agent's live walk's (seon.repl/page-walk),
-  ;; so seon.render/draw, the cold draw, is never called, and it equals the cold draw on the db it is drawn to
+  ;; so no walk is drawn cold, and it equals a cold walk (seon.render/walk :once) on the db it is drawn to
   (let [[reads]
         (at/in-agent (fn [{:keys []}]
                        [(str "(let [t (:task @seon.agent/state)"

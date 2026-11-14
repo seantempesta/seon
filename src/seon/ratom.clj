@@ -1,24 +1,26 @@
 (ns seon.ratom
   "Reagent's reactive atoms on the server: reagent.ratom (reagent-project/reagent fa4dc05,
   src/reagent/ratom.cljs) ported, its names and behaviour kept: RAtom, Reaction, deref capture
-  (*ratom-context*), run-in-reaction, flush!, dispose! and add-on-dispose!. A render runs in a
-  reaction; each deref inside it registers what it read; a change re-runs only the reactions
+  (*ratom-context*), run-in-reaction, flush!, dispose! and add-on-dispose!, with the store (`store`) a source a
+  reaction derefs. Each deref inside a reaction registers what it read; a change re-runs only the reactions
   that read what changed, and a reaction whose new value is = to its old signals nothing on.
 
   One change, the owner's (\"I'd rather infer the cursor than require it\"; docs/decisions.md): the
   cursor is inferred. A render reads ctx through a tracking view (`view`), a map that delegates
   to the real value and records each path it looks up, as Vue 3's reactive proxy and MobX's
-  observable map do. A reset! of the atom behind it dirties a reaction only when a changed path
-  and a read path are prefixes of one another (a deep read; a shallow one only from above; an
-  iterated node by a direct value added, removed or replaced), the changed paths from the diff the view was made
-  with (seon.ctx/changes for ctx: the one diff), computed once a change and matched against an
-  index of the reads by path (`source-changed`). The printer and the page writer
-  take the real value (`unwrap`, `realize`), each such read whole.
+  observable map do. A run's reads are recorded once (`reads-of`): what it read through views, and
+  what it read of the store (Datahike's recorder, as a reaction's key set). The walk kept as a
+  value (seon.render/walk) keeps them, and a change reaches a run only when a changed path and a
+  read path are prefixes of one another (a deep read; a shallow one only from above; an iterated
+  node by a direct value added, removed or replaced), the changed paths from the tree's one diff
+  (seon.ctx/changes), matched against the one index of the reads by path (`read-index`,
+  `reached`). The printer and the page writer take the real value (`unwrap`, `realize`), each such
+  read whole.
 
   Reagent's JavaScript-only parts, and what stands for them here: its scheduler
   (requestAnimationFrame, batching/schedule) is the commit: flush! runs at a non-reactive deref,
-  Reagent's own rule, and once per transaction after its patch, the server's frame; its render
-  queue is the walk's, drained in mount order. docs/render.md#reactive-renders."
+  Reagent's own rule, and after a commit (`commit!`); a page's render queue is the walk's, drained
+  in mount order. docs/render.md#reactive-renders."
   (:refer-clojure :exclude [defn defn- atom run!])
   (:require [seon.contract :refer [defn defn-]] [datahike.reads :as reads]))
 
@@ -118,22 +120,23 @@
     res))
 
 (defn reads-of
-  "(f) run in no reaction, answering [its value, the reads it made through views of reference ref: #{[path kind]}]: what a walk
-  kept as a value (seon.render/walk) keeps of a component's run, matched against the tree's next diff (`reached`). Its reads of
-  anything else are not kept. See docs/render.md#a-page-is-a-kept-walk."
-  {:malli/schema [:=> [:cat :any :seon.host/fn] [:tuple :any [:set [:tuple [:vector :any] :keyword]]]]}
+  "(f) run in no reaction, its reads recorded as a reaction's run records them (`deref-capture`, the one recorder), answering [its
+  value, the reads it made through views of reference ref: #{[path kind]}, its key set: the datom keys of its reads of a db
+  (datahike.reads/reads-index), nil when it read none]: what a walk kept as a value (seon.render/walk) keeps of a component's
+  run, matched against the tree's next diff (`reached`) and the next datoms moved. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :any :seon.host/fn] [:tuple :any [:set [:tuple [:vector :any] :keyword]] [:maybe [:set :any]]]]}
   [ref f]
-  (let [cap (volatile! nil)
+  (let [cap (volatile! nil) ks (volatile! nil)
         r (reify IReaction
             (-get [_ k] (when (= k :captured) @cap))
-            (-set! [_ k v] (when (= k :captured) (vreset! cap v)))
+            (-set! [_ k v] (case k :captured (vreset! cap v) :key-set (vreset! ks v) nil))
             (-handle-change [_ _ _ _] nil)
             (-update-watching [_ _] nil)
             (-queued-run [_] nil)
             (-run [_ _] nil)
             (-set-opts [_ _] nil))
-        v (binding [*ratom-context* r] (f))]
-    [v (into #{} (keep (fn [x] (when (and (vector? x) (identical? ref (:ref (first x)))) [(nth x 1) (nth x 2)]))) @cap)]))
+        v (deref-capture f r)]
+    [v (into #{} (keep (fn [x] (when (and (vector? x) (identical? ref (:ref (first x)))) [(nth x 1) (nth x 2)]))) @cap) @ks]))
 
 ;;; --- which reads a change reaches ---------------------------------------------------------
 
@@ -305,15 +308,6 @@
   ;; the value now, not a read: the view's lookups are the reads
   (let [v (binding [*ratom-context* nil] @r)] (view {:ref r :changes changes} v [])))
 
-(defn view=
-  "Are a and b equal as a render's args: two views of the same source at the same path (Reagent
-  compares an RCursor by its ratom and path), else =."
-  {:malli/schema [:=> [:cat :any :any] :boolean]}
-  [a b]
-  (if (and (view? a) (view? b))
-    (and (identical? (:ref (.-src a)) (:ref (.-src b))) (= (.-path a) (.-path b)))
-    (= a b)))
-
 (defn fresh
   "x as of now in source src (nil: x's own): a view made again over the source's current value at its path (a stored view holds
   the value it was made with; an RCursor reads its ratom at each deref), else x. A walk kept as a value (seon.render/walk) holds
@@ -347,20 +341,13 @@
       (recur)))
   nil)
 
-;;; --- reaction --------------------------------------------------------------------------------
-
-;; each source read through views: its diff and its readers by path, {ref {:changes f :pre {path #{r}}
-;; :deep {path #{r}} :keys {path #{r}}}}. One watch a source: a reset! computes its changed paths once
-;; and reaches only the reactions that read one of them, by index, so a change costs
-;; what it changed, never every reader of the source
-(defonce ^:private sources (volatile! {}))
-
-(declare source-changed)
+;;; --- which reads a tree's change reaches -------------------------------------------------------
 
 (defn read-index
   "Read index ix ({:pre :deep :keys}, each {path #{reader}}; nil: none) with reader r's reads of one source ([[path kind] ...])
   added (f conj) or removed (f disj): a read at path indexed at each of its prefixes (:pre), a whole read at its path (:deep), an
-  iteration at the node it iterated (:keys). The one index a change is matched against (`reached`). See docs/render.md#reactive-renders."
+  iteration at the node it iterated (:keys). The one index a change is matched against (`reached`): a walk kept as a value holds
+  it (seon.render/walk's :tree-readers). See docs/render.md#reactive-renders."
   {:malli/schema [:=> [:cat [:maybe :map] :any [:maybe [:or [:set [:tuple [:vector :any] :keyword]] [:sequential [:tuple [:vector :any] :keyword]]]] :seon.host/fn] :map]}
   [ix r reads f]
   (let [add (fn [m k] (let [v (f (get m k #{}) r)] (if (seq v) (assoc m k v) (dissoc m k))))]
@@ -369,6 +356,20 @@
                 (= kind :deep) (update :deep add p)
                 (= kind :keys) (update :keys add p)))
             (or ix {:pre {} :deep {} :keys {}}) reads)))
+
+(defn move-reads
+  "Read index ix with reader r's reads moved from was to now (each [[path kind] ...]): the reads it lost out, the reads it gained
+  in, and r back at each prefix of a lost read that a read it still holds also sits under (an index keeps one set of readers a
+  path, so a lost read's disj takes r off the prefixes its held reads share). Equal to the index built from now whole, in
+  writes proportional to what moved. See docs/render.md#reactive-renders."
+  {:malli/schema [:=> [:cat [:maybe :map] :any [:maybe [:set [:tuple [:vector :any] :keyword]]] [:maybe [:set [:tuple [:vector :any] :keyword]]]] :map]}
+  [ix r was now]
+  (let [was (or was #{}) now (or now #{})
+        lost (remove now was)
+        ix (read-index (read-index ix r lost disj) r (remove was now) conj)
+        under? (fn [p q] (and (<= (count p) (count q)) (= p (subvec q 0 (count p)))))]
+    (reduce (fn [ix p] (if (some (fn [[q _]] (under? p q)) now) (update-in ix [:pre p] (fnil conj #{}) r) ix))
+            ix (distinct (mapcat (comp prefixes first) lost)))))
 
 (defn reached
   "The readers of read index ix (`read-index`) a diff's changes ([[op path ...] ...]) reach: a read at or below a changed path
@@ -382,30 +383,7 @@
                 (seq p) (into (get keys (pop p)))))
             #{} changes)))
 
-(defn- index-reads!
-  "Reaction r's reads of source src ([[path kind] ...]) added to its index (f conj) or removed
-  (f disj); the source watched while any reaction reads it, and let go when none does."
-  {:malli/schema [:=> [:cat :map :any [:set [:tuple [:vector :any] :keyword]] :seon.host/fn] :nil]}
-  [src r reads f]
-  (let [ref (:ref src)
-        had? (contains? @sources ref)]
-    (vswap! sources update ref (fn [ix] (assoc (read-index ix r reads f) :changes (:changes src))))
-    (cond (and (not had?) (seq (get-in @sources [ref :pre]))) (add-watch ref ::paths source-changed)
-          (empty? (get-in @sources [ref :pre])) (do (vswap! sources dissoc ref) (when had? (remove-watch ref ::paths)))))
-  nil)
-
-(defn- source-changed
-  "The one watch on a source read through views: the paths its reset! changed (its diff, once),
-  and each reaction a changed path reaches, looked up in its index: a read at or below
-  the path (:pre), a deep read above it (:deep), a node iterated whose direct value it added,
-  removed or replaced (:keys)."
-  {:malli/schema [:=> [:cat :any :any :any :any] :nil]}
-  [_ ref old new]
-  (when-not (identical? old new)
-    (let [ix (get @sources ref)
-          hit (reached ix ((:changes ix) old new))]
-      (doseq [r hit] (-handle-change r ::reached old new))))
-  nil)
+;;; --- reaction --------------------------------------------------------------------------------
 
 (defn- handle-reaction-change
   "The watch a reaction puts on each source: Reagent's handle-reaction-change."
@@ -415,7 +393,7 @@
 (deftype Reaction [^:volatile-mutable f ^:volatile-mutable state ^:volatile-mutable dirty? ^:volatile-mutable nocache?
                    ^:volatile-mutable watching ^:volatile-mutable watches ^:volatile-mutable auto-run
                    ^:volatile-mutable caught ^:volatile-mutable captured ^:volatile-mutable last-captured
-                   ^:volatile-mutable reads ^:volatile-mutable on-set ^:volatile-mutable on-dispose
+                   ^:volatile-mutable on-set ^:volatile-mutable on-dispose
                    ^:volatile-mutable on-dispose-arr ^:volatile-mutable key-set]
   clojure.lang.IRef
   (addWatch [this k fw] (set! watches (check-watches watches (assoc watches k fw))) this)
@@ -444,32 +422,21 @@
   IReaction
   (-get [this k]
     (case k :captured captured :last last-captured :watching watching :dirty? dirty? :state state
-            :auto-run auto-run :reads reads :key-set key-set :peek (binding [*ratom-context* nil] (.deref this))))
+            :auto-run auto-run :key-set key-set :peek (binding [*ratom-context* nil] (.deref this))))
   (-set! [_ k v]
     (case k :captured (set! captured v) :dirty? (set! dirty? v) :f (set! f v) :auto-run (set! auto-run v) :key-set (set! key-set v)))
   (-handle-change [this sender oldval newval]
-    ;; a source read through views reaches this reaction only by a changed path it read (::reached:
-    ;; source-changed's index); the store only by a commit touching a key its run read; every other source by Reagent's own watch
+    ;; the store reaches it only by a commit touching a key its run read; every other source by Reagent's own watch
     (when-not (or (identical? oldval newval) dirty? (and (instance? Store sender) (not (reads/reads-touched? key-set (-moved sender)))))
       (if (nil? auto-run)
         (do (set! dirty? true) (rea-enqueue this))
         (if (true? auto-run) (-run this false) (auto-run this)))))
   (-update-watching [this derefed]
-    ;; a reactive object is watched (Reagent's); a view's reads are indexed at their source by path
-    (let [by-src (reduce (fn [m d] (if (vector? d) (update m (first d) (fnil conj #{}) [(nth d 1) (nth d 2)]) m)) {} derefed)
-          new (set (remove vector? derefed))
-          old (set (remove map? (keys watching)))]
+    ;; a reactive object is watched (Reagent's); a read through a view is no source: a walk kept as a value keeps it (`reads-of`)
+    (let [new (set (remove vector? derefed))
+          old (set (keys watching))]
       (set! last-captured derefed)
-      ;; only the reads it gained or lost: a rerun that read what it read before (a layout over every row,
-      ;; a member added) indexes the one path that moved, not each path again (docs/render.md#reactive-renders)
-      (doseq [src (distinct (concat (keys reads) (keys by-src)))
-              :let [o (get reads src #{}) n (get by-src src #{})]
-              :when (not= o n)]
-        (let [gone (reduce disj o n) added (reduce disj n o)]
-          (when (seq gone) (index-reads! src this gone disj))
-          (when (seq added) (index-reads! src this added conj))))
-      (set! reads by-src)
-      (set! watching (zipmap (concat new (keys by-src)) (repeat true)))
+      (set! watching (zipmap new (repeat true)))
       (doseq [w new :when (not (contains? old w))] (add-watch w this handle-reaction-change))
       (doseq [w old :when (not (contains? new w))] (remove-watch w this))))
   (-queued-run [this] (when (and dirty? (some? watching)) (-run this true)))
@@ -509,14 +476,12 @@
   IDisposable
   (dispose! [this]
     (let [s state wg watching]
-      (doseq [[src rs] reads] (index-reads! src this rs disj))
       (set! watching nil)
-      (set! reads nil)
       (set! last-captured nil)
       (set! state nil)
       (set! auto-run nil)
       (set! dirty? true)
-      (doseq [w (keys wg) :when (not (map? w))] (remove-watch w this))
+      (doseq [w (keys wg)] (remove-watch w this))
       (when (some? on-dispose) (on-dispose s))
       (doseq [g on-dispose-arr] (g this))))
   (add-on-dispose! [_ g] (set! on-dispose-arr (conj (or on-dispose-arr []) g))))
@@ -527,7 +492,7 @@
   before its watches; :on-dispose, called with its last value when it is disposed."
   {:malli/schema [:=> [:cat [:maybe :seon.host/fn] [:* :any]] :seon.host/deref]}
   [f & {:keys [auto-run on-set on-dispose]}]
-  (let [r (Reaction. f nil true false nil nil nil nil nil nil nil nil nil nil nil)]
+  (let [r (Reaction. f nil true false nil nil nil nil nil nil nil nil nil nil)]
     (-set-opts r {:auto-run auto-run :on-set on-set :on-dispose on-dispose})
     r))
 
