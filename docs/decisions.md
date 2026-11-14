@@ -58,6 +58,10 @@ At 21:00: "If the reactive core is built make sure everyone is moving onto it we
 
 At 21:45: "Just make sure all agents are doing algorithmic analysis first. I want clear eyes going into projects and we don't accept large overruns for ticks, mem or time." Every plan states n, the big-O, and the ticks, bytes and seconds expected before any code; every proof carries all three budgets; a measured overrun in any of them stops the work until its cause is found (§3a). Root checks each land message for the three numbers beside their estimates. Stated in `AGENTS.md` §3 and [cost](cost.md#what-is-measured).
 
+### Docs as you go; bad docs cleaned; replaced code removed
+
+At 21:38: "Make sure you are telling agents to write up docs as the go and to clean up bad docs and to remove code when they have a replacement done." Each landing updates the wiki section of what it changed, fixes or deletes any wrong text it finds there, and deletes the code its replacement made redundant, named on its `Deletes:` line. Stated in `AGENTS.md` §3 and §7.
+
 ### Overnight: nobody waits for the owner
 
 At 21:40: "I want you to go autonomous and don't have you or any agents wait for me. If you know what to do and I think there's a lot to do so do it. Learn as you go and it's okay to revisit ideas once we find better symmetries." Root decides what would have gone to him and lists each ruling for him to reverse; sessions ask root. Stated in [sessions](sessions.md#the-managing-session).
