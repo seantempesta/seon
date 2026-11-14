@@ -390,8 +390,10 @@
   {:malli/schema [:=> [:cat [:maybe :seon.task/id] [:maybe :string] :any :boolean] :nil]}
   [task message evals turn?]
   (let [n (when turn? (begin! task) (inc (agent/turn-now)))
-        ;; as a model's turn does (work!): main moved, its program comes in now, so an outside agent is on main's code too and a conflict is an unmerged entry it sees
+        ;; as a model's turn does (work!): main moved, it merges in, and a conflict is an unmerged entry it sees. An outside agent has no
+        ;; run to end and fork again, so its process takes its branch's program in place before its evals run: no reply runs old code
         _ (when (and turn? (agent/main-moved? (:base @agent/state) (agent/heard-main))) (branch/merge-main!))
+        _ (when (and turn? (:behind @agent/state)) (agent/take-branch-program!))
         [id basis] (when turn? (open-turn! task n 1 false nil))
         _ (when turn? (agent/transact! [{:seon.model-call/id id :seon.model-call/basis basis}]) (agent/commit!))
         calls (model/call-evals {"message-md" message "evals" evals} (str "outside-" (or n "repl")))

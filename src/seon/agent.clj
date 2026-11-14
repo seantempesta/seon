@@ -266,6 +266,20 @@
   {:malli/schema [:=> [:cat] [:maybe :seon.host/db]]}
   [] (when-let [c (get-in @state [:program :seon.db/commit])] (pdb/at-commit (:store-conn @state) c)))
 
+(defn take-branch-program!
+  "Bring this running process's program to its branch's, in place: the forms that differ between the program it holds
+  (program-db) and its branch's head load (seon.program/load-diff!, the one start's loader), and :program names the head.
+  For an outside agent, whose replies have no run the reconciler can end at a boundary and fork again: a model's run re-forks
+  instead (seon.turn's :refork), loading only its branch's own forms. Costs what differs, main's moves included. Answers the
+  load errors. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat] [:sequential :map]]}
+  []
+  (let [p (program-db) db (db)
+        errs (when (and p (not= (d/commit-id p) (d/commit-id db))) (program/load-diff! p db))]
+    (swap! state assoc :behind false
+           :program {:seon.db/branch (:branch @state) :seon.db/commit (d/commit-id db) :seon.db/t (:max-tx db)})
+    (vec errs)))
+
 (defn mem-mb
   "This process's memory as the platform charges it, read now (lib/real-mb: one call): on the
   events that report the agent's state (its hello, each commit, a :tests reply, :stats),
@@ -582,7 +596,9 @@
                   main (if-let [c (:main r)] (pdb/at-commit conn c) main)]
               (swap! state #(cond-> (assoc % :db @conn)
                               ;; the merge base is now the main just merged
-                              merged? (assoc :base main :behind true :merged-t (:t r))
+                              merged? (assoc :base main :merged-t (:t r))
+                              ;; behind only when main's program moved: a main moved by records alone leaves its code as it is
+                              (and merged? (seq applied)) (assoc :behind true)
                               ;; main's schema moves are in the merged branch too: the registry slot built again
                               merged? with-slot))
               (when merged?
@@ -1307,7 +1323,9 @@
         (hold-env! (db) {:args ["--profile" "scripted"] :checkout (:checkout plan)})
         ;; an agent behind its branch (a merge of main loads nothing into it: merge-main!) forks children holding its own program:
         ;; each brings it to the branch first, the forms that differ only (seon.program/load-diff!), so a verdict judges the branch
-        (when-let [p (program-db)] (when (not= (d/commit-id p) (d/commit-id (db))) (program/load-diff! p (db))))
+        ;; only behind (a merge of main loaded nothing into it): the forms its own evals defined are loaded in it already, and a
+        ;; second eval of them here would repeat their effects (a def that holds 300 MB: a-test-childs-ceiling-is-its-own)
+        (when (:behind @state) (when-let [p (program-db)] (program/load-diff! p (db))))
         ;; and as a test process: a private function's contract is checked on each call here, whatever its agent's
         ;; setting (the owner, 2026-11-10: "Private helpers: tests only"; docs/checks.md#contracts-armed-at-definition)
         (contract/check-private! true)
