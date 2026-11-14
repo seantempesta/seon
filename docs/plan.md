@@ -44,7 +44,8 @@ recorded.
 5. A test child forks only from a process already on its branch's environment, never from root's agent: today the service
    runs another checkout's tests in a fork of root's long-running agent, which carries root's config, environment, heap,
    threads and loaded libraries, and each fix so far swapped one of those (owner, 2026-11-14: make it impossible, not
-   another check). Until the branch's own clean program process exists, the service runs no test across environments
+   another check). The agent `seon.system/prove-tree!` spawns on a branch starts on that branch's environment through the
+   one start path; the import of a checkout's files onto a branch and the live route stay, since Stage 1 builds on them
    (runtime, tests; moved up from Stage 4.3).
 6. `seon.repl/an-uncited-public-defn-is-told-at-its-eval` (proof green at turn 48, its agent now lost) restarted on a fresh
    agent, or the first of the random round's tasks to reach green, merged by `seon_done` (context).
