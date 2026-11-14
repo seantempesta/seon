@@ -53,12 +53,14 @@
   ;; planner runs records what it read: with-reads no longer turns the planner off (on Jolt its cursors read through the
   ;; index protocol, which records), so a commit to what a planned join read reaches it.
   (let [[db t1 t2] (seeded)
+        one (count (second (d/with-reads #(d/pull db [:seon.task/plan] t1))))
         [_ rs] (d/with-reads #(dotimes [_ 200] (d/pull db [:seon.task/plan] t1)))
         q '[:find ?id :in $ ?e :where [?e :seon.task/needs ?n] [?n :seon.task/id ?id]]
-        [v qrs] (d/with-reads #(d/q q db t1))
+        ;; the planner on, whatever with-reads binds: what this asks is that the planner's reads are recorded
+        [v qrs] (d/with-reads #(binding [datahike.query/*disable-planner* false] (d/q q db t1)))
         idx (d/reads-index qrs)
         tx (fn [tx-data] (:tx-data (d/with db tx-data)))]
-    (is (= 1 (count rs)) (str "200 reads of one range are one: " (count rs)))
+    (is (= one (count rs)) (str "200 pulls of one attribute hold what one pull holds (" one "): " (count rs)))
     (is (= #{["r/t2"]} v))
     (is (d/reads-touched? idx (tx [{:db/id t1 :seon.task/needs [{:seon.task/id "r/t3"}]}])) "a need added to the entity it joined from")
     (is (d/reads-touched? idx (tx [[:db/retract t2 :seon.task/id "r/t2"]])) "the joined entity's id, retracted")
