@@ -2823,6 +2823,18 @@
   (let [[r] (in-agent (fn [_] [{:op :eval :agent "root" :code "(:seon.error/type @(seon.system/call! sys {:op :gate :branch :no-such-branch :tests ['a/b]}))"}]))]
     (is (= :seon.writer/refused (:value r)) (pr-str r))))
 
+;; docs/errors.md#nothing-crashes-and-nothing-hangs: a wait on root ends with its answer or a typed error at its declared bound. The first
+;; backlog task's seon_done waited 24+ minutes in judge! > ask-gate > await-reply, an unbounded deref, while the gate's first batch hung
+;; in a fork (runs/evidence/gate-stall-1346). The bound arrives on the one timer (seon.step/put-after!). Estimate: one wait of 50 ms on
+;; a timer, a few allocations: ~0.2M ticks.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-wait-on-root-ends-at-its-bound
+  (with-redefs [agent/send! (fn [_] nil)]
+    (let [k 987654321
+          r (agent/await-reply k {:op :gate :k k :tests [] :prio 0} 50)]
+      (is (= :seon.bound/reached (get-in r [:result :seon.error/type])) (pr-str r))
+      (is (= {:seon.bound/ms 50} (get-in r [:result :seon.bound/bound])) "it names the bound it reached")
+      (is (nil? (get-in @agent/state [:waits k])) "and holds no wait after"))))
+
 ;; docs/merging.md#a-merge-runs-what-the-change-reaches: an eval never waits on the merge gate. A fresh agent's (my.agent/prove) of one
 ;; docs edit sat 17+ minutes in judge! > ask-gate > await-reply behind another agent's 37-minute gate (root's :tests had one worker;
 ;; runs/evidence/hang-101236, 2026-11-14). Now the prove asks the gate and answers at once, its process proof :deferred; the gate's

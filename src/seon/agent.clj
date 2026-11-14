@@ -236,16 +236,28 @@
   "Send root m, a request of this process's own key k ({:op .. :k k}), and wait for root's
   answer to it, the message carrying k: the :transport proc delivers it to the promise held
   under k in :waits (seon.repl/transport-step), put there before m is sent, so no answer
-  arrives unawaited, and every other message goes where it is owed meanwhile. A wait an
-  interrupt stops lets its promise go; the answer that comes later goes where an unawaited one
+  arrives unawaited, and every other message goes where it is owed meanwhile. With ms, its declared bound, the wait ends at it with
+  the typed :seon.bound/reached. A wait an interrupt stops lets its promise go; the answer that comes later goes where an unawaited one
   does (handle!). Root gone ends the process (the transport's end). See
   docs/processes.md#the-socket-and-the-agent-proc."
-  {:malli/schema [:=> [:cat :int :seon.wire/seon-msg] :seon.wire/seon-msg]}
-  [k m]
-  (let [p (promise)]
-    (swap! state assoc-in [:waits k] p)
-    (try (send! m) @p
-         (finally (swap! state update :waits dissoc k)))))
+  {:malli/schema [:function [:=> [:cat :int :seon.wire/seon-msg] :seon.wire/seon-msg]
+                  [:=> [:cat :int :seon.wire/seon-msg [:maybe pos-int?]] :seon.wire/seon-msg]]}
+  ([k m] (await-reply k m nil))
+  ;; ms: the request's declared bound. Past it the one timer (seon.step/put-after!) delivers the typed :seon.bound/reached as the
+  ;; answer, so the wait ends whatever root does; an answer that comes later goes where an unawaited one does (handle!)
+  ([k m ms]
+   (let [p (promise)]
+     (swap! state assoc-in [:waits k] p)
+     (when ms
+       (let [due (a/chan 1)]
+         (step/put-after! due ms :due)
+         (a/go (a/<! due)
+               (deliver p {:op :reply :k k :result (contract/error :seon.bound/reached #'seon.agent/await-reply
+                                                                   (str "root did not answer " (:op m) " within its bound of " ms " ms")
+                                                                   {:seon.bound/bound {:seon.bound/ms ms} :seon.bound/spent {:seon.bound/ms ms}
+                                                                    :seon.bound/at (keyword "seon.agent" (name (:op m)))})}))))
+     (try (send! m) @p
+          (finally (swap! state update :waits dissoc k))))))
 
 (defn mem-mb
   "This process's memory as the platform charges it, read now (lib/real-mb: one call): on the
@@ -1751,7 +1763,8 @@
   {:malli/schema [:=> [:cat [:vector :qualified-symbol] :int] :any]}
   [tests prio]
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
-    (:result (await-reply k {:op :gate :k k :tests tests :prio prio}))))
+    ;; the gate's declared bound: past it the judge answers :seon.bound/reached, never waits on a gate that cannot answer
+    (:result (await-reply k {:op :gate :k k :tests tests :prio prio} (cfg/value :seon.config.proofs/gate-ms)))))
 
 (defn send-gate!
   "Send root's :gate request k for tests at prio and wait on nothing: its answer arrives as a :reply nobody awaits, which handle!
