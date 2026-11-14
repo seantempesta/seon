@@ -906,7 +906,10 @@
       (is (= ["a" "b" "c" "d"] (mapv :seon.task/name (read out))) "a task the file lacks is appended")
       (is (str/starts-with? out (subs text 0 (- (count text) 2))) "after every byte that was there")
       (is (str/includes? out "\n {:seon.task/name \"d\"\n  :seon.task/plan \"four\"\n  :seon.task/kind :work\n  :seon.task/proofs #{x/z}}]") (str "in the files' layout, a member a line: " (pr-str out))))
-    (is (= text (source/task-file-text text {"b" (second (read text)) "a" (first (read text))})) "an entry stated as it is changes nothing")))
+    (is (= text (source/task-file-text text {"b" (second (read text)) "a" (first (read text))})) "an entry stated as it is changes nothing")
+    ;; a namespace's first task (seen 11-14: [] threw, its first child asked for a tag it doesn't have)
+    (is (= [{:seon.task/name "d" :seon.task/plan "four"}] (read (source/task-file-text "[]\n" {"d" {:seon.task/name "d" :seon.task/plan "four"}})))
+        "an empty file takes its first entry")))
 
 ;; Estimate: import of seon.facts.edn (~300 entries x 4 datoms x 5k) 6M + all 34 schema files imported and written back ~25M + 3 edits x (db-with + 91 KB file rewrite) 9M = 40000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-changed-schema-entry-rewrites-only-itself
