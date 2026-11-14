@@ -88,4 +88,8 @@ Questions for root: (a) admission: do root tasks take places under `:seon.config
   :seon.task/plan "Measured 2026-11-14 (data, by parts, seon.reconcile-test/a-design-step-is-done-when-it-improved-the-plan's world of one task): when a judging carries a task edit to main (seon.reconcile/judge-tx: merge-tx of the branch's [:task id] keys), it speculates main with the carry and runs ```seon.reconcile/index``` again over the result, about 3.5M ticks for one changed plan; the judging without it costs about 4.6M, against the 0.7M its test once estimated. carry-tx's carry did the same before the one merge. The cost to find: what index reads again for a write that moved one task's members (proportional to the change: the task's own entry of the index, not the world). Proof: that test's estimate back near the judge's own reads, with the carried edit costing what it moved."
   :seon.task/kind :work
   :seon.task/proofs #{seon.reconcile-test/a-design-step-is-done-when-it-improved-the-plan}}
+ {:seon.task/name "the-gate-proves-the-candidate-branch"
+  :seon.task/plan "seon_done's gate builds a git worktree today (run-on-checkout, fx.clj:1087): 9.9 GB in runs/merge-tests with 3 left behind. The gate becomes prove! of the candidate branch in the system; its process tests run in children started on that branch's environment (seon.agent/a-test-child-starts-on-its-branchs-environment). Deletes run-on-checkout, run-held, the checkout part of gate-answer, full-run-command's :built? and runs/merge-tests, after an audit to the owner. Owners: tests, runtime."
+  :seon.task/proofs #{seon.reconcile-test/a-gate-runs-no-git-worktree seon.reconcile-test/a-gate-red-holds-the-task-with-its-red-test}
+  :seon.task/needs #{}}
 ]

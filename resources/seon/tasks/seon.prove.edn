@@ -69,4 +69,8 @@
  {:seon.task/name "a-docs-landing-is-proved-by-reach"
   :seon.task/plan "BLOCKERS row 10 (root): bin/land's docs-only path ran only health and seon.doc-test, so seon.repl-test/the-template-instructions-and-the-help-page-run, which reads the help page, never ran and main went red at 4af7a1f2ae. Built on jolt/tests (077e958a8c bin/land, 0f20a178b3 docs/merging.md, 4002cab4d6 AGENTS.md section 3 and decisions.md: the owner's 2026-11-14 ruling, prove by reach, narrow later), reverted there (history kept) while the owner holds AGENTS.md and the docs; re-applied when he releases them. Deletes: bin/land's docs-only path. Follow-up (data): narrow the rerun to tests that read the changed page or section."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.repl-test/the-template-instructions-and-the-help-page-run}}]
+  :seon.task/proofs #{seon.repl-test/the-template-instructions-and-the-help-page-run}}
+ {:seon.task/name "a-docs-edit-is-proved-by-its-readers-in-seconds"
+  :seon.task/plan "Measured 2026-11-14: a fresh agent's (my.agent/prove) of one docs/prompt.md edit ran 17+ minutes without answering, root at ~1 core meanwhile, and root's REPL queued behind it. Owner: \"the test suite is supposed to be a handful of minutes worst case\". Find the cause first (hypothesis: the edit reaches ~104 doc-reader tests plus deferred process tests, cold after every digest moved). Then a run selects only the tests whose recorded reads include the changed section, and a run that cannot finish answers a typed error, never hangs. Owners: tests, data."
+  :seon.task/proofs #{seon.prove-test/a-one-section-change-runs-only-the-tests-that-read-it seon.prove-test/a-prove-that-cannot-answer-ends-with-a-typed-error}
+  :seon.task/needs #{}}]
