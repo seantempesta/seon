@@ -553,8 +553,8 @@
 (defn merge-main
   "The one merge of main into a branch, decided: head's own datoms since base (`own-datoms`), their keys (program keys and facts,
   `touched-by`), and main's content at those keys only, against base's: a key both changed, differently, is a conflict, and any
-  conflict stops it, writing nothing ({:conflicts}), unless the branch decided it (its unmerged entry resolved, or the key redefined
-  since, while main's content there is still the entry's theirs: the branch's value stands). Clean, the tx that makes main's head the merged branch, head's own datoms with
+  conflict stops it, writing nothing ({:conflicts}), unless the branch decided it (its unmerged entry resolved, while main's content
+  there is still the entry's theirs: the branch's value stands). Clean, the tx that makes main's head the merged branch, head's own datoms with
   their transactions' facts and retractions ({:tx :keys}): main plus the branch's own change. Main's moves elsewhere are never read,
   so it costs what the branch wrote, never how far main moved. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:or [:map [:conflicts [:vector :map]]] [:map [:tx :seon.db/tx-data] [:keys [:vector :any]]]]]}
@@ -575,9 +575,12 @@
         ;; a conflict the branch has decided (git add): its entry is resolved, or the branch redefined the key since, and main's content
         ;; there is still the entry's theirs, so the branch's value stands; main moving the key again is a new conflict
         held (into {} (map (juxt :key identity)) (entries head))
-        decided? (fn [{k :key}] (when-let [en (held k)]
-                                  (and (or (:resolved? en) (not= (get o k) (:ours en))) (= (get m k) (:theirs en)))))
-        conflicts (vec (remove decided? (:conflicts r)))]
+        ;; resolved (git add: my.branch/resolve!), and main's content there still the entry's theirs; an entry merely held (main's evidence
+        ;; of another task's conflict reaches a branch as a record) decides nothing
+        decided? (fn [{k :key}] (when-let [en (held k)] (and (:resolved? en) (= (get m k) (:theirs en)))))
+        conflicts (vec (remove decided? (:conflicts r)))
+        ;; the entries this merge decides, and only those, settle: a branch holds main's merge entries too (records merge), never its own
+        settled (into #{} (map :key) (filter decided? (:conflicts r)))]
     (if (seq conflicts)
       {:conflicts conflicts}
       (let [unique? #(= :db.unique/identity (get-in (:schema head) [% :db/unique]))
@@ -588,8 +591,8 @@
                  (into (for [{:keys [e a v]} gone] (if (and (unique? a) (not (named e))) [:db/retractEntity e] [:db/retract e a v])))
                  (into added)
                  (into (for [t txs dt (d/datoms head :eavt t)] dt))
-                 ;; the merge settles every entry: none stays on the merged branch
-                 (into (for [e (entry-eids head)] [:db/retractEntity e])))}))))
+                 ;; the entries it decided settle: none of them stays on the merged branch
+                 (into (for [e (entry-eids head) :when (settled (:seon.merge/key (d/entity head e)))] [:db/retractEntity e])))}))))
 
 ;; ---- what program code does not do ----------------------------------------------------
 
