@@ -46,6 +46,24 @@
     (is (not (d/reads-touched? one (tx [{:db/id t1 :seon.task/ns 'x.z}]))) "nor another attribute, for a one-attribute pull")
     (is (contains? (reads #(d/pull db [:seon.task/plan] 987654321)) [:e 987654321]) "a missing entity: its first datom reaches it")))
 
+;; Estimate: a seeded db, 200 pulls of one attribute under one recorder ~1M; one planned join query ~0.2M; 3 d/with ~0.2M = ~1500000
+(deftest ^{:seon.test/estimate {:ticks 1500000}} a-recorder-holds-one-range-a-key-and-the-planner-records
+  ;; task datahike.reads/a-lazy-read-records-into-the-read-it-belongs-to (2) and context's T9: the recorder kept one range a
+  ;; read, so 200 reads of one attribute held 200 ranges for one key (565 B each); it holds each range once. And a query the
+  ;; planner runs records what it read: with-reads no longer turns the planner off (on Jolt its cursors read through the
+  ;; index protocol, which records), so a commit to what a planned join read reaches it.
+  (let [[db t1 t2] (seeded)
+        [_ rs] (d/with-reads #(dotimes [_ 200] (d/pull db [:seon.task/plan] t1)))
+        q '[:find ?id :in $ ?e :where [?e :seon.task/needs ?n] [?n :seon.task/id ?id]]
+        [v qrs] (d/with-reads #(d/q q db t1))
+        idx (d/reads-index qrs)
+        tx (fn [tx-data] (:tx-data (d/with db tx-data)))]
+    (is (= 1 (count rs)) (str "200 reads of one range are one: " (count rs)))
+    (is (= #{["r/t2"]} v))
+    (is (d/reads-touched? idx (tx [{:db/id t1 :seon.task/needs [{:seon.task/id "r/t3"}]}])) "a need added to the entity it joined from")
+    (is (d/reads-touched? idx (tx [[:db/retract t2 :seon.task/id "r/t2"]])) "the joined entity's id, retracted")
+    (is (not (d/reads-touched? idx (tx [{:db/id t2 :seon.task/plan "Other."}]))) "an attribute the join did not read")))
+
 (deftest a-transaction-touches-only-what-a-read-scanned
   (let [[db t1 t2] (seeded)
         point (d/reads-index (second (d/with-reads #(d/q '[:find ?e . :in $ ?id :where [?e :seon.task/id ?id]] db "r/t2"))))
