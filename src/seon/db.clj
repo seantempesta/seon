@@ -414,15 +414,24 @@
       (when-let [e (write-once-refusal r ix)] (refuse! e))
       r)))
 
+(declare tx-meta)
+
 (defn transact-checked
-  "The writer's transact (`datahike.writing/transact!`) through both checks (`checked`): the connection's 'transact!
+  "The writer's transact (`datahike.writing/transact!`) through both checks (`checked`), its tx-meta stamped with the runtime and the
+  connection's branch (`tx-meta`, a caller's own values winning): the connection's 'transact!
   (`connect` adds it to every connection), so root's batch and an agent's run-ahead apply pass it with no call of their own. arg-map's
   :seon.db/schemas (a branch's own schema changes, {:forms :registry}) are the per-datom check's. See
   docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :seon.host/db :seon.db/transact-args] :seon.db/tx-report]}
   [db arg-map]
   (when-let [e (supplied-instant nil (:tx-meta arg-map))] (refuse! e))
-  (checked db (:tx-data arg-map) (:seon.db/schemas arg-map) #(datahike.writing/transact! db (-> arg-map (dissoc :seon.db/schemas) (assoc :tx-data %)))))
+  ;; every transaction names its runtime and the connection's branch (tx-meta), a caller's own values winning: the merge reads a
+  ;; datom's owner by its transaction's branch, and one that named none was nobody's (task seon.db/every-transaction-names-its-branch)
+  ;; (a store still installing its schema, bootstrap, holds no :seon.tx/* attribute yet: its install transaction names nothing)
+  ;; (and a store opened from before an attribute was installed names only those it holds)
+  (let [stamp (into {} (filter #(get-in db [:schema (key %)])) (tx-meta (get-in db [:config :branch] :db)))
+        arg-map (if (seq stamp) (update arg-map :tx-meta #(merge stamp %)) arg-map)]
+    (checked db (:tx-data arg-map) (:seon.db/schemas arg-map) #(datahike.writing/transact! db (-> arg-map (dissoc :seon.db/schemas) (assoc :tx-data %))))))
 
 (defn with
   "The one transaction on a database value (Datahike's `d/with`) through both checks (`checked`): every speculation, an

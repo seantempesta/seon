@@ -269,7 +269,9 @@
         b (read base) d (read db)
         content-attr? (content-attr (nth b 2) (nth d 2))
         content? (fn [{:keys [a]}] (content-attr? a))]
+    ;; a transaction's own entity (its instant, runtime, branch) bears no key: its facts ride with the datoms it made (carried-tx)
     (into #{} (for [e (into #{} (comp (filter content?) (map :e)) moved)
+                    :when (not (or (first (d/datoms base :eavt e :db/txInstant)) (first (d/datoms db :eavt e :db/txInstant))))
                     [side many das] [b d]
                     k (entity-keys side many e das)]
                 k))))

@@ -104,8 +104,10 @@
        ;; 8,126 calls; 46 since touched-keys calls touched-by (which takes datoms a caller already holds) once per side;
        ;; 71 since a fact is a side's change only if it wrote it, about 23 more, split approximately: seon.merge/derived? once per
        ;; attribute asked whether it is data (~14: the differing datoms' attributes on two dbs, the keys' on three), and per changed key
-       ;; and side one seon.merge/owned?, one tx-branch of the other side's last writer and one per datom it added (~9)
-       :fixed {:bytes 650000 :calls 71}
+       ;; and side one seon.merge/owned?, one tx-branch of the other side's last writer and one per datom it added (~9);
+       ;; 47 since the derived attributes are the entity index's own (one seon.db/index read per data-attr?, 7, never a derived? per
+       ;; attribute) and a transaction's entity bears no key (its instant, runtime and branch ride with its datoms): measured 47
+       :fixed {:bytes 650000 :calls 47}
        :sizes [10 30 100]}))
 
 (defn embedded-of
@@ -172,7 +174,7 @@
 (deftest ^{:seon.test/estimate {:ticks 90000000}} a-diff-of-two-commits-costs-the-nodes-that-differ
   ;; See docs/storage.md#merges-read-what-changed (seon.ctx/moved's call: two values of one branch, :eavt, the whole range)
   (let [[a b] (diff-of 10) [gone added] (d/datoms-diff a b :eavt [])]
-    (is (= [10 11] [(count gone) (count added)]) "ten values replaced, and the transaction's own datom"))
+    (is (= [10 13] [(count gone) (count added)]) "ten values replaced, and the transaction's own datoms: its instant, runtime and branch"))
   (cost/proof
     {:of 'datahike.api/datoms-diff :input 'seon.merge-cost-test/diff-of
      :n "values replaced on entities spread over a 10,000-datom store of three :eavt levels, in one commit"
@@ -259,4 +261,5 @@
        :growth :constant
        :fixed {:bytes 2000000 :calls 117}
        :sizes [10 30 100]}))
+
 

@@ -2033,3 +2033,19 @@
         (is (= 3 (count values)) (str "the mark found " (count values) " of the 3 values out of line"))
         (is (= (- (count marked) 3) reads) (str reads " reads for " (- (count marked) 3) " nodes and 3 values out of line")))
       (finally (d/release conn) (run! seon.lib/remove-tree! @stores-made) (reset! stores-made [])))))
+
+;; Estimate: the test branch ~1M + two transactions through the checked path ~1M = 3000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-transaction-names-its-branch-whoever-writes-it
+  ;; task seon.db/every-transaction-names-its-branch: the merge reads a datom's owner by its transaction's :seon.tx/branch, and a
+  ;; transaction written with no tx-meta named none (a seed's, a raw write's), so a side could not tell its own facts from shared ones;
+  ;; the one path stamps the connection's branch and runtime, and a caller's own value wins
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [b (:branch cfg)
+           r (d/transact conn {:tx-data [{:seon.agent/key "stamp-raw" :seon.agent/status :idle}]})
+           tx (d/entity (:db-after r) (:max-tx (:db-after r)))
+           r2 (d/transact conn {:tx-data [{:seon.agent/key "stamp-own" :seon.agent/status :idle}] :tx-meta {:seon.tx/branch :elsewhere}})
+           tx2 (d/entity (:db-after r2) (:max-tx (:db-after r2)))]
+       (is (= b (:seon.tx/branch tx)) "a raw write names the connection's branch")
+       (is (string? (:seon.tx/runtime tx)) "and the runtime that made it")
+       (is (= :elsewhere (:seon.tx/branch tx2)) "a caller's own value wins")))))
