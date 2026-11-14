@@ -46,4 +46,6 @@ The sites that resolve a name held in data to a var by design.
 
 The sites that fill a gap in another namespace, each owed a fix in that namespace's owner.
 
+- `my.branch/import!`: resolves `seon.system/catch-up` at its call, since `seon.system` requires `my.branch`. Owed: `catch-up` (a function of a db and files) moves below both callers with the readers it uses, and the require is direct.
+
 - `my.agent` (its last form): interns `source`, `source-fn`, `pst`, `doc` and `dir` into Jolt's `clojure.repl` in every process. Jolt's `clojure.repl` carrying them deletes the intern.

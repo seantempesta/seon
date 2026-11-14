@@ -12,6 +12,33 @@
   [_ r]
   (-> (with-meta r nil) (assoc :applied (count (:applied r)))))
 
+(defn import!
+  "Bring files a session edited onto this agent's branch, as one write through the agent's writer, the path an eval takes: the
+  files paths name (relative to root, default this agent's checkout), each read as a boot's catch-up reads its checkout's changed
+  files (seon.system/catch-up :fact? false :paths: code, pages and task files as program keys, in the shape an eval writes);
+  main never moves. Answers {:imported [path] :unchanged [path] :skipped [{:path :why}]}: a file that does not read is skipped
+  with why, never half-written, and one whose facts the branch holds already is unchanged. See
+  docs/source.md#a-boot-catches-up-with-its-checkout."
+  {:malli/schema [:function [:=> [:cat [:sequential :string]] :map] [:=> [:cat :string [:sequential :string]] :map]]}
+  ([paths] (import! (cfg/checkout) paths))
+  ([root paths]
+   ;; catch-up is root's namespace's, which requires this one: resolved at the call (docs/resolution.md, owed)
+   (let [catch-up (requiring-resolve 'seon.system/catch-up)
+         db (agent/db)
+         read (fn [ps] (catch-up db root {:fact? false :paths (vec ps)}))
+         ;; each file alone says whether it is skipped or already held; the ones that change are read together, so a file's
+         ;; dependents across them are read once
+         per (into {} (for [p paths] [p (read [p])]))]
+     (if-let [e (some #(when (contract/error? %) %) (vals per))]
+       e
+       (let [skipped (vec (for [[_ r] per s (:skipped r)] {:path (:path s) :why (:reason s)}))
+             out (set (map :path skipped))
+             unchanged (vec (for [[p r] per :when (and (not (out p)) (empty? (:tx r)))] p))
+             todo (vec (for [[p r] per :when (and (not (out p)) (seq (:tx r)))] p))
+             r (when (seq todo) (read todo))]
+         (when (seq (:tx r)) (agent/transact! (:tx r)) (agent/commit!))
+         {:imported todo :unchanged unchanged :skipped skipped})))))
+
 (defn merge-main!
   "git merge main: stage this runtime onto the branch, then merge main's changes since
   the merge base. What does not conflict is applied and loaded here; each conflict stays

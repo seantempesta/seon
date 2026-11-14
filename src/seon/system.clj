@@ -1354,14 +1354,16 @@
   (seon.fx/unreadable), a task file the changed task files are refused with (seon.task/load-tx), and a file a merged task main
   holds unsynced also changed (seon.problems/unsynced?: the checkout's text would replace the merge's). Answers {:tx :paths
   :skipped}, {:paths []} when nothing differs, nil when db holds no tree, or the read's error. Its caller writes :tx on the branch
-  it brings up to date (boot!: main). opts: :tree, the tree to read what differs from (default db's held one), and :fact? false,
-  which moves no source fact (changed-tx alone): a session's files written as a branch of the store, never main."
+  it brings up to date (boot!: main). opts: :tree, the tree to read what differs from (default db's held one), :fact? false,
+  which moves no source fact (changed-tx alone): a session's files written as a branch of the store, never main; and :paths,
+  the files to read in place of the tree's diff (seon.fx/files-at: a session's import, my.branch/import!)."
   {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:maybe :map]]
-                  [:=> [:cat :seon.host/db :string [:map [:tree {:optional true} :string] [:fact? {:optional true} :boolean]]] [:maybe :map]]]}
+                  [:=> [:cat :seon.host/db :string [:map [:tree {:optional true} :string] [:fact? {:optional true} :boolean] [:paths {:optional true} [:sequential :string]]]] [:maybe :map]]]}
   ([db root] (catch-up db root {}))
   ([db root {:keys [fact?] :or {fact? true} :as opts}]
   (when-let [tree (or (:tree opts) (:tree (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))))]
-    (let [r (fx/changed-since root tree)
+    ;; :paths names the files to read (a session's import, my.branch/import!), else the tree's diff names them
+    (let [r (if-let [ps (:paths opts)] (fx/files-at root ps) (fx/changed-since root tree))
           tasks-dir (cfg/value :seon.config.source/tasks-dir)]
       (cond
         (contract/error? r) r
