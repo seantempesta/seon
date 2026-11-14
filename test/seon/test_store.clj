@@ -103,7 +103,9 @@
          (not (clojure.string/blank? (:out (seon.lib/sh "lsof" "-t" "--" f)))))))
 
 (defn- numbered-generations
-  "[[n path] ...] of the generations of the key's store at stem, newest first: stem-<n> for each n of them, and stem itself as 0."
+  "[[n path] ...] of the generations of the key's store at stem, newest first: stem-<n> for each n of them, and stem itself as 0.
+  A stage a generation is made in (stem-<n>.stage-<uuid>, test-runner/program-db) is no generation."
+  {:malli/schema [:=> [:cat :string] [:vector [:tuple :int :string]]]}
   [stem]
   (let [f (java.io.File. ^String stem) dir (.getParentFile f)
         pat (re-pattern (str "\\Q" (.getName f) "\\E-(\\d+)"))]
@@ -111,7 +113,8 @@
                  (for [n (some-> dir .list seq) :let [m (re-matches pat n)]
                        :when (and m (.isDirectory (java.io.File. dir ^String n)))]
                    [(Long/parseLong (second m)) (str dir "/" n)]))
-         (sort-by (comp - first)))))
+         (sort-by (comp - first))
+         vec)))
 
 (defn generations
   "The directories of the key's store at stem (kept-program-store's path), newest generation first: stem-<n> for each n of
@@ -133,7 +136,8 @@
   2026-11-12). This one is marked used (its newest generation's mtime). A key's store is its generations (generations, base-<key>-<n>):
   those of this key beyond the :seon.config.proofs/program-stores-kept most recently used, and the keys beyond that count
   (the most recently used generation of each ranks it), are removed, so the disk stays bounded, but never a generation a process
-  holds open (held-open?), however many: a run reads its tree's generation to the end. Nothing is made here.
+  holds open (held-open?), however many: a run reads its tree's generation to the end. A stage a generation was left in
+  (<generation>.stage-<uuid>) that no process holds open is removed too. Nothing is made here.
   See docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :string :string] :string]}
   [base k]
@@ -148,6 +152,11 @@
     ;; never one a process holds open (its LMDB environment, data.mdb): removing it under that process failed its write
     ;; (NoSuchFileException under program-store-<key>/, 2026-11-12), whatever the count
     (doseq [g (drop (config/value :seon.config.proofs/program-stores-kept) (sort-by #(- (used %)) mine))
+            :when (not (held-open? g))]
+      (seon.lib/remove-tree! g))
+    (doseq [n (some-> dir .list seq)
+            :when (re-matches (re-pattern (str "\\Q" stem "\\E-[0-9a-f]{8}(?:-\\d+)?\\.stage-.+")) n)
+            :let [g (str dir "/" n)]
             :when (not (held-open? g))]
       (seon.lib/remove-tree! g))
     (doseq [[_ gs] (drop (dec (config/value :seon.config.proofs/program-stores-kept))

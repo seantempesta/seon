@@ -174,7 +174,8 @@
   seon.proofs/a-failed-import-leaves-no-branch: one selected 0 tests and said OK). Every text is
   read from the tree's git objects (tree-files). Two runs on one new tree both import it and the first to
   finish keeps the branch (keep-tree!). A tree to import goes into the newest generation, or, when its data file
-  is past max-bytes (an LMDB file never shrinks), into the next generation, an empty store: a full store is never moved or
+  is past max-bytes (an LMDB file never shrinks), into the next generation, made whole in a stage beside it and renamed in once (a run
+  whose rename finds it made reads again), an empty store: a full store is never moved or
   removed under the runs that read it (task seon.test-store/the-kept-program-store-is-one-store-a-tree-added-never-replaced:
   the plan's tree, kept in a store a later tree filled, was imported again by every shard inside a test's budget). Only the plan
   passes a bound (tests-of: :seon.config.proofs/program-store-max-bytes); any other caller (nil) imports into the newest generation.
@@ -200,23 +201,36 @@
          found (some (fn [g] (when-let [o (when (.isFile (io/file g "data.mdb")) (open g))]
                                (if (pdb/branch? (:conn o) b) (assoc o :path g) (do (d/release (:conn o)) nil))))
                      gens)
-         {:keys [conn cfg path]}
+         found-or-made
          (or found
              (let [newest (first gens)
-                   path (cond (nil? newest) store
-                              (or (nil? max-bytes) (<= (.length (io/file newest "data.mdb")) max-bytes)) newest
-                              :else (ts/next-generation store))
-                   o (or (open path) (pdb/open! :lmdb path 0 :db))]
-               ;; the store's branches listed only for a tree to import (keep-tree! picks the nearest kept tree), since
-               ;; d/branches reads every roster entry (35k ticks, 102 KB a branch)
-               (keep-tree! (:conn o) (:cfg o) root tree b (d/branches (:conn o)))
-               (assoc o :path path)))]
-     (.setLastModified (io/file path) (System/currentTimeMillis))
-     ;; the branch's connection made while the store's main one is held: its env stays this process's, never a path another
-     ;; process removed in between (a connect of a missing store makes an empty one)
-     (let [bc @(pdb/connect (assoc cfg :branch b))]
-       (d/release conn)
-       bc))))
+                   full? (and newest max-bytes (> (.length (io/file newest "data.mdb")) max-bytes))
+                   path (cond (nil? newest) store full? (ts/next-generation store) :else newest)]
+               (if full?
+                 ;; a new generation is made in a stage beside it, whole, then renamed in once: two runs starting it at once
+                 ;; never open one path that does not exist yet (a store's open makes it); the run whose rename finds it made
+                 ;; reads again, and finds the tree there or imports into theirs
+                 (let [stage (str path ".stage-" (random-uuid))]
+                   (try (let [st (pdb/open! :lmdb stage 0 :db)]
+                          (try (keep-tree! (:conn st) (:cfg st) root tree b (d/branches (:conn st)))
+                               (finally (d/release (:conn st)))))
+                        (let [[rc _] (seon.lib/c-rename stage path)]
+                          (if (zero? rc) (assoc (pdb/open! :lmdb path 0 :db) :path path) :made-meanwhile))
+                        (finally (seon.lib/remove-tree! stage))))
+                 (let [o (or (open path) (pdb/open! :lmdb path 0 :db))]
+                   ;; the store's branches listed only for a tree to import (keep-tree! picks the nearest kept tree), since
+                   ;; d/branches reads every roster entry (35k ticks, 102 KB a branch)
+                   (keep-tree! (:conn o) (:cfg o) root tree b (d/branches (:conn o)))
+                   (assoc o :path path)))))]
+     (if (= :made-meanwhile found-or-made)
+       (program-db root store tree max-bytes)
+       (let [{:keys [conn cfg path]} found-or-made]
+         (.setLastModified (io/file path) (System/currentTimeMillis))
+         ;; the branch's connection made while the store's main one is held: its env stays this process's, never a path another
+         ;; process removed in between (a connect of a missing store makes an empty one)
+         (let [bc @(pdb/connect (assoc cfg :branch b))]
+           (d/release conn)
+           bc))))))
 
 (defn- builder-id
   "The id of the code that builds a reach graph on db: the digest of the :form/id of every var of

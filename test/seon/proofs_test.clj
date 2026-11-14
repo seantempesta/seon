@@ -456,7 +456,13 @@
         (is (= #{'app.mv-calc/add 'app.mv-calc/sub} (names db-b)) "and B's db is B's tree")
         (is (and (nil? (calls 'seon.source/import-tx)) (nil? (calls 'seon.source/refresh-tx))) "A's branch is found in generation 0: nothing imported")
         (is (= #{'app.mv-calc/add} (names db-a2)) "and it is A's program")
-        (is (.isFile (java.io.File. store "data.mdb")) "generation 0 is where it was, with its data"))
+        (is (.isFile (java.io.File. store "data.mdb")) "generation 0 is where it was, with its data")
+        (let [stage (java.io.File. (str store "-2.stage-left-behind"))]
+          (.mkdirs stage)
+          (is (= [(str store "-1") store] (ts/generations store)) "a stage left behind is no generation")
+          (is (= (str store "-2") (ts/next-generation store)) "and does not move the next one")
+          (ts/shared-program-store! (str dir "/ps") "0123abcd")
+          (is (not (.exists stage)) "and a stage no process holds is collected")))
       (finally (close-stores! store)))))
 
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-failed-import-leaves-no-branch
