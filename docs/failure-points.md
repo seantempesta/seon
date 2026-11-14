@@ -106,7 +106,7 @@ The failure points whose edge answers data with no catch.
 | The platform refuses the process's memory figure | `seon.agent/mem-mb` (Jolt's `jolt.host/process-footprint-bytes` answers nil) | arithmetic on nil throws: a gauge never reads a made-up number |
 | `host_statistics64` refuses | `seon.lib/sysmem` | `:seon.lib/sysmem-refused`; `bin/check scale-work` fails naming it |
 | `getloadavg` refuses | `seon.lib/load-average` | `:seon.lib/load-refused`, thrown in `seon.prove/machine-load`; the step's state stays |
-| `fork()` refused (another Chez thread active) | `seon.lib/fork!`, the one spawning skeleton | checked once, never waited out: `:fork-failed` / `:standby-failed` with `:active-threads`; `:seon.test/fork-refused`; `:clone-failed` |
+| `fork()` beside another active Chez thread | `seon.lib/fork!`, the one spawning skeleton | waited out: Chez's `fork_alone` forks once every other thread has parked, woken by each that does; a thread that never parks is ended by its caller's bound (``jolt.host/fork-alone-cancel!``), answered `:fork-failed` / `:standby-failed` with `:active-threads`, `:seon.test/fork-refused`, `:clone-failed` |
 | A forked child's code throws or escapes | `seon.lib/fork!`'s child | the child exits 1, the throw on its stderr, never unwinding into the parent's frames |
 | An outside client half-open at root's server | `seon.server/serve-connection!`, on its own thread | that thread parks until the socket closes; every other connection is served |
 | Root's server is not running or answers nothing (the MCP relay) | `bin/mcp` (perl, outside `src`) | a JSON-RPC error `-32000` naming why; the relay goes on, so a restarted root answers the next message |
