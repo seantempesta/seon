@@ -1647,6 +1647,21 @@
         (is (= [:stop] @sent) "the agent is told to stop after it")
         (is (:stop-sent st))))))
 
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-stop-transition-never-waits-on-its-process
+  ;; task seon.agent-proc/a-stop-transition-never-waits-on-its-process (docs/flow.md#the-five-rules: a proc waits only by
+  ;; parking on its in-port): Flow's stop of root's graph calls each agent proc's ::flow/stop, which waited in await-dead for
+  ;; its process's end to close, so an agent ignoring :stop held root's whole stop. It sends :stop and returns; the death,
+  ;; when an agent proc leaves while root runs, is already recorded (its end's EOF, :dead). Red before: the transition
+  ;; never returned. Estimate: one transition of a map and two channel ops, ~0.1M
+  (let [in (clojure.core.async/chan) out (clojure.core.async/chan 4)
+        st {:id :a1 :pid 4242 :end {:in in :out out} :inflight {}}
+        r (clojure.core.async/thread (seon.agent-proc/agent-proc st :clojure.core.async.flow/stop))
+        [v port] (clojure.core.async/alts!! [r (clojure.core.async/timeout 2000)])]
+    (is (= r port) "the transition returns with the agent's end still open")
+    (is (:stop-sent v) "having told the agent to stop")
+    (is (= {:op :stop} (clojure.core.async/poll! out)) "its :stop went out on the end")
+    (clojure.core.async/close! in)))
+
 (deftest ^{:seon.test/estimate {:ticks 6000000}} a-reasoning-overrun-is-the-next-turns-to-read
   ;; docs/failure-points.md (a turn of the agent's loop): a model call whose reasoning spent its whole token budget answers
   ;; :seon.model/reasoning-ate-reply, and the run ended :error at that turn, though the agent could reason less and go on
