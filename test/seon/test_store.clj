@@ -117,6 +117,12 @@
         others (for [n (some-> dir .list seq) :when (and (re-matches (re-pattern (str "\\Q" stem "\\E-[0-9a-f]{8}")) n) (not= n (.getName own)))]
                  (java.io.File. dir ^String n))]
     (when (.isDirectory own) (.setLastModified own (System/currentTimeMillis)))
+    ;; a store a plan moved aside (test-runner/move-aside!, of any key) goes once no process holds it open
+    (doseq [n (some-> dir .list seq)
+            :when (re-matches (re-pattern (str "\\Q" stem "\\E-[0-9a-f]{8}\\.retired-.+")) n)
+            :let [p (str dir "/" n)]
+            :when (not (held-open? p))]
+      (seon.lib/remove-tree! p))
     ;; never one a process holds open (its LMDB environment, data.mdb): removing it under that process failed its write
     ;; (NoSuchFileException under program-store-<key>/, 2026-11-12), whatever the count
     (doseq [^java.io.File o (drop (dec (config/value :seon.config.proofs/program-stores-kept)) (sort-by #(- (.lastModified ^java.io.File %)) others))
