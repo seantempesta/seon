@@ -10,7 +10,7 @@ Every agent reads this page whole before any work: Claude sessions directly, Seo
 
 *Rules out.* Counting landings, tests or lines as progress. Reading a task that never merged as a small number: it is a failure. Work that removes no turn while no agent can merge: then everything goes to the one path through. Carrying on over a failure of the system itself: it stops the work loudly and is fixed at its cause first.
 
-*Enforced by:* not yet enforced; owed `my.root/turns`, the query context runs by hand.
+*Enforced by:* root's page shows turns to merged (```seon.render.ui/turns-tile```, each agent's turn kept by the render proc from its commits, never written to main), and the same ledger is data at root's REPL (```my.root/turns```). The tile draws ```my.root/turns-of```'s rows once a render reads branches through the one reaction.
 
 ## 2. There is only the Seon agent
 
