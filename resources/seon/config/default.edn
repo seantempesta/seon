@@ -593,6 +593,11 @@
  ;; branch changed). Unit: engine ticks. The most a test's :seon.test/estimate may state as :ticks: its budget is ten times
  ;; it, so a test past 1e9 ticks is split or moved to a system test's root. At the bound: an :undeclared-test row naming it.
  :seon.config.proofs/test-ticks-cap 100000000
+ ;; Unit: ms. The merge gate's declared bound, its request's (seon.agent/ask-gate): past it the judge's wait ends with the typed
+ ;; :seon.bound/reached and no verdict, whatever the gate does. Worked from its work: a build ~45 s, a seed ~60 s, and its process
+ ;; tests, a test root's boot ~20 s then ~0.5 s a test, 253 in a large gate ~150 s: ~250 s; ten times that (AGENTS 3, the one factor).
+ ;; At the bound: the judge answers :seon.bound/reached (no verdict), a :platform problem.
+ :seon.config.proofs/gate-ms 2500000
  ;; Unit: engine ticks a ms. The slowest rate green tests ran at, waiting included: the 5th percentile of ticks/ms over every stored
  ;; green (88,534 greens, 2026-11-13: p5 149, median 116,069). A test child ends a test that never returns at ten times its estimate
  ;; at this rate (seon.agent/wall-bound-ms): a wall bound derived from the test's own declared work, never a typed-in time.
