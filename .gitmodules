@@ -56,6 +56,3 @@
 [submodule "reference-code/datastar"]
 	path = reference-code/datastar
 	url = https://github.com/starfederation/datastar
-[submodule "reference-code/reagent"]
-	path = reference-code/reagent
-	url = https://github.com/reagent-project/reagent
