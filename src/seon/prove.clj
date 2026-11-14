@@ -139,14 +139,15 @@
 
 (defn- expected
   "The processes an item of it's class holds at its peak, as far as st has read: a plain test's batch, its child; else the most
-  a reading saw a batch of its class hold; a class never read, the most any class was read at; none read yet, a quarter of
-  :max-processes."
+  a reading saw a batch of its class hold; a class never read, all of :max-processes, so it runs alone until its peak is read.
+  Never another class's peak: a process test boots a whole root (its bin/held, its embed-worker, its children), and twenty of
+  them granted at a step's three a batch put ~74 roots on 18 cores (runs/evidence/load70-1026)."
   {:malli/schema [:=> [:cat :map [:maybe :map]] pos-int?]}
   [st it]
   (let [c (item-class it)]
     (if (= plain c)
       1
-      (or (get-in st [:peaks c]) (some->> (vals (:peaks st)) seq (reduce max)) (max 1 (quot (:max-processes st 4) 4))))))
+      (or (get-in st [:peaks c]) (:max-processes st)))))
 
 (defn- held-now
   "The processes batch bid holds by reading held (held-processes'): those started with its tag, and a test batch's own child
@@ -407,11 +408,16 @@
         st (update st :batches dissoc bid)
         fails (when-not (or fx? (contract/error? r)) (proofs/failures r))
         reported (when-not (or fx? (contract/error? r)) (into #{} (keep #(some-> (:var %) (subs 2) symbol)) (:reports r)))
+        ;; ended at its wall bound: wall time reads the machine, so no verdict, a :platform problem (seon.proofs/answer-ran)
+        wall (when-not (or fx? (contract/error? r)) (into #{} (keep #(when (= :seon.test/wall-spent (:seon.error/type %)) (some-> (:var %) (subs 2) symbol))) (:reports r)))
         v (when fx? (:value r))
         result (fn [[t d]] (cond (contract/error? r) r
                                  ;; root's effect owner ran it: its verdict reads as a test's
                                  (and fx? (map? v)) (assoc v :answer {:pass (:pass v 0) :fail (:fail v 0) :error (:error v 0) :digests {t d}
                                                                       :reports (if (seq (:failures v)) (mapv #(assoc % :var (str "#'" t)) (:failures v)) [{:type :pass :var (str "#'" t)}])})
+                                 (and (not fx?) (wall t)) (contract/error :seon.prove/no-verdict #'seon.prove/batch-ended
+                                                                          (str t " ended at its wall bound (:seon.test/wall-spent): wall time reads the machine, so it is no verdict and is never cached; its fiber dump is on its test child's stderr")
+                                                                          {:test t :digest d :reported (vec (sort-by str reported))})
                                  (and (not fx?) (fails t)) {:pass 0 :fail 1 :error 0 :failures (fails t) :answer r}
                                  (and (not fx?) (reported t)) {:pass 1 :fail 0 :error 0 :answer r}
                                  :else (contract/error :seon.prove/no-verdict #'seon.prove/batch-ended
