@@ -634,3 +634,27 @@
     (is (seon.check/left? {:pid 9 :ppid 1 :stat "S"} true self) "a row still running: left")
     (is (not (seon.check/left? {:pid 9 :ppid 1 :stat "Z"} true self)) "a row that can run nothing more: not left")))
 
+
+;; docs/server.md#working-a-task-from-a-worktree: bin/mcp relays each message on its own connection to root, and answers each as it
+;; comes, so one call waiting (a prove parked on a gate) blocks no other: measured 2026-11-14, one held call kept a session's every
+;; other tool call waiting 17 min while root answered others in 3 ms. Here a stand-in root holds call 1 open and answers call 2
+(deftest ^{:seon.test/execs ["bin/mcp"] :seon.test/estimate {:ticks 3000000}} a-relay-answers-a-quick-call-while-a-slow-one-waits
+  ;; estimate: one relay process started (~1M ticks of ours to start it and read its pipes) and three socket accepts
+  (with-open [ss (java.net.ServerSocket. 0 4 (java.net.InetAddress/getByName "127.0.0.1"))]
+    (let [p (.start (ProcessBuilder. ^java.util.List [(str (seon.config/checkout) "/bin/mcp") (str (.getLocalPort ss))]))
+          in (.getOutputStream p)
+          line! (fn [^java.io.OutputStream os s] (.write os (.getBytes (str s "\n") "UTF-8")) (.flush os))
+          out (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream p)))
+          answer! (fn [^java.net.Socket s line]
+                    (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s))))
+                    (line! (.getOutputStream s) line)
+                    (.close s))]
+      (try
+        (line! in "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\"}")
+        (let [slow (.accept ss)]
+          (line! in "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}")
+          (answer! (.accept ss) "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}")
+          (is (str/includes? (.readLine out) "\"id\":2") "the quick call is answered while the slow one waits")
+          (answer! slow "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[]}}")
+          (is (str/includes? (.readLine out) "\"id\":1") "and the slow one when root answers it, a whole line"))
+        (finally (.close in) (.waitFor p))))))
