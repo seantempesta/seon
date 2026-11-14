@@ -659,6 +659,12 @@
  ;; with nothing running one item is always granted, so the queue never stalls with nothing to wake it. Admission only,
  ;; never a verdict (docs/clocks.md#the-machines-load-admits-work).
  ;; Set per machine (config/local.edn), never shipped: a load is absolute.
+ ;; Unit: on/off. Whether a test's tick count decides its verdict (its budget, ten times its estimate, and the ceiling
+ ;; :seon.config.agent/test-ticks; seon.proofs/run-tests!). Off by the owner's ruling, 2026-11-15: "disable the tick counting
+ ;; test until we can reliably measure ticks" (main's full run at 7cf0c01b64 was red on 8 tests at the 300M ceiling, and one
+ ;; digest read 161M and 300M: a test's count takes other threads' work). Ticks are still recorded on every verdict; bytes and
+ ;; the test's own result decide. Turned back on by seon.proofs/a-tests-ticks-are-its-own-work.
+ :seon.config.proofs/ticks-decide false
  ;; :seon.config.proofs/max-load 12.0
  ;; Unit: ms. The least work a shard of an incremental run is worth (seon.proofs/worth-shards). Provenance: a shard's start
  ;; costs about 5 s, and 8 s more for its process tests' root (docs/testing.md#a-root-costs-what-it-boots), so it saves its cost past

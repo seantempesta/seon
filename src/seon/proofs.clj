@@ -731,7 +731,10 @@
   ([tests digests note!] (run-tests! tests digests note! nil nil))
   ([tests digests note! ticks] (run-tests! tests digests note! ticks nil))
   ([tests digests note! ticks reused]
-  (let [tset (set tests) ticks (when (and ticks (pos? ticks)) ticks)]
+  ;; a tick budget decides a verdict only while :seon.config.proofs/ticks-decide holds (off by the owner's ruling until a test's
+  ;; count is its own work: task seon.proofs/a-tests-ticks-are-its-own-work); off, no test is bounded or red by its ticks, and
+  ;; each result still records the ticks it measured
+  (let [tset (set tests) ticks (when (and ticks (pos? ticks) (cfg/value :seon.config.proofs/ticks-decide)) ticks)]
     (into {} (for [[n ts] (group-by (comp symbol namespace) tests)
                    :let [counts (volatile! {}) ran (volatile! {}) out (java.io.StringWriter.)
                          done! (fn [tv m] (let [v (test-symbol (str tv))
