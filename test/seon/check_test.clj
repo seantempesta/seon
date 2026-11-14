@@ -658,3 +658,30 @@
           (answer! slow "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[]}}")
           (is (str/includes? (.readLine out) "\"id\":1") "and the slow one when root answers it, a whole line"))
         (finally (.close in) (.waitFor p))))))
+
+;; docs/machine.md#reading-a-hang: bin/evidence samples every process it signals, from the one set. A process of the run's group
+;; that left its tree (its parent ended: a test child forked late, a detached root's agent) is signalled through its group, and
+;; was never sampled, since the samples came from the first ps's tree alone (deps, 2026-11-14: 21833 in a 300 s overrun, an
+;; empty dump). The member is made deterministic, never raced: the leader reads a close-on-exec pipe to its end, which ends only
+;; once its grandchild has exec'd under the name bin/evidence reads. Estimate: four shell calls in process, ~1M ticks.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} bin-evidence-samples-every-process-it-signals
+  (let [dir (str (System/getProperty "java.io.tmpdir") "/evidence-" (random-uuid))
+        ;; the leader is disowned (zsh waits on none of it) and says its pid on a fifo once its member has exec'd
+        leader (str/trim (:out (clojure.java.shell/sh
+                                "zsh" "-c" (str "mkdir -p " dir " && mkfifo " dir "/leader && "
+                                                "{ perl -e 'setpgrp(0,0); pipe(R,W); if (!fork) { if (!fork) { close R; open STDOUT, \">/dev/null\"; "
+                                                "exec {\"sleep\"} \"jolt-evidence-probe\", \"30\" } exit 0 } close W; my $x = <R>; wait; "
+                                                "print \"$$\\n\"; close STDOUT; sleep 30' > " dir "/leader 2>/dev/null </dev/null &! }; "
+                                                "read -r p < " dir "/leader; print -r -- $p"))))]
+    (try
+      (is (re-matches #"\d+" leader) (str "the leader's pid: " leader))
+      (let [r (clojure.java.shell/sh (str (seon.config/checkout) "/bin/evidence") dir leader)
+            signalled (->> (str/split-lines (slurp (str dir "/signalled.txt"))) (map #(first (str/split % #" "))))]
+        (is (zero? (:exit r)) (:err r))
+        (is (seq signalled) "the member that left the tree is signalled through its group")
+        (is (every? #(.exists (java.io.File. (str dir "/sample-" % ".txt"))) signalled)
+            (str "every process signalled has its sample: " (vec signalled) " " (vec (.list (java.io.File. dir))))))
+      (finally
+        ;; the group this test made, led by the process it started (AGENTS.md section 8: a verified pid)
+        (when (re-matches #"\d+" leader) (clojure.java.shell/sh "kill" "-TERM" (str "-" leader)))
+        (seon.lib/remove-tree! dir)))))
