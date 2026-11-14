@@ -1297,8 +1297,10 @@
                           :health (let [st (-> st (advance-main (:db m)) (assoc :fold (:fold m)) health!)
                                         h (some-> (:root-walk st) :p :tree :health)]
                                     ;; none held (no root walk yet): read whole, as health! does when it holds none
+                                    ;; the point it was put at rides on it (its metadata's :db and :fold): a reader comparing
+                                    ;; it reads there, never a later main or fold (seon.agent-test/root-reads-the-health-the-render-proc-keeps)
                                     (step/out! o :to-api {:op :health-answer :rid (:rid m) :db (:main-db st)
-                                                          :r (or h (problems/health (:main-db st)))})
+                                                          :r (with-meta (or h (problems/health (:main-db st))) {:db (:main-db st) :fold (:fold st)})})
                                     (pass st o))
                           :context (let [st (-> st health! with-context)] (step/out! o :to-web {:op :text :k (:k m) :text (get-in st [:context :text] "")}) st)
                           ;; the debug timeline stepped to a turn, or to latest

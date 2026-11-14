@@ -104,8 +104,10 @@
        ;; 8,126 calls; 46 since touched-keys calls touched-by (which takes datoms a caller already holds) once per side;
        ;; 71 since a fact is a side's change only if it wrote it, about 23 more, split approximately: seon.merge/derived? once per
        ;; attribute asked whether it is data (~14: the differing datoms' attributes on two dbs, the keys' on three), and per changed key
-       ;; and side one seon.merge/owned?, one tx-branch of the other side's last writer and one per datom it added (~9)
-       :fixed {:bytes 650000 :calls 71}
+       ;; and side one seon.merge/owned?, one tx-branch of the other side's last writer and one per datom it added (~9);
+       ;; 47 since the derived attributes are the entity index's own (one seon.db/index read per data-attr?, 7, never a derived? per
+       ;; attribute) and a transaction's entity bears no key (its instant, runtime and branch ride with its datoms): measured 47
+       :fixed {:bytes 650000 :calls 47}
        :sizes [10 30 100]}))
 
 (defn embedded-of
@@ -172,7 +174,7 @@
 (deftest ^{:seon.test/estimate {:ticks 90000000}} a-diff-of-two-commits-costs-the-nodes-that-differ
   ;; See docs/storage.md#merges-read-what-changed (seon.ctx/moved's call: two values of one branch, :eavt, the whole range)
   (let [[a b] (diff-of 10) [gone added] (d/datoms-diff a b :eavt [])]
-    (is (= [10 11] [(count gone) (count added)]) "ten values replaced, and the transaction's own datom"))
+    (is (= [10 13] [(count gone) (count added)]) "ten values replaced, and the transaction's own datoms: its instant, runtime and branch"))
   (cost/proof
     {:of 'datahike.api/datoms-diff :input 'seon.merge-cost-test/diff-of
      :n "values replaced on entities spread over a 10,000-datom store of three :eavt levels, in one commit"
@@ -247,7 +249,8 @@
 ;; bear read on three dbs, ~6.5 contracted calls a read (key-content, eid, definition-key, form-row, form-of, live?, def-content, same?),
 ;; 59; derived? once per distinct attribute of the diff, 7, with its properties and index reads, 21; a tx-branch per datom the branch
 ;; added and main's last writer's, 7; entity-keys 6, data-attr? 5, program-of 3, and own-datoms, touched-by, content-attr, three-way,
-;; attribute-declarations, changes and merge-main itself, 7: 114 calls, ~2 MB. (A first estimate of 15 missed the content reads, ~8
+;; attribute-declarations, changes and merge-main itself, 7; the branch's unmerged entries read once (entries, with entry-eids, and
+;; entry-eids again for the settling retraction), 3: 117 calls, ~2 MB. (A first estimate of 15 missed the content reads, ~8
 ;; calls each, and derived? was asked per datom, 13 times; now per attribute.) Nothing of main's n forms is read: constant in n
 (deftest ^{:seon.test/estimate {:ticks 60000000}} merge-main-costs-the-branchs-change-not-mains-moves
   (cost/proof
@@ -256,6 +259,7 @@
        :work (str "the datoms the branch wrote since base (one diff of base and head), the keys they bear, and main's content at "
                   "those keys only: main's own moves are never read, so the same work however far main moved")
        :growth :constant
-       :fixed {:bytes 2000000 :calls 114}
+       :fixed {:bytes 2000000 :calls 117}
        :sizes [10 30 100]}))
+
 
