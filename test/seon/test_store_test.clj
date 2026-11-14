@@ -170,6 +170,30 @@
       (is (and (there? "bbbbbbbb") (there? "cccccccc")) "and the others within the count")
       (finally (.close holder) (seon.lib/remove-tree! dir)))))
 
+;; docs/merging.md#verdicts-are-a-cache: a key's store is its generations (base-<key>, base-<key>-<n>), newest first; those of the key
+;; beyond :seon.config.proofs/program-stores-kept most recently used go, never one a process holds open; other keys' generations go
+;; with their key. Cost: directories in a scratch dir and one lsof a generation, ~5M.
+(deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/execs ["lsof"]} a-keys-generations-beyond-the-count-go-unless-held-open
+  (let [dir (str (seon.config/checkout) "/target/tmp/gens-ps-" (random-uuid))
+        base (str dir "/ps")
+        mk (fn [n age] (let [f (java.io.File. (str base "-" n))] (.mkdirs f) (spit (str f "/data.mdb") "x")
+                         (.setLastModified f (- (System/currentTimeMillis) (* age 60000))) f))
+        there? (fn [n] (.isDirectory (java.io.File. (str base "-" n))))
+        _ (do (mk "aaaaaaaa" 50) (mk "aaaaaaaa-1" 40) (mk "aaaaaaaa-2" 30) (mk "aaaaaaaa-3" 20) (mk "bbbbbbbb" 100) (mk "bbbbbbbb-1" 90) (mk "cccccccc" 5))
+        holder (java.io.RandomAccessFile. (str base "-aaaaaaaa/data.mdb") "r")]
+    (try
+      (is (= [(str base "-aaaaaaaa-3") (str base "-aaaaaaaa-2") (str base "-aaaaaaaa-1") (str base "-aaaaaaaa")] (ts/generations (str base "-aaaaaaaa")))
+          "the key's generations, newest first, generation 0 last")
+      (is (= (str base "-aaaaaaaa-4") (ts/next-generation (str base "-aaaaaaaa"))) "the next one")
+      (with-redefs [seon.config/value (let [v seon.config/value] (fn [k] (if (= k :seon.config.proofs/program-stores-kept) 2 (v k))))]
+        (ts/shared-program-store! base "aaaaaaaa"))
+      (is (there? "aaaaaaaa") "the least recently used, but held open by a process: kept")
+      (is (not (there? "aaaaaaaa-1")) "past the count and held by none: removed")
+      (is (and (there? "aaaaaaaa-2") (there? "aaaaaaaa-3")) "the two most recently used stay")
+      (is (not (or (there? "bbbbbbbb") (there? "bbbbbbbb-1"))) "another key, past the count: its generations go with it")
+      (is (there? "cccccccc") "and the most recently used other key stays")
+      (finally (.close holder) (seon.lib/remove-tree! dir)))))
+
 (deftest an-ask-is-one-line-each-way-on-a-socket-of-its-own
   ;; docs/testing.md#a-root-costs-what-it-boots: ask opens its socket in-process (bin/ask was a perl process a
   ;; request, ~17 ms of a cheap one's ~20 under load); its answers are bin/ask's: the reply as data, :eof, :refused

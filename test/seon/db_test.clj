@@ -2028,3 +2028,35 @@
         (is (= 3 (count values)) (str "the mark found " (count values) " of the 3 values out of line"))
         (is (= (- (count marked) 3) reads) (str reads " reads for " (- (count marked) 3) " nodes and 3 values out of line")))
       (finally (d/release conn) (run! seon.lib/remove-tree! @stores-made) (reset! stores-made [])))))
+
+;; Estimate: the test branch ~1M + two transactions through the checked path ~1M = 3000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-transaction-names-its-branch-whoever-writes-it
+  ;; task seon.db/every-transaction-names-its-branch: the merge reads a datom's owner by its transaction's :seon.tx/branch, and a
+  ;; transaction written with no tx-meta named none (a seed's, a raw write's), so a side could not tell its own facts from shared ones;
+  ;; the one path stamps the connection's branch and runtime, and a caller's own value wins
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [b (:branch cfg)
+           r (d/transact conn {:tx-data [{:seon.agent/key "stamp-raw" :seon.agent/status :idle}]})
+           tx (d/entity (:db-after r) (:max-tx (:db-after r)))
+           r2 (d/transact conn {:tx-data [{:seon.agent/key "stamp-own" :seon.agent/status :idle}] :tx-meta {:seon.tx/branch :elsewhere}})
+           tx2 (d/entity (:db-after r2) (:max-tx (:db-after r2)))]
+       (is (= b (:seon.tx/branch tx)) "a raw write names the connection's branch")
+       (is (string? (:seon.tx/runtime tx)) "and the runtime that made it")
+       (is (= :elsewhere (:seon.tx/branch tx2)) "a caller's own value wins")))))
+
+;; Estimate: two seon.db/owners calls on the marked index ~2k ticks and ~2 KB each = 10000000 ticks with the profile
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-contract-checks-the-entity-index-once-where-it-is-made
+  ;; root's waiver audit: seon.program-cost-test's record-tx proof was 8.6x its bytes, and 41 KB of its 91 KB was two contracts
+  ;; validating the whole entity index (seon.db/index's return, seon.db/owners' argument), at every call; the index is checked once
+  ;; where it is made and marked, and a contract naming it admits the mark at once
+  (let [ix (pdb/index)
+        _ (pdb/owners ix [:seon.agent/key])
+        _ (seon.profile/begin!)
+        _ (pdb/owners ix [:seon.agent/key])
+        b (:bytes (first (filter #(= 'seon.db/owners (:var %)) (seon.profile/touched))))]
+    (is (< b 4000) (str "a call taking the index checks no more than the mark: " b " bytes"))
+    (is (= (hash ix) (get (:seon.contract/valid (meta ix)) :seon.db/entity-index-shape)) "the index carries its mark, its hash")
+    (is (not (seon.contract/valid? :seon.db/entity-index (assoc ix :entity-schemas {:x 1})))
+        "a changed copy keeps the metadata but not the hash: it is checked in full, and refused")
+    (is (not (seon.contract/valid? :seon.db/entity-index (with-meta (dissoc ix :forms) nil))) "an unmarked value is checked in full, and refused")))

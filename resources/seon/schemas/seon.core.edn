@@ -94,10 +94,12 @@
  ;; the writer's transact arguments (datahike.writing/transact!), through seon.db/transact-checked
  :seon.db/transact-args [:map [:tx-data :seon.db/tx-data] [:tx-meta {:optional true} [:maybe :map]] [:seon.db/schemas {:optional true} [:maybe :seon.db/branch-schemas]]]
  ;; what schema forms say an entity is (seon.db/entity-index): the one value every reader of what an entity is takes first
- :seon.db/entity-index [:map [:forms :map] [:entity-schemas [:map-of :keyword :qualified-keyword]] [:identity-schemas [:map-of :keyword :qualified-keyword]]
+ ;; the entity index as every reader takes it: its shape, checked once where it is made (seon.db's entity-index marks it)
+ :seon.db/entity-index [:seon.contract/once :seon.db/entity-index-shape]
+ :seon.db/entity-index-shape [:map [:forms :map] [:entity-schemas [:map-of :keyword :qualified-keyword]] [:identity-schemas [:map-of :keyword :qualified-keyword]]
                         [:schema-identities [:map-of :qualified-keyword :keyword]] [:drawn-schemas [:set :qualified-keyword]] [:history-schemas [:set :qualified-keyword]]
                         [:required-keys [:map-of :qualified-keyword [:vector :keyword]]] [:own-required [:map-of :qualified-keyword [:vector :keyword]]]
-                        [:targets [:map-of :keyword [:vector :qualified-keyword]]] [:required-refs [:vector :qualified-keyword]] [:specs {:optional true} :any]]
+                        [:targets [:map-of :keyword [:vector :qualified-keyword]]] [:required-refs [:vector :qualified-keyword]] [:derived-attrs [:set :keyword]] [:specs {:optional true} :any]]
  :seon.db/open [:map [:cfg :seon.db/cfg] [:conn :seon.host/conn] [:recovered? :boolean]]
  ;; the program as facts
  ;; a checkout's inputs with no program facts (seon.fx/inputs): what every reach digest holds
@@ -274,6 +276,7 @@
  ;; a property a schema carries, read by seon.schema.datahike when it declares the attribute (docs/storage.md)
  :seon.db/attributes [:boolean {:description "On a schema's properties, true when it is an entity schema: the keys of its map are attributes, and an entity holding one is checked against its required keys. See docs/storage.md#the-write-checks-every-entity-it-touches."}]
  :seon.db/identity [:boolean {:description "On an attribute's schema, true when its value identifies its entity, a lookup ref (Datahike's :db.unique/identity)."}]
+ :seon.contract/valid [:map-of {:description "In a value's metadata, each named schema its maker checked it against (seon.contract/checked-once) to the value's hash then: a [:seon.contract/once shape] contract admits it at once while its hash is the same. See docs/checks.md#contracts-armed-at-definition."} :qualified-keyword :int]
  :seon.db/derived [:boolean {:description "On an entity schema's properties, true when its entities are derived from other facts (an embedding of a text, a cite of a plan): a cache each branch computes, never merged (docs/merging.md#a-branch-merges-main-in)."}]
  :seon.db/index [:boolean {:description "On an attribute's schema, true when its values are indexed for lookup by value (Datahike's :db/index)."}]
  :seon.db/tagged [:boolean {:description "On an attribute's schema, true when each of its values names the schema it satisfies by :seon.db/tag and is held to it at the write (seon.db/invalid-datom)."}]
@@ -286,6 +289,8 @@
  :seon.db/retired [:map-of {:description "On the error that refuses a store at open, the stored names a rename retired, each to the name that replaced it."} :keyword :keyword]
  :seon.db/schemas [:map {:description "In a write's argument map, a branch's own schema changes, which the per-datom check reads: the key forms and the registry they compile in."} [:forms :map] [:registry :seon.host/registry]]
  ;; processes
+ :seon.agent-proc/clone [:map {:description "A clone request held behind another clone's handshake in an agent proc's :held (seon.agent-proc/end-hold): the message that goes out, and holds, when the hold before it ends."}]
+ :seon.agent-proc/rid [:int {:description "The request id of a clone held behind another clone's handshake, which holds in its turn when it goes out (seon.agent-proc/end-hold)."}]
  :seon.agent-proc/streams [:map-of {:description "An agent proc's in-flight eval output by stream id: the pieces of text of that stream so far, sent whole to the web proc's :streams in-port."} :any [:vector :string]]
  :seon.agent/threw [:and {:description "A child test run's result when it threw: what it threw, which the run rethrows once every child was taken."} :seon.host/throwable]
  :seon.agent/env [:and {:description "A task's agent as the reconciler reads it: the env (branch, model, turn bound) its run started with."} :seon.task/env]
@@ -316,6 +321,7 @@
  :seon.fx/us [:int {:min 0 :description "On an effect's outcome, the microseconds it ran."}]
  :seon.fx/queue-us [:int {:min 0 :description "On an effect's outcome, the microseconds it waited in its owner's queue."}]
  :seon.fx/ask [:map {:description "On an effect request's :req, a run another process does (a test batch: the api's {:op :tests} of the agent holding its branch): its owner asks the api for it as an output and takes its one answer on :answers, never a worker waiting inside its step (docs/flow.md, the five rules)."}]
+ :seon.fx/limits-of [:map {:description "In an admission reader's own state (the :process owner, the test service): the admission dials it derived (seon.fx/limits-held) and the config map they were derived from, derived again only when the config in force is another value."} [:config :map] [:limits :map]]
  :seon.fx/class [:any {:description "On an effect's request, what its processes are measured by (a process test, a check step): its owner admits it at that class's peak, the whole budget until one is read (seon.fx/admits?)."}]
  :seon.fx/processes [:int {:min 1 :description "On an effect's request, the processes it holds by construction (a plain test's batch: its one fork), its weight at admission until its class's peak is read (seon.fx/admits?)."}]
  :seon.fx/peak-processes [:int {:min 1 :description "On an effect's outcome, the most processes its work held at once, counted where they started (seon.lib/a-process-reports-the-most-processes-it-held-at-once): its class's weight from then on."}]

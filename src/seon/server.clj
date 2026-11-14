@@ -8,8 +8,8 @@
   REPL path, recorded on main), and can work a task as a Seon agent. Its ops are one table
   (`ops`: {:op k ...args}), which MCP lists as its tools.
 
-  The listener and each connection are edge threads (blocking accept and reads); a
-  connection is an outside caller of root's API, as bin/check is. Try it:
+  The listener and each connection are fibers parked on their sockets, and each op runs on a
+  :server-op worker (perform-op); a connection is an outside caller of root's API, as bin/check is. Try it:
   printf '{:op :agents}\\n' | nc -w 5 127.0.0.1 PORT
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
@@ -611,34 +611,51 @@
                (json/write-str (rpc-error (get @msg "id") (if @msg -32603 -32700) (print/text d)))
                (sedn/encode d)))))))
 
+(defn perform-op
+  "The :server-op effect's perform: one server op, run on the kind's :mixed worker (docs/server.md#ops). The request's :run is the
+  op as a thunk the connection made (bound-fn: its *emit* and the dynamic vars it was taken with), so an op that blocks holds this
+  worker, never the connection's fiber, a carrier or another connection. Answers {:value its line}."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [run]} :req}] {:value (run)})
+
 (defn- serve-connection!
-  "Answer one connection's request lines (respond), line by line, until it closes; a
-  notification is answered nothing. Every other connection is its own thread."
+  "Answer one connection's request lines, line by line, until it closes; a notification is answered nothing. It runs on a
+  fiber parked on its socket (jolt.socket), and each line's op runs on a :server-op worker (perform-op), so the connection
+  holds no OS thread and an op that blocks holds no other connection. See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.system/sys :any] :any]}
   [sys sock]
   (let [r (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream sock) "UTF-8"))
         out (.getOutputStream sock)]
     (loop []
       (when-let [line (.readLine r)]
-        (when-let [a (binding [*emit* (when-not (str/starts-with? (str/triml line) "{\"")
-                                        (fn [m] (.write out (.getBytes (str (sedn/encode m) "\n") "UTF-8")) (.flush out)))]
-                       (respond sys line))]
-          (.write out (.getBytes (str a "\n") "UTF-8"))
-          (.flush out))
+        (let [mcp? (str/starts-with? (str/triml line) "{\"")
+              run (bound-fn [] (binding [*emit* (when-not mcp?
+                                                  (fn [m] (.write out (.getBytes (str (sedn/encode m) "\n") "UTF-8")) (.flush out)))]
+                                 (respond sys line)))
+              o @(c/effect! sys :server-op {:run run})
+              ;; the owner's own refusal (no worker, a stopped root) is this request's answer, in its protocol
+              a (if (contract/error? o)
+                  (if mcp? (json/write-str (rpc-error nil -32603 (print/text o))) (sedn/encode o))
+                  (:value o))]
+          (when a
+            (.write out (.getBytes (str a "\n") "UTF-8"))
+            (.flush out)))
         (recur)))
     (.close sock)))
 
 (defn serve!
-  "Listen on 127.0.0.1:port (0: a free port the kernel picks; read it with .getLocalPort):
-  the accept loop and each connection on edge threads (blocking accept and reads). Answers
-  the server socket."
+  "Listen on 127.0.0.1:port (0: a free port the kernel picks; read it with .getLocalPort). The accept loop and each connection
+  are fibers parked on their sockets (jolt.socket), at most :seon.config.root/server-connections open: one past it waits in the
+  accept until one closes (a token taken at its accept, given back at its close). Answers the server socket. See
+  docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.system/sys nat-int?] :any]}
   [sys port]
-  (let [ss (java.net.ServerSocket. port 50 (java.net.InetAddress/getByName "127.0.0.1"))]
-    (doto (Thread. ^Runnable (fn [] (loop [] (let [s (.accept ss)]
-                                                (doto (Thread. ^Runnable (fn [] (serve-connection! sys s)) "seon-server-conn")
-                                                  (.setDaemon true) (.start))
-                                                (recur))))
-                   "seon-server-accept")
-      (.setDaemon true) (.start))
+  (let [ss (java.net.ServerSocket. port 50 (java.net.InetAddress/getByName "127.0.0.1"))
+        tokens (a/chan (cfg/value :seon.config.root/server-connections))]
+    (a/io-thread
+      (loop []
+        (a/>!! tokens true)
+        (let [s (.accept ss)]
+          (a/io-thread (try (serve-connection! sys s) (finally (a/poll! tokens))))
+          (recur))))
     ss))
