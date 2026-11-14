@@ -188,6 +188,17 @@
  :seon.result/out [:map {:description "What the forms of the result wrote to out, as printed code."} [:seon.print/code :string]]
  :seon.result/err [:map {:description "What the forms of the result wrote to err, as printed code."} [:seon.print/code :string]]
  :seon.result/forms [:int {:min 2 :description "How many forms ran, when there were several."}]
+ ;; a test's result, keyed by what it read: reused on any branch while nothing its reads name moved (docs/merging.md#verdicts-are-a-cache)
+ :seon.proof/id [:and {:seon.db/identity true :seon.db/content-id true :description "The result's identity: the digest of its test and its reads' digest."} :seon.lib/digest]
+ :seon.proof/test [:qualified-symbol {:seon.db/index true :description "The test the result is of."}]
+ :seon.proof/reads-digest [:and {:description "The digest of the content each read key held at the basis, basis excluded (seon.reads/content-digest): equal content gives one result on any branch."} :seon.lib/digest]
+ :seon.proof/reads [:and {:description "What the run read, matched against what moved to decide reuse."} :seon.reads/set]
+ :seon.proof/failures [:vector {:description "The assertions that failed."} :seon.problems/assertion]
+ :seon.proof/route [:enum {:description "How it was proved: :live, the branch's forms loaded into the running runtime; :full, a binary built from it."} :live :full]
+ :seon.proof/proof-fact [:map {:seon.db/attributes true}
+                         [:seon.proof/id :seon.proof/id] [:seon.proof/test :seon.proof/test] [:seon.proof/reads-digest :seon.proof/reads-digest]
+                         [:seon.proof/reads :seon.proof/reads] [:seon.proof/status :seon.proof/status] [:seon.proof/route :seon.proof/route]
+                         [:seon.proof/failures {:optional true} :seon.proof/failures] [:seon.bound/spent {:optional true} :seon.bound/spent]]
  :seon.result/result-fact [:map {:seon.db/attributes true}
                            [:seon.result/hash :seon.result/hash] [:seon.result/value {:optional true} :seon.result/value]
                            [:seon.result/ex {:optional true} :seon.result/ex] [:seon.result/out {:optional true} :seon.result/out]
@@ -525,7 +536,7 @@
  ;; the gate's run of them (each test's status); the changed namespaces the gate could not read from the branch, each with why:
  ;; it tested another tree than the one that merges, so none of its results counts as a pass
  :seon.task/deferred [:map-of {:description "The process tests that the task's change reaches, which its merge runs on a checkout, each with its digest as main held it at the task's base: the key by which the gate reads main's own verdict of that test (seon.proofs/main-red); nil when the test is new on the branch, so its red is the task's. An observation; the gate's results are :seon.task/deferred-results."} :qualified-symbol [:maybe :string]]
- :seon.task/deferred-results [:map-of {:description "The gate's run of the deferred tests, each test's status."} :qualified-symbol :seon.proof/status]
+ :seon.task/deferred-results [:and {:description "The gate's run of the deferred tests, each test's status."} :seon.proof/results]
  :seon.task/gate-unread [:vector {:description "The changed namespaces that the gate could not read from the branch, each with why."} [:map [:ns :symbol] [:reason :string]]]
  ;; measured at its end from the branch (seon.merge/three-way's :ours): the printed program keys it changed since its merge base
  ;; (each seon.edn/encode of a :seon.merge/program-key, so generated ones are too); the octopus merge admits on them

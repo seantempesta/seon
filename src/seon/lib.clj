@@ -352,7 +352,7 @@
 
 (defn digest
   "The first 16 hex digits of the SHA-256 of s: a content identity (docs/source.md#a-result-is-a-function-of-its-digest). The one hash of a string; hasch is for store ids."
-  {:malli/schema [:=> [:cat :string] [:string {:min 16 :max 16}]]}
+  {:malli/schema [:=> [:cat :string] :seon.lib/digest]}
   [s]
   ;; the first 8 bytes as one long in hex, left-padded: the same digits as each byte's two, with no per-byte format
   (let [b (.digest (java.security.MessageDigest/getInstance "SHA-256") (.getBytes ^String s))

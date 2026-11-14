@@ -109,7 +109,7 @@
   "The transaction recording that who read section address as it is though its code changed: its
   :seon.doc/read made the current form ids, the text untouched, and the review (who, and the form
   ids it read at) kept as a fact. nil when no such section."
-  {:malli/schema [:=> [:cat :seon.host/db :string :string] [:maybe [:vector :map]]]}
+  {:malli/schema [:=> [:cat :seon.host/db :string :string] [:maybe :seon.db/tx-data]]}
   [db address who]
   (when-let [e (pdb/eid db :seon.doc/address address)]
     (let [now (read-map db (set (:seon.doc/names (d/pull db [:seon.doc/names] e))))]
@@ -132,8 +132,8 @@
   is load-dir-tx's to retract). A section that already states it writes nothing, so an unchanged
   page answers []. A link (or cited path#anchor) that reaches no section is written as the lookup of its address, so
   the write refuses the load, :seon.db/no-target naming it (docs/references.md#the-wiki-in-the-store)."
-  {:malli/schema [:function [:=> [:cat :seon.host/db [:or :string [:vector :string]] [:map-of :string :string]] [:vector :any]]
-                  [:=> [:cat :seon.host/db [:or :string [:vector :string]] [:map-of :string :string] :map] [:vector :any]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:or :string [:vector :string]] [:map-of :string :string]] :seon.db/tx-data]
+                  [:=> [:cat :seon.host/db [:or :string [:vector :string]] [:map-of :string :string] :map] :seon.db/tx-data]]}
   ([db dir pages] (load-tx db dir pages {}))
   ([db dir pages baseline]
   (let [baseline (fn [a] (get baseline a))
@@ -304,7 +304,7 @@
   drawn with that block in its place and loaded again (load-tx over the wiki's dirs), so what the
   text derives (lead, references, names, read) follows it and the page's other docs write nothing.
   A heading changed to another anchor is another doc: the old one retracted, the new one added."
-  {:malli/schema [:=> [:cat :seon.host/db :string :string] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.host/db :string :string] :seon.db/tx-data]}
   [db address text]
   (let [path (page-of address)]
     (load-tx db (cfg/value :seon.config.root/wiki-dirs)
@@ -322,8 +322,8 @@
   transaction) onto db: load-tx over its pages (an unchanged wiki answers [], a link to no section
   refused by the write, :seon.db/no-target), and every section under dir of a page the checkout no
   longer holds retracted. Root's boot and my.root/load-docs! both write it."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :string [:or :string [:vector :string]]] [:vector :any]]
-                  [:=> [:cat :seon.host/db :string [:or :string [:vector :string]] :map] [:vector :any]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db :string [:or :string [:vector :string]]] :seon.db/tx-data]
+                  [:=> [:cat :seon.host/db :string [:or :string [:vector :string]] :map] :seon.db/tx-data]]}
   ([db checkout dir] (load-dir-tx db checkout dir {}))
   ([db checkout dir baseline]
    (let [ps (into (sorted-map) (mapcat #(pages checkout %)) (if (string? dir) [dir] dir))]

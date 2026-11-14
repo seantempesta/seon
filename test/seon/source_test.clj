@@ -99,8 +99,10 @@
     (is (= "(defn f3 [] 33)" (:form/src (:var/form (d/entity after [:var/name 'app.oe/f3])))) "the edit is the var's form")
     (is (= "(defn f5 [] 5)" (:form/src (:var/form (d/entity after [:var/name 'app.oe/f5])))) "and the others are as they were")))
 
-;; Estimate: file-text of seon.system (126 forms x 64k, as the write-back proof) 8M + refresh-tx of one form (2 analyses + gate) 1.9M = 10000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-held-form-is-checked-against-the-file-reading-macros-not-a-seek-a-reference
+;; Estimate: file-text of seon.system (126 forms x 64k, as the write-back proof) 8M + refresh-tx of one form (2 analyses + gate) 1.9M
+;; + the forms of what it requires that this process lacks, found once a process (seon.program/unheld-forms: on a first import one
+;; :form/id range of ~6,000 forms, ~10M; an import reads what it requires from db's program, docs/source.md#indexing-a-tree) = 20000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-held-form-is-checked-against-the-file-reading-macros-not-a-seek-a-reference
   ;; docs/source.md#a-boot-catches-up-with-its-checkout: whether a held form expands a macro that reads files is asked of the program's
   ;; file-reading macros, found once a refresh (file-reading-macros), never by seeking each reference's var: a one-form edit of
   ;; seon.system (126 forms, 2,573 references) sought 2,573 vars, 19 of its 80 MB (2026-11-12). Estimate: no :var/name seek a
@@ -1001,13 +1003,38 @@
         top (fn [n] (str "(ns app.rq-top (:require [app.rq-mid :as mid]))\n\n(defn t [] (+ " n " (mid/mm)))\n"))
         db (d/db-with (empty-db) (source/import-tx (empty-db) {"test/app/rq_dep.clj" "(ns app.rq-dep)\n\n(defn d [x] x)\n" "test/app/rq_mid.clj" mid "test/app/rq_top.clj" (top 1)}))
         changed {"test/app/rq_top.clj" (top 2)}]
-    (is (= changed (source/required-files db changed '#{app.rq-mid})) "what's loaded is left")
     (run! remove-ns names)
     (dosync (alter @#'clojure.core/*loaded-libs* #(reduce disj % names)))
     (let [after (d/db-with db (source/refresh-tx db changed))]
       (is (some #{'app.rq-dep/d} (d/q '[:find [?r ...] :where [?v :var/name app.rq-top/t] [?v :var/form ?f] [?f :form/refs ?r]] after)) "the macro expanded as what it is")
       (is (= (top 2) (source/file-text after 'app.rq-top)) "and the change lands")
       (is (= mid (source/file-text after 'app.rq-mid)) "what was only read changes nothing"))))
+
+;; docs/source.md#indexing-a-tree: an import is a function of db and the files, whatever the importing process loaded (tests, 11-13:
+;; web's process and tests' imported one tree into one parent and got different programs; a deftest went missing)
+;; Estimate: import of 3 files (6 forms) 0.6M + 2 refresh-tx of one file, each setting up the 2 namespaces it requires (~5 forms) 2M = 3000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-import-is-the-same-program-whatever-the-process-loaded
+  (let [names '[app.pd-dep app.pd-mid app.pd-top]
+        mid (fn [target] (str "(ns app.pd-mid (:require [app.pd-dep :as dep]))\n\n(defmacro mm [] `(dep/" target " 1))\n"))
+        top (fn [n] (str "(ns app.pd-top (:require [app.pd-mid :as mid]))\n\n(defn t [] (+ " n " (mid/mm)))\n"))
+        dep "(ns app.pd-dep)\n\n(defn d [x] x)\n\n(defn e [x] x)\n"
+        db (d/db-with (empty-db) (source/import-tx (empty-db) {"test/app/pd_dep.clj" dep "test/app/pd_mid.clj" (mid "e") "test/app/pd_top.clj" (top 1)}))
+        changed {"test/app/pd_top.clj" (top 2)}
+        refs #(set (d/q '[:find [?r ...] :where [?v :var/name app.pd-top/t] [?v :var/form ?f] [?f :form/refs ?r]] (d/db-with db (source/refresh-tx db changed))))
+        forget! #(do (run! remove-ns names) (dosync (alter @#'clojure.core/*loaded-libs* (fn [l] (reduce disj l names)))))
+        ;; a process that never loaded them
+        fresh (do (forget!) (refs))
+        ;; a process that loaded an older app.pd-mid, whose macro expands to dep/d: db's program says dep/e
+        stale (do (forget!)
+                  (binding [*ns* (the-ns 'user)]
+                    (eval '(ns app.pd-dep)) (eval '(defn d [x] x)) (eval '(defn e [x] x))
+                    (dosync (alter @#'clojure.core/*loaded-libs* conj 'app.pd-dep))
+                    (eval '(ns app.pd-mid (:require [app.pd-dep :as dep]))) (eval '(defmacro mm [] (list 'app.pd-dep/d 1)))
+                    (dosync (alter @#'clojure.core/*loaded-libs* conj 'app.pd-mid)))
+                  (refs))]
+    (forget!)
+    (is (contains? fresh 'app.pd-dep/e) "db's macro, expanded")
+    (is (= fresh stale) "the same program from a process that loaded another version of what it requires")))
 
 ;; Estimate: load-all! of 366 example forms + 2 x 100k 36.2M + import, replace-tx and load-changes! of 2 forms 0.8M = 40000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-form-an-import-replaces-runs-its-new-text
