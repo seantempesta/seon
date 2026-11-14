@@ -52,7 +52,7 @@ At 21:00 the owner chose: tests that use a root work on their own branches of th
 
 ### Everyone moves onto the reactive core; it is stress-tested before victory
 
-At 21:00: "If the reactive core is built make sure everyone is moving onto it we stress test it and tune it before claiming victory." Then: "It should make incremental rendering cheap and easy to use." The core is done when every area's copy is deleted onto it (plan item 5), its cost per change is proved O(d) and constant in the store, the number of tracks and the context size, and an incremental render is plain hiccup that derefs tracks, with no invalidation or bookkeeping written by its author. Stated in [the plan](plan.md#the-order) and [render](render.md).
+At 21:00: "If the reactive core is built make sure everyone is moving onto it we stress test it and tune it before claiming victory." Then: "It should make incremental rendering cheap and easy to use." The core is done when every area's copy is deleted onto it (plan item 5), its cost per change is proved O(d) and constant in the store, the number of tracks and the context size, and an incremental render is plain hiccup that derefs tracks, with no invalidation or bookkeeping written by its author. Then: "we need to go through a learning phase where we test ideas for using it in the repl and find the best solutions, confirm it with agents to make sure it works, iterate if we need to." Each move onto the core is first tried at the REPL on real data, measured beside its estimate, and confirmed by a Seon agent using it unaided before it is built. Stated in [the plan](plan.md#the-order) and [render](render.md).
 
 ### After boot, only Flow; one specialist ports every holdout
 
