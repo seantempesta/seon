@@ -11,7 +11,7 @@ There is no boundary between program and data: one db, one tree. Sharing comes f
 One question decides it: can two branches legitimately hold different values of it?
 
 - **Yes: on a branch, moved by a merge.** Forms, vars, files, config, tasks, a user's data, evals and their results.
-- **No: on main, and no merge carries it.** Any `seon.*` attribute but the task content an agent may improve (`seon.merge/carried-platform-attrs`): messages, what root records of an agent, UI facts. A message is one entity on main with `:seon.message/to`, from, body and sent-ms; an agent's next act writes the ones to it onto its own branch ([users](users.md#messages)).
+- **No: on main, and no merge carries it.** Any `seon.*` attribute but the task content an agent may improve (a `:task` key of `seon.merge`'s stated keys): messages, what root records of an agent, UI facts. A message is one entity on main with `:seon.message/to`, from, body and sent-ms; an agent's next act writes the ones to it onto its own branch ([users](users.md#messages)).
 - **Each attribute of an entity is set on one branch.** A branch has one writer, so a conflict is two branches setting the same attribute of one entity since their base. An agent's entity is set on main by root (status, process) and on its branch by its process (turn, namespace).
 
 A db value reads only its own branch's datoms: a ref to an entity only another branch holds is valid, but `d/pull` through it answers nothing.
@@ -54,7 +54,7 @@ A number far off its line is a defect to find. n is what the operation is about,
 
 ## A result stands until what it read changes
 
-A defect today (task ``seon.program/a-tests-digest-reads-what-it-ran``). A test's verdict is keyed by its static reach, the vars its forms refer to ([source](source.md#tests-run-by-reach)). A process test forks an agent, which reaches root's code by messages, not var references, so a change in `seon.reconcile`, `seon.writer` or `seon.system` can keep a stale green. The daily `bin/test --all` on main is the net; a red it finds is a `:platform` problem naming each test (`seon.prove/full-answered`), and one task per red is task ``seon.prove/a-red-in-the-daily-full-test-is-a-task``. The fix: a test's key is a fixed seed and the vars it called, recorded by every process it executed in.
+A defect today (task ``seon.proofs/a-process-tests-reads-hold-what-its-agent-ran``). A test's verdict is keyed by its static reach, the vars its forms refer to ([source](source.md#tests-run-by-reach)). A process test forks an agent, which reaches root's code by messages, not var references, so a change in `seon.reconcile`, `seon.writer` or `seon.system` can keep a stale green. The daily `bin/test --all` on main is the net; a red it finds is a `:platform` problem naming each test (`seon.prove/full-answered`), and one task per red is task ``seon.prove/a-red-in-the-daily-full-test-is-a-task``. The fix: a test's key is a fixed seed and the vars it called, recorded by every process it executed in.
 
 ## Catching up to a db value
 

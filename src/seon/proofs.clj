@@ -335,7 +335,7 @@
      :failures (failures reports)}))
 
 (defn- test-facts
-  "The :seon.test/* attributes a test's result sets (task seon.proofs/test-results-are-a-few-facts), given old (the entity as the branch holds it, or nil)
+  "The :seon.test/* attributes a test's result sets (task seon.proofs/a-verdict-is-an-entity-that-names-its-environment), given old (the entity as the branch holds it, or nil)
   and new ({:digest :status :failures :measure {:ms :ticks :bytes}}; no :measure for a reused result, which ran
   nothing): the digest, the status (a different status at the same digest is :flaky), the failing assertions while not
   green (as data, seon.proofs/failures' shape), and the sums, which a new digest resets to this run and the same digest adds to."
@@ -365,7 +365,7 @@
 
 (defn result-tx
   "The transaction that records a test run's results on the branch that ran it (docs/merging.md#verdicts-are-a-cache,
-  task seon.proofs/test-results-are-a-few-facts): for each test of ran ({test result}, answer-ran's, with its :ms
+  task seon.proofs/a-verdict-is-an-entity-that-names-its-environment): for each test of ran ({test result}, answer-ran's, with its :ms
   :ticks :bytes) its digest, status, failing assertions (failures, {test [assertion]}, as data) and sums; for each of
   reused ({test result}, a result the cache held at its digest) its digest, status and the failures it kept, so a
   freshly branched agent's proofs show their reused status; for each of deferred (the process tests the

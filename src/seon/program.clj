@@ -1022,7 +1022,7 @@
   bound), in a namespace it holds, every var it defines bound there? The binary's record holds test/'s forms too, which no
   binary compiles: one is held once its namespace is loaded. A form imported into a namespace loaded earlier (a test namespace
   loaded at boot, then a re-import adding a deftest) defines a var this process does not hold yet: it is loaded, never read
-  as an unmap (seon.stage/stage-tx). With no record, nothing is held. See docs/source.md#the-binary-records-its-program."
+  as an unmap. With no record, nothing is held. See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe [:set :string]] :map] :boolean]}
   [db forms f]
   (boolean (and (contains? forms (:id f))

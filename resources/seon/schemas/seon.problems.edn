@@ -74,6 +74,7 @@
  ;; (the writer's :spawn names main's commit and t on :fork; seon.agent/init! compares)
  :seon.agent/fork-misaligned [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/fork-misaligned]]
                                                      [:commit :uuid] [:t :int] [:branch-commit [:maybe :uuid]] [:image-t :int]]]
+ :seon.system/undeliverable [:and {:description "An output Flow could not deliver (no proc takes it) or a stop dropped, read from Flow's report chan (seon.system/flow-report)."} :seon.error/base [:map [:seon.error/type [:= :seon.system/undeliverable]] [:coord :string]]]
  :seon.system/proc-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/proc-defect]] [:pid {:optional true} [:maybe :keyword]]
                                                      [:took {:optional true} [:or :keyword [:vector :keyword]]]]]
  :seon.system/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/refused]]]]
@@ -271,7 +272,7 @@
  :seon.agent/waste :seon.learn/waste
  :seon.agent/error :seon.error/base
  ;; task content a branch and main both changed since the branch's base, differently: root's
- ;; to resolve (seon.task/carry-tx; owner, 2026-10-22, D4)
+ ;; to resolve (seon.merge/task-conflicts of the one merge; owner, 2026-10-22, D4)
  :seon.task/task-conflicts [:vector [:map [:task :seon.task/id] [:attr :keyword] [:base :any] [:ours :any] [:theirs :any]]]
 
  ;; ---- the one read: seon.problems/report ----
@@ -294,7 +295,7 @@
                              :seon.problems/caused #{:retyped-attribute :unnamed-site :stale-section :uncited-var :long-form :unfocused-docstring :leadless-section :orphan-page :waived-proof :uncited-task :stale-plan :unestimated-test :undeclared-test :unschemed-key :refused-value :hand-written-list}
                              ;; shown, never a reason to refuse done (root's ruling, 2026-10-23: every var edit stales the sections that cite it;
                              ;; and the plans that cite it, an agent's own task's among them)
-                             :seon.problems/attention #{:stale-section :uncited-var :long-form :unfocused-docstring :stale-plan}
+                             :seon.problems/attention #{:stale-section :uncited-var :long-form :unfocused-docstring :stale-plan :hand-written-list}
                              :seon.problems/areas [[:docs #{:stale-pin :stale-section :orphan-page :leadless-section :uncited-var :unfocused-docstring}] [:tests #{:red :cost :waived-proof :unestimated-test :undeclared-test}]
                                                     [:laws #{:unnamed-site :long-form :unschemed-key :refused-value :hand-written-list :retyped-attribute}] [:merges #{:merge :task-conflict :unrun :unsynced}] [:tasks #{:failed :uncited-task :stale-plan}]
                                                     [:agents #{:stalled :dead :error :waste}] [:errors #{:platform :eval :agent :effect}] [:health #{:problem-unlinked :stale-binary}]]

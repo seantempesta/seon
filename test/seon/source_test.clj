@@ -13,7 +13,7 @@
             [seon.merge :as pm]
             [seon.program :as program]
             [seon.source :as source]
-            [seon.program-test :as pt] [seon.stage :as stage] [seon.system :as root] [seon.doc] [seon.graph] [seon.agent] [test-runner]))
+            [seon.program-test :as pt] [seon.system :as root] [seon.doc] [seon.graph] [seon.agent] [test-runner]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -260,7 +260,7 @@
   ;; read after the whole, on an import of real files and on a refresh that removes one (its retractions). Two small
   ;; namespaces are the forms (the shipped config and its schema are the bulk the config check reads): lib.clj and ref.clj
   ;; (70 KB) were 509 M ticks of speculating and importing forms that no assertion counts differently
-  (let [files (into {} (for [p ["src/seon/stage.clj" "src/seon/edn.clj" "resources/seon/schemas/seon.config.edn" config/shipped-file]]
+  (let [files (into {} (for [p ["src/seon/cron.clj" "src/seon/edn.clj" "resources/seon/schemas/seon.config.edn" config/shipped-file]]
                          [p (slurp (str here "/" p))]))
         counted #{:form/id :ns/name :ns/file :schema/key :schema/file}
         read-after (fn [db] {:entries (seon.config/entries db) :schemas (program/schema-changes db)
@@ -1010,7 +1010,7 @@
     (is (= 6 ((resolve 'app.mm-src/g) 5)) "the new record")
     (is (true? ((resolve 'app.mm-src/box?) ((resolve 'app.mm-src/->Box) 1))) "an instance? test held by the binary sees the redefined record")))
 
-;; Estimate: load-all! of 366 example forms + 3 x 100k 36.3M + import and replace of 3 forms 0.6M + stage-tx over ~370 forms x 5k 2M = 40000000 ticks
+;; Estimate: load-all! of 366 example forms + 3 x 100k 36.3M + import and replace of 3 forms 0.6M = 40000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-form-imported-into-a-loaded-namespace-is-loaded-not-unmapped
   ;; the step E dry run (2026-10-22): a root restarted on a tree whose test namespace gained a
   ;; deftest imported it onto main, but held? read the namespace's existence as "the binary
@@ -1024,8 +1024,7 @@
         rep (d/with db (source/replace-tx db {path (str a-text "\n(defn b [] 2)\n")}))
         errs (program/load-changes! (:db-after rep) (pdb/report->tx rep))]
     (is (= [] errs))
-    (is (= 2 (some-> (resolve (symbol (str nsym) "b")) deref (apply []))) "the imported form is loaded where main's program runs")
-    (is (= [] (stage/stage-tx (:db-after rep))) "so staging this runtime unmaps nothing")))
+    (is (= 2 (some-> (resolve (symbol (str nsym) "b")) deref (apply []))) "the imported form is loaded where main's program runs")))
 
 ;; docs/source.md#a-process-holds-the-tests-only-when-it-runs-them: agents forked before an import ran the previous main's tests against the new program,
 ;; red with nothing to see: their records said the new text, their vars the old
@@ -1750,7 +1749,7 @@
 
 ;; Estimate: 2 imports of 2 files (4 forms) 0.8M + 2 refresh-tx of 3 files 1.2M = 2000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-renamed-alias-target-analyzes-beside-the-image
-  ;; task seon.source/another-trees-ns-form-analyzes-beside-the-image: one process analyzes two trees whose
+  ;; task seon.source/a-macro-bakes-the-analyzed-trees-files: one process analyzes two trees whose
   ;; namespaces disagree (a namespace renamed, the alias of its requirer pointed at the new one), in either
   ;; direction: the removed file's old text is never read again (refresh-tx's dependents), and a namespace
   ;; no source root holds answers its requirer's require from the analysis (read-nss), never a load from disk

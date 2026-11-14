@@ -122,12 +122,19 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/result] [:maybe :map]]}
   [main head r]
   (let [unmerged (pm/unmerged head)
-        uncontracted (pm/uncontracted (:ours r))]
+        uncontracted (pm/uncontracted (:ours r))
+        ;; behind means main's program moved: a fact main wrote ([:datum ...], its records) is already main's and merges as it is;
+        ;; one the branch also changed is a conflict (:conflicts), never behind
+        moved (into {} (remove (comp #{:datum} first key)) (:theirs r))]
     (cond
-      (seq (:theirs r))
+      (seq (:conflicts r))
       (contract/error :seon.merge/behind #'seon.writer/merge-refused
-                      (str "main changed " (count (:theirs r)) " key(s) since the branch's merge base: merge main into the branch first")
-                      {:tx (:max-tx main) :behind (count (:theirs r))
+                      (str "the branch and main changed " (count (:conflicts r)) " key(s) differently: merge main into the branch and resolve them first")
+                      {:tx (:max-tx main) :behind (count (:conflicts r))})
+      (seq moved)
+      (contract/error :seon.merge/behind #'seon.writer/merge-refused
+                      (str "main changed " (count moved) " key(s) since the branch's merge base: merge main into the branch first")
+                      {:tx (:max-tx main) :behind (count moved)
                        :seon.error/fix "A merge task merges main into the branch (my.branch/merge-main!), resolves any conflict, and its proofs run on the combined program."})
       (seq unmerged)
       (contract/error :seon.merge/unmerged #'seon.writer/merge-refused
@@ -327,7 +334,7 @@
                                         :else {:ok true :dropped false}))
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
                         (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st)}))
-      :octopus-merge (let [[st r] (octopus-merge st o (vec (:branches m)) (:data-attrs m #{}))] (reply st r))
+      :octopus-merge (let [[st r] (octopus-merge st o (vec (:branches m)) (:data-attrs m :all))] (reply st r))
       ;; the merge gate's candidate: branch b merged over main as the octopus merge would merge it, applied to
       ;; a value and never committed, and the files that merge would write, with their text as it holds them
       ;; (written, source/files): what the gate tests is what the merge writes, schema resources included

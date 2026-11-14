@@ -147,6 +147,7 @@
   [:seon.config.proofs/tick-quantum {:optional true} :seon.config.proofs/tick-quantum]
   [:seon.config.proofs/seeds {:optional true} :seon.config.proofs/seeds]
   ;; effects and the model
+  [:seon.config.fx/bounds {:optional true} :seon.config.fx/bounds]
   [:seon.config.fx/buf {:optional true} :seon.config.fx/buf]
   [:seon.config.ai/provider {:optional true} :seon.config.ai/provider]
   [:seon.config.ai/script {:optional true} :seon.config.ai/script]

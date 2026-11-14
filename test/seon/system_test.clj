@@ -307,6 +307,9 @@
     (is (= 0 exit) log)
     (is (= :group-ended (get-in stopped [:drained :ended])) (str "the boot server's group was ended by the stop: " (pr-str stopped)))
     (is (true? (:graph stopped)) "every proc exited")
+    ;; task seon.lib/a-process-reports-the-most-processes-it-held-at-once: a root reports the most processes it held at once,
+    ;; read with no ps; one that forked no agent held itself and its boot fork server
+    (is (= 2 (:peak-processes stopped)) (str "the root's peak, on its ROOT STOPPED line: " (pr-str stopped)))
     ;; what the stop calls, named here so this test's digest takes it (a root's own code is the full run's otherwise)
     (is (= [:enum :group-ended :eof] (last (:malli/schema (meta #'seon.fork-server/release!)))) "release! answers how the server ended")))
 
@@ -636,3 +639,18 @@
       (is (clojure.string/includes? (:seon.error/message r) "bin/prove --out") "and points at the tree's own build"))
     (is (nil? (refusal (with "src/seon/agent.clj" :src))) "a src change loads live: the system proves it")
     (is (= :seon.system/binary-not-current (:seon.error/type (#'root/tree-refusal nil tree))) "a binary of no recorded tree is unknown, never current")))
+
+(deftest ^{:seon.test/estimate {:ticks 1000000}} an-undeliverable-output-is-a-problem
+  ;; docs/flow.md#the-proc-contract: Flow reports an output it can't deliver (a pid not in the graph, an unconnected out) and one
+  ;; a stop dropped on its report chan, a sliding 100 that nothing in Seon read, so past 100 they were lost unseen. Root reads
+  ;; it as it reads the error chan: each such report is the api's :error with the typed :seon.system/undeliverable, which it
+  ;; records as a problem; any other report is not one
+  (let [report->error @#'seon.system/flow-report]
+    (let [m (report->error {:clojure.core.async.flow/undeliverable [:gone :in] :clojure.core.async.flow/pid :src})]
+      (is (= :error (:op m)))
+      (is (= :src (:pid m)))
+      (is (= :seon.system/undeliverable (get-in m [:data :seon.error/type])) "typed, so the api records it as a problem")
+      (is (= "[:gone :in]" (get-in m [:data :coord]))))
+    (is (= :seon.system/undeliverable (get-in (report->error {:clojure.core.async.flow/dropped-on-stop [:src :out]}) [:data :seon.error/type]))
+        "an output a stop dropped, the same")
+    (is (nil? (report->error {:clojure.core.async.flow/pid :x :something :else})) "a report that loses nothing is no problem")))
