@@ -42,8 +42,8 @@
     (is (= #{[:ea t1 :seon.task/id] [:ea t1 :seon.task/plan]} two) (pr-str two))
     (is (= #{[:ea t1 :seon.task/plan]} one) (str "one attribute, and no [:e e] from the existence probe: " (pr-str one)))
     (is (d/reads-touched? two (tx [{:db/id t1 :seon.task/plan "Changed."}])) "an attribute it read")
-    (is (not (d/reads-touched? two (tx [{:db/id t1 :seon.task/ns "x.y"}]))) "an attribute of the entity it did not read")
-    (is (not (d/reads-touched? one (tx [{:db/id t1 :seon.task/id "r/t1b"}]))) "nor another attribute, for a one-attribute pull")
+    (is (not (d/reads-touched? two (tx [{:db/id t1 :seon.task/ns 'x.y}]))) "an attribute of the entity it did not read")
+    (is (not (d/reads-touched? one (tx [{:db/id t1 :seon.task/ns 'x.z}]))) "nor another attribute, for a one-attribute pull")
     (is (contains? (reads #(d/pull db [:seon.task/plan] 987654321)) [:e 987654321]) "a missing entity: its first datom reaches it")))
 
 (deftest a-transaction-touches-only-what-a-read-scanned
