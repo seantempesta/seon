@@ -581,7 +581,10 @@
           {:ok false :applied [] :conflicts (:conflicts r) :t (:max-tx @conn)})
       :else
       (let [;; the parent is the commit merged: a branch name would name main's head when this commits, which can be newer than what was merged
-            rep (d/merge-db conn #{(d/commit-id main)} (pm/merge-tx head base main (:apply r) data-attrs)
+            tx (pm/merge-tx head base main (:apply r) data-attrs)
+            ;; a merged task's cites are derived from its text: made again here, never carried (seon.task/merged-cites-tx)
+            tx (into tx (task/merged-cites-tx (pdb/speculate-db head tx) (:apply r)))
+            rep (d/merge-db conn #{(d/commit-id main)} tx
                              (pdb/tx-meta (:branch @state) {:seon.tx/merged main-b}))
             ops (pdb/report->tx rep)
             errs (program/load-changes! (:db-after rep) ops)]

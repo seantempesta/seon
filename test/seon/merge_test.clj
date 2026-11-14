@@ -632,3 +632,4 @@
     (testing "a key both changed, differently, stops it"
       (let [main' (as main :main (var-tx "f" "(* 2 x)"))]
         (is (seq (:conflicts (pm/merge-main b0 head main'))) "a conflict, and no tx")))))
+

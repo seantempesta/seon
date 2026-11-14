@@ -62,7 +62,7 @@
 
 (defn- derived?
   "Whether attribute a, or the entity schema it belongs to, is marked {:seon.db/derived true}: a cache each branch computes from other
-  facts (an embedding, what a task file last stated), never merged. See docs/merging.md#a-branch-merges-main-in."
+  facts (an embedding, a cite, what a task file last stated, a section's read forms), never merged. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :qualified-keyword] :boolean]}
   [a] (boolean (or (:seon.db/derived (contract/properties a))
                    (some-> (get-in (pdb/index) [:entity-schemas a]) contract/properties :seon.db/derived))))
@@ -368,13 +368,18 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/program-key] :boolean]}
   [base side other [kind x a & vs :as k]]
   (let [others (tx-branch other (:max-tx other))
+        ;; a datom side's transaction wrote: one naming the other side's branch is the other's, and one the other side's history holds
+        ;; at the same transaction is history both share (a seed, a merge either way), so it is no one's change; one naming none is the side's
+        own-datom? (fn [d] (not (or (and others (= others (tx-branch side (:tx d))))
+                                    (some #(= (:tx d) (:tx %)) (d/datoms (d/history other) :eavt (:e d) (:a d) (:v d))))))
         attr-owned? (fn [e a vs]
                       (let [dts (fn [db] (if (seq vs) (d/datoms db :eavt e a (first vs)) (d/datoms db :eavt e a)))
                             held (into #{} (map :v) (dts base))
                             now (dts side)]
-                        ;; foreign only when its transaction names the other side's branch: one that names none is the side's own
-                        (or (some #(and (not (held (:v %))) (not (and others (= others (tx-branch side (:tx %)))))) now)
-                            (some #(seq (d/datoms (d/history side) :eavt e a %)) (remove (into #{} (map :v) now) held)))))]
+                        (or (some #(and (not (held (:v %))) (own-datom? %)) now)
+                            ;; a value base holds that side let go of: side's change only if side's own transaction retracted it
+                            (some (fn [v] (some #(and (not (:added %)) (own-datom? %)) (d/datoms (d/history side) :eavt e a v)))
+                                  (remove (into #{} (map :v) now) held)))))]
     (boolean
       (if (= :datum kind)
         (attr-owned? x a vs)
@@ -565,7 +570,12 @@
         m (reduce (fn [p k] (if (and (or (= :datum (first k)) (stated-keys (first k))) (not= (get p k) (get b k)) (not (owned? base main head k)))
                               (if (contains? b k) (assoc p k (get b k)) (dissoc p k)) p))
                   (program-of main ks :all) ks)
-        r (three-way b (program-of head ks :all) m)]
+        ;; and the branch's content there counts as its change only if the branch wrote it: a key of an entity it touched holds
+        ;; values it never wrote (a stale record, an attribute of its own agent entity root wrote on main)
+        o (reduce (fn [p k] (if (and (or (= :datum (first k)) (stated-keys (first k))) (not= (get p k) (get b k)) (not (owned? base head main k)))
+                              (if (contains? b k) (assoc p k (get b k)) (dissoc p k)) p))
+                  (program-of head ks :all) ks)
+        r (three-way b o m)]
     (if (seq (:conflicts r))
       {:conflicts (:conflicts r)}
       (let [unique? #(= :db.unique/identity (get-in (:schema head) [% :db/unique]))

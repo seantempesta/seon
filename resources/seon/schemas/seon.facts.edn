@@ -439,7 +439,7 @@
                                                   :file/path]}]
  ;; the cite as ctx holds it: what it names, its owner and its target by identity, drawn by its two renders, which read the
  ;; rest from the db (docs/render.md#a-component-answers-hiccup)
- :seon.cite/cite-fact [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/cite
+ :seon.cite/cite-fact [:map {:seon.db/attributes true :seon.db/derived true :seon.render/hiccup seon.render.ui/cite
                              ;; what it names, by identity alone: its render reads the rest from the db (:seon.cite/of-read, :seon.cite/target-read)
                              :seon.ctx/pattern [:seon.cite/id :seon.cite/depth :seon.cite/order
                                                 {:seon.cite/of [:seon.task/id :seon.task/ns :seon.agent/key]}

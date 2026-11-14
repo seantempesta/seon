@@ -348,7 +348,9 @@
                                     (try (d/transact bc {:tx-data (pm/unmerged-tx head (vec (:conflicts r)) (:max-tx main)) :tx-meta (pdb/tx-meta b)})
                                          (finally (d/release bc)))
                                     {:ok false :conflicts (:conflicts r)})
-                                  (let [merged (:db-after (d/with main {:tx-data (:tx r) :tx-meta (pdb/tx-meta b {:seon.tx/merged main-b})}))
+                                  (let [;; a merged task's cites are derived from its text: made again here, never carried
+                                        tx (into (:tx r) (task/merged-cites-tx (pdb/speculate-db main (:tx r)) (:keys r)))
+                                        merged (:db-after (d/with main {:tx-data tx :tx-meta (pdb/tx-meta b {:seon.tx/merged main-b})}))
                                         cid (d/force-branch! merged b #{(d/commit-id head) (d/commit-id main)} {:expected-current-commit (d/commit-id head)})]
                                     {:ok true :commit cid :keys (count (:keys r)) :t (:max-tx merged)})))))
       ;; the merge gate's candidate: branch b merged over main as the octopus merge would merge it, applied to
