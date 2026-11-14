@@ -67,7 +67,7 @@ The words for data and branches, in Datahike's and git's terms, and the namespac
 | **program** | the forms held as facts (`:form/src`), loaded where main or a branch changes them | `seon.program` |
 | **store** | konserve under Datahike | `seon.db` |
 | **entity schema** | a Malli map with `{:seon.db/attributes true}`; its members are Datahike attributes | `seon.schema.datahike/declarations` |
-| **observation** | data on the branch that observed it, never merged | `seon.merge/carried-platform-attrs` |
+| **observation** | data on the branch that observed it, never merged | every `seon.*` attribute but `seon.merge`'s stated keys |
 | **generation** | a build of Seon's own source, recorded on main ([source](source.md#the-next-generation)) | `seon.fx/build` |
 | **prove** | run what a change reaches, reusing every green at its reach digest ([merging](merging.md#a-merge-runs-what-the-change-reaches)) | `seon.proofs/plan`, `my.agent/prove` |
 
