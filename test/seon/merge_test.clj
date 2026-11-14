@@ -634,6 +634,23 @@
         (is (seq (:conflicts (pm/merge-main b0 head main'))) "a conflict, and no tx")))))
 
 
+;; Estimate: the world 0.5M (cached) + 4 small transactions ~1M + one merge-main of a few datoms ~3M + one db-with ~0.5M = 10000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-fact-both-sides-hold-from-different-transactions-is-kept
+  ;; d8a0285ba8's regression (lb76, 2026-11-15 00:33): datoms-diff compares whole datoms, tx included, so a fact base and the branch both
+  ;; hold, asserted in different transactions, was a gone datom and an added one; the added (shared history) was dropped and the gone
+  ;; retracted, and the merge took six tasks' execution away. A fact is [e a v] (docs/merging.md#a-branch-merges-main-in)
+  (let [as (fn [db branch tx] (:db-after (d/with db {:tx-data (if (fn? tx) (tx db) tx) :tx-meta {:seon.tx/branch branch}})))
+        w (d/db-with (base) [{:seon.agent/key "a1" :seon.agent/status :busy}])
+        head (as w :main/b (var-tx "f" "(inc x)"))
+        b0 (-> w (as :main [[:db/add [:seon.agent/key "a1"] :seon.agent/status :idle]])
+               (as :main [[:db/add [:seon.agent/key "a1"] :seon.agent/status :busy]]))
+        main (as b0 :main [{:seon.agent/key "a2" :seon.agent/status :idle}])
+        {:keys [tx conflicts]} (pm/merge-main b0 head main)
+        merged (d/db-with main tx)]
+    (is (nil? conflicts) (pr-str conflicts))
+    (is (= :busy (:seon.agent/status (d/entity merged [:seon.agent/key "a1"]))) "the fact both hold stays")
+    (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch keeps its own change")))
+
 ;; Estimate: the world 0.5M (cached) + 4 small transactions ~1M + one merge-main (a diff of a few datoms, one history seek each, program-of
 ;; on 2 keys of three dbs) ~3M + one db-with ~0.5M = 10000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 10000000}} a-fact-from-before-the-base-is-neither-sides-change
