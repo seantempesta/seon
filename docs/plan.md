@@ -88,6 +88,14 @@ one test result, 73 staleness functions), and the bugs are those copies disagree
 - **The outside enters by one catch-up:** seed = catch-up from empty; import = catch-up of paths; landing = catch-up after
   `bin/update` moves root's tree; pins stated as the whole set. Inside, every read is a datom read.
 
+### Claude sessions move onto the Seon path (Stage 1, now)
+
+A session works as a Seon agent: one branch mirrored in Seon, REPL first, file edits imported by a thin hook
+(`my.branch/import!` on each write; runtime builds it and proves it on one edit end to end: file, branch, `seon_prove`,
+`seon_done`, main, disk and git), proving and merging with `seon_prove`/`seon_done` once admission (item 2) and the one
+start path (Stage 0.5, tests with runtime) are on main. `bin/land` lands what is in flight, then only the tasks that build
+this path, and is deleted when the path carries a week of landings.
+
 ### The order
 
 1. **Stage 0's merge.** "Main's reds" were on the agent's branch: merging main into it lost main's task lifecycle datoms
