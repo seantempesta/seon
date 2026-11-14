@@ -524,6 +524,9 @@
              ;; an argument is the same when its value is (a view by its path), and a render when its fn is (a defn at the REPL is a
              ;; new one)
              (every? true? (map same-arg? children (:args prev))) (or (not (var? f)) (identical? (var-get f) (:fv prev)))
+             ;; an entry drawn only for another output (::for: a record the model output placed first, its :out nil) is no hit for
+             ;; a placement that wants its html: that one runs once, draws it and clears the mark (context-4, 2026-11-14)
+             (or (::for env) (not (:for-only prev)))
              (not (contains? @(:queue w) k)))
       (do (led! w f :hit nil nil) [::child k])
       (let [;; an entity rendered by its schema's render: the render its schema names for each other output the walk asks
@@ -653,7 +656,7 @@
         ;; merged: its written html (placed-units) stays while its revision does
         (vswap! (:cache w) update k merge {:f f :opts opts :args args :out (if same? (:out prev) out) :children children
                                     :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0))) :kept @kept :outs @outs
-                                    :reads read-keys :entity-reads @entity-reads :fv (when (var? f) (var-get f)) :tree-reads @tree-reads :drawn? (contains? ks :seon.render/drawn)})
+                                    :reads read-keys :entity-reads @entity-reads :for-only (boolean (::for env)) :fv (when (var? f) (var-get f)) :tree-reads @tree-reads :drawn? (contains? ks :seon.render/drawn)})
         ;; who read what of the tree, as it reads its db (`walk`)
         (let [was (or (:tree-reads prev) #{}) now (or @tree-reads #{})]
           (when-not (= was now)
