@@ -102,7 +102,7 @@ The owner, 2026-11-12: "We are never to design systems that are so inefficient a
   - an error as data, flowing to whoever can fix it ([errors](docs/errors.md)).
 - **Nothing crashes and nothing hangs:** every wait ends, with its value or a typed error saying why it never will ([errors](docs/errors.md#nothing-crashes-and-nothing-hangs)).
 - **Never pass or keep a db value:** a kept db value is a reference, `{:branch :commit :t}` ([storage](docs/storage.md#a-kept-db-value-is-a-reference)).
-- **A mechanism is built once and reused everywhere.** Before building anything that waits, retries, spawns, answers a request or reads config, find its one implementation.
+- **A mechanism is built once and reused everywhere, and that one path is made optimal** (owner, 2026-11-14: "Make all hot paths optimal and make everything that can be into hot paths. No more 4 ways of doing the same thing. 2 ways of doing the same thing even has to justify itself"). Before building anything that waits, retries, spawns, answers a request or reads config, find its one implementation and route through it. A second way to do one job is a problem until its justification is written where it lives, and the one path's cost is held to its lower bound.
 - **Get out of an agent's way:** it has a real REPL; record what happened, never gate what it may do, and never cut its context ([processes](docs/processes.md#an-agent-is-never-gated)).
 
 ## 5. Laws
