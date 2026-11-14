@@ -1126,75 +1126,82 @@
     (if (str/includes? t "\n") [:pre [:code t]] [:code t])))
 
 (defn status-hiccup
-  "How the work stands (seon.ctx.status/status's data s), written to the agent at the moment it reads it. Each proof answers the
-  question its state asks: not written, where it goes and a test to copy; red, what it asserted and what it got; every proof
-  green and something blocks merging, exactly what and the form that clears it; all green and nothing blocks, that it does not.
-  Main's side only when something conflicts: both sides and the form that settles each. No table beside the same words: a list of
-  the proofs' states only when there are several. See docs/render.md#how-the-work-stands."
+  "How the work stands (seon.ctx.status/status's data s), written to the agent at the moment it reads it: what its task still
+  needs, as boxes. One box per proof, checked when no reason of the done rule names it, and one per other reason
+  (seon.reconcile/done-explain, the judge's own function, as :refused carries them with the form that clears each): the boxes
+  are the merge's needs and nothing else. Each is keyed by its test or reason, so a box that changes
+  reaches the model as one named edit. Under the boxes, what helps each: a proof not written, where it goes and a test to
+  copy; a red one, what it asserted and what it got; an unmerged entry, both sides and the form that settles each. What does
+  not block (stale sections, process tests the merge runs, tests no gate judges) is said apart, as not blocking.
+  See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [_opts {:keys [proofs refused test-run unmerged without-a-contract caused attention merge unjudged also-red-on-main main-moved]}]
+  [_opts {:keys [reasons proofs refused test-run unmerged attention merge unjudged also-red-on-main main-moved]}]
   (let [state #(:status %)
+        named (set (keep :symbol reasons))
         unwritten (filter #(= :undefined (state %)) proofs)
-        red (filter #(#{:fail :error} (state %)) proofs)
         ;; three states with no verdict, each told the one thing that helps it (docs/render.md#how-the-work-stands): the run died (its error
-        ;; is what to fix, :not-run), a process test the merge's gate runs (:deferred), not judged yet (:unknown: (prove) runs it)
+        ;; is what to fix, :not-run), a process test the merge's gate runs (:deferred, never a box), not judged yet (:unknown: (prove) runs it)
         [died deferred unknown] (map (fn [st] (filter #(= st (state %)) proofs)) [:not-run :deferred :unknown])
-        green? (and (seq proofs) (every? #(= :pass (state %)) proofs))
-        blocks (cond-> []
-                 (seq refused) (into (for [r refused :when (not (and (= :proof-unknown (:reason r)) (some #(= (:test r) (:test %)) unwritten)))]
-                                       [(reason-title (:reason r)) (or (:test r) (:vars r) (:keys r) (:problems r)) (:do r)]))
-                 (seq without-a-contract) (conj ["functions without a contract" without-a-contract nil])
-                 (seq caused) (conj ["problems to clear" caused nil])
-                 (seq attention) (into (for [a attention] [a nil nil])))
-        ;; two reasons can say one thing (a refusal and the status's own): said once, with what clears it if either has it
-        blocks (vals (reduce (fn [m [what x do :as b]] (let [o (get m [what x])] (if (and o (or (nth o 2) (not do))) m (assoc m [what x] b))))
-                             (array-map) blocks))
-        block (fn [[what x do]]
-                (let [items (when (coll? x) (map #(as-text (if (map? %) (or (:key %) (:symbol %) %) %)) x))]
-                  (if items
-                    ;; each named on its own, so a change of one says that one (docs/render.md#a-change-is-edits-by-name)
-                    [:div [:p (str what ":")]
-                     (into [:ul {:key :items}] (for [i (distinct items)] [:li i]))
-                     (when do [:p "To clear it: " (form-hiccup do)])]
-                    [:p what (when (some? x) (str ": " x)) (when do [:span ". To clear it: " (form-hiccup do)])])))]
+        boxed (remove #(= :deferred (state %)) proofs)
+        ;; a namespace's scaffold once, with its first proof not written: a later one repeats none of it
+        scaffolded (set (map (comp :test first val) (group-by #(:ns (:shape %)) unwritten)))
+        ;; a proof's own reason is its box; every other reason is a box of its own
+        others (remove #(and (= :proof-unknown (:reason %)) (some (fn [p] (= (:test %) (:test p))) proofs)) refused)
+        items #(when (coll? %) (distinct (map (fn [x] (as-text (if (map? x) (or (:key x) (:symbol x) x) x))) %)))
+        open? (or (seq others) (some #(named (:test %)) boxed) (seq unmerged))
+        quiet (cond-> []
+                (seq attention) (into attention)
+                (seq deferred) (conj (markdown (str (str/join ", " (map #(str "`" (:test %) "`") deferred)) ": " (proof-state :seon.status/explain :deferred)) {:inline? true}))
+                unjudged (conj (str "Not judged, so these say nothing about your change: " (str/join ", " (:tests unjudged)) ". " (:why unjudged) ".")))]
     [:section
-     [:h2 "Your proofs"]
-     (when test-run [:p "The tests could not run: " (str/join "; " (:failed test-run))])
-     (when (next proofs)
-       (into [:ul {:key :proofs}] (for [{:keys [test status]} proofs] [:li {:key test} [:code (str test)] ": " (or (proof-state :seon.status/title status) (kname status))])))
-     ;; not written: where it goes, and a namespace's example once, its own, so a proof written moves neither
-     (for [[n us] (group-by #(:ns (:shape %)) unwritten) :let [{:keys [requires fixtures helpers example]} (:shape (first us))]]
-       (concat
-        (for [[i {:keys [test]}] (map-indexed vector us)]
-          [:div {:key test}
-           [:p "Write " [:code (str test)] "." (when n (list " It goes in " [:code (str n)] "."))]
-           (when (zero? i) (when-let [form (some #(when (= test (:test %)) (:do %)) refused)] [:div [:p "Scaffold:"] (form-hiccup form)]))])
-        (when (or requires example)
-          [[:div {:key n}
-            (when requires [:p "A test in " [:code (str n)] " requires:"])
-            (when requires [:pre [:code requires]])
-            (when (seq fixtures) [:p "Its fixtures:"])
-            (when (seq fixtures) [:pre [:code (str/join "\n" fixtures)]])
-            (when (seq helpers) [:p "Helpers a test there uses: " (str/join ", " (map #(str "`" (name %) "`") helpers)) ". Every helper there: " [:code (str "(dir " n ")")]])
-            (when example [:p "Example:"])
-            (when example [:pre [:code example]])]])))
-     ;; red: which, every assertion that failed with what it got (never a count in place of them), and what it calls (the test's own
-     ;; source is not repeated: the agent wrote it, or reads it by (source test))
-     (for [{:keys [test failures calls status]} red]
-       [:div {:key test}
-        [:p [:code (str test)] " fails."]
-        (markdown (proof-state :seon.status/explain status) {:inline? true})
-        (for [[i {a :assert as :asserts g :got m :message}] (map-indexed vector failures)]
-          ;; what it asserted and what it got, each a value of its own, never a sentence holding them
-          [:dl {:key i :class "seon-failure"}
-           [:dt "asserted"] [:dd [:pre [:code (str/join "\n" (map #(as-text %) (or as [a])))]]]
-           [:dt "got"] [:dd [:pre [:code (as-text g)]]]
-           (when m [:dd m])])
-        (when (seq calls)
-          [:div {:key :calls} [:p "It calls " (str/join ", " (map #(str "`" (:var %) "`") calls)) "."]
-           (for [{v :var src :source} calls :when src] [:pre {:key (str v)} [:code src]])])])
-     ;; each state with no verdict: what it means and what helps it, its schema's words, then its proofs
-     (for [[st ps] [[:not-run died] [:deferred deferred] [:unknown unknown]] :when (seq ps)]
+     [:h2 "What your task still needs"]
+     [:p {:key :rule} (if open? "Your task is done when every box is checked, then it merges." "Every box is checked: nothing blocks your merge.")]
+     (when test-run [:p {:key :test-run} "The tests could not run: " (str/join "; " (:failed test-run))])
+     (into [:ul {:key :needs}]
+           (concat
+            ;; a proof's box holds what helps it, so it names its test once and changes as one: not written, where it goes and
+            ;; the scaffold; red, what it means, each assertion that failed with what it got (never a count in place of them), and what
+            ;; it calls (the test's own source is not repeated: the agent wrote it, or reads it by (source test))
+            (for [{:keys [test status shape failures calls]} boxed :let [done? (not (named test))]]
+              [:li {:key test} (if done? "[x] " "[ ] ") [:code (str test)]
+               (when-not done? (str ": " (or (proof-state :seon.status/title status) (kname status))))
+               (when (= :undefined status)
+                 (list (when-let [n (:ns shape)] [:span ". It goes in " [:code (str n)] "."])
+                       (when-let [form (when (scaffolded test) (some #(when (= test (:test %)) (:do %)) refused))] [:div [:p "Scaffold:"] (form-hiccup form)])))
+               (when (#{:fail :error} status)
+                 (list (markdown (proof-state :seon.status/explain status) {:inline? true})
+                       (for [[i {a :assert as :asserts g :got m :message}] (map-indexed vector failures)]
+                         ;; what it asserted and what it got, each a value of its own, never a sentence holding them
+                         [:dl {:key i :class "seon-failure"}
+                          [:dt "asserted"] [:dd [:pre [:code (str/join "\n" (map #(as-text %) (or as [a])))]]]
+                          [:dt "got"] [:dd [:pre [:code (as-text g)]]]
+                          (when m [:dd m])])
+                       (when (seq calls)
+                         [:div {:key :calls} [:p "It calls " (str/join ", " (map #(str "`" (:var %) "`") calls)) "."]
+                          (for [{v :var src :source} calls :when src] [:pre {:key (str v)} [:code src]])])))])
+            (for [{:keys [reason test vars keys problems do]} others :let [x (or test vars keys problems) is (items x)]]
+              (if (next is)
+                ;; several things under one reason: each its own element beside the label (an element holding text is one value),
+                ;; so one that comes or goes is one named edit
+                [:li {:key (or test reason)} [:span (str "[ ] " (reason-title reason) ":")]
+                 (into [:ul {:key :items}] (for [i is] [:li i]))
+                 (when do [:p "To clear it: " (form-hiccup do)])]
+                [:li {:key (or test reason)}
+                 (str "[ ] " (reason-title reason) (cond (seq is) (str ": " (first is)) (some? x) (str ": " (as-text x))))
+                 (when do [:span ". To clear it: " (form-hiccup do)])]))))
+     ;; a test namespace a proof goes in, once: its requires, fixtures, helpers and a test to copy, its own, so a proof written moves none
+     (for [[n us] (group-by #(:ns (:shape %)) unwritten) :let [{:keys [requires fixtures helpers example]} (:shape (first us))]
+           :when (or requires example)]
+       [:div {:key n}
+        (when requires [:p "A test in " [:code (str n)] " requires:"])
+        (when requires [:pre [:code requires]])
+        (when (seq fixtures) [:p "Its fixtures:"])
+        (when (seq fixtures) [:pre [:code (str/join "\n" fixtures)]])
+        (when (seq helpers) [:p "Helpers a test there uses: " (str/join ", " (map #(str "`" (name %) "`") helpers)) ". Every helper there: " [:code (str "(dir " n ")")]])
+        (when example [:p "Example:"])
+        (when example [:pre [:code example]])])
+     ;; each state with no verdict but the merge's own: what it means and what helps it, its schema's words, then its proofs
+     (for [[st ps] [[:not-run died] [:unknown unknown]] :when (seq ps)]
        [:div {:key st} (markdown (str (str/join ", " (map #(str "`" (:test %) "`") ps)) ": " (proof-state :seon.status/explain st)) {:inline? true})])
      ;; merge: nothing until something conflicts; then both sides and the form that settles each
      (when (seq unmerged)
@@ -1203,17 +1210,12 @@
         (for [{:keys [key ours theirs]} unmerged]
           [:div {:key key} [:p [:code (str key)] ". Yours:"] [:pre [:code (as-text ours)]] [:p "Main's:"] [:pre [:code (as-text theirs)]]
            [:p "Keep yours: " [:code (str "(my.branch/resolve! '" key ")")] ". Take main's: " [:code (str "(my.branch/resolve! '" key " :theirs)")] "."]])])
-     (cond
-       (and green? (empty? blocks) (empty? unmerged))
-       [:p {:key :merging} "Every proof passes and nothing blocks merging."]
-       (and green? (seq blocks))
-       (into [:div {:key :merging} [:p "Every proof passes, but your branch can't merge yet:"]] (map block) blocks)
-       (seq blocks)
-       (into [:div {:key :merging} [:p "Also blocking merging:"]] (map block) blocks))
+     (when (seq (:conflicts merge)) [:p {:key :conflicts} (str (count (:conflicts merge)) " things conflict with main; they are listed above.")])
      (when main-moved [:p {:key :main-moved} main-moved])
+     ;; a fact beside its box, which stays open: the agent's to clear whoever caused it (the owner, 2026-11-07)
      (when (seq also-red-on-main) [:p {:key :also-red-on-main} (str "Also red on main at your merge base: " (str/join ", " also-red-on-main) ".")])
-     (when unjudged [:p {:key :unjudged} (str "Not judged, so these say nothing about your change: " (str/join ", " (:tests unjudged)) ". " (:why unjudged) ".")])
-     (when (seq (:conflicts merge)) [:p (str (count (:conflicts merge)) " things conflict with main; they are listed above.")])]))
+     (when (seq quiet)
+       [:div {:key :not-blocking} [:p "These don't block your merge:"] (into [:ul] (for [q quiet] [:li q]))])]))
 
 (defn status
   "How the agent's work on its task stands (a component over ctx and the db): the data seon.ctx.status/status makes of its branch db, drawn by
