@@ -6,6 +6,14 @@ Time is measured and recorded, and decides only at the owner's exceptions. `bin/
 
 An idle system does no work: no proc steps, renders, pings, flushes or polls happen unless a message arrived. Work runs because it arrived, is admitted by its measured workload and parks when there is none. A proc reports its problems as facts and its changes as events, so health is the absence of open problem facts ([errors](errors.md#problems)) and nothing is polled to learn it; the `idle` check step holds it ([checks](checks.md#modes)). A clock, sleep, poll, deadline or fixed slot standing in for a dependency or a workload is the mistake this rules out (owner, 2026-10-30: "timeouts just mean we have the wrong design (most of the time)"): a wait ends on its value or on its producer's typed error ([errors](errors.md#nothing-crashes-and-nothing-hangs)).
 
+
+## Two kinds of wait
+
+A clock never guesses when something will finish (owner, 2026-11-15). Every wait is one of two kinds, and each ends one way:
+- **A wait on our own system** (a proc's answer, a root's reply, a merge, a test child, a writer's commit): the answer will come, only its time is unknown. It is a blocking wait on a Flow channel, ended by the producer's message: its value, its typed error, or its death delivered as a message. No deadline stands in for it, and if a wait of this kind can hang, the producer is the bug (`seon.agent-proc`'s holds, each released by every end of its request, are the pattern: `seon.agent-test/every-request-an-agent-proc-holds-is-released-by-any-of-its-ends`).
+- **A wait on the world outside** (a web fetch, a model provider, a subprocess, the OS): the answer may never come. It carries a declared timeout, a spec'd config entry with its reason (`:seon.config.fx/bounds`, `:seon.config.root/stop-ms`), armed through the one timer, and past it the wait ends with a typed error such as `:seon.bound/reached`.
+
+So a timeout in our own code, or a guess at how long our own work takes, is the mistake; a timeout at the edge of the world is required.
 ## Time decides (the owner's exceptions)
 
 The sites where the owner allowed time to decide: the delayed insert, the one timer, the cron, the kernel's TCP keepalive, and a run ended far past its measured time once its evidence is captured.

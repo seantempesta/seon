@@ -92,7 +92,7 @@ The owner, 2026-11-12: "We are never to design systems that are so inefficient a
 
 ## 4. The principles: everything is data flowing through the system
 
-- **If nothing has changed, we do nothing,** and no clock decides anything ([clocks](docs/clocks.md#if-nothing-has-changed-we-do-nothing)).
+- **If nothing has changed, we do nothing, and no clock guesses when something will finish** ([clocks](docs/clocks.md#two-kinds-of-wait)): a wait on our own system blocks on its Flow channel until the producer's value, typed error or death arrives; a wait on the world outside (the web, a model provider, a subprocess) has a declared, spec'd timeout and ends with a typed error.
 - **Every need is met by one of six things.** If none fits, stop and say so:
   - a value: immutable Datahike values in one store with many branches ([storage](docs/storage.md));
   - a Flow proc and its channels ([flow](docs/flow.md#the-step-fn-contract-every-proc-follows));
@@ -166,6 +166,9 @@ Name things with Clojure's, its libraries', Jolt's and git's words: entity, attr
 - A check that cannot fail, or one that nobody read.
 - A claim passed on unchecked, or the owner's sentence turned into a build before the code was read.
 - Dropping a store or rewriting history: that is the owner's act. A branch is not: its commits stay in git.
+- A merge rule proved only on a synthetic fixture: three rules landed on 2026-11-14 that a real stale branch broke (one retracted 712 facts). A merge change is proved on real-shaped data before it lands ([merging](docs/merging.md#a-merge-change-is-proved-on-a-real-branch)).
+- A number, cause or commit id stated before it was read or measured: a guess passed on is a lost turn for every reader.
+- Acting on a branch, a process or a store without first checking its content and identity: a branch moved to the wrong commit, a stray waiter that landed a tip.
 
 ## 10. Done
 

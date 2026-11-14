@@ -2,6 +2,22 @@
 
 The owner's standing rulings, one entry each: his words and date, and where the rule is stated now. The mechanism lives in `AGENTS.md` and the wiki; the reasoning and the history around each ruling are in git. A ruling a later one reverses keeps a one-line pointer to it.
 
+## 2026-11-15 rulings
+
+The owner's rulings on the morning after the first night run on its own.
+
+### No clock guesses when our own work finishes; the world outside gets declared timeouts
+
+"db/txInstant is fine. Update my wording so it's more accurate -- no clocks for guessing when things might finish -- be sure and use flow and blocking waits if you are sure it's going to come through but don't know when and we need proper timeout error config entries to handle timeouts for things like retrieving data from the web." A wait on our own system blocks on its Flow channel until the producer's value, typed error or death; a wait on the world outside has a spec'd timeout config entry and ends with a typed error. Ordering facts by `:db/txInstant` (the merge's `overtaken`) is not a clock deciding when work finishes, and stays. It refines the 2026-11-14 rulings on timers below. Stated in `AGENTS.md` §4 and [clocks](clocks.md#two-kinds-of-wait).
+
+### Ticks do not fail a test until they are measured reliably
+
+"Lets focus on fixing the reds, disable the tick counting test until we can reliably measure ticks." The same test at one digest measured 161M and 300M ticks, so a tick count does not make a verdict red until the same test at one digest measures within 10% across runs; ticks are still recorded. A named exception to "nothing is switched off", made by the owner with its end condition. Stated in [cost](cost.md#what-is-measured).
+
+### Encode what was learned into the wiki
+
+"Reflect on both your instructions, your agents instructions, how they faired and lets come up with documentation and task updates ... I think we learned a lot and I want to encode it into the wiki not just update the plan." Each lesson goes to the section that owns it: [clocks](clocks.md#two-kinds-of-wait), [merging](merging.md#a-merge-change-is-proved-on-a-real-branch), [cost](cost.md#what-is-measured), [sessions](sessions.md#the-managing-session), `AGENTS.md` §9; each problem left open is a task with its proof.
+
 ## 2026-11-14 rulings
 
 The owner's rulings of this day and the night before, each with his words where recorded and where it is now stated.
