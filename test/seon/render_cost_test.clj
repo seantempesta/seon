@@ -244,9 +244,13 @@
      ;; 2026-11-14 (web): restated in ticks and bytes, the owner's measure (ticks, bytes, seconds; calls retired: they count private
      ;; helpers production does not check, W-5's marker tests among them). Ticks = the work's calls above x ~1.4k ticks a contracted call
      ;; on this render path (seon.render-cost-test/a-request-made-again-costs-what-moved: 3.65M ticks over 2,598 calls, 2026-11-14).
-     :per-n {:ticks 444000 :bytes 280000}
-     :fixed {:ticks 2660000 :bytes 6600000}
-     ;; bytes 1.28x at 30 (~400 KB an eval against a ~10 KB lower bound): waste, its task seon.render/a-debug-entry-allocates-what-it-shows
+     ;; bytes from the bound, never a run (root, 2026-11-14): an eval is its message text (~1 KB), its html entry (~3 KB), its wire JSON
+     ;; (~2 KB) and its pulled entity (~2 KB): ~8 KB, 20 KB with slack; fixed, the system prompt (~20 KB), the agent's ctx (~200 KB),
+     ;; the page's skeleton (~50 KB) and the request body (~50 KB): ~0.35 MB, 1 MB with slack
+     :per-n {:ticks 444000 :bytes 20000}
+     :fixed {:ticks 2660000 :bytes 1000000}
+     ;; measured 8.2 / 11.0 / 19.2 MB at 3 / 10 / 30: ~8x the fixed bound and ~20x the per-eval one, waste, its task
+     ;; seon.render/a-debug-entry-allocates-what-it-shows
      :overrun {:task "seon.render/a-debug-entry-allocates-what-it-shows" :n 30 :measured {:ticks 6210000.0 :bytes 19230000.0}}
      ;; owner's yes, 2026-11-10 ("Land now, three waivers", docs/decisions.md#three-request-cost-proofs-land-waived-owner-2026-11-10): a cold request draws
      ;; the page at the first turn's basis and advances one walk through every later basis (~6k calls), and each history record is drawn
