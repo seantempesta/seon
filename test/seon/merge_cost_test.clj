@@ -108,7 +108,8 @@
        ;; 47 since the derived attributes are the entity index's own (one seon.db/index read per data-attr?, 7, never a derived? per
        ;; attribute) and a transaction's entity bears no key (its instant, runtime and branch ride with its datoms): measured 47;
        ;; 49 since a datom a side added is its change only if base's history doesn't hold it (seon.merge/shared?, one per side here)
-       :fixed {:bytes 650000 :calls 49}
+       ;; 58 since a side's own write older than base's at its key is a conflict (seon.merge/overtaken, one per changed key and side, ~9)
+       :fixed {:bytes 650000 :calls 58}
        :sizes [10 30 100]}))
 
 (defn embedded-of
@@ -222,7 +223,8 @@
      ;; and 640 MB for no key. Before that again: 536 calls, 11 MB at n = 10
      ;; 27 calls since 2026-10-30: seon.merge/content-attr, one contracted call per side's filter, was
      ;; uncontracted (as a contracted predicate asked of each attribute it was 1,771)
-     :fixed {:bytes 4000000 :calls 27}
+     ;; 28 since the base is checked for keys a side wrote before the other rewrote them (seon.merge/overtaken-base, one call, no key here)
+     :fixed {:bytes 4000000 :calls 28}
      :sizes [10 30 100]}))
 
 (defn moved-main-of
