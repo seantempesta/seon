@@ -10,7 +10,18 @@ You are in `next/`: **Seon on Jolt, built to replace Seon** (`~/src/seon` is the
 
 **Find a detail** in `docs/README.md`, then through `seon_context` (§6), then with ``git grep -n 'term' -- docs resources/seon/tasks src``. A `bin/` script's header comment is its manual.
 
-**The running system:** `bin/system status` (server port 7888, dashboard http://127.0.0.1:7777/). The standing system and its store (`runs/store`) are for use: agents work and merge there, and sessions reach it through the MCP tools (§6). The store may be erased while it holds only test data; once it holds data we keep, it is not erased, and everything we keep is in git as code and EDN. Once a system is up, its store is the source of truth ([files and the db](docs/source.md#files-and-the-db-two-directions)).
+**The running system:** `bin/system status` (server port 7888, dashboard http://127.0.0.1:7777/). The standing system and its store (`runs/store`) are for use: agents work and merge there, and sessions reach it through the MCP tools (§6). Once a system is up, its store is the source of truth ([files and the db](docs/source.md#files-and-the-db-two-directions)), and **everything we keep also reaches git**, in the files the system imports from, so a store can be wiped or rebuilt without loss.
+
+**What we keep, and its file:** code and tests (`src/`, `test/`), the wiki (`docs/`), tasks (`resources/seon/tasks/<owning-ns>.edn`), schemas (`resources/seon/schemas/`), config (`resources/seon/config/`), `bin/` scripts. Nothing else is kept: scratch namespaces, `runs/`, `target/` and test data are not, and a test never writes on the standing store's main.
+
+**How it gets there, by where you work:**
+| You work as | Your change lives on | It reaches git by |
+|---|---|---|
+| A Seon agent | your task's branch in the store | its merge into main (`seon_done`), then the write-back of main's changed files |
+| A Claude session in a worktree | `jolt/<area>` in git, imported into the system | your landing |
+| Anyone writing on main directly (`seon_create`, `my.task/update!` on main) | main in the store | nothing yet: write the same entry into its file on your branch, in the same session |
+
+**The rule:** a change you mean to keep is in a file on a branch that will land, before you end your turn. Until a task created in the store is written to its file by the system (`seon.task/a-task-created-in-the-store-reaches-its-file`), that last row is yours to do by hand. The store is erased only while it holds nothing that is not in git; ask root before any erase.
 
 ## 1. What Seon is for, and what moving forward means
 
