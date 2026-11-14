@@ -380,7 +380,10 @@
                                                 calls pulled) :at at :to-come? to-come?} gone (assoc :gone gone))
                 ;; the turn's frame, head and each of its messages a unit (ui/debug-units), each drawn only when its own input moved: a move
                 ;; draws the messages it added (docs/render.md#the-debug-page-is-the-wire-request)
-                (when-let [in (when (seq calls) (some-> (ui/debug-input bdb at calls raw? (:p kw)) (assoc :view (ui/view-param view) :opened opened)))]
+                ;; read outside the view's recorder, as every read of the branch here is (branch-walk): the request is keyed by the branch's
+                ;; head, and its reads are the branch's, never main's index
+                (when-let [in (when (seq calls) (some-> (binding [datahike.index.interface/*reads* nil] (ui/debug-input bdb at calls raw? (:p kw)))
+                                                        (assoc :view (ui/view-param view) :opened opened)))]
                   (ui/debug-units {:unit "d-turn" :seon.render/index (program/index-of-db bdb)} in))
                 context)
         kw (assoc ::walks {:branch [b kw]}))))))
