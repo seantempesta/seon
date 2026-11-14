@@ -54,6 +54,43 @@ task must take. The priority (owner,
 2026-11-14) is one view: fix the broken processes that slow us down, and move Claude sessions off files and git onto the
 system, working, proving and merging as Seon agents do. Everything else in this plan stays, in order behind it.
 
+## The order of work now
+
+Agreed 2026-11-14 by every area and the owner ([decisions](decisions.md#2026-11-14-rulings)). Each session works its items
+in this order, on its one branch, and lands when green ([AGENTS.md](../AGENTS.md#3-how-work-moves)). Every item names its
+expected finish to root; root holds it to 2x and 3x.
+
+1. **Stage 0's merge.** Context retries the first backlog task's `seon_done`, watched, once the fork fix is live
+   (4cf7d0ca6a, live since 14:56).
+2. **Nothing hangs, one rule:** every wait passes its declared bound (`:seon.bound/bound`) and ends with
+   `:seon.bound/reached` or a typed error the stall check reads. The fork's wait (deps: Chez, Jolt, `seon.lib/fork!`;
+   runtime reviews); the model call's await and the stall check's effect exemption, agent_proc.clj:123 (runtime's deadline
+   slice; context's turn records the stall); the stalled eval (runtime).
+3. **Running code meets new code, one class:** a process keeps the program it started on until its next start.
+   - The landed change enters the store through the one import: `bin/land` tells root main's new commit, root imports it
+     with its own import (reading git and gitlinks itself), and a pin or binary change answers `:restart`. The bridge's
+     code string and the second import path are deleted (runtime; deps and data review).
+   - An agent's run keeps its program through its own redefinitions and a landing (Stage 0.6: context builds the turn,
+     runtime the `on-root-change` hook).
+   - A restart waits for nothing in flight, so a green session can land at any time (web, runtime).
+4. **Proving as Flow,** the components `seon_done` needs: the effects proc's first slice, deleting `seon.prove`'s grant
+   and admission (tests builds, runtime reviews); the `:ms` deadline and env route (runtime); the merge's check as a prove
+   of the candidate branch; then the harness. The test fork of the running root on a test branch is runtime's, filed.
+   Config reaches running procs live: a main commit that moves a config entry is a message to the procs that read it, and
+   an agent whose branch overrides it is told to merge main.
+5. **The land check runs in seconds:** results reused by reads (data, tests); a cost proof's call counts from the class
+   registry, never a hand sum (tests).
+6. **Merge cost:** re-fork plus load-diff, 8.22B ticks a merge toward ~1.5B (runtime), then the one three-way merge,
+   deleting `carry-tx` (data).
+7. **Duplication, standing:** each session lists, in its area, two shapes for one thing and two passes over one shape,
+   and files each as a task naming what it deletes. Known now: two import paths, two page walks (W-2), two three-way
+   merges, three hiccup walkers.
+8. **The backlog curated** before the next random round: duplicates (same evidence or proof) merged, superseded tasks
+   deleted, and health flags two tasks citing the same evidence or proof (context).
+
+Waits until 1–4 are on main: page assembly cost (W-3), one drawer per page, page search under 8M ticks, the hand-written
+lists class, konserve's read cost, the rest of the errno class, `runtime-for`, `hold-env!` slice 2, the judge's re-index.
+
 ## Stage 0: one happy path (now)
 
 **Goal:** one real backlog task merged by an agent. **Done when:** a task drawn from the backlog is on main, with its turns

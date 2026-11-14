@@ -6,6 +6,38 @@ The owner's standing rulings, one entry each: his words and date, and where the 
 
 The owner's rulings of this day and the night before, each with his words where recorded and where it is now stated.
 
+### No new process before the existing one is found
+
+"Do not create any new processes until you have verified we don't have an existing solution that needs to updated or deleted by this implementation. I will say that is a standing rule for all agents." Stated in [AGENTS.md](../AGENTS.md#3-how-work-moves) (the gate).
+
+### A session lands when green; agents merge themselves
+
+"I want only one worktree and one branch per agent and subagents still need to share the same branch. No more creating hundreds of tiny branches and then waiting hours with them queued up so nothing is merging. Agents are to figure shit out on their own and ideally self merge. I want this done through the seon system though so we may need to wait on some more components for the full flow tests work which should be prioritized." Chosen: a session runs `bin/land` when its check is green, with no release from root; root reads each landed diff. The components that let `seon_done` carry it (proving as Flow) go first. Stated in [AGENTS.md](../AGENTS.md#3-how-work-moves) and [the plan](plan.md#the-order-of-work-now).
+
+### Overruns: 2x audit, 3x reset
+
+Chosen 2026-11-14 after a root session went badly and was restarted to audit "the true lay of the land": each item a session works has an expected finish; past 2x root reads the session's transcript and corrects it; past 3x, or on a repeated wrong turn, the session writes its state and a fresh one starts with an audit brief. Stated in [AGENTS.md](../AGENTS.md#2-who-does-what).
+
+### Bounds are worked out, never waived or restated from a run
+
+On a cost proof whose estimate was restated from measurements three times and then waived: "Find out why and pressure them to justify it algorithmically and to think about the problem differently. How can they have no idea what the bounds are?" A cost proof's estimate is the lower bound as arithmetic; no `:overrun` waiver; past 2x the design is what changes, or the estimate's missed work is named. Stated in [AGENTS.md](../AGENTS.md#3a-design-to-the-lower-bound).
+
+### Config changes reach running procs live
+
+"Flow processes can be updated live and a config update should update live to all relevant branches. If branches have their own overrides we can message the agents and instruct them to merge in the config changes to their git and merge it in." Stated in [the plan](plan.md#the-order-of-work-now).
+
+### Growth: one shape, processed once
+
+"I am not going to set arbitrary amounts. I want us to keep looking for duplication in the data model and then duplication in processing the data model. Fixing the two so we only process things once and it's done well." Stated in [AGENTS.md](../AGENTS.md#3-how-work-moves) and [the plan](plan.md#the-order-of-work-now).
+
+### The landed change enters the store through the one import
+
+"I think the one import path if that's a seon focused solution." `bin/land` tells root main's new commit; root imports it with its one import and answers `:restart` for a pin or binary change; the bridge's code string goes. Stated in [the plan](plan.md#the-order-of-work-now).
+
+### The backlog is curated before a random round
+
+Chosen 2026-11-14: duplicates (same evidence or proof) merged and superseded tasks deleted before the next round. Stated in [the plan](plan.md#the-order-of-work-now).
+
 ### The priority: Claude sessions work through the system
 
 "I want to optimize what fixes broken processes that are slowing us down and getting more of the system off the file based git focused standpoint. I want claude agents to work through the system ... Collapse the focus to just this one view." Then: "Don't delete useful parts of the plan, I said prioritize." Stated in [the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority).
