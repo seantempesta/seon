@@ -15,6 +15,34 @@ so repeated rounds carry every task from start to end (owner, 2026-11-14). Beyon
 (2026-11-11): the system improves its own code (correctness, cost, how interwoven it is, the turns its agents take) by
 "lots of base hits rather than swinging for homeruns".
 
+## The system we are building toward
+
+The target is a system that, once booted, has no dragons or sharp edges: complexity is pushed to the edges, and every problem
+comes back to us as data without breaking anything (owner, 2026-11-14). Five guarantees define it; each names what breaks it
+today and the work that makes it true.
+1. **Booting is the only place we check.** A process starts through one path, which proves once that it holds exactly what
+   its branch names (program, registry, config, environment variables, libraries, pin, binary); past startup that is
+   guaranteed. Broken today by test children forked from root's agent, scripts that take the caller's shell, and merges on
+   a branch's stale program. Made true by Stage 0.5, Stage 1.6 and Stage 2.1.
+2. **Everything inside is plain:** immutable values and Flow procs; no locks, clocks or guards; derived data re-derived by
+   the system when its inputs move, never by a caller remembering to. Broken today by cites, the reach graph and imports
+   going stale, and by two three-way merges in one. Made true by Stage 1.5, Stage 1.6 and a registry of stated and derived
+   attributes (Stage 2).
+3. **Complexity sits at the edges, behind one owner each:** the shell, files, network, the model, processes, git and the
+   dependency forks are effects, bounded and killable, whose failures come back as typed data. Broken today by a reasoning
+   overrun ending a run, a stop with no bound, and git and forks outside the store. Made true by Stage 0.3, Stage 1.7 and
+   Stage 3.2.
+4. **Self-modification cannot cut the floor out:** an agent may redefine anything, and the machinery it runs on (its turn
+   loop, its answers, its test children) runs from the program, not from the REPL's redefinitions. Broken today by an
+   agent that redefined how every eval answers and hung its own turn loop. Made true by Stage 0.6 and Stage 4.3.
+5. **Every problem comes back as data:** every wait ends with a value or a typed error; every error carries its fix and its
+   causes, is drawn on the page of whoever can act on it, and is counted. Broken today by a hang that recorded no stall and
+   by a board of rows dug out of logs by hand. Made true by Stage 0.3, Stage 1.8 and Stage 3.1.
+
+**Measured by:** of a week's failures, the share that arrived as classified data rather than found by a person or session in
+logs, rising to all of them; and zero hangs, zero false reds, and restarts only for a binary change. Then the turns metric
+measures the agents, not the plumbing.
+
 ## Why it is slow today
 
 A process often runs on state its branch doesn't name (stale code, pins, schema registry, config, caches), so verdicts are
@@ -48,7 +76,10 @@ recorded.
    one start path, which checks once, at startup, that the process holds exactly that environment (config, environment
    variables, libraries, pin) and refuses to start otherwise; past startup nothing re-checks it; the import of a checkout's files onto a branch and the live route stay, since Stage 1 builds on them
    (runtime, tests; moved up from Stage 4.3).
-6. `seon.repl/an-uncited-public-defn-is-told-at-its-eval` (proof green at turn 48, its agent now lost) restarted on a fresh
+6. An agent's redefinitions cannot break its own machinery: its turn loop, its eval answers and its test children run from
+   the program, and a wait in the turn loop ends with a typed error that is recorded as a stall (round 1: an agent that
+   redefined `seon.repl/response` hung at turn 24 with no stall recorded) (context, runtime; moved up from Stage 4.3).
+7. `seon.repl/an-uncited-public-defn-is-told-at-its-eval` (proof green at turn 48, its agent now lost) restarted on a fresh
    agent, or the first of the random round's tasks to reach green, merged by `seon_done` (context).
 
 ## Stage 1: Claude sessions work through the system (the priority)
