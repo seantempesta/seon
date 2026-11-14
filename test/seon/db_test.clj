@@ -1707,9 +1707,10 @@
   ;; on disk of its own, the last resort: a node has an address only once a durable store holds it; removed at the end.
   ;; Its seed is 1000 datoms of the example program: at 550 (87 nodes) one node is 1.1% of the tree, so one more config
   ;; key on main moved a B-tree split and turned it red, 9 of 87 against the tenth (batch 20, 2026-11-10); measured on
-  ;; that tree: 5 of 108 own at 1000, 4 of 158 at 2000, the bound five nodes clear, for about 1 s more than 550
+  ;; that tree: 5 of 108 own at 1000, 4 of 158 at 2000, the bound five nodes clear, for about 1 s more than 550. At 1000 one more
+  ;; config key moved a split again (web's :seon.config.render/recent-errors, 2026-11-14: 12 of 118 against the tenth), so 2000
   (let [path (str (seon.config/checkout) "/target/db-test-nodes-" (random-uuid))
-        {cfg :cfg main :conn} (pdb/open! :lmdb path 1000 :db)]
+        {cfg :cfg main :conn} (pdb/open! :lmdb path 2000 :db)]
       (let [b (keyword (str "test-" (random-uuid)))
             _ (d/branch! main :db b)
             br (pdb/connect (assoc cfg :branch b))

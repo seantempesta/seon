@@ -326,7 +326,7 @@
                                {:seon.agent/task :seon.task/task-fact}
                                {:seon.agent/system [:db/id]}
                                {[:seon.model-call/_agent :tx :at] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated :seon.model-call/error :seon.model-call/forms :seon.model-call/basis {[:seon.eval/_call :tx :at] [:db/id :seon.eval/call-id :seon.eval/agent]}]}
-                               {[:seon.eval/_agent :tx :at] [:seon.eval/id :seon.eval/agent {:seon.eval/by [:db/id :seon.agent/key :seon.system/id]} :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response :seon.eval/result :seon.eval/opened]}
+                               {[:seon.eval/_agent :tx :at] [:seon.eval/id :seon.eval/agent {:seon.eval/by [:db/id :seon.agent/key :seon.system/id]} :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response {:seon.eval/result [:db/id :seon.result/ex]} :seon.eval/opened]}
                                {[:seon.message/_to :tx :at] [:seon.message/id {:seon.message/from [:seon.agent/key :seon.user/name :seon.system/id]} :seon.message/to :seon.message/body]}
                                {:seon.cite/_of :seon.cite/cite-fact}
                                {:seon.search/_of :seon.search/search-fact}] :seon.render/hiccup seon.render.ui/agent :seon.render/openai-compat seon.ctx.wire/agent-msgs}
