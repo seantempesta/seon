@@ -652,6 +652,28 @@
     (is (= :stopped (:seon.agent/status (d/entity merged [:seon.agent/key "root"]))) "main's fact, never the shared old value")
     (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch keeps its own change")))
 
+;; Estimate: the world 0.5M (cached) + 1M a task's create + 3 small transactions ~1M + one merge-main and one delta three-way of a few keys
+;; ~4M (an as-of program read on the overtaken key) = 10000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-branch-write-main-rewrote-later-is-a-conflict
+  ;; agent lb76's branch (2026-11-15): it rewrote three other tasks' plans at 10:00 and 14:36; main rewrote them at 17:57 and 18:45; an
+  ;; older merge path then moved its base past main's writes without taking the plans, so the merge to main read the branch's older plan
+  ;; as its change since base and would have replaced main's newer one. Both changed the plan since the value the branch replaced: a
+  ;; conflict, decided by the branch (docs/merging.md#a-branch-merges-main-in)
+  (let [as (fn [db branch ms tx] (:db-after (d/with db {:tx-data (if (fn? tx) (tx db) tx)
+                                                        :tx-meta {:seon.tx/branch branch :db/txInstant (java.util.Date. (long ms))}})))
+        w (base)
+        w (d/db-with w (seon.task/create-tx w [{:seon.task/ns 'demo :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{}}]))
+        t0 (.getTime ^java.util.Date (:db/txInstant (d/entity w (:max-tx w))))
+        head (as w :main/b (+ t0 1000) [[:db/add [:seon.task/id "demo/x"] :seon.task/plan "Make x, as the agent read it."]])
+        b0 (as w :main (+ t0 2000) [[:db/add [:seon.task/id "demo/x"] :seon.task/plan "Make x, as main learned it later."]])
+        main (as b0 :main (+ t0 3000) [{:seon.agent/key "a2" :seon.agent/status :idle}])
+        k [:task "demo/x"]]
+    (is (= [k] (mapv :key (:conflicts (pm/merge-main b0 head main)))) "merging main into the branch: a conflict, not the branch's older plan")
+    (is (= [k] (mapv :key (:conflicts (pm/delta-three-way b0 head main :all)))) "and merging the branch to main")
+    (testing "a branch write after main's is the branch's change"
+      (let [head' (as head :main/b (+ t0 4000) [[:db/add [:seon.task/id "demo/x"] :seon.task/plan "Make x, decided."]])]
+        (is (empty? (:conflicts (pm/merge-main b0 head' main))))))))
+
 ;; Estimate: the world 0.5M (cached) + 5 small transactions + 3 merge-mains (each a diff of a few datoms, program-of on ~3 keys of three
 ;; dbs) ~10M = 15000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 15000000}} a-conflict-the-branch-resolved-merges-the-next-time
