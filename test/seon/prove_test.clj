@@ -725,6 +725,23 @@
     (is (= 18 (count (batches (second (prove/ask-items st0 1 :batch (into {} (for [i (range 18)] [[(symbol "app.w-test" (str "t" i)) (str "d" i)] {:agent (keyword (str "a" i)) :ms 5}])))))))
         "a plain test's batch is its child alone: eighteen, one a worker")))
 
+;; docs/merging.md#the-test-service: a class no reading has seen is never sized by another class's peak. A merge gate's 20 process tests,
+;; each booting a whole root (its bin/held, its embed-worker, its children), were granted beside each other at a step's measured 3
+;; processes a batch: ~74 roots and load 70 on 18 cores (runs/evidence/load70-1026). A class never read runs alone, its peak is
+;; read, and then it is admitted by that peak. T1, in process: ~40 grant passes over 20 items.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-class-never-read-runs-alone-until-its-peak-is-read
+  (let [procs (fn [pre n] (into {} (for [i (range n)] [[(symbol "app.r-test" (str pre i)) (str pre "d" i)]
+                                                       {:agent (keyword (str pre i)) :process? true :tree "t" :checkout "/c" :ms 5}])))
+        st0 (assoc (merge (proc0) (prove/admission {:cores 18})) :peaks {[:step false true] 3})]
+    (with-redefs [prove/held-processes (fn [] {})]
+      (is (= 1 (count (batches (second (prove/ask-items st0 1 :batch (procs "t" 20))))))
+          "twenty root-booting tests, their class never read: one batch alone, not one at each step's three"))
+    (with-redefs [prove/held-processes (fn [] {(prove/batch-tag 1) 15})]
+      (let [[st _] (prove/ask-items st0 1 :batch (procs "a" 1))
+            [st o] (prove/ask-items st 2 :batch (procs "b" 19))]
+        (is (= 16 (get-in st [:peaks [:test true false]])) "its batch read at 15 and its own child: the class's peak")
+        (is (= 0 (count (batches o))) "sixteen beside sixteen is over twenty: nothing more while it runs")))))
+
 ;; docs/clocks.md#the-machines-load-admits-work: over max-load nothing more is granted while an item runs; with nothing
 ;; running one item is granted anyway, so the queue never stalls with nothing to wake it
 (deftest ^{:seon.test/estimate {:ticks 500000}} max-load-admits-only-under-it-but-never-stalls
