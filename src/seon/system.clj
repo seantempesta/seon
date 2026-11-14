@@ -1756,9 +1756,11 @@
   {:malli/schema [:=> [:cat :map] [:maybe :map]]}
   [r]
   (when-let [coord (or (::flow/undeliverable r) (::flow/dropped-on-stop r))]
-    (let [msg (str "an output was lost: " (print/text coord) (if (::flow/dropped-on-stop r) ", dropped by a stop" ", which nothing in the graph takes"))]
+    ;; the coord as the error stores it: EDN that reads back, whole (seon.edn/encode, the wire's printer)
+    (let [c (sedn/encode coord)
+          msg (str "an output was lost: " c (if (::flow/dropped-on-stop r) ", dropped by a stop" ", which nothing in the graph takes"))]
       {:op :error :pid (::flow/pid r) :message msg
-       :data (contract/error :seon.system/undeliverable #'seon.system/flow-report msg {:coord (print/text coord)})})))
+       :data (contract/error :seon.system/undeliverable #'seon.system/flow-report msg {:coord c})})))
 
 (defonce ^:private uncaught
   ;; where an error no thread, fiber or go body caught goes (uncaught!): kept under :early until this process's root listens,
