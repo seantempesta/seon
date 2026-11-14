@@ -34,6 +34,10 @@ Context runs one watched task now, random rounds after the model call's bound. O
 Then: "I think the perf readings are mostly a canary in the coal mine for us. If we get a crazy number like 10 seconds to write a transaction and we know it should be ms we don't allow it. Hot paths should make it so damn easy to do the right thing that agents want to use it." A cost far over its lower bound stops the work (AGENTS §3, 10x); a hot path's API is the easiest way to do its job.
 
 The why, in his words: "Clojure is kind of like this. It's very hard to write clojure that is stateful or even imperative. You are given great tools that always refocus on a few solid ways to thread through them so you end up building with tools that are optimized for their execution rather than supporting everything. This is what we are doing. We are adding constraints to our system to optimize. I want one best way of doing things reused everywhere." To be folded into [principles](principles.md#4-one-mechanism-per-job) at the next retrospective.
+### No timeouts in tests
+
+"Why are we having timeouts in our tests? That's not allowed." A test ends by its result or by a deadlock event (Jolt's quiescence, with every fiber's dump), never by a clock; an effect a test does not provide answers its typed error at once.
+
 ### Writes through Flow, for sameness
 
 On whether one writer per branch was fine: "I like the idea of flow processing it in terms of monitoring and keeping things the same for interface with long running stateful processes so I'll pay a reasonable overhead for the sameness." Every agent's write becomes a credited message to root's writer proc; the measured overhead per commit is held to a reasonable share of a turn.
