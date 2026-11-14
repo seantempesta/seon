@@ -144,6 +144,25 @@
   ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"
    "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS" "-u" "SEON_WEB_PORT" "-u" "SEON_SERVER_PORT"])
 
+(def child-env-variables
+  "The variables child-env-scrub removes: the ones that name a checkout's root, runs, home, libraries and ports. See
+  docs/source.md#the-next-generation."
+  (mapv second (filter #(= "-u" (first %)) (partition 2 1 child-env-scrub))))
+
+(defn checkout-env!
+  "This process's environment made checkout's own, as bin/test starts a shard of it: child-env-variables removed, then
+  SEON_CHECKOUT, HOME, JOLT_PWD and JOLT_LMDB_LIB set from checkout as bin/env and bin/test set them. For a process forked from another checkout's (a test child of the
+  service, forked from root's agent), so what it starts (a test's root, bin/system) reads checkout's tree, never root's.
+  See docs/source.md#the-next-generation."
+  {:malli/schema [:=> [:cat :string] :nil]}
+  [checkout]
+  (doseq [v child-env-variables] (lib/c-unsetenv v))
+  ;; what bin/env and bin/test give a shard of checkout, each from checkout as they derive it
+  (doseq [[v x] {"SEON_CHECKOUT" checkout "HOME" (str checkout "/target/home") "JOLT_PWD" checkout
+                 "JOLT_LMDB_LIB" (str checkout "/target/lib/liblmdb.dylib")}]
+    (lib/c-setenv v x 1))
+  nil)
+
 (defn source-file?
   "Is the file at relative path p one a read of the source takes, under a source dir: Clojure or EDN, or a kind the
   allow-list names (seon.config/file-kind). See docs/source.md#a-program-file."
