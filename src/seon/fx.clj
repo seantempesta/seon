@@ -1245,7 +1245,7 @@
                   (doseq [^java.io.File d (concat (.listFiles (java.io.File. (str (cfg/checkout) "/target")))
                                                   (.listFiles (java.io.File. (str (cfg/checkout) "/target/runs"))))
                           :let [n (.getName d) rel (if (= "runs" (.getName (.getParentFile d))) (str "runs/" n) n)]
-                          :when (and (.isDirectory d) (re-matches #"(program-store|test-store)-[0-9a-f]+" n)
+                          :when (and (.isDirectory d) (re-matches #"(program-store|test-store)-[0-9a-f]+(?:-\d+)?" n)
                                      (.isFile (java.io.File. d "data.mdb")))]
                     (let [to (str dir "/target/" rel)]
                       (seon.lib/remove-tree! to) (lib/sh "mkdir" "-p" to)
@@ -1398,7 +1398,7 @@
 
 (defn- clone-program-store!
   "The checkout's plan program store (its own :seon.config.proofs/program-store, each base-<digest> under it, as kept-store!
-  keys them) cloned under base, an item's own (cp -c, APFS copy-on-write, as each check step clones the seeded store): items
+  keys them, and each generation of one, base-<digest>-<n>: seon.test-store/generations) cloned under base, an item's own (cp -c, APFS copy-on-write, as each check step clones the seeded store): items
   running at once share no mutable store, and a clone's writes are cache, dropped with it. Answers base. See
   docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :string :string] :string]}
@@ -1410,7 +1410,7 @@
         from (java.io.File. ^String src)
         stem (.getName from)]
     (doseq [^java.io.File d (some-> (.getParentFile from) .listFiles seq)
-            :when (and (.isDirectory d) (re-matches (re-pattern (str "\\Q" stem "\\E-[0-9a-f]{8}")) (.getName d)))
+            :when (and (.isDirectory d) (re-matches (re-pattern (str "\\Q" stem "\\E-[0-9a-f]{8}(?:-\\d+)?")) (.getName d)))
             :let [to (str base (subs (.getName d) (count stem)))]]
       (lib/sh "mkdir" "-p" to)
       (doseq [n (kept-files d)]
