@@ -679,9 +679,10 @@
                ;; - 2026-11-14 (web): one seon.render/entity-read-keys per component run, its tree reads as datom keys: 15 calls
                ;; sum: ~2,455 calls, ~0.78M ticks, ~3.3 MB. Measured 2026-11-13 at 2 / 4 / 8: 2,429 calls, 0.82M ticks, 3.54 MB at every size
                ;; (1.01M and 4.17 MB when rules sorted all 162 vars). None of it reads the parent's history
-               ;; 2026-11-15 (context): +24 calls, seon.ratom/key-set (contracted) in each entity-schema of a view and in placed-messages, where an
-               ;; iteration was read: a page's key-set reads, constant in the parent's length
-               :fixed {:calls 2479 :bytes 3500000 :ticks 800000}
+               ;; 2026-11-15 (web): restated in ticks and bytes, the owner's measure. Calls went green and red at one digest (2,455 / 2,463):
+               ;; seon.profile's call counters are process-wide, so a thread still running during the measure adds its calls, while ticks
+               ;; and bytes are this thread's own (docs/cost.md#how-we-measure)
+               :fixed {:bytes 3500000 :ticks 800000}
                :sizes [2 4 8]}))
 
 (defn rules-of
