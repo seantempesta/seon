@@ -908,7 +908,11 @@
       ;; a defect in a root proc: recorded as data (its error map when it carries one), and
       ;; the message the step took answered with it (Flow's catch dropped the step's outputs):
       ;; the api's own throw answers every message its step took (::lost)
-      :error (let [e (if (contract/error? (:data m))
+      :error (if (stopped-statuses (get-in st [:view :agents (:to m) :status]))
+               ;; an output Flow dropped for an agent the api stopped on purpose (its cancel, stop or kill: :seon.status/stopped): the
+               ;; stop meant to drop what was in flight to it, so it is no problem (seon.problems-test/a-drop-to-an-agent-stopped-on-purpose-is-no-problem)
+               st
+               (let [e (if (contract/error? (:data m))
                        (:data m)
                        (contract/error :seon.system/proc-defect (proc-sym st (:pid m)) (or (:message m) "a defect with no message")
                                        ;; where it threw, and what it took (a message's op, or an answer's keys)
@@ -925,7 +929,7 @@
                    (cond-> (:down m) (assoc-in [::down (:pid m)] e))
                    (view! update :root-errors #(lib/push-window %1 %2 (cfg/value :seon.config.root/view-window)) (merge {:pid (:pid m) :message (:message m)} (:data m)))
                    (view! update :root-errors-total (fnil inc 0))
-                   (problem (err/occurrence e :platform {} (System/currentTimeMillis)))))
+                   (problem (err/occurrence e :platform {} (System/currentTimeMillis))))))
       ;; an agent's errors since its last commit (seon.error/note, each of its class), counted across agents
       :errors (let [task (get-in st [:view :agents (:agent m) :task])]
                 (reduce (fn [st s] (problem st (err/sent->occurrence s (:agent m) task))) st (:entries m)))
@@ -1766,6 +1770,8 @@
     (let [c (sedn/encode coord)
           msg (str "an output was lost: " c (if (::flow/dropped-on-stop r) ", dropped by a stop" ", which nothing in the graph takes"))]
       {:op :error :pid (::flow/pid r) :message msg
+       ;; the pid an undeliverable output was for: the api judges whether it left on purpose (its :error case)
+       :to (when (::flow/undeliverable r) (first coord))
        :data (contract/error :seon.system/undeliverable #'seon.system/flow-report msg {:coord c})})))
 
 (defonce ^:private uncaught

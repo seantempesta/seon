@@ -36,6 +36,7 @@ Each page of the wiki, in one line.
 - [source](source.md): agents change Seon's own functions at the REPL; a merge writes them back.
 - [references](references.md): what a text cites, read by one parser, pulled at its delimiter's depth.
 - [ctx](ctx.md): the agent's entity as one map, `@ctx`, and the one render the model and the person read.
+- [reactive](reactive.md): the reactive core: Reagent's reactions and tracks over the store, each run's reads recorded as datom keys, and a commit reaching only the readers of what it moved.
 - [render](render.md): every view is the one printer or a render declared on the value's schema.
 - [prompt](prompt.md): the system prompt every agent reads first.
 - [agent](agent.md): the help page, which `my.agent/doc` reads by section.

@@ -140,6 +140,7 @@ The ways a Flow graph can wedge or lose data, each read in the source and confir
 2. **A step that never returns can't be stopped:** `stop` names it after `:stop-timeout-ms`, and it lives on.
 3. **Clocks inside Flow:** `compute-timeout-ms`, `finish-outputs!`'s 1000 ms, `stop-timeout-ms`, ping's 1000 ([clocks](clocks.md)).
 4. **Drops:** the report chan past 100 (sliding, counted in the ping's metadata), casts past 100 (oldest dropped), a mult with no taps, and any lossy-buffer channel (counted by `jolt.host/chan-dropped`); an unconnected out is dropped but reported; the error chan never drops (a reporting proc waits).
+5. **A step that runs long shows as an unanswered ping:** ```clojure.core.async.flow/ping-proc``` with `:timeout-ms 1`, asked twice a few seconds apart, gets no answer from a proc inside one step (seen 2026-11-14: `:render` reading health whole for 80 s a step). A `:mixed` proc is its own OS thread, so its frames are not in the fiber dump.
 
 ## The step-fn contract every proc follows
 

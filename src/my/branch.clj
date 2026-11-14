@@ -41,14 +41,14 @@
          {:imported todo :unchanged unchanged :skipped skipped})))))
 
 (defn merge-main!
-  "git merge main: stage this runtime onto the branch, then merge main's changes since
-  the merge base. What does not conflict is applied and loaded here; each conflict stays
-  on the branch as an unmerged entry (base, ours, theirs). Answers {:ok :applied
+  "git merge main: the branch becomes main plus its own change since the merge base (seon.agent/merge-main!); a key both
+  changed stops it, and each conflict stays on the branch as an unmerged entry (base, ours, theirs). Main's forms load at this
+  process's next start, never here. Answers {:ok :applied
   :conflicts :unmerged} (unmerged: every entry still open, earlier ones included), printed by `merged-summary`: the whole
   value stays under the eval's handle."
   {:malli/schema [:=> [:cat] [:map [:ok :boolean]]]}
   []
-  (let [r (agent/merge-main! :all)
+  (let [r (agent/merge-main!)
         db (agent/db)]
     (with-meta (assoc r :unmerged (pm/unmerged db)) {:seon.render/schema :seon.branch/merged})))
 

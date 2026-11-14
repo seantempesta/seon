@@ -66,7 +66,7 @@ A test reads a root's branches from the store in its own process, never by askin
 ## Test types
 
 A test is what its deftest's metadata states: each metadata key an entity schema owns is written on the test's var as that attribute's fact (```seon.program/def-tx```), so a test is named as any entity is (```seon.db/most-specific```). Three sets of attributes:
-- **`:seon.test/test`**: `:seon.test/estimate`, `{:ticks n}` worked from what it must do (optional `:bytes`, `:asks`, `:execs`). It is given the shared world (`my.test/world`, `seon.test-store/test-db`, `test-branch!`) and runs in process.
+- **`:seon.test/test`**: `:seon.test/estimate`, `{:ticks n}` worked from what it must do (optional `:bytes`, `:asks`, `:execs`). It is given the shared world (`my.test/world`, `seon.test-store/test-db`, `test-branch!`) and runs in process. A deftest with no estimate is health's `:unestimated-test`, which stops a land before any prove.
 - **`:seon.test/system-test`**: also `:seon.test/root`, the root's arguments it asks for (`[]`: the shard's shared root). It is given a running system.
 - **`:seon.test/binary-test`**: also `:seon.test/execs`, the commands it runs (`["target/seon"]`, `["bin/check"]`).
 

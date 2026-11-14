@@ -17,7 +17,7 @@
 
 ;; Estimate: two owners, one atom, two reactions, three steps: ~100k ticks
 (deftest ^{:seon.test/estimate {:ticks 100000}} a-reaction-runs-only-in-its-owners-step
-  ;; seon.ratom/a-reaction-queue-is-its-owners: owner A's reaction dirtied in owner B's step is never run by B's flush!; it reaches A
+  ;; docs/reactive.md#how-a-commit-reaches-its-readers-today: owner A's reaction dirtied in owner B's step is never run by B's flush!; it reaches A
   ;; as a message on A's port ({:seon.ratom/dirty r}) and runs in A's step. Red before: one process-wide queue, so B's flush! ran A's
   ;; reaction (and preempted fibers lost 267,087 of 400,000 enqueues to it: flow-lab e18). Deterministic, no load
   (let [port (clojure.core.async/chan 4)
@@ -37,7 +37,7 @@
 
 ;; Estimate: two owners, one atom, one auto-run reaction, three steps: ~100k ticks
 (deftest ^{:seon.test/estimate {:ticks 100000}} an-auto-run-reaction-runs-only-in-its-owners-step
-  ;; runtime-2's review of seon.ratom/a-reaction-queue-is-its-owners: an auto-run reaction (run!) of owner A whose source changes in owner
+  ;; docs/reactive.md#how-a-commit-reaches-its-readers-today (runtime-2's review of the owner queue): an auto-run reaction (run!) of owner A whose source changes in owner
   ;; B's step does not fire in B's step, under B's bindings; it reaches A as a message on A's port and runs in A's step. Red before:
   ;; it ran at once inside B's reset!
   (let [port (clojure.core.async/chan 4)

@@ -151,13 +151,15 @@
                :n "evals of the session before the turn"
                :work "the new turn's messages read, each earlier component's as they were kept, the tree walked once; the turn's page message, its edits made once"
                :growth :linear
-               :per-n {:calls 8 :bytes 15000}
-               :fixed {:calls 900 :bytes 600000}
+               ;; 2026-11-14 (web): restated in ticks and bytes, the owner's measure (ticks, bytes, seconds; calls retired: they count private
+               ;; helpers production does not check, W-5's marker tests among them). Ticks = the work's calls above x ~1.4k ticks a contracted call
+               ;; on this render path (seon.render-cost-test/a-request-made-again-costs-what-moved: 3.65M ticks over 2,598 calls, 2026-11-14).
+               :per-n {:ticks 11200 :bytes 15000}
+               :fixed {:ticks 1260000 :bytes 600000}
                ;; owner's yes, 2026-11-10 ("Land now, three waivers", docs/decisions.md#three-request-cost-proofs-land-waived-owner-2026-11-10): a cold request draws
                ;; the page at the first turn's basis and advances one walk through every later basis (~6k calls), and each history record is drawn
                ;; by its own model render (~3k, an eval's print the most); the rest is outside the model render. The waiver comes off with that task.
                ;; Measured on jolt/pages 2026-11-10 at its largest size, 2,350 calls and 3.62 MB at 100 (its bound: 1,700 calls, 2.1 MB).
-               :overrun {:task "seon.render/a-model-render-draws-each-turns-diff" :n 100 :measured {:calls 2350.0 :bytes 3620000.0}}
                :sizes [10 30 100]}))
 
 (defn greens-of
