@@ -79,4 +79,8 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.proofs-test/a-jolt-gate-is-a-test-reused-by-what-it-reads}
   :seon.task/needs #{}}
+ {:seon.task/name "a-tests-bytes-and-wall-are-budgets-as-its-ticks-are"
+  :seon.task/plan "The owner, 2026-11-14 (via root): \"we don't accept large overruns for ticks, mem or time.\" What exists [M, verdict files]: every result records :ticks, :bytes and :ms (seon.proofs/test-vars' measure!), and only ticks are a budget: ten times ^{:seon.test/estimate {:ticks n}} (docs/merging.md#a-tests-tick-budget). Change: the estimate states :bytes and :ms beside :ticks, worked from its parts; bytes are a budget as ticks are (ten times, a typed :seon.test/bytes-spent ending the test, bytes being work done by this thread); wall is recorded with the machine's 1-min load at the test's start and end (an outside read, so a verdict that reads it is never reused by it) and judged only past ten times its estimate at a load under the cores, as a :platform problem naming the load, never a red (wall under load is the machine's, not the test's). health's :unestimated-test names a test whose estimate states no :bytes. Estimate: one more counter compare a test (bytes are measured already), zero reads added. Proof, red first: a test that allocates past ten times its stated :bytes ends with :seon.test/bytes-spent (seon.proofs-test/a-test-past-its-bytes-budget-ends-typed)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.proofs-test/a-test-past-its-bytes-budget-ends-typed}}
 ]

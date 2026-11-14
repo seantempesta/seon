@@ -741,8 +741,9 @@
  :seon.config.proofs/tree-files-kept 12
  ;; Unit: bytes. The kept program dbs' store on disk (its data.mdb). Measured 2026-10-23: 12 MB
  ;; for the whole program (118 files), about 2 MB more a kept tree that changed a file. At the
- ;; bound: the store is removed before it is opened and starts again from the run's tree (one
- ;; import); an LMDB file never shrinks, so collecting would not bring it under.
+ ;; bound: the next tree the plan imports starts the key's next generation, <path>-<key>-<n> (test-runner/program-db), a whole
+ ;; import; the full one is never moved or removed under the runs reading it (an LMDB file never shrinks, so collecting would
+ ;; not bring it under); generations past program-stores-kept that no process holds open are removed.
  :seon.config.proofs/program-store-max-bytes 268435456
  ;; Unit: path. The checks' own store, bin/check's store when SEON_STORE names none: output, regenerable from its seed, so
  ;; seon.check/seed keys it by the digest of what the seed writes (a link to <path>-<digest>) and removes one made from another
