@@ -248,7 +248,7 @@
   branch of yet is imported here, so no test pays an import inside its own budget (a key change once cost a test its 400M).
   See docs/merging.md#a-tests-tick-budget."
   (delay (let [store (ts/kept-program-store) db (program-db (config/checkout) store)]
-           (reach-graph-of db (fx/declared-refs seon.graph/built-text) store)
+           (reach-graph-of db (fx/declared-refs seon.graph/built-text) store (fx/tree-id (config/checkout)))
            db)))
 
 (defn program
@@ -262,39 +262,67 @@
   second arm goes when a session's tree is a branch of the store. docs/merging.md#a-merge-runs-what-the-change-reaches."
   [] (or (:db @seon.agent/state) @kept-program))
 
+(defn- tree-file
+  "The file of base (\"reach-graph\", \"reads-index\") kept for tree in the program store at store: one a tree, so plans of two
+  trees at once never overwrite each other's (one slot for every tree made a test's cost the last writer's). A tree-less run
+  (a scratch store of a test's own) keeps base.fasl."
+  [store base tree] (io/file store (if tree (str base "-" tree ".fasl") (str base ".fasl"))))
+
+(defn- kept-tree-files
+  "The files of base kept for any tree in store, newest first."
+  [store base]
+  (->> (.listFiles (io/file store))
+       (filter (fn [^java.io.File f] (let [n (.getName f)] (and (str/starts-with? n (str base "-")) (str/ends-with? n ".fasl")))))
+       (sort-by (fn [^java.io.File f] (- (.lastModified f))))))
+
+(defn- keep-tree-file!
+  "Write bs to f atomically (a reader sees the whole file or none), then remove base's files past the
+  :seon.config.proofs/tree-files-kept newest, so the disk stays bounded. Regenerable output: a file removed is made again."
+  [store base ^java.io.File f ^bytes bs]
+  (let [tmp (io/file store (str (.getName f) "." (random-uuid)))]
+    (java.nio.file.Files/write (.toPath tmp) bs (make-array java.nio.file.OpenOption 0))
+    (java.nio.file.Files/move (.toPath tmp) (.toPath f) (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/ATOMIC_MOVE java.nio.file.StandardCopyOption/REPLACE_EXISTING]))
+    (doseq [^java.io.File o (drop (config/value :seon.config.proofs/tree-files-kept) (kept-tree-files store base))]
+      (.delete o))))
+
 (defn reach-graph-of
-  "The reach graph of db: the one stored in the program store at store (reach-graph.fasl, jfasl:
-  a stored graph decodes in about a sixth of what building one costs, 23M ticks against 146M on
-  Seon's program) brought to db by seon.program/reach-update, which re-folds only what differs,
-  else built (seon.program/reach-graph); stored again when it moved. A stored graph is used
-  only when the code that builds one (builder-id) and the system's data-refs are the ones it was
-  built under; one that does not read is built over: it is regenerable output of the kept store."
-  [db data-refs store]
-  (let [f (io/file store "reach-graph.fasl")
-        id (builder-id db)
-        stored (when (.isFile f)
-                 (let [{:keys [builder graph]} (fasl/deserialize {} (java.nio.file.Files/readAllBytes (.toPath f)))]
-                   (when (and (= id builder) (= data-refs (:data-refs graph))) graph)))
-        g (if stored (program/reach-update stored db) (program/reach-graph db data-refs))]
-    (when (or (nil? stored) (not= (:live g) (:live stored)))
-      (let [tmp (io/file store (str "reach-graph.fasl." (random-uuid)))]
-        (java.nio.file.Files/write (.toPath tmp) ^bytes (fasl/serialize {:builder id :graph (dissoc g :affected)})
-                                   (make-array java.nio.file.OpenOption 0))
-        (java.nio.file.Files/move (.toPath tmp) (.toPath f) (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/ATOMIC_MOVE java.nio.file.StandardCopyOption/REPLACE_EXISTING]))))
-    g))
+  "The reach graph of db, the program of tree: the one stored for tree in the program store at store (tree-file: jfasl, a stored
+  graph decodes in about a sixth of what building one costs, 23M ticks against 146M on Seon's program), else the newest stored
+  for another tree as a base, brought to db by seon.program/reach-update, which re-folds only what differs, else built
+  (seon.program/reach-graph); stored again for tree when it moved. A test of tree reads the graph its plan stored for tree, so
+  its cost is its own tree's, never another prove's. A stored graph is used only when the code that builds one (builder-id)
+  and the system's data-refs are the ones it was built under; one that does not read is built over: it is regenerable output of
+  the kept store."
+  ([db data-refs store] (reach-graph-of db data-refs store nil))
+  ([db data-refs store tree]
+   (let [f (tree-file store "reach-graph" tree)
+         id (builder-id db)
+         read-graph (fn [^java.io.File f]
+                      (when (.isFile f)
+                        (let [{:keys [builder graph]} (try (fasl/deserialize {} (java.nio.file.Files/readAllBytes (.toPath f)))
+                                                           ;; removed by keep-tree-file! between the listing and the read: none
+                                                           (catch java.nio.file.NoSuchFileException _ nil))]
+                          (when (and (= id builder) (= data-refs (:data-refs graph))) graph))))
+         own (read-graph f)
+         stored (or own (when tree (some read-graph (kept-tree-files store "reach-graph"))))
+         g (if stored (program/reach-update stored db) (program/reach-graph db data-refs))]
+     (when (or (nil? own) (not= (:live g) (:live own)))
+       (keep-tree-file! store "reach-graph" f (fasl/serialize {:builder id :graph (dissoc g :affected)})))
+     g)))
 
 (defn- reads-index-of
   "The reads index of the checkout at root on tree (seon.program/reads-index over graph g and inputs in), kept in the program
-  store at store beside the reach graph (reads-index.fasl, by tree): a plan on a tree already indexed reads it, never makes
-  it again (Tests: plans remade every digest on each ask, 1.4-12.6 s). Regenerable output of the kept store."
+  store at store beside the reach graph (tree-file reads-index, one a tree): a plan on a tree already indexed reads it, never
+  makes it again (Tests: plans remade every digest on each ask, 1.4-12.6 s; one slot for every tree remade it at each other
+  tree's plan). Regenerable output of the kept store."
   [root store tree g in]
-  (let [f (io/file store "reads-index.fasl")
-        kept (when (.isFile f) (let [{t :tree rd :rd} (fasl/deserialize {} (java.nio.file.Files/readAllBytes (.toPath f)))] (when (= t tree) rd)))]
+  (let [f (tree-file store "reads-index" tree)
+        kept (when (.isFile f) (let [{t :tree rd :rd} (try (fasl/deserialize {} (java.nio.file.Files/readAllBytes (.toPath f)))
+                                                           (catch java.nio.file.NoSuchFileException _ nil))]
+                                 (when (= t tree) rd)))]
     (or kept
-        (let [rd (seon.program/reads-index g in (fx/blob-ids root tree))
-              tmp (io/file store (str "reads-index.fasl." (random-uuid)))]
-          (java.nio.file.Files/write (.toPath tmp) ^bytes (fasl/serialize {:tree tree :rd rd}) (make-array java.nio.file.OpenOption 0))
-          (java.nio.file.Files/move (.toPath tmp) (.toPath f) (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/ATOMIC_MOVE java.nio.file.StandardCopyOption/REPLACE_EXISTING]))
+        (let [rd (seon.program/reads-index g in (fx/blob-ids root tree))]
+          (keep-tree-file! store "reads-index" f (fasl/serialize {:tree tree :rd rd}))
           rd))))
 
 (defn- tests-of
@@ -311,7 +339,7 @@
         ;; the plan alone bounds the store, at its own import, before anything of this run reads it
         db (program-db root store tree (config/value :seon.config.proofs/program-store-max-bytes))
         in (fx/inputs root config/config (config/checkout) tree)
-        g (reach-graph-of db (:data-refs in) store)
+        g (reach-graph-of db (:data-refs in) store tree)
         ;; the process store a process test's root takes is indexed by this tree's code: its key is an input of theirs
         in (seon.program/with-index-code g in)
         ;; a process test's config values are its root's, whoever plans (seon.config/test-system-config)
@@ -693,14 +721,14 @@
         (println (str "prove: a merge's verification: " (+ ran late) " keys that reach a process run (no green at their digest), 0 left out: "
                       ran " in this plan, " late " the slow ones run last (the process plan after it)"))))
     ;; a key green and red at one digest: red, never run again until a change moves its digest;
-    ;; out/flaky names each, and bin/test ends red on it after its shards ran
+    ;; out/flaky names each, and bin/test prints it after its shards ran: no verdict, never a red
     ;; the reuse audit (seon.proofs/plan-of): reused greens run again; out/audit names them, and bin/test calls a red among
     ;; them a reuse mismatch: a digest that missed an input
     (write! (str out "/audit") (apply str (map #(str % "\n") audit)))
     (when (seq audit)
       (println (str "prove: reuse audit: " (count audit) " reused greens run again (chosen by the tree): " (str/join " " (map str audit)))))
     (let [flaky (for [[k r] flaky]
-                  (str "FLAKY " k " " (:digest r) ": green and red at this digest, red until a change moves it (seon.proofs/flaky)"))]
+                  (str "FLAKY " k " " (:digest r) ": green and red at this digest, no verdict: a :platform problem, never a red (seon.proofs/flaky)"))]
       (write! (str out "/flaky") (apply str (map #(str % "\n") flaky)))
       (run! println flaky))
     (println (str "prove: " (count cand) " keys (" (if tests? (count digests) 0) " tests, " (count (remove proofs/mg-key? (keys steps))) " check steps, " (count (filter proofs/mg-key? (keys steps))) " contracts), "
@@ -869,7 +897,11 @@
           planned (let [f (io/file out "tests.edn")] (when (.isFile f) (:tree (edn/read-string (slurp f)))))]
       (cond (not (zero? (:exit made))) (fail (str "bin/worktree --at " at " " base " exited " (:exit made)) made)
             (nil? planned) (fail (str "the base's runner made no plan in " out " (exit " (:exit r) ")") r)
-            (not= tree planned) (fail (str "the base's runner planned tree " planned ", not the base's " tree) r)))
+            ;; the evidence of what moved the checkout's tree off its commit's: the files git sees changed or untracked in it (a
+            ;; red seen only under concurrent proves, deps' and runtime's lands 2026-11-14, green alone)
+            (not= tree planned) (fail (str "the base's runner planned tree " planned ", not the base's " tree "; the checkout's files off its commit: "
+                                           (str/trim (:out (lib/sh "git" "-C" at "status" "--porcelain" "--untracked-files=all"))))
+                                      r)))
     (finally (remove-checkout! at))))
 
 (defn base-program
@@ -917,7 +949,7 @@
 
 (defn- health!
   "The health step (docs/health.md#checks-are-callers-of-seon): what this checkout caused since its
-  base (seon.fx/base-commit), branch-health of classes. The head is the working tree's program db, kept in the
+  base (seon.fx/base-commit), branch-health of classes. The head is the committed tip's (HEAD's tree, never an uncommitted change), its program db kept in the
   program store (program-db: a tree it never saw is the nearest kept tree with the changed files refreshed), and the
   base the base tree's, made by the base's own code in a process of its own (base-program), each with its tasks and wiki (with-wiki):
   it costs what the trees differ by and two wiki loads, never a root booted or the program imported
@@ -928,8 +960,17 @@
         base (fx/base-commit root)]
     (if-not base
       (do (println (str "HEALTH FAILED: no base: " root " has no commit before this one on " (config/value :seon.config.source/main))) 1)
-      (let [store (ts/shared-program-store! (config/value :seon.config.proofs/program-store) @ts/kept-program-digest)
-            head (with-wiki (program-db root store) root)
+      (let [;; what the checkout holds that no commit does: said, never judged (health reads the committed tip)
+            dirty (seq (remove str/blank? (str/split-lines (:out (sh/sh "git" "-C" root "status" "--porcelain")))))
+            _ (when dirty (println (str "health reads the committed tip " (str/trim (:out (sh/sh "git" "-C" root "rev-parse" "--short" "HEAD")))
+                                        "; " (count dirty) " uncommitted path(s) not judged (commit them to have them judged): "
+                                        (str/join ", " (map #(subs % 3) (take 5 dirty))) (when (next (drop 4 dirty)) ", ..."))))
+            store (ts/shared-program-store! (config/value :seon.config.proofs/program-store) @ts/kept-program-digest)
+            ;; the head is the committed tip (HEAD's tree, its tasks and wiki as git holds them), never the checkout's files: a
+            ;; change not yet committed (a helper's, mid-edit) is no part of what lands, so none of what health judges
+            head (let [hdir (str root "/target/tmp/health-head-" (random-uuid))]
+                   (try (with-wiki (program-db root store (fx/tree-of root "HEAD")) (fx/checkout-at root "HEAD" ["docs" (tasks-dir) "*.md"] hdir))
+                        (finally (seon.lib/remove-tree! hdir))))
             ;; the base's tasks and wiki, as git holds them, in a directory of this run's own, removed once read; and where the base's
             ;; checkout is made when its program must be (base-program), removed once its runner ran
             dir (str root "/target/tmp/health-base-" base "-" (random-uuid))

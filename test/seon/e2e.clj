@@ -300,15 +300,18 @@
                  (when-not (some #(and (ready (:agent %)) (= "calc/neg" (:task %))) (task/running (db sys)))
                    (recur ready))))
              (println :cancel-neg (select-keys (root/cancel! sys ["calc/neg"]) [:ok])))
-   :check "[(app.calc/sum-sq 3 4) (count (my.db/q '[:find ?e :where [?e :seon.model-call/id]]))]" :expect ["[25 0]"]
+   ;; the merged tasks' model calls reach main as facts (docs/merging.md#a-branch-merges-main-in): the 5 of :model-calls-in-merges
+   :check "[(app.calc/sum-sq 3 4) (count (my.db/q '[:find ?e :where [?e :seon.model-call/id]]))]" :expect ["[25 5]"]
    :ok (fn [{:keys [sys q d]}]
          (let [idx (r/index d)
                done? (every? #(r/done? idx %) ["calc/add-merge" "calc/twice-merge" "calc/square-merge" "calc/sum-sq-merge"])
                blocked (r/blocked-by idx "calc/abs")
                sq-db (:db @(c/branch-db sys (task/default-branch "calc/square")))
                sq-turns (sort-by first (map (fn [[n e]] [n (str/join "\n\n" (keep :content (:messages (wire/render sq-db (:seon.model-call/basis (d/pull sq-db [:seon.model-call/basis] e))))))])
-                                            (d/q '[:find ?n ?e :where [?e :seon.model-call/n ?n] [?e :seon.model-call/origin :model]
-                                                   [?e :seon.model-call/basis _]] sq-db)))
+                                            ;; square's own calls: a branch holds every agent's records once main's merge in (docs/merging.md#a-branch-merges-main-in)
+                                            (d/q '[:find ?n ?e :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.model-call/agent ?a]
+                                                   [?e :seon.model-call/n ?n] [?e :seon.model-call/origin :model] [?e :seon.model-call/basis _]]
+                                                 sq-db (:seon.task/agent (task/task sq-db "calc/square")))))
                read-failure? (and (= 2 (count sq-turns))
                                   (str/includes? (second (second sq-turns)) "(= 9 (app.calc/square 3))")
                                   (str/includes? (second (second sq-turns)) "(= 9 0)"))]

@@ -452,8 +452,7 @@
   [db c] (@(requiring-resolve (quote seon.ctx.wire/model-call-msgs)) {:seon.db/db db} (assoc c :seon.model-call/origin :model)))
 
 (defn no-error-render
-  "Asserts that defects ds (a walk's `:seon.render/component-defect`s, read with @(:defects w): `seon.render/take-defects!` is the
-  reader that drains them) hold no component's error drawn in a page: each that `:expects` does not name is a failed assertion naming
+  "Asserts that defects ds (a walk value's `:seon.render/component-defect`s, its :defects) hold no component's error drawn in a page: each that `:expects` does not name is a failed assertion naming
   the render and its message. `:expects` is a set of strings, each matched exactly against a defect's `:seon.error/message` or the
   name of the render that threw (`:seon.error/in`, as a string): a test that renders an error on purpose names it, and nothing else
   passes. Answers the defects not expected (empty when the assertion held). A page built in an agent's own process (a forked one, as
@@ -468,21 +467,40 @@
      (is (empty? unexpected) (str "a page drew an error in a component's place: " (pr-str (mapv #(select-keys % [:seon.error/in :seon.error/message]) unexpected))))
      unexpected)))
 
-(defn flush!
-  "`seon.render/flush!` of walk w (what it ran), and `no-error-render` of w: a test that flushes a walk through this checks, each time, that no
-  component drew an error. A test that renders an error on purpose calls `seon.render/flush!` and checks its defects itself."
-  {:malli/schema [:function [:=> [:cat :map [:or [:= :all] [:maybe [:sequential :any]]]] :map]
-                  [:=> [:cat :map [:or [:= :all] [:maybe [:sequential :any]]] [:maybe :map]] :map]]}
-  ([w datoms] (flush! w datoms nil))
-  ([w datoms ix] (let [ran (seon.render/flush! w datoms ix)] (no-error-render @(:defects w)) ran)))
+(defn walk
+  "`seon.render/walk` of prev with opts (:changes seon.ctx/changes unless given, :outputs the hiccup unless given), and `no-error-render`
+  of what it answered: a test that walks a page through this checks, each time, that no component drew an error. A test that renders an
+  error on purpose calls `seon.render/walk` and checks its :defects itself. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat [:maybe :map] :map] :map]}
+  [prev opts]
+  (let [p (seon.render/walk prev (merge {:changes @(requiring-resolve 'seon.ctx/changes) :outputs #{:seon.render/hiccup}} opts))]
+    (no-error-render (:defects p))
+    p))
 
 (defn draw
-  "`seon.render/draw` of ctx tree c (the walk), and `no-error-render` of that walk: a test that draws a page through this checks that no
-  component drew an error."
+  "Ctx tree c drawn cold by render var f on db, its diff changes (`walk` nil), its page's units (:units, :lists) and its hiccup (:hiccup)
+  answered, and `no-error-render` of it. opts :index (else db's), :outputs, :model-only, :place, :once (a reader that reads it and lets it go,
+  seon.render/walk's). See
+  docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:function [:=> [:cat :map :any :any :any] :map]
-                  [:=> [:cat :map :any :any :any :map] :map]]}
+                  [:=> [:cat :map :any :any :any [:maybe :map]] :map]]}
   ([c changes db f] (draw c changes db f nil))
-  ([c changes db f opts] (let [w (if opts (seon.render/draw c changes db f opts) (seon.render/draw c changes db f))] (no-error-render @(:defects w)) w)))
+  ([c changes db f opts]
+   (walk nil (merge {:db db :tree c :root f :changes changes :index (or (:index opts) (seon.program/index-of-db db)) :units true :resolve true}
+                    (select-keys opts [:outputs :model-only :place :once])))))
+
+(defn resolved
+  "Component k's output in walk value p with every child's marker replaced by that child's output (`seon.render/resolved`), html? true
+  as the page writes each. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:function [:=> [:cat :map [:vector :any]] :any] [:=> [:cat :map [:vector :any] :boolean] :any]]}
+  ([p k] (resolved p k false))
+  ([p k html?] (seon.render/resolved p k html?)))
+
+(defn answer
+  "Walk value p's answer for output o (:seon.render/openai-compat: the model's messages), its values in order, without the
+  components that answered them (`seon.render/answer-sources`). See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :map :qualified-keyword] [:vector :any]]}
+  [p o] (mapv first (get (:answers p) o)))
 
 (defn tree-parts
   "The conversation of agent record c on db as the agent's walk answers it for the model, cold: parts [ref messages turn] of the request, its system message, its opening and the page calls Seon generates (seon.ctx.wire/page-diff-msgs) left out. A db that holds no system prompt gets a stub of one, which the walk needs and the parts leave out."
@@ -505,8 +523,9 @@
   "The parts of agent record c ({:tree}) on db as the model reads them, drawn cold: {id form}."
   {:malli/schema [:=> [:cat :seon.host/db [:map [:tree :map]]] :map]}
   [db c]
-  (let [w (draw (:tree c) @(requiring-resolve 'seon.ctx/changes) db #'seon.render.ui/agent {:model-only true})]
-    (try (seon.render/placed-hiccup w (seon.render/page-lists w)) (finally (seon.render/dispose-walk! w)))))
+  (let [ch @(requiring-resolve 'seon.ctx/changes)
+        lists (:lists (draw (:tree c) ch db #'seon.render.ui/agent {:model-only true}))]
+    (:placed (draw (:tree c) ch db #'seon.render.ui/agent {:model-only true :place lists}))))
 
 (defn composed
   "Units ({:id :html}, a page's at any depth) each with its html composed with its children's (seon.render.proc/compose fills each
@@ -518,8 +537,8 @@
     (mapv #(cond-> % (:html %) (update :html compose by)) us)))
 
 (defn page-units
-  "Walk w's units as the page shows them (seon.render/placed-units, at any depth), each composed (composed). See
+  "Walk value p's units as the page shows them (its :units, at any depth, `seon.render/laid-out`), each composed (composed). See
   docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
-  [w]
-  (composed (seon.render/placed-units w)))
+  [p]
+  (composed (:units (seon.render/laid-out p))))

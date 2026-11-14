@@ -213,7 +213,7 @@
                       [:unrecorded {:optional true :description "Your result was not recorded on your branch, and why."} :seon.error/base]
                       [:text {:optional true} :string] [:record {:optional true} :string]
                       [:recorded {:optional true :description "The vars this eval made program on your branch (a method as [multi dispatch]); they merge with your task. If you only meant to try something, take it back with (ns-unmap 'the.ns 'the-name) and define such things in your own namespace."} [:vector [:or :symbol [:vector :any]]]]
-                      [:unmapped {:optional true :description "The vars it removed from your branch's program."} [:vector :qualified-symbol]] [:fns {:optional true} [:vector :map]]
+                      [:unmapped {:optional true :description "The definitions it removed from your branch's program: a var by its name, a method by [multimethod dispatch-value]."} [:vector [:or :qualified-symbol [:tuple :qualified-symbol :any]]]] [:fns {:optional true} [:vector :map]]
                       ;; seon.repl/edit!'s: the var it changed and the lines around the change, [line text] each
                       [:edited {:optional true :description "What an edit changed: the var and the lines around the change."} [:map [:var :symbol] [:lines [:vector [:tuple pos-int? :string]]]]]]
  ;; what an eval changed of an existing var's meaning (seon.program/meaning: its contract, its
@@ -252,6 +252,8 @@
  ;; the api proc's state keys (seon.system; keys-schemas sweep): in the proc's memory, never stored. A caller is a promise or a proc's reply route {:route :tag}
  :seon.system/backing [:map-of {:description "The agents going back to an earlier point (back!), each with its caller and the branch asked for."} :keyword [:map [:p [:or :seon.host/promise :map]] [:branch :seon.db/branch]]]
  :seon.system/busy [:set {:description "The agents with an eval in flight: the stall check's set (a gone one never)."} :keyword]
+ :seon.system/live [:set {:description "The pids of the agents a root forked and has not seen exit: what its peak counts."} :seon.lib/pid]
+ :seon.system/peak [:int {:min 2 :description "The most processes a root held at once: itself, its boot fork server and its live agents, said on its stop."}]
  :seon.system/dying [:map-of {:description "A killed agent's process by pid, with the agent, its end as it will be recorded, and the requests it died in, until the fork server reports its exit."} :seon.lib/pid [:tuple :keyword :map :any]]
  :seon.system/errors [:map-of {:description "The error occurrences folded by cause (seon.error/fold), each cause's entry, until flushed to the store."} :any :seon.error/entry]
  :seon.system/errors-dirty [:boolean {:description "True when the folded errors hold an entry not yet written to the store."}]
@@ -290,9 +292,10 @@
  :seon.contract/raw [:and {:description "In a var's metadata, the fn the var held before instrument! wrapped it; a var with it has its source read from the recorded form."} :seon.host/fn]
  :seon.contract/checked-at [:= {:description "In a var's metadata, :definition when its contract is checked from the definition on."} :definition]
  :seon.contract/var [:qualified-symbol {:description "On a contract error, the var whose contract was refused."}]
- :seon.lib/load-refused [:and {:description "The error when the OS refuses the machine's load average (getloadavg)."} :seon.error/base [:map [:seon.error/type [:= :seon.lib/load-refused]]]]
+ :seon.lib/command [:vector {:description "A shell command as run: the program and its arguments, its options (:in, :dir, :env) apart."} :string]
+ :seon.lib/shell-unanswered [:and {:description "A shell call that could not answer its child's output: a pipe whose read failed (Jolt raises its errno) or a command that could not start (seon.lib/sh)."} :seon.error/base [:map [:seon.error/type [:= :seon.lib/shell-unanswered]] [:seon.lib/command :seon.lib/command]]]
  :seon.lib/sysmem-refused [:and {:description "The error when the OS refuses the machine's memory figures (host_statistics64)."} :seon.error/base [:map [:seon.error/type [:= :seon.lib/sysmem-refused]]]]
- :seon.fork-server/not-single-threaded [:and {:description "The error data when the fork server cannot fork because root boots with more than one thread: how many are active."} :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/not-single-threaded]] [:active-threads :int]]]
+ :seon.fork-server/not-single-threaded [:and {:description "The error data when the fork server cannot fork because root boots with more than one thread: how many are active."} :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/not-single-threaded]] [:active-threads :int] [:holders {:optional true} [:maybe [:sequential [:map [:id :int] [:name :string]]]]]]]
  :seon.warm/tidy [:= {:description "The name of the held task the warm boot makes to pull a var's refs, so a first pull is warm."} :seon.warm/tidy]
  :seon.program/expr [:= {:description "What a node's literal value answers when the node is neither a constant nor a quote."} :seon.program/expr]
  :seon.program/unbound [:= {:description "What a var's root answers when the var has none (seon.program/root-of), so a readback compares it by identity."} :seon.program/unbound]
@@ -308,8 +311,12 @@
  :seon/args [:map {:description "On a hiccup element, the arguments its :seon/call is made with."}]
  :seon/callable [:boolean {:description "On a var's metadata, true when the page may call it by name (seon.web/ui-call)."}]
  ;; the effect owner's outcome stamps and queue key (seon.fx)
+ :seon.lib/load-refused [:and {:description "The error when the OS refuses the machine's load average (getloadavg)."} :seon.error/base [:map [:seon.error/type [:= :seon.lib/load-refused]]]]
  :seon.fx/us [:int {:min 0 :description "On an effect's outcome, the microseconds it ran."}]
  :seon.fx/queue-us [:int {:min 0 :description "On an effect's outcome, the microseconds it waited in its owner's queue."}]
+ :seon.fx/class [:any {:description "On an effect's request, what its processes are measured by (a process test, a check step): its owner admits it at that class's peak, the whole budget until one is read (seon.fx/admits?)."}]
+ :seon.fx/processes [:int {:min 1 :description "On an effect's request, the processes it holds by construction (a plain test's batch: its one fork), its weight at admission until its class's peak is read (seon.fx/admits?)."}]
+ :seon.fx/peak-processes [:int {:min 1 :description "On an effect's outcome, the most processes its work held at once, counted where they started (seon.lib/a-process-reports-the-most-processes-it-held-at-once): its class's weight from then on."}]
  :seon.fx/at-ms [:int {:description "On an effect's outcome, the wall time in ms at which it ended."}]
  :seon.fx/qk [:tuple {:description "A queued request's place in its owner's queue: [negative priority, arrival number], so the least runs first."} :int :int]
  :seon.fx/end [:= {:description "What a read answers at the end of its input, so the loop stops."} :seon.fx/end]

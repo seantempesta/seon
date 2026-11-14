@@ -1,0 +1,15 @@
+#!/bin/zsh
+# bin/binary-digest [DIR [REV]] — the binary's identity: one sha256 over what only a build can change at REV (default: the
+# tree DIR is as bin/tree names it, what bin/build builds), the paths and prefixes :seon.config.build/inputs names and every
+# pin (gitlink), as git lists them (mode, blob or commit id, path). The one implementation: bin/build writes it beside the
+# binary (target/seon.digest) and seon.fx/runtime-for compares a branch's with it at the one start. The program (src/'s
+# forms) is not in it: a process loads its branch's forms as a diff. docs/source.md#the-binary-records-its-program.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+ROOT=${1:-$(cd "$(dirname "$0")/.." && pwd)}
+REV=${2:-$("$(dirname "$0")/tree" "$ROOT")} || exit 1
+CFG=$ROOT/resources/seon/config/default.edn
+IN=($(sed -nE 's#^ :seon\.config\.build/inputs \[(.*)\].*#\1#p' "$CFG" | tr -d '"'))
+(( $#IN )) || { print -u2 "binary-digest: no :seon.config.build/inputs line in $CFG"; exit 1 }
+{ git -C "$ROOT" ls-tree -r "$REV" -- $IN || exit 1
+  git -C "$ROOT" ls-tree -r "$REV" | awk '$1 == "160000"'
+} | LC_ALL=C sort -u | shasum -a 256 | cut -d' ' -f1

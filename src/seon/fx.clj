@@ -379,6 +379,25 @@
   (let [r (git-run {} root ["show" (str tree ":" path)] nil)]
     (when (zero? (:exit r)) (:out r))))
 
+(defn runtime-for
+  "The binary a process on tree's branch runs: {:binary its path :digest d} when target/seon's identity (target/seon.digest, what
+  bin/build wrote: bin/binary-digest, the digest of what only a build can change) is tree's, else :seon.process/env-mismatch
+  naming both digests, for its caller to build once. The one check of which runtime a branch needs, made at the one start;
+  the program (src/'s forms) is not in it: the process loads its branch's forms as a diff. Cost: one git ls-tree of the build
+  inputs and the pins, ~30 ms. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :string] [:or [:map [:binary :string] [:digest :string]] :seon.error/base]]}
+  [tree]
+  (let [root (cfg/checkout)
+        f (java.io.File. (str root "/target/seon.digest"))
+        built (when (.isFile f) (str/trim (slurp f)))
+        r (lib/sh (str root "/bin/binary-digest") root tree)
+        want (str/trim (str (:out r)))]
+    (cond (not (zero? (:exit r))) (error #'runtime-for :seon.fx/io-error (str "bin/binary-digest " tree ": " (:err r)) {:path root})
+          (= built want) {:binary (str root "/target/seon") :digest want}
+          :else (error #'runtime-for :seon.process/env-mismatch
+                       (str "target/seon's identity " (or built "(none recorded)") " is not tree " tree "'s " want ": build it")
+                       {:seon.process/binary-digest built :seon.process/branch-digest want :seon.process/tree tree}))))
+
 (defn tree-id
   "git's id of the tree at root as it is on disk: HEAD's tree (none before a first commit) with every
   changed and untracked unignored file added, in an index of its own (the repository's untouched), less
@@ -832,7 +851,7 @@
   "{digest result} of the verdicts cached for cand ({key digest}): two file checks a key, and a red's file read. A green is
   {:digest :pass 1 :fail 0 :error 0}; a red its status counted once, with its failures and, for a cost
   proof, the verdict it was judged by (:cost {:rows :verdict}); a digest cached both green and red is
-  flaky (seon.proofs/verdict), judged red (a green's file is not read: measured on one scripted turn, 2,258 reads of 41 KB each were the turn's largest per-test cost). A test's verdict is a function of its digest, so a red is
+  flaky (seon.proofs/verdict), judged red, with both runs' ticks (a green's file is read only there: measured on one scripted turn, 2,258 reads of 41 KB each were the turn's largest per-test cost). A test's verdict is a function of its digest, so a red is
   reused as a green is. Answers the first :seon.fx/io-error a file gives, never a partial answer. dir:
   the cache's (:seon.config.proofs/results-dir unless given)."
   {:malli/schema [:function [:=> [:cat [:map-of [:or :qualified-symbol :string] :string]] [:or [:map-of :string :map] :seon.error/base]]
@@ -844,14 +863,19 @@
                   ;; a green's file is its verdict (its content is never read: written once, whole, by write-verdicts!'s
                   ;; rename), so a test is one file check; only a red's content (its failures) is read
                   g (.exists (java.io.File. ^String gp))
-                  r (when (.exists (java.io.File. ^String rp)) (read-verdict rp))]
+                  r (when (.exists (java.io.File. ^String rp)) (read-verdict rp))
+                  ;; green and red at one digest (flaky, rare): the green's file is read too, for the ticks it spent (seon.proofs/flaky)
+                  gt (when (and g (map? r)) (let [v (read-verdict gp)] (if (contract/error? v) v (:ticks v))))]
               (when g (.setLastModified (java.io.File. ^String gp) (System/currentTimeMillis)))
               (when (map? r) (.setLastModified (java.io.File. ^String rp) (System/currentTimeMillis)))
               (cond (contract/error? r) (reduced r)
-                    :else (if-let [v (proofs/verdict dg (when g {:digest dg :pass 1 :fail 0 :error 0})
+                    ;; gt is nil but at a flaky digest: no check, so a green costs what it did
+                    (and gt (contract/error? gt)) (reduced gt)
+                    :else (if-let [v (proofs/verdict dg (when g (cond-> {:digest dg :pass 1 :fail 0 :error 0} gt (assoc :ticks gt)))
                                                      (when r (cond-> {:digest dg :pass 0 :fail (if (= :fail (:status r)) 1 0) :error (if (= :error (:status r)) 1 0)
                                                                       :failures (vec (:failures r)) :writer (:writer r)}
-                                                               (:cost r) (assoc :cost (:cost r)))))]
+                                                               (:cost r) (assoc :cost (:cost r))
+                                                               (and g (:ticks r)) (assoc :ticks (:ticks r)))))]
                             (assoc acc dg v)
                             acc))))
           {} cand)))
@@ -1077,7 +1101,7 @@
   tree it ran in (out/tests.edn: {:digests {test digest}}; nil when the plan never ran), found the
   verdicts cached at those digests ({digest result}, stored-results, which the run's shards wrote).
   :pass when a green is cached (it ran green, or was green at its
-  digest), :fail when a red is (flaky, or a red), :error with none: a run that never reached it
+  digest, or flaky there: no verdict, never a red), :fail when a red is, :error with none: a run that never reached it
   (its plan or its build failed, it died) says nothing of it passing. The record read, never
   prove's printed output."
   {:malli/schema [:=> [:cat [:maybe [:map [:digests [:map-of :qualified-symbol :string]]]] [:map-of :string :map] [:sequential :qualified-symbol]]
@@ -1153,6 +1177,15 @@
      :failures (into {} (for [[t s] results :when (= :fail s) :let [fs (get fails t)] :when (seq fs)] [t (vec fs)]))
      :digests (select-keys (:digests a) (keys results))}))
 
+(defn- kept-files
+  "The files of a program store d a copy of it carries: its data, and the reach graphs and reads indexes kept for its trees
+  (test-runner/tree-file: one a tree, so the copy's tests read their own tree's, never rebuild it)."
+  {:malli/schema [:=> [:cat :any] [:sequential :string]]}
+  [^java.io.File d]
+  (into [] (comp (filter #(.isFile ^java.io.File %)) (map #(.getName ^java.io.File %))
+                 (filter #(or (= % "data.mdb") (str/starts-with? % "reach-graph") (str/starts-with? % "reads-index"))))
+        (some-> (.listFiles d) seq)))
+
 (defn- run-on-checkout
   "One run of the :tests effect (run-tests) on a checkout of the merge candidate: a detached worktree of repo at
   branch's head (bin/worktree --at, as a generation's), files ({relative path text}, the candidate's changed files)
@@ -1216,7 +1249,7 @@
                                      (.isFile (java.io.File. d "data.mdb")))]
                     (let [to (str dir "/target/" rel)]
                       (seon.lib/remove-tree! to) (lib/sh "mkdir" "-p" to)
-                      (doseq [n ["data.mdb" "reach-graph.fasl"] :when (.isFile (java.io.File. d n))]
+                      (doseq [n (kept-files d)]
                         (lib/sh "cp" "-c" (str (.getPath d) "/" n) (str to "/" n))))))
               ;; a gate's run builds only through its runner, when the binary is not current for the candidate's tree
               ;; (bin/test's plan: seon.system/binary-current, rule (a)); the full run builds main's tree here, into its kept slot
@@ -1229,7 +1262,7 @@
                 (error #'seon.fx/run-on-checkout :seon.fx/io-error (str (build-failure (str (:out b) (:err b)) files) "; its log: " log) {:path dir}))
             (if-not (or all? built?)
               ;; the gate: the system proves the candidate's checkout (prove, seon.system/prove-tree!, which root binds to this
-              ;; effect's :ctx), named by exactly the deferred tests; its process tests run as items on dir, by the :item owner
+              ;; effect's :ctx), named by exactly the deferred tests; its process tests run as items on dir, by the :process owner
               (let [a (if prove
                         (prove {:checkout dir :tree (tree-id dir) :names (set tests) :mode :judge})
                         (error #'seon.fx/run-on-checkout :seon.fx/io-error "the gate has no system to prove its candidate on (the :tests effect's :ctx names no :prove-tree)" {:path dir}))]
@@ -1380,28 +1413,21 @@
             :when (and (.isDirectory d) (re-matches (re-pattern (str "\\Q" stem "\\E-[0-9a-f]{8}")) (.getName d)))
             :let [to (str base (subs (.getName d) (count stem)))]]
       (lib/sh "mkdir" "-p" to)
-      (doseq [n ["data.mdb" "reach-graph.fasl"] :when (.isFile (java.io.File. d ^String n))]
+      (doseq [n (kept-files d)]
         (lib/sh "cp" "-c" (str (.getPath d) "/" n) (str to "/" n))))
     base))
 
-(defn run-item
-  "The :item effect: one item of a session's prove that the test service (seon.prove) granted, run on the session's
-  checkout at tree, niced: :build is bin/build seon there; :seed brings the checkout's program store to the tree and, :binary?,
-  seeds its check store fresh, once a tree (each binary step takes a clone of it, as bin/check's steps do); :step is one check
-  step (bin/check --steps, then bin/test --store-steps, which stores it green at its digest; past its bound bin/check fails
-  it). Its answer {:value {:pass :fail :error :failures :ms}}, the verdict read back from the cache by its digest, so an
-  item asked again is reused there. A checkout whose files are no longer tree is refused (:seon.fx/io-error, :tree-moved): a verdict would be
-  stored under a digest of files that are not there. A green already stored is answered at once, :reused, with no process
-  started. See docs/merging.md#a-session-proves-through-root."
+(defn- run-tree-item
+  "A build, a seed or a check step of run-item, on its checkout at its tree. See docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [kind tree checkout name digest bound] :as req} :req}]
+  [{:keys [kind tree checkout name digest bound] :as req}]
   (let [t0 (profile/now-ns)
         here (tree-id checkout)
         ;; a green already stored at its digest is the answer: no process started (2.3 s a test's runner, only to reuse it)
         held (when-not (#{:build :seed} kind) (stored-results {name digest}))]
     (cond
       (not= here tree)
-      (error #'seon.fx/run-item :seon.fx/io-error (str "the checkout " checkout " is tree " here ", not the item's " tree ": its files moved since the plan")
+      (error #'seon.fx/run-tree-item :seon.fx/io-error (str "the checkout " checkout " is tree " here ", not the item's " tree ": its files moved since the plan")
              {:path checkout :tree-moved true})
       (contract/error? held) held
       (proofs/green? (get held digest)) {:value (assoc (select-keys (get held digest) [:pass :fail :error]) :ms (profile/ms-since t0) :reused true)}
@@ -1420,7 +1446,7 @@
             store (str checkout "/target/check-store")
             sh (fn [& argv] (let [r (apply lib/sh (concat child-env-scrub [(str "SEON_RESULTS_DIR=" (cfg/value :seon.config.proofs/results-dir))
                                                                            (str "SEON_STORE=" store)
-                                                                           ;; the test service reads what its running items hold by it
+                                                                           ;; the :process owner reads what each request in flight holds by it (held-processes)
                                                                            (str "SEON_PROVE_BATCH=" (:seon.prove/batch req))]
                                                           ["nice" "-n" "15"] argv [:dir checkout]))]
                               (spit log (str "$ " (str/join " " argv) " (exit " (:exit r) ")\n" (:out r) (:err r)) :append true)
@@ -1455,14 +1481,31 @@
           (contract/error? stored) stored
           (= :build kind) (if (zero? (:exit r))
                             {:value {:pass 1 :fail 0 :error 0 :failures [] :ms ms}}
-                            (error #'seon.fx/run-item :seon.fx/io-error (str (build-failure (str (:out r) (:err r)) nil) "; its log: " log) {:path checkout}))
+                            (error #'seon.fx/run-tree-item :seon.fx/io-error (str (build-failure (str (:out r) (:err r)) nil) "; its log: " log) {:path checkout}))
           (= :seed kind) (if (and (zero? (:exit r)) (or (not (:binary? req)) (.isFile (java.io.File. (str store "/data.mdb")))))
                            {:value {:pass 1 :fail 0 :error 0 :failures [] :ms ms}}
-                           (error #'seon.fx/run-item :seon.fx/io-error (str "the seed of " store " failed (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log) {:path checkout}))
+                           (error #'seon.fx/run-tree-item :seon.fx/io-error (str "the seed of " store " failed (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log) {:path checkout}))
           v {:value (assoc (select-keys v [:pass :fail :error :failures]) :ms ms)}
           (= :step kind) {:value {:pass 0 :fail 1 :error 0 :failures [{:type :fail :message (str "bin/check --steps " name ": " (runner-end (str (:out r) (:err r))))}] :ms ms}}
-          :else (error #'seon.fx/run-item :seon.fx/io-error (str "the shard stored no verdict for " name " (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log)
+          :else (error #'seon.fx/run-tree-item :seon.fx/io-error (str "the shard stored no verdict for " name " (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log)
                        {:path checkout}))))))
+
+(defn run-item
+  "The :process effect: one item of a prove that the test service (seon.prove) asked, which this kind's owner admitted by the
+  processes its class holds (admits?). A test batch ({:kind :test :msg}) is asked of the agent holding its branch through
+  :ask-tests (root binds it: the api's :tests op), its answer the agent's. Any other is run on the session's
+  checkout at tree, niced: :build is bin/build seon there; :seed brings the checkout's program store to the tree and, :binary?,
+  seeds its check store fresh, once a tree (each binary step takes a clone of it, as bin/check's steps do); :step is one check
+  step (bin/check --steps, then bin/test --store-steps, which stores it green at its digest; past its bound bin/check fails
+  it). Its answer {:value {:pass :fail :error :failures :ms}}, the verdict read back from the cache by its digest, so an
+  item asked again is reused there. A checkout whose files are no longer tree is refused (:seon.fx/io-error, :tree-moved): a verdict would be
+  stored under a digest of files that are not there. A green already stored is answered at once, :reused, with no process
+  started. See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [kind] :as req} :req {:keys [ask-tests]} :ctx}]
+  (if (= :test kind)
+    (ask-tests (:msg req))
+    (run-tree-item req)))
 
 ;; ---- the owner -----------------------------------------------------------------------
 
@@ -1480,6 +1523,87 @@
   {:malli/schema [:=> [:cat :map :map] :boolean]}
   [st {:keys [budget budget-key]}] (boolean (and budget (>= (get-in st [:spent budget-key] 0) budget))))
 
+(defn limits
+  "The admission dials from the config's optional keys, any combination: :max-workers (the least count set, else the cores),
+  :max-load, and :budget, the processes in flight, derived (the cores and two). See docs/config.md#the-test-services-three-limits."
+  {:malli/schema [:=> [:cat [:map [:cores pos-int?] [:max-workers {:optional true} [:maybe pos-int?]]
+                             [:max-cores {:optional true} [:maybe number?]] [:max-load {:optional true} [:maybe number?]]]]
+                  [:map [:max-workers pos-int?] [:budget pos-int?] [:max-load [:maybe number?]]]]}
+  [{:keys [cores max-workers max-cores max-load]}]
+  (let [by-cores (when max-cores (max 1 (long (Math/floor (* max-cores cores)))))
+        counts (filterv some? [max-workers by-cores])]
+    {:max-workers (if (seq counts) (reduce min counts) cores) :budget (+ cores 2) :max-load max-load}))
+
+(defn config-limits
+  "limits of the config this process holds, read at each admission, so a dial the owner turns (when he games, say) admits by
+  it at the next one. See docs/config.md#the-test-services-three-limits."
+  {:malli/schema [:=> [:cat] [:map [:max-workers pos-int?] [:budget pos-int?] [:max-load [:maybe number?]]]]}
+  []
+  (let [c (:config (cfg/in-force))]
+    (limits {:cores (cfg/value :seon.config.machine/cores) :max-cores (:seon.config.proofs/max-cores c)
+             :max-workers (:seon.config.proofs/max-workers c) :max-load (:seon.config.proofs/max-load c)})))
+
+(defn batch-tag
+  "The value of SEON_PROVE_BATCH in every process batch bid of the test service starts: the service's process and the batch, so a
+  reading of the machine's processes (held-processes) names the request each belongs to, a root a process test detaches among
+  them. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :int] :string]}
+  [bid] (str (lib/c-getpid) "-" bid))
+
+(defn held-processes
+  "The processes on the machine by their SEON_PROVE_BATCH tag ({tag n}), one ps read (~70 ms); nil when ps answers none, and then
+  nothing more is admitted while one runs. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat] [:maybe [:map-of :string nat-int?]]]}
+  []
+  ;; awk keeps each process's tag, so only the tags cross (the whole listing is ~0.9 MB); pipefail answers ps's failure
+  (let [r (lib/sh "zsh" "-c" (str "setopt pipefail; ps -axwwE -o command | awk 'match($0, /SEON_PROVE_BATCH=[^ ]+/) "
+                                  "{ print substr($0, RSTART + 17, RLENGTH - 17) }'"))]
+    (when (zero? (:exit r)) (frequencies (str/split-lines (:out r))))))
+
+(defn- weight
+  "The processes request m holds at its peak under bound b: its class's measured peak, else what it declares (:seon.fx/processes),
+  else b, so an unmeasured class runs alone; none without a class. See docs/config.md#the-test-services-three-limits."
+  {:malli/schema [:=> [:cat pos-int? :map :map] nat-int?]}
+  [b st m]
+  (if-let [c (:seon.fx/class m)] (or (get-in st [:peaks c]) (:seon.fx/processes m) b) 0))
+
+(defn- holds
+  "The processes request f in flight holds under bound b: the more of its class's weight now and what this pass's reading counts by
+  its tag (a test batch's fork counted too). See docs/config.md#the-test-services-three-limits."
+  {:malli/schema [:=> [:cat pos-int? :map :map] nat-int?]}
+  [b st f]
+  (let [w (weight b st {:seon.fx/class (:class f) :seon.fx/processes (:declared f)})]
+    (if-let [held (:reading st)] (max w (+ (get held (:tag f) 0) (if (:test? f) 1 0))) w)))
+
+(defn hold-reason
+  "Why request m waits under limits lim beside st's :flight, :load and :reading: :workers, :load or :processes; nil when admitted.
+  A request of no class is never held, and nothing in flight admits one. See docs/config.md#the-test-services-three-limits."
+  {:malli/schema [:=> [:cat :map :map :map] [:maybe [:enum :workers :load :processes]]]}
+  [{:keys [budget max-workers max-load]} st m]
+  (let [flight (vals (:flight st))]
+    (cond
+      (or (nil? (:seon.fx/class m)) (empty? flight)) nil
+      (>= (count flight) max-workers) :workers
+      (and max-load (:load st) (>= (:load st) max-load)) :load
+      (> (+ (transduce (map #(holds budget st %)) + flight) (weight budget st m)) budget) :processes)))
+
+(defn admits?
+  "Whether request m is admitted under limits lim beside what st has in flight (hold-reason is nil). See
+  docs/config.md#the-test-services-three-limits."
+  {:malli/schema [:=> [:cat :map :map :map] :boolean]}
+  [lim st m] (nil? (hold-reason lim st m)))
+
+(defn- measured
+  "st with each request in flight but not fresh (admitted this pass: its processes have not started) read in held: where it holds
+  more than its class's peak so far, that is the peak; a class its requests declare (a plain test's one fork) is never read."
+  {:malli/schema [:=> [:cat :map [:maybe :map] [:set :any]] :map]}
+  [st held fresh]
+  (reduce-kv (fn [st k f]
+               (let [h (when held (+ (get held (:tag f) 0) (if (:test? f) 1 0)))]
+                 (cond-> st (and h (not (fresh k)) (not (:declared f)) (> h (get-in st [:peaks (:class f)] 0)))
+                   (assoc-in [:peaks (:class f)] h))))
+             st (:flight st)))
+
 (defn- admit
   "What the owner does with a queued request at now-ms: :run, :wait (no free worker, or its
   bucket holds fewer tokens than the request's estimate :est: a :tick or a worker's :done
@@ -1491,6 +1615,7 @@
     (spent? st m)
     (error #'seon.fx/admit :seon.fx/budget-spent "the request's budget is spent" {:budget budget :spent (get-in st [:spent budget-key])})
     (>= (:busy st) (:workers st)) :wait
+    (not (admits? (:lim st) st m)) :wait
     (and (:bucket st) (< (:tokens (refill (:bucket st) now-ms)) (or est 0))) :wait
     :else :run))
 
@@ -1531,7 +1656,10 @@
     (when (and (contract/error? (:outcome r)) (get-in r [:dest :agent]))
       (step/out! o :out {:op :problem :class :effect :error (dissoc (:outcome r) :seon.fx/us :seon.fx/queue-us :seon.fx/at-ms)
                          :agent (get-in r [:dest :agent])}))
-    (let [st (charge st r)]
+    (let [st (cond-> (charge st r)
+               (:fkey (:request r)) (update :flight dissoc (:fkey (:request r)))
+               (and (:seon.fx/class (:request r)) (:seon.fx/peak-processes (:outcome r)))
+               (update-in [:peaks (:seon.fx/class (:request r))] (fnil max 0) (:seon.fx/peak-processes (:outcome r))))]
       (if (and limited? (:request r))
         (let [q (:request r)
               qk (or (::qk q) [(- (:prio q 0)) (inc (:seq st))])]
@@ -1561,26 +1689,69 @@
   (let [more (->> (:queue st) (remove (fn [[_ r]] (spent? st r))) (take (dec (:batch st 1))))]
     [(update st :queue #(apply dissoc % (map key more))) (into [m] (map val) more)]))
 
-(defn- dispatch
-  "Take queued requests in priority order while workers are free; a refused one is answered
-  at once. A kind with :batch gives a free worker its head request and those queued behind it,
-  as one work item {:batch [m ...]}. Answers st."
+(defn- read-machine
+  "st with the load (only with max-load set) and the processes by tag (only while an undeclared class is in flight) read once a
+  pass, when m has a class and something is in flight; readings become peaks. See docs/clocks.md#the-machines-load-admits-work."
+  {:malli/schema [:=> [:cat :map :map :map] :map]}
+  [st lim m]
+  (if (or (:read? st) (nil? (:seon.fx/class m)) (empty? (:flight st)))
+    st
+    (let [ld (when (:max-load lim) ((:load-fn st)))
+          held (when (some (complement :declared) (vals (:flight st))) ((:held-fn st)))]
+      (cond-> (assoc st :read? true :reading held)
+        ld (assoc :load ld)
+        held (measured held (:fresh st #{}))))))
+
+(defn- held-told
+  "st and o with the askers of the queued requests told once that they wait on the machine's load ({:op :prove-held :key :held
+  true :load :max-load :queued}), so a hold never reads as a hang; the askers are a request's :seon.prove/askers."
+  {:malli/schema [:=> [:cat :map :seon.host/volatile :map] :map]}
+  [st o lim]
+  (if (:holding st)
+    st
+    (let [qs (vals (:queue st))
+          askers (into (sorted-set) (mapcat :seon.prove/askers) qs)]
+      (doseq [k askers] (step/out! o :out {:op :prove-held :key k :held true :load (:load st) :max-load (:max-load lim) :queued (count qs)}))
+      (assoc st :holding askers))))
+
+(defn- resumed-told
+  "st with the askers told they were held for the load told it ended ({:op :prove-held :key :held false}), at the next admission."
   {:malli/schema [:=> [:cat :map :seon.host/volatile] :map]}
   [st o]
-  (loop [st st]
-    (if-let [[qk m] (first (:queue st))]
-      (let [now (quot (profile/now-ns) 1000000)
-            d (admit st m now)]
-        (cond
-          (= :wait d) (wake-later st m now)
-          (= :run d) (let [[st ms] (batch (update st :queue dissoc qk) (assoc m ::qk qk))
-                           t (profile/now-ns)]
-                       (step/out! o :to-workers (if (:batch st) {:batch (mapv #(assoc % :taken-ns t) ms)} (assoc (first ms) :taken-ns t)))
-                       (recur (cond-> (update st :busy inc)
-                                (:bucket st) (update :bucket #(update (refill % now) :tokens - (transduce (map (fn [r] (or (:est r) 0))) + ms))))))
-          :else (do (reply! o (:dest m) d)
-                    (recur (update st :queue dissoc qk)))))
-      st)))
+  (doseq [k (:holding st)] (step/out! o :out {:op :prove-held :key k :held false}))
+  (dissoc st :holding))
+
+(defn- dispatch
+  "Take queued requests in priority order while each is admitted (a free worker, the bucket, the dials of config-limits read this
+  pass); a refused one is answered at once; a request of a class joins :flight until its outcome. Answers st. See
+  docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat :map :seon.host/volatile] :map]}
+  [st o]
+  (let [lim (or (:limits st) (config-limits))]
+    (loop [st (assoc st :lim lim :read? false :fresh #{})]
+      (if-let [[qk m] (first (:queue st))]
+        (let [now (quot (profile/now-ns) 1000000)
+              st (read-machine st lim m)
+              d (admit st m now)]
+          (cond
+            (= :wait d) (let [st (if (= :load (hold-reason lim st m)) (held-told st o lim) st)]
+                          (wake-later (dissoc st :lim :read? :fresh :reading) m now))
+            (= :run d) (let [[st ms] (batch (update st :queue dissoc qk) (assoc m ::qk qk))
+                             ms (mapv #(cond-> % (:seon.fx/class %) (assoc :fkey (or (get-in % [:req :seon.prove/batch]) [:seq (:seon.fx/qk %)]))) ms)
+                             st (reduce (fn [st r] (if-let [k (:fkey r)]
+                                                     (-> st (assoc-in [:flight k] {:class (:seon.fx/class r) :declared (:seon.fx/processes r) :tag (get-in r [:req :seon.prove/batch])
+                                                                                   :test? (= :test (get-in r [:req :kind]))})
+                                                         (update :fresh conj k))
+                                                     st))
+                                        st ms)
+                             st (cond-> st (and (:holding st) (some :fkey ms)) (resumed-told o))
+                             t (profile/now-ns)]
+                         (step/out! o :to-workers (if (:batch st) {:batch (mapv #(assoc % :taken-ns t) ms)} (assoc (first ms) :taken-ns t)))
+                         (recur (cond-> (update st :busy inc)
+                                  (:bucket st) (update :bucket #(update (refill % now) :tokens - (transduce (map (fn [r] (or (:est r) 0))) + ms))))))
+            :else (do (reply! o (:dest m) d)
+                      (recur (update st :queue dissoc qk)))))
+        (dissoc st :lim :read? :fresh :reading)))))
 
 (defn- bound
   "The owner's queue holds at most :seon.config.fx/buf requests of the agents; at the bound it stops reading :in (Flow's
@@ -1600,12 +1771,15 @@
                 :rate "tokens per second the provider admits (nil: no bucket)"
                 :batch "the most requests one worker step takes from the queue (nil: one, as itself)"
                 :close? "the kind has a :close: when the queue is empty and nothing is in flight, its worker is told {:idle true}"
-                :tick "its clock's channel (external in-port, with :rate): a :tick when the bucket refilled"}
+                :tick "its clock's channel (external in-port, with :rate): a :tick when the bucket refilled"
+                :limits "its admission dials (limits' map; nil: config-limits, read at each admission)"
+                :load-fn "reads the machine's load (lib/load-average)" :held-fn "reads the processes by tag (held-processes)"}
        :ins {:in "requests, addressed [:fx/<kind> :in] by any proc" :ask "root's own requests, never held back by the bound" :done "its workers' outcomes"} :outs {}
        ;; admission and routing only: never blocks, never computes long
        :workload :io
-       :ping-map-fn (fn [st] (-> (select-keys st [:kind :workers :busy :done]) (assoc :queued (count (:queue st)) :spent (:spent st))))})
-  ([args] (assoc (select-keys args [:kind :workers :batch :close?]) :busy 0 :done 0 :seq 0 :queue (sorted-map) :spent {}
+       :ping-map-fn (fn [st] (-> (select-keys st [:kind :workers :busy :peaks :load :done]) (assoc :in-flight (count (:flight st))) (assoc :queued (count (:queue st)) :spent (:spent st))))})
+  ([args] (assoc (select-keys args [:kind :workers :batch :close? :limits]) :busy 0 :flight {} :peaks {} :done 0
+                 :load-fn (or (:load-fn args) lib/load-average) :held-fn (or (:held-fn args) held-processes) :seq 0 :queue (sorted-map) :spent {}
                  :bucket (when-let [r (:rate args)]
                            {:tokens (double r) :cap (double r) :per-ms (/ r 1000.0) :rate-ms (/ r 1000.0) :at (quot (profile/now-ns) 1000000)})
                  :tick (:tick args)
@@ -1708,6 +1882,24 @@
         [(-> st (dissoc :call) (assoc ::flow/input-filter (constantly true)) (update :n inc))
          (merge {[(:owner st) :done] [done]} (stream-out (when (sequential? ends) ends)))]))))
 
+(defn- stream-due
+  "A streaming worker's step on its bound's due {:due t0}: a call quiet past its kind's :seon.bound/ms is shut and its
+  outcome made :seon.bound/reached; one that streamed since is re-armed. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  {:malli/schema [:=> [:cat :map :map] [:tuple :map [:maybe :map]]]}
+  [st m]
+  (let [{:keys [ms t0 last-ns shut dead]} (:call st)]
+    (if (or (nil? (:call st)) dead (not= t0 (:due m)))
+      [st nil]
+      (let [quiet (quot (- (profile/now-ns) last-ns) 1000000)]
+        (if (< quiet ms)
+          (do (step/put-after! (:lines st) (- ms quiet) {:due t0}) [st nil])
+          (do (when shut (shut))
+              [(assoc-in st [:call :dead] (error #'seon.fx/stream-due :seon.bound/reached
+                                                 (str "the " (name (:kind st)) " stream sent nothing for " quiet " ms, past its bound of " ms " ms")
+                                                 {:seon.bound/bound {:seon.bound/ms ms} :seon.bound/spent {:seon.bound/ms quiet}
+                                                  :seon.bound/at (keyword "seon.fx" (name (:kind st)))}))
+               nil]))))))
+
 (defn worker-proc
   "One performer of an effect kind: takes a work item from its owner's shared channel,
   performs it with the kind's Var, and gives the owner the outcome (with its timing). A batch
@@ -1744,7 +1936,9 @@
   ([st in m]
    (cond
      (nil? m) [st nil]
-     (= :lines in) (stream-step st m)
+     (:due m) (stream-due st m)
+     ;; a line is the call's progress: its quiet is counted from it (stream-due)
+     (= :lines in) (if (:call st) (stream-step (cond-> st (:line m) (assoc-in [:call :last-ns] (profile/now-ns))) m) [st nil])
      (:idle m) [(cond-> st (and (:close st) (:handle st)) (assoc :closed ((:close st) (:handle st)))) nil]
      :else
      (let [ms (or (:batch m) [m])
@@ -1765,8 +1959,11 @@
            done (mapv #(done-of %1 %2 t0 t1) ms rs)]
        (if-let [sm (and (not (:batch m)) (:stream (first rs)))]
          ;; a streaming perform: the call is read a line at a time on :lines until it ends, and the worker reads nothing else meanwhile
-         (do (read-lines! (:pull sm) (:lines st) (:shut sm))
-             [(assoc st :call (assoc (select-keys sm [:step :final :close :shut]) :m m :s (:init sm) :t0 t0)
+         (let [bound-ms (get-in (cfg/value :seon.config.fx/bounds) [(:kind st) :seon.bound/ms])]
+           (read-lines! (:pull sm) (:lines st) (:shut sm))
+           ;; the kind's declared bound, of quiet: re-armed by each line, so a reply that keeps streaming is never cut
+           (when bound-ms (step/put-after! (:lines st) bound-ms {:due t0}))
+             [(assoc st :call (cond-> (assoc (select-keys sm [:step :final :close :shut]) :m m :s (:init sm) :t0 t0 :last-ns t0) bound-ms (assoc :ms bound-ms))
                      ::flow/input-filter #(= % :lines))
               nil])
          [(update st :n + (count ms)) {[(:owner st) :done] [(if (:batch m) {:batch done} (first done))]}])))))
