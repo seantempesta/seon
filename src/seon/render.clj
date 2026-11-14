@@ -403,6 +403,19 @@
 
 (declare entity-schema)
 
+(defn- marker-key
+  "The key of the child component whose marker x is ([::child k], what `emit` puts in an output in its place), else nil: every
+  reader of an output stops there, the child's output being its own. See docs/render.md#components."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [x] (when (and (vector? x) (= ::child (first x))) (second x)))
+
+(defn- element-parts
+  "Hiccup element x ([tag attrs? & children]) as [tag attrs children]: attrs its second place when that is a map and not raw html
+  (seon.web.html/raw?), which is a child as text is; nil attrs otherwise. The one split every reader of an output makes. See
+  docs/render.md#the-hiccup-is-checked."
+  {:malli/schema [:=> [:cat [:vector :any]] [:tuple :any [:maybe :map] [:sequential :any]]]}
+  [x] (let [a (second x) a? (and (map? a) (not (h/raw? a)))] [(first x) (when a? a) (if a? (drop 2 x) (rest x))]))
+
 (defn misfits
   "What hiccup output out holds that the intermediate refuses, by kind (:seon.render/misfits): each element's attributes against
   :seon.render/hiccup-attrs, walked through its own elements and never into a child's (a marker is the child's own output). {} when it
@@ -415,13 +428,13 @@
                              (not (or (string? v) (number? v) (boolean? v) (nil? v) (keyword? v) (symbol? v) (uuid? v))) :value))]
     ;; the counts so far threaded through the walk, a value
     ((fn walk [n x]
-       (cond (and (vector? x) (= ::child (first x))) n
+       (cond (marker-key x) n
              (and (vector? x) (keyword? (first x)))
-             (let [attrs (when (and (map? (second x)) (not (h/raw? (second x)))) (second x))
+             (let [[_ attrs kids] (element-parts x)
                    n (if (and attrs (not (contract/fits? :seon.render/hiccup-attrs attrs)))
                        (reduce (fn [n [k v]] (if-let [c (kind k v)] (update n c (fnil inc 0)) n)) n attrs)
                        n)]
-               (reduce walk n (if attrs (drop 2 x) (rest x))))
+               (reduce walk n kids))
              (sequential? x) (reduce walk n x)
              :else n))
      {} out)))
@@ -442,11 +455,11 @@
   [out]
   ;; the placements so far threaded through the walk, a value
   ((fn walk [found x sel]
-     (cond (and (vector? x) (= ::child (first x))) (conj found [sel (second x)])
+     (cond (marker-key x) (conj found [sel (marker-key x)])
            (and (vector? x) (keyword? (first x)))
-           (let [attrs (when (map? (second x)) (second x))
+           (let [[_ attrs kids] (element-parts x)
                  sel (if-let [id (:id attrs)] (str "#" id) sel)]
-             (reduce #(walk %1 %2 sel) found (if attrs (drop 2 x) (rest x))))
+             (reduce #(walk %1 %2 sel) found kids))
            (sequential? x) (reduce #(walk %1 %2 sel) found x)
            :else found))
    [] out nil))
@@ -479,6 +492,20 @@
                                (cond-> {} sym (assoc :seon.error/in sym) (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
     (vswap! (:defects w) conj defect)
     defect))
+
+(defn entity-read-keys
+  "The datom keys tree reads rs (seon.ratom/reads-of's #{[path kind]}) made of the pulled entities in tree: a read of attribute a
+  of a map that carries :db/id e is [:ea e a], the key a store read of that slice records, so a commit of e's a reaches its
+  reader by the walk's datom index (:readers) and a commit of a sibling attribute does not. One get-in a read. See
+  docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :any [:maybe [:set :any]]] [:set :any]]}
+  [tree rs]
+  (into #{} (keep (fn [[path _]]
+                    (when (and (seq path) (qualified-keyword? (peek path)))
+                      (let [m (get-in tree (pop path))]
+                        (when-let [e (and (map? m) (:db/id m))]
+                          [:ea e (peek path)])))))
+        rs))
 
 (defn render!
   "Component [f opts & children] drawn in walk w: its marker [::child key], its output kept in w's
@@ -545,6 +572,8 @@
             id (str (:id-prefix w) (key-id k))
             reads (volatile! nil)
             tree-reads (volatile! nil)
+            ;; its reads of pulled entities in the tree, as datom keys (`entity-read-keys`), matched as its db reads are
+            entity-reads (volatile! nil)
             kept (volatile! nil)
             ;; its render and the drawing of its output in one: a lazy part of the hiccup reads (and
             ;; throws) only when it is drawn, and a db render's reads are all of what it drew
@@ -600,7 +629,7 @@
                   (binding [ratom/*ratom-context* nil] (one))
                   ;; what it read of the tree and of the store, recorded once (the one recorder, seon.ratom/reads-of): the tree's next
                   ;; diff and the next datoms moved are matched against them (`walk`)
-                  (let [[out rs ks] (ratom/reads-of (:ref (:src w)) one)] (vreset! tree-reads rs) (vreset! reads ks) out))
+                  (let [[out rs ks] (ratom/reads-of (:ref (:src w)) one)] (vreset! tree-reads rs) (vreset! reads ks) (vreset! entity-reads (entity-read-keys @(:ref (:src w)) rs)) out))
             bytes (- (profile/alloc-bytes) a0)
             ;; a child the hiccup and the model output both placed is held once
             children (if (seq others) (vec (distinct @kids)) @kids)
@@ -624,15 +653,15 @@
         ;; merged: its written html (placed-units) stays while its revision does
         (vswap! (:cache w) update k merge {:f f :opts opts :args args :out (if same? (:out prev) out) :children children
                                     :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0))) :kept @kept :outs @outs
-                                    :reads read-keys :fv (when (var? f) (var-get f)) :tree-reads @tree-reads :drawn? (contains? ks :seon.render/drawn)})
+                                    :reads read-keys :entity-reads @entity-reads :fv (when (var? f) (var-get f)) :tree-reads @tree-reads :drawn? (contains? ks :seon.render/drawn)})
         ;; who read what of the tree, as it reads its db (`walk`)
         (let [was (or (:tree-reads prev) #{}) now (or @tree-reads #{})]
           (when-not (= was now)
             (vswap! (:tree-readers w) ratom/move-reads k was now)))
         ;; the components that read the db: the ones a transaction's datoms are matched against
         (vswap! (:db-keys w) (if (seq read-keys) conj disj) k)
-        (when (:reads prev) (forget-readers! w k (:reads prev)))
-        (doseq [rk read-keys] (vswap! (:readers w) update rk (fnil conj #{}) k))
+        (when (or (:reads prev) (:entity-reads prev)) (forget-readers! w k (into (or (:reads prev) #{}) (:entity-reads prev))))
+        (doseq [rk (into (or read-keys #{}) @entity-reads)] (vswap! (:readers w) update rk (fnil conj #{}) k))
         [::child k]))))
 
 (defn kept-of
@@ -649,7 +678,7 @@
     (vswap! (:cache w) dissoc k)
     (vswap! (:queue w) disj k)
     (vswap! (:db-keys w) disj k)
-    (forget-readers! w k (:reads c))
+    (forget-readers! w k (into (or (:reads c) #{}) (:entity-reads c)))
     (when (:tree-reads c) (vswap! (:tree-readers w) ratom/read-index k (:tree-reads c) disj))
     (some->> (:form c) (vswap! (:forms w) dissoc))
     (doseq [ch (:children c) :when (contains? @(:cache w) ch)]
@@ -660,7 +689,7 @@
   "Is x, an element or a component call, for the page alone (its attributes or opts :wire/for \"page\": what the model does not read)? See
   docs/render.md#a-part-prints-as-its-render."
   {:malli/schema [:=> [:cat :any] :boolean]}
-  [x] (and (vector? x) (map? (second x)) (= "page" (:wire/for (second x)))))
+  [x] (and (vector? x) (= "page" (:wire/for (second (element-parts x))))))
 
 (defn emit
   "Hiccup hc drawn in walk w: an element's children drawn; a component call rendered (render!) to
@@ -714,7 +743,7 @@
   {:malli/schema [:=> [:cat :any :any] :any]}
   [out f]
   (let [style (:seon.render/style (meta f))]
-    (if (and (vector? out) (map? (second out)) (:class (second out)))
+    (if (and (vector? out) (:class (second (element-parts out))))
       (cond-> out
         (and style (not (css? style))) (update-in [1 :class] str " " style)
         ;; the render that drew it, which the walk put on the root as data (:render, `with-id`), written as an html attribute
@@ -733,7 +762,7 @@
      ((fn res [k]
         (let [c (get cache k)]
           ;; through elements and lists, never into an element's attributes: a :wire/result holds a whole record, and no marker sits there
-          ((fn go [x] (cond (and (vector? x) (= ::child (first x))) (res (second x))
+          ((fn go [x] (cond (marker-key x) (res (marker-key x))
                             (vector? x) (mapv go x)
                             (seq? x) (doall (map go x))
                             :else x))
@@ -845,9 +874,9 @@
         [ids hc'] ((fn go [ids x]
                      (cond (h/raw? x) [ids x]
                            (and (vector? x) (keyword? (first x)))
-                           (let [attrs (when (and (map? (second x)) (not (h/raw? (second x)))) (second x))
+                           (let [[_ attrs xs] (element-parts x)
                                  id (:id attrs)
-                                 [ids ks] (kids go (cond-> ids id (conj (str id))) (if attrs (drop 2 x) (rest x)))]
+                                 [ids ks] (kids go (cond-> ids id (conj (str id))) xs)]
                              [ids (cond-> (into (if attrs [(first x) attrs] [(first x)]) ks) id (conj (region (str id))))])
                            (seq? x) (let [[ids ks] (kids go ids x)] [ids (or (seq ks) ())])
                            :else [ids x]))
@@ -876,12 +905,12 @@
   [cache rk drawn-list? thrown]
   (let [rc (get cache rk)
         shell (fn shell [x]
-                (cond (and (vector? x) (= ::child (first x)))
-                      (let [c (get cache (second x))] (when (drawn-list? (second x)) (shell (styled (:out c) (:f c)))))
+                (cond (marker-key x)
+                      (let [c (get cache (marker-key x))] (when (drawn-list? (marker-key x)) (shell (styled (:out c) (:f c)))))
                       (h/raw? x) x
                       (and (vector? x) (keyword? (first x)))
-                      (let [attrs (when (and (map? (second x)) (not (h/raw? (second x)))) (second x))]
-                        (into (if attrs [(first x) attrs] [(first x)]) (map shell) (if attrs (drop 2 x) (rest x))))
+                      (let [[tag attrs kids] (element-parts x)]
+                        (into (if attrs [tag attrs] [tag]) (map shell) kids))
                       (seq? x) (doall (map shell x))
                       :else x))
         [hc ids] (regions (shell (styled (:out rc) (:f rc))))
@@ -925,8 +954,8 @@
                        r (:rev c)
                        ;; its html written once a revision: kept on its cache entry, by its revision
                        html (if (= r (:unit-rev c)) (:unit-html c)
-                                (let [slotted ((fn go [x] (cond (and (vector? x) (= ::child (first x)))
-                                                                (when-let [id (:id (get cache (second x)))] (h/raw (str "<!--s:" id "-->")))
+                                (let [slotted ((fn go [x] (cond (marker-key x)
+                                                                (when-let [id (:id (get cache (marker-key x)))] (h/raw (str "<!--s:" id "-->")))
                                                                 (vector? x) (mapv go x)
                                                                 (seq? x) (doall (map go x))
                                                                 :else x))
@@ -981,15 +1010,16 @@
   [p out]
   (cond
     (nil? out) nil
-    (and (vector? out) (= ::child (first out))) (when-let [f (part-form p (second out))] [(assoc-in f [1 :id] (:id (get (:cache p) (second out))))])
+    (marker-key out) (let [k (marker-key out)] (when-let [f (part-form p k)] [(assoc-in f [1 :id] (:id (get (:cache p) k)))]))
     (page-only? out) nil
     (and (vector? out) (keyword? (first out)))
-    (let [[tag & more] out m? (and (map? (first more)) (not (h/raw? (first more))))
-          attrs (when m? (strip-attrs (first more)))]
-      [(into (cond-> [tag] attrs (conj attrs)) (mapcat #(body-forms p %)) (if m? (rest more) more))])
+    (let [[tag a kids] (element-parts out)
+          attrs (when a (strip-attrs a))]
+      [(into (cond-> [tag] attrs (conj attrs)) (mapcat #(body-forms p %)) kids)])
     (and (vector? out) (or (var? (first out)) (fn? (first out)))) [(into [(if (var? (first out)) (symbol (first out)) (first out))] (rest out))]
     (seq? out) (mapcat #(body-forms p %) out)
-    (h/raw? out) [(str out)]
+    ;; raw html is read as its html text, never the raw value's map
+    (h/raw? out) [(:seon.web.html/raw out)]
     :else [out]))
 
 (defn part-form
@@ -1000,11 +1030,12 @@
   {:malli/schema [:=> [:cat :map [:vector :any]] :any]}
   [p k]
   (let [c (get (:cache p) k)
-        out (cond-> (:out c) (and (vector? (:out c)) (map? (second (:out c)))) (update 1 dissoc :id))
+        out (cond-> (:out c) (and (vector? (:out c)) (second (element-parts (:out c)))) (update 1 dissoc :id))
+        [_ wrapper-attrs wrapper-kids] (when (vector? out) (element-parts out))
         ;; a part's own root element, a plain section or div, is the part itself: its children stand under the head
-        wrapper? (and (vector? out) (#{:section :div} (first out)) (nil? (strip-attrs (if (map? (second out)) (second out) {}))))
+        wrapper? (and (vector? out) (#{:section :div} (first out)) (nil? (strip-attrs (or wrapper-attrs {}))))
         body (if wrapper?
-               (mapcat #(body-forms p %) (if (map? (second out)) (drop 2 out) (rest out)))
+               (mapcat #(body-forms p %) wrapper-kids)
                (body-forms p out))]
     (when (and (seq body) (not= "page" (:wire/for (:opts c))))
       (into [(symbol (:f c)) (if-let [at (:at (:opts c))] {:ctx at} {})] body))))
@@ -1052,7 +1083,7 @@
   {:malli/schema [:=> [:cat :any] :any]}
   [x0]
   (letfn [(el? [x] (and (vector? x) (some? (first x))))
-          (given [x] (when (and (el? x) (map? (second x))) (let [a (second x)] (or (:key a) (:id a)))))
+          (given [x] (when-let [a (and (el? x) (second (element-parts x)))] (or (:key a) (:id a))))
           (words [x]
             (let [t (first (filter string? (tree-seq coll? seq x)))]
               (when t (str/join " " (keep-indexed (fn [i w] (when (< i 6) w)) (str/split (str/trim t) #"\s+"))))))
@@ -1066,7 +1097,7 @@
           (go [x]
             (if-not (el? x)
               x
-              (let [n (if (map? (second x)) 2 1)
+              (let [n (if (second (element-parts x)) 2 1)
                     kids (subvec x n)]
                 (if (or (empty? kids) (some #(or (string? %) (number? %)) kids) (and (keyword? (first x)) (nil? (next kids)) (nil? (given (first kids)))))
                   x
@@ -1186,7 +1217,7 @@
   (let [cache (:cache p)]
     ;; one pass into one vector, each component's source made once
     (persistent! ((fn go [acc k] (let [e (get cache k) src (assoc (select-keys e [:f :args]) :key k)]
-                                   (reduce (fn [acc x] (if (and (vector? x) (= ::child (first x))) (go acc (second x)) (conj! acc [x src])))
+                                   (reduce (fn [acc x] (if (marker-key x) (go acc (marker-key x)) (conj! acc [x src])))
                                            acc (get-in e [:outs o]))))
                   (transient []) (:out p)))))
 
