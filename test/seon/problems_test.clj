@@ -627,11 +627,11 @@
                                                                    ; base and head (tests, 2026-11-12: 69 -> 73 with data's)
                                                               8    ; :unfocused-docstring (data, 73 -> 81 measured): its reader and its bound on base and head,
                                                                    ; and a seek and a row for each changed Seon var the input's tree holds
-                                                              5    ; :unsynced judges the move's touched tasks, not only merged ones (data, 2026-11-14,
-                                                                   ; 81 -> 86): unsynced-candidates' contract, and the touched task's unsynced?, derived?,
-                                                                   ; and refine?'s eid and cites-of
-                                                              2)}  ; :hand-written-list's reader on base and head for the move's changed vars (context,
+                                                              5    ; :unsynced judges the move's touched tasks, not only merged ones (data, 2026-11-14, 81 -> 86): unsynced-candidates'
+                                                                   ; contract, and the touched task's unsynced?, derived? and derived?'s seon.db/eid of the refine section
+                                                              2    ; :hand-written-list's reader on base and head for the move's changed vars (context,
                                                                    ; 2026-11-14, measured 86 -> 88)
+                                                              1)}  ; retyped-attributes' own contract, once a read (data, 2026-11-14)
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 25000000}} problems-cost-nothing-for-a-clean-program
@@ -1005,7 +1005,7 @@
                ;; and a row for each changed Seon var the tree holds
                ;; and 4 for :hand-written-list (context, measured 85 -> 89): its reader on base and head, and on each side the seek of
                ;; each changed var's metadata
-               :fixed {:ticks 460000 :bytes 1800000 :calls 89}
+               :fixed {:ticks 460000 :bytes 1800000 :calls 90} ; 90: and retyped-attributes' own contract, once a read (data, 2026-11-14)
                :sizes [10 30 100]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
@@ -1223,7 +1223,8 @@
                ;; 64: :unestimated-test and :undeclared-test two more (each its seon.db/eid and derived-row)
                ;; 66: :unfocused-docstring one more (its seon.db/eid and derived-row)
                ;; 68: :hand-written-list one more (its seon.db/eid and derived-row), context 2026-11-14
-               :fixed {:ns 3000000 :bytes 4000000 :calls 68}
+               ;; 70: :retyped-attribute one more, the same two (data, 2026-11-14)
+               :fixed {:ns 3000000 :bytes 4000000 :calls 70}
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 4000000}} attention-survives-a-store-write
@@ -1572,7 +1573,7 @@
             :let [[caused full] (made base head c)]]
       (is (seq full) (str (name c) ": the branch made a row"))
       (is (= full caused) (str (name c) ": caused-split answers it, as the full reading does")))
-    (is (= (set (keys {:unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :unfocused-docstring 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated-test 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1 :hand-written-list 1}))
+    (is (= (set (keys {:unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :unfocused-docstring 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated-test 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1 :hand-written-list 1 :retyped-attribute 1}))
            seon.problems/caused-classes)
         "the classes a branch is judged on are the content classes, as :seon.problems/class declares them")))
 
@@ -1601,6 +1602,18 @@
         caused-of (fn [head] (filter #(str/includes? % ":seon.agent/started-ms") (problems/caused base head)))]
     (is (seq (caused-of (d/db-with base (entry "[:int {:min 10 :description \"Ms.\"}]")))) "an entry tightened under a stored value is caused it")
     (is (empty? (caused-of (d/db-with base (entry "[:int {:min 0 :description \"Ms.\"}]")))) "one every stored value still fits is not")))
+
+;; Estimate: a world (cached) 0.5M + 3 caused-split reads of one moved entry (a registry each side, ~1.5M) = 6000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-branch-that-retypes-an-installed-attribute-is-caused-it
+  ;; docs/health.md#a-retyped-attribute (root, 2026-11-14): a stored attribute's value type and cardinality are fixed once installed,
+  ;; and the store follows main, so a branch whose entry gives an attribute main declares another type or cardinality is caused a row
+  ;; at its land check, never found by root refusing to open its store (seon.db/install-missing!'s :seon.db/types-differ)
+  (let [base (world)
+        entry (fn [form] [{:schema/key :seon.agent/started-ms :schema/form form}])
+        retyped (fn [head] (filter #(str/includes? % "fixed once installed") (problems/caused base head)))]
+    (is (seq (retyped (d/db-with base (entry "[:string {:description \"Ms.\"}]")))) "a type another than main's is caused it")
+    (is (empty? (retyped (d/db-with base (entry "[:int {:min 0 :description \"Ms, newly described.\"}]"))))
+        "an entry changed in what it says or how it checks, its type kept, is not")))
 
 (deftest ^{:seon.test/estimate {:ticks 8000000}} a-branch-that-changes-what-its-plan-cites-is-shown-the-stale-plan-never-refused
   ;; docs/health.md#a-plan-that-went-stale: changing the code a plan cites is the work (an agent's own task cites what it

@@ -669,6 +669,41 @@
           (is (not (.exists (java.io.File. (str dir "/b.txt")))) "and no file written into it")))
       (finally (seon.lib/remove-tree! dir)))))
 
+;; Estimate: about 25 git processes (init, commits, rev-parse, status, update-ref, read-tree) at ~150k ticks of spawn and read each
+;; = 4000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 4000000} :seon.test/execs ["git"]} main-moves-only-from-the-commit-the-store-was-imported-from
+  ;; docs/source.md#commit-the-merges-branch: git's main follows the store's main (task seon.source/a-merge-moves-gits-main-to-the-
+  ;; stores-files): a commit carries :expect, the commit the store's main was imported from, and the ref moves only from it, as
+  ;; one compare-and-swap (git update-ref NEW EXPECT). A landing that moved main since is never undone by the store's older text:
+  ;; the answer is :seon.fx/ref-moved, nothing written
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/fx-expect-" (random-uuid))) (.mkdirs)))
+        git (fn [& args] (clojure.string/trim (str (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@localhost" args)))))
+        commit #(fx/git-commit {:req (merge {:dir dir :branch "main" :message "Seon merge"} %)})]
+    (try
+      (git "init" "-q" "-b" "main")
+      (spit (str dir "/a.txt") "a\n") (git "add" "-A") (git "commit" "-q" "-m" "one")
+      (let [imported (git "rev-parse" "HEAD")
+            r (commit {:expect imported :files {"src/demo/x.clj" "(ns demo.x)\n"}})]
+        (is (= (get-in r [:value :sha]) (git "rev-parse" "HEAD")) (pr-str r))
+        (is (= imported (git "rev-parse" "HEAD^")) "one commit on the commit the store was imported from")
+        (is (= "" (git "status" "--short")) "the checked-out tree moved with it, clean")
+        (is (= "(ns demo.x)\n" (slurp (str dir "/src/demo/x.clj"))))
+        (is (= [imported (fx/tree-id dir)] ((juxt :expected :tree) (:value r))) "the answer names the commit it was made from and the tree now"))
+      (testing "a landing moved main after the store's import: refused, the landing kept"
+        (let [stale (git "rev-parse" "HEAD")]
+          (spit (str dir "/c.txt") "landed\n") (git "add" "-A") (git "commit" "-q" "-m" "a landing")
+          (let [landed (git "rev-parse" "HEAD")
+                r (commit {:expect stale :files {"c.txt" "the store's older text\n"}})]
+            (is (= :seon.fx/ref-moved (:seon.error/type r)) (pr-str r))
+            (is (= [stale landed] ((juxt :expected :found) r)) "naming the commit it expected and the one main holds")
+            (is (= landed (git "rev-parse" "HEAD")) "main unmoved")
+            (is (= "landed\n" (slurp (str dir "/c.txt"))) "and the landing's file as it landed"))))
+      (testing "a branch no tree has checked out: the same compare-and-swap"
+        (git "branch" "-q" "side" "HEAD^")
+        (let [r (commit {:branch "side" :expect (git "rev-parse" "HEAD") :files {"d.txt" "d\n"}})]
+          (is (= :seon.fx/ref-moved (:seon.error/type r)) (pr-str r))))
+      (finally (seon.lib/remove-tree! dir)))))
+
 (deftest a-sessions-item-runs-on-its-checkout-once
   ;; docs/merging.md#a-session-proves-through-root: the :item effect runs one item seon.prove granted (a check step) on the
   ;; session's checkout, and its verdict is the cache's by digest: an item green at its digest is answered from the cache with no
