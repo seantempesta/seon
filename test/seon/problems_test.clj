@@ -667,6 +667,8 @@
                                                                    ; contract, and the touched task's unsynced?, derived? and derived?'s seon.db/eid of the refine section
                                                               2    ; :hand-written-list's reader on base and head for the move's changed vars (context,
                                                                    ; 2026-11-14, measured 86 -> 88)
+                                                              2    ; :stateful-outside-flow's reader on base and head for the move's changed vars (flow,
+                                                                   ; 2026-11-14, measured 89 -> 91)
                                                               1)}  ; retyped-attributes' own contract, once a read (data, 2026-11-14)
                :sizes [10 30 100]}))
 
@@ -1045,7 +1047,9 @@
                ;; each changed var's metadata
                ;; 97 (context, 2026-11-14, the owner's hand-list decree): each changed var's form read and walked for its literal lists
                ;; (scan-form, seon.source/read-forms, literal-lists) on base and head
-               :fixed {:ticks 460000 :bytes 1800000 :calls 97} ; 90: and retyped-attributes' own contract, once a read (data, 2026-11-14)
+               ;; 101 (flow, 2026-11-14, measured 97 -> 101): :stateful-outside-flow's reader on base and head, and on each side the
+               ;; seek of each changed var's namespace file
+               :fixed {:ticks 460000 :bytes 1800000 :calls 101} ; 90: and retyped-attributes' own contract, once a read (data, 2026-11-14)
                :sizes [10 30 100]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
@@ -1264,7 +1268,8 @@
                ;; 66: :unfocused-docstring one more (its seon.db/eid and derived-row)
                ;; 68: :hand-written-list one more (its seon.db/eid and derived-row), context 2026-11-14
                ;; 70: :retyped-attribute one more, the same two (data, 2026-11-14)
-               :fixed {:ns 3000000 :bytes 4000000 :calls 70}
+               ;; 72: :stateful-outside-flow's reader and its row on the world (flow, 2026-11-14, measured 70 -> 72)
+               :fixed {:ns 3000000 :bytes 4000000 :calls 72}
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 4000000}} attention-survives-a-store-write
@@ -1613,7 +1618,7 @@
             :let [[caused full] (made base head c)]]
       (is (seq full) (str (name c) ": the branch made a row"))
       (is (= full caused) (str (name c) ": caused-split answers it, as the full reading does")))
-    (is (= (set (keys {:unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :unfocused-docstring 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated-test 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1 :hand-written-list 1 :retyped-attribute 1}))
+    (is (= (set (keys {:stateful-outside-flow 1 :unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :unfocused-docstring 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated-test 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1 :hand-written-list 1 :retyped-attribute 1}))
            seon.problems/caused-classes)
         "the classes a branch is judged on are the content classes, as :seon.problems/class declares them")))
 
