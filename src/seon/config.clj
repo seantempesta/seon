@@ -328,6 +328,20 @@
   "The config this process reads: :config and :sources, its branch's (hold!) or as it loaded; :schema, the config map compiled as its branch states it; :text, the shipped file as its branch states it; :entries and :changes, what they were built from; :waiting, the keys it does not act on (waiting). See docs/config.md#a-process-holds-its-branchs-config."
   (atom (assoc loaded :schema config-schema :text built-text :waiting {})))
 
+(defn hold-checkout!
+  "Make this process's config the one a test process of checkout dir loads, as bin/test starts a shard: dir's shipped file
+  under the scripted profile, with no config/local.edn and none of this process's own layers (test-system-config's rule),
+  both held and as loaded (config and sources, which readers at load take). For a test child of the service, a fork of
+  root's agent, whose config was root's: its profile, and its local.edn's source root and branch. Answers nil. See
+  docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat :string] :nil]}
+  [dir]
+  (let [r (layered (load-layers dir ["--profile" "scripted"]))]
+    (swap! held merge (select-keys r [:config :sources]))
+    (alter-var-root #'config (constantly (:config r)))
+    (alter-var-root #'sources (constantly (:sources r)))
+    nil))
+
 (defn in-force
   "This process's config as its branch states it, {:config}: built once at its start, refreshed only when a transaction touches an entry. Not which layer each key came
   from: that differs by process while a digest takes no place, so a reader of it could be green in one process and red in another at one digest. Root's boot writes them on

@@ -40,6 +40,7 @@ The sites that resolve a name held in data to a var by design.
 - `my.agent/asked`, `my.agent/no-var`, `my.agent/ns-named?`: a name an agent asks `callers`, `callees` or `source` about is read as its REPL reads it, and one that resolves to nothing answers `:my.agent/no-var`, never "no callers". A bare name is a namespace only when one of that name exists and no var of the agent's namespace resolves from it: `'seon.task` is the namespace, `'map` stays `clojure.core/map`.
 - `my.agent/help`: reads its own namespace's docstring by name.
 - `seon.repl/eval-string`: each response's handle (``result/a3f9c1d2``), the agent REPL's own `*1`, defined as it answers.
+- `seon.config/hold-checkout!`: a test child of another checkout, a fork of root's agent, holds the config a test process of that checkout loads, its own namespace's `config` and `sources` included, since readers take them as loaded: a test environment.
 
 ## Owed its owner's fix
 
