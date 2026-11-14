@@ -18,6 +18,10 @@ Context runs one watched task now, random rounds after the model call's bound. O
 
 "Your job is see waste and that's how you find what to delete. Unify the concept at the root of all of our problems and the other problems should go away because they aren't possible anymore." On the survey: "If we have many ways what is the best way? Don't we have a way of auto tracking what reads have changed in ratoms and datahike reads ... I want the optimal solution not the first one that each agent came up with." On recording's switch-offs: "Assume agents did stupid shit ... we shouldn't just accept the bad ideas that are easily fixable." On cost: "Don't worry about a few ms. Focus on what is the best mechanism that our agents can use that's simple and the most expressive and powerful. We can optimize it later. Right now we dedupe and upgrade everyone." Then: "Can we make the ratom do the reaction work but in the way that agents are expecting when writing hiccup components? Most agents are trained on reagent and I don't want to teach a foreign concept. I don't care if we have two interfaces if it's the same system and we are computing things efficiently." Agreed by every area: one reaction over the store, one tracker, one stored index. Stated in [the plan](plan.md#the-root-concept-one-reaction-over-the-store).
 
+### A fix deletes the other implementations
+
+"Find fixes and you must delete the other implementations. This is how our code base shrinks and we get better code and faster and more correct code." Stated in [AGENTS.md](../AGENTS.md#3-how-work-moves).
+
 ### Reference code needs no asking
 
 "You never need to ask to checkout reference code into reference-code/. I strongly encourage always reading good clojure code as it helps correct mistakes we make in our own code." Stated in [AGENTS.md](../AGENTS.md#3-how-work-moves) (Learn).

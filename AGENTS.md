@@ -70,7 +70,7 @@ Run, then right, then fast. If you can't show it running, it isn't done.
 - **A merge that completes a task** removes the task's entry and says `Completes: ns/name`.
 - **No regressions:** a number that got worse is refused unless the message names its reason and who follows it up.
 - **Never delete or move a red verdict:** the fix is a new digest ([merging](docs/merging.md#verdicts-are-a-cache)). A flaky result is a defect to fix at its cause.
-- **What a new design replaces goes with it:** code, tasks and wiki text.
+- **A fix deletes the other implementations** (owner, 2026-11-14: "Find fixes and you must delete the other implementations. This is how our code base shrinks and we get better code and faster and more correct code"): every implementation of the same job goes in the same landing, code, tasks and wiki text, and the landing message's `Deletes:` line names each. Root reads each landed diff against that line and files what was left.
 - **A dependency pin** is proved whole on its own branch before it is handed over ([merging](docs/merging.md#conflicts-and-pins)).
 - **Before a compaction,** a session sends its parent a few lines: what it finished, what cost it time, and what change to a script, check or this file would have saved that time. It then makes each fact it learned true where that fact lives (the wiki section, the task, the docstring), and removes the entries it completed.
 
