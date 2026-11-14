@@ -77,6 +77,20 @@ A design is judged by these rules before it is built, and each one has stopped a
 - **What we keep lives in git.** Code and EDN representations of everything of value; the store is erasable while it holds
   only test data, and stops being erasable once it holds data we keep.
 
+## Measured or hypothesis
+
+Every claim says whether it was measured or is a hypothesis. A measured claim gives its number and where it came from: the
+command, the log or the file:line. Anything else is a hypothesis, however likely, and names the observation that would
+settle it. A cost's cause is named only after it is measured warm, twice: a first cold run, a filling cache or a loaded
+machine measures something other than the code.
+
+## One entry, checked everywhere
+
+Each kind of state a process runs on (its environment, its branch, its malli registry, its pins, the binary it runs) is set
+at one point and checked at every entry: prove, land, the test service, agents, test children, update. A process running on
+state its tree doesn't name gives verdicts that are wrong or look flaky, and more care at each caller does not stop it. So
+the state has one setter, every entry checks it against the tree, and a law goes red on any path around it.
+
 ## Raise the alarm
 
 You are the one in the field: you will see these rules broken before anyone else does. When you find a second mechanism for

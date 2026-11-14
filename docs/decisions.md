@@ -2,6 +2,30 @@
 
 The owner's standing rulings, one entry each: his words and date, and where the rule is stated now. The mechanism lives in `AGENTS.md` and the wiki; the reasoning and the history around each ruling are in git. A ruling a later one reverses keeps a one-line pointer to it.
 
+## 2026-11-14 rulings
+
+The owner's rulings of this day and the night before, each with his words where recorded and where it is now stated.
+
+### Sessions message the owning session directly; the blockers board holds the state
+
+Set the night of 2026-11-13 (quote not recorded), after many back-and-forth messages. It replaces "sessions talk to root only" (2026-11-12). A blocker or a bug in another area is a row on the board; a message goes to the owning session only to block, unblock or agree an interface, in 6 lines or fewer, with evidence and one ask, one thread per problem, no acknowledgements. Root keeps releases and the owner's decisions. Stated in `AGENTS.md` §2.
+
+### Main is pushed to GitHub
+
+"push main now so nothing is lost", after README.md says plainly that a major refinement is under way (2026-11-13, as recorded by root). Root pushes main to `github.com/seantempesta/seon` after landings; no other branch of this repository is pushed; a pull request upstream is a draft, opened only with his yes. Stated in `AGENTS.md` §3 and §8.
+
+### Worktrees are temporary; Claude sessions become Seon agents on branches
+
+"The worktrees and everything else is a hack for your claude agents ... Perhaps having agents just work on branches and then we can really deepen the merge and testing mechanisms just like real agents will do?" (2026-11-13). Sessions move onto branches of the one system after 2 or 3 real tasks have merged end to end, one area first. Stated in `AGENTS.md` §3.
+
+### Docs changes are proved by reach
+
+He owned "telling agents not to check doc updates" as a bad decision (quote as recorded by root). A docs-and-tasks change reruns every test that reads the changed docs; narrowing to the tests that read the changed section follows. It replaces "a docs-and-tasks change is never proved". Stated in `AGENTS.md` §3 and [tests run by reach](source.md#tests-run-by-reach).
+
+### Process fixes from the retrospectives
+
+Approved with the retrospectives' working theory: every claim is marked measured or hypothesis; `bin/land --check` before any release ask; a landing's `Deletes:` line matches the deletions ledger, and a replacement lands with its old path deleted; a session updates its resume note before any landing or long run. Quote not recorded. Stated in `AGENTS.md` §2 and §3, and in [principles](principles.md#measured-or-hypothesis).
+
 ## 2026-11-13 rulings
 
 The owner's rulings of this day, each with his words and where it is now stated.
