@@ -33,19 +33,13 @@
   (pm/unmerged (agent/db)))
 
 (defn resolve!
-  "Settle the unmerged entry of var sym, or of program key k (a task's: [:task \"ns/name\"]) (git add). With no side the branch
-  keeps what it holds now; :theirs or :base takes that side: a var's definition loaded (or the var unmapped when that side
-  deleted it) and recorded, a task's content written. Answers the entries still unmerged."
-  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :seon.merge/program-key]] [:vector :seon.merge/entry-value]]
-                  [:=> [:cat [:or :qualified-symbol :seon.merge/program-key] [:enum :ours :theirs :base]] [:vector :seon.merge/entry-value]]]}
+  "Settle the unmerged entry of var sym (git add). With no side the branch keeps what it
+  holds now; :theirs or :base loads that side's definition (or unmaps the var when that
+  side deleted it) and records it. Answers the entries still unmerged."
+  {:malli/schema [:function [:=> [:cat :qualified-symbol] [:vector :seon.merge/entry-value]]
+                  [:=> [:cat :qualified-symbol [:enum :ours :theirs :base]] [:vector :seon.merge/entry-value]]]}
   ([sym] (resolve! sym :ours))
   ([sym side]
-   (if (vector? sym)
-     (let [k sym entry (first (filter #(= k (:key %)) (pm/entries (agent/db))))]
-       (when (and entry (not= :ours side))
-         (agent/transact! (pm/content-tx (agent/db) k (get entry side))))
-       (agent/transact! (pm/resolve-tx (agent/db) k))
-       (unmerged))
    (let [k [:var sym]
          entry (first (filter #(= k (:key %)) (pm/entries (agent/db))))
          content (get entry side)
@@ -57,7 +51,7 @@
          (do (ns-unmap (find-ns nsym) (symbol (name sym)))
              (stage/stage!))))
      (agent/transact! (pm/resolve-tx (agent/db) k))
-     (unmerged)))))
+     (unmerged))))
 
 (defn changes
   "git diff main...: what this branch's merge will carry to main, the vars it added, changed

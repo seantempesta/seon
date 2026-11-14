@@ -68,7 +68,7 @@ An agent holds the task root started it for from its first form: `my.task/curren
 
 When an agent ends, every task whose content its branch changed since its merge base is written onto main, and one that main also changed, differently, is a conflict for root.
 
-A task's content (plan, instructions, proofs, a stall task's cause) is a key of Seon's one three-way merge (a `:task` row of `seon.merge`'s stated keys), merged like a var: a change on one side alone is taken, equal values write nothing, and a change on both sides is an unmerged entry, settled with ``(my.branch/resolve! [:task "ns/name"] :theirs)``. A branch's content never makes a task main doesn't hold; its declaration does. Root's judge (`seon.reconcile/judge-tx`) merges the branch's task keys at its run's end, so a design's plan reaches main before implement starts, and a both-changed member is among the task's `:seon.task/conflicts`.
+`seon.task/carry-tx` compares base, branch and main over `seon.merge/carried-platform-attrs` (plan, instructions, proofs, a stall task's cause). A change on the branch alone overwrites main's; equal values write nothing; a change on both sides goes on the task as `:seon.task/task-conflicts`, shown by `seon.problems/report` as `:task-conflict`. Root's judge (`seon.reconcile/judge-tx`) calls it, so a design's plan reaches main before implement starts. A merge merges the program only (`:data-attrs #{}`), so task edits on main never put a merge behind.
 
 ## A refused run is held for root
 
@@ -87,7 +87,7 @@ A task whose end was refused, or that its agent marked failed, is held for root:
 - A proof with no result refuses as `:proof-unknown`, a red one as `:proof-red`; a process test left out of the judging is neither.
 - An open problem the branch caused (`seon.problems/caused`) refuses.
 - A `:design` task may leave proofs red but not unknown, until its plan differs from the one it began with.
-- Every task is refused `:no-proofs` until it has one; the reason shows the form that registers one: ``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)`` (`seon.task/member-tx`). A red test not registered is a `:stray-red`. Proofs merge onto main with the plan, as task content (`seon.merge`'s `:task` key).
+- Every task is refused `:no-proofs` until it has one; the reason shows the form that registers one: ``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)`` (`seon.task/member-tx`). A red test not registered is a `:stray-red`. Proofs are carried onto main with the plan (`seon.task/carry-tx`).
 - A red counts only when the branch made it: a non-proof test red on main (`seon.proofs/main-red`) is never a `:stray-red`; it stays main's. A proof of the task always counts.
 - A contract gap is a function the branch defines without a contract: `seon.merge/uncontracted` over the merge's `:ours`, the same answer for the writer's merge gate, root's judge and the agent's own check (`seon.turn`).
 
