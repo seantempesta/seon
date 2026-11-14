@@ -64,7 +64,7 @@
   "Whether an attribute of db is data that data-attrs (a set, or :all) names, as a predicate:
   the set itself, or for :all one that asks of an attribute alone whether db's own schema entry
   gives it a value type, outside the program's namespaces: every fact, the platform's records included, with no list of what may
-  cross (owner, 2026-11-14: \"If there are no conflicts I don't see any reason to not merge everything\"). A merge
+  cross (docs/decisions.md#one-merge-everything-that-doesnt-conflict-both-directions). A merge
   asks it of the attributes of the datoms that differ, so it costs those, never the schema:
   d/schema rebuilt the whole schema map on every call, once per db per read."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/data-attrs] ifn?]}

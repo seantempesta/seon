@@ -546,7 +546,7 @@
   the same way, so a member main changed never reads, at the run's end, as this branch reverting it (live finding F3), and one
   both changed is a conflict. data-attrs :all (every caller's): every other fact main wrote since the base (its records, a
   task's lifecycle) merges by its [:datum e a] key, so the branch after it is main's plus its own change. A conflict stops the
-  merge (owner, 2026-11-14: \"The merge doesn't happen while there are conflicts\"): nothing of main's is applied, the base stays,
+  merge (docs/decisions.md#one-merge-everything-that-doesnt-conflict-both-directions): nothing of main's is applied, the base stays,
   and each conflict is an unmerged entry the branch resolves. Answers {:ok :applied :conflicts :t}."
   {:malli/schema [:=> [:cat :seon.merge/data-attrs] [:map [:ok :boolean]]]}
   [data-attrs]
