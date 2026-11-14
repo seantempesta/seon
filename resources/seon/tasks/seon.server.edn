@@ -48,4 +48,8 @@ Proofs, red first: a read by a client that does not hold the agent leaves its br
   :seon.task/plan "Measured 2026-11-14: bin/mcp's stdio loop reads one message, waits for root's whole answer, then reads the next, so one long call (a prove parked on a gate) blocks every other tool call from that Claude session; root itself answered other evals in 3 ms meanwhile (tests). The owner: \"make sure we are not blocking the repl\". Fix: the relay answers each message on its own connection concurrently (a child per message, each answer written as one line), so a waiting call blocks nothing else. Replaces the misattributed seon.system/root-answers-its-repl-while-it-works. Owner: web (server scripts)."
   :seon.task/proofs #{seon.check-test/a-relay-answers-a-quick-call-while-a-slow-one-waits}
   :seon.task/needs #{}}
+ {:seon.task/name "a-reply-on-the-wire-is-made-one-way"
+  :seon.task/plan "Found by context's duplication audit, 2026-11-14 (the owner: no duplicated effort; plan item 7), both ends read [M]. Web's. seon.server (server.clj:343) repeats seon.agent/on-the-wire's plain-value rule inline with a different key set (:text :ex :recorded :main), so root's reply and an agent's carry different keys; seon.repl and seon.turn already call on-the-wire. Change: the server calls seon.agent/on-the-wire. Deletes: the inline rule. Proof: root's and an agent's reply to the same eval carry the same keys."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.server-test/a-reply-on-the-wire-is-made-one-way}}
 ]
