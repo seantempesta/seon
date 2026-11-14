@@ -136,7 +136,7 @@
 
 (defn load-average
   "The machine's 1-minute load average (libc getloadavg): a reading of the machine, which the test service's admission
-  reads in a step it already takes (seon.prove/machine-load), never polled. Throws :seon.lib/load-refused when the OS
+  reads in a step it already takes (seon.fx/read-machine), never polled. Throws :seon.lib/load-refused when the OS
   refuses it. See docs/clocks.md#the-machines-load-admits-work."
   {:malli/schema [:=> [:cat] :double]}
   []
