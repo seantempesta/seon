@@ -463,7 +463,7 @@
         (is (str/starts-with? (page-code r1) "(my.render/diff {:commit #uuid \"") "what moved is a generated eval of its own at the end, after turn 1's own eval")
         (is (re-find #"\[\"page\" \"p-task\" \"task-view-demo_2Ff\" \"cite-[^\"]*demo_2Ff\" :pre\]" (:content (peek r1)))
             "the cited var's edit at its own part, nested in its task's as the pull nests it: the ids name each render and what it shows, and only what moved inside the cite is sent")
-        (is (not (str/includes? (:content (peek r1)) "Your proofs")) "one edit at the part that moved, never the page whole")
+        (is (not (str/includes? (:content (peek r1)) "What your task still needs")) "one edit at the part that moved, never the page whole")
         (is (str/includes? (:content (peek r1)) "Triples."))
         (is (not (re-find #"seon\.render\.ui/task-view\b" (:content (peek r1)))) "a component that did not change is not told again")
         (is (not (re-find #"\"status\"" (:content (peek r1)))) "a turn taken moved nothing of how the work stands: not told again")
@@ -829,7 +829,7 @@
         (is (re-find #"\"status\"" (:content (peek r1))) "a verdict recorded after turn 1: how the work stands, told again")
         ;; (the task's data draws each proof's recorded status too, so it moves with a verdict: reported)
         (is (not (re-find #"\"related" (:content (peek r1)))) "what a verdict does not move is not told again")
-        (is (str/includes? (:content (peek r1)) "fails") "the proof's new verdict")
+        (is (str/includes? (:content (peek r1)) "\": red\"") "the proof's new verdict")
         (is (not (str/includes? (:content (peek r1)) "seon.render.ui/task-view")) "the rest unchanged, not told again")
         (is (not-any? #(str/includes? (str (:content %)) ";;") (rest r1)) "no ;; reaches the model")
         (is (nil? (resolve 'seon.ctx/messages)) "one path: no request without an agent")))))
@@ -1349,7 +1349,7 @@
             text (pr-str parts)]
         (is (str/includes? text "Task: ") "the task's part, by its own render (seon.render.ui/task-view)")
         (is (str/includes? text "Make f.") "and its plan's text")
-        (is (str/includes? text "Your proofs") "the proofs' part beside it")))))
+        (is (str/includes? text "What your task still needs") "the proofs' part beside it")))))
 
 (deftest a-first-request-is-the-system-prompt-and-the-page-as-a-message
   (ts/test-branch!
@@ -2258,8 +2258,8 @@
     (is (empty? (:helpers shape)) "only the helpers its example calls (it calls none)")
     (is (= "(deftest g-test (is (= 1 (g))))" (:example shape)) "one real test of it: the shortest of its first five by name")
     (is (nil? (status/test-shape db 'nowhere-test/x)) "a namespace the branch lacks has no shape: the agent makes it first")
-    (let [h (pr-str (seon.render.ui/status-hiccup {} {:proofs [{:test 'demo-test/new-test :status :undefined :shape shape}]}))]
-      (is (re-find #"Write " h) "it is told to write it")
+    (let [h (pr-str (seon.render.ui/status-hiccup {} {:reasons [{:reason :proof-unknown :symbol 'demo-test/new-test}] :proofs [{:test 'demo-test/new-test :status :undefined :shape shape}]}))]
+      (is (re-find #"not written" h) "it is told it is not written")
       (is (re-find #"deftest g-test" h)))))
 
 (deftest a-turn-passing-adds-no-page-message

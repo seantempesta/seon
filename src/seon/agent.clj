@@ -1047,9 +1047,8 @@
                                     (swap! reports into @current)
                                     (reset! current []))
                       :else nil))
-        ;; the branch's registry as the REPL binds it: the one held (branch-schemas), never derived again here
-        _ (binding [mr/*registry* (:registry (branch-schemas))]
-            (proofs/run-tests! tests (zipmap tests (repeat nil)) note! ticks))
+        ;; this process's lookups read its branch's registry (seon.contract/layers), so the tests check against it
+        _ (proofs/run-tests! tests (zipmap tests (repeat nil)) note! ticks)
         reports @reports
         counts (frequencies (map :type reports))]
     {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
@@ -1246,8 +1245,8 @@
         ;; left a child of a grown agent less room than any test needs (docs/machine.md#what-a-process-owns-in-memory)
         (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)) (cfg/value :seon.config.agent/trip-bytes))
         ;; a run of a session's checkout (seon.system/prove-tree!): its tests read that checkout's files, as their digests
-        ;; (the tree's) say, never root's, which this agent was forked from (seon.config/checkout reads SEON_CHECKOUT)
-        (when-let [co (:checkout plan)] (lib/c-setenv "SEON_CHECKOUT" co 1))
+        ;; (the tree's) say, and they and what they start run in its environment and test config, never root's, which this agent was forked from
+        (when-let [co (:checkout plan)] (fx/checkout-env! co) (cfg/hold-checkout! co))
         ;; a batch the test service granted: every process this child starts carries it, so the service reads what its
         ;; running batches hold (seon.prove/held-processes)
         (when-let [b (:seon.prove/batch plan)] (lib/c-setenv "SEON_PROVE_BATCH" b 1))

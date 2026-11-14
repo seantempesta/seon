@@ -1779,6 +1779,8 @@
         {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors digest digest-ms contracts pid fd compacted retained dropped-trees main-inputs]}
         (boot! backend path datoms main source t0)
         recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
+        ;; root holds main, so its malli default registry is main's (its schema entries beyond the binary's included)
+        _ (program/hold-registry! (program/schema-registry (program/schema-changes db)))
         ;; this root's boot id (runs of an earlier boot are reaped); its fact is written
         ;; through the writer once the graph runs, and that commit is the reconciler's first pass
         boot (lib/unique-id)

@@ -117,6 +117,12 @@
         others (for [n (some-> dir .list seq) :when (and (re-matches (re-pattern (str "\\Q" stem "\\E-[0-9a-f]{8}")) n) (not= n (.getName own)))]
                  (java.io.File. dir ^String n))]
     (when (.isDirectory own) (.setLastModified own (System/currentTimeMillis)))
+    ;; a store a plan moved aside (test-runner/move-aside!, of any key) goes once no process holds it open
+    (doseq [n (some-> dir .list seq)
+            :when (re-matches (re-pattern (str "\\Q" stem "\\E-[0-9a-f]{8}\\.retired-.+")) n)
+            :let [p (str dir "/" n)]
+            :when (not (held-open? p))]
+      (seon.lib/remove-tree! p))
     ;; never one a process holds open (its LMDB environment, data.mdb): removing it under that process failed its write
     ;; (NoSuchFileException under program-store-<key>/, 2026-11-12), whatever the count
     (doseq [^java.io.File o (drop (dec (config/value :seon.config.proofs/program-stores-kept)) (sort-by #(- (.lastModified ^java.io.File %)) others))
@@ -323,7 +329,9 @@
                     (concat cmd (apply concat (assoc (apply hash-map opts) :dir dir))))))
 
 (def root-profile
-  "The profile a test's root runs under, whatever profile runs the process that starts it: the
+  "The profile a test's root, and any binary a test runs, runs under, whatever profile runs the process that starts it
+  (a test child of the service runs under root's: ./seon units under deepseek measured an armed call at 6.1 ticks, 15.1 under
+  this one): the
   scripted provider's, a test fixture, so no test helper starts a paid provider (a DeepSeek agent's
   start-root! inherited --profile deepseek, a root with six idle processes that outlived its eval).
   A test naming another gives its own --profile in start-root!'s args (the last one given wins,

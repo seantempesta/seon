@@ -44,6 +44,8 @@
   (step/out! o :main {:t t :prev prev :ops ops :commit (d/commit-id @(:conn st)) :ns (profile/now-ns)})
   (when-let [errs (seq (program/load-changes! db ops {:tests? false}))]
     (step/out! o :events (step/event {:type :load-errors :errors (vec errs)})))
+  ;; root holds main: a moved schema entry (a retraction included: a deleted key leaves the registry) is its registry now
+  (when (some (fn [[_ _ a]] (#{:schema/form :schema/key} a)) ops) (program/hold-registry! (program/schema-registry (program/schema-changes db))))
   ;; a config entry moved: main's root entity says so with the next commit (docs/config.md#facts-on-main)
   (let [st (union-caught-up st (pdb/conn-main (:conn st)) db)]
     (if-let [{c :config srcs :sources} (cfg/moved db ops)] (update st :pend (fnil conj []) {:tx-data (task/config-tx c srcs)}) st)))

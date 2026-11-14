@@ -926,19 +926,32 @@
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} an-eval-reads-the-schema-entries-only-after-one-moved
-  ;; docs/machine.md#an-agents-first-write: seon.repl/branch-registry, which each eval calls (wrap-registry,
+  ;; docs/machine.md#an-agents-first-write: seon.agent/branch-schemas, which the process's registry is set from (
   ;; instrument, the page walk), read every schema entry (two passes, seon.program/schema-changes: 748
   ;; entries, 1.08 MB) to learn nothing had changed. With the registry held (the fork hands main's) a call
   ;; costs under a tenth of one read; after a registration the next eval binds the registered schema.
   (let [m "(fn [f] (let [b (seon.profile/alloc-bytes)] (f) (- (seon.profile/alloc-bytes) b)))"
         [_ costs reg valid]
         (in-agent [(str "(def meas " m ")")
-                   "[(meas #'seon.repl/branch-registry) (meas #(seon.program/schema-changes (:db @seon.agent/state)))]"
+                   "[(meas #'seon.agent/branch-schemas) (meas #(seon.program/schema-changes (:db @seon.agent/state)))]"
                    "(my.schema/register! :lab.gap/n [:int {:min 3}])"
-                   "[(malli.core/validate :lab.gap/n 5 {:registry malli.registry/*registry*}) (malli.core/validate :lab.gap/n 1 {:registry malli.registry/*registry*})]"])
+                   "[(seon.contract/valid? :lab.gap/n 5) (seon.contract/valid? :lab.gap/n 1)]"])
         [held read] (:value costs)]
-    (is (< (* 10 held) read) (str "a call of branch-registry with the registry held allocated " held " bytes; one read of the schema changes " read))
+    (is (< (* 10 held) read) (str "a call of branch-schemas with the registry held allocated " held " bytes; one read of the schema changes " read))
     (is (= [true false] (:value valid)) (str "after a registration the next eval binds it: " (pr-str reg) " " (pr-str valid)))))
+
+;; docs/source.md#schemas-at-the-repl: an agent process holds one branch, so its one malli registry is that branch's, on every path:
+;; an eval, the turn loop, a Flow step, a handler, a thread. Red before: the branch's registry was bound only around some paths (11
+;; hand bindings), so code outside them checked against main's and threw "malli has no schema" (context's loop task, 2026-11-13: a
+;; key its branch held and main had deleted). Here a raw Thread, which conveys no binding, stands for every such path, and a
+;; lookup by name at call time (contract/valid?, as contract/error's type check and config's key check do) is what failed.
+;; Estimate: in-agent's setup (~1.5M) + 3 asks (~0.25M each) = ~2.3M
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-branchs-own-schema-holds-on-every-path
+  (let [[reg _ called]
+        (in-agent ["(my.schema/register! :lab.reg/n [:int {:min 3}])"
+                   ":registered"
+                   "(let [r (promise) t (Thread. #(deliver r (try [(seon.contract/valid? :lab.reg/n 5) (seon.contract/valid? :lab.reg/n 1)] (catch Throwable e (ex-message e)))))] (.start t) (.join t) @r)"])]
+    (is (= [true false] (:value called)) (str "a call outside any eval checks against the branch's schema: " (pr-str reg) " " (pr-str called)))))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} root-reads-the-health-the-render-proc-keeps
@@ -1263,7 +1276,7 @@
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} an-edit-of-a-middleware-runs-next
   (let [[_ _ marked vars] (in-agent ["(def marks (atom 0)) (in-ns 'seon.repl)"
-                                     "(let [old wrap-registry] (alter-var-root #'wrap-registry (fn [_] (fn [h] (let [n (old h)] (fn [req] (swap! @(find-var (symbol (str (ns-name (first (filter #(ns-resolve % 'marks) (all-ns)))) \"/marks\"))) inc) (n req)))))))"
+                                     "(let [old wrap-cost] (alter-var-root #'wrap-cost (fn [_] (fn [h] (let [n (old h)] (fn [req] (swap! @(find-var (symbol (str (ns-name (first (filter #(ns-resolve % 'marks) (all-ns)))) \"/marks\"))) inc) (n req)))))))"
                                      "@@(find-var (symbol (str (ns-name (first (filter #(ns-resolve % 'marks) (all-ns)))) \"/marks\")))"
                                      "(every? var? seon.repl/middleware)"])]
     (is (pos? (:value marked)) (pr-str marked))
@@ -3535,3 +3548,13 @@
         "a process test is answered as an error naming why, never left out")
     (is (= (set (keys items)) (set (concat (:run s) (map #(symbol (subs (:var %) 2)) (:reused-reports s)))))
         "every granted item is run or reported")))
+
+(defn- throws-here {:malli/schema [:=> [:cat] :any]} [] (throw (ex-info "the place is the finding" {:k 1})))
+
+;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: a turn's error names the fn the throw happened in
+;; (seon.error/thrown-in), so it says which code threw; a compile error's macro (an unqualified symbol) names none, and is no
+;; contract failure of thrown-in. Red before: the turn loop's error kept no place (context's loop task, 2026-11-13), and thrown-in
+;; failed its own contract on `cond`. Estimate: two throws and two triages (Jolt keeps 25 frames): ~0.3M ticks
+(deftest ^{:seon.test/estimate {:ticks 400000}} an-error-map-names-where-it-was-thrown
+  (is (= 'seon.agent-test/throws-here (seon.error/thrown-in (try (throws-here) (catch Throwable e e)))) "a run's throw names its fn")
+  (is (nil? (seon.error/thrown-in (ex-info "Syntax error macroexpanding cond" {:clojure.error/symbol 'cond}))) "a macroexpansion's names none, and thrown-in answers"))
