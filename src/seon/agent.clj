@@ -1287,7 +1287,7 @@
         ;; left a child of a grown agent less room than any test needs (docs/machine.md#what-a-process-owns-in-memory)
         (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)) (cfg/value :seon.config.agent/trip-bytes))
         ;; a batch the test service granted: every process this child starts carries it, so the service reads what its
-        ;; running batches hold (seon.prove/held-processes)
+        ;; running batches hold (seon.fx/held-processes)
         (when-let [b (:seon.prove/batch plan)] (lib/c-setenv "SEON_PROVE_BATCH" b 1))
         ;; its tests run as bin/test's runner runs them: no interrupt or eval of the agent's
         ;; (task seon.agent/a-test-child-starts-as-a-test-runner-does)
@@ -1537,7 +1537,9 @@
   {:malli/schema [:=> [:cat :map [:sequential :qualified-symbol]] [:vector :map]]}
   [reused ts]
   (vec (for [t ts :let [r (reused t)] :when r
-             f (or (seq (:failures r))
+             ;; a flaky digest: one :pass report carrying its evidence, which seon.prove/flaky-problems files as a :platform problem
+             f (or (when (:flaky r) [(assoc (select-keys r [:flaky :seon.proofs/ticks :seon.proofs/red-failures :digest]) :type :pass)])
+                   (seq (:failures r))
                    [(cond-> {:type (if (proofs/green? r) :pass (if (pos? (:error r)) :error :fail))}
                       (not (proofs/green? r)) (assoc :message "red at this digest, with no failure kept"))])]
          (cond-> (assoc f :var (str "#'" t) :reused true)
@@ -1663,7 +1665,7 @@
   ;; (test-child-runs!'s SEON_CHECKOUT), whichever plan the run takes; it rode on the held plan alone, so a run that planned again read
   ;; the main tree's (its process tests found no process store there, 2026-11-12)
   ([ticks proofs mode forked names items checkout] (run-tests-forked ticks proofs mode forked names items checkout nil))
-  ;; batch: the test service's tag of the batch this run is (seon.prove/batch-tag), set in its test children's environment
+  ;; batch: the test service's tag of the batch this run is (seon.fx/batch-tag), set in its test children's environment
   ([ticks proofs mode forked names items checkout batch]
   ;; an item the test service granted, at the digest this agent's plan of the run gave it: run as planned, nothing planned again
   ;; the runtime invariant (docs/merging.md#a-session-proves-through-root): this process runs its branch's program before a

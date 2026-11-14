@@ -527,12 +527,14 @@
   [n] [(vec (range n))])
 
 ;; docs/cost.md#how-we-measure: a size measured by one call passes its own slack cold (its first call's extra work under 3x
-;; of the ticks it states) and still bends the growth fit, which takes increments over the smallest size; the curve is then
-;; judged on each size measured again warm, so a verdict never rests on what ran before it in the process. Red before:
+;; of the ticks it states) and still bends the growth fit, which takes increments over the smallest size; so a proof makes one
+;; unmeasured call at the smallest size first, and a verdict never rests on what ran before it in the process. Red before:
 ;; seon.doc-cost-test/a-cited-var-finds-its-sections-by-the-names-sections-hold in a shard, 1.57x at n=30 and n^1.68
 (deftest a-curve-is-judged-on-warm-sizes
   (let [{:keys [rows verdict]} (cost/run {:of 'seon.cost-test/cold-once :input 'seon.cost-test/cold-once-input
                                           :n "elements" :work "each element printed and its digits counted (linear)" :growth :linear
                                           :per-n {:ticks 20} :fixed {:ticks 2000} :sizes [100 300 1000]})]
     (is (:ok? verdict) (pr-str verdict))
-    (is (:calls (first rows)) (str "the smallest size, cold, was measured again warm: " (pr-str (mapv #(select-keys % [:n :measured :expected :calls]) rows))))))
+    ;; warm before timing: its cold first call was the unmeasured warm-up, so every size is one warm call and none is measured again
+    ;; (web's cold first row bent the curve and every row was re-measured up to cost-max-samples: 27-39 calls a row, 2026-11-14)
+    (is (every? (comp nil? :calls) rows) (str "each size one warm call: " (pr-str (mapv #(select-keys % [:n :measured :expected :calls]) rows))))))

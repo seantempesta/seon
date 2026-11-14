@@ -272,7 +272,7 @@
   ;; as reaching a process and was left out of bin/prove. A render runs no process
   (let [db (src-program)
         in (seon.fx/inputs (seon.config/checkout))
-        g (runner/reach-graph-of db (:data-refs in) (ts/kept-program-store))
+        g (runner/reach-graph-of db (:data-refs in) (ts/kept-program-store) (seon.fx/tree-id (seon.config/checkout)))
         idx (seon.program/graph-index g in
                                       {"agent" '[seon.render.ui/agent] "root" '[seon.render.ui/root] "root-ctx" '[seon.render.ui/root-ctx] "render-ctx" '[seon.render.ui/render-ctx]})]
     (is (= {"agent" false "root" false} (update-vals idx :process?))

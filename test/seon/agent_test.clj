@@ -3610,6 +3610,31 @@
     (is (= 1 (:index-builds (seon.agent/schema-moved moved #{:seon.eval/id}))) "and a later write of another attribute builds no other")))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 1 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~1750k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+;; docs/config.md#a-process-holds-its-branchs-config, plan Stage 0.5 (task seon.agent/a-test-child-starts-on-its-branchs-environment, slice A):
+;; an agent's start holds the config its branch states (load-diff!'s seon.program/hold-config!), so what forks from it is on its
+;; branch's environment by construction, and a config a branch cannot hold is refused at its write (seon.program/config-refused),
+;; so no agent can start on one: checked once, where it is written, never again downstream. Green when written (tests, 16:45):
+;; it guards a guarantee the code already gives, which the plan had wrongly said was missing.
+;; Estimate: in-agent's setup ~1.5M + one root eval of two spawns at a commit (each ~0.25M asked) and four submits = ~2.5M
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2500000 :asks 1}} an-agent-starts-on-the-config-its-branch-states
+  (let [[r] (in-agent (fn [{:keys [agent ns]}]
+                        (let [b (fn [s] (str ":task-" ns "-" s))
+                              entry (fn [form] (pr-str (str "(do (seon.agent/transact! [{:config/key :seon.config.root/view-window :config/form " (pr-str form)
+                                                            " :config/file \"resources/seon/config/default.edn\"}]) (seon.agent/commit!) (datahike.api/commit-id (seon.agent/db)))")))]
+                          [{:op :eval :agent "root"
+                            :code (str "(let [sub (fn [a code] (:value @(c/submit! sys a code {:origin :outside})))"
+                                       "      a :" agent
+                                       "      good (sub a " (entry "37") ")"
+                                       "      r @(seon.system/call! sys {:op :spawn :opts {:branch " (b "env-good") " :commit good}})"
+                                       "      held (when (:id r) (sub (:id r) \"(seon.config/value :seon.config.root/view-window)\"))"
+                                       "      _ (when (:id r) (c/kill! sys (:id r)))"
+                                       "      bad @(c/submit! sys a " (entry ":not-a-count") " {:origin :outside})]"
+                                       "  {:held held :root (seon.config/value :seon.config.root/view-window) :bad (select-keys bad [:value :ex]) :answer (when-not (:id r) r)})")}])))
+        v (:value r)]
+    (is (= 37 (:held v)) (str "the agent holds its branch's value from its start, not root's (" (:root v) "): " (pr-str v)))
+    (is (nil? (:value (:bad v))) (str "a config the branch cannot hold is refused at its write, never reaching a branch an agent starts on: " (pr-str v)))
+    (is (some? (:ex (:bad v))) (pr-str v))))
+
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-session-restored-at-an-older-commit-runs-that-commits-definitions
   ;; docs/storage.md#compiled-code: a spawn with {:branch b :commit C}
   ;; makes b from the session's commit C and forks it from main's image with the program at C loaded over it, the way a resumed

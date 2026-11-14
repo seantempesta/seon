@@ -386,6 +386,10 @@
                          " (" (print/text (vec (sort (:sizes e))) (:part print/budgets)) "), fewer than " min-points ": give it sizes under the cap where its work dominates")
                     {:of (:of e) :sizes (vec (sort (:sizes e))) :cap cap})
   (let [f @(requiring-resolve (:of e))
+        ;; warm before timing: one unmeasured call at the smallest size, so no row reads its process's first call (code compiled,
+        ;; a cache filled, a fixture made). A cold first row bent the curve and every row was measured again up to
+        ;; :seon.config.proofs/cost-max-samples: 27-39 calls a row, 1.24B ticks for 63M of work
+        _ (when-not (:cases e) (when-let [n0 (first ns)] (apply f (vec (@(requiring-resolve (:input e)) n0)))))
         ;; each point measured: a size and its input built outside the measure, or a generated
         ;; case and its arguments, the contract's bound on them its estimate
         points (if (:cases e)
