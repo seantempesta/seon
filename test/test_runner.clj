@@ -275,9 +275,14 @@
   (a scratch store of a test's own) keeps base.fasl."
   [store base tree]
   (let [n (if tree (str base "-" tree ".fasl") (str base ".fasl"))
-        gens (ts/generations store)]
-    (or (some #(let [f (io/file % n)] (when (.isFile f) f)) gens)
-        (io/file (or (first gens) store) n))))
+        here (io/file store n)]
+    ;; the store's own first (one stat): its generations are listed (a read of the directory beside them) only for a file not
+    ;; there, so a kept file costs what it cost before generations (seon.program-cost-test/a-plan-reads-the-stored-reach-and-pays-for-what-moved)
+    (if (.isFile here)
+      here
+      (let [gens (ts/generations store)]
+        (or (some #(let [f (io/file % n)] (when (.isFile f) f)) gens)
+            (io/file (or (first gens) store) n))))))
 
 (defn- kept-tree-files
   "The files of base kept for any tree in any generation of store, newest first."
