@@ -7,7 +7,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-] :as contract] [seon.print :as print] [clojure.string :as str] [malli.core :as m] [malli.registry] [seon.schema.datahike :as sd] [seon.config :as cfg]
             [datahike.connections] [datahike.writing] [datahike.config] [datahike.store] [konserve.store] [hasch.core :as hasch] [datahike.api :as d] [org.replikativ.persistent-sorted-set :as pss] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
-            [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix] [seon.lib :as lib] [jolt.ffi :as ffi] [datahike.ids] [datahike.core] [datahike.reads]))
+            [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix] [seon.lib :as lib] [jolt.ffi :as ffi] [datahike.ids] [datahike.core] [datahike.reads] [clojure.edn]))
 
 (def schema
   "The Datahike schema, derived from the registry's entity schemas (resources/seon/schemas,
@@ -44,12 +44,28 @@
                                  (if (contains? forms a) (m/schema a {:registry registry}) (contract/schema a))))
         ;; an attribute's validator is found once a transaction: a transaction writes many datoms of few attributes
         seen (volatile! {})
-        valid-of (fn [a] (or (get @seen a) (let [f (m/validator (schema-of a))] (vswap! seen assoc a f) f)))]
+        valid-of (fn [a] (or (get @seen a) (let [f (m/validator (schema-of a))] (vswap! seen assoc a f) f)))
+        ;; and whether it is tagged: its form's properties read in place once an attribute a transaction, no call
+        tagged (volatile! {})
+        tagged? (fn [a] (if (contains? @tagged a)
+                          (get @tagged a)
+                          (let [f (if (contains? forms a) (get forms a) (get contract/forms a))
+                                t (boolean (and (vector? f) (map? (second f)) (:seon.db/tagged (second f))))]
+                            (vswap! tagged assoc a t) t)))]
     (letfn [(refused [a v]
-              (when-not ((valid-of a) v)
+              (if-not ((valid-of a) v)
                 (let [ps (contract/problems (schema-of a) v)]
                   (contract/error :seon.db/invalid-datom #'invalid-datom (let [{:keys [in value]} (first ps)] (str a " refuses this value at " in ": " (:seon.print/code value)))
-                                  {:attribute a :seon.error/problems ps}))))
+                                  {:attribute a :seon.error/problems ps}))
+                ;; a tagged attribute (:seon.db/tagged): each value is also held to the schema its own :seon.db/tag names
+                (when (tagged? a)
+                  (some (fn [x] (let [t (:seon.db/tag x)]
+                                  (when-not (and (known? t) ((valid-of t) x))
+                                    (contract/error :seon.db/invalid-datom #'invalid-datom
+                                                    (if (known? t) (str a "'s value tagged " t " is not what " t " says (its problems under :seon.error/problems)")
+                                                        (str a "'s value is tagged " t ", which no schema registers"))
+                                                    {:attribute a :seon.error/problems (if (known? t) (contract/problems (schema-of t) x) [])}))))
+                        (if (or (set? v) (sequential? v)) v [v])))))
             (value [a v]
               (let [{:db/keys [valueType cardinality]} (get schema a)
                     many? (= :db.cardinality/many cardinality)
@@ -307,6 +323,22 @@
   {:malli/schema [:=> [:cat :map] :nil]}
   [e] (throw (ex-info (:seon.error/message e) e)))
 
+(defn- write-once-refusal
+  "The :seon.db/write-once refusal of report r, or nil: a value of an attribute whose entry says :seon.db/write-once (in the
+  forms of ix) that r replaced with another. Retracting the entity whole is no change of it. See
+  docs/storage.md#the-write-checks-every-entity-it-touches."
+  {:malli/schema [:=> [:cat :seon.db/tx-report :seon.db/entity-index] [:maybe :seon.db/write-once]]}
+  [r ix]
+  ;; an attribute's properties read in place from its form, no call a datom or an attribute
+  (let [once? #(let [f (get (:forms ix) %)] (boolean (and (vector? f) (map? (second f)) (:seon.db/write-once (second f)))))]
+    (some (fn [[[e a] ds]]
+            (let [held (some #(when-not (:added %) (:v %)) ds) new (some #(when (:added %) (:v %)) ds)]
+              (when (and (some? held) (some? new) (not= held new))
+                (contract/error :seon.db/write-once #'write-once-refusal
+                                (str a " is written once: this write would change the value it holds (both under :held and :new; a second status is a defect, filed as one)")
+                                {:attribute a :entity e :held held :new new}))))
+          (group-by (juxt :e :a) (filter #(once? (:a %)) (:tx-data r))))))
+
 (defn- checked
   "Transaction tx-data applied to db by apply-fn (Datahike's, given the tx-data: its report), held to both checks: each
   datom's value (`invalid-datom`, with schemas {:forms :registry}, a branch's own) before, a lookup ref to nothing
@@ -376,6 +408,7 @@
                                                   (cond-> {:target entity-id} by (assoc :by by)))))
                        (throw x)))))]
       (when-let [e (invalid-entity r ix)] (refuse! e))
+      (when-let [e (write-once-refusal r ix)] (refuse! e))
       r)))
 
 (defn transact-checked
@@ -1177,4 +1210,41 @@
               (if (some #{:all} ks)
                 (reduced (into #{} cat (vals idx)))
                 (into acc (mapcat #(get idx %)) ks))))
+          #{} datoms))
+
+(defn- key-content
+  "What read key k (as datahike.reads/range-key makes it) holds on db: its datoms' content, or for an attribute read whole
+  its revision (a commit id naming its datoms, Datahike's cache context), digested whole when db holds none (a speculation)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.reads/key] :any]}
+  [db k]
+  (let [rev (fn [a] (let [c (:cache-context db)] (or (get-in c [:datahike.cache/attribute-revisions a]) (:datahike.cache/conservative-revision c))))]
+    (if (= :any k)
+      (or (:datahike.cache/conservative-revision (:cache-context db)) (:max-tx db))
+      (let [[kind x y z] k]
+        (case kind
+          :e (mapv (juxt :a :v) (d/datoms db :eavt x))
+          :ea (mapv :v (d/datoms db :eavt x y))
+          :av (if (or (get-in (:schema db) [x :db/index]) (get-in (:schema db) [x :db/unique]))
+                (mapv :e (d/datoms db :avet x y))
+                (into [] (comp (filter #(= y (:v %))) (map :e)) (d/datoms db :aevt x)))
+          :a (or (rev x) (mapv (juxt :e :v) (d/datoms db :aevt x))))))))
+
+(defn reads-digest
+  "The digest of what read keys (each its pr-str) and outside reads held on db, the basis left out: equal content gives one
+  digest on any branch. See docs/storage.md#what-a-read-scanned."
+  {:malli/schema [:=> [:cat :seon.host/db [:set :string] [:maybe [:set :seon.fx/read]]] :seon.lib/digest]}
+  [db keys outside]
+  (lib/digest (pr-str [(vec (for [s (sort keys)] [s (key-content db (clojure.edn/read-string s))]))
+                       (vec (sort-by pr-str outside))])))
+
+(defn results-moved
+  "The results (:seon.proof/proof-fact entities) on db a move's datoms reach: one AVET seek of :seon.proof/read-keys for each of a
+  datom's keys; a schema datom reaches every result. See docs/storage.md#what-a-read-scanned."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/datom]] [:set :seon.db/eid]]}
+  [db datoms]
+  (reduce (fn [acc dt]
+            (let [ks (datahike.reads/datom-keys dt)]
+              (if (some #{:all} ks)
+                (reduced (into #{} (map :e) (d/datoms db :aevt :seon.proof/read-keys)))
+                (into acc (comp (mapcat #(d/datoms db :avet :seon.proof/read-keys (pr-str %))) (map :e)) ks))))
           #{} datoms))

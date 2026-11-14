@@ -665,7 +665,7 @@
          ;; each form's row on every text write: 762k, 923k, 1.60M ticks; 3.10, 4.06, 7.43 MB; 65 calls (red: over and steeper)
          ;; 105 since the write asks each touched entity's own required keys (seon.db: a test whose estimate went is a var again):
          ;; one lookup for each of the 3 entities a definition touches (tests, 2026-11-12)
-         :fixed {:calls 105 :bytes 1000000 :ticks 340000} ; 83 until the write checked every datom (the owner, 2026-11-06); 102
+         :fixed {:calls 106 :bytes 1000000 :ticks 340000} ; 106 (data, 2026-11-14): the write's :seon.db/write-once check, one call a transaction ; 83 until the write checked every datom (the owner, 2026-11-06); 102
          ;; since the check is a function, seon.db/checked, not a macro shaped to the count (the audit of 2026-11-09; the owner's
          ;; validation at transaction time, 2026-11-08). 380k ticks and 1.12 MB measured then, under the shared load of a full prove
          :sizes [30 100 300]})

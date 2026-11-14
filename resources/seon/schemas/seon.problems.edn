@@ -126,6 +126,7 @@
  :seon.server/unanswered [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/unanswered]] [:port :int] [:why [:enum :refused :eof :reset]]]]
  :seon.server/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/defect]] [:line :string] [:data {:optional true} :seon.db/plain]]]
  ;; a value its attribute's declared schema refuses, at the write (seon.db/invalid-datom)
+ :seon.db/write-once [:and {:description "A write that would change a value its attribute's entry says is written once (:seon.db/write-once): refused, the held value and the new one named."} :seon.error/base [:map [:seon.error/type [:= :seon.db/write-once]] [:attribute :qualified-keyword] [:entity :int] [:held :any] [:new :any]]]
  :seon.db/invalid-datom [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/invalid-datom]] [:attribute :qualified-keyword]]]
  ;; a lookup ref a write names that names no entity (a cite's target, a wiki link to no section), at the write (seon.db/checked): the lookup
  :seon.db/no-target [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/no-target]] [:target :seon.ref/target]]]
