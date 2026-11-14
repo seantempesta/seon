@@ -17,7 +17,7 @@ How Jolt's core.async works underneath: channels, one waiter protocol, parking a
 What a put does when the channel is full:
 - `(chan)`: rendezvous, the putter waits for a taker.
 - `(chan n)`, `(buffer n)`: parks or blocks; loses nothing.
-- `(sliding-buffer n)`: never waits; **drops the oldest**, silently.
+- `(sliding-buffer n)`: never waits; **drops the oldest**, silently to the putter; the channel counts its drops (`jolt.host/chan-dropped`, which Flow's ping reports).
 - `(dropping-buffer n)`: never waits; **drops the newest**, silently.
 - `(promise-chan)`: keeps the first value; later puts **answer true and are dropped**; every take reads the one value.
 - `(chan n xf ex-handler)`: the transducer runs **on the put**, under the channel lock; a throw puts `(ex-handler e)` if non-nil; `reduced` closes the channel.
@@ -29,10 +29,10 @@ What a put does when the channel is full:
 What each operation does on a fiber and on an OS thread.
 
 - `>!` `<!` `>!!` `<!!`: park on a fiber, block on a thread. Inside `go`, a park the CPS pass can see captures no continuation.
-- `offer!`, `poll!`: never wait; `nil` if they can't.
+- `offer!`: never waits; answers true, false when the channel is closed, nil when full. `poll!`: never waits; nil when nothing is ready.
 - `alts!`, `alts!!`: wait on all ports at once, a fast pass then handler registration, no poll loop; `:priority true` takes the first ready port in order; `:default` answers at once.
 - **`put!`, `take!` that can't complete at once:** a callback handler registered under the channel's mutex (`jolt-async-put!`, `jolt-async-take!`), so pending puts complete in order and the callback runs on a fiber. No thread per pending op.
-- `timeout ms`: a channel the **one timer thread** closes at ms (`jolt-async-timeout`): one min-heap for all deadlines, O(log k) to arm, O(1) to cancel.
+- `timeout ms`: a channel the shared timer closes at ms: one min-heap for every deadline in the runtime, O(log k) to arm (a main carrier runs it in its program loop). A timeout channel can't be cancelled; it just closes. The O(1) cancel, `jolt.host/timer-cancel!`, is for timed socket and deref waits.
 
 ## go, thread, io-thread
 
@@ -60,19 +60,19 @@ How Seon meets each need with channels.
 - **A lossy buffer** (sliding, dropping) only on **one stream whose newest value subsumes the rest** (a tick, main's latest commit, a view); **never for data that must arrive**, and never for many keys on one port, where one key's value evicts another's. Many keys on one port that a reader may drop: the message says only that something moved, and the reader reads the state of the keys it holds (a branch's head). There is no buffer that keeps the latest value per key, and a `sub` channel per key can't be a Flow proc's port (ports are fixed at init). A best-effort stream beside an answer that carries everything may slide (`seon.server/prove-streamed`).
 - **Delayed retry, and any wait past a bound:** ```seon.step/put-after!``` puts the message on the proc's own in-port once ms pass (one heap entry and a parked fiber), the one timer ([clocks](clocks.md)).
 - **Request and answer:** carry `:reply` (a channel or a Flow coord) in the request. **Credit:** an asker keeps at most N requests outstanding and its answer channel holds N, so an answer never parks; without credit, two bounded queues in a request/answer cycle deadlock. A `promise-chan` per request when exactly one answer is wanted.
-- **Failure:** a throw inside `go` kills that fiber; its result channel closes and `jolt.fibers/monitor!` and `join` see the throwable. Answer errors as values on the reply channel.
+- **Failure:** a throw inside `go` kills that fiber and closes its result channel; `(go-monitor ch)` yields the throwable (a clean finish just closes it), and the throw also goes to the uncaught-exception handler. `jolt.fibers/monitor!` and `join` take a fiber (`jolt.fibers/spawn`), never a `go` channel. Answer errors as values on the reply channel.
 - **Quiet:** core.async alone cannot see it; count messages ([flow](flow.md#idioms-for-seon)).
 
 ## Where Jolt's Flow differs from upstream
 
-`flow.clj` and `flow/spi.clj` are upstream's `dev-flow-alpha` plus `update!`. `flow/impl.clj` is Jolt's:
+`flow.clj` and `flow/impl/graph.clj` are upstream's `dev-flow-alpha` plus `update!` (`graph.clj` adds the `Update` protocol); `flow/spi.clj` is upstream's; `flow/impl.clj` is Jolt's:
 
 - each proc has its own control channel (no control mult);
 - outputs are routed when sent, by a resolver per pid reading a live table (`proc-resolver`), and an output to a pid not in the flow is reported, not thrown;
 - `update!` diffs procs by fingerprint;
 - `stop` awaits every exit and finishes in-flight outputs;
 - Flow's own plumbing runs on fibers;
-- `:chan-opts {:in {:chan c}}` uses a channel you made.
+- `:chan-opts` apply to **in-ports only**: `:chan` (a channel you made, used as is and closed by the flow when the in-port is dropped), `:buf-or-n` (default 10), `:xform` (with no `:buf-or-n`, a rendezvous channel; its throw goes to the error chan). An out's chan-opts are ignored: a fan-out's mult source is a fixed `(chan 10)`, and a mult once made stays.
 
 `update!`'s docstring promises `{:added :removed :rewired :running}`, but it answers `{:stopped :started :kept :lost :missed-exit :ms}` (`create-flow`'s `update-flow`); `:lost` counts dropped in-chans only, never a message a stopped proc held.
 
@@ -95,28 +95,28 @@ Flow calls a proc's four functions so (`flow.clj` `process`, `flow/impl.clj` `pr
 
 The loop: paused, it reads only control; running, `alts!! :priority true` over control, casts and the filtered ins. A closed in-port gives `msg = nil` once, then leaves the read set. A throw in transform keeps the old state, drops the outputs, sends `{::flow/pid ::flow/msg ::flow/ex}` to the error chan and carries on. Outputs are put one at a time against control, so a stop reaches a proc parked on a full output.
 
-Where an output goes (`proc-resolver`): a connected out to its consumer (a mult for fan-out); a declared out with no conn is dropped with no report; `[pid in]` to that in-chan, or, for a pid not in the flow, dropped with `{::flow/undeliverable coord}` on the report chan; `::flow/report` to the report chan; `[::flow/cast sig]` to every proc whose `:signal-select` takes it. Fan-out is a mult, so one full consumer holds back all ([the library](#the-library-over-the-primitives)).
+Where an output goes (`proc-resolver`): a connected out to its consumer (a mult for fan-out); a declared out with no conn is dropped and reported as `{::flow/undeliverable [pid out]}` on the report chan; `[pid in]` to that in-chan, or, for a pid not in the flow, dropped with `{::flow/undeliverable coord}` on the report chan; `::flow/report` to the report chan; `[::flow/cast sig]` to every proc whose `:signal-select` takes it. Fan-out is a mult, so one full consumer holds back all ([the library](#the-library-over-the-primitives)).
 
 ## The API
 
 What each function of Jolt's Flow API does, with its defaults.
 
 - `create-flow`: `:stop-timeout-ms` default 10000; in-port buffer default 10.
-- `start`: makes the report and error chans (sliding 100: old entries dropped silently), runs every init, starts every proc paused.
+- `start`: makes the report chan (sliding 100: old entries dropped, the count in the ping answer's metadata) and the error chan (a fixed `(chan 100)` that never drops: a proc that reports an error waits while it is full), runs every init, starts every proc paused.
 - `resume`, `pause` and their `-proc` forms put on the proc's control chan (`(chan 10)`) with `>!!` under the graph lock.
 - `ping`: waits up to 1000 ms; a proc inside a step is left out.
 - `inject`: puts on an `:io` fiber and answers a Future at once; an edge derefs it to feel back-pressure.
 - `update!`: unchanged procs (step Var, describe, args, chan-opts) keep loop, state and queue; changed and removed ones are stopped and awaited.
-- `stop`: awaits each exit up to `:stop-timeout-ms`, then closes everything, answering `true` or `{::flow/running #{pids}}`; a proc parked on a full output finishes its outputs, up to 1000 ms per message, then reports `{::flow/dropped-on-stop out}`.
+- `stop`: awaits every exit within one `:stop-timeout-ms` for the whole stop, then closes everything, answering `true` or `{::flow/running #{pids}}`; a proc parked on a full output finishes its outputs, up to 1000 ms per message, then reports `{::flow/dropped-on-stop out}`.
 - casts: a sliding 100 per proc; one not taken in time is dropped.
 
 ## Changing a running graph
 
 A running graph takes new code and new procs with no restart, and Seon relies on it: root adds and removes each agent's proc live (```seon.system/api-proc```), and an agent adds and removes its test runs' procs (```seon.agent/run-tests-forked```). Proven by ```seon.step-test/a-running-graph-takes-new-code-and-new-procs-with-no-restart``` (red when a proc holds its step-fn's value instead of its Var):
 
-- **A redefined step-fn** is the proc's code from its next step, with no `update!`: a proc holds its step-fn by Var (`flow/process #'f`), and its state is kept.
+- **A redefined step-fn** is the proc's code from its next step, with no `update!`: a proc holds its step-fn by Var (`flow/process #'f`), and its state is kept. `describe` is captured when `flow/process` ran, so a redefinition that changes ports or workload is not seen (that is an `update!`), and the new code must accept the old state's shape; a proc built from a function value, not its Var, never sees a redefinition.
 - **`update!` that adds or rewires procs** stops none: every unchanged proc keeps its loop, state and queue, a fan-out it now feeds becomes a mult, and nothing in flight is lost (`:lost {}`).
-- **`update!` with a proc's own definition changed** (its args, describe or chan-opts) stops and restarts that proc alone, fresh; every other proc keeps its state.
+- **`update!` with a proc's own definition changed** (its step Var, describe data, args or chan-opts, compared by `=`) stops and restarts that proc alone with fresh state (its init re-runs); its in-ports and queued messages are kept unless its in-port's `:chan-opts` changed, which closes, drains and counts the old channel in `:lost`; a change only in a describe function (`:ping-map-fn`, `:signal-select`) is not seen. Every other proc keeps its state.
 
 So code reaches a running system by redefinition and procs by `update!`; a restart is for a change of the binary only.
 
@@ -127,7 +127,7 @@ The ways a Flow graph can wedge or lose data, each read in the source and confir
 1. **A proc stuck inside a step wedges the graph's control.** Its control chan holds 10 and commands are put under the graph lock, so the 11th blocks holding it: `ping`, `pause`, `update!` and `stop` of every proc then wait for that step.
 2. **A step that never returns can't be stopped:** `stop` names it after `:stop-timeout-ms`, and it lives on.
 3. **Clocks inside Flow:** `compute-timeout-ms`, `finish-outputs!`'s 1000 ms, `stop-timeout-ms`, ping's 1000 ([clocks](clocks.md)).
-4. **Silent drops:** an unconnected out, report and error chans past 100, casts past 100, a mult with no taps.
+4. **Drops:** the report chan past 100 (sliding, counted in the ping's metadata), casts past 100 (oldest dropped), a mult with no taps, and any lossy-buffer channel (counted by `jolt.host/chan-dropped`); an unconnected out is dropped but reported; the error chan never drops (a reporting proc waits).
 
 ## The step-fn contract every proc follows
 
