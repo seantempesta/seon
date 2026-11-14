@@ -509,9 +509,8 @@
       [::next st'])))
 
 (defn- next-of
-  "What follows a turn of run state st whose model call was acted on (act!'s answer st'): [::next st'] or [::end ...]. A failure a
-  next turn can change (:seon.model/retryable) is read at the next turn, two in a row end the work; any other ends it at once. See
-  docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map."
+  "What follows a turn whose model call was acted on (st', act!'s answer): [::next st'] or [::end ...]. A retryable failure is
+  read next turn, two in a row end the work. See docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map."
   {:malli/schema [:=> [:cat :map :map] [:vector :any]]}
   [st st']
   (cond (and (contract/valid? :seon.model/failure st') (turn-can-change (:seon.error/type st')))
@@ -567,9 +566,9 @@
       :else (ask st))))
 
 (defn turn-begin
-  "A turn of run state st begun: main merged in when it moved (behind on its program, the run ends :refork), its proofs observed
-  and its status read. Answers [st' {:prove ..}] for a clear status, else the end checks' [::end ...] or [::next st], or the model call
-  made ready, [st' {:model request}]. A throw is the agent's to read (threw). See docs/flow.md#the-step-fn-contract-every-proc-follows."
+  "A turn begun: main merged in if it moved (behind, the run ends :refork), proofs observed, status read. Answers [st' {:prove ..}]
+  when clear, else [::end ...], [::next st] or [st' {:model request}]; a throw is the agent's to read. See
+  docs/flow.md#the-step-fn-contract-every-proc-follows."
   {:malli/schema [:=> [:cat :map] [:or [:tuple [:= ::next] :map] [:tuple [:= ::end] :map :seon.agent/outcome [:maybe :string] [:maybe :map]]
                       [:tuple :map [:map [:prove {:optional true} [:map [:names [:set :symbol]] [:reach? :boolean]]] [:model {:optional true} :map]]]]]}
   [st]
