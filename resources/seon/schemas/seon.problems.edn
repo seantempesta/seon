@@ -74,6 +74,7 @@
  ;; (the writer's :spawn names main's commit and t on :fork; seon.agent/init! compares)
  :seon.agent/fork-misaligned [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/fork-misaligned]]
                                                      [:commit :uuid] [:t :int] [:branch-commit [:maybe :uuid]] [:image-t :int]]]
+ :seon.system/undeliverable [:and {:description "An output Flow could not deliver (no proc takes it) or a stop dropped, read from Flow's report chan (seon.system/flow-report)."} :seon.error/base [:map [:seon.error/type [:= :seon.system/undeliverable]] [:coord :string]]]
  :seon.system/proc-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/proc-defect]] [:pid {:optional true} [:maybe :keyword]]
                                                      [:took {:optional true} [:or :keyword [:vector :keyword]]]]]
  :seon.system/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/refused]]]]

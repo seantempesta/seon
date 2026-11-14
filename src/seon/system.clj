@@ -1750,6 +1750,16 @@
       ;; a transition's throw (init, resume: Flow names no step op): the proc stays paused for good, reading no in-port
       (and ex (nil? (::flow/op e))) (assoc :down true))))
 
+(defn- flow-report
+  "Flow's report r as the api's :error message, typed :seon.system/undeliverable, when it says an output was lost (undeliverable,
+  or dropped by a stop); nil for any other report. See docs/flow.md#the-api."
+  {:malli/schema [:=> [:cat :map] [:maybe :map]]}
+  [r]
+  (when-let [coord (or (::flow/undeliverable r) (::flow/dropped-on-stop r))]
+    (let [msg (str "an output was lost: " (pr-str coord) (if (::flow/dropped-on-stop r) ", dropped by a stop" ", which nothing in the graph takes"))]
+      {:op :error :pid (::flow/pid r) :message msg
+       :data (contract/error :seon.system/undeliverable 'seon.system/flow-report msg {:coord (pr-str coord)})})))
+
 (defonce ^:private uncaught
   ;; where an error no thread, fiber or go body caught goes (uncaught!): kept under :early until this process's root listens,
   ;; which start! fails on; then root's :back, as a defect the api records on main
@@ -1887,11 +1897,14 @@
         _ (deliver root-procs-p built)
         g (flow/create-flow {:procs root-procs :conns root-conns :stop-timeout-ms (cfg/value :seon.config.root/flow-stop-ms)})
         _ (deliver graph-p g)
-        {root-errors :error-chan} (flow/start g)
+        {root-errors :error-chan root-reports :report-chan} (flow/start g)
         ;; Flow's error channel (every proc's, agents included) piped into :back, each defect
         ;; fed to the api as data, with the message the step took (:msg), which the api
         ;; answers; :back outlives it
         _ (a/pipe (a/pipe root-errors (a/chan 1 (map flow-error))) (:back chans) false)
+        ;; and its report channel: an output Flow could not deliver, or a stop dropped, is a problem (flow-report); the
+        ;; report chan slides at 100, so it is read, never left to lose what it says
+        _ (a/pipe (a/pipe root-reports (a/chan 1 (keep flow-report))) (:back chans) false)
         sys (merge chans {:cfg store-cfg :conn conn :graph g :t0 t0
                           :store-path path :boot boot
                           :bindings bindings

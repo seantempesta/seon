@@ -102,7 +102,7 @@ Where an output goes (`proc-resolver`): a connected out to its consumer (a mult 
 What each function of Jolt's Flow API does, with its defaults.
 
 - `create-flow`: `:stop-timeout-ms` default 10000; in-port buffer default 10.
-- `start`: makes the report chan (sliding 100: old entries dropped, the count in the ping answer's metadata) and the error chan (a fixed `(chan 100)` that never drops: a proc that reports an error waits while it is full), runs every init, starts every proc paused.
+- `start`: makes the report chan (sliding 100: old entries dropped, the count in the ping answer's metadata; root reads it, so an output Flow could not deliver or a stop dropped is a problem, ```seon.system-test/an-undeliverable-output-is-a-problem```) and the error chan (a fixed `(chan 100)` that never drops: a proc that reports an error waits while it is full), runs every init, starts every proc paused.
 - `resume`, `pause` and their `-proc` forms put on the proc's control chan (`(chan 10)`) with `>!!` under the graph lock.
 - `ping`: waits up to 1000 ms; a proc inside a step is left out.
 - `inject`: puts on an `:io` fiber and answers a Future at once; an edge derefs it to feel back-pressure.
