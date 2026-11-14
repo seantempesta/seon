@@ -44,6 +44,8 @@ The standard is the best way known, written down, until a better one replaces it
 3. change the script, the check or the wiki section so the better thing is the default, deleting the old way in the same change;
 4. tell every session what to stop doing.
 
+Claude Code refuses a shell command whose text it cannot check for a dangerous removal (an `rm` inside a heredoc or a Makefile recipe written through the shell), and only a person may approve it: write such a file with the editor instead.
+
 A lesson kept only in a session's memory is lost at its next compaction. Before compacting, a session reports to its parent what cost it time and which script or check would have caught it. It then makes each fact it learned true where that fact lives.
 
 ## Live agent runs find the system's problems
