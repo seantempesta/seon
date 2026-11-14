@@ -31,4 +31,5 @@
  {:seon.task/name "a-turns-status-is-computed-once"
   :seon.task/plan "Found by context's duplication audit, 2026-11-14 (the owner: no duplicated effort; plan item 7), both ends read [M]. How the work stands is computed twice on a green turn: seon.turn/status-now answers the page component's kept status (seon.render/kept-of) and otherwise calls seon.ctx.status/status itself, and seon.turn/judged calls status-now again after the judge; a component that threw is recomputed by the fallback and throws again, labelled seon.turn/status-now. Each pass does delta-changes, caused-split and commit-as-db (up to ~15M ticks cold [H]). Change: the turn reads the kept status only; a component that threw is the turn's error (turn-error!), never a recompute; judged reads the kept status after the judge's facts move it. Deletes: status-now's fallback call. Proof: a green turn calls seon.ctx.status/status once (a cost proof's calls)."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.turn-test/a-turns-status-is-computed-once}}]
+  :seon.task/proofs #{seon.turn-test/a-turns-status-is-computed-once}}
+]
