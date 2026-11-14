@@ -1194,14 +1194,16 @@
                      (one (write st id :done (commit-tx (:db st) (contract/error :seon.system/no-source-text #'seon.reconcile/commit-tx
                                                                                  (str "main holds no text for " (str/join ", " paths)) {:paths (vec paths)})
                                                         members paths [])))
-                     ;; git's main follows the store's main: committed on git's main only from the commit main was imported from
+                     ;; git follows the store's main: committed on the branch main was imported from (git's main for the standing root), only from
                      ;; (:expect, one compare-and-swap; a landing that moved it since answers :seon.fx/ref-moved, nothing written);
                      ;; a main imported from no commit writes the merges branch, as before
-                     (let [imported (:commit (:seon.system/source (d/pull (:db r) [:seon.system/source] [:seon.system/id :root])))]
+                     ;; the branch main was imported from (its source fact's :branch, git's main for the standing root), from its :commit
+                     (let [{imported :commit from :branch} (:seon.system/source (d/pull (:db r) [:seon.system/source] [:seon.system/id :root]))
+                           imported (when from imported)]
                        (one (request (assoc-in st [:flights id :writeback :written] (vec (keys files))) id :committed
                                      {:op :fx :kind :git :req (cond-> {:dir (:root (:source st)) :files files :modes (source/modes (:db r) (keys files))
                                                                        :message (source/commit-message members)
-                                                                       :branch (if imported (cfg/value :seon.config.source/main) (:branch (:source st)))}
+                                                                       :branch (if imported from (:branch (:source st)))}
                                                                 imported (assoc :expect imported))})))))
       ;; the sha on each merged task; the merge already runs where main's program runs
       ;; (seon.program/load-changes!), so nothing is built (BUILD plan P4)
