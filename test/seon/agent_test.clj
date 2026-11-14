@@ -3727,3 +3727,17 @@
             (agent/fx! :model {:messages [] :call "c1"} {}))
           (is (nil? @asked) "a streamed call's wait is the owner's to end")))
       (finally (reset! agent/state held)))))
+
+(deftest ^{:seon.test/estimate {:ticks 2000000}} an-agent-names-the-program-it-holds-as-a-reference
+  ;; docs/processes.md#the-agent-process: the program a process holds is a reference (AGENTS.md §4), the branch as it loaded it
+  ;; at its start; program-db reads that commit, whatever the branch's head has moved to since
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [old @agent/state
+           start @conn]
+       (try
+         (reset! agent/state {:store-conn conn :program {:seon.db/branch (:branch cfg) :seon.db/commit (d/commit-id start) :seon.db/t (:max-tx start)}})
+         (d/transact conn [{:seon.system/id :root :seon.system/content-t (inc (:max-tx @conn))}])
+         (is (not= (d/commit-id start) (d/commit-id @conn)) "the branch moved on")
+         (is (= (d/commit-id start) (d/commit-id (agent/program-db))) "the program it holds is still the one it started on")
+         (finally (reset! agent/state old)))))))
