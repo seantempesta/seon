@@ -183,7 +183,8 @@
                    :growth :constant
                    ;; measured 2026-11-10 at 10, 40, 160 greens: before, 142k, 278k, 836k ticks and 0.58, 1.06, 3.03 MB (about 4.8k ticks
                    ;; and 16 KB a green test: a branch of 1,600 verdicts about 8M ticks and 27 MB a turn); after, 108k ticks and 0.46 MB at each
-                   :fixed {:bytes 500000 :calls 45}
+                   ;; 46 calls: the done rule's input made by seon.reconcile/input, the judge's one producer, not a map built here (context, 2026-11-14)
+                   :fixed {:bytes 500000 :calls 46}
                    :sizes [10 40 160]}))))
 
 (defn test-ns-of
