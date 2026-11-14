@@ -564,3 +564,16 @@
         (is (= c0 (pm/content-commit held @conn)) "and no content, so the commit held stands")
         (d/transact conn ((var-tx "g" "x") @conn))
         (is (= (d/commit-id @conn) (pm/content-commit held @conn)) "a definition moves it")))))
+
+;; Estimate: the world, three small dbs and one delta three-way = 80000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 80000000}} a-task-main-finished-is-finished-on-the-branch-after-merging-main
+  ;; agent lb76's branch (2026-11-14): main closed seon.check/a-selection-derives-what-it-needs-from-its-steps (:done, :cancelled);
+  ;; after merging main the branch read it as ready with no proof, and the done rule refused the agent for it. A branch's state after
+  ;; merging main is main's plus its own change: what the branch never wrote is main's
+  (let [b (with (base) [{:seon.task/id "t/x" :seon.task/plan "Do it." :seon.task/execution :ready}])
+        theirs (with b [{:seon.task/id "t/x" :seon.task/execution :cancelled :seon.task/outcome :done}])
+        ours (with b (var-tx "f" "(inc x)"))
+        r (pm/delta-three-way b ours theirs :all)
+        merged (d/db-with ours (pm/merge-tx ours b theirs (:apply r) :all))]
+    (is (= [:cancelled :done] ((juxt :seon.task/execution :seon.task/outcome) (d/entity merged [:seon.task/id "t/x"]))) "main's end of the task")
+    (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch keeps its own change")))
