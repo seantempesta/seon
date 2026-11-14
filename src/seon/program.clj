@@ -1957,7 +1957,7 @@
                   (into starters)
                   (as-> d (into #{} (remove gone-ids) d)))
         ;; a test namespace's form reading the checkout's files itself (file-readers, checkout-read?) judges those files:
-        ;; the tests reaching it take the tree (one-printer-and-no-cut-before-it
+        ;; the tests reaching it take the tree (the one-printer test, now a-site-the-one-printer-section-names-still-prints,
         ;; was reused over edits to what it read, and read as flaky)
         scans (flag :scans #(and (test-nss (:ns %)) (some file-readers (:refs %)) (checkout-read? %) (not (env-reader-form? %))))
         ;; a test namespace's form reading one part of the checkout whole (test-class-readers) takes that part's class
