@@ -1200,7 +1200,7 @@
                                      {:op :fx :kind :git :req (cond-> {:dir (:root (:source st)) :files files :modes (source/modes (:db r) (keys files))
                                                                        :message (source/commit-message members)
                                                                        :branch (if imported (cfg/value :seon.config.source/main) (:branch (:source st)))}
-                                                                imported (assoc :expect imported))}))))))
+                                                                imported (assoc :expect imported))})))))
       ;; the sha on each merged task; the merge already runs where main's program runs
       ;; (seon.program/load-changes!), so nothing is built (BUILD plan P4)
       ;; and main's source fact moves to the commit, in the same write: main was imported from it now (catch-up reads from there)
