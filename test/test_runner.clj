@@ -213,7 +213,9 @@
                  (let [stage (str path ".stage-" (random-uuid))]
                    (try (let [st (pdb/open! :lmdb stage 0 :db)]
                           (try (keep-tree! (:conn st) (:cfg st) root tree b (d/branches (:conn st)))
-                               (finally (d/release (:conn st)))))
+                               ;; the stage's env closed before the rename: an env left open on the renamed file would be
+                               ;; a second open of one file when this process opens the final path (docs/failure-points.md#lmdb-locks)
+                               (finally (d/release (:conn st)) (klmdb/close-env! stage))))
                         (let [[rc _] (seon.lib/c-rename stage path)]
                           (if (zero? rc) (assoc (pdb/open! :lmdb path 0 :db) :path path) :made-meanwhile))
                         (finally (seon.lib/remove-tree! stage))))
