@@ -1,7 +1,7 @@
 #!/bin/zsh
 # bin/jolt-gates [GATE ...] — Jolt's own gates on this checkout's Jolt pin and this checkout's Chez: what a Jolt
 # pin owes before it is handed over (docs/merging.md#conflicts-and-pins), every gate of test/forks/jolt-gates.txt
-# (or the ones named): Jolt built once, then the gates in parallel, each worker a clonefile copy of the build with its own HOME and TMPDIR, niced, each gate under a timeout, its output kept in target/jolt-gates/logs/GATE.out.
+# (or the ones named): Jolt built once, then the gates in parallel, each worker a clonefile copy of the build with its own HOME and TMPDIR, niced, each gate bounded (bin/bounded, 1,100 s), its output kept in target/jolt-gates/logs/GATE.out.
 # The gates run in a clone of the fork kept at target/jolt-gates/work, moved to the pinned commit, never in
 # reference-code/jolt: Jolt's Makefile runs `git submodule update` for its vendored libraries, which a
 # worktree's checkout must never do (bin/worktree). Verdicts go to target/jolt-gates/verdicts.tsv as they
@@ -52,7 +52,10 @@ for g in ${(f)"$(for g in $gates; do print "${last[$g]:-600} $g"; done | sort -k
 : > "$T/verdicts.tsv"; P=()
 for (( w = 1; w <= N; w++ )); do
   ( for g in ${(f)"$(cat $T/w$w.list)"}; do t0=$SECONDS
-      ( cd "$T/w$w" && HOME=$T/w$w.home JOLT_CHEZ=$C nice -n 15 timeout -k 30 1100 make CHEZ=$C TMPDIR=$T/w$w.tmp/ $g ) > "$T/logs/$g.out" 2>&1 < /dev/null
+      # bin/bounded, the one bounded run (its own process group, evidence past the bound, nothing it started outlives it):
+      # under `timeout` a stopped gate run left its workers running in groups of their own (2026-11-14)
+      HOME=$T/w$w.home JOLT_CHEZ=$C nice -n 15 "$ROOT/bin/bounded" 1100000 "$T/logs/$g.evidence" \
+        zsh -c "cd ${(q)T}/w$w && exec make CHEZ=${(q)C} TMPDIR=${(q)T}/w$w.tmp/ $g" > "$T/logs/$g.out" 2>&1 < /dev/null
       case $? in 0) st=PASS;; 124|137) st=TIMEOUT;; *) st=FAIL;; esac
       print "$g\t$st\t$((SECONDS - t0))" >> "$T/verdicts.tsv"; print "$st $g"; done ) & P+=($!)
 done
