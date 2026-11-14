@@ -1215,12 +1215,6 @@
   (lib/digest (pr-str [(vec (for [s (sort keys)] [s (key-content db (clojure.edn/read-string s))]))
                        (vec (sort-by pr-str outside))])))
 
-(defn written-keys
-  "The keys datoms touch (datahike.reads/datom-keys of each, its pr-str, a schema datom's \":all\"): a run's writes in
-  :seon.reads/key-set's terms, so \"does a read see this write\" is a set intersection. See docs/storage.md#what-a-read-scanned."
-  {:malli/schema [:=> [:cat [:sequential :seon.host/datom]] [:set :string]]}
-  [datoms] (into #{} (comp (mapcat datahike.reads/datom-keys) (map pr-str)) datoms))
-
 (defn readers
   "The derived entities on db whose :seon.reads/key-set holds a key a datom of datoms touches: one AVET seek a key, from the db
   alone, so a restart, a fork and a merge keep them; a schema datom reaches every one. See docs/storage.md#what-a-read-scanned."
