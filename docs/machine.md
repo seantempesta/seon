@@ -25,7 +25,7 @@ Check that a check ran what it claims:
 - Two sides of a "shared cache" may not share a key: compare the digests themselves on one tree.
 - A task's stated cause, a helper's report and your own theory are hypotheses until measured.
 - Never make load to reproduce something: read the code, find the deterministic form, or record what the next real run did.
-- To measure what a process holds, build and return from a function (a local in scope keeps its value), with a control that keeps nothing; a walk not disposed (seon.render/dispose-walk!) stays alive through its watches.
+- To measure what a process holds, build and return from a function (a local in scope keeps its value), with a control that keeps nothing; a walk value kept in a process's state (seon.render/walk) stays alive while that state holds it.
 
 ### Reading a hang
 

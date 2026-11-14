@@ -17,7 +17,7 @@
   flight, more events only queue, so a burst becomes one pass (the round trip is the
   coalescing window: no step sleeps). The answer is joined with health and the events into root's
   process value (process-value), which is part of root's ctx (process!). Every page is the render
-  of a ctx through the one walk (seon.render/walker): / root's (root-walk, root's ctx on main),
+  of a ctx through the one walk (seon.render/walk, a value kept across moves): / root's (root-walk, root's ctx on main),
   /agent/{name} an agent's page, the one render of its ctx the model reads too (its process's walk,
   else its branch's drawn by root), /agent/{name}/debug its @ctx printed, /agent/{name}/context
   what its model was sent, a name its id in this boot or its branch; each laid out by seon.render.ui/page-chrome into units. Then, per unit: inputs
@@ -29,7 +29,7 @@
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.program :as program] [seon.render.ui :as ui] [seon.print :as print] [seon.print.select :as select] [seon.repl :as repl] [seon.system :as c]
-            [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.db] [datahike.index.interface]
+            [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.ctx :as ctx] [seon.db] [datahike.index.interface]
             [seon.config :as config] [seon.step :as step] [seon.problems :as problems] [seon.error :as err]))
 
 (defn- event-cap "Events the stream keeps (:seon.config.render.list/stream)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/stream))
@@ -123,7 +123,7 @@
   moves), so a render main declares or changes is the one a unit runs; the binary's only before main is read. See
   docs/render.md#one-rendering-system-drawn-from-the-data."
   {:malli/schema [:=> [:cat :map] :map]}
-  [st] (or (some-> (:root-walk st) :w :index deref) (seon.db/index)))
+  [st] (or (some-> (:root-walk st) :p :index) (seon.db/index)))
 
 (defn- step-units
   "Run a layout's units, in the order the layout shows them, against what the view retained: a
@@ -386,54 +386,100 @@
   (when-let [eid (when db (let [v (if (= :chat (first-of view)) (second view) view)] (when-not (vector? v) (location db v))))]
     (let [e (d/entity db eid)] (when (:seon.agent/key e) [e (task/this-boots db e)]))))
 
+(defn- walk-of
+  "Tree t on db drawn as a value from prev (seon.render/walk, nil: cold), its schemas read in ix, rooted on its entity's render
+  (seon.render/render-var-of, with ident, the identity the caller holds of it, for a branch that holds no entity yet; prev's root
+  while ix and the entity's own :seon.render/hiccup stand): moved, the datoms since prev's db (nil: drawn cold), opts merged in
+  (:id-prefix). Nothing is laid out: a reader of the page lays out the value (`laid`). The defects prev holds that no reader took yet
+  (`take-walk-defects`) stay with the next. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat [:maybe :map] :seon.host/db :any :map :map [:maybe [:sequential :any]] :map] :map]}
+  [prev db t ix ident moved opts]
+  (let [root (if (and prev (identical? ix (:index prev)) (= (:seon.render/hiccup (:tree prev)) (:seon.render/hiccup t)))
+               (:root prev)
+               (render/render-var-of ix (merge ident t)))
+        p (render/walk prev (merge (cond-> {:db db :tree t :root root :index ix :outputs #{:seon.render/hiccup} :changes ctx/changes}
+                                     (some? moved) (assoc :moved moved))
+                                   opts))]
+    (cond-> p (seq (:defects prev)) (update :defects #(into (:defects prev) %)))))
+
+(defn- laid
+  "Kept walk kw (`kept-walk`) with its page laid out (seon.render/laid-out: its value's :units and :lists, and each component's
+  placements and html kept by its revision), for a reader of its units that keeps the answer where kw is kept; one laid out
+  already, kw itself. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [kw] (if (contains? (:p kw) :units) kw (update kw :p render/laid-out)))
+
+(defn- placed-of
+  "The parts of kept walk kw (its value :p) placed in the root's lists sels, as the model reads each ({id form},
+  seon.render/placed-hiccup), read from the value, so no component runs: [parts kw'], kw' keeping the placements it made. See
+  docs/render.md#a-part-prints-as-its-render."
+  {:malli/schema [:=> [:cat :map [:sequential :string]] [:tuple :map :map]]}
+  [kw sels]
+  (let [[m p] (render/placed-hiccup (:p kw) (vec sels))] [m (assoc kw :p p)]))
+
 (defn- kept-walk
-  "A walk kept across moves: entity e's ctx on db (seon.ctx/build, its tree as mark makes it) in a reactive
-  atom, drawn once by its entity's render (seon.render/render-var-of: its tree, with ident, the identity the caller
-  holds of it, for a branch that holds no entity yet) over the db it holds: {:w :a :c :at}, :at a volatile of that db.
-  Root's own page (root-walk), each user's (`user-walk`) and each watched agent's branch (`branch-walk`) keep one; `advance-walk!`
-  moves it. Walk-opts go on the walk (:id-prefix, `user-walk`'s). See docs/render.md#a-page-is-a-kept-walk."
+  "A walk kept across moves: entity e's ctx on db (seon.ctx/build, its tree as mark makes it) drawn once as a value
+  (seon.render/walk, `walk-of`) by its entity's render (seon.render/render-var-of: its tree, with ident, the identity the caller
+  holds of it, for a branch that holds no entity yet): {:p the walk's value :c the ctx :db the db it is at :ident}. Root's own page
+  (root-walk), each user's (`user-walk`) and each watched agent's branch (`branch-walk`) keep one; `advance-walk!` moves it.
+  Walk-opts go on the walk (:id-prefix, `user-walk`'s). See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:maybe pos-int?] :any :map :seon.host/fn] :map]
                   [:=> [:cat :seon.host/db [:maybe pos-int?] :any :map :seon.host/fn [:map [:id-prefix {:optional true} :string]]] :map]]}
   ([db e branch ident mark] (kept-walk db e branch ident mark {}))
   ([db e branch ident mark walk-opts]
-  (let [ix (program/index-of-db db)
-        c (assoc-in (ctx/build ix db e branch) [:ix :own-index?] true) at (volatile! db) a (ratom/atom (mark (:tree c)))
-        w (merge (render/walker {:ref a :changes ctx/changes} (fn [] @at) [(render/render-var-of ix (merge ident (:tree c))) {} (ratom/ref-view a ctx/changes)] ix) walk-opts)]
-    (render/flush! w nil)
-    {:w w :a a :c c :at at})))
+  (let [c (assoc-in (ctx/build (program/index-of-db db) db e branch) [:ix :own-index?] true)
+        kw (merge {:c c :db db :ident ident} (select-keys walk-opts [:id-prefix]))]
+    (assoc kw :p (walk-of nil db (mark (:tree c)) (get-in c [:ix :index]) ident nil (select-keys walk-opts [:id-prefix]))))))
 
 (defn- advance-walk!
   "Kept walk kw (`kept-walk`) as of db, a later value of its branch: its ctx patched by what moved
-  (seon.ctx/advance), its atom reset to the tree mark makes of it and the moved datoms flushed, so the
-  components their change reached are drawn and nothing else; at the db it holds, only what mark changed.
-  Answers kw with its ctx. Given known, {:from :moved}: the datoms db moved by from :from, read once for every walk that
-  holds it (advance-main), so no walk diffs main again. See docs/render.md#a-page-is-a-kept-walk."
+  (seon.ctx/patch) and its walk value moved to the tree mark makes of it with the moved datoms (`walk-of`), so the
+  components their change reached are drawn and nothing else; at the db it holds, only what mark changed. A schema entry
+  moved builds the ctx's index again (seon.ctx/patch), and an entity naming another render of its own roots the walk there:
+  either draws it cold. Answers kw at db. Given known, {:from :moved}: the datoms db moved by from :from, read once for every
+  walk that holds it (advance-main), so no walk diffs main again. See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:function [:=> [:cat :map :seon.host/db :any :seon.host/fn] :map]
                   [:=> [:cat :map :seon.host/db :any :seon.host/fn [:maybe [:map [:from :seon.host/db] [:moved [:sequential :any]]]]] :map]]}
   ([kw db branch mark] (advance-walk! kw db branch mark nil))
-  ([{:keys [w a c at] :as kw} db branch mark known]
-  (let [held @at
-        same? (identical? held db)
+  ([{:keys [p c ident id-prefix] held :db :as kw} db branch mark known]
+  (let [same? (identical? held db)
         moved (cond same? [] (identical? held (:from known)) (:moved known) :else (ctx/moved held db nil))
         c' (if same? c (ctx/patch c db moved branch))]
-    (vreset! at db)
-    (reset! a (mark (:tree c')))
-    (if (= (get-in c [:tree :seon.render/hiccup]) (get-in c' [:tree :seon.render/hiccup]))
-      (do (render/flush! w moved) (assoc kw :c c'))
-      ;; the entity names another render of its own (seon.render/render-var-of): the same ctx, walked again from that root
-      (let [[_ o view] (:root w)
-            w' (merge (render/walker (:src w) (:db w) [(render/render-var-of @(:index w) (merge (select-keys (:tree c) [:seon.agent/key]) (:tree c'))) o view] @(:index w))
-                      (select-keys w [:id-prefix]))]
-        (render/dispose-walk! w)
-        (render/flush! w' nil)
-        (assoc kw :w w' :c c'))))))
+    (assoc kw :c c' :db db
+           :p (walk-of p db (mark (:tree c')) (get-in c' [:ix :index]) ident moved (cond-> {} id-prefix (assoc :id-prefix id-prefix)))))))
+
+(defn- rewalk
+  "Kept walk kw with f applied to the tree its value holds (root's runtime values, `process!`, `health!`), walked again over
+  the db it holds with nothing moved: the tree's diff (seon.ctx/changes) draws exactly the components that read what f changed.
+  See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :map :seon.host/fn] :map]}
+  [{:keys [p db ident id-prefix] :as kw} f]
+  (assoc kw :p (walk-of p db (f (:tree p)) (:index p) ident [] (cond-> {} id-prefix (assoc :id-prefix id-prefix)))))
+
+(defn- take-walk-defects
+  "St with the defects its kept walks hold (root's, each branch read's, each user's: the components that threw in a walk since
+  the last take) taken: [st' defects], for root to record each as a problem. See docs/health.md."
+  {:malli/schema [:=> [:cat :map] [:tuple :map [:vector :map]]]}
+  [st]
+  (let [ds (vec (concat (get-in st [:root-walk :p :defects])
+                        (mapcat #(get-in (val %) [:walk :p :defects]) (:branch-reads st))
+                        (mapcat #(get-in (val %) [:p :defects]) (:user-walks st))))
+        clear (fn [kw] (cond-> kw (seq (get-in kw [:p :defects])) (assoc-in [:p :defects] [])))]
+    [(if (empty? ds)
+       st
+       (cond-> st
+         (:root-walk st) (update :root-walk clear)
+         (:branch-reads st) (update :branch-reads update-vals #(cond-> % (:walk %) (update :walk clear)))
+         (:user-walks st) (update :user-walks update-vals clear)))
+     ds]))
 
 (defn- branch-walk
   "Kept walk kw (nil: none yet) of agent e's page (e on main) on its branch, as of bdb, the evals main records it opened
   (:seon.agent/opened) drawn opened: one a branch, held in its read's state (:branch-reads b :walk, which the pass that drew it
   writes, `pass-view`) so every view of the agent (its chat drawn from its branch, @ctx, the debug page's latest)
   draws from it; built at the first, after it advanced (`advance-walk!`), made again when the agent's entity on
-  the branch is not the one it holds (none yet at its first draw); at the same db and opened, kw itself. Answers {:w :c}. See docs/render.md#a-page-is-a-kept-walk."
+  the branch is not the one it holds (none yet at its first draw); at the same db and opened, kw itself. Answers the kept walk
+  (`kept-walk`) with :opened. See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat [:maybe :map] :seon.host/db :any] :map]}
   [kw bdb e]
   (let [opened (set (:seon.agent/opened e))
@@ -445,9 +491,8 @@
         ;; a walk of another entity than the branch holds now (none, before the agent's first write to its
         ;; branch; another, a branch made again) is made again: a patch reaches only what its ctx holds
         (or (nil? kw) (not= eid (get-in kw [:c :tree :db/id])))
-        ;; the walk it replaces is disposed by the pass that writes this one to st (`pass-view`)
         (assoc (kept-walk bdb eid branch {:seon.agent/key (:seon.agent/key e)} mark) :opened opened)
-        (and (identical? @(:at kw) bdb) (= opened (:opened kw))) kw
+        (and (identical? (:db kw) bdb) (= opened (:opened kw))) kw
         :else (assoc (advance-walk! kw bdb branch mark) :opened opened))))))
 
 (defn- live?
@@ -497,9 +542,12 @@
   (let [walks (or (:user-walks st) {})
         ;; the signed-in user's agents list is every page's (`user-sides`): its change redraws every view
         signed (some-> db (d/entity [:seon.system/id :root]) :seon.system/signed-in :seon.user/name)
-        side (fn [walks] (when-let [kw (get walks signed)] (into {} (for [u (list-units (render/placed-units (:w kw)) "#c-side")] [(:id u) (:rev u)]))))
+        side (fn [walks] (when-let [kw (get walks signed)] (into {} (for [u (list-units (:units (:p kw)) "#c-side")] [(:id u) (:rev u)]))))
+        ;; the signed-in user's page is laid out (`laid`) to read its agents list, and kept laid out: every view shows that list
+        lay (fn [walks] (cond-> walks (contains? walks signed) (update signed laid)))
+        walks (lay walks)
         before (side walks)
-        walks (into {} (map (fn [[n kw]] [n (advance-walk! kw db :main identity known)])) walks)]
+        walks (lay (into {} (map (fn [[n kw]] [n (advance-walk! kw db :main identity known)])) walks))]
     (cond-> (assoc st :user-walks walks)
       (not= before (side walks)) (update :dirty (fnil into #{}) (keys (:views st)))
       (seq walks) (update :dirty (fnil into #{})
@@ -509,23 +557,24 @@
 
 (defn- user-sides
   "The agents list every page shows: the signed-in user's (root's :seon.system/signed-in), as that user's kept walk drew it (seon.render.ui/agents-list,
-  its page's c-side; kw, that user's walk, `user-walk`): root, then what the user started, each with what it started under it. Nothing before main is read or with no one signed in.
+  its page's c-side; kw, that user's walk, `user-walk`, laid out, `laid`): root, then what the user started, each with what it started under it. Nothing before main is read or with no one signed in.
   See docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat [:maybe :map]] [:vector :map]]}
   [kw]
-  (if kw (list-units (render/placed-units (:w kw)) "#c-side") []))
+  (if kw (list-units (:units (:p kw)) "#c-side") []))
 
 (defn- system-units
   "Which system a page is: the system walk's unit in #p-system (seon.render.ui/system-source), which the frame places in the top bar of
-  every page; none before the system walk is drawn. See docs/render.md#the-page."
+  every page; none before the system walk is drawn. Root's walk is laid out (`laid`) and kept so by the pass that draws a page
+  (`pass-view`), so this lays out nothing there. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
-  [st] (if-let [w (some-> (:root-walk st) :w)] (list-units (render/placed-units w) "#p-system") []))
+  [st] (if-let [rw (:root-walk st)] (list-units (:units (:p (laid rw))) "#p-system") []))
 
 (defn- agent-view
   "View's page when it names an agent (entity eid on main db): its components as its process drew
   them (ask-parts, seon.repl/render-ctx: the units of its walk) at the branch root read or later, else, with no process
   to ask, none that answered or one still busy with its run, as root draws them from its branch (seon.ctx/build, drawn once by the same walk
-  and layout: seon.render/draw) with main's renders, the page saying so. Everything the page shows
+  and layout, cold: seon.render/walk) with main's renders, the page saying so. Everything the page shows
   of the agent is its ctx: its run's status and verdict reach its branch by take!, never read here
   on main. Root's agents (the sidebar) are root's chrome; its input (seon.render.ui/agent-input)."
   {:malli/schema [:=> [:cat :map :any :seon.host/db pos-int?] :map]}
@@ -551,27 +600,30 @@
         ;; the branch's kept walk (branch-walk), one a branch; an agent read from main is drawn once, its reads the page's
         b (get-in st [:branches view :branch])
         ;; made or advanced here, at most once a view, and written to st by the pass (`pass-view`), with the users' walks it made
-        bw (delay (when (and (contains? (:branch-reads st) b) (not branchless?)) (branch-walk (get-in st [:branch-reads b :walk]) bdb e)))
+        ;; laid out (`laid`) where it is walked: every view of it reads its units
+        bw (delay (when (and (contains? (:branch-reads st) b) (not branchless?)) (binding [datahike.index.interface/*reads* nil] (laid (branch-walk (get-in st [:branch-reads b :walk]) bdb e)))))
         walked #(deref bw)
-        ew (delay (user-walk st db e))
+        ew (delay (some-> (user-walk st db e) laid))
         signed (some-> db (d/entity [:seon.system/id :root]) :seon.system/signed-in)
-        sw (delay (when signed (user-walk st db signed)))
+        sw (delay (when signed (some-> (user-walk st db signed) laid)))
         bix (delay (program/index-of-db bdb))
         cold-tree #(quiet (fn [] (:tree (ctx/build @bix bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (or (:seon.agent/branch e) :db)))))
+        ;; a cold walk of the branch (no kept walk holds it): drawn once as a value, read and let go
+        cold-walk (fn [t] (quiet #(laid {:p (walk-of nil bdb t @bix {:seon.agent/key (:seon.agent/key e)} nil {}) :db bdb})))
         ;; a branchless agent's kept walk (`user-walk`: a user's, root's session's) tracks its own reads and `user-walks` marks its views
         ;; dirty when main moves it: its first draw here is no read of this page's
         branch-units (fn [] (if-let [kw (or (walked) (binding [datahike.index.interface/*reads* nil] @ew))]
-                              (binding [datahike.index.interface/*reads* nil] (render/placed-units (:w kw)))
-                              (let [t (cond-> (cold-tree) (seq opened) (update :seon.eval/_agent #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
-                                    w (quiet #(render/draw t ctx/changes bdb (render/render-var-of @bix (merge {:seon.agent/key (:seon.agent/key e)} t)) {:index @bix}))]
-                                (try (render/placed-units w) (finally (render/dispose-walk! w))))))
+                              (:units (:p kw))
+                              (:units (:p (cold-walk (cond-> (cold-tree) (seq opened) (update :seon.eval/_agent #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %))))))))
         ;; @ctx's part pairs (seon.render.ui/ctx-parts): what the model reads of each part of the task's list, beside
         ;; its unit as the page draws it, from one walk of the page
         ;; the part texts the tab opened (/open: a long one is drawn closed, ui/ctx-parts)
         opened-parts (into #{} (filter #(str/starts-with? % "d-part-")) (get-in st [:tab view :open] #{}))
-        pairs (fn [w] (let [all (render/placed-units w)
+        pairs (fn [kw] (let [all (:units (:p kw))
                             by (into {} (map (juxt :id identity)) all)
-                            lists (render/page-lists w)
+                            lists (:lists (:p kw))
+                            ;; read from kw laid out, whose placements are all made: the parts' read keeps nothing new
+                            [parts] (placed-of kw lists)
                             ;; each list's units, the ones nested in them too: a nested one's change is the pair's
                             us (vec (mapcat #(list-units all %) lists))
                             ;; the page's rules come with the parts they style
@@ -579,18 +631,15 @@
                             ;; a part's unit as the page shows it, its nested units composed into it
                             html #(compose (:html %) by)]
                         {:id "d-parts" :container "#c-rows" :rev (hash [(mapv (juxt :id :rev) (concat us rules)) opened-parts])
-                         :html (h/html (ui/ctx-parts (render/placed-hiccup w lists) (into {} (map (juxt :id html)) (remove :parent us)) opened-parts
+                         :html (h/html (ui/ctx-parts parts (into {} (map (juxt :id html)) (remove :parent us)) opened-parts
                                                      (apply str (map html (remove :parent rules)))))}))
         ;; the debug view: @ctx, its part pairs and the agent's record as data by the one printer (its :seon.ctx/ctx render)
         ctx-units (fn [] (let [kw (walked)
                                t (if kw (:tree (:c kw)) (cold-tree))
-                               part-unit (if kw
-                                           (quiet #(pairs (:w kw)))
-                                           (let [w (quiet #(render/draw t ctx/changes bdb (render/render-var-of @bix (merge {:seon.agent/key (:seon.agent/key e)} t)) {:index @bix}))]
-                                             (try (quiet #(pairs w)) (finally (render/dispose-walk! w)))))]
+                               part-unit (quiet #(pairs (or kw (cold-walk t))))]
                            [part-unit
                             {:id "d-ctx" :container "#c-rows" :rev (:t t)
-                             :html (h/html [:li {:id "d-ctx"} (quiet #(render/hiccup {:seon.render/index (if kw @(:index (:w kw)) @bix) :db bdb} (with-meta t {:seon.render/schema :seon.ctx/ctx})))])}]))
+                             :html (h/html [:li {:id "d-ctx"} (quiet #(render/hiccup {:seon.render/index (if kw (:index (:p kw)) @bix) :db bdb} (with-meta t {:seon.render/schema :seon.ctx/ctx})))])}]))
         ;; its process's draw and root's each count revisions of their own: a unit says whose it is, so its process's answer replaces root's first draw at the same number
         units (if own?
                 (mapv #(assoc % :own? true) (:units held))
@@ -610,7 +659,7 @@
         system? (= "root" (:seon.agent/key e))
         ;; the system walk fills regions of this page, so its own root unit (its page) is not placed
         ;; and its source line, which every page holds (system-units), is placed once
-        system (when (and chat? system?) (some->> (:root-walk st) :w render/placed-units (remove #(#{render/root-container "#p-system"} (:container %)))))
+        system (when (and chat? system?) (some->> (:root-walk st) laid :p :units (remove #(#{render/root-container "#p-system"} (:container %)))))
         head (cond-> (or (d/pull db [:seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/description :seon.agent/max-turns {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure]} {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid) {:seon.agent/key (:seon.agent/key e)})
                ;; an earlier boot's process recorded no end (its root went away): its pid names nothing now
                (not (task/this-boots db e)) (dissoc :processes))
@@ -637,9 +686,9 @@
 
 (defn- root-walk
   "St with root's walk current as of main db: root's ctx (seon.ctx/build of root's entity on main)
-  held in a reactive atom its walk draws by the layout root's entity names (:seon.render/root-ctx), built at main's
-  first read, then advanced by what each move of main changed (seon.ctx/advance, its datoms
-  flushed): the walk draws the components their change reached, nothing else. Root's page is dirty when it moves; the agents
+  drawn as a value (`kept-walk`) by the layout root's entity names (:seon.render/root-ctx), built at main's
+  first read, then advanced by what each move of main changed (`advance-walk!`, seon.ctx/patch with its datoms):
+  the walk draws the components their change reached, nothing else. Root's page is dirty when it moves; the agents
   list every page shows is the signed-in user's (`user-sides`), not root's."
   {:malli/schema [:=> [:cat :map :seon.host/db [:maybe :seon.host/db] [:maybe [:sequential :any]]] :map]}
   [st db held moved]
@@ -652,9 +701,8 @@
           (update :dirty (fnil into #{}) (keys (:views st))))
       (nil? held) st
       :else
-      (let [{:keys [a]} rw
-            ;; root's process (process!) is root's own data beside the pull: kept across a move of main
-            p (:process @a) h (:health @a) ts (:turns @a)
+      (let [;; root's process (process!), health and turns (turns!) are root's own data beside the pull: kept across a move of main
+            {p :process h :health ts :turns} (:tree (:p rw))
             rw (advance-walk! rw db :main #(cond-> % p (assoc :process p) h (assoc :health h) ts (assoc :turns ts)) {:from held :moved moved})]
         (update (assoc st :root-walk rw) :dirty (fnil conj #{}) :root)))))
 
@@ -662,30 +710,29 @@
   "St with root's process value p (root's ruling on root's process values, option a: the writer's, the fork
   server's and the store's numbers, each proc's defects and the event stream are root's own data,
   part of root's ctx beside its db pull, never written) in root's walk: when it differs from what
-  the walk holds, assoc'd into root's ctx and flushed, so the one component that reads it runs again."
+  the walk holds, assoc'd into the tree its value holds and walked again with nothing moved (`rewalk`), so the one
+  component that reads it runs again. See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [st p]
-  (if-let [{:keys [w a]} (:root-walk st)]
-    (if (= p (:process @a))
+  (if-let [rw (:root-walk st)]
+    (if (= p (:process (:tree (:p rw))))
       st
-      (do (reset! a (assoc @a :process p))
-          (render/flush! w nil)
-          (update st :dirty (fnil conj #{}) :root)))
+      (-> (assoc st :root-walk (rewalk rw #(assoc % :process p)))
+          (update :dirty (fnil conj #{}) :root)))
     st))
 
 (defn- turns!
-  "St with turns ts ({agent-key turn}) kept and, when they differ from what root's walk holds, assoc'd into root's ctx and flushed, so
-  the one component that reads them (seon.render.ui/turns-tile) runs again. Derived data, never written to main. See
+  "St with turns ts ({agent-key turn}) kept and, when they differ from what root's walk holds, assoc'd into the tree root's walk value holds and walked
+  again with nothing moved (`rewalk`), so the one component that reads them (seon.render.ui/turns-tile) runs again. Derived data, never written to main. See
   seon.render.proc/roots-page-shows-turns-to-merged's plan."
   {:malli/schema [:=> [:cat :map [:map-of :string nat-int?]] :map]}
   [st ts]
   (let [st (assoc st :turns ts)]
-    (if-let [{:keys [w a]} (:root-walk st)]
-      (if (= ts (:turns @a))
+    (if-let [rw (:root-walk st)]
+      (if (= ts (:turns (:tree (:p rw))))
         st
-        (do (reset! a (assoc @a :turns ts))
-            (render/flush! w nil)
-            (update st :dirty (fnil conj #{}) :root)))
+        (-> (assoc st :root-walk (rewalk rw #(assoc % :turns ts)))
+            (update :dirty (fnil conj #{}) :root)))
       st)))
 
 (defn- view-turns
@@ -723,12 +770,12 @@
   fold it was last asked with puts it at (`seon.problems/with-fold`): a repeat of a written signature,
   which main does not hold yet, is counted there, so the banner, root's context and the api's answer are
   one count, and a fold that moved with main still counts it again. When no class changed, the held
-  report stays and nothing is flushed.
+  report stays and nothing is walked.
   See docs/render.md#health-is-what-flows."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
-  (if-let [{:keys [w a]} (:root-walk st)]
-    (let [db (:main-db st) pt (seon.db/point db) from (:health-at st) prev (:health @a) fold (:fold st)]
+  (if-let [rw (:root-walk st)]
+    (let [db (:main-db st) pt (seon.db/point db) from (:health-at st) prev (:health (:tree (:p rw))) fold (:fold st)]
       ;; the held report stands while both what it was read from and the counts it was put at do
       (if (and (= pt from) (= fold (:health-fold st)))
         st
@@ -741,9 +788,8 @@
               st (assoc st :health-at pt :health-fold fold)]
           (if (= (:classes h) (:classes prev))
             st
-            (do (reset! a (assoc @a :health h))
-                (render/flush! w nil)
-                (update st :dirty (fnil conj #{}) :root))))))
+            (-> (assoc st :root-walk (rewalk rw #(assoc % :health h)))
+                (update :dirty (fnil conj #{}) :root))))))
     st))
 
 (defn- with-context
@@ -755,14 +801,15 @@
   nothing (docs/render.md#the-page)."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
-  (if-let [{:keys [w a]} (:root-walk st)]
-    (let [v @a t (:max-tx (:main-db st)) k (:context-key st)]
+  (if-let [rw (:root-walk st)]
+    (let [v (:tree (:p rw)) t (:max-tx (:main-db st)) k (:context-key st)]
       (if (and k (identical? v (k 0)) (= t (k 1)))
         st
-        (let [r (print/print-value (render/placed-hiccup w ["#p-tiles" "#c-rows" "#p-head" "#c-side"])
-                                   {:budget (config/value :seon.config.render/root-context-budget)})
+        (let [[parts rw] (placed-of rw ["#p-tiles" "#c-rows" "#p-head" "#c-side"])
+              r (print/print-value parts {:budget (config/value :seon.config.render/root-context-budget)})
               ctx (or (:text r) (:seon.error/message r))]
-          (assoc st :context {:text ctx :tokens (select/estimate ctx)} :context-key [v t]))))
+          ;; root's walk keeps the placements the read made
+          (assoc st :root-walk rw :context {:text ctx :tokens (select/estimate ctx)} :context-key [v t]))))
     st))
 
 (defn- second-of
@@ -876,15 +923,13 @@
        (when (= :seon.render/no-location (:seon.error/type e)) [:p [:a {:href "/root"} "◆ seon: every session on main"]])])
 
 (defn- keep-walks
-  "St holding the walks a page made or advanced (`agent-view`'s ::walks: the branch's and the users'), a branch walk it replaces
-  disposed. See docs/render.md#a-page-is-a-kept-walk."
+  "St holding the walks a page made or advanced (`agent-view`'s ::walks: the branch's and the users'), values that replace
+  the ones held. See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :map [:maybe :map]] :map]}
   [st {[b bw] :branch users :users}]
-  (let [old (get-in st [:branch-reads b :walk :w])]
-    (when (and bw old (not (identical? old (:w bw)))) (render/dispose-walk! old))
-    (cond-> st
-      bw (assoc-in [:branch-reads b :walk] bw)
-      (seq users) (update :user-walks merge users))))
+  (cond-> st
+    bw (assoc-in [:branch-reads b :walk] bw)
+    (seq users) (update :user-walks merge users)))
 
 (defn- pass-view
   "One view rendered: [st' patch-message-or-nil]; a view whose entity main does not hold yet renders
@@ -896,6 +941,8 @@
   {:malli/schema [:=> [:cat :map :any] [:tuple :map [:maybe :map]]]}
   [st view-id]
   (let [held (get-in st [:views view-id])
+        ;; root's walk laid out (`laid`) outside the view's reads, kept so: every page reads its system units
+        st (cond-> st (:root-walk st) (update :root-walk laid))
         [out reads] (d/with-reads #(page-value st view-id))
         st (keep-walks st (when (map? out) (::walks out)))
         out (cond-> out (map? out) (dissoc ::walks))
@@ -938,12 +985,12 @@
   {:malli/schema [:=> [:cat :map :seon.host/volatile :any] [:tuple :map [:maybe :map]]]}
   [st o view-id]
   (try
-    (let [r (pass-view st view-id)]
-      ;; a component that threw in a kept walk is a problem root records, as a view that threw is
-      (doseq [w (concat (some-> (:root-walk (first r)) :w vector) (keep #(some-> (:walk (val %)) :w) (:branch-reads (first r))) (map :w (vals (:user-walks (first r)))))
-              d (render/take-defects! w)]
+    (let [[st patch] (pass-view st view-id)
+          ;; a component that threw in a kept walk is a problem root records, as a view that threw is
+          [st ds] (take-walk-defects st)]
+      (doseq [d ds]
         (step/out! o :to-api {:op :error :pid :render :message (:seon.error/message d) :data d}))
-      r)
+      [st patch])
     (catch Exception ex
       (let [held (get-in st [:views view-id])
             in (err/thrown-in ex)
@@ -967,10 +1014,9 @@
     (compose skeleton units order)))
 
 (defn- drop-read
-  "St without branch b's read (no view shows it): its db let go and its kept walk (branch-walk) disposed."
+  "St without branch b's read (no view shows it): its db and its kept walk (branch-walk) let go."
   {:malli/schema [:=> [:cat :map :any] :map]}
   [st b]
-  (some-> (get-in st [:branch-reads b :walk]) :w render/dispose-walk!)
   (update st :branch-reads dissoc b))
 
 (defn- drop-view
@@ -1249,7 +1295,7 @@
                           ;; at the counts the api's fold holds (with-fold: a repeat of a written signature is counted
                           ;; there, not yet on main), which it keeps to bring its next move of main from what it held
                           :health (let [st (-> st (advance-main (:db m)) (assoc :fold (:fold m)) health!)
-                                        h (some-> (:root-walk st) :a deref :health)]
+                                        h (some-> (:root-walk st) :p :tree :health)]
                                     ;; none held (no root walk yet): read whole, as health! does when it holds none
                                     (step/out! o :to-api {:op :health-answer :rid (:rid m) :db (:main-db st)
                                                           :r (or h (problems/health (:main-db st)))})

@@ -949,7 +949,7 @@
 
 (defn- health!
   "The health step (docs/health.md#checks-are-callers-of-seon): what this checkout caused since its
-  base (seon.fx/base-commit), branch-health of classes. The head is the working tree's program db, kept in the
+  base (seon.fx/base-commit), branch-health of classes. The head is the committed tip's (HEAD's tree, never an uncommitted change), its program db kept in the
   program store (program-db: a tree it never saw is the nearest kept tree with the changed files refreshed), and the
   base the base tree's, made by the base's own code in a process of its own (base-program), each with its tasks and wiki (with-wiki):
   it costs what the trees differ by and two wiki loads, never a root booted or the program imported
@@ -960,8 +960,17 @@
         base (fx/base-commit root)]
     (if-not base
       (do (println (str "HEALTH FAILED: no base: " root " has no commit before this one on " (config/value :seon.config.source/main))) 1)
-      (let [store (ts/shared-program-store! (config/value :seon.config.proofs/program-store) @ts/kept-program-digest)
-            head (with-wiki (program-db root store) root)
+      (let [;; what the checkout holds that no commit does: said, never judged (health reads the committed tip)
+            dirty (seq (remove str/blank? (str/split-lines (:out (sh/sh "git" "-C" root "status" "--porcelain")))))
+            _ (when dirty (println (str "health reads the committed tip " (str/trim (:out (sh/sh "git" "-C" root "rev-parse" "--short" "HEAD")))
+                                        "; " (count dirty) " uncommitted path(s) not judged (commit them to have them judged): "
+                                        (str/join ", " (map #(subs % 3) (take 5 dirty))) (when (next (drop 4 dirty)) ", ..."))))
+            store (ts/shared-program-store! (config/value :seon.config.proofs/program-store) @ts/kept-program-digest)
+            ;; the head is the committed tip (HEAD's tree, its tasks and wiki as git holds them), never the checkout's files: a
+            ;; change not yet committed (a helper's, mid-edit) is no part of what lands, so none of what health judges
+            head (let [hdir (str root "/target/tmp/health-head-" (random-uuid))]
+                   (try (with-wiki (program-db root store (fx/tree-of root "HEAD")) (fx/checkout-at root "HEAD" ["docs" (tasks-dir) "*.md"] hdir))
+                        (finally (seon.lib/remove-tree! hdir))))
             ;; the base's tasks and wiki, as git holds them, in a directory of this run's own, removed once read; and where the base's
             ;; checkout is made when its program must be (base-program), removed once its runner ran
             dir (str root "/target/tmp/health-base-" base "-" (random-uuid))

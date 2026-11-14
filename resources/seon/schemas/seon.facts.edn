@@ -66,7 +66,7 @@
  :var/meta [:set {:seon.db/index true :description "The keys of the var's own metadata (:test, :macro, :arglists, :private, :malli/schema, ...), without their values and without location keys, :doc or contract-instrumentation keys. See docs/source.md#a-program-file."} :keyword]
  :var/contract [:string {:description "The var's declared :malli/schema as seon.edn text; read it back with seon.edn/decode."}]
  ;; A TEST'S LAST RESULT, on its var entity on the branch whose agent ran it (seon.proofs/result-tx,
- ;; written by seon.agent/run-tests-forked when a run ends; task seon.proofs/test-results-are-a-few-facts,
+ ;; written by seon.agent/run-tests-forked when a run ends; task seon.proofs/a-verdict-is-an-entity-that-names-its-environment,
  ;; R2a): overwritten in place, no history. The digest it was judged at; green, red, or flaky (green and red at
  ;; that digest, seon.proofs/verdict), or deferred (a process test the run left to root's gate), and present only while that digest is the test's reach digest now (a
  ;; moved digest retracts them: unknown); its failing assertions as data, the test child's reports (seon.proofs/failures,

@@ -1749,7 +1749,7 @@
 
 ;; Estimate: 2 imports of 2 files (4 forms) 0.8M + 2 refresh-tx of 3 files 1.2M = 2000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-renamed-alias-target-analyzes-beside-the-image
-  ;; task seon.source/another-trees-ns-form-analyzes-beside-the-image: one process analyzes two trees whose
+  ;; task seon.source/a-macro-bakes-the-analyzed-trees-files: one process analyzes two trees whose
   ;; namespaces disagree (a namespace renamed, the alias of its requirer pointed at the new one), in either
   ;; direction: the removed file's old text is never read again (refresh-tx's dependents), and a namespace
   ;; no source root holds answers its requirer's require from the analysis (read-nss), never a load from disk

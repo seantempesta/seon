@@ -32,7 +32,7 @@
   `report` reads what was recorded, at a cost that follows the problems. `health` adds the
   derived classes, read from the program's facts when asked (docs/health.md#cost)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print.emit :as emit] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.source :as source] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.doc :as doc] [seon.task :as task] [seon.config :as config] [seon.cost :as cost] [seon.reader :as reader] [seon.edn :as sedn] [seon.render :as render] [seon.schema.datahike :as sd]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print.emit :as emit] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.source :as source] [malli.core] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.doc :as doc] [seon.task :as task] [seon.config :as config] [seon.cost :as cost] [seon.reader :as reader] [seon.edn :as sedn] [seon.render :as render] [seon.schema.datahike :as sd]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses task/failed)
@@ -474,22 +474,73 @@
   [db v]
   (boolean (some->> (pdb/eid db :var/name v) (d/entity db) :var/contract sedn/decode render/contract-inputs seq)))
 
+(def ^:private reads-name
+  "The calls whose literal vector argument names what the call takes (a pull pattern, the keys a select takes, a path, a command's
+  argv, a foreign function's signature): never a hand-made list. See docs/health.md#a-hand-written-list."
+  '#{pull pull-many select-keys get-in assoc-in update-in git! git-try git-run sh defc})
+
+(defn- literal-lists
+  "The hand-made lists in form f: each literal set, or vector of keywords or of strings, of three or more members all keywords, all
+  strings or all quoted symbols, that is not a malli schema (a vector headed by a keyword other than its members, :enum included,
+  as malli reads it), a datalog clause, an argument of a read that names what it takes (`reads-name`) or an ns form. See
+  docs/health.md#a-hand-written-list."
+  {:malli/schema [:=> [:cat :any] [:vector [:vector :any]]]}
+  [f]
+  (let [out (volatile! [])
+        lvar? #(and (symbol? %) (or (= '_ %) (str/starts-with? (name %) "?")))
+        homog? (fn [x] (or (every? keyword? x) (every? string? x) (every? symbol? x)))
+        malli? (fn [x] (and (vector? x) (keyword? (first x)) (contains? (into #{} (filter keyword?) (keys (malli.core/default-schemas))) (first x))))
+        walk (fn walk [x quoted? read-arg?]
+               (when (and (or (set? x) (vector? x)) (>= (count x) 3) (homog? x) (not-any? lvar? x) (not read-arg?) (not (malli? x))
+                          (or (set? x) (every? keyword? x) (every? string? x) quoted?))
+                 (vswap! out conj (vec (sort-by str x))))
+               (cond (and (seq? x) (= 'quote (first x))) (walk (second x) true false)
+                     (and (seq? x) (symbol? (first x)) (= "ns" (name (first x)))) nil
+                     (and (seq? x) (symbol? (first x)) (reads-name (symbol (name (first x))))) (run! #(walk % false true) (rest x))
+                     (map? x) (run! #(walk % false false) (mapcat identity x))
+                     (coll? x) (run! #(walk % false false) x)))]
+    (walk f false false)
+    @out))
+
+(defn- scan-form
+  "Form text src of namespace nsym, read to tell its lists, never to run it: an auto keyword whose alias this process has not
+  loaded keeps the alias text as its namespace (::f/x reads as :f/x, as Jolt's reader does in its build's scan mode) and a tagged
+  literal reads as itself, so a form of any namespace reads here. Deps' jolt.host/the-readers-scan-mode-is-a-read-option exposes
+  that mode, and the rewrite goes. See docs/health.md#a-hand-written-list."
+  {:malli/schema [:=> [:cat :symbol :string] :any]}
+  [nsym src]
+  (binding [*read-eval* false *default-data-reader-fn* tagged-literal]
+    (:form (first (:forms (source/read-forms nsym (str/replace src #"(?<![\w:])::(?=[\w.*+!?<>=-])" ":")))))))
+
 (defn hand-written-lists
-  "A :hand-written-list row for each page list (:seon.render/list) among names (nil: every list on db) whose form names a
-  component other than itself (`component?`), with the parts it names. See docs/health.md#a-hand-written-list."
+  "A :hand-written-list row for each hand-made list among the vars names (nil: every var on db), shown with its owning namespace for
+  judgement (a dial, a patch over a missing mechanism, or a restatement of held data), never a reason to refuse: a page list
+  (:seon.render/list) whose form names a component other than itself (`component?`), with the parts it names, and each literal
+  enumeration a form holds (`literal-lists`), with its members. See docs/health.md#a-hand-written-list."
   {:malli/schema [:=> [:cat :seon.host/db :map [:maybe [:set :symbol]]] [:vector :seon.problems/row]]}
   [db ans names]
   (let [lists (if names
                 (filter #(some-> (pdb/eid db :var/name %) (as-> e (d/entity db e)) :var/meta (contains? :seon.render/list)) names)
-                (keep #(:var/name (d/entity db (:e %))) (d/datoms db :avet :var/meta :seon.render/list)))]
-    (vec (for [v (sort-by str lists)
-               :let [refs (some->> (pdb/eid db :var/name v) (d/entity db) :var/form :form/refs)
-                     parts (vec (sort-by str (filter #(and (symbol? %) (not= v %) (component? db %)) refs)))]
-               :when (seq parts)
-               :let [s (str "hand-written-list " v)]]
-           (derived-row ans s (some-> (namespace v) symbol)
-                        (str v " names its parts (" (str/join ", " parts) "): a page draws what its pull holds, each part by its schema's render")
-                        {:kind :hand-written-list :var v :parts parts} {:var v :parts parts})))))
+                (keep #(:var/name (d/entity db (:e %))) (d/datoms db :avet :var/meta :seon.render/list)))
+        ;; the vars as entities: named ones by their one seek, every one by the :var/form index, never a seek by its name again
+        vars (if names (keep #(some->> (pdb/eid db :var/name %) (d/entity db)) names) (map #(d/entity db (:e %)) (d/datoms db :aevt :var/form)))]
+    (into (vec (for [v (sort-by str lists)
+                     :let [refs (some->> (pdb/eid db :var/name v) (d/entity db) :var/form :form/refs)
+                           parts (vec (sort-by str (filter #(and (symbol? %) (not= v %) (component? db %)) refs)))]
+                     :when (seq parts)
+                     :let [s (str "hand-written-list " v)]]
+                 (derived-row ans s (some-> (namespace v) symbol)
+                              (str v " names its parts (" (str/join ", " parts) "): a page draws what its pull holds, each part by its schema's render")
+                              {:kind :hand-written-list :var v :parts parts} {:var v :parts parts})))
+          (for [ve (sort-by (comp str :var/name) vars)
+                :let [v (:var/name ve) src (some-> ve :var/form :form/src)]
+                :when src
+                :let [form (scan-form (symbol (namespace v)) src)]
+                m (literal-lists form)
+                :let [ms (str "[" (str/join " " m) "]") s (str "hand-written-list " v " " ms)]]
+            (derived-row ans s (some-> (namespace v) symbol)
+                         (str v " holds a hand-made list " ms ": judge it a dial (spec'd config with its reason), a patch over a missing mechanism (fix the root) or held data restated (derive it)")
+                         {:kind :hand-written-list :var v :members m} {:var v :members m})))))
 
 (defn unfocused-docstrings
   "An :unfocused-docstring row for each named Seon var whose docstring is over :seon.config.shrink/docstring-words words or
