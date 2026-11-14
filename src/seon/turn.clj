@@ -404,16 +404,32 @@
     (print (sedn/encode (mapv agent/on-the-wire (map :response rs))))
     nil))
 
+(defn specified-tx
+  "The write that marks task task specified on branch db, or nil: the first status s a turn reads in which one of its proofs is red
+  (or threw) writes :seon.task/specified-turn, the turn of agent k (its :seon.agent/turn) then, once; an agent with no turn yet writes nothing. A verdict keeps no history, so the
+  moment it is observed is when it is written; a branch cut from main does not hold it. Nothing when no proof is red, or when the task
+  holds it already. See docs/render.md#how-the-work-stands."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :string :map] [:maybe :seon.db/tx-data]]}
+  [db task k s]
+  (let [n (:seon.agent/turn (d/entity db [:seon.agent/key k]))]
+    ;; a turn not known is no turn written (unknown is never 0)
+    (when (and n (some #(#{:fail :error} (:status %)) (:proofs s))
+               (nil? (:seon.task/specified-turn (d/entity db [:seon.task/id task]))))
+      [{:seon.task/id task :seon.task/specified-turn n}])))
+
 (defn hand-back-end
   "How an outside agent's run ends: [outcome reason] from the stop its agent requested
-  (my.task/fail! makes it :failed, with the reason it gave) and the done rule's reasons. A task
-  the agent failed ends :failed whatever the proofs say, as the turn loop ends it (work!); else
-  :green when the done rule has no reason, else :red with the reasons."
-  {:malli/schema [:=> [:cat [:maybe :map] [:sequential :any]] [:tuple :seon.agent/outcome [:maybe :string]]]}
-  [stop reasons]
+  (my.task/fail! makes it :failed, with the reason it gave) and its status s (seon.ctx.status/status: the done rule's :reasons, and
+  :test-run when a test run failed as a whole). A task the agent failed ends :failed whatever the proofs say, as the turn loop ends it
+  (work!); else :green when the done rule has no reason, else :red with the reasons, after the failed run when there is one: while it
+  stands no verdict counts and every proof reads unknown, so the run is what to fix, said first. See docs/render.md#how-the-work-stands."
+  {:malli/schema [:=> [:cat [:maybe :map] :map] [:tuple :seon.agent/outcome [:maybe :string]]]}
+  [stop {:keys [reasons test-run]}]
   (cond (= :failed (:outcome stop)) [:failed (:reason stop)]
         (empty? reasons) [:green nil]
-        :else [:red (r/explain-text reasons)]))
+        :else [:red (str (when-let [f (seq (:failed test-run))]
+                           (str "the test run failed as a whole (" (str/join "; " f) "), so no verdict counts: "))
+                         (r/explain-text reasons))]))
 
 (defn- unjudged-reason
   "What a green end of status s leaves unjudged, in words, or nil (seon.task/unjudged): the end says it, and the judge decides as before."
@@ -450,7 +466,8 @@
         _ (branch/merge-main!)
         _ (observe task)
         s (judged (status-now))
-        [outcome reason] (if (contract/error? s) [:error (:seon.error/message s)] (let [[o why] (hand-back-end stop (:reasons s))] [o (or why (unjudged-reason s))]))]
+        _ (when-not (contract/error? s) (some-> (specified-tx (agent/db) task (:key @agent/state) s) agent/transact!))
+        [outcome reason] (if (contract/error? s) [:error (:seon.error/message s)] (let [[o why] (hand-back-end stop s)] [o (or why (unjudged-reason s))]))]
     (end! {} outcome reason (when (contract/error? s) s))))
 
 (defn work!
@@ -506,7 +523,11 @@
                                     :else [::next (dissoc st' :threw :error)]))
             ;; the request the last answered model call sent: a turn whose own call answered replaces it
             asked (:requests @agent/state)
-            step (do
+            ;; root is stopping (its :stop, read at once by the transport): the turn in flight finished, so the run ends here,
+            ;; between turns, its work committed by end!, and nothing is cut (the one stop's drain)
+            step (if (:draining @agent/state)
+                   (ended st :waiting "root is stopping: the run ended between turns, its work committed" nil)
+                   (do
                      (try
                        ;; main moved since the last turn: merge it in now, so the agent works on main's program and
                        ;; wiki as they are and a conflict is an unmerged entry it sees and resolves before it can
@@ -517,6 +538,8 @@
                              s (status-now)
                              s (judged s)
                              no-status? (contract/error? s)
+                             ;; the first red of one of its proofs is when the task was specified: written once, as observed
+                             _ (when-not no-status? (some-> (specified-tx (agent/db) task (:key @agent/state) s) agent/transact!))
                              reasons (:reasons s)
                              stop (get-in @agent/state [:turn :stop])
                              ;; what the task references, as facts (its proofs, its plan's cites): never its plan re-parsed
@@ -557,7 +580,7 @@
                              ;; a turn that threw counts against the cap, which the next turn checks
                              (if (< 1 (:threw st'))
                                (ended st' :error (str "two turns in a row threw: " (:seon.error/message (:error st'))) (:error st'))
-                               [::next st'])))))]
+                               [::next st']))))))]
         (case (first step)
           ::next (recur (second step))
           ::end (let [[_ st outcome reason err] step] (end! st outcome reason err)))))))

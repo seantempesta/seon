@@ -328,20 +328,6 @@
   "The config this process reads: :config and :sources, its branch's (hold!) or as it loaded; :schema, the config map compiled as its branch states it; :text, the shipped file as its branch states it; :entries and :changes, what they were built from; :waiting, the keys it does not act on (waiting). See docs/config.md#a-process-holds-its-branchs-config."
   (atom (assoc loaded :schema config-schema :text built-text :waiting {})))
 
-(defn hold-checkout!
-  "Make this process's config the one a test process of checkout dir loads, as bin/test starts a shard: dir's shipped file
-  under the scripted profile, with no config/local.edn and none of this process's own layers (test-system-config's rule),
-  both held and as loaded (config and sources, which readers at load take). For a test child of the service, a fork of
-  root's agent, whose config was root's: its profile, and its local.edn's source root and branch. Answers nil. See
-  docs/config.md#a-process-holds-its-branchs-config."
-  {:malli/schema [:=> [:cat :string] :nil]}
-  [dir]
-  (let [r (layered (load-layers dir ["--profile" "scripted"]))]
-    (swap! held merge (select-keys r [:config :sources]))
-    (alter-var-root #'config (constantly (:config r)))
-    (alter-var-root #'sources (constantly (:sources r)))
-    nil))
-
 (defn in-force
   "This process's config as its branch states it, {:config}: built once at its start, refreshed only when a transaction touches an entry. Not which layer each key came
   from: that differs by process while a digest takes no place, so a reader of it could be green in one process and red in another at one digest. Root's boot writes them on
@@ -433,6 +419,26 @@
       (if (:seon.error/type r)
         (do (swap! held assoc :schema (schema-of changes)) r)
         (do (reset! held (assoc r :entries es :changes changes)) nil)))))
+
+(defn hold-args!
+  "Make this process's own layers what args state, over es, its branch's config entries (the binary's shipped text when it
+  holds none), and schema changes: held and as loaded (config and sources, which readers at load take), and every later hold!
+  of its branch's entries layers over them too. A process's layers come from its role, never its parent's: a test process's
+  are [\"--profile\" \"scripted\"], no config/local.edn (test-system-config's rule), though a test child is a fork of an agent, itself
+  a fork of root and its local.edn. seon.agent/hold-env! calls it as a test child's first act. Answers nil, or the refusal
+  of es (the layers held then). See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat [:sequential :string] [:maybe [:map-of :qualified-keyword :string]] [:map-of :qualified-keyword :any]] [:maybe :seon.config/refused]]}
+  [args es changes]
+  (let [dir (checkout)
+        layers (layers-over #(read-layer (java.io.StringReader. built-text) % dir) dir args)
+        r0 (layered layers (schema-of changes))
+        put! (fn [r] (reset! held r) (alter-var-root #'config (constantly (:config r))) (alter-var-root #'sources (constantly (:sources r))))]
+    (alter-var-root #'built-layers (constantly layers))
+    ;; the layers' own config first, so the entries below are read under this process's profile, never its parent's
+    (put! (assoc r0 :schema (schema-of changes) :text built-text :waiting {}))
+    (when es
+      (let [r (of-entries es changes)]
+        (if (:seon.error/type r) r (do (put! (assoc r :entries es :changes changes)) nil))))))
 
 (defn text-refusal
   "Why text can't be the shipped config on this process's branch, as a boot reads it with no profile, or nil: its message names each key. What a write of the file checks first (seon.fx/unreadable). See docs/source.md#a-program-file."
