@@ -94,6 +94,6 @@ Root and an agent speak length-prefixed frames (a length word and a jfasl body, 
 
 ## Interrupts
 
-Root stops a running form out of band with SIGUSR1, and a form past its work budget stops itself: `seon.intr`.
+Root stops a running form out of band with SIGUSR1, and a form past its work budget stops itself: `seon.intr`. A stop of root interrupts nothing: each agent is sent `:stop`, which its transport reads at once, so a run in flight ends `:waiting` between turns (```seon.turn/work!```) and the agent exits after the requests before it, each ending by its own bound (```seon.agent-proc/stop!```); the stop's own bound, `:seon.config.root/stop-ms`, ends a root that never exits.
 
 Each eval runs under its own interrupt token (`jolt.host/run-interruptible`); the signal sets every token on the stack, so the whole request stops at a safe point the form's own `try` cannot swallow. A form past its tick budget (calls and loop back-edges, never time; `:seon.config.agent/form-ticks` for a model's, an outside or a UI eval, `seon.repl/budgeted`) answers `:seon.repl/ticks-spent`, and one past its byte budget (`:seon.config.agent/form-bytes`) `:seon.repl/bytes-spent`; the request goes on ([failure points](failure-points.md)).

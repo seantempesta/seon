@@ -1421,7 +1421,8 @@
        (= :pause op) (do (flow/pause-proc (:flow @agent/state) :repl) [st nil])
        ;; a paused proc reads only its control channel: a stop resumes the REPL first, so it ends the
        ;; process after the requests before it, paused or not
-       (= :stop op) (do (flow/resume-proc (:flow @agent/state) :repl) [st {:repl [m]}])
+       ;; and the run in flight learns at once that root is stopping, so it ends between turns (seon.turn/work!), never cut
+       (= :stop op) (do (swap! agent/state assoc :draining true) (flow/resume-proc (:flow @agent/state) :repl) [st {:repl [m]}])
        (= :resume op) (do (flow/resume-proc (:flow @agent/state) :repl) [st nil])
        :else [st {:repl [m]}]))))
 

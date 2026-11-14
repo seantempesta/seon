@@ -433,18 +433,22 @@
   source fact, tree, the binary's answer for it and the inputs bin/update wrote), main's source fact is written again as a boot
   writes it (seon.system/booted-source: this boot, main's program digest now, the inputs of the files now), so agents key their
   results by the landed files and every agent keeps running. Answers {:kept boot :tree} or {:restart why}, which bin/update
-  restarts on. See docs/source.md#a-landing-enters-main-as-data."
+  restarts on; kept with a binary not current for the landed tree, :build true, which bin/update builds with no restart. See
+  docs/source.md#a-landing-enters-main-as-data."
   {:malli/schema [:=> [:cat :seon.system/sys :string] :map]}
   [sys tree]
   (let [db @(:conn sys)
         held (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))
         inputs (root/held-inputs)
-        why (root/restart-for held tree (when (= tree (:tree held)) (root/stale-binary db)) inputs)]
+        stale (when (= tree (:tree held)) (root/stale-binary db))
+        why (root/restart-for held tree stale inputs)]
     (if why
       {:restart why}
       (let [src (root/booted-source held (:boot sys) (program/binary-program) (program/program-digest db) (fx/config-input config/config (config/checkout)) nil inputs)
             r @(root/transact-main! sys [{:seon.system/id :root :seon.system/source src}])]
-        (if (contract/error? r) r {:kept (:boot sys) :tree tree})))))
+        ;; kept, but the binary is not current for the landed tree (forms, config or schema entries it bakes): bin/update builds
+        ;; it now, with no restart, so the next boot is on main's build, never a stale one
+        (if (contract/error? r) r (cond-> {:kept (:boot sys) :tree tree} (seq (:reaches stale)) (assoc :build true)))))))
 
 (defn build!
   "Build the next generation from main's last merges commit, for what cannot load in place
