@@ -283,12 +283,11 @@
         ;; a red here that main was red on too, at the branch's merge base: said as a fact, and the agent's to clear all the same (the owner, 2026-11-07)
         also-on-main (when (and base (some (fn [[_ st]] (= :fail st)) results))
                        (vec (sort-by str (keep (fn [[t {st :status}]] (when (and (= :fail st) (= :fail (get results t))) t)) (verdicts base (set proofs))))))
+        ;; the judge's own producer of the done rule's input; with no claims read no test is main's (none red outside the proofs)
         input (cond-> (if claims
                         (r/done-input claims tid results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) nil plan-before (set deferred))
-                        (cond-> {:proofs (set proofs) :kind kind :results results :main-green #{} :allowed-red #{}
-                                 :uncontracted (set gaps) :unmerged (mapv #(sedn/encode (:key %)) unmerged) :deferred (set deferred)}
-                          (= :design kind) (assoc :plan plan)
-                          (and (= :design kind) plan-before) (assoc :plan-before plan-before)))
+                        (r/input {:proofs (set proofs) :kind kind :plan plan :plan-before plan-before}
+                                 results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) (set deferred) (constantly false) (constantly false)))
                 (seq (:caused split)) (assoc :caused (set (:caused split)))
                 (some? changed?) (assoc :changed? changed?)
                 ;; a refine's one write: the task it refines names a function it did not (one function, root's judging reads it too)

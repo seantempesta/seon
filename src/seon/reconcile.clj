@@ -386,10 +386,27 @@
    (observe idx db (for [dt moved :let [a (:a dt)] :when (and (keyword? a) (or (watched-attrs a) (watched-ns (namespace a))))]
                      [:db/add (:e dt) a]))))
 
+(defn input
+  "The done rule's input for task t ({:proofs :kind :plan :plan-before}) and its results; green? and red? say whether main holds a
+  test green and whether it may be red. The one producer the judge's `done-input` and seon.ctx.status/status call. See
+  docs/tasks.md#the-done-rule."
+  {:malli/schema [:=> [:cat :map :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:set :qualified-symbol] fn? fn?] :seon.reconcile/done-input]}
+  [{:keys [proofs kind plan plan-before]} results uncontracted unmerged deferred green? red?]
+  (cond-> {:proofs (or proofs #{})
+           :kind kind
+           :results results
+           :main-green (into #{} (filter green?) (keys results))
+           :allowed-red (into #{} (filter red?) (keys results))
+           :uncontracted uncontracted
+           :unmerged (vec unmerged)
+           :deferred deferred}
+    (= :design kind) (assoc :plan plan)
+    (and (= :design kind) plan-before) (assoc :plan-before plan-before)))
+
 (defn done-input
-  "The done rule's input for the results of task id's end, observed against main at t basis
-  (nil: main as idx holds it), over the index: the regression and allowed-red sets restricted to the tests
-  that ran (the only ones done-explain asks about), each test looked up by its claimants; for
+  "The done rule's input (`input`) for the results of task id's end, observed against main at t basis
+  (nil: main as idx holds it), over the index: a test is main-green when a task claiming it merged by the basis, allowed-red when
+  one claiming it has not (each test looked up by its claimants); for
   a :design task, its accumulated plan now and plan-before, the one its branch began with
   (its merge base's; nil: unknown); deferred, the process tests its end left to root's gate."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id :seon.proof/results [:set :qualified-symbol] [:sequential :string] [:maybe :int] [:maybe :seon.task/plan] [:set :qualified-symbol]] :seon.reconcile/done-input]}
@@ -397,16 +414,10 @@
   (let [by? (fn [x] (when-let [mt (get-in idx [:done x :merged-t])] (or (nil? basis) (<= mt basis))))
         claim (fn [t] (disj (get-in idx [:claims t] #{}) id))
         kind (get-in idx [:tasks id :seon.task/kind] :work)]
-    (cond-> {:proofs (get-in idx [:acc id] #{})
-             :kind kind
-             :results results
-             :main-green (into #{} (filter #(some by? (claim %))) (keys results))
-             :allowed-red (into #{} (filter #(some (complement by?) (claim %))) (keys results))
-             :uncontracted uncontracted
-             :unmerged (vec unmerged)
-             :deferred deferred}
-      (= :design kind) (assoc :plan (:plan (task/accumulate (:tasks idx) id)))
-      (and (= :design kind) plan-before) (assoc :plan-before plan-before))))
+    (input {:proofs (get-in idx [:acc id] #{}) :kind kind :plan-before plan-before
+            :plan (when (= :design kind) (:plan (task/accumulate (:tasks idx) id)))}
+           results uncontracted unmerged deferred
+           #(some by? (claim %)) #(some (complement by?) (claim %)))))
 
 (defn- merge-keys
   "The program keys merge task id merges: what the tasks on its branch measured as changed
