@@ -1533,13 +1533,26 @@
     {:max-workers (if (seq counts) (reduce min counts) cores) :budget (+ cores 2) :max-load max-load}))
 
 (defn config-limits
-  "limits of the config this process holds, read at each admission, so a dial the owner turns (when he games, say) admits by
-  it at the next one. See docs/config.md#the-test-services-three-limits."
+  "limits of the config this process holds: what limits-held derives once a config change, so a dial the owner turns (when he
+  games, say) admits by it at the next admission. See docs/config.md#the-test-services-three-limits."
   {:malli/schema [:=> [:cat] [:map [:max-workers pos-int?] [:budget pos-int?] [:max-load [:maybe number?]]]]}
   []
   (let [c (:config (cfg/in-force))]
     (limits {:cores (cfg/value :seon.config.machine/cores) :max-cores (:seon.config.proofs/max-cores c)
              :max-workers (:seon.config.proofs/max-workers c) :max-load (:seon.config.proofs/max-load c)})))
+
+(defn limits-held
+  "[st limits]: config-limits of the config this process holds, kept in the reader's own state st (under ::limits-of, with the
+  config map it was derived from) and derived again only when the config in force is another value (seon.config/held is replaced
+  only when a transaction touches an entry): a dial the owner turns reaches the next admission or grant, and every other one costs
+  one identical? compare, never a resolver read (~200k ticks a call). The :process owner's dispatch and seon.prove's grant read it.
+  See docs/config.md#the-test-services-three-limits."
+  {:malli/schema [:=> [:cat :map] [:tuple :map [:map [:max-workers pos-int?] [:budget pos-int?] [:max-load [:maybe number?]]]]]}
+  [st]
+  (let [c (:config (cfg/in-force)) h (::limits-of st)]
+    (if (and h (identical? c (:config h)))
+      [st (:limits h)]
+      (let [l (config-limits)] [(assoc st ::limits-of {:config c :limits l}) l]))))
 
 (defn batch-tag
   "The value of SEON_PROVE_BATCH in every process batch bid of the test service starts: the service's process and the batch, so a
@@ -1725,7 +1738,7 @@
   docs/flow.md#effects-one-owner-and-its-workers-per-kind."
   {:malli/schema [:=> [:cat :map :seon.host/volatile] :map]}
   [st o]
-  (let [lim (or (:limits st) (config-limits))]
+  (let [[st lim] (if (:limits st) [st (:limits st)] (limits-held st))]
     (loop [st (assoc st :lim lim :read? false :fresh #{})]
       (if-let [[qk m] (first (:queue st))]
         (let [now (quot (profile/now-ns) 1000000)
