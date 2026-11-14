@@ -465,15 +465,21 @@
   ;; (seon.repl/serve-item!); a child of one run kept the other run's pipe end, so that run's end of file waited on the
   ;; other child and it answered a :pipe-held error with no report (bin/check agent-checks, 2026-11-12). Here run a's test
   ;; parks on a fifo until run b's test has run and opened it, so a's child is alive the whole time b's pipe is; each run
-  ;; answers its own test, green, and nothing else. A regression waits for ever on b's end of file (no clock may end it)
+  ;; answers its own test, green, and nothing else. A regression waits for ever on b's end of file (no clock may end it).
+  ;; A run that answers first and is not green (its fork refused, :seon.test/fork-refused naming its holders) never ran
+  ;; its end of the fifo, so the test opens that end itself: the other run ends red, and the first one's answer is said
   (let [fifo (str (seon.config/checkout) "/target/runs/two-runs-" (random-uuid))
         _ (clojure.java.shell/sh "mkfifo" fifo)
         nss ["(ns app.twa-test (:require [clojure.test :refer [deftest is]])) (deftest waits (is (= \"b ran\" (slurp " (pr-str fifo) "))))"
              "(ns app.twb-test (:require [clojure.test :refer [deftest is]])) (deftest runs (spit " (pr-str fifo) " \"b ran\") (is (= 1 1)))"]
-        run "(let [go (fn [n] (clojure.core.async/io-thread (seon.agent/run-tests-forked 100000000 #{} :main (fn [_] nil) #{n})))
+        run (str "(let [go (fn [n] (clojure.core.async/io-thread (seon.agent/run-tests-forked 100000000 #{} :main (fn [_] nil) #{n})))
                    a (go 'app.twa-test) b (go 'app.twb-test)
-                   pick (fn [r] (select-keys r [:pass :fail :error :reports]))]
-               (pr-str {:a (pick (clojure.core.async/<!! a)) :b (pick (clojure.core.async/<!! b))}))"
+                   pick (fn [r] (if (contains? r :pass) (select-keys r [:pass :fail :error :reports]) r))
+                   [r1 ch] (clojure.core.async/alts!! [a b])
+                   _ (when-not (= 1 (:pass r1)) (if (= ch b) (spit " (pr-str fifo) " \"b did not run\") (slurp " (pr-str fifo) ")))
+                   r2 (clojure.core.async/<!! (if (= ch a) b a))
+                   [ra rb] (if (= ch a) [r1 r2] [r2 r1])]
+               (pr-str {:a (pick ra) :b (pick rb)}))")
         [_ _ two] (in-agent [(apply str nss) "nil" run])
         v (some-> (:value two) clojure.edn/read-string)]
     (.delete (java.io.File. fifo))
