@@ -40,6 +40,14 @@
        (assoc @(root/transact-main! sys (into (vec tx) (for [d ds] {:seon.task/id (task/task-id (:seon.task/ns d) (:seon.task/name d)) :seon.task/started-by by})))
               :tasks (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) ds))))))
 
+(defn- release-tx
+  "The write that releases held task id (run!'s, restart-tx's): running by compare-and-swap from held, the reasons root last gave
+  retracted (the same again is news to the next judgment), and its starter the user, who released it."
+  {:malli/schema [:=> [:cat :seon.task/id] [:vector :any]]}
+  [id]
+  [[:db/cas [:seon.task/id id] :seon.task/execution :held :running] [:db.fn/retractAttribute [:seon.task/id id] :seon.task/reasons]
+   {:seon.task/id id :seon.task/started-by (task/sender (config/value :seon.config.root/user-name))}])
+
 (defn run!
   "Release tasks ids: the one release (nothing autoruns). Each held task becomes running,
   by compare-and-swap on main (a cancel! between the read and the write refuses the write);
@@ -60,11 +68,35 @@
                                        (str "task " id (if-let [e (x id)] (str " is " (name e)) " does not exist") ", not held: nothing to release")
                                        {:task id :execution (x id)})))]
     (cond-> (if (seq held)
-              @(root/transact-main! sys (into [] (mapcat #(vector [:db/cas [:seon.task/id %] :seon.task/execution :held :running] [:db.fn/retractAttribute [:seon.task/id %] :seon.task/reasons]
-                                                                  {:seon.task/id % :seon.task/started-by (task/sender (config/value :seon.config.root/user-name))}))
-                                              held))
+              @(root/transact-main! sys (into [] (mapcat release-tx) held))
               {:ok true :changed 0})
       (seq refused) (assoc :not-held refused))))
+
+(defn restart-tx
+  "The write that starts each held task of ids again with a fresh agent on a fresh branch (seon.task/restart-tx), its instructions
+  naming the run it leaves (that agent and branch, read from the facts), and releases it as run! does. A task that is not held is
+  left as it is. See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.task/id]] [:vector :any]]}
+  [db ids]
+  (into [] (mapcat (fn [id]
+                     (let [t (d/entity db [:seon.task/id id])]
+                       (when (= :held (:seon.task/execution t))
+                         (let [{:keys [tx left]} (task/restart-tx db id)
+                               note (str "An earlier run of this task left its work on branch " (:branch left)
+                                         (some->> (:agent left) (str ", agent ")) ": read it with (my.db/at {:branch " (:branch left)
+                                         "}) and evaluate what you keep.")]
+                           (-> tx
+                               (conj {:seon.task/id id :seon.task/instructions (str/trim (str (:seon.task/instructions t) "\n\n" note))})
+                               (into (release-tx id))))))))
+        ids))
+
+(defn restart!
+  "Start each held task of ids again with a fresh agent on a fresh branch, the run it leaves named in its instructions
+  (`restart-tx`); answers the writer's answer. See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat :seon.system/sys [:sequential :seon.task/id]] :map]}
+  [sys ids]
+  (let [tx (restart-tx @(:conn sys) ids)]
+    (if (seq tx) @(root/transact-main! sys tx) {:ok true :changed 0})))
 
 (defn take-back-tx
   "The write that takes the running tasks among ids back from their runs on db: each is held by

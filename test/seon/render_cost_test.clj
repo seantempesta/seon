@@ -624,11 +624,15 @@
   ;; diff skips what both share. Estimate: the session at three sizes, a diff each
   (cost/proof {:of 'seon.ctx/moved :input 'seon.render-cost-test/moved-between-turns-of
                :n "turns of the agent, an eval each"
-               :work (str "the datoms of one turn (its eval and its call), found by walking the root-to-leaf paths the two commits do not "
-                          "share: one node a level, so the index's depth, log n, and never the db's size")
-               :growth :log
+               :work (str "the datoms of one turn (12: its eval and its call), found by walking the paths the two commits do not share and "
+                          "decoding each unshared leaf whole: a turn's datoms sit in the leaf the session's evals fill, so up to a leaf's "
+                          "size (about 40 turns here) that leaf grows with the turns, then splits and stays flat; never the db's size "
+                          "(the view path this replaced was 25.9 MB at 10 turns)")
+               ;; corrected 11-13 (data's probe, both trees): the first estimate (:log, 20k + 25k a level) left out the leaf decoded whole, so
+               ;; 30 schema datoms elsewhere (data's branch) moved the split and the bytes at 40 turns went 140k -> 278k. Linear to a leaf:
+               :growth :linear
                :fixed {:calls 1 :bytes 20000}
-               :per-n {:bytes 25000}
+               :per-n {:bytes 7000}
                :sizes [10 20 40]}))
 
 (defn walk-plus-one-of

@@ -2108,6 +2108,24 @@
     (is (contains? tests (symbol (name p))) (str p " names no test the tree holds"))))
 
 ;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 judgings x 0.7M (the index and the judge-tx) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-task-starts-again-with-a-fresh-agent-on-a-fresh-branch
+  ;; docs/tasks.md#a-refine-curates-its-own-task (context, 11-13: done by hand twice for the loop task): a held task restarted is on a
+  ;; branch named by its last ending, with none of its end's facts and no agent, its instructions naming the run it left, released; the
+  ;; reconciler's next action for it is a spawn. One write (seon.task/restart-tx) serves this, a refine's supersede and attach's fresh.
+  ;; Estimate: one small world, one judging, one restart
+  (let [db0 (with-refine-section (mdb [(decl "a")] :extra (work "a" :running)))
+        {db1 :db} (judge! db0 "a" {:outcome :cap} :results {(t "a") :fail})
+        old (task/task db1 "demo/a")
+        db2 (d/db-with db1 (my.root/restart-tx db1 ["demo/a"]))
+        a (d/entity db2 [:seon.task/id "demo/a"])]
+    (is (= [:held :cap] [(:seon.task/execution old) (:seon.task/outcome old)]) "capped and held, as the loop task was")
+    (is (not= (:seon.task/branch old) (:seon.task/branch a)) "a fresh branch")
+    (is (= (:seon.task/branch a) (:branch (task/restart-tx db1 "demo/a"))) "named by its ending: the same write names the same branch")
+    (is (empty? (filter a seon.task/end-attrs)) "none of the end's facts, no agent")
+    (is (str/includes? (str (:seon.task/instructions a)) "a-a") "its instructions name the agent of the run it left")
+    (is (= :running (:seon.task/execution a)) "released")
+    (is (some #(and (= :spawn (:op %)) (= "demo/a" (:task %))) (actions-for db2)) "its next action is a new agent")))
+
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-cap-ends-the-run-held-and-gets-its-refine
   ;; docs/tasks.md#a-refine-curates-its-own-task (Optimization's restated claim, 2026-11-12): a cap ends the run, failed in its number
   ;; of turns; nothing parks at a cap; it is held, its release runs it again from its branch's head, and it gets its refine as any end

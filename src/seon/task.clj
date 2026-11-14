@@ -1082,6 +1082,37 @@
     (boolean (some #(= br (or (:seon.task/branch %) (default-branch (:seon.task/id %))))
                    (:seon.task/needs (d/pull db [{:seon.task/needs [:seon.task/id :seon.task/branch]}] [:seon.task/id id]))))))
 
+(defn- end-retracts
+  "The retractions of every fact task id's end wrote (end-attrs) that db holds on it. See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:vector :any]]}
+  [db id]
+  (let [t (d/entity db (pdb/eid db :seon.task/id id))]
+    (vec (for [a (sort end-attrs) :when (some? (get t a))] [:db.fn/retractAttribute [:seon.task/id id] a]))))
+
+(defn- outcome-at
+  "The tx of task id's outcome on db, or nil. See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe :int]]}
+  [db id]
+  (some-> (first (d/datoms db :eavt (pdb/eid db :seon.task/id id) :seon.task/outcome)) :tx))
+
+(defn restart-tx
+  "The write that puts task id on a fresh branch, cut from main when its next agent starts: named by its last ending (its default
+  branch, \"-r\", the tx of its outcome, else db's t), so the same ending names the same branch; and none of the facts its end wrote
+  (end-attrs), its agent among them, so the reconciler starts a new agent. Answers {:tx :branch :left}: :left the agent and branch of
+  the run it leaves, which stay as they are. The one way a task starts again: a refine nobody acted on (refine-tx), attach's :fresh
+  (seon.server/attach!) and my.root/restart!. A fresh branch is clean until main changes forms it holds too.
+  With ending, a tx, the branch is named by it instead: a refine's supersede names it by the ending of the task it refines.
+  See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/id] [:map [:tx [:vector :any]] [:branch :seon.task/branch] [:left :map]]]
+                  [:=> [:cat :seon.host/db :seon.task/id [:maybe :int]] [:map [:tx [:vector :any]] [:branch :seon.task/branch] [:left :map]]]]}
+  ([db id] (restart-tx db id (outcome-at db id)))
+  ([db id ending]
+   (let [t (d/entity db (pdb/eid db :seon.task/id id))
+         fresh (keyword (str (name (default-branch id)) "-r" (or ending (:max-tx db))))]
+     {:branch fresh
+      :left {:agent (some-> t :seon.task/agent :seon.agent/key) :branch (or (:seon.task/branch t) (default-branch id))}
+      :tx (into [{:seon.task/id id :seon.task/branch fresh}] (end-retracts db id))})))
+
 (defn- unacted?
   "Whether refine rid is one nobody acted on, read from its own facts: cancelled, or held at an outcome that ended its run without
   finishing it (the outcome schema's own sets: ended less finished, its cap, its death, a closing). A refine in flight, waiting on
@@ -1108,16 +1139,16 @@
             ;; one nobody acted on is declared again on a fresh branch, named by the ending that supersedes it (the t of the task's
             ;; outcome), so a replay of the same end names the same branch; its end's facts go: a new agent, none of the old one's
             ;; records. The old branch is kept, as every task's is (its commits stay)
-            fresh (when prior (keyword (str (name (default-branch rid)) "-r"
-                                            (or (some-> (first (d/datoms db :eavt (pdb/eid db :seon.task/id id) :seon.task/outcome)) :tx) (:max-tx db)))))
+            restart (when prior (restart-tx db rid (outcome-at db id)))
+            fresh (:branch restart)
             decls (cond->> (refine-decls t) fresh (mapv #(assoc % :seon.task/branch fresh)))
             tx (create-tx db decls)]
         (when (vector? tx)
           ;; started by the agent whose run it refines: its agent is that one's child (:seon.agent/parent, start-tx)
           (cond-> (-> tx
                       ;; the end's facts, every one an end writes (end-attrs)
-                      (into (when prior (for [x [rid vid] a (sort end-attrs)]
-                                          [:db.fn/retractAttribute [:seon.task/id x] a])))
+                      ;; and the review's, on the refine's branch (its declaration names it)
+                      (into (when prior (into (:tx restart) (end-retracts db vid))))
                       ;; each states its declaration's proofs again, a dropped one retracted, as a changed task file's entry does
                       ;; (entity-tx): a refine declared when its proofs were a test since deleted kept it, and capped
                       (into (when prior (mapcat #(entity-tx db (pdb/eid db :seon.task/id (task-id (:seon.task/ns %) (:seon.task/name %)))

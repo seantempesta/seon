@@ -157,8 +157,9 @@
       ;; its agent is live: it is the one to work it (a second spawn on its branch is refused)
       live {:agent (:agent live) :task id :shared true}
       :else
-      (let [env (cond-> (assoc (r/desired-env t) :model "outside")
-                  fresh? (assoc :branch (keyword (str (name (task/default-branch id)) "-r" (random-uuid))))
+      (let [restart (when fresh? (task/restart-tx db id))
+            env (cond-> (assoc (r/desired-env t) :model "outside")
+                  restart (assoc :branch (:branch restart))
                   client (assoc :holder client))
             ;; the session's agent continues (docs/turn.md#parked)
             k (when-not (or fresh? clone-of) (task/agent-key db id))
@@ -171,8 +172,10 @@
           r
           (let [replaced (when fresh? (:agent (first (live-run sys db id))))]
             @(c/transact-main! sys (vec (concat (task/execution-tx [id] :running)
-                                                (when fresh? [{:seon.task/id id :seon.task/branch (:branch env)}])
-                                                (task/start-tx db id (:boot sys) ag env (System/currentTimeMillis)))))
+                                                (:tx restart)
+                                                ;; read after the restart's retractions: its outcome swap starts from none
+                                                (task/start-tx (cond-> db restart (-> (pdb/with (:tx restart)) :db-after)) id (:boot sys) ag env
+                                                               (System/currentTimeMillis)))))
             (when replaced (c/kill! sys replaced))
             {:agent ag :task id})))))))
 
