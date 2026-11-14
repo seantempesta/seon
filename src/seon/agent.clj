@@ -551,53 +551,53 @@
 ;; ---- merging main into this branch (seon.merge; session M1) -------------------------------
 
 (defn merge-main!
-  "git merge main into this agent's branch, in this process (it owns the branch's writes):
-  main's changes since the merge base that do not conflict apply in one merge commit with
-  main as parent, each conflict stays on the branch as an unmerged entry, and the changed
-  definitions load here. Task content (a :task key of seon.merge's stated keys: another session's design, root's edit) merges
-  the same way, so a member main changed never reads, at the run's end, as this branch reverting it (live finding F3), and one
-  both changed is a conflict. data-attrs :all (every caller's): every other fact main wrote since the base (its records, a
-  task's lifecycle) merges by its [:datum e a] key, so the branch after it is main's plus its own change. A conflict stops the
-  merge (docs/decisions.md#one-merge-everything-that-doesnt-conflict-both-directions): nothing of main's is applied, the base stays,
-  and each conflict is an unmerged entry the branch resolves. Answers {:ok :applied :conflicts :t}."
-  {:malli/schema [:=> [:cat :seon.merge/data-attrs] [:map [:ok :boolean]]]}
-  [data-attrs]
+  "git merge main into this agent's branch, in this process (it owns the branch's writes), by the one merge
+  (seon.merge/merge-main): the merged branch is main's head plus this branch's own datoms since the base, so it costs what the
+  branch wrote, never how far main moved. A key both changed stops it: nothing of main's is applied, the base stays, and each
+  conflict is an unmerged entry the branch resolves. Clean, it is one commit (datahike.versioning/force-branch!, parents the
+  branch's head and the main merged, refused if the branch moved), and this process's connection follows it. None of main's forms loads into this running process: its program stays the one :program names
+  (program-db), :behind says so, and its test children and its next start load the branch's difference (load-diff!).
+  Answers {:ok :merged :applied :conflicts :t}: :merged the main commit merged, nil when main had not moved; :applied the program
+  keys main changed since the old base (main-changes, held for the pair main-line already read: no second diff). See
+  docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat] [:map [:ok :boolean]]]}
+  []
   (commit!)
   (let [conn (:store-conn @state)
-        main-b (pdb/main-branch (:cfg @state))
+        cfg (:cfg @state)
+        branch (:branch @state)
+        main-b (pdb/main-branch cfg)
         main (heard-main)
-        head @conn
-        ;; git's merge base: the main last merged, unless main has since merged a commit of this branch (its own merge up), which
-        ;; is then the base; read from the commit graph only when main moved, over the commits since (docs/sharing.md#a-merge)
-        same? (= (d/commit-id main) (d/commit-id (:base @state)))
-        base (if same? (:base @state) (pdb/branch-base conn main-b (:branch @state)))
-        r (if same? {:theirs {}} (pm/delta-three-way base head main data-attrs))]
-    (cond
-      (empty? (:theirs r))
-      {:ok true :applied [] :conflicts [] :t (:max-tx head)}
-      ;; a conflict stops the merge: only its unmerged entries are written, main's changes wait until they are resolved
-      (seq (:conflicts r))
-      (do (transact! (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
-          {:ok false :applied [] :conflicts (:conflicts r) :t (:max-tx @conn)})
-      :else
-      (let [;; the parent is the commit merged: a branch name would name main's head when this commits, which can be newer than what was merged
-            rep (d/merge-db conn #{(d/commit-id main)} (pm/merge-tx head base main (:apply r) data-attrs)
-                             (pdb/tx-meta (:branch @state) {:seon.tx/merged main-b}))
-            ops (pdb/report->tx rep)
-            errs (program/load-changes! (:db-after rep) ops)]
-        ;; the merge base is now main's head, the value just merged, so no walk of the commit graph finds it: what main changed is not this branch's change
-        (let [attrs (into #{} (map (fn [op] (nth op 2 nil))) ops)]
-          (doc/carry-index! head @conn (map (fn [op] [(nth op 1) (nth op 2)]) ops))
-          (swap! state #(-> % (assoc :db @conn :base main) (schema-moved attrs)))
-          ;; the same on the branch's fact, or the status, which reads the fact, takes what main changed for this branch's work until a next turn writes it
-          (let [merged-t (:max-tx @conn)]
-            ;; carried like any write: skipped, the next search rebuilt the index after every merge
-            (let [r (d/transact conn [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id (:base @state))}])]
-              (doc/carry-index! (:db-before r) (:db-after r) (map (juxt :e :a) (:tx-data r))))
-            (swap! state assoc :db @conn :merged-t merged-t)))
-        (send! {:op :committed :t (:max-tx @conn) :txs 1})
-        (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:merged-t @state) :datoms (count ops)}
-          (seq errs) (assoc :load-errors errs))))))
+        head @conn]
+    (if (= (d/commit-id main) (d/commit-id (:base @state)))
+      {:ok true :merged nil :applied [] :conflicts [] :t (:max-tx head)}
+      ;; git's merge base: the main last merged, unless main has since merged a commit of this branch (its own merge up), which
+      ;; is then the base (docs/sharing.md#a-merge)
+      (let [base (pdb/branch-base conn main-b branch)
+            r (pm/merge-main base head main)]
+        (if (seq (:conflicts r))
+          ;; a conflict stops the merge: only its unmerged entries are written, main's changes wait until they are resolved
+          (do (transact! (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
+              {:ok false :merged nil :applied [] :conflicts (:conflicts r) :t (:max-tx @conn)})
+          (let [applied (vec (keys (main-changes (:base @state) main)))
+                merged (pdb/db-with main (conj (vec (:tx r)) (assoc (pdb/tx-meta branch {:seon.tx/merged main-b}) :db/id :db/current-tx)))
+                ;; Datahike's force-branch! moves this process's live connection to the merged head with it (follow-head!), so
+                ;; its writer's next commit builds on what the merge brought
+                _ (d/force-branch! merged branch #{(d/commit-id head) (d/commit-id main)} {:expected-current-commit (d/commit-id head)})
+                conn' conn ;; kept: it follows the head
+                ;; the merge commit's own transaction: what :t answers
+                merged-t (:max-tx @conn')
+                ;; the merge base is now main's head, the value just merged, so no walk of the commit graph finds it
+                _ (swap! state assoc :db @conn' :base main :behind true)
+                ;; the registry slot built again on the merged branch: main's schema moves are in it too, unread by the merge
+                _ (swap! state with-slot)
+                ;; the same on the branch's fact, or the status, which reads the fact, takes what main changed for this branch's work
+                ;; until a next turn writes it. The text index is not carried: what main's moves wrote is not read here, so the slot,
+                ;; keyed by its db, is built again at its next read, and at the re-fork the fork server's index for main is inherited
+                _ (d/transact conn' [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id main)}])]
+            (swap! state assoc :db @conn' :merged-t merged-t)
+            (send! {:op :committed :t merged-t :txs 1})
+            {:ok true :merged (d/commit-id main) :applied applied :conflicts [] :t merged-t}))))))
 
 ;; ---- evaluation -----------------------------------------------------------------
 
@@ -1309,6 +1309,9 @@
         ;; its first act on its own env: the branch's environment, whatever the agent it was forked from held (its reads of
         ;; db go through its own env, so after own-store!)
         (hold-env! (db) {:args ["--profile" "scripted"] :checkout (:checkout plan)})
+        ;; an agent behind its branch (a merge of main loads nothing into it: merge-main!) forks children holding its own program:
+        ;; each brings it to the branch first, the forms that differ only (seon.program/load-diff!), so a verdict judges the branch
+        (when-let [p (program-db)] (when (not= (d/commit-id p) (d/commit-id (db))) (program/load-diff! p (db))))
         ;; and as a test process: a private function's contract is checked on each call here, whatever its agent's
         ;; setting (the owner, 2026-11-10: "Private helpers: tests only"; docs/checks.md#contracts-armed-at-definition)
         (contract/check-private! true)
@@ -2013,7 +2016,7 @@
                 (swap! state update :inbox (fnil conj []) {:from :fx :k (:k m) :kind (fx-done! (:k m)) :body r})
                 nil)
     ;; root asks this agent to merge main into its branch (it owns the branch's writes)
-    :merge-main [{:op :merged-main :id (:id m) :result (merge-main! (:data-attrs m :all))}]
+    :merge-main [{:op :merged-main :id (:id m) :result (merge-main!)}]
     :clone (do (clone! m) nil)
     :stats [{:op :stats :id (:id m) :result {:mem-mb (mem-mb) :t (:max-tx (db)) :pid (lib/c-getpid)
                                               :results (count (:results @state)) :evals (:n @state)
