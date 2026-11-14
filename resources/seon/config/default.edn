@@ -788,6 +788,12 @@
  ;; sends queue. At the bound agent procs park (back-pressure). Session FX1.
  :seon.config.fx/buf 1024
 
+ ;; Unit: each effect kind's declared bound (:seon.bound/bound). The model's is ten times the slowest
+ ;; of 120 model calls on 30 agent branches, measured 2026-11-14 (p50 2.9 s, p90 12.5 s, max 23.6 s):
+ ;; a call never answered ends at 240 s as :seon.bound/reached, never a wait for good. A kind not
+ ;; named waits unbounded until its bound is measured (seon.agent/fx!).
+ :seon.config.fx/bounds {:model {:seon.bound/ms 240000}}
+
  ;; Who answers agents' turns. With no profile, none: the first turn answers the typed
  ;; :seon.model/no-provider and the run ends on it (root's ruling 2026-10-22: production
  ;; ran the scripted test fixture as if it were a model). --profile deepseek (or

@@ -481,14 +481,19 @@
 (defn fx!
   "The effect kind with req, through root's owner proc, answered here: its outcome
   {:value ...} or its declared error. Recorded with this eval request. No lock: an
-  interrupt may end the wait; the outcome then arrives later as an async one does."
+  interrupt may end the wait; the outcome then arrives later as an async one does. The wait
+  lasts as long as the kind declares (:seon.config.fx/bounds, its :seon.bound/ms) and no longer:
+  past it the outcome is the typed :seon.bound/reached. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
   {:malli/schema [:=> [:cat :keyword :map :map] :map]}
   [kind req opts]
   (if (= :test (:mode @state))
     (fx-test kind req)
     (let [k (:tx-seq (swap! state update :tx-seq inc))
           _ (swap! state update :fx-pending (fnil assoc {}) k kind)
-          r (dissoc (await-reply k (merge opts {:op :fx :k k :kind kind :req req})) :op :k)]
+          m (await-reply k (merge opts {:op :fx :k k :kind kind :req req})
+                         (get-in (cfg/value :seon.config.fx/bounds) [kind :seon.bound/ms]))
+          ;; a bound reached answers as await-reply's own :reply; an effect's answer is its outcome, so that error is the outcome
+          r (if (= :reply (:op m)) (:result m) (dissoc m :op :k))]
       (fx-done! k)
       r)))
 
