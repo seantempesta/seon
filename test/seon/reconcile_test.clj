@@ -2318,3 +2318,26 @@
       "imported from the root's own branch: a compare-and-swap from that commit")
   (is (= {:branch "jolt/merges"} (r/write-back-target {:commit "c0"} "jolt/merges")) "a detached head: the merges branch")
   (is (= {:branch "jolt/merges"} (r/write-back-target nil "jolt/merges")) "imported from no commit: the merges branch"))
+
+;; Estimate: the test branch 1M + 2 branches and 3 small transactions 2M + one merge-main in the writer (merge-main over a few datoms
+;; ~3M, a with and a force-branch! commit ~2M) = 10000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} the-writer-merges-main-into-a-branch-on-mains-program
+  ;; docs/merging.md#a-branch-merges-main-in: agent lb76's branch held the old seon.merge, so merging itself it ran the old code; the
+  ;; merge is decided by the writer, where main's program runs, reading the branch as data, and written onto the branch as main's head
+  ;; plus the branch's own datoms, one commit with both parents
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [w (volatile! (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 4) :events (a/chan 4)}))
+           ask (fn [req] (let [[st outs] (#'writer/writer-proc @w :in (assoc req :dest {:rid 1}))] (vreset! w st) (:r (first (:to-api outs)))))
+           b (pdb/on-main (:branch cfg) :mm-branch)
+           _ (d/branch! conn (:branch cfg) b)
+           bc (pdb/connect (assoc cfg :branch b))]
+       (try
+         (d/transact bc {:tx-data [{:seon.agent/key "mm-own" :seon.agent/status :busy}] :tx-meta (pdb/tx-meta b)})
+         (d/transact conn {:tx-data [{:seon.agent/key "mm-main" :seon.agent/status :idle}] :tx-meta (pdb/tx-meta (:branch cfg))})
+         (let [r (ask {:op :merge-main :branch b})
+               merged (pdb/head conn b)]
+           (is (:ok r) (pr-str r))
+           (is (= :busy (:seon.agent/status (d/entity merged [:seon.agent/key "mm-own"]))) "the branch's own fact")
+           (is (= :idle (:seon.agent/status (d/entity merged [:seon.agent/key "mm-main"]))) "and main's"))
+         (finally (d/release bc)))))))
