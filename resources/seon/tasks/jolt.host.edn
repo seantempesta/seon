@@ -56,4 +56,9 @@
   :seon.task/kind :work
   :seon.task/proofs #{jolt.host-test/a-runs-redefinition-is-its-threads-alone}
   :seon.task/needs #{}}
+ {:seon.task/name "every-var-read-and-macro-expansion-records-its-forms-key"
+  :seon.task/plan "deps; root chose completeness over cost (owner: cost set aside), 2026-11-14. Root's one-tracker direction, agreed 2026-11-14 (target/root/one-derivation-survey.html): every read a computation makes records through Datahike's di/record-read! as a datom key, so a reaction or a reused verdict is never green on a read nobody recorded (a false green). What exists: Jolt direct-links calls to jv$ globals, so a call of a function reaches no hook [M]; seon.profile sees only contracted functions, so it misses defn-, letfn and uncontracted code [H]. Change: (1) a fn-prologue hook the compiler emits (backend_scheme.clj): while a run records, the function's form records [:e its form entity] once per run (a per-run set, deduped), costing a per-thread check of ~0.8 ns a call when nothing records [M, measured in Chez 2026-11-14]; (2) at namespace load, each macro the analyzer expands records its form's key into the load's reads. Shares the linked-binding sites with jolt.host/a-runs-redefinition-is-its-threads-alone (Stage 0.6), so it lands in that pin cycle if it shares them. Deletes: seon.profile's read set as a tracker. Gates: fastpathratio and the cost gates move by the prologue's check; restated with the reason. Proof, red first: a run that calls an uncontracted fn records that fn's form key."
+  :seon.task/kind :work
+  :seon.task/proofs #{jolt.host-test/every-var-read-and-macro-expansion-records-its-forms-key}
+  :seon.task/needs #{"jolt.host/a-runs-redefinition-is-its-threads-alone"}}
 ]
