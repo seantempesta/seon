@@ -846,8 +846,9 @@
  ;; costs ~$5.8 (one such reply ~$0.04). Thinking at :low effort (below) reasons in hundreds to a few
  ;; thousand tokens a reply; a reply that spends the bound on reasoning is
  ;; :seon.model/reasoning-ate-reply, and a task or model raises the bound through the resolver
- ;; (v1's 65,536 for :high).
- :seon.config.ai/max-tokens 8192
+ ;; (v1's 65,536 for :high). Raised to v1's 65,536 after a run died at 8,192 of 8,192 in reasoning
+ ;; (b6f1354d); the owner: "raise it whatever it needs to be ... if it's cheap I don't care".
+ :seon.config.ai/max-tokens 65536
  ;; DeepSeek's thinking mode (:enabled | :disabled), on at :low effort (owner, 2026-11-12,
  ;; reasoning :low as the default for work tasks: "Sure"; it replaces off, 2026-10-21). The
  ;; reasoning is what shows where the context confused the model (docs/decisions.md, "Reasoning is

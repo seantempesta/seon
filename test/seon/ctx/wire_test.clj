@@ -781,7 +781,7 @@
                        (when (zero? n) (d/transact conn [{:seon.task/id "demo/g" :seon.config.ai/max-tokens 77}]))
                        (recur (inc n) (conj out [b body])))))]
         (is (= ["run-model" "run-model" "run-model"] (mapv (comp :model second) sent)) "the run's model names the provider's")
-        (is (= [8192 77 77] (mapv (comp :max_tokens second) sent)) "each turn's provider is its basis's")
+        (is (= [(seon.config/value :seon.config.ai/max-tokens) 77 77] (mapv (comp :max_tokens second) sent)) "each turn's provider is its basis's: the configured bound, then the task's own")
         (doseq [[b body] sent]
           (is (= (clojure.data.json/write-str body)
                  (clojure.data.json/write-str (:body (wire/wire-turn (d/commit-as-db (:store @conn) (:commit b)) b))))
