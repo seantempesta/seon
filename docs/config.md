@@ -60,13 +60,13 @@ A limit is removed, or derived from measurements with its provenance, and reachi
 
 ## The test service's three limits
 
-How much the test service runs at once is three optional keys, and any combination of them has an answer. ```seon.prove/admission``` turns them into one count and, when set, a load; ```seon.prove/config-admission``` reads them. Items and the queue: [the test service](merging.md#the-test-service).
+How much proving runs at once is three optional keys, and any combination of them has an answer. ```seon.fx/limits``` turns them into one count and, when set, a load; ```seon.fx/config-limits``` reads them at each admission of the `:process` effect owner, so a dial turned (when the owner games, say) holds at its next admission. Items and the queue: [the test service](merging.md#the-test-service).
 
-- `:seon.config.proofs/max-workers`: items running at once.
+- `:seon.config.proofs/max-workers`: requests of a class (a test batch, a process test, a check step, a build) in flight at once.
 - `:seon.config.proofs/max-cores`: a share of `:seon.config.machine/cores` in (0,1], rounded down, at least 1.
-- `:seon.config.proofs/max-load`: the 1-minute load average under which a further item is granted.
+- `:seon.config.proofs/max-load`: the 1-minute load average under which a further request is admitted.
 
-The count is the least of the count keys set, else the core count. Beside them, one bound is derived, never a key: the processes the running items hold stay under the cores and two (`:max-processes`, AGENTS.md §3a.7), counted from the machine by ```seon.prove/held-processes``` ([the test service](merging.md#the-test-service)). The load is read only in a step the service already takes, never on a timer ([the machine's load admits work](clocks.md#the-machines-load-admits-work)), and never blocks the first item. These are signals: they decide when an item starts, never a verdict. The shipped file sets `max-workers` only; set the others, or `:seon.config.machine/cores`, to the machine in `config/local.edn`.
+The count is the least of the count keys set, else the core count. Beside them, one bound is derived, never a key: the processes in flight stay under the cores and two (AGENTS.md §3a.7). Each request weighs its class's peak, read from the machine by ```seon.fx/held-processes``` (every process a request starts carries its `SEON_PROVE_BATCH` tag) or off its outcome's `:seon.fx/peak-processes`; a plain test's batch declares its one fork (`:seon.fx/processes`); a class never measured weighs the whole bound, so it runs alone until it is (```seon.fx/hold-reason```). A request of no class (a model call) is never held. The load is read only in a step the owner already takes, never on a timer ([the machine's load admits work](clocks.md#the-machines-load-admits-work)), and nothing in flight always admits one. While the load holds a request, its askers are told once, and again when it resumes (`:prove-held`, the client's HELD and RESUMED lines). These are signals: they decide when a request starts, never a verdict. The shipped file sets `max-workers` only; set the others, or `:seon.config.machine/cores`, to the machine in `config/local.edn`.
 
 ## Constants
 
