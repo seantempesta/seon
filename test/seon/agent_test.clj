@@ -1655,10 +1655,10 @@
   ;; never returned. Estimate: one transition of a map and two channel ops, ~0.1M
   (let [in (clojure.core.async/chan) out (clojure.core.async/chan 4)
         st {:id :a1 :pid 4242 :end {:in in :out out} :inflight {}}
-        r (clojure.core.async/thread (seon.agent-proc/agent-proc st :clojure.core.async.flow/stop))
-        [v port] (clojure.core.async/alts!! [r (clojure.core.async/timeout 2000)])]
-    (is (= r port) "the transition returns with the agent's end still open")
-    (is (:stop-sent v) "having told the agent to stop")
+        ;; on the test's own fiber, no clock (docs/testing.md): a transition that waited would park on in, which nothing
+        ;; feeds, and the test child's quiescence would end it red
+        v (seon.agent-proc/agent-proc st :clojure.core.async.flow/stop)]
+    (is (:stop-sent v) "it returns with the agent's end still open, having told the agent to stop")
     (is (= {:op :stop} (clojure.core.async/poll! out)) "its :stop went out on the end")
     (clojure.core.async/close! in)))
 
