@@ -196,6 +196,30 @@
              (written (step (api view) :back {:op :status :agent :a2
                                               :set {:error (contract/error :seon.agent/failed 'seon.system/spawn! "fork server went down before the fork" {:agent :a2})}})))))))
 
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-stall-is-observed-by-the-agent-proc
+  (let [end {:in (a/chan 4) :out (a/chan 16)}
+        st (#'ap/agent-proc {:id :a1 :end end :branch :b1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4) :fx-kinds #{:fx/model}})
+        [st _] (#'ap/agent-proc st :in {:op :req :rid 1 :kind :eval :msg {:op :eval :forms "(Thread/sleep 99999)"}})
+        st (assoc st :last-frame-ms 1000)]
+    (testing "an eval in flight, no frame for longer than the stall bound, no effect outstanding: stalled, once"
+      (let [[st outs] (#'ap/agent-proc st :in {:op :stall? :now-ms 5000 :stall-ms 2000})
+            s (first (filter #(= :stalled (:op %)) (:to-api outs)))]
+        (is (= :seon.agent/stalled (get-in s [:error :seon.error/type])))
+        (is (= 4000 (get-in s [:error :quiet-ms])))
+        (is (contract/valid? :seon.agent/stalled (:error s)))
+        (is (empty? (:to-api (second (#'ap/agent-proc st :in {:op :stall? :now-ms 6000 :stall-ms 2000})))) "reported once per quiet spell")))
+    (testing "an effect outstanding is waiting on its owner, not stalled"
+      (let [[st _] (#'ap/agent-proc st :from {:op :fx :k 1 :kind :model})
+            st (assoc st :last-frame-ms 1000)]
+        (is (empty? (:to-api (second (#'ap/agent-proc st :in {:op :stall? :now-ms 9000 :stall-ms 2000})))))))
+    (testing "a test of its run that started is what a stall names; its first frame after the stall ends it"
+      (let [[st _] (#'ap/agent-proc st :from {:op :testing :test "#'app.t/hangs"})
+            st (assoc st :last-frame-ms 1000)
+            [st outs] (#'ap/agent-proc st :in {:op :stall? :now-ms 5000 :stall-ms 2000})
+            [_ outs2] (#'ap/agent-proc st :from {:op :testing :test "#'app.t/next"})]
+        (is (= {:kind :tests :form "#'app.t/hangs"} (get-in (first (:to-api outs)) [:error :last-op])) "the stall names the test")
+        (is (some #(= {:op :spoke :agent :a1} %) (:to-api outs2)) "its next frame: it spoke")))))
+
 ;; docs/flow.md#the-five-rules, rule 3: a stall is said by its source (seon.agent/quiescent!), never polled by root. Estimate: a few pure
 ;; step calls ~ 1,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 1000000}} a-stall-the-agent-says-is-recorded-by-its-proc

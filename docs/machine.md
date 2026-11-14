@@ -29,7 +29,7 @@ Check that a check ran what it claims:
 
 ### Reading a hang
 
-A hang's evidence is gone once it is killed, and `timeout` signals the whole group. Before killing a process stuck at 0% CPU, capture `kill -INFO PID` (a Jolt process's fiber dump on stderr; a run that goes on after it was stuck on a lost wake), `sample PID 5`, `lsof -p PID` and `ps -M -p PID`, and put them on the defect's task. Read the threads in condition waits and the parked fibers less the idle Flow procs on alts. A `:jolt/deadlock` or `jolt-main-carrier: stuck` is the detector's verdict and may be wrong. `bin/evidence` also asks a live root for ```seon.system/stall-state``` (read-only): root's api (`::busy`, `::lost`) and each agent proc's (`:inflight`, `:fx-out`, `:stall-seen`, `:last-frame-ms`), with every proc that answered the ping.
+A hang's evidence is gone once it is killed, and `timeout` signals the whole group. Before killing a process stuck at 0% CPU, capture `kill -INFO PID` (a Jolt process's fiber dump on stderr; a run that goes on after it was stuck on a lost wake), `sample PID 5`, `lsof -p PID` and `ps -M -p PID`, and put them on the defect's task. Read the threads in condition waits and the parked fibers less the idle Flow procs on alts. A `:jolt/deadlock` or `jolt-main-carrier: stuck` is the detector's verdict and may be wrong. `bin/evidence` also asks a live root for ```seon.system/stall-state``` (read-only): root's stall check (`::stall-armed`, `::busy`, `::lost`) and each agent proc's (`:inflight`, `:fx-out`, `:stall-seen`, `:last-frame-ms`), with every proc that answered the ping.
 
 ### Reading a red
 

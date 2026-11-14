@@ -116,6 +116,18 @@
                                           (= kind :eval) (assoc :running {:form (:forms msg)
                                                                           :since-ms (System/currentTimeMillis)})))]})]))
     :write [(cond-> (to-proc! st (:msg m)) (= :fx-reply (:op (:msg m))) (update :fx-out (fnil dec 1))) nil]
+    ;; root's stall check (seon.system's timer): a request in flight, no frame from the agent for longer than the stall bound
+    ;; and no effect of its outstanding is a stall, observed once per quiet spell. It stays only for what the agent cannot
+    ;; say itself (seon.agent/quiescent!): an eval pinned in a blocking foreign call; it goes with task
+    ;; jolt.host/a-blocking-call-on-a-main-carrier-parks
+    :stall? (let [quiet (- (:now-ms m) (:last-frame-ms st (:now-ms m)))]
+              (if (and (seq (:inflight st)) (not (:stall-seen st)) (> quiet (:stall-ms m)) (zero? (:fx-out st 0)) (not (:dead? st)))
+                [(assoc st :stall-seen true)
+                 {:to-api [{:op :stalled :agent (:id st)
+                            :error (contract/error :seon.agent/stalled #'seon.agent-proc/agent-in
+                                                   (str "agent " (name (:id st)) " sent nothing for " quiet " ms with a request in flight")
+                                                   {:agent (:id st) :quiet-ms quiet :last-op (:last-op st)})}]}]
+                [st nil]))
     :forked (do (when (and (:kill? st) (not (:dead? st))) (lib/kill! (:pid m) 9))
                 [(assoc st :pid (:pid m)) nil])
     ;; a process that never existed reads as dead: hang up root's end, the reader sees EOF

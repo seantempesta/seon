@@ -230,8 +230,8 @@
  ;; root's API
  :seon.system/sys [:map [:graph :any] [:ext :seon.host/chan] [:conn :seon.host/conn]]
  :seon.system/api-state [:map [:agents :map] [:pending :map] [:rid :int] [:boot :string]
-                         ;; what seon.system/stall-state reads, each by its entry
-                         [:seon.system/busy {:optional true}] [:seon.system/lost {:optional true}]]
+                         ;; the stall check's keys, each by its entry (seon.system/stall-state reads them)
+                         [:seon.system/busy {:optional true}] [:seon.system/lost {:optional true}] [:seon.system/stall-armed {:optional true}]]
  :seon.system/request [:map [:op :keyword]]
  ;; root's system declaration (resources/seon/system.edn, seon.graph): procs by id, effect
  ;; kinds, the conns between them
@@ -264,6 +264,8 @@
  :seon.system/respawn [:map-of {:description "The agents ended for a respawn, with the caller and the spawn opts that start the next in their place."} :keyword [:map [:p [:or :seon.host/promise :map]] [:opts :map]]]
  :seon.system/restored [:map-of {:description "The agents whose spawn restores a commit, whose answer then says what was not restored."} :keyword [:= true]]
  :seon.system/spawning [:map-of {:description "The callers of each agent's spawn, answered at its hello or the end it met first."} :keyword [:or :seon.host/promise :map]]
+ :seon.system/stall-armed [:boolean {:description "True when the api's stall-check timer is armed (what the stall task reads)."}]
+ :seon.system/stall-timer [:and {:description "The stall check's armed flag: a host volatile the proc's state holds, so a thrown step does not undo it (seon.step/timer)."} :seon.host/volatile]
  :seon.system/taken [:and {:description "A host volatile of the messages the api's step took, kept so a throw can still answer them (seon.step)."} :seon.host/volatile]
  :seon.system/update [:boolean {:description "True when the agent procs changed and the flow graph is yet to be updated with them."}]
  ;; keys the code names with no entry before (keys-schemas sweep): schema properties, metadata keys, map keys and the sentinels a function answers
