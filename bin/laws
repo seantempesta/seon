@@ -5,6 +5,8 @@
 # exits 1 when one is not named. Kinds, each a mark over code with strings
 # and comments stripped, and the doc (and section) that sanctions it:
 #   catch       `(catch `                                         docs/failure-points.md
+#   printer     a printer beside seon.print, a cut in a display namespace, a budgeted cut outside one: docs/render.md#one-printer
+#               (seon.problems/printer-law, the :seon.config.render dials); read by Seon as catch is, the same health class
 #               read by Seon, not here: the :unnamed-site class over the compiler's facts
 #               (seon.problems/laws) that this checkout caused since its base, which
 #               bin/check health prints (docs/health.md#checks-are-callers-of-seon)
@@ -88,7 +90,7 @@ kinds=${*:-clocks measures resolution transactions dates defs}
 for k in $kinds; do
   [ "$k" = catch ] || echo "== $k"
   case $k in
-    catch) out=$("$ROOT/bin/check" health unnamed-site 2>&1); st=$?
+    catch|printer) out=$("$ROOT/bin/check" health unnamed-site 2>&1); st=$?
            printf '%s\n' "$out" | grep -E "^unnamed-site|HEALTH (OK|FAILED)"
            [ $st = 0 ] || bad=1 ;;
     clocks) sites clocks '[Ss]leep|[Tt]imeout([^s]|$)|deadline|[A-Z]-MS' docs/clocks.md "## Time decides" ;;
