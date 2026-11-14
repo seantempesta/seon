@@ -1539,6 +1539,16 @@
     (is (= :waiting (:outcome end)) (pr-str end))
     (is (= 1 (:model-calls end)) (str "the turn in flight finished (its one model call), and no other began: " (pr-str end)))))
 
+;; Estimate: as a-run-told-to-stop-ends-between-turns, the world and one work! loop of 2 turns = ~6M: 6,000,000
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-run-that-merged-main-ends-between-turns-to-run-on-mains-program
+  ;; docs/merging.md#a-branch-merges-main-in: a merge of main loads none of main's forms into the running agent (seon.agent/merge-main!
+  ;; leaves it :behind), and no turn runs old code: the run ends :refork after the turn in flight, before its next model call, and
+  ;; root forks it again on main's program (seon.reconcile-test/a-run-that-merged-main-is-forked-again-on-mains-program)
+  (let [red {:reasons [{:reason :proof-red}]}
+        end (work-with (fn [st called!] (called!) (swap! agent/state assoc :behind true) st) (constantly red))]
+    (is (= :refork (:outcome end)) (pr-str end))
+    (is (= 1 (:model-calls end)) (str "the turn in flight finished, and no model call ran on the old program: " (pr-str end)))))
+
 (deftest ^{:seon.test/estimate {:ticks 200000}} a-stop-lets-the-eval-in-flight-end-by-its-own-bound
   ;; the same drain, root's side (seon.agent-proc/stop!): a stop interrupted an agent's eval in flight (SIGUSR1), cutting it at
   ;; its next safe point; it now sends :stop alone, which the agent answers after the request before it, that request ending by

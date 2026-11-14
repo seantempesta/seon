@@ -532,7 +532,12 @@
                        ;; wiki as they are and a conflict is an unmerged entry it sees and resolves before it can
                        ;; merge (the owner, 2026-10-30: "updates as often as we can")
                        (when (agent/main-moved? (:base @agent/state) (agent/heard-main)) (branch/merge-main!))
-                       (let [obs (observe task)
+                       (if (:behind @agent/state)
+                         ;; a merge of main loaded none of main's forms here (seon.agent/merge-main!): no turn runs old code, so the run
+                         ;; ends between turns and root forks it again on main's program, its branch's own forms loaded at that start
+                         ;; (load-diff!); the next run goes on from the branch's facts (docs/merging.md#a-branch-merges-main-in)
+                         (ended st :refork "merged main: the run goes on in a process forked on main's program" nil)
+                         (let [obs (observe task)
                              ;; how the work stands (one computation a turn, the page's component draws its own)
                              s (status-now)
                              s (judged s)
@@ -568,7 +573,7 @@
                            stop (ended st (:outcome stop) (:reason stop) nil)
                            ;; its status threw (the agent's program broke it): the agent reads why, this turn
                            no-status? (next-of (act! (turn-error! st s) obs s model))
-                           :else (next-of (act! st obs s model))))
+                           :else (next-of (act! st obs s model)))))
                        ;; root's interrupt (a ThreadDeath, seon.intr) passes: it ends the work, never a turn's error
                        (catch Exception e
                          ;; the second in a row with no model turn between ends its work with that error: a turn
