@@ -99,7 +99,10 @@
       (do (doc/text-index db)
       ;; main's schema registry, which each agent forked holds until it writes a schema entry
       (let [k (program/schema-changes db)]
-        (assoc st :warm-t t :schema-registry {:key k :registry (program/schema-registry k) :index (pdb/index-of {:forms k})}))))))
+        (let [reg (program/schema-registry k)]
+          ;; main's registry is this process's (it holds main), so every agent forked from it starts holding main's
+          (program/hold-registry! reg)
+          (assoc st :warm-t t :schema-registry {:key k :registry reg :index (pdb/index-of {:forms k})})))))))
 
 (defn index-for-agent
   "What a forked agent is handed of st's index: {:db :index}, the db it is of being main's current

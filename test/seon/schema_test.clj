@@ -109,6 +109,17 @@
     (is (= [] (program/load-changes! (:db-after rep) (pdb/report->tx rep))))
     (is (= :paused (status-of :paused)) "re-armed against main's :seon.task/outcome")))
 
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-merged-schema-change-leaves-the-process-registry-as-it-was
+  ;; docs/source.md#schemas-at-the-repl: a loader is called on throwaway dbs (tests, a branch's resume), so it never sets this
+  ;; process's default registry; holding main does (root's boot and main commit, the fork server's warm start). Red when
+  ;; load-changes! set it: :paused, registered on a test db, leaked to every later check in the shard (mg/seon.task/move-tx,
+  ;; bin/land --check 2026-11-14). Estimate: a test db 1M + a registration 3M + load-changes! (the registry recompiled, the
+  ;; contracts naming :seon.task/outcome re-armed) 6M
+  (let [db (ts/test-db)
+        rep (d/with db (:tx (schema/registration db :seon.task/outcome (read-string paused-status) false)))]
+    (is (= [] (program/load-changes! (:db-after rep) (pdb/report->tx rep))))
+    (is (false? (seon.contract/valid? :seon.task/outcome :paused)) "this process still holds its own registry, which refuses :paused")))
+
 (deftest an-unquoted-predicate-is-refused-naming-it
   ;; 2026-10-29: the md-scan bench's run registered [:vector [:tuple nat-int? nat-int?]] unquoted,
   ;; was refused :unreadable, and spent its last turns finding which part did not read back

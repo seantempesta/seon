@@ -39,7 +39,7 @@
   {:malli/schema [:=> [:cat :seon.host/throwable] [:maybe :qualified-symbol]]}
   [e]
   (let [d (merge (clojure.main/ex-triage (assoc (Throwable->map e) :clojure.error/phase :execution)) (ex-data e))]
-    (some-> (:clojure.error/symbol d) (#(symbol (namespace %) (first (clojure.string/split (name %) #"\$"))))
+    (some-> (:clojure.error/symbol d) (#(when (namespace %) (symbol (namespace %) (first (clojure.string/split (name %) #"\$")))))
             (#(when-not (#{"malli.core" "seon.contract" "seon.profile"} (namespace %)) %)))))
 
 (defn cause
