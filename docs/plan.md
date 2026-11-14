@@ -67,8 +67,9 @@ recorded.
    reads it for the agent on its next turn, and the agent's page shows its recent errors with their causes, one render
    (owner, 2026-11-14). `:seon.config.ai/max-tokens` holds reasoning and reply together; one run of two died of it this
    round (runtime for the effect, context and web for the render).
-4. A fork waits for other threads to park, never races them: a refusal agents hit in production, built and pinned on
-   jolt/deps, landing after item 2 because a pin change reruns everything (deps; moved from Stage 3).
+4. A fork waits for other threads to park, never races them: landed 168a472aba; its wait then missed the wake of a thread
+   entering a collect-safe call and hung a test child for good (runs/evidence/gate-stall-1346), fixed in Chez 3ec3794d
+   with gate forkbesidenative (deps).
 5. A test child forks only from a process already on its branch's environment, never from root's agent: today the service
    runs another checkout's tests in a fork of root's long-running agent, which carries root's config, environment, heap,
    threads and loaded libraries, and each fix so far swapped one of those (owner, 2026-11-14: make it impossible, not

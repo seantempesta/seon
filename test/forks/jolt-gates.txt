@@ -20,6 +20,8 @@ applyscaling
 recordctoralloc
 rootchange
 forkafterwake
+forkbesidenative
+pipereadfailure
 lazyscaling
 vecscaling
 pipescaling
