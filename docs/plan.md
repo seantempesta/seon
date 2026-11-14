@@ -78,8 +78,11 @@ one test result, 73 staleness functions), and the bugs are those copies disagree
   slice a component reads of a pulled value (`[:ea e a]`); a code read as its form's datom (once per var per run, at
   Jolt's var read, macros at load); config, files and pins as their entities. `seon.profile`'s set and ratom's path
   tracking stop being trackers.
-- **One index, stored:** `:seon.reads/key-set` (indexed) on every derived entity, replacing `:seon.proof/read-keys`; an
-  in-process view is at most a cache of it. A reaction's identity is a content id of [fn, reads digest, program].
+- **One index, stored:** `:seon.reads/key-set` (indexed), the rename of `:seon.proof/read-keys` (on main with
+  `seon.db/results-moved`, but written and read by nothing in src), on every durable derived entity; a page component's
+  key set lives in its walk value; one match, `(touches? key-set datoms)`. It deletes the four live in-process indexes:
+  the walk's `:readers` and `:tree-readers`, the render proc's `:read-index`, and ratom's `sources`. A reaction's identity
+  is a content id of [fn, reads digest, program].
 - **Re-run by the commit:** the writer sends each commit's datoms once; the readers of moved keys re-run as effects on
   their kind's owner, bounded and admitted (never inside the writer's step). A pin change answers `:restart`.
 - **The outside enters by one catch-up:** seed = catch-up from empty; import = catch-up of paths; landing = catch-up after
@@ -97,7 +100,8 @@ one test result, 73 staleness functions), and the bugs are those copies disagree
 3. **Nothing hangs, one rule:** every wait passes its declared bound and ends with `:seon.bound/reached` or a typed error:
    the fork (deps), the model call and the stalled eval (runtime's deadline slice; context's turn records the stall). Seven
    deadline mechanisms become this one.
-4. **The reaction's core** (context and web build; data the index and schema; deps the recorder): the lazy-read gap and the
+4. **The reaction's core** (context builds it as one tip with its first production writer, the index and Reagent's
+   `reaction`/`track` over it; data reviews the schema; deps the recorder): the lazy-read gap and the
    planner's two seeks recorded (deps); one stored index; the writer's commit datoms; the 8 `*reads* nil` bypasses removed.
 5. **Each area moves onto it, deleting its copy in the same landing** (in parallel):
    - tests: verdict files, `.recent`, `reads.edn`, `:seon.test/*` facts, the two flaky judges; reuse is "no read key
