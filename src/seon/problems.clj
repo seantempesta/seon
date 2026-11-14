@@ -538,7 +538,7 @@
 (defn- unaliased
   "Form text src with each auto keyword's :: made one colon (::f/x is :f/x, ::x is :x): a :: not after a word character or a colon
   and before a symbol character. One pass over the characters: the lookbehind regex it replaces cost ~4.5k ticks and ~89 KB a
-  character on Jolt (context 2026-11-14, root's REPL: 1.4B ticks and 27.7 GB for 300 forms). See docs/health.md#a-hand-written-list."
+  character on Jolt (measured on main's forms: 1.4B ticks and 27.7 GB for 300 of them). See docs/health.md#a-hand-written-list."
   {:malli/schema [:=> [:cat :string] :string]}
   [^String src]
   (let [n (.length src) sb (StringBuilder. n)
