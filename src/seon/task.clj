@@ -1089,12 +1089,14 @@
 
 (defn derived?
   "Whether task entity e is made by the system from data it derives again, so no file states it: it has a cause (a stall's
-  :seon.task/cause, a :seon.task/causes tag such as a slow test's measurement) or is a refine (`refine?`). See
+  :seon.task/cause, a :seon.task/causes tag such as a slow test's measurement) or is a refine (`refine?`). Seeks only. See
   docs/source.md#a-merged-task-reaches-mains-files."
   {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
   [db e]
   (boolean (or (seq (d/datoms db :eavt e :seon.task/cause)) (seq (d/datoms db :eavt e :seon.task/causes))
-               (refine? db (:v (first (d/datoms db :eavt e :seon.task/id)))))))
+               ;; a refine (`refine?`'s rule) by seeks alone: one of its cites targets `refine-section`, never a pull of each cite
+               (when-let [sec (pdb/eid db :seon.doc/address refine-section)]
+                 (some #(= sec (:v (first (d/datoms db :eavt (:e %) :seon.cite/target)))) (d/datoms db :avet :seon.cite/of e))))))
 
 (def ^:private refine-proofs
   "What every refine proves: the shipped task files are still whole tasks, what a refine's edit of a task reaches at its

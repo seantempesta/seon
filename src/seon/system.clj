@@ -1341,7 +1341,7 @@
   held or no checkout is declared; git's refusal throws, as a refused task file does (changed-tx). See docs/source.md#a-landing-enters-main-as-data."
   {:malli/schema [:=> [:cat [:maybe :map] [:maybe :string]] [:set :seon.task/id]]}
   [held commit]
-  (let [root (cfg/value :seon.config.source/root)
+  (let [root (get cfg/config :seon.config.source/root)
         m (if (and root (:commit held) commit) (fx/messages-since root (:commit held) commit) "")]
     (if (string? m) (task/completes m) (throw (ex-info (str "the landed commits' messages could not be read: " (:seon.error/message m)) m)))))
 
