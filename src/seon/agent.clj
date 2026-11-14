@@ -332,9 +332,14 @@
           (swap! state #(-> % (assoc :db (:db c)) (dissoc :dirty? :tx)))
           ;; the eval errors folded since the last commit ride it (seon.error/note): root counts
           ;; them across agents
-          (let [errs (:errors @state)]
+          ;; and its turn, when it moved since the last commit (root's render proc keeps each agent's turn: turns to merged on
+          ;; root's page, derived data never written to main: seon.render.proc/roots-page-shows-turns-to-merged)
+          (let [errs (:errors @state) n (turn-now) moved? (not= n (:sent-turn @state))]
             (when errs (swap! state dissoc :errors))
-            (send! (cond-> {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c) :mem-mb (mem-mb)} errs (assoc :errors (vec (vals errs))))))))))
+            (when moved? (swap! state assoc :sent-turn n))
+            (send! (cond-> {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c) :mem-mb (mem-mb)}
+                     errs (assoc :errors (vec (vals errs)))
+                     moved? (assoc :turn n))))))))
 
 (defn- with-citations
   "tx-data, which writes a task's plan or instructions, with what that text cites derived in it
