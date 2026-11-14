@@ -212,6 +212,8 @@
    :seon.task/name (str "fast-" (str/replace (name var) #"[^A-Za-z0-9-]+" "-"))
    :seon.task/kind :work
    :seon.task/proofs #{var}
+   ;; its cause, the measurement: what makes it the system's, remade from the verdict cache and never filed (seon.task/derived?)
+   :seon.task/causes [{:seon.db/tag :seon.cause/slow-test :seon.cause/var var :seon.cause/held ms :seon.cause/expected bound}]
    :seon.task/plan (str "`" var "` measured " ms " ms, at or over the bound of " bound " (:seon.config.proofs/slow-test-ms), so bin/prove "
                         "and merges leave it out (docs/merging.md#a-slow-test-runs-last). Find what it waits on, most often a process it "
                         "starts, and make it test its claim without that wait: never a raised bound, never a weaker claim. Done when "

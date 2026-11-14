@@ -709,8 +709,9 @@
 
 ;; ---- the reader ------------------------------------------------------------------
 
-(def ^:private stated-attributes
-  "The task attributes a declaration states (its members, config flattened), as stored."
+(def stated-attributes
+  "The task attributes a declaration states (its members, config flattened), as stored: what load-tx writes beside
+  :seon.task/declared, so one newer than it is an edit made on main since its file was read (seon.problems/unsynced?)."
   [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
    :seon.task/kind :seon.task/evidence :seon.task/examples
    :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
@@ -969,12 +970,21 @@
                      (ns-of e) (assoc :seon.task/ns (ns-of e))
                      (ex-of e) (assoc :seon.task/execution (ex-of e)))]))))
 
+(defn completes
+  "The task ids text (commit messages) says it completes: each ns/name after `Completes:`, one or a comma-separated list, anywhere
+  in a line, as bin/land reads them. See docs/tasks.md#task-files."
+  {:malli/schema [:=> [:cat :string] [:set :seon.task/id]]}
+  [text]
+  (into #{} (comp (mapcat #(str/split (second %) #"\s*,\s*")) (map str/trim))
+        (re-seq #"Completes:\s*([\w.\-]+/[\w.!?*+<>=\-]*[\w!?*+<>=\-](?:\s*,\s*[\w.\-]+/[\w.!?*+<>=\-]*[\w!?*+<>=\-])*)" text)))
+
 (defn load-tx
-  "The transaction reconciling task files into main db. files: {owning-ns declarations or
-  error}, every file read (a file not given is not judged). Answers the tx-data, or the
-  first error: a file's own, or needs that name no task or form a cycle."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :symbol :any]] [:or :seon.db/tx-data :seon.error/base]]}
-  [db files]
+  "The transaction reconciling task files ({owning-ns declarations or error}, each file read) into main db, or the first error.
+  A task completed names (`completes`) is done, never cancelled, filed or made in the store. See docs/source.md#a-landing-enters-main-as-data."
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:map-of :symbol :any]] [:or :seon.db/tx-data :seon.error/base]]
+                  [:=> [:cat :seon.host/db [:map-of :symbol :any] [:set :seon.task/id]] [:or :seon.db/tx-data :seon.error/base]]]}
+  ([db files] (load-tx db files #{}))
+  ([db files completed]
   (if-let [r (first (filter :seon.error/type (vals files)))]
     r
     (let [decls (into {} (for [ds (vals files) d ds] [(task-id (:seon.task/ns d) (:seon.task/name d)) d]))
@@ -992,7 +1002,8 @@
           reread (vec (for [[id d] decls :when (and (all id) (= d (some-> (stored id) sedn/decode))
                                                     (not= rd (:v (first (d/datoms db :eavt (pdb/eid db :seon.task/id id) :seon.task/cites-digest)))))]
                         [id d]))
-          declared (fn [id d] {:seon.task/id id :seon.task/declared (sedn/encode d) :seon.task/cites-digest rd})]
+          declared (fn [id d] {:seon.task/id id :seon.task/declared (sedn/encode d) :seon.task/cites-digest rd})
+          outcome-of (fn [id] (:v (first (d/datoms db :eavt (pdb/eid db :seon.task/id id) :seon.task/outcome))))]
       (if-let [p (needs-problem graph graph)]
         (file-refused (first owners) p)
         (let [new-ids (mapv #(task-id (:seon.task/ns %) (:seon.task/name %)) new)
@@ -1026,9 +1037,16 @@
                (mapcat (fn [[id d]] (conj (cites-tx db [:seon.task/id id] id (text-citations db d))
                                           [:db/add [:seon.task/id id] :seon.task/cites-digest rd]))
                        reread)
-               (mapcat (fn [id] [[:db/add [:seon.task/id id] :seon.task/execution :cancelled]
-                                 [:db/retract [:seon.task/id id] :seon.task/declared (stored id)]])
-                       removed))))))))
+               (mapcat (fn [id] (let [o (outcome-of id)]
+                                  (cond-> [[:db/retract [:seon.task/id id] :seon.task/declared (stored id)]]
+                                    ;; a landing that says it completes the task: done (a finished one keeps its outcome)
+                                    (and (completed id) (not (finished o))) (conj [:db/add [:seon.task/id id] :seon.task/outcome :done])
+                                    (not (completed id)) (conj [:db/add [:seon.task/id id] :seon.task/execution :cancelled]))))
+                       removed)
+               ;; a task made in the store, in no file, that the landing completes
+               (for [id (sort completed) :let [t (all id)]
+                     :when (and t (nil? (stored id)) (not (decls id)) (not (finished (outcome-of id))) (not= :cancelled (:seon.task/execution t)))]
+                 [:db/add [:seon.task/id id] :seon.task/outcome :done])))))))))
 
 (def refine-section
   "The wiki section a refine is: a task that cites it curates the task it needs (docs/tasks.md#a-refine-curates-its-own-task)."
@@ -1040,6 +1058,42 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] :boolean]}
   [db id]
   (boolean (some #(= refine-section (get-in % [:seon.cite/target :seon.doc/address])) (cites-of db (pdb/eid db :seon.task/id id)))))
+
+(def ^:private entry-config
+  "The config keys a task file's entry nests under :seon.task/config and load-tx flattens onto the task."
+  [:seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
+
+(defn stated
+  "Declaration d in the one shape main's and a file's are compared in: its proofs and needs sets, and none of what no file
+  states (its branch, the system's run state; after; cause; an empty member). See docs/source.md#a-merged-task-reaches-mains-files."
+  {:malli/schema [:=> [:cat :seon.task/declaration] :seon.task/declaration]}
+  [d]
+  (into {} (remove (fn [[_ v]] (and (coll? v) (empty? v))))
+        (cond-> (dissoc d :seon.task/branch :seon.task/after :seon.task/cause :seon.task/causes)
+          (:seon.task/proofs d) (update :seon.task/proofs set)
+          (:seon.task/needs d) (update :seon.task/needs set))))
+
+(defn declaration
+  "The declaration main states for task entity e, as its file's entry would (`stated`): load-tx's write read back, its needs
+  as ids and its config nested. What a sync writes to the task's file. See docs/source.md#a-merged-task-reaches-mains-files."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :seon.task/declaration]}
+  [db e]
+  (let [p (d/pull db (into [:seon.task/ns :seon.task/name {:seon.task/needs [:seon.task/id]}] (remove #{:seon.task/branch} stated-attributes)) e)
+        c (select-keys p entry-config)]
+    (stated (cond-> (-> (apply dissoc p entry-config) (update :seon.task/needs #(set (map :seon.task/id %))))
+              (:seon.task/proofs p) (update :seon.task/proofs set)
+              (seq c) (assoc :seon.task/config c)))))
+
+(defn derived?
+  "Whether task entity e is made by the system from data it derives again, so no file states it: it has a cause (a stall's
+  :seon.task/cause, a :seon.task/causes tag such as a slow test's measurement) or is a refine (`refine?`). Seeks only. See
+  docs/source.md#a-merged-task-reaches-mains-files."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
+  [db e]
+  (boolean (or (seq (d/datoms db :eavt e :seon.task/cause)) (seq (d/datoms db :eavt e :seon.task/causes))
+               ;; a refine (`refine?`'s rule) by seeks alone: one of its cites targets `refine-section`, never a pull of each cite
+               (when-let [sec (pdb/eid db :seon.doc/address refine-section)]
+                 (some #(= sec (:v (first (d/datoms db :eavt (:e %) :seon.cite/target)))) (d/datoms db :avet :seon.cite/of e))))))
 
 (def ^:private refine-proofs
   "What every refine proves: the shipped task files are still whole tasks, what a refine's edit of a task reaches at its
