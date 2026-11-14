@@ -554,13 +554,12 @@
   "git merge main into this agent's branch, in this process (it owns the branch's writes):
   main's changes since the merge base that do not conflict apply in one merge commit with
   main as parent, each conflict stays on the branch as an unmerged entry, and the changed
-  definitions load here. The task content main carried since the base (seon.task/carry-tx,
-  the other way: another session's design, root's edit) comes in the same commit, since the
-  base moves to main's head and a member main changed would otherwise read, at the run's end,
-  as this branch reverting it (live finding F3); one both changed keeps the branch's and is
-  answered in :task-conflicts. data-attrs: the data that merges beside the program. When main's
-  content mark is the base's (seon.merge/same-content?), only records moved main: nothing is
-  diffed and nothing merges. Answers {:ok :applied :conflicts :task-conflicts :t}."
+  definitions load here. Task content (a :task key of seon.merge's stated keys: another session's design, root's edit) merges
+  the same way, so a member main changed never reads, at the run's end, as this branch reverting it (live finding F3), and one
+  both changed is a conflict. data-attrs :all (every caller's): every other fact main wrote since the base (its records, a
+  task's lifecycle) merges by its [:datum e a] key, so the branch after it is main's plus its own change. A conflict stops the
+  merge (docs/decisions.md#one-merge-everything-that-doesnt-conflict-both-directions): nothing of main's is applied, the base stays,
+  and each conflict is an unmerged entry the branch resolves. Answers {:ok :applied :conflicts :t}."
   {:malli/schema [:=> [:cat :seon.merge/data-attrs] [:map [:ok :boolean]]]}
   [data-attrs]
   (commit!)
@@ -568,20 +567,21 @@
         main-b (pdb/main-branch (:cfg @state))
         main (heard-main)
         head @conn
-        ;; main's content mark is the base's: only records moved main, so nothing merges and nothing is diffed; declared data
-        ;; moves no mark, so a merge that declares some reads the diff (docs/storage.md#mains-content-mark)
-        same? (and (= #{} data-attrs) (pm/same-content? (:base @state) main))
         ;; git's merge base: the main last merged, unless main has since merged a commit of this branch (its own merge up), which
         ;; is then the base; read from the commit graph only when main moved, over the commits since (docs/sharing.md#a-merge)
-        base (if (or same? (= (d/commit-id main) (d/commit-id (:base @state)))) (:base @state) (pdb/branch-base conn main-b (:branch @state)))
+        same? (= (d/commit-id main) (d/commit-id (:base @state)))
+        base (if same? (:base @state) (pdb/branch-base conn main-b (:branch @state)))
         r (if same? {:theirs {}} (pm/delta-three-way base head main data-attrs))]
-    (if (empty? (:theirs r))
+    (cond
+      (empty? (:theirs r))
       {:ok true :applied [] :conflicts [] :t (:max-tx head)}
-      (let [carried (task/carry-tx base main head)
-            ;; the parent is the commit merged: a branch name would name main's head when this commits, which can be newer than what was merged
-            rep (d/merge-db conn #{(d/commit-id main)} (-> (pm/merge-tx head base main (:apply r) data-attrs)
-                                               (into (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
-                                               (into (:tx carried)))
+      ;; a conflict stops the merge: only its unmerged entries are written, main's changes wait until they are resolved
+      (seq (:conflicts r))
+      (do (transact! (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
+          {:ok false :applied [] :conflicts (:conflicts r) :t (:max-tx @conn)})
+      :else
+      (let [;; the parent is the commit merged: a branch name would name main's head when this commits, which can be newer than what was merged
+            rep (d/merge-db conn #{(d/commit-id main)} (pm/merge-tx head base main (:apply r) data-attrs)
                              (pdb/tx-meta (:branch @state) {:seon.tx/merged main-b}))
             ops (pdb/report->tx rep)
             errs (program/load-changes! (:db-after rep) ops)]
@@ -597,7 +597,6 @@
             (swap! state assoc :db @conn :merged-t merged-t)))
         (send! {:op :committed :t (:max-tx @conn) :txs 1})
         (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:merged-t @state) :datoms (count ops)}
-          (seq (:conflicts carried)) (assoc :task-conflicts (:conflicts carried))
           (seq errs) (assoc :load-errors errs))))))
 
 ;; ---- evaluation -----------------------------------------------------------------
@@ -2014,7 +2013,7 @@
                 (swap! state update :inbox (fnil conj []) {:from :fx :k (:k m) :kind (fx-done! (:k m)) :body r})
                 nil)
     ;; root asks this agent to merge main into its branch (it owns the branch's writes)
-    :merge-main [{:op :merged-main :id (:id m) :result (merge-main! (:data-attrs m #{}))}]
+    :merge-main [{:op :merged-main :id (:id m) :result (merge-main! (:data-attrs m :all))}]
     :clone (do (clone! m) nil)
     :stats [{:op :stats :id (:id m) :result {:mem-mb (mem-mb) :t (:max-tx (db)) :pid (lib/c-getpid)
                                               :results (count (:results @state)) :evals (:n @state)
@@ -2112,7 +2111,7 @@
   the process starts (init!: an outside agent's branch is cut before root writes its start on main), or by the turn that begins a
   later task of the session; once, nothing written when the branch holds it. The task is running, as main holds it
   (its release, written on main after the branch was cut, read :held here: my.task/current and the
-  page's task said held); a task's execution is no content a merge carries (seon.merge/carried-platform-attrs).
+  page's task said held); a task's execution is no content a merge carries (seon.merge's stated :task keys).
   A task the branch lacks (a fork's: its branch is cut from another task's) is written as main
   declares it first (seon.task/create-tx). The agent's first task on its branch (its entity there with no task yet) is
   where the agent is made: it is written with what every agent cites (seon.task/agent-cites-tx), on its branch, so

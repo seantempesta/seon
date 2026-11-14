@@ -272,7 +272,7 @@
  :seon.agent/waste :seon.learn/waste
  :seon.agent/error :seon.error/base
  ;; task content a branch and main both changed since the branch's base, differently: root's
- ;; to resolve (seon.task/carry-tx; owner, 2026-10-22, D4)
+ ;; to resolve (seon.merge/task-conflicts of the one merge; owner, 2026-10-22, D4)
  :seon.task/task-conflicts [:vector [:map [:task :seon.task/id] [:attr :keyword] [:base :any] [:ours :any] [:theirs :any]]]
 
  ;; ---- the one read: seon.problems/report ----

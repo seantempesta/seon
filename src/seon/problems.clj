@@ -17,7 +17,7 @@
     :error                          a run the turn loop ended on an error (the model)
     :waste                          forms charged to the producer of what was shown
     :task-conflict                  task content a branch and main both changed, differently,
-                                    recorded at its agent's end (seon.task/carry-tx)
+                                    recorded at its agent's end (seon.merge/task-conflicts)
     :failed                         a task held for root with a failure: a run refused, its
                                     agent dead or its merge refused (seon.reconcile/hold-tx), or
                                     marked failed (my.task/fail!, root or a check): its reason, a
