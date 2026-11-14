@@ -325,7 +325,10 @@
 ;; namespace this image has loaded under another target (across the rename of seon.system to seon.graph, seon.server's `c` names
 ;; one in each tree) is a retargeted alias, which Jolt refuses. This image has loaded seon.check-test, `contract` naming
 ;; seon.contract; a clone of this checkout's HEAD gets a base commit where that alias names seon.error, and a head restoring it
-(deftest ^{:seon.test/estimate {:ticks 100000000}} the-health-step-reads-a-base-whose-alias-the-head-retargets
+;; Estimate, from its parts (the import is the shard's, test-runner/kept-program, warmed before the first test, never this budget's):
+;; ~10 store connects at ~0.15M (1.5M), store config and ids (0.8M), the kept store's key and digest (0.6M), two tree ids (0.5M),
+;; ~24 git shells (0.2M), three queries of one namespace's forms on two program dbs and a base read from its store (~5M) = ~9000000.
+(deftest ^{:seon.test/estimate {:ticks 9000000}} the-health-step-reads-a-base-whose-alias-the-head-retargets
   (let [co (str (seon.config/checkout))
         dir (str co "/target/tmp/health-rename-" (random-uuid))
         repo (str dir "/repo")
@@ -340,10 +343,12 @@
                                             (d/q '[:find [?s ...] :in $ ?n :where [?ns :ns/name ?n] [?ns :ns/form ?f] [?f :form/src ?s]] db 'seon.check-test))))]
     (try
       (sh! "git" "clone" "-q" "--shared" co repo)
-      ;; as a shard's earlier test does on a clean checkout: this process holds HEAD's tree from the kept store, so the test reads
-      ;; that store itself, never a copy: a copy keeps the store's id, and one branch under two paths is refused by Datahike
-      ;; (\"Configuration does not match existing connections\", batches 58 and 60, here and in every later test of the process)
-      (test-runner/program-db repo (ts/kept-program-store))
+      ;; this process holds the checkout's tree from the kept store (test-runner/kept-program, a program fixture the shard makes
+      ;; before its first test, so an import of a tree the store lacks is never this test's: one took its 1B budget in data's
+      ;; land, 945M of it seon.source/text-tx), and the clone of a clean checkout is that tree, so the head below is read, not
+      ;; imported. The test reads that store itself, never a copy: a copy keeps the store's id, and one branch under two paths is
+      ;; refused by Datahike (\"Configuration does not match existing connections\", batches 58 and 60)
+      @test-runner/kept-program
       (let [text (slurp (str repo "/" file))
             _ (is (str/includes? text "[seon.contract :as contract]"))
             _ (spit (str repo "/" file) (str/replace text "[seon.contract :as contract]" "[seon.error :as contract]"))
