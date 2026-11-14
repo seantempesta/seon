@@ -210,7 +210,9 @@
  :seon.proof/test [:qualified-symbol {:seon.db/index true :description "The test the result is of."}]
  :seon.proof/reads-digest [:and {:description "The digest of the content each read key held at the basis, basis excluded (seon.reads/content-digest): equal content gives one result on any branch."} :seon.lib/digest]
  ;; read back by seek: a moved datom's five keys (datahike.reads/datom-keys, each its pr-str) find the results they move, one AVET seek each
- :seon.proof/reads [:set {:seon.db/index true :description "The read keys the run's reads recorded (datahike.reads/range-key, each its pr-str): what a moved datom is sought by."} :string]
+ :seon.proof/reads [:and {:description "What the run read, matched against what moved to decide reuse."} :seon.reads/set]
+ ;; its own key, never :seon.proof/reads retyped: a stored attribute's type is fixed once installed (seon.db/install-missing!)
+ :seon.proof/read-keys [:set {:seon.db/index true :description "The read keys the run's reads recorded (datahike.reads/range-key, each its pr-str): what a moved datom is sought by."} :string]
  :seon.proof/outside [:set {:description "The reads the run made outside the store, as its effects answered them."} :seon.fx/read]
  :seon.proof/unreusable [:and {:description "The effects the run used whose answers its inputs don't decide: such a result is recorded, never reused."} :seon.reads/unreusable]
  :seon.proof/basis [:and {:description "The db the run read: its branch, commit and t."} :seon.db/reference]
@@ -221,7 +223,7 @@
  :seon.proof/route [:enum {:description "How it was proved: :live, the branch's forms loaded into the running runtime; :full, a binary built from it."} :live :full]
  :seon.proof/proof-fact [:map {:seon.db/attributes true}
                          [:seon.proof/id :seon.proof/id] [:seon.proof/test :seon.proof/test] [:seon.proof/reads-digest :seon.proof/reads-digest]
-                         [:seon.proof/reads :seon.proof/reads] [:seon.proof/status :seon.proof/status] [:seon.proof/route :seon.proof/route]
+                         [:seon.proof/reads :seon.proof/reads] [:seon.proof/read-keys {:optional true} :seon.proof/read-keys] [:seon.proof/status :seon.proof/status] [:seon.proof/route :seon.proof/route]
                          [:seon.proof/basis :seon.proof/basis]
                          [:seon.proof/outside {:optional true} :seon.proof/outside] [:seon.proof/unreusable {:optional true} :seon.proof/unreusable]
                          [:seon.proof/agent {:optional true} :seon.proof/agent] [:seon.proof/program {:optional true} :seon.proof/program]

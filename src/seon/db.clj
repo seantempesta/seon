@@ -1238,13 +1238,13 @@
                        (vec (sort-by pr-str outside))])))
 
 (defn results-moved
-  "The results (:seon.proof/proof-fact entities) on db a move's datoms reach: one AVET seek of :seon.proof/reads for each of a
+  "The results (:seon.proof/proof-fact entities) on db a move's datoms reach: one AVET seek of :seon.proof/read-keys for each of a
   datom's keys; a schema datom reaches every result. See docs/storage.md#what-a-read-scanned."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/datom]] [:set :seon.db/eid]]}
   [db datoms]
   (reduce (fn [acc dt]
             (let [ks (datahike.reads/datom-keys dt)]
               (if (some #{:all} ks)
-                (reduced (into #{} (map :e) (d/datoms db :aevt :seon.proof/reads)))
-                (into acc (comp (mapcat #(d/datoms db :avet :seon.proof/reads (pr-str %))) (map :e)) ks))))
+                (reduced (into #{} (map :e) (d/datoms db :aevt :seon.proof/read-keys)))
+                (into acc (comp (mapcat #(d/datoms db :avet :seon.proof/read-keys (pr-str %))) (map :e)) ks))))
           #{} datoms))
