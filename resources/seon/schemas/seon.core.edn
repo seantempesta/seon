@@ -213,7 +213,7 @@
                       [:unrecorded {:optional true :description "Your result was not recorded on your branch, and why."} :seon.error/base]
                       [:text {:optional true} :string] [:record {:optional true} :string]
                       [:recorded {:optional true :description "The vars this eval made program on your branch (a method as [multi dispatch]); they merge with your task. If you only meant to try something, take it back with (ns-unmap 'the.ns 'the-name) and define such things in your own namespace."} [:vector [:or :symbol [:vector :any]]]]
-                      [:unmapped {:optional true :description "The vars it removed from your branch's program."} [:vector :qualified-symbol]] [:fns {:optional true} [:vector :map]]
+                      [:unmapped {:optional true :description "The definitions it removed from your branch's program: a var by its name, a method by [multimethod dispatch-value]."} [:vector [:or :qualified-symbol [:tuple :qualified-symbol :any]]]] [:fns {:optional true} [:vector :map]]
                       ;; seon.repl/edit!'s: the var it changed and the lines around the change, [line text] each
                       [:edited {:optional true :description "What an edit changed: the var and the lines around the change."} [:map [:var :symbol] [:lines [:vector [:tuple pos-int? :string]]]]]]
  ;; what an eval changed of an existing var's meaning (seon.program/meaning: its contract, its
@@ -274,6 +274,7 @@
  ;; a property a schema carries, read by seon.schema.datahike when it declares the attribute (docs/storage.md)
  :seon.db/attributes [:boolean {:description "On a schema's properties, true when it is an entity schema: the keys of its map are attributes, and an entity holding one is checked against its required keys. See docs/storage.md#the-write-checks-every-entity-it-touches."}]
  :seon.db/identity [:boolean {:description "On an attribute's schema, true when its value identifies its entity, a lookup ref (Datahike's :db.unique/identity)."}]
+ :seon.db/derived [:boolean {:description "On an entity schema's properties, true when its entities are derived from other facts (an embedding of a text, a cite of a plan): a cache each branch computes, never merged (docs/merging.md#a-branch-merges-main-in)."}]
  :seon.db/index [:boolean {:description "On an attribute's schema, true when its values are indexed for lookup by value (Datahike's :db/index)."}]
  :seon.db/tagged [:boolean {:description "On an attribute's schema, true when each of its values names the schema it satisfies by :seon.db/tag and is held to it at the write (seon.db/invalid-datom)."}]
  :seon.db/to [:vector {:description "On a ref attribute's schema, the entity schemas the entity it refers to may be."} :qualified-keyword]

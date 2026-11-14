@@ -231,7 +231,7 @@
 
 ;; See docs/vector.md#search
 (deftest a-search-costs-flat-in-its-texts-length
-  ;; task seon.ctx.search/a-search-costs-what-it-ranks: relevance tokenized each pool item's whole text on every search (seon.doc/terms over 40
+  ;; task seon.ctx.search/the-pages-search-names-only-the-hits-it-shows: relevance tokenized each pool item's whole text on every search (seon.doc/terms over 40
   ;; texts' 134k characters, 2.5M ticks of an 8.7M search on main's program); a text's term counts are kept beside its row of the text
   ;; index, counted once, so a search costs the words it ranks, not the length of the texts holding them
   (cost/proof {:of 'seon.ctx.search/search :input 'seon.doc-cost-test/long-texts-input
@@ -243,7 +243,7 @@
 
 ;; See docs/vector.md#search
 (deftest a-search-costs-nothing-for-sections-it-does-not-answer-from
-  ;; task seon.ctx.search/a-search-costs-what-it-ranks: relevance read every section's named vars on every search
+  ;; task seon.ctx.search/the-pages-search-names-only-the-hits-it-shows: relevance read every section's named vars on every search
   ;; (seon.ctx.search/section-names, 0.64M ticks and 5.4 MB of a 13.2M search on main's program); a name's sections are
   ;; one seek of :seon.doc/names, so the sections no hit names cost nothing
   (cost/proof {:of 'seon.ctx.search/search :input 'seon.doc-cost-test/naming-input

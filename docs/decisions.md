@@ -6,6 +6,10 @@ The owner's standing rulings, one entry each: his words and date, and where the 
 
 The owner's rulings of this day and the night before, each with his words where recorded and where it is now stated.
 
+### One merge: everything that doesn't conflict, both directions
+
+On why a merge of main kept main's task lifecycle off a branch: "Wait why aren't we merging everything that's not a conflict with main? Everything else is hand written lists and we shouldn't be recording data that isn't true. Facts are facts at a certain tx time." On merging a branch's records into main: "If there are no conflicts I don't see any reason to not merge everything. What's the issue?" Then: "The merge doesn't happen while there are conflicts and the merging costs should be incremental." Every fact merges by its key in both directions, a conflict stops the merge, and the merge reads only what moved since its base. It supersedes "an agent's own records never merge" (merging.md's reading of the 2026-11-04 ruling; branches are still kept and queried). Stated in [merging](merging.md#a-branch-merges-main-in).
+
 ### The priority: Claude sessions work through the system
 
 "I want to optimize what fixes broken processes that are slowing us down and getting more of the system off the file based git focused standpoint. I want claude agents to work through the system ... Collapse the focus to just this one view." Then: "Don't delete useful parts of the plan, I said prioritize." Stated in [the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority).
@@ -664,7 +668,7 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 ### Seon's key files are facts, on one mechanism
 
-"is the indexing a shared system or are we building another parallel system": the schema files' entity and merge are generalised, not copied. Task `seon.source/seon-files-move-by-branch`.
+"is the indexing a shared system or are we building another parallel system": the schema files' entity and merge are generalised, not copied. Task `seon.source/the-trees-commit-merges-three-way`.
 
 ### A user's branch tracks main like an agent's
 
@@ -1072,7 +1076,7 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 ### Test results are a few facts per test and per function, with no history
 
-"We want to be able to query things in the db, functions, tests, schemas and understand what tests are failing and timings so don't remove everything from the db". Task seon.proofs/test-results-are-a-few-facts.
+"We want to be able to query things in the db, functions, tests, schemas and understand what tests are failing and timings so don't remove everything from the db". Task seon.proofs/a-verdict-is-an-entity-that-names-its-environment.
 
 ### A kept db value is a reference, {:branch :commit :t}
 

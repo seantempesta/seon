@@ -680,7 +680,7 @@
               (if-not (and checkout (:branch (:source st)))
                 (reply! st o p (contract/error :seon.system/no-gate-checkout #'seon.system/ext-op "this root has no checkout to run process tests on (:seon.config.source/gate-checkout, or a source root)"))
                 (let [[st rid] (pend st p :gate nil)]
-                  (step/out! o :to-writer {:op :merge-candidate :branch (:branch m) :data-attrs #{} :dest {:gate rid :tests (:tests m) :base (:base m) :repo checkout :prio (:prio m 0)}})
+                  (step/out! o :to-writer {:op :merge-candidate :branch (:branch m) :data-attrs :all :dest {:gate rid :tests (:tests m) :base (:base m) :repo checkout :prio (:prio m 0)}})
                   st)))
       ;; the test service (seon.prove): the request goes to its proc, the caller (a session, or an
       ;; agent's turn through its proc) is answered when the run it joined ends
@@ -932,7 +932,7 @@
       ;; frame (:spoke) or its end retracts it
       :stalled (let [s (cond-> {:quiet-ms (:quiet-ms (:error m))} (get-in m [:error :last-op]) (assoc :last-op (get-in m [:error :last-op])))]
                  ;; while root stops, a stalled agent is one that does not exit on :stop: the stall, a recorded fact,
-                 ;; ends it (no clock of the stop's own: task seon.system/shutdown-and-death-are-dataflow)
+                 ;; ends it (no clock of the stop's own: task seon.system/a-stop-or-crash-resumes-from-one-resume-point-and-says-what-it-lost)
                  (cond-> (-> st (set-agent o (:agent m) {:stalled s}) (stall-task o (:agent m) s))
                    (:closing st) (to-agent o (:agent m) {:op :kill})))
       :spoke (set-agent st o (:agent m) {:stalled nil})
@@ -2427,7 +2427,7 @@
     (a/close! (:judge sys))
     ;; parked on the drain, no bound: each agent interrupted and stopped exits (seon.agent-proc/stop!), the
     ;; writer flushes, the fork server ends; one that never does is a stall, recorded (task
-    ;; seon.system/shutdown-and-death-are-dataflow)
+    ;; seon.system/a-stop-or-crash-resumes-from-one-resume-point-and-says-what-it-lost)
     (let [drained @p
           graph (flow/stop (:graph sys))]
       ;; a wait put on :judge that the stopped reconciler never took is answered here

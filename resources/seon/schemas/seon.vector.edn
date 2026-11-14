@@ -20,7 +20,7 @@
  ;; and two branches that embed one text hold one value (owner, 2026-11-09: the transaction that wrote it no longer decides)
  :seon.vector/text :string
  ;; the text's whole token count; past :seon.config.vector/max-tokens its first were embedded
- :seon.vector/fact [:map {:seon.db/attributes true}
+ :seon.vector/fact [:map {:seon.db/attributes true :seon.db/derived true}
                     [:seon.vector/of :seon.vector/of]
                     [:seon.vector/model :seon.vector/model]
                     [:seon.vector/text :seon.vector/text]
