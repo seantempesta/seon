@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.reconcile :as r] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.program-test] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.agent-proc] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [seon.doc] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.async.remote :as remote] [jolt.async.remote.flow :as rflow] [jolt.io-poller :as poller]))
+            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.agent-proc] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [my.branch] [seon.template :as tpl] [seon.stall-proofs] [seon.doc] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.async.remote :as remote] [jolt.async.remote.flow :as rflow] [jolt.io-poller :as poller]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -683,6 +683,45 @@
     (is (= ['{reds-test/r :fail} 0 1 false 1 [["the recorded failure" true]]] (:value judge))
         (str "red as recorded, with its failure, nothing run and no child forked " (pr-str judge)))
     (is (= [:pass 1] (:value other)) (str "another's red runs, and is green: " (pr-str other)))))
+
+;; Estimate: as its sibling below (in-agent and three asks, a test child forked), ~20M
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 20000000 :asks 3}} a-test-child-holds-its-branchs-config-never-its-parents
+  ;; the owner, 2026-11-14: \"Why does it matter what the config is that we are forking from\": a process is handed its branch's
+  ;; environment and its first act is to hold it (seon.agent/hold-env!), whatever its parent held. A test child was a fork of its
+  ;; agent, itself a fork of root, so it held root's own layers and variables: here the shared root's source root (its --set and
+  ;; SEON_SOURCE_ROOT), as the standing root's gave the first real task's agent's tests (seon.source-test's red in context's agent
+  ;; nae67b62, 2026-11-14). A test process holds a test's layers (--profile scripted, no local layer) and variables over its
+  ;; branch's config entries, as a bin/test shard does
+  (let [[_ run] (in-agent ["(ns env-test (:require [clojure.test :refer [deftest is]])) (deftest no-parents-layers (is (nil? (get seon.config/config :seon.config.source/root))) (is (= :scripted (seon.config/profile))))"
+                           "(select-keys (my.agent/prove 'env-test/no-parents-layers) [:results])"]
+                          {:proofs #{'env-test/no-parents-layers}})]
+    (is (= {:results '{env-test/no-parents-layers :pass}} (:value run)) (str "the test child holds a test's environment, not root's: " (pr-str run)))))
+
+;; Estimate: in-agent's setup and teardown (~1.5M) + 4 asks of the test's own (~0.25M each: an import is two reads of one
+;; one-form file and one branch write, a lookup) = ~2.5M
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2500000 :asks 4}} a-sessions-edit-is-imported-onto-its-agents-branch
+  ;; plan Stage 1 (a session's files as its branch's transaction; agreed by context, data and runtime): (my.branch/import! root
+  ;; paths) at the agent's REPL reads the files a session edited and writes what changed onto the agent's branch through its own
+  ;; writer, the shape an eval writes (seon.system/catch-up :fact? false :paths); main never moves. The goal, data's: the edit is on
+  ;; the branch as forms, not on main, and the same edit again is unchanged
+  (let [dir (str (seon.config/checkout) "/target/tmp/import-" (random-uuid))
+        path "src/seon/import_probe.clj"
+        _ (.mkdirs (java.io.File. (str dir "/src/seon")))
+        _ (spit (str dir "/" path) "(ns seon.import-probe)\n\n(defn probe [] 3)\n")
+        ;; the agent evaluates it from text, which no reach reads: named here, so a change to it reruns this test
+        _ my.branch/import!
+        imp (str "(my.branch/import! " (pr-str dir) " [" (pr-str path) "])")]
+    (try
+      (let [[first-r on-branch on-main again]
+            (in-agent [imp
+                       "(some-> (datahike.api/entity (seon.agent/db) [:var/name 'seon.import-probe/probe]) :var/form :form/src)"
+                       "(some? (seon.db/eid (seon.agent/heard-main) :var/name 'seon.import-probe/probe))"
+                       imp])]
+        (is (= {:imported [path] :unchanged [] :skipped []} (:value first-r)) (pr-str first-r))
+        (is (str/includes? (str (:value on-branch)) "(defn probe [] 3)") (str "on the agent's branch as forms: " (pr-str on-branch)))
+        (is (false? (:value on-main)) "not on main: main moves only by the merge")
+        (is (= {:imported [] :unchanged [path] :skipped []} (:value again)) (str "the same edit again is unchanged: " (pr-str again))))
+      (finally (seon.lib/remove-tree! dir)))))
 
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 20000000 :asks 3}} an-agents-green-records-what-it-read
   ;; docs/source.md#tests-run-by-reach: a green an agent's run stores is keyed by what it read (seon.proofs/reads-key): the
@@ -1490,6 +1529,28 @@
 ;; Estimate: the world, built once a process (~3.2M measured here; my.test/world's docstring says ~0.6M), and three work! loops of
 ;; at most 3 turns on it (each: its start's reads and writes on the value ~0.2M, ~3 turns of a few datoms and an error map,
 ;; agent/error-map ~0.3M each; first put at 50k a turn, which missed the error map and the world) = ~6M: 6,000,000
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-run-told-to-stop-ends-between-turns
+  ;; task seon.system/a-stop-or-crash-resumes-from-one-resume-point-and-says-what-it-lost (one stop, one drain, agreed by
+  ;; runtime, tests and web, 2026-11-14): a stop lets each item in flight end by its own bound. An agent working a task holds
+  ;; one request for the whole run, so the item is the turn: told to stop (root's :stop, read at once by its transport), the run
+  ;; ends :waiting after the turn in flight, never cut inside it. Estimate: as its sibling below, the world and one work! loop
+  (let [red {:reasons [{:reason :proof-red}]}
+        end (work-with (fn [st called!] (swap! agent/state assoc :draining true) (called!) st) (constantly red))]
+    (is (= :waiting (:outcome end)) (pr-str end))
+    (is (= 1 (:model-calls end)) (str "the turn in flight finished (its one model call), and no other began: " (pr-str end)))))
+
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-stop-lets-the-eval-in-flight-end-by-its-own-bound
+  ;; the same drain, root's side (seon.agent-proc/stop!): a stop interrupted an agent's eval in flight (SIGUSR1), cutting it at
+  ;; its next safe point; it now sends :stop alone, which the agent answers after the request before it, that request ending by
+  ;; its own tick budget. Estimate: one step of a map, ~0.2M
+  (let [sigs (atom []) sent (atom [])]
+    (with-redefs [seon.lib/kill! (fn [_ sig] (swap! sigs conj sig) nil)
+                  seon.agent-proc/to-proc! (fn [st m] (swap! sent conj (:op m)) st)]
+      (let [st (#'seon.agent-proc/stop! {:pid 4242 :inflight {7 {:op :eval}}})]
+        (is (= [] @sigs) "no signal: the eval in flight ends by its own bound")
+        (is (= [:stop] @sent) "the agent is told to stop after it")
+        (is (:stop-sent st))))))
+
 (deftest ^{:seon.test/estimate {:ticks 6000000}} a-reasoning-overrun-is-the-next-turns-to-read
   ;; docs/failure-points.md (a turn of the agent's loop): a model call whose reasoning spent its whole token budget answers
   ;; :seon.model/reasoning-ate-reply, and the run ended :error at that turn, though the agent could reason less and go on
@@ -2496,6 +2557,25 @@
         plan (agent/test-plan db db #{})
         mg (:mg (#'agent/process-plan {:plan plan :deferred []} nil))]
     (is (contains? (set (keys mg)) "mg/seon.ref/lead-sentence") (str "a contract key with no green at its digest is an item of the merge: " (pr-str mg)))))
+
+;; docs/source.md#tests-run-by-reach: a db no store commit names (a test's world) is graphed whole, at its own size, never updated from the
+;; graph its process holds. In an agent's test child that graph is main's whole program, and updating it down to the world cost
+;; seon.agent-test/an-unchanged-branch-reads-no-test-as-changed 40M ticks (its budget; 0.88M where a test before it had left the world's
+;; graph held, 4.4M under bin/test; context's evidence, 2026-11-14). Estimate: two small worlds' graphs ~3M each, one test plan ~3M = ~9M.
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-test-world-is-graphed-whole-never-updated-from-a-held-program
+  (let [w (mt/world)
+        [_ in] (agent/test-inputs w)
+        other (seon.program-test/record w 'app.held "(defn held [] 1)")
+        g0 (program/reach-graph other (:data-refs in))
+        hits (atom 0)
+        update0 program/reach-update
+        before @agent/state]
+    (try
+      (swap! agent/state assoc :base-graph {:point ["held-commit" 1] :graph g0 :inputs in :value nil})
+      (with-redefs [program/reach-update (fn [g db] (when (identical? g g0) (swap! hits inc)) (update0 g db))]
+        (agent/test-plan w w #{}))
+      (is (= 0 @hits) "the world was graphed whole, never the held program's graph updated down to it")
+      (finally (reset! agent/state before)))))
 
 ;; docs/merging.md#verdicts-are-a-cache: base and branch are digested by the same inputs, so a branch that changed nothing selects
 ;; nothing as changed. Red before: the inputs design added the private checks, the index class and a process test's config

@@ -39,21 +39,18 @@
   nil)
 
 (defn- end-agent!
-  "The agent state ended as a test leaves it: the walk of its render (seon.repl/render-ctx holds one
-  in the state, reactions on @ctx that run at every write of it) disposed, then the state put back as
-  enter-agent! found it (a test that left it empty broke the next one reading the process's own db: seon.render-test/
-  markdown-reads-no-text-again in a test child). A walk left behind makes every later write of the record in
-  this process cost its reactions (seon.ctx-test/a-swap-costs-what-it-changed read 52 calls after this test, not 39)."
+  "The agent state ended as a test leaves it: its walk's defects checked, then the state put back as enter-agent! found it (a
+  test that left it empty broke the next one reading the process's own db: seon.render-test/markdown-reads-no-text-again in a
+  test child). The walk is a value in the state (seon.repl/page-walk): nothing of it runs after the test."
   {:malli/schema [:function [:=> [:cat] :nil] [:=> [:cat :map] :nil]]}
   ([] (end-agent! {}))
   ([opts]
    ;; no page this test drew drew an error in a component's place (seon.fixtures/no-error-render): the walk's own defects and the ones
    ;; seon.repl/page-walk took into the agent's errors; a test that draws an error on purpose names it in :expects
-   (seon.fixtures/no-error-render (into (vec (some-> (:walk @seon.agent/state) :defects deref))
+   (seon.fixtures/no-error-render (into (vec (:defects (:walk @seon.agent/state)))
                                         (comp (map :error) (filter #(= :seon.render/component-defect (:seon.error/type %))))
                                         (vals (:errors @seon.agent/state)))
                                   opts)
-   (some-> (:walk @seon.agent/state) seon.render/dispose-walk!)
    (remove-watch seon.agent/state :seon.ctx/ctx)       ; the record the test drew stays @ctx's (the test reads it after), as with an empty state
    (reset! seon.agent/state (when (not= ::unset @found) @found))
    (add-watch seon.agent/state :seon.ctx/ctx @#'seon.ctx/on-state)
@@ -1059,6 +1056,56 @@
        [(binding [malli.registry/*registry* (:registry (seon.agent/branch-schemas))] (f)) (:db @seon.agent/state)]
        (finally (end-agent!))))
 
+;; See docs/render.md#a-page-is-a-kept-walk
+(deftest ^{:seon.test/estimate {:ticks 20000000}} an-agents-walk-is-a-value
+  ;; estimate: a seeded 3-eval agent (~5M), two live walks (~1M each), a write, and a cold walk to compare (~1M)
+  ;; the agent keeps its walk as a value in its state (seon.render/walk), advanced by what each write moved: no reaction, watch or
+  ;; cell of it runs after, and its request after a write is the cold request of the same db
+  (let [db (seeded 3 nil)
+        cold (fn [db] (let [ix (seon.program/index-of-db db) t (:tree (ctx/build ix db (pdb/eid db :seon.agent/key k) :b))]
+                        (seon.render/walk nil {:db db :tree t :root (seon.render/render-var-of ix (merge {:seon.agent/key k} t)) :index ix
+                                               :changes ctx/changes :model-only true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})))
+        [[p0 p1] db'] (as-agent! db #(let [p0 (seon.repl/page-walk)]
+                                       (swap! ctx/ctx assoc-in [:seon.agent/task :seon.task/plan] "Make `app.x/f0` pass, twice.")
+                                       ;; a write after it, so @ctx holds what the plan's write derived (its cites), as the-page-reads-every-write-since-it-was-drawn
+                                       (seon.agent/transact! [{:seon.agent/key k :seon.agent/description "another write after it"}])
+                                       [p0 (seon.repl/page-walk)]))]
+    (is (not-any? volatile? (vals p0)) "the walk the agent keeps is a value, no cell of it")
+    (is (not-any? volatile? (vals p1)) "and the next is a value too")
+    (is (seq (:ran p1)) "a write moved what read it")
+    (is (= (:messages (seon.ctx.wire/request (cold db') db')) (:messages (seon.ctx.wire/request p1 db')))
+        "its request after the write is the cold request of the same db")))
+
+;; See docs/render.md#the-page
+(deftest ^{:seon.test/estimate {:ticks 20000000}} an-agents-recent-errors-are-on-its-page-with-their-causes
+  ;; estimate: a seeded 3-eval agent (~5M), a failed call and a failed eval written (~1M), its page and request drawn once (~3M)
+  ;; plan Stage 0.3 (owner, 2026-11-14): a model call that failed (a reasoning overrun) and an eval that threw are the agent's to
+  ;; read on its next turn, and its page shows them with their causes: one render, the open problems', from what its pull holds
+  (let [err (fn [ty msg fix] {:seon.error/type ty :seon.error/operation 'seon.model/call :seon.error/message msg :seon.error/fix fix})
+        db (d/db-with (seeded 3 nil)
+                      (into [{:seon.model-call/id (str k "/9") :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n 9
+                              :seon.model-call/origin :model}
+                             {:seon.agent/key k :seon.agent/turn 9}
+                             {:seon.model-call/id (str k "/9")
+                              :seon.model-call/error (err :seon.model/reasoning-ate-reply "the reasoning used all 8192 tokens; no reply"
+                                                          "raise :seon.config.ai/max-tokens, or ask for less at once")}]
+                            ;; as the REPL keeps an answer: its error in the eval's result (seon.db/with-response, seon.repl's)
+                            (seon.repl/record-tx {:seon.agent/key k} "e-threw" (seon.task/sender "a1")
+                                                 (seon.db/with-response
+                                                   {:seon.eval/code "(app.x/f0 :x)" :seon.eval/intent "Call f0 with a keyword."
+                                                    :seon.eval/call (seon.task/call-ref k 9) :seon.eval/call-id "c-threw"}
+                                                   {:handle 'result/e-threw :ex (err :seon.agent/eval-error "app.x/f0 can't add :x" "pass a number")}))))
+        [page msgs] (try (enter-agent! {:db db :key k :branch :b})
+                         [(pr-str (seon.repl/render-ctx-hiccup)) (pr-str (:messages (seon.ctx.wire/request (seon.repl/page-walk) (seon.agent/db))))]
+                         (finally (end-agent!)))]
+    (is (str/includes? page "the reasoning used all 8192 tokens") "the page: the failed call's message")
+    (is (str/includes? page "raise :seon.config.ai/max-tokens") "and its fix")
+    (is (str/includes? page "app.x/f0 can't add :x") "the page: the eval's error")
+    (is (str/includes? page "pass a number") "and its fix")
+    (is (re-find #"Recent errors.*Eval e-threw: Call f0 with a keyword" page) "under the open problems, each failure named by what failed")
+    ;; the model reads the eval's error in its conversation, and the call's overrun on its next turn (seon.turn, runtime's)
+    (is (str/includes? msgs "app.x/f0 can't add :x") "the model's request: the eval's error")))
+
 (deftest the-page-reads-every-write-since-it-was-drawn
   ;; docs/render.md#reactive-renders: the agent's page walk is given every datom its db moved by since
   ;; it last drew (ctx's own diff of each move, seon.ctx/take-moved!), so a db component sees a write
@@ -1066,17 +1113,21 @@
   ;; and saw only the last transaction's datoms: a plan's new citation drew nothing until a commit)
   (let [db (d/db-with (seeded 20 nil) [{:seon.doc/address "docs/x.md#the-z" :seon.doc/heading "The z"
                                          :seon.doc/lead "What z does." :seon.doc/text "What z does."}])
-        page #(pr-str (let [w (seon.repl/page-walk)] (seon.render/placed-hiccup w (seon.render/page-lists w))))
+        reads #(pr-str (mapv first (get-in % [:answers :seon.render/openai-compat])))
+        page #(reads (seon.repl/page-walk))
         [[before after] db'] (as-agent! db #(let [before (page)]
                                                (swap! ctx/ctx assoc-in [:seon.agent/task :seon.task/plan] "Make `app.x/f0` pass; see [the z](docs/x.md#the-z).")
                                                (seon.agent/transact! [{:seon.agent/key k :seon.agent/description "another write after it"}])
                                                [before (page)]))
-        cold (pr-str (seon.fixtures/drawn-parts db' (ctx/build (seon.db/index) db' (pdb/eid db' :seon.agent/key k) :b)))]
+        ix (seon.program/index-of-db db')
+        t (:tree (ctx/build ix db' (pdb/eid db' :seon.agent/key k) :b))
+        cold (reads (seon.render/walk nil {:db db' :tree t :root (seon.render/render-var-of ix (merge {:seon.agent/key k} t)) :index ix :changes ctx/changes
+                                           :model-only true :outputs #{:seon.render/hiccup :seon.render/openai-compat}}))]
     (is (str/includes? before "What x does.") "the section the plan cited before")
     (is (not (str/includes? before "What z does.")))
     (is (str/includes? after "What z does.") "the section the plan cites now, drawn in the same commit")
     (is (not (str/includes? after "What x does.")) "and not the one it no longer cites")
-    (is (= cold after) "the live page is the cold draw of the db it is drawn to")))
+    (is (= cold after) "the live request is the cold walk's of the db it is drawn to")))
 
 (deftest a-search-is-a-member-a-swap-adds-and-changes
   ;; the owner, 2026-11-01: an agent changes what its page shows by swap! on its ctx, and the walk draws the part
@@ -1621,11 +1672,12 @@
   ;; task seon.render/one-way-to-make-what-an-agent-is-sent, step 3: a turn's draw ran the conversation and the tiles for nobody,
   ;; which printed every eval a second time. A person's page draws them; what the model reads is the same either way
   (let [db (seeded 3 nil)
-        ledger #(set (keys (seon.render/ledger (:walk @seon.agent/state))))
+        ledger #(set (keys (:ledger (:walk @seon.agent/state))))
+        reads #(mapv first (get-in % [:answers :seon.render/openai-compat]))
         as (fn [f] (try (enter-agent! {:db db :key k :branch :b}) (f) (finally (end-agent!))))
-        [parts unwatched watched page] (as #(let [p (let [w (seon.repl/page-walk)] (seon.render/placed-hiccup w (seon.render/page-lists w))) u (ledger) pg (seon.repl/render-ctx-hiccup)]
+        [parts unwatched watched page] (as #(let [p (reads (seon.repl/page-walk)) u (ledger) pg (seon.repl/render-ctx-hiccup)]
                                               [p u (ledger) pg]))
-        whole (as #(do (seon.repl/render-ctx-hiccup) (let [w (seon.repl/page-walk)] (seon.render/placed-hiccup w (seon.render/page-lists w)))))]
+        whole (as #(do (seon.repl/render-ctx-hiccup) (reads (seon.repl/page-walk))))]
     (is (unwatched 'seon.render.ui/agent-parts) "the model's list is drawn")
     (is (every? unwatched '[seon.render.ui/conversation-list seon.render.ui/evaluation]) "and the conversation, which it reads as messages")
     (is (not-any? unwatched '[seon.render.ui/eval-output seon.render.ui/chat-end seon.render.ui/agent-state]) (pr-str unwatched))
@@ -1663,12 +1715,17 @@
         was-f (var-get v)
         rules-of (fn [page] (some #(when (str/starts-with? (:id %) "page-rules") (:html %)) (:units page)))]
     (try
-      (enter-agent! {:db db :key k :branch :b})
+      ;; in test mode, so the redefinition's record below applies to the agent's db value
+      (enter-agent! {:db db :key k :branch :b :mode :test})
       (let [page (seon.repl/render-ctx)
-            read #(pr-str (:messages (seon.ctx.wire/request (seon.repl/page-walk))))
+            read #(pr-str (:messages (seon.ctx.wire/request (seon.repl/page-walk) (seon.agent/db))))
             before (read)
             _ (alter-meta! v assoc :seon.render/style ".task-view { color: red; }")
             _ (alter-var-root v (fn [f] (fn [& args] (apply f args))))
+            ;; as a defn at the agent's REPL records it: its form moved (one redefinition path, docs/render.md#a-page-is-a-kept-walk)
+            _ (seon.agent/transact! [{:db/id "n" :ns/name 'seon.render.ui :ns/file "src/seon/render/ui.clj"}
+                                     {:db/id "v" :var/name 'seon.render.ui/task-view :var/form "f"}
+                                     {:db/id "f" :form/id "seon.render.ui/task-view-red" :form/src "(defn task-view ...)" :form/ns "n" :form/order 0 :form/defines #{"v"}}])
             page' (seon.repl/render-ctx)]
         (is (not (str/includes? before ".task-view")) "no CSS anywhere in what the model reads")
         (is (str/includes? (rules-of page) ".task-view") "the page holds the rules")

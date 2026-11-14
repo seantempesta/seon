@@ -574,16 +574,17 @@
 ;; twice (layered: aero, then the whole config validated against its schema), ~15M ticks each, and held twice = ~40M
 ;; (was 10M at 3M a resolve: measured 39M, the resolve's validation of every key was the work it missed).
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-test-process-of-a-checkout-holds-its-config-not-its-parents
-  (let [held @#'seon.config/held h @held c config/config s config/sources
+  (let [held @#'seon.config/held h @held c config/config s config/sources layers0 @#'seon.config/built-layers
         parent (config/layered (config/load-layers (config/checkout) ["--profile" "deepseek" "--set" ":seon.config.source/branch=\"jolt/merges\""]))]
     (try
       ;; the parent: root's profile and a layer of its own, held and as loaded
       (swap! held merge (select-keys parent [:config :sources]))
       (alter-var-root #'config/config (constantly (:config parent)))
       (alter-var-root #'config/sources (constantly (:sources parent)))
-      (config/hold-checkout! (config/checkout))
+      (config/hold-args! ["--profile" "scripted"] nil {})
       (is (= [:scripted :scripted] [(config/value :seon.config.root/profile) (config/profile)])
           "the profile it reads either way is the test one, not its parent's")
       (is (= (:seon.config.source/branch config/test-system-config) (:seon.config.source/branch config/config) (config/value :seon.config.source/branch))
           "and no layer of its parent's is left")
-      (finally (reset! held h) (alter-var-root #'config/config (constantly c)) (alter-var-root #'config/sources (constantly s))))))
+      (finally (reset! held h) (alter-var-root #'config/config (constantly c)) (alter-var-root #'config/sources (constantly s))
+               (alter-var-root #'seon.config/built-layers (constantly layers0))))))

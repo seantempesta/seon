@@ -14,8 +14,9 @@
 # seon.server/ops is a tool seon_<op>; seon.check/mcp-proof compares them).
 #
 # Stock perl, no Seon binary (a `seon mcp` per client was 722 MB each; this is about 6 MB, and
-# seon.check/mcp-proof fails past :seon.config.machine/relay-mb). One connection per message, so
-# a root restarted between calls (bin/system next) costs the session nothing. A message with an id
+# seon.check/mcp-proof fails past :seon.config.machine/relay-mb). One connection per message, each relayed by a child of its own at once and its answer written whole when it
+# comes, so a call root holds (a prove parked on a gate) blocks no other (seon.check-test/a-relay-answers-a-quick-call-while-a-slow-one-waits),
+# and a root restarted between calls (bin/system next) costs the session nothing. A message with an id
 # that root does not answer (none running, not listening, it died mid-request) is answered the
 # JSON-RPC error saying why: the client never hangs on it. A line that is not JSON is relayed as
 # it is, and root answers its defect (docs/failure-points.md).
@@ -42,10 +43,15 @@ if [[ ${1:-} == call ]]; then
     print $_->{text}, "\n" for @{$r->{result}{content}};
   ' "$0" "$PORT" "$ROOT" "$@"
 fi
-exec perl -MIO::Socket::INET -MJSON::PP -e '
+exec perl -MIO::Socket::INET -MIO::Select -MJSON::PP -MPOSIX -e '
+  # each message relayed by a child of its own, so a call root holds (a prove parked on a gate) blocks no other; the parent
+  # reads stdin and the pipe of every child, and writes each answer whole when its child closes, so answers never interleave
   $| = 1; my ($port, $portf) = @ARGV; my $client = $ENV{SEON_MCP_CLIENT} // "mcp-$$-" . time();
-  while (my $line = <STDIN>) {
-    $line .= "\n" unless $line =~ /\n\z/;
+  $SIG{CHLD} = "IGNORE";
+  my $all = sub { my ($fh, $s) = @_; while (length $s) { my $n = syswrite($fh, $s) // die "bin/mcp: write: $!"; substr($s, 0, $n) = "" } };
+  my $sel = IO::Select->new(\*STDIN); my ($in, $eof, %out) = ("", 0);
+  my $relay = sub {
+    my ($line) = @_;
     my $msg = eval { decode_json($line) };
     my $id = ref $msg eq "HASH" ? $msg->{id} : undef;   # undef for a line that is not JSON: root answers it
     # who asks: the client id of this session on every message (seon.server/held: an agent it attached
@@ -58,7 +64,27 @@ exec perl -MIO::Socket::INET -MJSON::PP -e '
       $s = IO::Socket::INET->new(PeerAddr => "127.0.0.1", PeerPort => $p, Proto => "tcp");
       $why = $s ? "root answered nothing (it stopped mid-request?)" : "root'"'"'s server on 127.0.0.1:$p is not listening ($!): bin/system start";
     }
-    my $got = 0;
-    if ($s) { print $s $line; shutdown($s, 1); while (my $a = <$s>) { print $a; $got = 1 } close $s }
-    print encode_json({jsonrpc => "2.0", id => $id, error => {code => -32000, message => $why}}), "\n" if !$got && defined $id;
-  }' "${1:-}" "${SEON_RUNS:-$ROOT/runs}/root.port"
+    my $got = "";
+    if ($s) { print $s $line; shutdown($s, 1); local $/; $got = <$s> // ""; close $s }
+    $got eq "" && defined $id ? encode_json({jsonrpc => "2.0", id => $id, error => {code => -32000, message => $why}}) . "\n" : $got;
+  };
+  while (!$eof || keys %out) {
+    for my $fh ($sel->can_read) {
+      if ($fh == \*STDIN) {
+        my $n = sysread(STDIN, my $buf, 65536);
+        if (!$n) { $eof = 1; $sel->remove(\*STDIN); $in .= "\n" if $in ne ""; }
+        $in .= $buf if $n;
+        while ($in =~ s/\A([^\n]*\n)//) {
+          my $line = $1;
+          pipe(my $r, my $w) or die "bin/mcp: pipe: $!";
+          my $pid = fork() // die "bin/mcp: fork: $!";
+          if ($pid == 0) { close $r; $all->($w, $relay->($line)); close $w; POSIX::_exit(0) }
+          close $w; $sel->add($r); $out{$r} = "";
+        }
+      } else {
+        my $n = sysread($fh, my $buf, 65536);
+        if ($n) { $out{$fh} .= $buf } else { $all->(\*STDOUT, $out{$fh}) if $out{$fh} ne ""; delete $out{$fh}; $sel->remove($fh); close $fh }
+      }
+    }
+  }
+' "${1:-}" "${SEON_RUNS:-$ROOT/runs}/root.port"

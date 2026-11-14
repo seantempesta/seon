@@ -744,7 +744,8 @@
   resumed branch's older one) is the graph held updated to it (seon.program/reach-update, in
   either direction), never built again: the graph held is the one this process was forked
   with, main's, kept by the fork server (:graph) with its index (seon.program/reach-indexed), and built
-  here only when there is none or its :data-refs are not inputs'. The graph held keeps its index
+  here only when there is none, its :data-refs are not inputs', or base is no store's value (no commit: a test's world, graphed
+  whole at its own size). The graph held keeps its index
   across the update, so the base's is the answers of the tests the move touched, never of every test
   (docs/source.md#tests-run-by-reach)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.program/inputs] :map]}
@@ -755,6 +756,9 @@
     (if (and w (first at) (= at w-at) (= inputs (:inputs w)))
       (:value w)
       (let [g (cond (not (and g0 (= (:data-refs inputs) (:data-refs g0)))) (program/reach-graph base (:data-refs inputs))
+                    ;; a db no store commit names (a test's world) shares nothing with the graph held: graphed whole, at its own
+                    ;; size, never main's whole program updated down to it (40M ticks in a test child)
+                    (nil? (first at)) (program/reach-graph base (:data-refs inputs))
                     (and (first at) (= at w-at)) g0
                     :else (program/reach-update g0 base))
             g (program/reach-indexed g inputs)
@@ -1215,6 +1219,23 @@
                                                                               {:test t :bound-ms ms :dump dump})))))))
     {:fiber fiber :test t :cancel cancel}))
 
+(defn hold-env!
+  "A process's first act: hold the environment of the branch it runs, db, whatever its parent held (the owner:
+  \"Why does it matter what the config is that we are forking from\"). Its config is db's entries under its role's layers, args
+  (a test process: --profile scripted, no local layer: seon.config/hold-args!), never its parent's, read with its environment
+  variables, never root's: a run of a session's checkout takes that checkout's (seon.fx/checkout-env!), any other child keeps
+  its agent's and drops root's own (seon.fx/root-variables), until one statement of them takes the place of both. Its
+  program and registry are db's already: a test child is forked from the agent holding db, and seon.contract/layers reads the
+  agent's slot. A test child calls it at its start, unconditionally. Answers the config's refusal, or nil. See
+  docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat :seon.host/db [:map [:args [:sequential :string]] [:checkout {:optional true} [:maybe :string]]]] [:maybe :map]]}
+  [db {:keys [args checkout]}]
+  ;; its environment variables first, since the config reads some (:seon.config.source/root is #env SEON_SOURCE_ROOT): a run
+  ;; of a session's checkout takes that checkout's, as bin/test gives a shard; any other child keeps its agent's checkout,
+  ;; home and working directory (its run's own, seon.fx/run-dir) and drops root's own variables
+  (if checkout (fx/checkout-env! checkout) (doseq [v fx/root-variables] (lib/c-unsetenv v)))
+  (cfg/hold-args! args (cfg/entries db) (program/schema-changes db)))
+
 (defn- test-child-runs!
   "A test child's body (jolt.async.remote.flow/fork!'s child), end its end of the link to its run's fold proc
   (test-run-step), opened by fork! over the one stream it holds: watched as seon.lib/fork!'s children are (seon.lib/end-with!,
@@ -1249,9 +1270,6 @@
         ;; the test child's own ceiling, from its own heap at its fork: the agent's absolute ceiling
         ;; left a child of a grown agent less room than any test needs (docs/machine.md#what-a-process-owns-in-memory)
         (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)) (cfg/value :seon.config.agent/trip-bytes))
-        ;; a run of a session's checkout (seon.system/prove-tree!): its tests read that checkout's files, as their digests
-        ;; (the tree's) say, and they and what they start run in its environment and test config, never root's, which this agent was forked from
-        (when-let [co (:checkout plan)] (fx/checkout-env! co) (cfg/hold-checkout! co))
         ;; a batch the test service granted: every process this child starts carries it, so the service reads what its
         ;; running batches hold (seon.prove/held-processes)
         (when-let [b (:seon.prove/batch plan)] (lib/c-setenv "SEON_PROVE_BATCH" b 1))
@@ -1260,13 +1278,14 @@
         (intr/forked!)
         ;; its reads through its own env, never the agent's (own-store!); its writes stay its own value's (:test mode)
         (own-store! (:cfg @state) (:branch @state))
+        ;; its first act on its own env: the branch's environment, whatever the agent it was forked from held (its reads of
+        ;; db go through its own env, so after own-store!)
+        (hold-env! (db) {:args ["--profile" "scripted"] :checkout (:checkout plan)})
         ;; and as a test process: a private function's contract is checked on each call here, whatever its agent's
         ;; setting (the owner, 2026-11-10: "Private helpers: tests only"; docs/checks.md#contracts-armed-at-definition)
         (contract/check-private! true)
-        ;; nor the agent's walk: a fork holds its reactions on @ctx, which would run at a test's every write of a
-        ;; record of its own (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
-        (some-> (:walk @state) render/dispose-walk!)
-        (swap! state #(-> % (dissoc :walk) (assoc :mode :test :evaluating false)))
+        ;; nor the agent's walk, a value its test has no use for (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
+        (swap! state #(-> % (dissoc :walk :walk-whole?) (assoc :mode :test :evaluating false)))
         ;; the test's own working directory: what a test writes relative to it is this run's, removed
         ;; when the child has ended (docs/failure-points.md, a directory walk)
         (let [run-dir (fx/run-dir (lib/c-getpid))] (.mkdirs (java.io.File. ^String run-dir)) (lib/c-chdir run-dir))

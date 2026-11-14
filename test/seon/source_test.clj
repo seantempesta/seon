@@ -529,6 +529,21 @@
     (is (some? (d/entity db1 [:var/name 'app.landed/f])) "and the landed file's facts are main's")))
 
 ;; Estimate: 8 restart-for x 5k + 2 empty-db and checked writes 0.2M + booted-source and 2 test-inputs pulls 0.1M = 400000 ticks
+(deftest ^{:seon.test/estimate {:ticks 400000}} a-config-or-schema-landing-loads-in-place
+  ;; the owner, 2026-11-14: Seon restarts only for a binary change. The landing's commit loads a changed schema entry (its
+  ;; dependents re-armed, root's registry held: seon.program/load-changes!, seon.writer's main-commit) and a changed config entry
+  ;; (seon.program/hold-config!) in place, so neither is a restart: root's restart at 29e63624cc named only config and schema files
+  ;; (and forms). A pin, native code or deps.edn still is. Estimate: four calls of a pure fn, ~0.4M
+  (let [held {:root "/r" :dirs ["src"] :tree "t1" :commit "c1"}
+        inputs {:tree "t1m" :env "e" :code "c" :config {}}
+        why #(root/restart-for held "t1" {:binary "t0" :tree "t1" :reaches %} inputs)]
+    (is (nil? (why ["resources/seon/config/default.edn" "resources/seon/schemas/seon.config.root.edn" 'seon.main/root-serve]))
+        "config and schema entries and forms root runs: all loaded by the landing's commit, keep running")
+    (is (re-find #"reaches deps.edn" (str (why ["deps.edn" "resources/seon/schemas/seon.core.edn"])))
+        "a build input no load brings still restarts, naming it")
+    (is (re-find #"system.edn" (str (why ["resources/seon/system.edn"])))
+        "root's graph (system.edn) is not loaded in place yet: a restart (its procs swap through Flow's update!, the plan's next step)")))
+
 (deftest ^{:seon.test/estimate {:ticks 400000}} a-landing-keeps-the-system-running-only-when-nothing-calls-for-a-restart
   ;; docs/source.md#a-landing-enters-main-as-data: after the bridge moved main's source fact to the landed tree, bin/update keeps
   ;; the system running (my.root/landed!) when its binary is current for that tree and the inputs of the files were written;
@@ -1523,6 +1538,33 @@
       (finally
         (when @root (ts/stop-root! @root))
         (seon.lib/remove-tree! dir)))))
+
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-landed-schema-file-installs-its-new-attributes
+  ;; docs/source.md#a-landing-enters-main-as-data: a landing that changes a schema file keeps root running (it loads in place), so
+  ;; its new stored attributes must be installed by the landing's own write: context's 1916c1b31c added :seon.task/specified-turn,
+  ;; the bridge's commit carried the entry but no declaration, and every branch proved in the system then refused the attribute
+  ;; until root restarted (2026-11-14). Only a boot installed it. Estimate: a test db ~1M, one schema file's refresh-tx and the
+  ;; registry it states ~3M, one storing write ~0.5M
+  (let [db (ts/test-db)
+        text "{:app.shape/entity [:map {:seon.db/attributes true} [:app.shape/size :int]]\n :app.shape/size :int}\n"
+        tx (seon.system/changed-tx db {"resources/seon/schemas/app.shape.edn" text} {} nil)]
+    (is (some #(= :app.shape/size (:db/ident %)) (filter map? tx)) "the new attribute's declaration rides the landing's write")
+    (is (= 3 (:app.shape/size (d/entity (d/db-with (d/db-with db tx) [{:db/id 900 :app.shape/size 3}]) 900)))
+        "and the landed main can store it at once")))
+
+(deftest ^{:seon.test/estimate {:ticks 3000000}} named-paths-catch-up-on-a-db-that-holds-no-tree
+  ;; data's review of my.branch/import!: catch-up answered nil on a db that holds no :seon.system/source tree even when its
+  ;; :paths named the files, and import! read that nil as every path unchanged, a wrong answer with no error. Named paths need no
+  ;; held tree (seon.fx/files-at reads them). Estimate: a test db ~1M, one file read and one form's refresh-tx ~1M
+  (let [dir (scratch-dir "paths")
+        p "src/seon/paths_probe.clj"]
+    (try
+      (.mkdirs (java.io.File. (str dir "/src/seon")))
+      (spit (str dir "/" p) "(ns seon.paths-probe)\n\n(defn probe [] 1)\n")
+      (let [r (seon.system/catch-up (ts/test-db) dir {:fact? false :paths [p]})]
+        (is (= [p] (:paths r)) (pr-str (dissoc r :tx)))
+        (is (seq (:tx r)) "and what it read is written"))
+      (finally (seon.lib/remove-tree! dir)))))
 
 ;; docs/source.md#a-boot-catches-up-with-its-checkout: the default boot of a root with a source tree indexes what its checkout changed
 ;; since main last indexed it, through bin/system, end to end: an untracked new file reaches main; a file that does not read is named

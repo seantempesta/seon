@@ -545,17 +545,21 @@
 
 (defn- settle
   "Outputs of the queue (ask-items, batch-ended) carried out: an :asker-answered of run k finishes it with its answer
-  (run-answer of its plan and its items' results, or the typed error of an item with no verdict); every other output passes through. Answers [st outputs]."
+  (run-answer of its plan and its items' results, each item with no verdict its own error; or, when no item landed a verdict, the
+  typed error); every other output passes through. Answers [st outputs]."
   {:malli/schema [:=> [:cat :map [:sequential :map]] [:tuple :map [:vector :map]]]}
   [st outs]
   (reduce (fn [[st acc] o]
             (if (= :asker-answered (:op o))
               (let [k (:asker o) run (get-in st [:runs k])]
                 (if run
-                  ;; an item with no verdict (its fork refused, its batch errored) is the run's answer: the typed error, as a run
-                  ;; that could not run answers; the verdicts that did land are the cache's
+                  ;; a run none of whose items landed a verdict (its forks refused, its batches errored) answers the typed error, as a
+                  ;; run that could not run; else its verdicts, each item with no verdict its own :error report (run-answer), so one
+                  ;; test ended at its wall bound voids only its own verdict, never the run's (a task closed on it)
                   (let [rs (:results (:r o))
-                        [st more] (finish st k (or (some (fn [[_ r]] (when (contract/error? r) r)) (sort-by (comp str key) rs))
+                        ;; a build or seed is no result of the run (run-answer): only its tests and steps decide
+                        own (sort-by (comp str key) (remove (comp vector? key) rs))
+                        [st more] (finish st k (or (when (and (seq own) (every? (comp contract/error? val) own)) (val (first own)))
                                                    (assoc (run-answer (:base run) rs) :verdicts (:verdicts (:r o) []))))]
                     [st (into acc more)])
                   [st acc]))

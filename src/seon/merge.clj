@@ -34,10 +34,10 @@
 (def carried-platform-attrs
   "The platform attributes (seon.*) a branch carries: the task content an agent may improve
   (my.task/update!: its plan, its instructions, the proofs a design registers, and a stall task's
-  cause), carried onto main at its run's end (seon.task/carry-tx). Every other seon.* attribute is a platform record (root's boot and
+  cause; and the turn its specification was written at, seon.turn/specified-tx), carried onto main at its run's end (seon.task/carry-tx). Every other seon.* attribute is a platform record (root's boot and
   quiescence, recorded errors, runs, observations) written where it happened and never
   carried, so main writing one never puts a branch behind."
-  #{:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause :seon.task/found-nothing})
+  #{:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause :seon.task/found-nothing :seon.task/specified-turn})
 
 (def ^:private stated-keys
   "The program keys one entity's stated attributes hold, by key kind, as data: :id the identity naming the entity, :stated each attribute its content
