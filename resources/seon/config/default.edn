@@ -1191,6 +1191,14 @@
  ;; #env honours where bin/system names it (until a built binary's top-level code sees its argv,
  ;; so --set can say it).
  :seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 0]
+ ;; Unit: connections. Root's server connections open at once, each a fiber (~6 KB); one past it waits in the accept until one
+ ;; closes. Provenance: the sessions' relays (bin/mcp, a connection a call) and the test roots' askers, a few dozen at most; bounded,
+ ;; where a connection was an OS thread each with no bound (2026-11-14).
+ :seon.config.root/server-connections 256
+ ;; Unit: workers. Server ops answered at once, each on a :mixed worker (an OS thread): an op that blocks (a root eval, a
+ ;; :done waiting on its judge) holds its worker, never a carrier or another connection. Provenance: the sessions working at once
+ ;; (seven tonight), doubled; an op past them waits its turn at the :server-op owner.
+ :seon.config.root/server-op-workers 16
  ;; Unit: pid. The process this root ends with (seon.lib/end-with!, armed once its boot has forked the fork server):
  ;; a test's root names its test process (seon.test-store/start-root! sets SEON_END_WITH), so however that process
  ;; ends, -9 included, its roots and their agents end too (2026-11-08: 12 process groups outlived a stopped prove). 0: none.
