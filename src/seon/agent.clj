@@ -479,12 +479,9 @@
       k)))
 
 (defn fx!
-  "The effect kind with req, through root's owner proc, answered here: its outcome
-  {:value ...} or its declared error. Recorded with this eval request. No lock: an
-  interrupt may end the wait; the outcome then arrives later as an async one does. A request that
-  streams (:call) waits until its owner answers, which its bound of quiet guarantees; any other
-  lasts as long as the kind declares (:seon.config.fx/bounds, its :seon.bound/ms) and no longer:
-  past it the outcome is the typed :seon.bound/reached. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  "The effect kind with req, through root's owner proc: its outcome {:value ...} or its declared error. A
+  request that streams (:call) is ended by its owner; any other waits its kind's :seon.config.fx/bounds, then
+  answers :seon.bound/reached. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
   {:malli/schema [:=> [:cat :keyword :map :map] :map]}
   [kind req opts]
   (if (= :test (:mode @state))

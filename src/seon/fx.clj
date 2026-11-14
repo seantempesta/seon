@@ -1668,10 +1668,8 @@
          (merge {[(:owner st) :done] [done]} (stream-out (when (sequential? ends) ends)))]))))
 
 (defn- stream-due
-  "A streaming worker's step on its bound's due {:due t0}: a call quiet for its kind's :seon.bound/ms (no line since the
-  last, re-armed by each one) is ended: its connection shut (the reader then puts the stream's end) and its outcome made
-  :seon.bound/reached; a call that streamed since is re-armed for the rest of the bound. A due of a call already ended, or
-  of another call, is dropped. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  "A streaming worker's step on its bound's due {:due t0}: a call quiet past its kind's :seon.bound/ms is shut and its
+  outcome made :seon.bound/reached; one that streamed since is re-armed. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
   {:malli/schema [:=> [:cat :map :map] [:tuple :map [:maybe :map]]]}
   [st m]
   (let [{:keys [ms t0 last-ns shut dead]} (:call st)]

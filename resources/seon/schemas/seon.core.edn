@@ -252,6 +252,8 @@
  ;; the api proc's state keys (seon.system; keys-schemas sweep): in the proc's memory, never stored. A caller is a promise or a proc's reply route {:route :tag}
  :seon.system/backing [:map-of {:description "The agents going back to an earlier point (back!), each with its caller and the branch asked for."} :keyword [:map [:p [:or :seon.host/promise :map]] [:branch :seon.db/branch]]]
  :seon.system/busy [:set {:description "The agents with an eval in flight: the stall check's set (a gone one never)."} :keyword]
+ :seon.system/live [:set {:description "The pids of the agents a root forked and has not seen exit: what its peak counts."} :seon.lib/pid]
+ :seon.system/peak [:int {:min 2 :description "The most processes a root held at once: itself, its boot fork server and its live agents, said on its stop."}]
  :seon.system/dying [:map-of {:description "A killed agent's process by pid, with the agent, its end as it will be recorded, and the requests it died in, until the fork server reports its exit."} :seon.lib/pid [:tuple :keyword :map :any]]
  :seon.system/errors [:map-of {:description "The error occurrences folded by cause (seon.error/fold), each cause's entry, until flushed to the store."} :any :seon.error/entry]
  :seon.system/errors-dirty [:boolean {:description "True when the folded errors hold an entry not yet written to the store."}]
