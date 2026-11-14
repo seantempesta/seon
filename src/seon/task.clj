@@ -682,7 +682,7 @@
 
 (def stated-attributes
   "The task attributes a declaration states (its members, config flattened), as stored: what load-tx writes beside
-  :seon.task/declared, so one newer than it is an edit made on main since its file was read (unsynced?)."
+  :seon.task/declared, so one newer than it is an edit made on main since its file was read (seon.problems/unsynced?)."
   [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
    :seon.task/kind :seon.task/evidence :seon.task/examples
    :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
@@ -1071,23 +1071,6 @@
   write-back. Its done is its write (names-new-site?); this proof is green before it starts. A test of the tree, checked so
   (seon.reconcile-test/a-refines-proofs-are-tests-the-tree-holds): the load test it named before was deleted, and every refine capped."
   #{'seon.task-files-test/the-shipped-task-files-are-whole-tasks-that-merge-themselves})
-
-
-(defn unsynced?
-  "Whether task entity e on db differs from its file: merged and still declared, or live, stated (not seon.task/derived?) and never
-  filed or edited since its file was read (a member datom newer than :seon.task/declared, which load-tx writes beside them). Seeks
-  only. See docs/source.md#a-merged-task-reaches-mains-files."
-  {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
-  [db e]
-  (let [declared (first (d/datoms db :eavt e :seon.task/declared))]
-    (boolean
-      (if (= :merged (:v (first (d/datoms db :eavt e :seon.task/outcome))))
-        (some? declared)
-        (and (not (finished (:v (first (d/datoms db :eavt e :seon.task/outcome)))))
-             (not (#{:done :cancelled} (:v (first (d/datoms db :eavt e :seon.task/execution)))))
-             (or (nil? declared)
-                 (some (fn [a] (some #(> (:tx %) (:tx declared)) (d/datoms db :eavt e a))) (conj stated-attributes :seon.task/needs)))
-             (not (derived? db e)))))))
 
 (defn names-new-site?
   "Whether refine rid's work is done, read on db (its branch) against base (its merge base): the plan of the task it refines cites a

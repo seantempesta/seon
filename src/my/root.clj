@@ -219,7 +219,7 @@
       (seq not-lost) (assoc :not-lost not-lost)))))
 
 (defn sync-req
-  "What a reviewed sync of the tasks ids that differ from their files (seon.task/unsynced?) commits, read from db: a merged
+  "What a reviewed sync of the tasks ids that differ from their files (seon.problems/unsynced?) commits, read from db: a merged
   task's changed files (seon.problems/changed-paths) as db holds them now, and each task's file, read under tasks-dir (where root
   reads its tasks), with a merged task's entry removed and any other's written as db holds it (seon.task/declaration, through
   seon.source/task-file-text), as the :git effect's request for root's source dir: on jolt/sync-<the first task's name>, a new
@@ -228,7 +228,7 @@
   {:tasks :paths :req :not-unsynced}. See docs/source.md#a-merged-task-reaches-mains-files."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.task/id] :string] :map]}
   [db ids tasks-dir]
-  (let [ts (filterv #(some->> (pdb/eid db :seon.task/id %) (task/unsynced? db)) ids)
+  (let [ts (filterv #(some->> (pdb/eid db :seon.task/id %) (problems/unsynced? db)) ids)
         es (mapv #(pdb/eid db :seon.task/id %) ts)
         merged? #(= :merged (:seon.task/outcome (d/pull db [:seon.task/outcome] %)))
         paths (vec (sort (distinct (mapcat #(problems/changed-paths db %) (filter merged? es)))))

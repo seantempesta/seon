@@ -14,7 +14,7 @@
   the base its write-back edits, entry by entry, with rewrite-clj (v1's `schema-file-text`):
   every other byte as it was."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.program :as program] [seon.db :as pdb] [seon.reader :as reader] [seon.config :as config] [seon.task :as task] [jolt.scheme] [clojure.java.io] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.program :as program] [seon.db :as pdb] [seon.reader :as reader] [seon.config :as config] [jolt.scheme] [clojure.java.io] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set]
             [rewrite-clj.zip :as z] [rewrite-clj.node :as node] [rewrite-clj.parser :as parser] [jolt.analyzer] [jolt.host] [seon.edn :as sedn] [clojure.edn :as edn]))
 
 (defn read-forms
@@ -290,17 +290,12 @@
     [{:file/path path :file/text text :seon.script/says (str/join "\n" ls)
       :seon.script/usage (str/join "\n" (filter #(str/starts-with? % path) ls))}]))
 
-(defn- held-tx
-  "The facts of the file at path holding text: the file and its text, write-back's base (docs/source.md#a-program-file)."
-  {:malli/schema [:=> [:cat :string :string] :seon.db/tx-data]}
-  [path text] [{:file/path path :file/text text}])
-
 (defn held-text
   "The text the file at path holds on db: a file of one entry, as a db holds it (docs/source.md#a-program-file)."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]]}
   [db path] (:file/text (d/entity db [:file/path path])))
 
-(declare schema-resource-text config-text config-tx task-text)
+(declare schema-resource-text config-text config-tx)
 
 (def ^:private file-kinds
   "What a kind of file (seon.config/file-kind) differs by, as data: :tx, the facts of its text, and :text, its text as a db holds it. Nothing else in the import, the merge or the write-back
@@ -308,9 +303,7 @@
   {:schema {:tx #'schema-tx :text #'schema-resource-text}
    :config {:tx #'config-tx :text #'config-text}
    :script {:tx #'script-tx :text #'held-text}
-   :fixture {:tx #'fixture-tx :text #'held-text}
-   ;; a task file: its text held as a schema resource's is, each task main changed rewritten in place (task-text)
-   :task {:tx #'held-tx :text #'task-text}})
+   :fixture {:tx #'fixture-tx :text #'held-text}})
 
 (defn modes-tx
   "The facts of modes ({relative path git mode}, the files as the import read them), only where they differ from db. See docs/source.md#a-program-file."
@@ -894,21 +887,6 @@
                       (for [k (sort-by str (keys held)) :when (not (contains? now k))] [k nil]))]
     (if (seq edits) (schema-file-text base (vec edits)) base)))
 
-(defn task-text
-  "The task file at path as db holds it: its held text (\"[]\" for a new file) with each task of its namespace that differs from it
-  (seon.task/unsynced?) written in place by task-file-text: a merged one's entry removed, any other's declaration as main states it
-  (seon.task/declaration). So a merge that changed a task writes its file with the code it merged, and no one edits a task file by
-  hand. See docs/source.md#a-merged-task-reaches-mains-files."
-  {:malli/schema [:=> [:cat :seon.host/db :string] :string]}
-  [db path]
-  (let [nsym (symbol (str/replace (last (str/split path #"/")) #"\.edn$" ""))
-        base (or (held-text db path) "[]\n")
-        edits (into {} (for [[e] (d/q '[:find ?e :in $ ?n :where [?e :seon.task/ns ?n]] db nsym)
-                             :when (task/unsynced? db e)
-                             :let [t (d/entity db e)]]
-                         [(:seon.task/name t) (when-not (= :merged (:seon.task/outcome t)) (dissoc (task/declaration db e) :seon.task/ns))]))]
-    (if (seq edits) (task-file-text base edits) base)))
-
 (defn schema-resource-text
   "The schema resource at path as db holds it (entries-file-text)."
   {:malli/schema [:=> [:cat :seon.host/db :string] :string]}
@@ -956,8 +934,8 @@
 (defn changed-files
   "The files a merge's changes (seon.merge/three-way's :ours) touch, as db (after them) holds
   them: the file of each namespace whose forms they add, change or remove, the resource of
-  each schema entry they change, each script they change, the task file of each task they change, and the page of each doc they
-  change (its address's path, drawn by seon.doc/files); sorted relative paths."
+  each schema entry they change, each script they change, and the page of each doc they change (its address's path,
+  drawn by seon.doc/files); sorted relative paths."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/changes] [:vector :string]]}
   [db changes]
   (vec (sort (distinct (for [[[k x] [a b]] changes
@@ -965,8 +943,6 @@
                                        :form (ns-file db (:ns (or b a)))
                                        (:schema :config :script :fixture) (:file (or b a))
                                        :section (first (str/split x #"#" 2))
-                                       ;; a task's content: its owning namespace's task file
-                                       :task (str (config/value :seon.config.source/tasks-dir) "/" (first (str/split x #"/" 2)) ".edn")
                                        nil)]
                              :when p]
                          p)))))
