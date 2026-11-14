@@ -565,6 +565,28 @@
            (mapv (juxt :class (comp :seon.error/type :error) (comp :test :error) (comp :digest :error) (comp :reported :error)) problems))
         "the missing item is a problem naming it, its digest and what the answer did name")))
 
+;; docs/merging.md#verdicts-are-a-cache: a green and a red at one digest whose ticks are over ten times apart (AGENTS 3, the one
+;; factor) ran different work for one input: a fixture's world, a commit-less db, a namespace read whole (2026-11-14's three
+;; hidden reds), each a :platform problem with its evidence, filed by the run whose plan reads it, once a digest. Red before: the
+;; flaky verdict judged red and nothing was filed. Estimate: three short feeds ~0.3M.
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-green-and-a-red-ten-times-apart-at-one-digest-is-a-platform-problem
+  (let [flaky (fn [t g r] {:type :fail :flaky true :var (str "#'" t) :reused true :message "flaky"
+                           :seon.proofs/ticks {:green g :red r}})
+        plan {:items {} :selected ['app.x-test/t 'app.x-test/u 'app.x-test/v]
+              :digests {'app.x-test/t "d1" 'app.x-test/u "d2" 'app.x-test/v "d3"}
+              :reused-reports [(flaky 'app.x-test/t 1000000 30000000) (flaky 'app.x-test/u 1000000 9000000)
+                               {:type :fail :var "#'app.x-test/v" :reused true :message "1 is not 2"}]}
+        problems (fn [outs] (mapv (juxt :class (comp :seon.error/type :error) (comp :test :error) (comp :digest :error) (comp :ticks :error))
+                                  (filter #(= :problem (:op %)) outs)))
+        plan-of (fn [st rid t] (let [[st o] (feed st [(req rid :b t :a1)])
+                                     m (first (filter #(get-in % [:req :plan?]) o))]
+                                 (feed st [(answer-of m plan)])))
+        [st o1] (plan-of (proc0) 1 5)
+        [_ o2] (plan-of st 2 6)]
+    (is (= [[:platform :seon.proofs/ticks-apart 'app.x-test/t "d1" {:green 1000000 :red 30000000}]] (problems o1))
+        "30x apart is a problem naming the test, its digest and both ticks; 9x apart and a red alone are not")
+    (is (= [] (problems o2)) "the same digest read by the next run is not filed again")))
+
 (defn queue-of
   "Grant's argument at n: the service's state with n items queued for one batch asker and one free worker. See
   docs/merging.md#the-test-service."

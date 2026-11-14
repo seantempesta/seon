@@ -791,7 +791,7 @@
   "{digest result} of the verdicts cached for cand ({key digest}): two file checks a key, and a red's file read. A green is
   {:digest :pass 1 :fail 0 :error 0}; a red its status counted once, with its failures and, for a cost
   proof, the verdict it was judged by (:cost {:rows :verdict}); a digest cached both green and red is
-  flaky (seon.proofs/verdict), judged red (a green's file is not read: measured on one scripted turn, 2,258 reads of 41 KB each were the turn's largest per-test cost). A test's verdict is a function of its digest, so a red is
+  flaky (seon.proofs/verdict), judged red, with both runs' ticks (a green's file is read only there: measured on one scripted turn, 2,258 reads of 41 KB each were the turn's largest per-test cost). A test's verdict is a function of its digest, so a red is
   reused as a green is. Answers the first :seon.fx/io-error a file gives, never a partial answer. dir:
   the cache's (:seon.config.proofs/results-dir unless given)."
   {:malli/schema [:function [:=> [:cat [:map-of [:or :qualified-symbol :string] :string]] [:or [:map-of :string :map] :seon.error/base]]
@@ -803,14 +803,18 @@
                   ;; a green's file is its verdict (its content is never read: written once, whole, by write-verdicts!'s
                   ;; rename), so a test is one file check; only a red's content (its failures) is read
                   g (.exists (java.io.File. ^String gp))
-                  r (when (.exists (java.io.File. ^String rp)) (read-verdict rp))]
+                  r (when (.exists (java.io.File. ^String rp)) (read-verdict rp))
+                  ;; green and red at one digest (flaky, rare): the green's file is read too, for the ticks it spent (seon.proofs/flaky)
+                  gt (when (and g (map? r)) (let [v (read-verdict gp)] (if (contract/error? v) v (:ticks v))))]
               (when g (.setLastModified (java.io.File. ^String gp) (System/currentTimeMillis)))
               (when (map? r) (.setLastModified (java.io.File. ^String rp) (System/currentTimeMillis)))
               (cond (contract/error? r) (reduced r)
-                    :else (if-let [v (proofs/verdict dg (when g {:digest dg :pass 1 :fail 0 :error 0})
+                    (contract/error? gt) (reduced gt)
+                    :else (if-let [v (proofs/verdict dg (when g (cond-> {:digest dg :pass 1 :fail 0 :error 0} gt (assoc :ticks gt)))
                                                      (when r (cond-> {:digest dg :pass 0 :fail (if (= :fail (:status r)) 1 0) :error (if (= :error (:status r)) 1 0)
                                                                       :failures (vec (:failures r)) :writer (:writer r)}
-                                                               (:cost r) (assoc :cost (:cost r)))))]
+                                                               (:cost r) (assoc :cost (:cost r))
+                                                               (and g (:ticks r)) (assoc :ticks (:ticks r)))))]
                             (assoc acc dg v)
                             acc))))
           {} cand)))

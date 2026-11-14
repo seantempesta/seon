@@ -279,15 +279,17 @@
 
 (defn flaky
   "The result of a digest that judged both green and red: red (red's counts and failures), with
-  :flaky true and one more failure saying so. A test's verdict is a function of its digest, so
+  :flaky true and one more failure saying so, holding both runs' ticks when both were measured
+  (:seon.proofs/ticks, which seon.prove/ticks-apart reads). A test's verdict is a function of its digest, so
   one that differs is a defect at its cause (a clock, a race, an input the digest misses): it is
   judged red, never reused as green, and never run again until a change moves its digest."
-  {:malli/schema [:=> [:cat :string :map] :map]}
-  [dg red]
+  {:malli/schema [:=> [:cat :string :map :map] :map]}
+  [dg green red]
   (-> red
       (assoc :flaky true :digest dg)
       ;; first, so it leads the test's failures
-      (update :failures #(into [{:type :fail :flaky true :message (str "flaky: green and red at digest " dg " (seon.proofs/flaky)")}]
+      (update :failures #(into [(cond-> {:type :fail :flaky true :message (str "flaky: green and red at digest " dg " (seon.proofs/flaky)")}
+                                  (and (:ticks green) (:ticks red)) (assoc :seon.proofs/ticks {:green (:ticks green) :red (:ticks red)}))]
                                (remove :flaky) %))))
 
 (defn verdict
@@ -296,7 +298,7 @@
   [dg green red]
   (cond (:flaky red) red
         (:flaky green) green
-        (and green red) (flaky dg red)
+        (and green red) (flaky dg green red)
         :else (or green red)))
 
 (defn status-of

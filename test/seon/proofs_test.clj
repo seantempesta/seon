@@ -614,8 +614,8 @@
   ;; kept per digest the red was gone, and the green reused
   (with-dir
    (fn [dir]
-     (let [green {:test 'app.f-test/t :digest "d-flaky" :pass 1 :fail 0 :error 0}
-           red {:test 'app.f-test/t :digest "d-flaky" :pass 0 :fail 1 :error 0}
+     (let [green {:test 'app.f-test/t :digest "d-flaky" :pass 1 :fail 0 :error 0 :ticks 1000}
+           red {:test 'app.f-test/t :digest "d-flaky" :pass 0 :fail 1 :error 0 :ticks 30000}
            fails {'app.f-test/t [{:type :fail :message "1 is not 2"}]}
            cand {'app.f-test/t "d-flaky" 'app.f-test/g "d-green" 'app.f-test/r "d-red" 'app.f-test/n "d-none"}]
        (store! dir {'app.f-test/t green})
@@ -627,8 +627,9 @@
              f (found "d-flaky")]
          (is (:flaky f) "a digest that holds a green and a red is flaky")
          (is (not (proofs/green? f)) "judged red, never reused as green")
-         (is (= {:type :fail :flaky true :message "flaky: green and red at digest d-flaky (seon.proofs/flaky)"} (first (:failures f)))
-             "its failures lead with one saying so, then the red's own")
+         (is (= {:type :fail :flaky true :message "flaky: green and red at digest d-flaky (seon.proofs/flaky)"
+                 :seon.proofs/ticks {:green 1000 :red 30000}} (first (:failures f)))
+             "its failures lead with one saying so, with both runs' ticks (seon.prove/ticks-apart reads them), then the red's own")
          (is (= "1 is not 2" (:message (second (:failures f)))))
          (is (not (proofs/green? (found "d-red"))) "a red alone is reused red, with its failures")
          (is (= ['app.f-test/n] run) "only the digest with no result runs: the flaky and the red are reused, never run again")
