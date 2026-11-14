@@ -307,6 +307,9 @@
     (is (= 0 exit) log)
     (is (= :group-ended (get-in stopped [:drained :ended])) (str "the boot server's group was ended by the stop: " (pr-str stopped)))
     (is (true? (:graph stopped)) "every proc exited")
+    ;; task seon.lib/a-process-reports-the-most-processes-it-held-at-once: a root reports the most processes it held at once,
+    ;; read with no ps; one that forked no agent held itself and its boot fork server
+    (is (= 2 (:peak-processes stopped)) (str "the root's peak, on its ROOT STOPPED line: " (pr-str stopped)))
     ;; what the stop calls, named here so this test's digest takes it (a root's own code is the full run's otherwise)
     (is (= [:enum :group-ended :eof] (last (:malli/schema (meta #'seon.fork-server/release!)))) "release! answers how the server ended")))
 

@@ -806,14 +806,19 @@
     (case (:ev m)
       :forked (do (step/out! o :events (step/event {:type :spawned :agent (:agent m) :pid (:pid m) :fork-ms (:fork-ms m)}))
                   (when (stopped-statuses (get-in st [:view :agents (:agent m) :status])) (lib/kill! (:pid m) 9))
-                  (-> st (set-agent o (:agent m) {:pid (:pid m)})
+                  ;; the most processes this root held at once: itself, its boot fork server and its live agents (a fold of
+                  ;; their forks and exits, read with no ps), said on its stop (task seon.lib/a-process-reports-the-most-processes-it-held-at-once)
+                  (-> st (update ::live (fnil conj #{}) (:pid m))
+                      (as-> st (update st ::peak (fnil max 2) (+ 2 (count (::live st)))))
+                      (set-agent o (:agent m) {:pid (:pid m)})
                       (view! update-in [:fork-server :agents-forked] (fnil inc 0))
                       (view! update-in [:stats :fork-ms] lib/push-window (:fork-ms m) 500)
                       (to-agent o (:agent m) {:op :forked :pid (:pid m)})))
       ;; the agent the exit is of: the death waiting on its pid, a live agent with it, or the last
       ;; one to end with it and no exit yet (stopped: none waits); never an entry whose exit is
       ;; recorded, whose pid the OS has given again
-      :exit (let [mine (filter (fn [[_ a]] (= (:pid m) (:pid a))) (get-in st [:view :agents]))
+      :exit (let [st (update st ::live disj (:pid m))
+                  mine (filter (fn [[_ a]] (= (:pid m) (:pid a))) (get-in st [:view :agents]))
                   st (if-let [aid (or (first (get-in st [::dying (:pid m)]))
                                       (some (fn [[aid]] (when (get-in st [:agents aid]) aid)) mine)
                                       (some->> (remove (fn [[_ a]] (:exit a)) mine) seq (apply max-key (fn [[_ a]] (:ended-ms a 0))) key))]
@@ -893,7 +898,7 @@
                                     (update-in [:stats :batched-tx] (fnil + 0) (:n-tx m)))))
       ;; the end of the flow: the writer has drained; the fork server goes last
       :drained (do (step/out! o :to-fs {:op :shutdown}) st)
-      :fs-down (do (some-> (:shutdown-p st) (deliver {:drained true :fork-server (:pid m) :ended (:ended m)})) st)
+      :fs-down (do (some-> (:shutdown-p st) (deliver {:drained true :fork-server (:pid m) :ended (:ended m) :peak-processes (::peak st 2)})) st)
       ;; a defect in a root proc: recorded as data (its error map when it carries one), and
       ;; the message the step took answered with it (Flow's catch dropped the step's outputs):
       ;; the api's own throw answers every message its step took (::lost)
@@ -2386,7 +2391,8 @@
   First the end is a fact on main, durable (:seon.system/stopped {:boot :cause :at-ms}; cause
   :stop! unless the caller names it: :stdin-eof, :signal), so every clean end says why; a
   refused stop fact still stops root, and the answer carries it (:stop-fact-refused).
-  Answers {:stopped true :cause :drained .. :graph true|{::flow/running #{pids}} :ms}."
+  Answers {:stopped true :cause :drained .. :graph true|{::flow/running #{pids}} :ms :peak-processes}, the last the most processes
+  the root held at once (itself, its boot fork server, its live agents)."
   {:malli/schema [:function [:=> [:cat :seon.system/sys] :map] [:=> [:cat :seon.system/sys :keyword] :map]]}
   ([sys] (stop! sys :stop!))
   ([sys cause]
@@ -2409,5 +2415,6 @@
       ;; the store is released and kept, whoever gave its path
       (d/release (:conn sys))
       (when (= :lmdb (:backend (:store (:cfg sys)))) (klmdb/close-env! (:store-path sys)))
-      (cond-> {:stopped true :cause cause :drained drained :graph graph :agents-left 0 :ms (lib/r2 (profile/ms-since t0))}
+      (cond-> {:stopped true :cause cause :drained drained :graph graph :agents-left 0 :ms (lib/r2 (profile/ms-since t0))
+               :peak-processes (:peak-processes drained)}
         (contract/error? fact) (assoc :stop-fact-refused fact))))))
