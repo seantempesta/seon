@@ -664,7 +664,7 @@
 ;; was never sampled, since the samples came from the first ps's tree alone (deps, 2026-11-14: 21833 in a 300 s overrun, an
 ;; empty dump). The member is made deterministic, never raced: the leader reads a close-on-exec pipe to its end, which ends only
 ;; once its grandchild has exec'd under the name bin/evidence reads. Estimate: four shell calls in process, ~1M ticks.
-(deftest ^{:seon.test/estimate {:ticks 3000000}} bin-evidence-samples-every-process-it-signals
+(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["zsh" "bin/evidence" "kill"]} bin-evidence-samples-every-process-it-signals
   (let [dir (str (System/getProperty "java.io.tmpdir") "/evidence-" (random-uuid))
         ;; the leader is disowned (zsh waits on none of it) and says its pid on a fifo once its member has exec'd
         leader (str/trim (:out (clojure.java.shell/sh

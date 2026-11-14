@@ -80,9 +80,8 @@
 ;; batch-of deals a queue over). No clock: an item passed over is aged in skips.
 
 (defn- item-class
-  "What an item's processes are measured by, its :seon.fx/class at the :process owner: its kind, a process test or not, on the
-  binary or not. A plain test's batch is its test child alone, declared as one process (:seon.fx/processes); every other class
-  runs alone at the owner until its peak is read (seon.fx/admits?)."
+  "An item's :seon.fx/class at the :process owner, what its processes are measured by: its kind, a process test or not, on the
+  binary or not. See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat [:maybe :map]] :any]}
   [it] [(:kind it :test) (boolean (:process? it)) (boolean (:binary? it))])
 
