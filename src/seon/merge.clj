@@ -62,7 +62,7 @@
 
 (defn- derived?
   "Whether attribute a, or the entity schema it belongs to, is marked {:seon.db/derived true}: a cache each branch computes from other
-  facts (an embedding, a cite, what a task file last stated), never merged. See docs/merging.md#a-branch-merges-main-in."
+  facts (an embedding, what a task file last stated), never merged. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :keyword] :boolean]}
   [a] (boolean (or (:seon.db/derived (contract/properties a))
                    (some-> (get-in (pdb/index) [:entity-schemas a]) contract/properties :seon.db/derived))))
