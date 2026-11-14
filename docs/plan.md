@@ -111,6 +111,11 @@ this path, and is deleted when the path carries a week of landings.
    native code, `deps.edn`), once, through root's online takeover (deps, runtime).
 6. Agents self-merge with `seon_done`; `bin/land` is deleted.
 
+The goal is boring, continuous integration (owner: "make merging boring so it happens more and agents are just always
+integrating with main"): every turn syncs main down (cost O(d)); every green, conflict-free change merges up at once,
+never batched; a code change loads live. The test is each branch's drift from main (time and changes since its last
+sync), shown on the dashboard: drift is a problem, not a merge-time surprise.
+
 ### The order
 
 1. **Stage 0's merge.** "Main's reds" were on the agent's branch: merging main into it lost main's task lifecycle datoms
