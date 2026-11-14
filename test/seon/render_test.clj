@@ -2084,6 +2084,19 @@
     (is (not (re-find #"\[ \]" h)) "nothing open when the reasons are none, a stale section included")
     (is (str/includes? h "Every box is checked") (str "and it says so: " h))))
 
+(deftest ^{:seon.test/estimate {:ticks 1000000}} an-unmerged-entrys-form-is-one-resolve-takes
+  ;; docs/render.md#how-the-work-stands: the form the page offers for an unmerged entry runs as written. A var's entry is settled by
+  ;; its name (my.branch/resolve!'s contract); context's first-task merge, 11-14, got '[:var seon.repl/wrap-instrument] from the page
+  ;; and a contract error from resolve!. Any other program key (a task's) is settled by the key itself
+  (let [h (h/html (ui/status-hiccup {} {:unmerged [{:key '[:var app.m/f] :ours "(defn f [] 1)" :theirs "(defn f [] 2)"}
+                                                   {:key [:task "app/t"] :ours {:seon.task/plan "a"} :theirs {:seon.task/plan "b"}}]}))]
+    (is (str/includes? h "(my.branch/resolve! 'app.m/f)") (str "a var's, by its name: " h))
+    (is (str/includes? h "(my.branch/resolve! 'app.m/f :theirs)") "both sides")
+    (is (not (str/includes? h "'[:var")) "never its key")
+    (is (some #{"(my.branch/resolve! '[:task \"app/t\"])"}
+              (tree-seq coll? seq (ui/status-hiccup {} {:unmerged [{:key [:task "app/t"] :ours {:seon.task/plan "a"} :theirs {:seon.task/plan "b"}}]})))
+        "a task's, by its key, as the code it runs")))
+
 (deftest the-models-page-holds-the-plan-whole
   ;; the blind agent's plan was cut "+86 chars" at a part's budget: the task itself took an eval to read
   (let [[_ branch _] (paged-dbs)

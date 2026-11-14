@@ -98,6 +98,35 @@
   (let [tx (restart-tx @(:conn sys) ids)]
     (if (seq tx) @(root/transact-main! sys tx) {:ok true :changed 0})))
 
+(defn turns-of
+  "The turns ledger, read from the store: one row per task an agent worked, as a pull answers it (its id, kind, execution and
+  outcome; :seon.task/merged-t once it merged, else the done rule's :seon.task/reasons), its runs under :seon.agent/_task in the
+  order they started, each its agent's key and :seon.agent/turn: the agent's highest :seon.model-call/n on its own branch, where
+  its turn loop writes it. db is main; branch-db answers a branch's db, read once a branch. A run with no model call (an outside
+  agent's) is no run. See docs/plan.md#the-goal."
+  {:malli/schema [:=> [:cat :seon.host/db ifn?] [:vector :map]]}
+  [db branch-db]
+  (let [agents (d/q '[:find ?a ?k ?br ?t :where [?a :seon.agent/task ?t] [?a :seon.agent/key ?k] [?a :seon.agent/branch ?br]] db)
+        ;; each branch read once: every agent's highest call number on it, the highest across branches (a branch cut from main
+        ;; holds the calls main merged of an earlier agent too)
+        turns (apply merge-with max {}
+                     (for [br (distinct (map #(nth % 2) agents))
+                           :let [bdb (branch-db br)]
+                           :when bdb]
+                       (into {} (d/q '[:find ?k (max ?n) :where [?a :seon.agent/key ?k] [?c :seon.model-call/agent ?a] [?c :seon.model-call/n ?n]] bdb))))
+        runs (group-by #(nth % 3) (for [[a k _ t] agents :let [n (get turns k)] :when n] [a k n t]))]
+    (vec (sort-by :seon.task/id
+                  (for [[t rs] runs]
+                    (assoc (d/pull db [:seon.task/id :seon.task/kind :seon.task/execution :seon.task/outcome :seon.task/merged-t :seon.task/reasons] t)
+                           :seon.agent/_task (vec (for [[a k n] (sort-by #(:seon.agent/started-ms (d/entity db (first %))) rs)]
+                                                    {:seon.agent/key k :seon.agent/turn n}))))))))
+
+(defn turns
+  "The turns ledger of root's system (`turns-of` on main, each agent's branch read by the writer). See docs/plan.md#the-goal."
+  {:malli/schema [:=> [:cat :seon.system/sys] [:vector :map]]}
+  [sys]
+  (turns-of @(:conn sys) #(:db @(root/branch-db sys %))))
+
 (defn take-back-tx
   "The write that takes the running tasks among ids back from their runs on db: each is held by
   compare-and-swap from :running (a cancel! or a hold between the read and the write refuses the write),
@@ -204,7 +233,7 @@
         entries (into {} (for [[nsym names] (group-by #(:seon.task/ns (d/pull db [:seon.task/ns] %)) es)]
                            [(str (config/value :seon.config.source/tasks-dir) "/" nsym ".edn")
                             (source/task-file-text (slurp (io/file tasks-dir (str nsym ".edn")))
-                                                   (set (map #(:seon.task/name (d/pull db [:seon.task/name] %)) names)))]))
+                                                   (zipmap (map #(:seon.task/name (d/pull db [:seon.task/name] %)) names) (repeat nil)))]))
         files (merge (doc/files db paths) entries)]
     {:tasks ts :paths paths
      :not-unsynced (vec (for [id ids :when (not-any? #{id} ts)]

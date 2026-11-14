@@ -869,11 +869,29 @@
   ;; comments before it), the file's first with the whitespace after it; every other byte, a namespaced map's too, is kept
   (let [text "[#:seon.task{:name \"a\",\n             :plan \"one\"}\n ;; b is next\n {:seon.task/name \"b\" :seon.task/plan \"two\" :seon.task/proofs #{x/y}}\n {:seon.task/name \"c\" :seon.task/plan \"three\"}]\n"]
     (is (= "[;; b is next\n {:seon.task/name \"b\" :seon.task/plan \"two\" :seon.task/proofs #{x/y}}\n {:seon.task/name \"c\" :seon.task/plan \"three\"}]\n"
-           (source/task-file-text text #{"a"})))
+           (source/task-file-text text {"a" nil})))
     (is (= "[#:seon.task{:name \"a\",\n             :plan \"one\"}\n {:seon.task/name \"c\" :seon.task/plan \"three\"}]\n"
-           (source/task-file-text text #{"b"})) "with the comment that leads it")
-    (is (= "[]\n" (source/task-file-text text #{"a" "b" "c"})) "every entry gone")
-    (is (= text (source/task-file-text text #{"z"})) "a name no entry has changes nothing")))
+           (source/task-file-text text {"b" nil})) "with the comment that leads it")
+    (is (= "[]\n" (source/task-file-text text {"a" nil "b" nil "c" nil})) "every entry gone")
+    (is (= text (source/task-file-text text {"z" nil})) "a name no entry has changes nothing")))
+
+;; Estimate: 4 task-file-text of a 3-entry text, a rewrite-clj parse and a few member edits each, ~80k = 400000 ticks
+(deftest ^{:seon.test/estimate {:ticks 400000}} a-task-files-entry-is-rewritten-in-place
+  ;; docs/source.md#a-merged-task-reaches-mains-files: a task the store states differently from its file reaches the file as the
+  ;; members that differ, each in its old place and layout; a member it no longer states goes; a task the file lacks is appended in
+  ;; the files' layout. Every other node (entries, comments, a namespaced map) is byte-identical, so a review reads only what moved
+  (let [text "[#:seon.task{:name \"a\",\n             :plan \"one\"}\n ;; b is next\n {:seon.task/name \"b\"\n  :seon.task/plan \"two\"\n  :seon.task/kind :work\n  :seon.task/proofs #{x/y}}\n {:seon.task/name \"c\" :seon.task/plan \"three\"}]\n"
+        b {:seon.task/name "b" :seon.task/plan "two, better" :seon.task/kind :work :seon.task/proofs '#{x/y}}
+        read #(clojure.edn/read-string {:default tagged-literal} %)]
+    (is (= (str/replace text "\"two\"" "\"two, better\"") (source/task-file-text text {"b" b}))
+        "the plan replaced in its place; every other byte kept, the comment and the namespaced entry too")
+    (is (= (str/replace text "\n  :seon.task/kind :work" "") (source/task-file-text text {"b" (dissoc (second (read text)) :seon.task/kind) "zzz" nil}))
+        "a member no longer stated goes with its line, the rest of the entry as it was; a nil for a name no entry has changes nothing")
+    (let [out (source/task-file-text text {"d" {:seon.task/name "d" :seon.task/plan "four" :seon.task/kind :work :seon.task/proofs '#{x/z}}})]
+      (is (= ["a" "b" "c" "d"] (mapv :seon.task/name (read out))) "a task the file lacks is appended")
+      (is (str/starts-with? out (subs text 0 (- (count text) 2))) "after every byte that was there")
+      (is (str/includes? out "\n {:seon.task/name \"d\"\n  :seon.task/plan \"four\"\n  :seon.task/kind :work\n  :seon.task/proofs #{x/z}}]") (str "in the files' layout, a member a line: " (pr-str out))))
+    (is (= text (source/task-file-text text {"b" (second (read text)) "a" (first (read text))})) "an entry stated as it is changes nothing")))
 
 ;; Estimate: import of seon.facts.edn (~300 entries x 4 datoms x 5k) 6M + all 34 schema files imported and written back ~25M + 3 edits x (db-with + 91 KB file rewrite) 9M = 40000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-changed-schema-entry-rewrites-only-itself
