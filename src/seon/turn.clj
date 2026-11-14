@@ -275,12 +275,8 @@
     [id (cond-> (assoc (basis! task n max-turns :model merge?) :agent k) model-name (assoc :model model-name))]))
 
 (defn- model-request!
-  "Turn n's model call made ready and never sent (docs/flow.md#the-step-fn-contract-every-proc-follows: a call out is an
-  output): the agent's turn number moves (docs/turn.md#the-turn-is-a-number), its basis is recorded, and the request is drawn
-  from the agent's context (its walk's model output read by seon.ctx.wire/request, each turn's page message among it).
-  st is the run's state, t the task as the turn observed it. Answers the call: :request, what root's :model owner is asked
-  (my.fx :model, session FX1: it admits, performs and answers it, and the API key never enters this process), with :id
-  and :t1, when it was ready. See docs/turn.md#act."
+  "Turn n's model call made ready, never sent: the agent's turn number moved, its basis recorded and the request drawn from
+  its walk. Answers {:id :t1 :request}, the request what root's :model owner is asked. See docs/turn.md#act."
   {:malli/schema [:=> [:cat :map :map [:maybe :string]] [:map [:id :string] [:request :map] [:t1 :int]]]}
   [{:keys [turn max-turns merge?]} t model-name]
   (let [;; the turn this is: the agent's number, one past the one in force, which the messages taken now and every record
@@ -501,10 +497,8 @@
 ;; counts :threw and :thrown and the :error a turn's error left, and :pending, what the step that asked left for its answer.
 
 (defn- threw
-  "A turn of run state st that threw e (root's interrupt, a ThreadDeath, passes: it ends the work, never a turn's error): the
-  agent's to read (turn-error!), counted against the cap, which the next turn checks. The second in a row with no model turn
-  between ends the work with that error; called?, the turn's model call answered before it threw, makes it the agent's turn,
-  so the count starts again. See docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map."
+  "A turn of run state st that threw e, as the agent's to read: [::next st'] counted against the cap, or [::end ...] at the second throw
+  in a row (called?: the turn's model call answered first, so the count starts again). See docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map."
   {:malli/schema [:=> [:cat :map :any :boolean] [:vector :any]]}
   [st e called?]
   (let [st' (cond-> (-> (turn-error! st (cond-> (agent/error-map e 'seon.turn/work!) (err/thrown-in e) (assoc :seon.error/in (err/thrown-in e))))
@@ -515,11 +509,9 @@
       [::next st'])))
 
 (defn- next-of
-  "What follows a turn of run state st whose model call was acted on (act!'s answer, st'). A model call's typed error that a next
-  turn can change (its reasoning spent the budget, the provider refused, was rate-limited or unreachable) is a turn's error the
-  next turn reads, as a throw is: the agent can reason less, or the provider can answer next time; two in a row with no answered
-  call between end the work, as two throws do. One no turn can change (no provider, no script, a script's invalid reply: the
-  config's) ends the work at once, naming it. See docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error."
+  "What follows a turn of run state st whose model call was acted on (act!'s answer st'): [::next st'] or [::end ...]. A failure a
+  next turn can change (:seon.model/retryable) is read at the next turn, two in a row end the work; any other ends it at once. See
+  docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map."
   {:malli/schema [:=> [:cat :map :map] [:vector :any]]}
   [st st']
   (cond (and (contract/valid? :seon.model/failure st') (turn-can-change (:seon.error/type st')))
@@ -575,14 +567,9 @@
       :else (ask st))))
 
 (defn turn-begin
-  "A turn of run state st begins: main merged in when it moved since the last turn, so the agent works on main's program and wiki
-  as they are and a conflict is an unmerged entry it sees and resolves before it can merge (the owner, 2026-10-30: \"updates as
-  often as we can\"); its proofs observed (observe) and how the work stands read (status-now). A clear status asks its verdict,
-  [st' {:prove request}] (seon.agent/judge!'s names and reach?), answered to turn-verdict; else the end checks, and the model call
-  made ready and never sent, [st' {:model request}] (root's :model owner's request), answered to turn-end; or [::end st outcome
-  reason error], or [::next st]. Each step runs Seon's code with the program on the agent's branch, Seon's own code included,
-  which the agent may change (a registered :seon.ref/block re-armed seon.ref/scan's contract, which the request's own scan then
-  broke), so a throw is the agent's to read, as data, and the run goes on (threw). See docs/flow.md#the-step-fn-contract-every-proc-follows."
+  "A turn of run state st begun: main merged in when it moved (behind on its program, the run ends :refork), its proofs observed
+  and its status read. Answers [st' {:prove ..}] for a clear status, else the end checks' [::end ...] or [::next st], or the model call
+  made ready, [st' {:model request}]. A throw is the agent's to read (threw). See docs/flow.md#the-step-fn-contract-every-proc-follows."
   {:malli/schema [:=> [:cat :map] [:or [:tuple [:= ::next] :map] [:tuple [:= ::end] :map :seon.agent/outcome [:maybe :string] [:maybe :map]]
                       [:tuple :map [:map [:prove {:optional true} [:map [:names [:set :symbol]] [:reach? :boolean]]] [:model {:optional true} :map]]]]]}
   [st]
@@ -629,9 +616,7 @@
          (catch Exception e (threw st e (not (identical? asked (:requests @agent/state))))))))
 
 (defn start!
-  "A run of task `task` begun (the model `model` when set, else root's; max-turns agent-wide: its :seon.agent/turn against its
-  budget, which root passes from the agent's own on main): the turn state begun, main merged into the branch
-  (my.branch/merge-main!) and the main and merge base it heard recorded. Answers the run's state before its first turn, which
+  "A run of task `task` begun: its turn state set, main merged in and the main it heard recorded. Answers the run's state, which
   turn-begin takes. See docs/turn.md#work-from-release-to-judge."
   {:malli/schema [:=> [:cat [:map [:task :seon.task/id] [:model {:optional true} :string] [:max-turns pos-int?]]] :map]}
   [{:keys [task model max-turns]}]

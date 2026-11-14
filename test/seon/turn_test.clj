@@ -56,7 +56,7 @@
 ;; Estimate: in-agent's own setup and teardown (~1.5M: the task file, attach, kill and its branches' deletes) + 1 ask of the test's own
 ;; at ~0.25M (an eval's recorded answer decoded); the turn's observe, status and draw run in the agent's process, not this one = 2000000;
 ;; bytes: the answer's decode and the harness's maps, ~2 MB; seconds: the agent's attach and its eval round trip, ~2 s of waiting
-(deftest ^{:seon.test/estimate {:ticks 2000000 :bytes 2000000 :asks 1}} a-turn-sends-its-model-call-and-returns
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :bytes 2000000 :asks 1}} a-turn-sends-its-model-call-and-returns
   ;; task seon.turn/a-turn-is-a-flow-step (docs/flow.md#the-step-fn-contract-every-proc-follows: a call out is an output, its answer a
   ;; message): turn-begin, on a run whose status asks the model (a task with no proofs: its reason :no-proofs), answers the model call's
   ;; request as its output and returns. The call is opened and its request drawn (its sent hash written), and nothing is sent: no
