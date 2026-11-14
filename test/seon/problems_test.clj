@@ -847,7 +847,8 @@
         page "# Forks\n\n## Jolt\n\n`reference-code/jolt` pinned at `4342b73c`, the tip of ``jolt/x``.\n\n## Chez\n\n`reference-code/chez` pinned at `80e4b9f`.\n"
         db (d/db-with db0 (seon.doc/load-tx db0 "docs" {"docs/forks.md" page}))
         pinned (fn [pins] (mapv (juxt :path :stated :recorded)
-                                (get-in (problems/health (cond-> db pins (d/db-with [{:seon.system/id :root :seon.system/source {:root "/c" :files 1 :forms 1 :ms 1 :pins pins}}])))
+                                ;; the branch's pins are its :seon.pin entities, as the import writes them (seon.source/pins-tx)
+                                (get-in (problems/health (cond-> db pins (d/db-with (seon.source/pins-tx db pins))))
                                         [:classes :stale-pin :rows])))]
     (is (= [] (pinned nil)) "no import recorded: unknown, not a mismatch")
     (is (= [] (pinned {"reference-code/jolt" "4342b73cdeadbeef" "reference-code/chez" "80e4b9f0"})))
