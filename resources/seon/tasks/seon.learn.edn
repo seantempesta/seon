@@ -7,4 +7,8 @@
  {:seon.task/name "turns-to-green-report"
   :seon.task/plan "The owner's key number: turns to a good solution, from all runs (AGENTS §1). What exists: :seon.agent/turn, :seon.model-call/tokens, cache-hit-tokens and cache-miss-tokens, and :seon.task/waste are recorded; `seon.learn` has `seon.learn/waste` and `seon.learn/summary` only, and nothing reports turns to green. v1: `seon.mine` and ``my.root/turns-report`` (median and p90 per step, model and commit; ~/src/seon/src/seon/mine.clj). Correct: a new ``seon.learn/report``, one query: median and p90 turns to green per template (step), per model and per main commit; tokens and cost per green; cache-hit share; the top waste rules. It renders on its schema on the dashboard and in root's context (`:seon.render/root-context`, rendered by `seon.render.ui/root-context`)."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.learn-test/report-quantiles-match-recorded-runs}}]
+  :seon.task/proofs #{seon.learn-test/report-quantiles-match-recorded-runs}}
+ {:seon.task/name "a-runs-waste-is-folded-once"
+  :seon.task/plan "Found by context's duplication audit, 2026-11-14 (the owner: no duplicated effort; plan item 7), both ends read [M]. An ended run's waste is folded from its evals three ways with three 'shown' sets: seon.turn/end! (its task's own proofs and cites, stored as :seon.agent/waste), seon.learn/run (passes {}, so nothing counts as re-read), and seon.ctx.status (cites, with the needs' proofs from pulled-accumulated). The refine agent and my.root/run-losses read a summary that differs from the stored one. Change: one function answers the shown set of a task on a db, read by all three; learn/run and run-losses read the stored summary when the run ended. Deletes: the {} fold and the second shown builder. Proof: learn/run of an ended run equals its stored :seon.agent/waste."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.learn-test/a-runs-waste-is-folded-once}}]
