@@ -158,6 +158,6 @@ Proofs: the check's test above; a cost proof that a write's check costs its touc
   :seon.task/kind :work
   :seon.task/proofs #{seon.db-test/a-store-opens-with-no-rename-table}}
  {:seon.task/name "an-eval-responses-parts-are-its-schemas-keys"
-  :seon.task/plan "seon.db's result-parts and response-rank (src/seon/db.clj:474,478) list an eval response's keys and their order by hand. Derive both from the :seon.result/* entity schema's keys in declared order, and delete the two defs. Root approved, 2026-11-14 (data's hand-made-lists inventory)."
+  :seon.task/plan "`seon.db/result-parts` and `seon.db/response-rank` (src/seon/db.clj:474,478) list an eval response's keys and their order by hand. Derive both from the :seon.result/* entity schema's keys in declared order, and delete the two defs. Root approved, 2026-11-14 (data's hand-made-lists inventory)."
   :seon.task/kind :work
   :seon.task/proofs #{seon.db-test/an-eval-responses-parts-are-its-schemas-keys}}]

@@ -48,6 +48,6 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.task-test/an-end-retracts-every-attribute-its-schema-marks}}
  {:seon.task/name "agent-and-declaration-attributes-are-read-from-their-schemas"
-  :seon.task/plan "seon.task's agent-attrs and process-attrs (src/seon/task.clj:364,368: root's view key to attribute) and stated-attributes (:712, the task attributes a declaration states) are hand-kept. Derive agent-attrs and process-attrs from the :seon.agent and process entity schemas' keys (each key's name is root's member), and stated-attributes from the declaration schema's keys; delete the defs. Root approved, 2026-11-14 (data's hand-made-lists inventory)."
+  :seon.task/plan "`seon.task/agent-attrs` and `seon.task/process-attrs` (src/seon/task.clj:364,368: root's view key to attribute) and `seon.task/stated-attributes` (:712, the task attributes a declaration states) are hand-kept. Derive agent-attrs and process-attrs from the :seon.agent and process entity schemas' keys (each key's name is root's member), and stated-attributes from the declaration schema's keys; delete the defs. Root approved, 2026-11-14 (data's hand-made-lists inventory)."
   :seon.task/kind :work
   :seon.task/proofs #{seon.task-test/a-declaration-states-its-schemas-attributes}}]

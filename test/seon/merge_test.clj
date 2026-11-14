@@ -252,7 +252,8 @@
     (is (empty? (:theirs (tw (base) observed))))
     (is (seq (:theirs (tw (base) (with (base) (var-tx "f" "(dec x)"))))))))
 
-(deftest platform-records-merge-as-facts
+;; Estimate: the world 0.5M (cached) + 2 small dbs + 3 programs of :all, each a read of every data attribute's datoms (a few thousand) ~2M = 10000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} platform-records-merge-as-facts
   ;; owner, 2026-11-14: "If there are no conflicts I don't see any reason to not merge everything": root's records on main
   ;; (boot, quiescence, recorded errors) are facts a branch takes by their [:datum e a] keys, as any data; a task's content is its key
   (let [rooted (with (base) [{:seon.system/id :root :seon.system/quiescent {:t 9 :root-causes []}}])
