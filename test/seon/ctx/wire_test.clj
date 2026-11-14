@@ -766,7 +766,7 @@
       (let [sent (loop [n 0 out []]
                    (if (= n 3)
                      out
-                     ;; as a turn goes (seon.turn/act!): the turn, its basis commit holding it, its provider
+                     ;; as a turn goes (seon.turn/model-request!): the turn, its basis commit holding it, its provider
                      ;; there, its model call, its request drawn on the db after them; then its call's eval
                      (let [_ (d/transact conn (ts/turn-tx "a1" (inc n) {}))
                            b {:commit (d/commit-id @conn) :task "demo/g" :turn (inc n) :max-turns 9
