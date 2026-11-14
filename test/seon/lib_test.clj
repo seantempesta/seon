@@ -197,7 +197,7 @@
         (is (not-any? held [r xr xw kr]) (str "and none of its parent's other descriptors: held " (pr-str held))))
       (finally (run! lib/c-close [r xr xw kr kw])))))
 
-(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["sh"]} a-shell-call-answers-its-output-or-says-why-not
+(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["sh"]} a-shell-call-that-cannot-read-its-output-is-a-typed-error-naming-the-command
   ;; a shell call answers its whole output, or a typed error naming the command, never an empty answer; the read failure is
   ;; raised as Jolt's pipe port raises it since a5a3a89d (a Scheme error naming the errno). See docs/failure-points.md
   (is (= {:exit 0 :out "late\n" :err ""} (lib/sh "sh" "-c" "sleep 0.05; echo late")) "a child that writes after a wait answers its text")
