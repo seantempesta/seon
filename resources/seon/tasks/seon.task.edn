@@ -46,4 +46,9 @@
  {:seon.task/name "agent-and-declaration-attributes-are-read-from-their-schemas"
   :seon.task/plan "`seon.task/agent-attrs` and `seon.task/process-attrs` (src/seon/task.clj:364,368: root's view key to attribute) and `seon.task/stated-attributes` (:712, the task attributes a declaration states) are hand-kept. Derive agent-attrs and process-attrs from the :seon.agent and process entity schemas' keys (each key's name is root's member), and stated-attributes from the declaration schema's keys; delete the defs. Root approved, 2026-11-14 (data's hand-made-lists inventory)."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.task-test/a-declaration-states-its-schemas-attributes}}]
+  :seon.task/proofs #{seon.task-test/a-declaration-states-its-schemas-attributes}}
+ {:seon.task/name "a-cite-is-a-reaction-recomputed-after-a-merge"
+  :seon.task/plan "Root, 2026-11-14, under the owner's store-or-derive rule: a task's cites (seon.cite/cite-fact) are derived from its plan's text, so they are a reaction over the store, recomputed on the receiving side after a merge, and carry {:seon.db/derived true} (seon.merge/derived?), never merged. Today they merge as facts: marking them derived without a recomputation broke every e2e merge task (a refine arrived citing nothing, open-problem :uncited-task; data's ownership landing, 30c3d26f03). Build on the reaction core: the cite reader (seon.task/task-cites' derivation) is a reaction whose key set reads the plan, so a merge that moves a plan re-derives its cites; then the property goes on cite-fact. Proof, red first: a merge that brings a task with a plan citing a var leaves its cites on the receiving branch without any cite datom crossing."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.merge-test/a-merged-tasks-cites-are-derived-where-it-lands}
+  :seon.task/needs #{"seon.db/a-commits-datoms-rerun-the-readers-of-what-they-moved"}}]
