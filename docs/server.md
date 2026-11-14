@@ -2,7 +2,7 @@
 
 Root's server is one socket on 127.0.0.1 where outside agents (a Claude session through MCP, a person with `nc`) send requests, one per line, and read one answer per line: `seon.server`.
 
-A line opening `{"` is MCP's JSON-RPC; any other is an EDN request `{:op k ...}` (```seon.server/respond```). Both reach the same table of ops. The server is an outside caller of root's functions ([root](root.md#roots-functions)). ```seon.server/serve!``` listens on `:seon.config.root/server-port` (`bin/ports` gives each checkout its own; 0 serves none), its accept loop and connections on edge threads ([failure points](failure-points.md)). ```seon.main/root-serve``` is what `bin/system run` starts.
+A line opening `{"` is MCP's JSON-RPC; any other is an EDN request `{:op k ...}` (```seon.server/respond```). Both reach the same table of ops. The server is an outside caller of root's functions ([root](root.md#roots-functions)). ```seon.server/serve!``` listens on `:seon.config.root/server-port` (`bin/ports` gives each checkout its own; 0 serves none), its accept loop and each connection fibers parked on their sockets, at most `:seon.config.root/server-connections` open, and each op run on a `:server-op` effect worker (```seon.server/perform-op```), so an op that blocks holds its worker, never a carrier or another connection ([failure points](failure-points.md)). ```seon.main/root-serve``` is what `bin/system run` starts.
 
 ## Ops
 

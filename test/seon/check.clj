@@ -470,8 +470,7 @@
   readers (Flow's error channel, the fork server's socket) and, while the web proc listens,
   the web server's acceptor and sweeper (ring-chez-adapter's, each a future, which runs on Jolt's
   solo pool as clojure-agent-send-off-pool-N, the JVM's name; task seon.web/web-server-threads-are-joined-at-stop), and, for a
-  sys that serves (:server, run-check's), the server's acceptor (seon.server/serve!: a connection's thread lives while it is
-  open). The embedding model's threads are the
+  sys that serves (:server, run-check's), nothing more: its accept and connections are fibers (seon.server/serve!). The embedding model's threads are the
   helper's process's, none root's (docs/vector.md#the-model)."
   ([] {:roster {"main" 1 "jolt-shutdown" 1 "jolt-timer" 1 "jolt-io-poller" 1 "jolt-asleep" 1 "jolt-carrier" (fiber-carriers)}
        :gc-sweepers (seon.config/value :seon.config.root/gc-sweepers)
@@ -485,7 +484,8 @@
      (update (declared-threads) :roster merge
              (cond-> {"async-mixed" mixed "seon-fs-events" 1}
                web? (assoc "clojure-agent-send-off-pool" 2)
-               (:server sys) (assoc "seon-server-accept" 1))))))
+               ;; a sys that serves (seon.server/serve!) adds no thread: its accept and connections are fibers, its ops :server-op's workers (async-mixed)
+               )))))
 
 (defn- threads
   "The threads this process runs now, measured as declared-threads declares them, and :os,
