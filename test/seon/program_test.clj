@@ -291,6 +291,24 @@
   [here]
   (runner/reach-graph-of (runner/program) (data-refs here) (ts/kept-program-store)))
 
+;; docs/source.md#tests-run-by-reach: a form that enumerates a namespace's vars ((ns-interns 'n), ns-publics, ns-map) reads every one
+;; of them, so a var added there moves the digest of every test that reaches the form. Red before (data and root, 2026-11-14):
+;; seon.render-cost-test/the-rules-cost-their-namespaces-vars-read-once kept its green at digest daf75fb3 after seon.render.ui gained
+;; a var, and a fresh run at that digest was red (164 calls against 163). Estimate: 3 tiny imports 3M, a graph and an update 1M,
+;; 3 reach-digests 1M = ~5M.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-namespace-enumerated-by-a-test-is-reached-whole
+  (let [t (str "(ns app.pt-nv-test (:require [clojure.test :refer [deftest is]]))\n"
+               "(deftest counts (is (pos? (count (ns-interns 'app.pt-nv)))))\n")
+        at (fn [s] (let [db (empty-db)] (d/db-with db (source/import-tx db {"src/app/pt_nv.clj" s "test/app/pt_nv_test.clj" t}))))
+        in {:env "e" :tree "t" :config {}}
+        dg (fn [db] ((ts/reach-digests db in) 'app.pt-nv-test/counts))
+        db1 (at "(ns app.pt-nv)\n(defn f [x] x)\n")
+        db2 (at "(ns app.pt-nv)\n(defn f [x] x)\n(defn g [x] x)\n")]
+    (is (not= (dg db1) (dg db2)) "a var added to the namespace it enumerates moves the test's digest")
+    (is (= (program/graph-index (program/reach-graph db2 nil) in nil)
+           (program/graph-index (program/reach-update (program/reach-graph db1 nil) db2) in nil))
+        "and an update agrees with a rebuild")))
+
 ;; Estimate: 3 tiny-file imports 3M + 3 graphs 0.6M + 2 updates + 2 reach-digests 0.8M + 1 record 0.3M; kept-graph 10M + a reverse walk over it 4M. Estimated 20,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-name-a-test-hands-over-quoted-is-what-it-reaches
   ;; root, 2026-10-27: (cost/proof {:of 'seon.program/reach-update ...}) did not reach reach-update,

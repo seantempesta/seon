@@ -177,7 +177,7 @@
 (def pins
   "Where the wiki states each customized library's pin: the page, and the line that states one
   (`reference-code/x` pinned at `sha`), compared with the gitlinks root's last index of its source
-  recorded (:seon.system/source :pins, seon.system/import-tree!)."
+ recorded (its :seon.pin/pin-fact entities, seon.source/pins-of)."
   {:page "docs/forks.md" :line #"(?m)^`(reference-code/[^`]+)` pinned at `([0-9a-f]+)`"})
 
 (defn stale-pins
@@ -187,7 +187,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
   [db ans]
   (let [{:keys [page line]} pins
-        recorded (some->> (pdb/eid db :seon.system/id :root) (d/pull db [:seon.system/source]) :seon.system/source :pins)]
+        recorded (not-empty (source/pins-of db))]
     (vec (when recorded
            (for [{a :v e :e} (d/datoms db :aevt :seon.doc/address) :when (str/starts-with? a (str page "#"))
                  [_ path sha] (re-seq line (or (:seon.doc/text (d/pull db [:seon.doc/text] e)) ""))

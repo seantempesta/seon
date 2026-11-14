@@ -906,7 +906,10 @@
       (is (= ["a" "b" "c" "d"] (mapv :seon.task/name (read out))) "a task the file lacks is appended")
       (is (str/starts-with? out (subs text 0 (- (count text) 2))) "after every byte that was there")
       (is (str/includes? out "\n {:seon.task/name \"d\"\n  :seon.task/plan \"four\"\n  :seon.task/kind :work\n  :seon.task/proofs #{x/z}}]") (str "in the files' layout, a member a line: " (pr-str out))))
-    (is (= text (source/task-file-text text {"b" (second (read text)) "a" (first (read text))})) "an entry stated as it is changes nothing")))
+    (is (= text (source/task-file-text text {"b" (second (read text)) "a" (first (read text))})) "an entry stated as it is changes nothing")
+    ;; a namespace's first task (seen 11-14: [] threw, its first child asked for a tag it doesn't have)
+    (is (= [{:seon.task/name "d" :seon.task/plan "four"}] (read (source/task-file-text "[]\n" {"d" {:seon.task/name "d" :seon.task/plan "four"}})))
+        "an empty file takes its first entry")))
 
 ;; Estimate: import of seon.facts.edn (~300 entries x 4 datoms x 5k) 6M + all 34 schema files imported and written back ~25M + 3 edits x (db-with + 91 KB file rewrite) 9M = 40000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-changed-schema-entry-rewrites-only-itself
@@ -1820,3 +1823,24 @@
         (is (zero? (:exit (sh/sh "git" "-C" d "merge-base" "--is-ancestor" "main" "HEAD"))) "HEAD contains main")
         (is (.isFile (java.io.File. (str d "/src/demo/half.clj"))) "and the merged file is kept"))
       (finally (seon.lib/remove-tree! d)))))
+
+(deftest ^{:seon.test/estimate {:ticks 30000000}} an-imported-branch-holds-its-pins
+  ;; docs/source.md#indexing-a-tree: a branch's pins are data on it. Each gitlink the import read (seon.fx/read-source's :pins)
+  ;; is an entity of :seon.pin/pin-fact, its path and the commit it pins; a pin the tree no longer holds is retracted whole,
+  ;; and root's :seon.system/source fact keeps no copy (one record of a pin). seon.fx/runtime-for reads them. The estimate: two
+  ;; imports of one small namespace, ~10M each, and the pulls.
+  (let [file {"src/app/pins.clj" "(ns app.pins)\n(defn f \"A form.\" [] 1)\n"}
+        opts {:root "/r" :dirs ["src"]}
+        a "reference-code/a" b "reference-code/b"
+        sha #(apply str (repeat 40 %))
+        db0 (empty-db)
+        r1 {:value file :modes {} :commit (sha "1") :tree (sha "2") :pins {a (sha "a") b (sha "b")}}
+        i1 (root/import-of db0 nil r1 opts 0)
+        db1 (d/db-with db0 (:tx i1))]
+    (is (= {a (sha "a") b (sha "b")} (source/pins-of db1)) "the import wrote each pin")
+    (is (not (contains? (:fact i1) :pins)) "the source fact keeps no copy of the pins")
+    (let [r2 (assoc r1 :tree (sha "3") :pins {a (sha "c")})
+          i2 (root/import-of db1 (:fact i1) r2 opts 0)
+          db2 (d/db-with db1 (:tx i2))]
+      (is (= {a (sha "c")} (source/pins-of db2)) "a moved pin is the new commit, a removed one is gone")
+      (is (empty? (d/datoms db2 :avet :seon.pin/path b)) "the removed submodule's entity is retracted whole"))))
