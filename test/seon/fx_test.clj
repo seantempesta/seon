@@ -642,7 +642,13 @@
 (deftest a-runners-end-keeps-its-error
   (let [end (@#'seon.fx/runner-end "prove: run\nerror[analyze/unknown-namespace]: No such namespace: print\n  --> 2566:28\nTEST FAILED (the plan)\nPROVE FAILED\n\n")]
     (is (clojure.string/includes? end "No such namespace: print"))
-    (is (clojure.string/includes? end "2566:28"))))
+    (is (clojure.string/includes? end "2566:28")))
+  ;; a base's runner that threw (deps' land, 2026-11-14): the exception's head came before 14 trace frames, so its last lines
+  ;; were frames alone and the check said "made no plan" with no why
+  (let [end (@#'seon.fx/runner-end (str "prove: plan\nUnhandled exception (ExceptionInfo): the kept store refused its open\n  ex-data: {:path \"/s\"}\n  trace:\n"
+                                        (clojure.string/join "\n" (map #(str "    frame-" %) (range 14))) "\n"))]
+    (is (clojure.string/includes? end "the kept store refused its open") end)
+    (is (clojure.string/includes? end "frame-13") "and where it ended")))
 
 (deftest a-build-the-analyzer-stopped-names-its-cause
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a gate on a tree that doesn't compile says what stopped it and the agent's form, not "named no exception"
