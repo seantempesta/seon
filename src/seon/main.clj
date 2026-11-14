@@ -131,10 +131,6 @@
                                            (seq names) (assoc :names (vec names)))
                                     #(case (:type %)
                                        :prove-verdict (out! (verdict-line %))
-                                       ;; the service holding this run for the machine's load, and resuming it: never a silent wait
-                                       :prove-held (out! (if (:held %)
-                                                           (str "HELD: load " (:load %) " >= max-load " (:max-load %) ", " (:queued %) " items waiting")
-                                                           "RESUMED"))
                                        nil))]
     (cond (seon.contract/error? r) (do (out! "prove: " (:seon.error/message r)) (out! "PROVE FAILED") 1)
           :else (do ;; the plan line every prove prints (bin/prove's merge verdict reads it for the landing's message)

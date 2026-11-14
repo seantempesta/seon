@@ -60,11 +60,6 @@ Names that look like clock reads but are data.
 - `seon.render-test/no-position?`: the test after it asserts `:vec-timeout nil` holds no deadline.
 - `seon.check/hidden-inputs`, `seon.check/named-test-inputs`: the names the `test-inputs` step reads test forms against.
 
-## The machine's load admits work
-
-A reading of how busy the machine is now, never of when.
-- `seon.prove/machine-load`, `seon.prove/grant` (with `seon.lib/load-average`, libc's `getloadavg`): with `:seon.config.proofs/max-load` set (per machine, in `config/local.edn`), the test service grants an item only while the 1-minute load is under it ([merging](merging.md#the-test-service)). It is read only in a step the service already takes, and with nothing running one item is always granted, so the queue never stalls. Admission only, never a verdict; shown as `:load`.
-
 ## Time orders a queue (measured workload)
 
 A measured time chooses which work goes first, never whether a result is green.

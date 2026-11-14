@@ -1234,7 +1234,7 @@
                 (error #'seon.fx/run-on-checkout :seon.fx/io-error (str (build-failure (str (:out b) (:err b)) files) "; its log: " log) {:path dir}))
             (if-not (or all? built?)
               ;; the gate: the system proves the candidate's checkout (prove, seon.system/prove-tree!, which root binds to this
-              ;; effect's :ctx), named by exactly the deferred tests; its process tests run as items on dir, by the :item owner
+              ;; effect's :ctx), named by exactly the deferred tests; its process tests run as items on dir, by the :process owner
               (let [a (if prove
                         (prove {:checkout dir :tree (tree-id dir) :names (set tests) :mode :judge})
                         (error #'seon.fx/run-on-checkout :seon.fx/io-error "the gate has no system to prove its candidate on (the :tests effect's :ctx names no :prove-tree)" {:path dir}))]
@@ -1389,24 +1389,17 @@
         (lib/sh "cp" "-c" (str (.getPath d) "/" n) (str to "/" n))))
     base))
 
-(defn run-item
-  "The :item effect: one item of a session's prove that the test service (seon.prove) granted, run on the session's
-  checkout at tree, niced: :build is bin/build seon there; :seed brings the checkout's program store to the tree and, :binary?,
-  seeds its check store fresh, once a tree (each binary step takes a clone of it, as bin/check's steps do); :step is one check
-  step (bin/check --steps, then bin/test --store-steps, which stores it green at its digest; past its bound bin/check fails
-  it). Its answer {:value {:pass :fail :error :failures :ms}}, the verdict read back from the cache by its digest, so an
-  item asked again is reused there. A checkout whose files are no longer tree is refused (:seon.fx/io-error, :tree-moved): a verdict would be
-  stored under a digest of files that are not there. A green already stored is answered at once, :reused, with no process
-  started. See docs/merging.md#a-session-proves-through-root."
+(defn- run-tree-item
+  "A build, a seed or a check step of run-item, on its checkout at its tree. See docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [kind tree checkout name digest bound] :as req} :req}]
+  [{:keys [kind tree checkout name digest bound] :as req}]
   (let [t0 (profile/now-ns)
         here (tree-id checkout)
         ;; a green already stored at its digest is the answer: no process started (2.3 s a test's runner, only to reuse it)
         held (when-not (#{:build :seed} kind) (stored-results {name digest}))]
     (cond
       (not= here tree)
-      (error #'seon.fx/run-item :seon.fx/io-error (str "the checkout " checkout " is tree " here ", not the item's " tree ": its files moved since the plan")
+      (error #'seon.fx/run-tree-item :seon.fx/io-error (str "the checkout " checkout " is tree " here ", not the item's " tree ": its files moved since the plan")
              {:path checkout :tree-moved true})
       (contract/error? held) held
       (proofs/green? (get held digest)) {:value (assoc (select-keys (get held digest) [:pass :fail :error]) :ms (profile/ms-since t0) :reused true)}
@@ -1424,9 +1417,7 @@
             ;; and the steps' one seeded store is the checkout's own, never a store this process was handed
             store (str checkout "/target/check-store")
             sh (fn [& argv] (let [r (apply lib/sh (concat child-env-scrub [(str "SEON_RESULTS_DIR=" (cfg/value :seon.config.proofs/results-dir))
-                                                                           (str "SEON_STORE=" store)
-                                                                           ;; the test service reads what its running items hold by it
-                                                                           (str "SEON_PROVE_BATCH=" (:seon.prove/batch req))]
+                                                                           (str "SEON_STORE=" store)]
                                                           ["nice" "-n" "15"] argv [:dir checkout]))]
                               (spit log (str "$ " (str/join " " argv) " (exit " (:exit r) ")\n" (:out r) (:err r)) :append true)
                               r))
@@ -1460,14 +1451,31 @@
           (contract/error? stored) stored
           (= :build kind) (if (zero? (:exit r))
                             {:value {:pass 1 :fail 0 :error 0 :failures [] :ms ms}}
-                            (error #'seon.fx/run-item :seon.fx/io-error (str (build-failure (str (:out r) (:err r)) nil) "; its log: " log) {:path checkout}))
+                            (error #'seon.fx/run-tree-item :seon.fx/io-error (str (build-failure (str (:out r) (:err r)) nil) "; its log: " log) {:path checkout}))
           (= :seed kind) (if (and (zero? (:exit r)) (or (not (:binary? req)) (.isFile (java.io.File. (str store "/data.mdb")))))
                            {:value {:pass 1 :fail 0 :error 0 :failures [] :ms ms}}
-                           (error #'seon.fx/run-item :seon.fx/io-error (str "the seed of " store " failed (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log) {:path checkout}))
+                           (error #'seon.fx/run-tree-item :seon.fx/io-error (str "the seed of " store " failed (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log) {:path checkout}))
           v {:value (assoc (select-keys v [:pass :fail :error :failures]) :ms ms)}
           (= :step kind) {:value {:pass 0 :fail 1 :error 0 :failures [{:type :fail :message (str "bin/check --steps " name ": " (runner-end (str (:out r) (:err r))))}] :ms ms}}
-          :else (error #'seon.fx/run-item :seon.fx/io-error (str "the shard stored no verdict for " name " (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log)
+          :else (error #'seon.fx/run-tree-item :seon.fx/io-error (str "the shard stored no verdict for " name " (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log)
                        {:path checkout}))))))
+
+(defn run-item
+  "The :process effect: one item of a prove that the test service (seon.prove) asked, which this kind's owner admitted by the
+  processes its class holds (admits?). A test batch ({:kind :test :msg}) is asked of the agent holding its branch through
+  :ask-tests (root binds it: the api's :tests op), its answer the agent's. Any other is run on the session's
+  checkout at tree, niced: :build is bin/build seon there; :seed brings the checkout's program store to the tree and, :binary?,
+  seeds its check store fresh, once a tree (each binary step takes a clone of it, as bin/check's steps do); :step is one check
+  step (bin/check --steps, then bin/test --store-steps, which stores it green at its digest; past its bound bin/check fails
+  it). Its answer {:value {:pass :fail :error :failures :ms}}, the verdict read back from the cache by its digest, so an
+  item asked again is reused there. A checkout whose files are no longer tree is refused (:seon.fx/io-error, :tree-moved): a verdict would be
+  stored under a digest of files that are not there. A green already stored is answered at once, :reused, with no process
+  started. See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [kind] :as req} :req {:keys [ask-tests]} :ctx}]
+  (if (= :test kind)
+    (ask-tests (:msg req))
+    (run-tree-item req)))
 
 ;; ---- the owner -----------------------------------------------------------------------
 
@@ -1499,11 +1507,12 @@
   (budget {:cores (cfg/value :seon.config.machine/cores) :max-cores (:seon.config.proofs/max-cores (:config (cfg/in-force)))}))
 
 (defn- weight
-  "The processes request m holds at its peak, under budget b: its class's (:seon.fx/class) most measured; b for a class never
-  measured, so it runs alone until it is; none for a request of no class (a model call, a read: no process of this machine)."
+  "The processes request m holds at its peak, under budget b: its class's (:seon.fx/class) most measured, else what it declares
+  (:seon.fx/processes: a plain test's batch is one fork), else b for a class never measured, so it runs alone until it is; none
+  for a request of no class (a model call, a read: no process of this machine)."
   {:malli/schema [:=> [:cat pos-int? :map :map] nat-int?]}
   [b st m]
-  (if-let [c (:seon.fx/class m)] (get-in st [:peaks c] b) 0))
+  (if-let [c (:seon.fx/class m)] (or (get-in st [:peaks c]) (:seon.fx/processes m) b) 0))
 
 (defn admits?
   "Whether request m fits under budget b beside what st's requests in flight hold (:held): always when nothing is in flight,

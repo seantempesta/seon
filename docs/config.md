@@ -58,15 +58,9 @@ At boot root writes the config in force on main as its own entity, named by its 
 
 A limit is removed, or derived from measurements with its provenance, and reaching it is a typed error or a problem that names the key: never a silent cut, drop or clamp ([decisions](decisions.md#no-artificial-limits-or-cuts-on-an-agents-context-or-evals-owner-2026-10-29)). Before adding a bound, measure the population it bounds and say what happens at it and who sees it. A budget is right when work stays under it nine times in ten and an overrun is worth looking at. Nothing cuts an agent's own context or evals.
 
-## The test service's three limits
+## The processes proving may hold
 
-How much the test service runs at once is three optional keys, and any combination of them has an answer. ```seon.prove/admission``` turns them into one count and, when set, a load; ```seon.prove/config-admission``` reads them. Items and the queue: [the test service](merging.md#the-test-service).
-
-- `:seon.config.proofs/max-workers`: items running at once.
-- `:seon.config.proofs/max-cores`: a share of `:seon.config.machine/cores` in (0,1], rounded down, at least 1.
-- `:seon.config.proofs/max-load`: the 1-minute load average under which a further item is granted.
-
-The count is the least of the count keys set, else the core count. Beside them, one bound is derived, never a key: the processes the running items hold stay under the cores and two (`:max-processes`, AGENTS.md §3a.7), counted from the machine by ```seon.prove/held-processes``` ([the test service](merging.md#the-test-service)). The load is read only in a step the service already takes, never on a timer ([the machine's load admits work](clocks.md#the-machines-load-admits-work)), and never blocks the first item. These are signals: they decide when an item starts, never a verdict. The shipped file sets `max-workers` only; set the others, or `:seon.config.machine/cores`, to the machine in `config/local.edn`.
+One optional key, `:seon.config.proofs/max-cores`, a share of `:seon.config.machine/cores` in (0,1] (rounded down, at least 1; absent, all the cores), is the processes the `:process` effect owner's requests may hold at once (```seon.fx/budget```, read at each admission, so a lowered share admits less at the next one). Each request weighs its class's peak, read off its outcome's `:seon.fx/peak-processes`; a plain test's batch declares one; a class never measured weighs the whole budget, so it runs alone until it is (```seon.fx/admits?```, [effects](flow.md#effects-one-owner-and-its-workers-per-kind)). A request of no class (a model call) holds none. No load or ps is read: a weight is counted where processes start. Items and the queue: [the test service](merging.md#the-test-service).
 
 ## Constants
 

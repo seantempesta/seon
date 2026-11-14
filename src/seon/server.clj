@@ -406,7 +406,7 @@
   (let [ev (c/events sys)
         done (a/chan 1)
         prefix (str (name branch) "@")
-        line #(select-keys % [:type :key :test :digest :status :ms :failures :held :load :max-load :queued])
+        line #(select-keys % [:type :key :test :digest :status :ms :failures])
         id (juxt :test :digest :kind)
         owed (fn [written answer]
                (doseq [w (:verdicts answer) :when (not (written (id w)))]
@@ -422,7 +422,7 @@
              (cond (= ch done) (owed written v)
                    ;; root's events ended (it stopped): only the answer is left to wait on
                    (nil? v) (owed written (a/<!! done))
-                   :else (if (and (#{:prove-verdict :prove-held} (:type v)) (str/starts-with? (str (:key v)) prefix))
+                   :else (if (and (= :prove-verdict (:type v)) (str/starts-with? (str (:key v)) prefix))
                            (do (*emit* (line v)) (recur (cond-> written (= :prove-verdict (:type v)) (conj (id v)))))
                            (recur written)))))
          (finally (a/untap (:events-mult sys) ev)))))

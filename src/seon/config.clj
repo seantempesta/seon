@@ -105,7 +105,7 @@
   once the config map is dissolved (seon.db/one-definition-of-each-entity, step 2). See docs/config.md#a-process-holds-its-branchs-config."
   #{:seon.config.agent/wake-turns :seon.config.ai/reasoning-effort :seon.config.ai/script :seon.config.ai/temperature
     :seon.config.ai/thinking :seon.config.root/profile :seon.config.source/gate-checkout :seon.config.source/root
-    :seon.config.proofs/max-workers :seon.config.proofs/max-cores :seon.config.proofs/max-load})
+    :seon.config.proofs/max-cores})
 
 (defn- closed
   "The compiled config map s as a config is read: closed at its top (an unknown key refuses it) and every key but those it
