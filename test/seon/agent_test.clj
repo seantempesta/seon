@@ -3609,6 +3609,31 @@
     (is (= 1 (:index-builds (seon.agent/schema-moved moved #{:seon.eval/id}))) "and a later write of another attribute builds no other")))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 1 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~1750k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+;; docs/config.md#a-process-holds-its-branchs-config, plan Stage 0.5 (task seon.agent/a-test-child-starts-on-its-branchs-environment, slice A):
+;; an agent's start holds the config its branch states (load-diff!'s seon.program/hold-config!), so what forks from it is on its
+;; branch's environment by construction, and a config a branch cannot hold is refused at its write (seon.program/config-refused),
+;; so no agent can start on one: checked once, where it is written, never again downstream. Green when written (tests, 16:45):
+;; it guards a guarantee the code already gives, which the plan had wrongly said was missing.
+;; Estimate: in-agent's setup ~1.5M + one root eval of two spawns at a commit (each ~0.25M asked) and four submits = ~2.5M
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2500000 :asks 1}} an-agent-starts-on-the-config-its-branch-states
+  (let [[r] (in-agent (fn [{:keys [agent ns]}]
+                        (let [b (fn [s] (str ":task-" ns "-" s))
+                              entry (fn [form] (pr-str (str "(do (seon.agent/transact! [{:config/key :seon.config.root/view-window :config/form " (pr-str form)
+                                                            " :config/file \"resources/seon/config/default.edn\"}]) (seon.agent/commit!) (datahike.api/commit-id (seon.agent/db)))")))]
+                          [{:op :eval :agent "root"
+                            :code (str "(let [sub (fn [a code] (:value @(c/submit! sys a code {:origin :outside})))"
+                                       "      a :" agent
+                                       "      good (sub a " (entry "37") ")"
+                                       "      r @(seon.system/call! sys {:op :spawn :opts {:branch " (b "env-good") " :commit good}})"
+                                       "      held (when (:id r) (sub (:id r) \"(seon.config/value :seon.config.root/view-window)\"))"
+                                       "      _ (when (:id r) (c/kill! sys (:id r)))"
+                                       "      bad @(c/submit! sys a " (entry ":not-a-count") " {:origin :outside})]"
+                                       "  {:held held :root (seon.config/value :seon.config.root/view-window) :bad (select-keys bad [:value :ex]) :answer (when-not (:id r) r)})")}])))
+        v (:value r)]
+    (is (= 37 (:held v)) (str "the agent holds its branch's value from its start, not root's (" (:root v) "): " (pr-str v)))
+    (is (nil? (:value (:bad v))) (str "a config the branch cannot hold is refused at its write, never reaching a branch an agent starts on: " (pr-str v)))
+    (is (some? (:ex (:bad v))) (pr-str v))))
+
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-session-restored-at-an-older-commit-runs-that-commits-definitions
   ;; docs/storage.md#compiled-code: a spawn with {:branch b :commit C}
   ;; makes b from the session's commit C and forks it from main's image with the program at C loaded over it, the way a resumed
@@ -3705,3 +3730,39 @@
 (deftest ^{:seon.test/estimate {:ticks 400000}} an-error-map-names-where-it-was-thrown
   (is (= 'seon.agent-test/throws-here (seon.error/thrown-in (try (throws-here) (catch Throwable e e)))) "a run's throw names its fn")
   (is (nil? (seon.error/thrown-in (ex-info "Syntax error macroexpanding cond" {:clojure.error/symbol 'cond}))) "a macroexpansion's names none, and thrown-in answers"))
+
+(deftest ^{:seon.test/estimate {:ticks 100000}} an-effects-wait-ends-at-its-kinds-declared-bound
+  ;; docs/flow.md#effects-one-owner-and-its-workers-per-kind: fx! waits as long as its kind declares (:seon.config.fx/bounds),
+  ;; never for good; a root that never answers is the effect's own typed :seon.bound/reached, the outcome the turn reads as an
+  ;; error (seon.turn: contract/error? of fx!'s answer), never a completion with no value
+  (let [value cfg/value held @agent/state]
+    ;; an agent's own key counter, as a forked agent holds it
+    (swap! agent/state update :tx-seq #(or % 0))
+    (try
+      (with-redefs [cfg/value (fn [k] (if (= k :seon.config.fx/bounds) {:model {:seon.bound/ms 50}} (value k)))
+                    agent/send! (fn [_] nil)]
+        (let [r (agent/fx! :model {:messages []} {})]
+          (is (contract/error? r) (str "an error, as the turn reads it: " (pr-str r)))
+          (is (= :seon.bound/reached (:seon.error/type r)))
+          (is (= {:seon.bound/ms 50} (:seon.bound/bound r)) "its kind's declared bound")
+          (is (empty? (:fx-pending @agent/state)) "the wait let its key go"))
+        ;; a request that streams (:call) takes no total bound here: its owner's quiet bound answers it (seon.fx/stream-due)
+        (let [asked (atom ::none)]
+          (with-redefs [agent/await-reply (fn [_ _ ms] (reset! asked ms) {:op :fx-reply :value 1})]
+            (agent/fx! :model {:messages [] :call "c1"} {}))
+          (is (nil? @asked) "a streamed call's wait is the owner's to end")))
+      (finally (reset! agent/state held)))))
+
+(deftest ^{:seon.test/estimate {:ticks 2000000}} an-agent-names-the-program-it-holds-as-a-reference
+  ;; docs/processes.md#the-agent-process: the program a process holds is a reference (AGENTS.md §4), the branch as it loaded it
+  ;; at its start; program-db reads that commit, whatever the branch's head has moved to since
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [old @agent/state
+           start @conn]
+       (try
+         (reset! agent/state {:store-conn conn :program {:seon.db/branch (:branch cfg) :seon.db/commit (d/commit-id start) :seon.db/t (:max-tx start)}})
+         (d/transact conn [{:seon.system/id :root :seon.system/content-t (inc (:max-tx @conn))}])
+         (is (not= (d/commit-id start) (d/commit-id @conn)) "the branch moved on")
+         (is (= (d/commit-id start) (d/commit-id (agent/program-db))) "the program it holds is still the one it started on")
+         (finally (reset! agent/state old)))))))

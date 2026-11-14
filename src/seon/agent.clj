@@ -259,6 +259,13 @@
      (try (send! m) @p
           (finally (swap! state update :waits dissoc k))))))
 
+(defn program-db
+  "The db of the program this process holds (its :program reference: the branch as it loaded it at its start), which
+  differs from the branch's head once main is merged in without loading (a process keeps its program until its next start,
+  docs/plan.md item 3). See docs/processes.md#the-agent-process."
+  {:malli/schema [:=> [:cat] [:maybe :seon.host/db]]}
+  [] (when-let [c (get-in @state [:program :seon.db/commit])] (pdb/at-commit (:store-conn @state) c)))
+
 (defn mem-mb
   "This process's memory as the platform charges it, read now (lib/real-mb: one call): on the
   events that report the agent's state (its hello, each commit, a :tests reply, :stats),
@@ -484,16 +491,21 @@
       k)))
 
 (defn fx!
-  "The effect kind with req, through root's owner proc, answered here: its outcome
-  {:value ...} or its declared error. Recorded with this eval request. No lock: an
-  interrupt may end the wait; the outcome then arrives later as an async one does."
+  "The effect kind with req, through root's owner proc: its outcome {:value ...} or its declared error. A
+  request that streams (:call) is ended by its owner; any other waits its kind's :seon.config.fx/bounds, then
+  answers :seon.bound/reached. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
   {:malli/schema [:=> [:cat :keyword :map :map] :map]}
   [kind req opts]
   (if (= :test (:mode @state))
     (fx-test kind req)
     (let [k (:tx-seq (swap! state update :tx-seq inc))
           _ (swap! state update :fx-pending (fnil assoc {}) k kind)
-          r (dissoc (await-reply k (merge opts {:op :fx :k k :kind kind :req req})) :op :k)]
+          ;; a request that streams (it names its call, :call) is ended by its owner's bound of quiet, re-armed by each chunk
+          ;; (seon.fx/stream-due), so a long reply that keeps streaming is never cut here; any other waits its kind's bound
+          m (await-reply k (merge opts {:op :fx :k k :kind kind :req req})
+                         (when-not (:call req) (get-in (cfg/value :seon.config.fx/bounds) [kind :seon.bound/ms])))
+          ;; a bound reached answers as await-reply's own :reply; an effect's answer is its outcome, so that error is the outcome
+          r (if (= :reply (:op m)) (:result m) (dissoc m :op :k))]
       (fx-done! k)
       r)))
 
@@ -1288,7 +1300,7 @@
         ;; left a child of a grown agent less room than any test needs (docs/machine.md#what-a-process-owns-in-memory)
         (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)) (cfg/value :seon.config.agent/trip-bytes))
         ;; a batch the test service granted: every process this child starts carries it, so the service reads what its
-        ;; running batches hold (seon.prove/held-processes)
+        ;; running batches hold (seon.fx/held-processes)
         (when-let [b (:seon.prove/batch plan)] (lib/c-setenv "SEON_PROVE_BATCH" b 1))
         ;; its tests run as bin/test's runner runs them: no interrupt or eval of the agent's
         ;; (task seon.agent/a-test-child-starts-as-a-test-runner-does)
@@ -1538,7 +1550,9 @@
   {:malli/schema [:=> [:cat :map [:sequential :qualified-symbol]] [:vector :map]]}
   [reused ts]
   (vec (for [t ts :let [r (reused t)] :when r
-             f (or (seq (:failures r))
+             ;; a flaky digest: one :pass report carrying its evidence, which seon.prove/flaky-problems files as a :platform problem
+             f (or (when (:flaky r) [(assoc (select-keys r [:flaky :seon.proofs/ticks :seon.proofs/red-failures :digest]) :type :pass)])
+                   (seq (:failures r))
                    [(cond-> {:type (if (proofs/green? r) :pass (if (pos? (:error r)) :error :fail))}
                       (not (proofs/green? r)) (assoc :message "red at this digest, with no failure kept"))])]
          (cond-> (assoc f :var (str "#'" t) :reused true)
@@ -1664,7 +1678,7 @@
   ;; (test-child-runs!'s SEON_CHECKOUT), whichever plan the run takes; it rode on the held plan alone, so a run that planned again read
   ;; the main tree's (its process tests found no process store there, 2026-11-12)
   ([ticks proofs mode forked names items checkout] (run-tests-forked ticks proofs mode forked names items checkout nil))
-  ;; batch: the test service's tag of the batch this run is (seon.prove/batch-tag), set in its test children's environment
+  ;; batch: the test service's tag of the batch this run is (seon.fx/batch-tag), set in its test children's environment
   ([ticks proofs mode forked names items checkout batch]
   ;; an item the test service granted, at the digest this agent's plan of the run gave it: run as planned, nothing planned again
   ;; the runtime invariant (docs/merging.md#a-session-proves-through-root): this process runs its branch's program before a
@@ -2199,6 +2213,9 @@
      ;; pull cost what the inherited node cache lacked, 24-183 KB a spawn
      (reset! link {:fd fd :conn c})
      (reset! state (cond-> {:id id :key session :branch branch :task task :db @store-conn
+                   ;; the program this process holds, as a reference (a kept db value is one, AGENTS.md §4): the branch as it
+                   ;; loaded it at its start (program-db reads it)
+                   :program {:seon.db/branch branch :seon.db/commit (d/commit-id @store-conn) :seon.db/t (:max-tx @store-conn)}
                    :base base :main db0 :store-conn store-conn :cfg cfg :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :waits {} :inbox [] :tx-seq 0 :mode :agent

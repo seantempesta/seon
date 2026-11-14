@@ -74,6 +74,7 @@
  ;; (the writer's :spawn names main's commit and t on :fork; seon.agent/init! compares)
  :seon.agent/fork-misaligned [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/fork-misaligned]]
                                                      [:commit :uuid] [:t :int] [:branch-commit [:maybe :uuid]] [:image-t :int]]]
+ :seon.system/undeliverable [:and {:description "An output Flow could not deliver (no proc takes it) or a stop dropped, read from Flow's report chan (seon.system/flow-report)."} :seon.error/base [:map [:seon.error/type [:= :seon.system/undeliverable]] [:coord :string]]]
  :seon.system/proc-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/proc-defect]] [:pid {:optional true} [:maybe :keyword]]
                                                      [:took {:optional true} [:or :keyword [:vector :keyword]]]]]
  :seon.system/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/refused]]]]
@@ -112,6 +113,13 @@
  :seon.prove/full-run-running [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/full-run-running]] [:running :string]]]
  :seon.prove/no-verdict [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/no-verdict]] [:test [:or :qualified-symbol :string]]
                                                  [:digest {:optional true} :string] [:reported {:optional true} [:vector :qualified-symbol]]]]
+ ;; a green and a red at one digest (seon.prove/flaky-problems): an input the digest misses
+ :seon.proofs/flaky [:and {:description "A test green and red at one digest (seon.proofs/flaky): no verdict, a :platform problem naming what its digest misses (seon.prove/flaky-problems). See docs/merging.md#verdicts-are-a-cache."}
+                     :seon.error/base [:map [:seon.error/type [:= :seon.proofs/flaky]] [:test :qualified-symbol] [:digest :string] [:owner :symbol]
+                                       [:red-failures [:vector :seon.problems/assertion]] [:ticks {:optional true} :seon.proofs/ticks]]]
+ :seon.proofs/red-failures [:vector {:description "On a flaky result, the red run's failures, kept as the evidence (seon.proofs/flaky)."} :seon.problems/assertion]
+ ;; the ticks the green and the red at one digest spent (seon.proofs/flaky), on its flaky failure
+ :seon.proofs/ticks [:map [:green :int] [:red :int]]
  ;; a tree's build or seed that is not green (seon.prove/item-ended): every item that needs it answers it, none granted
  :seon.prove/build-red [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/build-red]] [:tree :string] [:kind [:enum :build :seed]]]]
  :seon.prove/superseded [:and :seon.error/base [:map {:description "A run of the test service ended because a request for the same slot came at another digest: its branch moved on (seon.prove/request). See docs/merging.md#the-test-service."} [:seon.error/type [:= :seon.prove/superseded]] [:by :string]]]
@@ -240,7 +248,7 @@
  ;; the error that ended it: the agent's death, the turn loop's error, a refused merge
  :seon.task/error :seon.error/base
  ;; failing assertions per red test (at most 8 each, printed by seon.print under :part)
- :seon.problems/assertion [:map [:type [:enum :fail :error]] [:message {:optional true} [:maybe :string]] [:flaky {:optional true} :boolean]
+ :seon.problems/assertion [:map [:type [:enum :fail :error]] [:message {:optional true} [:maybe :string]] [:flaky {:optional true} :boolean] [:seon.proofs/ticks {:optional true} :seon.proofs/ticks]
                            [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]
                            [:got {:optional true} [:maybe :string]] [:at {:optional true} [:vector :string]] [:seon.error/type {:optional true} :qualified-keyword]]
  ;; one clojure.test report as the test child keeps it (seon.agent/test-report)

@@ -2,7 +2,7 @@
 
 A name resolves at run time, or a Var is defined outside its definition form, only where this page names the function and its reason; `bin/laws resolution` lists every such site in `src/`.
 
-Every definition happens once, where it is defined: code names what it calls through its namespace's requires, and behaviour varies through the environment or through data. A name is resolved at run time only where data names it (a declaration, a schema's render, a cost estimate) or where the compiler's facts are read; a Var's root changes only when its contract is armed.
+Every definition happens once, where it is defined (`bin/laws defs` refuses a namespace naming one twice, since the second silently replaces the first): code names what it calls through its namespace's requires, and behaviour varies through the environment or through data. A name is resolved at run time only where data names it (a declaration, a schema's render, a cost estimate) or where the compiler's facts are read; a Var's root changes only when its contract is armed.
 
 `intern`, `alter-var-root` and `with-redefs` are code smells, not banned. A legitimate use builds vars in a namespace you own where no definition form exists (a REPL harness, a test environment), and its docstring says why. A gap in another namespace is filled in that namespace's owner.
 
