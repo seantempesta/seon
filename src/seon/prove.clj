@@ -449,8 +449,8 @@
   {:malli/schema [:=> [:cat :map :string] [:tuple :map [:vector :map]]]}
   [st k]
   (let [{:keys [agent mode names checkout digest]} (get-in st [:runs k])
-        ;; its digest: the key the agent holds this plan under, beside another run's (seon.agent/hold-plan)
-        [st m] (step/ask st [:prove :answers] [:plan k] (cond-> {:op :tests :id agent :mode mode :plan? true :digest digest} names (assoc :names names)
+        ;; its key and digest: the agent holds this plan under its key, beside another run's (seon.agent/hold-plan)
+        [st m] (step/ask st [:prove :answers] [:plan k] (cond-> {:op :tests :id agent :mode mode :plan? true :key k :digest digest} names (assoc :names names)
                                                           (and checkout (not= :turn mode)) (assoc :process? true)))]
     [(assoc-in st [:runs k :stage] :plan) [m]]))
 

@@ -1049,7 +1049,7 @@
   ;; inherits it and the turn's other readers find it held (branch-changes)
   (branch-changes (:base @state) (db))
   (let [k (:tx-seq (swap! state update :tx-seq inc))
-        ;; the run's digest, the key its plan is held under (`hold-plan`) while this ask awaits it
+        ;; the run's digest: its run's plans are held (`hold-plan`) while this ask awaits it; the answer names its run's key
         d (program/run-digest (db))
         answered (volatile! false)]
     (swap! state assoc-in [:proving k] d)
@@ -1063,7 +1063,7 @@
         (vreset! answered true)
         ;; its facts on this branch, once an ask, from the answer and this agent's plan of the run
         (if (and (map? r) (not (contract/error? r)))
-          (record-answer! r (get (:held-plans @state) d) (or (some->> (:task @state) (task/task (db)) :seon.task/accumulated :proofs) #{}))
+          (record-answer! r (get (:held-plans @state) (:key r)) (or (some->> (:task @state) (task/task (db)) :seon.task/accumulated :proofs) #{}))
           r))
       ;; an interrupt ended this wait, the only way one ends before its answer: the test child it was for goes too, so its run answers as a death (no verdict) and nothing is left running
       (finally (swap! state release-plan k)
@@ -1606,22 +1606,33 @@
            (:reads-rd (:plan sel)) (assoc :reads-rd (force (:reads-rd (:plan sel)))))})
 
 ;; docs/merging.md#the-test-service: runs of one branch overlap (a turn's prove!, root's :judge, a session's run, each its
-;; own ask of the service), so a plan is held under its run's digest, never in one slot the next plan overwrites
+;; own ask of the service, at one digest or two), so a plan is held under its run's key, never in one slot the next plan overwrites
 (defn- hold-plan
-  "Agent state st holding plan (held-plan) under digest d, its run's (seon.prove/plan! names it), beside the plans some
-  prove! of this agent still awaits (:proving, {k digest}); any other is dropped, so at most one more than the asks in flight
-  are held. See docs/merging.md#the-test-service."
-  {:malli/schema [:=> [:cat :map [:maybe :string] :map] :map]}
-  [st d plan]
-  (assoc st :held-plans (assoc (select-keys (:held-plans st) (vals (:proving st))) d plan)))
+  "Agent state st holding plan (held-plan) of run key k at digest d (seon.prove/plan! names both), beside the plans of the
+  digests some prove! of this agent still awaits (:proving, {ask digest}); any other is dropped, so what is held is the runs
+  in flight plus the newest. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map [:maybe :string] [:maybe :string] :map] :map]}
+  [st k d plan]
+  (let [awaited (set (vals (:proving st)))]
+    (assoc st :newest-plan k
+              :held-plans (assoc (into {} (filter #(awaited (:digest (val %)))) (:held-plans st)) k (assoc plan :digest d)))))
 
 (defn- release-plan
-  "Agent state st with prove! ask k answered or ended: k leaves :proving, and its digest's plan goes when no other ask awaits
-  it. See docs/merging.md#the-test-service."
+  "Agent state st with prove! ask k answered or ended: k leaves :proving, and the plans of its digest go when no other ask
+  awaits it. See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :map :int] :map]}
   [st k]
   (let [d (get-in st [:proving k]) st (update st :proving dissoc k)]
-    (cond-> st (not-any? #{d} (vals (:proving st))) (update :held-plans dissoc d))))
+    (cond-> st (not-any? #{d} (vals (:proving st)))
+      (update :held-plans #(into {} (remove (fn [[_ p]] (= d (:digest p)))) %)))))
+
+(defn- held-plans
+  "The plans agent state st holds (`hold-plan`), the newest first: a grant's items run as the first that gave each its digest.
+  See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [st]
+  (let [hs (:held-plans st) n (:newest-plan st)]
+    (into (if (contains? hs n) [(hs n)] []) (vals (dissoc hs n)))))
 
 (defn- item-selection
   "The selection that runs items ({test digest}, the test service's grant) as held (held-plan, this agent's last plan of a
@@ -1721,7 +1732,7 @@
     (contract/error :seon.agent/program-differs #'seon.agent/run-tests-forked
                     (str "this agent runs another program than its branch: " (str/join ", " (map :var differs)))
                     {:differs differs})
-  (let [{:keys [unread] :as sel} (cond-> (grant-selection (some-> (:held-plans @state) vals vec) items #(run-plan proofs mode names))
+  (let [{:keys [unread] :as sel} (cond-> (grant-selection (held-plans @state) items #(run-plan proofs mode names))
                                     checkout (assoc-in [:plan :checkout] checkout)
                                     batch (assoc-in [:plan :seon.prove/batch] batch))]
   (if unread
@@ -2014,7 +2025,7 @@
                    ;; digests (each item's run records what it ran); main's run is main's prove's to write
                    ;; held for the items it grants this agent (item-selection), each run at the digest planned here, and for
                    ;; the facts its answer writes on this branch (record-answer!)
-                   _ (when-not (or (:unread sel) (:unread pp)) (swap! state hold-plan (:digest m) (held-plan sel)))]
+                   _ (when-not (or (:unread sel) (:unread pp)) (swap! state hold-plan (:key m) (:digest m) (held-plan sel)))]
                [{:op :tests :id (:id m) :mem-mb (mem-mb)
                  :result (or (:unread sel) (:unread pp)
                              (cond-> {:items (select-keys (:digests sel) (:run sel)) :selected (:selected sel) :deferred (:deferred sel)

@@ -3742,23 +3742,29 @@
     (is (= '[a/moved] sel) "so the branch's change is the test its reach moved, never one some run recorded reads for")))
 
 ;; docs/merging.md#the-test-service: runs of one branch overlap (a turn's prove!, root's :judge, a session's run; tests-4 read it
-;; 2026-11-14: root forwards each :tests with no per-agent exclusion, system.clj's pend), so a plan is held under its run's digest.
+;; 2026-11-14: root forwards each :tests with no per-agent exclusion, system.clj's pend), at two digests or at one (a turn and a
+;; :judge of an unchanged branch, whose plans differ by mode), so a plan is held under its run's key.
 ;; Red before: one :held-plan slot, so the second run's plan replaced the first's while its prove! awaited, and the first recorded its
-;; answer at the second's digests. Estimate: a few assocs and two item checks over two plans, ~10k ticks.
+;; answer with the second's selection. Estimate: a few assocs and two item checks over three plans, ~15k ticks.
 (deftest ^{:seon.test/estimate {:ticks 100000}} an-overlapping-runs-plan-is-its-own
-  (let [plan (fn [t d] {:digests {t d} :plan {}})
-        st (-> {:proving {1 "dA"}}
-               (#'agent/hold-plan "dA" (plan 'a.x-test/one "1a"))
-               (#'agent/hold-plan "dB" (plan 'a.x-test/one "1b")))
-        sel #(#'agent/grant-selection (vec (vals (:held-plans %1))) %2 (fn [] :planned-again))]
-    (is (= "1a" (get-in st [:held-plans "dA" :digests 'a.x-test/one])) "the plan an ask awaits stays, whatever plan came after")
-    (is (= "1b" (get-in st [:held-plans "dB" :digests 'a.x-test/one])) "beside the newest")
-    (is (= ['a.x-test/one] (:run (sel st {'a.x-test/one "1a"}))) "an item of the first run runs as its plan planned it")
+  (let [plan (fn [t d sel] {:digests {t d} :plan {} :selected sel})
+        st (-> {:proving {1 "dA" 2 "dA"}}
+               (#'agent/hold-plan "b@dA!turn" "dA" (plan 'a.x-test/one "1a" [:turn]))
+               (#'agent/hold-plan "b@dA" "dA" (plan 'a.x-test/one "1a" [:judge]))
+               (#'agent/hold-plan "b@dB" "dB" (plan 'a.x-test/one "1b" [:b])))
+        sel #(#'agent/grant-selection (#'agent/held-plans %1) %2 (fn [] :planned-again))]
+    (is (= [:turn] (get-in st [:held-plans "b@dA!turn" :selected])) "a turn's plan stays beside a :judge's at the same digest")
+    (is (= [:judge] (get-in st [:held-plans "b@dA" :selected])) "and the :judge's beside it")
+    (is (= "1b" (get-in st [:held-plans "b@dB" :digests 'a.x-test/one])) "beside the newest, at another digest")
+    (is (= ['a.x-test/one] (:run (sel st {'a.x-test/one "1a"}))) "an item of the first digest runs as its plan planned it")
     (is (= ['a.x-test/one] (:run (sel st {'a.x-test/one "1b"}))) "and one of the second as its")
-    (let [after (#'agent/release-plan st 1)]
-      (is (= #{"dB"} (set (keys (:held-plans after)))) "an answered ask's plan goes; nothing awaits it")
-      (is (= #{"dC"} (set (keys (:held-plans (#'agent/hold-plan after "dC" (plan 'a.x-test/one "1c"))))))
-          "and a plan no ask awaits is dropped by the next: at most one more than the asks in flight are held"))))
+    (is (= [:b] (:selected (first (#'agent/held-plans st)))) "the newest plan is first")
+    (let [one (#'agent/release-plan st 1)]
+      (is (= 3 (count (:held-plans one))) "an answered ask's digest's plans stay while another ask awaits that digest")
+      (let [after (#'agent/release-plan one 2)]
+        (is (= #{"b@dB"} (set (keys (:held-plans after)))) "and go once none does")
+        (is (= #{"b@dC"} (set (keys (:held-plans (#'agent/hold-plan after "b@dC" "dC" (plan 'a.x-test/one "1c" []))))))
+            "a plan no ask awaits is dropped by the next: what is held is the runs in flight plus the newest")))))
 
 ;; docs/merging.md#the-test-service: a grant the agent planned again (its held plan gave an item another digest) answers exactly
 ;; the granted items, never what the run's own selection filter keeps. Found 2026-11-13: the loop task held by
