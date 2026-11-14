@@ -92,7 +92,9 @@ build_chez() {
   say "chez: copying reference-code/chez at $CHEZ_PIN"
   copy_tree "$RC/chez" "$T/src/chez"
   say "chez: configure + make -j$JOBS + install into target/chez"
-  ( cd "$T/src/chez"
+  # every command's status counts (set -e): a failed make with an install after it reported success, and the old
+  # libkernel.a stayed under the new pin's stamp (Chez f7716d17 did not compile and no tree noticed, 2026-11-14)
+  ( set -e; cd "$T/src/chez"
     # --threads: Jolt requires a threaded Chez. -fPIC: jolt build --library folds
     # libkernel.a into a shared object (as reference-code/jolt's own provisioning does).
     ./configure --threads --disable-x11 --disable-curses --installprefix="$T/chez" CFLAGS+=-fPIC
