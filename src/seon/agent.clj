@@ -266,18 +266,19 @@
   ;; ms: the request's declared bound. Past it the one timer (seon.step/put-after!) delivers the typed :seon.bound/reached as the
   ;; answer, so the wait ends whatever root does; an answer that comes later goes where an unawaited one does (handle!)
   ([k m ms]
-   (let [p (promise)]
+   (let [p (promise)
+         ;; an answer disarms the bound and closes its channel, so neither the timer nor the go block outlives the wait
+         due (when ms (a/chan 1))
+         h (when ms (step/put-after! due ms :due))]
      (swap! state assoc-in [:waits k] p)
      (when ms
-       (let [due (a/chan 1)]
-         (step/put-after! due ms :due)
-         (a/go (a/<! due)
+       (a/go (when (a/<! due)
                (deliver p {:op :reply :k k :result (contract/error :seon.bound/reached #'seon.agent/await-reply
                                                                    (str "root did not answer " (:op m) " within its bound of " ms " ms")
                                                                    {:seon.bound/bound {:seon.bound/ms ms} :seon.bound/spent {:seon.bound/ms ms}
                                                                     :seon.bound/at (keyword "seon.agent" (name (:op m)))})}))))
      (try (send! m) @p
-          (finally (swap! state update :waits dissoc k))))))
+          (finally (step/cancel! h) (some-> due a/close!) (swap! state update :waits dissoc k))))))
 
 (defn program-db
   "The db of the program this process holds (its :program reference: the branch as it loaded it at its start), which

@@ -23,17 +23,18 @@
   "Puts m on channel ch once ms milliseconds pass: the one timer of the system (the cron's
   tick, the delayed insert, an effect's declared deadline, root's stall check; docs/clocks.md#time-decides-the-owners-exceptions).
   One entry on Jolt's deadline heap (jolt.host/timer-at!, the heap `timeout` uses, in monotonic ms), whose
-  thunk is a put! that never waits: nothing parks while it is armed. Answers the handle `cancel!` takes, so a
+  thunk is a put! that never waits: nothing parks while it is armed. Answers the handle `cancel!` takes (a volatile of
+  Jolt's entry, a host object no other contract names), so a
   bound whose wait ended disarms (measured: 0.17 us to arm and 0.04 us to cancel, against 5.4 us and a fiber
   held for the whole bound for a go block on a timeout)."
-  {:malli/schema [:=> [:cat :seon.host/chan :int :any] :seon.host/object]}
+  {:malli/schema [:=> [:cat :seon.host/chan :int :any] :seon.host/volatile]}
   [ch ms m]
-  (jolt.host/timer-at! (+ (quot (System/nanoTime) 1000000) (max 1 ms)) (fn [] (a/put! ch m))))
+  (volatile! (jolt.host/timer-at! (+ (quot (System/nanoTime) 1000000) (max 1 ms)) (fn [] (a/put! ch m)))))
 
 (defn cancel!
   "Disarm a `put-after!` by its handle: its message is never put (one that already fired is put already). Answers nil."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/object]] :nil]}
-  [h] (when h (jolt.host/timer-cancel! h)) nil)
+  {:malli/schema [:=> [:cat [:maybe :seon.host/volatile]] :nil]}
+  [h] (when h (jolt.host/timer-cancel! @h)) nil)
 
 (defn timer
   "A self-timer's armed flag: a host object the proc's state holds, as a step's taken messages
