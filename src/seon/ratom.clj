@@ -103,6 +103,9 @@
   {:malli/schema [:=> [:cat :seon.host/db] :seon.host/deref]}
   [db] (Store. db nil nil))
 
+;; the recorder outside every reaction, while a run is in progress (`deref-capture`): nil when none was bound
+(def ^:dynamic ^:private *outer-reads* nil)
+
 (defn- deref-capture
   "(f) in r's context: its derefs become r's sources (watched when they differ from the last
   run's), and every read of a db it made, recorded by Datahike's recorder, r's key set (the
@@ -111,11 +114,12 @@
   {:malli/schema [:=> [:cat :seon.host/fn :any] :any]}
   [f r]
   (-set! r :captured nil)
-  (let [outer datahike.index.interface/*reads*
-        [res rs] (reads/with-reads #(binding [*ratom-context* r] (f)))
-        ;; with-reads binds a recorder of its own and does not nest: a read made here is also the outer recorder's (a page
-        ;; read inside the render proc's pass), as it was before this run recorded its own. Deps' task
-        ;; datahike.reads/with-reads-nests-in-an-outer-recorder moves this into with-reads, and this line goes
+  (let [;; the recorder outside every reaction (a read of the render proc's pass): taken at the outermost run, where no reaction is
+        ;; in progress, and handed down, so a nested run's reads reach it and never its parent run's (each run's reads are its own)
+        outer (or *outer-reads* (when (nil? *ratom-context*) datahike.index.interface/*reads*))
+        [res rs] (binding [*outer-reads* outer] (reads/with-reads #(binding [*ratom-context* r] (f))))
+        ;; with-reads binds a recorder of its own and does not nest; deps' task datahike.reads/with-reads-nests-in-an-outer-recorder
+        ;; moves this into with-reads, and this line goes
         _ (when (and outer (seq rs)) (swap! outer into rs))
         c (-get r :captured)]
     (-set! r :dirty? false)

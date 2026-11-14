@@ -489,18 +489,12 @@
    (walk nil (merge {:db db :tree c :root f :changes changes :index (or (:index opts) (seon.program/index-of-db db)) :units true :resolve true}
                     (select-keys opts [:outputs :model-only :place :once])))))
 
-(defn as-walker
-  "Walk value p as the readers of a walker's cells read it ({:cache :out :index}, each a volatile): `seon.render/resolved` by key or as html,
-  `seon.render/misfits-by-render`, `seon.render/part-form`, `seon.render/placed-units` on its own, which read no value yet. See docs/render.md#a-page-is-a-kept-walk."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [p] {:cache (volatile! (:cache p)) :out (volatile! (:out p)) :index (volatile! (:index p)) :defects (volatile! [])})
-
 (defn resolved
-  "Component k's output in walk value p with every child's marker replaced by that child's output (`seon.render/resolved` over the
-  value's cache, `as-walker`), html? true as the page writes each. See docs/render.md#a-page-is-a-kept-walk."
+  "Component k's output in walk value p with every child's marker replaced by that child's output (`seon.render/resolved`), html? true
+  as the page writes each. See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:function [:=> [:cat :map [:vector :any]] :any] [:=> [:cat :map [:vector :any] :boolean] :any]]}
   ([p k] (resolved p k false))
-  ([p k html?] (seon.render/resolved (as-walker p) k html?)))
+  ([p k html?] (seon.render/resolved p k html?)))
 
 (defn answer
   "Walk value p's answer for output o (:seon.render/openai-compat: the model's messages), its values in order, without the
@@ -543,8 +537,8 @@
     (mapv #(cond-> % (:html %) (update :html compose by)) us)))
 
 (defn page-units
-  "Walk value p's units as the page shows them (its :units, at any depth), each composed (composed). See
+  "Walk value p's units as the page shows them (its :units, at any depth, `seon.render/laid-out`), each composed (composed). See
   docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [p]
-  (composed (:units p)))
+  (composed (:units (seon.render/laid-out p))))

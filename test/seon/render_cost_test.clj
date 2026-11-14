@@ -411,11 +411,7 @@
      ;; renders the model now reads drawn on a step. 1,365 at 10 since the turn line holds no number and the cost line is sized once
      ;; (seon.print/response-text); the owner approved 250 for a change's 379, and said cull later
      :per-n {:calls 8.2 :bytes 37000}
-     ;; 2026-11-14, the kept walk a value (seon.render/walk): an advance now also lays out the page's units (placed-units over
-     ;; its placed components, ~1,000 calls at 10 turns), work the page's reader paid at its next read before; the bytes fell
-     ;; (4.0 MB) since no reactive walker, atom or watch is kept. Asking the units only where they are read is
-     ;; seon.render/a-kept-walk-lays-out-its-units-when-they-are-read
-     :fixed {:calls 2320 :bytes 11250000}
+     :fixed {:calls 1285 :bytes 11250000}
      :sizes [10 40 160]}))
 
 ;; On disk, the one-store rule's last resort (docs/cost.md#how-we-measure): a page advanced from one turn's basis to the next
@@ -803,9 +799,7 @@
      ;; measured 2026-11-10: 81 calls at 10, 40 and 160; 99 KB, 124 KB, 217 KB. 2026-11-12: 87 at 10, 88 KB: the reactions' read index
      ;; is the one value index a walk kept as a value reads too (seon.ratom/read-index, reached), a call each where it was inline
      :per-n {:calls 0 :bytes 900}
-     ;; 2026-11-14, a walk a value (seon.render/walk): each call sets up a walker over the kept parts (its cells and the kept
-     ;; parts copied in and out, ~30 calls and ~30 KB) where flush! reused one
-     :fixed {:calls 118 :bytes 136000}
+     :fixed {:calls 88 :bytes 100000}
      :sizes [10 40 160]}))
 
 (defn big-member
@@ -819,15 +813,15 @@
 
 (defn bulk-of
   "The input of size n: a page of ten small members and one whose hiccup is n elements, drawn and its units written once, then one
-  small member changed and walked: placed-units' argument, that walk value's cells (seon.fixtures/as-walker)."
+  small member changed and walked: placed-units' argument, that walk value."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
   [n]
   (let [db (ts/test-db)
         t {:db/id 1 :size n :ids (vec (range 10 20)) :vals (into {} (map (fn [i] [i {:v 0}])) (range 10 20))}
         ;; drawn and its units written once (each component's placements kept on its entry)
         p (seon.fixtures/walk nil {:db db :tree t :root #'bulk-list :index (seon.db/index) :units true})]
-    ;; one small member changed and drawn, its units not yet written: what placed-units, on the walk's cells, writes
-    [(seon.fixtures/as-walker (moved-to p db (update-in t [:vals 10 :v] inc)))]))
+    ;; one small member changed and drawn, its units not yet written: what placed-units, on the walk value, writes
+    [(moved-to p db (update-in t [:vals 10 :v] inc))]))
 
 ;; docs/render.md#a-layout-places-its-lists
 (deftest a-flush-places-what-moved
@@ -839,8 +833,12 @@
      :n "elements in an unchanged member's hiccup"
      :work "each component's kept placements read once, the changed member's html written again; nothing of the unchanged member's hiccup"
      :growth :constant
-     ;; measured 2026-11-11: 2 calls and 18.8 KB at 10, within 20 KB at 100 and 1000; before (the prewalk) 31.2 KB at 10, 83.7 KB at 100 (n^0.43)
-     :fixed {:calls 2 :bytes 20000}
+     ;; measured 2026-11-11: 2 calls and 18.8 KB at 10, within 20 KB at 100 and 1000; before (the prewalk) 31.2 KB at 10, 83.7 KB at 100 (n^0.43).
+     ;; Those 2 calls were wrong: the input was a walker's cells, which the measure's first call wrote, so every later call it kept
+     ;; measured a page already laid out. Over a walk value each call does the work: placed-units, placed, places of the changed member,
+     ;; styled and thrown-in (5), and its one <li> written by seon.web.html (html, write!, write-attrs!, callback, an attr-name per
+     ;; attribute's part and an escape per text: ~23), ~28 calls; its html, its placements and the value's new cache entries, ~35 KB
+     :fixed {:calls 30 :bytes 40000}
      :sizes [10 100 1000]}))
 
 

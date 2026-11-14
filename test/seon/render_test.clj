@@ -979,12 +979,12 @@
                              #'seon.render.ui/agent)]
                (mapv (juxt :id :html) (:units w)))]
     (is (some? (:p cell)) "the branch's read holds its walk")
-    (is (= cold (mapv (juxt :id :html) (:units (:p cell)))) "after the move, what a cold draw at the head draws")
+    (is (= cold (mapv (juxt :id :html) (:units (r/laid-out (:p cell))))) "after the move, what a cold draw at the head draws")
     (let [w (:p cell) [st3 _] (pass-view st2 :a3)
           html (p/view-html st3 :a3)]
       (is (identical? w (:p (get-in st3 [:branch-reads :task-demo-f :walk]))) "@ctx draws from the same walk")
       ;; owner, 2026-11-03: "the record is @ctx with each part that was rendered and the rendered part"
-      (doseq [[id content] (#'p/placed-of cell (:lists w))]
+      (doseq [[id content] (first (#'p/placed-of cell (:lists w)))]
         (is (str/includes? html (str "data-part=\"" id "\"")) (str "@ctx pairs part " id))
         (is (str/includes? html (h/html (r/part-text content)))
             (str id ": what the model reads of it, as a request prints it"))))
@@ -993,7 +993,7 @@
             back (let [w (draw (:tree (seon.ctx/build (seon.db/index) branch (seon.db/eid branch :seon.agent/key k) (:seon.agent/branch e))) seon.ctx/changes branch
                                  #'seon.render.ui/agent)]
                    (mapv (juxt :id :html) (:units w)))]
-        (is (= back (mapv (juxt :id :html) (:units (:p (get-in st5 [:branch-reads :task-demo-f :walk]))))))))
+        (is (= back (mapv (juxt :id :html) (:units (r/laid-out (:p (get-in st5 [:branch-reads :task-demo-f :walk])))))))))
     (testing "the branch's read let go: its walk with it"
       (let [[st4 _] (p/render-proc st2 :from-web {:op :views :views #{} :tabs 0})]
         (is (nil? (get-in st4 [:branch-reads :task-demo-f])))))))
@@ -1046,7 +1046,7 @@
                      (let [db (nth vs i)
                            kw' (#'p/advance-walk! kw db :task-demo-f identity)
                            [units tree] (step-cold db)]
-                       (is (= units (mapv (juxt :id :html) (:units (:p kw')))) (str "its units at " i))
+                       (is (= units (mapv (juxt :id :html) (:units (r/laid-out (:p kw'))))) (str "its units at " i))
                        (is (= tree (dissoc (:tree (:c kw')) :t :commit)) (str "its ctx at " i))
                        kw'))
                    kw0 [3 4 3 1 5 0 4 4 2])]
@@ -1253,7 +1253,7 @@
         [st1 _] (pass-view st :root)
         [st2 _] (pass-view st1 [:chat :a3])
         ws (concat [(get-in st2 [:root-walk :p])] (keep #(some-> (:walk (val %)) :p) (:branch-reads st2)) (map :p (vals (:user-walks st2))))
-        seen (apply merge-with #(merge-with + %1 %2) (map (comp r/misfits-by-render fx/as-walker) ws))
+        seen (apply merge-with #(merge-with + %1 %2) (map r/misfits-by-render ws))
         ;; root's session is in this world, so root's page draws the user's tree (the person, a3 under it): more agent renders, and root's nested sessions render, deleted, 3 classes fewer
         ;; measured 2026-11-11, the walk's own class on each component's root (its render's name) among them: it goes when data-render replaces it.
         ;; 2026-11-12: more drawn, no render's own count up: a3's page (every branch read keeps its walk now) and root's own task (root's
@@ -2112,7 +2112,7 @@
         w (draw {} seon.ctx/changes db #'data-view)
         k (:out w)
         h0 (fx/resolved w k true)
-        text (r/part-text (r/part-form (fx/as-walker w) k))]
+        text (r/part-text (r/part-form w k))]
     (is (str/includes? (h/html h0) "Make it") "the page draws the data by its schema's html render, here the printer's")
     (is (= h0 (fx/resolved (draw {} seon.ctx/changes db #'data-view) k true)) "drawn again, equal")
     (is (str/includes? text "Make it") "the model is sent the value as data")
@@ -2721,7 +2721,7 @@
   each composed with its nested units."
   [db name]
   (let [kw (#'p/kept-walk db (:db/id (d/entity db [:seon.user/name name])) :main {} identity)]
-    (seon.fixtures/composed (:units (:p kw)))))
+    (seon.fixtures/composed (:units (r/laid-out (:p kw))))))
 
 (deftest a-users-page-draws-the-agents-it-started
   ;; docs/users.md#whats-on-screen (step 3): a user is an agent found by its name; its page is the agent's render over its pull, which joins
@@ -3260,7 +3260,9 @@
     (is (contains? (lists 'seon.render.ui/pull-view) "#p-head") "the pull view's front is a part")
     (is (not (contains? (lists 'seon.render.ui/stage) "#p-head")) "the stage's front is the page's alone")))
 
-(deftest a-kept-walk-whose-entity-names-another-render-is-drawn-by-it
+;; estimate: 3 cold walks of an agent's page (kept, re-rooted on advance, the cold draw) at ~20 components x ~60k ticks = ~3.6M, 3 ctx
+;; builds of root's pull ~0.5M each = 1.5M, 2 layouts (the kept walk's, the cold draw's) ~0.3M each = 0.6M: ~5.7M
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-kept-walk-whose-entity-names-another-render-is-drawn-by-it
   ;; docs/render.md#a-page-is-a-kept-walk: a kept walk advanced (seon.render.proc/advance-walk!) to a value where its entity names a
   ;; render of its own (:seon.render/hiccup) is rooted there and drawn by it, as a walk drawn cold at that value is
   (let [db (booted)
@@ -3271,13 +3273,13 @@
         ix (seon.db/index)
         t (:tree (seon.ctx/build ix db' a :db))
         cold (draw t seon.ctx/changes db' (r/render-var-of ix t) {:index ix})
-        html (apply str (map :html (:units (:p kw'))))]
+        html (apply str (map :html (:units (r/laid-out (:p kw')))))]
     (fx/no-error-render (:defects (:p kw')))
     (is (= (r/render-var-of ix (:tree (seon.ctx/build ix db a :db))) (:root (:p kw))) "drawn first by the render it names first")
     (is (not= #'ui/pull-view (:root (:p kw))))
     (is (= #'ui/pull-view (:root (:p kw'))) "advanced to a value naming its own render: rooted on it")
     (is (str/includes? html "pull-front") "and drawn by it")
-    (is (= (mapv (juxt :id :html) (:units cold)) (mapv (juxt :id :html) (:units (:p kw')))) "what a cold walk at that value draws")))
+    (is (= (mapv (juxt :id :html) (:units cold)) (mapv (juxt :id :html) (:units (r/laid-out (:p kw'))))) "what a cold walk at that value draws")))
 
 (deftest a-render-name-that-resolves-to-nothing-is-said
   ;; docs/render.md#an-entity-may-name-its-own-render: an entity naming a render of its own that this process has no var for is drawn by
@@ -3786,7 +3788,7 @@
   (let [w (draw tree seon.ctx/changes db #'seon.render.ui/agent)]
     ;; a cite's component is keyed by the cite: its owner, a space, what it names (seon.render.ui/cite's identity)
     (into {} (for [[k _] (:cache w) :when (= 'seon.render.ui/cite (first k))]
-                    [(last (str/split (str (second k)) #" " 2)) (some-> (r/part-form (fx/as-walker w) k) r/part-text)]))))
+                    [(last (str/split (str (second k)) #" " 2)) (some-> (r/part-form w k) r/part-text)]))))
 
 (deftest a-work-task-is-sent-how-a-task-is-worked
   (let [k "b1/a1"
@@ -3923,7 +3925,7 @@
         tree (:tree (seon.ctx/build (seon.db/index) db aid :b))
         ;; the task drawn by its schema's render over the task's pull, as the agent's page walk places it (seon.render.ui/tiles)
         w (draw (:seon.agent/task tree) seon.ctx/changes db #'ui/task-view {:index (seon.db/index)})
-        text (r/part-text (r/part-form (fx/as-walker w) (:out w)))
+        text (r/part-text (r/part-form w (:out w)))
         html (h/html (fx/resolved w (:out w) true))
         asks-db? (fn [c] (and (var? (:f c)) (contains? (r/inputs (:f c)) :seon.db/db)))
         db-parts (count (filter asks-db? (vals (:cache w))))]
@@ -4012,7 +4014,7 @@
   (let [opts {:db (ts/test-db) :root #'some-lists-layout :index (seon.db/index) :model-only true}
         ;; the renders a walk ran
         ran (fn [p] (into #{} (map (comp symbol first key)) (:ran p)))
-        lists (fn [p] (distinct (map first (#'r/placed (fx/as-walker p)))))
+        lists (fn [p] (distinct (map first (first (#'r/placed p)))))
         w (fx/walk nil (assoc opts :tree {:v 1}))
         w1 (fx/walk w (assoc opts :tree {:v 2} :moved [] :place ["#parts"]))]
     (is (= ["#parts"] (lists w)) "the person's list is placed nowhere")
