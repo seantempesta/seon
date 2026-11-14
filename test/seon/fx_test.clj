@@ -102,14 +102,32 @@
 ;; the owner's dials are the config in force at each admission: the owner turns max-workers down while he games, and the next
 ;; admission holds by it, no restart
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-dial-turned-holds-at-the-next-admission
-  (let [lim (atom (fx/limits {:cores 18}))]
-    (with-redefs [fx/config-limits (fn [] @lim)]
+  ;; the dial is turned as the owner turns it: the config in force becomes another value (seon.config/held, replaced when a
+  ;; transaction touches an entry), never a redefinition of its reader
+  (let [base (:config (seon.config/in-force))
+        cf (atom {:config (assoc base :seon.config.proofs/max-workers 18 :seon.config.proofs/max-cores nil :seon.config.proofs/max-load nil)})]
+    (with-redefs [seon.config/in-force (fn [] @cf)]
       (let [[st _] (fx/owner-proc (powner) :in (preq 1 :seon.fx/processes 1))
             [st o2] (fx/owner-proc st :in (preq 2 :seon.fx/processes 1))
             _ (is (= [2] (sent o2)) "eighteen workers: a second admitted")
-            _ (reset! lim (fx/limits {:cores 18 :max-workers 2}))
+            _ (swap! cf assoc-in [:config :seon.config.proofs/max-workers] 2)
             [_ o3] (fx/owner-proc st :in (preq 3 :seon.fx/processes 1))]
         (is (empty? (sent o3)) "max-workers turned to two: the third waits, no restart")))))
+
+;; Estimate: two derivations of the limits (config-limits: one resolver read and a map, ~5k each) and one compare, ~15k measured
+;; (the task's ~200k a read was not borne out here: 14k for the whole test) = ~20000.
+(deftest ^{:seon.test/estimate {:ticks 20000}} a-grant-reads-no-config
+  ;; AGENTS.md 3a.3, root's review of b8eea50e59: the dials are derived once a config change, held by the reader, never read
+  ;; through the resolver at each admission or grant (~200k ticks a call)
+  (let [[st l1] (fx/limits-held {})
+        _ (seon.profile/begin!)
+        [st2 l2] (fx/limits-held st)
+        called (into #{} (map :var) (seon.profile/touched))]
+    (is (= l1 l2) "the config unchanged: the same limits")
+    (is (not-any? called '[seon.fx/config-limits seon.config/value seon.config/resolve]) (str "and no config read: " (sort-by str called)))
+    (let [c (:config (seon.config/in-force))]
+      (with-redefs [seon.config/in-force (fn [] {:config (assoc c :seon.config.proofs/max-workers 3)})]
+        (is (= 3 (:max-workers (second (fx/limits-held st2)))) "a turned dial reaches the next read")))))
 
 ;; docs/flow.md, the five rules (rule 1, reviewed by flow): a test batch's run is the agent's, never a wait inside a worker's step. The
 ;; owner asks the api for it as an output (step/ask) and takes its one answer on its own :answers port: no worker, no timer, and its
