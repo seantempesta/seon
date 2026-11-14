@@ -426,7 +426,7 @@
 ;; another process's reader left an empty data file its next connect read as "Database does not exist" (data's, runtime's and
 ;; root's health runs, 2026-11-14, program-store-37babf7c). What was moved aside goes once no process holds it.
 ;; Cost: two small imports (~20M each, a-failed-import's), one rename = ~40M.
-(deftest ^{:seon.test/estimate {:ticks 40000000}} a-kept-program-store-past-its-bound-is-moved-aside-not-removed
+(deftest ^{:seon.test/estimate {:ticks 40000000} :seon.test/execs ["git"]} a-kept-program-store-past-its-bound-is-moved-aside-not-removed
   (let [d (checkout! {"deps.edn" "{}" "src/app/mv_calc.clj" "(ns app.mv-calc)\n(defn add [a b] (+ a b))\n"})
         dir (scratch-dir)
         store (str dir "/ps-0123abcd")
