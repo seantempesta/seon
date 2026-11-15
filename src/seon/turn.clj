@@ -277,10 +277,9 @@
     [id (cond-> (assoc (basis! task n max-turns :model merge?) :agent k) model-name (assoc :model model-name))]))
 
 (defn- request!
-  "The request of model call id at basis, the one way a turn's context is made, for a model's turn and an outside read alike:
-  basis recorded, the request drawn from the kept walk, its hash and its parts stored. Answers {:messages :parts}. See
-  docs/render.md#a-turn-stores-what-it-sent. sent, the request before's {:messages :digests}, lets it digest only what it added; it
-  answers this one's as :sent."
+  "The request of model call id at basis, the one way a turn's or a read's context is made: basis recorded, the request drawn from
+  the kept walk, its hash and (store?) its parts kept; sent, the last request's :seon.turn/sent. Answers {:messages :parts :sent}. See
+  docs/render.md#a-turn-stores-what-it-sent."
   {:malli/schema [:function [:=> [:cat :string [:maybe :string] :int :seon.model-call/basis :boolean] :map]
                   [:=> [:cat :string [:maybe :string] :int :seon.model-call/basis :boolean [:maybe :map]] :map]]}
   ([id prev n basis store?] (request! id prev n basis store? nil))
