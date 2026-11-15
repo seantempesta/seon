@@ -528,21 +528,36 @@
     (is (= ["/r" ["src"]] [(:root fact) (:dirs fact)]) "what the import read from stays")
     (is (some? (d/entity db1 [:var/name 'app.landed/f])) "and the landed file's facts are main's")))
 
-;; Estimate: 8 restart-for x 5k + 2 empty-db and checked writes 0.2M + booted-source and 2 test-inputs pulls 0.1M = 400000 ticks
-(deftest ^{:seon.test/estimate {:ticks 400000}} a-config-or-schema-landing-loads-in-place
-  ;; the owner, 2026-11-14: Seon restarts only for a binary change. The landing's commit loads a changed schema entry (its
-  ;; dependents re-armed, root's registry held: seon.program/load-changes!, seon.writer's main-commit) and a changed config entry
-  ;; (seon.program/hold-config!) in place, so neither is a restart: root's restart at 29e63624cc named only config and schema files
-  ;; (and forms). A pin, native code or deps.edn still is. Estimate: four calls of a pure fn, ~0.4M
-  (let [held {:root "/r" :dirs ["src"] :tree "t1" :commit "c1"}
-        inputs {:tree "t1m" :env "e" :code "c" :config {}}
-        why #(root/restart-for held "t1" {:binary "t0" :tree "t1" :reaches %} inputs)]
-    (is (nil? (why ["resources/seon/config/default.edn" "resources/seon/schemas/seon.config.root.edn" 'seon.main/root-serve]))
-        "config and schema entries and forms root runs: all loaded by the landing's commit, keep running")
-    (is (re-find #"reaches deps.edn" (str (why ["deps.edn" "resources/seon/schemas/seon.core.edn"])))
-        "a build input no load brings still restarts, naming it")
-    (is (re-find #"system.edn" (str (why ["resources/seon/system.edn"])))
-        "root's graph (system.edn) is not loaded in place yet: a restart (its procs swap through Flow's update!, the plan's next step)")))
+(defn- tree-with
+  "The git tree of the checkout's HEAD with path's blob replaced by text, written as git objects through an index of its own (the
+  checkout and its index untouched)."
+  [path text]
+  (let [co (config/checkout) idx (str (System/getProperty "java.io.tmpdir") "/rt-index-" (random-uuid))
+        env (assoc (into {} (System/getenv)) "GIT_INDEX_FILE" idx)
+        git (fn [& args] (let [r (apply sh/sh "git" "-C" co (concat args [:env env]))] (assert (zero? (:exit r)) (:err r)) (str/trim (:out r))))
+        blob (:out (sh/sh "git" "-C" co "hash-object" "-w" "--stdin" :in text))]
+    (git "read-tree" "HEAD")
+    (git "update-index" "--add" "--cacheinfo" (str "100644," (str/trim blob) "," path))
+    (git "write-tree")))
+
+;; Estimate: three trees written as git objects and three runtime-for asks (bin/binary-digest once a tree, ~30 ms each), the
+;; restart-for answers pure; ~2M ticks of this process's own work
+(deftest ^{:seon.test/estimate {:ticks 2000000} :seon.test/execs ["git" "bin/binary-digest"]} a-landing-restarts-only-when-a-build-input-moved
+  ;; task seon.system/a-landing-restarts-root-only-for-a-binary-change (deps' (2), in runtime's slice, root 2026-11-15): keep or
+  ;; restart is seon.fx/runtime-for's answer for the landed tree and nothing else; a landing kept builds nothing (bin/update). On
+  ;; real trees: the checkout's HEAD tree with a src form changed is kept (src is no build input: a boot loads the program as a
+  ;; diff); with deps.edn changed, or root's graph (system.edn, a boot reads the binary's copy), it restarts naming the path.
+  ;; Red before: restart-for read stale-binary's tree compare, never runtime-for
+  (let [held (fn [t] {:root "/r" :dirs ["src"] :tree t :commit "c1"})
+        inputs {:tree "tm" :env "e" :code "c" :config {}}
+        why (fn [t] (root/restart-for (held t) t (seon.fx/runtime-for t) inputs))
+        co (config/checkout)
+        src (tree-with "src/seon/lib.clj" (str (slurp (str co "/src/seon/lib.clj")) "\n;; a comment a landing added\n"))
+        deps (tree-with "deps.edn" (str (slurp (str co "/deps.edn")) "\n;; a build input changed\n"))
+        graph (tree-with "resources/seon/system.edn" (str (slurp (str co "/resources/seon/system.edn")) "\n;; root's graph changed\n"))]
+    (is (nil? (why src)) "a landing that moves only src keeps the system running and builds nothing")
+    (is (re-find #"deps.edn" (str (why deps))) (str "a landing that moves a build input restarts, naming it: " (why deps)))
+    (is (re-find #"system.edn" (str (why graph))) (str "and root's graph is one: " (why graph)))))
 
 (deftest ^{:seon.test/estimate {:ticks 400000}} a-landing-keeps-the-system-running-only-when-nothing-calls-for-a-restart
   ;; docs/source.md#a-landing-enters-main-as-data: after the bridge moved main's source fact to the landed tree, bin/update keeps
@@ -551,19 +566,14 @@
   (let [held {:root "/r" :dirs ["src"] :tree "t1" :commit "c1"}
         inputs {:tree "t1m" :env "e" :code "c" :config {}}
         why #(root/restart-for %1 %2 %3 %4)]
-    (is (nil? (why held "t1" nil inputs)) "main holds the files' tree, the binary is current for it, inputs written: keep running")
-    (is (re-find #"no landing brought it in" (why held "t2" nil inputs)) "main is not at the files' tree (no bridge ran): restart, whose boot catches up")
-    ;; task seon.system/an-update-keeps-running-agents: the bridge's commit loaded the changed forms into root in place
-    ;; (seon.writer's main-commit, seon.program/load-changes!), so a form root runs is no restart; a running agent goes on
-    (is (nil? (why held "t1" {:binary "t0" :tree "t1" :reaches ['seon.writer/commit-batch]} inputs))
-        "what the landing changed is forms root runs, loaded in place by the bridge's commit: keep running")
-    (is (re-find #"reaches deps.edn" (why held "t1" {:binary "t0" :tree "t1" :reaches ["deps.edn" 'seon.writer/commit-batch]} inputs))
-        "a build input no load brings (a path): restart, naming it")
-    (is (re-find #"binary-tree" (why held "t1" {:binary nil :tree "t1" :reaches [] :missing :binary-tree} inputs)) "a binary that recorded no tree: restart")
-    (is (re-find #"git said no" (why held "t1" {:binary "t0" :tree "t1" :error "git said no"} inputs)) "a diff git could not make is no answer of current")
-    (is (re-find #"stale at its boot" (why (assoc held :stale-binary {:binary "t0"}) "t1" nil inputs)) "a binary stale since its boot: restart")
-    (is (re-find #"no inputs" (why held "t1" nil nil)) "no inputs written for the files: restart")
-    (is (re-find #"no source fact" (why nil "t1" nil inputs)) "main never brought to a tree: restart"))
+    (let [current {:binary "target/seon" :digest "d1"}
+          differs (contract/error :seon.process/env-mismatch 'seon.fx/runtime-for "not tree t1's"
+                                   {:seon.process/binary-digest "d0" :seon.process/branch-digest "d1" :seon.process/tree "t1" :seon.process/differs ["deps.edn"]})]
+      (is (nil? (why held "t1" current inputs)) "main holds the files' tree, the binary is current for it (runtime-for), inputs written: keep running")
+      (is (re-find #"no landing brought it in" (why held "t2" current inputs)) "main is not at the files' tree (no bridge ran): restart, whose boot catches up")
+      (is (re-find #"what differs is deps.edn" (why held "t1" differs inputs)) "runtime-for says the binary is not tree's: restart, naming what differs")
+      (is (re-find #"no inputs" (why held "t1" current nil)) "no inputs written for the files: restart")
+      (is (re-find #"no source fact" (why nil "t1" current inputs)) "main never brought to a tree: restart")))
   ;; kept, root writes its source fact again for this boot (my.root/landed!, booted-source): an agent's plan keys its tests by
   ;; the landed files' inputs once its db holds that fact (a fork of main, or a merge of main), with no restart
   (let [db0 (pdb/empty-db false)
