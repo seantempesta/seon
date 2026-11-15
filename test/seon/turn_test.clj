@@ -59,11 +59,12 @@
 ;; bytes: the answer's decode and the harness's maps, ~2 MB; seconds: the agent's attach and its eval round trip, ~2 s of waiting
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :bytes 2000000 :asks 1}} a-turn-sends-its-model-call-and-returns
   ;; task seon.turn/a-turn-is-a-flow-step (docs/flow.md#the-step-fn-contract-every-proc-follows: a call out is an output, its answer a
-  ;; message): turn-begin, on a run whose status asks the model (a task with no proofs: its reason :no-proofs), answers the model call's
-  ;; request as its output and returns. The call is opened and its request drawn (its sent hash written), and nothing is sent: no
+  ;; message): turn-begin, on a run whose status asks the model (a task with no proofs: its reason :no-proofs), its main's merge and its
+  ;; observation answered as the :repl proc answers them, answers the model call's request as its output and returns. The call is opened and its request drawn (its sent hash written), and nothing is sent: no
   ;; effect is out and no reply or error is recorded on it
   (let [[r] (at/in-agent (fn [{:keys [task]}]
-                           [(str "(let [[st out] (seon.turn/turn-begin (seon.turn/start! {:task " (pr-str task) " :max-turns 3}))"
+                           [(str "(let [go (fn go [[st out]] (if (or (:merge out) (:observe out)) (go (seon.turn/step-run st (@#'seon.turn/effect-answer out))) [st out]))"
+                                 "      [st out] (go (seon.turn/turn-begin (seon.turn/start! {:task " (pr-str task) " :max-turns 3})))"
                                  "      call (:call (:model out))"
                                  "      m (datahike.api/pull (seon.agent/db) [:seon.model-call/sent-hash] [:seon.model-call/id call])]"
                                  "  {:out (set (keys out)) :messages (count (:messages (:model out))) :pending (= call (:id (:pending st)))"
@@ -150,6 +151,26 @@
   ;; with no mechanism of its own. Red before: judge! waited inside the :repl step
   (let [r (held-run (constantly {:reasons []}) #'agent/judge! ping-of)]
     (is (not (contains? (get-in r [:seen :site]) :stepping)) (str "parked while its proofs are queued: " (pr-str (:seen r))))
+    (is (= "app.calc/total-is-exact" (get-in r [:seen :run :task])) (str "the ping is answered with the run: " (pr-str (:seen r))))
+    (is (= :waiting (get-in r [:end :outcome])) (pr-str (:end r)))))
+
+;; Estimate: as an-agent-answers-ping-during-its-hand-back, main's merge held in the judge's place: 8,000,000 ticks, 8,000,000 bytes
+(deftest ^{:seon.test/estimate {:ticks 8000000 :bytes 8000000}} a-run-answers-ping-while-main-merges
+  ;; task seon.turn/no-turn-step-waits-for-main-or-its-observation (docs/flow.md#flow-inside-an-agent): main's merge into the branch is an
+  ;; output ({:merge}) answered as a message, so while root's writer merges, the :repl proc is parked and answers a ping. Red before:
+  ;; hand-back-step and turn-begin called my.branch/merge-main! inside the step
+  (let [r (held-run (constantly {:reasons []}) #'my.branch/merge-main! ping-of (fn [arg] (str "(seon.turn/hand-back! " (pr-str (:task arg)) ")")))]
+    (is (not (contains? (get-in r [:seen :site]) :stepping)) (str "parked while main merges: " (pr-str (:seen r))))
+    (is (= "app.calc/total-is-exact" (get-in r [:seen :run :task])) (str "the ping is answered with the hand-back: " (pr-str (:seen r))))
+    (is (= :waiting (get-in r [:end :outcome])) (str "the stop ended it at once: " (pr-str (:end r))))))
+
+;; Estimate: as an-agent-answers-ping-while-its-proofs-are-queued, the observation held: 8,000,000 ticks, 8,000,000 bytes
+(deftest ^{:seon.test/estimate {:ticks 8000000 :bytes 8000000}} a-run-answers-ping-while-its-observation-is-planned
+  ;; task seon.turn/no-turn-step-waits-for-main-or-its-observation: a turn's observation (seon.turn/observe: its proofs run by the test
+  ;; service) is an output ({:observe}), so while the service plans them the :repl proc is parked and answers a ping. Red before: turn-begin
+  ;; observed inside the step
+  (let [r (held-run (constantly {:reasons [{:reason :proof-red}]}) #'turn/observe ping-of)]
+    (is (not (contains? (get-in r [:seen :site]) :stepping)) (str "parked while its observation is planned: " (pr-str (:seen r))))
     (is (= "app.calc/total-is-exact" (get-in r [:seen :run :task])) (str "the ping is answered with the run: " (pr-str (:seen r))))
     (is (= :waiting (get-in r [:end :outcome])) (pr-str (:end r)))))
 
