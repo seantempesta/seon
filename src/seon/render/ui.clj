@@ -887,7 +887,7 @@
          ;; each wire message's tokens and the request's, by the one sizer (seon.ctx.wire/messages-tokens, the turn's cache check's): it
          ;; reads lengths and writes no JSON
          :sizes (mapv #(wire/messages-tokens (mapv (:messages w) %)) (:groups w)) :tokens (wire/messages-tokens (:messages w))
-         :differs? (boolean (and sent-hash (not= sent-hash (lib/digest (sedn/encode (sedn/canonical (:messages w)))))))
+         :differs? (boolean (and sent-hash (not= sent-hash (lib/digest (sedn/encode (:messages w))))))
          :usage (select-keys m [:seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens :seon.model-call/ms :seon.model-call/model])
          :error (:seon.model-call/error m)})))))
 

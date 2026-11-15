@@ -522,7 +522,7 @@
     (fn [_ conn]
       (let [[_ r2] (stored-turns! conn)
             back (wire/sent-request @conn (seon.lib/call-id "a1" 2))
-            h #(seon.lib/digest (seon.edn/encode (seon.edn/canonical %)))]
+            h #(seon.lib/digest (seon.edn/encode %))]
         (is (= r2 (:messages back)) "turn 2's request read back from its parts is what it sent")
         (is (= (h r2) (h (:messages back))) "its digest is the sent hash")
         (is (= (into [] (comp (filter (fn [[ref]] (= [:page 2] ref))) (mapcat second)) (:parts back))
@@ -2127,7 +2127,7 @@
                       _ (d/transact conn [{:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/basis b :seon.model-call/forms 1
                                            :seon.model-call/ms 1}])
                       ms (:messages (wire/render @conn b))]
-                  (d/transact conn [{:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/sent-hash (seon.lib/digest (seon.edn/encode (seon.edn/canonical ms)))}])
+                  (d/transact conn [{:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/sent-hash (seon.lib/digest (seon.edn/encode ms))}])
                   ms))
         r0 (turn! 1 {:seon.model-call/reasoning "why"})
         _ (d/transact conn [{:seon.eval/id "e2" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/code "(f 1)"

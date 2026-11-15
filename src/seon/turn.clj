@@ -292,9 +292,9 @@
         ;; the request is the agent's model output, each turn's page message among it: made on the db that holds them
         db (agent/db)
         {:keys [messages parts]} (wire/render db basis {:walk (repl/page-walk)})
-        ;; a hash of the bytes sent (canonical: the same message hashes alike however built), and what the turn sent, each message a
+        ;; a hash of the bytes sent, and what the turn sent, each message a
         ;; part stored once, so debug reads it back as sent (seon.ctx.wire/sent-tx, sent-request)
-        _ (agent/transact! (into [{:seon.model-call/id id :seon.model-call/sent-hash (lib/digest (sedn/encode (sedn/canonical messages)))}]
+        _ (agent/transact! (into [{:seon.model-call/id id :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}]
                                  (wire/sent-tx id parts)))
         _ (agent/commit!)]
     ;; :call and :agent name this model call and its agent, so the reply is read as it streams (docs/flow.md#effects-one-owner-and-its-workers-per-kind)
@@ -393,7 +393,7 @@
                         0))]
          (agent/transact! [{:seon.model-call/id (lib/call-id k (str "read-" n)) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n
                             :seon.model-call/origin :outside :seon.model-call/basis basis
-                            :seon.model-call/sent-hash (lib/digest (sedn/encode (sedn/canonical messages)))}])))
+                            :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}])))
      text)))
 
 (defn- turn-messages
