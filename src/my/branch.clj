@@ -60,34 +60,40 @@
   []
   (pm/unmerged (agent/db)))
 
+(defn- settle-fact!
+  "One datum entry en of this branch taken to side (its :base or :theirs, as git checkout --theirs): its value written (seon.merge/side-tx);
+  a ref to an entity this branch lacks (main made it after the base) brings that entity's own facts from main first, so the branch never
+  holds a ref to nothing; a var's form taken is loaded here too, as an eval of it would be. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.merge/entry-value [:enum :theirs :base]] :any]}
+  [{k :key :as en} side]
+  (let [[_ e a] k v (get en side) db (agent/db)]
+    (when (and (int? v) (= :db.type/ref (get-in (:schema db) [a :db/valueType])) (empty? (d/datoms db :eavt v)))
+      (agent/transact! [(assoc (dissoc (d/pull (agent/heard-main) '[*] v) :db/id) :db/id v)]))
+    (agent/transact! (pm/side-tx (agent/db) k v))
+    (when (and (= :var/form a) (int? v))
+      (let [db (agent/db) sym (:var/name (d/entity db e)) src (:form/src (d/entity db v))]
+        (when (and sym src)
+          (let [cur (ns-name *ns*)] (repl/eval-string (str "(in-ns '" (symbol (namespace sym)) ")\n" src "\n(in-ns '" cur ")"))))))))
+
 (defn resolve!
-  "Settle the unmerged entry of var sym, or of program key k (a task's: [:task \"ns/name\"]) (git add). With no side the branch
-  keeps what it holds now; :theirs or :base takes that side: a var's definition loaded (or the var unmapped when that side
-  deleted it) and recorded, a task's content written. Answers the entries still unmerged."
-  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :seon.merge/program-key]] [:vector :seon.merge/entry-value]]
-                  [:=> [:cat [:or :qualified-symbol :seon.merge/program-key] [:enum :ours :theirs :base]] [:vector :seon.merge/entry-value]]]}
-  ([sym] (resolve! sym :ours))
-  ([sym side]
-   (if (vector? sym)
-     (let [k sym entry (first (filter #(= k (:key %)) (pm/entries (agent/db))))]
-       (when (and entry (not= :ours side))
-         (agent/transact! (pm/side-tx (agent/db) k (get entry side))))
-       (agent/transact! (pm/resolve-tx (agent/db) k))
-       (unmerged))
-   (let [k [:var sym]
-         entry (first (filter #(= k (:key %)) (pm/entries (agent/db))))
-         content (get entry side)
-         nsym (symbol (namespace sym))]
-     (when (and entry (not= :ours side))
-       (if-let [src (:src content)]
-         (let [cur (ns-name *ns*)]
-           (repl/eval-string (str "(in-ns '" nsym ")\n" src "\n(in-ns '" cur ")")))
-         ;; main's side removed it: unmapped here, and its definition retracted as an eval's ns-unmap retracts it (seon.repl/removal-tx)
-         (let [db (agent/db) e (pdb/eid db :var/name sym) f (some-> e (#(d/entity db %)) :var/form :db/id)]
-           (ns-unmap (find-ns nsym) (symbol (name sym)))
-           (when f (agent/transact! (repl/removal-tx db [[sym e f]]))))))
-     (agent/transact! (pm/resolve-tx (agent/db) k))
-     (unmerged)))))
+  "Settle the unmerged entries of an entity (git add): a var by its symbol, any entity by its name ([:seon.task/id \"ns/name\"],
+  [:var/name sym]: seon.merge/named, as the merge shows a conflict), or one entry by its key ([:datum e a]). With no side the branch
+  keeps what it holds now; :theirs or :base takes that side
+  (`settle-fact!`: main's value, a missing ref target brought from main, a var's form loaded). Answers the entries still unmerged."
+  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol [:tuple :keyword :any] [:tuple [:= :datum] :int :keyword]]] [:vector :seon.merge/entry-value]]
+                  [:=> [:cat [:or :qualified-symbol [:tuple :keyword :any] [:tuple [:= :datum] :int :keyword]] [:enum :ours :theirs :base]] [:vector :seon.merge/entry-value]]]}
+  ([x] (resolve! x :ours))
+  ([x side]
+   (let [db (agent/db) es (pm/entries db)
+         ;; the entity x names: a var's symbol, an identity pair, or the entity of a datum key
+         e (cond (symbol? x) (pdb/eid db :var/name x)
+                 (and (vector? x) (= :datum (first x))) (second x)
+                 (and (vector? x) (= 2 (count x)) (qualified-keyword? (first x))) (pdb/eid db (first x) (second x)))
+         datum (vec (filter #(and (= :datum (first (:key %))) (not (:resolved? %)) (if (= :datum (first x)) (= x (:key %)) (= e (second (:key %))))) es))]
+     (doseq [en datum]
+       (when (not= :ours side) (settle-fact! en side))
+       (agent/transact! (pm/resolve-tx (agent/db) (:key en))))
+     (unmerged))))
 
 (defn changes
   "git diff main...: what this branch's merge will carry to main, the vars it added, changed
