@@ -394,8 +394,29 @@
                             :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}])))
      text)))
 
+(defn- turn-messages
+  "The messages turn n took, as its driver reads them ({:id :from :body :sent-ms}, :from by name, seon.task/sender-name), in the order they
+  were linked: those whose link to this agent (the :seon.message/to datom) is after turn n-1's basis and at or before basis, turn n's.
+  It's the edge seon.ctx/placed-messages places a model's messages by, so a session hears each message in the reply whose turn
+  took it, as a model reads it in that turn's request. t is one sequence across the store's branches, so a message main's merge brought
+  keeps a t after the turn before it. One seek of the agent's message links (O(m), m its messages) and an entity read of each new one.
+  See docs/users.md#messages."
+  {:malli/schema [:=> [:cat pos-int? :map] [:vector [:map [:id :string] [:from [:maybe :string]] [:body :string] [:sent-ms :int]]]]}
+  [n basis]
+  (let [db (agent/db) k (:key @agent/state)
+        lo (or (when (> n 1) (some-> (d/entity db [:seon.model-call/id (lib/call-id k (dec n))]) :seon.model-call/basis :t)) 0)
+        hi (:t basis)]
+    (if-let [me (pdb/eid db :seon.agent/key k)]
+      (->> (d/datoms db :avet :seon.message/to me)
+           (filter #(and (< lo (:tx %)) (<= (:tx %) hi)))
+           (sort-by (juxt :tx :e))
+           (mapv (fn [dt] (let [m (d/entity db (:e dt))]
+                            {:id (:seon.message/id m) :from (task/sender-name (:seon.message/from m))
+                             :body (:seon.message/body m) :sent-ms (:seon.message/sent-ms m)}))))
+      [])))
+
 (defn outside-reply!
-  "An outside agent's seon_eval on this process, one reply as a model's is: its evals (`seon.model/call-evals`) through the one REPL path in order, every one whatever the one before it did (docs/model.md#one-tool-repl). With turn?, the agent works task with its model outside: the reply is its turn, its message on its model call, opened as a model's turn is, so it reads as a model's in the conversation, and its answer is what a model's next request would add: any page eval Seon ran, before and after its evals. Otherwise it is someone at the REPL of an agent its own model drives: no turn moves. Answers each response as the wire carries it, printed as EDN for the server (`seon.server/op-answer`). See docs/turn.md#an-outside-agent."
+  "An outside agent's seon_eval on this process, one reply as a model's is: its evals (`seon.model/call-evals`) through the one REPL path in order, every one whatever the one before it did (docs/model.md#one-tool-repl). With turn?, the agent works task with its model outside: the reply is its turn, its message on its model call, opened as a model's turn is, so it reads as a model's in the conversation, and its answer is what a model's next request would add: any page eval Seon ran, before and after its evals. Otherwise it is someone at the REPL of an agent its own model drives: no turn moves. Prints {:responses [each response as the wire carries it]} as EDN for the server (`seon.server/op-answer`), with :messages, the messages the turn took (`turn-messages`), when the reply is a turn. See docs/turn.md#an-outside-agent."
   {:malli/schema [:=> [:cat [:maybe :seon.task/id] [:maybe :string] :any :boolean] :nil]}
   [task message evals turn?]
   (let [n (when turn? (begin! task) (inc (agent/turn-now)))
@@ -411,7 +432,9 @@
       (agent/transact! [{:seon.model-call/id id :seon.model-call/forms (count rs) :seon.model-call/model "outside"
                          :seon.model-call/reply (or message "")}])
       (agent/commit!))
-    (print (sedn/encode (mapv agent/on-the-wire (map :response rs))))
+    ;; the messages this turn took lead the answer, so the session driving the agent hears them as a model would in its request
+    (print (sedn/encode (cond-> {:responses (mapv agent/on-the-wire (map :response rs))}
+                          turn? (assoc :messages (turn-messages n basis)))))
     nil))
 
 (defn specified-tx

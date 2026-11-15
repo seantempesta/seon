@@ -560,9 +560,8 @@
   #{"form" "var" "ns" "method" "impl" "schema" "file" "db" "db.install" "db.type" "db.cardinality" "db.unique"})
 
 (defn moves-program?
-  "Whether a commit's resolved ops change the program (an attribute of attr-namespaces): what
-  moves the reach graph a fork hands its agent (seon.fork-server) and starts a run of main's
-  tests (seon.prove)."
+  "Whether a commit's resolved ops change the program (an attribute of attr-namespaces). Called once a commit, by the writer
+  (seon.writer/program-at), whose :program-t on each notice is what the fork server's reach graph and seon.prove's main runs read."
   {:malli/schema [:=> [:cat [:sequential :any]] :boolean]}
   [ops] (boolean (some (fn [[_ _ a]] (and (keyword? a) (attr-namespaces (namespace a)))) ops)))
 
