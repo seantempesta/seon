@@ -96,7 +96,9 @@
             _ (datahike.connector/follow-head! conn)
             c3 (d/commit-id @conn)
             changed (d/changes conn c2 c3)]
-        (is (= :datahike/changes-not-ancestor refused) (str "the value's own record does not reach the branch head: " (pr-str refused)))
+        ;; refused either way: the walk by :base leaves the branch head's lineage (not-ancestor), or meets the test
+        ;; branch's first commit, which kept no changes (unrecorded), before it
+        (is (#{:datahike/changes-not-ancestor :datahike/changes-unrecorded} refused) (str "the value's own record does not reach the branch head: " (pr-str refused)))
         (is (= (facts ds) (facts changed)) (str "d/changes from the head it replaced answers exactly the stated change: " (pr-str (facts changed))))
         (is (= c2 (:base (konserve.core/get (:store @conn) (datahike.writing/commit-changes-key c3) nil {:sync? true})))
             "the record names the stated base")))))
