@@ -511,9 +511,8 @@
     (if prev (into (subvec (assembly-parts db prev) 0 keep) add) add)))
 
 (defn sent-tx
-  "The facts that keep what model call id sent at turn n, from its request's parts: each message a part by its canonical digest,
-  stored once, and the call's assembly: what changed since call prev's (the parts it keeps, then the ones it adds), whole every
-  :seon.config.ctx/assembly-checkpoint-turns turns or with no prev. See docs/render.md#a-turn-stores-what-it-sent."
+  "The facts that keep what model call id sent at turn n: its new messages as parts, and its assembly as what changed since call
+  prev's (whole at a checkpoint). See docs/render.md#a-turn-stores-what-it-sent."
   {:malli/schema [:=> [:cat :seon.host/db :string [:maybe :string] :int [:vector :any]] [:vector :map]]}
   [db id prev n parts]
   (let [dg #(lib/digest (sedn/encode (sedn/canonical %)))
