@@ -248,7 +248,7 @@
       ;; the library files, read only when the pins moved from those the store's library files were read at (library-since; a
       ;; store holding none asks with :none): a boot whose pins stand reads none (docs/vector.md#search)
       (cond-> (assoc src-read :modes (into {} (for [[p t] (:value src-read) :when (and t (cfg/file-kind p))]
-                                        [p (if (.canExecute (java.io.File. (str base "/" p))) "100755" "100644")]))
+                                        [p (if (.canExecute (java.io.File. (str base "/" p))) "100755" "100644")])))
         (and library-since program (:pins src-read) (not= library-since (:pins src-read))) (assoc :library (library-source base program))))
     (catch Throwable e (error #'seon.fx/read-source :seon.fx/io-error (step/error-msg e) {:path root}))))
 
