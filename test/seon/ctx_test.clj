@@ -1473,12 +1473,9 @@
                 "ref-of for its value, and edits' own return); measured 5 calls, 2,709 ticks and 23,280 bytes "
                 "at 100 and at 1,000 evals")
      :growth :constant
-     ;; derived from edits' code, priced by the unit table (seon.cost/units), never from a run: the root's 15-odd keys against the
-     ;; new map's: `distinct` over 30 keys keeps 15 in a persistent set, 15 x :map/assoc 825 B = 12.4 KB; the skip and ro sets
-     ;; (transient into, ~10 keys x 92 B) 0.9 KB; change: one assoc 0.8 KB; the one attribute's write: acc's :edited, :tx and :paths
-     ;; (an assoc-in, two vec conj: ~1.6 KB), its path conj 0.25 KB; why: registered? and the schema's valid? ~2 KB; the contract's
-     ;; check of the call's eight arguments ~1 KB: about 20 KB, flat in the evals
-     :fixed {:bytes 20000}
+     ;; in ticks (the owner, 2026-11-15: calls are no cost): twelve key compares (~10 ticks each), the schema check of the one value
+     ;; (~1.5k), its datom (~200) and six contracted calls' wrappers (~15 each): ~2k ticks
+     :fixed {:ticks 2000}
      :sizes [100 300 1000 3000]}))
 
 (defn swap-input
@@ -1526,18 +1523,11 @@
      ;; paid before it), then seon.db/checked and seon.db/index-of (the check a function, not a macro shaped to this count, and
      ;; a branch's own entity schemas: the audit of 2026-11-09); read from the path, 118 measured. The owner accepted
      ;; validation at transaction time, 2026-11-08 ("a small price to pay. Make sure that implementation is efficient")
-     ;; derived from write!'s path, priced by the unit table (seon.cost/units), never from a run: edits over the agent and its task, two
-     ;; levels of ~15 keys: 2 x 20 KB = 40 KB (the a-write test's arithmetic); the transaction is about 20 datoms (the plan's retract and
-     ;; add, three cite entities of ~4 datoms upserted, the transaction's own), each three index inserts (3 x :sorted/assoc 668 B,
-     ;; x2.5 for its datom and path copy) = 5 KB: 100 KB a d/with, two of them (pdb/speculate, then agent/transact!) = 200 KB; each
-     ;; datom checked once by its schema (~1 KB) twice = 40 KB; the plan's 30 characters parsed (:str/seq-char 80 B, x10 for the
-     ;; parser's tokens) = 24 KB; patch: the task pulled again, 12 attributes (:db/pull 14.8 KB + 11 x :db/pull-attr 4.1 KB) = 60 KB,
-     ;; its path copied up (5 assoc, 4 KB) and touched-by over 20 datoms (5 assoc each, 16 KB) = 80 KB; three cite names asked
-     ;; (a seek of 2.4 KB), twice = 14 KB; the watch, install! and swap!'s own assoc-in = 5 KB: about 400 KB, flat in the evals
-     ;; measured 1,641,344 bytes at 100 evals against the 400 KB this derives (4.10x over, under the 10x that stops work): the proof
-     ;; stays live at its earlier bound, so a growth is still red, while task seon.cost/a-swap-allocates-four-times-its-work finds
-     ;; the missing 1.2 MB (work this arithmetic missed, or waste) and lowers the bound to what it finds
-     :fixed {:bytes 1650000}
+     ;; in ticks (the owner, 2026-11-15: calls are no cost): the two checked transactions (the swap's seon.db/with and its citations'
+     ;; speculate: a d/with of a few datoms into the seeded db and its entity check, ~180k each), the sentence's parse (~30k) and the
+     ;; rest of the path's ~118 contracted calls at ~1.4k (~165k): ~550k. The first restatement priced only the calls (165k), and
+     ;; measured 534k at 100: the two transactions are the work it left out
+     :fixed {:ticks 550000}
      :sizes [100 300 1000 3000]})
   ;; no record left behind: an empty state builds none (as-agent!'s callers leave theirs too)
   (end-agent!))
@@ -1556,11 +1546,8 @@
      :n "evals in the session's record"
      :work "one seek of the entity's attribute (its one datom) and one pull of that datom's transaction: made-by's own call"
      :growth :constant
-     ;; derived from made-by's code, priced by the unit table (seon.cost/units), never from a run: the one datom of the attribute, a seek
-     ;; of 2.4 KB (seon.task-cost-test's unique-seek) and the reduce over it 0.2 KB; the pull of the transaction's three attributes
-     ;; (:db/pull 14.8 KB + 2 x :db/pull-attr 4.1 KB) = 23 KB; the dissoc and assoc 2 x 0.8 KB; the contract's check of its three
-     ;; arguments and its map 1 KB: about 28 KB, flat in the evals
-     :fixed {:bytes 28000}
+     ;; in ticks (the owner, 2026-11-15: calls are no cost): one index seek (~3k ticks) and one pull of a transaction's attributes (~5k)
+     :fixed {:ticks 8000}
      :sizes [100 300 1000 3000]}))
 
 ;; ---- changes' bound, checked on generated records -----------------------------------------

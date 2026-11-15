@@ -37,14 +37,16 @@
               "parent and link targets are map lookups. Nothing is written: the answer is []")
    :growth :linear
    ;; 2026-10-31 (shrink-tests-4): sizes [10 20 30] on the world (a size is a multiple of ten: pages of ten sections):
-   ;; 1.69 / 3.56 MB: the old sizes up to 250 read the same ~177 KB a section
+   ;; 1.69 / 3.56 MB, 231 / 459 / 687 calls: exactly 3 + 22.8 a section (228 a page), the old sizes up to 250 read the same
+   ;; ~177 KB a section
    :per-n {:ns 170000 :bytes 190000}
    :fixed {:ns 50000 :bytes 50000}
    :sizes [10 20 30]})
 
 (deftest an-unchanged-reload-costs-a-parse-and-a-pull-per-section
-  ;; the claim: per section, a parse and a pull, nothing written. The proof judges the bytes against the estimate: red if
-  ;; a pass over the whole wiki appears or a section costs more bytes than the estimate.
+  ;; the claim: per section, a parse and a pull, nothing written. The proof judges the bytes (exact, the thread's own) against
+  ;; the estimate and their growth: red if a pass over the whole wiki appears (steeper than linear) or bytes pass the estimate.
+  ;; (It asserted an exact count of contracted calls a page until the owner's "Drop :calls", 2026-11-15.)
   (let [{:keys [rows verdict]} (cost/run reload-estimate)]
     (is (:ok? verdict) (cost/explain reload-estimate rows verdict))))
 

@@ -106,7 +106,7 @@
 ;; ---- red proofs: the failing assertions and cost verdicts, persisted ---------------------
 
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-red-assertion-is-persisted
-  (let [verdict {:ok? false :over [{:dim :calls :n 10 :ratio 2.0}] :steeper [] :under [] :unmeasured []}
+  (let [verdict {:ok? false :over [{:dim :bytes :n 10 :ratio 2.0}] :steeper [] :under [] :unmeasured []}
         run {:pass 1 :fail 10 :error 0
              :reports (into [{:type :pass :var "#'app.t/ok"}
                              (agent/test-report {:type :fail :message (cost/explain {:of 'app/f :input 'app/in :n "n" :work "w" :growth :linear :sizes [1 10 100]} [] verdict)
@@ -501,32 +501,69 @@
   (let [m (profile/measure! #(problems/health db))]
     [(:value m) (dissoc m :value)]))
 
+(defn- calls-of
+  "The contracted calls of thunk f."
+  [f]
+  (:calls (profile/measure! f)))
+
 (deftest ^{:seon.test/estimate {:ticks 10000000}} health-reads-each-part-once
-  ;; Estimate: one health read is every class's reader over the 3-task seeded program plus one doc, about 5 M ticks measured
-  ;; warm by the health cost proofs; the 10 M bound holds it within 2x. Recorded reads are a set (docs/storage.md#what-a-read-scanned,
-  ;; each range once however often read), so a part read again per class is invisible there; what the set shows is which ranges
-  ;; health read. The goal is held as: health reads no range beyond what each class's own reader reads over the same db (a class
-  ;; that re-read a part by another route, or scanned the whole for a part, adds a range no reader owns), and never an open range.
   (let [db0 (seeded 3 2)
         db (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" "# P\n\nIt says what it is about.\n"}))
-        [[h _] reads] (d/with-reads #(measured-health db))
-        keys-of (fn [f] (d/reads-index (second (d/with-reads f))))
+        [h m] (measured-health db)
         rows (get-in h [:classes :problem-unlinked :rows])
         ans (problems/answers db)
-        tasks (mapv :e (d/datoms db :aevt :seon.task/id))
-        parts [#(problems/answers db) #(problems/report db) #(problems/stalled-agents db ans) #(problems/stale-pins db ans)
-               #(problems/stale-binary db ans) #(problems/orphan-pages db ans) #(problems/leadless-sections db ans)
-               #(problems/uncited-tasks db ans) #(problems/stale-plans db ans) #(problems/unsynced-tasks db ans tasks)
-               #(problems/waived-proofs db ans) #(problems/unschemed-keys db ans) #(problems/unnamed-sites db ans)
-               #(problems/native-in-defonce db ans) #(problems/stale-sections db ans) #(problems/hand-written-lists db ans nil)
-               #(problems/problem-unlinked db ans (:classes h))]
-        owned (into #{} (mapcat #(keys-of (fn [] (doall (%))))) parts)
-        health-keys (d/reads-index reads)]
+        classes {:stalled #(problems/stalled-agents db ans) :stale-pin #(problems/stale-pins db ans)
+                 :stale-binary #(problems/stale-binary db ans) :orphan-page #(problems/orphan-pages db ans)
+                 :leadless-section #(problems/leadless-sections db ans) :uncited-task #(problems/uncited-tasks db ans)
+                 :unnamed-site #(problems/unnamed-sites db ans) :stale-section #(problems/stale-sections db ans)
+                 :stale-plan #(problems/stale-plans db ans) :waived-proof #(problems/waived-proofs db ans)
+                 :hand-written-list #(problems/hand-written-lists db ans nil)
+                 :stateful-outside-flow #(problems/stateful-outside-flow db ans nil)
+                 :unsynced #(problems/unsynced-tasks db ans (mapv :e (d/datoms db :aevt :seon.task/id)))
+                 ;; the remainder: answers, report-with, health-with (and problem-unlinked inside it, over the derived rows as health hands them), and the folds
+                 :fixed (let [derived (#'problems/other-derived db ans (mapv :e (d/datoms db :aevt :seon.task/id)))]
+                          #(let [a (problems/answers db)]
+                             (#'problems/health-with db a (:classes (#'problems/report-with db a {} nil)) derived)))}
+        measured (update-vals classes calls-of)
+        ;; 74 -> 86 -> 88 -> 89 on 2026-11-10 (uncited-tasks every ready task, stale-binary, waived-proof), one total; per class since. Each bound is the contracted calls measured on this world.
+        bounds {:stalled 1             ; the processes holding a stall fact, one range
+                :stale-pin 2           ; the pins of the branch scheme
+                :stale-binary 2        ; root's source fact: one seon.db/eid and one pull
+                :orphan-page 1         ; the sections' references, one scan
+                :leadless-section 1    ; the stored sections' first blocks
+                :uncited-task 15       ; the ready tasks' plans, cites and proofs (12 are the proofs read, seon.db/eid per proof), and task-reads (19 while it asked the program which cited vars were its own)
+                :unnamed-site 18       ; the catch sites of the program's forms (live? and form-of per form, the namespaces once), and
+                                       ; the one-printer law's (its rule, four dials read once, and its marks' sites: tests, 9 -> 18)
+                :stale-section 2       ; the read datoms and the vars' forms, one scan each
+                :stale-plan 3          ; task-reads, and a seon.db/eid per cited var of a ready task
+                :waived-proof 1        ; the test forms' cost proofs passing by :overrun, one scan (Deep fixes' class)
+                ;; its own and unsynced-candidates' contracts, and per task that may differ from its file at most 4: unsynced?,
+                ;; derived? and its seon.db/eid of the refine section, and its row (derived-row) when it differs; a filed one's
+                ;; edit and a refine's cite are seeks, no call (data, 2026-11-14: the store is the source, so every live task is judged)
+                :unsynced (+ 2 (* 4 (count (#'problems/unsynced-candidates db (mapv :e (d/datoms db :aevt :seon.task/id))))))
+                :fixed 55              ; (52 -> 55, tests: the world's own unnamed printer sites are rows problem-unlinked reads)
+                                       ; (50 -> 52, data 11-14: this world's own store-made tasks give :unsynced rows, so problem-unlinked seeks its section, seon.db/eid, and writes its row, derived
+                ;; the owner's decree (2026-11-14): per var with a form, its read (scan-form, seon.source/read-forms and the reader's two
+                ;; contracted helpers) and its walk (literal-lists), and the class's own. At import the form is read once already: keeping its
+                ;; literals there makes this a seek a var (seon.problems/a-forms-hand-made-lists-are-read-at-its-import)
+                :hand-written-list (+ 1 (* 5 (count (d/datoms db :aevt :var/form)))
+                                       ;; and one unaliased per form whose text holds an auto keyword
+                                       (count (filter #(some-> (:v %) str (.contains "::")) (d/datoms db :aevt :form/src))))
+                ;; its own contract, a derived-row per row, and a seon.db/eid per qualified ref of each src var that swaps or resets
+                ;; (the seek that tells whether the ref is process-global state)
+                :stateful-outside-flow (let [vs (keep #(let [ve (d/entity db (:e %))] (when (some-> ve :var/ns :ns/file (str/starts-with? "src/")) ve)) (d/datoms db :aevt :var/form))]
+                                         (+ 1 (count (problems/stateful-outside-flow db ans nil))
+                                            (reduce + (for [ve vs :let [refs (set (some-> ve :var/form :form/refs))]
+                                                            :when (some '#{clojure.core/swap! clojure.core/reset!} refs)]
+                                                        (count (filter qualified-symbol? refs))))))
+                :wrappers 2}]         ; health's and other-derived's own contracts
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
     (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
-    (is (not (contains? health-keys :any)) "no part is read by an open range")
-    (is (= #{} (clojure.set/difference health-keys owned)) "health reads no range that a class's own reader does not")))
+    (doseq [[c bound] (dissoc bounds :wrappers)]
+      (is (<= (measured c) bound) (str c " reads " (measured c) " contracted calls, bound " bound)))
+    ;; task-reads is in uncited-task's, stale-plan's and unsynced's rows (each measured alone makes it), and health makes it once (other-derived)
+    (is (<= (:calls m) (- (apply + (vals bounds)) 2)) (str "one health read makes " (:calls m) " contracted calls: the classes' bounds sum to " (apply + (vals bounds)) ", less task-reads counted three times"))))
 
 (deftest ^{:seon.test/estimate {:ticks 20000000}} problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
@@ -631,7 +668,9 @@
                :work "no pull and no contracted call per finished task: the move's datoms (given, the render proc's) name the touched task and its agent's task, the derived classes are carried and read where the two dbs differ; the program's changes come from the moved datoms (seon.merge/delta-changes given them), and the per-task part is the cold index nodes the task scans touch"
                :growth :linear
                :per-n {:ticks 1700 :bytes 10500}
-               :fixed {:ticks 650000 :bytes 3000000}
+               ;; fixed calls, once a read whatever n, summed by what makes them: Point, 2026-11-10 (in Sean's absence, reported to him): 54 -> 56
+               :fixed {:ticks 650000 :bytes 3000000} ; :unestimated reads the move's open tasks too: the moved task states no estimate,
+                                                                   ; its row (derived-row) on base and head (data, 2026-11-15, measured 104 -> 106)
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 25000000}} problems-cost-nothing-for-a-clean-program
@@ -830,7 +869,11 @@
     (is (= [] (unnamed (src (with-ref db0 'clojure.core/subs)))) "a cut outside a display namespace is no site")
     (testing "the section names it: no problem"
       (let [page (str "# Render\n\n## One printer\n\nEach site with its reason.\n\n- `" v "`: the wire\n")]
-        (is (= [] (unnamed (let [db (src (with-ref db0 'clojure.core/pr-str))] (d/db-with db (seon.doc/load-tx db "docs" {"docs/render.md" page}))))))))))
+        (is (= [] (unnamed (let [db (src (with-ref db0 'clojure.core/pr-str))] (d/db-with db (seon.doc/load-tx db "docs" {"docs/render.md" page}))))))))
+    (testing "named in a section under it: no problem (the law's list sits in a subsection; its names went unread, 2026-11-15)"
+      (let [page (str "# Render\n\n## One printer\n\nEach site with its reason, below.\n\n### Printing beside the printer\n\n- `" v "`: the wire\n")]
+        (is (= [] (unnamed (let [db (src (with-ref db0 'clojure.core/pr-str))] (d/db-with db (seon.doc/load-tx db "docs" {"docs/render.md" page})))))
+            "a subsection's name counts")))))
 
 (deftest ^{:seon.test/estimate {:ticks 6000000}} a-root-on-a-stale-binary-is-a-problem
   ;; task seon.problems/a-root-on-a-stale-binary-is-a-problem, docs/health.md#a-stale-binary: a boot holds seon.system/stale-binary's
@@ -945,7 +988,6 @@
                ;; as steeper growth (task seon.cost/a-speedup-never-reads-as-steeper)
                ;; 91 (main) + 13: the one-printer law's rule in the full read, its four dials read through the resolver (tests: 92 -> 99 at 10
                ;; before main's 91; measured 184 against a summed 178 on the merged tip, the sum having counted the dials' reads once)
-               ;; +1: native-in-defonce, one contracted read of the forms reaching jolt.scheme/eval-string (none in this world)
                :fixed {:ns 19500000 :bytes 17500000}
                :sizes [10 30 100]}))
 
@@ -1032,7 +1074,6 @@
                ;; (scan-form, seon.source/read-forms, literal-lists) on base and head; + 13: the one-printer law's rule, its four dials read
                ;; once for both sides (tests, measured 90 -> 103 before context's 97); + 4 (flow, 2026-11-14): :stateful-outside-flow's reader
                ;; on base and head, and on each side the seek of each changed var's namespace file
-               ;; + 2 (runtime): :native-in-defonce's reader on base and head for the changed forms (measured 114 -> 116)
                :fixed {:ticks 460000 :bytes 1800000} ; 90: and retyped-attributes' own contract, once a read (data, 2026-11-14)
                :sizes [10 30 100]}))
 
@@ -1669,8 +1710,8 @@
 ;; proof's verdict reads as a :cost row of health (docs/health.md): estimate one world (~10 M ticks, as
 ;; seeded's) and two health reads of a db of one task, ~40 M ticks.
 (deftest ^{:seon.test/estimate {:ticks 60000000}} a-judged-cost-verdict-reads-as-a-cost-problem
-  (let [rows [{:n 1 :ticks 10} {:n 10 :ticks 100} {:n 100 :ticks 2000}]
-        red {:ok? false :over [{:dim :ticks :n 100 :ratio 2.0}] :steeper [] :under [] :unmeasured []}
+  (let [rows [{:n 1 :calls 10} {:n 10 :calls 100} {:n 100 :calls 2000}]
+        red {:ok? false :over [{:dim :bytes :n 100 :ratio 2.0}] :steeper [] :under [] :unmeasured []}
         green {:ok? true :over [] :steeper [] :under [] :unmeasured []}
         db (d/db-with (world)
                       [(ended "t/slow" {:seon.task/proofs #{'app.t/f-cost 'app.t/g-cost}

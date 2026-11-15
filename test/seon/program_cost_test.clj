@@ -92,7 +92,6 @@
                 "the forms sorted by order once (n log n compares)")
      :growth :n-log-n
      :ops {:map/assoc 3 :map/get 4 :sort/compare 1 :vec/conj 2 :set/conj! 2}
-     ;; itself, and the depth-first sort once for the namespaces and once per namespace (one here)
      :sizes [30 100 300]}))
 
 (def ^:private divergence-sizes "The sizes divergence's proof measures." [10 30 100])

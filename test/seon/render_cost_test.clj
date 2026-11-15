@@ -48,7 +48,6 @@
                 "seq; callback, write-attrs!, attr-name twice, escape for the attribute and the text)")
      :growth :linear
      :per-n {:bytes (Math/round (bytes-of per-node))}
-     ;; html itself, the root's write! and its StringBuilder
      :sizes [100 300 1000 10000]}))
 
 (defn messages
@@ -77,17 +76,11 @@
      ;; 2026-11-10, step 2 (senders as refs): bound 170 -> 171 calls a message, the +1 the one call of seon.render/reference-value per
      ;; sender (a printed reference is its identity value); measured 3,657 at 20 and 10,497 at 60 (170.6 a message, 168 before). Ruled
      ;; by Point for the owner on 2026-11-10, awaiting his word. The +1 is the reference rule's own call, which no other fix removes: the ~200 calls a message of a one-key sender map were seon.render's hook path before that rule, and the printer alone shows no namespace cost (seon.print-cost-test/a-nested-maps-key-namespace-costs-nothing-more)
-     ;; derived from the one pass above, priced by the unit table (seon.cost/units), never from a run: a message's reference-value for
-     ;; its sender, one map assoc 0.8 KB; its render's hiccup (a vector, an attribute map) 0.3 KB and its one line of ~40 characters
-     ;; (:str/append 36 B each) 1.4 KB, the concat 0.3 KB; print/line's pr-str of the body and sender ~20 characters x 26 B = 0.5 KB;
-     ;; the leaf laid out: 3 vec conj (0.75 KB) and 2 assoc (1.6 KB); the contracts of the ~8 calls a message goes through (nested,
-     ;; render-of, own-key, schema-of, declared, line, message, reference-value) each check its three-key map ~0.75 KB = 6 KB: about 12 KB
-     ;; a message; the fixed part, the options, the printer's root and its budget cells ~20 KB
-     ;; measured 1,729,328 bytes at 20 messages against the 260 KB this derives (6.65x over, under the 10x that stops work): the
-     ;; proof stays live at its earlier bound, so a growth is still red, while task seon.cost/the-printer-allocates-six-times-its-work
-     ;; finds the missing bytes (work this arithmetic missed, or waste) and lowers the bound to what it finds
-     :per-n {:bytes 85000}
-     :fixed {:bytes 100000}
+     ;; 2026-11-15 (web, the owner's "Drop :calls"): the same work in ticks. ~171 contracted calls a message and ~260 once, at ~1.4k
+     ;; ticks a contracted call on this render path (seon.render-cost-test/a-request-made-again-costs-what-moved: 3.65M ticks over 2,598
+     ;; calls): ~240k ticks a message, ~360k once
+     :per-n {:ticks 240000}
+     :fixed {:ticks 360000}
      :sizes [20 60 180]}))
 
 (defn main-of
@@ -706,6 +699,8 @@
                :work (str "the namespace's vars (" (count (ns-interns 'seon.render.ui)) " now) read once (ns-interns ~7k ticks, 93 KB; a meta read and css? each, ~200 ticks and ~700 B), "
                           "the 24 that state rules sorted (~3k): constant in the renders drawn. It sorted every var by symbol: 124k ticks, 492 KB")
                :growth :constant
+               ;; calls: rules, and css? once for each var of seon.render.ui, counted from the namespace itself: a restated count went red
+               ;; at each new render (163, then 164 with turns-tile)
                :fixed {:bytes 240000 :ticks 45000}
                :sizes [1 4 16]}))
 
