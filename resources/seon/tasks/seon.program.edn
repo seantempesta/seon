@@ -107,4 +107,8 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.proofs-test/a-green-is-reused-across-a-library-change-it-never-called}
   :seon.task/estimate {jolt.host/var-digest {:n 1, :order :constant, :ticks 200, :bytes 0}, seon.proofs/read-digests {:n 100, :order :linear, :ticks 20000, :bytes 4096}}}
+ {:seon.task/name "a-test-that-reads-a-schemas-properties-is-reached-by-that-schema"
+  :seon.task/plan "Owner: tests (tests-4 asked deps to file it, 2026-11-15). Class: a test whose input reads a schema entry's properties through seon.contract/properties has no reach edge to that entry, so a change to the entry never reruns it. Evidence [M]: seon.problems-test/problem-unlinked-follows-the-classes-not-their-rows reads (contract/properties :seon.problems/class); runtime's 3b0dff01c3 added :native-in-defonce to that entry and its land never ran the test, so main was red on it until deps' pin land caught it (target/land/20261115T130504-jolt-deps.log: 74 calls against 72; the :calls count was then deleted, b0f37301a9). Fix at the class, not per test: seon.program/graph-index's schema edges give a call of contract/properties (and its siblings that read a schema entry's properties) an edge to the entry it names, so tests-reaching answers that test for that entry. Proof, red first: a change to one schema entry reaches a test that reads its properties and no test that does not."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.program-test/a-change-to-a-schema-entry-reaches-the-tests-that-read-its-properties}}
 ]
