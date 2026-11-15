@@ -434,7 +434,7 @@
   (let [inputs (cfg/value :seon.config.build/inputs)]
     (if-not built-tree
       (vec inputs)
-      (let [r (git-run {} root (into ["diff" "--raw" "--no-renames" built-tree tree]) nil)]
+      (let [r (git-run {} root ["diff" "--raw" "--no-renames" built-tree tree] nil)]
         (vec (for [l (str/split-lines (str (:out r))) :when (not (str/blank? l))
                    :let [[meta p] (str/split l #"\t" 2) [om nm] (str/split (subs meta 1) #" ")]
                    :when (or (= "160000" om) (= "160000" nm)
