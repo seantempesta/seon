@@ -626,13 +626,14 @@
 
 
 (defn- merged-of
-  "What the writer's merge of main into the branch head makes, from base b0 (seon.merge/decide, then seon.writer/replay of main's change onto head): {:conflicts},
+  "What the writer's merge of main into the branch head makes, from base b0 (seon.merge/decide, then the branch's change carried onto main, seon.merge/carry and seon.writer/replay): {:conflicts},
   {:refused} with the replay's typed refusal, or {:db} the merged value."
   [b0 head main]
   (let [r (pm/decide b0 main head)]
     (if (:conflicts r)
       r
-      (let [db (seon.writer/replay head main (:txs r) {})] (if (contract/error? db) {:refused db} {:db db})))))
+      (let [db (seon.writer/replay main head (:txs (pm/carry b0 head main)) {})]
+        (if (contract/error? db) {:refused db} {:db (cond-> db (seq (:settle-ops r)) (-> (d/with (:settle-ops r)) :db-after))})))))
 
 ;; Estimate: the world 0.5M (cached) + 5 small transactions ~1M + one merge-main (a diff of a few datoms, program-of on 2 keys of three
 ;; dbs) ~3M + one db-with ~0.5M = 10000000 ticks
@@ -810,3 +811,30 @@
                (is (:ok (seon.writer/merge-main-into conn cfg b)) "and main merges in")
                (is (= "main-model" (:seon.agent/model (d/entity (pdb/head conn b) [:seon.agent/key "dc-agent"]))) "holding main's value"))))
          (finally (d/release bc)))))))
+
+
+;; docs/merging.md#a-branch-merges-main-in: a merge of main into a branch is built on main's head, so it states its change against the
+;; branch head it replaces (datahike's force-branch! :changes, deps 0fb0383f): what main moved for the branch. seon.merge/change-record
+;; reads it at the keys either side touched; deps' condition: it equals, by net presence at both ends, the fact difference of the two
+;; values. Red before: d/changes(branch-head -> merged) was refused, and the fallback diff (tx-sensitive) showed every branch fact moved,
+;; so a wake re-sent the whole page (seon.agent-test/a-wake-shows-what-moved-not-the-page-again)
+;; Estimate: the world 0.5M (cached) + 5 small transactions ~1M + decide and carry ~2M + two whole reads of a small world ~1M = 5000000
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-merge-states-what-main-moved-for-the-branch
+  (let [as (fn [db branch tx] (:db-after (d/with db {:tx-data (if (fn? tx) (tx db) tx) :tx-meta {:seon.tx/branch branch}})))
+        b0 (as (base) :main [{:seon.agent/key "a1" :seon.agent/model "m0"}])
+        head (as b0 :main/b (var-tx "f" "(inc x)"))
+        main (-> b0 (as :main (var-tx "g" "(dec x)")) (as :main [[:db/add [:seon.agent/key "a1"] :seon.agent/model "m1"]]))
+        {:keys [db]} (merged-of b0 head main)
+        [gone added] (pm/changed-datoms b0 main)
+        c (pm/carry b0 head main)
+        ks (distinct (concat (for [{:keys [ops]} (:txs c) [o e a] ops :when (not= :db/retractEntity o)] [e a])
+                             (for [dt (concat gone added) :when (keyword? (:a dt))] [(:e dt) (:a dt)])))
+        ds (pm/change-record head db ks (mapcat identity (:remapped c)) (:max-tx db))
+        ;; the facts of a value by net presence, transactions' own facts left out
+        facts (fn [v] (into #{} (comp (remove #(seq (d/datoms v :eavt (:e %) :db/txInstant))) (map (juxt :e :a :v))) (d/datoms v :eavt)))
+        [h m] [(facts head) (facts db)]
+        net (fn [added?] (into #{} (comp (filter #(= added? (:added %))) (map (juxt :e :a :v))) ds))]
+    (is (= [#{} #{}] (let [x (into #{} (remove h) m) y (net true)] [(into #{} (remove y) x) (into #{} (remove x) y)])) "what it adds is exactly what the merged value holds and the head did not: [missing extra]")
+    (is (= [#{} #{}] (let [x (into #{} (remove m) h) y (net false)] [(into #{} (remove y) x) (into #{} (remove x) y)])) "and what it retracts, what the head held and the merged value does not: [missing extra]")
+    (is (contains? (net true) [(:db/id (d/entity db [:var/name 'app/g])) :var/form (:db/id (:var/form (d/entity db [:var/name 'app/g])))]) "main's new var is a move")
+    (is (not-any? #(= (:db/id (d/entity db [:var/name 'app/f])) (first %)) (net true)) "the branch's own var is no move of its own")))
