@@ -699,9 +699,25 @@
       (is (empty? (get-in st2 [:flights "demo/a" :main-unknown]))))
     (let [[st2 _] (#'r/advance st' "demo/a" :main-asked {:reports []})]
       (is (= #{x} (get-in st2 [:flights "demo/a" :main-unknown])) "answered nothing: unknown, never the task's"))
+    ;; the wait's end: the test service answers every waiter, a failed run with its error (seon.prove-test/a-failed-run-answers-its-waiters-with-the-error);
+    ;; an error answer ends this step typed, the asked reds unknown (held), and the flight goes on to the branch's read
+    (let [[st2 outs] (#'r/advance st' "demo/a" :main-asked {:seon.error/type :seon.prove/run-failed :seon.error/operation 'seon.prove/request :seon.error/message "the run failed"})]
+      (is (= #{x} (get-in st2 [:flights "demo/a" :main-unknown])) "main's error answer: unknown, held, never the task's")
+      (is (= [{:op :write :req {:op :branch-diff :branch :demo/a}}] (mapv :req outs)) "and the flight goes on"))
     (testing "a red main-red holds already is not asked again"
       (let [[_ outs] (#'r/advance st "demo/a" :tested {:reports [{:var "#'demo-test/x" :type :fail}] :main-red #{x}})]
         (is (= [{:op :write :req {:op :branch-diff :branch :demo/a}}] (mapv :req outs)))))))
+
+;; Estimate: 1 db-of x 0.5M + 2 advance calls ~ 700,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 700000}} an-answer-for-a-flight-that-ended-advances-nothing
+  ;; docs/reconcile.md: an answer that arrives after its flight ended (the task closed, its agent killed, a second hand-back)
+  ;; is no step of any flight: red before, :main-asked made a flight of the answer alone, with no :act and no :results, and
+  ;; judged it (seon.reconcile/done-input refused results nil: the pilot's seventh seon_done, 2026-11-15)
+  (let [db (db-of [(decl "a")] :extra (work "a" :running))
+        st (st-of db)
+        [st' outs] (#'r/advance st "demo/a" :main-asked {:reports [{:var "#'demo-test/x" :type :fail}]})]
+    (is (= [] outs) "nothing asked, nothing written")
+    (is (nil? (get-in st' [:flights "demo/a"])) "and no flight made of the answer")))
 
 ;; Estimate: the done rule is a pure function over a small map: ~50,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 50000}} a-red-whose-main-verdict-is-unknown-holds-and-is-no-stray
@@ -872,7 +888,7 @@
     (testing ":ready is the octopus merge"
       (is (= [octopus] (actions-for (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :ready)))))))
     (testing ":gate is the gate, with the tests its judging deferred"
-      (is (= [{:op :gate :task "demo/a-merge" :tests [boots] :base {boots "d-boots"}}]
+      (is (= [{:op :gate :task "demo/a-merge" :tests [boots]}]
              (actions-for (mdb [(decl "a")] :extra (concat (work "a" :done) (ts/root-tx gate) (work "a-merge" :gate :members {:seon.task/deferred {boots "d-boots"}})))))))
     (testing "a judged task no longer running is closed, never merged"
       (is (= [{:op :close :task "demo/a-merge"}]
@@ -1193,7 +1209,7 @@
       (is (= {:outcome :gate :reasons [] :deferred []} (judged self [boots])) "the only deferred test is the root's own: no test runs, and the tree is still analyzed")
       (is (= {:outcome :gate :reasons [] :deferred [other]} (judged self [boots other])) "another test beside it is still gated, itself not named")
       (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (ts/root-tx self) (work "a-merge" :gate :members {:seon.task/deferred {boots "d-boots" other nil}})))]
-        (is (= [{:op :gate :task "demo/a-merge" :tests [other] :base {other nil}}] (actions-for db)))))
+        (is (= [{:op :gate :task "demo/a-merge" :tests [other]}] (actions-for db)))))
     (testing "no checkout to run them on (a root with no source): held, never merged with them unrun"
       (let [j (judged nil [boots])]
         (is (= :closed (:outcome j)))
@@ -1977,7 +1993,7 @@
   (let [id "demo/a-merge"
         boots 'seon.system-test/boots other 'seon.system-test/other
         db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :gate :members {:seon.task/deferred {boots "d-boots" other "d-other"}})))
-        st (assoc (st-of db) :flights {id {:act {:op :gate :task id :tests [boots other] :base {boots "d-boots" other "d-other"}}}})
+        st (assoc (st-of db) :flights {id {:act {:op :gate :task id :tests [boots other]}}})
         answer (fn [rs mains] {:value {:results rs :main-red mains}})
         after (fn [outs] (d/db-with db (some #(get-in % [:req :req :tx-data]) outs)))]
     (testing "its only red is main's: the task is ready, its results kept whole, and the system told"
@@ -2015,7 +2031,7 @@
   (let [id "demo/a-merge"
         boots 'seon.system-test/boots other 'seon.system-test/other
         db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :gate :members {:seon.task/deferred {boots "d-boots" other "d-other"}})))
-        st (assoc (st-of db) :flights {id {:act {:op :gate :task id :tests [boots other] :base {boots "d-boots" other "d-other"}}}})
+        st (assoc (st-of db) :flights {id {:act {:op :gate :task id :tests [boots other]}}})
         gate {:value {:results {boots :fail other :pass} :main-red #{}}}
         main (fn [status] {:reports [{:var (str "#'" boots) :type status}]})
         after (fn [outs] (d/db-with db (some #(get-in % [:req :req :tx-data]) outs)))
