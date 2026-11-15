@@ -932,3 +932,20 @@
           "redefining the function it called moves its verdict, found by what it read")
       (is (not= (pdb/reads-digest db ks nil) (pdb/reads-digest (:db-after redefined) ks nil))
           "and what it read no longer holds what it did"))))
+
+;; docs/storage.md#what-a-read-scanned: a plan finds a verdict at its digest, and a green at another digest while what its run read
+;; still holds what it did (reuse by the one read record); a change to what it read ends the reuse.
+;; Estimate: a world with 2 forms (~2M), one graph (~2M), a verdict written (~0.5M), three lookups with digests (<0.5M): 5,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-plan-finds-a-verdict-and-reuses-a-green-while-its-reads-hold
+  (let [w0 (mt/with (mt/world) (mt/code 'pt.vr "(ns pt.vr)\n(defn add [x y] (+ x y))\n"))
+        g (program/reach-graph w0 nil)
+        t 'pt.vr-test/adds
+        basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
+        rdb (pdb/db-with w0 (proofs/verdict-tx w0 g basis {t {:digest "d1" :pass 1 :fail 0 :error 0}} {t [{:var 'pt.vr/add}]} {}))
+        green {:pass 1 :fail 0 :error 0}]
+    (is (= {"d1" (assoc green :digest "d1")} (proofs/stored-verdicts rdb w0 {t "d1"} [t])) "found at its digest")
+    (is (= {"d2" (assoc green :digest "d2")} (proofs/stored-verdicts rdb w0 {t "d2"} [t]))
+        "at another digest, reused while what it read holds what it did")
+    (is (= {} (proofs/stored-verdicts rdb w0 {t "d2"} [])) "never for a test that may not be reused by its reads")
+    (let [w1 (mt/with w0 (mt/code 'pt.vr "(ns pt.vr)\n(defn add [x y] (+ y x))\n"))]
+      (is (= {} (proofs/stored-verdicts rdb w1 {t "d2"} [t])) "and no longer once a function it called moved"))))

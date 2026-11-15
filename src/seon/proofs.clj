@@ -638,6 +638,32 @@
                  :let [st (:v (first (d/datoms db :eavt e :seon.proof/status)))]]
              [d {:digest d :pass (if (= :pass st) 1 0) :fail (if (= :fail st) 1 0) :error (if (#{:error :none} st) 1 0)}])))
 
+(defn reused-by-reads
+  "{digest result} for the tests of cand ({test digest}) found holds no verdict for: each one's green on rdb (the results
+  branch) whose read keys still hold on db what they held when it ran (seon.db/reads-digest equal to its
+  :seon.proof/reads-digest), a green at the test's digest now. Reuse by what a run read, the one record (read-keys): one seek of
+  :seon.proof/test a test, then its greens' digests. See docs/storage.md#what-a-read-scanned."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:map-of :any :string] [:map-of :string :map]] [:map-of :string :map]]}
+  [rdb db cand found]
+  (into {} (for [[test-var d] cand :when (and (qualified-symbol? test-var) (not (contains? found d)))
+                 :let [hit (some (fn [dt]
+                                   (let [e (:e dt) at (fn [a] (:v (first (d/datoms rdb :eavt e a))))]
+                                     (when (= :pass (at :seon.proof/status))
+                                       (let [ks (into #{} (map :v) (d/datoms rdb :eavt e :seon.proof/read-keys))]
+                                         (and (seq ks) (= (at :seon.proof/reads-digest) (pdb/reads-digest db ks nil)))))))
+                                 (d/datoms rdb :avet :seon.proof/test test-var))]
+                 :when hit]
+             [d {:digest d :pass 1 :fail 0 :error 0}])))
+
+(defn stored-verdicts
+  "{digest result} of the verdicts rdb (the results branch) holds for cand ({test digest}) on db, the program planned: each
+  candidate's verdict at its digest (verdicts-at), and, for the reusable tests found holds none for, a green whose read keys still
+  hold on db what they held (reused-by-reads). What a test plan reads of the store. See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:map-of :any :string] [:or [:set :any] [:sequential :any]]] [:map-of :string :map]]}
+  [rdb db cand reusable]
+  (let [at (verdicts-at rdb cand)]
+    (merge at (reused-by-reads rdb db (select-keys cand reusable) at))))
+
 (defn plan-of
   "What bin/prove and bin/test run on a program: the tests of names (or all) and the bin/check
   steps with no green at their digest (plan), less, when nothing is named, the ones that reach a

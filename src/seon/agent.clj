@@ -988,16 +988,7 @@
         cd (update-vals idx #(cond-> (:digest %) (:data? %) mix))
         ;; the digests by reach alone: what selection compares with base's, which take no recorded reads
         static cd
-        ;; recorded reads (seon.proofs/read-digests): a test at its newest green's digest while all it read is unchanged; the
-        ;; reads index made once a commit of this branch and kept in the agent's state, never per ask
-        ;; never a test that reaches a process of its own: what the agent or root it drives ran is not in its record
-        held (let [h (fx/held-reads (proofs/reads-reusable idx))] (if (contract/error? h) {} h))
-        cd (if (seq held)
-             (let [at (pdb/point db)
-                   rd (or (when (= at (first (:reads-index @state))) (second (:reads-index @state)))
-                          (let [rd (program/reads-index g in {})] (swap! state assoc :reads-index [at rd]) rd))]
-               (proofs/read-digests cd rd held))
-             cd)
+        ;; reuse by what a run read is the store's (seon.proofs/reused-by-reads, below), never the file cache's reads.edn
         ;; base's digests take the same point for those tests, so selection still asks what the code changed: a proof over the
         ;; data is selected by its reach, and its verdict is kept and found at the data it read
         bd (some-> b :index (as-> ix (base-at-reads (into {} (for [[t {:keys [digest]}] ix] [t (cond-> digest (:data? (idx t)) mix)]))
@@ -1017,7 +1008,14 @@
         removed-process (program/process-tests (select-keys (:index b) (keys removed)))]
     ;; the verdicts cached at the digests (every run's, whoever ran it: seon.fx/stored-results); a
     ;; cache that could not be read is the plan's :unread, which a run answers (never zero greens)
-    (let [stored (fx/stored-results cd) unread (when (contract/error? stored) stored)
+    ;; the verdicts the store holds (the test service writes them to the results branch, seon.prove's verdicts-write): its value held
+    ;; once for this plan, one seek a candidate (seon.proofs/verdicts-at), then reuse by what each run read for the rest
+    ;; (seon.proofs/reused-by-reads, never a test that reaches a process of its own). No results branch yet: nothing found
+    (let [conn (:store-conn @state)
+          rb (when conn (pdb/on-main (pdb/main-branch (:cfg @state)) (cfg/value :seon.config.proofs/results-branch)))
+          rdb (when (and rb (pdb/branch? conn rb)) (pdb/head conn rb))
+          stored (if rdb (proofs/stored-verdicts rdb db cd (proofs/reads-reusable idx)) {})
+          unread nil
           ;; a green is anyone's. A red is this agent's own, so its judge need not run what its turn just recorded, never another's: a digest does not
           ;; see the machine, so another's red, under load, would be told to this agent as its work
           found (when-not unread (into {} (remove (fn [[_ r]] (and (proofs/red? r) (not (:flaky r)) (not= (:key @state) (get-in r [:writer :key]))))) stored))]
