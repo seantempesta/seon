@@ -470,8 +470,8 @@
        (finally (seon.lib/remove-tree! tree store (str store "-agents") (str store "-in") (str store ".log")))))))
 
 ;; Estimate: the world (built once a process, ~3M when this test builds it first) + main's ~200 config entries through db-with ~1M + one
-;; hold-config! (of-entries' aero read of every entry ~3.6M) ~4M + stale-binary (binary-current: one git child for a tree git cannot
-;; diff ~0.1M) + main's program digest ~1M + 2 booted-source writes and 2 health derivations on the world ~2M = 11,000,000 ticks
+;; hold-config! (of-entries' aero read of every entry ~3.6M) ~4M + stale-binary (seon.fx/runtime-for: its tree's digest, refused
+;; for a tree git cannot read ~0.1M) + main's program digest ~1M + 2 booted-source writes and 2 health derivations on the world ~2M = 11,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 11000000}} a-boot-on-a-binary-of-another-program-holds-mains-config
   ;; task seon.system/a-boot-resumes-from-the-db, THE GAP: a landing moves git first, and its bridge's merge brings main in
   ;; the db after it (bin/land), so a boot between them finds main behind its tree and its binary built from another
@@ -643,10 +643,10 @@
 ;; next eval, root runs the landed form, and its source fact is at the landed tree under the same boot. Red before: restart-for
 ;; restarted for any form of root-reach the binary lacks, ending every agent (2026-11-12, context's paid agent :dead).
 ;; The landed tree is the seeded main's tree with that one change, made in a git index of its own (the repository's refs
-;; untouched), so binary-current diffs two trees of this repository as bin/update's ask does.
+;; untouched), so seon.fx/runtime-for reads both trees in this repository as bin/update's ask does.
 ;; Estimate, test process: two dozen git and bin/ calls and six socket asks, a few million ticks (the estimate below); its
 ;; root: one boot (~11 s, docs/cost.md), one agent forked (<2 s), the bridge's commit and one form's load (tens of ms), and
-;; landed!'s binary-current over the whole reach graph (~1.4 s, ~300M ticks, measured on the standing root); about 15 s wall.
+;; landed!'s seon.fx/runtime-for (one binary digest a tree, ~42 ms); about 15 s wall.
 (deftest ^{:seon.test/estimate {:ticks 20000000} :seon.test/root [] :seon.test/execs ["git" "bin/land" "bin/tree"]} an-update-keeps-running-agents
   (let [checkout (config/checkout)
         path (test-store)
