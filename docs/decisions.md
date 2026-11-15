@@ -38,6 +38,10 @@ Before going out, the owner set three things:
 
 Runtime builds this right after the update owner, which it extends. Until it lands, a path land that must restart root goes ahead, and context re-releases its round agents on the new root, told before the land starts.
 
+### Sessions land as soon as a land is ready (night)
+
+The owner wants sessions to merge and update as soon as everything is ready, with no wait for root's word. Ready means: main merged in; laws, health and the reach tests green; `runtime-for` says the land keeps root running; and no other land running at that moment. A land that would restart root still waits for root's word, because restarts are batched until flow's drain lands. A session reports each landing to root through Seon messaging. This supersedes the rule that every land starts on root's word.
+
 ### Three priorities tonight: tests inside the system, the core infrastructure in use, messaging (late evening)
 
 The owner named three priorities, all at once, and this supersedes the entry below where they differ:
