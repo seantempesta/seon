@@ -1076,10 +1076,8 @@
     line))
 
 (defn- hit-items
-  "The list items of search hits (seon.ctx.search/search's, best first) read on db: a function at :seon.config.render/relevance-summary or
-  above drawn with its source (seon.doc/source-of), best first while :seon.config.render/search-source-tokens has room; every other hit
-  its name and the line of its text holding a word of the query (`hit-line`), folded under its name. Round 1 (2026-11-15): an agent
-  shown the functions it needed as lines spent its turns on (source ..) of each. See docs/vector.md#search."
+  "The list items of search hits on db, best first: a function at :seon.config.render/relevance-summary or above with its source while
+  :seon.config.render/search-source-tokens has room, every other hit its line (`hit-line`). See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] [:vector :any]]}
   [db hits]
   (let [cut (config/value :seon.config.render/relevance-summary)]
@@ -1135,8 +1133,8 @@
            ;; (curated pair 1, 2026-11-10) where a line says why it matters
            ;; each hit its name, the line folded under it: a person reads the names and opens one (folding is presentation)
            ;; a function at the relevance cut or above is drawn with its source, best first while
-           ;; :seon.config.render/search-source-tokens has room (round 1, 2026-11-15: an agent shown hold-env!, agent-frame and
-           ;; test-child-runs! as lines spent its turns on (source ..) of each); the rest each its line
+           ;; :seon.config.render/search-source-tokens has room (an agent shown the functions it needed as lines spent its turns
+           ;; on (source ..) of each, docs/vector.md#search); the rest each its line
            (into [:ol] (hit-items at hits))])))))
 
 (defn- reason-title
