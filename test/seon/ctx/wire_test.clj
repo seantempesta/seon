@@ -478,7 +478,7 @@
           (is (str/includes? (:content (peek r2)) "quadruple")))))))
 
 ;; See docs/render.md#a-turn-stores-what-it-sent
-(deftest a-cold-request-reads-each-turns-stored-page
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-cold-request-reads-each-turns-stored-page
   ;; a cold request drew every earlier turn's page again at its past points (a 30-turn agent: 11B ticks, 37.6 GB, the pages 773k of
   ;; its 966k chars [M root result/a444fa99]); a turn now keeps what it sent, so a request made again draws only its own turn's pair
   (ts/test-branch!
@@ -512,7 +512,7 @@
             "turn 2's stored page is what its request sent")))))
 
 ;; See docs/render.md#a-turn-stores-what-it-sent
-(deftest one-message-is-one-part-however-it-was-built
+(deftest ^{:seon.test/estimate {:ticks 3000000}} one-message-is-one-part-however-it-was-built
   ;; a digest of an encoding that kept insertion order would name one message twice, and nothing would be shared (data, 2026-11-15)
   (ts/test-branch!
     (fn [_ conn]

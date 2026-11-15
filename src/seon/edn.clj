@@ -18,6 +18,6 @@
 
 (defn canonical
   "Value v with every map sorted by its keys' text, so the same value encodes to the same text however it was built: what a
-  content digest of a value encodes (a config's id, a sent part's)."
+  content digest of a value encodes (a config's id, a sent part's). See docs/render.md#a-turn-stores-what-it-sent."
   {:malli/schema [:=> [:cat :any] :any]}
   [v] (walk/postwalk #(if (map? %) (into (sorted-map-by (fn [a b] (compare (str a) (str b)))) %) %) v))

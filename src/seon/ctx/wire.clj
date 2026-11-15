@@ -494,11 +494,8 @@
                   (:value (render/model ix0 es {:ix ix0 :handle (symbol "@ctx")}) es))))
 
 (defn sent-tx
-  "What turn n of agent key k sent that reads the db at a past point, as the facts that keep it: each of its page messages (the
-  request's parts labelled [:page n], `request`) as a part named by the digest of its canonical EDN (seon.edn/canonical), once for the same message however it was built, and the call's
-  :seon.model-call/assembly naming them in order, so a later request reads them (`stored-page`) and never draws those points again
-  (owner, 2026-11-15: \"do not store full copies of rendered data just the components that we assemble\"). [] when the turn sent no
-  page message. See docs/render.md#a-turn-stores-what-it-sent."
+  "Turn n of agent key k's page messages (the request's [:page n] parts, `request`) as facts: each a part named by its canonical
+  digest, and the call's :seon.model-call/assembly naming them in order. [] when it sent none. See docs/render.md#a-turn-stores-what-it-sent."
   {:malli/schema [:=> [:cat :string :int [:vector :any]] [:vector :map]]}
   [k n parts]
   (let [ms (into [] (comp (filter (fn [[ref _ m]] (and (= :page (first ref)) (= n m)))) (mapcat second)) parts)
@@ -524,7 +521,7 @@
   turn where something moved is `(my.render/diff p0 p1)` and its result the edits between the parts at the two points
   (seon.render/page-edits over forms-moved, as `page-edits-between` makes them); nothing moved, or a first page that shows nothing:
   no messages. Placed by the agent's model render before turn n's call, [#'page-diff-msgs opts a p0 p1 n], so the walk keeps each
-  pair as a component keyed by its points and a new turn runs only its own pair. The parts come from the draw of all the turns'
+  pair as a component keyed by its points. A turn whose call stored what it sent is read (`stored-page`). The parts come from the draw of all the turns'
   bases the placing render shares (`turn-entities`): opts' metadata :seon.ctx.wire/parts, a function answering this pair's two
   (`pages-from`), metadata so the component's opts compare by what they say, never by that function; without it, the pair's own
   chain is drawn (`page-parts-through`). See docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
