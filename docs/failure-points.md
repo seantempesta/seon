@@ -99,6 +99,7 @@ An eval's record is plain data: a value in it that is not (a library's record in
 | an effect worker performing a request | `seon.fx/worker-proc` | `:seon.fx/defect` as the outcome: the asker is always answered |
 | an effect worker folding a streamed reply | `seon.fx/stream-step` | `:seon.fx/defect`, the rest of the stream read and dropped |
 | one outside connection's request (line EDN or MCP's JSON-RPC) | `seon.server/respond` | `:seon.server/defect` (for MCP a JSON-RPC error, `-32700` for a line opening `{"` that is not JSON); every other connection goes on |
+| which way one request line runs, before `respond` reads it (a line naming `inbox`) | `seon.server/inline-op?` | `false`: a line that does not read runs on a `:server-op` worker, where `respond` answers its `:seon.server/defect`; nothing is lost |
 | every root proc | Flow's error channel, piped to the api's `:back` | `:root-errors` in the api's view, written once per signature on main with repeats counted (`seon.error/flush-tx`; `my.root/problems` reads both) |
 
 ## Failure points met without a catch (the edge answers data)

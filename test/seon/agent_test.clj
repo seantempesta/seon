@@ -1182,6 +1182,16 @@
     (is (= [:failed {:task (:task @names) :reason "the premise is refuted" :counterexample "(= 1 2)" :open? true}]
            (:value seen)))))
 
+;; Estimate: in-agent's setup and teardown (~1.5M) + one root eval loading await.clj and asking (~0.3M) = ~1.8M; 2,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-wait-on-a-shared-roots-quiet-is-refused-naming-await-db
+  ;; the rail, after four tests stopped at their 300 s bound waiting on a shard's shared root's quiet (2026-11-15 [M]): a shared root
+  ;; says so (:seon.config.root/shared), and await-quiet there answers :seon.await/shared-root naming the wait to use instead. Red
+  ;; before: it answered whatever quiet report the shared root held, from another test's work
+  (let [[_ r] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+                         {:op :eval :agent "root" :code "(seon.await/await-quiet sys 0)"}])]
+    (is (= :seon.await/shared-root (:seon.error/type (:value r))) (pr-str r))
+    (is (clojure.string/includes? (str (:seon.error/fix (:value r))) "await-db") "it names the wait to use")))
+
 (defn- ended-code
   "Root-REPL code answering how task id's work stands after its agent handed it back: [the task's outcome and reason on main,
   the agent's own end on its branch (seon.reconcile/pull-end)]."
@@ -3050,7 +3060,9 @@
                 (die! k2)
                 (let [[ans] (done r)
                       lost (into #{} (keep #(when (and (= :error (:type %)) (:exit %)) (:var %))) (:reports ans))]
-                  (is (= #{"#'app.fold/t" "#'app.fold/u"} lost) (str "each test ends with its own result, never unreported: " (pr-str ans)))))))))
+                  (is (= #{"#'app.fold/t" "#'app.fold/u"} lost) (str "each test ends with its own result, never unreported: " (pr-str ans)))
+                  (is (every? #(clojure.string/includes? (str (:message %)) "test process died:") (filter #(and (= :error (:type %)) (:exit %) (:var %)) (:reports ans)))
+                      "and each names the death's own report, what the child threw at start, never only its exit status")))))))
       (is (nil? (a/poll! error-chan)) "no proc threw")
       (finally
         (flow/stop g)

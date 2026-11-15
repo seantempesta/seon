@@ -582,6 +582,9 @@
 (deftest ^{:seon.test/estimate {:ticks 90000000 :bytes 600000000}} a-restart-loads-the-text-index-an-earlier-one-built
   (ts/test-branch!
     (fn [_ conn]
+      ;; this test's own texts, so no earlier test's image has its key: an image is kept by the texts it holds, and two tests with equal
+      ;; worlds share one by design (deps, 2026-11-15: this test went red when another built its key first)
+      (d/transact conn ((mt/code 'app.own (str "(ns app.own)\n(defn f \"" (random-uuid) "\" [] 1)\n")) @conn))
       (let [built (atom 0)
             open seon.sqlite/fts-open
             build #(let [ix (#'doc/build-index %)] (sqlite/retire! ix) ix)
@@ -592,7 +595,7 @@
           (is (.isFile (#'doc/image-file k)) "a build writes its image")
           (build @conn)
           (is (= 1 @built) "the same texts again: loaded, not built")
-          (d/transact conn ((mt/code 'app.kept (str "(ns app.kept)\n(defn f \"A text that moves the key.\" [] 1)\n")) @conn))
+          (d/transact conn ((mt/code 'app.kept (str "(ns app.kept)\n(defn f \"" (random-uuid) "\" [] 1)\n")) @conn))
           (is (not= k (#'doc/index-key @conn)) "a changed text moves the key")
           (build @conn)
           (is (= 2 @built) "and builds once")
