@@ -1591,13 +1591,15 @@
   start's `inputs` mode wrote. A system keeps running when main holds the landed tree as data (the bridge's commit loaded its forms,
   config and schema entries in place) and the running binary is tree's (rt not an error): nothing is built, a boot catches main's
   program up in place. Each other case is the restart's reason: no source fact; main not at the files' tree (no bridge ran); a
-  binary not tree's, naming what differs (:seon.process/differs: a build input or a pin); no inputs written. See
-  docs/source.md#a-landing-enters-main-as-data."
-  {:malli/schema [:=> [:cat [:maybe :map] :string :any [:maybe :map]] [:maybe :string]]}
+  binary not tree's, naming what differs (:seon.process/differs: a build input or a pin); no inputs written. Any other error of
+  runtime-for (the tree could not be read: :seon.fx/io-error) is answered as itself, never a reason to restart: the update fails
+  typed and the system keeps running. See docs/source.md#a-landing-enters-main-as-data."
+  {:malli/schema [:=> [:cat [:maybe :map] :string :any [:maybe :map]] [:or :nil :string :seon.error/base]]}
   [held tree rt inputs]
   (cond
     (nil? held) "main holds no source fact"
     (not= tree (:tree held)) (str "main holds tree " (:tree held) ", not the files' " tree ": no landing brought it in as data")
+    (and (contract/error? rt) (not= :seon.process/env-mismatch (:seon.error/type rt))) rt
     (contract/error? rt) (str "the running binary is not current for " tree ": what differs is "
                               (str/join ", " (or (seq (:seon.process/differs rt)) [(:seon.error/message rt)])))
     (nil? inputs) "no inputs were written for the files (runs/root-inputs.edn)"))
