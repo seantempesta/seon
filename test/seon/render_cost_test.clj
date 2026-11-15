@@ -733,8 +733,11 @@
                ;; :for-only); measured 2,909 / 4,629 / 8,189 at 10 / 20 / 40, ~300 over the old bound at each size, so fixed, not per turn
                ;; 2026-11-15 (context): +6 fixed calls, seon.ratom/key-set (contracted) where the root's and joins' key sets are read in place of
                ;; an iteration (seon.ctx/placed-messages, seon.render/entity-schema), so a value replaced reruns no reader of which keys exist
+               ;; 2026-11-15 (web): +15 fixed calls: the new eval's step and its call's view read each attribute they show alone
+               ;; (ratom/realize a call, contracted), not the entity whole, so a commit of one they do not show reruns neither
+               ;; (seon.render-test/a-record-rerun-only-by-what-it-shows); measured 2,929 at 10 against 2,916
                :per-n {:calls 176 :bytes 156000}
-               :fixed {:calls 1156 :bytes 1850000}
+               :fixed {:calls 1171 :bytes 1850000}
                :sizes [10 20 40]})
   (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/walk-same-of
                :n "turns of the agent, an eval each"
