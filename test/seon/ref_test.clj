@@ -331,8 +331,8 @@
                 "by characters: AGENTS.md (41 KB) 1.7 ms, 2.3 MB and 700 calls (~56 B and 0.017 calls a byte), the wiki's 37 pages "
                 "70 B a byte; the numbers below are the bound the reader set")
      :growth :linear
-     :per-n {:ns 270 :bytes 360 :calls 0.14}
-     :fixed {:ns 20000 :bytes 20000 :calls 5}
+     :per-n {:ns 270 :bytes 360}
+     :fixed {:ns 20000 :bytes 20000}
      :sizes [250 500 1000 10000 100000]}))
 
 (deftest a-namespace-is-read-as-a-namespace

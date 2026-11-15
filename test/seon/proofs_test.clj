@@ -413,7 +413,7 @@
                 "at 10k keys (6.3 ms), bytes exactly linear, wall time a little steeper (the map's depth and GC)")
      :growth :n-log-n
      :per-n {:ns 100 :bytes 120}
-     :fixed {:ns 20000 :bytes 40000 :calls 1}
+     :fixed {:ns 20000 :bytes 40000}
      :sizes [100 300 1000 10000]}))
 
 (defn- checkout!

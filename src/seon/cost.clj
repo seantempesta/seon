@@ -12,7 +12,7 @@
                    :work \"one pass: per row, one key lookup and one transient assoc!\"
                    :growth :linear
                    :ops {:seq/reduce 1 :map/get 1 :map/assoc! 1}
-                   :per-n {:calls 1.0} :fixed {:calls 1.0}
+                   :per-n {:ticks 30.0} :fixed {:ticks 200.0}
                    :sizes [1000 10000 100000]}))
 
   - :n says what N counts; :work is the floor: the passes over the data and what each
@@ -20,11 +20,11 @@
   - :growth is how the least work grows, W(n). Expected cost at n = fixed + per-n x W(n).
   - :ops derive per-n from `units`, the measured costs of unit operations on this runtime,
     so an estimate is derived, never copied from a run; :per-n states costs directly
-    (:calls: contracted calls per unit of W(n), exact).
+    (ticks or bytes per unit of W(n)).
   - :input names (fn [n] args): the input is built outside the measurement.
 
-  `run` measures the function at each size, ascending: allocated bytes and calls of
-  contracted functions (seon.profile) are exact, so they are judged tightly; wall ns is the
+  `run` measures the function at each size, ascending: allocated bytes and engine
+  ticks are exact, so they are judged tightly; wall ns is the
   minimum over repeats, judged at 3x (the machine is shared). It stops at the first size
   over its estimate, so a quadratic body under a linear estimate costs one size too many,
   not hours. `judge` is a function of its rows, its estimate and the config (the tick quantum): over (a size above slack x estimate), steeper (a dimension
@@ -39,26 +39,27 @@
 ;; ---- the judge (pure) -----------------------------------------------------------------
 
 (def slack
-  "Each dimension is over above this multiple of its estimate. Ticks, bytes and calls are
+  "Each dimension is over above this multiple of its estimate. Ticks and bytes are
   counted exactly on one thread, so their slack is the estimate's own imprecision (an
   estimate priced from unit operations leaves out a function's overheads: ticks get time's
   old 3x); CPU time moves with the machine's load."
-  {:ticks 3.0 :ns 3.0 :bytes 1.25 :calls 1.0})
+  {:ticks 3.0 :ns 3.0 :bytes 1.25})
 
 (def exact
   "The dimensions a verdict is decided on: counted, so the same code on the same input
   measures the same on any machine at any load, and a green is a function of its reach
   digest (results reused by input digest: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on). Cost is work done: ticks
   (the time dimension: jolt.host/ticks-of, measured by once; judged wherever the estimate states
-  them, derived from the unit table's :ops or stated in :per-n), bytes and calls. An estimate with
+  them, derived from the unit table's :ops or stated in :per-n) and bytes, each the measured thread's own; a contracted call's count is a
+  profile's (seon.profile), never a cost: it counts every thread's (docs/cost.md#what-is-measured). An estimate with
   none of them both stated and measured is red (:uncounted). CPU time (:ns) moves with load
   (158 to 210 us for one function between load 10 and 17, check-events): it is
   measured, recorded and shown, never red."
-  #{:ticks :bytes :calls})
+  #{:ticks :bytes})
 
 (def dimensions
-  "The measured dimensions, in the order a verdict shows them."
-  [:ticks :ns :bytes :calls])
+  "The measured dimensions, in the order a verdict shows them: :seon.cost/dim's members, read once (the schema is their one home)."
+  (contract/enum-values :seon.cost/dim))
 
 (def steeper-by
   "A dimension is steeper when its fitted exponent exceeds its growth's own exponent over
@@ -264,17 +265,15 @@
 (defn- once
   "One call of f on args, measured by the one measurement of a call (seon.profile/measure!): the
   engine ticks it ran on this thread, less tick-allowance for each collection during it; its ns
-  of this thread's CPU; the bytes this thread allocated; and contracted calls (calls only when
-  the contracts are on: seon.profile counts armed functions). The collection count is read
+  of this thread's CPU; the bytes this thread allocated. The collection count is read
   outside the bytes' window, so reading it allocates nothing the call is charged."
   {:malli/schema [:=> [:cat :seon.host/fn [:sequential :any]] :seon.cost/dims]}
   [f args]
   (let [g0 (:count (lib/gc-stats))
-        {:keys [ticks bytes cpu-ns calls thrown]} (profile/measure! #(apply f args))
+        {:keys [ticks bytes cpu-ns thrown]} (profile/measure! #(apply f args))
         _ (when thrown (throw thrown))
         gcs (- (:count (lib/gc-stats)) g0)]
-    (cond-> {:ticks (double (max 0 (- ticks (* tick-allowance gcs)))) :ns (double cpu-ns) :bytes (double bytes)}
-      contract/on? (assoc :calls (double calls)))))
+    {:ticks (double (max 0 (- ticks (* tick-allowance gcs)))) :ns (double cpu-ns) :bytes (double bytes)}))
 
 (def ^:private threaded
   "Makes this process multi-threaded, once, before anything is measured: Jolt's lazy seq cells take a
@@ -295,7 +294,7 @@
   "f on args, measured by one call (a measure is not a loop by default; precision is what accumulates
   as the system is exercised), or, given cap, by at most cap calls, the measure an agent asks for on a perf problem and
   the one `run` takes for a size whose one call was over its estimate (its first call filled what later calls read): its
-  meta's :calls says how many it made. With cap,
+  meta's :samples says how many it made. With cap,
   at its steady state: calls until `:seon.config.proofs/cost-settled` calls
   after the one that allocated the fewest bytes so far allocate no fewer; each dimension's minimum over
   all of them (bytes are the steady state's; ticks and calls their least, which noise only adds
@@ -305,7 +304,7 @@
   estimate went red or green by the draw (task seon.cost/a-call-allocates-the-same-bytes-each-time).
   A count of calls, never a time. A call that has not settled after
   `:seon.config.proofs/cost-max-samples` calls answers the least of them, marked in the answer's
-  meta (`:unsettled {:calls n :lowered-at k}`): noise on a large allocation lowers the least now and
+  meta (`:unsettled {:samples n :lowered-at k}`): noise on a large allocation lowers the least now and
   then without end (a 32 MB call: the last new low at call 53 of 60), so \"no new low in a run of
   calls\" is a test that fails by chance, not a defect of the call; a call that never reaches a floor
   shows in that mark and in the spread of its bytes."
@@ -320,9 +319,9 @@
                             [best n low-at]
                             (let [m (once f args) n (inc n)]
                               (recur n (merge-with min best m) (if (< (:bytes m) (:bytes best)) n low-at)))))
-        dims (into {} (for [[d v] best] [d (max 0.0 (- v (if (= d :calls) 0.0 (get b d 0.0))))]))]
+        dims (into {} (for [[d v] best] [d (max 0.0 (- v (get b d 0.0)))]))]
     ;; one call is the measure asked for, not an unsettled one
-    (cond-> (vary-meta dims assoc :calls n) (and (< 1 cap) (< (- n low-at) need)) (vary-meta assoc :unsettled {:calls n :lowered-at low-at})))))
+    (cond-> (vary-meta dims assoc :samples n) (and (< 1 cap) (< (- n low-at) need)) (vary-meta assoc :unsettled {:samples n :lowered-at low-at})))))
 
 (declare units)
 
@@ -345,7 +344,7 @@
 
 (defn bound
   "The cost bound var sym's contract carries (:seon.cost/bound beside :malli/schema): a function of
-  the same arguments answering what one call may cost, {:ticks :bytes :calls}, and :out, the measure
+  the same arguments answering what one call may cost, {:ticks :bytes}, and :out, the measure
   of its answer a caller's bound passes on. Its terms are the algorithm's steps, each step's cost
   measured once (docs/cost.md#a-bound-in-the-contract)."
   {:malli/schema [:=> [:cat :qualified-symbol] :seon.host/fn]}
@@ -403,13 +402,13 @@
         ;; shard: 1.57x at n=30, 0.85x at 100, read as n^1.68). Then each such row is measured again warm, as an over row
         ;; is, and the curve judged on those: a verdict never rests on what ran before it in the process
         (let [v (judge e rows)]
-          (if (or (:ok? v) (every? :calls rows))
+          (if (or (:ok? v) (every? :samples rows))
             {:rows rows :verdict v :left-out left-out}
             (let [rows (mapv (fn [[_ args] row]
-                               (if (:calls row)
+                               (if (:samples row)
                                  row
                                  (let [m (measure f (force args) (config/value :seon.config.proofs/cost-max-samples))]
-                                   (assoc row :measured m :calls (:calls (meta m))))))
+                                   (assoc row :measured m :samples (:samples (meta m))))))
                              points rows)]
               {:rows rows :verdict (judge e rows) :left-out left-out})))
         (let [args (force args)
@@ -419,7 +418,7 @@
               row (if (:ok? (judge e [row]))
                     row
                     (let [m (measure f args (config/value :seon.config.proofs/cost-max-samples))]
-                      (assoc row :measured m :calls (:calls (meta m)))))
+                      (assoc row :measured m :samples (:samples (meta m)))))
               rows (conj rows row)]
           (if (and (nil? (:overrun e)) (not (:ok? (judge e [row]))))
             {:rows rows :verdict (judge e rows) :left-out left-out}
@@ -451,7 +450,7 @@
           (for [{:keys [dim n ratio]} under] ["muted" (str "LOOSE: " (name dim) " at n=" n " is " (format "%.2f" ratio) "x its estimate: tighten the estimate.")])
           (for [d unmeasured] ["muted" (str "NOT MEASURED: " (name d) ".")])
           (when (:uncounted v)
-            [["bad" "NO COUNTED DIMENSION: the estimate states no bytes, calls or ticks that were measured; time alone is never red, so the proof could not fail."]])
+            [["bad" "NO COUNTED DIMENSION: the estimate states no bytes or ticks that were measured; time alone is never red, so the proof could not fail."]])
           (when-let [{:keys [fault task n largest]} waiver-fault]
             [["bad" (str "BROKEN WAIVER: " (case fault
                                              :no-task (str "its :overrun names task " task ", which no file under resources/seon/tasks declares: file the task, or delete the :overrun.")
@@ -469,12 +468,12 @@
   {:malli/schema [:=> [:cat :seon.cost/estimate [:vector {:gen/max 4} :seon.cost/row] :seon.cost/verdict] :string]}
   [e rows v]
   (let [dims (filter (set (mapcat (comp keys :expected) rows)) dimensions)
-        line (fn [{:keys [n measured expected calls]}]
+        line (fn [{:keys [n measured expected samples]}]
                (str n ": " (str/join "  " (for [d dims :let [m (get measured d) x (get expected d)]]
                                             (str (num-text m) "/" (num-text x)
                                                  (when m (if (pos? x) (format " (%.2fx)" (/ m x)) (when (pos? m) " (inf x)"))))))
                     ;; its one call was over: the least of a warm-up's calls
-                    (when calls (str "  (warm: the least of " calls " calls; the first was over)"))))
+                    (when samples (str "  (warm: the least of " samples " samples; the first was over)"))))
         ratios (fn [d] (sort (keep (fn [{:keys [measured expected]}] (let [m (get measured d) x (get expected d)] (when (and m x (pos? x)) (/ m x)))) rows)))
         over (set (map :n (:over v)))]
     (str/join "\n"

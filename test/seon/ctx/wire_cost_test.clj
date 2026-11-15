@@ -74,7 +74,7 @@
                ;; on the world, sizes 30 100 300 (2026-10-31): 4.45 MB and 44 calls at 30, 4.89 MB and 45 at 100
                ;; measured 2026-10-27: 46 calls and 5.23 MB at 50, 48 and 5.45 MB at 200: the ring's first pushes, each node's
                ;; degree counted once (bounded, `degree`) and its neighbours read once
-               :fixed {:calls 46 :bytes 4900000}
+               :fixed {:bytes 4900000}
                :sizes [30 100 300]}))
 
 (defn hub-of
@@ -94,7 +94,7 @@
                :work (str "the seed pushed, the hub read to :hub (64 datoms a read) and found past it, so it "
                           "is not pushed and the rest of its callers are never read: flat in them")
                :growth :constant
-               :fixed {:calls 10 :bytes 1000000}
+               :fixed {:bytes 1000000}
                :sizes [200 500 1000]}))
 
 (defn sections-of
@@ -123,7 +123,9 @@
                :n "wiki sections with vectors"
                :work "the task read with its accumulated plan, its references parsed and each resolved, its proofs' forms, the cited sections viewed, similar off: eighteen contracted calls, flat in the wiki"
                :growth :constant
-               :fixed {:calls 18}
+               ;; in ticks (the owner, 2026-11-15: calls are no cost): eighteen contracted calls at ~1.4k ticks a call (the render
+               ;; path's measure), its reads and parses included: ~25k ticks
+               :fixed {:ticks 25000}
                :sizes [10 100 1000]}))
 
 (defn request-of
@@ -186,7 +188,7 @@
                    ;; measured 2026-11-10 at 10, 40, 160 greens: before, 142k, 278k, 836k ticks and 0.58, 1.06, 3.03 MB (about 4.8k ticks
                    ;; and 16 KB a green test: a branch of 1,600 verdicts about 8M ticks and 27 MB a turn); after, 108k ticks and 0.46 MB at each
                    ;; 46 calls: the done rule's input made by seon.reconcile/input, the judge's one producer, not a map built here (context, 2026-11-14)
-                   :fixed {:bytes 500000 :calls 46}
+                   :fixed {:bytes 500000}
                    :sizes [10 40 160]}))))
 
 (defn test-ns-of
@@ -212,8 +214,8 @@
                :growth :linear
                ;; measured 2026-11-10 at 10, 40, 160: before, 0.18M, 1.13M, 12.5M ticks and 0.70, 6.3, 85.9 MB (quadratic); after,
                ;; 0.15M, 0.52M, 1.99M ticks and 0.46, 1.70, 6.50 MB (about 40 KB a helper and test)
-               :per-n {:bytes 42000 :calls 0}
-               :fixed {:bytes 100000 :calls 4}
+               :per-n {:bytes 42000}
+               :fixed {:bytes 100000}
                :sizes [10 40 160]}))
 
 (def ^:dynamic *conn*
@@ -257,5 +259,5 @@
                      :n "turns of the session before the pair"
                      :work "the kept walk advanced by what moved between the flush's point and the next basis, the first point's page taken from the slot"
                      :growth :constant
-                     :fixed {:bytes 600000 :calls 20}
+                     :fixed {:bytes 600000}
                      :sizes [10 30 100]})))))

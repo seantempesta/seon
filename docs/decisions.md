@@ -1682,9 +1682,9 @@ He chose option B: a kept test store holds a branch per git tree. Replaced by 20
 
 Quote not recorded. Stated in [machine](machine.md) and [merging](merging.md#a-worktree-session-works-in-a-checkout-of-its-own).
 
-### Cost is work done: ticks, bytes and calls, never wall time
+### Cost is work done: ticks and bytes, never wall time; calls are no cost (owner, 2026-11-15)
 
-Quote not recorded. Stated in [cost](cost.md).
+"Drop :calls" (2026-11-15, via root, after a calls bound went green and red at one digest: the counters are process-wide). A contracted call's count stays visible in profiles, never judged. Stated in [cost](cost.md).
 
 ### A session's prove runs the process tests it reaches (owner, 2026-11-08)
 

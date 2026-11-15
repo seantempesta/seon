@@ -692,7 +692,7 @@
   :waived-proof row with its test, the task it names, the size it was taken at (:n), the numbers it recorded and
   `multiple`, the greatest of the counted dimensions' recorded multiples of the proof's own bound at that size (the
   arithmetic of a verdict: seon.cost/expected, seon.cost/row-ratio; nil when the record states no size or the
-  estimate is not literal). Found by the forms that reference seon.cost/proof (one :form/refs seek), the
+  estimate is not literal, or states a dimension this program does not measure). Found by the forms that reference seon.cost/proof (one :form/refs seek), the
   `:overrun` map read out of the form by the reader. Closed when the proof's `:overrun` is deleted. Cost: the forms that call
   seon.cost/proof, each read once; with only, a set of form entities (a branch's candidates, `split-rows`), those of them
   alone. See docs/health.md#a-proof-that-passes-by-waiver."
@@ -708,7 +708,10 @@
              [i m] (map-indexed vector proofs)
              :let [{:keys [task n measured]} (:overrun m)
                    estimate (select-keys m [:ops :per-n :fixed :growth])
-                   literal? (and (every? map? (vals (dissoc estimate :growth))) (keyword? (:growth estimate)) (pos-int? n))
+                   ;; literal, and in this program's dimensions: a base read under a later program (a branch's caused split) may state one
+                   ;; it dropped (:calls, 2026-11-15), and its multiple is then not computed, its row still shown
+                   literal? (and (every? map? (vals (dissoc estimate :growth))) (keyword? (:growth estimate)) (pos-int? n)
+                                 (every? (set cost/dimensions) (mapcat keys (vals (dissoc estimate :growth :ops)))))
                    bound (when literal? (cost/expected estimate cost/units n))
                    multiple (when bound (some->> (for [d (keys measured) :when (and (cost/exact d) (contains? bound d))]
                                                    (cost/row-ratio {:measured measured :expected bound} d))

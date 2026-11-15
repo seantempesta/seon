@@ -88,7 +88,7 @@ The owner, 2026-11-12: "We are never to design systems that are so inefficient a
 6. **Waiting is not working.** Wall time far above CPU time means something waits. Find the waiter: a bound, a lock, a lost reply or a queue. Never raise the bound.
 7. **The machine is scheduled by the system.** Work is admitted from the cores and the memory, and the critical path goes first. A person never picks shard counts, caps or holds; work in flight stays near the core count.
 8. **Nothing is switched off, sampled or waived** to get around a bug or a cost; the cause is fixed (§9).
-9. **Measure the result in work done** (ticks, bytes, calls) beside the estimate, before and after, and say which mattered. A claim of "faster" without both numbers is not taken.
+9. **Measure the result in work done** (ticks, bytes) beside the estimate, before and after, and say which mattered. A claim of "faster" without both numbers is not taken.
 
 ## 4. The principles: everything is data flowing through the system
 

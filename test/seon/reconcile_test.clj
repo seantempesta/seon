@@ -1068,8 +1068,8 @@
                  ;; attribute is a seek of its own, 35 seeks a task in place of the one :eavt range read '* made, so a task costs about
                  ;; 100k ticks and 320 KB (measured at 5 and 15). Deep fixes' named-pull item (a named pull reads the entity's
                  ;; :eavt range once) should bring it back under the old figure, 36k ticks and 180 KB a task
-                 :fixed {:ticks 200000.0 :bytes 600000.0 :calls 20.0}
-                 :per-n {:ticks 100000.0 :bytes 320000.0 :calls 11.0}
+                 :fixed {:ticks 200000.0 :bytes 600000.0}
+                 :per-n {:ticks 100000.0 :bytes 320000.0}
                  :sizes listed-sizes})))
 
 ;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 3 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 transacts or db-withs x 50k ~ 3,000,000 ticks
