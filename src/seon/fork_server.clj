@@ -49,7 +49,7 @@
 
 (defn graph-at-fork
   "Server state st with main's reach graph (built when the server starts) brought to :db, only
-  when a commit since moved the program (:graph-moved, seon.program/moves-program?): a spawn's own commit (its
+  when a commit since moved the program (:graph-moved, the writer's :program-t, seon.writer/program-at): a spawn's own commit (its
   run) moves none, and reach-update reads every live form (15-21 ms a fork, measured). The graph keeps its
   index (seon.program/reach-indexed), moved with it and held under the inputs an agent forked from :db takes
   (seon.agent/test-inputs: made whole here when they are not the held ones, never in every agent), so an agent's
@@ -191,7 +191,8 @@
                       ;; a commit not the one the writer said
                       (not= (:max-tx db') (:t m)) (update :mismatch inc)
                       ;; the program moved: the reach graph is brought to it at the next fork
-                      (program/moves-program? (:tx-data m)) (assoc :graph-moved true :static-due true))
+                      ;; the program moved: the writer's :program-t changed (seon.writer/program-at, the one computation of it)
+                      (not= (:program-t m) (:program-t st)) (assoc :graph-moved true :static-due true :program-t (:program-t m)))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled; while
                  ;; the tests' load is still due it loads them all at the first fork, as main has them then
                  errs (seq (program/load-changes! db' (:tx-data m) {:tests? (not (:tests-due st))}))

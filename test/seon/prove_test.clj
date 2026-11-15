@@ -63,8 +63,9 @@
   ;; data commit none. Off, neither runs anything, and a session's request for main runs as ever, at the t the notice recorded
   (let [db (ts/test-db)
         dg (seon.program/program-digest db)
+        ;; each notice carries the writer's :program-t (seon.writer/program-at): none moved at 5, the form at 6
         commits [[:main {:t 5 :ops [[:db/add 900 :task/name "x" 5 true]] :db db}]
-                 [:main {:t 6 :ops [[:db/add 901 :form/src "(defn f [] 1)" 6 true]] :db db}]]
+                 [:main {:t 6 :ops [[:db/add 901 :form/src "(defn f [] 1)" 6 true]] :db db :program-t 6}]]
         value seon.config/value
         with-on (fn [on? f] (with-redefs [seon.config/value (fn [k] (if (= k :seon.config.proofs/prove-main-on-commit) on? (value k)))
                                           seon.db/at-commit (fn [_ _] db)]
@@ -80,6 +81,22 @@
            (is (= 1 (count (asks o2 :spawn))) "a session's request runs main")
            (is (= [7] (waiters-answered all)) "and is answered once, at its end")
            (is (= 0 (count (asks all :write))) "nothing written to the store: its agent cached its verdicts"))))))
+
+;; Estimate: as its sibling above (a test db, three notices folded): ~20M ticks, most of it the test db; 20,000,000
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-program-commit-the-sliding-notice-dropped-still-starts-main
+  ;; docs/merging.md#the-test-service (root's path item A, 2026-11-15): :main is a sliding buffer of one, and on main a records-only
+  ;; commit lands 24-457 ms behind each program commit [M], so the step often takes only the later notice. The writer carries
+  ;; :program-t (the t of main's last program-moving commit) on every notice, so the newest notice subsumes the ones it replaced:
+  ;; a records-only notice with a newer :program-t starts main's run; the same :program-t again starts none. Red before: the step
+  ;; read only the notice's own :ops, and the run was never asked
+  (let [db (ts/test-db)
+        value seon.config/value]
+    (with-redefs [seon.config/value (fn [k] (if (= k :seon.config.proofs/prove-main-on-commit) true (value k)))
+                  seon.db/at-commit (fn [_ _] db)]
+      (let [[st o] (feed (proc0) [[:main {:t 7 :ops [[:db/add 902 :task/name "y" 7 true]] :db db :program-t 6}]])]
+        (is (= 1 (count (asks o :spawn))) "the program commit's run starts from the records-only notice that replaced it")
+        (let [[_ o2] (feed st [[:main {:t 8 :ops [[:db/add 903 :task/name "z" 8 true]] :db db :program-t 6}]])]
+          (is (empty? (asks o2 :spawn)) "a later notice with the same :program-t starts no second run"))))))
 
 (deftest ^{:seon.test/estimate {:ticks 500000}} an-answer-whose-child-died-is-never-remembered
   ;; THE PLAN 0.7 (root, 2026-10-27): a judge's run whose test child died answered every later ask
