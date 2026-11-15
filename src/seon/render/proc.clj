@@ -814,7 +814,7 @@
               st (assoc st :health-at pt :health-fold fold :health-live live :rv-owner own :health-pending [] :health-rev-at (:health-rev st))]
           ;; a live report first made (its reactions' first captures queued, seon.ratom/make-reaction) or made bounded (flush-max rows
           ;; a step) runs and makes the rest in the proc's next steps
-          (when (or (:more? live) (pos? (binding [rv/*owner* own] (rv/queued)))) (a/put! (:events-ch st) {::health-more true}))
+          (when (or (:more? live) (pos? (binding [rv/*owner* own] (rv/queued)))) (a/put! (:health-wake st) true))
           (if (= (:classes h) (:classes prev))
             st
             (-> (assoc st :root-walk (rewalk rw #(assoc % :health h)))
@@ -959,15 +959,15 @@
 (declare health-answer)
 
 (defn- health-more
-  "St with one bounded step of health's reactions (health-step); while any are left, the next step's own message (::health-more on
-  the proc's events chan, never kept as an event), so ping and stop interleave and nothing is dropped (flow's rule 2). The step that
+  "St with one bounded step of health's reactions (health-step); while any are left, the next step's own wake (:health-wake, its own one-slot
+  channel, never the shared events buffer), so ping and stop interleave and nothing is dropped (flow's rule 2). The step that
   settles answers every :health ask waiting on it (:health-waiting), with the report of that point (at or after the point each ask
   advanced to: main only moves forward), as replies the step sends through its outputs (:health-replies)."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
   (let [[st settled?] (health-step st)]
     (cond
-      (not settled?) (do (a/put! (:events-ch st) {::health-more true}) st)
+      (not settled?) (do (a/put! (:health-wake st) true) st)
       (seq (:health-waiting st))
       (let [waiting (:health-waiting st)
             st (-> st (assoc :fold (:fold (peek waiting))) health!)]
@@ -1178,7 +1178,7 @@
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
   (let [q #(some-> % lib/summ)]
-    {;; what a drain must account for (flow's rule 5): health's queued reactions and the :health asks waiting on its settle, apart
+    {;; what a drain must account for (docs/flow.md#the-step-fn-contract-every-proc-follows, :seon.flow/held's schema entry): health's queued reactions and the :health asks waiting on its settle, apart
      :seon.flow/held {:queue (if-let [o (:rv-owner st)] (binding [rv/*owner* o] (rv/queued)) 0) :waiting (count (:health-waiting st))}
      :passes (:passes st 0) :pass-ms (q (:pass-ms st)) :patch-pass-ms (q (:patch-pass-ms st)) :quiet-pass-ms (q (:quiet-pass-ms st))
      :patch-bytes (q (:patch-bytes st)) :event-age-ms (q (:event-age-ms st)) :rendered (get-in st [:counts :rendered] 0) :same-bytes (get-in st [:counts :same] 0)
@@ -1208,11 +1208,9 @@
   {:malli/schema [:=> [:cat :map :map] :map]}
   [st ev]
   (cond
-    ;; this proc's own next step of health's flush, never an event a stream shows
-    (::health-more ev) (if (:health-live st) (health-more st) st)
     ;; a reaction of this proc's owner, dirtied in another owner's step: queued here, and run by the next bounded flush
     (:seon.ratom/dirty ev) (do (binding [rv/*owner* (:rv-owner st)] (rv/take-dirty! ev))
-                               (when (:health-live st) (a/put! (:events-ch st) {::health-more true}))
+                               (when (:health-live st) (a/put! (:health-wake st) true))
                                st)
     :else
   (cond-> (update st :new-events conj ev)
@@ -1335,6 +1333,7 @@
                 :system "a promise of the built system (its declared procs, for the health tile)"
                 :conn "the store main's commit notices are read from"}
        :ins {:answers "the api's answers" :from-web "views open, page and keyframe requests"
+             :health-wake "health's own next bounded step (health-more): a channel of one slot, sliding, since wake-ups subsume each other (docs/core-async.md's one lossy case)"
              :main "main's commit notices from the writer {:t :prev :ops :commit}, read with seon.db/at-commit: each one's datoms find the pages whose reads they touched"}
        :outs {:to-api "requests to the api" :to-web "patches, keyframes, pages, the agents' index"}
        ;; a pass renders what changed; it never waits. :mixed: one thread of its own for
@@ -1345,11 +1344,15 @@
        :ping-map-fn stats})
   ([args]
    ;; no beat: a pass happens on an event, an api answer or a tab's request, never on a clock
-   (let [events (a/chan (a/sliding-buffer 4096))]
+   (let [events (a/chan (a/sliding-buffer 4096))
+         ;; health's wake (health-more's next bounded step), its own in-port: on the shared events buffer a burst of api events
+         ;; dropped it and a held :health ask waited on nothing (root's review of 30653cc9f7). One slot, sliding: a wake already
+         ;; there is the same wake, so the newest loses nothing
+         wake (a/chan (a/sliding-buffer 1))]
      (a/tap (:events-mult args) events)
-     {:user-walks {} :events-ch events :mult (:events-mult args) :system-p (:system args) :conn (:conn args) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{}
+     {:health-wake wake :user-walks {} :events-ch events :mult (:events-mult args) :system-p (:system args) :conn (:conn args) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{}
       :new-events [] :events [] :views {} :branches {}
-      ::flow/in-ports {:events events}}))
+      ::flow/in-ports {:events events :health-wake wake}}))
   ([st tr]
    (when (= tr ::flow/stop)
      (a/untap (:mult st) (:events-ch st)))
@@ -1358,11 +1361,9 @@
    (let [o (volatile! {})
          busy? (seq (:pending st))
          st (case in
-              :events (if (nil? m) st
-                          (let [st (reduce on-event st (drain m (:events-ch st) 2048))]
-                            ;; the :health asks a settling step answered, sent through this step's outputs (flow's condition 2)
-                            (doseq [r (:health-replies st)] (step/out! o :to-api r))
-                            (ask-state (dissoc st :health-replies) o)))
+              :events (if (nil? m) st (ask-state (reduce on-event st (drain m (:events-ch st) 2048)) o))
+              ;; health's own next bounded step (its wake, never on the shared events buffer)
+              :health-wake (if (:health-live st) (health-more st) st)
               ;; a commit on main: the pages its datoms touched walk in the pass
               ;; a commit on main (a sliding buffer of one: the newest, its datoms since the main held
               ;; found by their diff, so a lagging proc never parks the writer)
@@ -1404,7 +1405,7 @@
                                         [st settled?] (if (:health-live st) (health-step st) [st true])]
                                     (if settled?
                                       (let [st (health! st)] (step/out! o :to-api (health-answer st (:rid m))) (pass st o))
-                                      (do (a/put! (:events-ch st) {::health-more true})
+                                      (do (a/put! (:health-wake st) true)
                                           (pass (update st :health-waiting (fnil conj []) {:rid (:rid m) :fold (:fold m)}) o))))
                           :context (let [st (-> st health! with-context)] (step/out! o :to-web {:op :text :k (:k m) :text (get-in st [:context :text] "")}) st)
                           ;; the debug timeline stepped to a turn, or to latest
@@ -1419,4 +1420,7 @@
      ;; nothing asked is in flight after what was, or after what went to the tabs: their
      ;; views are current (the web proc says so on each feed; seon.check/idle waits on it)
      (when (and (empty? (:pending st)) (or busy? (seq (:to-web @o)))) (step/out! o :to-web {:op :settled}))
-     [st @o])))
+     ;; the :health asks a settling step answered, in whichever step it settled (:health-wake, :main, :health), sent through
+     ;; this step's outputs at its one exit (flow's condition 2)
+     (doseq [r (:health-replies st)] (step/out! o :to-api r))
+     [(dissoc st :health-replies) @o])))
