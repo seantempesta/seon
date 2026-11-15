@@ -411,24 +411,69 @@
   (let [r (git-run {} root ["show" (str tree ":" path)] nil)]
     (when (zero? (:exit r)) (:out r))))
 
+(defn- tree-digest
+  "The binary identity of git tree tree (bin/binary-digest at it): a tree is immutable, so its digest is computed once a checkout
+  and kept beside the builds, target/runtime-for/TREE.digest (derived data, as tree-diff's), which every later ask reads.
+  {:digest d} or the error of the one bin/binary-digest run."
+  {:malli/schema [:=> [:cat :string :string] [:or [:map [:digest :string]] :seon.error/base]]}
+  [root tree]
+  (let [f (java.io.File. (str root "/target/runtime-for/" tree ".digest"))]
+    (if (.isFile f)
+      {:digest (str/trim (slurp f))}
+      (let [r (lib/sh (str root "/bin/binary-digest") root tree)
+            d (str/trim (str (:out r)))]
+        (if (and (zero? (:exit r)) (seq d))
+          (do (write-file {:req {:path (.getPath f) :text d}}) {:digest d})
+          (error #'tree-digest :seon.fx/io-error (str "bin/binary-digest " tree ": " (:err r)) {:path root}))))))
+
+(defn- build-differs
+  "The build inputs (:seon.config.build/inputs) and pins (gitlinks) that differ between the binary's tree (target/seon.tree)
+  and tree, as paths; every input and pin when the binary recorded no tree. Asked only on a mismatch."
+  {:malli/schema [:=> [:cat :string [:maybe :string] :string] [:vector :string]]}
+  [root built-tree tree]
+  (let [inputs (cfg/value :seon.config.build/inputs)]
+    (if-not built-tree
+      (vec inputs)
+      (let [r (git-run {} root ["diff" "--raw" "--no-renames" built-tree tree] nil)]
+        (vec (for [l (str/split-lines (str (:out r))) :when (not (str/blank? l))
+                   :let [[meta p] (str/split l #"\t" 2) [om nm] (str/split (subs meta 1) #" ")]
+                   :when (or (= "160000" om) (= "160000" nm)
+                             (some #(or (= p %) (and (str/ends-with? % "/") (str/starts-with? p %))) inputs))]
+               p))))))
+
 (defn runtime-for
   "The binary a process on tree's branch runs: {:binary its path :digest d} when target/seon's identity (target/seon.digest, what
   bin/build wrote: bin/binary-digest, the digest of what only a build can change) is tree's, else :seon.process/env-mismatch
-  naming both digests, for its caller to build once. The one check of which runtime a branch needs, made at the one start;
-  the program (src/'s forms) is not in it: the process loads its branch's forms as a diff. Cost: one git ls-tree of the build
-  inputs and the pins, ~30 ms. See docs/source.md#the-binary-records-its-program."
-  {:malli/schema [:=> [:cat :string] [:or [:map [:binary :string] [:digest :string]] :seon.error/base]]}
-  [tree]
-  (let [root (cfg/checkout)
-        f (java.io.File. (str root "/target/seon.digest"))
-        built (when (.isFile f) (str/trim (slurp f)))
-        r (lib/sh (str root "/bin/binary-digest") root tree)
-        want (str/trim (str (:out r)))]
-    (cond (not (zero? (:exit r))) (error #'runtime-for :seon.fx/io-error (str "bin/binary-digest " tree ": " (:err r)) {:path root})
-          (= built want) {:binary (str root "/target/seon") :digest want}
-          :else (error #'runtime-for :seon.process/env-mismatch
-                       (str "target/seon's identity " (or built "(none recorded)") " is not tree " tree "'s " want ": build it")
-                       {:seon.process/binary-digest built :seon.process/branch-digest want :seon.process/tree tree}))))
+  naming both digests and :seon.process/differs (the build inputs and pins that differ), for its caller to build once. The one
+  check of which runtime a branch needs, made at every start (root's boot, an agent's, a test child's fork) and by the restart
+  predicate; the program (src/'s forms) is not in it: a process loads its branch's forms as a diff. With {:scope :all}, for a
+  process whose store holds no Seon program and so runs the binary's baked one, the src tree must be the binary's too, and the
+  answer adds :program, tree's src id. tree's digest is kept by tree id (tree-digest); a later ask costs one file read. See
+  docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:function [:=> [:cat :string] [:or [:map [:binary :string] [:digest :string]] :seon.error/base]]
+                  [:=> [:cat :string [:map [:scope {:optional true} [:enum :root :all]]]]
+                   [:or [:map [:binary :string] [:digest :string] [:program {:optional true} :string]] :seon.error/base]]]}
+  ([tree] (runtime-for tree {}))
+  ([tree {:keys [scope] :or {scope :root}}]
+   (let [root (cfg/checkout)
+         read (fn [p] (let [f (java.io.File. (str root p))] (when (.isFile f) (str/trim (slurp f)))))
+         built (read "/target/seon.digest")
+         built-tree (read "/target/seon.tree")
+         w (tree-digest root tree)
+         src (fn [t] (when t (let [r (git-run {} root ["rev-parse" "--verify" "--quiet" (str t ":src")] nil)]
+                               (when (zero? (:exit r)) (str/trim (:out r))))))
+         mismatch (fn [want why]
+                    (error #'runtime-for :seon.process/env-mismatch
+                           (str "target/seon's identity " (or built "(none recorded)") " is not tree " tree "'s " want ": " why)
+                           {:seon.process/binary-digest built :seon.process/branch-digest want :seon.process/tree tree
+                            :seon.process/differs (build-differs root built-tree tree)}))]
+     (cond (contract/error? w) w
+           (not= built (:digest w)) (mismatch (:digest w) "build it")
+           (= :all scope) (let [p (src tree)]
+                            (if (and p (= p (src built-tree)))
+                              {:binary (str root "/target/seon") :digest (:digest w) :program p}
+                              (mismatch (:digest w) "its program (src) is not the binary's: build it")))
+           :else {:binary (str root "/target/seon") :digest (:digest w)}))))
 
 (defn tree-id
   "git's id of the tree at root as it is on disk: HEAD's tree (none before a first commit) with every

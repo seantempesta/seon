@@ -968,4 +968,11 @@
         other (fx/runtime-for before)]
     (is (= (str root "/target/seon") (:binary same)) (str "answered " same))
     (is (= :seon.process/env-mismatch (:seon.error/type other)) (str "answered " other))
-    (is (not= (:seon.process/binary-digest other) (:seon.process/branch-digest other)))))
+    (is (not= (:seon.process/binary-digest other) (:seon.process/branch-digest other)))
+    ;; the agreed interface (task seon.system/a-landing-restarts-root-only-for-a-binary-change): a mismatch names what a build
+    ;; changes that differs, and a tree's digest is kept by its id, the one value every reader takes
+    (is (some #{"reference-code/chez"} (:seon.process/differs other)) (str "differs " (:seon.process/differs other)))
+    (is (.isFile (java.io.File. (str root "/target/runtime-for/" before ".digest"))) "the tree's digest is kept by its id")
+    ;; :all, a process that runs the binary's baked program: the binary's own tree is current, with its src id
+    (let [all (fx/runtime-for (clojure.string/trim (slurp (str root "/target/seon.tree"))) {:scope :all})]
+      (is (string? (:program all)) (str "answered " all)))))

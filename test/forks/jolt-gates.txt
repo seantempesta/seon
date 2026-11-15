@@ -228,3 +228,6 @@ flowstepended
 flowpingstepping
 tickslineage
 emitquotedvalues
+siginfodumpdisabled
+siginfodumpchild
+fibercost
