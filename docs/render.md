@@ -324,6 +324,7 @@ Everything a model is sent is read from the tree through one conversion, and an 
 
 - `seon.render.ui/agent-input`: a person's REPL, messages, interrupt and release. The model's REPL is its eval tool and a message reaches it as a message; interrupt and release act on it.
 - `seon.render.ui/person-input`: the person's message box on root's chat (Send, Enter). It sends a message to root's session, which reaches its model as a message.
+- `seon.render.ui/offer`: a place an agent offered the person (my.user/focus!'s value), a button that sets their web state there (seon.system/focus!) and opens it. The model has the value its eval answered, printed in its turn.
 - `seon.render.ui/root-input`: a person's request, which becomes a task (``seon.system/ask!``). An agent messages root, or `seon_eval root` asks by the same call.
 - `seon.render.ui/root-tools`: root's spawn and evaluate-in-every-agent. An agent messages root, or `seon_eval root` does the same.
 - `seon.render.ui/debug`, `seon.render.ui/debug-turn`, `seon.render.ui/debug-row`: stepping through recorded requests and opening a message. The model reads its own conversation whole.

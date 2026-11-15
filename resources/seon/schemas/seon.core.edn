@@ -332,6 +332,7 @@
  :seon/call [:qualified-symbol {:description "On a hiccup element, the var (marked ^:seon/callable) a click or submit of it calls in the system."}]
  :seon/agent [:keyword {:description "On a hiccup element, the agent that its :seon/call is made in: its address or id."}]
  :seon/args [:map {:description "On a hiccup element, the arguments its :seon/call is made with."}]
+ :seon/go [:string {:description "On a hiccup element with a :seon/call, the page to open once that call has answered (an offer's tap)."}]
  :seon/callable [:boolean {:description "On a var's metadata, true when the page may call it by name (seon.web/ui-call)."}]
  ;; the effect owner's outcome stamps and queue key (seon.fx)
  :seon.lib/load-refused [:and {:description "The error when the OS refuses the machine's load average (getloadavg)."} :seon.error/base [:map [:seon.error/type [:= :seon.lib/load-refused]]]]
