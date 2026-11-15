@@ -801,8 +801,14 @@
     (if (seq dirty)
       (error #'seon.fx/git-commit :seon.fx/io-error (str "refused, nothing merged: " wt " holds changes of its own: " (str/join ", " dirty)) {:path wt})
       (let [r (run ["merge" "-q" "--no-edit" ref])]
-        (if (zero? (:exit r))
+        (cond
+          ;; the merge said done, and HEAD contains ref: what bin/update's ancestry check did (a merge that did nothing once gave
+          ;; eight false UPDATE OKs), now the effect's own answer
+          (and (zero? (:exit r)) (zero? (:exit (run ["merge-base" "--is-ancestor" ref "HEAD"]))))
           {:value {:sha (str/trim (:out (run ["rev-parse" "HEAD"]))) :merged ref}}
+          (zero? (:exit r))
+          (error #'seon.fx/git-commit :seon.fx/io-error (str "merging " ref " into " wt " answered done, but HEAD does not contain " ref) {:path wt})
+          :else
           (let [conflicts (vec (remove str/blank? (str/split-lines (:out (run ["diff" "--name-only" "--diff-filter=U"])))))]
             (run ["merge" "--abort"])
             (error #'seon.fx/git-commit :seon.fx/io-error
@@ -829,7 +835,7 @@
             (if wt
               (try (merge-in-tree! wt (let [who (cfg/value :seon.config.source/committer-name) mail (cfg/value :seon.config.source/committer-email)]
                                         {"GIT_AUTHOR_NAME" who "GIT_AUTHOR_EMAIL" mail "GIT_COMMITTER_NAME" who "GIT_COMMITTER_EMAIL" mail})
-                                   merge) (catch Throwable e (error #'seon.fx/git-commit :seon.fx/io-error (step/error-msg e) {:path dir})))
+                                   merge) (catch Throwable e (if (intr/interrupt? e) (throw e) (error #'seon.fx/git-commit :seon.fx/io-error (step/error-msg e) {:path dir}))))
               (error #'seon.fx/git-commit :seon.fx/io-error (str "no worktree has " branch " checked out: nothing to merge into") {:path dir})))
     :else
   (if (and (empty? files) (not allow-empty?))
@@ -856,7 +862,8 @@
             ;; only from the head read above; a new branch only if none appeared meanwhile
             (git! {} dir ["update-ref" ref sha (if have? parent "0000000000000000000000000000000000000000")] nil)
             {:value {:sha sha :files (count files)}}))))
-      (catch Throwable e (error #'seon.fx/git-commit :seon.fx/io-error (step/error-msg e) {:path dir}))))))
+      ;; an interrupt or a budget's end is no git error: it goes on to the step (seon.intr/interrupt?)
+      (catch Throwable e (if (intr/interrupt? e) (throw e) (error #'seon.fx/git-commit :seon.fx/io-error (step/error-msg e) {:path dir})))))))
 
 ;; ---- the wiki's history: what each section was last written against -----------------------
 
