@@ -2,5 +2,7 @@
 {:seon.web/unread-form [:and {:description "A toggled unit's text after its row's id (the browser's) that does not read as EDN, so no form was opened (seon.web/open-form): the page answers it, never a guess."}
                         :seon.error/base [:map [:seon.error/type [:= :seon.web/unread-form]] [:seon.web/unit :string]]]
  ;; keys-schemas sweep
+ :seon.web.html/void-element [:enum {:description "An HTML element that has no content and no end tag, as the HTML standard lists them (https://html.spec.whatwg.org/multipage/syntax.html#void-elements): seon.web.html writes no end tag for one."}
+                              "area" "base" "br" "col" "embed" "hr" "img" "input" "link" "meta" "source" "track" "wbr"]
  :seon.web.html/raw [:string {:description "The one key of a map marking its string as HTML written as it is, not escaped (seon.web.html/raw)."}]
  :seon.web/unit [:string {:description "On a cut's refused form, the unit (EDN text) that did not read."}]}

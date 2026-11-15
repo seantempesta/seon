@@ -701,6 +701,27 @@
       (let [head' (as head :main/b (+ t0 4000) [[:db/add [:seon.task/id "demo/x"] :seon.task/plan "Make x, decided."]])]
         (is (empty? (:conflicts (pm/merge-main b0 head' main))))))))
 
+;; Estimate: the world 0.5M (cached) + 4 small transactions ~1M + one merge-main and one merge-tx of a few datoms ~4M = 8000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-fact-of-an-entity-the-other-side-deleted-is-left-out
+  ;; Stage 0 (2026-11-15 01:28): main removed the test var seon.lib-test/a-fork-whose-wait-is-cancelled-says-how-many-run, whole; lb76's
+  ;; own verdict on it (:seon.test/digest, :seon.test/status) merged onto main's db, a nameless entity, and seon.agent/record-results!
+  ;; read a nil :var/name. A fact has no subject once the other side deleted its entity (docs/merging.md#a-branch-merges-main-in)
+  (let [as (fn [db branch tx] (:db-after (d/with db {:tx-data (if (fn? tx) (tx db) tx) :tx-meta {:seon.tx/branch branch}})))
+        b0 (as (base) :main (var-tx "t" "(is true)"))
+        e (:db/id (d/entity b0 [:var/name 'app/t]))
+        head (-> b0 (as :main/b [[:db/add e :seon.test/digest "d1"] [:db/add e :seon.test/status :deferred]])
+                 (as :main/b (var-tx "f" "(inc x)")))
+        main (as b0 :main [[:db/retractEntity e]])
+        {:keys [tx conflicts]} (pm/merge-main b0 head main)
+        merged (d/db-with main tx)]
+    (is (nil? conflicts) (pr-str conflicts))
+    (is (empty? (d/datoms merged :eavt e)) "merging main into the branch: no nameless entity")
+    (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch keeps its own change")
+    (testing "and merging the branch to main"
+      (let [r (pm/delta-three-way b0 head main :all)
+            onto (d/db-with main (pm/merge-tx main b0 head (keys (:ours r)) :all))]
+        (is (empty? (d/datoms onto :eavt e)))))))
+
 ;; Estimate: the world 0.5M (cached) + 5 small transactions + 3 merge-mains (each a diff of a few datoms, program-of on ~3 keys of three
 ;; dbs) ~10M = 15000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 15000000}} a-conflict-the-branch-resolved-merges-the-next-time

@@ -544,18 +544,26 @@
       []
       (filterv #(contains? lacking (:db/ident %)) (program/schema-declarations onto contract/registry)))))
 
+(defn- deleted-by?
+  "Whether entity e is one base held and db holds nothing of: db deleted it, whole. A fact another side wrote of it since has no
+  subject on db, and a merge onto db leaves it out, never a nameless entity (a test's verdict on a var db removed). Cost: two seeks."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :int] :boolean]}
+  [base db e]
+  (boolean (and (first (d/datoms base :eavt e)) (nil? (first (d/datoms db :eavt e))))))
+
 (defn merge-tx
   "The tx-data merging src's changes since base for program keys ks onto db onto: the
   Datahike declarations of the attributes its datoms use that onto lacks (attribute-declarations),
   then the datoms src wrote, as they are (carried-tx), and the declarations a merged schema
   entry's population needs on onto (as a registration installs them). An entity whose identity
   src retracted is retracted whole on onto, so no fact onto wrote of it (a test's results) stays
-  on a nameless entity (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
+  on a nameless entity; and a fact src wrote of an entity onto deleted whole (`deleted-by?`) is left out, for the same reason
+  (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db [:maybe [:sequential :seon.merge/program-key]] :seon.merge/data-attrs] :seon.db/tx-data]}
   [onto base src ks data-attrs]
   ;; a branch with nothing of its own has no keys: (keys {}) is nil; a :held-only row's key onto doesn't hold is left
   (let [ks (filterv (fn [[kind v]] (let [row (stated-keys kind)] (or (not (:held-only row)) (pdb/eid onto (:id row) v)))) ks)
-        carried (carried-tx base src ks data-attrs)
+        carried (into [] (remove #(and (:added %) (deleted-by? base onto (:e %)))) (carried-tx base src ks data-attrs))
         schema (:schema src)
         unique? #(= :db.unique/identity (get-in schema [% :db/unique]))
         named (into #{} (keep #(when (and (:added %) (unique? (:a %))) (:e %))) carried)
@@ -631,6 +639,8 @@
     (if (seq conflicts)
       {:conflicts conflicts}
       (let [unique? #(= :db.unique/identity (get-in (:schema head) [% :db/unique]))
+            ;; a fact of an entity main deleted whole has no subject on main: left out (its program keys were judged above)
+            added (into [] (remove #(deleted-by? base main (:e %))) added)
             named (into #{} (keep #(when (unique? (:a %)) (:e %))) added)
             txs (into (sorted-set) (map :tx) added)]
         {:keys ks
