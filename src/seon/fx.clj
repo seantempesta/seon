@@ -176,11 +176,8 @@
   [^String p] (boolean (or (.endsWith p ".clj") (.endsWith p ".edn") (cfg/file-kind p))))
 
 (defn library-source
-  "The source of what the program depends on, read for the :library effect: every classpath root (deps.edn's :paths under a
-  pinned submodule, and its :deps as jolt.deps resolves them) and the binary's embedded archive (Jolt's own), each root by its
-  identity (a pinned dir's pin commit, a versioned jar or gitlib its path, the archive the binary's digest); only the roots
-  whose identity differs from since are read. {:value {:roots {root identity} :files {path {:text :root :rel}}}}: a jar's file
-  path is root!/rel, rel what each var's :file names. See docs/vector.md#search."
+  "The :library effect: the source of every root the program depends on (classpath roots, and the binary's embedded archive) whose
+  identity differs from since, {:value {:roots {root identity} :files {path {:text :root :rel}}}}. See docs/vector.md#search."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [root pins since]} :req}]
   (try

@@ -516,14 +516,12 @@
   digest; the library is read again when it moves (`library-round`). See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db] :string]}
   [db]
-  (lib/digest (pr-str [(into (sorted-map) (source/pins-of db))
-                       (get-in (d/pull db [:seon.system/source] [:seon.system/id :root]) [:seon.system/source :inputs :config :seon.env/deps])])))
+  (lib/digest (str/join "\n" (concat (for [[p c] (sort (source/pins-of db))] (str p " " c))
+                                      [(str (get-in (d/pull db [:seon.system/source] [:seon.system/id :root]) [:seon.system/source :inputs :config :seon.env/deps]))]))))
 
 (defn- library-round
-  "A round with no text due (st, main db): when the dependency inputs moved from those the library was read at (`library-inputs`,
-  :seon.library/inputs) and were not asked already, the :library effect at the lowest :prio, reading only the roots whose identity
-  moved (since, :seon.library/roots); else the round ends. Derived data kept current by main's notice, as the vectors are. See
-  docs/vector.md#search."
+  "A round with nothing to embed: when the dependency inputs moved (`library-inputs`) and were not asked yet, the :library effect at
+  the lowest :prio for the roots whose identity moved; else the round ends. See docs/vector.md#search."
   {:malli/schema [:=> [:cat :map :seon.host/db] [:tuple :map [:vector :map]]]}
   [st db]
   (let [in (library-inputs db)
@@ -573,7 +571,6 @@
             [st m] (step/ask st [:vectors :answers] [:embedded [(mapv first due) (mapv peek due) (select-keys m [:t :commit])]]
                              {:op :fx :kind :embed :req (cond-> {:texts (mapv second due)} more? (assoc :more true))})]
         [(assoc st :running true :more more?) [m]])
-      ;; nothing to embed: the round's room goes to the dependency source, when it moved
       :else (library-round st db))))
 
 (defn vectors-proc
