@@ -249,6 +249,24 @@
     (is (= (seon.config/value :seon.config.root/user-name) (:from (first (:messages heard)))) "with who sent it, by name")
     (is (empty? (:messages again)) (str "and the next reply does not carry it again: " (pr-str (:messages again))))))
 
+;; Estimate: in this process, two server round trips (~0.5M each, as a-message-reaches-the-agent's): ~1M; 2,000,000. In root: one
+;; message write, and the api's wake-inbox over that commit's ops (~1k ticks)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} an-inbox-wait-answers-when-a-message-is-written
+  ;; task seon.server/a-message-reaches-the-session-that-drives-its-agent, part 2's api side: a wait for a message to an agent
+  ;; (seon.system/await-message) is answered by the commit that writes one, whoever writes it, with no clock. The api checks it in
+  ;; the step that takes main's notice, before await-db's waits, so once await-db sees the message on main the wait is answered.
+  ;; Red before: no wait existed (a session polled seon_context)
+  (let [k (volatile! nil)
+        [before after] (at/in-agent (fn [{:keys [agent]}]
+                                      (vreset! k (name agent))
+                                      [{:op :eval :agent "root" :code (str "(def inbox-p (seon.system/await-message sys " (pr-str (name agent)) ")) (realized? inbox-p)")}
+                                       {:op :eval :agent "root"
+                                        :code (str "(do @(seon.system/message! sys " (pr-str (keyword (name agent))) " \"wake up\")"
+                                                   " (seon.system/await-db sys #(seq (datahike.api/q '[:find ?m :where [?m :seon.message/body \"wake up\"]] %)))"
+                                                   " [(realized? inbox-p) (some? (:max-tx @inbox-p))])")}]))]
+    (is (false? (last (:value before))) (str "nothing answers it before a message: " (pr-str before)))
+    (is (= [true true] (:value after)) (str "answered with main's db at the commit that wrote the message: " (pr-str after)))))
+
 (deftest the-context-op-answers-what-a-model-is-sent
   ;; dogfood 2026-10-25: an outside agent read the task's data and turn sections only, not the system
   ;; prompt and screen a model is sent, and its (my.task/status) answered :seon.turn/not-observed.
