@@ -1,5 +1,5 @@
 #!/bin/sh
-# DEVIATES: builds the binary from the shell; moves inside as the build effect keyed by seon.fx/runtime-for (seon.fx/runtime-for-reads-the-pins-from-the-branch).
+# DEVIATES: builds the binary from the shell. Not to be ported: seon.fx/runtime-for-reads-the-pins-from-the-branch decides when a build is needed from runtime-for, inside.
 # bin/build — the runtime from the pinned sources: Chez (our fork) -> Jolt (our fork)
 # -> target/hello (a binary that requires Datahike and opens an in-memory db), then
 # target/lib/libprobe.dylib (native/probe.c, native/ids.c), target/lib/liblmdb.dylib (LMDB, record locks, MDB_SAFENOSYNC),

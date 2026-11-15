@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-# DEVIATES: a perl holder ends a child's process group when its starter dies, outside Flow; moves inside as death on a channel (seon.system/shutdown-and-death-are-dataflow).
+# DEVIATES: a perl holder ends a child's group when its starter dies, outside Flow. Not to be ported: seon.system/shutdown-and-death-are-dataflow makes death a channel message, which may leave no job for it.
 # bin/held [--detach] [--drain] [--log F] [--pids F] [--ready F] [--done F] CMD [ARGS]   the one holder
 # of a long-lived child (a root, a check mode): CMD in a process group of its own, ended with its
 # starter, its end reported. The process that started it (bin/check, a test runner) holds the

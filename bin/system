@@ -1,5 +1,5 @@
 #!/bin/zsh
-# DEVIATES: starts, stops and restarts a root from the shell (a double fork, pid files); moves inside as ops of the one system (seon.system/operator-commands, seon.system/an-update-loses-nothing).
+# DEVIATES: starts and stops a root from the shell (a double fork, pid files). Not to be ported: seon.system/operator-commands and seon.system/an-update-loses-nothing decide which of these jobs the one system still needs.
 # bin/system [start [--reindex] [ARGS]|stop|kill|status|next]   this checkout's standing root, on this checkout's own
 # ports (bin/ports): its server (reached by bin/mcp, or `printf '{:op :agents}\n' | bin/ask
 # PORT`) and its dashboard. `start` (the default) runs it detached: double-forked so it

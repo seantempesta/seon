@@ -1,4 +1,4 @@
-# DEVIATES: the runtime's environment set by a sourced shell file, a caller's value winning; moves inside as one stated environment (seon.fx/a-scripts-environment-is-stated-in-one-place).
+# DEVIATES: the runtime's environment from a sourced shell file, a caller's value winning. Not to be ported: seon.fx/a-scripts-environment-is-stated-in-one-place states it once, where the runtime reads it.
 # bin/env — sourced by bin/build, bin/test, bin/check, bin/system, bin/ports, bin/worktree and
 # bin/cache-smoke: where the runtime finds its native libraries and its checkout, and Jolt's options.
 # LMDB: konserve.jolt.lmdb-ffi loads JOLT_LMDB_LIB, the robust-lock build bin/build makes
