@@ -242,6 +242,13 @@
   [x]
   (if (view? x) (let [src (.-src x)] (notify-deref-watcher! [src (.-path x) :deep]) (.-m x)) x))
 
+(defn key-set
+  "The keys of map x, recorded for a view as a read of its key set alone (`read-index`'s :key-set): reached when a key is added or
+  removed, never when a value is replaced, as (keys x) is not (an iteration, which reads each direct value too). What a reader of which
+  keys an entity holds asks. See docs/render.md#reactive-renders."
+  {:malli/schema [:=> [:cat [:maybe :map]] [:set :any]]}
+  [x] (if (view? x) (.keySet ^java.util.Map x) (set (keys x))))
+
 (defn untracked
   "View x's value with no read recorded (any other x as it is): for a reader of what is written once, an entity's id, which a read per member would make a list's reading cost a read per member. See docs/render.md#reactive-renders."
   {:malli/schema [:=> [:cat :any] :any]}
@@ -275,7 +282,7 @@
      (~'containsKey [~'_ ~'k] (notify-deref-watcher! [~'src (conj ~'path ~'k) :shallow]) (contains? ~'m ~'k))
      (~'entryAt [~'this ~'k] (when (contains? ~'m ~'k) (clojure.lang.MapEntry. ~'k (.valAt ~'this ~'k))))
      clojure.lang.IPersistentCollection
-     (~'count [~'_] (notify-deref-watcher! [~'src ~'path :keys]) (count ~'m))
+     (~'count [~'_] (notify-deref-watcher! [~'src ~'path :key-set]) (count ~'m))
      (~'cons [~'this ~'x] (conj (unwrap ~'this) ~'x))
      (~'empty [~'_] (empty ~'m))
      (~'equiv [~'this ~'o] (= (unwrap ~'this) (if (view? ~'o) (unwrap ~'o) ~'o)))
@@ -286,11 +293,11 @@
      ;; what a persistent map's = asks of the other side (APersistentMap.equiv), so (= m view)
      ;; holds as (= view m) does
      java.util.Map
-     (~'size [~'_] (notify-deref-watcher! [~'src ~'path :keys]) (count ~'m))
-     (~'isEmpty [~'_] (notify-deref-watcher! [~'src ~'path :keys]) (empty? ~'m))
+     (~'size [~'_] (notify-deref-watcher! [~'src ~'path :key-set]) (count ~'m))
+     (~'isEmpty [~'_] (notify-deref-watcher! [~'src ~'path :key-set]) (empty? ~'m))
      (~'get [~'this ~'k] (.valAt ~'this ~'k))
      (~'entrySet [~'this] (set (seq ~'this)))
-     (~'keySet [~'_] (notify-deref-watcher! [~'src ~'path :keys]) (set (keys ~'m)))
+     (~'keySet [~'_] (notify-deref-watcher! [~'src ~'path :key-set]) (set (keys ~'m)))
      (~'values [~'this] (vals ~'this))
      clojure.lang.IFn
      (~'invoke [~'this ~'k] (.valAt ~'this ~'k))
@@ -380,9 +387,9 @@
 ;;; --- which reads a tree's change reaches -------------------------------------------------------
 
 (defn read-index
-  "Read index ix ({:pre :deep :keys}, each {path #{reader}}; nil: none) with reader r's reads of one source ([[path kind] ...])
+  "Read index ix ({:pre :deep :keys :key-set}, each {path #{reader}}; nil: none) with reader r's reads of one source ([[path kind] ...])
   added (f conj) or removed (f disj): a read at path indexed at each of its prefixes (:pre), a whole read at its path (:deep), an
-  iteration at the node it iterated (:keys). The one index a change is matched against (`reached`): a walk kept as a value holds
+  iteration at the node it iterated (:keys), a key set at its node (:key-set, `key-set`). The one index a change is matched against (`reached`): a walk kept as a value holds
   it (seon.render/walk's :tree-readers). See docs/render.md#reactive-renders."
   {:malli/schema [:=> [:cat [:maybe :map] :any [:maybe [:or [:set [:tuple [:vector :any] :keyword]] [:sequential [:tuple [:vector :any] :keyword]]]] :seon.host/fn] :map]}
   [ix r reads f]
@@ -390,8 +397,9 @@
     (reduce (fn [ix [p kind]]
               (cond-> (reduce #(update %1 :pre add %2) ix (prefixes p))
                 (= kind :deep) (update :deep add p)
-                (= kind :keys) (update :keys add p)))
-            (or ix {:pre {} :deep {} :keys {}}) reads)))
+                (= kind :keys) (update :keys add p)
+                (= kind :key-set) (update :key-set add p)))
+            (or ix {:pre {} :deep {} :keys {} :key-set {}}) reads)))
 
 (defn move-reads
   "Read index ix with reader r's reads moved from was to now (each [[path kind] ...]): the reads it lost out, the reads it gained
@@ -409,14 +417,17 @@
 
 (defn reached
   "The readers of read index ix (`read-index`) a diff's changes ([[op path ...] ...]) reach: a read at or below a changed path
-  (:pre), a whole read above it (:deep), a node iterated whose direct value it added, removed or replaced (:keys). See
+  (:pre), a whole read above it (:deep), a node iterated whose direct value it added, removed or replaced (:keys), a node's key set one
+  of whose keys it added or removed (:key-set). See
   docs/render.md#reactive-renders."
   {:malli/schema [:=> [:cat [:maybe :map] [:sequential [:vector :any]]] [:set :any]]}
   [ix changes]
-  (let [{:keys [pre deep keys]} ix]
-    (reduce (fn [acc [_ p]]
+  (let [{:keys [pre deep keys key-set]} ix]
+    (reduce (fn [acc [op p]]
               (cond-> (into (into acc (get pre p)) (mapcat #(get deep %)) (prefixes p))
-                (seq p) (into (get keys (pop p)))))
+                (seq p) (into (get keys (pop p)))
+                ;; a key set is reached by a key added or gone, never by a value replaced
+                (and (seq p) (not= :replace op)) (into (get key-set (pop p)))))
             #{} changes)))
 
 ;;; --- reaction --------------------------------------------------------------------------------
