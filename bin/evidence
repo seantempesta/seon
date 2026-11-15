@@ -1,4 +1,5 @@
 #!/bin/zsh
+# DEVIATES: reads ps, sample, lsof and fiber dumps from the shell. Not to be ported: seon.system/a-wait-past-its-bound-captures-its-own-evidence asks what a bounded Flow wait leaves to capture.
 # bin/evidence DIR PID [PORT]: what PID and the processes under it are doing, into DIR, as a run is stopped: a stuck run ended at its
 # bound otherwise takes its evidence with it (docs/clocks.md#time-decides-the-owners-exceptions). First, with PORT, the Seon state
 # of the root serving there (seon.system/stall-state, asked of its server: root's stall check and each agent proc's, read-only), in
