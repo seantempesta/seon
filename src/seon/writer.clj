@@ -190,6 +190,15 @@
                      (cond-> (nil? why-not) (-> (update :taken into (keys (:ours r))) (assoc :db db'))))))
              {:taken #{} :db main :members []} branches))))
 
+(defn- branch-tx!
+  "The report of transacting arg-map on branch b of the store cfg names, through the one write path (seon.db/connect's, stamped with b):
+  a connection opened for it and released after. Every write the writer makes on a branch it does not hold takes this. See
+  docs/storage.md#the-write-checks-every-entity-it-touches."
+  {:malli/schema [:=> [:cat :map :keyword [:or :map :seon.db/tx-data]] :map]}
+  [cfg b arg-map]
+  (let [bc (pdb/connect (assoc cfg :branch b))]
+    (try (d/transact bc arg-map) (finally (d/release bc)))))
+
 (defn merge-main-into
   "Main merged into branch b on main's program (seon.merge/merge-main): a conflict writes only its unmerged entries; clean, one force-branch! onto b while b is at its head. Answers {:ok :conflicts :commit :t :main}, :main the commit merged. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :any :map :seon.db/branch] :map]}
@@ -198,9 +207,7 @@
         base (pdb/branch-base conn main-b b)
         r (pm/merge-main base head main)]
     (if (:conflicts r)
-      (let [bc (pdb/connect (assoc cfg :branch b))]
-        (try (d/transact bc {:tx-data (pm/unmerged-tx head (vec (:conflicts r)) (:max-tx main)) :tx-meta (pdb/tx-meta b)})
-             (finally (d/release bc)))
+      (do (branch-tx! cfg b {:tx-data (pm/unmerged-tx head (vec (:conflicts r)) (:max-tx main)) :tx-meta (pdb/tx-meta b)})
         {:ok false :conflicts (:conflicts r) :main (d/commit-id main)})
       (let [;; a merged task's cites are derived from its text: made again here, never carried (seon.task/merged-cites-tx)
             tx (into (:tx r) (task/merged-cites-tx (pdb/speculate-db main (:tx r)) (:keys r)))
@@ -289,7 +296,7 @@
   {:malli/schema [:=> [:cat :seon.host/conn :keyword :keyword] [:maybe :map]]}
   [conn main b]
   (let [db @conn
-        live (:seon.status/live (contract/properties :seon.agent/status))]
+        live task/live-statuses]
     (when-let [k (first (for [d (d/datoms db :aevt :seon.agent/branch)
                               :when (= b (pdb/on-main main (:v d)))
                               :let [e (d/entity db (:e d))]
@@ -355,9 +362,7 @@
       :branch-for-tree (reply st (if (exists? (:branch m))
                                    {:ok true :exists true}
                                    (do (d/branch! conn main (:branch m))
-                                       (when (seq (:tx m))
-                                         (let [bc (pdb/connect (assoc (:cfg st) :branch (:branch m)))]
-                                           (try (d/transact bc (vec (:tx m))) (finally (d/release bc)))))
+                                       (when (seq (:tx m)) (branch-tx! (:cfg st) (:branch m) (vec (:tx m))))
                                        {:ok true :exists false})))
       ;; a tree's branch dropped once no proof of it runs (seon.system/prove-tree!; the owner's ruling, 2026-11-11): only a tree-<id>
       ;; branch, never another; one already gone answers so
@@ -365,10 +370,8 @@
       ;; b, or b's head moved to commit :to (its db, :to its one parent) while b is still at :expected; refused while a live agent
       ;; holds b, since that agent is its branch's one writer
       :tx (reply st (or (branch-held conn main (:branch m))
-                        (let [bc (pdb/connect (assoc (:cfg st) :branch (:branch m)))]
-                          (try (let [rep (d/transact bc {:tx-data (vec (:tx-data m))})]
-                                 {:ok true :t (:max-tx (:db-after rep)) :datoms (count (:tx-data rep)) :commit (d/commit-id (:db-after rep))})
-                               (finally (d/release bc))))))
+                        (let [rep (branch-tx! (:cfg st) (:branch m) {:tx-data (vec (:tx-data m))})]
+                          {:ok true :t (:max-tx (:db-after rep)) :datoms (count (:tx-data rep)) :commit (d/commit-id (:db-after rep))})))
       :reset-branch (reply st (or (when-not (exists? (:branch m)) (refused (str "no branch " (:branch m)) {}))
                                   (branch-held conn main (:branch m))
                                   (if-let [to (d/commit-as-db conn (:to m))]

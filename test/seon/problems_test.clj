@@ -678,7 +678,7 @@
                                                                    ; (Data model, 2026-11-12: nothing switched off; measured 58 -> 64)
                                                               3    ; seon.problems/unschemed-keys: on base and head for the move's forms, and in the full read (data, 64 -> 67)
                                                               2    ; seon.problems/refused-values' contract on base and head (data, 67 -> 69)
-                                                              4    ; the test law's two classes (unestimated-tests, undeclared-tests), one reader each on
+                                                              4    ; the test law's two classes (unestimated, undeclared-tests), one reader each on
                                                                    ; base and head (tests, 2026-11-12: 69 -> 73 with data's)
                                                               8    ; :unfocused-docstring (data, 73 -> 81 measured): its reader and its bound on base and head,
                                                                    ; and a seek and a row for each changed Seon var the input's tree holds
@@ -689,8 +689,10 @@
                                                               2    ; :stateful-outside-flow's reader on base and head for the move's changed vars (flow,
                                                                    ; 2026-11-14, measured 89 -> 91)
                                                               1    ; retyped-attributes' own contract, once a read (data, 2026-11-14)
-                                                              13)} ; the one-printer law's rule (seon.problems/printer-law): its four dials read once through the
+                                                              13   ; the one-printer law's rule (seon.problems/printer-law): its four dials read once through the
                                                                    ; resolver for both sides (tests, measured 89 -> 102)
+                                                              2)} ; :unestimated reads the move's open tasks too: the moved task states no estimate,
+                                                                   ; its row (derived-row) on base and head (data, 2026-11-15, measured 104 -> 106)
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 25000000}} problems-cost-nothing-for-a-clean-program
@@ -1079,7 +1081,7 @@
                ;; 68 calls at 10: :long-form (seon.problems/long-forms) is a class the changed vars are asked, with its bound read once (seon.config/value) each form's chars set against the bound's (seon.print.emit/chars-per-token), a long one's tokens estimated;
                ;; the 7 more contracted calls, each instrumented (its output checked), are the ticks and bytes the fixed part grew by (measured: the
                ;; seek and text of a var cost ~8k ticks of it)
-               ;; and 4: the test law's two classes (unestimated-tests, undeclared-tests), one reader each on base and head (tests,
+               ;; and 4: the test law's two classes (unestimated, undeclared-tests), one reader each on base and head (tests,
                ;; 2026-11-12: measured 69 -> 73); and 4 for data's two caused classes (unschemed-key, refused-value), one reader
                ;; each on base and head, the same shape (measured 73 -> 77 once both met in one tree)
                ;; and 8 for :unfocused-docstring (data, measured 77 -> 85): its reader and its bound on base and head, and a seek
@@ -1305,7 +1307,7 @@
                ;; 56: :unsynced one more (its seon.db/eid and derived-row), 2026-11-10
                ;; 58: :unschemed-key one more (its seon.db/eid and derived-row: this input gives every declared class open rows)
                ;; 60: :refused-value one more, the same two
-               ;; 64: :unestimated-test and :undeclared-test two more (each its seon.db/eid and derived-row)
+               ;; 64: :unestimated and :undeclared-test two more (each its seon.db/eid and derived-row)
                ;; 66: :unfocused-docstring one more (its seon.db/eid and derived-row)
                ;; 68: :hand-written-list one more (its seon.db/eid and derived-row), context 2026-11-14
                ;; 70: :retyped-attribute one more, the same two (data, 2026-11-14)
@@ -1622,7 +1624,7 @@
 (deftest ^{:seon.test/estimate {:ticks 60000000}} a-changed-test-states-what-its-type-needs
   ;; docs/testing.md#test-types: a test the branch added or changed that reaches a root (directly or through its namespace's
   ;; helper) naming none, or calls a store of its own is a caused :undeclared-test, one row a lack (stating no estimate is
-  ;; :unestimated-test's); declared, none but an estimate over its cap; an unchanged undeclared test is not judged. Work: the world (cached), three imports of a
+  ;; :unestimated's); declared, none but an estimate over its cap; an unchanged undeclared test is not judged. Work: the world (cached), three imports of a
   ;; six-form namespace (~5 M ticks each) and two caused-splits over the few vars they change.
   (let [old "(deftest old (is true))"
         base (law-ns old)
@@ -1635,8 +1637,21 @@
     (is (= '#{[t :root] [h :root] [s :store]} (lacks undeclared))
         "each lack its row, the helper's root reached through the namespace's own code")
     (is (= '#{[over :ticks]} (lacks declared)) "declared: only the estimate over the ticks cap")
-    (is (= 6 (count (caused undeclared))) "caused, refusing done: those three and the three changed tests' :unestimated-test, never the unchanged old's")
+    (is (= 6 (count (caused undeclared))) "caused, refusing done: those three and the three changed tests' :unestimated, never the unchanged old's")
     (is (= 1 (count (caused declared))))))
+
+;; Estimate: the world (cached) + two task creates ~2M + two caused-splits over one moved task each ~6M = 10000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} an-open-task-states-its-estimate
+  ;; docs/cost.md#how-we-measure (the owner, 2026-11-15: "I'm not seeing algorithmic estimates being done"): a task a branch adds or
+  ;; changes states its hot functions' n, order, ticks and bytes before their code (:seon.task/estimate), or it is a caused :unestimated
+  ;; row; a person's request (:user) states none
+  (let [db0 (world)
+        task (fn [nm m] (d/db-with db0 (seon.task/create-tx db0 [(merge {:seon.task/ns 'app :seon.task/name nm :seon.task/kind :work
+                                                                        :seon.task/proofs #{'app-test/real} :seon.task/plan "Make `app.calc/inc2` faster."} m)])))
+        rows (fn [head] (filterv #(= :unestimated (:class %)) (:rows (problems/caused-split db0 head))))]
+    (is (= ["app/bare states no estimate"] (mapv #(re-find #"app/bare states no estimate" (:message %)) (rows (task "bare" {})))) "a task with no estimate is caused")
+    (is (empty? (rows (task "stated" {:seon.task/estimate {'app.calc/inc2 {:n 100 :order :linear :ticks 20000 :bytes 4096}}}))) "one that states it is not")
+    (is (empty? (rows (task "asked" {:seon.task/kind :user}))) "nor a person's request")))
 
 ;; docs/health.md#two-kinds-of-problem: a branch is judged on the content it makes, every class of it (the owner, 2026-11-12:
 ;; nothing switched off). For each content class a branch can make, the rows caused-split answers from what the branch moved are
@@ -1659,7 +1674,7 @@
             :let [[caused full] (made base head c)]]
       (is (seq full) (str (name c) ": the branch made a row"))
       (is (= full caused) (str (name c) ": caused-split answers it, as the full reading does")))
-    (is (= (set (keys {:stateful-outside-flow 1 :unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :unfocused-docstring 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated-test 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1 :hand-written-list 1 :retyped-attribute 1}))
+    (is (= (set (keys {:stateful-outside-flow 1 :unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :unfocused-docstring 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1 :hand-written-list 1 :retyped-attribute 1}))
            seon.problems/caused-classes)
         "the classes a branch is judged on are the content classes, as :seon.problems/class declares them")))
 

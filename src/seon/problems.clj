@@ -470,19 +470,27 @@
            (derived-row ans s nsym (str v " is public and its docstring cites no docs/ section: cite the one that describes it")
                         {:kind :uncited-var :var v} {:var v})))))
 
-(defn unestimated-tests
-  "Each of the named vars (a set of symbols, the vars a branch changed) that is a test stating no estimate on its deftest
-  (no :seon.test/estimate fact on its var: docs/testing.md#test-types), as an :unestimated-test row: a new or changed test states what it should cost, worked from
-  what it must do, and runs under the cap until it does (docs/merging.md#a-tests-tick-budget). Closed by stating
-  ^{:seon.test/estimate {:ticks n}}. Cost: one seek per named var."
-  {:malli/schema [:=> [:cat :seon.host/db :map [:set :symbol]] [:vector :seon.problems/row]]}
-  [db ans names]
-  (vec (for [v (sort names)
-             :let [e (pdb/eid db :var/name v) ent (when e (d/entity db e)) nsym (some-> (namespace v) symbol)]
-             :when (and ent (contains? (set (:var/meta ent)) :test) (nil? (:seon.test/estimate ent)))
-             :let [s (str "unestimated-test " v)]]
-         (derived-row ans s nsym (str v " states no estimate: state ^{:seon.test/estimate {:ticks n}} on its deftest, worked from what it must do")
-                      {:kind :unestimated-test :var v} {:var v}))))
+(defn unestimated
+  "What states no estimate among a branch's change, as :unestimated rows: each of the named vars (the vars a branch changed) that is a
+  test with no :seon.test/estimate on its deftest (docs/testing.md#test-types), and each of the tasks (entity ids, the open tasks whose
+  own datoms the branch moved) that is not a person's request (:user) and whose plan states no :seon.task/estimate. A test states what
+  it should cost, worked from what it must do, and runs under the cap until it does (docs/merging.md#a-tests-tick-budget); a task states
+  its hot functions' n, order, ticks and bytes before their code carries :seon.cost/bound (docs/cost.md#how-we-measure). Cost: one seek
+  per named var and one entity read per task."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:set :symbol] [:set :int]] [:vector :seon.problems/row]]}
+  [db ans names tasks]
+  (into (vec (for [v (sort names)
+                   :let [e (pdb/eid db :var/name v) ent (when e (d/entity db e)) nsym (some-> (namespace v) symbol)]
+                   :when (and ent (contains? (set (:var/meta ent)) :test) (nil? (:seon.test/estimate ent)))
+                   :let [s (str "unestimated-test " v)]]
+               (derived-row ans s nsym (str v " states no estimate: state ^{:seon.test/estimate {:ticks n}} on its deftest, worked from what it must do")
+                            {:kind :unestimated :var v} {:var v})))
+        (for [e (sort tasks)
+              :let [t (d/entity db e) id (:seon.task/id t)]
+              :when (and id (not= :user (:seon.task/kind t)) (#{:held :running} (:seon.task/execution t)) (nil? (:seon.task/estimate t)))
+              :let [s (str "unestimated-task " id)]]
+          (derived-row ans s 'seon.task (str id " states no estimate: state :seon.task/estimate {fn {:n :order :ticks :bytes}} for each hot function its plan changes, worked out before its code")
+                       {:kind :unestimated :task id} {:task id}))))
 
 (defn long-forms
   "Each of the named vars (a set of symbols, the vars a branch changed), in source or in a test, whose
@@ -774,7 +782,7 @@
 
 (defn undeclared-tests
   "Each of the named vars (the vars a branch changed) that is a test and breaks its law, one :undeclared-test row a
-  lack (one stating no estimate is `unestimated-tests`'): its estimate is over its cap (:seon.config.proofs/test-ticks-cap, a system test's
+  lack (one stating no estimate is `unestimated`'s): its estimate is over its cap (:seon.config.proofs/test-ticks-cap, a system test's
   asks-cap, a binary test's execs-cap); it reaches a running system (:seon.config.proofs/system-vars) and names no
   :seon.test/root, or runs a command (exec-vars) and names no :seon.test/execs; or its namespace makes a store of its own
   (own-store-vars). Read from the compiler's facts (`test-reach`); a test the branch did not change is not judged.
@@ -896,6 +904,8 @@
                            (into (comp (mapcat #(d/datoms db :avet :seon.task/needs %)) (map :e)) (map :e (by-attr :seon.task/outcome)))
                            (cond-> (seq defined) (into (comp (filter #(defined (:v %))) (map :e)) (d/datoms db :aevt :seon.task/proofs))))))
         task-only (into (task-cands base) (task-cands head))
+        ;; the tasks whose own datoms the branch moved: an open one states its estimate (unestimated)
+        moved-tasks (fn [db] (into #{} (filter #(seq (d/datoms db :eavt % :seon.task/id))) (map :e moved)))
         rows (fn [db state forms-of]
                (let [tr (task-reads db task-only)]
                  (concat (map #(assoc % :class :unnamed-site) (sites db state forms-of))
@@ -905,7 +915,7 @@
                          (map #(assoc % :class :hand-written-list) (hand-written-lists db ans moved-vars))
                          (map #(assoc % :class :stateful-outside-flow) (stateful-outside-flow db ans moved-vars))
                          (map #(assoc % :class :unfocused-docstring) (unfocused-docstrings db ans moved-vars))
-                         (map #(assoc % :class :unestimated-test) (unestimated-tests db ans moved-vars))
+                         (map #(assoc % :class :unestimated) (unestimated db ans moved-vars (moved-tasks db)))
                          (map #(assoc % :class :undeclared-test) (undeclared-tests db ans moved-vars))
                          (map #(assoc % :class :leadless-section) (leadless-sections db ans led-cands))
                          (when linkage? (map #(assoc % :class :orphan-page) (orphan-pages db ans)))
