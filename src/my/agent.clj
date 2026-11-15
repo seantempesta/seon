@@ -201,7 +201,7 @@
     (or (no-var db x)
         (let [[_ in] (agent/test-inputs db)
               g (agent/branch-graph db (:base @agent/state) in)]
-          (filterv agent/judges? (program/tests-reaching g x))))))
+          (filterv #(agent/judges? g #{} %) (program/tests-reaching g x))))))
 
 (defn cost
   "What contracted function x costs, measured by the test runs, never estimated: :per-call, its
