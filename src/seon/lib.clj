@@ -166,8 +166,9 @@
   [st]
   (let [sig (bit-and st 0x7f)] (if (zero? sig) {:exit (bit-and (bit-shift-right st 8) 0xff)} {:signal sig})))
 
-;; ---- Chez introspection and GC controls, defined once in Scheme ----
-(defonce scheme-defs
+;; ---- Chez introspection and GC controls, defined in Scheme ----
+;; a plain def (procedures only, no state): a change loaded in place redefines them (seon.profile's scheme-defs, the same rule)
+(def scheme-defs
   (do (scm/eval-string
         "(define (proto-active-threads)
            (disable-interrupts) (mutex-acquire #%$tc-mutex)

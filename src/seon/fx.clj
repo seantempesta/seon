@@ -1561,7 +1561,7 @@
 
 (defn- weight
   "The processes request m holds at its peak under bound b: the more of what it declares (:seon.fx/processes, its test type's
-  weight) and its class's peak as outcomes measured it (a declared 3 once held 127, 2026-11-13); a class neither declared nor
+  weight) and its class's peak as outcomes measured it (a declared weight has under-counted a process tree); a class neither declared nor
   measured weighs b, so it runs alone; none without a class. See docs/config.md#the-test-services-three-limits."
   {:malli/schema [:=> [:cat pos-int? :map :map] nat-int?]}
   [b st m]

@@ -154,6 +154,22 @@
    ;; cut outside one; the law's marks and display namespaces are config dials (printer-law), named by that one section
    {:law :printer :fact :form/refs :page "docs/render.md" :section "docs/render.md#one-printer" :except #{} :rule printer-law}])
 
+(defn native-in-defonce
+  "Each live form that evaluates native code (it reaches jolt.scheme/eval-string) inside a defonce, as a :native-in-defonce row:
+  a change to it loaded in place (a landing's update, root and the fork server) is skipped, so the process runs code whose native
+  half was never defined (every agent's start then throws). The fix is a plain def whose state defines keep their value.
+  Cost: one index seek of the forms reaching eval-string, then each one's text. See docs/health.md#native-code-in-a-defonce."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (vec (for [dt (d/datoms db :avet :form/refs 'jolt.scheme/eval-string)
+             :let [e (:e dt) src (:v (first (d/datoms db :eavt e :form/src)))]
+             :when (and src (str/starts-with? src "(defonce") (program/live? db e))
+             :let [nsym (some->> (first (d/datoms db :eavt e :form/ns)) :v (d/entity db) :ns/name)
+                   head (subs src 0 (min 60 (count src)))]]
+         (derived-row ans (str "native-in-defonce " (:v (first (d/datoms db :eavt e :form/id)))) nsym
+                      (str nsym " evaluates native code inside a defonce, so a change to it never loads in place: " head)
+                      {:kind :native-in-defonce :form head} {:form head}))))
+
 (defn unnamed-sites
   "Each site of a law (`laws`) its page does not name: a live form carrying the law's fact, by
   the var it defines, in a namespace of Seon's own src, and no test's (a form defining a var whose
@@ -1290,7 +1306,7 @@
   ([db fold]
    (let [ans (answers db)]
      (health-with db ans (:classes (report-with db ans fold nil)) (assoc (other-derived db ans (mapv :e (d/datoms db :aevt :seon.task/id)))
-                                     :unnamed-site (unnamed-sites db ans) :stale-section (stale-sections db ans)
+                                     :unnamed-site (unnamed-sites db ans) :native-in-defonce (native-in-defonce db ans) :stale-section (stale-sections db ans)
                                      :hand-written-list (hand-written-lists db ans nil))))))
 
 (defn- touched-tasks
