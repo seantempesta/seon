@@ -575,6 +575,32 @@
     (is (= #{"lib-a/a2.clj" "lib-b/b.clj"} retracted) "a file its re-read root no longer holds goes, and a vanished root's files")
     (is (= {"lib-a" "a@2"} (some :seon.library/roots tx)) "the roots' identities it was read at are kept")))
 
+;; docs/vector.md#search: the text index is kept on disk by its content (the text attributes' revisions), so a restart whose texts did
+;; not change loads it (~70 ms on main) instead of building it (~1 s), the first fix of "boot re-derives what didn't change"; a changed
+;; text builds once; a truncated image is built again, never trusted. Estimate: three builds of a test store's index (~25M ticks each
+;; on main's 9 M chars; a test store's texts are fewer) and two loads: <= 200M ticks, 1 GB
+(deftest ^{:seon.test/estimate {:ticks 200000000 :bytes 1000000000}} a-restart-loads-the-text-index-an-earlier-one-built
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [built (atom 0)
+            open seon.sqlite/fts-open
+            build #(let [ix (#'doc/build-index %)] (sqlite/retire! ix) ix)
+            k (#'doc/index-key @conn)]
+        (is (some? k) "a committed value has a content key")
+        (with-redefs [seon.sqlite/fts-open (fn [rows] (swap! built inc) (open rows))]
+          (build @conn)
+          (is (.isFile (#'doc/image-file k)) "a build writes its image")
+          (build @conn)
+          (is (= 1 @built) "the same texts again: loaded, not built")
+          (d/transact conn ((mt/code 'app.kept (str "(ns app.kept)\n(defn f \"A text that moves the key.\" [] 1)\n")) @conn))
+          (is (not= k (#'doc/index-key @conn)) "a changed text moves the key")
+          (build @conn)
+          (is (= 2 @built) "and builds once")
+          (let [f (#'doc/image-file (#'doc/index-key @conn)) bs (java.nio.file.Files/readAllBytes (.toPath f))]
+            (java.nio.file.Files/write (.toPath f) (java.util.Arrays/copyOf bs (quot (alength bs) 2)) (make-array java.nio.file.OpenOption 0))
+            (build @conn)
+            (is (= 3 @built) "a truncated image is built again, never loaded")))))))
+
 ;; docs/vector.md#search: a regex has no trigram to ask the index for, so grep reads every text of the kinds asked, once, off
 ;; the attribute's own datoms. Estimate (2026-11-12, main: 8191 texts, 7.7 M chars): the :aevt scan 1.4 M ticks and 7 MB,
 ;; the regex 16 M ticks, so about 2 k ticks and 1 KB a text; budget 4 k and 4 KB. Measured before: 82 KB a text (a seek
