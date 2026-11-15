@@ -1341,7 +1341,8 @@
   docs/ctx.md#the-pattern. ix is the entity index schemas are read in (seon.db/index-of)."
   {:malli/schema [:=> [:cat :map :map [:maybe :keyword]] [:maybe :qualified-keyword]]}
   [ix e via]
-  (let [s (most-specific ix e)]
+  ;; its schema follows from which keys it holds alone (most-specific reads e's keys): a view's key set, so a value replaced reruns nothing
+  (let [s (most-specific ix (if (ratom/view? e) (zipmap (ratom/key-set e) (repeat true)) e))]
     (cond (nil? s) (get (pdb/owners ix [via]) via)
           (keyword? s) s
           :else (throw (ex-info (str "no one entity schema names this entity: " (:ambiguous s) " extend none of each other")

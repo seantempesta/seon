@@ -1025,8 +1025,8 @@
         ;; of each join holding a placed member (a member linked); a member linked places again a render that asked (a turn's call moves
         ;; :seon.agent/turn, which its readers read). Only those joins: a view of a join is a contracted call, and one whose members are all
         ;; read under a turn's call (the evals) places nothing here
-        _ (count c)
-        _ (doseq [k (distinct (map (comp first second) ms))] (count (get c k)))
+        _ (ratom/key-set c)
+        _ (doseq [k (distinct (map (comp first second) ms))] (ratom/key-set (get c k)))
         ;; a turn's edge: its basis's t, else the transaction that made its call
         edge (fn [call] (or (:t (:seon.model-call/basis call)) (:db/id (:at call)) 0))
         ;; the turns in order, one pass with the members: each turn takes those linked at or before its edge, no edge before an earlier one's. The record holds its calls newest first, so its reverse is turn order; one that is not (a window by position) is sorted by number
