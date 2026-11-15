@@ -88,7 +88,7 @@
   {:malli/schema [:=> [:cat :seon.system/sys] :map]}
   [sys]
   (assoc (let [db @(:conn sys)] (live-tasks db (index-now (:conn sys) db)))
-         :agents (into (sorted-map) (for [[id a] (:agents (c/state sys)) :when (not (c/gone-statuses (:status a)))]
+         :agents (into (sorted-map) (for [[id a] (:agents (c/state sys)) :when (not (seon.task/gone-statuses (:status a)))]
                                       [id (select-keys a [:branch :status :task])]))))
 
 (def ^:dynamic *sys*
@@ -126,7 +126,7 @@
   [sys db id]
   (if-let [r (some #(when (= id (:task %)) %) (task/running db))]
     (let [a (get-in (c/state sys) [:agents (:agent r)])]
-      (if (and a (not (c/gone-statuses (:status a)))) [r nil] [nil r]))
+      (if (and a (not (seon.task/gone-statuses (:status a)))) [r nil] [nil r]))
     [nil nil]))
 
 (defn- attach!
