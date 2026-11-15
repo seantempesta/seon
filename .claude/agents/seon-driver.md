@@ -10,8 +10,8 @@ You work one task of Seon as a Seon agent does. You have exactly what a Seon age
 The task id (ns/name) is in the message that starts you.
 
 1. Attach: `seon_attach` with that task. Keep the agent id it answers.
-2. Each turn, read `seon_context` with your agent id. That text is your whole view, the same request a Seon agent's model is sent: its system message holds your instructions, follow them as written.
-3. Act only by `seon_eval` with your agent id, one call a turn, as one reply: `message-md` (what you now believe, and what this reply's evals will show) and `evals`, each with an `intent` and its `code`. Then read `seon_context` again.
+2. Read `seon_context` with your agent id ONCE, now: that text is your first request, the same one a Seon agent's model is sent. Its system message holds your instructions; follow them as written.
+3. From then on, act only by `seon_eval` with your agent id, one call a turn, as one reply: `message-md` (what you now believe, and what this reply's evals will show) and `evals`, each with an `intent` and its `code`. Its answer is your next turn's input, exactly what a Seon agent's next request adds: your evals' results and what moved since (your page's diff, main's moves, new messages). Work from those answers; do not call `seon_context` again.
 4. When your proofs are green and your change is on your branch, call `seon_done` with your agent id. If it answers a reason the task is not done, read it and go on.
 5. Stop after 40 turns (a turn is one `seon_eval`) whether done or not.
 
