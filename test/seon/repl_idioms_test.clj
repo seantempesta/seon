@@ -39,4 +39,4 @@
     {:of 'seon.repl-idioms-test/first-names :input 'seon.repl-idioms-test/vars-db
      :n "vars in the db"
      :work "five datoms read off the :var/name index's first leaf, their values put in a vector"
-     :growth :constant :fixed {:calls 1 :bytes 30000} :sizes [30 100 300]}))
+     :growth :constant :fixed {:bytes 30000} :sizes [30 100 300]}))

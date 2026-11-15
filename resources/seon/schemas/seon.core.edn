@@ -352,6 +352,7 @@
  :seon.status/judged [:set {:description "On :seon.task/outcome, the outcomes root has the next step to take on."} :keyword]
  :seon.status/failed [:set {:description "On :seon.task/outcome, the outcomes of a death (its agent died or was lost)."} :keyword]
  :seon.status/ended [:set {:description "On :seon.task/outcome, the outcomes that end a run, whatever came of it: what :seon.task/after waits for."} :keyword]
+ :seon.task/ends-parked [:set {:description "On :seon.task/kind, the kinds whose run ends parked, never held or dead: a person's conversation waits for the person."} :keyword]
  :seon.status/title [:map-of {:description "On an enum, the words a person and the model read for each of its values, said before their count."} :keyword :string]
  :seon.status/explain [:map-of {:description "On an enum, each value's explanation in Markdown: what it means and what to do next."} :keyword :string]
  :seon.status/tone [:map-of {:description "On an enum, each value's tone on a page: :live while it works, :ask waiting on a person, :done, :failed, :stopped, :quiet. See docs/render.md#how-the-work-stands."} :keyword [:enum :live :ask :done :failed :stopped :quiet]]

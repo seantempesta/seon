@@ -478,7 +478,7 @@
  :seon.task/branch [:keyword {:description "The branch the task's work is on."}]
  :seon.task/model [:string {:description "The model that works the task."}]
  :seon.task/execution [:and {:seon.db/index true :description "Whether the task is held, running or cancelled."} [:enum :held :running :cancelled]]
- :seon.task/kind [:enum {:description "What kind of work the task is."} :user :work :design :implement :test :merge :whole]
+ :seon.task/kind [:enum {:description "What kind of work the task is." :seon.task/ends-parked #{:user}} :user :work :design :implement :test :merge :whole]
  ;; measured evidence a task starts from: its last failed run's conflicts, unmerged keys, red
  ;; proofs and problem (seon.reconcile/hold-tx), read by the run root releases next
  ;; what the task's plan says its hot functions should cost, before their code carries :seon.cost/bound (the one home once it does):

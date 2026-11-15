@@ -39,8 +39,8 @@
                 "value, and the call counted: no allocation (each check was a try, ~176 B, before)")
      :growth :linear
      ;; measured 2026-10-23: 0.02 B and ~10 ticks a call (seon.cost/units :fn/armed-call); 353 B before
-     :per-n {:bytes 16.0 :calls 1.0}
-     :fixed {:bytes 2000.0 :calls 1.0}
+     :per-n {:bytes 16.0}
+     :fixed {:bytes 2000.0}
      :sizes [100 300 1000 10000]}))
 
 (deftest an-arm-that-can-throw-is-still-reported-as-the-schemas

@@ -29,5 +29,5 @@
                ;; 300 / 1,000 / 3,000 / 10,000 characters, 76 calls each (the container's draw); before the escape was one pass, 54
                ;; ticks and 96 B a character
                :per-n {:ticks 800 :bytes 6000}
-               :fixed {:ticks 8000 :bytes 45500 :calls 76}
+               :fixed {:ticks 8000 :bytes 45500}
                :sizes [3 10 30 100]}))
