@@ -837,7 +837,12 @@
  ;; call's bound is of quiet, re-armed by each chunk (seon.fx/stream-due), so a long reasoning reply
  ;; that keeps streaming is never cut; a call that does not stream waits this long in all. A kind not
  ;; named waits unbounded until its bound is measured (seon.agent/fx!).
- :seon.config.fx/bounds {:model {:seon.bound/ms 240000}}
+ ;; :server-op is a work bound on each server op (seon.server/answer, seon.intr/run): ten times the heaviest op
+ ;; measured, :context's cold request for a 30-turn agent, 11B ticks and 37.6 GB allocated [M root result/a444fa99],
+ ;; so an op that loops for good is stopped and answers its caller typed, and its worker goes on. Root's own :eval
+ ;; takes none (seon.server/root-eval: a whole-program load allocates tens of GB); an interrupt ends it.
+ :seon.config.fx/bounds {:model {:seon.bound/ms 240000}
+                         :server-op {:seon.bound/ticks 110000000000 :seon.bound/bytes 376000000000}}
 
  ;; Who answers agents' turns. With no profile, DeepSeek through the endpoint below (owner, 2026-11-15:
  ;; "just make deepseek the default"; it was none, and a root restarted without --profile deepseek

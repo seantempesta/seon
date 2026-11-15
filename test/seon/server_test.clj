@@ -95,12 +95,55 @@
   ;; Stage 1's safety item (the MCP relay answers each call on its own): an op runs under its declared work bound
   ;; (:seon.config.fx/bounds :server-op, seon.intr/run in seon.server/answer), so one that runs past it is stopped and answers its caller,
   ;; typed, and the next request is answered. Root's own :eval is the exception, unbounded as root-eval says (its interrupt ends it)
-  (let [v seon.config/value
-        [past ok] (with-redefs [seon.config/value (fn [k & more] (if (= k :seon.config.fx/bounds) {:server-op {:seon.bound/ticks 1000}} (apply v k more)))]
-                    (at/in-agent [{:op :agents} {:op :eval :agent "root" :code "(reduce + (range 100000))"}]))]
+  ;; the bound is set in root's process, where the server reads it, around the worker's own code (respond)
+  (let [[past ok] (at/in-agent [{:op :eval :agent "root"
+                                 :code (str "(let [v seon.config/value]"
+                                            " (with-redefs [seon.config/value (fn [k & more] (if (= k :seon.config.fx/bounds) {:server-op {:seon.bound/ticks 1000}} (apply v k more)))]"
+                                            "   (seon.edn/decode (#'seon.server/respond sys \"{:op :agents}\"))))")}
+                                {:op :eval :agent "root" :code "(reduce + (range 100000))"}])
+        past (:value past)]
     (is (= :seon.server/defect (:seon.error/type past)) (str "the op past its bound is answered: " (pr-str (select-keys past [:seon.error/type :seon.error/message]))))
     (is (= :seon.repl/ticks-spent (get-in past [:data :seon.error/type])) "with the bound's typed error")
     (is (= 4999950000 (:value ok)) "and root's own eval runs unbounded, the server going on")))
+
+;; See docs/server.md#ops
+;; Estimate: the shard's shared root (~0 here), five root evals and two stops through the server (~0.25M each), two sockets
+;; (~10k ticks each): ~1.8M; 2,000,000 ticks, worked from the work.
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} a-caller-stops-its-own-op
+  ;; Stage 1's safety item: a root eval has no work bound, so what ends one that waits for good is its caller's stop:
+  ;; seon_interrupt (EDN :interrupt, every op of its client) and MCP's notifications/cancelled (the one request id), each
+  ;; answered on the connection's fiber. The blocked eval is answered, and the server goes on. The residue, named: a client
+  ;; killed outright sends no cancel; a bounded op still ends at its bound, but root's :eval runs on until seon_interrupt or root's stop
+  (let [root @ts/shared-root-default
+        ask #(ts/ask root %)
+        tag (str "stop-" (System/nanoTime))
+        line! (fn [s l] (let [o (.getOutputStream ^java.net.Socket s)] (.write o (.getBytes (str l "\n") "UTF-8")) (.flush o)))
+        ;; the world's wait, declared: a red that never answers ends here, typed by the socket, never at the test's bound
+        open! #(doto (java.net.Socket. "127.0.0.1" (int (:port root))) (.setSoTimeout 20000))
+        read! #(.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream ^java.net.Socket %) "UTF-8")))
+        started (fn [p] (str "(do (deliver root.repl/" p " true) @(promise))"))
+        _ (ask {:op :eval :agent "root" :code "(do (def e1 (promise)) (def e2 (promise)))"})
+        ;; EDN: an eval that waits for good, stopped by its client's seon_interrupt once it runs
+        s1 (open!)
+        _ (line! s1 (pr-str {:op :eval :agent "root" :client tag :code (started "e1")}))
+        _ (ask {:op :eval :agent "root" :code "@e1"})
+        stop1 (ask {:op :interrupt :client tag})
+        a1 (clojure.edn/read-string (read! s1))
+        ;; MCP: the same wait, as tools/call id 7, stopped by notifications/cancelled naming request 7
+        s2 (open!)
+        _ (line! s2 (clojure.data.json/write-str {"jsonrpc" "2.0" "id" 7 "method" "tools/call" "seon/client" (str tag "-mcp")
+                                                  "params" {"name" "seon_eval" "arguments" {"agent" "root" "code" (started "e2")}}}))
+        _ (ask {:op :eval :agent "root" :code "@e2"})
+        _ (with-open [s (open!)]
+            (line! s (clojure.data.json/write-str {"jsonrpc" "2.0" "method" "notifications/cancelled" "seon/client" (str tag "-mcp") "params" {"requestId" 7}})))
+        a2 (clojure.data.json/read-str (read! s2))
+        after (ask {:op :eval :agent "root" :code "(+ 1 2)"})]
+    (.close s1) (.close s2)
+    (is (= {:stopped 1 :dropped 0} stop1) "the stop finds the client's running op")
+    (is (re-find #"(?i)interrupt" (pr-str a1)) (str "the stopped eval is answered, interrupted: " (pr-str a1)))
+    (is (= 7 (get a2 "id")) "the cancelled MCP request is answered, by its id")
+    (is (re-find #"(?i)interrupt" (pr-str a2)) (str "interrupted: " (pr-str a2)))
+    (is (= 3 (ts/value-of (:response after))) "the server goes on")))
 
 (deftest the-server-speaks-mcp
   ;; root's server answers MCP's JSON-RPC

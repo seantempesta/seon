@@ -14,12 +14,24 @@
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.system :as c] [my.root :as root] [seon.fx :as fx] [seon.config :as cfg] [seon.task :as task] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
-            [seon.lib :as lib] [seon.edn :as sedn] [seon.db :as pdb] [seon.repl :as repl] [seon.print :as print] [seon.ctx.wire :as wire] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str] [clojure.walk] [clojure.core.async :as a] [jolt.fibers :as fibers]))
+            [seon.lib :as lib] [seon.edn :as sedn] [seon.db :as pdb] [seon.repl :as repl] [seon.intr :as intr] [seon.print :as print] [seon.ctx.wire :as wire] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str] [clojure.walk] [clojure.core.async :as a] [jolt.fibers :as fibers]))
 
 (defn- refused
   "The server refusing a request, as root's API does: the one error map."
   {:malli/schema [:=> [:cat :string] :seon.system/refused]}
   [why] (contract/error :seon.system/refused #'seon.server/refused why))
+
+(defn- stop-ops!
+  "Stop the server ops whose stop key holds each entry of k ({:client c}, and :id, one MCP request): one message to the
+  :server-op owner on its :ask port (seon.fx/stop), answered at once, never behind the ops it stops. Answers
+  {:stopped n :dropped n}, or the owner's refusal. See docs/server.md#ops."
+  {:malli/schema [:=> [:cat :seon.system/sys :seon.fx/stop] :map]}
+  [sys k]
+  (let [o @(c/effect! sys :server-op {:seon.fx/stop k})] (if (contract/error? o) o (:value o))))
+
+(def ^:dynamic *token*
+  "The interrupt token the :server-op owner made for the op this worker runs (seon.fx/stop): answer runs the op under it."
+  nil)
 
 (defn task-summaries
   "Every task on main db: {id {:execution :done :blocked-by :agent :outcome :failure}}: the server's and the
@@ -100,7 +112,8 @@
   cost, error maps, *1 and *e), in root.repl (my.root as root, seon.system as c, datahike as
   d) with `sys` a local bound to this root, unbounded (root's own forms take no tick or allocation
   budget: a whole-program load allocates tens of GB, and the agent's per-form
-  budget stopped it); its response recorded on main as root's eval, by the user (seon.repl/record-tx). The record's write is
+  budget stopped it; the one op answer runs with no :server-op bound for that reason). What ends one that runs too long is an
+  interrupt: root's SIGUSR1 (seon.intr), or end-all at root's stop; its response recorded on main as root's eval, by the user (seon.repl/record-tx). The record's write is
   sent and not waited on: nothing reads it before the answer, and root's writer keeps its order before any later write
   (it cost 6-30 ms of every root eval's 45-54 ms). Its *in* is input, the request's own (empty when none). See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.system/sys :string [:maybe :string]] :seon.repl/answer]}
@@ -261,10 +274,15 @@
                  :evals {:type "array" :description "The evals this reply runs, in order."
                          :items {:type "object" :properties (array-map :intent {:type "string" :description "What this eval is about to do. A sentence is fine."} :code {:type "string" :description "Clojure to evaluate."})
                                  :required ["intent" "code"]}}
-                 :code {:type "string" :description "root only: Clojure forms"}
+                 :code {:type "string" :description "Clojure forms: root's, or on an agent the one eval of this reply (with intent), as evals [{intent, code}] would send it"}
+                 :intent {:type "string" :description "with code on an agent: what that eval is about to do"}
                  :input {:type "string" :description "root only: what the forms read as *in* (stdin), empty when none is sent"}
                  :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}}
           :required ["agent"]}
+   :interrupt {:doc "Stop every op you asked that still runs or waits (your seon_eval at root included, which has no work bound): a queued one is answered stopped, a running one interrupted and answered :seon.server/interrupted. Answered at once, never behind the ops it stops. An MCP client's notifications/cancelled stops the one request it names the same way."
+               :args {}}
+   :import {:doc "Import a file you wrote onto the Seon agent your checkout holds (my.branch/import!): what bin/seon-import, the edit hook, asks. path: the file's absolute path, inside the checkout your client names (bin/mcp call's checkout-<path>)."
+            :args {:path {:type "string" :description "the file's absolute path"}} :required ["path"]}
    :context {:doc "The request of the task an agent works as a model is sent it now: system prompt, its conversation and its page. Name the agent, or a task (ns/name): the agent working it, else one attached to it now (attach), so one request reads a task's context. wire: the request body as JSON, as a provider is sent it (roles, call ids, tools; a root with no --profile has no model or max_tokens in it). No model is called."
              :args {:agent {:type "string"} :task {:type "string" :description "ns/name, instead of an agent"}
                     :wire {:type "boolean" :description "answer the request body as JSON, not the text"}}}
@@ -318,15 +336,14 @@
 
 (defn- agent-reply
   "An outside agent's request of agent ag as one reply (seon.turn/outside-reply!): {:responses [...]}, each eval's, and :messages, the messages
-  its turn took when the reply is the agent's turn (docs/users.md#messages). The shape every eval of an agent takes, the old :code refused, saying so, with nothing run. See docs/server.md#ops."
+  its turn took when the reply is the agent's turn (docs/users.md#messages). The shape every eval of an agent takes (the :eval op makes
+  a plain {intent, code} one reply of that eval). See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.system/sys :keyword :map] :map]}
   [sys ag req]
   (let [{:keys [task env]} (work-of sys ag)
         outside? (and task (= "outside" (:model env)))
         msg (:message-md req)]
     (cond
-      (and (contains? req :code) (not (contains? req :evals)))
-      (refused (str "seon_eval on an agent is one reply now: {agent, message-md, evals: [{intent, code}, ...]}; your code was not run. Only root takes plain code."))
       (and (nil? task) (not (str/blank? msg)))
       (refused (str (name ag) " works no task now (its last has ended): seon_attach task=ns/name works one again, on its branch."))
       (and (not outside?) (not (str/blank? msg)))
@@ -346,7 +363,27 @@
       ;; text, which is no EDN since out-verbatim). The model reads the text alone (tools/call)
       (if (contract/error? r) r {:response (cond-> (select-keys r [:handle :text :ex :recorded :main :unrecorded])
                                              (and (contains? r :value) (contract/plain? (:value r))) (assoc :value (:value r)))}))
-    (agent-reply sys ag req)))
+    ;; plain code on an agent is a reply of that one eval, for every caller (bin/mcp call's code=, a model that sends it)
+    (agent-reply sys ag (if (and (contains? req :code) (not (contains? req :evals)))
+                          (-> req (assoc :evals [{:intent (or (:intent req) "") :code (:code req)}]) (update :message-md #(or % "")) (dissoc :code :intent))
+                          req))))
+
+(defmethod op-answer :interrupt [sys _ req]
+  (if-let [cl (:client req)]
+    (stop-ops! sys {:client cl})
+    (refused "seon_interrupt stops its caller's own ops, named by its client id (bin/mcp sends seon/client with every call): this request names none")))
+
+(defmethod op-answer :import [sys _ req]
+  (let [cl (:client req)
+        checkout (some->> cl (re-matches #"checkout-(/.+)") second)
+        path (str (:path req))
+        rel (when (and checkout (str/starts-with? path (str checkout "/"))) (subs path (inc (count checkout))))]
+    (cond (nil? checkout) (refused (str "seon_import imports onto the agent a checkout holds: its client is checkout-<path> (bin/mcp call), not " (pr-str cl)))
+          (nil? rel) (refused (str path " is outside the checkout " checkout ": not imported"))
+          :else (if-let [{:keys [agent task]} (root/held-agent sys cl)]
+                  (agent-reply sys agent {:task task :client cl :message-md ""
+                                          :evals [{:intent (str "import " rel ", written by the session") :code (str "(my.branch/import! " (pr-str checkout) " [" (pr-str rel) "])")}]})
+                  (refused (str checkout " holds no Seon agent (bin/mcp call attach task=NS/NAME): " rel " not imported"))))))
 
 ;; the block's text as the model reads it: printed to the agent's output, not as a
 ;; value (a value comes back as a string literal, escaped, under the reply's budget);
@@ -506,19 +543,34 @@
             :else (refused (str ag " answered no end for " task))))
     (refused (str ag " works no task"))))
 
+(def ^:private inline-ops
+  "The ops a connection answers on its own fiber, never through a :server-op worker: a stop must not wait behind the ops it
+  stops (serve-connection!)."
+  #{:interrupt})
+
 (def ^:private held-ops
   "The ops that act on an agent's work, which its holder's client (or a request naming its task) may ask."
   #{:done :eval :message})
 
 (defn answer
-  "One request's answer: its op's (op-answer), or held's refusal for an op on an agent another client holds."
+  "One request's answer: its op's (op-answer), or held's refusal for an op on an agent another client holds. The op runs
+  under its own interrupt token with its declared work bound (seon.intr/run, :seon.config.fx/bounds :server-op), so an op
+  past it throws the typed :seon.repl/ticks-spent or bytes-spent, which respond answers its caller; its token is the one
+  the :server-op owner made (*token*), so its caller can stop it (seon_interrupt). Root's own :eval is run as root-eval
+  says, under the token with no bound. See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.system/sys :map] :map]}
   [sys req]
   (let [ag (some-> (:agent req) (#(if (= "root" %) :root (keyword %))))
-        missing (remove #(contains? req (keyword %)) (:required (get ops (:op req))))]
+        missing (remove #(contains? req (keyword %)) (:required (get ops (:op req))))
+        run (fn [] (or (when (and (held-ops (:op req)) (keyword? ag) (not= :root ag)) (held sys ag req))
+                       (op-answer sys ag req)))]
     (or (when (seq missing) (refused (str "seon_" (name (:op req)) " needs " (str/join ", " missing) ": " (str/join "; " (for [m missing] (str m " is " (get-in ops [(:op req) :args (keyword m) :description] "required")))))))
-        (when (and (held-ops (:op req)) (keyword? ag) (not= :root ag)) (held sys ag req))
-        (op-answer sys ag req))))
+        (cond
+          ;; answered on the connection's own fiber (serve-connection!): a stop is one message to the owner, never bounded work
+          (inline-ops (:op req)) (run)
+          (and (= :eval (:op req)) (= :root ag)) (intr/run nil nil *token* run)
+          :else (let [{:seon.bound/keys [ticks bytes]} (:server-op (cfg/value :seon.config.fx/bounds))]
+                  (intr/run ticks bytes *token* run))))))
 
 (def protocol-versions
   "The MCP protocol versions this server answers (modelcontextprotocol.io/specification):
@@ -548,6 +600,9 @@
   {:malli/schema [:=> [:cat [:maybe :seon.system/sys] :map] [:maybe :map]]}
   [sys {:strs [id method params] :as msg}]
   (let [result (fn [r] {"jsonrpc" "2.0" "id" id "result" r})]
+    ;; MCP's cancellation (a notification: answered nothing): the client gave up on its request requestId, which is stopped
+    (when (and (= "notifications/cancelled" method) (string? (get msg "seon/client")) (some? (get params "requestId")))
+      (stop-ops! sys {:client (get msg "seon/client") :id (get params "requestId")}))
     (when id
       (case method
         "initialize" (result {"protocolVersion" (or (some #{(get params "protocolVersion")} protocol-versions) (peek protocol-versions))
@@ -582,35 +637,60 @@
   line opening `{\"` is MCP's JSON-RPC (mcp-reply, JSON out), every other line is EDN (answer,
   EDN out), so an EDN request is a keyword-keyed map. The entrant boundary: a defect (a line
   that does not read, an op that throws) answers that request as the typed
-  :seon.server/defect, for MCP inside a JSON-RPC error with the request's id (-32700 for
+  :seon.server/defect (an op its caller stopped, :seon.server/interrupted), for MCP inside a JSON-RPC error with the request's id (-32700 for
   a line that is not JSON, naming the rule)."
-  {:malli/schema [:=> [:cat [:maybe :seon.system/sys] :string] [:maybe :string]]}
-  [sys line]
+  {:malli/schema [:function [:=> [:cat [:maybe :seon.system/sys] :string] [:maybe :string]]
+                  [:=> [:cat [:maybe :seon.system/sys] :string :any] [:maybe :string]]]}
+  ([sys line] (respond sys line nil))
+  ;; read: the line as the connection already read it (line-parts), nil to read it here
+  ([sys line read]
   (let [mcp? (str/starts-with? (str/triml line) "{\"")
         msg (volatile! nil)]
     (try (if mcp?
-           (some-> (mcp-reply sys (vreset! msg (json/read-str line))) json/write-str)
-           (sedn/encode (answer sys (edn/read-string line))))
+           (some-> (mcp-reply sys (vreset! msg (or read (json/read-str line)))) json/write-str)
+           (sedn/encode (answer sys (or read (edn/read-string line)))))
          (catch Throwable e
            (let [cause (step/error-msg e)
-                 d (contract/error :seon.server/defect #'seon.server/respond
-                                   (if (and mcp? (nil? @msg)) (str "a line opening {\" is MCP's JSON-RPC, and an EDN request a keyword-keyed map; this one is not JSON: " cause) cause)
-                                   (cond-> {:line line} (ex-data e) (assoc :data (ex-data e))))]
+                 d (if (instance? ThreadDeath e)
+                     ;; its caller stopped it (seon_interrupt, notifications/cancelled), or root's interrupt
+                     (contract/error :seon.server/interrupted #'seon.server/respond "the op was stopped by its caller's interrupt" {:line line})
+                     (contract/error :seon.server/defect #'seon.server/respond
+                                     (if (and mcp? (nil? @msg)) (str "a line opening {\" is MCP's JSON-RPC, and an EDN request a keyword-keyed map; this one is not JSON: " cause) cause)
+                                     (cond-> {:line line} (ex-data e) (assoc :data (ex-data e)))))]
              (if mcp?
                (json/write-str (rpc-error (get @msg "id") (if @msg -32603 -32700) (print/text d)))
-               (sedn/encode d)))))))
+               (sedn/encode d))))))))
 
 (defn perform-op
   "The :server-op effect's perform: one server op, run on the kind's :mixed worker (docs/server.md#ops). The request's :run is the
-  op as a thunk the connection made (bound-fn: its *emit* and the dynamic vars it was taken with), so an op that blocks holds this
-  worker, never the connection's fiber, a carrier or another connection. Answers {:value its line}."
+  op as a thunk the connection made (bound-fn: its *emit* and the dynamic vars it was taken with) of the token the owner made
+  for it (:seon.fx/token, seon.fx/stop), so an op that blocks holds this worker, never the connection's fiber, a carrier or
+  another connection. Answers {:value its line}."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [run]} :req}] {:value (run)})
+  [{{:keys [run] :as req} :req}] {:value (run (:seon.fx/token req))})
+
+(defn- line-parts
+  "What a connection reads from one request line before it runs: whether it is answered on the fiber (inline-ops, MCP's
+  notifications/cancelled), and who may stop it ({:client :id}: bin/mcp's seon/client and the MCP request id, or an EDN
+  request's :client; nil when it names no client), and :msg, the line read once, which respond takes. A line that does not
+  read is neither: respond reads it again and answers its defect."
+  {:malli/schema [:=> [:cat :string] [:map [:inline? :boolean] [:stop-key [:maybe :seon.fx/stop-key]] [:msg :any]]]}
+  [line]
+  (let [msg (try (if (str/starts-with? (str/triml line) "{\"") (json/read-str line) (edn/read-string line)) (catch Exception _ nil))]
+    (cond (and (map? msg) (contains? msg "jsonrpc"))
+          (let [cl (get msg "seon/client")]
+            {:inline? (boolean (or (= "notifications/cancelled" (get msg "method"))
+                                   (and (= "tools/call" (get msg "method")) (inline-ops (some-> (get-in msg ["params" "name"]) (str/replace #"^seon_" "") keyword)))))
+             :stop-key (when (string? cl) (cond-> {:client cl} (some? (get msg "id")) (assoc :id (get msg "id"))))
+             :msg msg})
+          (map? msg) {:inline? (boolean (inline-ops (:op msg))) :stop-key (when (string? (:client msg)) {:client (:client msg)}) :msg msg}
+          :else {:inline? false :stop-key nil :msg nil})))
 
 (defn- serve-connection!
   "Answer one connection's request lines, line by line, until it closes; a notification is answered nothing. It runs on a
   fiber parked on its socket (jolt.socket), and each line's op runs on a :server-op worker (perform-op), so the connection
-  holds no OS thread and an op that blocks holds no other connection. See docs/server.md#ops."
+  holds no OS thread and an op that blocks holds no other connection; a stop (seon_interrupt, MCP's notifications/cancelled)
+  runs on this fiber, so it is answered while every worker is held. See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.system/sys :any] :any]}
   [sys sock]
   (let [r (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream sock) "UTF-8"))
@@ -618,10 +698,14 @@
     (loop []
       (when-let [line (.readLine r)]
         (let [mcp? (str/starts-with? (str/triml line) "{\"")
-              run (bound-fn [] (binding [*emit* (when-not mcp?
-                                                  (fn [m] (.write out (.getBytes (str (sedn/encode m) "\n") "UTF-8")) (.flush out)))]
-                                 (respond sys line)))
-              o @(c/effect! sys :server-op {:run run})
+              {:keys [inline? stop-key msg]} (line-parts line)
+              run (bound-fn [tok] (binding [*emit* (when-not mcp?
+                                                     (fn [m] (.write out (.getBytes (str (sedn/encode m) "\n") "UTF-8")) (.flush out)))
+                                            *token* tok]
+                                    (respond sys line msg)))
+              ;; a stop is answered here, never queued behind the ops it stops (inline-ops); every other op on a worker, under the
+              ;; token its owner makes for it when the request names who may stop it
+              o (if inline? {:value (run nil)} @(c/effect! sys :server-op (cond-> {:run run} stop-key (assoc :seon.fx/stop-key stop-key))))
               ;; the owner's own refusal (no worker, a stopped root) is this request's answer, in its protocol
               a (if (contract/error? o)
                   (if mcp? (json/write-str (rpc-error nil -32603 (print/text o))) (sedn/encode o))

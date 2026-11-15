@@ -108,14 +108,21 @@
   root stopped it, or the typed :seon.repl/ticks-spent {:ticks n} or :seon.repl/bytes-spent {:bytes
   n} when a budget ran out."
   {:malli/schema [:function [:=> [:cat [:maybe pos-int?] :seon.host/fn] :any]
-                  [:=> [:cat [:maybe pos-int?] [:maybe pos-int?] :seon.host/fn] :any]]}
+                  [:=> [:cat [:maybe pos-int?] [:maybe pos-int?] :seon.host/fn] :any]
+                  [:=> [:cat [:maybe pos-int?] [:maybe pos-int?] :any :seon.host/fn] :any]]}
   ([ticks thunk] (run ticks nil thunk))
-  ([ticks bytes thunk]
-  ;; an enclosing eval already stopped, or root's interrupt is pending: this one does not start
-  (when (or @pending (some #(deref (:cause %)) @stack))
-    (throw (ThreadDeath.)))
-  (let [tok (jolt.host/make-interrupt)
-        e {:token tok :cause (volatile! nil) :thread (Thread/currentThread)}]
+  ([ticks bytes thunk] (run ticks bytes nil thunk))
+  ;; tok: the token its asker made (jolt.host/make-interrupt), so the asker can stop it (stop!); nil, one of its own
+  ([ticks bytes tok thunk]
+  (let [tok (or tok (jolt.host/make-interrupt))
+        e {:token tok :cause (volatile! nil) :thread (Thread/currentThread)}
+        mine (filter #(= (:thread e) (:thread %)) @stack)]
+    ;; an enclosing eval on this thread already stopped, or root's interrupt is pending: this one does not start (another
+    ;; thread's stopped run, a server op stop! ended on another worker, is not this one's)
+    (when (or @pending (some #(deref (:cause %)) mine))
+      (throw (ThreadDeath.)))
+    ;; the outermost run on its thread: a flag stop! set just after the run before it ended was that run's, never this one's
+    (when (empty? mine) (Thread/interrupted))
     (swap! stack conj e)
     (try (if (or ticks bytes) (jolt.host/run-interruptible tok thunk ticks bytes) (jolt.host/run-interruptible tok thunk))
          (catch Throwable ex
@@ -142,3 +149,18 @@
            (swap! stack (fn [s] (doall (remove #(identical? % e) s))))
            ;; the flag on-usr1 set is this eval's: never the next request's
            (Thread/interrupted))))))
+
+(defn stop!
+  "Stop the run under token tok, as root's SIGUSR1 stops every run but for that one alone: its entry and every run nested
+  inside it on its thread are set (a nested run polls its own token), and its thread is interrupted, so a blocked wait
+  ends too. A token whose run has not started yet is set, and that run stops as it starts. Called from another thread:
+  the run stops at its next poll (each 100,000 ticks). true when the run was live."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [tok]
+  (let [es @stack
+        e (some #(when (identical? tok (:token %)) %) es)]
+    (if e
+      (do (run! #(set-token! % :interrupted) (filter #(= (:thread e) (:thread %)) es))
+          (.interrupt ^Thread (:thread e))
+          true)
+      (do (jolt.host/interrupt! tok) false))))
