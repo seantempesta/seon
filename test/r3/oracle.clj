@@ -142,7 +142,7 @@
                      :let [t (get-in v [:tasks id])]]
                  (cond (not= :running (:seon.task/execution t)) {:op :close :task id}
                        (= :gate (:seon.task/outcome t)) (let [base (into {} (remove (fn [[k]] (= (:started-by (:root v)) (str k)))) (:seon.task/deferred t))]
-                                                         {:op :gate :task id :tests (vec (sort-by str (keys base))) :base base})
+                                                         {:op :gate :task id :tests (vec (sort-by str (keys base)))})
                        :else {:op :merge :task id}))
         live-after (- (count (filter #(live? v %) ids)) (count live-kills))
         room (max 0 (- (:max-running (:root v) default-max-running) live-after))
