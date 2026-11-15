@@ -2,6 +2,66 @@
 
 The owner's standing rulings, one entry each: his words and date, and where the rule is stated now. The mechanism lives in `AGENTS.md` and the wiki; the reasoning and the history around each ruling are in git. A ruling a later one reverses keeps a one-line pointer to it.
 
+## 2026-11-15 rulings
+
+The owner's rulings on the morning after the first night run on its own.
+
+### No clock guesses when our own work finishes; the world outside gets declared timeouts
+
+"db/txInstant is fine. Update my wording so it's more accurate -- no clocks for guessing when things might finish -- be sure and use flow and blocking waits if you are sure it's going to come through but don't know when and we need proper timeout error config entries to handle timeouts for things like retrieving data from the web." A wait on our own system blocks on its Flow channel until the producer's value, typed error or death; a wait on the world outside has a spec'd timeout config entry and ends with a typed error. Ordering facts by `:db/txInstant` (the merge's `overtaken`) is not a clock deciding when work finishes, and stays. It refines the 2026-11-14 rulings on timers below. Stated in `AGENTS.md` §4 and [clocks](clocks.md#two-kinds-of-wait).
+
+### Ticks do not fail a test until they are measured reliably
+
+"Lets focus on fixing the reds, disable the tick counting test until we can reliably measure ticks." The same test at one digest measured 161M and 300M ticks, so a tick count does not make a verdict red until the same test at one digest measures within 10% across runs; ticks are still recorded. A named exception to "nothing is switched off", made by the owner with its end condition. Then: "I want the ticks measurement fixed so we can have failing conditions based on going over on limits. Until then it's temporarily disabled." Fixing the measurement is the tests area's first item, and the land that fixes it turns failing on ticks back on. Stated in [cost](cost.md#what-is-measured).
+
+### Encode what was learned into the wiki
+
+"Reflect on both your instructions, your agents instructions, how they faired and lets come up with documentation and task updates ... I think we learned a lot and I want to encode it into the wiki not just update the plan." Each lesson goes to the section that owns it: [clocks](clocks.md#two-kinds-of-wait), [merging](merging.md#a-merge-change-is-proved-on-a-real-branch), [cost](cost.md#what-is-measured), [sessions](sessions.md#the-managing-session), `AGENTS.md` §9; each problem left open is a task with its proof.
+
+### Work from inside the runtime
+
+"The mindset must be that we are transitioning away from claude agents being focused on building infrastructure that only works from the outside. The view of the system from the runtime should be the focus and seon agents working inside the system itself and claude agents using the internal systems via mcp repl and thin wrapper scripts." Also: "We are migrating away from the command line tools and the traditional offline build and run tests approach. Everything is moving to a runtime where the system forks and checks itself and we can even build a replacement binary and switch over to it. Mostly we should be able to just eval the latest code ... and the runtime tracks main." Stated in `AGENTS.md` §0 (five working rules) and §6.
+
+### The store is the source of truth; a clean, green branch merges by itself
+
+"We are moving away from git being the source of truth to it being the db and the internal updates get merged to git. Yes we still need hooks for your claude agents to update code on their branches." "Yes I want the auto merge behavior if there are no conflicts"; asked what a branch needs, he chose: no conflict and the tests its change reaches green, then it merges with no release. Stated in `AGENTS.md` §0 and [the plan](plan.md#the-order) (M5).
+
+### The test system queues with Flow; no hacks
+
+"I want the test system we are trying to build where all agents can request tests whenever they want and it properly queues with flow. Focus on getting that not hacks." Asked about a load gate in the frozen scripts, he chose this instead. Stated in [the plan](plan.md#the-order) (M3).
+
+### Every waiver goes; calls are no cost dimension
+
+"I do want to remove all the waivers and to either own the limits and tweak them until they work or remove them if we can't reliably measure them." On `:calls`, which counts every thread: drop it. Stated in `AGENTS.md` §3 step 2 and §3a.9.
+
+### No "shard": Flow's words and Flow's way
+
+"Can we stop using the term shard? Switch to proper flow terms and do things the flow way." Its words are worker, item and batch ([vocabulary](vocabulary.md#words-we-do-not-use)); its shape is M3.
+
+### Estimating is automatic, from what is built
+
+"Agents keep falling back to just writing the code as quickly as possible rather than doing proper algorithmic estimation ahead of time. We need to get them doing this without being prompted automatically ... Most ops end up being 100x or more inefficient and it doesn't require heroics or genius level coding it just requires repl driven deveopment and measuring and basic common sense." Then: "We already built a lot of this so it might just be refactoring and wiring up. Every agent doing all work needs to first look for existing code and not to just write another implementation. They are to collapse duplicate implementation too whenever they find them." He chose all four: the estimate as task data, a live cost canary, bounds on hot paths, and cost beside bound in every eval's answer. Stated in [the plan](plan.md#the-order) (Track E).
+
+### History stores what was sent as its components; a switch resumes at the turn
+
+On storing each turn's request: "Yes we can store what we sent and we store what the model sent, but do not store full copies of rendered data just the components that we assemble." A turn keeps its assembly (components at their content digest, in order) and the model's output; a component's output is stored once by content. On a binary switch: in-flight evals end and resume at their turn boundary, flights and requests are facts, and nothing of ours is killed on wall time but one spec'd stall dial for native code (he chose the recommended answer). On the merge's time: "There was a reason I was told we needed to replay? Maybe it's inconsistent in terms of what happened and what really happened was separate txs? Dig into this more and find the proper solution that's also effiicent": open, with data and deps; it gates landing 3. Stated in [the plan](plan.md#the-order) (landings 3, 5, 12).
+
+### Long work is a message, never a blocking command
+
+"I saw you saying you were running them and you blocked for minutes and held up all updates. No commands should do that period. We should have long running systems be flow systems and sending a message can trigger a long running task that you can get notified for." And: "We know exactly what has changed and there are efficient solutions to everything in our design. If you see complicated garabge we need to step back and take a fresh approach ... always fix things at the data model first." Stated in `AGENTS.md` §4.
+
+### The overhaul halves the code
+
+"I want our codebase cut in half when we are done overhauling everything so de-duplication of ideas is essential." And: "Collapse all duplicate systems in favor of good tools and systems we can use everywhere." `src` is 43,312 lines on 2026-11-15; the target is about 21,600, by collapsing duplicate ideas, never by removing functionality. Stated in [the plan](plan.md#the-order).
+
+### An agent loads main's changes in place
+
+Round 1's transcript showed agents re-forked into a cold process every turn: each turn merged main whenever main moved, and a merge that brought code ended the run. Asked how an agent should take main's changes, he chose loading in place: at each turn boundary the agent merges main and evaluates main's changed forms into its running process, as root does on a landing, re-forking only when a build input changed. Stated in [the plan](plan.md#the-order).
+
+### Root fixes errors anywhere; the plan is A to B
+
+"You can and should fix all errors anywhere in the system. Distribute this work to expert agents as you need too." "We need a plan from where we are now A to where we want to go B. That's your job." The order he approved is in [the plan](plan.md#the-order).
+
 ## 2026-11-14 rulings
 
 The owner's rulings of this day and the night before, each with his words where recorded and where it is now stated.
@@ -29,7 +89,6 @@ Context runs one watched task now, random rounds after the model call's bound. O
 ### One way, made optimal
 
 "Make all hot paths optimal and make everything that can be into hot paths. No more 4 ways of doing the same thing. 2 ways of doing the same thing even has to justify itself." Every job routes through its one path, each path has one specialist who holds it to its lower bound, and a second way is a problem until justified. Stated in `AGENTS.md` §4.
-
 
 Then: "I think the perf readings are mostly a canary in the coal mine for us. If we get a crazy number like 10 seconds to write a transaction and we know it should be ms we don't allow it. Hot paths should make it so damn easy to do the right thing that agents want to use it." A cost far over its lower bound stops the work (AGENTS §3, 10x); a hot path's API is the easiest way to do its job.
 
