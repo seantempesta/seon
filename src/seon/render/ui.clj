@@ -200,8 +200,6 @@
 
 ;;; --- status -------------------------------------------------------------------
 
-(def live "The live agent statuses (:seon.agent/status)." (:seon.status/live (contract/properties :seon.agent/status)))
-(def ^:private gone (:seon.status/gone (contract/properties :seon.agent/status)))
 (def ^:private finished task/finished)
 
 (defn shown-status
@@ -332,7 +330,7 @@
   {:malli/schema [:=> [:cat [:maybe :map] :any :map] [:maybe :map]]}
   [x id agent-outcome]
   (let [st (get agent-outcome id)]
-    (if (and x (gone (or (:status x) (:type x))) (finished st)) (assoc x :ended-as st) x)))
+    (if (and x (task/gone-statuses (or (:status x) (:type x))) (finished st)) (assoc x :ended-as st) x)))
 
 (defn focus-of
   "A page's focus as its bar and its head name it: {:address :label :view}. Root's is :root. An agent's is a map of its address
@@ -601,7 +599,7 @@
   [call c]
   (boolean (and c (= :model (ratom/realize (get call :seon.model-call/origin)))
                 (nil? (ratom/realize (get call :seon.model-call/forms))) (nil? (ratom/realize (get call :seon.model-call/error)))
-                (not (gone (ratom/realize (get c :seon.agent/status)))))))
+                (not (task/gone-statuses (ratom/realize (get c :seon.agent/status)))))))
 
 (defn- said?
   "Whether model call view call holds words or thinking to show."
@@ -2142,7 +2140,7 @@
         o (:seon.task/outcome t)
         turn (:seon.agent/turn a)
         end (when (and (:seon.agent/outcome a) (or (nil? turn) (= turn (:seon.agent/ended-turn a)))) (:seon.agent/outcome a))
-        gone? (contains? gone status)
+        gone? (contains? task/gone-statuses status)
         ;; which enum says it, and its value: its words and tone are that enum's (:seon.status/title, :seon.status/tone)
         [from k] (cond (and gone? (= :running o)) [:seon.agent/status status]
                        (and o (not= :running o)) [:seon.task/outcome o]

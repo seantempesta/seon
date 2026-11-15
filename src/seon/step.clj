@@ -119,6 +119,27 @@
   {:malli/schema [:=> [:cat [:map [:pending :map]] :any] [:tuple :map :any]]}
   [st rid] [(update st :pending dissoc rid) (get-in st [:pending rid])])
 
+(defn- deliver-all!
+  "r delivered to every promise a pending table's value x holds: an entry is a promise, a map naming its :p, or a collection of
+  either (a proc's reply route, a map whose :p is no promise, is that proc's to end); walked by reduce, building no sequence. nil.
+  See docs/flow.md#the-five-rules."
+  {:malli/schema [:=> [:cat :any :any] :nil]}
+  [x r]
+  ;; a promise is pending and invoked to deliver it (a delay or a future is pending too, and no promise)
+  (cond (and (instance? clojure.lang.IPending x) (instance? clojure.lang.IFn x)) (deliver x r)
+        (and (map? x) (contains? x :p)) (deliver-all! (:p x) r)
+        (map? x) (reduce-kv (fn [_ _ v] (deliver-all! v r)) nil x)
+        (coll? x) (reduce (fn [_ v] (deliver-all! v r)) nil x))
+  nil)
+
+(defn end-all
+  "st at one of its holder's ends (a stop, its in-port's EOF): every request held in tables ks of st answered r (each promise
+  delivered once; one answered already keeps its answer) and each table emptied, so nothing waits on a holder that is gone. The
+  one way a holder ends what it holds (docs/flow.md#the-five-rules, rule 3). Answers st."
+  {:malli/schema [:=> [:cat :map :any [:* :keyword]] :map]}
+  [st r & ks]
+  (reduce (fn [st k] (deliver-all! (get st k) r) (update st k empty)) st ks))
+
 (defn ask-edge
   "An edge's request (a caller outside the graph, on a thread of its own: the web's handler, root's
   REPL surface, root's stop): m with a fresh promise as :p, put on the proc's channel ch, and that
