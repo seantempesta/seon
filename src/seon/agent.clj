@@ -1444,7 +1444,8 @@
         give-up? (and (seq died) (seq rest-todo) (<= 2 stalled))
         lost (when give-up?
                (for [t rest-todo] {:type :error :var (str "#'" t) :exit status
-                                   :message (str "test process died twice with no test ended: " status ", before " t " ran")}))
+                                   ;; the death's own report names what its child threw at start (test-run-answer's :ex): kept, never dropped
+                                   :message (str "test process died twice with no test ended, before " t " ran: " (or (some :message died) status))}))
         st (-> st (update :children dissoc cpid) (update :by-os dissoc os)
                (update :run-dirs (fnil conj []) (fx/run-dir os))
                (assoc-in [:shards shard] (-> sh (update :reports #(-> % (into (:streamed acc)) (into (:reports ans)) (into lost)))

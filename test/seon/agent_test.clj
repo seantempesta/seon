@@ -3041,7 +3041,9 @@
                 (die! k2)
                 (let [[ans] (done r)
                       lost (into #{} (keep #(when (and (= :error (:type %)) (:exit %)) (:var %))) (:reports ans))]
-                  (is (= #{"#'app.fold/t" "#'app.fold/u"} lost) (str "each test ends with its own result, never unreported: " (pr-str ans)))))))))
+                  (is (= #{"#'app.fold/t" "#'app.fold/u"} lost) (str "each test ends with its own result, never unreported: " (pr-str ans)))
+                  (is (every? #(clojure.string/includes? (str (:message %)) "test process died:") (filter #(and (= :error (:type %)) (:exit %) (:var %)) (:reports ans)))
+                      "and each names the death's own report, what the child threw at start, never only its exit status")))))))
       (is (nil? (a/poll! error-chan)) "no proc threw")
       (finally
         (flow/stop g)
