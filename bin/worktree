@@ -100,9 +100,8 @@ setup() {
     # bin/worktree --at went red in full proves, never alone)
     for e in "$FROM"/target/*.stamp(N); do
       # and NAME.program, the program the binary was built from (seon.system/binary-current reads it: without it a gate's binary is unknown, and builds),
-      # and NAME.digest, its identity (seon.fx/runtime-for reads it at every start: without it every attach in a land's checkout was refused,
-      # "identity (none recorded)", flow's 16:43 land, 2026-11-15)
-      for p in $e ${e%.stamp} ${e%.stamp}.build ${e%.stamp}.tree ${e%.stamp}.program ${e%.stamp}.digest; do
+      # whose :digest is its identity (seon.fx/runtime-for compares it at every start)
+      for p in $e ${e%.stamp} ${e%.stamp}.build ${e%.stamp}.tree ${e%.stamp}.program; do
         if [[ -e $p ]]; then cp -cR "$p" "$WT/target/"; fi
       done
     done
