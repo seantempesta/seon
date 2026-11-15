@@ -272,19 +272,13 @@
         (contains? m :running) (update ::busy (fnil (if (and (:running m) (not (task/gone-statuses (:status a))) (not (task/gone-statuses (:status a')))) conj disj) #{}) id)))
     st))
 
-(defn stall-state
-  "What root's stall check and each agent proc hold now, a hang's evidence (bin/evidence asks it through root's server
-  before a run past its bound is ended; it reads, never writes): the api proc's ::stall-armed, ::busy, ::lost and :pending (its
-  ping's: every ask it holds unanswered), each effect owner's :busy, :in-flight, :queued and :done (:fx), and
-  each agent proc's :inflight (each request's kind), :fx-out, :stall-seen, :last-frame-ms, :holding and :held (a clone's handshake held, and how many wait behind it), read by one Flow ping of
-  the graph, with :answered, every proc that answered it, and :unanswered, each proc mid-step when it was sent by its
-  ::flow/site (what it steps, since when): such a proc's evidence is {:site ...} in place of its state, never read as nil. See docs/clocks.md#time-decides-the-owners-exceptions."
-  {:malli/schema [:=> [:cat :seon.system/sys] [:map [:root [:map [:seon.system/stall-armed {:optional true}] [:seon.system/busy {:optional true}]
-                                                               [:seon.system/lost {:optional true}]]]
-                                                   [:agents :map] [:answered [:vector :keyword]] [:unanswered :map]]]}
-  [sys]
-  (let [states (flow/ping (:graph sys) :timeout-ms (cfg/value :seon.config.check/ping-ms))
-        ;; a proc mid-step when the ping is sent answers nothing: Jolt's ping names it in ::flow/unanswered and gives only its
+(defn stall-of
+  "stall-state's evidence from one Flow ping answer, states ({pid ping-entry}, its metadata's ::flow/unanswered the procs that
+  were mid-step): a pure read, so both its paths, a proc that answered and one named by its site, are tested on a value. See
+  docs/clocks.md#time-decides-the-owners-exceptions."
+  {:malli/schema [:=> [:cat :map] [:map [:root :map] [:agents :map] [:answered [:vector :keyword]] [:unanswered :map]]]}
+  [states]
+  (let [;; a proc mid-step when the ping is sent answers nothing: Jolt's ping names it in ::flow/unanswered and gives only its
         ;; ::flow/site (what it steps, since when, the message), the evidence a hang most needs, so that site stands in for its state
         unanswered (set (::flow/unanswered (meta states)))
         site #(::flow/site (get states %))
@@ -304,6 +298,18 @@
                      [pid (assoc (select-keys s [:fx-out :stall-seen :last-frame-ms :holding :held]) :inflight (update-vals (:inflight s) :kind))]))
      :answered (vec (sort (remove unanswered (keys states))))
      :unanswered (into (sorted-map) (for [pid unanswered] [pid (site pid)]))}))
+
+(defn stall-state
+  "What root's stall check and each agent proc hold now, a hang's evidence (bin/evidence asks it through root's server
+  before a run past its bound is ended; it reads, never writes): the api proc's ::stall-armed, ::busy, ::lost and :pending (its
+  ping's: every ask it holds unanswered), each effect owner's :busy, :in-flight, :queued and :done (:fx), and
+  each agent proc's :inflight (each request's kind), :fx-out, :stall-seen, :last-frame-ms, :holding and :held (a clone's handshake held, and how many wait behind it), read by one Flow ping of
+  the graph, with :answered, every proc that answered it, and :unanswered, each proc mid-step when it was sent by its
+  ::flow/site (what it steps, since when): such a proc's evidence is {:site ...} in place of its state, never read as nil. See docs/clocks.md#time-decides-the-owners-exceptions."
+  {:malli/schema [:=> [:cat :seon.system/sys] [:map [:root [:map [:seon.system/stall-armed {:optional true}] [:seon.system/busy {:optional true}]
+                                                               [:seon.system/lost {:optional true}]]]
+                                                   [:agents :map] [:answered [:vector :keyword]] [:unanswered :map]]]}
+  [sys] (stall-of (flow/ping (:graph sys) :timeout-ms (cfg/value :seon.config.check/ping-ms))))
 
 (defn- stall-task
   "Root's task to deal with agent id's stall s, when it works a task (seon.template/stall: one per

@@ -2,7 +2,7 @@
   "Root as a whole process, run as the built binary (target/seon, bin/build seon): a root
   boots its fork server, so it runs in a process of its own rather than in the test
   runner's, whose threads and GC sweepers are the runner's."
-  (:require [seon.lib] [clojure.test :refer [deftest is]] [clojure.java.shell :as sh] [clojure.edn :as edn]
+  (:require [seon.lib] [clojure.core.async.flow :as flow] [clojure.test :refer [deftest is]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.db :as pdb] [datahike.api :as d] [seon.test-store :as ts] [seon.config :as config] [seon.contract :as contract]
             [seon.system :as root] [seon.program :as program] [seon.problems] [my.test :as mt]))
 
@@ -79,6 +79,22 @@
                                                            "   (my.root/cancel! sys [\"" ns "/t\"]) by))")}))
         r (ts/value-of resp)]
     (is (= {:seon.agent/key (seon.config/value :seon.config.root/user-name)} r) (str "a task released at root's REPL is the user's: " (pr-str resp)))))
+
+;; Estimate: one pure read of a five-entry ping answer: ~20k ticks; 200,000
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-stall-read-names-a-mid-step-proc-by-its-site-and-an-answered-one-by-its-state
+  ;; root's reviewer on 6635b0cac2: the live test below takes one path or the other by what the ping happens to find; this one always takes
+  ;; both, on a ping answer as Jolt's ping gives it (a proc that answered: its ::flow/state; one mid-step: ::flow/unanswered and its site)
+  (let [site {:stepping :main :since-ns 1 :msg {:op :commit}}
+        states (with-meta {:api {::flow/state {:seon.system/stall-armed false :seon.system/busy #{} :pending {}}}
+                           :reconciler {::flow/site site}
+                           :fx/process {::flow/state {:busy 0 :in-flight 0 :queued 0 :done 3}}}
+                 {::flow/unanswered [:reconciler]})
+        r (seon.system/stall-of states)]
+    (is (= {:site site} (:reconciler r)) "a mid-step proc's evidence is its site, never its state read as nil")
+    (is (= site (get-in r [:unanswered :reconciler])) "and it is named unanswered")
+    (is (not-any? #{:reconciler} (:answered r)) "and never listed as answered")
+    (is (= #{} (get-in r [:root :seon.system/busy])) "an answered proc's evidence is its own ping map")
+    (is (= {:busy 0 :in-flight 0 :queued 0 :done 3} (get-in r [:fx :fx/process])) "an effects owner's load")))
 
 (deftest a-hangs-evidence-holds-roots-stall-state
   ;; task seon.system/a-hangs-evidence-test-reads-only-its-own-agent: the root is shared with every test of the run, so other tests'
