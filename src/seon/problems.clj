@@ -1295,15 +1295,12 @@
                assoc :seon.render/schema :seon.problems/report)))
 
 (defn- other-derived
-  "The derived classes `caused-split` does not read, their rows on db; :unsynced judges the task entities es (`unsynced-tasks`)."
+  "The derived classes `caused-split` does not read, their rows on db, read whole by both readers of health (they are cheap, or the
+  running system's state); :unsynced judges the task entities es (`unsynced-tasks`)."
   {:malli/schema [:=> [:cat :seon.host/db :map [:sequential :int]] :map]}
   [db ans es]
-  (let [tr (task-reads db)]
   {:stalled (stalled-agents db ans) :stale-pin (stale-pins db ans) :stale-binary (stale-binary db ans) :orphan-page (orphan-pages db ans)
-   :leadless-section (leadless-sections db ans)
-   ;; the tasks' readiness and cites read once for the two classes that judge them
-   :uncited-task (uncited-tasks db ans tr) :stale-plan (stale-plans db ans tr) :unsynced (unsynced-tasks db ans es)
-   :waived-proof (waived-proofs db ans) :unschemed-key (unschemed-keys db ans)}))
+   :leadless-section (leadless-sections db ans) :unsynced (unsynced-tasks db ans es)})
 
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the
@@ -1314,8 +1311,12 @@
                   [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}
   ([db] (health db {}))
   ([db fold]
-   (let [ans (answers db)]
+   (let [ans (answers db)
+         ;; the tasks' readiness and cites read once for the two classes that judge them
+         tr (task-reads db)]
      (health-with db ans (:classes (report-with db ans fold nil)) (assoc (other-derived db ans (mapv :e (d/datoms db :aevt :seon.task/id)))
+                                     :uncited-task (uncited-tasks db ans tr) :stale-plan (stale-plans db ans tr)
+                                     :waived-proof (waived-proofs db ans) :unschemed-key (unschemed-keys db ans)
                                      :unnamed-site (unnamed-sites db ans) :native-in-defonce (native-in-defonce db ans) :stale-section (stale-sections db ans)
                                      :hand-written-list (hand-written-lists db ans nil))))))
 
@@ -1360,7 +1361,11 @@
                                        (update :unsynced #(vec (sort-by :task (into (into [] (comp (remove (fn [r] (ids (:task r)))) (map current))
                                                                                           (get-in prev [:classes :unsynced :rows]))
                                                                                     %))))
-                                       (assoc :unnamed-site (carried :unnamed-site) :native-in-defonce (carried :native-in-defonce) :stale-section (carried :stale-section) :hand-written-list (carried :hand-written-list))))))
+                                       (assoc :unnamed-site (carried :unnamed-site) :native-in-defonce (carried :native-in-defonce)
+                                              ;; read from what moved (split-rows), never whole again: whole they cost ~290M a move of main
+                                              :uncited-task (carried :uncited-task) :stale-plan (carried :stale-plan)
+                                              :waived-proof (carried :waived-proof) :unschemed-key (carried :unschemed-key)
+                                              :stale-section (carried :stale-section) :hand-written-list (carried :hand-written-list))))))
 
 (defn own
   "The open problems of one agent, by class and shaped as `report` (so the one render draws it, an

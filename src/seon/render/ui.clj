@@ -1235,7 +1235,7 @@
                        (when (seq calls)
                          [:div {:key :calls} [:p "It calls " (str/join ", " (map #(str "`" (:var %) "`") calls)) "."]
                           (for [{v :var src :source} calls :when src] [:pre {:key (str v)} [:code src]])])))])
-            (for [{:keys [reason test vars keys problems do]} others :let [x (or test vars keys problems) is (items x)]]
+            (for [{:keys [reason test vars keys problems do claimed-by]} others :let [x (or test vars keys problems) is (items x)]]
               (if (next is)
                 ;; several things under one reason: each its own element beside the label (an element holding text is one value),
                 ;; so one that comes or goes is one named edit
@@ -1244,6 +1244,8 @@
                  (when do [:p "To clear it: " (form-hiccup do)])]
                 [:li {:key (or test reason)}
                  (str "[ ] " (reason-title reason) (cond (seq is) (str ": " (first is)) (some? x) (str ": " (as-text x))))
+                 (when (seq claimed-by)
+                   [:span {:key :claimed-by} ". Claimed by " (str/join ", " (map #(str (:task %) (when-let [o (:outcome %)] (str " (" (name o) ")"))) claimed-by))])
                  (when do [:span ". To clear it: " (form-hiccup do)])]))))
      ;; a test namespace a proof goes in, once: its requires, fixtures, helpers and a test to copy, its own, so a proof written moves none
      (for [[n us] (group-by #(:ns (:shape %)) unwritten) :let [{:keys [requires fixtures helpers example]} (:shape (first us))]

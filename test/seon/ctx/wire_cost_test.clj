@@ -187,7 +187,8 @@
                    :growth :constant
                    ;; measured 2026-11-10 at 10, 40, 160 greens: before, 142k, 278k, 836k ticks and 0.58, 1.06, 3.03 MB (about 4.8k ticks
                    ;; and 16 KB a green test: a branch of 1,600 verdicts about 8M ticks and 27 MB a turn); after, 108k ticks and 0.46 MB at each
-                   ;; 46 calls: the done rule's input made by seon.reconcile/input, the judge's one producer, not a map built here (context, 2026-11-14)
+                   ;; no :calls: a count of contracted calls grew with each read the status gained (fix 3's claimants, 46 -> 47), a hand-kept
+                   ;; number (owner 2026-11-15: calls are no cost dimension); the bytes are the counted check
                    :fixed {:bytes 500000}
                    :sizes [10 40 160]}))))
 
