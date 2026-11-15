@@ -125,7 +125,7 @@
       ;; root's interrupt, whichever way it ended the form: the escape, or a
       ;; blocked wait thrown out by the thread's interrupt flag
       (or (:jolt/interrupted d) (= :interrupted @(:cause e))) (throw (ThreadDeath.))
-      :else (throw ex)))
+      :else (throw ex))))
 
 (defn run
   "(thunk) under its own token, stopped by root's SIGUSR1, once it has run ticks engine ticks, or
