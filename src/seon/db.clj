@@ -1325,9 +1325,12 @@
   far fewer distinct keys). See docs/storage.md#what-a-read-scanned."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :any [:set :string]]] [:map-of :any :seon.lib/digest]]}
   [db sets]
-  (let [piece (into {} (for [s (into #{} cat (vals sets))] [s (pr-str [s (key-content db (clojure.edn/read-string s))])]))]
+  ;; each distinct key's printed pair as bytes once; a set's digest reads its pieces into one hash in order, never joining them
+  ;; (joined, each set's string repeated its large pieces: 30 GB for 2,184 sets)
+  (let [piece (into {} (for [s (into #{} cat (vals sets))] [s (.getBytes ^String (pr-str [s (key-content db (clojure.edn/read-string s))]))]))
+        open (.getBytes "[[") sep (.getBytes " ") close (.getBytes "] []]")]
     (into {} (for [[id ks] sets]
-               [id (lib/digest (str "[[" (str/join " " (map piece (sort ks))) "] []]"))]))))
+               [id (lib/digest-parts (concat [open] (interpose sep (map piece (sort ks))) [close]))]))))
 
 (defn results-moved
   "The results (:seon.proof/proof-fact entities) on db a move's datoms reach: one AVET seek of :seon.proof/read-keys for each of a
