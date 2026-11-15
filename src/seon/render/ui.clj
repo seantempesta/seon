@@ -608,6 +608,29 @@
   {:malli/schema [:=> [:cat :any] :boolean]}
   [call] (not (and (str/blank? (ratom/realize (get call :seon.model-call/reply))) (str/blank? (ratom/realize (get call :seon.model-call/reasoning))))))
 
+(defn- call-words
+  "What a model call said, as its page shows it: its reply as Markdown, its thinking folded (a call that said nothing but thought: its
+  first paragraph, marked as thinking, the rest folded), and whether it was cut at the token limit. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string] [:maybe :boolean]] :any]}
+  [reply reasoning truncated]
+  [:section {:class "flex w-full flex-col gap-1"}
+   (if (and (str/blank? reply) (not (str/blank? reasoning)))
+     ;; a call that said nothing but thought (reasoning on: its words go to its reasoning): its first paragraph is the agent's
+     ;; words, marked as thinking, and the rest folded under a line that says how much more there is
+     (let [[first-p & more] (remove str/blank? (str/split reasoning #"\n\s*\n"))]
+       [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100"}
+        [:span {:class "text-xs text-text-500"} "thinking"]
+        [#'markdown first-p {:inline? true}]
+        (when (seq more)
+          [:details [:summary {:class "text-xs text-text-500"} (str (count more) (if (= 1 (count more)) " more paragraph" " more paragraphs") " of thinking")]
+           [:div {} [#'markdown (str/join "\n\n" more) {:inline? true}]]])])
+     (when-not (str/blank? reasoning)
+       [:details [:summary {:class "text-xs text-text-500"} "thinking"]
+        [:div {} [#'markdown reasoning {:inline? true}]]]))
+   (when-not (str/blank? reply)
+     [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100"} [#'markdown reply {:inline? true}]])
+   (when truncated [:span {:class "text-2xs text-error"} "cut at the token limit"])])
+
 (defn model-call-view
   "A model call (the declared html render of :seon.model-call/fact), one render wherever it is placed: in the conversation the walk
   places the call's own view, so this one component answers the page and, by the schema's model render beside it, the model
@@ -617,33 +640,21 @@
   its turn in one line. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx {:optional true} :map]]] :map] :any]}
   [{c :seon.ctx/ctx :as opts} call]
-  (let [{:seon.model-call/keys [id n origin reply reasoning truncated basis]} (ratom/realize call)
-        head (str (if (= :outside origin) (str "context read " n) (str "turn " n (when-let [m (:max-turns basis)] (str " of " m)))))
+  ;; each attribute read alone where it is shown, so a commit of one it does not show (its forms, its call ids) reruns nothing; its
+  ;; number, origin and basis are the inline line's alone (docs/render.md#reactive-renders)
+  (let [g #(ratom/realize (get call %))
         flying? (in-flight? call c)]
     (cond
-      (= :inline (:as opts)) [:span head]
+      (= :inline (:as opts)) (let [n (g :seon.model-call/n)]
+                               [:span (if (= :outside (g :seon.model-call/origin)) (str "context read " n)
+                                          (str "turn " n (when-let [m (ratom/realize (get-in call [:seon.model-call/basis :max-turns]))] (str " of " m))))])
       (or (said? call) flying?)
+      (let [id (g :seon.model-call/id)]
       (cond->
-        [:section {:class "flex w-full flex-col gap-1"}
-         (if (and (str/blank? reply) (not (str/blank? reasoning)))
-           ;; a call that said nothing but thought (reasoning on: its words go to its reasoning): its first paragraph is the agent's
-           ;; words, marked as thinking, and the rest folded under a line that says how much more there is
-           (let [[first-p & more] (remove str/blank? (str/split reasoning #"\n\s*\n"))]
-             [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100"}
-              [:span {:class "text-xs text-text-500"} "thinking"]
-              [#'markdown first-p {:inline? true}]
-              (when (seq more)
-                [:details [:summary {:class "text-xs text-text-500"} (str (count more) (if (= 1 (count more)) " more paragraph" " more paragraphs") " of thinking")]
-                 [:div {} [#'markdown (str/join "\n\n" more) {:inline? true}]]])])
-           (when-not (str/blank? reasoning)
-             [:details [:summary {:class "text-xs text-text-500"} "thinking"]
-              [:div {} [#'markdown reasoning {:inline? true}]]]))
-         (when-not (str/blank? reply)
-           [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100"} [#'markdown reply {:inline? true}]])
-         (when truncated [:span {:class "text-2xs text-error"} "cut at the token limit"])]
+        (call-words (g :seon.model-call/reply) (g :seon.model-call/reasoning) (g :seon.model-call/truncated))
         ;; kept as it is through the turn's redraws (data-ignore-morph: the reply's commit leaves an eval still running its intent, code
         ;; and output) and gone at the redraw that no longer draws it; the model never reads it (docs/render.md#in-flight-output-streams)
-        flying? (conj (stream-container id []))))))
+        flying? (conj (stream-container id [])))))))
 
 (defn message
   "A message to an agent (the declared html render of :seon.message/fact), one render wherever it is placed: in a conversation the
@@ -1031,11 +1042,19 @@
   {:seon.render/style ".cite > p { font-family: var(--font-text); }"
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
   [{db :seon.db/db ix :seon.render/index} c]
-  (let [c (ratom/realize c)
+  (let [;; what it names (its target, its owner) is read by identity alone, and the rest from the db by the pattern its schema declares
+        ;; (tracked as db reads); its own attributes each alone. So a commit inside the task that cites it, its plan, reruns nothing the
+        ;; cite does not read (docs/render.md#reactive-renders)
+        joins #{:seon.cite/target :seon.cite/of}
+        own (into {} (for [k (ratom/key-set c) :when (not (joins k))] [k (ratom/realize (get c k))]))
         ;; an entity the cite names, read whole by the pattern schema k declares; one with no id (a cite made by hand) as it is given
-        read (fn [m k] (if-let [e (:db/id m)] (merge m (dissoc (:tree (ctx/build ix db e nil (render/schema-property ix k :seon.ctx/pattern))) :t :branch :commit)) m))
-        t (read (:seon.cite/target c) :seon.cite/target-read)
-        of (read (:seon.cite/of c) :seon.cite/of-read)
+        read (fn [j k] (let [m (get c j)]
+                         (if-let [e (some-> m (get :db/id) ratom/realize)]
+                           (assoc (dissoc (:tree (ctx/build ix db e nil (render/schema-property ix k :seon.ctx/pattern))) :t :branch :commit) :db/id e)
+                           (ratom/realize m))))
+        t (read :seon.cite/target :seon.cite/target-read)
+        of (read :seon.cite/of :seon.cite/of-read)
+        c (cond-> own of (assoc :seon.cite/of of))
         task-ns (some-> (:seon.task/ns of) str)
         reach (into #{} (for [[_ v] (:proved of) r (get-in v [:var/form :form/refs])] r))
         sym (:var/name t)
@@ -1348,9 +1367,11 @@
   anchor (eval-<id>)."
   {:malli/schema [:=> [:cat :map :map] :any]}
   [{db :seon.db/db c :seon.ctx/ctx} e]
-  (let [{:seon.eval/keys [id code intent opened] :as ev} (ratom/realize e)
-        mark (wire/result-mark db ev)
-        {:keys [ex value]} (:seon.eval/response (:record mark))
+  ;; each attribute it shows read alone, so a change to one it does not show (who ran it, its call) reruns nothing
+  ;; (docs/render.md#reactive-renders); its response as seon.db/response-of resolves it, from the two attributes that hold it
+  (let [g #(ratom/realize (get e %))
+        id (g :seon.eval/id) code (g :seon.eval/code) intent (g :seon.eval/intent) opened (g :seon.eval/opened)
+        {:keys [ex value]} (pdb/response-of db {:seon.eval/response (g :seon.eval/response) :seon.eval/result (g :seon.eval/result)})
         err (or ex (when (contract/error? (ratom/realize value)) value))
         said? (not (str/blank? intent))
         key (some-> c (get :seon.agent/key) ratom/realize)]
