@@ -353,6 +353,12 @@
   (let [{:keys [address label]} (focus-of focus)
         link (fn [on? href label] [:a {:href href :class (str "rounded px-2 py-0.5 " (if on? "bg-base-800 text-text-50" "text-text-400 hover:text-text-100"))
                                       :aria-current (when on? "page")} label])]
+    (if (and (= :root focus) (= :chat tab))
+      ;; the person's bar (docs/decisions.md, The page is a friendly chat): Seon's name, home, and one quiet way to the debug view, where
+      ;; the checkout line and the tabs are
+      [:nav {:class "seon-bar person-bar"}
+       [:a {:href "/" :class "text-lg font-semibold text-text-50 no-underline"} "Seon"]
+       [:a {:href "/root/debug" :class "ml-auto text-xs text-text-500 no-underline hover:text-text-300" :title "what Seon reads and the system's status"} "debug"]]
     [:nav {:class "seon-bar"}
      [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "hidden text-text-500 sm:inline"} "on jolt"]
      ;; which system this is (`system-source`, the system walk's unit the frame places on every page)
@@ -363,7 +369,7 @@
           (when (or (= :root focus) (not= :chat tab)) [:span {:class "mr-1 font-semibold text-text-100"} label])
           (if (= :root focus)
             (list (link (= :chat tab) base "chat") (link (= :context tab) "/root/debug" "debug"))
-            (list (link (= :chat tab) base "chat") (link (= :debug tab) (str base "/ctx") "@ctx") (link (= :context tab) (str base "/debug") "debug")))]))]))
+            (list (link (= :chat tab) base "chat") (link (= :debug tab) (str base "/ctx") "@ctx") (link (= :context tab) (str base "/debug") "debug")))]))])))
 
 (defn shell
   "The document around a view's body: head, the stylesheet, Datastar, and the feed of that view's
@@ -436,6 +442,16 @@
                     [:td {:class (when (and m x (pos? x) (> (/ m x) 3)) "bad")}
                      (str (group3 m) " / " (group3 x) (when (and m x (pos? x)) (str " (" (fmt2 (/ m x)) "×)")))])])]]
       (render/hiccup (assoc opts :schema :seon.cost/verdict) verdict)]))
+
+(defn offer
+  "A place an agent offers the person (the declared html render of :seon.user/offer, the value my.user/focus! answers): a button in the
+  person's words; tapped, it calls seon.system/focus! (the person's web state, :seon.user/focus, set to its place) and, once that answers,
+  opens the place's page. Nothing is written until the tap. See docs/users.md#whats-on-screen."
+  {:seon.render/style ".offer { display: inline-block; margin: 0.25rem 0; padding: 0.625rem 1.125rem; border-radius: 1rem; font-size: 1.0625rem; font-weight: 600; background: var(--color-base-800); color: var(--color-text-50); border: 1px solid var(--color-base-700); }
+.offer:hover { border-color: var(--color-signal); }"
+   :malli/schema [:=> [:cat :seon.render/opts :seon.user/offer] :any]}
+  [_ {:seon.user/keys [place label]}]
+  [:button {:type "button" :seon/call 'seon.system/focus! :seon/args {:key (second place)} :seon/go (str "/agent/" (second place))} label])
 
 (defn person-input
   "The person's message box on root's chat (docs/decisions.md, The page is a friendly chat): like the good chat tools, a box that grows

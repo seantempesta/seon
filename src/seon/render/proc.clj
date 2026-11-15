@@ -302,22 +302,6 @@
         (keyword? view) (agent-named db (address-of view))
         :else view))
 
-(defn- focus-tx
-  "The transaction that moves the signed-in user's focus to the newest of opened (the views a tab just opened): the agent its page is, or
-  root's (:root or :home) retracting it; nil when none of them names a page, the user is not signed in, or the focus already is that. See docs/users.md#whats-on-screen."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:sequential :any]] [:maybe [:vector :any]]]}
-  [db opened]
-  (when-let [u (some-> db (d/entity [:seon.system/id :root]) :seon.system/signed-in)]
-    (let [named (fn [v] (let [x (if (vector? v) (second v) v)]
-                          (cond (#{:root :home} x) ::root
-                                (keyword? x) (let [e (some->> (location db x) (d/entity db))] (when (:seon.agent/key e) (:seon.agent/key e))))))
-          to (last (keep named opened))
-          held (:seon.agent/key (:seon.user/focus u))
-          who [:seon.user/name (:seon.user/name u)]]
-      (cond (nil? to) nil
-            (= ::root to) (when held [[:db.fn/retractAttribute who :seon.user/focus]])
-            (not= to held) [[:db/add who :seon.user/focus [:seon.agent/key to]]]))))
-
 (defn- focus
   "The focus of view's page for its bar and its head (seon.render.ui/focus-of): :root, else the agent its address names on main db:
   its address (its key: every link of its pages is /agent/<key>, which survives a root's restart), its label (its id, with the
@@ -698,7 +682,7 @@
         head-unit {:id "p-agent-head" :container "#p-head" :rev (hash head)
                    :html (h/html [:section {:id "p-agent-head" :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (ui/agent-head {} head)])}]
     ;; the walks this page made or advanced, for the pass to write to st (`pass-view`)
-    (assoc (ui/page-chrome {:units (vec (concat (system-units st) sides [head-unit] units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
+    (assoc (ui/page-chrome {:units (vec (concat (when-not person? (system-units st)) sides [head-unit] units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
                       ;; never a wait: drawn from its branch until its process answers, the page says so
                       :caption (when (and chat? (not own?))
                                  (when (:error held) (str "Its process didn't answer, so this may be behind: " (:seon.error/message (:error held)))))
@@ -870,7 +854,7 @@
      ;; root's page is its session's, made at boot: none yet, nothing to draw
      (= :root view) (when (and eid (:seon.agent/key (d/entity db eid))) (agent-view st view db eid))
      ;; root's debug page holds the system's own view beside its session's requests
-     (and eid (= :debug (first-of view))) (cond-> (debug-value st view) (= :root (second view)) (some-> (update :seon.render/units into (system-view-units st))))
+     (and eid (= :debug (first-of view))) (some-> (debug-value st view) (update :seon.render/units into (concat (map ui/page-unit (system-units st)) (when (= :root (second view)) (system-view-units st)))))
      (and eid (= :chat (first-of view)) (agent-of db (second view))) (agent-view st view db eid)
      (and eid (agent-of db view)) (agent-view st view db eid)
      (= :home (second-of view)) (ui/page-chrome {:units (conj (system-units st) {:id "p-sign-in" :container "#p-head" :rev 0 :html (h/html (ui/sign-in {:seon.db/db db}))}) :view (ui/view-param view) :tab :chat} :root)
@@ -1348,8 +1332,6 @@
                            :else st))
               :from-web (case (:op m)
                           :views (let [w (:views m)
-                                       _ (when-let [tx (focus-tx (:main-db st) (remove #(contains? (:watch st) %) w))]
-                                           (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data tx}} :route [:render :answers] :tag [:focus]}))
                                        ;; a view no tab watches keeps nothing: its retained page, its branch read, its rows
                                        drop #(into {} (filter (fn [[v]] (contains? w v))) %)]
                                    (ask-state (-> (reduce drop-view st (remove #(contains? w %) (keys (:views st))))
