@@ -129,8 +129,9 @@
 (deftest render-proc-has-no-beat
   (let [d (p/render-proc)]
     (is (not (contains? (:ins d) :tick)) "no beat in-port")
-    ;; :main, main's commits from the writer: a pass follows a commit, never a clock
-    (is (= #{:answers :from-web :main} (set (keys (:ins d)))))
+    ;; :main, main's commits from the writer: a pass follows a commit, never a clock; :health-wake is health's own next bounded
+    ;; step, put only by this proc's steps (health-more, the :health op), never a timer
+    (is (= #{:answers :from-web :main :health-wake} (set (keys (:ins d)))))
     (is (nil? (resolve 'seon.render.proc/SAMPLE-MS)))
     (is (nil? (resolve 'seon.render.proc/start-sampler!))))
   (testing "a proc's health from root's view: its declared procs, its defects by pid"
