@@ -1318,6 +1318,17 @@
   (lib/digest (pr-str [(vec (for [s (sort keys)] [s (key-content db (clojure.edn/read-string s))]))
                        (vec (sort-by pr-str outside))])))
 
+(defn reads-digests
+  "reads-digest of each read-key set of sets ({id keys}, no outside reads) on db, each distinct key's content read and printed
+  once across them all: the same digests as reads-digest gives one set at a time (its printed vector assembled from the shared
+  pieces), at the cost of the distinct keys, never of every set's keys (a plan's reuse by reads: ~1,900 sets of ~410 keys over
+  far fewer distinct keys). See docs/storage.md#what-a-read-scanned."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :any [:set :string]]] [:map-of :any :seon.lib/digest]]}
+  [db sets]
+  (let [piece (into {} (for [s (into #{} cat (vals sets))] [s (pr-str [s (key-content db (clojure.edn/read-string s))])]))]
+    (into {} (for [[id ks] sets]
+               [id (lib/digest (str "[[" (str/join " " (map piece (sort ks))) "] []]"))]))))
+
 (defn results-moved
   "The results (:seon.proof/proof-fact entities) on db a move's datoms reach: one AVET seek of :seon.proof/read-keys for each of a
   datom's keys; a schema datom reaches every result. See docs/storage.md#what-a-read-scanned."
