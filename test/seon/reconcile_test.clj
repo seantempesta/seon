@@ -681,21 +681,35 @@
 
 ;; Estimate: 1 db-of x 0.5M + 3 advance calls (one run-digest of a small main ~0.3M) ~ 1,500,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 1500000}} the-judge-asks-main-of-a-red-nobody-knew-before-it-judges
-  ;; docs/tasks.md#the-done-rule (seon.proofs/a-red-main-holds-is-mains-whatever-the-digest): the judge's run names a red whose
-  ;; verdict at base nobody knows yet (:unknown-reds); the flight asks main's verdict of it by name and waits, and only then
-  ;; reads the branch; a red main answers red is main's. Red before: the flight went to the diff at once, the red the task's
+  ;; docs/tasks.md#the-done-rule (seon.proofs/a-red-main-holds-is-mains-whatever-the-digest): every red of the judge's run that is
+  ;; not main-red already is asked of main by name, and the flight waits, then reads the branch: red there, main's; answered
+  ;; nothing (a process test), :main-unknown. Red before: the flight went to the diff at once, the red the task's
   (let [db (db-of [(decl "a")] :extra (work "a" :running))
         x 'demo-test/x
         flight {:act {:op :spawn :task "demo/a" :env {:branch :demo/a}} :agent :a-a}
         st (st-of db :flights {"demo/a" (assoc flight :step :tested)})
-        [st' outs] (#'r/advance st "demo/a" :tested {:reports [{:var "#'demo-test/x" :type :fail}] :main-red #{} :unknown-reds {x "d-x"}})]
+        [st' outs] (#'r/advance st "demo/a" :tested {:reports [{:var "#'demo-test/x" :type :fail}] :main-red #{}})]
     (is (= [{:branch :main :names #{x} :mode :judge}] (mapv #(select-keys (:req %) [:branch :names :mode]) outs)) "one ask of main, by name")
     (is (= :main-asked (get-in st' [:pending (:tag (first outs)) 1])) "answered at :main-asked, nothing read before it")
     (let [[st2 outs] (#'r/advance st' "demo/a" :main-asked {:reports [{:var "#'demo-test/x" :type :fail}]})]
       (is (= [{:op :write :req {:op :branch-diff :branch :demo/a}}] (mapv :req outs)) "then the branch, read once")
       (is (= #{x} (set (get-in st2 [:flights "demo/a" :main-red]))) "red on main: main's"))
     (let [[st2 _] (#'r/advance st' "demo/a" :main-asked {:reports [{:var "#'demo-test/x" :type :pass}]})]
-      (is (empty? (get-in st2 [:flights "demo/a" :main-red])) "green on main: the task's own"))))
+      (is (empty? (get-in st2 [:flights "demo/a" :main-red])) "green on main: the task's own")
+      (is (empty? (get-in st2 [:flights "demo/a" :main-unknown]))))
+    (let [[st2 _] (#'r/advance st' "demo/a" :main-asked {:reports []})]
+      (is (= #{x} (get-in st2 [:flights "demo/a" :main-unknown])) "answered nothing: unknown, never the task's"))
+    (testing "a red main-red holds already is not asked again"
+      (let [[_ outs] (#'r/advance st "demo/a" :tested {:reports [{:var "#'demo-test/x" :type :fail}] :main-red #{x}})]
+        (is (= [{:op :write :req {:op :branch-diff :branch :demo/a}}] (mapv :req outs)))))))
+
+;; Estimate: the done rule is a pure function over a small map: ~50,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 50000}} a-red-whose-main-verdict-is-unknown-holds-and-is-no-stray
+  ;; docs/tasks.md#the-done-rule: a red main was asked of and answered nothing is :main-unknown, never :stray-red
+  (let [j (fn [m] (r/done-explain (merge {:proofs #{'demo-test/a} :results {'demo-test/a :pass 'demo-test/p :fail} :main-green #{} :allowed-red #{} :uncontracted #{}} m)))]
+    (is (= [{:reason :stray-red :symbol 'demo-test/p}] (j {})) "unasked: the branch's")
+    (is (= [{:reason :main-unknown :symbol 'demo-test/p}] (j {:main-unknown #{'demo-test/p}})) "main's verdict unknown: held, named so")
+    (is (= [] (j {:main-red #{'demo-test/p} :main-unknown #{'demo-test/p}})) "main's red wins")))
 
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 transacts or db-withs x 50k ~ 600,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 600000}} a-typed-error-from-work-or-the-judge-holds-the-task-and-is-no-death
@@ -1148,7 +1162,7 @@
         ;; ... and gated: its outcome :gate, the gate's answer in
         gated (fn [root rs unread err]
                 (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :gate :members {:seon.task/deferred {boots "d-boots"}}) (when root (ts/root-tx root))))]
-                  (d/db-with db (#'r/gated (st-of db) "demo/a-merge" rs unread err #{}))))
+                  (d/db-with db (#'r/gated (st-of db) "demo/a-merge" rs unread err #{} #{}))))
         octopus [{:op :octopus-merge :task "demo/a-merge" :members [{:task "demo/a-merge"}]}]]
     (is (= {:outcome :gate :reasons [] :deferred [boots]} (judged gate [boots])) "unrun: gated first")
     (is (= {:outcome :gate :reasons [] :deferred []} (judged gate [])) "none deferred: its tree is still analyzed, with no checkout (docs/merging.md#a-merge-runs-what-the-change-reaches)")
@@ -1973,8 +1987,9 @@
         (is (= {boots :fail other :pass} (:seon.task/deferred-results tk)))
         (is (= [[:platform :seon.prove/full-run-red [boots]]]
                (for [o outs :when (= :problem (:op o))] [(:class o) (get-in o [:error :seon.error/type]) (get-in o [:error :tests])])))))
-    (testing "a red of its own beside main's: held, naming only its own"
-      (let [[_ outs] (#'r/advance st id :gated (answer {boots :fail other :fail} #{boots}))
+    (testing "a red of its own beside main's: asked of main, green there, held, naming only its own"
+      (let [[st2 _] (#'r/advance st id :gated (answer {boots :fail other :fail} #{boots}))
+            [_ outs] (#'r/advance st2 id :gate-main-asked {:reports [{:var (str "#'" other) :type :pass}]})
             tk (task/task (after outs) id)]
         (is (= [:closed :held] ((juxt :seon.task/outcome :seon.task/execution) tk)))
         (is (str/includes? (get-in tk [:seon.task/failure :reason]) (str other " fail")))
@@ -1985,8 +2000,9 @@
         (is (= {boots :fail other :none} (:seon.task/deferred-results tk)))
         (is (= :closed (:seon.task/outcome tk)))
         (is (str/includes? (get-in tk [:seon.task/failure :reason]) (str other " none")))))
-    (testing "no :main-red: every red is the task's, and no problem is told"
-      (let [[_ outs] (#'r/advance st id :gated (answer {boots :fail other :pass} nil))]
+    (testing "no :main-red and main green: the red is the task's, and no problem is told"
+      (let [[st2 _] (#'r/advance st id :gated (answer {boots :fail other :pass} nil))
+            [_ outs] (#'r/advance st2 id :gate-main-asked {:reports [{:var (str "#'" boots) :type :pass}]})]
         (is (= :closed (:seon.task/outcome (task/task (after outs) id))))
         (is (not-any? #(= :problem (:op %)) outs))))))
 
@@ -2000,7 +2016,7 @@
         boots 'seon.system-test/boots other 'seon.system-test/other
         db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :gate :members {:seon.task/deferred {boots "d-boots" other "d-other"}})))
         st (assoc (st-of db) :flights {id {:act {:op :gate :task id :tests [boots other] :base {boots "d-boots" other "d-other"}}}})
-        gate {:value {:results {boots :fail other :pass} :main-red #{} :unknown-reds {boots "d-boots"}}}
+        gate {:value {:results {boots :fail other :pass} :main-red #{}}}
         main (fn [status] {:reports [{:var (str "#'" boots) :type status}]})
         after (fn [outs] (d/db-with db (some #(get-in % [:req :req :tx-data]) outs)))
         [st2 outs] (#'r/advance st id :gated gate)
@@ -2014,7 +2030,12 @@
         (is (= [boots] (for [o outs :when (= :problem (:op o))] (first (get-in o [:error :tests])))))))
     (testing "main holds it green: the task's own red, held"
       (let [[_ outs] (#'r/advance st2 id :gate-main-asked (main :pass))]
-        (is (= :closed (:seon.task/outcome (task/task (after outs) id))))))))
+        (is (= :closed (:seon.task/outcome (task/task (after outs) id))))))
+    (testing "main answered nothing of it (a process test): held, its reason saying main's verdict is unknown"
+      (let [[_ outs] (#'r/advance st2 id :gate-main-asked {:reports []})
+            tk (task/task (after outs) id)]
+        (is (= :closed (:seon.task/outcome tk)))
+        (is (str/includes? (get-in tk [:seon.task/failure :reason]) "main's verdict unknown") (pr-str (:seon.task/failure tk)))))))
 
 ;; Estimate: 1 db-of 0.5M + 1 d/with of a retractEntity 50k + the index listed twice (0.6M each) + 1 observe from the last 0.3M ~ 2M ticks
 (clojure.test/deftest ^{:seon.test/estimate {:ticks 2000000}}
