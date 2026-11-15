@@ -93,8 +93,8 @@
     (is (map? (:agents r)) "each agent proc's, by pid")
     (is (and (seq (:agents r)) (every? #(and (contains? % :stall-seen) (contains? % :last-frame-ms) (contains? % :holding) (= 0 (:held %))) (vals (:agents r)))) "with what its stall check reads, and the clone handshake it holds with what waits behind it (none here)")
     (is (map? (get-in r [:reconciler :flight-steps])) "the reconciler's flights by task and the step each waits at")
-    (is (and (boolean? (get-in r [:reconciler :quiet])) (vector? (get-in r [:reconciler :waits])) (int? (get-in r [:reconciler :live])))
-        "whether it is quiet, the waits on main it holds and its live tasks: what a parked await-db waits on")
+    (is (and (boolean? (get-in r [:reconciler :quiet])) (vector? (get-in r [:reconciler :waits])) (vector? (get-in r [:reconciler :live])))
+        "whether it is quiet, the waits on main it holds and its live tasks by id (the leak a hang's capture must name): what a parked await-db waits on")
     (is (some #{:api} (:answered r)) "and the procs that answered, root's api among them")))
 
 (deftest a-kill-is-answered-once-the-agents-end-is-recorded
