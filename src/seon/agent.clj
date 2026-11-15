@@ -1635,12 +1635,13 @@
 
 (defn- held-plan
   "What this agent keeps of its plan of a run (run-plan's sel) for the items the test service grants it: every digest, and
-  of the plan only what running a test reads (:removed, :process, :base-digests, :static-reads and the reads index made, so
-  each green is keyed by what it read), not its graph. See docs/merging.md#the-test-service."
+  of the plan only what running a test and writing its verdict read (:removed, :process, :base-digests, :static-reads, the
+  reads index made, so each green is keyed by what it read, and :graph, whose called closure names a verdict's read keys:
+  seon.proofs/verdict-tx; a reference to the branch graph this agent holds anyway, no copy). See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :map] :map]}
   [sel]
   {:digests (:digests sel)
-   :plan (cond-> (select-keys (:plan sel) [:removed :process :base-digests :static-reads])
+   :plan (cond-> (select-keys (:plan sel) [:removed :process :base-digests :static-reads :graph])
            (:reads-rd (:plan sel)) (assoc :reads-rd (force (:reads-rd (:plan sel)))))})
 
 ;; docs/merging.md#the-test-service: runs of one branch overlap (a turn's prove!, root's :judge, a session's run, each its
