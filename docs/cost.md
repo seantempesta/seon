@@ -63,6 +63,7 @@ Every measurement, in a cost proof or outside one, starts from a written estimat
 - **Record the load** beside a timed run; final timings on a quiet machine.
 - **Whoever reads first pays the cold read:** the first reader of an on-disk index decodes its nodes, so measure warm or in both orders before blaming a function. A cost proof makes one unmeasured call at its smallest size before timing (``seon.cost/run``), and a test's fixtures are made before it (``seon.proofs/warm-fixtures!``): no measure reads its process's first call.
 - **A first call is not the work:** in a fresh process Jolt's first call to a function can cost several times its warm one (seon.render/rules: 1.04M cold, 124k warm, 2026-11-13). A probe measures after one warm call (`seon.profile/measure!` around the second), and an estimate states the work a call does warm, or a cold reader's first call when that is what runs (a cold request).
+- **An eval's `:cost` is the whole eval:** reading, analyzing and compiling the form as well as running it ([render](render.md#cost-is-shown-one-way)), so a per-call cost at the REPL is a warm loop of n calls minus the same loop empty, divided by n, never one eval's `:cost` over n (a serializer measured that way read 58 KB a call against 7.8 KB, 2026-11-14).
 - **A unit's cost is the difference of two sizes, by function:** measure at two sizes with `seon.profile/measure!` and subtract `seon.profile/touched` by var.
 - **The contracts' share is a run with them off:** `SEON_INSTRUMENT=off` (`:seon.config.contract/instrument`).
 
