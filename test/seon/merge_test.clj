@@ -321,7 +321,9 @@
     (is (and (seq @seen) (every? #(#{:schema/key :schema/form :schema/file} (:a %)) @seen))
         (str "only schema entries' datoms are speculated: " (vec (distinct (map :a @seen)))))))
 
-(deftest ^{:seon.test/execs ["git"]} a-tree-the-binary-was-built-from-states-no-schema-change
+;; Estimate: 34 schema files read by git show and imported into an empty db; measured at root 84M ticks for two such reads [M result/d73745fb],
+;; so ~40M for one
+(deftest ^{:seon.test/execs ["git"] :seon.test/estimate {:ticks 50000000}} a-tree-the-binary-was-built-from-states-no-schema-change
   ;; docs/source.md#a-program-file: the shipped schema resources, imported as the import reads them (seon.source/file-tx), are no change against the binary built
   ;; from them, so a root and a checkout on one tree key a test alike (seon.agent/branch-inputs mixes changes into :seon.env/schemas). Red on any entry the import writes otherwise
   ;; the schema files are the binary's own tree's (binary-program's :inputs :tree), never the checkout's now: an agent forked from a
