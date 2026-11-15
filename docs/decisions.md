@@ -52,7 +52,7 @@ On storing each turn's request: "Yes we can store what we sent and we store what
 
 ### The overhaul halves the code
 
-"I want our codebase cut in half when we are doing overhauling everything so de-duplication of ideas is essential." And: "Collapse all duplicate systems in favor of good tools and systems we can use everywhere." `src` is 43,312 lines on 2026-11-15; the target is about 21,600, by collapsing duplicate ideas, never by removing functionality. Stated in [the plan](plan.md#the-order).
+"I want our codebase cut in half when we are done overhauling everything so de-duplication of ideas is essential." And: "Collapse all duplicate systems in favor of good tools and systems we can use everywhere." `src` is 43,312 lines on 2026-11-15; the target is about 21,600, by collapsing duplicate ideas, never by removing functionality. Stated in [the plan](plan.md#the-order).
 
 ### Root fixes errors anywhere; the plan is A to B
 

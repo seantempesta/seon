@@ -120,7 +120,7 @@ sync), shown on the dashboard: drift is a problem, not a merge-time surprise.
 
 ### The order
 
-The overhaul halves the code (owner, 2026-11-15: "I want our codebase cut in half when we are doing overhauling everything so de-duplication of ideas is essential"): `src` goes from 43,312 lines to about 21,600, each landing's `Deletes:` line counting toward it, and no functionality removed.
+The overhaul halves the code (owner, 2026-11-15: "I want our codebase cut in half when we are done overhauling everything so de-duplication of ideas is essential"): `src` goes from 43,312 lines to about 21,600, each landing's `Deletes:` line counting toward it, and no functionality removed.
 
 The owner approved this order on 2026-11-15, from four independent audits and their synthesis (`target/root/audits-2026-11-15/`, a session's scratch: each landing's task plan carries what it needs). Every piece first finds the existing code that does its job, wires it, and collapses the duplicates (owner: "We already built a lot of this so it might just be refactoring and wiring up"); a complicated design steps back to a pillar, data model first (`AGENTS.md` §4). Sizes are calendar days for one session at measured rates (half of lands retried, finishes 2-3x late). Landings 3-7 are the critical path to merging by design; the first real `seon_done` is tried as soon as landing 1, the status read decoupled from the page walk (landing 6's first piece) and data's stopped-merge and run-record fixes are on main, without waiting for 4-7.
 1. **The `:done` waits end on the judge's own end** (jolt/runtime; deletes `merge-ms` and the wait on root-wide quiet). Done: `seon_done` ends while another agent runs. 0.5 day, runtime.
