@@ -276,6 +276,22 @@
                            (main-base-tx)))
     [id (cond-> (assoc (basis! task n max-turns :model merge?) :agent k) model-name (assoc :model model-name))]))
 
+(defn- request!
+  "The request of model call id at basis, the one way a turn's context is made: the basis recorded on the call and committed, the
+  request drawn from the agent's kept walk on the db that holds it (seon.ctx.wire/render), then the hash of what it sends and what it
+  sends, each message a part stored once (seon.ctx.wire/sent-tx, after call prev's), committed. A model's turn and an outside read
+  both ask it. Answers {:messages :parts}. See docs/render.md#a-turn-stores-what-it-sent."
+  {:malli/schema [:=> [:cat :string [:maybe :string] :int :seon.model-call/basis] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]}
+  [id prev n basis]
+  (agent/transact! [{:seon.model-call/id id :seon.model-call/basis basis}])
+  (agent/commit!)
+  (let [db (agent/db)
+        {:keys [messages parts] :as r} (wire/render db basis {:walk (repl/page-walk)})]
+    (agent/transact! (into [{:seon.model-call/id id :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}]
+                           (wire/sent-tx db id prev n parts)))
+    (agent/commit!)
+    r))
+
 (defn- model-request!
   "Turn n's model call made ready, never sent: the agent's turn number moved, its basis recorded and the request drawn from
   its walk. Answers {:id :t1 :request}, the request what root's :model owner is asked. See docs/turn.md#act."
@@ -287,16 +303,7 @@
         [id basis] (open-turn! (:seon.task/id t) n max-turns (boolean merge?) model-name)
         ;; the provider as the config stands at the basis (main's as the turn heard it, over the task's own), never one copied at boot
         provider (wire/provider-of (agent/db) basis)
-        _ (agent/transact! [{:seon.model-call/id id :seon.model-call/basis basis}])
-        _ (agent/commit!)
-        ;; the request is the agent's model output, each turn's page message among it: made on the db that holds them
-        db (agent/db)
-        {:keys [messages parts]} (wire/render db basis {:walk (repl/page-walk)})
-        ;; a hash of the bytes sent, and what the turn sent, each message a
-        ;; part stored once, so debug reads it back as sent (seon.ctx.wire/sent-tx, sent-request)
-        _ (agent/transact! (into [{:seon.model-call/id id :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}]
-                                 (wire/sent-tx (agent/db) id (when (> n 1) (lib/call-id (:key @agent/state) (dec n))) n parts)))
-        _ (agent/commit!)]
+        {:keys [messages]} (request! id (when (> n 1) (lib/call-id (:key @agent/state) (dec n))) n basis)]
     ;; :call and :agent name this model call and its agent, so the reply is read as it streams (docs/flow.md#effects-one-owner-and-its-workers-per-kind)
     {:id id :t1 (profile/now-ns)
      :request {:messages messages :task (:seon.task/id t) :turn turn :provider provider :call id :agent (:key @agent/state)}}))
@@ -381,20 +388,18 @@
                         (basis! task turn max-turns :outside true)
                         (let [db (agent/db)] {:commit (d/commit-id db) :t (:max-tx db) :task task :turn turn :max-turns max-turns :origin :outside :merge? true}))
                       :agent k)
-         walk (repl/page-walk)
-         db (agent/db)
-         {:keys [messages]} (wire/render db basis {:walk walk})
-         ;; as a person reads it: the system prompt, then each record as the call made and its result
-         text (wire/read-text db basis messages wire?)]
-     ;; the run's turn read is a model call, as a model turn's is; its number the agent's own count of reads on the branch
-     (when take?
-       (let [n (inc (or (d/q '[:find (max ?n) . :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/n ?n]]
-                             (agent/db) (pdb/eid (agent/db) :seon.agent/key k))
-                        0))]
-         (agent/transact! [{:seon.model-call/id (lib/call-id k (str "read-" n)) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n
-                            :seon.model-call/origin :outside :seon.model-call/basis basis
-                            :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}])))
-     text)))
+         ;; the run's turn read is a model call, as a model turn's is, made by the one request!; its number the agent's own count of reads
+         ;; on the branch. An observer's read records nothing: the request drawn alone
+         n (when take? (inc (or (d/q '[:find (max ?n) . :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/n ?n]]
+                                     (agent/db) (pdb/eid (agent/db) :seon.agent/key k))
+                                0)))
+         id (when take? (lib/call-id k (str "read-" n)))
+         {:keys [messages]} (if take? (request! id nil n basis) (wire/render (agent/db) basis {:walk (repl/page-walk)}))
+         ;; the read is a call of the agent's once its request is drawn, never before: a read the walk saw mid-draw would place itself
+         _ (when take? (agent/transact! [{:seon.model-call/id id :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :outside}])
+                       (agent/commit!))]
+     ;; as a person reads it: the system prompt, then each record as the call made and its result
+     (wire/read-text (agent/db) basis messages wire?))))
 
 (defn- turn-messages
   "The messages turn n took ({:id :from :body :sent-ms}), in link order: linked to this agent after turn n-1's basis t and at or
