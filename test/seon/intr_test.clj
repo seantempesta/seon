@@ -16,3 +16,11 @@
       (is (= [false ()] [@pending @stack]) "nothing pending, no eval of the parent's")
       (is (= :ran (intr/run nil (fn [] :ran))) "the child's own eval runs")
       (finally (reset! pending false) (reset! stack held)))))
+
+;; See docs/server.md#ops
+(deftest ^{:seon.test/estimate {:ticks 200000}} an-interrupt-between-runs-stops-the-next-run
+  ;; root's reviewer on a8d254ccf9: a thread's interrupt flag found at a run's start that no recorded stop explains is a real interrupt
+  ;; that came between runs: the run does not start (never cleared unread); the run after it starts as usual
+  (.interrupt (Thread/currentThread))
+  (is (thrown? ThreadDeath (intr/run 1000000 (fn [] :ran))) "the interrupt is answered, not swallowed")
+  (is (= :ran (intr/run 1000000 (fn [] :ran))) "and consumed: the next run runs"))
