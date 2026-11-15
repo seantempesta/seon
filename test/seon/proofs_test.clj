@@ -318,9 +318,7 @@
           'app.pv-budget-test "(deftest swallows (try (loop [] (recur)) (catch Throwable _ nil)) (is true))"
           'app.pv-budget-test "(deftest after (is (= 3 (+ 1 2))))")
   (let [notes (atom [])
-        ;; the budget proved with it on (:seon.config.proofs/ticks-decide, off by the owner's ruling until a test's count is its own)
-        ran (with-redefs [seon.config/value (let [v seon.config/value] (fn [k & more] (if (= k :seon.config.proofs/ticks-decide) true (apply v k more))))]
-              (proofs/run-tests! '[app.pv-budget-test/spins app.pv-budget-test/swallows app.pv-budget-test/after] {} #(swap! notes conj %) 1000000))
+        ran (proofs/run-tests! '[app.pv-budget-test/spins app.pv-budget-test/swallows app.pv-budget-test/after] {} #(swap! notes conj %) 1000000)
         unbounded (proofs/run-tests! '[app.pv-budget-test/after] {} (fn [_]) nil)
         spent (some #(when (= :seon.test/ticks-spent (get-in % [:seon.test/report :seon.error/type])) %) @notes)]
     (is (= {:pass 0 :fail 0 :error 1} (select-keys (ran 'app.pv-budget-test/spins) [:pass :fail :error])) "the endless test is red")

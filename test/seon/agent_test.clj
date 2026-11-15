@@ -3288,9 +3288,7 @@
   ;; bounded runs' included. Step E's run 7 (2026-10-22): the agent's proof fork, whose
   ;; tests each run bounded evals (seon.intr/run), spun 2.5 h past its 2e11-tick budget.
   ;; Here a proof that loops over bounded evals for ever ends at its own budget, named
-  (let [[_ _ r] (in-agent [;; the tick bound proved with it on, stated on its own branch (an agent holds its branch's config)
-                        "(do (seon.agent/transact! [{:config/key :seon.config.proofs/ticks-decide :config/form \"true\" :config/file \"resources/seon/config/default.edn\"}]) (seon.agent/commit!))"
-                        "(do (ns spin-test (:require [clojure.test :refer [deftest is]]))
+  (let [[_ r] (in-agent ["(do (ns spin-test (:require [clojure.test :refer [deftest is]]))
                               (deftest spin (loop [] (seon.intr/run 100000 #(reduce + (range 1000))) (recur))))"
                          "(let [r (seon.agent/run-tests-forked 100000000 #{'spin-test/spin} :turn)] [(:seon.error/type (first (filter :seon.error/type (:reports r)))) (some :var (:reports r))])"])
         [type test] (:value r)]
