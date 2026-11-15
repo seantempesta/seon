@@ -400,9 +400,11 @@
  ;; which Jolt reads into *compiler-options*' root at start (Jolt jolt/image-fn-forms-opt-in).
  ;; {:image-fn-forms false}: Seon writes no state image, so its fn literals register no source for
  ;; one, a third less allocation a compile (task jolt.backend/image-registration-is-opt-in;
- ;; measured 2026-10-23). Read by bin/env from this line, so it stays one line of text. At the
+ ;; measured 2026-10-23). :no-inline-ns-prefixes [seon my]: the build splices no var of Seon's own program into a caller,
+ ;; so an agent's edit or a landing's load in place reaches every caller (task jolt.backend/a-build-inlines-no-program-var;
+ ;; library bodies stay spliced). Read by bin/env from this line, so it stays one line of text. At the
  ;; bound: none; a value that is no EDN map stops every Jolt process at start, naming it.
- :seon.config.build/jolt-compiler-options "{:image-fn-forms false}"
+ :seon.config.build/jolt-compiler-options "{:image-fn-forms false :no-inline-ns-prefixes [seon my]}"
  ;; What only a build can change: the paths bin/build compiles or bakes into target/seon, besides every
  ;; pin (a gitlink .gitmodules names, read from the tree). The binary's identity is the digest of these at a
  ;; tree (seon.fx/binary-digest, recorded with the binary in target/seon.program); a process whose
