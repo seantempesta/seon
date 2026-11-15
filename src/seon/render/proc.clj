@@ -335,7 +335,7 @@
           :else v)))
 
 ;; debug-value reads the branch's one kept walk, which branch-walk (below, beside the other kept walks) makes and advances
-(declare branch-walk)
+(declare branch-walk branch-outputs)
 
 (defn- debug-value
   "View [:debug id]'s page: the timeline of agent id's requests on its branch as this proc last read it
@@ -373,7 +373,7 @@
           ;; to bdb, never a cold draw of its request (docs/render.md#the-debug-page-is-the-wire-request)
           b (get-in st [:branches view :branch])
           e (when-let [eid (location (:main-db st) view)] (d/entity (:main-db st) eid))
-          kw (when (and to-come? b e (= :latest at)) (branch-walk (get-in st [:branch-reads b :walk]) bdb e))]
+          kw (when (and to-come? b e (= :latest at)) (branch-walk (get-in st [:branch-reads b :walk]) bdb e (conj (branch-outputs st b) :seon.render/openai-compat)))]
       (cond-> (ui/debug (if (= :root (second view)) :root (focus (:main-db st) view))
                 (cond-> {:turns (mapv (fn [e {:seon.model-call/keys [basis tokens cache-hit-tokens]}]
                                                   (cond-> {:e e :turn (:turn basis) :origin (:origin basis)} tokens (assoc :tokens tokens) cache-hit-tokens (assoc :cached cache-hit-tokens)))
@@ -486,15 +486,26 @@
          (:user-walks st) (update :user-walks update-vals clear)))
      ds]))
 
+(defn- branch-outputs
+  "The outputs branch b's kept walk draws: what the views of it a tab holds or waits for read. The page's hiccup always; the model's
+  request (:seon.render/openai-compat) only while a debug view of it is open, since only its latest turn reads it (`debug-value`):
+  a chat drew the model's request of every watched agent, 6.8B ticks and 35.8 GB on root's session against its page's 163M
+  [M]. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat :map :any] [:set :keyword]]}
+  [st b]
+  (if (some #(and (= :debug (first-of %)) (= b (get-in st [:branches % :branch]))) (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st))))
+    #{:seon.render/hiccup :seon.render/openai-compat}
+    #{:seon.render/hiccup}))
+
 (defn- branch-walk
-  "Kept walk kw (nil: none yet) of agent e's page (e on main) on its branch, as of bdb, the evals main records it opened
-  (:seon.agent/opened) drawn opened: one a branch, held in its read's state (:branch-reads b :walk, which the pass that drew it
-  writes, `pass-view`) so every view of the agent (its chat drawn from its branch, @ctx, the debug page's latest)
+  "Kept walk kw (nil: none yet) of agent e's page (e on main) on its branch, as of bdb, drawing outputs (`branch-outputs`), the evals
+  main records it opened (:seon.agent/opened) drawn opened: one a branch, held in its read's state (:branch-reads b :walk, which the
+  pass that drew it writes, `pass-view`) so every view of the agent (its chat drawn from its branch, @ctx, the debug page's latest)
   draws from it; built at the first, after it advanced (`advance-walk!`), made again when the agent's entity on
-  the branch is not the one it holds (none yet at its first draw); at the same db and opened, kw itself. Answers the kept walk
-  (`kept-walk`) with :opened. See docs/render.md#a-page-is-a-kept-walk."
-  {:malli/schema [:=> [:cat [:maybe :map] :seon.host/db :any] :map]}
-  [kw bdb e]
+  the branch is not the one it holds (none yet at its first draw) or its views read other outputs than it draws; at the same db
+  and opened, kw itself. Answers the kept walk (`kept-walk`) with :opened. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:=> [:cat [:maybe :map] :seon.host/db :any [:set :keyword]] :map]}
+  [kw bdb e outputs]
   (let [opened (set (:seon.agent/opened e))
         branch (or (:seon.agent/branch e) :db)
         mark (fn [t] (cond-> t (seq opened) (update :seon.eval/_agent #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %))))]
@@ -503,9 +514,9 @@
       (cond
         ;; a walk of another entity than the branch holds now (none, before the agent's first write to its
         ;; branch; another, a branch made again) is made again: a patch reaches only what its ctx holds
-        (or (nil? kw) (not= eid (get-in kw [:c :tree :db/id])))
-        ;; it answers the model's request too, so the debug page's latest reads it, never a cold draw (seon.ctx.wire/render's :walk)
-        (assoc (kept-walk bdb eid branch {:seon.agent/key (:seon.agent/key e)} mark {:outputs #{:seon.render/hiccup :seon.render/openai-compat}}) :opened opened)
+        ;; and one drawing other outputs than its views read: the model's request only while a debug view reads it
+        (or (nil? kw) (not= eid (get-in kw [:c :tree :db/id])) (not= outputs (:outputs kw)))
+        (assoc (kept-walk bdb eid branch {:seon.agent/key (:seon.agent/key e)} mark {:outputs outputs}) :opened opened)
         (and (identical? (:db kw) bdb) (= opened (:opened kw))) kw
         :else (assoc (advance-walk! kw bdb branch mark) :opened opened))))))
 
@@ -615,7 +626,7 @@
         b (get-in st [:branches view :branch])
         ;; made or advanced here, at most once a view, and written to st by the pass (`pass-view`), with the users' walks it made
         ;; laid out (`laid`) where it is walked: every view of it reads its units
-        bw (delay (when (and (contains? (:branch-reads st) b) (not branchless?)) (binding [datahike.index.interface/*reads* nil] (laid (branch-walk (get-in st [:branch-reads b :walk]) bdb e)))))
+        bw (delay (when (and (contains? (:branch-reads st) b) (not branchless?)) (binding [datahike.index.interface/*reads* nil] (laid (branch-walk (get-in st [:branch-reads b :walk]) bdb e (branch-outputs st b))))))
         walked #(deref bw)
         ew (delay (some-> (user-walk st db e) laid))
         signed (some-> db (d/entity [:seon.system/id :root]) :seon.system/signed-in)

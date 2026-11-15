@@ -435,6 +435,16 @@
 
 ;; ---- the end, judged once ---------------------------------------------------------------
 
+(defn- parked-if-person
+  "End j of a task of kind as `judgment` decided it, unless the kind ends parked (seon.task/ends-parked: a person's conversation):
+  then an end that would hold it for root, or a death, parks it with its reasons, so the person's next message wakes it (wake). It
+  runs again only on a message, so a turn that always fails costs one run a message: no retry bound. See docs/turn.md#parked."
+  {:malli/schema [:=> [:cat [:maybe :seon.task/kind] :map] :map]}
+  [kind j]
+  (if (and (or (:hold j) (= :dead (:outcome j))) (contains? task/ends-parked kind))
+    {:outcome :parked :reasons (:reasons j)}
+    j))
+
 (defn judgment
   "How task id's agent's end stands, decided once, where its facts are in hand (judge-tx; the gate's answer, gated),
   from the index and facts, a map of: :end (the agent's own end, {:outcome :reason}, or nil: it wrote none, :no-end), :died
@@ -451,7 +461,7 @@
         outside (outside? (:seon.agent/env (task-agent idx id)))]
     (cond
       (not= :running execution) {:outcome :closed :reasons []}
-      died {:outcome :dead :reasons [] :hold (str "its agent died" (some->> (:seon.error/message died) (str ": ")))}
+      died (parked-if-person kind {:outcome :dead :reasons [] :hold (str "its agent died" (some->> (:seon.error/message died) (str ": ")))})
       :else
       (let [rs (done-explain (cond-> (cond-> (assoc (done-input idx id results uncontracted unmerged basis plan-before (set deferred))
                                               :caused (set caused) :main-red (set main-red))
@@ -466,7 +476,7 @@
                                (and (some-> behind pos?) merge?)
                                (assoc :behind behind)))
             ended (str "ended" (some->> oc name (str " ")) (some->> (:reason end) (str " (") (#(str % ")"))) ": " (explain-text rs))]
-        (cond
+        (parked-if-person kind (cond
           ;; the process tests the branch's change reaches run before its merge, on a checkout (:gate, seon.fx/run-tests),
           ;; nobody asking (owner's ruling, 2026-10-27: process tests the change reaches run automatically at the judge)
           (and (empty? rs) merge?)
@@ -505,7 +515,7 @@
             (if (and (= told rs) (not again?))
               {:outcome :closed :reasons rs :hold (str "the same verdict again: " (explain-text rs))}
               {:outcome (if behind-only? :behind :told) :reasons rs :verdict rs}))
-          :else {:outcome :closed :reasons rs :hold ended})))))
+          :else {:outcome :closed :reasons rs :hold ended}))))))
 
 (defn actions
   "The actions for index idx, in the order root executes them (the full view's rule): reap,
@@ -698,11 +708,15 @@
   then closed by the judged rule, its task not running)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id [:sequential :any] :string :map] [:vector :any]]}
   [db id move problem facts]
-  (let [agent (some-> (d/entity db [:seon.task/id id]) :seon.task/agent :seon.agent/key)]
+  (let [t (d/entity db [:seon.task/id id])
+        agent (some-> t :seon.task/agent :seon.agent/key)]
+    ;; a person's session is never held: it waits for the person (seon.task/ends-parked, `parked-if-person`)
+    (if (contains? task/ends-parked (:seon.task/kind t))
+      (vec move)
     (into (vec move)
           [[:db/cas [:seon.task/id id] :seon.task/execution :running :held]
            ;; what a hold writes, by the one list of it (seon.task/held-attrs: the failure, then its evidence)
-           (into {:seon.task/id id} (map vector task/held-attrs [(cond-> {:reason problem} agent (assoc :agent agent)) (evidence id facts problem)]))])))
+           (into {:seon.task/id id} (map vector task/held-attrs [(cond-> {:reason problem} agent (assoc :agent agent)) (evidence id facts problem)]))]))))
 
 (defn quiescent
   "Main's last quiescence report on db ({:t :root-causes}, written by the reconciler proc), or nil."
@@ -784,9 +798,13 @@
    :closed "was stopped and held" :killed "was stopped"})
 
 (defn after-work
-  "The step after an agent's turn loop answered r, on a task holding proofs: an end that parks it (park-outcomes: it waits, or spent its turns) on a task with no proofs claimed nothing and has nothing of its own to prove, so its branch is read for its verdict with no test run; anything else is judged by its tests. See docs/turn.md#parked."
-  {:malli/schema [:=> [:cat :map [:maybe [:set :any]]] [:enum :diffed :tested]]}
-  [r proofs] (if (and (not (:ex r)) (empty? proofs) (park-outcomes (:outcome (:value r)))) :diffed :tested))
+  "The step after an agent's turn loop answered r, on a task of kind holding proofs: a kind that ends parked (seon.task/ends-parked, a
+  person's conversation) is read for its end with no test run, whatever its end, its error its reason; an end that parks it
+  (park-outcomes: it waits) on a task with no proofs claimed nothing and has nothing of its own to prove, so its branch is read for its
+  verdict with no test run; anything else is judged by its tests. See docs/turn.md#parked."
+  {:malli/schema [:=> [:cat :map [:maybe [:set :any]] [:maybe :seon.task/kind]] [:enum :diffed :tested]]}
+  [r proofs kind]
+  (if (or (contains? task/ends-parked kind) (and (not (:ex r)) (empty? proofs) (park-outcomes (:outcome (:value r))))) :diffed :tested))
 
 (defn tell-tx
   "The message that tells who started task id (:seon.task/started-by, a user or an agent) how it stands, when write tx moves its outcome to one of `ends-told`: what it reads next, which wakes it (`write` wakes it). A launched agent that died could not say so itself. Sent at now (ms). See docs/agent.md#working-for-a-person."
@@ -873,7 +891,8 @@
       :reap (let [a (get-in st [:idx :agents (get-in st [:idx :tasks id :seon.task/agent])])
                   ended? (and (= (:boot (:root (:idx st))) (:seon.agent/boot a)) (:seon.agent/ended-ms a))
                   why (if ended? "its agent ended with the task :running" "root restarted")]
-              (one (write st id :done (into (task/move-tx id :running :lost
+              ;; a person's session (seon.task/ends-parked) waits for its person's next message, its reason kept
+              (one (write st id :done (into (task/move-tx id :running (if (contains? task/ends-parked (get-in st [:idx :tasks id :seon.task/kind])) :parked :lost)
                                                           (cond-> {:seon.task/reason why}
                                                             ended? (assoc :seon.task/error (contract/error :seon.reconcile/agent-ended-running #'seon.reconcile/start why {:task id}))))
                                             (when-not ended? (ended-ms-tx db id now))))))
@@ -1166,7 +1185,7 @@
                                                          (ended-ms-tx (:db st) id now))))
                            id agent)
                 :else
-                (if (= :diffed (after-work r (:seon.task/proofs (d/entity (:db st) [:seon.task/id id]))))
+                (if (= :diffed (let [t (d/entity (:db st) [:seon.task/id id])] (after-work r (:seon.task/proofs t) (:seon.task/kind t))))
                   (one (request (assoc-in st [:flights id :results] {}) id :diffed {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}}))
                   (one (request (cond-> st (:ex r) (assoc-in [:flights id :worked-error] (:ex r)))
                                 id :tested {:op :judge :id agent}))))
