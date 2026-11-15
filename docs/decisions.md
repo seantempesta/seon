@@ -38,6 +38,10 @@ He asked that Claude agents be driven through the Seon MCP turns, with context l
 
 He ruled that the binary is rebuilt only when a change needs it: when a build input changed and the new binary must be tested (the parallel system), or when the system is about to restart; never on every land (2026-11-15). A kept-running land builds nothing, since a boot catches up main's program in place. Runtime carries it in plan item 17; E removes the per-land build of the land's own checkout.
 
+### Safe self-landing before the reactive switch-over continues
+
+Asked to order runtime's three items after the health land, he chose (2026-11-15): one owner for updates first (lands never collide; a binary is built only when needed), then admission by weight (the system schedules proofs, replacing the hand gate and root's ordering), then the reactive switch-over's next land. The goal they serve: agents prove whenever they want, the system schedules, and agents land safely on their own.
+
 ### Every compaction leaves a principal engineer's prompt
 
 He ruled that a session about to compact leaves its successor a prompt he can paste into a fresh session, casting it as the principal engineer leading its area on the company's most important project, turning a working prototype into a real product, with rigor, correctness and a sharpness that makes it a pleasure to work with (2026-11-15). Stated in `AGENTS.md` §3.
