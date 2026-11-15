@@ -1820,7 +1820,7 @@
                       vt (let [[c t] (pdb/point (db))]
                            (proofs/verdict-tx (db) (:graph plan) {:seon.db/branch (:branch @state) :seon.db/commit c :seon.db/t t}
                                               (into {} (for [[t x] ran] [t (cond-> x (seq (get failures t)) (assoc :failures (get failures t)))]))
-                                              (:fns r) (:static-reads plan)))
+                                              (or (:fns r) {}) (or (:static-reads plan) {})))
                       sent (when (and (not items) (seq vt))
                              (let [k (:tx-seq (swap! state update :tx-seq inc))] (:result (await-reply k {:op :prove :k k :verdicts vt}))))
                       w (fx/write-verdicts! {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state) :agent (:id @state) :key (:key @state)} ran failures)]
