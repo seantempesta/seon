@@ -1715,7 +1715,13 @@
     (is (not-any? #(= "#p-system" (:container %)) (:seon.render/units root)) "and no unit for it")
     (is (str/includes? (h/html (:seon.render/hiccup dbg)) "p-system") "the debug view has the checkout line's place")
     (is (not (str/includes? (h/html (:seon.render/hiccup home)) "id=\"p-agents\"")) "no agents column on the person's page (it drew an empty one)")
-    (is (str/includes? (h/html (:seon.render/hiccup (#'p/page-value st [:chat :a3]))) "id=\"p-agents\"") "an agent's page keeps it")))
+    (is (str/includes? (h/html (:seon.render/hiccup (#'p/page-value st [:chat :a3]))) "id=\"p-agents\"") "an agent's page keeps it")
+    (is (re-find #"href=\"/user/[^\"]+\"[^>]*>agents<" (bar home)) "the person's bar opens the agents working for them")
+    ;; an agent's full page: its context (task list, tiles) inside the chat's column, after the conversation, so it scrolls with it
+    (let [a3 (p/view-html (first (pass-view st [:chat :a3])) [:chat :a3])
+          chat-at (str/index-of a3 "id=\"p-chat\"") ctx-at (str/index-of a3 "id=\"p-context\"") rows-at (str/index-of a3 "id=\"c-rows\"")]
+      (is (and chat-at ctx-at rows-at (< chat-at rows-at ctx-at)) "the context follows the conversation in the chat's column")
+      (is (< ctx-at (or (str/index-of a3 "</main>" ctx-at) 0)) "inside the chat's column"))))
 
 ;; See docs/render.md#the-page
 (deftest ^{:seon.test/estimate {:ticks 2000000}} roots-chat-has-the-persons-message-box

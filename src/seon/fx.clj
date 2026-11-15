@@ -14,7 +14,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str] [jolt.ffi :as ffi] [jolt.deps :as deps]
-            [seon.edn :as sedn] [clojure.edn :as edn] [clojure.java.io :as io] [seon.proofs :as proofs] [seon.reader :as reader] [seon.program :as program]))
+            [seon.edn :as sedn] [clojure.edn :as edn] [clojure.java.io :as io] [seon.proofs :as proofs] [seon.reader :as reader] [seon.program :as program] [seon.intr :as intr]))
 
 (defn- error
   "An effect's declared failure, as the one error map (its variant registered in
@@ -1777,6 +1777,7 @@
                          :agent (get-in r [:dest :agent])}))
     (let [st (cond-> (charge st r)
                (:fkey (:request r)) (update :flight dissoc (:fkey (:request r)))
+               (::qk (:request r)) (update :stoppable dissoc (::qk (:request r)))
                (and (:seon.fx/class (:request r)) (:seon.fx/peak-processes (:outcome r)))
                (update-in [:peaks (:seon.fx/class (:request r))] (fnil max 0) (:seon.fx/peak-processes (:outcome r))))]
       (if (and limited? (:request r))
@@ -1840,6 +1841,14 @@
   (doseq [k (:holding st)] (step/out! o :out {:op :prove-held :key k :held false}))
   (dissoc st :holding))
 
+(defn- stoppable
+  "Requests ms as dispatched: each whose asker may stop it (:seon.fx/stop-key) gets the token its run goes under, made here and
+  kept in st's :stoppable until its outcome, so a stop finds it whichever worker took it (stop). Answers [st ms]."
+  {:malli/schema [:=> [:cat :map [:sequential :map]] [:tuple :map [:vector :map]]]}
+  [st ms]
+  (let [ms (mapv #(cond-> % (get-in % [:req :seon.fx/stop-key]) (assoc-in [:req :seon.fx/token] (jolt.host/make-interrupt))) ms)]
+    [(reduce (fn [st r] (cond-> st (and (::qk r) (get-in r [:req :seon.fx/token])) (assoc-in [:stoppable (::qk r)] r))) st ms) ms]))
+
 (defn- dispatch
   "Take queued requests in priority order while each is admitted (a free worker, the bucket, the dials of config-limits read this
   pass); a refused one is answered at once; a request of a class joins :flight until its outcome. Answers st. See
@@ -1857,6 +1866,7 @@
                           (wake-later (dissoc st :lim :read? :fresh :reading) m now))
             (= :run d) (let [[st ms] (batch (update st :queue dissoc qk) (assoc m ::qk qk))
                              ms (mapv #(cond-> % (:seon.fx/class %) (assoc :fkey (or (get-in % [:req :seon.prove/batch]) [:seq (:seon.fx/qk %)]))) ms)
+                             [st ms] (stoppable st ms)
                              st (reduce (fn [st r] (if-let [k (:fkey r)]
                                                      (-> st (assoc-in [:flight k] {:class (:seon.fx/class r) :declared (:seon.fx/processes r) :tag (get-in r [:req :seon.prove/batch])
                                                                                    :test? (= :test (get-in r [:req :kind]))})
@@ -1878,6 +1888,21 @@
             :else (do (reply! o (:dest m) d)
                       (recur (update st :queue dissoc qk)))))
         (dissoc st :lim :read? :fresh :reading)))))
+
+(defn- stop
+  "The owner at a stop {:req {:seon.fx/stop k}} on :ask: each request whose :seon.fx/stop-key holds k is stopped (queued:
+  answered :seon.fx/stopped; running: seon.intr/stop! on its token). Answers {:value {:stopped n :dropped n}}. See docs/server.md#ops."
+  {:malli/schema [:=> [:cat :map :seon.host/volatile :map] :map]}
+  [st o m]
+  (let [k (get-in m [:req :seon.fx/stop])
+        hit? (fn [[_ r]] (when-let [sk (get-in r [:req :seon.fx/stop-key])] (and (seq k) (= k (select-keys sk (keys k))))))
+        queued (filter hit? (:queue st))
+        live (filter hit? (:stoppable st))]
+    (doseq [[_ r] queued]
+      (reply! o (:dest r) (error #'seon.fx/stop :seon.fx/stopped "stopped by its asker before it ran" {:seon.fx/stop k})))
+    (run! (fn [[_ r]] (intr/stop! (get-in r [:req :seon.fx/token]))) live)
+    (reply! o (:dest m) {:value {:stopped (count live) :dropped (count queued)}})
+    (update st :queue #(apply dissoc % (map key queued)))))
 
 (defn- bound
   "The owner's queue holds at most :seon.config.fx/buf requests of the agents; at the bound it stops reading :in (Flow's
@@ -1919,7 +1944,7 @@
        ;; admission and routing only: never blocks, never computes long
        :workload :io
        :ping-map-fn (fn [st] (-> (select-keys st [:kind :workers :busy :peaks :load :done]) (assoc :in-flight (count (:flight st))) (assoc :queued (count (:queue st)) :spent (:spent st))))})
-  ([args] (assoc (select-keys args [:kind :workers :batch :close? :limits]) :busy 0 :flight {} :peaks {} :done 0 :rid 0 :pending {}
+  ([args] (assoc (select-keys args [:kind :workers :batch :close? :limits]) :busy 0 :flight {} :stoppable {} :peaks {} :done 0 :rid 0 :pending {}
                  :load-fn (or (:load-fn args) lib/load-average) :held-fn (or (:held-fn args) held-processes) :seq 0 :queue (sorted-map) :spent {}
                  :bucket (when-let [r (:rate args)]
                            {:tokens (double r) :cap (double r) :per-ms (/ r 1000.0) :rate-ms (/ r 1000.0) :at (quot (profile/now-ns) 1000000)})
@@ -1933,8 +1958,10 @@
      (if (nil? m)
        [st nil]
        (case in
-         (:in :ask) (let [n (inc (:seq st))]
-               [(bound (dispatch (-> st (assoc :seq n) (assoc-in [:queue [(- (:prio m 0)) n]] (assoc m :in-ns (profile/now-ns)))) o)) @o])
+         (:in :ask) (if (get-in m [:req :seon.fx/stop])
+                      [(stop st o m) @o]
+                      (let [n (inc (:seq st))]
+               [(bound (dispatch (-> st (assoc :seq n) (assoc-in [:queue [(- (:prio m 0)) n]] (assoc m :in-ns (profile/now-ns)))) o)) @o]))
          :done (let [st (bound (dispatch (reduce #(outcome %1 o %2) (update st :busy dec) (or (:batch m) [m])) o))]
                  ;; the kind's one worker holds a host object that ends when the work does (:close): the queue
                  ;; empty and nothing in flight is that event, told to the worker as the next item, unless an

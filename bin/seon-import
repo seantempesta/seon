@@ -1,25 +1,16 @@
 #!/bin/zsh
 # bin/seon-import: Claude Code's PostToolUse hook on Edit and Write (registered in .claude/settings.json): the file a
-# session just wrote is imported onto its Seon agent's branch (my.branch/import!), so a session works as a Seon agent does
-# (AGENTS.md §0). Reads the hook's JSON on stdin (tool_input.file_path). The agent is the one this file's checkout holds:
-# a session attaches its task from its checkout (bin/mcp call attach task=NS/NAME, client checkout-<checkout>), and the
-# standing root names that agent (my.root/held-agent). A checkout that holds no agent, a file outside a checkout, or no
-# standing root imports nothing and says why on stderr; the hook never blocks the edit (exit 0). One import per write:
-# the agent answers {:imported :unchanged :skipped}. See docs/server.md#working-a-task-from-a-worktree.
+# session just wrote is imported onto its Seon agent's branch, so a session works as a Seon agent does (AGENTS.md §0).
+# A thin wrapper over the standing root's import op (seon_import: seon.server's op-answer :import, my.branch/import! on the
+# agent this checkout's client holds, my.root/held-agent). Reads the hook's JSON on stdin (tool_input.file_path); a file
+# outside a checkout or no standing root imports nothing and says why on stderr; the hook never blocks the edit (exit 0).
+# See docs/server.md#working-a-task-from-a-worktree.
 emulate -L zsh; setopt pipefail
 f=$(perl -MJSON::PP -0777 -e 'my $j = eval { decode_json(<STDIN>) } || {}; print(($j->{tool_input} // {})->{file_path} // "")')
 [[ -n $f && -f $f ]] || exit 0
 root=$(git -C ${f:h} rev-parse --show-toplevel 2>/dev/null) || exit 0
-rel=${f#$root/}
 # the standing root: the main checkout's (a worktree's git dir names it)
 main=${$(git -C $root rev-parse --path-format=absolute --git-common-dir):h}
-port=$(<$main/runs/root.port 2>/dev/null) || { print -u2 "seon-import: no standing root ($main/runs/root.port): $rel not imported"; exit 0 }
-mcp=$root/bin/mcp
-held=$($mcp call --port $port eval agent=root code="(my.root/held-agent sys \"checkout-$root\")" 2>&1)
-agent=$(print -r -- $held | perl -ne 'print $1 if /:agent :(\S+?)[,}\s]/')
-task=$(print -r -- $held | perl -ne 'print $1 if /:task "([^"]+)"/')
-[[ -n $agent && -n $task ]] || { print -u2 "seon-import: $root holds no Seon agent (bin/mcp call attach task=NS/NAME): $rel not imported"; exit 0 }
-out=$($mcp call --port $port eval agent=$agent task=$task intent="import $rel, written by the session" \
-        code="(my.branch/import! \"$root\" [\"$rel\"])" 2>&1)
-print -u2 -r -- "seon-import $rel -> $agent ($task): $(print -r -- $out | perl -ne 'print $1 if /(\{:imported[^}]*\})/')"
+port=$(<$main/runs/root.port 2>/dev/null) || { print -u2 "seon-import: no standing root ($main/runs/root.port): ${f#$root/} not imported"; exit 0 }
+print -u2 -r -- "seon-import ${f#$root/}: $(SEON_MCP_CLIENT=checkout-$root $root/bin/mcp call --port $port import path=$f 2>&1)"
 exit 0
