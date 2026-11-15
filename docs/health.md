@@ -111,6 +111,10 @@ Nothing gates an evaluation ([processes](processes.md#an-agent-is-never-gated)).
 
 Root's page draws every open class; an agent's page draws only its own task's and branch's problems (`seon.render.ui/own-problems`, from `seon.problems/own`), at a cost flat in finished history (`seon.problems-test/an-agents-own-problems-cost-nothing-for-the-history`).
 
+## Native code in a defonce
+
+A form that evaluates native code (`jolt.scheme/eval-string`) inside a `defonce` is a `:native-in-defonce` row (```seon.problems/native-in-defonce```). A landing loads changed forms in place, in root and the fork server, and a `defonce` skips its body, so the process would run code whose native half was never defined (2026-11-15: every agent's start threw). The fix is a plain `def` whose state defines keep their value, `(define x (if (top-level-bound? 'x) x init))`, so a reload redefines the procedures and keeps the counters (```seon.profile```'s blocks; `seon.program-test/a-native-block-changed-in-place-defines-what-it-added-and-keeps-its-state`).
+
 ## A stale binary
 
 Root's binary is stale when built from another git tree than the one main was last brought to from outside (an import or a landing): its boot writes both trees on `:seon.system/source` (```seon.system/booted-source```) and ```seon.problems/stale-binary``` derives one `:stale-binary` row while they differ. Root then runs main's program loaded over its binary at each boot ([a boot runs main's program](source.md#a-boot-runs-mains-program)), a build input stays the binary's, and its agents share no verdicts ([source](source.md#the-binary-records-its-program)). The message names the acts that bring the two into agreement (```seon.problems/stale-binary-acts```, [files and the db](source.md#files-and-the-db-two-directions)); the next boot on a binary of main's tree closes it.

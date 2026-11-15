@@ -154,6 +154,24 @@
    ;; cut outside one; the law's marks and display namespaces are config dials (printer-law), named by that one section
    {:law :printer :fact :form/refs :page "docs/render.md" :section "docs/render.md#one-printer" :except #{} :rule printer-law}])
 
+(defn native-in-defonce
+  "Each live form that evaluates native code (it reaches jolt.scheme/eval-string) inside a defonce, as a :native-in-defonce row: a
+  change to it loaded in place is skipped. Cost: one index seek and each hit's text; with only (a branch's candidate forms,
+  `split-rows`), one seek each of those. See docs/health.md#native-code-in-a-defonce."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]] [:=> [:cat :seon.host/db :map [:maybe [:set :int]]] [:vector :seon.problems/row]]]}
+  ([db ans] (native-in-defonce db ans nil))
+  ([db ans only]
+  (vec (for [e (if only
+                 (filter #(seq (d/datoms db :eavt % :form/refs 'jolt.scheme/eval-string)) only)
+                 (map :e (d/datoms db :avet :form/refs 'jolt.scheme/eval-string)))
+             :let [src (:v (first (d/datoms db :eavt e :form/src)))]
+             :when (and src (str/starts-with? src "(defonce") (program/live? db e))
+             :let [nsym (some->> (first (d/datoms db :eavt e :form/ns)) :v (d/entity db) :ns/name)
+                   id (:v (first (d/datoms db :eavt e :form/id)))]]
+         (derived-row ans (str "native-in-defonce " id) nsym
+                      (str nsym " evaluates native code inside a defonce, so a change to it never loads in place: form " id)
+                      {:kind :native-in-defonce :form id} {:form id})))))
+
 (defn unnamed-sites
   "Each site of a law (`laws`) its page does not name: a live form carrying the law's fact, by
   the var it defines, in a namespace of Seon's own src, and no test's (a form defining a var whose
@@ -920,6 +938,7 @@
                          (map #(assoc % :class :leadless-section) (leadless-sections db ans led-cands))
                          (when linkage? (map #(assoc % :class :orphan-page) (orphan-pages db ans)))
                          (map #(assoc % :class :waived-proof) (waived-proofs db ans form-cands))
+                         (map #(assoc % :class :native-in-defonce) (native-in-defonce db ans form-cands))
                          (map #(assoc % :class :unschemed-key) (unschemed-keys db ans key-cands))
                          (map #(assoc % :class :refused-value) (refused-values db ans moved-attrs))
                          (map #(assoc % :class :uncited-task) (uncited-tasks db ans tr))
@@ -1290,7 +1309,7 @@
   ([db fold]
    (let [ans (answers db)]
      (health-with db ans (:classes (report-with db ans fold nil)) (assoc (other-derived db ans (mapv :e (d/datoms db :aevt :seon.task/id)))
-                                     :unnamed-site (unnamed-sites db ans) :stale-section (stale-sections db ans)
+                                     :unnamed-site (unnamed-sites db ans) :native-in-defonce (native-in-defonce db ans) :stale-section (stale-sections db ans)
                                      :hand-written-list (hand-written-lists db ans nil))))))
 
 (defn- touched-tasks
@@ -1334,7 +1353,7 @@
                                        (update :unsynced #(vec (sort-by :task (into (into [] (comp (remove (fn [r] (ids (:task r)))) (map current))
                                                                                           (get-in prev [:classes :unsynced :rows]))
                                                                                     %))))
-                                       (assoc :unnamed-site (carried :unnamed-site) :stale-section (carried :stale-section) :hand-written-list (carried :hand-written-list))))))
+                                       (assoc :unnamed-site (carried :unnamed-site) :native-in-defonce (carried :native-in-defonce) :stale-section (carried :stale-section) :hand-written-list (carried :hand-written-list))))))
 
 (defn own
   "The open problems of one agent, by class and shaped as `report` (so the one render draws it, an
