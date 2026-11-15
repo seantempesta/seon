@@ -1531,11 +1531,12 @@
     (is (str/includes? r1 ":value 11") "and the call after it runs")))
 
 (defn- work-with
-  "seon.turn/work! of the world's task for 3 turns, in this process as an agent's test fork on the world (my.test/eval-in's state),
+  "seon.turn/work! (or run, given, of the same argument) of the world's task for 3 turns, in this process as an agent's test fork on the world (my.test/eval-in's state),
   its turn's model call (seon.turn/model-request!, the request made ready; seon.turn/act!, its answer acted on) answered by (act st), its status by (status): what the loop decides from what
   a turn answers. What reads a store or root stands in (main, the proofs, the end's write), the decisions of the loop are its
   own. Answers its end, with the model calls act made (:model-calls)."
-  [act status]
+  ([act status] (work-with act status seon.turn/work!))
+  ([act status run]
   (let [old @agent/state
         calls (volatile! 0)
         ;; a model call answered: the agent's turn moves, as open-turn! writes it, and the request is the one it sent
@@ -1553,23 +1554,26 @@
                        seon.turn/act! (fn [st _ _] (act st called!))
                        seon.turn/end! (fn [{:keys [turn]} outcome reason _]
                                         (cond-> {:outcome outcome :results {} :uncontracted #{} :turns turn :model-calls @calls} reason (assoc :reason reason)))]
-           (seon.turn/work! {:task "app.calc/total-is-exact" :max-turns 3}))
-         (finally (reset! agent/state old)))))
+           (run {:task "app.calc/total-is-exact" :max-turns 3}))
+         (finally (reset! agent/state old))))))
 
-;; Estimate: the world, built once a process (~3.2M measured here; my.test/world's docstring says ~0.6M), and three work! loops of
-;; at most 3 turns on it (each: its start's reads and writes on the value ~0.2M, ~3 turns of a few datoms and an error map,
-;; agent/error-map ~0.3M each; first put at 50k a turn, which missed the error map and the world) = ~6M: 6,000,000
-(deftest ^{:seon.test/estimate {:ticks 6000000}} a-run-told-to-stop-ends-between-turns
-  ;; task seon.system/a-stop-or-crash-resumes-from-one-resume-point-and-says-what-it-lost (one stop, one drain, agreed by
-  ;; runtime, tests and web, 2026-11-14): a stop lets each item in flight end by its own bound. An agent working a task holds
-  ;; one request for the whole run, so the item is the turn: told to stop (root's :stop, read at once by its transport), the run
-  ;; ends :waiting after the turn in flight, never cut inside it. Estimate: as its sibling below, the world and one work! loop
+;; Estimate: the world, built once a process (~3.2M), one start! and one turn-begin on it (~0.2M), and the stop's end step: ~3.5M; 6,000,000
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-run-told-to-stop-ends-at-once
+  ;; docs/flow.md#flow-inside-an-agent: root's :stop is a message to the :repl proc holding the run, which ends it at once :waiting,
+  ;; with what its turns committed, never waiting out a model call in flight (minutes; context-4's ruling, 2026-11-15): the call's
+  ;; answer, when it comes, finds no run and is dropped. Red before: a stop was the :draining flag, read only between turns, so the run
+  ;; waited for the call in flight and its turn's end
   (let [red {:reasons [{:reason :proof-red}]}
-        end (work-with (fn [st called!] (swap! agent/state assoc :draining true) (called!) st) (constantly red))]
+        out (volatile! nil)
+        end (work-with (fn [st called!] (called!) st) (constantly red)
+                       (fn [arg] (let [[st o] (seon.turn/step-run (seon.turn/start! arg) nil)]
+                                   (vreset! out (set (keys o)))
+                                   (@#'seon.turn/end-of (seon.turn/step-run st {:seon.turn/stop true})))))]
+    (is (= #{:model} @out) "the run's model call was out when the stop came")
     (is (= :waiting (:outcome end)) (pr-str end))
-    (is (= 1 (:model-calls end)) (str "the turn in flight finished (its one model call), and no other began: " (pr-str end)))))
+    (is (= 0 (:model-calls end)) (str "the stop did not wait for the call in flight: " (pr-str end)))))
 
-;; Estimate: as a-run-told-to-stop-ends-between-turns, the world and one work! loop of 2 turns = ~6M: 6,000,000
+;; Estimate: as a-run-told-to-stop-ends-at-once, the world and one work! loop of 2 turns = ~6M: 6,000,000
 (deftest ^{:seon.test/estimate {:ticks 6000000}} a-run-that-merged-main-ends-between-turns-to-run-on-mains-program
   ;; docs/merging.md#a-branch-merges-main-in: a merge of main loads none of main's forms into the running agent (seon.agent/merge-main!
   ;; leaves it :behind), and no turn runs old code: the run ends :refork after the turn in flight, before its next model call, and

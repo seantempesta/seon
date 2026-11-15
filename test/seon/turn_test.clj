@@ -1,6 +1,7 @@
 (ns seon.turn-test
   "seon.turn's pure parts, on the world (docs/testing.md#testing-in-the-world). Run: bin/test seon.turn-test"
-  (:require [clojure.test :refer [deftest is]] [my.test :as t] [seon.turn :as turn] [seon.agent-test :as at]))
+  (:require [clojure.test :refer [deftest is]] [my.test :as t] [seon.turn :as turn] [seon.agent-test :as at] [seon.agent :as agent]
+            [seon.repl :as repl] [seon.lib :as lib] [clojure.core.async.flow :as flow]))
 
 (deftest an-agents-tokens-are-its-model-calls-sum
   ;; seon.turn/agent-usage: an agent's model calls and tokens are what its calls recorded, every turn's, a turn that
@@ -94,3 +95,59 @@
                  (finally (alter-var-root #'turn/turn-begin (constantly orig))))]
     (is (= "the redefined turn-begin" (:reason end)) (str "the second turn began with the redefinition: " (pr-str end)))
     (is (= 1 (:model-calls end)) "the first turn ran the turn-begin the run started with")))
+
+(defn- held-run
+  "A run of the world's task (seon.agent-test's work-with: its turns' effects stood in) driven by the real :repl proc (seon.repl/agent-step)
+  in a graph, its status by status, with the effect var held (agent/fx!, the model call, or agent/judge!, the proofs) parked until the
+  test is done: what (probe g) answers while the wait is out, then root's :stop, the run's reply (its end) and whether the process exited."
+  [status held probe]
+  (@#'at/work-with (fn [st called!] (called!) st) status
+                (fn [arg]
+                  (let [out (promise) release (promise) replied (promise) exited (promise)]
+                    (with-redefs-fn {held (fn [& _] (deliver out true) @release {:value {}})
+                                     #'agent/send! (fn [m] (when (and (= :reply (:op m)) (= 7 (:id m))) (deliver replied m)) true)
+                                     #'lib/c-exit (fn [code] (deliver exited code) nil)}
+                      (fn []
+                        (let [g (flow/create-flow {:procs {:repl {:proc (flow/process #'repl/agent-step)}} :stop-timeout-ms 1000})]
+                          (flow/start g) (flow/resume g)
+                          ;; the graph is stopped inside the redefinitions whatever ends the test: a :stop it still holds must
+                          ;; never reach the real lib/c-exit, which would end this test process (it ended a shard at exit 0 once)
+                          (try
+                            @(flow/inject g [:repl :in] [{:op :eval :id 7 :forms (str "(seon.turn/work! " (pr-str arg) ")")}])
+                            @out
+                            (let [seen (probe g)]
+                              @(flow/inject g [:repl :in] [{:op :stop}])
+                              (let [reply @replied code @exited]
+                                {:seen seen :end (get-in reply [:response :value]) :exit code}))
+                            ;; the dropped call's fiber ends; its answer finds no run
+                            (finally (deliver release true) (flow/stop g))))))))))
+
+(defn- ping-of
+  "The :repl proc's site and ping answer in graph g. See docs/flow.md#flow-inside-an-agent."
+  [g]
+  (let [p (flow/ping g)] {:site (get-in p [:repl :clojure.core.async.flow/site]) :run (get-in p [:repl :clojure.core.async.flow/state :run])}))
+
+;; Estimate: the world (~3.2M), one eval of work! through the real :repl proc (an eval's record ~0.5M), the run's first turn (~0.2M), a graph
+;; started and stopped and a ping (~0.2M): ~4.1M; 8,000,000. Bytes: the world's seek and the turn's facts, ~4 MB; 8,000,000. Seconds: in
+;; process, ~0.1 s
+(deftest ^{:seon.test/estimate {:ticks 8000000 :bytes 8000000}} a-run-answers-ping-and-stop-between-turns
+  ;; task seon.turn/a-turn-is-a-flow-step (docs/flow.md#flow-inside-an-agent): the :repl proc holds a run (work! in an eval) as its state and
+  ;; takes each wait's answer as a message, so while the model call is out it is parked on its ports and answers a ping with the run; root's
+  ;; :stop ends the run at once, :waiting, the call in flight dropped, replies to root's work! eval with that end, then exits. Red before: work!
+  ;; drove the run inside one :repl step, stepping for the whole call, so no pong came and a stop waited for the turn's end
+  (let [r (held-run (constantly {:reasons [{:reason :proof-red}]}) #'agent/fx! ping-of)]
+    (is (not (contains? (get-in r [:seen :site]) :stepping)) (str "parked on its ports while the model call is out: " (pr-str (:seen r))))
+    (is (= "app.calc/total-is-exact" (get-in r [:seen :run :task])) (str "the ping is answered with the run: " (pr-str (:seen r))))
+    (is (= :waiting (get-in r [:end :outcome])) (str "the stop ended the run at once: " (pr-str (:end r))))
+    (is (= 0 (get-in r [:end :model-calls])) "the call in flight was dropped, never waited for")
+    (is (= 0 (:exit r)) "and the process exits after it")))
+
+;; Estimate: as a-run-answers-ping-and-stop-between-turns, the proofs' wait in the model call's place: 8,000,000 ticks, 8,000,000 bytes
+(deftest ^{:seon.test/estimate {:ticks 8000000 :bytes 8000000}} an-agent-answers-ping-while-its-proofs-are-queued
+  ;; task seon.turn/a-turn-is-a-flow-step: a clear status sends the proofs (turn-begin's :prove, seon.agent/judge!) as an output; while the test
+  ;; service holds them the agent sits at the turn boundary, parked, answering ping, so the service's back-pressure reaches the model spend
+  ;; with no mechanism of its own. Red before: judge! waited inside the :repl step
+  (let [r (held-run (constantly {:reasons []}) #'agent/judge! ping-of)]
+    (is (not (contains? (get-in r [:seen :site]) :stepping)) (str "parked while its proofs are queued: " (pr-str (:seen r))))
+    (is (= "app.calc/total-is-exact" (get-in r [:seen :run :task])) (str "the ping is answered with the run: " (pr-str (:seen r))))
+    (is (= :waiting (get-in r [:end :outcome])) (pr-str (:end r)))))

@@ -641,32 +641,54 @@
              :max-turns max-turns :merge? merge? :merge-cfg merge-cfg}
       model (assoc :model-name model))))
 
+(defn- effect-answer
+  "Output out of a turn step ({:prove ..} or {:model ..}), its effect done: the verdict (seon.agent/judge!) or the model call's
+  outcome through root's :model owner, as the message step-run takes ({::verdict v}, {::answer a}), or its throw ({::threw e}),
+  the turn's as a throw inside a step is. Where it runs is its executor's: in place (work! with no :repl proc) or on a fiber of
+  its own, the edge ask (seon.repl's :repl proc). See docs/flow.md#the-five-rules."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{:keys [prove model]}]
+  (try (if prove {::verdict (agent/judge! (:names prove) (:reach? prove))} {::answer (agent/fx! :model model {})})
+       (catch Exception e {::threw e})))
+
+(defn step-run
+  "A run's one driver: run state st and msg, the message its last output was answered with (nil: the run's first step), stepped
+  to its next output or its end. msg {::verdict v} goes to turn-verdict, {::answer a} to turn-end, {::threw e} to threw, and
+  {::stop true} (root is stopping) ends the run at once, :waiting, the call in flight dropped; a turn that answers ::next begins
+  the next. Answers [st' {:prove ..}|{:model ..}] or [::end st outcome reason error]. Each step is called through its var, so a
+  redefined one takes effect at the next turn. See docs/flow.md#the-step-fn-contract-every-proc-follows."
+  {:malli/schema [:=> [:cat :map [:maybe :map]]
+                  [:or [:tuple [:= ::end] :map :seon.agent/outcome [:maybe :string] [:maybe :map]]
+                   [:tuple :map [:map [:prove {:optional true} [:map [:names [:set :symbol]] [:reach? :boolean]]] [:model {:optional true} :map]]]]]}
+  [st msg]
+  (loop [step (cond (::stop msg) [::end (dissoc st :pending) :waiting "root is stopping: the run ended at once, with what its turns committed" nil]
+                    (contains? msg ::threw) (threw (dissoc st :pending) (::threw msg) false)
+                    (contains? msg ::verdict) (turn-verdict st (::verdict msg))
+                    (contains? msg ::answer) (turn-end st (::answer msg))
+                    :else (turn-begin st))]
+    (if (= ::next (first step)) (recur (turn-begin (second step))) step)))
+
+(defn- end-of
+  "A run's end step [::end st outcome reason error] written and answered (end!). See docs/turn.md#the-end."
+  {:malli/schema [:=> [:cat [:tuple [:= ::end] :map :seon.agent/outcome [:maybe :string] [:maybe :map]]] :seon.turn/end]}
+  [[_ st outcome reason err]] (end! st outcome reason err))
+
 (defn work!
   "Work task `task` (the model `model` when set, else root's), until the agent's turn reaches
   max-turns (agent-wide: its :seon.agent/turn against its budget, which root passes from the agent's own on main).
-  Answers the end ({:outcome :turns :model-calls :tokens :ms}); the same end is written on
-  the branch. It first merges main into the branch (start!), as a merge task
-  does again at each green. It drives the turn's steps in this process (turn-begin, turn-verdict, turn-end), doing each
-  output's effect where it is asked (the judge, the model call) and giving the step its answer; each step is called through its
-  var, so a redefined step takes effect at the next turn. See docs/flow.md#flow-inside-an-agent."
+  It first merges main into the branch (start!), as a merge task does again at each green, then drives the run with step-run.
+  In an eval the agent's :repl proc runs (seon.repl/*run* bound), the run is handed to that proc, which takes each output's
+  answer as a message, so it answers ping and stop between the waits, and replies to this eval with the end when the run ends:
+  this answers {::run :started}. Anywhere else each output's effect is done in place (effect-answer) and this answers the end
+  ({:outcome :turns :model-calls :tokens :ms}); the same end is written on the branch either way. See docs/flow.md#flow-inside-an-agent."
   {:malli/schema [:=> [:cat [:map [:task :seon.task/id] [:model {:optional true} :string]
                              [:max-turns pos-int?]]]
-                  :seon.turn/end]}
+                  [:or :seon.turn/end [:map [::run [:= :started]]]]]}
   [arg]
-  (loop [st (start! arg)]
-    (let [;; an output's effect done here; its throw is the turn's, as a throw inside a step is
-          answered (fn [st' effect step] (let [a (try {:answer (effect)} (catch Exception e {:threw e}))]
-                                           (if-let [e (:threw a)] (threw (dissoc st' :pending) e false) (step st' (:answer a)))))
-          ;; root is stopping (its :stop, read at once by the transport): the turn in flight finished, so the run ends here,
-          ;; between turns, its work committed by end!, and nothing is cut (the one stop's drain)
-          step (if (:draining @agent/state)
-                 [::end st :waiting "root is stopping: the run ended between turns, its work committed" nil]
-                 (loop [step (turn-begin st)]
-                   (if (keyword? (first step))
-                     step
-                     (let [[st' {:keys [prove model]}] step]
-                       (cond prove (recur (answered st' #(agent/judge! (:names prove) (:reach? prove)) turn-verdict))
-                             model (answered st' #(agent/fx! :model model {}) turn-end))))))]
-      (case (first step)
-        ::next (recur (second step))
-        ::end (let [[_ st outcome reason err] step] (end! st outcome reason err))))))
+  (let [st (start! arg)]
+    (if-let [hand repl/*run*]
+      (do (vreset! hand {:st st :step #'step-run :effect #'effect-answer :end #'end-of}) {::run :started})
+      (loop [step (step-run st nil)]
+        (if (= ::end (first step))
+          (end-of step)
+          (recur (step-run (first step) (effect-answer (second step)))))))))
