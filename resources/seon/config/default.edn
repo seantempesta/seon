@@ -673,6 +673,10 @@
  ;; (:seon.config.agent/test-ticks), never ten times its estimate; ticks are still recorded on every verdict. Turned back on by
  ;; seon.proofs/a-tests-ticks-are-its-own-work.
  :seon.config.proofs/ticks-decide false
+ ;; the store's branch the test service writes verdicts to (:seon.proof entities, one write a batch from the prove proc), apart from
+ ;; main so a merge never carries them; created from main by the writer's :clone-branch when missing. A plan holds its value once
+ ;; (task seon.proofs/a-verdict-is-an-entity-that-names-its-environment)
+ :seon.config.proofs/results-branch :results
  ;; :seon.config.proofs/max-load 12.0
  ;; Unit: ms. The least work a shard of an incremental run is worth (seon.proofs/worth-shards). Provenance: a shard's start
  ;; costs about 5 s, and 8 s more for its process tests' root (docs/testing.md#a-root-costs-what-it-boots), so it saves its cost past
