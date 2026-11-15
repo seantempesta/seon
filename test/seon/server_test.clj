@@ -395,15 +395,16 @@
   ;; is, runs its git on a fiber. A pool's thread count is no proof here (an idle one this process holds takes the copies).
   ;; Estimate: two git calls on an empty repository (a spawn and an exit event each) and one thread: ~1M ticks
   (let [dir (str (seon.config/checkout) "/target/tmp/done-shells-" (random-uuid))
-        sh clojure.java.shell/sh
-        on-fiber (atom [])]
+        ;; counted where the system counts: seon.lib/sh, through which every shell of Seon's runs on a fiber (its docstring), is a
+        ;; contracted function, so seon.profile holds its exact calls; no library var (clojure.java.shell/sh) is redefined to watch it
+        shells (fn [] (some #(when (= 'seon.lib/sh (:var %)) (:calls %)) (seon.profile/touched)))]
     (try
       (seon.lib/sh "git" "init" "-q" dir)
-      (with-redefs [clojure.java.shell/sh (fn [& args] (swap! on-fiber conj (jolt.fibers/in-fiber?)) (apply sh args))]
-        (let [files (atom nil)]
-          (doto (Thread. ^Runnable (fn [] (reset! files (seon.fx/uncommitted dir)))) (.start) (.join))
-          (is (= [] @files) "the read answers from the thread")
-          (is (= [true] @on-fiber) "and its one shell ran on a fiber, never on the thread's futures")))
+      (let [files (atom nil)]
+        (seon.profile/begin!)
+        (doto (Thread. ^Runnable (fn [] (reset! files (seon.fx/uncommitted dir)))) (.start) (.join))
+        (is (= [] @files) "the read answers from the thread")
+        (is (= 1 (shells)) "and its one shell ran through seon.lib/sh, on a fiber, never on the thread's futures"))
       (finally (seon.lib/remove-tree! dir)))))
 
 (deftest done-answers-the-judges-reasons
