@@ -38,6 +38,13 @@ Before going out, the owner set three things:
 
 Runtime builds this right after the update owner, which it extends. Until it lands, a path land that must restart root goes ahead, and context re-releases its round agents on the new root, told before the land starts.
 
+### Three priorities tonight: tests inside the system, the core infrastructure in use, messaging (late evening)
+
+The owner named three priorities, all at once, and this supersedes the entry below where they differ:
+1. **Tests run inside the system:** one runner, `:prove`, through E. The old runner goes.
+2. **The system uses its core infrastructure:** every hand-built derived value and incremental update moves onto reactions and ratoms (`seon.ratom`), and each move deletes the duplicated code it replaces. Runtime fixes the core first (the review's five changes). Then each area's reader lands as soon as its REPL prototype measures well, without waiting for D.
+3. **Messaging:** sessions and agents talk through Seon's messages (`seon_message`, `seon_inbox`, attached session agents).
+
 ### The reactive switch-over: the design gate now, reader landings after the self-merge path (evening)
 
 The reactive switch-over's design gate runs now, beside the self-merge path. All area entries `seon.ratom/<area>-reads-on-the-core` reach main, an independent reviewer judges the core against Reagent and re-frame, and each area measures its reader against its engine as a REPL prototype. The reader landings that delete each hand-built engine go after runtime's update owner and D, and take no landing slot from the path.
