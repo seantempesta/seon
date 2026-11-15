@@ -1407,7 +1407,7 @@
   "st with each wait on a task's judge (:judged, {task [promise]}) answered once the task has no flight: {:task :outcome} when it
   is settled?, the typed :seon.reconcile/judge-left-running when its flight ended and left it :running (nothing of root's will
   move it); a task at :ready waits on, its merge to come as commits, until root is quiet with it unmerged
-  (:seon.reconcile/judge-left-ready). Asked after every step, so the producer's own end answers
+  (:seon.reconcile/judge-left-ready): no octopus merge flying and no live merge task. Asked after every step, so the producer's own end answers
   its waiter, never a quiet of the whole root. O(waits)."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
@@ -1420,11 +1420,13 @@
                          r (cond (settled? (:db st) id) {:task id :outcome o}
                                  (= :running o) (contract/error :seon.reconcile/judge-left-running #'seon.reconcile/answer-judged
                                                                 (str id "'s judge ended and left it :running: nothing root runs will move it") {:task id})
-                                 ;; :ready (or :gate with nothing deferred) waits for its merge, until root is quiet with it unmerged:
-                                 ;; then nothing root runs will merge it (quiet: no flight, nothing live, nothing left to start)
-                                 (and (:quiet st) (nil? (:report st)) (empty? (:flights st)) (empty? (:live (:idx st))))
+                                 ;; :ready (or :gate with nothing deferred) waits for its merge, until nothing will merge it: this step's pass
+                                 ;; ran first and starts an octopus merge whenever no merge is in flight, so with no octopus merge flying and no
+                                 ;; live merge task, none is coming for it (scoped to merging, never to every agent's work: flow's review)
+                                 (and (not-any? #(= :octopus-merge (get-in % [:act :op])) (vals (:flights st)))
+                                      (not (some (:live (:idx st)) (:merging (:idx st)))))
                                  (contract/error :seon.reconcile/judge-left-ready #'seon.reconcile/answer-judged
-                                                 (str id " is " (name o) " and root went quiet without merging it") {:task id :outcome o}))]
+                                                 (str id " is " (name o) " and no merge of it is in flight or coming") {:task id :outcome o}))]
                      (if r (do (doseq [p ps] (deliver p r)) (update st :judged dissoc id)) st))))
                st (:judged st))))
 
