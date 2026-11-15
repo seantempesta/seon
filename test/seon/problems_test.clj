@@ -1315,7 +1315,8 @@
                ;; 68: :hand-written-list one more (its seon.db/eid and derived-row), context 2026-11-14
                ;; 70: :retyped-attribute one more, the same two (data, 2026-11-14)
                ;; 72: :stateful-outside-flow's reader and its row on the world (flow, 2026-11-14, measured 70 -> 72)
-               :fixed {:ns 3000000 :bytes 4000000 :calls 72}
+               ;; 74: :native-in-defonce one more (its seon.db/eid and derived-row; runtime 3b0dff01c3, measured 72 -> 74)
+               :fixed {:ns 3000000 :bytes 4000000 :calls 74}
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 4000000}} attention-survives-a-store-write
