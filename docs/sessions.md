@@ -14,7 +14,7 @@ Each named session owns one area and knows all of it:
 | tests | the test system: selection, digests, verdicts in the store, `:prove` and its clients |
 | deps | the libraries and native code: Jolt, Chez, Datahike and konserve, their pins, and the binary's identity |
 | data | schemas, pull patterns and keys, and the one merge |
-| flow | Jolt's Flow and Seon's use of it: procs, their start, drain and stop, and the list of state and waits outside Flow |
+| flow | Jolt's Flow and Seon's use of it: procs, their start, drain and stop, and the list of state and waits outside Flow (`seon.problems/nothing-inside-seon-crashes-or-hangs`); the merge gate inside the system (`seon.fx/proving-runs-as-flow`); the switch-over design (`seon.system/an-update-loses-nothing`); messaging (`seon_inbox`, `seon_message`, attach of `session/<area>`); and the review of every design that waits |
 
 - A fix that adds, moves or reads an attribute, ref or pattern clause goes to data first, with the pull form wanted.
 - A session reads the code a helper changes, takes the measurements that decide a design itself, and never answers for code it has not read.
