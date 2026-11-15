@@ -809,12 +809,17 @@
 (defn- main-answer
   "Main's answer r (ask-main's) for the tests asked: :red, those main holds red (main's, whatever the change); :unknown, those it
   answered nothing of (a process test, whose verdict main's runs never store; or an answer that is an error), which hold the task
-  and are never the branch's. A test main holds green is in neither: its red is the branch's. See docs/tasks.md#the-done-rule."
-  {:malli/schema [:=> [:cat [:set :qualified-symbol] :any] [:map [:red [:set :qualified-symbol]] [:unknown [:set :qualified-symbol]]]]}
+  and are never the branch's. A test main holds green is in neither: its red is the branch's. Beside them :answered, each asked
+  test's status as main gave it (:unknown when none), and :error, the type of an error answer: what the judge writes as it read it
+  (:seon.task/main-asked). See docs/tasks.md#the-done-rule."
+  {:malli/schema [:=> [:cat [:set :qualified-symbol] :any] [:map [:red [:set :qualified-symbol]] [:unknown [:set :qualified-symbol]] [:answered [:map-of :qualified-symbol :keyword]] [:error {:optional true} :keyword]]]}
   [asked r]
-  (let [m (if (or (nil? r) (contract/error? r)) {} (proofs/results r))]
-    {:red (into #{} (filter #(#{:fail :error} (get m %))) asked)
-     :unknown (into #{} (remove #(contains? m %)) asked)}))
+  (let [err? (or (nil? r) (contract/error? r))
+        m (if err? {} (proofs/results r))]
+    (cond-> {:red (into #{} (filter #(#{:fail :error} (get m %))) asked)
+             :unknown (into #{} (remove #(contains? m %)) asked)
+             :answered (into {} (for [t asked] [t (get m t :unknown)]))}
+      (and r err?) (assoc :error (:seon.error/type r)))))
 
 (defn- reds-to-ask
   "The red tests of results ({test status}) main's verdict is asked of: every one that is not main-red already, the reader's
@@ -999,7 +1004,7 @@
   a member both changed among the task's conflicts for root; and a failure the agent marked (my.task/fail!) carried with the task held.
   Answers {:tx :outcome :kept?}: kept? when the agent's process is to stay."
   {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db] [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]]] [:map [:tx [:vector :any]] [:outcome :seon.task/outcome]]]}
-  [st {:keys [act run-problems worked-error deferred deferred-digests main-red main-unknown]} results {:keys [db base base-t] :as diff}]
+  [st {:keys [act run-problems worked-error deferred deferred-digests main-red main-unknown main-asked]} results {:keys [db base base-t] :as diff}]
   (let [main (:db st) idx (:idx st)
         id (:task act)
         t (get-in idx [:tasks id])
@@ -1050,6 +1055,8 @@
                ;; each with its digest as main held it at the task's base (nil: new on the branch), an observation the gate reads by
                (seq deferred) (assoc :seon.task/deferred (into {} (for [t deferred] [t (get deferred-digests t)])))
                (seq (:failures run-problems)) (assoc :seon.task/failures (:failures run-problems))
+               ;; what the judge asked main of the run's reds and how it read the answer (seon.reconcile/main-answer)
+               (or main-asked (seq main-red)) (assoc :seon.task/main-asked (merge {:main-red (set main-red) :asked {}} main-asked))
                (seq (:costs run-problems)) (assoc :seon.task/costs (:costs run-problems))
                error (assoc :seon.task/error error)
                (seq (:waste end)) (assoc :seon.task/waste (:waste end))
@@ -1250,9 +1257,11 @@
                     ;; since (three-way's :ours, measured for the octopus merge)
                     (one (request st id :diffed {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}})))))
       ;; main's verdict of the reds asked: each main holds red is main's, each it answered nothing of unknown (docs/tasks.md#the-done-rule)
-      :main-asked (one (request (let [{:keys [red unknown]} (main-answer (get-in f [:asked]) r)]
+      :main-asked (one (request (let [{:keys [red unknown answered error]} (main-answer (get-in f [:asked]) r)]
                                   (-> st (update-in [:flights id :main-red] #(into (set %) red))
-                                      (assoc-in [:flights id :main-unknown] unknown)))
+                                      (assoc-in [:flights id :main-unknown] unknown)
+                                      ;; what main answered, as the judge read it, written with the end (judge-tx)
+                                      (assoc-in [:flights id :main-asked] (cond-> {:asked answered} error (assoc :error error)))))
                                 id :diffed {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}}))
       ;; root stops the agent because its work ended (its view says :ended, not :killed), unless
       ;; its session parked: then the process stays, idle, for the next message's wake
