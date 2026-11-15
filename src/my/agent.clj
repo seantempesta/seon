@@ -412,8 +412,26 @@
       (program/process-path (:graph plan) t))))
 
 (def ^:private every-kind
-  "What grep reads when :in names nothing: the kinds of text the program records (seon.doc/text-attrs)."
+  "What grep reads when :in names nothing: the kinds of text the program records (seon.doc/text-attrs less :library)."
   #{:var :test :section :task :schema})
+
+(defn- grep-empty
+  "grep's answer rows as the eval shows them: an empty one says where to look next (`grep-none-text`), the regex a string with a
+  regex's operators likely meant, or, with nothing in the program, the libraries' grep; else rows. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat [:vector :map] [:or :string :seon.host/regex] [:set :keyword] [:maybe [:set :keyword]] [:maybe :string]] [:vector :map]]}
+  [rows pattern kinds in ns]
+  (cond
+    (and (empty? rows) (string? pattern) (re-find #"[|^$()\[\]*+?\\]" pattern))
+    (with-meta rows {:seon.render/schema :my.agent/grep-none
+                     :say (str "no line holds the string as written: a string is matched as its text, and a regex is written #\"...\", as "
+                               "(my.agent/grep #\"" (str/replace pattern "\"" "\\\"") "\""
+                               (when (or in ns) (str " " (print/text (cond-> {} in (assoc :in in) ns (assoc :ns ns)) (:part print/budgets)))) ")")})
+    ;; nothing in the program: the libraries it loaded (Jolt, Datahike, malli, ...) are the next place, a grep of their own
+    (and (empty? rows) (not (kinds :library)))
+    (with-meta rows {:seon.render/schema :my.agent/grep-none
+                     :say (str "no line of the program holds it; the libraries it loaded (Jolt, Datahike, malli, ...): "
+                               "(my.agent/grep " (print/text pattern (:part print/budgets)) " {:in #{:library}})")})
+    :else rows))
 
 (defn grep
   "Like grep, over this branch's program: every line matching pattern in the functions, tests, wiki sections,
@@ -422,7 +440,8 @@
   naming that task and how many of its lines matched; another task's plan is a hit as any text is.
   pattern is a string, matched as written, or a regex (#\"plan|proof\"); a string with a regex's operators that matches
   nothing answers [], shown with its regex form (`grep-none-text`). opts, and no others: :in, a set of kinds (:var :test
-  :section :task :schema), :ns, a name and what is under it (\"seon.ref\": seon.ref/x and seon.ref.y/z, not seon.ref-test). The answer is data, and whole: narrow it as you
+  :section :task :schema, or :library: the source of the libraries the program loaded, Jolt's included, read by
+  its path), :ns, a name and what is under it (\"seon.ref\": seon.ref/x and seon.ref.y/z, not seon.ref-test). The answer is data, and whole: narrow it as you
   would a list, (take 10 (grep \"x\")), (filter #(= :test (:kind %)) ...), (count ...), and read a hit's lines
   with (lines \"seon.task/accumulate\" 1 20). (search s) ranks by meaning, words and references; grep finds text. See docs/vector.md#search."
   {:malli/schema [:function [:=> [:cat [:or :string :seon.host/regex]] [:vector :map]]
@@ -446,19 +465,14 @@
      ;; a string is its text as written: one holding a regex's operators that matches nothing is still [] (a
      ;; value, so a reply's later calls run), shown with its regex form: the string's characters between #" and ",
      ;; a quote escaped
-     (if (and (empty? rows) (string? pattern) (re-find #"[|^$()\[\]*+?\\]" pattern))
-       (with-meta rows {:seon.render/schema :my.agent/grep-none
-                        :ask (str "(my.agent/grep #\"" (str/replace pattern "\"" "\\\"") "\""
-                                  (when (or in ns) (str " " (print/text (cond-> {} in (assoc :in in) ns (assoc :ns ns)) (:part print/budgets)))) ")")})
-       rows))))
+     (grep-empty rows pattern kinds in ns))))
 
 (defn grep-none-text
-  "grep's empty answer to a string holding a regex's operators as the eval shows it (seon.render/model, the
-  schema :my.agent/grep-none): [] and the regex form that asks for what it likely meant. See docs/agent.md#small-answers."
+  "grep's empty answer as the eval shows it (seon.render/model, the schema :my.agent/grep-none): [] and where to look next, the
+  regex form a string with a regex's operators likely meant, or the libraries' grep. See docs/agent.md#small-answers."
   {:malli/schema [:=> [:cat :seon.render/opts [:vector :map]] :any]}
   [_ rs]
-  (print/code (str "[] ; no line holds the string as written: a string is matched as its text, and a regex is written #\"...\", as "
-                   (:ask (meta rs)))))
+  (print/code (str "[] ; " (:say (meta rs)))))
 
 (defn ls
   "Like ls: what x holds, one row each. A namespace ('seon.task): each definition, privates included, in file
