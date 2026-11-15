@@ -357,6 +357,23 @@
                                         " (select-keys (#'seon.server/inbox-answer sys {:agent " (pr-str (name agent)) "}) [:seon.error/type :waited-ms])))")}]))]
     (is (= {:seon.error/type :seon.server/no-message :waited-ms 50} (:value r)) (pr-str r))))
 
+;; Estimate: three server round trips (~0.5M each) and one delivery on the agent (~0.1M): ~1.6M; 3,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} an-inbox-answers-a-message-once
+  ;; root's end-to-end test on main 6635b0cac2 [M result/bda749de]: a second inbox call returned the messages the first had answered,
+  ;; so a session's standing wait would wake at once forever. The inbox delivers what it answers (the agent's one delivery,
+  ;; seon.agent/deliver!: delivery is the fact, docs/users.md#messages), so the next call answers only what came after. Red before: the
+  ;; second call answered the same message
+  (let [[_ first-r again] (at/in-agent (fn [{:keys [agent]}]
+                                         [{:op :message :agent agent :body "answered once"}
+                                          {:op :inbox :agent (name agent)}
+                                          {:op :eval :agent "root"
+                                           :code (str "(let [v seon.config/value]"
+                                                      " (with-redefs [seon.config/value (fn ([k] (if (= k :seon.config.root/inbox-wait-ms) 50 (v k))) ([k c] (v k c)))]"
+                                                      " (let [r (#'seon.server/inbox-answer sys {:agent " (pr-str (name agent)) "})]"
+                                                      " (or (:seon.error/type r) (mapv :body (:messages r))))))")}]))]
+    (is (= ["answered once"] (mapv :body (:messages first-r))) (pr-str first-r))
+    (is (= :seon.server/no-message (:value again)) (str "asked again, nothing new: never the same message twice: " (pr-str again)))))
+
 (deftest ^{:seon.test/estimate {:ticks 300000}} an-inbox-line-runs-on-its-connection-and-holds-no-worker
   ;; part 2: seon_inbox waits, so it runs on the connection's fiber (which parks), never one of the 16 :server-op worker threads
   ;; (:seon.config.root/server-op-workers): eight waiting sessions would hold half of them. Both protocols. Red before: no inline op
