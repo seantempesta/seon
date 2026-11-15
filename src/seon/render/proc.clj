@@ -490,7 +490,7 @@
   "The outputs branch b's kept walk draws: what the views of it a tab holds or waits for read. The page's hiccup always; the model's
   request (:seon.render/openai-compat) only while a debug view of it is open, since only its latest turn reads it (`debug-value`):
   a chat drew the model's request of every watched agent, 6.8B ticks and 35.8 GB on root's session against its page's 163M
-  [M 2026-11-15]. See docs/render.md#a-page-is-a-kept-walk."
+  [M]. See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :map :any] [:set :keyword]]}
   [st b]
   (if (some #(and (= :debug (first-of %)) (= b (get-in st [:branches % :branch]))) (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st))))
