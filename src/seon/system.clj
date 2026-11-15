@@ -2074,7 +2074,7 @@
       ;; :judge, which keys the run by its head's digest): recorded on main, one run with any other asker's
       run-tests! {:op :judge :id id}
       kill! {:op :kill :id id}
-      message! {:op :message :id id :body (:body args)}
+      message! (cond-> {:op :message :id id :body (:body args)} (:from args) (assoc :from (:from args)))
       ;; my.root/run!'s one transaction: the held task (:task) released, its next run the reconciler's
       release! {:op :write :req {:op :tx :branch :db :tx-data (task/execution-tx [(:task args)] :running)}}
       ;; a reader opened an eval of agent key's page: the fact on the agent's entity on main (opened!), named by a lookup ref:
@@ -2125,9 +2125,11 @@
   ([sys agent-id forms-string opts] (request! sys 'submit! agent-id (assoc opts :forms forms-string))))
 
 (defn message!
-  "Send the signed-in user's message body (a string) to the agent: one message fact on main through root's writer (`message-write`), which wakes it, whether or not its process lives; the agent's next act delivers it. A promise of the writer's answer for that fact's transaction, or refused when main holds no agent of that id or key. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.system/sys :seon.agent/id :string] :seon.host/promise]}
-  [sys agent-id body] (request! sys 'message! agent-id {:body body}))
+  "Send message body (a string) to the agent, from the agent keyed :from when given (a session's, seon.server/connection-agent), else the signed-in user: one message fact on main through root's writer (`message-write`), which wakes it, whether or not its process lives; the agent's next act delivers it. A promise of the writer's answer for that fact's transaction, or refused when main holds no agent of that id or key. See docs/users.md#messages."
+  {:malli/schema [:function [:=> [:cat :seon.system/sys :seon.agent/id :string] :seon.host/promise]
+                  [:=> [:cat :seon.system/sys :seon.agent/id :string [:maybe [:map [:from :string]]]] :seon.host/promise]]}
+  ([sys agent-id body] (message! sys agent-id body nil))
+  ([sys agent-id body {:keys [from]}] (request! sys 'message! agent-id (cond-> {:body body} from (assoc :from from)))))
 
 (defn release!
   "Release the held task task-id (my.root/run!'s one transaction): the reconciler runs its next

@@ -373,8 +373,20 @@
             (cond (contract/error? r) r (:ex r) (:ex r) :else {:agent ag :task task :context (:seon.print/code (:out r))}))))
       (refused (if ag (str ag " works no task: attach one first") (str "no task " (:task req) ", and no agent named"))))))
 
+(defn connection-agent
+  "The key of the agent connection req's client works through, or nil (then the signed-in person, seon.system's :message): the agent
+  it holds (attach!'s :holder), among the running and the parked tasks' agents (a session's agent parks between requests). Two :avet
+  seeks; one connection's agent, read per request, never kept. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.system/sys :map] [:maybe :string]]}
+  [sys req]
+  (when-let [c (:client req)]
+    (let [db @(:conn sys)]
+      (some (fn [{:keys [env key]}] (when (= c (:holder env)) key))
+            (concat (task/running db) (task/running db :parked))))))
+
 (defmethod op-answer :message [sys ag req]
-  @(c/message! sys ag (:body req)))
+  ;; from the agent the connection works through (connection-agent), else the signed-in person
+  @(c/message! sys ag (:body req) (some->> (connection-agent sys req) (hash-map :from))))
 
 (defmethod op-answer :write_back [sys _ _] (root/write-back! sys))
 

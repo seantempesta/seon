@@ -212,6 +212,22 @@
     (is (some #{4} (map :value (:responses named))) "and so does one that names the agent's task")
     (is (true? (:value open)) "the refused done left the task open")))
 
+;; Estimate: in this process, three server round trips (~0.5M each): ~1.5M; 2,000,000. In root: connection-agent's two :avet seeks of
+;; running and parked tasks (~50k ticks)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} a-message-from-a-connection-is-from-its-agent
+  ;; task seon.server/a-message-reaches-the-session-that-drives-its-agent, part 4: a session's message is from the agent its connection
+  ;; holds (seon.server/connection-agent), never the signed-in person. Red before: every message from MCP was :from "user" (flow's
+  ;; probe ba18c9e9bd81a184)
+  (let [k (volatile! nil)
+        [sent from] (at/in-agent (fn [{:keys [agent]}]
+                                   (vreset! k (name agent))
+                                   [{:op :message :agent "root" :body "from the session holding it" :client "c1"}
+                                    {:op :eval :agent "root"
+                                     :code "(let [db @(:conn sys) e (ffirst (datahike.api/q '[:find ?m :where [?m :seon.message/body \"from the session holding it\"]] db))] (seon.task/sender-name (:seon.message/from (datahike.api/entity db e))))"}])
+                                 {:client "c1"})]
+    (is (true? (:ok sent)) (pr-str sent))
+    (is (= @k (:value from)) (str "from the agent the connection holds: " (pr-str from)))))
+
 (deftest a-message-reaches-the-agent
   ;; (parity row 73): the owner's message, sent as
   ;; the page's message bar sends it (seon.system/message!, here through the server's :message
