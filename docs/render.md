@@ -166,7 +166,7 @@ One pass over the pull renders every output asked of it ([users](users.md#the-st
 
 Your page and your model's context are renders of `@ctx`, and a render runs again only when a path it read changes: read the narrowest path you need, and give each member of a list its own component. A rerun moves only the reads it gained or lost in the walk's path index (```seon.ratom/read-index```; `seon.ratom-test/a-rerun-indexes-only-the-reads-it-gained-or-lost`), but a layout that lists every member still reruns at O(members).
 
-**A render is an input of what it draws, as the data is.** A move of a definition (`:var/form`) queues each component whose render reaches it through `:form/refs` (`seon.render/queue-moved-renders!`, `seon.render-test/a-render-that-changes-draws-again`); it costs nothing until a definition moves.
+**A render is an input of what it draws, as the data is.** A move of a definition (`:var/form`) queues each component whose render reaches it through `:form/refs` (`seon.render/queue-moved-renders!`, `seon.render-test/a-render-that-changes-draws-again`); it costs nothing until a definition moves. A landing moves definitions on main, which an agent's branch walk never reads, so main's move hands its `:var/form` datoms, with each var's `:var/name`, to every kept branch walk (`seon.render.proc/advance-main`, `seon.render-test/a-landing-redraws-what-a-branch-walk-drew`).
 
 **Writing one.** A render is a function `[opts & args]` answering hiccup; it is a component when its opts contract names `:seon.ctx/ctx` or `:seon.db/db`. A call `[#'f {} arg]` in a render's hiccup draws f there as a component of its own, keyed by f and its args:
 

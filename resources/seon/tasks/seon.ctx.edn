@@ -157,4 +157,10 @@ Proof: an agent whose change stales a section reads, in its status, each section
  {:seon.task/name "the-prompt-says-only-what-a-session-holds"
   :seon.task/plan "Flow's audit (relayed by root, 2026-11-16 ~03:30): docs/prompt.md tells an agent three things that are false in a session namespace: that Datahike is aliased d in every namespace (a session namespace has no d), that my.db/main exists (it does not), and that search hits are plain maps (they are not). Each cost the auditing agent turns.\n\nPRIOR WORK: docs/prompt.md (the system prompt, seon.ctx.wire/agent-system-text); the namespaces an agent's REPL starts in (seon.repl's ns setup); my.db; seon.ctx.search's hit shape. Searched: none of the three is checked by a test today.\n\nChange, at the cause: each claim made true where the agent reads it, either the namespace gains it (d aliased in every namespace an agent starts in, as the prompt promises) or the prompt says what is there. A proof evaluates each claim in a fresh session namespace, the way an agent would.\n\nCOST: a prompt edit, or one alias in the namespace setup; ~0 per request."
   :seon.task/proofs #{seon.ctx-test/what-the-prompt-names-evaluates-in-a-session-namespace}}
-]
+
+ {:seon.task/name "an-agent-moving-entries-moves-their-comments"
+  :seon.task/plan "Root's review of the pilot sync, 2026-11-16 05:1x: the first Seon agent reordered :seon.repl/answer's entries in seon.core.edn and left each ;; comment where it was, so four comments sat over the wrong entries (fixed by hand, 97ac6cf112). The class: what an agent reads of an EDN file it edits does not say that a comment belongs to the entry below it. PRIOR WORK: seon.repl/edit! (the agent's edit of a form), the agent's context for a schema file (seon.ctx), seon.source's file text. Fix at the source of the agent's view: an entry's lead comment is part of the entry as the agent reads and edits it (as a form's :form/lead is for code), so a move carries it. COST: no new pass; the lead is read with the entry."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.ctx-test/an-entry-moved-by-an-agent-keeps-its-lead-comment}
+  :seon.task/needs #{}
+  :seon.task/estimate #:seon.ctx{pattern {:n 1, :order :constant, :ticks 100000, :bytes 1000000}}}]
