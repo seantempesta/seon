@@ -4745,7 +4745,8 @@
         (is (= [[:db.fn/retractAttribute [:seon.user/name "sean"] :seon.user/focus]] (txs o3)) "opening home retracts it")))
     (is (some? st1))))
 
-(deftest home-is-roots-chat-whatever-the-focus
+;; Estimate: 3 location reads on a paged fixture (its build ~1.5M) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} home-is-roots-chat-whatever-the-focus
   ;; docs/decisions.md, The page is a friendly chat (2026-11-15): the person talks to root at /, and never learns other agents exist, so
   ;; home is root's chat however the focus stands (a tab that opened an agent's page, or root's my.user/focus!, moved it before)
   (let [[main _ _] (paged-dbs)]
