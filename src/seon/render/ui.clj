@@ -437,6 +437,34 @@
                      (str (group3 m) " / " (group3 x) (when (and m x (pos? x)) (str " (" (fmt2 (/ m x)) "×)")))])])]]
       (render/hiccup (assoc opts :schema :seon.cost/verdict) verdict)]))
 
+(defn offer
+  "A place an agent offers the person (the declared html render of :seon.user/offer, the value my.user/focus! answers): a button in the
+  person's words; tapped, it calls seon.system/focus! (the person's web state, :seon.user/focus, set to its place) and, once that answers,
+  opens the place's page. Nothing is written until the tap. See docs/users.md#whats-on-screen."
+  {:seon.render/style ".offer { display: inline-block; margin: 0.25rem 0; padding: 0.625rem 1.125rem; border-radius: 1rem; font-size: 1.0625rem; font-weight: 600; background: var(--color-base-800); color: var(--color-text-50); border: 1px solid var(--color-base-700); }
+.offer:hover { border-color: var(--color-signal); }"
+   :malli/schema [:=> [:cat :seon.render/opts :seon.user/offer] :any]}
+  [_ {:seon.user/keys [place label]}]
+  [:button {:type "button" :seon/call 'seon.system/focus! :seon/args {:key (second place)} :seon/go (str "/agent/" (second place))} label])
+
+(defn person-input
+  "The person's message box on root's chat (docs/decisions.md, The page is a friendly chat): like the good chat tools, a box that grows
+  taller with its text (up to 40% of the screen), a clear Send button, Enter sends and Shift+Enter is a new line; what is sent is a
+  message to root's session through the same call every input makes (seon.system/submit!). See docs/render.md#the-page."
+  {:seon.render/style ".person-input { display: flex; align-items: flex-end; gap: 0.5rem; padding: 0.75rem 0 1rem; }
+.person-input textarea { flex: 1; min-width: 0; font-family: ui-sans-serif, system-ui, -apple-system, 'Helvetica Neue', sans-serif; font-size: 1.1875rem; line-height: 1.5; padding: 0.75rem 1rem; border-radius: 1rem; resize: none; field-sizing: content; min-height: 3.25rem; max-height: 40vh; overflow-y: auto; }
+.person-input button[type=submit] { flex: none; font-size: 1.0625rem; font-weight: 600; padding: 0.75rem 1.25rem; border-radius: 1rem; background: var(--color-signal); color: var(--color-base-950); }
+.person-input button[type=submit]:hover { filter: brightness(1.1); }"
+   :malli/schema [:=> [:cat :seon.render/opts [:map [:address :keyword] [:focus? {:optional true} [:maybe :boolean]]]] :any]}
+  [opts {:keys [address focus?]}]
+  [:form {:id (:unit opts) :class "person-input" :data-seon-repl "" :seon/call 'seon.system/submit! :seon/agent address}
+   [:textarea (cond-> {:name "forms" :rows 1 :autocomplete "off" :placeholder "Message Seon" :aria-label "Message Seon"
+                       ;; Enter sends, Shift+Enter is a new line; the box grows with its text where the browser does not (field-sizing)
+                       (keyword "data-on:keydown") "if (evt.key==='Enter' && !evt.shiftKey) { evt.preventDefault(); el.form.requestSubmit() }"
+                       (keyword "data-on:input") "el.style.height='auto'; el.style.height=Math.min(el.scrollHeight, innerHeight*0.4)+'px'"}
+                focus? (assoc :autofocus true))]
+   [:button {:type "submit" :aria-label "Send"} "Send"]])
+
 (defn agent-input
   "The input at the top of an agent's page, each through root's requests (the server's ops send
   the same): words are a message its next turn reads (seon.system/message!), and a line that starts with
@@ -447,7 +475,9 @@
   @ctx's page is long and the field ends it)."
   {:seon.render/style "#p-input button[data-interrupt][disabled] { visibility: hidden; }"
    :malli/schema [:=> [:cat :seon.render/opts :seon.render/agent-input] :any]}
-  [opts {:keys [id address live? held focus? busy? talks?]}]
+  [opts {:keys [id address live? held focus? busy? talks? person?]}]
+  (if person?
+    (person-input opts {:address (or address id) :focus? focus?})
   [:section {:id (:unit opts) :class "seon-stack-2"}
    (if (or live? talks?)
      [:form {:class "seon-row" :data-seon-repl "" :seon/call 'seon.system/submit! :seon/agent (or address id)}
@@ -470,7 +500,7 @@
    (when held
      [:button {:class "self-start rounded border border-base-700 px-2" :title (str "release " held ": the reconciler runs its next run (my.root/run!)")
                :seon/call 'seon.system/release! :seon/agent id :seon/args {:task held}}
-      (str "▶ release " held)])])
+      (str "▶ release " held)])]))
 
 ;;; --- an eval's parts ---------------------------------------------------------------
 
