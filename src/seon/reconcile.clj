@@ -1476,7 +1476,7 @@
                               :flight-steps (into (sorted-map) (for [[id f] (:flights st)] [id (or (:step f) (get-in f [:act :op]))])) :pending (count (:pending st)) :behind (count (:behind st))
                               :quiet (boolean (:quiet st)) :root-causes (count (:root-causes (:quiescent st)))
                               ;; the waits on main it holds ({:after t}) and its quiet report's write until answered: what a parked await-db waits on
-                              :waits (mapv :after (:waits st)) :report (:report st) :live (count (:live (:idx st)))
+                              :waits (mapv :after (:waits st)) :report (:report st) :live (vec (take 10 (sort (:live (:idx st)))))
                               ;; the tasks whose judge a caller waits on (seon_done): answered at each one's end
                               :judged (vec (sort (keys (:judged st))))})})
   ([args] (assoc (dissoc args :judge) :seen 0 :rid 0 :flights {} :pending {} :waits [] :judged {} :behind []

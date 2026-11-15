@@ -555,6 +555,20 @@
   ;; this test process's shared roots by [checkout args] (shared-root!): data, not a function
   (java.util.concurrent.ConcurrentHashMap.))
 
+;; Estimate: one copy a shared root's log (~100 KB): ~1M ticks, at a shard's end, only when it had a red
+(defn keep-root-logs!
+  "The files written: each shared root's log copied into dir, before the shutdown hook deletes its runs; a shard with a red
+  calls it. See docs/testing.md#a-root-costs-what-it-boots."
+  {:malli/schema [:=> [:cat :string] [:vector :string]]}
+  [dir]
+  (vec (for [d (vals shared-roots)
+             :let [r (when (realized? d) (try @d (catch Throwable _ nil)))
+                   f (some-> (:runs r) (java.io.File. "root.log"))]
+             :when (and f (.isFile f))
+             :let [to (java.io.File. ^String dir (str "shared-root-" (.getName (java.io.File. ^String (:runs r))) ".log"))]]
+         (do (java.nio.file.Files/copy (.toPath f) (.toPath to) (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/REPLACE_EXISTING]))
+             (str to)))))
+
 (defn- dead-pid?
   "Is the pid of a name made by mark-of no live process (kill -0: a fact about a process, never a clock; a reused pid keeps
   a stale name, never loses a live one's)?"
