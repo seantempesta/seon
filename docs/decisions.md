@@ -54,6 +54,10 @@ On storing each turn's request: "Yes we can store what we sent and we store what
 
 "I want our codebase cut in half when we are done overhauling everything so de-duplication of ideas is essential." And: "Collapse all duplicate systems in favor of good tools and systems we can use everywhere." `src` is 43,312 lines on 2026-11-15; the target is about 21,600, by collapsing duplicate ideas, never by removing functionality. Stated in [the plan](plan.md#the-order).
 
+### An agent loads main's changes in place
+
+Round 1's transcript showed agents re-forked into a cold process every turn: each turn merged main whenever main moved, and a merge that brought code ended the run. Asked how an agent should take main's changes, he chose loading in place: at each turn boundary the agent merges main and evaluates main's changed forms into its running process, as root does on a landing, re-forking only when a build input changed. Stated in [the plan](plan.md#the-order).
+
 ### Root fixes errors anywhere; the plan is A to B
 
 "You can and should fix all errors anywhere in the system. Distribute this work to expert agents as you need too." "We need a plan from where we are now A to where we want to go B. That's your job." The order he approved is in [the plan](plan.md#the-order).
