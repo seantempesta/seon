@@ -151,3 +151,23 @@
     (is (not (contains? (get-in r [:seen :site]) :stepping)) (str "parked while its proofs are queued: " (pr-str (:seen r))))
     (is (= "app.calc/total-is-exact" (get-in r [:seen :run :task])) (str "the ping is answered with the run: " (pr-str (:seen r))))
     (is (= :waiting (get-in r [:end :outcome])) (pr-str (:end r)))))
+
+;; Estimate: two calls of status-now with its readers stood in (no store read, no render): ~0.1M ticks, ~1 MB, ~1 ms
+(deftest ^{:seon.test/estimate {:ticks 100000 :bytes 1000000}} a-cold-process-reads-its-status-without-drawing-its-page
+  ;; Stage 0's 20G (2026-11-15): a hand-back in a re-attached process asked its status of the page walk, which drew the whole conversation
+  ;; cold (a page diff each turn, each over a collected commit's as-of view). With no walk held the status is read directly; a held walk
+  ;; still gives its kept status, so a warm turn computes it once (docs/turn.md#act)
+  (let [old @seon.agent/state
+        drawn (volatile! 0) direct (volatile! 0)]
+    (try
+      (with-redefs [seon.agent/db (constantly nil)
+                    seon.repl/page-walk (fn [] (vswap! drawn inc) {:held true})
+                    seon.render/kept-of (fn [_ _] {:reasons [] :from :walk})
+                    seon.ctx.status/status (fn [_ _ _] (vswap! direct inc) {:reasons [] :from :direct})]
+        (reset! seon.agent/state (dissoc old :walk))
+        (let [s (@#'turn/status-now)] (is (= :direct (:from s)) (str "no walk held: the status is read directly: " (pr-str s))))
+        (is (zero? @drawn) "and the page is not drawn")
+        (swap! seon.agent/state assoc :walk {:held true})
+        (is (= :walk (:from (@#'turn/status-now))) "a held walk: its kept status")
+        (is (= 1 @drawn) "advanced once, as a warm turn does"))
+      (finally (reset! seon.agent/state old)))))

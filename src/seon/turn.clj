@@ -79,11 +79,13 @@
     {:test-run test-run :task (task/task (agent/db) id)}))
 
 (defn- status-now
-  "How the work stands now, the data a turn decides from: what the page's status component kept (seon.render/kept-of), one reaction for both, so a status nothing moved costs nothing; with none (it threw, or a layout places none) seon.ctx.status/status of the branch and @ctx. The branch may have changed
-  what status calls, so a status that throws is its error, the turn's to give the agent (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map), never an
-  empty status: no reason is not done (unknown is not {}: docs/errors.md#unknown-is-never-a-default)."
+  "How the work stands now, the data a turn decides from: the status the agent's held page walk kept (seon.render/kept-of), so a warm
+  turn computes it once for the page and the decision; with no walk held (a process started cold: a re-attach, a re-fork, a hand-back)
+  or none kept there, seon.ctx.status/status directly, never a cold draw of the page (a long agent's cold page diffs every turn: lb76,
+  144 turns, past 20G ticks; its status alone 228M). A status that throws is its error, the turn's to give the agent
+  (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map), never an empty status. See docs/turn.md#act."
   {:malli/schema [:=> [:cat] [:or :map :seon.error/base]]}
-  [] (try (or (render/kept-of (repl/page-walk) '[seon.render.ui/status])
+  [] (try (or (when (:walk @agent/state) (render/kept-of (repl/page-walk) '[seon.render.ui/status]))
               (status/status (agent/db) @ctx/ctx {}))
           ;; root's interrupt (a ThreadDeath, seon.intr) passes: it is no status error
           (catch Exception e
