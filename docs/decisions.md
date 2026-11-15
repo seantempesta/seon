@@ -10,6 +10,10 @@ The owner's rulings on the morning after the first night run on its own.
 
 "Tests needs to always have sub agents running (I think sonnet is fine) that are refactoring tests to test for 90% of the goal and make it a ms test and to drop any tests that are low quality and slow." The tests session keeps Sonnet helpers working at all times, in its one worktree, each on test files nobody else edits, slowest first ("Have the agents run those conversions slowest first"); a test is rewritten to prove the most important 90% of its goal in milliseconds, or dropped when it is low quality and slow, its `Deletes:` line naming what now proves its goal (`AGENTS.md` §2, helpers; §3, no functionality removed).
 
+### Everyone switches over once a change is verified
+
+"Okay so we are changing agent behavior after it lands? I want everyone to merge fork main and immediately switch over once it's tested and verified." A verified change to shared machinery is the one way from its landing: every session merges main at once, agents fork from it, and no transitional second way waits for a later landing. For landing 12 this replaces root's ruling that `bin/test` keep its file cache until E: its next slice moves `bin/test`'s verdicts onto the store and deletes the file cache. Stated in [the plan](plan.md#the-order).
+
 ### A land proves a copy of its commit
 
 Asked how to free a session's worktree during a land (1,007 session-minutes locked on 2026-11-15 over 103 lands [M], and one land proved files still being edited), he chose: `bin/land` proves a throwaway checkout of the exact commit it lands, so the worktree is free at once and a proof always covers what merges; deleted with E. Stated in `AGENTS.md` §3.
