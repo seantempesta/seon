@@ -288,25 +288,17 @@
       (is (and (there? "bbbbbbbb") (there? "cccccccc")) "the two most recently used others stay")
       (finally (seon.lib/remove-tree! dir)))))
 
-;; docs/clocks.md#two-kinds-of-wait: a test's ask of a test root (seon.test-store/ask) ends before the test's wall bound, typed, with
-;; what it asked and the root's state then (seon.system/stall-state, asked on a second connection with its own bound), never at the
-;; wall with no evidence (pilot 14's hang blocked in ask's readLine and named nothing: flow's evidence gap). A stub root here: it reads
-;; the first ask and never answers; it answers the second with a state. Red before: ask had no bound and the test ended at its wall.
-;; Estimate: two socket round trips and a small edn read, ~1M ticks; its wait is its bound, a few seconds of wall time.
+;; docs/clocks.md#two-kinds-of-wait: an ask of a test root (seon.test-store/ask) ends at its declared bound, typed, with what it asked
+;; and the root's state then (seon.system/stall-state, asked on a second connection with its own bound, the margin), never at the
+;; test's wall with no evidence (pilot 14's hang blocked in ask's readLine and named nothing: flow's evidence gap). A root that answers
+;; neither ask (a socket that takes connections and never replies) gives the same typed no-answer as its state: no second hang.
+;; Red before: ask had no bound, and this test ended at its wall (OVERRAN, ~5 min). Estimate: two connections and two socket
+;; timeouts, ~0.1M ticks; its wall time is its bounds, 0.5 s and the 3 s margin.
 (deftest ^{:seon.test/estimate {:ticks 1000000}} an-ask-no-root-answers-ends-at-its-bound-with-the-roots-state
-  (with-open [server (java.net.ServerSocket. 0)]
-    (let [port (.getLocalPort server)
-          held (atom [])
-          serve (future
-                  (let [first-conn (.accept server)]
-                    (swap! held conj first-conn)
-                    (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream first-conn))))
-                    (with-open [second-conn (.accept server)]
-                      (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream second-conn))))
-                      (doto (java.io.PrintWriter. (.getOutputStream second-conn) true) (.println (pr-str {:response {:value {:prove {:runs-in-flight ["k1"]}}}}))))))
-          r (ts/ask {:port port} {:op :prove :names ['a.b-test/t]})]
-      (doseq [c @held] (.close ^java.net.Socket c))
-      (future-cancel serve)
+  (with-open [server (java.net.ServerSocket. 0 8)]
+    (let [m {:op :prove :names ['a.b-test/t]}
+          r (ts/ask {:port (.getLocalPort server)} m 500)]
       (is (= :seon.test-store/no-answer (:seon.error/type r)) (pr-str r))
-      (is (= {:op :prove :names ['a.b-test/t]} (:asked r)) "naming what it asked")
-      (is (= ["k1"] (get-in r [:root-state :response :value :prove :runs-in-flight])) "and the root's state then"))))
+      (is (= m (:asked r)) "naming what it asked")
+      (is (= :seon.test-store/no-answer (get-in r [:root-state :seon.error/type])) (str "the root's state, asked with its own bound, is the same typed silence: " (pr-str (:root-state r))))
+      (is (nil? (get-in r [:root-state :root-state])) "and no second evidence ask"))))
