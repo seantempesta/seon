@@ -104,7 +104,7 @@
  {:seon.task/name "a-namespace-that-does-not-load-fails-only-its-own-tests"
   :seon.task/plan "Owner: runtime (the one loader). Measured at root [tests-4, 2026-11-15]: one form that did not load (seon.reads-test, Jolt's emit-quoted on a #uuid) failed a test agent's whole program load, so every test in every batch answered :seon.prove/no-verdict (482 load failures, 30 no-verdicts a test) and main's run proved nothing; the failure reached main only as error facts no status or page shows. The existing mechanism: the agent's program load (seon.agent-proc's load of the branch's program). Fix: a namespace that does not load answers its load error to its own tests (each a red naming the form), and every other namespace loads and runs; the run states the namespaces it could not load. Cost: none on a good load; O(namespaces) on a bad one. Proof, red first: an agent whose branch holds one namespace that does not load runs the other namespaces' tests green and answers that namespace's tests with its load error."
   :seon.task/kind :work
-  :seon.task/proofs #{}
+  :seon.task/proofs #{seon.agent-test/a-namespace-that-does-not-load-fails-only-its-own-tests}
   :seon.task/estimate #:seon.agent{load-program {:n 300, :order :linear, :ticks 100000, :bytes 100000}}
   :seon.task/needs #{}}
 ]
