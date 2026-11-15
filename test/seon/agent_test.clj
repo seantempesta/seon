@@ -3155,25 +3155,28 @@
     (is (= [:error :seon.fx/io-error] (:value refused)) (pr-str refused))
     (is (= [:verdict {t :error}] (:value unreached)) (pr-str unreached))))
 
-;; docs/merging.md#a-merge-runs-what-the-change-reaches: a gate's answer that holds a test with no verdict (its batch's error,
-;; seon.prove/run-answer's :no-verdict) is the agent's typed error naming why, never a silence: the gate wrote only its verdicts, and the
-;; why was lost (data's pilot gate, 2026-11-15 23:0x: 280 tests, no message recorded anywhere; result/a1a99fa9). The gate answered at its seam.
-;; Estimate: in-agent's setup and teardown ~1.5M + 4 asks at ~0.25M = ~2.5M
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 6}} a-gate-answer-with-no-verdict-is-the-proves-error
-  (let [t 'seon.repl-test/a-proof-the-gate-left-with-no-verdict
+;; docs/merging.md#a-merge-runs-what-the-change-reaches: a gate's answer that leaves a test with no verdict (its batch's error,
+;; seon.prove/run-answer's :no-verdict) holds only that test: it stays deferred and the answer says why, while every other verdict of
+;; the run stands. Red before: judge! answered the no-verdict as the prove's typed error, which voided the run's verdicts (data's
+;; pilot run 14: one process test at its wall bound, and the pilot's own proof read unknown). The gate answered at its seam.
+;; Estimate: in-agent's setup and teardown ~1.5M + 5 asks at ~0.25M = ~2.75M
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3500000 :asks 7}} a-gate-answer-with-no-verdict-holds-only-its-tests
+  (let [t 'seon.repl-test/a-proof-the-gate-left-with-no-verdict u 'seon.repl-test/a-proof-the-gate-judged-green
         _ '[seon.agent/judge! seon.agent/ask-gate seon.proofs/gate-tx]
         seam (str "(do (in-ns 'user) (def gate-reply (atom nil))"
                   " (alter-var-root #'seon.agent/send-gate! (constantly (fn [k tests _] (seon.agent/handle! {:op :reply :k k :result (@gate-reply tests)}) nil))) :ok)")
-        prove "(let [r (my.agent/prove)] (if (seon.contract/error? r) [:error (:seon.error/type r) (:seon.error/message r)] [:verdict (:proofs r)]))"
-        [_ _ _ _ answered]
-        (in-agent (fn [_] [seam (process-proof "a-proof-the-gate-left-with-no-verdict" 2)
-                           (str "(reset! user/gate-reply (fn [tests] {:value {:results {} :digests {} :no-verdict (zipmap tests (repeat {:seon.error/type :seon.test/fork-refused"
-                                " :seon.error/message \"the test child could not be forked\"}))}}))")
+        prove "(let [r (my.agent/prove)] (if (seon.contract/error? r) [:error (:seon.error/type r)] [:verdict (:proofs r) (:unjudged r)]))"
+        [_ _ _ _ _ answered]
+        (in-agent (fn [_] [seam (process-proof "a-proof-the-gate-left-with-no-verdict" 2) (process-proof "a-proof-the-gate-judged-green" 2)
+                           (str "(reset! user/gate-reply (fn [tests] {:value {:results {'" u " :pass} :digests {'" u " \"gate\"}"
+                                " :no-verdict {'" t " {:seon.error/type :seon.test/fork-refused :seon.error/message \"the test child could not be forked\"}}}}))")
                            prove prove])
-                  {:proofs #{t}})
-        [kind type message] (:value answered)]
-    (is (= [:error :seon.prove/no-verdict] [kind type]) (pr-str answered))
-    (is (some-> message (str/includes? "the test child could not be forked")) (str "naming the batch's own error: " (pr-str message)))))
+                  {:proofs #{t u}})
+        [kind proofs unjudged] (:value answered)]
+    (is (= :verdict kind) (str "the run answers its verdicts, never the one test's error: " (pr-str answered)))
+    (is (= :pass (get proofs u)) "the gate's green stands")
+    (is (= :deferred (get proofs t)) "the test with no verdict stays deferred")
+    (is (some-> unjudged (str/includes? "the test child could not be forked")) (str "and the answer says why: " (pr-str unjudged)))))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-hand-back-with-a-red-process-test-is-no-green-end

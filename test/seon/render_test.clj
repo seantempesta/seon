@@ -1350,7 +1350,8 @@
         ;; session names request/root, through which it reaches the person it works for)
         ;; 2026-11-15: chat-ask 6 -> 13 with no render changed: root's boot now writes the binary's plan over a stale one
         ;; (seon.system/root-agent-boot-tx), so this world's root holds the real plan, long enough to draw folded, where it held "p"
-        pinned '{seon.render.ui/agent {:class 23 :wire 4} seon.render.ui/agent-parts {:class 3} seon.render.ui/agent-state {:class 3 :wire 3} seon.render.ui/agents-list {:class 1} seon.render.ui/chat-ask {:class 13} seon.render.ui/chat-end {:class 1} seon.render.ui/cite {:class 2} seon.render.ui/conversation-list {:class 3} seon.render.ui/conversation-turn {:class 5} seon.render.ui/eval-output {:class 75 :qualified 36} seon.render.ui/evaluation {:class 21 :qualified 9} seon.render.ui/message {:class 2} seon.render.ui/model-call-view {:class 2} seon.render.ui/page-rules {:class 3} seon.render.ui/problems-tile {:class 1} seon.render.ui/process-tile {:class 4} seon.render.ui/root {:class 1} seon.render.ui/root-evals {:class 3} seon.render.ui/root-head {:class 2} seon.render.ui/root-side {:class 6} seon.render.ui/rules-list {:class 3} seon.render.ui/status {:class 2} seon.render.ui/system-message {:class 6 :wire 3} seon.render.ui/task-view {:class 10} seon.render.ui/turn {:class 2}}]
+        ;; chat-ask 13 -> 5: its fold and toggle are its rules by place, no class; the 5 left are markdown's own root class
+        pinned '{seon.render.ui/agent {:class 23 :wire 4} seon.render.ui/agent-parts {:class 3} seon.render.ui/agent-state {:class 3 :wire 3} seon.render.ui/agents-list {:class 1} seon.render.ui/chat-ask {:class 5} seon.render.ui/chat-end {:class 1} seon.render.ui/cite {:class 2} seon.render.ui/conversation-list {:class 3} seon.render.ui/conversation-turn {:class 5} seon.render.ui/eval-output {:class 75 :qualified 36} seon.render.ui/evaluation {:class 21 :qualified 9} seon.render.ui/message {:class 2} seon.render.ui/model-call-view {:class 2} seon.render.ui/page-rules {:class 3} seon.render.ui/problems-tile {:class 1} seon.render.ui/process-tile {:class 4} seon.render.ui/root {:class 1} seon.render.ui/root-evals {:class 3} seon.render.ui/root-head {:class 2} seon.render.ui/root-side {:class 6} seon.render.ui/rules-list {:class 3} seon.render.ui/status {:class 2} seon.render.ui/system-message {:class 6 :wire 3} seon.render.ui/task-view {:class 10} seon.render.ui/turn {:class 2}}]
 
     (is (= pinned seen) (str "a count moved: write the new one here when it went down, never when it went up\n"
                              (pr-str (into (sorted-map) seen))))))
@@ -4671,6 +4672,13 @@
       (let [fold2 (reduce seon.error/fold fold (map occ (range 4 7)))
             [_ asked2] (#'seon.system/api-proc (assoc api :seon.system/errors fold2) :ext {:op :health :db main1 :p (promise)})
             [st2 out] (reduce (fn [[st _] m] (#'p/render-proc st :from-web m)) [st nil] (get asked2 [:render :from-web]))
+            ;; an ask on an unsettled report waits, and the proc's own bounded steps (::health-more on its events chan) answer it at
+            ;; the step that settles (task seon.render.proc/a-health-ask-waits-for-settling-never-loops-in-the-step): driven here as
+            ;; the proc's step loop drives them, at most 100 steps
+            [st2 out] (loop [st st2 out out i 0]
+                        (if (or (some #(= :health-answer (:op %)) (get out :to-api)) (= i 100))
+                          [st out]
+                          (let [[st o2] (#'p/render-proc st :events {:seon.render.proc/health-more true})] (recur st (merge-with into out o2) (inc i)))))
             answered (some #(when (= :health-answer (:op %)) (:r %)) (get out :to-api))
             banner2 (:html (second (filter #(= "#p-tiles" (:container %)) (:seon.render/units (#'p/page-value st2 [:debug :root])))))]
         (is (= 7 (count-of answered)) (str "the api's answer counts all seven: " (pr-str (count-of answered))))

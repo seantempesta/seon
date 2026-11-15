@@ -652,21 +652,25 @@
                   (not= :pass st) (assoc :failures (or (:v (first (d/datoms db :eavt e :seon.proof/failures))) [])))])))
 
 (defn reused-by-reads
-  "{digest result} for the tests of cand ({test digest}) found holds no verdict for: each one's green on rdb (the results
-  branch) whose read keys still hold on db what they held when it ran (seon.db/reads-digest equal to its
-  :seon.proof/reads-digest), a green at the test's digest now. Reuse by what a run read, the one record (read-keys): one seek of
-  :seon.proof/test a test, then its greens' digests. See docs/storage.md#what-a-read-scanned."
+  "{digest result} for the tests of cand ({test digest}) found holds no verdict for: each one's newest green on rdb (the results
+  branch, by its basis :t, as the plan's read-digests looks a test up) whose read keys still hold on db what they held when it ran
+  (seon.db/reads-digests equal to its :seon.proof/reads-digest), a green at the test's digest now. One seek of :seon.proof/test a
+  test, then one batch of digests over every newest green's keys, each distinct key read once (a cold plan walked every green and
+  printed each one's ~410 keys: 88.8B ticks for 2,258 tests). See docs/storage.md#what-a-read-scanned."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:map-of :any :string] [:map-of :string :map]] [:map-of :string :map]]}
   [rdb db cand found]
-  (into {} (for [[test-var d] cand :when (and (qualified-symbol? test-var) (not (contains? found d)))
-                 :let [hit (some (fn [dt]
-                                   (let [e (:e dt) at (fn [a] (:v (first (d/datoms rdb :eavt e a))))]
-                                     (when (= :pass (at :seon.proof/status))
-                                       (let [ks (into #{} (map :v) (d/datoms rdb :eavt e :seon.proof/read-keys))]
-                                         (and (seq ks) (= (at :seon.proof/reads-digest) (pdb/reads-digest db ks nil)))))))
-                                 (d/datoms rdb :avet :seon.proof/test test-var))]
-                 :when hit]
-             [d {:digest d :pass 1 :fail 0 :error 0}])))
+  (let [at (fn [e a] (:v (first (d/datoms rdb :eavt e a))))
+        ;; each candidate's newest green and its read keys
+        newest (into {} (for [[test-var d] cand :when (and (qualified-symbol? test-var) (not (contains? found d)))
+                              :let [e (some->> (d/datoms rdb :avet :seon.proof/test test-var)
+                                               (map :e) (filter #(= :pass (at % :seon.proof/status))) seq
+                                               (apply max-key #(get (at % :seon.proof/basis) :seon.db/t 0)))
+                                    ks (when e (into #{} (map :v) (d/datoms rdb :eavt e :seon.proof/read-keys)))]
+                              :when (seq ks)]
+                          [d [e ks]]))
+        now (pdb/reads-digests db (update-vals newest second))]
+    (into {} (for [[d [e _]] newest :when (= (at e :seon.proof/reads-digest) (now d))]
+               [d {:digest d :pass 1 :fail 0 :error 0}]))))
 
 (defn stored-verdicts
   "{digest result} of the verdicts rdb (the results branch) holds for cand ({test digest}) on db, the program planned: each

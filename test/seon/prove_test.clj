@@ -44,6 +44,36 @@
           (recur st (into all o) (inc (.indexOf all m))))
         [st all]))))
 
+;; docs/merging.md#the-test-service: a judge's named ask on main while main's own run holds the tests branch waits for that runner,
+;; never a second spawn the branch refuses (data, 2026-11-16, result/bbd0ab17: every pilot judged during a main run read its reds
+;; :unknown from :seon.system/refused). Estimate: a few messages through the step fn, ~20k ticks each = ~0.3M.
+(defn- named-ask [rid t] [:req {:rid rid :branch :main :t t :digest (str "d" t) :names #{'a.b-test/t} :mode :judge}])
+
+(deftest ^{:seon.test/estimate {:ticks 500000}} two-asks-held-on-the-tests-branch-are-both-answered
+  (let [[st o] (feed (proc0) [(req 1 :main 5) (named-ask 2 5) (named-ask 3 6)])
+        _ (is (= 1 (count (asks o :spawn))) "one runner on the tests branch; the two asks wait for it, never a refused spawn")
+        [st all] (run-through st o test-run-answer)]
+    (is (= [1 2 3] (waiters-answered all)) "each asker answered, in turn")
+    (is (every? #(= 1 (count %)) (vals (group-by :tag (asks all :spawn)))) "one spawn at a time")
+    (is (empty? (:held-main st)) "nothing left held")))
+
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-named-ask-during-mains-run-is-answered-with-its-verdicts
+  (let [[st o] (feed (proc0) [(req 1 :main 5) (named-ask 2 5)])
+        _ (is (= 1 (count (asks o :spawn))) "while main's runner is in flight the ask asks no second runner, which the branch would refuse")
+        [_ all] (run-through st o test-run-answer)
+        r (:r (first (filter #(and (= :prove-answer (:op %)) (= 2 (:rid %))) all)))]
+    (is (not (seon.contract/error? r)) (str "answered, never refused: " (pr-str r)))
+    (is (= {'a.b-test/t :pass} (proofs/results r)) "with its test's verdict")))
+
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-dying-main-run-answers-its-waiters-and-the-held-ask-runs
+  (let [[st o] (feed (proc0) [(req 1 :main 5) (named-ask 2 5)])
+        died (seon.contract/error :seon.system/refused 'seon.system/spawn! "the fork server could not fork it" {})
+        [st o2] (feed st [(answer-of (first (asks o :spawn)) died)])]
+    (is (= [1] (waiters-answered o2)) "the dying run answers its own waiter")
+    (is (seon.contract/error? (:r (first (filter #(= :prove-answer (:op %)) o2)))) "with its typed error")
+    (is (= 1 (count (asks o2 :spawn))) "and the held ask spawns its own runner")
+    (is (empty? (:held-main st)))))
+
 ;; Estimate: one state-view of a small state map: ~20k ticks; 200,000
 (deftest ^{:seon.test/estimate {:ticks 200000}} the-state-view-says-how-far-mains-proving-is-behind
   ;; root's (c), 2026-11-15: main's proving never backlogs (moves during a run coalesce into one next run), and the sweep reads how
@@ -462,6 +492,20 @@
 (defn- answers [outs] (into {} (for [o outs :when (= :asker-answered (:op o))] [(:asker o) (:r o)])))
 (def ^:private green-of (fn [& ts] {:pass (count ts) :fail 0 :error 0 :reports (mapv #(hash-map :type :pass :var (str "#'" %)) ts)}))
 
+;; docs/merging.md#the-test-service: a runner ends when its last item does. A runner still owning a running item when its run finished
+;; was ended only by a later finish, so with none, it held the tests branch and every held main ask waited for good (task
+;; seon.prove/a-runner-ends-when-its-last-item-does; found reading for pilot 14). Red before: the item's batch ended and no kill was asked.
+;; Estimate: one batch through the step fn ~0.1M.
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-runner-ends-when-its-last-item-does
+  (let [[st o1] (prove/ask-items (items-st 1) 7 :batch {['app.x-test/t "d1"] {:agent :p1 :ms 5}})
+        b (first (batches o1))
+        ;; the run that spawned runner :p1 has finished; its item still runs
+        st (assoc st :runners {"k0" :p1})
+        [st o2] (feed st [(answer-of b (green-of 'app.x-test/t))])]
+    (is (= [:p1] (mapv #(get-in % [:req :id]) (asks o2 :kill))) "the item's end ends its runner")
+    (is (contains? (:killing st) "k0") "asked once")))
+
+
 ;; docs/merging.md#the-test-service: ten askers of one item run it once, and each is answered when its last item is green
 (deftest ^{:seon.test/estimate {:ticks 200000}} an-item-many-ask-runs-once-and-answers-each
   (let [it {:agent :a1 :ms 50}
@@ -654,7 +698,7 @@
     ;; every reader of a run's tests reads them as no verdict (root's review of f4ca2f3a4c): the agent's record (seon.proofs/results) and
     ;; the done rule's ask of main (seon.reconcile/main-answer), where a red would make the change's red main's
     (is (= {} (proofs/results r)) "no result for a test that never ran")
-    (is (= {:red #{} :unknown #{'a.b-test/u}} (#'seon.reconcile/main-answer #{'a.b-test/u} r)) "main answered nothing of it: unknown, never main's red")))
+    (is (= {:red #{} :unknown #{'a.b-test/u}} (select-keys (#'seon.reconcile/main-answer #{'a.b-test/u} r) [:red :unknown])) "main answered nothing of it: unknown, never main's red")))
 
 ;; docs/merging.md#the-test-service: each asker is told an item's verdict as it lands, before it is answered, so a session's
 ;; bin/prove prints each test as it ends; an item with no verdict is told as :no-verdict, never left out

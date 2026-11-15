@@ -132,8 +132,10 @@
  ;; reached 747 MB and two agents died on Datahike's fatal-commit-error while recording. The map
  ;; is address space, not memory or disk: without MDB_WRITEMAP (the flags are MDB_NOSYNC|MDB_SAFENOSYNC) the
  ;; file grows only as it is used, so LMDB's guidance is a map as large as the store may ever
- ;; grow. 64 GiB.
- :seon.config.store/lmdb-map-bytes 68719476736
+ ;; grow. 128 GiB since root went down at 64 GiB (MDB_MAP_FULL in seon.db/retain!): the sweep's per-batch commits
+ ;; grow the file from its end while it frees, as the free list's own record needs a contiguous run; the fix is
+ ;; retain!'s (task seon.db/a-store-near-its-map-is-compacted-at-boot).
+ :seon.config.store/lmdb-map-bytes 137438953472
  ;; Unit: children per index node. A commit rewrites the nodes it touched, so smaller nodes
  ;; mean fewer bytes printed and written per commit. Provenance: dev/dur.clj measured 512 -> 64
  ;; cut a small commit 27 -> 16 ms with fsync, before the node emitter.
@@ -400,9 +402,11 @@
  ;; which Jolt reads into *compiler-options*' root at start (Jolt jolt/image-fn-forms-opt-in).
  ;; {:image-fn-forms false}: Seon writes no state image, so its fn literals register no source for
  ;; one, a third less allocation a compile (task jolt.backend/image-registration-is-opt-in;
- ;; measured 2026-10-23). Read by bin/env from this line, so it stays one line of text. At the
+ ;; measured 2026-10-23). :no-inline-ns-prefixes [seon my]: the build splices no var of Seon's own program into a caller,
+ ;; so an agent's edit or a landing's load in place reaches every caller (task jolt.backend/a-build-inlines-no-program-var;
+ ;; library bodies stay spliced). Read by bin/env from this line, so it stays one line of text. At the
  ;; bound: none; a value that is no EDN map stops every Jolt process at start, naming it.
- :seon.config.build/jolt-compiler-options "{:image-fn-forms false}"
+ :seon.config.build/jolt-compiler-options "{:image-fn-forms false :no-inline-ns-prefixes [seon my]}"
  ;; What only a build can change: the paths bin/build compiles or bakes into target/seon, besides every
  ;; pin (a gitlink .gitmodules names, read from the tree). The binary's identity is the digest of these at a
  ;; tree (seon.fx/binary-digest, recorded with the binary in target/seon.program); a process whose

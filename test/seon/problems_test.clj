@@ -909,7 +909,7 @@
     (is (= [["t0" "t1"]] (rows stale)) "a binary not current for main's tree: one row naming both trees")
     (is (some #(str/includes? % "seon.writer/commit-batch") (messages stale)) "and what between them reaches root's own code")
     (is (nil? (:inputs (source stale))) "and no inputs to key agents' verdicts by")
-    ;; task seon.system/every-reader-of-the-binarys-tree-asks-binary-current: a binary built from t0 and current for t1 by reach
+    ;; a binary built from t0 and current for t1 by its identity (seon.fx/runtime-for)
     (is (= "t1" (get-in (source (boot db0 "b3" {:program "p0" :inputs (assoc in :tree "t0")} "p3" nil (assoc in :tree "t1"))) [:inputs :tree]))
         "a binary current for main's tree by reach, built from another, hands agents main's tree's inputs, never its own")
     (is (nil? (:inputs (source (boot db0 "b4" {:program "p0" :inputs (assoc in :tree "t0")} "p4" {:binary "t0" :tree "t1" :reaches ['x/y]} (assoc in :tree "t1")))))

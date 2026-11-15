@@ -995,6 +995,32 @@
         (is (:bytes-after (pdb/compact-if-due! path)) "the sweep left its freed pages to compact"))
       (finally (seon.lib/remove-tree! path (str path ".compact"))))))
 
+;; docs/storage.md#collection (root down 2026-11-16: boot's sweep grew runs/store to its 64 GiB map, then to 128 GiB in 75 s): under
+;; MDB_SAFENOSYNC no page freed after the last sync is reused, and at boot no writer syncs, so retain! syncs after each batch it sweeps.
+;; Estimate: 6,000 keys of 2 KB written in one txn ~12 MB ~30M ticks + 5 small commits ~2M + a sweep of 6 batches, each one multi-dissoc
+;; and one env sync, ~10M = 45000000; measured 61M (the 6,000 keys' write cost more than counted: within 2x). The sweep grew the file
+;; 10,616,832 B (648 pages) unsynced, 3,162,112 B (193) synced; its 7 syncs cost 59 ms (93 -> 152 ms)
+(deftest ^{:seon.test/estimate {:ticks 45000000}} a-sweep-at-boot-reuses-the-pages-it-frees
+  (let [path (str (seon.config/checkout) "/target/tmp/sweep-reuse-" (random-uuid))
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+        size #(.length (java.io.File. (str path "/data.mdb")))
+        n 6000 pad (apply str (repeat 2000 "x"))]
+    (try
+      ;; keys nothing reaches, written before every commit the sweep keeps: six batches of the sweep's 1,000
+      (k/multi-assoc (:store @conn) (into {} (for [i (range n)] [(keyword "orphan" (str i)) pad])) {:sync? true})
+      (doseq [i (range 5)] (d/transact conn [{:note/text (str "n" i) :note/agent :t}]))
+      ;; the steady snapshot a boot starts from: the last sync before it
+      (pdb/sync! (:config @conn))
+      (let [before (size)
+            r (pdb/retain! conn 3)
+            grown (- (size) before)]
+        (is (<= n (:swept r)) (pr-str r))
+        (is (not (k/exists? (:store @conn) :orphan/0 {:sync? true})) "the orphans are gone")
+        ;; the orphans' leaf pages are ~n x 2 KB / 16 KB ~ 750; unsynced, every batch's rewritten pages come from the end (all of them),
+        ;; synced, the second batch on reuses the first's
+        (is (< grown (* 250 16384)) (str "the sweep grew the file " grown " bytes over " before)))
+      (finally (d/release conn) (seon.lib/remove-tree! path (str path ".compact"))))))
+
 ;; Estimate: a store opened on disk ~5M + 21 small commits ~0.3M each ~6M + 3 sweeps of a small store ~3M each ~9M = 25000000
 ;; (first stated 150M, counting a sweep as a large store's: measured 19-22M)
 (deftest ^{:seon.test/estimate {:ticks 25000000}} every-branchs-merge-base-outlives-every-sweep
@@ -2080,13 +2106,15 @@
     (finally (run! seon.lib/remove-tree! @stores-made) (reset! stores-made []))))
 
 (defn- mark-reads
-  "The konserve reads one fresh mark of db's :eavt makes and the keys it marks: [reads marked]."
+  "The konserve reads one fresh mark of db's :eavt makes and the keys it marks: [reads marked], the reads as konserve reports them
+  (konserve.metrics: each value read is one :io event, :read-immutable or :read-edn), never a redefinition of the reader, which a
+  compiled caller in the binary does not call through."
   {:malli/schema [:=> [:cat :seon.host/db] [:tuple :int [:set :any]]]}
   [db]
-  (let [n (atom 0) g k/get gi k/get-immutable]
-    (with-redefs [k/get (fn [& args] (swap! n inc) (apply g args))
-                  k/get-immutable (fn [& args] (swap! n inc) (apply gi args))]
-      (let [marked (psi/mark (:eavt db))] [@n marked]))))
+  (let [n (atom 0)]
+    (km/add-sink! ::mark-reads (fn [e] (when (and (= :io (:level e)) (#{:read-immutable :read-edn} (:op e))) (swap! n inc))))
+    (try (let [marked (psi/mark (:eavt db))] [@n marked])
+         (finally (km/remove-sink! ::mark-reads)))))
 
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-collections-mark-reads-each-node-once
   ;; docs/storage.md#collection: a collection's mark (datahike.gc, under seon.db/retain! at every root boot) walks each
@@ -2160,3 +2188,22 @@
     (is (not (contains? (d/reads-index reads) [:ea t :seon.task/plan])) "the set answered at the return is what was read by then")
     (let [[_ outer] (d/with-reads #(:seon.task/id e))]
       (is (contains? (d/reads-index outer) [:ea t :seon.task/id]) "read under another recorder, it records there"))))
+
+;; docs/storage.md#lmdb-durability: a process reading beside the writer (a candidate binary testing itself on the live store,
+;; task seon.system/the-store-half-of-an-update-that-loses-nothing) opens the store MDB_RDONLY. konserve opened its main dbi in a
+;; write transaction, which a read-only env refuses (MDB_IS_READONLY), so a read-only connect failed before it read anything.
+;; Estimate: a store of 20 commits ~3M ticks, a read-only connect and one query ~1M: 5,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-read-only-connect-reads-the-store
+  (let [path (str (seon.config/checkout) "/target/db-test-ro-" (random-uuid))
+        {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)]
+    (swap! stores-made conj path)
+    (try
+      (d/transact conn {:tx-data (vec (for [i (range 20)] {:note/text (str "ro" i) :note/agent :t}))})
+      (pdb/sync! cfg)
+      (d/release conn)
+      (let [ro (assoc-in cfg [:store :lmdb :flags] (bit-or 0x20000 0x10000 0x8000))
+            r (try (let [c (d/connect ro)]
+                     (try (d/q '[:find (count ?e) . :where [?e :note/text]] @c) (finally (d/release c))))
+                   (catch Exception e (ex-message e)))]
+        (is (= 20 r) (str "a read-only connect reads the store: " r)))
+      (finally (run! seon.lib/remove-tree! @stores-made) (reset! stores-made [])))))
