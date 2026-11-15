@@ -363,6 +363,26 @@
           ;; both sides changed still to resolve
           (and merge? (or merge-step? (seq unmerged))) (update :merge-turns inc))))))
 
+(defn- last-read
+  "The number of agent k's newest context read on its branch (its call \"read-<n>\"), or nil."
+  {:malli/schema [:=> [:cat :string] [:maybe :int]]}
+  [k] (d/q '[:find (max ?n) . :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/n ?n]]
+           (agent/db) (pdb/eid (agent/db) :seon.agent/key k)))
+
+(defn- read!
+  "Agent k's context read at basis, a model call of its own (read-<n>, origin :outside, no turn) made by the one request!, stored as
+  what changed since its read before; the call is the agent's once its request is drawn, never before (a read the walk saw mid-draw
+  would place itself). Answers {:id :messages :parts}. See docs/turn.md#an-outside-agent."
+  {:malli/schema [:=> [:cat :string :seon.model-call/basis] :map]}
+  [k basis]
+  (let [p (last-read k)
+        n (inc (or p 0))
+        id (lib/call-id k (str "read-" n))
+        r (request! id (some->> p (str "read-") (lib/call-id k)) n basis)]
+    (agent/transact! [{:seon.model-call/id id :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :outside}])
+    (agent/commit!)
+    (assoc r :id id)))
+
 (defn context-block
   "The request of task as a model is sent it on this branch now, as one text: the system prompt, its conversation and its page.
   take?: the read is the run's turn (its model is outside): this process works task, takes the messages delivered, shows the
@@ -387,57 +407,34 @@
                         (basis! task turn max-turns :outside true)
                         (let [db (agent/db)] {:commit (d/commit-id db) :t (:max-tx db) :task task :turn turn :max-turns max-turns :origin :outside :merge? true}))
                       :agent k)
-         ;; the run's turn read is a model call, as a model turn's is, made by the one request!; its number the agent's own count of reads
-         ;; on the branch. An observer's read records nothing: the request drawn alone
-         n (when take? (inc (or (d/q '[:find (max ?n) . :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/n ?n]]
-                                     (agent/db) (pdb/eid (agent/db) :seon.agent/key k))
-                                0)))
-         id (when take? (lib/call-id k (str "read-" n)))
-         {:keys [messages]} (if take? (request! id nil n basis) (wire/render (agent/db) basis {:walk (repl/page-walk)}))
-         ;; the read is a call of the agent's once its request is drawn, never before: a read the walk saw mid-draw would place itself
-         _ (when take? (agent/transact! [{:seon.model-call/id id :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :outside}])
-                       (agent/commit!))]
-     ;; as a person reads it: the system prompt, then each record as the call made and its result
+         ;; the run's turn read is a model call, as a model turn's is, made by the one request!; an observer's records nothing
+         {:keys [messages]} (if take? (read! k basis) (wire/render (agent/db) basis {:walk (repl/page-walk)}))]
      (wire/read-text (agent/db) basis messages wire?))))
 
-(defn- turn-messages
-  "The messages turn n took ({:id :from :body :sent-ms}), in link order: linked to this agent after turn n-1's basis t and at or
-  before basis's, the edge seon.ctx/placed-messages places a model's by, so the session driving it hears each once. See
-  docs/users.md#messages."
-  {:malli/schema [:=> [:cat pos-int? :map] [:vector [:map [:id :string] [:from [:maybe :string]] [:body :string] [:sent-ms :int]]]]}
-  [n basis]
-  (let [db (agent/db) k (:key @agent/state)
-        lo (or (when (> n 1) (some-> (d/entity db [:seon.model-call/id (lib/call-id k (dec n))]) :seon.model-call/basis :t)) 0)
-        hi (:t basis)]
-    (if-let [me (pdb/eid db :seon.agent/key k)]
-      (->> (d/datoms db :avet :seon.message/to me)
-           (filter #(and (< lo (:tx %)) (<= (:tx %) hi)))
-           (sort-by (juxt :tx :e))
-           (mapv (fn [dt] (let [m (d/entity db (:e dt))]
-                            {:id (:seon.message/id m) :from (task/sender-name (:seon.message/from m))
-                             :body (:seon.message/body m) :sent-ms (:seon.message/sent-ms m)}))))
-      [])))
-
 (defn outside-reply!
-  "An outside agent's seon_eval on this process, one reply as a model's is: its evals (`seon.model/call-evals`) through the one REPL path in order, every one whatever the one before it did (docs/model.md#one-tool-repl). With turn?, the agent works task with its model outside: the reply is its turn, its message on its model call, opened as a model's turn is, so it reads as a model's in the conversation, and its answer is what a model's next request would add: any page eval Seon ran, before and after its evals. Otherwise it is someone at the REPL of an agent its own model drives: no turn moves. Prints {:responses [each response as the wire carries it]} as EDN for the server (`seon.server/op-answer`), with :messages, the messages the turn took (`turn-messages`), when the reply is a turn. See docs/turn.md#an-outside-agent."
+  "An outside agent's seon_eval on this process, one reply as a model's is: its evals (`seon.model/call-evals`) through the one REPL path in order, every one whatever the one before it did (docs/model.md#one-tool-repl). With turn?, the agent works task with its model outside: the reply is its turn, opened as a model's is (the one `request!`), its message on its model call, and its answer adds :request, what the model's next request would add: a context read taken after its evals (`context-block`, by the same request!), past the read the session saw last. Otherwise it is someone at the REPL of an agent its own model drives: no turn moves. Prints {:responses [...]} as EDN for the server (`seon.server/op-answer`). See docs/users.md#messages."
   {:malli/schema [:=> [:cat [:maybe :seon.task/id] [:maybe :string] :any :boolean] :nil]}
   [task message evals turn?]
-  (let [n (when turn? (begin! task) (inc (agent/turn-now)))
+  (let [k (:key @agent/state)
+        n (when turn? (begin! task) (inc (agent/turn-now)))
+        ;; what the session saw last: its newest context read, taken at its attach's seon_context or the reply before
+        seen (when turn? (some->> (last-read k) (str "read-") (lib/call-id k)))
         ;; as a model's turn does (work!): main moved, it merges in, and a conflict is an unmerged entry it sees. An outside agent has no
         ;; run to end and fork again, so its process takes its branch's program in place before its evals run: no reply runs old code
         _ (when (and turn? (agent/main-moved? (:base @agent/state) (agent/heard-main))) (branch/merge-main!))
         _ (when (and turn? (:behind @agent/state)) (agent/take-branch-program!))
         [id basis] (when turn? (open-turn! task n 1 false nil))
-        _ (when turn? (agent/transact! [{:seon.model-call/id id :seon.model-call/basis basis}]) (agent/commit!))
+        _ (when turn? (request! id (when (> n 1) (lib/call-id k (dec n))) n basis))
         calls (model/call-evals {"message-md" message "evals" evals} (str "outside-" (or n "repl")))
         rs (repl/run-calls (mapv #(dissoc % :message-md) calls) (fn [cid] {:origin :outside :call-id cid}) evaluated!)]
     (when turn?
       (agent/transact! [{:seon.model-call/id id :seon.model-call/forms (count rs) :seon.model-call/model "outside"
                          :seon.model-call/reply (or message "")}])
       (agent/commit!))
-    ;; the messages this turn took lead the answer, so the session driving the agent hears them as a model would in its request
-    (print (sedn/encode (cond-> {:responses (mapv agent/on-the-wire (map :response rs))}
-                          turn? (assoc :messages (turn-messages n basis)))))
+    ;; what the model's next request adds past what the session saw last: a read by the one request!, after the evals
+    (let [delta (when turn? (context-block task true) (wire/sent-delta (agent/db) seen (lib/call-id k (str "read-" (last-read k)))))]
+      (print (sedn/encode (cond-> {:responses (mapv agent/on-the-wire (map :response rs))}
+                            turn? (assoc :request (wire/messages-text delta))))))
     nil))
 
 (defn specified-tx

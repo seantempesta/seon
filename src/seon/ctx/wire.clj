@@ -102,7 +102,7 @@
                    ;; no stored commit and no t (a world written without commits): the db handed in is the point
                    :else db))))
 
-(declare page-diff-msgs example-msgs reply-of wire-of)
+(declare page-diff-msgs example-msgs reply-of wire-of messages-text)
 
 (defn- part-ref
   "The ref and turn of message m the agent's model output holds, from src, the component whose own answer held it
@@ -227,9 +227,12 @@
   "A read of messages, the request basis b makes on db, as an outside agent is answered it: the system prompt, then each record as the call made and its result; wire?: the request body as JSON, the bytes a provider is sent (`wire-turn`). See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.host/db :seon.model-call/basis [:vector :seon.model/message] :boolean] :string]}
   [db basis messages wire?]
-  (if wire?
-    (json/write-str (:body (wire-turn db basis)))
-    (str/join "\n\n" (remove str/blank? (mapcat (fn [{:keys [content tool-calls]}] (concat (map #(str (:intent %) "\n" (:code %)) tool-calls) [content])) messages)))))
+  (if wire? (json/write-str (:body (wire-turn db basis))) (messages-text messages)))
+
+(defn messages-text
+  "Messages ms as a person reads them: each call's intent and code, then each content, apart. See docs/server.md#ops."
+  {:malli/schema [:=> [:cat [:sequential :seon.model/message]] :string]}
+  [ms] (str/join "\n\n" (remove str/blank? (mapcat (fn [{:keys [content tool-calls]}] (concat (map #(str (:intent %) "\n" (:code %)) tool-calls) [content])) ms))))
 
 ;; ---- model renders: an entity of each schema as the model reads it (stage 2b, docs/users.md#the-stages-agreed-2026-11-09) ----
 ;; Each is (f {:seon.db/db db} entity): a vector of :seon.model/message values and the entities it places, in its order; the one
@@ -532,6 +535,16 @@
   (when-let [as (assembly-parts db id)]
     (let [ps (mapv (fn [[ref n ds]] [ref (mapv #(:seon.part/message (d/entity db [:seon.part/digest %])) ds) n]) as)]
       {:messages (into [] (mapcat second) ps) :parts ps})))
+
+(defn sent-delta
+  "The messages model call id's stored request adds past call from's (nil from: all of it): its parts after the ones the two share
+  first, read back as sent, so a session driving an agent is answered what its model's next request adds. See
+  docs/render.md#a-turn-stores-what-it-sent."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :string] :string] [:vector :seon.model/message]]}
+  [db from id]
+  (let [ps (assembly-parts db id)
+        k (if from (count (take-while true? (map = (assembly-parts db from) ps))) 0)]
+    (into [] (comp (drop k) (mapcat (fn [[_ _ ds]] ds)) (map #(:seon.part/message (d/entity db [:seon.part/digest %])))) ps)))
 
 (defn stored-page
   "Turn n's page messages of agent a (an entity id) as its model call stored them: its [:page n] parts, new at turn n, so among
