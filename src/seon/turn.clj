@@ -449,47 +449,13 @@
 
 (defn- clear?
   "Whether status s is clear: it was drawn and the done rule gives no reason, so the tests its change reaches are judged before it
-  is done or merges (judged; turn-begin's :prove). See docs/render.md#how-the-work-stands."
+  is done or merges (turn-begin's and hand-back-step's :prove). See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat [:or :map :seon.error/base]] :boolean]}
   [s] (and (not (contract/error? s)) (empty? (:reasons s))))
 
 (def ^:private judge-request
   "What a clear status asks of the judge (seon.agent/judge!'s names and reach?): every test its change reaches."
   {:names #{} :reach? true})
-
-(defn- judged
-  "Status s, the tests its change reaches judged when s is clear: its proofs pass, so the tests its change reaches run now, as the
-  judge judges them, the process tests among them on the gate's checkout (agent/judge!, their results facts on the branch), and the
-  status is read again from the branch, before it is done or merges (the owner's ruling: a turn runs the proofs, the reach runs once
-  they are green). A run that ended green on its proofs alone left the judge to find the reds its change made, with no turn left to fix them.
-  A turn asks the same as an output (turn-begin's :prove); a hand-back waits on it here."
-  {:malli/schema [:=> [:cat [:or :map :seon.error/base]] [:or :map :seon.error/base]]}
-  [s]
-  (if (clear? s)
-    (do (test-error! (agent/judge! (:names judge-request) (:reach? judge-request))) (status-now))
-    s))
-
-(defn hand-back!
-  "End run of task as an outside agent hands it back (seon.server's :done): the proofs run
-  again, and the run's end written as the turn loop writes its own (end!: the live runtime
-  staged, the end committed on the branch): hand-back-end says how it ends. Its turns, model calls, tokens and time are the outside model's,
-  unknown here, so absent (never 0). The judge decides from its own run of the proofs and the
-  plan the run began with on main; this end is what the run says of itself. Without it the
-  judge read no end and named the run :no-end. Answers the end."
-  {:malli/schema [:=> [:cat :seon.task/id] :seon.turn/end]}
-  [task]
-  (let [;; read before begin!, which starts the turn state anew when it has none yet
-        stop (get-in @agent/state [:turn :stop])
-        _ (begin! task)
-        ;; main taken now, as work! takes it at each start, so green work is never judged for being behind; a conflict is an
-        ;; unmerged entry, a reason the status says. Asked of main itself, never of what this process last heard of it (an
-        ;; outside agent's green task was judged behind 78 with that guard, 2026-11-11); a branch at main's head brings nothing
-        _ (branch/merge-main!)
-        _ (observe task)
-        s (judged (status-now))
-        _ (when-not (contract/error? s) (some-> (specified-tx (agent/db) task (:key @agent/state) s) agent/transact!))
-        [outcome reason] (if (contract/error? s) [:error (:seon.error/message s)] (let [[o why] (hand-back-end stop s)] [o (or why (unjudged-reason s))]))]
-    (end! {} outcome reason (when (contract/error? s) s))))
 
 ;; ---- a turn as Flow steps (docs/flow.md#the-step-fn-contract-every-proc-follows) ----------------------------------
 ;; A turn waits twice, on its verdict and on its model call, and each is an output, never a wait inside a step: turn-begin and
@@ -675,6 +641,18 @@
   {:malli/schema [:=> [:cat [:tuple [:= ::end] :map :seon.agent/outcome [:maybe :string] [:maybe :map]]] :seon.turn/end]}
   [[_ st outcome reason err]] (end! st outcome reason err))
 
+(defn- drive!
+  "A run, state st stepped by step (a step fn's var: step-run, hand-back-step) on the one message protocol, driven: in an eval the
+  :repl proc runs (seon.repl/*run* bound) it is handed to that proc, which takes each output's answer as a message and replies to the
+  eval with the end, and this answers {::run :started}; anywhere else each output's effect is done in place (effect-answer) and this
+  answers the end. See docs/flow.md#flow-inside-an-agent."
+  {:malli/schema [:=> [:cat :map :seon.host/var] [:or :seon.turn/end [:map [::run [:= :started]]]]]}
+  [st step]
+  (if-let [hand repl/*run*]
+    (do (vreset! hand {:st st :step step :effect #'effect-answer :end #'end-of}) {::run :started})
+    (loop [r (step st nil)]
+      (if (= ::end (first r)) (end-of r) (recur (step (first r) (effect-answer (second r))))))))
+
 (defn work!
   "Work task `task` (the model `model` when set, else root's), until the agent's turn reaches
   max-turns (agent-wide: its :seon.agent/turn against its budget, which root passes from the agent's own on main).
@@ -686,11 +664,53 @@
   {:malli/schema [:=> [:cat [:map [:task :seon.task/id] [:model {:optional true} :string]
                              [:max-turns pos-int?]]]
                   [:or :seon.turn/end [:map [::run [:= :started]]]]]}
-  [arg]
-  (let [st (start! arg)]
-    (if-let [hand repl/*run*]
-      (do (vreset! hand {:st st :step #'step-run :effect #'effect-answer :end #'end-of}) {::run :started})
-      (loop [step (step-run st nil)]
-        (if (= ::end (first step))
-          (end-of step)
-          (recur (step-run (first step) (effect-answer (second step)))))))))
+  [arg] (drive! (start! arg) #'step-run))
+
+(defn- hand-back-end-step
+  "The end of a hand-back of run state st whose status is s: what the status names written on the branch (specified-tx), then
+  [::end {} outcome reason error] as hand-back-end says it. See docs/turn.md#the-end."
+  {:malli/schema [:=> [:cat :map [:or :map :seon.error/base]] [:tuple [:= ::end] :map :seon.agent/outcome [:maybe :string] [:maybe :map]]]}
+  [st s]
+  (when-not (contract/error? s) (some-> (specified-tx (agent/db) (:task st) (:key @agent/state) s) agent/transact!))
+  (let [[outcome reason] (if (contract/error? s) [:error (:seon.error/message s)] (let [[o why] (hand-back-end (:stop st) s)] [o (or why (unjudged-reason s))]))]
+    [::end {} outcome reason (when (contract/error? s) s)]))
+
+(defn hand-back-step
+  "A hand-back's one driver step on step-run's message protocol, run state st ({:task}) and msg: nil begins (main merged in, the
+  task observed, its status read) and, when the status is clear, asks the judge as an output ({:prove judge-request}: the tests its
+  change reaches, as a turn asks them); {::verdict v} reads the status again with the verdict written (test-error!); either way the
+  end is hand-back-end-step's. {::threw e} is the judge's throw, the hand-back's own, as when it was a call; {::stop true} ends it
+  :waiting. See docs/flow.md#flow-inside-an-agent."
+  {:malli/schema [:=> [:cat :map [:maybe :map]]
+                  [:or [:tuple [:= ::end] :map :seon.agent/outcome [:maybe :string] [:maybe :map]]
+                   [:tuple :map [:map [:prove [:map [:names [:set :symbol]] [:reach? :boolean]]]]]]]}
+  [st msg]
+  (cond
+    (::stop msg) [::end {} :waiting "root is stopping: the hand-back ended before its judge answered" nil]
+    (contains? msg ::threw) (throw (::threw msg))
+    (contains? msg ::verdict) (do (test-error! (::verdict msg)) (hand-back-end-step st (status-now)))
+    :else (let [task (:task st)
+                ;; read before begin!, which starts the turn state anew when it has none yet
+                stop (get-in @agent/state [:turn :stop])
+                _ (begin! task)
+                ;; main taken now, as work! takes it at each start, so green work is never judged for being behind; a conflict is an
+                ;; unmerged entry, a reason the status says. Asked of main itself, never of what this process last heard of it (an
+                ;; outside agent's green task was judged behind 78 with that guard, 2026-11-11); a branch at main's head brings nothing
+                _ (branch/merge-main!)
+                _ (observe task)
+                s (status-now)
+                st (assoc st :stop stop)]
+            ;; a clear status: the tests its change reaches run now, as the judge judges them, before it is done (the owner's ruling: a
+            ;; turn runs the proofs, the reach runs once they are green), asked as an output, never awaited in the step
+            (if (clear? s) [st {:prove judge-request}] (hand-back-end-step st s)))))
+
+(defn hand-back!
+  "End run of task as an outside agent hands it back (seon.server's :done): the proofs run
+  again, and the run's end written as the turn loop writes its own (end!: the live runtime
+  staged, the end committed on the branch): hand-back-end says how it ends. Its turns, model calls, tokens and time are the outside model's,
+  unknown here, so absent (never 0). The judge decides from its own run of the proofs and the
+  plan the run began with on main; this end is what the run says of itself. Driven as a run (drive!, hand-back-step), so its wait on
+  the judge is an output and the agent answers ping and stop meanwhile. Answers the end, or {::run :started} in the :repl proc, which
+  replies with the end. See docs/flow.md#flow-inside-an-agent."
+  {:malli/schema [:=> [:cat :seon.task/id] [:or :seon.turn/end [:map [::run [:= :started]]]]]}
+  [task] (drive! {:task task} #'hand-back-step))
