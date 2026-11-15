@@ -231,6 +231,13 @@
                  [:reason {:optional true} :string] [:ms {:optional true} number?]]
  ;; keys-schemas sweep
  :seon.turn/next [:= {:description "The tag of a turn's answer that goes on: [:seon.turn/next state]; its end is [:seon.turn/end state outcome reason error]."} :seon.turn/next]
+ ;; a turn's or a hand-back's step answers its next output, its end, or the next turn (docs/flow.md#the-step-fn-contract-every-proc-follows)
+ :seon.turn/output [:map {:description "What a turn step asks done before it goes on, each answered as a message: the proofs judged (:prove), the model called (:model), main merged in (:merge), the task observed (:observe)."}
+                    [:prove {:optional true} [:map [:names [:set :symbol]] [:reach? :boolean]]] [:model {:optional true} :map]
+                    [:merge {:optional true} :map] [:observe {:optional true} :seon.task/id]]
+ :seon.turn/step [:or {:description "A turn step's answer: [state output] to wait on, [:seon.turn/next state] to begin the next turn, or [:seon.turn/end state outcome reason error]."}
+                  [:tuple :map :seon.turn/output] [:tuple :seon.turn/next :map]
+                  [:tuple [:= :seon.turn/end] :map :seon.agent/outcome [:maybe :string] [:maybe :map]]]
  :seon.model/at [:tuple {:description "Where a tool call sits in a model's reply: [call-index part], by which its output streams to its place."} :int :int]
  ;; keys-schemas sweep
  :seon.task/accumulated [:map {:description "A task's plan and proofs accumulated along its needs, theirs first: what its agent works from."} [:plan :string] [:proofs :seon.task/proofs]]
