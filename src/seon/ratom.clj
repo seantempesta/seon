@@ -22,7 +22,7 @@
   Reagent's own rule, and after a commit (`commit!`); a page's render queue is the walk's, drained
   in mount order. docs/render.md#reactive-renders."
   (:refer-clojure :exclude [defn defn- atom run!])
-  (:require [seon.contract :refer [defn defn-]] [datahike.reads :as reads] [datahike.index.interface] [clojure.core.async :as a] [seon.db :as pdb]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.reads :as reads] [datahike.index.interface] [clojure.core.async :as a]))
 
 (defprotocol IReaction
   "A reaction's own state, read and set by this namespace's functions (Reagent's JavaScript
@@ -88,16 +88,12 @@
 (defprotocol IStore
   "The store as a source a reaction derefs (docs/plan.md#the-root-concept-one-reaction-over-the-store)."
   (-moved [s] "The datoms of the commit that made its db, which its watchers are matched against.")
-  (-owner [s] "The owner of reactions whose state the store is (the proc it was made in), or nil.")
-  (-set-keys [s r ks] "Reaction r reads keys ks of the store (nil: none any more): its entry in the store's index, set in the store
-  owner's step (`store-keys!`).")
   (commit! [s db datoms] "s at db, made by a commit of datoms: each reaction that read one of their keys runs again, in the caller (an
   auto-run one at once, the rest at the next flush!). Its caller is the readers' owner proc, taking the commit's datoms as work with a
   declared bound, never the writer's step; a reaction re-run inside that step never parks on another proc (the step-fn contract):
   one that needs another proc's answer asks and is re-run on the answer (docs/flow.md#flow-inside-an-agent)."))
 
-(deftype Store [^:volatile-mutable db ^:volatile-mutable moved ^:volatile-mutable watches
-                ^:volatile-mutable idx ^:volatile-mutable rkeys owner]
+(deftype Store [^:volatile-mutable db ^:volatile-mutable moved ^:volatile-mutable watches]
   clojure.lang.IDeref
   (deref [this] (notify-deref-watcher! this) db)
   clojure.lang.IRef
@@ -108,46 +104,20 @@
   (setValidator [_ _] (throw (ex-info "a store takes no validator" {})))
   IStore
   (-moved [_] moved)
-  (-owner [_] owner)
-  (-set-keys [_ r ks]
-    (set! idx (cond-> (pdb/reads-drop idx r (get rkeys r #{})) (seq ks) (pdb/reads-add r ks)))
-    (set! rkeys (if (seq ks) (assoc rkeys r ks) (dissoc rkeys r))))
   (commit! [this db' datoms]
-    ;; the readers of what the datoms moved, from the index as it is now (a rerun below changes it): d x 5 lookups, whatever the
-    ;; readers (seon.db/readers); a watch that is not a reaction is told of every commit, as before
-    (let [old db rs (pdb/readers idx datoms)]
+    (let [old db]
       (set! db db')
       (set! moved datoms)
-      (notify-w this watches old db')
-      (doseq [r rs] (-handle-change r this old db')))
+      (notify-w this watches old db'))
     this))
 
 (defn store
   "The store at db as a source: a deref inside a reaction answers db and makes the store one of the reaction's sources, and
   what the run read of it is recorded by Datahike's recorder (datahike.reads) as the reaction's key set; `commit!` re-runs a
-  reaction only when the commit's datoms touch that set: the store keeps every reader's keys in one index (seon.db/reads-add), and a
-  commit asks it for the readers of what it moved (seon.db/readers), d x 5 lookups whatever the readers. See
+  reaction only when the commit's datoms touch that set (datahike.reads/reads-touched?). See
   docs/plan.md#the-root-concept-one-reaction-over-the-store."
   {:malli/schema [:=> [:cat :seon.host/db] :seon.host/deref]}
-  [db] (Store. db nil nil {} {} *owner*))
-
-(defn- store-keys!
-  "Reaction r reads keys ks of store s (nil: none any more): set in s's index now when s is the bound owner's (or has none), else sent
-  to s's owner as {:seon.ratom/keys [s r ks]} on its port, never written from another owner's step (`take-keys!`). See
-  docs/reactive.md#how-a-commit-reaches-its-readers-today."
-  {:malli/schema [:=> [:cat :any :any [:maybe [:set :any]]] :nil]}
-  [s r ks]
-  (let [o (-owner s)]
-    (cond (or (nil? o) (identical? o *owner*)) (-set-keys s r ks)
-          (:port o) (a/put! (:port o) {:seon.ratom/keys [s r ks]})
-          :else nil))
-  nil)
-
-(defn take-keys!
-  "Message m, {:seon.ratom/keys [s r ks]} on the bound owner's port, taken in its step: r's keys set in store s's index. nil. See
-  docs/reactive.md#how-a-commit-reaches-its-readers-today."
-  {:malli/schema [:=> [:cat :map] :nil]}
-  [m] (let [[s r ks] (:seon.ratom/keys m)] (-set-keys s r ks)) nil)
+  [db] (Store. db nil nil))
 
 ;; the recorder outside every reaction, while a run is in progress (`deref-capture`): nil when none was bound
 (def ^:dynamic ^:private *outer-reads* nil)
@@ -172,8 +142,6 @@
     ;; every read the run made is a dependency, however it reached the db: the one recorder (docs/plan.md#the-root-concept-one-reaction-over-the-store)
     (-set! r :key-set (when (seq rs) (reads/reads-index rs)))
     (when-not (= c (-get r :last)) (-update-watching r c))
-    ;; its keys in each store it read: the store's index, which a commit asks for the readers of what it moved (`store-keys!`)
-    (doseq [w (keys (-get r :watching)) :when (instance? Store w)] (store-keys! w r (-get r :key-set)))
     res))
 
 (defn reads-of
@@ -506,8 +474,7 @@
     (case k :captured (set! captured v) :dirty? (set! dirty? v) :f (set! f v) :auto-run (set! auto-run v) :key-set (set! key-set v)))
   (-handle-change [this sender oldval newval]
     ;; the store reaches it only by a commit touching a key its run read; every other source by Reagent's own watch
-    ;; a store reaches it only when its index names it for the commit's datoms (Store's commit!); every other source by Reagent's watch
-    (when-not (or (identical? oldval newval) dirty?)
+    (when-not (or (identical? oldval newval) dirty? (and (instance? Store sender) (not (reads/reads-touched? key-set (-moved sender)))))
       ;; run at once only in its owner's own step (or with no owner): in another owner's step it is dirtied and reaches its owner as
       ;; a message, an auto-run one too, so no reaction runs under another owner's bindings. The dirty? guard above keeps at most one
       ;; message outstanding a reaction, so an owner's port holds at most as many as the reactions it owns
@@ -520,9 +487,8 @@
           old (set (keys watching))]
       (set! last-captured derefed)
       (set! watching (zipmap new (repeat true)))
-      ;; a store is no watch: its index holds this reaction's keys (deref-capture sets them, store-keys!), dropped here when it is read no more
-      (doseq [w new :when (and (not (contains? old w)) (not (instance? Store w)))] (add-watch w this handle-reaction-change))
-      (doseq [w old :when (not (contains? new w))] (if (instance? Store w) (store-keys! w this nil) (remove-watch w this)))))
+      (doseq [w new :when (not (contains? old w))] (add-watch w this handle-reaction-change))
+      (doseq [w old :when (not (contains? new w))] (remove-watch w this))))
   (-queued-run [this]
     (when (and dirty? (some? watching))
       (cond (nil? auto-run) (-run this true)
@@ -569,7 +535,7 @@
       (set! state nil)
       (set! auto-run nil)
       (set! dirty? true)
-      (doseq [w (keys wg)] (if (instance? Store w) (store-keys! w this nil) (remove-watch w this)))
+      (doseq [w (keys wg)] (remove-watch w this))
       (when (some? on-dispose) (on-dispose s))
       (doseq [g on-dispose-arr] (g this))))
   (add-on-dispose! [_ g] (set! on-dispose-arr (conj (or on-dispose-arr []) g))))
