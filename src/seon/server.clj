@@ -481,7 +481,7 @@
       ;; and the task stays the agent's to hand back again
       (cond (contract/error? r) r
             (:ex r) (:ex r)
-            (:text r) (let [t (:max-tx @(:conn sys))
+            (:text r) (let [
                             outcome #(:seon.task/outcome (d/pull % [:seon.task/outcome] [:seon.task/id task]))
                             ;; the judge's own end answers (seon.reconcile/answer-judged): the task judged and past its merge (it
                             ;; left :running and the gate), or the typed error of a judge that left it :running, or root stopped
@@ -494,15 +494,14 @@
                               ;; green, behind main alone (seon.reconcile's judgment, bounded by max-behind): handed back again,
                               ;; which takes main first, as a model agent's turn loop does when it is told so
                               (= :behind (outcome db)) (op-answer sys ag req)
-                              :else (if-let [p (and (= :running (outcome db)) (c/defect db t "seon.reconcile"))]
-                                      {:task task :defect (select-keys p [:seon.error/type :seon.error/message])}
-                                      (let [files (fx/uncommitted (str (cfg/checkout)))]
+                              ;; a defect and a judge that left the task :running are the judge's own answers (j), never re-read here
+                              :else (let [files (fx/uncommitted (str (cfg/checkout)))]
                                         (cond-> (verdict-line db task (:main r))
                                           ;; judged; its merge gate runs on: the verdict comes later, where the agent reads
                                           (= :gate (outcome db))
                                           (assoc :next (str "the merge gate runs " (count (:seon.task/deferred (d/pull db [:seon.task/deferred] [:seon.task/id task])))
                                                             " process test(s) the change reaches; their verdict reaches your page (seon_context) and the task's outcome"))
-                                          (and (seq files) (not (contract/error? files))) (assoc :checkout-not-merged files))))))
+                                          (and (seq files) (not (contract/error? files))) (assoc :checkout-not-merged files)))))
             :else (refused (str ag " answered no end for " task))))
     (refused (str ag " works no task"))))
 

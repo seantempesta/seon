@@ -556,22 +556,22 @@
 ;; answer that was already an error is not taken back through its :dest again. Red before: :agent-facts (a vector) went whole into
 ;; err/occurrence's :agent, the api's step threw, and its :error answer re-ran back-op on the same answer, throwing again: a loop
 ;; of errors each wrapping the last (bin/check problems hung on it, 2026-11-12)
-;; docs/server.md#ops: seon_done's judge! is answered by the judge's end, or by a reconciler defect recorded after the ask: a step
-;; that throws keeps its state, so its flight never ends and answer-judged never runs for it (flow's review, 2026-11-15). Two
-;; producers, one promise. Estimate: two channel puts and one defect scan of a one-problem db, ~0.5M
+;; docs/server.md#ops: seon_done's judge! is answered by the judge's end, or by a reconciler defect: a step that throws keeps its
+;; state, so its flight never ends (flow's review). The api answers the wait in the step that records the defect, an ordinary
+;; pending entry, never a scan per commit (47.5M ticks a commit before [M]). Estimate: two api steps over a map, ~0.3M
 (deftest ^{:seon.test/estimate {:ticks 1000000}} a-judge-whose-reconciler-step-threw-answers-the-defect
-  (ts/test-branch!
-   (fn [_ conn]
-     (let [ext (clojure.core.async/chan 4) judge (clojure.core.async/chan 4)
-           sys {:graph nil :ext ext :judge judge :conn conn}
-           r (future (root/judge! sys {:task "demo/a" :env {} :agent :a1}))
-           await-m (clojure.core.async/<!! ext)
-           _ (clojure.core.async/<!! judge)
-           db1 (d/db-with @conn [{:seon.error/class :platform :seon.error/type :seon.system/proc-defect :seon.error/operation 'seon.reconcile/advance
-                                  :seon.error/message "the reconciler's step threw" :seon.error/last-ms 1}])]
-       (is ((:pred await-m) db1) "a reconciler defect after the ask ends the wait")
-       (deliver (:p await-m) db1)
-       (is (= :seon.system/proc-defect (get-in @r [:defect :seon.error/type])) (pr-str @r))))))
+  (let [st {:agents {} :pending {} :rid 0 :boot "b" :seon.system/errors {} :view {:agents {}}}
+        o (volatile! {})
+        stale (doto (promise) (deliver {:task "x" :outcome :closed}))
+        p (promise)
+        st (assoc-in st [:pending 7] {:p stale :kind :reconciler-defect :agent nil})
+        st (#'seon.system/ext-op st o {:op :wait :on :reconciler-defect :p p})]
+    (is (not (contains? (:pending st) 7)) "an entry its other producer already answered is dropped as a new one comes")
+    (is (= 1 (count (filter #(= :reconciler-defect (:kind %)) (vals (:pending st))))) "the new wait is one ordinary pending entry")
+    (#'seon.system/back-op st o {:op :error :pid :writer :message "not the reconciler"})
+    (is (= :unanswered (deref p 0 :unanswered)) "another proc's defect answers nothing")
+    (#'seon.system/back-op st o {:op :error :pid :reconciler :message "the reconciler's step threw"})
+    (is (= :seon.system/proc-defect (get-in (deref p 0 :unanswered) [:defect :seon.error/type])) "the reconciler's defect answers it")))
 
 ;; docs/errors.md#nothing-crashes-and-nothing-hangs: an agent's :merge-main waits with no clock (its merge-ms bound is deleted,
 ;; 2026-11-15); a writer step that throws on it answers the request's :dest, so the agent's await-reply ends with the typed error.
