@@ -285,9 +285,13 @@
   (agent/transact! [{:seon.model-call/id id :seon.model-call/basis basis}])
   (agent/commit!)
   (let [db (agent/db)
-        {:keys [messages parts] :as r} (wire/render db basis {:walk (repl/page-walk)})]
+        {:keys [messages parts] :as r} (wire/render db basis {:walk (repl/page-walk)})
+        ;; each message's digest, taken again only where the kept walk drew a new one: a message identical to the one at its place in the
+        ;; request before is that one, so its digest is (an unchanged component answers the same objects), and a turn digests what it added
+        ds (when store? (let [[pm pd] (::sent @agent/state)] (wire/sent-digests pm pd messages)))]
+    (when store? (swap! agent/state assoc ::sent [messages ds]))
     (agent/transact! (cond-> [{:seon.model-call/id id :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}]
-                       store? (into (wire/sent-tx db id prev n parts))))
+                       store? (into (wire/sent-tx db id prev n parts ds))))
     (agent/commit!)
     r))
 

@@ -564,6 +564,20 @@
         (is (= (digests p4) (back cp)) "whole, as sent")))))
 
 ;; See docs/render.md#a-turn-stores-what-it-sent
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-turn-digests-only-the-messages-it-added
+  ;; a 151-message turn digested all its messages each turn: 0.98M ticks and 9 MB [M root result/ddea4ea3], O(N) where the turn added a few;
+  ;; an agent's kept walk answers an unchanged component's same objects, so a message identical to the one at its place before is that one
+  (let [m (fn [i] {:role "user" :content (str "message " i)})
+        before (mapv m (range 5))
+        pd (wire/sent-digests nil nil before)
+        now (conj (assoc before 3 (m 33)) (m 5))
+        taken (atom 0)
+        real wire/part-digest
+        ds (with-redefs [wire/part-digest (fn [x] (swap! taken inc) (real x))] (wire/sent-digests before pd now))]
+    (is (= 2 @taken) "only the changed and the added message are digested")
+    (is (= (mapv real now) ds) "and every digest is the message's own")))
+
+;; See docs/render.md#a-turn-stores-what-it-sent
 (deftest ^{:seon.test/estimate {:ticks 3000000}} one-message-is-one-part-however-it-was-built
   ;; a digest of an encoding that kept insertion order would name one message twice, and nothing would be shared (data, 2026-11-15)
   (ts/test-branch!
