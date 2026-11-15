@@ -1310,7 +1310,9 @@
     (is (= 1 (count (re-seq #"href=\"/agent/a3\"" html))) "a3's entry is drawn once on root's chat: under the person, no list")
     (is (empty? (for [[id n] (frequencies ids) :when (> n 1)] id)) (str "no element id twice: " (pr-str (for [[id n] (frequencies ids) :when (> n 1)] id))))))
 
-(deftest a-nested-agents-model-render-answers-nothing
+;; Estimate: the program index of the test db (~4M: root's measured 4.1M, result/ce491daf) + paged-dbs' dozen transactions (~3M) + one cold
+;; model walk of root's small page (~3M) + its ctx and request (~1.5M) = ~11.5M, 12000000 (measured 11.2M at its first green)
+(deftest ^{:seon.test/estimate {:ticks 12000000}} a-nested-agents-model-render-answers-nothing
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: an agent placed in another's page (the person under root's) is drawn
   ;; as its entry (seon.render.ui/agent nested), and its model render answers nothing, since its conversation is no one's request but its own.
   ;; Red before: each nested agent's conversation was drawn for root's request and read by nothing (root's cold read on 2026-11-15: 38 page
