@@ -1862,7 +1862,7 @@
   map when the socket failed) and puts each whole line on lines, then {:end true}, or {:error e} for the failure. Ends
   at either, or when lines is closed; shut (the stream's :shut, nil: none) is called whenever it ends, so the
   connection is let go however the reading stops. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
-  {:malli/schema [:=> [:cat :seon.host/fn :seon.host/chan [:maybe :seon.host/fn]] :seon.host/thread]}
+  {:seon.flow/edge "an edge reader for a blocking read: a streaming call's connection, read by one thread that puts each line on its worker's :lines in-port" :malli/schema [:=> [:cat :seon.host/fn :seon.host/chan [:maybe :seon.host/fn]] :seon.host/thread]}
   [pull lines shut]
   (doto (Thread. ^Runnable
                  (fn []
