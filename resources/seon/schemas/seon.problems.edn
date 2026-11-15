@@ -178,7 +178,8 @@
  :seon.process/binary-digest [:maybe {:description "target/seon's identity as bin/build recorded it (target/seon.digest), or nil when none was recorded."} :string]
  :seon.process/branch-digest [:string {:description "A branch tree's binary identity (bin/binary-digest at that tree)."}]
  :seon.process/tree [:string {:description "A git tree id, as bin/tree and the import name it."}]
- :seon.process/env-mismatch [:and {:description "A process's binary is not its branch's: target/seon's identity (bin/binary-digest) differs from the branch tree's; its caller builds once (seon.fx/runtime-for)."} :seon.error/base [:map [:seon.error/type [:= :seon.process/env-mismatch]] [:seon.process/binary-digest [:maybe :string]] [:seon.process/branch-digest :string] [:seon.process/tree :string]]]
+ :seon.process/differs [:vector {:description "What differs between the binary's tree and a branch's that only a build changes: the build inputs and pins, as paths (seon.fx/runtime-for)."} :string]
+ :seon.process/env-mismatch [:and {:description "A process's binary is not its branch's: target/seon's identity (bin/binary-digest) differs from the branch tree's; its caller builds once (seon.fx/runtime-for)."} :seon.error/base [:map [:seon.error/type [:= :seon.process/env-mismatch]] [:seon.process/binary-digest [:maybe :string]] [:seon.process/branch-digest :string] [:seon.process/tree :string] [:seon.process/differs {:optional true} :seon.process/differs]]]
  :seon.fx/tree-unmoved [:and {:description "A commit moved git's main but its checked-out tree could not follow: the commit stands, the tree is brought in by hand."}
                         :seon.error/base [:map [:seon.error/type [:= :seon.fx/tree-unmoved]] [:sha :string]]]
  :seon.fx/ref-moved [:and {:description "A commit asked to move a branch only from the commit it expected found the branch elsewhere: nothing written; the caller reads what moved it and asks again."}
