@@ -279,3 +279,19 @@
       (is (= "boom" (ex-message (:thrown m))))
       (is (not (contains? m :value)))
       (is (= 11 (:calls m))))))
+
+;; docs/cost.md#a-call-past-the-floor: the live cost canary. A counted call whose whole passes a floor calls the hook once a
+;; stack, naming the deepest call past it (never each frame above), its work uncounted. Red before: no hook existed.
+;; Estimate: two counted calls allocating ~1 MB, ~2M ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000 :bytes 10000000}} a-call-past-the-floor-is-told-once-at-the-deepest-call
+  (let [seen (atom [])
+        inner (seon.profile/counted 'seon.profile-test/inner (fn [] (count (vec (range 20000)))))
+        outer (seon.profile/counted 'seon.profile-test/outer (fn [] (inc (inner))))
+        small (seon.profile/counted 'seon.profile-test/small (fn [] 1))]
+    (try
+      (seon.profile/over! 100000000 100000 (fn [sym t b] (swap! seen conj [sym (pos? t) (> b 100000)])))
+      (small)
+      (is (= [] @seen) "a call under the floor tells nothing")
+      (outer)
+      (is (= [['seon.profile-test/inner true true]] @seen) "once, the deepest call past the floor, not the frame above it")
+      (finally (seon.profile/over! Long/MAX_VALUE Long/MAX_VALUE nil)))))

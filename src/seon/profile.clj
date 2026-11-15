@@ -71,17 +71,31 @@
        (vector-set! c 5 (+ (- db seon-profile-kid-bytes) (vector-ref c 5)))
        (set! seon-profile-kid-ticks (+ kt dt))
        (set! seon-profile-kid-bytes (+ kb db)))
+     ;; the live cost canary (docs/cost.md#a-call-past-the-floor): a call whose own whole (ticks or bytes, callees included) passes
+     ;; a floor calls the hook (sym ticks bytes), once a stack: the deepest call past it, never each frame above it (kid-over
+     ;; says a callee already did). Floors start past every fixnum, so nothing fires until seon-profile-over! sets them
+     (define seon-profile-floor-ticks (greatest-fixnum))
+     (define seon-profile-floor-bytes (greatest-fixnum))
+     (define seon-profile-kid-over #f)
+     (define seon-profile-over-hook #f)
+     (define (seon-profile-over! ft fb hook)
+       (set! seon-profile-floor-ticks ft) (set! seon-profile-floor-bytes fb) (set! seon-profile-over-hook hook))
      ;; true while work that is not the running call's runs (a signal handler, seon-profile-aside):
      ;; its calls are not counted, and its ticks and bytes are a callee's to the call it interrupted
      (define seon-profile-off #f)
      (define-syntax seon-profile-call
        (syntax-rules ()
          [(_ c e) (if seon-profile-off e
-                  (let ([kt seon-profile-kid-ticks] [kb seon-profile-kid-bytes])
+                  (let ([kt seon-profile-kid-ticks] [kb seon-profile-kid-bytes] [ko seon-profile-kid-over])
                     (seon-profile-hit! c)
-                    (set! seon-profile-kid-ticks 0) (set! seon-profile-kid-bytes 0)
-                    (let* ([t0 (jolt-ticks)] [b0 (seon-profile-alloc)] [r e])
-                      (seon-profile-took! c (- (jolt-ticks) t0) (- (seon-profile-alloc) b0) kt kb)
+                    (set! seon-profile-kid-ticks 0) (set! seon-profile-kid-bytes 0) (set! seon-profile-kid-over #f)
+                    (let* ([t0 (jolt-ticks)] [b0 (seon-profile-alloc)] [r e]
+                           [dt (- (jolt-ticks) t0)] [db (- (seon-profile-alloc) b0)])
+                      (seon-profile-took! c dt db kt kb)
+                      (let ([over (or (> dt seon-profile-floor-ticks) (> db seon-profile-floor-bytes))])
+                        (when (and over (not seon-profile-kid-over) seon-profile-over-hook)
+                          (seon-profile-aside (lambda () (seon-profile-over-hook (vector-ref c 6) dt db))))
+                        (set! seon-profile-kid-over (or ko over seon-profile-kid-over)))
                       r)))]))
      ;; thunk run with its calls uncounted, its work a callee's of the call it interrupted
      (define (seon-profile-aside thunk)
@@ -126,7 +140,7 @@
 
 (def ^:private procs
   "The Scheme procedures above, by name (host procedures, resolved once)."
-  (into {} (for [k [:cell :counted :begin! :fold :calls :now :alloc :cpu :aside :reads-begin! :reads-fold]]
+  (into {} (for [k [:cell :counted :begin! :fold :calls :now :alloc :cpu :aside :reads-begin! :reads-fold :over!]]
              [k (scm/proc (str "seon-profile-" (name k)))])))
 
 (defonce ^:private opened-defs
@@ -178,6 +192,12 @@
   "f, counted under fn-sym: every call counted, with the ticks and bytes it did, in all and of its own."
   {:malli/schema [:=> [:cat :qualified-symbol :seon.host/fn] :seon.host/fn]}
   [fn-sym f] ((:counted procs) ((:cell procs) fn-sym) f))
+
+(defn over!
+  "Arm the live cost canary in this process: a counted call whose whole passes floor-ticks or floor-bytes calls (hook sym ticks
+  bytes), once a stack (the deepest call past the floor), its work uncounted (aside); a nil hook disarms it. See docs/cost.md#a-call-past-the-floor."
+  {:malli/schema [:=> [:cat pos-int? pos-int? [:maybe :seon.host/fn]] :any]}
+  [floor-ticks floor-bytes hook] ((:over! procs) floor-ticks floor-bytes hook))
 
 (defn aside
   "(thunk) run with its calls not counted, its work counted as a callee's of the call it interrupted:

@@ -112,6 +112,7 @@
  :seon.reconcile/judge-left-running [:and :seon.error/base [:map [:seon.error/type [:= :seon.reconcile/judge-left-running]] [:task :string]]]
  :seon.reconcile/judge-left-ready [:and :seon.error/base [:map [:seon.error/type [:= :seon.reconcile/judge-left-ready]] [:task :string]]]
  :seon.reconcile/agent-ended-running [:and :seon.error/base [:map [:seon.error/type [:= :seon.reconcile/agent-ended-running]] [:task :string]]]
+ :seon.cost/call-over-floor [:and :seon.error/base [:map [:seon.error/type [:= :seon.cost/call-over-floor]] [:fn :qualified-symbol] [:ticks :int] [:bytes :int]]]
  :seon.reconcile/write-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.reconcile/write-refused]] [:task :string] [:refused :map]]]
  :seon.prove/full-run-red [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/full-run-red]] [:tests [:vector :qualified-symbol]]]]
  :seon.prove/full-run-running [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/full-run-running]] [:running :string]]]
