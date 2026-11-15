@@ -2242,7 +2242,7 @@
 
 (defn- tree-leave!
   "One run of tree branch b ended: the last one marks b dropping, ends its agent ag (its end awaited on root's events, tapped
-  before the kill) and drops the branch (the writer's :drop-tree-branch: the owner's ruling, the system drops a tree's branch once
+  before the kill) and drops the branch (the writer's :drop-branch: the owner's ruling, the system drops a tree's branch once
   no proof of it runs), then lets a waiting run in. See docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :seon.system/sys :keyword [:maybe :seon.agent/id]] :nil]}
   [sys b ag]
@@ -2258,7 +2258,7 @@
               ;; wait's end; never an end event read from a tap, which slides and can drop the one event waited for
               (when (and ag (not (gone-statuses (get-in (state sys) [:agents ag :status]))))
                 @(request! sys 'kill! ag nil))
-              @(write! sys {:op :drop-tree-branch :branch b})
+              @(write! sys {:op :drop-branch :branch b})
               nil
               (finally (swap! tree-runs dissoc b) (deliver p true)))
             (recur)))))))
