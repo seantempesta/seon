@@ -11,6 +11,10 @@ How a fork's branches are named and where a pin sits.
 - A pinned commit is pushed to its fork on a ``jolt/<topic>`` branch by whoever made it: never the fork's `main`, never forced. Fork commits carry no AI trailers. `persistent-sorted-set` and `jolt-overlay` are private.
 - A pin moves only in a landing on main ([merging](merging.md#conflicts-and-pins)).
 
+## Fork work beside a Seon build
+
+A fork's checkout under `reference-code/` is also what Seon builds from. `bin/build` (and so `bin/test`, `bin/prove` and `bin/land`) moves every submodule back to its pin, which detaches a fork checkout that sits on a topic branch. `bin/tree` folds each submodule's checked-out commit into the tree's identity, so a fork checkout that moves while a run is going changes the identity under it: a test's root then reads a tree whose binary digest (`seon.fx/runtime-for`) is not target/seon's, and its spawns are refused with `:seon.process/env-mismatch` (deps, 2026-11-15: a Jolt commit during a prove turned `seon.system-test/a-second-boot-resumes-the-same-main` red). So fork work is committed on its `jolt/<topic>` branch before any Seon build, test, prove or land in that worktree, and no fork checkout moves while one runs. Commits on the branch survive the sync; uncommitted edits in a detached checkout are at risk.
+
 ## Following upstream
 
 ([decisions](decisions.md#the-forks-follow-upstream-theirs-when-almost-as-good-ours-written-to-be-offered-owner-2026-11-10))
