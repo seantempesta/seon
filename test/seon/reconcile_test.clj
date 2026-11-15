@@ -2345,6 +2345,14 @@
     (is (= [] (r/source-moved-tx db {:seon.error/type :seon.fx/ref-moved :expected "c0" :found "c2"})) "refused: nothing moved")))
 
 ;; Estimate: four calls of a pure function = 100000 ticks
+;; task seon.fx/proving-runs-as-flow (agreed with data): the source fact says which main t its tree holds, so the merge gate's base
+;; (the write-back's tree) knows how far it lags main (d/changes from that t). Red before: the fact held no :t
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-write-back-records-the-main-t-its-tree-holds
+  (let [db (d/db-with (ts/test-db) [{:seon.system/id :root :seon.system/source {:tree "t0" :commit "c0" :dirs ["src"]}}])]
+    (is (= [{:seon.system/id :root :seon.system/source {:tree "t1" :commit "c1" :dirs ["src"] :t 536870920}}]
+           (r/source-moved-tx db {:value {:sha "c1" :files 1 :expected "c0" :tree "t1"}} 536870920))
+        "the t of the db whose files it wrote, in the write that moves :commit")))
+
 (deftest ^{:seon.test/estimate {:ticks 100000}} a-write-back-commits-only-its-roots-merges-branch
   ;; docs/source.md#commit-the-merges-branch: a test root sourced from a session's worktree (on jolt/data) committed its scratch
   ;; task's file onto jolt/data, and the session's landing carried four onto main (test/mbca737a4b73ed79_test.clj, 2026-11-14):

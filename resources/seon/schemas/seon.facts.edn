@@ -632,6 +632,8 @@
  ;; took, or why it was refused
  :seon.system/source [:map {:seon.render/hiccup seon.render.ui/source-line}
                     [:root :string] [:commit {:optional true} :string] [:branch {:optional true} :string] [:tree {:optional true} :string] [:dirs {:optional true} [:vector :string]]
+                    ;; the t of main whose files the last write-back wrote (seon.reconcile/source-moved-tx): how far the tree lags main
+                    [:t {:optional true} :int]
                     [:pins {:optional true} [:map-of :string :string]] [:digest {:optional true} :string]
                     [:files :int] [:forms :int] [:retracted {:optional true} :int] [:ms number?]
                     [:error {:optional true} :string]
