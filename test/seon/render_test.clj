@@ -4669,6 +4669,13 @@
       (let [fold2 (reduce seon.error/fold fold (map occ (range 4 7)))
             [_ asked2] (#'seon.system/api-proc (assoc api :seon.system/errors fold2) :ext {:op :health :db main1 :p (promise)})
             [st2 out] (reduce (fn [[st _] m] (#'p/render-proc st :from-web m)) [st nil] (get asked2 [:render :from-web]))
+            ;; an ask on an unsettled report waits, and the proc's own bounded steps (::health-more on its events chan) answer it at
+            ;; the step that settles (task seon.render.proc/a-health-ask-waits-for-settling-never-loops-in-the-step): driven here as
+            ;; the proc's step loop drives them, at most 100 steps
+            [st2 out] (loop [st st2 out out i 0]
+                        (if (or (some #(= :health-answer (:op %)) (get out :to-api)) (= i 100))
+                          [st out]
+                          (let [[st o2] (#'p/render-proc st :events {:seon.render.proc/health-more true})] (recur st (merge-with into out o2) (inc i)))))
             answered (some #(when (= :health-answer (:op %)) (:r %)) (get out :to-api))
             banner2 (:html (second (filter #(= "#p-tiles" (:container %)) (:seon.render/units (#'p/page-value st2 [:debug :root])))))]
         (is (= 7 (count-of answered)) (str "the api's answer counts all seven: " (pr-str (count-of answered))))
