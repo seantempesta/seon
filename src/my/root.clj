@@ -448,15 +448,16 @@
         ;; the one binary identity (deps' seon.fx/runtime-for, kept by tree): kept when it is tree's, else a restart naming what differs
         rt (fx/runtime-for tree)
         why (root/restart-for held tree rt inputs)
-        ;; the update's outcome as a fact on main, written before bin/update acts on it, so a restart's reason outlives the restart
-        update (cond-> {:tree tree :outcome (if why :restart :kept) :boot (:boot sys) :at-ms (System/currentTimeMillis)}
+        ;; the update's outcome as a fact on main, written before bin/update acts on it, so a restart's reason outlives the restart; its
+        ;; transaction's :db/txInstant is when
+        update (cond-> {:tree tree :outcome (if why :restart :kept) :boot (:boot sys)}
                  why (assoc :reason why)
                  (seq (:seon.process/differs rt)) (assoc :differs (vec (:seon.process/differs rt))))]
     (if why
-      (let [r @(root/transact-main! sys [{:seon.system/id :root :seon.system/update update}])]
+      (let [r @(root/transact-main! sys [{:seon.system/id :root :seon.system/last-update update}])]
         (if (contract/error? r) r {:restart why}))
       (let [src (root/booted-source held (:boot sys) (program/binary-program) (program/program-digest db) (fx/config-input config/config (config/checkout)) nil inputs)
-            r @(root/transact-main! sys [{:seon.system/id :root :seon.system/source src :seon.system/update update}])]
+            r @(root/transact-main! sys [{:seon.system/id :root :seon.system/source src :seon.system/last-update update}])]
         ;; kept, but the binary is not current for the landed tree (forms, config or schema entries it bakes): bin/update builds
         ;; it now, with no restart, so the next boot is on main's build, never a stale one
         (if (contract/error? r) r {:kept (:boot sys) :tree tree})))))
