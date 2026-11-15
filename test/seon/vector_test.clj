@@ -527,3 +527,25 @@
         first-ticks (ticks) again (ticks)]
     (is (= (vector/near db q 10 {:of :form/id}) (vector/near db q 10 {:of :form/id})) "the same answer")
     (is (< again (- first-ticks (* 0.8 scan))) (str "the second call on the value pays no scan (" scan " ticks): " first-ticks " then " again))))
+
+;; docs/vector.md#search: the dependency source is derived data kept current by main's notice, as the vectors are: a round with
+;; nothing to embed asks the :library effect at the lowest :prio when the pins or deps moved from those it was read at, and
+;; nothing when they stand, or when the store depends on nothing (a test's). Estimate: the seed and two rounds: ~5M; 20,000,000
+(deftest ^{:seon.test/estimate {:ticks 20000000 :bytes 40000000}} an-idle-round-reads-the-dependency-source-when-its-pins-move
+  (ts/test-branch! (fn [_ conn]
+  (let [db (db-due-only conn)
+        db (with! conn db (embedded (vector/due db "m") (take (count (vector/due db "m")) (cycle (vectors 2 8 8 768))) "m"))
+        st (vector/vectors-proc {:model "m" :texts 64 :conn conn})
+        [_ o0] (vector/vectors-proc st :main (assoc (note db) :t 10))
+        db (with! conn db [{:seon.pin/path "reference-code/lib" :seon.pin/commit "c1"}])
+        [st o1] (vector/vectors-proc st :main (assoc (note db) :t 11))
+        ask (first (:to-api o1))]
+    (is (empty? (:to-api o0)) "a store that depends on nothing asks nothing")
+    (is (= :library (get-in ask [:req :kind])) (str "a pin with no library read asks the :library effect: " (pr-str o1)))
+    (is (= -1 (get-in ask [:req :prio])) "at the lowest priority")
+    (is (= {"reference-code/lib" "c1"} (get-in ask [:req :req :pins])) "with the pins it reads at")
+    (let [in (@#'vector/library-inputs db)
+          db (with! conn db [{:seon.system/id :root :seon.library/inputs in}])
+          [_ o2] (vector/vectors-proc (vector/vectors-proc {:model "m" :texts 64 :conn conn}) :main (assoc (note db) :t 12))]
+      (is (empty? (:to-api o2)) "pins that stand ask nothing"))))))
+
