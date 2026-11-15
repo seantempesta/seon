@@ -1977,7 +1977,8 @@
                            (and (seq rest-tests) (not reach?)) "the tests your change reaches run when your status is clear")]
         (if err
           err
-          (let [nv @nvs
+          ;; a test a later gate answered green is no longer without a verdict (root's review: nvs only grew)
+          (let [nv (into {} (remove (fn [[t _]] (= :green (:seon.test/status (pull-of t))))) @nvs)
                 [t e] (first (sort-by (comp str key) nv))
                 why (when t (str "the gate answered no verdict for " (count nv) " of your process tests (" t " first): "
                                  (:seon.error/type e) ": " (:seon.error/message e)))]
