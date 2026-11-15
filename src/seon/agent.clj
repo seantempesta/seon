@@ -585,8 +585,8 @@
   "git merge main into this agent's branch, decided on MAIN's program: root's writer runs the one merge (its :merge-main,
   seon.merge/merge-main), never this branch's code. The branch becomes main's head plus its own datoms since the base, one commit
   only while the branch is still at the head this process committed; a key both changed stops it, and each conflict is an unmerged
-  entry on the branch. This process writes nothing of its branch while it waits (the wait is bounded,
-  :seon.config.agent/merge-ms), then its connection follows the branch's moved head (datahike.connector/follow-head!). None of
+  entry on the branch. This process writes nothing of its branch while it waits; the wait ends by the writer's answer, or, if
+  its step throws, the typed error root answers the request's :dest with (seon.system/answer-taken), or root's end; then its connection follows the branch's moved head (datahike.connector/follow-head!). None of
   main's forms loads here: its program stays the one :program names (program-db) and :behind says so, so the run re-forks at its
   next turn boundary (seon.turn) and its test children load the branch's difference first (load-diff!). Answers {:ok :merged
   :applied :conflicts :t}: :merged the main commit merged, nil when main had not moved; :applied the program keys main changed since
@@ -600,7 +600,7 @@
       {:ok true :merged nil :applied [] :conflicts [] :t (:max-tx @conn)}
       (let [applied (vec (keys (main-changes (:base @state) main)))
             k (:tx-seq (swap! state update :tx-seq inc))
-            r (await-reply k {:op :merge-main :k k} (cfg/value :seon.config.agent/merge-ms))
+            r (await-reply k {:op :merge-main :k k})
             r (if (contains? r :result) (:result r) (dissoc r :op :k))]
         (if (contract/error? r)
           r
@@ -1111,7 +1111,7 @@
                       (:seon.test/report x) (swap! current conj (test-report (:seon.test/report x) (str "#'" (:test x))))
                       ;; a test's end: its result, after its reports, and the live heap it left (a
                       ;; collection, then the heap's bytes: what it holds for the tests after it, docs/cost.md#what-a-test-run-measures)
-                      (:test x) (do (put! {:seon.test/ended (str "#'" (:test x)) :reports @current :fns (:fns x)
+                      (:test x) (do (put! {:seon.test/ended (str "#'" (:test x)) :reports @current :fns (:fns x) :files (:files x)
                                            :ms (:ms x) :ticks (:ticks x) :bytes (:bytes x) :budget (:budget x)
                                            :heap (do (System/gc) (lib/bytes-in-heap))})
                                     (swap! reports into @current)
@@ -1161,7 +1161,7 @@
                                  (cond-> (-> acc (dissoc :running) (update :streamed into (:reports v)) (update :ended conj t))
                                    (seq (:fns v)) (assoc-in [:fns (proofs/test-symbol t)] (:fns v))
                                    (:heap v) (assoc-in [:heap (proofs/test-symbol t)] (:heap v))
-                                   (:ms v) (assoc-in [:measured (proofs/test-symbol t)] (select-keys v [:ms :ticks :bytes :budget]))))
+                                   (:ms v) (assoc-in [:measured (proofs/test-symbol t)] (select-keys v [:ms :ticks :bytes :budget :files]))))
           (contains? v :pass) (assoc acc :answer (dissoc v ::flow/pid))
           (::flow/ex v) (assoc acc :ex (::flow/ex v))
           :else acc)))
@@ -1799,8 +1799,7 @@
                       ;; each green keyed by what it read: the functions it called, itself, its reads besides code (docs/source.md#tests-run-by-reach)
                       ran (if-let [rd (some-> (:reads-rd plan) force)]
                             (into {} (for [[t x] ran] [t (cond-> x (proofs/green? x)
-                                                           (assoc :reads (proofs/reads-key rd {:fns (conj (into #{} (map :var) (get-in r [:fns t])) t)
-                                                                                               :keys (get-in plan [:static-reads t])})))]))
+                                                           (assoc :reads (proofs/reads-key rd (proofs/run-reads (assoc x :fns (get-in r [:fns t])) t (get-in plan [:static-reads t])))))]))
                             ran)
                       w (fx/write-verdicts! {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state) :agent (:id @state) :key (:key @state)} ran failures)]
                   ;; beside the cache, the same run's results as facts on this branch (the record shows them); an item the test service
@@ -1886,7 +1885,7 @@
   each read from the branch where the gate already judged it at its digest and never asked again. Their verdicts are facts on this
   branch (seon.proofs/gate-tx), so a red reads on its status and page with a turn to fix it, and the answer counts them. The task's own
   proofs and the tests named come first, ahead of other agents' longer runs (:prio); a red among them answers now. The rest, the tests
-  its change only reaches, run when reach? is true, which is when its status is clear and it has nothing else to do (seon.turn/turn-begin's :prove; seon.turn/judged at a hand-back);
+  its change only reaches, run when reach? is true, which is when its status is clear and it has nothing else to do (the :prove output of seon.turn/turn-begin and seon.turn/hand-back-step);
   (my.agent/prove), reach? false, leaves them :deferred and says so, so an eval never sits behind them. What no gate will run
   (seon.task/unjudged) stays :deferred, said under :unjudged and on the status. A failed gate, or a changed namespace with no file on
   the branch, is the answer: no verdict. Committed first: the gate reads the committed head, and the verdicts are held at its digests. See

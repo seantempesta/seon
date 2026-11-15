@@ -521,8 +521,7 @@
   (let [{:keys [tests digests tree mg rerun warm]} (edn/read-string (slurp file))
         ;; what each green read, keyed by the run's reads index (write-reads!): the functions it called, itself, its static reads
         {:keys [rd static]} (shard-reads file)
-        with-reads (fn [x] (cond-> x rd (assoc :reads (proofs/reads-key rd {:fns (conj (into #{} (map :var) (:fns x)) (:test x))
-                                                                              :keys (get static (:test x))}))))
+        with-reads (fn [x] (cond-> x rd (assoc :reads (proofs/reads-key rd (proofs/run-reads x (:test x) (get static (:test x)))))))
         t0 (profile/now-ns)]
     (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
     ;; armed as root arms them at boot, so a proof counts the same contracted calls here as in an agent's test child (docs/cost.md#counting-calls)

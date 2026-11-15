@@ -2363,7 +2363,14 @@
        (testing "a live agent's branch is its own to write"
          (d/transact conn {:tx-data [{:seon.agent/key "rp-live" :seon.agent/status :busy :seon.agent/branch b}] :tx-meta (pdb/tx-meta (:branch cfg))})
          (is (= "rp-live" (:agent (ask {:op :tx :branch b :tx-data [{:seon.agent/key "rp-2" :seon.agent/status :idle}]}))))
-         (is (contract/error? (ask {:op :reset-branch :branch b :to c0 :expected (d/commit-id (pdb/head conn b))}))))))))
+         (is (contract/error? (ask {:op :reset-branch :branch b :to c0 :expected (d/commit-id (pdb/head conn b))})))
+         (is (contract/error? (ask {:op :drop-branch :branch b})) "nor dropped while it lives"))
+       (testing "a branch no live agent holds is dropped; main never"
+         (d/transact conn {:tx-data [[:db/add [:seon.agent/key "rp-live"] :seon.agent/status :ended]] :tx-meta (pdb/tx-meta (:branch cfg))})
+         (is (= {:ok true :dropped true} (select-keys (ask {:op :drop-branch :branch b}) [:ok :dropped])))
+         (is (not (pdb/branch? conn b)) "its head is gone")
+         (is (= {:ok true :dropped false} (select-keys (ask {:op :drop-branch :branch b}) [:ok :dropped])) "a second drop finds none")
+         (is (contract/error? (ask {:op :drop-branch :branch (:branch cfg)})) "main is never dropped"))))))
 
 (deftest ^{:seon.test/estimate {:ticks 10000000}} the-writer-merges-main-into-a-branch-on-mains-program
   ;; docs/merging.md#a-branch-merges-main-in: agent lb76's branch held the old seon.merge, so merging itself it ran the old code; the
@@ -2406,3 +2413,78 @@
            (is (= :busy (:seon.agent/status (d/entity merged [:seon.agent/key "mm-own"]))) "the branch's own fact")
            (is (= :idle (:seon.agent/status (d/entity merged [:seon.agent/key "mm-main"]))) "and main's"))
          (finally (d/release bc)))))))
+
+;; docs/errors.md#nothing-crashes-and-nothing-hangs: a flight's last write (its :done step) that the writer refused left the task
+;; :running with no flight and no problem: it stayed live, the reconciler never went quiet, and seon_done's await-db waited for
+;; good (root's read, 2026-11-15: reconcile.clj's :done dropped the flight whatever its answer). Now a refused :done is the
+;; reconciler's :platform problem, which the server's :done reads beside its judge's answer (answer-judged). Red before: no output. Estimate: one step of a map, ~0.1M
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-flights-refused-last-write-is-a-problem-never-a-silent-end
+  (let [st {:db (seon.db/empty-db false) :boot "b" :flights {"t/a" {:act {:op :spawn :task "t/a"} :agent :a1}} :pending {} :rid 0}
+        refused (seon.contract/error :seon.writer/refused #'seon.writer/commit-batch "the cas found :ready, not :running" {})
+        [st' outs] (#'seon.reconcile/advance st "t/a" :done refused)
+        p (first outs)]
+    (is (nil? (get-in st' [:flights "t/a"])) "the flight ends")
+    (is (= [:problem :platform :seon.reconcile/write-refused] [(:op p) (:class p) (get-in p [:error :seon.error/type])]) (pr-str outs))
+    (is (= "t/a" (get-in p [:error :task])) "naming the task")
+    (is (= refused (get-in p [:error :refused])) "and the refusal")
+    (is (= [] (second (#'seon.reconcile/advance st "t/a" :done {:ok true :t 5}))) "an answered write ends it with nothing to say")
+    ;; a task cancelled (or held) while its flight ran: its last write's cas meets the move, an expected refusal, no defect
+    ;; (e2e-calc's cancel of calc/neg, the land of 2026-11-15 08:20)
+    (let [st (assoc st :db (d/db-with (:db st) [{:seon.task/id "t/a" :seon.task/execution :cancelled}]))]
+      (is (= [] (second (#'seon.reconcile/advance st "t/a" :done refused))) "a cancelled task's refused write is no problem"))))
+
+;; docs/server.md#ops: seon_done waits on its judge's own end (seon.reconcile/answer-judged), never on the whole root's quiet: a
+;; :running task of anyone's kept the reconciler from quiet, and a judge that left its task :running waited for good (context's
+;; 06:31 capture [M]: flights 0, live 1, quiet false, the :done pending). Each order of the judge's end and the wait, red first.
+;; Estimate: three steps of the reconciler over a db of one task, ~1M
+(deftest ^{:seon.test/estimate {:ticks 1500000}} a-judges-waiter-is-answered-by-the-judges-end-in-either-order
+  (let [db (fn [o] (d/db-with (seon.db/empty-db false) [{:seon.task/id "demo/a" :seon.task/outcome o}]))
+        st (fn [o] {:db (db o) :boot "b" :flights {} :pending {} :rid 0 :waits [] :judged {} :behind []})
+        step (fn [st in m] (first (r/reconciler-proc st in m)))]
+    (testing "the wait after the judge's end (no flight left): answered at once from the db, no window"
+      (let [p (promise) _ (step (st :closed) :judge {:op :judged :task "demo/a" :p p})]
+        (is (= {:task "demo/a" :outcome :closed} (deref p 0 :unanswered)))))
+    (testing "the judge left its task :running: the typed error, never a wait for good"
+      (let [p (promise) _ (step (st :running) :judge {:op :judged :task "demo/a" :p p})]
+        (is (= :seon.reconcile/judge-left-running (:seon.error/type (deref p 0 :unanswered))))))
+    (testing "the wait before the judge's end: held while its flight is in the air, answered by the step that ends it"
+      (let [p (promise)
+            s (assoc (st :running) :flights {"demo/a" {:act {:op :spawn :task "demo/a"} :agent :a1}})
+            s (step s :judge {:op :judged :task "demo/a" :p p})]
+        (is (= :unanswered (deref p 0 :unanswered)) "held: the judge is still in the air")
+        (#'seon.reconcile/answer-judged (assoc s :flights {} :db (db :failed)))
+        (is (= {:task "demo/a" :outcome :failed} (deref p 0 :unanswered)) "its end answers it")))
+    (testing "while an octopus merge flies, it waits; with none flying and no live merge, nothing will merge it (flow's review)"
+      (let [p (promise)
+            s (step (assoc (st :ready) :flights {"demo/m" {:act {:op :octopus-merge :task "demo/m"}}} :idx {:live #{:x} :merging #{}})
+                    :judge {:op :judged :task "demo/a" :p p})]
+        (is (= :unanswered (deref p 0 :unanswered)) "a merge in flight: wait, whatever else is live")
+        (#'seon.reconcile/answer-judged (assoc s :flights {}))
+        (is (= :seon.reconcile/judge-left-ready (:seon.error/type (deref p 0 :unanswered))) "no merge flying or coming, other agents live: answered")))))
+
+;; docs/errors.md#nothing-crashes-and-nothing-hangs: an octopus merge whose request the writer answered with an error (a step that
+;; threw, answered at its :dest) moved no member off :ready: (:results r) was nil, so each member's seon_done waited for its merge
+;; for good, and the next pass merged them again (root's question, 2026-11-15). Now each member moves :ready -> :closed, held, naming
+;; the error. Red before: no member moved. Estimate: one step over a db of two tasks, ~1M
+(deftest ^{:seon.test/estimate {:ticks 1500000}} a-merge-answered-an-error-moves-every-member-off-ready
+  (let [db (d/db-with (seon.db/empty-db true) [{:seon.task/id "demo/a" :seon.task/outcome :ready} {:seon.task/id "demo/b" :seon.task/outcome :ready}])
+        st {:db db :boot "b" :pending {} :rid 0 :idx {:tasks {"demo/a" {:seon.task/outcome :ready} "demo/b" {:seon.task/outcome :ready}}}
+            :flights {"demo/a" {:act {:op :octopus-merge :task "demo/a" :members [{:task "demo/a"} {:task "demo/b"}]}}}}
+        e (seon.contract/error :seon.system/proc-defect #'seon.system/flow-error "the octopus merge threw" {})
+        [_ outs] (#'seon.reconcile/advance st "demo/a" :octopus-merged e)
+        tx (set (mapcat #(get-in % [:req :req :tx-data]) outs))]
+    (doseq [id ["demo/a" "demo/b"]]
+      (is (contains? tx [:db/cas [:seon.task/id id] :seon.task/outcome :ready :closed]) (str id " moves off :ready: " (pr-str tx))))))
+
+;; docs/reconcile.md#the-reconcilers-index: a :running task whose agent's process ended (an outside agent a test ended, an attach
+;; whose process died) is not live: it held root's quiet for good, so every later await-quiet in a shard's shared root waited past
+;; its bound (the 08:35 capture [M]: reconciler live 1, flights 0, judged [], one quiet wait held). It is reaped :lost, typed.
+;; Red before: live. Estimate: one classify of a map, ~50k ticks
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-running-task-whose-agent-ended-is-reaped-not-live
+  (let [idx (fn [ended] (assoc r/empty-index :root {:boot "b"} :tasks {"t/a" {:seon.task/id "t/a" :seon.task/ns (quote t) :seon.task/name "a" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b :seon.task/proofs #{} :seon.task/needs #{} :seon.task/kind :work :seon.task/outcome :running :seon.task/agent "k7"}}
+                               :agents {"k7" (cond-> {:seon.agent/boot "b" :seon.agent/started-ms 10 :seon.agent/env {:branch :b}} ended (assoc :seon.agent/ended-ms ended))}))
+        c (fn [i] (#'seon.reconcile/classify i "t/a"))]
+    (is (contains? (:live (c (idx nil))) "t/a") "its agent runs: live")
+    (is (not (contains? (:live (c (idx 20))) "t/a")) "its agent ended after it started: not live")
+    (is (contains? (:reap (c (idx 20))) "t/a") "reaped")
+    (is (contains? (:live (c (idx 5))) "t/a") "an end from before this start (the session's earlier process) is no end of it")))
