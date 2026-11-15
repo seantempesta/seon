@@ -1296,9 +1296,10 @@
 
 (defn gate-answer
   "The system's answer a to the gate's run of tests (seon.system/prove-tree!'s, the run-tests-forked shape: :reports, :red,
-  :digests) as run-on-checkout answers it: {:results {test :pass|:fail} :failures {test [failure ...]} :digests}. A test
-  the run never reached (it is answered at its first red) is in none, so its branch keeps it deferred and asks again: never a
-  red it did not show. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  :digests) as run-on-checkout answers it: {:results {test :pass|:fail} :failures {test [failure ...]} :digests :no-verdict}. A test
+  the run never reached (it is answered at its first red), or one with no verdict (:no-verdict, its batch's error: the platform
+  failing), is in none, so its branch keeps it deferred and asks again: never a red it did not show. See
+  docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :map [:sequential :qualified-symbol]] :map]}
   [a tests]
   (let [red (set (:red a))
@@ -1307,7 +1308,8 @@
         results (into {} (for [t tests :let [s (cond (red t) :fail (passed t) :pass)] :when s] [t s]))]
     {:results results
      :failures (into {} (for [[t s] results :when (= :fail s) :let [fs (get fails t)] :when (seq fs)] [t (vec fs)]))
-     :digests (select-keys (:digests a) (keys results))}))
+     :digests (select-keys (:digests a) (keys results))
+     :no-verdict (select-keys (:no-verdict a) tests)}))
 
 (defn- kept-files
   "The files of a program store d a copy of it carries: its data, and the reach graphs and reads indexes kept for its trees
@@ -1402,7 +1404,13 @@
                   a
                   (let [v (gate-answer a tests)]
                     (vreset! green? (= (set tests) (set (keep (fn [[t s]] (when (= :pass s) t)) (:results v)))))
-                    {:value (assoc v :ms (profile/ms-since t0) :log log)})))
+                    (if (and (empty? (:results v)) (seq (:no-verdict v)))
+                      ;; no test has a verdict: the gate's answer is the platform's error, typed and held, never a red each
+                      (let [[t e] (first (:no-verdict v))]
+                        (contract/error :seon.prove/no-verdict #'seon.fx/run-on-checkout
+                                        (str "the gate's run answered no verdict for any of its " (count tests) " tests: " (:seon.error/type e) ": " (:seon.error/message e))
+                                        {:test t :no-verdict (:no-verdict v)}))
+                      {:value (assoc v :ms (profile/ms-since t0) :log log)}))))
             ;; the full run's shards cache their verdicts in this checkout's verdict cache, named to them,
             ;; so the verdicts read below are the ones its run wrote
             (let [out (str dir "/target/prove/run")

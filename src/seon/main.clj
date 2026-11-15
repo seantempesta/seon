@@ -141,9 +141,10 @@
                     (out! "prove: " (count (:selected r)) " keys, " (:reused r 0) " green at their digest (reused), " (:ran r 0)
                           " run (tests, process tests and check steps) through the system's one admission")
                     (out! "prove: " (shown (select-keys r [:key :ran :reused :pass :fail :error :deferred])))
-                    (if (seq (:red r))
-                      (do (out! "prove: red " (clojure.string/join " " (:red r))) (out! "PROVE FAILED") 1)
-                      (do (out! "PROVE OK") 0))))))
+                    (cond (seq (:red r)) (do (out! "prove: red " (clojure.string/join " " (:red r))) (out! "PROVE FAILED") 1)
+                          ;; a test with no verdict (its batch's error) is no red, and no green either
+                          (seq (:no-verdict r)) (do (out! "prove: no verdict " (clojure.string/join " " (keys (:no-verdict r)))) (out! "PROVE FAILED") 1)
+                          :else (do (out! "PROVE OK") 0))))))
 
 (defn- driver!
   "The check driver's -main (seon.check, in test/), loaded

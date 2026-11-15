@@ -631,7 +631,24 @@
     (is (not (seon.contract/error? r)) (str "the run answers its verdicts, not the one test's error: " (pr-str r)))
     (is (= 1 (:pass r)) "the test that passed counts")
     (is (= [:seon.prove/no-verdict] (keep #(when (= "#'a.b-test/u" (:var %)) (:seon.error/type %)) (:reports r)))
-        "and the one ended at its wall bound is its own no-verdict")))
+        "and the one ended at its wall bound is its own no-verdict")
+    (is (not-any? #{'a.b-test/u} (:red r)) (str "a no-verdict is no red: " (pr-str (:red r))))
+    (is (= ['a.b-test/u] (keys (:no-verdict r))) "it is named as no verdict, with why")))
+
+;; docs/merging.md#the-test-service: a batch's own error (its child could not be forked, it died before a test began) is the platform
+;; failing: each of its items has no verdict, and the error holds, typed, for its asker; never a red per item. Red before: run-answer
+;; named every errored item in :red, and the gate (seon.fx/gate-answer) read each red as :fail: data's pilot, 2026-11-15 23:0x, met
+;; the merge gate's answer of 280 :fail from one batch's error (root). Estimate: one run-answer and one gate-answer of 2 items, ~50k.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-batchs-error-is-no-verdict-and-never-a-red
+  (let [died {:seon.error/type :seon.test/fork-refused :seon.error/message "the test child could not be forked"}
+        r (#'prove/run-answer {:selected ['a.b-test/t 'a.b-test/u] :digests {'a.b-test/t "d1" 'a.b-test/u "d2"}}
+                              {'a.b-test/t died 'a.b-test/u died})
+        g (fx/gate-answer r ['a.b-test/t 'a.b-test/u])]
+    (is (= [] (:red r)) (str "no item ran, so none is red: " (pr-str (:red r))))
+    (is (= #{'a.b-test/t 'a.b-test/u} (set (keys (:no-verdict r)))) "each is no verdict")
+    (is (= :seon.test/fork-refused (get-in r [:no-verdict 'a.b-test/t :seon.error/type])) "naming the batch's own error")
+    (is (= {} (:results g)) (str "the gate reads no :fail from it, so its branch keeps them deferred: " (pr-str g)))
+    (is (= :seon.test/fork-refused (get-in g [:no-verdict 'a.b-test/u :seon.error/type])) "and the gate's answer carries why")))
 
 ;; docs/merging.md#the-test-service: each asker is told an item's verdict as it lands, before it is answered, so a session's
 ;; bin/prove prints each test as it ends; an item with no verdict is told as :no-verdict, never left out
