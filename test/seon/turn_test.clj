@@ -221,3 +221,19 @@
     (is (not (contains? (get-in r [:seen :site]) :stepping)) (str "parked while its judge is out: " (pr-str (:seen r))))
     (is (= "app.calc/total-is-exact" (get-in r [:seen :run :task])) (str "the ping is answered with the hand-back: " (pr-str (:seen r))))
     (is (= :waiting (get-in r [:end :outcome])) (str "the stop ended it at once: " (pr-str (:end r))))))
+
+;; task seon.prove/a-test-that-dies-fails-only-itself: a run that failed as a whole is held on the agent whole, its own keys
+;; with it (a no-verdict's :test and :reported say what the run did report). Red before: only its type, operation and message
+;; were kept. Estimate: one seek of the agent and one transaction handed to a stand-in, ~20k ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-failed-runs-error-is-held-whole
+  (let [old @seon.agent/state
+        db (t/with (t/world) [{:seon.agent/key "k-err"}])
+        err (seon.contract/error :seon.prove/no-verdict 'seon.prove/batch-ended "app.x-test/t's batch answered no verdict for it"
+                                 {:test 'app.x-test/t :digest "0123456789abcdef" :reported ['app.x-test/u]})
+        got (atom nil)]
+    (try
+      (reset! seon.agent/state (assoc old :key "k-err"))
+      (with-redefs [seon.agent/db (constantly db) seon.agent/transact! (fn [tx] (reset! got tx) {})]
+        (@#'seon.turn/test-error! err))
+      (is (= ['app.x-test/u] (get-in (first @got) [:seon.agent/test-error :reported])) (pr-str @got))
+      (finally (reset! seon.agent/state old)))))
