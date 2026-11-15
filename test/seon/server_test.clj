@@ -290,7 +290,7 @@
 ;; new one, ~10.5k ticks a message [M result/b45faee3]
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} a-message-to-an-attached-agent-is-in-the-next-reply
   ;; task seon.server/a-message-reaches-the-session-that-drives-its-agent (docs/users.md#messages): a session driving an agent through
-  ;; MCP hears a message to it in its next reply, as a model hears one in its next request: the messages its turn took, each once. Red
+  ;; MCP hears a message to it in its next reply, as a model hears one in its next request, once. Red
   ;; before: the reply carried its evals' responses alone, and main's merge had already put the message on the branch, so it read as
   ;; delivered while no one had read it (flow's probe, 2026-11-15: agent ba18c9e9bd81a184)
   (let [[_ sent heard again] (at/in-agent (fn [{:keys [agent task]}]
@@ -300,9 +300,11 @@
                                              {:op :eval :agent agent :message-md "" :evals [{:intent "add again" :code "(+ 2 2)"}]}]))]
     (is (true? (:ok sent)) (pr-str sent))
     (is (= [3] (mapv :value (:responses heard))) "the evals answer as before")
-    (is (= ["use demo/g"] (mapv :body (:messages heard))) (str "the reply after the message carries it: " (pr-str (dissoc heard :responses))))
-    (is (= (seon.config/value :seon.config.root/user-name) (:from (first (:messages heard)))) "with who sent it, by name")
-    (is (empty? (:messages again)) (str "and the next reply does not carry it again: " (pr-str (:messages again))))))
+    ;; the reply adds what the model's next request adds (seon.turn/outside-reply!, one request! for both kinds of agent), where a message
+    ;; to the agent is placed as its model reads it
+    (is (clojure.string/includes? (str (:request heard)) "use demo/g") (str "the reply after the message carries it: " (pr-str (dissoc heard :responses))))
+    (is (clojure.string/includes? (str (:request heard)) (seon.config/value :seon.config.root/user-name)) "with who sent it, by name")
+    (is (not (clojure.string/includes? (str (:request again)) "use demo/g")) (str "and the next reply does not carry it again: " (pr-str (:request again))))))
 
 ;; Estimate: in this process, two server round trips (~0.5M each, as a-message-reaches-the-agent's): ~1M; 2,000,000. In root: one
 ;; message write, and the api's wake-inbox over that commit's ops (~1k ticks)

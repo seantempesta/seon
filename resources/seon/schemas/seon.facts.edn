@@ -820,13 +820,13 @@
  :seon.model-call/assembly [:map {:description "What the turn sent, as what changed since the previous call's (:seon.model-call/prev): the first :keep parts of that call's, then :add, each part's ref, turn and messages' digests in order; with no prev, the parts whole. See docs/render.md#a-turn-stores-what-it-sent."}
                             [:keep [:int {:min 0}]]
                             [:add [:vector [:tuple :seon.ctx.wire/ref [:maybe :int] [:vector :seon.part/digest]]]]]
+ :seon.model-call/prev [:and {:seon.db/to [:seon.model-call/fact] :description "The model call whose assembly this one's continues (seon.ctx.wire/assembly-parts); none at a checkpoint. See docs/render.md#a-turn-stores-what-it-sent."} :seon.db/ref]
  ;; what labels a part of a request (seon.ctx.wire/part-ref): [:page n], [:eval id], [:message id], [:reply id], [:section addresses],
  ;; [:session key], [:example key], or an entity's schema and id
- :seon.model-call/prev [:and {:seon.db/to [:seon.model-call/fact] :description "The model call whose assembly this one's continues (seon.ctx.wire/assembly-parts); none at a checkpoint. See docs/render.md#a-turn-stores-what-it-sent."} :seon.db/ref]
  :seon.ctx.wire/ref [:or {:description "What labels a part of a request (seon.ctx.wire/part-ref): its kind, then what names it. See docs/render.md#a-turn-stores-what-it-sent."}
                      [:tuple [:= :page] :int] [:tuple [:= :eval] :string] [:tuple [:= :message] :string] [:tuple [:= :reply] :string]
                      [:tuple [:= :section] [:vector :any]] [:tuple [:= :session] [:maybe :string]] [:tuple [:= :example] :string] [:tuple :keyword :int]]
- :seon.part/digest [:and {:seon.db/identity true :seon.db/content-id true :description "A sent part's identity: the digest of its message's canonical EDN (seon.lib/digest of seon.edn/encode of seon.edn/canonical), so one message is one part however it was built and however many turns send it."} :string]
+ :seon.part/digest [:and {:seon.db/identity true :seon.db/content-id true :description "A sent part's identity: its message's digest (seon.ctx.wire/part-digest), so one message is one part however it was built and however many turns send it."} :string]
  :seon.part/message [:and {:description "The message as it was sent, plain data. See docs/render.md#a-turn-stores-what-it-sent."} :seon.model/message]
  :seon.part/fact [:map {:seon.db/attributes true} [:seon.part/digest :seon.part/digest] [:seon.part/message :seon.part/message]]
  :seon.model-call/fact [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/model-call-view :seon.render/openai-compat seon.ctx.wire/model-call-msgs}
