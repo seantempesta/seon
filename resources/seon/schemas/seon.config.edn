@@ -107,6 +107,7 @@
   [:seon.config.proofs/tree-files-kept {:optional true} :seon.config.proofs/tree-files-kept]
   [:seon.config.proofs/program-stores-kept {:optional true} :seon.config.proofs/program-stores-kept]
   [:seon.config.proofs/max-cores {:optional true} :seon.config.proofs/max-cores]
+  [:seon.config.proofs/ticks-decide {:optional true} :seon.config.proofs/ticks-decide]
   [:seon.config.proofs/max-load {:optional true} :seon.config.proofs/max-load]
   [:seon.config.proofs/child-min-ms {:optional true} :seon.config.proofs/child-min-ms]
   [:seon.config.proofs/unmeasured-ms {:optional true} :seon.config.proofs/unmeasured-ms]

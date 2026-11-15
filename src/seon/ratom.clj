@@ -22,7 +22,7 @@
   Reagent's own rule, and after a commit (`commit!`); a page's render queue is the walk's, drained
   in mount order. docs/render.md#reactive-renders."
   (:refer-clojure :exclude [defn defn- atom run!])
-  (:require [seon.contract :refer [defn defn-]] [datahike.reads :as reads] [datahike.index.interface]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.reads :as reads] [datahike.index.interface] [clojure.core.async :as a]))
 
 (defprotocol IReaction
   "A reaction's own state, read and set by this namespace's functions (Reagent's JavaScript
@@ -44,19 +44,32 @@
   sources (Reagent's)."
   nil)
 
-;; the running count: Reagent's debug counter, which its tests read; the agent is one thread
-(defonce ^:private -running (volatile! 0))
+;; Reagent keeps its queue and running count process-wide, one JavaScript thread; here both are an owner's (the proc whose step
+;; runs now), so no process-wide state is shared: preempted fibers lost 267,087 of 400,000 enqueues on the shared queue (flow-lab
+;; e18), and a fork copied a non-empty one. docs/flow.md#the-five-rules.
+(def ^:dynamic *owner*
+  "The owner of reactions whose step runs now (`owner`), whose flush! alone runs them; nil: a dirtied reaction runs at its next
+  deref. See docs/reactive.md#how-a-commit-reaches-its-readers-today."
+  nil)
+
+(defn owner
+  "A fresh owner of reactions {:queue :running :port}, held in its proc's state and bound as *owner* around its steps; port, where
+  another owner's step sends its dirtied reactions (nil: they wait for their next deref). See
+  docs/reactive.md#how-a-commit-reaches-its-readers-today."
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:maybe :seon.host/chan]] :map]]}
+  ([] (owner nil))
+  ([port] {:queue (volatile! nil) :running (volatile! 0) :port port}))
 
 (defn running
-  "How many watches reactions hold now (Reagent's (running)): back where it was once every
-  reaction a test made is disposed."
+  "How many watches the reactions of the owner bound now hold (Reagent's (running)): back where it was once every reaction it
+  made is disposed; 0 with no owner."
   {:malli/schema [:=> [:cat] :int]}
-  [] @-running)
+  [] (if-let [o *owner*] @(:running o) 0))
 
 (defn- check-watches
-  "new, the watches map, counted against old into the running count."
+  "new, the watches map, counted against old into the running count of the owner bound now."
   {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map]] [:maybe :map]]}
-  [old new] (vswap! -running + (- (count new) (count old))) new)
+  [old new] (when-let [o *owner*] (vswap! (:running o) + (- (count new) (count old)))) new)
 
 (defn- notify-w
   "Call each watch of this: (f k this old new)."
@@ -340,24 +353,35 @@
 
 ;;; --- queueing ------------------------------------------------------------------------------
 
-;; Reagent's rea-queue: the reactions a change dirtied, run by flush!
-(defonce ^:private rea-queue (volatile! nil))
-
 (defn- rea-enqueue
-  "Queue reaction r for flush!."
-  {:malli/schema [:=> [:cat :any] :nil]}
-  [r] (vswap! rea-queue (fnil conj []) r) nil)
+  "Queue reaction r, dirtied, for its owner o's flush!: in o's own step (o bound as *owner*) onto o's queue; in another owner's
+  step, a message {:seon.ratom/dirty r} on o's port, never a write to another owner's queue (seam 3: a recompute crosses a proc
+  only as a message); with no owner, or no port, nothing: r stays dirty and runs at its next deref."
+  {:malli/schema [:=> [:cat :any [:maybe :map]] :nil]}
+  [r o]
+  (cond (nil? o) nil
+        (identical? o *owner*) (vswap! (:queue o) (fnil conj []) r)
+        (:port o) (a/put! (:port o) {:seon.ratom/dirty r})
+        :else nil)
+  nil)
+
+(defn take-dirty!
+  "Message m, {:seon.ratom/dirty r} on the bound owner's port, taken in its step: r queued for this owner's flush!. nil. See
+  docs/reactive.md#how-a-commit-reaches-its-readers-today."
+  {:malli/schema [:=> [:cat :map] :nil]}
+  [m] (when-let [o *owner*] (vswap! (:queue o) (fnil conj []) (:seon.ratom/dirty m))) nil)
 
 (defn flush!
-  "Run every queued reaction, and any each of those queues, until none is left (Reagent's). The
-  server's frame: called after a transaction's patch, and at a non-reactive deref."
+  "Run every reaction the bound owner queued, and any each of those queues, until none is left (Reagent's): the end of the owner's
+  step, and a non-reactive deref. With no owner bound, nothing is queued, so nothing runs."
   {:malli/schema [:=> [:cat] :nil]}
   []
-  (loop []
-    (when-let [q @rea-queue]
-      (vreset! rea-queue nil)
-      (doseq [r q] (-queued-run r))
-      (recur)))
+  (when-let [o *owner*]
+    (loop []
+      (when-let [q @(:queue o)]
+        (vreset! (:queue o) nil)
+        (doseq [r q] (-queued-run r))
+        (recur))))
   nil)
 
 ;;; --- which reads a tree's change reaches -------------------------------------------------------
@@ -417,7 +441,7 @@
                    ^:volatile-mutable watching ^:volatile-mutable watches ^:volatile-mutable auto-run
                    ^:volatile-mutable caught ^:volatile-mutable captured ^:volatile-mutable last-captured
                    ^:volatile-mutable on-set ^:volatile-mutable on-dispose
-                   ^:volatile-mutable on-dispose-arr ^:volatile-mutable key-set]
+                   ^:volatile-mutable on-dispose-arr ^:volatile-mutable key-set owner]
   clojure.lang.IRef
   (addWatch [this k fw] (set! watches (check-watches watches (assoc watches k fw))) this)
   (removeWatch [this k]
@@ -451,9 +475,12 @@
   (-handle-change [this sender oldval newval]
     ;; the store reaches it only by a commit touching a key its run read; every other source by Reagent's own watch
     (when-not (or (identical? oldval newval) dirty? (and (instance? Store sender) (not (reads/reads-touched? key-set (-moved sender)))))
-      (if (nil? auto-run)
-        (do (set! dirty? true) (rea-enqueue this))
-        (if (true? auto-run) (-run this false) (auto-run this)))))
+      ;; run at once only in its owner's own step (or with no owner): in another owner's step it is dirtied and reaches its owner as
+      ;; a message, an auto-run one too, so no reaction runs under another owner's bindings. The dirty? guard above keeps at most one
+      ;; message outstanding a reaction, so an owner's port holds at most as many as the reactions it owns
+      (if (and (some? auto-run) (or (nil? owner) (identical? owner *owner*)))
+        (if (true? auto-run) (-run this false) (auto-run this))
+        (do (set! dirty? true) (rea-enqueue this owner)))))
   (-update-watching [this derefed]
     ;; a reactive object is watched (Reagent's); a read through a view is no source: a walk kept as a value keeps it (`reads-of`)
     (let [new (set (remove vector? derefed))
@@ -462,7 +489,11 @@
       (set! watching (zipmap new (repeat true)))
       (doseq [w new :when (not (contains? old w))] (add-watch w this handle-reaction-change))
       (doseq [w old :when (not (contains? new w))] (remove-watch w this))))
-  (-queued-run [this] (when (and dirty? (some? watching)) (-run this true)))
+  (-queued-run [this]
+    (when (and dirty? (some? watching))
+      (cond (nil? auto-run) (-run this true)
+            (true? auto-run) (do (set! dirty? false) (-run this false))
+            :else (do (set! dirty? false) (auto-run this)))))
   (-run [this check]
     (let [oldstate state
           res (if check
@@ -515,7 +546,7 @@
   before its watches; :on-dispose, called with its last value when it is disposed."
   {:malli/schema [:=> [:cat [:maybe :seon.host/fn] [:* :any]] :seon.host/deref]}
   [f & {:keys [auto-run on-set on-dispose]}]
-  (let [r (Reaction. f nil true false nil nil nil nil nil nil nil nil nil nil)]
+  (let [r (Reaction. f nil true false nil nil nil nil nil nil nil nil nil nil *owner*)]
     (-set-opts r {:auto-run auto-run :on-set on-set :on-dispose on-dispose})
     r))
 

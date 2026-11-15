@@ -120,45 +120,39 @@ sync), shown on the dashboard: drift is a problem, not a merge-time surprise.
 
 ### The order
 
-The order the areas work in now, each item with its owner; a later item starts when what it needs has landed.
+The overhaul halves the code (owner, 2026-11-15: "I want our codebase cut in half when we are done overhauling everything so de-duplication of ideas is essential"): `src` goes from 43,312 lines to about 21,600, each landing's `Deletes:` line counting toward it, and no functionality removed.
 
-1. **Stage 0's merge.** "Main's reds" were on the agent's branch: merging main into it lost main's task lifecycle datoms
-   and kept callers of definitions main deleted. Data's one merge (`seon.merge/a-tasks-content-is-a-key-of-the-one-merge`) fixes it: it takes every
-   datom main wrote that the branch did not also change at the same entity and attribute, and only that conflict stops it
-   (owner: "Facts are facts at a certain tx time"); `carried-platform-attrs` and `carry-tx` are deleted; then context runs the first task's `seon_done` again, watched, alone. Main stays clean:
-   a red on main is its owner's first item.
-2. **Load within the machine:** proving goes through the one effects owner (`seon.fx/owner-proc`, a `:process` kind,
-   admission from the cores) and `bin/prove` becomes its client; per-checkout shard sizing goes (tests; runtime reviews).
-   Until it lands, no session starts a prove while the 1-minute load is over 18.
-3. **After boot, only Flow; nothing hangs** (owner: "once the flow system is up and running ... we must only use flow based systems for stateful processes. If we still have holdouts we need to port them"; runtime, the Flow specialist, ports every holdout: `seon.step/every-wait-past-a-bound-is-a-flow-message-from-the-one-timer`): every wait passes its declared bound and ends with `:seon.bound/reached` or a typed error:
-   the fork (deps), the model call and the stalled eval (runtime's deadline slice; context's turn records the stall). Seven
-   deadline mechanisms become this one.
-3a. **A process never runs a binary its branch doesn't name** (owner, 2026-11-14: "this shouldn't be possible"): a
-   binary's identity is the digest of what only a build can change (pins, `deps.edn`, native code, `bin/build`, shipped
-   schemas and config): a mismatch builds, once. Its program is a second identity, the branch's forms: at the one start
-   a process loads exactly the forms its binary's recorded program differs by (load-diff, O(d)), so it always runs its
-   branch's program, with no guess. "Current by reach" (`seon.system/stale-binary`,
-   `binary-current`'s reach) and `seon.problems/stale-binary`'s own check are deleted; `bin/land`, `bin/prove`,
-   `bin/update`, `restart-for` and the test service ask the one answer (deps, as `runtime-for`'s core; runtime reviews).
-4. **The reaction's core** (context builds it as one tip with its first production writer, the index and Reagent's
-   `reaction`/`track` over it; data reviews the schema; deps the recorder): the lazy-read gap and the
-   planner's two seeks recorded (deps); one stored index; the writer's commit datoms; the 8 `*reads* nil` bypasses removed.
-5. **Each area moves onto it, deleting its copy in the same landing** (in parallel):
-   - tests: verdict files, `.recent`, `reads.edn`, `:seon.test/*` facts, the two flaky judges; reuse is "no read key
-     moved". The static reach graph stays only for a test with no recorded reads, and goes in the landing whose mutation
-     proof shows recording is complete;
-   - web: the walk's `:readers`, the proc's `read-index`, `render-reach`, the reactive holder, the second drawer;
-   - context: status computed twice, turns derived twice, waste folded three ways, wire's second walk, `placed-messages`;
-   - data: the five "moved?" lists, the program's reach flags, the loaders, `:seon.task/cause`, the readers atom;
-   - runtime: the one catch-up (the `bin/land` bridge, `landed-tx`'s 6-arity, `import-of`'s pins, `my.root/import!`,
-     `load-changes!`/`load-diff!`, `restart-for`'s classes);
-   - deps: Datahike's search memo and q result cache, once reactions hold results.
-6. **Stage 0.6:** an agent's redefinition never breaks its own turn: deps routes only the vars a run redefines (Jolt), and
-   context's turn runs on it.
-7. **The backlog curated** before the next random round (context).
+The owner adopted this order on 2026-11-15: eighteen landings over six primitives that already exist in the code, each finished and made the one way to do its job. The primitives:
+1. what a commit changed: Datahike keeps each commit's tx-data (`d/changes`), and the writer's notice delivers it live;
+2. who read what: the read-key index (`seon.db/reads-add`, `readers`);
+3. a decision stored once, never re-derived from a past point (a task's reasons, a turn's assembly, a verdict);
+4. ask and answer: `seon.step/pend` with `end-all`, so every end answers every waiter;
+5. one queue and one admission (`seon.prove`, the `:process` owner);
+6. one loader and one identity (`seon.program/diff-plan`, `load-diff!`, content digests).
 
-Waits: the cost work (recorder with the cache on, merge cost, page search, konserve's read cost), W-3 and one drawer per
-page beyond what item 5 deletes, the hand-written lists class, `runtime-for`, `hold-env!` slice 2, the judge's re-index.
+A session takes its first unblocked landing; areas run side by side; rounds of real agents run continuously and re-rank what follows by the turns they lose (`my.root/run-losses`). The first real `seon_done` is tried once 1, 2 and 4 are on main, and again after 6, 7 and 10. Every piece first finds the code that does its job and wires it; a complicated design steps back to a pillar, data model first (`AGENTS.md` §4).
+
+1. **`:done` waits on the judge's own end** (runtime). Deletes `merge-ms` and the wait on root-wide quiet. Done: `seon_done` ends while another agent runs.
+2. **The status read apart from the page walk; a run with a RED line or no result line fails** (context, tests). Done: a cold status read makes no as-of read, and a run printing RED fails.
+3. **An import compares form ids and is the one import** (runtime, data). Deletes the tree-digest shortcut that recorded files it never wrote, and the whole-tree import paths, onto `catch-up` from the empty tree.
+4. **A task's cited code is in its agent's context** (context; round 1 lost 13 of 16 turns finding it). Done: a round's agent edits in its first turns.
+5. **One loader; an agent loads main's changes in place** at its turn boundary, re-forking only for a build input (runtime; owner, 2026-11-15). Deletes `load-all!`, `reload-dependents!`, `load-changes!` onto `diff-plan`, and the cold re-fork per turn.
+6. **`d/changes`, with the merge as its first caller** (deps, data). The merge is each side's change from `d/merge-base` as `[e a v]`, replayed by source transaction, each a new later transaction with its metadata and `:seon.tx/source`, through the checked write (owner's ruling; measured). Deletes the stamp-ownership rules (`tx-branch`, `shared?`, `owned?`, `overtaken`), `delta-three-way`, `carried-tx`, `merge-main`, `judge-tx`'s own three-way and the data-attrs argument; `datoms-diff` stays only for commits older than the log.
+7. **The armed fact; a recorded `q` reads its entity-bound keys** (tests, data, deps). Done: a mutation of a reached function turns its test red.
+8. **The done rule computed once and stored as the task's reasons** (context, data). Deletes the second input builder and readiness inside the status render.
+9. **The hand-back as steps; `end-all`** (context, flow). Deletes the hand-back's in-form chain and the second pending tables (`await-reply`'s `:waits`, the reconciler's `:waits`/`:judged`, the agent proc's `:inflight`).
+10. **One `:merge` op that re-proves by itself:** main moving after a proof merges when no reached digest moved and re-proves the moved items (data, runtime). Deletes the octopus batch, `:behind`, `max-behind`, and the stored config entity (derived from its entries). Done: lb76 merges and the end-to-end proof is green.
+11. **One admission by weight** (runtime, tests). Deletes `grant`'s budget, `batch-of`, `held-processes`, `memory-jobs` and the hand load rule; `max-workers` and `max-load` stay as dials. Done: three agents and two sessions prove with load within the cores.
+12. **Verdicts are entities with their read keys; recorded keys decide reuse** (tests). Deletes the verdict files, `.recent`, `reads.edn`, `:seon.test/*`, `reuse-audit`, then the reach digest as reuse key; the reach graph stays as the program's index.
+13. **`bin/test` and `bin/prove` are thin clients; steps are deftests; tests fork from the standing system** (tests, deps). Deletes `run-on-checkout`, `run-tree-item`, `arm-wall!`, the worker modes, `bin/stalls`, `bin/check`'s units and the booted root per test process; a test's own ticks judge it again.
+14. **The pilot: git follows the store, one area lands through `seon_done`** (data, runtime; owner: pilot early). Deletes `jolt/merges`, `sync!`, `merges_catch_up` and the separate write-back repeat, onto the one write-back.
+15. **The reactive core live, one landing per reader** (runtime, then web, context, flow): the render proc's own index and second diff, the render's and `seon.ctx`'s own engines, health and laws as live classes, the reconciler index's four holders.
+16. **Each turn stores its assembly and the model's output** (context; owner, 2026-11-15): components by content digest, in order; a person's tab and the debug view show what was sent (owner). Deletes `basis-value`, the as-of fallbacks, the parts walk and the proof story's replay.
+17. **Updates lose nothing, then the control plane is carved** (runtime, deps, flow): flights and requests are facts, evals resume at their turn boundary, one restart predicate; then what is left unused in `seon.system`.
+18. **`bin/land` goes** (data, runtime): with the bridge, `landed-tx` and `bin/prove --out`, onto `seon_done`.
+- **Beside it:** focused docstrings (the per-var metric), one exception-to-data path, one citation resolver, hand lists as schema properties: random-round tasks reviewed by each area; estimating made automatic (web's plan).
+
+Designed so far, the order removes about 13,500 of the ~21,700 lines; the rest needs design, starting with `seon.agent`, `seon.repl` and `seon.turn` together, then `seon.render.ui`, the `*-tx` builders, `seon.fx` and `seon.program`.
 
 ## Stage 0: one happy path (now)
 

@@ -363,7 +363,9 @@
           'app.pv-own-budget-test "(deftest ^{:seon.test/estimate {:ticks 999999999999}} estimated-over-the-cap (loop [] (recur)))"
           'app.pv-own-budget-test "(deftest stated-none (is true))")
   (let [ts '[app.pv-own-budget-test/estimated-spins app.pv-own-budget-test/within app.pv-own-budget-test/estimated-over-the-cap app.pv-own-budget-test/stated-none]
-        ran (proofs/run-tests! ts {} (fn [_]) 50000000)]
+        ;; the estimate's budget proved with it on (:seon.config.proofs/ticks-decide, off by the owner's ruling until a test's count is its own)
+        ran (with-redefs [seon.config/value (let [v seon.config/value] (fn [k & more] (if (= k :seon.config.proofs/ticks-decide) true (apply v k more))))]
+              (proofs/run-tests! ts {} (fn [_]) 50000000))]
     (is (= 1000000 (:budget (ran 'app.pv-own-budget-test/estimated-spins))) "ten times its estimate")
     (is (= 1 (:error (ran 'app.pv-own-budget-test/estimated-spins))) "past it: red, named")
     (is (< (:ticks (ran 'app.pv-own-budget-test/estimated-spins)) 5000000) "after about its budget's work, not the cap's")

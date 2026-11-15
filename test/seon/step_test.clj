@@ -37,6 +37,17 @@
     (is (< (- g1000 g25) 3) (str "975 more pending timers added " (- g1000 g25) " threads"))
     (is (< (- t1000 t25) 3) "the callback form, measured with it: Jolt's pin forks no thread per pending take")))
 
+;; docs/clocks.md#time-decides-the-owners-exceptions: a bound whose wait was answered disarms (seon.agent/await-reply), so the
+;; timer never puts. Two timers on one channel, the earlier cancelled: the later's message is the first to come. Red under a
+;; cancel! that does nothing (:early arrives). Estimate: two heap entries and one take, ~20k ticks; 60 ms of the later timer.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-cancelled-timer-never-puts
+  (let [c (a/chan 2)
+        h (step/put-after! c 20 :early)]
+    (step/put-after! c 60 :late)
+    (step/cancel! h)
+    (is (= :late (a/<!! c)) "the cancelled timer's message never came")
+    (is (nil? (step/cancel! nil)) "a bound never armed has nothing to cancel")))
+
 (defn- running-src
   "A step-fn whose output tags each number with its code's version and its count (the running-graph proof's source)."
   {:malli/schema :seon.step/step-fn}

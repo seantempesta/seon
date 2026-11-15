@@ -275,7 +275,7 @@
         gcs (- (:count (lib/gc-stats)) g0)]
     {:ticks (double (max 0 (- ticks (* tick-allowance gcs)))) :ns (double cpu-ns) :bytes (double bytes)}))
 
-(def ^:private threaded
+(def ^{:private true :seon.flow/edge "a measurement's precondition: one thread started and joined once, so a measure runs in the multi-threaded regime every root runs in"} threaded
   "Makes this process multi-threaded, once, before anything is measured: Jolt's lazy seq cells take a
   claim path (compare-and-swap, more ticks and bytes a cell: a seq over a String's chars 8 ticks and
   80 B, then 15 and 272) from the first real OS thread on, for the rest of the process (`jolt-mt?`,
