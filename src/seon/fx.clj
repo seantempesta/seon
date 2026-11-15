@@ -14,7 +14,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str] [jolt.ffi :as ffi] [jolt.deps :as deps]
-            [seon.edn :as sedn] [clojure.edn :as edn] [clojure.java.io :as io] [seon.proofs :as proofs] [seon.reader :as reader]))
+            [seon.edn :as sedn] [clojure.edn :as edn] [clojure.java.io :as io] [seon.proofs :as proofs] [seon.reader :as reader] [seon.program :as program]))
 
 (defn- error
   "An effect's declared failure, as the one error map (its variant registered in
@@ -188,7 +188,8 @@
           deps (edn/read-string (slurp (str base "/deps.edn")))
           roots (->> (concat (keep #(when (pinned %) (str base "/" %)) (:paths deps)) (:roots (deps/resolve-deps (:deps deps) base)))
                      (filter #(.exists (java.io.File. ^String %))) distinct)
-          digest (let [f (java.io.File. (str base "/target/seon.digest"))] (if (.isFile f) (str/trim (slurp f)) "unbuilt"))
+          ;; the running binary's identity (its build record, held since its boot): what its embedded jar holds
+          digest (or (:digest (program/binary-program)) "unbuilt")
           ids (into {"jolt-embedded-resources.jar" digest} (for [r roots :let [rr (rel-of r)]] [rr (or (pinned rr) rr)]))
           due (into #{} (remove #(= (ids %) (get since %))) (keys ids))
           entries (fn [^java.util.zip.ZipFile z rr]
@@ -411,20 +412,47 @@
   (let [r (git-run {} root ["show" (str tree ":" path)] nil)]
     (when (zero? (:exit r)) (:out r))))
 
+(defn binary-digest
+  "The binary identity of git tree tree in the repository at root: the digest of what only a new binary or process acts on: tree's
+  build inputs (:seon.config.build/inputs), its pins, and the value default.edn states for each config key a schema marks
+  :seon.config/build, :seon.config/at-load or :seon.config/place, read as EDN data. What seon.system/built-program records with
+  the binary and seon.fx/runtime-for compares; the program (src/'s forms) is not in it. Four git calls. See
+  docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :string :string] [:or :seon.lib/digest :seon.error/base]]}
+  [root tree]
+  (try
+    (let [lines (fn [args] (str/split-lines (git! {} root args nil)))
+          ;; every EDN form a text holds, its tags kept as data (aero's #profile, #env): git show of several blobs is their texts end to end
+          forms (fn [text] (let [r (java.io.PushbackReader. (java.io.StringReader. text)) end (Object.)]
+                             (loop [acc []] (let [f (edn/read {:default tagged-literal :eof end} r)] (if (identical? end f) acc (recur (conj acc f)))))))
+          ;; a tree with no shipped config (a test's scratch tree) is digested with this checkout's build inputs and no config lines
+          shown (git-run {} root ["show" (str tree ":resources/seon/config/default.edn")] nil)
+          cfg (if (zero? (:exit shown)) (first (forms (:out shown))) {})
+          schemas (filter #(re-find #"/seon\.config[^/]*\.edn$" %) (lines ["ls-tree" "--name-only" tree "resources/seon/schemas/"]))
+          marked (for [m (when (seq schemas) (forms (git! {} root (into ["show"] (map #(str tree ":" %)) schemas) nil))) [k f] m
+                       :when (and (vector? f) (map? (second f))
+                                  (some (second f) [:seon.config/build :seon.config/at-load :seon.config/place]))]
+                   k)]
+      (lib/digest (str/join "\n" (into (sorted-set)
+                                       (concat (lines (into ["ls-tree" "-r" tree "--"] (or (:seon.config.build/inputs cfg) (cfg/value :seon.config.build/inputs))))
+                                               (filter #(str/starts-with? % "160000 ") (lines ["ls-tree" "-r" tree]))
+                                               (for [k marked :when (contains? cfg k)] (sedn/encode [k (get cfg k)])))))))
+    (catch Throwable e (error #'binary-digest :seon.fx/io-error (str "the binary identity of tree " tree ": " (step/error-msg e)) {:path root}))))
+
 (defn- tree-digest
-  "The binary identity of git tree tree (bin/binary-digest at it): a tree is immutable, so its digest is computed once a checkout
-  and kept beside the builds, target/runtime-for/TREE.digest (derived data, as tree-diff's), which every later ask reads.
-  {:digest d} or the error of the one bin/binary-digest run."
+  "The binary identity of git tree tree (binary-digest): a tree is immutable, so its digest is computed once a checkout for the
+  code that computes it and kept beside the builds, target/runtime-for/TREE.CODE.digest, CODE the digest of
+  (seon.program/running-form 'seon.fx/binary-digest): a change of binary-digest misses by construction. {:digest d} or
+  binary-digest's error."
   {:malli/schema [:=> [:cat :string :string] [:or [:map [:digest :string]] :seon.error/base]]}
   [root tree]
-  (let [f (java.io.File. (str root "/target/runtime-for/" tree ".digest"))]
+  (let [f (java.io.File. (str root "/target/runtime-for/" tree "." (lib/digest (program/running-form 'seon.fx/binary-digest)) ".digest"))]
     (if (.isFile f)
       {:digest (str/trim (slurp f))}
-      (let [r (lib/sh (str root "/bin/binary-digest") root tree)
-            d (str/trim (str (:out r)))]
-        (if (and (zero? (:exit r)) (seq d))
-          (do (write-file {:req {:path (.getPath f) :text d}}) {:digest d})
-          (error #'tree-digest :seon.fx/io-error (str "bin/binary-digest " tree ": " (:err r)) {:path root}))))))
+      (let [d (binary-digest root tree)]
+        (if (contract/error? d)
+          d
+          (do (write-file {:req {:path (.getPath f) :text d}}) {:digest d}))))))
 
 (defn- build-differs
   "The build inputs (:seon.config.build/inputs) and pins (gitlinks) that differ between the binary's tree (target/seon.tree)
@@ -457,7 +485,9 @@
   ([tree {:keys [scope] :or {scope :root}}]
    (let [root (cfg/checkout)
          read (fn [p] (let [f (java.io.File. (str root p))] (when (.isFile f) (str/trim (slurp f)))))
-         built (read "/target/seon.digest")
+         ;; the RUNNING binary's identity, held since its boot (seon.program/binary-program): never target/seon's file, which a
+         ;; later build replaces while this process still runs the old one (bin/update asked after its build, 2026-11-15)
+         built (:digest (program/binary-program))
          built-tree (read "/target/seon.tree")
          w (tree-digest root tree)
          src (fn [t] (when t (let [r (git-run {} root ["rev-parse" "--verify" "--quiet" (str t ":src")] nil)]
@@ -474,6 +504,20 @@
                               {:binary (str root "/target/seon") :digest (:digest w) :program p}
                               (mismatch (:digest w) "its program (src) is not the binary's: build it")))
            :else {:binary (str root "/target/seon") :digest (:digest w)}))))
+
+(defn- drop-untracked-gitlinks!
+  "Drop from the index env names every gitlink the checkout at root's own index does not hold: a pin is a gitlink the checkout
+  tracks, and a nested repository only add -A takes in (an untracked clone) is no part of the tree, so it moves no tree and no
+  binary identity (bin/tree, the same rule). See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat [:map-of :string :string] :string] :any]}
+  [env root]
+  (let [links (fn [e] (set (for [l (str/split-lines (git! e root ["ls-files" "-s"] nil))
+                                 :let [[m _ _ p] (str/split l #"\s+" 4)]
+                                 :when (= "160000" m)]
+                             p)))
+        held (links {})
+        extra (for [p (sort (links env)) :when (not (held p))] (str ":(top)" p))]
+    (when (seq extra) (git! env root (into ["rm" "--cached" "-f" "-q" "--"] extra) nil))))
 
 (defn tree-id
   "git's id of the tree at root as it is on disk: HEAD's tree (none before a first commit) with every
@@ -502,6 +546,7 @@
                head? (git! env root ["read-tree" "HEAD"] nil)))
        (git! env root ["add" "-A"] nil)
        (when (seq excludes) (git! env root (into ["rm" "-r" "--cached" "-q" "--ignore-unmatch" "--"] top) nil))
+       (drop-untracked-gitlinks! env root)
        (git! env root ["write-tree"] nil)
        (finally (.delete idx))))))
 

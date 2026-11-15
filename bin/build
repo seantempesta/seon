@@ -352,8 +352,6 @@ build_seon() {
   mv -f "$T/seon.program.$ID.new" "$T/seon.program"
   mv -f "$T/seon.$ID.new" "$T/seon"
   [ -n "$tree" ] && { echo "$tree" > "$T/seon.tree.$ID.new" && mv -f "$T/seon.tree.$ID.new" "$T/seon.tree"; }
-  # the binary's identity (bin/binary-digest: what only a build can change), which seon.fx/runtime-for compares at the one start
-  [ -n "$tree" ] && { "$ROOT/bin/binary-digest" "$ROOT" "$tree" > "$T/seon.digest.$ID.new" && mv -f "$T/seon.digest.$ID.new" "$T/seon.digest"; }
   [ -z "$key" ] || { echo "$key" > "$T/seon.stamp.$ID.new" && mv -f "$T/seon.stamp.$ID.new" "$T/seon.stamp"; }
   say "seon: built target/seon (tree ${tree:-unknown})"
   # this binary's compile cache warmed with the test namespaces, here at the build, so no agent compiles them at its first fork (seon.check/warm-tests)

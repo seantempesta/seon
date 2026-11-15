@@ -674,6 +674,10 @@
  ;; (seon.problems/closed?); the same outcome again writes no datom
  :seon.system/tasks [:or [:map [:files nat-int?]] [:map [:error :string]]]
  :seon.system/stopped :seon.system/end
+ ;; the last landing's update, written by my.root/landed! (the one update path) before bin/update acts on it: kept, or restart with
+ ;; its reason and what differs (seon.fx/runtime-for's :seon.process/differs), so a restart's reason is a fact, never only printed
+ :seon.system/last-update [:map [:tree :string] [:outcome [:enum :kept :restart]] [:boot :string]
+                      [:reason {:optional true} :string] [:differs {:optional true} [:vector :string]]]
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean
  :seon.system/previous-end :seon.system/end
  :seon.system/root-fact [:map {:seon.db/attributes true :seon.db/root-only true :seon.render/keys [:seon.system/id :seon.system/boot :seon.system/generation :seon.system/quiescent] :seon.ctx/pattern [* {:seon.system/config [*]} {[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true] [* {[:seon.agent/task :as :task] [:seon.task/id :seon.task/outcome :seon.task/reason]} {[:seon.process/_agent :as :processes] [*]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/hiccup seon.render.ui/root}
@@ -683,6 +687,7 @@
                           [:seon.system/config {:optional true} :seon.system/config]
                           [:seon.system/started-by {:optional true} :seon.system/started-by]
                           [:seon.system/stopped {:optional true} :seon.system/stopped]
+                          [:seon.system/last-update {:optional true} :seon.system/last-update]
                           [:seon.system/previous-end {:optional true} :seon.system/previous-end]
                           [:seon.system/quiescent {:optional true} :seon.system/quiescent]
                           [:seon.system/source {:optional true} :seon.system/source]
