@@ -134,24 +134,23 @@
         died (seon.contract/error :seon.process/env-mismatch 'seon.fx/runtime-for
                                   "target/seon's identity c7311e6b is not tree e6275967's 76dc758d: build it"
                                   {:seon.process/differs [] :seon.process/binary-digest "c7311e6b" :seon.process/branch-digest "76dc758d" :seon.process/tree "e6275967"})
-        binary (atom "c7311e6b")]
+]
     (with-redefs [seon.config/value (fn [k] (if (= k :seon.config.proofs/prove-main-on-commit) true (value k)))
                   seon.db/at-commit (fn [_ c] c)
-                  seon.program/run-digest (fn [c] (str "dg-" (name c)))
-                  seon.prove/binary-identity (fn [] @binary)]
+                  seon.program/run-digest (fn [c] (str "dg-" (name c)))]
       (let [note (fn [t pt] [:main {:t t :ops [] :commit (keyword (str "c" pt)) :program-t pt}])
-            [st o1] (feed (proc0) [(note 6 6)])
+            ;; the proc runs on binary c7311e6b, as its state holds it since its start
+            [st o1] (feed (assoc (proc0) :binary "c7311e6b") [(note 6 6)])
             spawn (first (asks o1 :spawn))
             [st o2] (feed st [(answer-of spawn died)])
             [st o3] (feed st [(note 7 6)])
-            _ (reset! binary "76dc758d")
-            [_ o4] (feed st [(note 8 6)])]
+            [_ o4] (feed st [(note 8 8)])]
         (is (some? spawn) "the program move asks main's run")
         (is (some #(and (= :problem (:op %)) (= :platform (:class %)) (= :seon.process/env-mismatch (get-in % [:error :seon.error/type]))
                         (= 'seon.fx (get-in % [:error :seon.problems/owner])) (= 6 (get-in % [:error :seon.prove/main-unproved]))) o2)
             (str "its agent's death is a :platform problem naming its owner and the program left unproved: " (pr-str o2)))
         (is (empty? (asks o3 :spawn)) "the same inputs (program and binary) are not asked again: same inputs, same answer")
-        (is (= 1 (count (asks o4 :spawn))) "a rebuilt binary is new inputs: main is asked again")))))
+        (is (= 1 (count (asks o4 :spawn))) "a newer program is new inputs: main is asked again (a new binary is a new process, whose boot asks it)")))))
 
 (deftest ^{:seon.test/estimate {:ticks 500000}} an-answer-whose-child-died-is-never-remembered
   ;; THE PLAN 0.7 (root, 2026-10-27): a judge's run whose test child died answered every later ask
