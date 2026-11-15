@@ -66,6 +66,26 @@ Round 1's transcript showed agents re-forked into a cold process every turn: eac
 
 "just make deepseek the default." A root started with no `--profile` had no provider, and a restart without `--profile deepseek` left round 2's agents on `:seon.model/no-provider`. With no profile, agents now run on DeepSeek; `:none` is set explicitly, and tests run under `--profile scripted`. It replaces root's ruling of 2026-10-22 (no default model). Stated in [model](model.md#the-default-model).
 
+### Leave the temporary mode first; only Seon-first designs
+
+"How much longer do we have to run in this temp mode while the final pieces of our actual test system land? Please prioritize this so we can have fast testing and agents can merge in the system and not via scripts." And: "Do not accept any designs that are external command line tools or external infrastructure. Only thin wrappers and seon first designs." Design from a Seon agent's standpoint, assuming the runtime, Flow, the reactive core and the db work; where they don't, making them work is the task. The path, in order: main proved on every landing, `d/changes` then one `:merge`, verdicts by read keys, one admission, thin `bin/test` and `bin/prove`, the `seon_done` pilot, updates that lose nothing, `bin/land` deleted. Stated in [the plan](plan.md#the-order) and `AGENTS.md` §0.
+
+### Prior work first, every time
+
+"We already built this. All agents must start all work looking for the existing or previous solutions. They must report that they searched and found no prior work if none is quoted and they will be terminated and restarted if they do this repeatedly." Then: "An agent that stops following instructions we need to find out why with an external audit, clean up the documentation and start fresh." Stated in `AGENTS.md` §3 (a plan's first part).
+
+### One root, an ordinary agent; the system is not an agent
+
+"Yes root is just a normal agent it just is first and all of it's children and their children hence the root name is still accurate." "Make sure all instances of what an agent is is one instance. We were supposed to make the env and the agent into one schema and not make similar systems anywhere else." "there are no two roots. We have a system process I think but it's not an agent and it shouldn't be holding internal process state." On splits: "Talk to flow about what should be separated out if we have conflicting concepts. Agents all have their own standized setup and we shouldn't break that." The design is task `seon.system/the-system-entity-and-root-as-an-agent`.
+
+### A session's REPL is a connection to an agent, recorded as any agent's
+
+"I want it to be like a repl connecting to separate systems. They can attach to a remote repl for any existing agent or they can make their own agent." On evals sent from outside: "Make sure they are treated the same so the mechnaism records the turns the same way. No duplicate systems. Anywhere. Be vigilant and tell me when you see them and propose and just fix if it's clear." Stated in [server](server.md#ops) once the change lands.
+
+### Names follow the code; one entity may match several schemas
+
+"Are these new attribute names good? Look for where the code is that the functions are predominantly being run with those schemas and prefer those names unless the code is the conflicting root stuff and then ask the specialst agents for their advice before just choosing. Names and schemas are very important. Do not duplicate data and make usre our concepts hold. You can have a single entity match several schemas if they are differnt ideas or extensions of ideas." On the erase: "you can erase when you're sure any improtant data is written to disk -- look at where we import data from into a fresh store." Stated in [data modeling](data-modeling.md) and the task above.
+
 ### Root reviews after the merge
 
 "I'm happy to have you post review things that are merged as we can easily undo a merge if we find a problem or just fix it." Sessions land themselves (`bin/land --fast`); root reviews each landed merge afterwards, and a problem found is reverted or fixed forward by its owner. Stated in `AGENTS.md` §3 (the fast lane).

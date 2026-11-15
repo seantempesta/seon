@@ -1858,11 +1858,14 @@
   "The tests of reach graph g whose reach includes var v, nearest first: the tests a change to v
   selects (reached-by over g's reverse edges, as the change's own re-fold walks them; a change
   marks v's forms and, beside them, what names v, which the reverse edges reach from v's forms
-  too), v left out. A var g holds no form of (a library's) reaches none: []."
+  too), v left out. A var g holds no form of (a library's) is reached through the forms that name it
+  (g's refd), a test among them included: a pin's tests are its library vars' (seon.program-test/a-library-vars-tests-are-those-reaching-its-callers)."
   {:malli/schema [:=> [:cat :map :qualified-symbol] [:vector :qualified-symbol]]}
-  [{:keys [rows defs rev tests]} v]
-  (into [] (comp (mapcat #(keep (fn [[k s]] (when (and (= :var k) (tests s) (not= v s)) s)) (:defines (rows %)))) (distinct))
-        (reached-by rev (get defs v []))))
+  [{:keys [rows defs rev tests refd]} v]
+  (let [own (get defs v)
+        ids (if (seq own) (reached-by rev own) (let [callers (vec (get refd v))] (into callers (reached-by rev callers))))]
+    (into [] (comp (mapcat #(keep (fn [[k s]] (when (and (= :var k) (tests s) (not= v s)) s)) (:defines (rows %)))) (distinct))
+          ids)))
 
 (defn- indexed
   "{k ids} of pairs [k id], in order, each ids a vector (a set when set? is true): the map a graph's
