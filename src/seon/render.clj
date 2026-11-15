@@ -249,13 +249,13 @@
 (defn hiccup
   "v rendered: (render-fn opts v), the function its override or schema names, else the printer's
   (print-hiccup); a value's own key holding hiccup answers that hiccup. opts' :seon.render/index is the entity index its
-  schemas are read in (seon.db/index-of), required: a walk's own, filled by `render!` and `emit`, passed on to the render it
-  calls. Inside a walk, one render calling another is the interim stage 2a of docs/users.md removes."
+  schemas are read in (seon.db/index-of): a walk's own, filled by `render!`, passed on to the render it calls; with none, the
+  binary's (seon.db/index), so a call kept as written (a component's error) carries no index into the model's text. Inside a walk, one render calling another is the interim stage 2a of docs/users.md removes."
   ;; it asks the db (optional): placed in a walk it is a component, so a nested value's render inside its output (`nested`) passes emit
   ;; and is given what its own contract asks (seon.render.ui/searched: the db)
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.render/index :map] [:seon.db/db {:optional true} :seon.host/db]]] :any] :any]}
-  [opts v]
-  (let [own (own-key v :seon.render/hiccup) ix (:seon.render/index opts)]
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.render/index {:optional true} :map] [:seon.db/db {:optional true} :seon.host/db]]] :any] :any]}
+  [opts0 v]
+  (let [own (own-key v :seon.render/hiccup) ix (or (:seon.render/index opts0) (pdb/index)) opts (assoc opts0 :seon.render/index ix)]
     (if (and (some? own) (not (symbol? own)))
       own
       ;; a producer's schema a stored value no longer fits: it is drawn as the data it is; a string whose attribute's schema names no
@@ -587,7 +587,8 @@
                                                     [])))
                           ;; its line first, as text (what threw and where), then the error as data
                           (with-id [:section [:p (:seon.error/message defect)]
-                                    [#'hiccup {:schema :seon.render/component-defect :as :block :seon.render/index @(:index w)} defect]]
+                                    ;; no index in its opts: hiccup reads the binary's, so the model's text of the part never prints a walk's whole index
+                                    [#'hiccup {:schema :seon.render/component-defect :as :block} defect]]
                                    {:id id :class "err" :wire/role "user"})))
             one #(try (let [env' (assoc env :children kids :self k)
                             ;; an entity's component reads its identity tracked, so it runs again when the entity first appears (a walk made
@@ -890,7 +891,7 @@
     ;; a var names where it threw; a fn value has no name to give (:seon.error/in is a var's qualified symbol)
     (let [defect (defect-of! {:defects defects} (when (var? f) (symbol f)) e)]
       [:section {:class "err"} [:p (:seon.error/message defect)]
-       [#'hiccup {:schema :seon.render/component-defect :as :block :seon.render/index ix} defect]])))
+       [#'hiccup {:schema :seon.render/component-defect :as :block} defect]])))
 
 (defn- page-unit
   "Walk cache's root unit (c-of, a component's entry by its key), its component rk's output as the page writes it (`placed-units`' first, which keeps it on rk's entry

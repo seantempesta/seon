@@ -3932,7 +3932,9 @@
       (is (= :seon.render/component-defect (:seon.error/type broken)) (str "the model reads the error as data: " (pr-str placed)))
       (is (str/includes? (:seon.error/message broken) "seon.ref/scan invalid-output") "what threw")
       (is (= [{:in [:seon.ref/blocks 3]}] (get-in broken [:seon.render/threw :problems])) "and the thrown error's own data")
-      (is (= "drawn" (last fine)) "the other part draws"))))
+      (is (= "drawn" (last fine)) "the other part draws")
+      ;; the part the model reads names no index: a thrown search drew a walk's whole index, 500k chars, into root's request [M]
+      (is (not (str/includes? (pr-str broken-part) ":seon.render/index")) "the error's call carries no index"))))
 
 (defn- plain-thrower
   "A plain call (its contract asks no input: the walk keeps it as written, the writer calls it) that throws."

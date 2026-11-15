@@ -1952,9 +1952,16 @@
                                (gate-plan-failure (slurp (:log (:value g))) (sort (for [[k n] (keys (branch-changes (:base @state) (db))) :when (= :ns k)] n))))
                           (contract/error :seon.agent/gate-unread #'judge!
                                           (gate-plan-failure (slurp (:log (:value g))) (sort (for [[k n] (keys (branch-changes (:base @state) (db))) :when (= :ns k)] n))) {:tests tests})
-                          :else (do (transact! (proofs/gate-tx (into {} (map (juxt identity pull-of)) tests) (:value g)))
-                                    (commit!)
-                                    nil)))
+                          :else (let [nv (get-in g [:value :no-verdict])]
+                                  (transact! (proofs/gate-tx (into {} (map (juxt identity pull-of)) tests) (:value g)))
+                                  (commit!)
+                                  ;; a test the gate left with no verdict (its batch's error, seon.prove/run-answer's :no-verdict) stays
+                                  ;; deferred, and why is the answer: never a silence
+                                  (when-let [[t e] (first (sort-by (comp str key) nv))]
+                                    (contract/error :seon.prove/no-verdict #'judge!
+                                                    (str "the gate answered no verdict for " (count nv) " of your process tests (" t " first): "
+                                                         (:seon.error/type e) ": " (:seon.error/message e))
+                                                    {:test t :no-verdict nv})))))
             ;; one stage's tests through the gate, waited on: the judge's own run (reach?), never an eval's
             gate! (fn [tests prio] (when (seq tests) (apply-gate! tests (ask-gate tests prio))))
             ;; the answers of gates an eval asked (gate-later!) that arrived since, written first, each once
