@@ -1523,3 +1523,18 @@
            (is (str/includes? src "(defmethod kind :a\n  [x] :was-a)") (str "each method, whole: " src))
            (is (< (str/index-of src ":was-a") (str/index-of src ":was-b")) "in file order"))
          (finally (reset! agent/state old) (remove-ns 'app.mm)))))
+
+;; Estimate: two steps of the :repl proc on a stand-in run, a few map ops each and one fiber started: ~20k ticks; 200,000
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-stale-answer-never-steps-the-run
+  ;; docs/flow.md#flow-inside-an-agent (context-4's review of 4bf49bab70): each output of a run is numbered and its answer carries the
+  ;; number, so an answer to another output (a call root's :stop dropped, whose run ended and a queued work! started the next) is
+  ;; dropped, never stepped into the run in force. Red before: any answer on :run stepped whatever run was current
+  (let [stepped (volatile! [])
+        run {:step (fn [s m] (vswap! stepped conj m) [s {:model {}}]) :effect (fn [_] {:seon.turn/answer {}}) :end identity}
+        st {:run run :run-st {} :rid 1 :resp {} :out-n 2 :run-port (clojure.core.async/chan 4)
+            :queue clojure.lang.PersistentQueue/EMPTY}
+        [st' _] (repl/agent-step st :run {:seon.turn/answer {:value :stale} :seon.repl/out 1})]
+    (is (= [] @stepped) "the stale answer stepped nothing")
+    (is (= st st') "and left the proc's state as it was")
+    (repl/agent-step st :run {:seon.turn/answer {:value :current} :seon.repl/out 2})
+    (is (= [{:seon.turn/answer {:value :current}}] @stepped) "the current output's answer steps the run, its number taken off")))
