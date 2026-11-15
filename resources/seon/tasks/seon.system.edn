@@ -149,4 +149,9 @@ Proofs, once ruled: a task file's declaration loads with the kind the ruling say
   :seon.task/kind :work
   :seon.task/needs #{"seon.step/every-wait-past-a-bound-is-a-flow-message-from-the-one-timer"}
   :seon.task/estimate #:seon.system{stall-state {:n 20, :order :linear, :ticks 2000000, :bytes 4000000}}}
+ {:seon.task/name "a-hangs-evidence-test-reads-only-its-own-agent"
+  :seon.task/plan "Owner: runtime; root's order 2026-11-15 18:0x, after the update owner. seon.system-test/a-hangs-evidence-holds-roots-stall-state is order-dependent [deps M, via root]: green alone on main and on deps' branch, red in deps' 190-test run and at 16:47 on context's tree. It is the second such test today (seon.doc-test's text index was the first). Cause [read test/seon/system_test.clj:83-102]: it asks ts/shared-root!, the one root every test in the run shares, and asserts over EVERY agent proc's state ((every? ... (= 0 (:held %))) over (vals (:agents r)), :98) and the whole api's :pending, so an agent another test left mid-ask or holding makes it red. It reads shared process state, not its own work. Fix at the cause: the test asserts on its own agent only (the pid of the ag it spawned, read from (:agents r) by that pid) and on the shape of the root's stall state, never on what other tests left. The class: a test on a shared root that asserts over all of a shared collection. Sweep the other ts/shared-root! tests for every?/count over :agents, :pending, :flights and the like. PRIOR WORK: seon.test-support's shared-root! (its own docstring on sharing); the stall state is seon.system/stall-state. COST: the test's cost is unchanged, one eval; the sweep is a grep of ts/shared-root! callers (~40 [H])."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.system-test/a-hangs-evidence-holds-roots-stall-state}
+  :seon.task/estimate #:seon.system{stall-state {:n 20, :order :linear, :ticks 2000000, :bytes 4000000}}}
 ]
