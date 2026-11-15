@@ -18,6 +18,14 @@ The owner's rulings on the morning after the first night run on its own.
 
 Told that ticks count Scheme work only (no foreign calls, GC copying, parked time or interrupts-off time: chez `s/cpnanopass.ss:2966`, `s/event.ss:47`) and that the 161M/300M swing is unexplained, he chose deps' order: dumps that need no event check; CPU time and bytes per fiber per dispatch; steps scoped by the existing nesting measure `ticks-of`, with no new marker; a counter of foreign lookups; then one experiment that settles the swing before ticks can fail a test. Plan in `deps-ticks-soundness-2026-11-15` (deps' task).
 
+### An agent runs while it learns; refine and restart when it stops
+
+"Measure while the agent is working, and if it's learning, let it go longer. Set up the refinement task: if we can trigger it at points, the refine agent's task is to edit the task and its evals, and we restart the agent from a better point" (from his phone; root's rewrite, his meaning). A run's progress is measured each turn; while it learns it runs past the turn cap, and when it stops learning its refine (`seon.task/refine-tx`) edits the task's plan and proofs and `my.root/restart!` starts a new agent from the refined task. Context plans it onto `my.root/run-losses`; stated in [tasks](tasks.md#a-refine-curates-its-own-task) once built.
+
+### Landing 12 lands with its file cache one land longer
+
+Asked whether landing 12 waits for the file cache's deletion, he chose to land now; the cache is the named transitional way, deleted in the next land.
+
 ### No landing past a red; a bad test is deleted, then backfilled
 
 Asked whether a land may merge when its only red is a known test already red on main: "I don't want to set a bad precedent. Is the test bad? Just delete it and backfill it later if it's not" (from his phone; root's rewrite, his meaning). No land merges past a red; a test that asserts what principles §6 rules out (wall time, load) is deleted and its goal filed as a backfill task, named in the Deletes line. First case: `seon.system-test/a-root-stops-in-a-second` (wall time), backfilled as a step's declared ticks.
