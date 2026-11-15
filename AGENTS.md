@@ -145,7 +145,7 @@ The standing system (the main checkout's root, its store `runs/store`) is the on
 - **the wiki:** how the system works now, by topic, briefly; no dated stories, no plans, no history;
 - **docstrings and schemas:** what one var or one value is, in a sentence;
 - **task entries:** work to do;
-- **decisions:** the owner's rulings, with quote, date and where each is stated;
+- **decisions:** the owner's rulings, each his meaning in correct Clojure, library, Jolt, Datahike and Flow terms (never a quote, never made-up words; unclear ones are asked first), with its date and where it is stated;
 - **the plan:** what is in flight and THE PLAN;
 - **git:** history, and every number a merge measured.
 

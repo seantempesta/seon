@@ -1,6 +1,6 @@
 # Decisions
 
-The owner's standing rulings, one entry each: his words and date, and where the rule is stated now. The mechanism lives in `AGENTS.md` and the wiki; the reasoning and the history around each ruling are in git. A ruling a later one reverses keeps a one-line pointer to it.
+The owner's standing rulings, one entry each: his meaning in correct terms (never quoted; asked first when unclear), its date, and where the rule is stated now. The mechanism lives in `AGENTS.md` and the wiki; the reasoning and the history around each ruling are in git. A ruling a later one reverses keeps a one-line pointer to it.
 
 ## 2026-11-15 rulings
 
