@@ -1541,11 +1541,12 @@
        (:error r)
        ;; and its binary identity (seon.fx/binary-digest of the tree it is built from): what seon.fx/runtime-for compares, held with the
        ;; record from the running binary's boot, so a later build never changes what a running process says it is
-       ;; a tree with no shipped config (a test's scratch tree) has no identity: its record names none, and runtime-for says so
+       ;; and its binary identity, or the error of reading it: a record with no identity is never written as if it had none
        (let [d (fx/binary-digest root (:tree inputs))]
-         (cond-> {:program (:program r) :forms (:forms r) :defs (:defs r)
-                  :inputs (assoc-in inputs [:config :seon.env/index] (or (:indexed-by r) "none"))}
-           (string? d) (assoc :digest d)))))))
+         (if (contract/error? d)
+           d
+           {:program (:program r) :forms (:forms r) :defs (:defs r) :digest d
+            :inputs (assoc-in inputs [:config :seon.env/index] (or (:indexed-by r) "none"))}))))))
 
 (defn held-inputs
   "The inputs of the files this system's checkout holds, as bin/system start (or bin/update's no-restart landing) last computed
