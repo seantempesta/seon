@@ -457,10 +457,10 @@
        vec))
 
 (def text-attrs
-  "Each searchable kind of text and the attribute holding it, the kinds seon.vector embeds: a form's
+  "Each searchable kind of text and the attribute holding it, what the text index holds (`text-index`): a form's
   source names a :var (or a :test), a wiki section's text a :section, a task's plan a :task, a
-  schema entry's form a :schema."
-  {:var :form/src :test :form/src :section :seon.doc/text :task :seon.task/plan :schema :schema/form})
+  schema entry's form a :schema, a loaded library's source file a :library (seon.fx/library-source)."
+  {:var :form/src :test :form/src :section :seon.doc/text :task :seon.task/plan :schema :schema/form :library :seon.library/text})
 
 (defn line-at
   "Where index i of text v falls: {:at the 1-based number of its line, :line the whole line it begins in, trimmed
@@ -489,7 +489,8 @@
                     (if i [{:kind kind :name n :line0 (count (filter #{\newline} (subs t 0 i)))}] []))))
     :seon.doc/text (when (kinds :section) [{:kind :section :name (:seon.doc/address (d/entity db e))}])
     :seon.task/plan (when (kinds :task) [{:kind :task :name (:seon.task/id (d/entity db e))}])
-    :schema/form (when (kinds :schema) [{:kind :schema :name (:schema/key (d/entity db e))}])))
+    :schema/form (when (kinds :schema) [{:kind :schema :name (:schema/key (d/entity db e))}])
+    :seon.library/text (when (kinds :library) [{:kind :library :name (:seon.library/path (d/entity db e))}])))
 
 (defn terms
   "Text s's terms, its identifier tokens, lower case: s split at every character that is no letter or digit
@@ -558,12 +559,49 @@
   "The text attributes in the order the index numbers them (its rows' attribute column)."
   (vec (sort (distinct (vals text-attrs)))))
 
+(defn- index-key
+  "The content key of db's texts: each text attribute's revision, else the conservative one, digested; nil for a value that is no
+  commit. Equal keys hold equal texts on any branch, after any restart. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :string]]}
+  [db]
+  (let [c (:cache-context db)]
+    (when (:datahike.cache/committed? c)
+      (lib/digest (str/join "\n" (for [a index-attrs]
+                                   (str a " " (or (get-in c [:datahike.cache/attribute-revisions a]) (:datahike.cache/conservative-revision c)))))))))
+
+(defn- image-file
+  "Where the text index of content key k is kept: target/text-index/<k>.db in this process's checkout."
+  {:malli/schema [:=> [:cat :string] :any]}
+  [k] (io/file (cfg/checkout) "target" "text-index" (str k ".db")))
+
+(defn- keep-image!
+  "Index ix written as the image of key k (sqlite/fts-image) whole or not at all: to a temporary name, then renamed, so no process
+  loads half a file; the directory then keeps its :seon.config.vector/text-index-files-kept newest images. nil."
+  {:malli/schema [:=> [:cat :string :map] :nil]}
+  [k ix]
+  (let [f (image-file k) dir (.getParentFile f) tmp (io/file dir (str k "." (.pid (ProcessHandle/current)) ".tmp"))]
+    (.mkdirs dir)
+    (java.nio.file.Files/write (.toPath tmp) ^bytes (sqlite/fts-image ix) (make-array java.nio.file.OpenOption 0))
+    (java.nio.file.Files/move (.toPath tmp) (.toPath f) (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/ATOMIC_MOVE java.nio.file.StandardCopyOption/REPLACE_EXISTING]))
+    (doseq [old (drop (cfg/value :seon.config.vector/text-index-files-kept)
+                      (sort-by #(- (.lastModified ^java.io.File %)) (filter #(.endsWith (.getName ^java.io.File %) ".db") (.listFiles dir))))]
+      (.delete ^java.io.File old))
+    nil))
+
 (defn- build-index
-  "The FTS5 index (seon.sqlite/fts-open) of every text attribute's texts on db: one row a text, its entity and
-  its attribute's number in `index-attrs`, one corpus whose bm25 `tokens` ranks."
+  "The FTS5 index of db's texts but the dependency source's, one row a text: loaded from its image on disk when one has its content
+  key (`index-key`), else built and its image written; a truncated or refused image is built again. See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
-  (sqlite/fts-open (for [[i a] (map-indexed vector index-attrs) {:keys [e v]} (d/datoms db :aevt a)] [e i (str v)])))
+  (let [k (index-key db) f (when k (image-file k))]
+    (or (when (and f (.isFile ^java.io.File f))
+          (try (sqlite/fts-load (java.nio.file.Files/readAllBytes (.toPath ^java.io.File f)))
+               ;; a corrupt image: built again below and written over
+               (catch clojure.lang.ExceptionInfo e (when-not (= :seon.sqlite/refused (:seon.error/type (ex-data e))) (throw e)))))
+        ;; the dependency source (:library) joins at the first grep that asks it (`with-library`), never at a warm start
+        (let [ix (sqlite/fts-open (for [[i a] (map-indexed vector index-attrs) :when (not= a :seon.library/text) {:keys [e v]} (d/datoms db :aevt a)] [e i (str v)]))]
+          (when k (keep-image! k ix))
+          ix))))
 
 (defn- release!
   "Reader done with index ix: its count in the slot goes down, and an index no longer the slot's with no reader left is closed."
@@ -611,6 +649,21 @@
   {:malli/schema [:=> [:cat :seon.host/db ifn?] :any]}
   [db f]
   (let [ix (acquire! db)] (try (f ix) (finally (release! ix)))))
+
+(defn- with-library
+  "Index ix of db holding the dependency source's rows (:seon.library/text): added, all at once, at the first reader that asks for
+  them, and marked in the slot's per-index state (its counted map's ::library, gone with the index), so carry-index! keeps them
+  current after. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
+  [db ix]
+  (let [[_ cur counted] @indexes]
+    (when-not (and (identical? ix cur) (::library @counted))
+      (let [n (get (zipmap index-attrs (range)) :seon.library/text)
+            rows (for [{:keys [e v]} (d/datoms db :aevt :seon.library/text)] [e n (str v)])]
+        ;; a carried write may have added some already: each is replaced, never doubled
+        (sqlite/using ix #(sqlite/replace-rows! % (map (fn [[e n]] [e n]) rows) rows))
+        (when (identical? ix cur) (swap! counted assoc ::library true)))))
+  ix)
 
 (defn carry-index!
   "The text index held for db before (`text-index`) as the index of db after: the move's writes brought into it.
@@ -708,7 +761,7 @@
         numbers (attr-numbers kinds)
         indexed? (and indexed? (seq numbers))
         candidates (when indexed?
-                     (group-by second (map (fn [[e a]] [e (index-attrs a)]) (with-index db #(sqlite/fts-substring % pattern numbers)))))]
+                     (group-by second (map (fn [[e a]] [e (index-attrs a)]) (with-index db #(sqlite/fts-substring (cond->> % (kinds :library) (with-library db)) pattern numbers)))))]
     (->> (for [a (distinct (keep text-attrs kinds))
                ;; each text with its entity: a candidate's by one seek, every text off the attribute's own datoms (a text is
                ;; cardinality one, so its :aevt datom holds it: a seek of :eavt again cost 120 KB a text on main)

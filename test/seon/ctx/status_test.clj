@@ -17,3 +17,16 @@
     (is (= (r/done-explain judge) (r/done-explain status)))
     (is (= #{:proof-red :contract-gap} (into #{} (map :reason) (r/done-explain status)))
         (str "the red proof and the gap are its reasons: " (pr-str (r/done-explain status))))))
+
+;; docs/render.md#how-the-work-stands: round 2 (2026-11-15): an agent whose change reddened another task's test spent four turns of db
+;; queries learning whose it was. A red test outside the task's proofs carries the tasks claiming it. Estimate: one refused call
+;; over two reasons, ~50k ticks; 1,000,000
+(deftest ^{:seon.test/estimate {:ticks 1000000 :bytes 1000000}} the-status-names-each-reached-tests-claiming-task
+  (let [refused @#'seon.ctx.status/refused
+        reasons [{:reason :stray-red :symbol 'app.b-test/other} {:reason :stray-red :symbol 'app.c-test/nobodys}]
+        claims {'app.b-test/other [{:task "app.b/the-other-task" :outcome :merged}]}
+        rows (refused reasons [] (constantly nil) (constantly nil) (constantly false) #(get claims % []))
+        by (into {} (map (juxt :test identity)) rows)]
+    (is (= [{:task "app.b/the-other-task" :outcome :merged}] (:claimed-by (by 'app.b-test/other))) (pr-str rows))
+    (is (not (contains? (by 'app.c-test/nobodys) :claimed-by)) "a test nobody claims says nothing of claims")))
+

@@ -158,6 +158,14 @@ The messaging audit's parts 1-4 approved: a reply carries the messages new since
 
 "You can and should fix all errors anywhere in the system. Distribute this work to expert agents as you need too." "We need a plan from where we are now A to where we want to go B. That's your job." The order he approved is in [the plan](plan.md#the-order).
 
+### An agent changes the program at its REPL; no fence around the checkout
+
+"don't put up guards or fences. An agent can do anything that the repl can eval. Good defaults and instructions are how we steer agents." Then: "try and fix systems so the class we are worried about can't occur or accept the risk of allowing agents to have power and to act responsibly for now. We need simplificity and de-duping over safety and guards and fences." Round 2's agents wrote their changes as files into the main tree through `SEON_CHECKOUT` and merged scratch definitions. Decided (runtime and context, root confirmed): the checkout stays main's tree for reads, config, git and the shell; the program changes only by evaluating definitions on the agent's branch; the prompt says so. No per-agent tree unless a round shows a need beyond editing `bin/` shell, which no task asks for any more (curation). It replaces the earlier "the branch's own tree". Stated in [prompt](prompt.md).
+
+### Forks are pushed before main
+
+On deps' finding that none of main's pins of Jolt, Datahike, konserve or persistent-sorted-set was on GitHub, asked whether to push the forks: "push forks, then main" (via root). Every pin's fork branch is pushed after the pin, and root pushes main only once each gitlink on it is in a remote branch (`git branch -r --contains`). Stated in [forks](forks.md#branch-scheme).
+
 ## 2026-11-14 rulings
 
 The owner's rulings of this day and the night before, each with his words where recorded and where it is now stated.
@@ -1837,9 +1845,9 @@ He chose option B: a kept test store holds a branch per git tree. Replaced by 20
 
 Quote not recorded. Stated in [machine](machine.md) and [merging](merging.md#a-worktree-session-works-in-a-checkout-of-its-own).
 
-### Cost is work done: ticks, bytes and calls, never wall time
+### Cost is work done: ticks and bytes, never wall time; calls are no cost (owner, 2026-11-15)
 
-Quote not recorded. Stated in [cost](cost.md).
+"Drop :calls" (2026-11-15, via root, after a calls bound went green and red at one digest: the counters are process-wide). A contracted call's count stays visible in profiles, never judged. Stated in [cost](cost.md).
 
 ### A session's prove runs the process tests it reaches (owner, 2026-11-08)
 

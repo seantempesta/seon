@@ -350,6 +350,10 @@
 (def gone-statuses "The agent statuses of a process gone, as :seon.agent/status's schema declares them (:seon.status/gone)."
   (:seon.status/gone (contract/properties :seon.agent/status)))
 
+(def ends-parked "The task kinds whose run ends parked, never held or dead, as :seon.task/kind's schema declares them (:seon.task/ends-parked):
+  a person's conversation waits for the person's next message. See docs/turn.md#parked."
+  (:seon.task/ends-parked (contract/properties :seon.task/kind)))
+
 (def stopped-statuses "The agent statuses of a process root stopped, as :seon.agent/status's schema declares them (:seon.status/stopped)."
   (:seon.status/stopped (contract/properties :seon.agent/status)))
 

@@ -65,7 +65,7 @@
           ;; it (a stop that throws goes on to its caller, its cause first)
           end! (fn [why] (deliver cause why)
                  (when (= why @cause)
-                   (try (out! "ROOT STOPPED " (shown (select-keys (c/stop! sys why) [:cause :ms :peak-processes :drained :graph :stop-fact-refused])))
+                   (try (out! "ROOT STOPPED " (shown (select-keys (c/stop! sys why) [:cause :ms :peak-processes :drained :graph :stop-fact-refused :phases])))
                         (finally (deliver stopped true))))
                  @stopped)]
       (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (end! :signal))))

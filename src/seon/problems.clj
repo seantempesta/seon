@@ -193,10 +193,14 @@
              :let [{:keys [marks site?]} (or (get rules law) (when rule (rule)))]
              :let [;; the page's cited names (or its one section's), read when a candidate site asks (a branch that changed no
                    ;; catching form reads nothing)
-                   named-set (delay (into #{} (comp (map :e) (mapcat #(d/datoms db :eavt % :seon.doc/names)) (map :v))
-                                          (if section
-                                            (d/datoms db :avet :seon.doc/address section)
-                                            (d/index-range db {:attrid :seon.doc/address :start (str page "#") :end (str page "#\uffff")}))))
+                   ;; a law's one section names its sites in it and in the sections under it (:seon.doc/parent): the printer law's list sits
+                   ;; in a subsection, whose names it never read (2026-11-15: 20 named sites read as unnamed on main)
+                   named-set (delay (let [below (fn below [es] (when (seq es)
+                                                                 (concat es (below (mapcat #(d/q '[:find [?c ...] :in $ ?p :where [?c :seon.doc/parent ?p]] db %) es)))))]
+                                      (into #{} (comp (mapcat #(d/datoms db :eavt % :seon.doc/names)) (map :v))
+                                            (if section
+                                              (below (map :e (d/datoms db :avet :seon.doc/address section)))
+                                              (map :e (d/index-range db {:attrid :seon.doc/address :start (str page "#") :end (str page "#\uffff")}))))))
                    site-of (or site? (constantly true))
                    named (fn [v] (@named-set v))
                    ;; the multimethod or protocol a form without a var extends: read only if one asks
@@ -755,7 +759,7 @@
   :waived-proof row with its test, the task it names, the size it was taken at (:n), the numbers it recorded and
   `multiple`, the greatest of the counted dimensions' recorded multiples of the proof's own bound at that size (the
   arithmetic of a verdict: seon.cost/expected, seon.cost/row-ratio; nil when the record states no size or the
-  estimate is not literal). Found by the forms that reference seon.cost/proof (one :form/refs seek), the
+  estimate is not literal, or states a dimension this program does not measure). Found by the forms that reference seon.cost/proof (one :form/refs seek), the
   `:overrun` map read out of the form by the reader. Closed when the proof's `:overrun` is deleted. Cost: the forms that call
   seon.cost/proof, each read once; with only, a set of form entities (a branch's candidates, `split-rows`), those of them
   alone. See docs/health.md#a-proof-that-passes-by-waiver."
@@ -771,7 +775,10 @@
              [i m] (map-indexed vector proofs)
              :let [{:keys [task n measured]} (:overrun m)
                    estimate (select-keys m [:ops :per-n :fixed :growth])
-                   literal? (and (every? map? (vals (dissoc estimate :growth))) (keyword? (:growth estimate)) (pos-int? n))
+                   ;; literal, and in this program's dimensions: a base read under a later program (a branch's caused split) may state one
+                   ;; it dropped (:calls, 2026-11-15), and its multiple is then not computed, its row still shown
+                   literal? (and (every? map? (vals (dissoc estimate :growth))) (keyword? (:growth estimate)) (pos-int? n)
+                                 (every? (set cost/dimensions) (mapcat keys (vals (dissoc estimate :growth :ops)))))
                    bound (when literal? (cost/expected estimate cost/units n))
                    multiple (when bound (some->> (for [d (keys measured) :when (and (cost/exact d) (contains? bound d))]
                                                    (cost/row-ratio {:measured measured :expected bound} d))
@@ -1288,15 +1295,12 @@
                assoc :seon.render/schema :seon.problems/report)))
 
 (defn- other-derived
-  "The derived classes `caused-split` does not read, their rows on db; :unsynced judges the task entities es (`unsynced-tasks`)."
+  "The derived classes `caused-split` does not read, their rows on db, read whole by both readers of health (they are cheap, or the
+  running system's state); :unsynced judges the task entities es (`unsynced-tasks`)."
   {:malli/schema [:=> [:cat :seon.host/db :map [:sequential :int]] :map]}
   [db ans es]
-  (let [tr (task-reads db)]
   {:stalled (stalled-agents db ans) :stale-pin (stale-pins db ans) :stale-binary (stale-binary db ans) :orphan-page (orphan-pages db ans)
-   :leadless-section (leadless-sections db ans)
-   ;; the tasks' readiness and cites read once for the two classes that judge them
-   :uncited-task (uncited-tasks db ans tr) :stale-plan (stale-plans db ans tr) :unsynced (unsynced-tasks db ans es)
-   :waived-proof (waived-proofs db ans) :unschemed-key (unschemed-keys db ans)}))
+   :leadless-section (leadless-sections db ans) :unsynced (unsynced-tasks db ans es)})
 
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the
@@ -1307,8 +1311,12 @@
                   [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}
   ([db] (health db {}))
   ([db fold]
-   (let [ans (answers db)]
+   (let [ans (answers db)
+         ;; the tasks' readiness and cites read once for the two classes that judge them
+         tr (task-reads db)]
      (health-with db ans (:classes (report-with db ans fold nil)) (assoc (other-derived db ans (mapv :e (d/datoms db :aevt :seon.task/id)))
+                                     :uncited-task (uncited-tasks db ans tr) :stale-plan (stale-plans db ans tr)
+                                     :waived-proof (waived-proofs db ans) :unschemed-key (unschemed-keys db ans)
                                      :unnamed-site (unnamed-sites db ans) :native-in-defonce (native-in-defonce db ans) :stale-section (stale-sections db ans)
                                      :hand-written-list (hand-written-lists db ans nil))))))
 
@@ -1353,7 +1361,11 @@
                                        (update :unsynced #(vec (sort-by :task (into (into [] (comp (remove (fn [r] (ids (:task r)))) (map current))
                                                                                           (get-in prev [:classes :unsynced :rows]))
                                                                                     %))))
-                                       (assoc :unnamed-site (carried :unnamed-site) :native-in-defonce (carried :native-in-defonce) :stale-section (carried :stale-section) :hand-written-list (carried :hand-written-list))))))
+                                       (assoc :unnamed-site (carried :unnamed-site) :native-in-defonce (carried :native-in-defonce)
+                                              ;; read from what moved (split-rows), never whole again: whole they cost ~290M a move of main
+                                              :uncited-task (carried :uncited-task) :stale-plan (carried :stale-plan)
+                                              :waived-proof (carried :waived-proof) :unschemed-key (carried :unschemed-key)
+                                              :stale-section (carried :stale-section) :hand-written-list (carried :hand-written-list))))))
 
 (defn own
   "The open problems of one agent, by class and shaped as `report` (so the one render draws it, an

@@ -27,8 +27,8 @@
      :n "times the entity's attribute was replaced"
      :work "one seek of the entity in the history index, then a row per datom, each with one seek of its transaction's time: about 20 KB a row"
      :growth :linear
-     :per-n {:calls 0 :bytes 20000}
-     :fixed {:calls 2 :bytes 5000}
+     :per-n {:bytes 20000}
+     :fixed {:bytes 5000}
      :sizes [10 40 160]}))
 
 (defn answer-of
@@ -45,8 +45,8 @@
      :n "rows in the answer"
      :work "one walk of the answer to record it and one to hash it, a row at a time"
      :growth :linear
-     :per-n {:calls 0 :bytes 50000}
-     :fixed {:calls 11 :bytes 50000}
+     :per-n {:bytes 50000}
+     :fixed {:bytes 50000}
      :sizes [10 40 160]}))
 
 (deftest finding-a-task-by-its-id-is-one-index-seek
@@ -58,7 +58,7 @@
                 "per task. About 3 us and 1.3 KB at 10k tasks")
      :growth :log
      :per-n {:ns 150 :bytes 50}
-     :fixed {:ns 1000 :bytes 600 :calls 1}
+     :fixed {:ns 1000 :bytes 600}
      :sizes [100 300 1000]
      ;; measured 2026-10-20 (was a Datalog query: 99 us, 108 KB): the seek itself allocates
      ;; 23-32 KB in our Datahike / persistent-sorted-set on Jolt, on the whole process's count.
@@ -116,8 +116,8 @@
      ;; accumulate; the runs it replaced made one, run-value). The ns and bytes bounds stay the runs' own
      ;; 2026-11-12, the named pull (the owner: a pull names the shape its reader needs): 2.53M ns / 1.89 MB at 10, a seek a named
      ;; attribute where '* read one :eavt range; Deep fixes' named-pull item (one range read) should bring it back to 130 us / 140 KB
-     :per-n {:ns 250000 :bytes 190000 :calls 2}
-     :fixed {:ns 100000 :bytes 100000 :calls 3}
+     :per-n {:ns 250000 :bytes 190000}
+     :fixed {:ns 100000 :bytes 100000}
      :sizes [10 30 100]}))
 
 (defn loaded-of
@@ -138,8 +138,8 @@
                 "pull of every member of every task (`seon.task/tasks`: ~93 KB a task on main, 46 MB for 452), and "
                 "the stored declaration of each task decoded to compare it; nothing is written")
      :growth :linear
-     :per-n {:ticks 20000.0 :bytes 30000.0 :calls 6.0}
-     :fixed {:ticks 100000.0 :bytes 200000.0 :calls 20.0}
+     :per-n {:ticks 20000.0 :bytes 30000.0}
+     :fixed {:ticks 100000.0 :bytes 200000.0}
      :sizes [10 100 300]}))
 
 (defn shipped-shaped
