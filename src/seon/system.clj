@@ -206,10 +206,8 @@
     (:ex r) (assoc :ex (select-keys (:ex r) [:seon.error/type :seon.error/message]))))
 
 (defn started-without-program-text
-  "What an agent is told when it starts without part of its program (swp, the :seon.agent/started-without-program error), its task's
-  id task: each error, and whose it is: a namespace not the task's own or its tests' is the program's defect, recorded as a problem
-  for its owner, and the agent goes on with its task (round 2: an agent told only the error spent its turns on another area's bug).
-  See docs/processes.md#an-agent-that-starts-without-its-program."
+  "What an agent that starts without part of its program (swp) is told for its task: each error, and whether a failed namespace is
+  its task's (its to fix) or the program's defect (go on). See docs/processes.md#an-agent-that-starts-without-its-program."
   {:malli/schema [:=> [:cat :map [:maybe :string]] :string]}
   [swp task]
   (let [tns (some-> task (str/split #"/") first)
@@ -1211,7 +1209,6 @@
           (let [tx (cond-> (into (vec tx) (source/modes-tx db (:modes r)))
                      ;; the gitlinks a git read found: the branch's pins are exactly these (a read with none, no git, leaves them)
                      (contains? r :pins) (into (source/pins-tx db (:pins r)))
-                     ;; the library files, read because the pins moved (seon.fx/read-source's :library)
                      (contains? r :library) (into (source/library-tx db (:library r) (:pins r))))]
             {:digest digest :tx tx
              ;; the counts read three attributes after tx: only their part of it is applied (seon.db/project-tx), never the whole import

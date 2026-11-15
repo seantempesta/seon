@@ -555,7 +555,7 @@
 (deftest ^{:seon.test/estimate {:ticks 20000000 :bytes 40000000}} a-grep-finds-a-librarys-source-line
   (let [lib {"jolt/fake_backend.clj" "(ns jolt.fake-backend)\n(defn emit-quoted [form]\n  (throw (ex-info (str \"emit-quoted: unsupported quoted form \" form) {})))\n"}
         db (mt/with (mt/world) (seon.source/library-tx (mt/world) lib {"reference-code/jolt" "abc"}))
-        program #{:var :test :section :task :schema}]
+        program (disj (set (keys doc/text-attrs)) :library)]
     (is (= [{:at "jolt/fake_backend.clj:3" :kind :library :text "(throw (ex-info (str \"emit-quoted: unsupported quoted form \" form) {})))"}]
            (doc/grep db "unsupported quoted form" #{:library} nil))
         "a library's line is found, named by its file's path and line")

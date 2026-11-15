@@ -415,6 +415,24 @@
   "What grep reads when :in names nothing: the kinds of text the program records (seon.doc/text-attrs less :library)."
   #{:var :test :section :task :schema})
 
+(defn- grep-empty
+  "grep's answer rows as the eval shows them: an empty one says where to look next (`grep-none-text`), the regex a string with a
+  regex's operators likely meant, or, with nothing in the program, the libraries' grep; else rows. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat [:vector :map] [:or :string :seon.host/regex] [:set :keyword] [:maybe [:set :keyword]] [:maybe :string]] [:vector :map]]}
+  [rows pattern kinds in ns]
+  (cond
+    (and (empty? rows) (string? pattern) (re-find #"[|^$()\[\]*+?\\]" pattern))
+    (with-meta rows {:seon.render/schema :my.agent/grep-none
+                     :say (str "no line holds the string as written: a string is matched as its text, and a regex is written #\"...\", as "
+                               "(my.agent/grep #\"" (str/replace pattern "\"" "\\\"") "\""
+                               (when (or in ns) (str " " (print/text (cond-> {} in (assoc :in in) ns (assoc :ns ns)) (:part print/budgets)))) ")")})
+    ;; nothing in the program: the libraries it loaded (Jolt, Datahike, malli, ...) are the next place, a grep of their own
+    (and (empty? rows) (not (kinds :library)))
+    (with-meta rows {:seon.render/schema :my.agent/grep-none
+                     :say (str "no line of the program holds it; the libraries it loaded (Jolt, Datahike, malli, ...): "
+                               "(my.agent/grep " (print/text pattern (:part print/budgets)) " {:in #{:library}})")})
+    :else rows))
+
 (defn grep
   "Like grep, over this branch's program: every line matching pattern in the functions, tests, wiki sections,
   task plans and schema entries, one row each, [{:at \"seon.task/accumulate:3\" :kind :var :text \"...\"}] (seon.doc/grep).
@@ -447,18 +465,7 @@
      ;; a string is its text as written: one holding a regex's operators that matches nothing is still [] (a
      ;; value, so a reply's later calls run), shown with its regex form: the string's characters between #" and ",
      ;; a quote escaped
-     (cond
-       (and (empty? rows) (string? pattern) (re-find #"[|^$()\[\]*+?\\]" pattern))
-       (with-meta rows {:seon.render/schema :my.agent/grep-none
-                        :say (str "no line holds the string as written: a string is matched as its text, and a regex is written #\"...\", as "
-                                  "(my.agent/grep #\"" (str/replace pattern "\"" "\\\"") "\""
-                                  (when (or in ns) (str " " (print/text (cond-> {} in (assoc :in in) ns (assoc :ns ns)) (:part print/budgets)))) ")")})
-       ;; nothing in the program: the libraries it loaded (Jolt, Datahike, malli, ...) are the next place, a grep of their own
-       (and (empty? rows) (not (kinds :library)))
-       (with-meta rows {:seon.render/schema :my.agent/grep-none
-                        :say (str "no line of the program holds it; the libraries it loaded (Jolt, Datahike, malli, ...): "
-                                  "(my.agent/grep " (print/text pattern (:part print/budgets)) " {:in #{:library}})")})
-       :else rows))))
+     (grep-empty rows pattern kinds in ns))))
 
 (defn grep-none-text
   "grep's empty answer as the eval shows it (seon.render/model, the schema :my.agent/grep-none): [] and where to look next, the
