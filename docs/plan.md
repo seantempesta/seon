@@ -61,12 +61,16 @@ What a fresh root reads first: what works now, what to do next, and the lessons 
 - **The self-merge path works end to end once.** Pilot run 15 took `seon.db/an-eval-responses-parts-are-its-schemas-keys` through `seon_done` (judge, gate, merge) into main in the store. Seon wrote it back to git (85cc745c06 on jolt/merges), root reviewed the sync, and it landed as 7875387c3e.
 - **Restarts and the store.** Lands keep root running again (09e83a2d59). Boot's sweep syncs, so freed pages are reused (1a7c7d8526). Each boot still grows the store ~2 GB from writes made before the writer's first sync (`seon.system/a-write-before-the-writer-syncs-its-own-steps`). The 64 GiB store copy `runs/store-pre-compact-20261116.mdb` is kept until the owner says otherwise.
 - **Redraw.** A render a land redefines now redraws every kept walk (2409c17de3).
-- **Next, in order:**
-  1. The page walk onto the reactive core (`seon.ratom/web-reads-on-the-core`). `@ctx` is one immutable tree; a render re-runs only when its input subtree isn't `identical?`; a dropped subtree disposes its reaction; key sets only at the pulls. Delete the walk's own engine and the render index fallback with it; never thread an index through calls.
-  2. Inbox fixes: no process, merged-down messages, ended agent, duplicates (`seon.server/*` inbox tasks).
-  3. bin/land's ticks print sums the wrong field.
-  4. Read-keys as one value a verdict.
-  5. The pilot judges against a pinned main.
+- **THE FOCUS of the next sessions (owner, 2026-11-16, [decisions](decisions.md#2026-11-16-rulings)): the test system fully implemented inside Seon, with no more hacks.** Done means every bullet below holds and the fast lane is gone:
+  - Every session and agent proves and lands through the system: `seon_prove` and `seon_done` on the `:prove` service. Tests run as thin clients of `:prove`, forked from the standing system (tests' item E).
+  - One land queue as data replaces the by-hand land count and the race it allows.
+  - Read-keys are one value a verdict (`seon.proofs/a-verdict-is-an-entity-that-names-its-environment`).
+  - Process tests have main verdicts.
+  - A pilot judges against a pinned main.
+  - Every test that ends at its bound has its wait found at its cause.
+  - Then `bin/land --fast`, `bin/land`, `bin/prove`, `bin/test`'s session use and the worktree land path are DELETED (plan item 18), each with what now does its job named in its Deletes line.
+  - What this needs from others comes first, because the loop depends on it: messaging that survives a restart (the `seon.server/*` inbox tasks: no process, merged-down messages, an ended agent, duplicates) and bin/land's ticks print fixed while it still exists.
+- **After the focus:** the page walk's remaining work on the reactive core (`seon.ratom/web-reads-on-the-core`, whose STATUS says what is left); runtime's slice 2b `:update` proc; the store's ~2 GB a boot.
 - **How root found things (lessons):**
   - Inboxes lapse at every restart: re-attach, and wake idle sessions directly.
   - Name one owner the moment a cause is found.
