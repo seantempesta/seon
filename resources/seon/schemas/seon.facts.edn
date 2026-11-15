@@ -285,7 +285,10 @@
  :seon.agent/test-error [:and {:description "The error, as data, of a test run that failed as a whole; present only while it is so."} :seon.error/base]
  ;; how its work ended, as the agent writes it on its branch (seon.agent/write-end!), naming its turn: root reads it at judging
  ;; (seon.reconcile/pull-end), and an end whose turn is not past the wake's is none (:no-end)
- :seon.agent/outcome [:enum {:description "How the agent's work ended, as the agent writes it on its branch; :refork, a run that merged main and goes on in a process forked on main's program (seon.turn)."} :green :red :waiting :cap :failed :merge-failed :error :refork]
+ :seon.agent/outcome [:enum {:description "How the agent's work ended, as the agent writes it on its branch; :refork, a run that merged main and goes on in a process forked on main's program (seon.turn)."
+                              ;; how the agent's own end reads where its task holds none (seon.render.ui/standing)
+                              :seon.status/title {:green "done" :waiting "parked" :cap "stopped at its cap" :red "ended red" :failed "failed" :merge-failed "merge failed" :error "ended in error"}
+                              :seon.status/tone {:green :done :waiting :ask :cap :stopped :red :failed :failed :failed :merge-failed :failed :error :failed}} :green :red :waiting :cap :failed :merge-failed :error :refork]
  :seon.agent/reason [:string {:description "Why the agent's work ended as its outcome says."}]
  :seon.agent/ended-turn [:int {:description "The turn that the agent's end names."}]
  ;; an entity's own pattern, stored with it from its first change; before that it reads its schema's (its role's). The
@@ -552,7 +555,13 @@
  ;; merge; :gate, a merge whose process tests are to run first; :merged, in main; :behind, a merge main moved under; :dead, its
  ;; agent died; :lost, its process was gone; :killed, stopped for a cancel, a hold or a changed environment; :refused, root refused
  ;; the spawn; :closed, judged when its task was no longer running, or held for root
- :seon.task/outcome [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ready :gate} :seon.status/failed #{:dead :lost} :seon.status/ended #{:done :merged :dead :lost :closed :cap} :description "How the task's work stands or ended."}
+ :seon.task/outcome [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ready :gate} :seon.status/failed #{:dead :lost} :seon.status/ended #{:done :merged :dead :lost :closed :cap} :description "How the task's work stands or ended."
+                     ;; how it reads to a person (seon.render.ui/standing): :parked and :told are woken by a message (seon.reconcile/park-outcomes);
+                     ;; :cap is not: it waits for its agent's turns to be raised and the task released
+                     :seon.status/title {:running "working" :parked "parked" :told "told" :cap "stopped at its cap" :done "done" :merged "merged" :ready "ready to merge"
+                                         :gate "at the merge gate" :behind "behind main" :dead "died" :lost "stopped by a restart" :killed "killed" :refused "refused" :closed "closed"}
+                     :seon.status/tone {:running :live :parked :ask :told :ask :cap :stopped :done :done :merged :done :ready :quiet :gate :quiet :behind :stopped
+                                        :dead :failed :lost :quiet :killed :failed :refused :failed :closed :quiet}}
                      [:enum :running :parked :told :cap :done :ready :gate :merged :behind :dead :lost :killed :refused :closed]]
  ;; why it stands so: the agent's own words, or root's (the death, a refused start)
  ;; the branch of the agent that launched this task (my.task/launch!), told how it ends (seon.reconcile/tell-tx)
