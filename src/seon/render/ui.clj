@@ -458,7 +458,8 @@
   "The person's message box on root's chat (docs/decisions.md, The page is a friendly chat): like the good chat tools, a box that grows
   taller with its text (up to 40% of the screen), a clear Send button, Enter sends and Shift+Enter is a new line; what is sent is a
   message to root's session through the same call every input makes (seon.system/submit!). See docs/render.md#the-page."
-  {:seon.render/style ".person-input { display: flex; align-items: flex-end; gap: 0.5rem; padding: 0.75rem 0 1rem; }
+  {:seon.render/style ".person-input { display: flex; align-items: flex-end; gap: 0.5rem; width: 100%; max-width: 46rem; margin: 0 auto; padding: 0.75rem 1rem 1rem; box-sizing: border-box; }
+.seon-columns:has(.person-input) { grid-template-columns: minmax(0, 1fr); }
 .person-input textarea { flex: 1; min-width: 0; font-family: ui-sans-serif, system-ui, -apple-system, 'Helvetica Neue', sans-serif; font-size: 1.1875rem; line-height: 1.5; padding: 0.75rem 1rem; border-radius: 1rem; resize: none; field-sizing: content; min-height: 3.25rem; max-height: 40vh; overflow-y: auto; }
 .person-input button[type=submit] { flex: none; font-size: 1.0625rem; font-weight: 600; padding: 0.75rem 1.25rem; border-radius: 1rem; background: var(--color-signal); color: var(--color-base-950); }
 .person-input button[type=submit]:hover { filter: brightness(1.1); }"
@@ -2560,7 +2561,8 @@
       ;; the agents on the left, then the page: its render's columns (an agent's chat large in the middle and its context on the
       ;; right), each scrolling on its own (docs/render.md#where-things-go)
       [:div {:class "seon-columns"}
-       (when-not (holds "c-side") (agents-aside [:ol {:id "c-side"} (render/region "c-side")]))
+       ;; the person's page draws no agents column (docs/decisions.md, The page is a friendly chat)
+       (when-not (or person? (holds "c-side")) (agents-aside [:ol {:id "c-side"} (render/region "c-side")]))
        [:div {:id "p-page"} (render/region "p-page")]
        (when-not chat (list (slot "p-caption") (when input (slot "p-input"))))]]
      :seon.render/units
