@@ -502,20 +502,18 @@
                               (mismatch (:digest w) "its program (src) is not the binary's: build it")))
            :else {:binary (str root "/target/seon") :digest (:digest w)}))))
 
-(defn- drop-unnamed-gitlinks!
-  "Drop from the index env names every gitlink the checkout at root's .gitmodules does not name: a pin is a gitlink .gitmodules
-  names, and a nested repository it does not (a clone left in the checkout) is no part of the tree, so it moves no tree and no
+(defn- drop-untracked-gitlinks!
+  "Drop from the index env names every gitlink the checkout at root's own index does not hold: a pin is a gitlink the checkout
+  tracks, and a nested repository only add -A takes in (an untracked clone) is no part of the tree, so it moves no tree and no
   binary identity (bin/tree, the same rule). See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat [:map-of :string :string] :string] :any]}
   [env root]
-  (let [mods (set (when (.isFile (java.io.File. (str root "/.gitmodules")))
-                    (for [l (str/split-lines (str (git-try root ["config" "-f" (str root "/.gitmodules") "--get-regexp" "^submodule\\..*\\.path$"])))
-                          :when (not (str/blank? l))]
-                      (second (str/split l #" " 2)))))
-        extra (for [l (str/split-lines (git! env root ["ls-files" "-s"] nil))
-                    :let [[m _ _ p] (str/split l #"\s+" 4)]
-                    :when (and (= "160000" m) (not (mods p)))]
-                (str ":(top)" p))]
+  (let [links (fn [e] (set (for [l (str/split-lines (git! e root ["ls-files" "-s"] nil))
+                                 :let [[m _ _ p] (str/split l #"\s+" 4)]
+                                 :when (= "160000" m)]
+                             p)))
+        held (links {})
+        extra (for [p (sort (links env)) :when (not (held p))] (str ":(top)" p))]
     (when (seq extra) (git! env root (into ["rm" "--cached" "-f" "-q" "--"] extra) nil))))
 
 (defn tree-id
@@ -545,7 +543,7 @@
                head? (git! env root ["read-tree" "HEAD"] nil)))
        (git! env root ["add" "-A"] nil)
        (when (seq excludes) (git! env root (into ["rm" "-r" "--cached" "-q" "--ignore-unmatch" "--"] top) nil))
-       (drop-unnamed-gitlinks! env root)
+       (drop-untracked-gitlinks! env root)
        (git! env root ["write-tree"] nil)
        (finally (.delete idx))))))
 
