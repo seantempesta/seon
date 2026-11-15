@@ -230,6 +230,25 @@
     (is (re-find #":id \"[a-p][0-9a-f]{15}\"" (:text taken)) "the entity's id, which the agent writes on its branch")
     (is (contract/error? none) "no live agent a0: refused, as root refuses")))
 
+;; Estimate: in this process, four server round trips and the answers' reads (~0.5M ticks each, as a-message-reaches-the-agent's): ~2M; 3,000,000.
+;; The reply's own cost at the agent: a seek of the messages linked to it, O(m) datoms (m its messages: here 1), and an entity read of each
+;; new one, ~10.5k ticks a message [M result/b45faee3]
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} a-message-to-an-attached-agent-is-in-the-next-reply
+  ;; task seon.server/a-message-reaches-the-session-that-drives-its-agent (docs/users.md#messages): a session driving an agent through
+  ;; MCP hears a message to it in its next reply, as a model hears one in its next request: the messages its turn took, each once. Red
+  ;; before: the reply carried its evals' responses alone, and main's merge had already put the message on the branch, so it read as
+  ;; delivered while no one had read it (flow's probe, 2026-11-15: agent ba18c9e9bd81a184)
+  (let [[_ sent heard again] (at/in-agent (fn [{:keys [agent task]}]
+                                            [{:op :attach :task task}
+                                             {:op :message :agent agent :body "use demo/g"}
+                                             {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 2)"}]}
+                                             {:op :eval :agent agent :message-md "" :evals [{:intent "add again" :code "(+ 2 2)"}]}]))]
+    (is (true? (:ok sent)) (pr-str sent))
+    (is (= [3] (mapv :value (:responses heard))) "the evals answer as before")
+    (is (= ["use demo/g"] (mapv :body (:messages heard))) (str "the reply after the message carries it: " (pr-str (dissoc heard :responses))))
+    (is (= (seon.config/value :seon.config.root/user-name) (:from (first (:messages heard)))) "with who sent it, by name")
+    (is (empty? (:messages again)) (str "and the next reply does not carry it again: " (pr-str (:messages again))))))
+
 (deftest the-context-op-answers-what-a-model-is-sent
   ;; dogfood 2026-10-25: an outside agent read the task's data and turn sections only, not the system
   ;; prompt and screen a model is sent, and its (my.task/status) answered :seon.turn/not-observed.
