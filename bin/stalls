@@ -1,5 +1,6 @@
 #!/bin/zsh
 # bin/stalls MS END BOUNDS LOG:PID ... — name a stalled test, and end one that overran: while any PID runs, each LOG (a
+# DEVIATES (owner, 2026-11-15: every bin/ script is thin over an op): watches bin/test's shards from the shell, outside the system; not ported: seon.prove/the-shell-runner-is-deleted asks what job is left once the runtime's mechanisms do theirs (owner: never port the outside logic as it is).
 # shard's, bin/test) whose last test line is "started <test>" (no "ended" since):
 # - quiet (no write) for longer than that test's stall bound prints and records "STALLED <test> <quiet ms> (LOG)", once per
 #   test, and nothing more: a name. The stall bound is the second word of its line in BOUNDS ("<test> <stall ms> <end ms>":

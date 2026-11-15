@@ -934,6 +934,22 @@
       (is (not= (pdb/reads-digest db ks nil) (pdb/reads-digest (:db-after redefined) ks nil))
           "and what it read no longer holds what it did"))))
 
+;; docs/merging.md#verdicts-are-a-cache (root, 2026-11-15; data's six reds): a verdict another runner made (:seeded, carried once from
+;; bin/test's file cache) answers nothing for the image: a test whose verdict depends on which process runs it was green under bin/test
+;; and red in the image at one digest, and the judge took the green. verdicts-at finds only :live and :full verdicts. Estimate: a world
+;; (~2M), one graph (~2M), two verdict-txs and db-withs (~1M), four seeks: 5,000,000
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-verdict-another-runner-made-answers-nothing-for-the-image
+  (let [d1 (seon.lib/digest "image run") d2 (seon.lib/digest "bin/test run")
+        w0 (mt/with (mt/world) (mt/code 'pt.vr "(ns pt.vr)\n(defn add [x y] (+ x y))\n"))
+        g (program/reach-graph w0 nil)
+        t 'pt.vr-test/adds
+        basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
+        live (proofs/verdict-tx w0 g basis {t {:digest d1 :pass 0 :fail 1 :error 0}} {t [{:var 'pt.vr/add}]} {})
+        seeded (mapv #(assoc % :seon.proof/route :seeded) (proofs/verdict-tx w0 g basis {t {:digest d2 :pass 1 :fail 0 :error 0}} {t [{:var 'pt.vr/add}]} {}))
+        db (pdb/db-with w0 (into live seeded))]
+    (is (= :fail (cond (pos? (:fail (get (proofs/verdicts-at db {t d1}) d1) 0)) :fail :else :none)) "the image's own red is found")
+    (is (= {} (proofs/verdicts-at db {t d2})) "a green another runner made (:seeded) answers nothing for the image")))
+
 ;; docs/storage.md#what-a-read-scanned: a plan finds a verdict at its digest, and a green at another digest while what its run read
 ;; still holds what it did (reuse by the one read record); a change to what it read ends the reuse.
 ;; Estimate: a world with 2 forms (~2M), one graph (~2M), a verdict written (~0.5M), three lookups with digests (<0.5M): 5,000,000 ticks

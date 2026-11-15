@@ -1,5 +1,6 @@
 #!/bin/zsh
 # bin/forks [UNIT ...] — the forks' own suites on Jolt (bin/check's forks step): each unit test/forks/baseline.edn
+# DEVIATES (owner, 2026-11-15: every bin/ script is thin over an op): runs the forks' suites in processes of its own, not on the test service; not ported: seon.check/check-steps-are-tests-on-the-service asks what job is left once the runtime's mechanisms do theirs (owner: never port the outside logic as it is).
 # names (a Datahike test namespace, a konserve test file) runs in one of a few processes (test/forks/run.jolt: the
 # units dealt into the run's jobs), niced, its temp files under a directory of its process's own, and its counts
 # are compared with the ones the baseline records. Named UNITs run alone (a name the baseline does not
