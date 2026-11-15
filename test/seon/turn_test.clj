@@ -100,7 +100,8 @@
   "A run of the world's task (seon.agent-test's work-with: its turns' effects stood in) driven by the real :repl proc (seon.repl/agent-step)
   in a graph, its status by status, with the effect var held (agent/fx!, the model call, or agent/judge!, the proofs) parked until the
   test is done: what (probe g) answers while the wait is out, then root's :stop, the run's reply (its end) and whether the process exited."
-  [status held probe]
+  ([status held probe] (held-run status held probe (fn [arg] (str "(seon.turn/work! " (pr-str arg) ")"))))
+  ([status held probe form]
   (@#'at/work-with (fn [st called!] (called!) st) status
                 (fn [arg]
                   (let [out (promise) release (promise) replied (promise) exited (promise)]
@@ -113,14 +114,14 @@
                           ;; the graph is stopped inside the redefinitions whatever ends the test: a :stop it still holds must
                           ;; never reach the real lib/c-exit, which would end this test process (it ended a shard at exit 0 once)
                           (try
-                            @(flow/inject g [:repl :in] [{:op :eval :id 7 :forms (str "(seon.turn/work! " (pr-str arg) ")")}])
+                            @(flow/inject g [:repl :in] [{:op :eval :id 7 :forms (form arg)}])
                             @out
                             (let [seen (probe g)]
                               @(flow/inject g [:repl :in] [{:op :stop}])
                               (let [reply @replied code @exited]
                                 {:seen seen :end (get-in reply [:response :value]) :exit code}))
                             ;; the dropped call's fiber ends; its answer finds no run
-                            (finally (deliver release true) (flow/stop g))))))))))
+                            (finally (deliver release true) (flow/stop g)))))))))))
 
 (defn- ping-of
   "The :repl proc's site and ping answer in graph g. See docs/flow.md#flow-inside-an-agent."
@@ -171,3 +172,13 @@
         (is (= :walk (:from (@#'turn/status-now))) "a held walk: its kept status")
         (is (= 1 @drawn) "advanced once, as a warm turn does"))
       (finally (reset! seon.agent/state old)))))
+
+;; Estimate: as an-agent-answers-ping-while-its-proofs-are-queued, a hand-back's begin and status in a run's place: 8,000,000 ticks, 8,000,000 bytes
+(deftest ^{:seon.test/estimate {:ticks 8000000 :bytes 8000000}} an-agent-answers-ping-during-its-hand-back
+  ;; seon.step/every-request-is-answered-at-each-end-of-its-holder's first part, root's order item 9 (docs/flow.md#flow-inside-an-agent): an
+  ;; outside agent's hand-back (seon.turn/hand-back!, seon_done's path) is a run on the same protocol, so while its judge is out the :repl proc
+  ;; is parked, answers a ping with it, and root's :stop ends it at once. Red before: hand-back! awaited agent/judge! inside the :repl step
+  (let [r (held-run (constantly {:reasons []}) #'agent/judge! ping-of (fn [arg] (str "(seon.turn/hand-back! " (pr-str (:task arg)) ")")))]
+    (is (not (contains? (get-in r [:seen :site]) :stepping)) (str "parked while its judge is out: " (pr-str (:seen r))))
+    (is (= "app.calc/total-is-exact" (get-in r [:seen :run :task])) (str "the ping is answered with the hand-back: " (pr-str (:seen r))))
+    (is (= :waiting (get-in r [:end :outcome])) (str "the stop ended it at once: " (pr-str (:end r))))))
