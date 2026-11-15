@@ -570,6 +570,26 @@
                "the proof and the test reaching the change; nothing else (not its namespace's other test, not another namespace's)"))
          (finally (run! remove-ns '[pt.rc pt.rc-test pt.rc-other-test])))))
 
+;; Estimate: as T1 above, two test plans of ~12 forms (~5M ticks each) and one schema entry written: 20M ticks
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-branch-that-changes-no-schema-selects-no-test-for-its-schemas
+  ;; base and branch are digested under the same derivation of their inputs (seon.agent/branch-inputs, the schema entries each holds
+  ;; beyond the binary's: seon.program/schema-changes): with the base under the boot's inputs and the branch under its own, every
+  ;; test that reads the schemas (:seon.env/schemas, ~1,150 of 2,128) read as changed by every branch while main held one entry the
+  ;; binary does not (a branch changing one function selected 2,063 tests against the 739 its change reaches, 2026-11-15)
+  (let [calc "(ns pt.rs)\n(defn add [x y] (+ x y))\n"
+        calc-test "(ns pt.rs-test (:require [clojure.test :refer [deftest is]] [pt.rs :as c]))\n(deftest adds (is (= 3 (c/add 1 2))))\n"
+        schema-test "(ns pt.rs-schema-test (:require [clojure.test :refer [deftest is]] [seon.db]))\n(deftest reads-the-schemas (is (var? #'seon.db/entity-index)))\n"
+        main (mt/with (mt/world) (mt/code 'pt.rs calc) (mt/code 'pt.rs-test calc-test) (mt/code 'pt.rs-schema-test schema-test))
+        ;; a schema entry main holds that the binary does not (registered, merged, or imported ahead of the binary)
+        main (d/db-with main [{:schema/key :pt.rs/thing :schema/form "[:map [:pt.rs/x :int]]"}])
+        branch (mt/with main (mt/code 'pt.rs "(ns pt.rs)\n(defn add [x y] (+ y x))\n"))]
+    (is (seq (program/schema-changes main)) "main holds a schema entry beyond the binary's")
+    (try (doseq [t [calc-test schema-test]] (binding [*ns* (create-ns 'user)] (load-string t)))
+         (let [plan (agent/test-plan branch main #{})]
+           (is (= '#{pt.rs-test/adds} (set (:selected plan)))
+               "the test reaching the change, and not the test that reads the schemas, which the branch did not change"))
+         (finally (run! remove-ns '[pt.rs pt.rs-test pt.rs-schema-test])))))
+
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 1 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~1750k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-plan-with-no-base-costs-what-a-plan-with-one-does
   ;; a plan that selects with no base (mode :main: the test service's run of main, and the tests that run as it

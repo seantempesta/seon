@@ -404,6 +404,10 @@
       (is (= 1 (count (:main outs))) "a group commit is one stored commit: one notice")
       (is (not-any? #(some? (:max-tx %)) (vals n)) "no db value in the notice")
       (is (= #{:t :prev :ops :commit :ns :program-t} (set (keys n))) "with the t of main's last program move (seon.writer/program-at)")
+      ;; seeded at the writer's start from main's t (data-2): a records-only commit after a boot carries the boot's t, so a root booted
+      ;; onto main proves it once (seon.prove's :main) instead of waiting for the next program move
+      (is (= (:program-t st) (:program-t n)) "the notes commit moved no program: the notice carries the writer's start t")
+      (is (int? (:program-t n)) "never nil after a restart")
       (is (= t0 (:prev n)))
       (is (= (:max-tx @conn) (:t n)))
       (is (= (:tx-data (first (:to-fork-server outs))) (:ops n)) "its ops are every report's ops, in order: the stored commit's")
