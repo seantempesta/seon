@@ -40,3 +40,22 @@
         ;; three commits: three commit records and three changes values read, ~20k ticks each, and their ~10 datoms; flat in
         ;; the store's size (a merge's diff at d = 7,163 is ~139M, lb76's own-datoms ~3.1B)
         (is (< dt 200000) (str "and costs its three commits, never the index: " dt " ticks (the diff here: " diff-dt ")"))))))
+
+;; Estimate: a test branch (~0.5M), one transact and commit (~0.15M), a d/with and its force-branch! (~0.3M), the
+;; head followed (~0.05M), d/changes over two commits (~0.05M), ~1M = 1000000
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-commit-of-a-speculated-value-keeps-its-changes
+  ;; Seon's merges commit a value built by d/with on another (seon.writer/merge-main-into: (d/with main tx), then
+  ;; force-branch!), never through the writer's transact: the changes ride every transaction (datahike.core/with), so
+  ;; that commit keeps them too, with the commit its value was built on as its base
+  (ts/test-branch!
+    (fn [cfg conn]
+      (d/transact conn [{:note/text "written" :note/agent :w}])
+      (let [c1 (d/commit-id @conn)
+            v (:db-after (d/with @conn [{:note/text "speculated" :note/agent :s}]))
+            _ (d/force-branch! v (:branch cfg) #{c1} {:expected-current-commit c1})
+            _ (datahike.connector/follow-head! conn)
+            c2 (d/commit-id @conn)
+            changed (into #{} (map (fn [x] [(:a x) (:v x) (:added x)])) (d/changes conn c1 c2))]
+        (is (not= c1 c2) "force-branch! made a commit")
+        (is (contains? changed [:note/text "speculated" true]) (str "its changes are the speculated transaction's: " (pr-str changed)))
+        (is (not (contains? changed [:note/text "written" true])) "and nothing before its base")))))
