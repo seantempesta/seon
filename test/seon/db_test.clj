@@ -1492,15 +1492,20 @@
   ;; and the compressor the config names is the store's (the :file backend's config map once replaced it).
   (doseq [backend [:lmdb :file]]
     (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
-          seen (atom [])]
+          ;; what konserve's normalize-store-config warns of is these spellings in the config it is handed (konserve.impl.defaults, its
+          ;; old top-level and :config keys): the config is data this namespace makes, so it is read, never a redef of konserve's warning
+          ;; (a library function the compiled code may not call through its var, which let a count of it pass at nothing)
+          old-spellings [[:store :default-serializer] [:store :serializers] [:store :read-handlers] [:store :write-handlers]
+                         [:store :config :compressor] [:store :config :encryptor]]
+          handed (pdb/store-cfg backend path)]
       (try
-        (with-redefs [konserve.impl.defaults/deprecated! (fn [from _] (swap! seen conj from))]
-          (let [{:keys [conn]} (pdb/open! backend path 0 :db)
-                store (:store @conn)]
-            (is (= [] @seen) (str backend ": no deprecated spelling"))
-            (is (= :FaslSerializer (:default-serializer store)) (str backend))
-            (is (= (seon.config/value :seon.config.store/compressor) (get-in store [:config :compressor :type])) (str backend))
-            (d/release conn true)))
+        (doseq [p old-spellings]
+          (is (not (contains? (get-in handed (pop p)) (peek p))) (str backend ": no deprecated spelling " p)))
+        (let [{:keys [conn]} (pdb/open! backend path 0 :db)
+              store (:store @conn)]
+          (is (= :FaslSerializer (:default-serializer store)) (str backend))
+          (is (= (seon.config/value :seon.config.store/compressor) (get-in store [:config :compressor :type])) (str backend))
+          (d/release conn true))
         (finally (seon.lib/remove-tree! path))))))
 
 (deftest a-file-store-reads-what-it-wrote-before-it-compressed
