@@ -409,7 +409,13 @@
   ;; (:seon.config.root/server-op-workers): eight waiting sessions would hold half of them. Both protocols. Red before: no inline op
   (is (#'seon.server/inline-op? "{:op :inbox :agent \"a1\"}") "EDN")
   (is (#'seon.server/inline-op? "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"seon_inbox\",\"arguments\":{\"agent\":\"a1\"}}}") "MCP")
-  (is (not (#'seon.server/inline-op? "{:op :eval :agent \"root\" :code \"(inbox)\"}")) "an eval naming inbox is no inbox"))
+  (is (not (#'seon.server/inline-op? "{:op :eval :agent \"root\" :code \"(inbox)\"}")) "an eval naming inbox is no inbox")
+  ;; root's reviewer on 6635b0cac2: the table decides (an op's :inline), never a name in code
+  (is (seq (filter (comp :inline val) seon.server/ops)) "some op declares :inline")
+  (doseq [[op v] seon.server/ops :when (:inline v)]
+    (is (#'seon.server/inline-op? (str "{:op " op "}")) (str op " declared :inline runs on its connection (EDN)"))
+    (is (#'seon.server/inline-op? (str "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"seon_" (name op) "\"}}")) (str op " (MCP)")))
+  (is (not (#'seon.server/inline-op? "{:op :agents}")) "an op that does not declare :inline runs on a worker"))
 
 (deftest the-context-op-answers-what-a-model-is-sent
   ;; dogfood 2026-10-25: an outside agent read the task's data and turn sections only, not the system
