@@ -22,6 +22,10 @@ The owner's rule: once a process is past boot and running, nothing inside it can
 - **deps** owns the interfaces to the libraries and native code (Jolt, Chez, Datahike, foreign calls), so a failure there reaches Seon as data at the edge.
 Each area works the others through agreed interfaces, recorded in the task they concern.
 
+### Sessions switch to REPL-driven work through the MCP tools once every part works, on one owner's plan (evening)
+
+The goal is that every session works as a Seon agent does: attached to its agent, it edits with `seon.repl/edit!` through `seon_eval`, proves through `:prove` and merges through `seon_done`, so the separate systems (worktrees, per-checkout systems, `bin/land`) can go. Sessions keep the Edit tool and the import hook until every part of that path is shown working. One owner plans the switch ahead and pushes it: the context session, since its `seon-driver` agents already work only through the `seon_*` tools. Its plan lists each kind of edit a session makes and whether the path serves it, with what a driver lacked filed against the shared tools, and the gate that says everyone switches.
+
 ### The reactive switch-over: the design gate now, reader landings after the self-merge path (evening)
 
 The reactive switch-over's design gate runs now, beside the self-merge path. All area entries `seon.ratom/<area>-reads-on-the-core` reach main, an independent reviewer judges the core against Reagent and re-frame, and each area measures its reader against its engine as a REPL prototype. The reader landings that delete each hand-built engine go after runtime's update owner and D, and take no landing slot from the path.
