@@ -502,15 +502,31 @@
     [(:value m) (dissoc m :value)]))
 
 (deftest ^{:seon.test/estimate {:ticks 10000000}} health-reads-each-part-once
-  ;; contracted calls are no cost dimension (owner, 2026-11-15); what a health read costs is the ticks and bytes of the
-  ;; health cost proofs. What is kept here is the shape of the answer.
+  ;; Estimate: one health read is every class's reader over the 3-task seeded program plus one doc, about 5 M ticks measured
+  ;; warm by the health cost proofs; the 10 M bound holds it within 2x. Recorded reads are a set (docs/storage.md#what-a-read-scanned,
+  ;; each range once however often read), so a part read again per class is invisible there; what the set shows is which ranges
+  ;; health read. The goal is held as: health reads no range beyond what each class's own reader reads over the same db (a class
+  ;; that re-read a part by another route, or scanned the whole for a part, adds a range no reader owns), and never an open range.
   (let [db0 (seeded 3 2)
         db (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" "# P\n\nIt says what it is about.\n"}))
-        [h _] (measured-health db)
-        rows (get-in h [:classes :problem-unlinked :rows])]
+        [[h _] reads] (d/with-reads #(measured-health db))
+        keys-of (fn [f] (d/reads-index (second (d/with-reads f))))
+        rows (get-in h [:classes :problem-unlinked :rows])
+        ans (problems/answers db)
+        tasks (mapv :e (d/datoms db :aevt :seon.task/id))
+        parts [#(problems/answers db) #(problems/report db) #(problems/stalled-agents db ans) #(problems/stale-pins db ans)
+               #(problems/stale-binary db ans) #(problems/orphan-pages db ans) #(problems/leadless-sections db ans)
+               #(problems/uncited-tasks db ans) #(problems/stale-plans db ans) #(problems/unsynced-tasks db ans tasks)
+               #(problems/waived-proofs db ans) #(problems/unschemed-keys db ans) #(problems/unnamed-sites db ans)
+               #(problems/native-in-defonce db ans) #(problems/stale-sections db ans) #(problems/hand-written-lists db ans nil)
+               #(problems/problem-unlinked db ans (:classes h))]
+        owned (into #{} (mapcat #(keys-of (fn [] (doall (%))))) parts)
+        health-keys (d/reads-index reads)]
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
-    (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")))
+    (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
+    (is (not (contains? health-keys :any)) "no part is read by an open range")
+    (is (= #{} (clojure.set/difference health-keys owned)) "health reads no range that a class's own reader does not")))
 
 (deftest ^{:seon.test/estimate {:ticks 20000000}} problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
