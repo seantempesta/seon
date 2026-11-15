@@ -447,7 +447,7 @@
  ;; prove's entry there). Provenance: root's ruling (a), 2026-10-23, from step E's dry run (a test
  ;; root importing test/ could not host a checkout, and its gated merges were all refused).
  ;; Absent (as here): root's own source root (:seon.config.source/root as it resolves, the
- ;; standing root's merges tree; seon.system/start! writes it with the config in force), so every
+ ;; standing root's merges tree, derived in the one merge of the layers, seon.config/layered), so every
  ;; root with a source gates a merge on the process tests its change reaches, nobody asking. With
  ;; neither (a test root given no source), such a merge is held, its reason naming the tests and
  ;; that no checkout runs them: never merged with them silently unrun.

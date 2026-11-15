@@ -437,6 +437,24 @@
                      (str (group3 m) " / " (group3 x) (when (and m x (pos? x)) (str " (" (fmt2 (/ m x)) "×)")))])])]]
       (render/hiccup (assoc opts :schema :seon.cost/verdict) verdict)]))
 
+(defn person-input
+  "The person's message box on root's chat (docs/decisions.md, The page is a friendly chat): like the good chat tools, a box that grows
+  taller with its text (up to 40% of the screen), a clear Send button, Enter sends and Shift+Enter is a new line; what is sent is a
+  message to root's session through the same call every input makes (seon.system/submit!). See docs/render.md#the-page."
+  {:seon.render/style ".person-input { display: flex; align-items: flex-end; gap: 0.5rem; padding: 0.75rem 0 1rem; }
+.person-input textarea { flex: 1; min-width: 0; font-family: ui-sans-serif, system-ui, -apple-system, 'Helvetica Neue', sans-serif; font-size: 1.1875rem; line-height: 1.5; padding: 0.75rem 1rem; border-radius: 1rem; resize: none; field-sizing: content; min-height: 3.25rem; max-height: 40vh; overflow-y: auto; }
+.person-input button[type=submit] { flex: none; font-size: 1.0625rem; font-weight: 600; padding: 0.75rem 1.25rem; border-radius: 1rem; background: var(--color-signal); color: var(--color-base-950); }
+.person-input button[type=submit]:hover { filter: brightness(1.1); }"
+   :malli/schema [:=> [:cat :seon.render/opts [:map [:address :keyword] [:focus? {:optional true} [:maybe :boolean]]]] :any]}
+  [opts {:keys [address focus?]}]
+  [:form {:id (:unit opts) :class "person-input" :data-seon-repl "" :seon/call 'seon.system/submit! :seon/agent address}
+   [:textarea (cond-> {:name "forms" :rows 1 :autocomplete "off" :placeholder "Message Seon" :aria-label "Message Seon"
+                       ;; Enter sends, Shift+Enter is a new line; the box grows with its text where the browser does not (field-sizing)
+                       (keyword "data-on:keydown") "if (evt.key==='Enter' && !evt.shiftKey) { evt.preventDefault(); el.form.requestSubmit() }"
+                       (keyword "data-on:input") "el.style.height='auto'; el.style.height=Math.min(el.scrollHeight, innerHeight*0.4)+'px'"}
+                focus? (assoc :autofocus true))]
+   [:button {:type "submit" :aria-label "Send"} "Send"]])
+
 (defn agent-input
   "The input at the top of an agent's page, each through root's requests (the server's ops send
   the same): words are a message its next turn reads (seon.system/message!), and a line that starts with
@@ -447,7 +465,9 @@
   @ctx's page is long and the field ends it)."
   {:seon.render/style "#p-input button[data-interrupt][disabled] { visibility: hidden; }"
    :malli/schema [:=> [:cat :seon.render/opts :seon.render/agent-input] :any]}
-  [opts {:keys [id address live? held focus? busy? talks?]}]
+  [opts {:keys [id address live? held focus? busy? talks? person?]}]
+  (if person?
+    (person-input opts {:address (or address id) :focus? focus?})
   [:section {:id (:unit opts) :class "seon-stack-2"}
    (if (or live? talks?)
      [:form {:class "seon-row" :data-seon-repl "" :seon/call 'seon.system/submit! :seon/agent (or address id)}
@@ -470,7 +490,7 @@
    (when held
      [:button {:class "self-start rounded border border-base-700 px-2" :title (str "release " held ": the reconciler runs its next run (my.root/run!)")
                :seon/call 'seon.system/release! :seon/agent id :seon/args {:task held}}
-      (str "▶ release " held)])])
+      (str "▶ release " held)])]))
 
 ;;; --- an eval's parts ---------------------------------------------------------------
 
@@ -2485,6 +2505,16 @@
   {:malli/schema [:=> [:cat] :any]}
   [] [:div {:id "p-bare"} [:main {:id "p-chat"} [:div {:id "p-head"}] [:ol {:id "c-rows"}]]])
 
+(defn page-unit
+  "A walk's laid-out unit u as a page's unit (the render proc's step-units input): its revision is its input, so the proc sends it only
+  when its output changed; an agent's own draw is marked :own?. The one shape every page's units take (page-chrome, root's debug page's
+  system view). See docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [u]
+  (cond-> {:id (:id u) :input (cond-> {:rev (:rev u)} (:own? u) (assoc :own? true)) :html (:html u) :container (:container u)}
+    (:parent u) (assoc :parent (:parent u))
+    (:regions u) (assoc :regions (:regions u))))
+
 (defn page-chrome
   "A page in root's chrome (root's, an agent's): the top bar, the agents list (#c-side, the signed-in user's walk's, unless the page
   holds its own), the page itself (#p-page: the unit of the page's root render, seon.render/placed-units' first, else `bare-page`'s),
@@ -2501,9 +2531,7 @@
         holds (set (:regions page))
         ;; the caption and the input end the page's chat column, else they follow the page
         chat (when (holds "p-chat") "#p-chat")
-        unit (fn [u] (cond-> {:id (:id u) :input (cond-> {:rev (:rev u)} (:own? u) (assoc :own? true)) :html (:html u) :container (:container u)}
-                       (:parent u) (assoc :parent (:parent u))
-                       (:regions u) (assoc :regions (:regions u))))]
+        unit page-unit]
     {:seon.render/hiccup
      [:div {:id "app" :class "seon-page" :data-view view}
       (top-bar id tab)
@@ -2578,6 +2606,10 @@
                                       "Its page as it reads it: the render of its ctx, each component's hiccup by its id, the text /context.txt serves, drawn again when its ctx changes."
                                       "A bar is one request to the model: its height the tokens sent, blue what the provider's cache served. Below, the request chosen, as it went on the wire, each message by its role; open one to read its fields as sent.")]]
       (when (= :root focus) (root-tools))
+      ;; root's: the system's own view (seon.render.ui/root's head and tiles, the system walk's units), placed here and never on the
+      ;; person's chat (docs/decisions.md, The page is a friendly chat)
+      (when (= :root focus)
+        [:section {:id "p-system-view" :class "seon-stack"} [:div {:id "p-head"} (render/region "p-head")] [:aside {:id "p-tiles" :class "seon-stack"} (render/region "p-tiles")]])
       (when context (slot (:id context)))
       ;; an agent's: its strip and its turn are units, so its layout never moves: a step, a turn added or the first
       ;; turn patches them in place (a patch reaches only the elements the tab holds)
