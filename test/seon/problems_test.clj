@@ -106,7 +106,7 @@
 ;; ---- red proofs: the failing assertions and cost verdicts, persisted ---------------------
 
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-red-assertion-is-persisted
-  (let [verdict {:ok? false :over [{:dim :calls :n 10 :ratio 2.0}] :steeper [] :under [] :unmeasured []}
+  (let [verdict {:ok? false :over [{:dim :bytes :n 10 :ratio 2.0}] :steeper [] :under [] :unmeasured []}
         run {:pass 1 :fail 10 :error 0
              :reports (into [{:type :pass :var "#'app.t/ok"}
                              (agent/test-report {:type :fail :message (cost/explain {:of 'app/f :input 'app/in :n "n" :work "w" :growth :linear :sizes [1 10 100]} [] verdict)
@@ -673,7 +673,7 @@
                :work "the agent's task's pull (its outcome, agent and attributes), and the error signatures' last-task datoms: none per finished task"
                :growth :constant
                :ops {:db/pull 0 :db/pull-attr 0 :edn/read-char 0}
-               :fixed {:ticks 85000 :bytes 320000 :calls 4}
+               :fixed {:ticks 85000 :bytes 320000}
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 30000000}} problems-move-at-the-cost-of-what-changed
@@ -683,35 +683,10 @@
                :n "finished tasks, each merged with a cost verdict and waste"
                :work "no pull and no contracted call per finished task: the move's datoms (given, the render proc's) name the touched task and its agent's task, the derived classes are carried and read where the two dbs differ; the program's changes come from the moved datoms (seon.merge/delta-changes given them), and the per-task part is the cold index nodes the task scans touch"
                :growth :linear
-               :per-n {:ticks 1700 :bytes 10500 :calls 0}
+               :per-n {:ticks 1700 :bytes 10500}
                ;; fixed calls, once a read whatever n, summed by what makes them: Point, 2026-11-10 (in Sean's absence, reported to him): 54 -> 56
-               :fixed {:ticks 650000 :bytes 3000000 :calls (+ 54   ; the read before 2026-11-10 (with :waived-proof's one)
-                                                              1    ; seon.problems/task-reads: the tasks' readiness and cites, once
-                                                              1    ; seon.problems/stale-plans' own contract
-                                                              1    ; and its seon.db/eid of the var the world's ready task cites
-                                                              1    ; seon.problems/unsynced-tasks' own contract (Optimization, 2026-11-10: a seek a declared task, no call)
-                                                              6    ; caused-split's content-class readers on base and head, for the move's candidates only
-                                                                   ; (Data model, 2026-11-12: nothing switched off; measured 58 -> 64)
-                                                              3    ; seon.problems/unschemed-keys: on base and head for the move's forms, and in the full read (data, 64 -> 67)
-                                                              2    ; seon.problems/refused-values' contract on base and head (data, 67 -> 69)
-                                                              4    ; the test law's two classes (unestimated, undeclared-tests), one reader each on
-                                                                   ; base and head (tests, 2026-11-12: 69 -> 73 with data's)
-                                                              8    ; :unfocused-docstring (data, 73 -> 81 measured): its reader and its bound on base and head,
-                                                                   ; and a seek and a row for each changed Seon var the input's tree holds
-                                                              5    ; :unsynced judges the move's touched tasks, not only merged ones (data, 2026-11-14, 81 -> 86): unsynced-candidates'
-                                                                   ; contract, and the touched task's unsynced?, derived? and derived?'s seon.db/eid of the refine section
-                                                              2    ; :hand-written-list's reader on base and head for the move's changed vars (context,
-                                                                   ; 2026-11-14, measured 86 -> 88)
-                                                              2    ; :stateful-outside-flow's reader on base and head for the move's changed vars (flow,
-                                                                   ; 2026-11-14, measured 89 -> 91)
-                                                              1    ; retyped-attributes' own contract, once a read (data, 2026-11-14)
-                                                              13   ; the one-printer law's rule (seon.problems/printer-law): its four dials read once through the
-                                                                   ; resolver for both sides (tests, measured 89 -> 102)
-                                                              2    ; :unestimated reads the move's open tasks too: the moved task states no estimate,
+               :fixed {:ticks 650000 :bytes 3000000} ; :unestimated reads the move's open tasks too: the moved task states no estimate,
                                                                    ; its row (derived-row) on base and head (data, 2026-11-15, measured 104 -> 106)
-                                                              2    ; :native-in-defonce's reader on base and head for the move's forms (runtime, measured 106 -> 108)
-                                                              -5)} ; the four classes split-rows reads from what moved are carried, never read whole again: task-reads,
-                                                                   ; uncited-tasks, stale-plans, waived-proofs, unschemed-keys gone from the move (runtime, 108 -> 103)
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 25000000}} problems-cost-nothing-for-a-clean-program
@@ -910,7 +885,11 @@
     (is (= [] (unnamed (src (with-ref db0 'clojure.core/subs)))) "a cut outside a display namespace is no site")
     (testing "the section names it: no problem"
       (let [page (str "# Render\n\n## One printer\n\nEach site with its reason.\n\n- `" v "`: the wire\n")]
-        (is (= [] (unnamed (let [db (src (with-ref db0 'clojure.core/pr-str))] (d/db-with db (seon.doc/load-tx db "docs" {"docs/render.md" page}))))))))))
+        (is (= [] (unnamed (let [db (src (with-ref db0 'clojure.core/pr-str))] (d/db-with db (seon.doc/load-tx db "docs" {"docs/render.md" page}))))))))
+    (testing "named in a section under it: no problem (the law's list sits in a subsection; its names went unread, 2026-11-15)"
+      (let [page (str "# Render\n\n## One printer\n\nEach site with its reason, below.\n\n### Printing beside the printer\n\n- `" v "`: the wire\n")]
+        (is (= [] (unnamed (let [db (src (with-ref db0 'clojure.core/pr-str))] (d/db-with db (seon.doc/load-tx db "docs" {"docs/render.md" page})))))
+            "a subsection's name counts")))))
 
 (deftest ^{:seon.test/estimate {:ticks 6000000}} a-root-on-a-stale-binary-is-a-problem
   ;; task seon.problems/a-root-on-a-stale-binary-is-a-problem, docs/health.md#a-stale-binary: a boot holds seon.system/stale-binary's
@@ -999,8 +978,8 @@
                :growth :linear
                ;; fixed calls 5 -> 9 (39 measured at n=10, 35 before): the world's test namespace app.calc-test has two
                ;; forms carrying a catch (a deftest's `is`), each read and dropped as no program namespace's: 2 calls each
-               :per-n {:ns 76000 :bytes 74500 :calls 3}
-               :fixed {:ns 50000 :bytes 50000 :calls 22} ; 22: the one-printer law's rule beside catch, its four dials read once (tests, 9 -> 22 by 39 -> 52 at 10)
+               :per-n {:ns 76000 :bytes 74500}
+               :fixed {:ns 50000 :bytes 50000} ; 22: the one-printer law's rule beside catch, its four dials read once (tests, 9 -> 22 by 39 -> 52 at 10)
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 15000000}} stale-pins-follow-the-pin-page
@@ -1008,8 +987,8 @@
                :n "sections of docs/forks.md, each stating one stale pin"
                :work "one AVET range of addresses, then per section a pull of its text, one regex scan and one row"
                :growth :linear
-               :per-n {:ns 30000 :bytes 30000 :calls 2}
-               :fixed {:ns 600000 :bytes 600000 :calls 5}
+               :per-n {:ns 30000 :bytes 30000}
+               :fixed {:ns 600000 :bytes 600000}
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 30000000}} health-follows-what-is-recorded-and-cited
@@ -1019,14 +998,13 @@
                :growth :linear
                ;; calls 3 -> 8 a site and 62 -> 91 fixed (context, 2026-11-14, the owner's hand-list decree): every var's form read and
                ;; walked for its literal lists (scan-form, seon.source/read-forms and its two helpers, literal-lists), each site a var's form
-               :per-n {:ns 80000 :bytes 80000 :calls 8}
+               :per-n {:ns 80000 :bytes 80000}
                ;; fixed bytes re-derived 2026-10-23 (jolt/similar-finds-helpers-by-embedding): 3.01 MB at 10,
                ;; 10.0 MB at 100, 80.2 MB at 1,000 sites; a fixed part near the smallest size's whole cost read
                ;; as steeper growth (task seon.cost/a-speedup-never-reads-as-steeper)
                ;; 91 (main) + 13: the one-printer law's rule in the full read, its four dials read through the resolver (tests: 92 -> 99 at 10
                ;; before main's 91; measured 184 against a summed 178 on the merged tip, the sum having counted the dials' reads once)
-               ;; +1: native-in-defonce, one contracted read of the forms reaching jolt.scheme/eval-string (none in this world)
-               :fixed {:ns 19500000 :bytes 17500000 :calls 105}
+               :fixed {:ns 19500000 :bytes 17500000}
                :sizes [10 30 100]}))
 
 ;; ---- caused reads what changed (diff by value), and agrees with the full reading ---------------
@@ -1112,8 +1090,7 @@
                ;; (scan-form, seon.source/read-forms, literal-lists) on base and head; + 13: the one-printer law's rule, its four dials read
                ;; once for both sides (tests, measured 90 -> 103 before context's 97); + 4 (flow, 2026-11-14): :stateful-outside-flow's reader
                ;; on base and head, and on each side the seek of each changed var's namespace file
-               ;; + 2 (runtime): :native-in-defonce's reader on base and head for the changed forms (measured 114 -> 116)
-               :fixed {:ticks 460000 :bytes 1800000 :calls 116} ; 90: and retyped-attributes' own contract, once a read (data, 2026-11-14)
+               :fixed {:ticks 460000 :bytes 1800000} ; 90: and retyped-attributes' own contract, once a read (data, 2026-11-14)
                :sizes [10 30 100]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
@@ -1249,8 +1226,8 @@
                :n "sections, none with a lead"
                :work "the sections' addresses and the lead datoms once, sorted by address, then a row per section"
                :growth :linear
-               :per-n {:bytes 8500 :calls 1}
-               :fixed {:bytes 9000 :calls 1}
+               :per-n {:bytes 8500}
+               :fixed {:bytes 9000}
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 4000000}} an-issue-with-no-page-is-a-problem
@@ -1290,8 +1267,8 @@
                ;; fixed calls 3 -> 18 (58 measured at n=10, 43 before): the world's own page docs/calc.md, whose two
                ;; sections cite four of the vars this input changes, so they are stale too and their recorded names
                ;; are read like the input's (about 4 calls a name, the per-n rate); ns and bytes are unchanged
-               :per-n {:ns 90000 :bytes 120000 :calls 4}
-               :fixed {:ns 2500000 :bytes 4000000 :calls 18}
+               :per-n {:ns 90000 :bytes 120000}
+               :fixed {:ns 2500000 :bytes 4000000}
                :sizes [10 30 100]}))
 
 (defn orphan-input
@@ -1304,8 +1281,8 @@
                :n "pages, none linked"
                :work "the sections' addresses and the reference datoms once, then a row per orphan"
                :growth :linear
-               :per-n {:ns 30000 :bytes 30000 :calls 1}
-               :fixed {:ns 500000 :bytes 500000 :calls 3}
+               :per-n {:ns 30000 :bytes 30000}
+               :fixed {:ns 500000 :bytes 500000}
                :sizes [10 30 100]}))
 
 (defn unlinked-input
@@ -1377,8 +1354,8 @@
                :n "tasks examined: finished design steps and the ready implement steps that need them, each citing"
                :work "the kind and task datoms once, then each implement step's needs walked once; whether any cite exists along them (one seek a task; until 2026-11-10 the program's vars among the cites, asked of seon.program/program-names)"
                :growth :linear
-               :per-n {:ns 50000 :bytes 65000 :calls 4}
-               :fixed {:ns 500000 :bytes 500000 :calls 5}
+               :per-n {:ns 50000 :bytes 65000}
+               :fixed {:ns 500000 :bytes 500000}
                :sizes [20 60 200]}))
 
 (deftest ^{:seon.test/estimate {:ticks 5000000}} a-ready-implement-task-that-cites-nothing-is-a-problem
@@ -1551,8 +1528,8 @@
                ;; 2026-10-29, the form's head read by seon.source/first-head (one contracted call per var): 32 calls at 10;
                ;; 2026-11-01, the head read by seon.reader (edamame: `::alias/kw` without the namespace loaded),
                ;; read-all and opts two more calls a var: 55 calls, 210k ticks, 593 KB at 10
-               :per-n {:ticks 20000 :bytes 57000 :calls 5}
-               :fixed {:ticks 10000 :bytes 30000 :calls 5}
+               :per-n {:ticks 20000 :bytes 57000}
+               :fixed {:ticks 10000 :bytes 30000}
                :sizes [10 30 100]}))
 
 
@@ -1590,8 +1567,8 @@
                :n "changed vars, each with a form under the bound"
                :work "per named var: one AVET seek, its entity and its form's text length"
                :growth :linear
-               :per-n {:ticks 13000 :bytes 39500 :calls 3}
-               :fixed {:ticks 10000 :bytes 30000 :calls 5}
+               :per-n {:ticks 13000 :bytes 39500}
+               :fixed {:ticks 10000 :bytes 30000}
                :sizes [10 30 100]}))
 
 ;; See docs/health.md#a-proof-that-passes-by-waiver
@@ -1750,7 +1727,7 @@
 ;; seeded's) and two health reads of a db of one task, ~40 M ticks.
 (deftest ^{:seon.test/estimate {:ticks 60000000}} a-judged-cost-verdict-reads-as-a-cost-problem
   (let [rows [{:n 1 :calls 10} {:n 10 :calls 100} {:n 100 :calls 2000}]
-        red {:ok? false :over [{:dim :calls :n 100 :ratio 2.0}] :steeper [] :under [] :unmeasured []}
+        red {:ok? false :over [{:dim :bytes :n 100 :ratio 2.0}] :steeper [] :under [] :unmeasured []}
         green {:ok? true :over [] :steeper [] :under [] :unmeasured []}
         db (d/db-with (world)
                       [(ended "t/slow" {:seon.task/proofs #{'app.t/f-cost 'app.t/g-cost}
@@ -1854,6 +1831,6 @@
                :n "tens of characters of a form's text holding auto keywords"
                :work "one pass over the characters rewriting each :: (no regex), then one read of the text"
                :growth :linear
-               :per-n {:ticks 250 :bytes 1000 :calls 0}
-               :fixed {:ticks 20000 :bytes 60000 :calls 5}
+               :per-n {:ticks 250 :bytes 1000}
+               :fixed {:ticks 20000 :bytes 60000}
                :sizes [50 150 450]}))
