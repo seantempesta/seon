@@ -356,7 +356,7 @@ He ruled that a reasoning overrun is an effect that triggers an error, which the
 
 ### Failure causes are verifiable tags
 
-He ruled that failures start being classified, with schemas as sets of truths: several classes can be true at the same time, like verifiable tags. A failure cause is a tag whose schema checks it against the error value. Stated in [the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority).
+He ruled that failures start being classified, with schemas as sets of truths: several classes can be true at the same time, like verifiable tags. Stated in [the plan](plan.md#stage-1-claude-sessions-work-through-the-system-the-priority).
 
 ### Blockers are tasks; sessions message the owning session directly
 
@@ -524,7 +524,7 @@ He ruled that the system does not teach to the test, recognizes systemic failure
 
 ### Embeddings stay in the store
 
-"Oh it's more robust than I thought ignore my previous request I think this is fine?" Stated in [vector](vector.md#a-vector-is-its-own-entity).
+(Owner's answer, 2026-11-15.) He withdrew his earlier request to move embeddings out of the store; the store holds them. Stated in [vector](vector.md#a-vector-is-its-own-entity).
 
 ### Check-step bounds are signals, not hard constraints
 
@@ -638,10 +638,6 @@ He ruled that the Data model session audits which data must be present on an age
 
 He ruled that agents are taught a general skill, learning to fish on any other value, instead of being handed each case. The function is `describe`. Not yet stated in the wiki.
 
-### A tool's answer is the plain value
-
-"oh I like yours better already". Not yet stated in the wiki.
-
 ### An agent works in its task's namespace
 
 He ruled that it must be clearer that agents are set up in their task's namespace, since context is automatically pulled in from that namespace. Not yet stated in the wiki.
@@ -692,7 +688,7 @@ He ruled that if a task is almost done right, it is simply fixed, synced to disk
 
 ### A root catches up with its checkout at start
 
-"don't let this decision cause even more chaos." Stated in [source](source.md#a-boot-catches-up-with-its-checkout).
+(Owner's answer, 2026-11-15.) This concerned system tests that need a replacement binary: build it, test it, switch over, and catch up by replaying the program's diff in one eval (see 2026-11-15, "A new binary runs in parallel, is tested there, then takes over"). Stated in [source](source.md#a-boot-catches-up-with-its-checkout).
 
 ### Pages are built from data by one walk (owner, 2026-11-10)
 
@@ -724,7 +720,7 @@ He ruled that the next time a change invalidates all the tests, it is run once, 
 
 ### No agent on the costliest model without the owner's yes
 
-He ruled that no agent runs on the costliest model without his approval, since he cannot afford it. Stated in [sessions](sessions.md#no-fan-out).
+He ruled that no Fable agent is launched without his approval, since he cannot afford it. Stated in [sessions](sessions.md#no-fan-out).
 
 ### A test earns its place or is cut
 
@@ -820,7 +816,7 @@ He ruled that when an entity is several things, the best-matching one wins. Stat
 
 ### Render functions take what they read; the cache is never relied on
 
-He ruled that there are no magic functions, and asked whether this works even without the cache, which he expects to be fast; so the cache is never relied on. Stated in [users](users.md#one-system-of-agents-the-design-agreed-2026-11-09), item 4.
+He ruled that there are no magic functions, and asked whether this works even without the cache, which he expects to be fast. Stated in [users](users.md#one-system-of-agents-the-design-agreed-2026-11-09), item 4.
 
 ### A session syncs by default
 
@@ -828,7 +824,7 @@ He ruled that agents can be private (experimental, not syncing with main the who
 
 ### The user agent generates the page; root relays and renders nothing
 
-He asked what root has to do with anything if the user is the one generating the html. The user agent generates the page; root relays and renders nothing. Stated in [users](users.md#the-stages-agreed-2026-11-09), stages 1b and 4.
+He asked what root has to do with anything if the user is the one generating the html. Stated in [users](users.md#the-stages-agreed-2026-11-09), stages 1b and 4.
 
 ### A message is delivered when it is on the recipient's branch
 
@@ -880,7 +876,7 @@ He ruled that the system does not do a million things when it only needs to chec
 
 ### In active development, the store is erased whenever a change needs it
 
-He ruled that, in active development, the store may be erased whenever wanted, with the other agents warned, and that in production the whole store is of course not dropped. Stated in AGENTS.md §9 and [machine](machine.md#disk-stays-bounded).
+He ruled that the store may be erased whenever wanted, with the other agents warned, and that in production the whole store is of course not dropped. Stated in AGENTS.md §9 and [machine](machine.md#disk-stays-bounded).
 
 ### An id is the content of the facts that make it (owner, 2026-11-08)
 
@@ -1236,7 +1232,7 @@ He ruled that he is always given links, or a stable way to find links, on a stab
 
 ### The page is a friendly chat; what the model was sent is shown whole
 
-He ruled that the page is a friendly chat window that his mother could use, and that nothing is hidden. Stated in [render](render.md#the-page) and [the debug page](render.md#the-debug-page-is-the-wire-request).
+He asked whether the page looks like a friendly chat window his mother could use, and said he wants nothing hidden. Stated in [render](render.md#the-page) and [the debug page](render.md#the-debug-page-is-the-wire-request).
 
 ### Counts are tokens; what an agent writes is Markdown
 
@@ -1280,7 +1276,7 @@ He ruled that runs are gone, since the concept does not really exist, and that m
 
 ### An agent's test results are facts on its branch
 
-"Agent runs only": an agent's tests write `:seon.test/*` facts on its branch; `bin/test` and `bin/prove` keep the shared verdict cache.
+(Owner's answer, 2026-11-15.) Runs and sessions are not concepts of their own; they collapse into the agent's schema. Only validated facts that were true at their time are stored, and what is needed to act is derived. So an agent's test results are validated facts on its branch, with no run or session entity; `bin/test` and `bin/prove` keep the shared verdict cache.
 
 ### A value is rendered by the newest render of its schema
 
@@ -1332,7 +1328,7 @@ He ruled that config has only the levels in use. Stated in `resources/seon/tasks
 
 ### Seon fits 8 GB
 
-"8 GB, fits in 16". Stated in [machine](machine.md#ten-agents-at-once).
+(Owner's answer, 2026-11-15.) Seon uses about 8 GB, so it fits on the 16 GB M1 target. Stated in [machine](machine.md#ten-agents-at-once).
 
 ### The standing root follows main's ref, never the checkout's HEAD
 
@@ -1528,7 +1524,7 @@ He ruled that needing a guard is always a sign that the right solution is not in
 
 ### An agent's spawn costs what a fork costs; no unnecessary complexity
 
-He ruled that an agent's spawn costs what a fork costs, in milliseconds, and asked what is being done otherwise if forking takes milliseconds.
+He asked what is being done if a fork takes milliseconds.
 
 ### @ctx prints as an atom
 
@@ -1671,7 +1667,7 @@ He ruled that there is no separate system for running agents. See 2026-11-06 on 
 
 ### No new linking attributes where :needs does it
 
-He ruled that the `:needs` way of connecting the graph is used, not new linking attributes; every agent of course has a stable key, which is essential, and everything survives if it can be resumed.
+He pointed to the `:needs` way of connecting the graph together; every agent of course has a stable key, which is essential, and everything should survive if it can be resumed.
 
 ### Messaging is one function, `my.agent/send-message`
 
@@ -1891,7 +1887,7 @@ He ruled that tests that are the same, especially when freshly branched, are not
 
 ### Output quality is decided by blind scoring on real data
 
-"Those decisions should override any of my decisions. This is up to the agent really".
+(Owner's answer, 2026-11-15.) An agent decides freely within the existing systems (it may write new render functions, fix existing ones, and so on), but builds no new system without the owner's or root's approval.
 
 ### The context speaks Clojure, with the agent's thinking beside its forms
 
@@ -1971,7 +1967,7 @@ He ruled that tasks are not restricted in what they can do. Stated in AGENTS.md 
 
 ### A request becomes design, implement, merge; templates are held tasks in the task EDN; one proofs field; every agent gets `(help)` and its task
 
-"No not a wiki. This is internal seon." The default request is one whole task (2026-10-26). Stated in [tasks](tasks.md#a-request-is-one-transaction) and [references](references.md#task-references).
+(Owner's answer, 2026-11-15.) Templates are base tasks in the db, cloned and modified by a function set programmatically, like a normal template. The default request is one whole task (2026-10-26). Stated in [tasks](tasks.md#a-request-is-one-transaction) and [references](references.md#task-references).
 
 ### Tasks are extensible, with no explicit kinds (`:seon.task/kind` goes)
 
@@ -2039,7 +2035,7 @@ He ruled that anything like this is made an effect and treated as strongly typed
 
 ### Every definition happens once, where it is defined
 
-He objected to things being redefined: every definition happens once, where it is defined. Stated in AGENTS.md §5 and [resolution](resolution.md).
+He asked why things are being redefined. Stated in AGENTS.md §5 and [resolution](resolution.md).
 
 ### Programs are known from the compiler, not from text
 
@@ -2095,7 +2091,7 @@ The owner's rulings of this day, each as his meaning and where it is now stated.
 
 ### Estimates are proofs on tasks
 
-"How long should something really take." Stated in AGENTS.md §5 and [cost](cost.md).
+(Owner's answer, 2026-11-15.) Agents set their expectations when they file or update a task; those become proofs held to account. A wrong estimate is updated, not fenced; agents are told never to game it and to correct mistakes instead. Stated in AGENTS.md §5 and [cost](cost.md).
 
 ### Scheduling is reconciliation over task attributes; no chain entity, no separate scheduler
 
