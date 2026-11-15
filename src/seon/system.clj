@@ -2250,9 +2250,9 @@
   is proved here: its agent loads them as a diff. A tree whose identity differs would run its tests on this binary's build of what
   it changes, and store them at the tree's digests; it is proved by a build of its own (bin/prove --out DIR). A binary that
   recorded no identity is unknown, never current. See docs/merging.md#a-session-proves-through-root."
-  {:malli/schema [:=> [:cat :string] [:maybe :seon.error/base]]}
-  [tree]
-  (let [rt (fx/runtime-for tree)]
+  {:malli/schema [:=> [:cat [:maybe :map] :string] [:maybe :seon.error/base]]}
+  [record tree]
+  (let [rt (fx/runtime-for tree {:record record})]
     (when (contract/error? rt)
       (contract/error :seon.system/binary-not-current #'tree-refusal
                       (str "this tree can't be proved on the running system: " (:seon.error/message rt)
@@ -2270,7 +2270,7 @@
   {:malli/schema [:=> [:cat :seon.system/sys [:map [:checkout :string] [:tree :string]]] :map]}
   [sys {:keys [checkout tree names mode]}]
   (let [b (tree-branch tree)
-        refusal (tree-refusal tree)
+        refusal (tree-refusal (program/binary-program) tree)
         c (when-not refusal (catch-up @(:conn sys) checkout {:fact? false}))]
     (cond
       refusal refusal

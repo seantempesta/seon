@@ -420,7 +420,7 @@
   git's or the reader's words."
   {:malli/schema [:=> [:cat :string :string] [:set :string]]}
   [root tree]
-  (let [lines (fn [args] (str/split-lines (git! {} root args nil)))
+  (let [lines (fn [args] (remove str/blank? (str/split-lines (git! {} root args nil))))
         ;; every EDN form a text holds, its tags kept as data (aero's #profile, #env): git show of several blobs is their texts end to end
         forms (fn [text] (let [r (java.io.PushbackReader. (java.io.StringReader. text)) end (Object.)]
                            (loop [acc []] (let [f (edn/read {:default tagged-literal :eof end} r)] (if (identical? end f) acc (recur (conj acc f)))))))
@@ -464,19 +464,23 @@
           (do (write-file {:req {:path (.getPath f) :text d}}) {:digest d}))))))
 
 (defn- build-differs
-  "What differs between the identity of the binary's tree (target/seon.tree) and tree's, named: each identity line the two do not
-  share, by its path (a build input or a pin) or its config key; the same lines binary-digest digests, so a mismatch always names
-  its cause. Every build input when the binary recorded no tree, or a tree's lines can't be read. Asked only on a mismatch."
-  {:malli/schema [:=> [:cat :string [:maybe :string] :string] [:vector :string]]}
-  [root built-tree tree]
-  (let [inputs (vec (cfg/value :seon.config.build/inputs))]
-    (if-not built-tree
-      inputs
-      (try
-        (let [a (identity-lines root built-tree) b (identity-lines root tree)
-              named (fn [l] (if (str/starts-with? l "[") (first (str/split (subs l 1) #"\s" 2)) (second (str/split l #"\t" 2))))]
-          (vec (distinct (map named (sort (concat (remove b a) (remove a b)))))))
-        (catch Throwable _ inputs)))))
+  "What differs between the identity of the binary's tree (in the checkout at root's repository) and tree's (in repo's), named: each identity line the two do not share, by its path
+  (a build input or a pin) or its config key; the same lines binary-digest digests, so a mismatch always names its cause. Every
+  build input when the binary recorded no tree. The :seon.fx/io-error of a tree whose lines can't be read; an interrupt passes.
+  Asked only on a mismatch."
+  {:malli/schema [:=> [:cat :string :string [:maybe :string] :string] [:or [:vector :string] :seon.error/base]]}
+  [root repo built-tree tree]
+  (if-not built-tree
+    (vec (cfg/value :seon.config.build/inputs))
+    (try
+      ;; each tree read where it was made: the binary's in this checkout's repository, the branch's in the source root's
+      (let [a (identity-lines root built-tree) b (identity-lines repo tree)
+            named (fn [l] (if (str/starts-with? l "[") (first (str/split (subs l 1) #"\s" 2)) (second (str/split l #"\t" 2))))]
+        (vec (distinct (map named (sort (concat (remove b a) (remove a b)))))))
+      (catch Throwable e
+        (if (intr/interrupt? e)
+          (throw e)
+          (error #'build-differs :seon.fx/io-error (str "what differs between trees " built-tree " and " tree ": " (step/error-msg e)) {:path root}))))))
 
 (defn runtime-for
   "The binary a process on tree's branch runs: {:binary its path :digest d} when the running binary's identity (its build record's
@@ -486,29 +490,33 @@
   check of which runtime a branch needs, made at every start (root's boot, an agent's, a test child's fork) and by the restart
   predicate; the program (src/'s forms) is not in it: a process loads its branch's forms as a diff. With {:scope :all}, for a
   process whose store holds no Seon program and so runs the binary's baked one, the src tree must be the binary's too, and the
-  answer adds :program, tree's src id. tree's digest is kept by tree id (tree-digest); a later ask costs one file read. See
+  answer adds :program, tree's src id. :record is the binary's build record to judge (default this process's,
+  seon.program/binary-program). tree's digest is kept by tree id (tree-digest); a later ask costs one file read. See
   docs/source.md#the-binary-records-its-program."
   {:malli/schema [:function [:=> [:cat :string] [:or [:map [:binary :string] [:digest :string]] :seon.error/base]]
-                  [:=> [:cat :string [:map [:scope {:optional true} [:enum :root :all]]]]
+                  [:=> [:cat :string [:map [:scope {:optional true} [:enum :root :all]] [:record {:optional true} [:maybe :map]]]]
                    [:or [:map [:binary :string] [:digest :string] [:program {:optional true} :string]] :seon.error/base]]]}
   ([tree] (runtime-for tree {}))
-  ([tree {:keys [scope] :or {scope :root}}]
+  ([tree {:keys [scope record] :or {scope :root record (program/binary-program)}}]
    (let [root (cfg/checkout)
          ;; a key a config may lack (seon.config's may-be-absent): absent, the checkout is the repository
          repo (or (get cfg/config :seon.config.source/root) root)
          read (fn [p] (let [f (java.io.File. (str root p))] (when (.isFile f) (str/trim (slurp f)))))
          ;; the RUNNING binary's identity, held since its boot (seon.program/binary-program): never target/seon's file, which a
          ;; later build replaces while this process still runs the old one (bin/update asked after its build, 2026-11-15)
-         built (:digest (program/binary-program))
+         built (:digest record)
          built-tree (read "/target/seon.tree")
          w (tree-digest root repo tree)
          src (fn [t] (when t (let [r (git-run {} repo ["rev-parse" "--verify" "--quiet" (str t ":src")] nil)]
                                (when (zero? (:exit r)) (str/trim (:out r))))))
          mismatch (fn [want why]
-                    (error #'runtime-for :seon.process/env-mismatch
-                           (str "target/seon's identity " (or built "(none recorded)") " is not tree " tree "'s " want ": " why)
-                           {:seon.process/binary-digest built :seon.process/branch-digest want :seon.process/tree tree
-                            :seon.process/differs (build-differs repo built-tree tree)}))]
+                    (let [differs (build-differs root repo built-tree tree)]
+                      (if (contract/error? differs)
+                        differs
+                        (error #'runtime-for :seon.process/env-mismatch
+                               (str "target/seon's identity " (or built "(none recorded)") " is not tree " tree "'s " want ": " why)
+                               {:seon.process/binary-digest built :seon.process/branch-digest want :seon.process/tree tree
+                                :seon.process/differs differs}))))]
      (cond (contract/error? w) w
            (not= built (:digest w)) (mismatch (:digest w) "build it")
            (= :all scope) (let [p (src tree)]

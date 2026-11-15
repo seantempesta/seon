@@ -1034,7 +1034,7 @@
     (is (not= at-load cfg-text) "max-agents, read at load, is stated in default.edn")
     (is (not= d0 (fx/binary-digest root (tree-with root base {cfg-p at-load}))) "a change of a key read at load is a new process's")
     ;; and a mismatch names its cause from the same lines (root, 2026-11-15: a schema-moved key answered :seon.process/differs [])
-    (is (= [":seon.config.root/max-agents"] (#'fx/build-differs root base (tree-with root base {cfg-p at-load})))
+    (is (= [":seon.config.root/max-agents"] (#'fx/build-differs root root base (tree-with root base {cfg-p at-load})))
         "the differs of a moved key name the key")
     (is (not= port cfg-text) "view-window is stated in default.edn")
     (is (= d0 (fx/binary-digest root (tree-with root base {cfg-p port}))) "a change of a key the branch holds is no build")
@@ -1069,12 +1069,11 @@
   (let [root (cfg/checkout)
         tree (clojure.string/trim (:out (clojure.java.shell/sh "git" "-C" root "rev-parse" "HEAD^{tree}")))
         d (fx/binary-digest root tree)]
-    (with-redefs [seon.program/binary-program (fn [] {:digest "another-build"})]
-      (let [r (fx/runtime-for tree)]
-        (is (= :seon.process/env-mismatch (:seon.error/type r)) (str "a running binary of another identity is told: " r))
-        (is (= "another-build" (:seon.process/binary-digest r)) "naming the running binary's identity")))
-    (with-redefs [seon.program/binary-program (fn [] {:digest d})]
-      (is (= d (:digest (fx/runtime-for tree))) "and its own tree's is current"))
+    ;; the binary's build record is data runtime-for judges (:record, default this process's): a record of another identity
+    (let [r (fx/runtime-for tree {:record {:digest "another-build" :inputs (:inputs (seon.program/binary-program))}})]
+      (is (= :seon.process/env-mismatch (:seon.error/type r)) (str "a running binary of another identity is told: " r))
+      (is (= "another-build" (:seon.process/binary-digest r)) "naming the running binary's identity"))
+    (is (= d (:digest (fx/runtime-for tree {:record {:digest d}}))) "and its own tree's is current")
     ;; a tree this repository cannot read is the identity's typed error, never a digest of what could be read
     (is (= :seon.fx/io-error (:seon.error/type (fx/runtime-for "0123456789abcdef0123456789abcdef01234567"))) "an unreadable tree is told")
     ;; the kept digest is keyed by the code that computed it: a value a changed binary-digest computed is never read back
