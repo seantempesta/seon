@@ -65,3 +65,38 @@
         (is (not= c1 c2) "force-branch! made a commit")
         (is (contains? changed [:note/text "speculated" true]) (str "its changes are the speculated transaction's: " (pr-str changed)))
         (is (not (contains? changed [:note/text "written" true])) "and nothing before its base")))))
+
+;; Estimate: a test branch (~0.5M), two transacts and commits (~0.3M), two d/with (~0.2M), two force-branch! (~0.4M),
+;; two d/changes over one commit each (~0.05M), ~1.5M = 1500000
+(deftest ^{:seon.test/estimate {:ticks 1500000}} a-merge-built-on-another-lineage-states-its-change-against-the-head-it-replaces
+  ;; landing 6's merge (data, 2026-11-15): the merged value is built on main's head and forced onto the branch, so its
+  ;; own change record names main's head as its base and d/changes from the branch head never reaches it
+  ;; (:datahike/changes-not-ancestor; seon.merge/changed-datoms then diffed whole heads, and every branch fact looked
+  ;; moved). force-branch!'s :changes states the change against the branch head instead, so d/changes from there
+  ;; answers exactly it
+  (ts/test-branch!
+    (fn [cfg conn]
+      (d/transact conn [{:note/text "base" :note/agent :base}])
+      (let [c0 (d/commit-id @conn)
+            base-db @conn
+            _ (d/transact conn [{:note/text "the branch's own" :note/agent :branch}])
+            c1 (d/commit-id @conn)
+            ;; main's change since the base, and the merged value built on main's lineage (the base plus main's change
+            ;; plus the branch's own fact replayed)
+            main-report (d/with base-db [{:note/text "main's" :note/agent :main}])
+            ds (:tx-data main-report)
+            merged (:db-after (d/with (:db-after main-report) [{:note/text "the branch's own" :note/agent :branch}]))
+            ;; without :changes: the record's base is c0's lineage, so d/changes from c1 is refused
+            _ (d/force-branch! merged (:branch cfg) #{c1} {:expected-current-commit c1})
+            _ (datahike.connector/follow-head! conn)
+            c2 (d/commit-id @conn)
+            refused (try (d/changes conn c1 c2) nil (catch clojure.lang.ExceptionInfo e (:type (ex-data e))))
+            ;; with :changes: the same main-lineage value forced over the head it replaces (c2), its change stated
+            _ (d/force-branch! merged (:branch cfg) #{c2} {:expected-current-commit c2 :changes {:base c2 :datoms ds}})
+            _ (datahike.connector/follow-head! conn)
+            c3 (d/commit-id @conn)
+            changed (d/changes conn c2 c3)]
+        (is (= :datahike/changes-not-ancestor refused) (str "the value's own record does not reach the branch head: " (pr-str refused)))
+        (is (= (facts ds) (facts changed)) (str "d/changes from the head it replaced answers exactly the stated change: " (pr-str (facts changed))))
+        (is (= c2 (:base (konserve.core/get (:store @conn) (datahike.writing/commit-changes-key c3) nil {:sync? true})))
+            "the record names the stated base")))))
