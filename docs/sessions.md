@@ -32,6 +32,11 @@ One session, root, manages the others and owns no code.
 - **It rules what is reversible and asks the owner the rest,** one question at a time. While he is away it decides, and lists each ruling for him to reverse.
 - **It verifies before it repeats.** A claim is checked by one command before it reaches the owner, and what was not checked is called inferred. The owner's sentence is quoted, never paraphrased, and the code is read before his sentence becomes work.
 - **It writes to the owner in Clojure's and the libraries' words,** briefly, with the number and the one decision.
+- **It checks identity and content before it acts on anything it cannot undo:** a branch's commit by what the commit holds, a process by its command and working directory, a store by a query. A branch moved to the wrong commit on 2026-11-14 because a commit id was taken from an unordered set.
+- **It holds a land that restarts root or loads code into it while a watched `seon_done` runs,** and tells the session that owns the land.
+- **It keeps every session working.** A session idle with work queued gets its next item at once, and a session that waits on something sets a background wake instead of ending its turn idle. On 2026-11-14 nothing landed from 02:52 to 06:00 because three sessions sat waiting for messages root could not send.
+- **It sends few messages.** The app pauses a session's sends after 20 since the owner last typed, so root batches its rulings, sends no acknowledgements, writes what it cannot send into its ledger, and never routes around the pause.
+- **After a long run on its own, it has the work reviewed by a fresh agent** that has not seen root's conclusions, from git, the land logs and the store, and it checks that review's claims before passing them on.
 
 ### What it reads itself, and what it hands off
 
