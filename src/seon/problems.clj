@@ -1366,17 +1366,16 @@
   {:malli/schema [:=> [:cat :map :seon.error/fold] :seon.problems/report]}
   [{:keys [store tasks by-class report-cache]} fold]
   (let [db @store tp (or (when-not (rv/-get tasks :caught) (rv/-get tasks :state)) {:ended {} :failed {:n 0 :rows []}})
-        ;; the fold sorts every counted row: done again only when a row, the task part or the fold moved, never on a read that moved none
-        k [by-class tp fold]
-        held (some-> report-cache deref)]
-    (if (and held (every? true? (map identical? k (:k held))))
-      (assoc (:v held) :t (:max-tx db))
-      (let [v ^{:seon.render/schema :seon.problems/report}
-               {:t (:max-tx db)
-                :classes (merge (fold-counted (into {} (for [c counted-classes] [c {:rows (vec (vals (get by-class c)))}])) db fold)
-                                (:ended tp) {:failed (:failed tp)})}]
-        (some-> report-cache (vreset! {:k k :v v}))
-        v))))
+        ;; the fold sorts every counted row: done again only when an error's row or the fold moved, never for a task's move or a read
+        ;; that moved none (the task part merges in as it is)
+        held (some-> report-cache deref)
+        counted (if (and held (identical? by-class (:by-class held)) (identical? fold (:fold held)))
+                  (:counted held)
+                  (let [c (fold-counted (into {} (for [c counted-classes] [c {:rows (vec (vals (get by-class c)))}])) db fold)]
+                    (some-> report-cache (vreset! {:by-class by-class :fold fold :counted c}))
+                    c))]
+    ^{:seon.render/schema :seon.problems/report}
+    {:t (:max-tx db) :classes (merge counted (:ended tp) {:failed (:failed tp)})}))
 
 (defn- other-derived
   "The derived classes `caused-split` does not read, their rows on db, read whole by both readers of health (they are cheap, or the
