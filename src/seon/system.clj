@@ -1877,6 +1877,11 @@
         max-running (or max-running (cfg/value :seon.config.agent/max-running))
         source (or source (when-let [r (get cfg/config :seon.config.source/root)]
                             {:root r :dirs (cfg/value :seon.config.source/dirs) :branch (cfg/value :seon.config.source/branch)}))
+        ;; a source given as an option (a check's or e2e's root in its own process) is this process's config, as a --set layer
+        ;; (seon.config/hold-args!, a test child's own mechanism), so the one merge of the layers derives what follows from it (the
+        ;; gate checkout) and every config this process writes later keeps it
+        _ (when (and source (nil? (:seon.config.source/root (:config (cfg/in-force)))))
+            (cfg/hold-args! (conj (vec (cfg/argv)) "--set" (str ":seon.config.source/root=" (pr-str (:root source)))) nil {}))
         {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors program-load digest digest-ms contracts pid fd compacted retained dropped-trees main-inputs]}
         (boot! backend path datoms main source t0)
         recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
@@ -1888,11 +1893,9 @@
         {in-force :config} (cfg/in-force)
         in-force-sources (cfg/boot-sources)
         provider (or provider (cfg/provider in-force))
-        ;; the config in force, written on main's root entity with the boot fact; the merge gate's
-        ;; checkout, when none is declared, is this root's own source root
-        config (cond-> (-> (cfg/with-provider in-force provider) (assoc :seon.config.agent/max-running max-running))
-                 (and (nil? (get in-force :seon.config.source/gate-checkout)) (:root source))
-                 (assoc :seon.config.source/gate-checkout (:root source)))
+        ;; the config in force, written on main's root entity with the boot fact (its gate checkout, when none is declared, is the
+        ;; source root, derived in the one merge of the layers: seon.config/layered)
+        config (-> (cfg/with-provider in-force provider) (assoc :seon.config.agent/max-running max-running))
         ;; then the GC's sweeper threads, a declared number (Chez would grow them by timing)
         sweepers (lib/gc-sweepers! (cfg/value :seon.config.root/gc-sweepers))
         ;; root's own, set after the fork server is forked: the fork server and its agents keep

@@ -588,3 +588,21 @@
           "and no layer of its parent's is left")
       (finally (reset! held h) (alter-var-root #'config/config (constantly c)) (alter-var-root #'config/sources (constantly s))
                (alter-var-root #'seon.config/built-layers (constantly layers0))))))
+
+;; Estimate: three layered resolutions of the shipped file, ~3M ticks each; ~10M ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-config-with-a-source-root-gates-on-it
+  ;; :seon.config.source/gate-checkout absent is the source root as it resolves, whatever layer names the root (the checkout's
+  ;; local.edn for the standing root). Derived once, in the one merge of the layers (config/layered), so every config this
+  ;; process holds has it: boot's own assoc lost it at 14:02 on 2026-11-15, when a landing moved a config entry and the writer
+  ;; wrote main's config again from the held config (seon.config/moved), so every process-test task ended :closed
+  (let [co (config/checkout)
+        base (config/load-layers co [])
+        at (fn [& layers] (config/layered (into base layers)))
+        {c :config srcs :sources} (at ["config/local.edn" {:seon.config.source/root "/merges"}])]
+    (is (= "/merges" (:seon.config.source/gate-checkout c)) "absent: the source root")
+    (is (= "config/local.edn" (get srcs :seon.config.source/gate-checkout)) "its layer is the root's")
+    (is (= "/gate" (:seon.config.source/gate-checkout
+                    (:config (at ["config/local.edn" {:seon.config.source/root "/merges" :seon.config.source/gate-checkout "/gate"}]))))
+        "a stated checkout wins")
+    (is (not (contains? (:config (at ["no root" {:seon.config.source/root nil}])) :seon.config.source/gate-checkout))
+        "no source root: none, and a merge reaching process tests is held saying so")))
