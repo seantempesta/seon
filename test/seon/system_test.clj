@@ -725,13 +725,17 @@
                          blob (clojure.string/trim (:out (seon.lib/sh "git" "-C" here "hash-object" "-w" "--stdin" :in (str text "\n;; changed\n"))))]
                      (git env "update-index" "--add" "--cacheinfo" (str "100644," blob "," path))))
                  (let [t (clojure.string/trim (git env "write-tree"))] (.delete (java.io.File. idx)) t)))
-        refusal #(#'root/tree-refusal tree %)]
+        refusal #(#'root/tree-refusal %)]
     (let [r (refusal (with "reference-code/jolt" :pin))]
       (is (= :seon.system/binary-not-current (:seon.error/type r)) (pr-str r))
-      (is (= ["reference-code/jolt"] (:baked r)) "it names the pin the binary bakes")
+      (is (some #{"reference-code/jolt"} (:baked r)) "it names the pin the binary bakes")
       (is (clojure.string/includes? (:seon.error/message r) "bin/prove --out") "and points at the tree's own build"))
     (is (nil? (refusal (with "src/seon/agent.clj" :src))) "a src change loads live: the system proves it")
-    (is (= :seon.system/binary-not-current (:seon.error/type (#'root/tree-refusal nil tree))) "a binary of no recorded tree is unknown, never current")))
+    ;; context's driver, 2026-11-15: a branch changing src only was refused because main's schema files had moved since the
+    ;; binary's build (the old rule diffed against the binary's tree); a schema is held and loaded as a diff, never baked
+    (is (nil? (refusal (with "resources/seon/schemas/seon.facts.edn" :src))) "a schema change loads live: the system proves it")
+    (with-redefs [seon.program/binary-program (constantly nil)]
+      (is (= :seon.system/binary-not-current (:seon.error/type (refusal tree))) "a binary of no recorded identity is unknown, never current"))))
 
 (deftest ^{:seon.test/estimate {:ticks 1000000}} an-undeliverable-output-is-a-problem
   ;; docs/flow.md#the-proc-contract: Flow reports an output it can't deliver (a pid not in the graph, an unconnected out) and one
