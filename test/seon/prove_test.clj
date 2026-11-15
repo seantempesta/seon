@@ -880,7 +880,7 @@
 
 ;; docs/merging.md#a-merge-runs-what-the-change-reaches: the judge's run through the test service answers, for each test it defers to
 ;; the merge check, that test's digest at the task's base, as the agent's plan computed it from the base's program. The merge check
-;; reads main's verdict at that digest (seon.fx/reds-at). Red before: the service built its answer without it, so the first real task
+;; recorded them on the task (:seon.task/deferred), and asks main of each red by name (seon.reconcile/ask-main). Red before: the service built its answer without it, so the first real task
 ;; on the store made at 06:46 carried a nil base digest for all 244 deferred tests, read as "new on the branch", and every red held it
 (deftest ^{:seon.test/estimate {:ticks 200000}} a-runs-answer-carries-each-deferred-tests-base-digest
   (let [base {:deferred ['a.b-test/p 'a.b-test/q] :deferred-digests {'a.b-test/p "bp" 'a.b-test/q nil} :selected [] :at-judge 0}
