@@ -1287,7 +1287,7 @@
   so it ends with the agent's starter), set up as bin/test's runner is, then tests run (run-tests-here), each value put on
   the end's :out, and last the run's answer; fork! then closes :out, awaits :sent and exits, a throw put last as ::flow/ex.
   A test that can never move again is told by Jolt's quiescence (child-quiescent!), the typed :seon.test/deadlock thrown into
-  its own fiber, so its report and the run's answer still go out; a wait on a peer root ends by that root's answer. A put commits when the value enters :out's buffer, not when it is written (jolt.async.remote): after each, the child
+  its own fiber, so its report and the run's answer still go out; a wait on a peer root ends at its peer bound (seon.test-store/ask). A put commits when the value enters :out's buffer, not when it is written (jolt.async.remote): after each, the child
   yields to the end's writer, so a death right after a test's start still names it. See
   docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
   {:malli/schema [:=> [:cat :map :map nat-int? [:sequential :qualified-symbol]] :any]}
@@ -1297,7 +1297,7 @@
         in-flight (atom nil)
         ;; a test that never returns is ended by its tick budget when its wait spends ticks, and when it spends none by its
         ;; source: Jolt's quiescence (child-quiescent!), a wait on the link being the agent's turn (putting); a wait on a peer
-        ;; root ends by that root's answer: no timer in the child (docs/testing.md#a-test-waits-without-a-clock)
+        ;; root ends at the peer bound its ask carries (seon.test-store/ask): no timer in the child (docs/testing.md#a-test-waits-without-a-clock)
         putting (volatile! false)
         put! (fn [v]
                (cond (:seon.test/started v) (reset! in-flight {:fiber (jolt.host/current-fiber) :test (:seon.test/started v)})
