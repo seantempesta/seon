@@ -841,7 +841,7 @@
  ;; calls off; --profile scripted, the
  ;; scripted provider (a test fixture) bin/check and bin/test run under, no paid call: it needs
  ;; that profile, which states its script (--set :seon.config.ai/provider=:scripted alone leaves none, and boot
- ;; refuses the provider's contract). There is no default model (docs/model.md#no-default-model);
+ ;; refuses the provider's contract). The default is DeepSeek (docs/model.md#the-default-model);
  ;; check the context before any paid call.
  :seon.config.ai/provider #keyword #profile {:default "openai-compat" :scripted "scripted" :deepseek "openai-compat"}
  ;; The scripted provider's reply function (a test fixture): replies by task.
