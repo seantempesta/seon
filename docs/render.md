@@ -205,7 +205,7 @@ The page is laid out by Tailwind's classes in each render's hiccup, responsive a
 
 ### Where things go
 
-A page is a bar over columns: the agents on the left (the frame's), then the page render's own columns, an agent's chat in the middle and its parts and tiles on the right (`seon.render.ui/agent-page`); the right column shows only when it holds a part, and each column scrolls on its own on a wide screen and stacks on a narrow one. `input.css` styles them by name: the frame's classes `seon-page`, `seon-bar`, `seon-columns`, and the layout's ids `#p-agents`, `#c-side`, `#p-chat`, `#c-rows`, `#p-context`, `#p-task`, `#p-tiles`. Each child of `#p-task` and `#p-tiles` is a block headed by what it is; its `:data-render`, on the page's html only, names the render that drew it. Shared styling: `seon-note`, `seon-stack`, `seon-stack-2`, `seon-row`, `muted`, `kicker`, `box`.
+A page is a bar over columns: the agents on the left (the frame's; none on the person's page, whose bar links to them), then the page render's chat, which takes the main space, with the agent's parts and tiles after its conversation in the same column, scrolling with it (`seon.render.ui/agent-page`); the parts show only when they hold one, and the columns stack on a narrow screen. `input.css` styles them by name: the frame's classes `seon-page`, `seon-bar`, `seon-columns`, and the layout's ids `#p-agents`, `#c-side`, `#p-chat`, `#c-rows`, `#p-context`, `#p-task`, `#p-tiles`. Each child of `#p-task` and `#p-tiles` is a block headed by what it is; its `:data-render`, on the page's html only, names the render that drew it. Shared styling: `seon-note`, `seon-stack`, `seon-stack-2`, `seon-row`, `muted`, `kicker`, `box`.
 
 ### Style
 
