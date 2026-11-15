@@ -794,7 +794,7 @@
 
 (defn- ask-main
   "Ask the test service for main's verdict of tests by name, as main's head holds them, for task id's flight; the answer names
-  step: {:op :prove :branch :main :mode :judge :names tests} (tests' review, 2026-11-15: :judge plans only what it names, and an
+  step: {:op :prove :branch :main :mode :judge :names tests} (:judge plans only what it names, and an
   item main's own run has queued gains this asker as a waiter, so none runs twice). The answer is waited on, never what the
   cache happens to hold. See docs/tasks.md#the-done-rule."
   {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :seon.reconcile/step [:set :qualified-symbol]] [:tuple :seon.reconcile/state :map]]}
