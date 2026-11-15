@@ -136,7 +136,7 @@
   them: a session's next task has a boot unchanged but a start time that moved). Not its
   :seon.agent/branch as root observes it (seon.task/agent-tx writes that too, under the store's name for the branch). Asked inline, once per
   datom of a move: a contracted call each would make a move cost its datoms in calls (seon.render-cost-test/a-move-of-main-costs-what-moved). See docs/reconcile.md#the-reconcilers-index."
-  #{:seon.agent/boot :seon.agent/started-ms})
+  #{:seon.agent/boot :seon.agent/started-ms :seon.agent/ended-ms})
 
 (def park-outcomes
   "An agent's own ends that park its session instead of ending it (docs/turn.md#parked): a
@@ -293,7 +293,10 @@
         ;; started in this boot's root: it is live while it works, its process is parked while it waits, and stays until
         ;; its task is cancelled or held (docs/turn.md#parked)
         here? (and t (= (:boot (:root idx)) (:seon.agent/boot a)))
-        live? (and here? (= :running o))
+        ;; its process ended after it started (a test ended its outside agent, an attach's process died): no work is under way, so
+        ;; it holds no quiet; reaped :lost, typed (an end from the session's earlier process, before this start, is no end of it)
+        ended? (when-let [e (:seon.agent/ended-ms a)] (>= e (:seon.agent/started-ms a 0)))
+        live? (and here? (= :running o) (not ended?))
         parked? (and here? (= :parked o))
         env (:seon.agent/env a)
         kill (cond
@@ -867,7 +870,13 @@
                ;; the session's agent continues (docs/turn.md#parked); kept on the flight for its start
                (one (request (cond-> st k (assoc-in [:flights id :key] k)) id :spawned
                              {:op :spawn :opts (cond-> {:branch (get-in act [:env :branch]) :task id} k (assoc :key k))})))
-      :reap (one (write st id :done (into (task/move-tx id :running :lost {:seon.task/reason "root restarted"}) (ended-ms-tx db id now))))
+      :reap (let [a (get-in st [:idx :agents (get-in st [:idx :tasks id :seon.task/agent])])
+                  ended? (and (= (:boot (:root (:idx st))) (:seon.agent/boot a)) (:seon.agent/ended-ms a))
+                  why (if ended? "its agent ended with the task :running" "root restarted")]
+              (one (write st id :done (into (task/move-tx id :running :lost
+                                                          (cond-> {:seon.task/reason why}
+                                                            ended? (assoc :seon.task/error (contract/error :seon.reconcile/agent-ended-running #'seon.reconcile/start why {:task id}))))
+                                            (when-not ended? (ended-ms-tx db id now))))))
       ;; a judged task whose execution is no longer running: closed
       :close (one (write st id :done (task/move-tx id from :closed {})))
       ;; a live task, or a parked one (its process idle) whose task was cancelled or held

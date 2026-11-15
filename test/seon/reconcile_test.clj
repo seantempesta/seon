@@ -2468,3 +2468,16 @@
         tx (set (mapcat #(get-in % [:req :req :tx-data]) outs))]
     (doseq [id ["demo/a" "demo/b"]]
       (is (contains? tx [:db/cas [:seon.task/id id] :seon.task/outcome :ready :closed]) (str id " moves off :ready: " (pr-str tx))))))
+
+;; docs/reconcile.md#the-reconcilers-index: a :running task whose agent's process ended (an outside agent a test ended, an attach
+;; whose process died) is not live: it held root's quiet for good, so every later await-quiet in a shard's shared root waited past
+;; its bound (the 08:35 capture [M]: reconciler live 1, flights 0, judged [], one quiet wait held). It is reaped :lost, typed.
+;; Red before: live. Estimate: one classify of a map, ~50k ticks
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-running-task-whose-agent-ended-is-reaped-not-live
+  (let [idx (fn [ended] (assoc r/empty-index :root {:boot "b"} :tasks {"t/a" {:seon.task/id "t/a" :seon.task/ns (quote t) :seon.task/name "a" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b :seon.task/proofs #{} :seon.task/needs #{} :seon.task/kind :work :seon.task/outcome :running :seon.task/agent "k7"}}
+                               :agents {"k7" (cond-> {:seon.agent/boot "b" :seon.agent/started-ms 10 :seon.agent/env {:branch :b}} ended (assoc :seon.agent/ended-ms ended))}))
+        c (fn [i] (#'seon.reconcile/classify i "t/a"))]
+    (is (contains? (:live (c (idx nil))) "t/a") "its agent runs: live")
+    (is (not (contains? (:live (c (idx 20))) "t/a")) "its agent ended after it started: not live")
+    (is (contains? (:reap (c (idx 20))) "t/a") "reaped")
+    (is (contains? (:live (c (idx 5))) "t/a") "an end from before this start (the session's earlier process) is no end of it")))
