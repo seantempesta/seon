@@ -695,8 +695,9 @@
         (let [bridged (sh/sh (str checkout "/bin/land") "--bridge" checkout old new (str (:port root)))]
           (is (str/includes? (:out bridged) "entered main") (str "the bridge: " (:out bridged) (:err bridged))))
         (is (str/starts-with? (str (at-root doc)) marker) "the bridge's commit loaded the landed form into root")
-        (is (some #{'seon.system/held-inputs} (:reaches (at-root "(seon.system/stale-binary @(:conn sys))")))
-            "what the binary lacks is a form root runs: the case restart-for once restarted for")
+        ;; one binary identity (seon.fx/runtime-for): a src form the binary lacks is loaded in place, never a stale binary (the case
+        ;; restart-for once restarted for, and binary-current once named by reach)
+        (is (nil? (at-root "(seon.system/stale-binary @(:conn sys))")) "a src change is no stale binary: root loads it in place")
         (let [kept (at-root (str "(my.root/landed! sys " (pr-str tree) ")"))]
           ;; and builds nothing, though the binary lacks a form root runs (owner 2026-11-15: build only when a restart is about to boot,
           ;; or a build input moved): the running root holds the form, and a boot catches main's program up in place
@@ -733,17 +734,16 @@
                          blob (clojure.string/trim (:out (seon.lib/sh "git" "-C" here "hash-object" "-w" "--stdin" :in (str text "\n;; changed\n"))))]
                      (git env "update-index" "--add" "--cacheinfo" (str "100644," blob "," path))))
                  (let [t (clojure.string/trim (git env "write-tree"))] (.delete (java.io.File. idx)) t)))
-        refusal #(#'root/tree-refusal %)]
+        refusal #(#'root/tree-refusal (seon.program/binary-program) %)]
     (let [r (refusal (with "reference-code/jolt" :pin))]
       (is (= :seon.system/binary-not-current (:seon.error/type r)) (pr-str r))
-      (is (some #{"reference-code/jolt"} (:baked r)) "it names the pin the binary bakes")
+      (is (= ["reference-code/jolt"] (:baked r)) "it names the pin the binary bakes, and only it")
       (is (clojure.string/includes? (:seon.error/message r) "bin/prove --out") "and points at the tree's own build"))
     (is (nil? (refusal (with "src/seon/agent.clj" :src))) "a src change loads live: the system proves it")
     ;; context's driver, 2026-11-15: a branch changing src only was refused because main's schema files had moved since the
     ;; binary's build (the old rule diffed against the binary's tree); a schema is held and loaded as a diff, never baked
     (is (nil? (refusal (with "resources/seon/schemas/seon.facts.edn" :src))) "a schema change loads live: the system proves it")
-    (with-redefs [seon.program/binary-program (constantly nil)]
-      (is (= :seon.system/binary-not-current (:seon.error/type (refusal tree))) "a binary of no recorded identity is unknown, never current"))))
+    (is (= :seon.system/binary-not-current (:seon.error/type (#'root/tree-refusal nil tree))) "a binary of no recorded identity is unknown, never current")))
 
 (deftest ^{:seon.test/estimate {:ticks 1000000}} an-undeliverable-output-is-a-problem
   ;; docs/flow.md#the-proc-contract: Flow reports an output it can't deliver (a pid not in the graph, an unconnected out) and one

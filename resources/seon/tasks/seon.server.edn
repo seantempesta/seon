@@ -68,4 +68,9 @@ PROOF (red first, once the waiter is found): seon.server-test/an-eval-at-root-wh
   :seon.task/kind :work
   :seon.task/proofs #{seon.server-test/a-refused-reply-after-a-close-names-the-attach}
   :seon.task/estimate #:seon.server{agent-reply {:n 1, :order :constant, :ticks 10000, :bytes 100000}}}
+ {:seon.task/name "a-callers-client-is-known-not-claimed"
+  :seon.task/plan "Web's. Root's reviewer on a8d254ccf9 (4) [H]: every client id the server acts on is self-asserted: bin/mcp stamps seon/client on each line and an EDN request carries :client, and held (seon.server/held), seon_interrupt and MCP's notifications/cancelled (seon.server/stop-ops!) trust it. Any local caller can claim another session's client and stop its ops or act on its held agent. PRIOR WORK to read first: seon.server/held, line-parts, stop-ops!, attach!'s :holder, bin/mcp's SEON_MCP_CLIENT and checkout-<path>. The direction to weigh: the client is bound to what the server knows of the caller (the connection, or a token attach! answers and the caller sends back), never to a field the caller writes. Cost and plan to be worked out before code. Proof, red first: seon.server-test/a-claimed-client-stops-no-one-elses-op."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.server-test/a-claimed-client-stops-no-one-elses-op}
+  :seon.task/estimate #:seon.server{line-parts {:n 1, :order :constant, :ticks 5000, :bytes 10000}}}
 ]
