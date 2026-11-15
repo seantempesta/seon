@@ -471,6 +471,10 @@
  :seon.task/kind [:enum {:description "What kind of work the task is."} :user :work :design :implement :test :merge :whole]
  ;; measured evidence a task starts from: its last failed run's conflicts, unmerged keys, red
  ;; proofs and problem (seon.reconcile/hold-tx), read by the run root releases next
+ ;; what the task's plan says its hot functions should cost, before their code carries :seon.cost/bound (the one home once it does):
+ ;; per function, the size n it is measured at, its order of growth, and the ticks and bytes of one call (docs/cost.md#how-we-measure)
+ :seon.task/estimate [:map-of {:description "The plan-time cost estimate of each hot function the task changes, before its code carries :seon.cost/bound."}
+                      :qualified-symbol [:map [:n :int] [:order :keyword] [:ticks :int] [:bytes :int]]]
  :seon.task/evidence [:map {:description "The measured evidence the task starts from: its last failed run's conflicts, unmerged keys, red proofs and problem."}
                       [:from :seon.task/id] [:conflicts [:vector :seon.merge/conflict]]
                       [:unmerged [:vector :string]] [:red [:vector :qualified-symbol]]
@@ -528,7 +532,7 @@
                           [:seon.task/examples {:optional true} :seon.task/examples]
                           [:seon.task/instructions {:optional true} :seon.task/instructions]
                           [:seon.task/model {:optional true} :seon.task/model]
-                          [:seon.task/evidence {:optional true} :seon.task/evidence]
+                          [:seon.task/evidence {:optional true} :seon.task/evidence] [:seon.task/estimate {:optional true} :seon.task/estimate]
                           [:seon.task/failure {:optional true} :seon.task/failure] [:seon.task/gone {:optional true} :seon.task/gone]
                           [:seon.task/cause {:optional true} :seon.task/cause]
                           [:seon.task/found-nothing {:optional true} :seon.task/found-nothing]
