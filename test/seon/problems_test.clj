@@ -3,7 +3,7 @@
   seon.problems/report lists them by class at a cost that follows the problems, not the
   program. Run: bin/test seon.problems-test"
   (:require [seon.test-store :as ts] [my.test :as t] [seon.profile :as profile] [clojure.test :refer [deftest is testing]] [clojure.edn :as edn]
-            [datahike.api :as d] [clojure.core.async :as a]
+            [datahike.api :as d] [clojure.core.async :as a] [seon.ratom :as rv]
             [seon.contract :as contract] [seon.db :as pdb] [seon.error :as err] [seon.agent :as agent]
             [seon.repl :as repl] [seon.proofs :as proofs] [seon.system :as root] [seon.agent-proc :as ap]
             [seon.reconcile :as rec] [seon.sock :as sock]
@@ -1834,3 +1834,29 @@
                :per-n {:ticks 250 :bytes 1000}
                :fixed {:ticks 20000 :bytes 60000}
                :sizes [50 150 450]}))
+
+;; Estimate: a world with 40 recorded errors; the live report built once (~40 rows x ~40k = ~2M), then two moves each its index lookup,
+;; the reruns it touched and the sync (~1M); ~10M ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-move-that-touches-no-error-reruns-no-error-row
+  ;; task seon.ratom/a-commit-reaches-only-the-readers-of-what-it-moved (Land A): health's recorded report as reactions over a store
+  ;; of main. Red before as cost: report-with read every recorded error's row on each move, 4,066 rows and 176M ticks for an 11-datom
+  ;; move of the standing main [runtime M result/aa0b4db9, d68abfc9]. A move that touches no error reruns no error row; one that adds
+  ;; an error changes that error's row alone; the report equals report's on the same db
+  (let [errs (fn [db ops] (let [[_ tx] (err/flush-tx (reduce err/fold {} (for [o ops] (occ (invalid o 1) :a1 1000))) db)] (d/db-with db tx)))
+        db1 (errs (world) (map #(symbol "app" (str "f" %)) (range 40)))]
+    (binding [rv/*owner* (rv/owner (a/chan 8))]
+      (let [s (rv/store db1)
+            live (problems/recorded-live s)
+            move! (fn [live tx] (let [rep (pdb/with @s tx) m (profile/measure! #(do (rv/commit! s (:db-after rep) (:tx-data rep)) (rv/flush!)))
+                                      changed @(:changed live)]
+                                  [(problems/recorded-sync! live) changed (:ticks m)]))]
+        (is (= (:classes (problems/report db1)) (:classes (problems/recorded-report live {}))) "the live report is report's, read whole")
+        (let [[live changed ticks] (move! live (seon.task/create-tx @s [{:seon.task/ns 'trial :seon.task/name "untouched" :seon.task/plan "p"}]))]
+          (is (empty? changed) "a move that touches no error reruns no error row")
+          (is (< ticks 2000000) (str "and costs its index lookup and the reruns it touched, not the 40 rows: " ticks " ticks"))
+          (let [[_ tx] (err/flush-tx (err/fold {} (occ (invalid 'app/new 1) :a1 2000)) @s)
+                before (count (:rows live))
+                [live changed _] (move! live tx)]
+            (is (empty? changed) (str "a move adding one error reruns no existing error's row: " (count changed)))
+            (is (= (inc before) (count (:rows live))) "and adds that error's row alone")
+            (is (= (:classes (problems/report @s)) (:classes (problems/recorded-report live {}))) "and the report is still report's")))))))

@@ -32,7 +32,7 @@
   `report` reads what was recorded, at a cost that follows the problems. `health` adds the
   derived classes, read from the program's facts when asked (docs/health.md#cost)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print.emit :as emit] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.source :as source] [malli.core] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.doc :as doc] [seon.task :as task] [seon.config :as config] [seon.cost :as cost] [seon.reader :as reader] [seon.edn :as sedn] [seon.render :as render] [seon.schema.datahike :as sd]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print.emit :as emit] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.source :as source] [malli.core] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.doc :as doc] [seon.task :as task] [seon.config :as config] [seon.cost :as cost] [seon.reader :as reader] [seon.edn :as sedn] [seon.render :as render] [seon.schema.datahike :as sd] [seon.ratom :as rv]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses task/failed)
@@ -854,7 +854,7 @@
   (into [] (mapcat (fn [a] (apply concat (d/datoms-diff base head :aevt [a]))))
         (distinct (concat section-attrs content-attrs [:var/name :seon.task/id :seon.task/plan :form/src] (map :fact laws)))))
 
-(declare task-reads uncited-tasks stale-plans)
+(declare task-reads uncited-tasks stale-plans recorded-sync!)
 
 (defn- split-rows
   "{:made :closed} of the derived rows (`caused-classes`, with ans's answers) the branch at head has
@@ -1293,6 +1293,72 @@
         unlinked (problem-unlinked db ans classes)]
     (vary-meta (assoc {:t (:max-tx db)} :classes (assoc classes :problem-unlinked {:n (count unlinked) :rows unlinked}))
                assoc :seon.render/schema :seon.problems/report)))
+
+(defn- task-part
+  "report-with's run classes and :failed over db and ans: the judged tasks' rows by class and the failed tasks' rows. What one
+  reaction of the recorded report holds (`recorded-live`), rerun when a commit moves a datom it read."
+  {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
+  [db ans]
+  (let [done? (memoize #(task/done? db %))
+        open-task? (fn [e] (or (seq (d/datoms db :eavt e :seon.task/deferred)) (not (done? e))))
+        tasks (into (sorted-set) (filter open-task?)
+                    (concat (mapcat #(es db %) [:seon.task/failures :seon.task/costs :seon.task/error :seon.task/waste :seon.task/deferred
+                                                :seon.task/conflicts :seon.task/unmerged :seon.task/task-conflicts])
+                            (mapcat (fn [st] (map :e (d/datoms db :avet :seon.task/outcome st))) (conj death-statuses :behind))))
+        by-class (apply merge-with into (map #(task-rows db ans %) tasks))]
+    {:ended (into {} (for [c ended-classes :let [rows (vec (sort-by #(- (or (:end-ms %) 0)) (get by-class c)))]] [c {:n (count rows) :rows rows}]))
+     :failed (let [failed (mapv #(failed-row db ans %) (es db :seon.task/failure))] {:n (count failed) :rows (vec (sort-by #(- (or (:at-ms %) 0)) failed))})}))
+
+(defn recorded-live
+  "The recorded report as reactions over store s (seon.ratom/store of main), made in its owner's step: answers, the error entities
+  (one whole-attribute read, rerun when an error is added or gone), the task part (`task-part`), and one row a recorded error
+  (`recorded-sync!` keeps them). A commit reruns only the reactions whose reads it moved, so a move that touches no error reruns no
+  error row. Answers {:store :answers :errors :tasks :rows {} :by-class {}}; `recorded-report` reads it. See
+  docs/reactive.md#how-a-commit-reaches-its-readers-today."
+  {:malli/schema [:=> [:cat :any] :map]}
+  [s]
+  (let [ans (rv/make-reaction #(answers @s) :auto-run true)
+        errs (rv/make-reaction #(es @s :seon.error/signature) :auto-run true)
+        tasks (rv/make-reaction #(task-part @s @ans) :auto-run true)
+        set-moved (volatile! true)]
+    @ans @errs @tasks
+    ;; the set is diffed against the rows only when it moved, never on every sync (O(errors) a move otherwise)
+    (add-watch errs ::set (fn [_ _ _ _] (vreset! set-moved true)))
+    (recorded-sync! {:store s :answers ans :errors errs :tasks tasks :rows {} :by-class {} :changed (volatile! #{}) :set-moved set-moved})))
+
+(defn recorded-sync!
+  "live (`recorded-live`) with one row reaction for each error entity its error set now holds: a new one made and read, a gone one
+  disposed and its row dropped from :by-class; and every row the last commit reran (its watch put it in :changed) in :by-class,
+  each class a sorted map by entity, so a change replaces its rows and nothing else. Called in the owner's step after its flush."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{:keys [store answers errors rows changed set-moved] :as live}]
+  (let [now (when @set-moved (set @errors))
+        gone (when now (remove now (keys rows)))
+        fresh (when now (remove #(contains? rows %) now))
+        row-of (fn [e] (let [r (rv/make-reaction #(error-row @store @answers e) :auto-run true)]
+                         (add-watch r ::row (fn [_ _ _ _] (vswap! changed conj e)))
+                         @r r))
+        rows (as-> rows rs (reduce (fn [rs e] (rv/dispose! (rs e)) (dissoc rs e)) rs gone) (reduce (fn [rs e] (assoc rs e (row-of e))) rs fresh))
+        moved (into (set fresh) @changed)
+        drop-e (fn [bc e] (reduce-kv (fn [bc c m] (assoc bc c (dissoc m e))) bc bc))
+        ;; each class a sorted map from its first row, so a change is O(log n), never a rebuild of the class
+        by-class (reduce (fn [bc e] (let [bc (drop-e bc e)] (if-let [r (rows e)] (let [row @r] (update bc (:class row) (fnil assoc (sorted-map)) e row)) bc)))
+                         (reduce drop-e (:by-class live) gone) moved)]
+    (vreset! changed #{})
+    (vreset! set-moved false)
+    (assoc live :rows rows :by-class by-class)))
+
+(defn recorded-report
+  "The recorded report of live (`recorded-live`, synced) as `report` answers it on its store's db: the counted classes from the kept
+  rows (in entity order, then by count with fold applied: `fold-counted`), the run classes and :failed from the task part.
+  The fold step reads every row once; the rows themselves are the reactions'."
+  {:malli/schema [:=> [:cat :map :seon.error/fold] :seon.problems/report]}
+  [{:keys [store tasks by-class]} fold]
+  (let [db @store tp @tasks]
+    ^{:seon.render/schema :seon.problems/report}
+    {:t (:max-tx db)
+     :classes (merge (fold-counted (into {} (for [c counted-classes] [c {:rows (vec (vals (get by-class c)))}])) db fold)
+                     (:ended tp) {:failed (:failed tp)})}))
 
 (defn- other-derived
   "The derived classes `caused-split` does not read, their rows on db, read whole by both readers of health (they are cheap, or the
