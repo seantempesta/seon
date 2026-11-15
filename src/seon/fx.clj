@@ -1810,6 +1810,14 @@
   (doseq [k (:holding st)] (step/out! o :out {:op :prove-held :key k :held false}))
   (dissoc st :holding))
 
+(defn- stoppable
+  "Requests ms as dispatched: each whose asker may stop it (:seon.fx/stop-key) gets the token its run goes under, made here and
+  kept in st's :stoppable until its outcome, so a stop finds it whichever worker took it (stop). Answers [st ms]."
+  {:malli/schema [:=> [:cat :map [:sequential :map]] [:tuple :map [:vector :map]]]}
+  [st ms]
+  (let [ms (mapv #(cond-> % (get-in % [:req :seon.fx/stop-key]) (assoc-in [:req :seon.fx/token] (jolt.host/make-interrupt))) ms)]
+    [(reduce (fn [st r] (cond-> st (and (::qk r) (get-in r [:req :seon.fx/token])) (assoc-in [:stoppable (::qk r)] r))) st ms) ms]))
+
 (defn- dispatch
   "Take queued requests in priority order while each is admitted (a free worker, the bucket, the dials of config-limits read this
   pass); a refused one is answered at once; a request of a class joins :flight until its outcome. Answers st. See
@@ -1849,14 +1857,6 @@
             :else (do (reply! o (:dest m) d)
                       (recur (update st :queue dissoc qk)))))
         (dissoc st :lim :read? :fresh :reading)))))
-
-(defn- stoppable
-  "Requests ms as dispatched: each whose asker may stop it (:seon.fx/stop-key) gets the token its run goes under, made here and
-  kept in st's :stoppable until its outcome, so a stop finds it whichever worker took it (stop). Answers [st ms]."
-  {:malli/schema [:=> [:cat :map [:sequential :map]] [:tuple :map [:vector :map]]]}
-  [st ms]
-  (let [ms (mapv #(cond-> % (get-in % [:req :seon.fx/stop-key]) (assoc-in [:req :seon.fx/token] (jolt.host/make-interrupt))) ms)]
-    [(reduce (fn [st r] (cond-> st (and (::qk r) (get-in r [:req :seon.fx/token])) (assoc-in [:stoppable (::qk r)] r))) st ms) ms]))
 
 (defn- stop
   "The owner at a stop {:req {:seon.fx/stop k}} on :ask: each request whose :seon.fx/stop-key holds k is stopped (queued:
