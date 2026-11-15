@@ -104,5 +104,6 @@
  {:seon.task/name "a-failure-marked-through-the-server-overruns-intermittently"
   :seon.task/plan "Found by deps 2026-11-15 [M]: seon.agent-test/a-failure-marked-through-the-server-holds-the-task overran its 300 s bound in four runs (context's land 00:34, runtime's 01:39, tests' 01:43, deps' reached-set run 08:50, each its shard-N-overran evidence), green elsewhere at ~252k ticks, and green rerun alone at 08:5x. Evidence kept: side-session-notes/local_8f79e2bb-ff27-4bdc-ba2c-e0f2f4a0d867/evidence/a-failure-marked-overran-2026-11-15-0850 (dumps, lsof, logs). In it, process 28406 (an agent: seon.repl/serve! under seon.lib/fork!) had fiber 0 parked on alt-handler after 1,890M ticks of work and fiber 1 parked in await after 400M: not idle, so the overrun is work or a wait after work, not a quiet hang [H: what that agent computed for 1.9B ticks; read its .err and the dump's stacks first]. Each overrun costs its land a full re-prove. Cause to find at both ends before any fix; no retry, no raised bound (AGENTS.md §3, §9)."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.agent-test/a-failure-marked-through-the-server-holds-the-task}}
+  :seon.task/proofs #{seon.agent-test/a-failure-marked-through-the-server-holds-the-task}
+  :seon.task/estimate #:seon.agent-test{a-failure-marked-through-the-server-holds-the-task {:n 1, :order :constant, :ticks 252000, :bytes 20000000}}}
 ]
