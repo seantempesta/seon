@@ -1022,16 +1022,27 @@
             {:seon.text/at at :seon.text/text (slurp abs)}
             (edit-refused at :no-source (str "no file at " abs ": write it whole first." (namespace-file-note at)) nil))))
   ([{at :seon.text/at src :seon.text/text} new]
-   (if (= new src)
-     {:unchanged at}
-     (let [abs (.getCanonicalPath (java.io.File. ^String at))
-           w (fx/write-file {:req {:path abs :text new}})]
+   (let [abs (.getCanonicalPath (java.io.File. ^String at))
+         tree (str (.getCanonicalPath (java.io.File. ^String (cfg/checkout))) "/")]
+   (cond
+     (= new src) {:unchanged at}
+     ;; the program's tree changes only through a branch, its merge's checks and the merge (the owner, 2026-11-15): a file under the
+     ;; checkout written on disk is the standing checkout changed under every session, and no merge carries it (a driver did, 2026-11-15)
+     (clojure.string/starts-with? abs tree)
+     (edit-refused at :in-the-tree
+                   (str abs " is in the program's tree, which changes only through your branch: a definition by evaluating it, or "
+                        "(seon.repl/edit! 'ns/f old new); a wiki section by (seon.repl/edit! \"docs/x.md#anchor\" old new); a schema entry by "
+                        "(my.schema/register! k form); a config key by edit! on resources/seon/config/default.edn; a bin/ script by edit! on its "
+                        "name. Nothing was written.")
+                   nil)
+     :else
+     (let [w (fx/write-file {:req {:path abs :text new}})]
        (if (contract/error? w)
          w
          {:edited {:path abs}
           :seon.text/said (str "Wrote to disk at " abs ": no branch holds this, and no merge carries it."
                                (path-note (cfg/file-kind (file-name at)))
-                               (namespace-file-note at))})))))
+                               (namespace-file-note at))}))))))
 
 (defn- held-file
   "A file this branch holds as a kind on the allow-list: its text as the branch states it. See docs/agent.md#changing-a-file."
