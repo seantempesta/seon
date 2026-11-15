@@ -607,15 +607,13 @@
 (defn- facts
   "The facts from changed since base (`changed-datoms`), each {:e :a :v :tx :side}: :retract for one gone, :add for one added, the
   side taken from which list it is in, never a datom's own flag (a diff's gone datoms are stored datoms, :added true). A
-  transaction's own facts, Datahike's own attributes, and the derived attributes (the entity index's :derived-attrs, made again after
-  a merge) are left out; every other fact merges whole. See docs/merging.md#a-branch-merges-main-in."
+  transaction's own facts and Datahike's own attributes are left out; every other fact merges whole (owner: no list of what merges). See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :map]]}
   [base from]
   (let [[gone added] (changed-datoms base from)
-        ;; derived values are made again after a merge, never carried
-        skip (:derived-attrs (pdb/index))
         txe (into #{} (map :tx) (concat gone added))
-        fact? (fn [{:keys [e a]}] (and (not (txe e)) (keyword? a) (not= "db" (namespace a)) (not (skip a))))
+        ;; every fact merges whole, no list of what crosses (owner): a transaction's own facts and Datahike's own are no facts of the merge
+        fact? (fn [{:keys [e a]}] (and (not (txe e)) (keyword? a) (not= "db" (namespace a))))
         as (fn [side] (fn [dt] {:e (:e dt) :a (:a dt) :v (:v dt) :tx (:tx dt) :side side}))
         held? (fn [db {:keys [e a v]}] (some? (first (d/datoms db :eavt e a v))))]
     ;; a fact is [e a v]: one both hold, asserted in different transactions (a diff compares whole datoms), is neither side's change
@@ -634,35 +632,50 @@
   "The one merge of from into into-db, decided over facts: from's since base (`facts`), and at each [e a] they touch (each [e a v]
   of a cardinality-many attribute) the values base, into-db and from hold. A conflict is a key both sides changed since base, to
   different values: {:conflicts [{:key [:datum e a] or [:datum e a v], :entity its name (`named`), :base :ours :theirs}]}, nothing
-  applied; :ours is from's, :theirs into-db's, a value (cardinality one) or whether the [e a v] is held. Clean: {:txs [{:source t
-  :ops}]}, from's source transactions in order, each the facts it changed as ops, replayed as new transactions. The same for main and
-  any branch. Costs O(d), d the facts from changed: one seek a key on each of three dbs (tests' pilot branch, 1,266 datoms: 69 ms,
-  result/b9f7c2bf). See docs/merging.md#a-branch-merges-main-in."
+  applied; :ours is into-db's, :theirs from's (git's words merging from into into-db), a value (cardinality one) or whether the [e a v]
+  is held. A conflict into-db decided (its entry resolved, my.branch/resolve!, while from still holds the entry's theirs) is no
+  conflict: into-db's value stands, from's facts at that key are not replayed, and the entry settles. Clean: {:txs [{:source t
+  :ops}]}, from's source transactions in order, each the facts it changed as ops, replayed onto into-db as new transactions. Main into
+  a branch replays main's change onto the branch, so the branch's own facts keep their transactions (seon.writer/merge-main-into).
+  Costs O(d), d the facts from changed: one seek a key on each of three dbs. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:or [:map [:conflicts [:vector :seon.merge/conflict]]] [:map [:txs [:vector [:map [:source :int] [:ops :seon.db/tx-data]]]]]]]}
   [base from into-db]
-  (let [fs (facts base from)
+  (let [ids (:identity-schemas (pdb/index))
+        ident (fn [db e] (some (fn [[a]] (some->> (first (d/datoms db :eavt e a)) :v (vector a))) ids))
+        ;; one entity is one identity on both sides: an entity from made since base that into-db holds under the same identity (a task
+        ;; a branch wrote as main declares it, seon.agent/begin-run!) is into-db's entity, its id never compared or written (a ref
+        ;; compares by its target's identity, never an id)
+        to-into (memoize (fn [e] (or (when-let [[a v] (ident from e)] (pdb/eid into-db a v)) e)))
+        ref? (fn [a] (= :db.type/ref (get-in (:schema from) [a :db/valueType])))
+        fs (mapv (fn [{:keys [e a v] :as f}] (assoc f :e0 e :v0 v :e (to-into e) :v (if (ref? a) (to-into v) v))) (facts base from))
         many? (fn [a] (= :db.cardinality/many (get-in (:schema from) [a :db/cardinality])))
         k-of (fn [{:keys [e a v]}] (if (many? a) [:datum e a v] [:datum e a]))
+        k0-of (fn [{:keys [e0 a v0]}] (if (many? a) [:datum e0 a v0] [:datum e0 a]))
+        k0s (reduce (fn [m f] (update m (k-of f) #(or % (k0-of f)))) {} fs)
         at (fn [db [_ e a v :as k]] (if (= 4 (count k)) (some? (first (d/datoms db :eavt e a v))) (:v (first (d/datoms db :eavt e a)))))
-        ;; a conflict from has decided (git add: its entry resolved, my.branch/resolve!) while into-db still holds the entry's theirs:
-        ;; from's value stands and the entry settles; into-db moving the key again is a new conflict
-        held (into {} (map (juxt :key identity)) (entries from))
-        decided? (fn [k i] (when-let [en (held k)] (and (:resolved? en) (= i (:theirs en)))))
+        ;; from's value read where from holds it, a ref as into-db's entity
+        at-from (fn [k] (let [[_ _ a :as k0] (k0s k) v (at from k0)] (if (and (ref? a) (number? v)) (to-into v) v)))
+        name-of (fn [e] (let [n (named into-db e)] (if (= n e) (named from e) n)))
+        held (into {} (map (juxt :key identity)) (entries into-db))
+        decided? (fn [k f] (when-let [en (held k)] (and (:resolved? en) (= f (:theirs en)))))
         judged (for [k (into (sorted-set-by #(compare (pr-str %1) (pr-str %2))) (map k-of) fs)
-                     :let [b (at base k) i (at into-db k) f (at from k)]
+                     :let [b (at base k) i (at into-db k) f (at-from k)]
                      :when (and (not= b i) (not= b f) (not= i f))]
-                 [(decided? k i) (cond-> {:key k :entity (named from (second k))}
-                                   (some? b) (assoc :base b) (some? f) (assoc :ours f) (some? i) (assoc :theirs i))])
+                 [(decided? k f) (cond-> {:key k :entity (name-of (second k))}
+                                   (some? b) (assoc :base b) (some? i) (assoc :ours i) (some? f) (assoc :theirs f))])
         conflicts (vec (keep (fn [[d c]] (when-not d c)) judged))
         settled (into #{} (keep (fn [[d c]] (when d (:key c)))) judged)
-        txs (->> fs (group-by :tx) (sort-by key)
-                 (mapv (fn [[t ds]] {:source t :ops (mapv (fn [{:keys [e a v side]}] [(if (= :add side) :db/add :db/retract) e a v]) ds)})))]
+        ;; an entity from holds no datom of while base did is deleted whole there: replayed so, its other side's facts go with it (a
+        ;; verdict on a test main removed leaves no nameless entity; lb76, 2026-11-15)
+        gone? (memoize (fn [e0] (and (seq (d/datoms base :eavt e0)) (empty? (d/datoms from :eavt e0)))))
+        op (fn [{:keys [e e0 a v side]}] (if (and (= :retract side) (gone? e0)) [:db/retractEntity e] [(if (= :add side) :db/add :db/retract) e a v]))
+        txs (->> fs (remove #(settled (k-of %))) (group-by :tx) (sort-by key)
+                 (mapv (fn [[t ds]] {:source t :ops (vec (distinct (map op ds)))})))]
     (cond (seq conflicts) {:conflicts conflicts}
           ;; the entries it decides settle: none stays on the merged value
           (seq settled) {:txs (conj txs {:source (:max-tx from)
-                                         :ops (vec (for [e (entry-eids from) :when (settled (:seon.merge/key (d/entity from e)))] [:db/retractEntity e]))})}
+                                         :ops (vec (for [e (entry-eids into-db) :when (settled (:seon.merge/key (d/entity into-db e)))] [:db/retractEntity e]))})}
           :else {:txs txs})))
-
 (defn mutations
   "What the forms a branch adds (ours: its changes since base) do that program code does
   not: call clojure.core/intern, alter-var-root, eval or load-string, or define inside a

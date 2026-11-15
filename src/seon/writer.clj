@@ -222,12 +222,12 @@
                  (catch clojure.lang.ExceptionInfo e
                    (reduced (contract/error :seon.merge/replay-refused #'seon.writer/replay
                                             (str "the merge replays transaction " source " and the write check refuses it: " (ex-message e))
-                                            {:tx source :entity (pm/named from (second (first ops))) :error (ex-data e)})))))
+                                            {:tx source :entity (let [x (second (first ops)) n (pm/named into-db x)] (if (= n x) (pm/named from x) n)) :error (ex-data e)})))))
           into-db txs))
 
 (defn merge-main-into
-  "Main merged into branch b, decided on main's program (seon.merge/decide: the branch's facts since the base against main's at the
-  same keys): a conflict writes only its unmerged entries; clean, the branch's own transactions replayed onto main's head (`replay`),
+  "Main merged into branch b, decided on main's program (seon.merge/decide: main's facts since the base against the branch's at the
+  same keys): a conflict writes only its unmerged entries; clean, main's transactions since the base replayed onto the branch's head (`replay`),
   its moved tasks' cites made again, and one force-branch! onto b with both parents. Answers {:ok :conflicts :commit :keys :t :main},
   or the typed error of a swept merge base or a refused replay. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :any :map :seon.db/branch] :map]}
@@ -236,8 +236,10 @@
         base (pdb/branch-base conn main-b b)
         ;; nothing to merge when the branch's base is main's head (a resume with main unmoved): nothing decided
         same? (and (not (contract/error? base)) (= (d/commit-id base) (d/commit-id main)))
-        r (when-not (or same? (contract/error? base)) (pm/decide base head main))
-        replayed (when (:txs r) (replay main head (:txs r) (pdb/tx-meta b {:seon.tx/merged main-b})))
+        ;; git's direction: main's change since the base replayed onto the branch, so the branch's own facts keep their transactions
+        ;; and only what main moved is new to it (a replay of the branch's own made its whole history look moved at every merge)
+        r (when-not (or same? (contract/error? base)) (pm/decide base main head))
+        replayed (when (:txs r) (replay head main (:txs r) (pdb/tx-meta b {:seon.tx/merged main-b})))
         ks (vec (distinct (for [{:keys [ops]} (:txs r) [_ e a] ops] [:datum e a])))]
     (cond
       (contract/error? base) base

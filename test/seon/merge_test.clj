@@ -626,13 +626,13 @@
 
 
 (defn- merged-of
-  "What the writer's merge makes of head merged into main from base b0 (seon.merge/decide, then seon.writer/replay): {:conflicts},
+  "What the writer's merge of main into the branch head makes, from base b0 (seon.merge/decide, then seon.writer/replay of main's change onto head): {:conflicts},
   {:refused} with the replay's typed refusal, or {:db} the merged value."
   [b0 head main]
-  (let [r (pm/decide b0 head main)]
+  (let [r (pm/decide b0 main head)]
     (if (:conflicts r)
       r
-      (let [db (seon.writer/replay main head (:txs r) {})] (if (contract/error? db) {:refused db} {:db db})))))
+      (let [db (seon.writer/replay head main (:txs r) {})] (if (contract/error? db) {:refused db} {:db db})))))
 
 ;; Estimate: the world 0.5M (cached) + 5 small transactions ~1M + one merge-main (a diff of a few datoms, program-of on 2 keys of three
 ;; dbs) ~3M + one db-with ~0.5M = 10000000 ticks
@@ -682,11 +682,11 @@
         w (d/db-with (base) [{:seon.agent/key "root" :seon.agent/status :busy}])
         head (as w :main/b (var-tx "f" "(inc x)"))
         b0 (d/db-with w [[:db/add [:seon.agent/key "root"] :seon.agent/status :idle]])
-        main (d/db-with b0 [[:db/add [:seon.agent/key "root"] :seon.agent/status :stopped]])
+        main (d/db-with b0 [[:db/add [:seon.agent/key "root"] :seon.agent/status :ended]])
         {:keys [db conflicts]} (merged-of w head main)
         merged db]
     (is (nil? conflicts) (str "read from the true base, w, the branch never changed root's fact: no change of its: " (pr-str conflicts)))
-    (is (= :stopped (:seon.agent/status (d/entity merged [:seon.agent/key "root"]))) "main's fact, never the shared old value")
+    (is (= :ended (:seon.agent/status (d/entity merged [:seon.agent/key "root"]))) "main's fact, never the shared old value")
     (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch keeps its own change")))
 
 ;; Estimate: the world 0.5M (cached) + 1M a task's create + 3 small transactions ~1M + one merge-main and one delta three-way of a few keys
@@ -713,7 +713,7 @@
     (is (= [k] (mapv :key (:conflicts (pm/delta-three-way b0 head main :all)))) "and merging the branch to main")))
 
 ;; Estimate: the world 0.5M (cached) + 4 small transactions ~1M + one merge-main and one merge-tx of a few datoms ~4M = 8000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 8000000}} a-fact-of-an-entity-main-deleted-refuses-the-merge
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-fact-of-an-entity-the-other-side-deleted-is-left-out
   ;; Stage 0 (2026-11-15 01:28): main removed the test var seon.lib-test/a-fork-whose-wait-is-cancelled-says-how-many-run, whole; lb76's
   ;; own verdict on it (:seon.test/digest, :seon.test/status) merged onto main's db, a nameless entity, and seon.agent/record-results!
   ;; read a nil :var/name. A fact has no subject once the other side deleted its entity (docs/merging.md#a-branch-merges-main-in)
@@ -723,12 +723,13 @@
         head (-> b0 (as :main/b [[:db/add e :seon.test/digest "d1"] [:db/add e :seon.test/status :deferred]])
                  (as :main/b (var-tx "f" "(inc x)")))
         main (as b0 :main [[:db/retractEntity e]])
-        {:keys [conflicts refused]} (merged-of b0 head main)]
-    ;; root's ruling (2026-11-15): a conflict is only an [e a] both changed; main deleted the var's own facts, the branch wrote others of
-    ;; it, so none conflicts, and the write check refuses the entity left with no name: typed, nothing applied, the agent's to settle
+        {:keys [conflicts db]} (merged-of b0 head main)
+        merged db]
+    ;; root's ruling (2026-11-15): a conflict is only an [e a] both changed, so none here; main holds no datom of the var, deleted whole,
+    ;; and that is what is replayed: the branch's facts of it go with it, never a nameless entity
     (is (nil? conflicts) (pr-str conflicts))
-    (is (= :seon.merge/replay-refused (:seon.error/type refused)) (str "merging main into the branch: refused, never a nameless entity: " (pr-str refused)))
-    (is (= [:var/name 'app/t] (:entity refused)) "naming the entity by its name")
+    (is (empty? (d/datoms merged :eavt e)) "merging main into the branch: no nameless entity")
+    (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch keeps its own change")
     (testing "and merging the branch to main"
       (let [r (pm/delta-three-way b0 head main :all)
             onto (d/db-with main (pm/merge-tx main b0 head (keys (:ours r)) :all))]
