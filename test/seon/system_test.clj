@@ -88,8 +88,7 @@
     (is (map? (:root r)) (pr-str r))
     (if (:site (:root r))
       (is (:stepping (:site (:root r))) (str "the api mid-step, named by what it steps: " (pr-str (:root r))))
-      (do (is (every? #{:seon.system/stall-armed :seon.system/busy :seon.system/lost :pending :awaits} (keys (:root r))) "root's stall check and its open asks, nothing else of its state")
-          (is (map? (get-in r [:root :pending])) "every ask the api holds unanswered, by rid")
+      (do (is (map? (get-in r [:root :pending])) "every ask the api holds unanswered, by rid")
           ;; red before (batch 32's problems overrun): the api's ping answered only :agents :closing :pending, so :root was {} on every
           ;; root and a hang's evidence never showed whether the stall check was armed or which agents it held busy
           (is (boolean? (:seon.system/stall-armed (:root r))) "the armed flag, read whatever its value")

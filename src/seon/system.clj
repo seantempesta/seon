@@ -289,15 +289,16 @@
         unanswered (set (::flow/unanswered (meta states)))
         site #(::flow/site (get states %))
         state #(when-not (unanswered %) (::flow/state (get states %)))
-        evidence (fn [pid ks] (if (unanswered pid) {:site (site pid)} (select-keys (state pid) ks)))]
+        ;; each proc's evidence is what its own :ping-map-fn shows (it chooses), or its site when it did not answer
+        evidence (fn [pid] (if (unanswered pid) {:site (site pid)} (state pid)))]
     ;; as the api's ping answers it (its :ping-map-fn): the armed flag (seon.step/timer), the busy set, what a throw lost
-    {:root (evidence :api [::stall-armed ::busy ::lost :pending :awaits])
+    {:root (evidence :api)
      ;; each effect owner's workers busy, requests in flight and queued: an op the api holds pending is named running, waiting
      ;; or answered and lost (a server op's connection parked with no worker busy, context's overrun 2026-11-15)
      :fx (into (sorted-map) (for [[pid m] states :let [s (::flow/state m)] :when (and (contains? s :in-flight) (contains? s :queued))]
                               [pid (select-keys s [:busy :in-flight :queued :done])]))
      ;; the reconciler's flights by task and the step each waits at: a judge that never settles is named
-     :reconciler (evidence :reconciler [:flights :flight-steps :quiet :t :waits :report :live :pending :behind :judged])
+     :reconciler (evidence :reconciler)
      :agents (into (sorted-map)
                    (for [[pid m] states :let [s (::flow/state m)] :when (contains? s :inflight)]
                      [pid (assoc (select-keys s [:fx-out :stall-seen :last-frame-ms :holding :held]) :inflight (update-vals (:inflight s) :kind))]))
