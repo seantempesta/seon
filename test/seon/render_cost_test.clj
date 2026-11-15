@@ -731,8 +731,10 @@
                ;; 2026-11-14 (web): +300 fixed calls, the html of the move's new eval and its call, drawn once: the model output places them
                ;; first (::for, no html), and the page's placement used to hit that entry and draw no html (the bug, seon.render/render!'s
                ;; :for-only); measured 2,909 / 4,629 / 8,189 at 10 / 20 / 40, ~300 over the old bound at each size, so fixed, not per turn
+               ;; 2026-11-15 (context): +6 fixed calls, seon.ratom/key-set (contracted) where the root's and joins' key sets are read in place of
+               ;; an iteration (seon.ctx/placed-messages, seon.render/entity-schema), so a value replaced reruns no reader of which keys exist
                :per-n {:calls 176 :bytes 156000}
-               :fixed {:calls 1150 :bytes 1850000}
+               :fixed {:calls 1156 :bytes 1850000}
                :sizes [10 20 40]})
   (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/walk-same-of
                :n "turns of the agent, an eval each"
