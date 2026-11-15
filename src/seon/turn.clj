@@ -557,13 +557,17 @@
       :else (ask st))))
 
 (defn- merged-in
-  "A turn of run state st with main merged in: behind, the run ends :refork (no turn runs old code: root forks it again on main's
-  program); else it asks the task observed ({:observe}). See docs/merging.md#a-branch-merges-main-in."
+  "A turn of run state st with main merged in: behind, this process takes its branch's program in place first (seon.agent/take-branch-program!:
+  the forms main changed since its last boundary, load-diff!), so no turn runs old code and the run goes on in the same process, each form
+  that did not load told to the agent as a :seon.agent/load-failed message its next request reads; then it asks the task observed
+  ({:observe}). See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :map] :seon.turn/step]}
   [st]
-  (if (:behind @agent/state)
-    [::end st :refork "merged main: the run goes on in a process forked on main's program" nil]
-    [st {:observe (:task st)}]))
+  (when (:behind @agent/state)
+    (doseq [{:keys [ns message]} (agent/take-branch-program!)]
+      (tell-error! (contract/error :seon.agent/load-failed #'seon.turn/merged-in (str "a form of " ns " that main changed did not load: " message) {:ns ns})
+                   "taking main's program in place at the turn's boundary")))
+  [st {:observe (:task st)}])
 
 (defn turn-begin
   "A turn begun: main merged in if it moved ({:merge}, `turn-merged`), else the task observed ({:observe}, `turn-observed`), each an
