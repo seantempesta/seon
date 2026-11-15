@@ -973,6 +973,10 @@
  ;; Unit: keys. A keyword-keyed map or set of at most this many shows identity attributes and
  ;; short members first, then alphabetically; a larger one its own seq order (v1).
  :seon.config.render.agent/sort-bound 64
+ ;; Unit: reactions a step. The most reactions an owner proc (the render proc first) runs in one step; the rest are its next
+ ;; message, so ping and stop interleave and nothing is dropped. Provenance: flow's review of Land A, 2026-11-15: a recorded error's
+ ;; row ~39k ticks [runtime M result/d68abfc9], so 250 is ~10M ticks a step. At the bound: the rest wait one message.
+ :seon.config.render/flush-max 250
  ;; Unit: characters per printed line (session P1's printer, matching v1's corpus output).
  :seon.config.render/width 72
  ;; The one-printer law (docs/render.md#one-printer; owner: "Do not create more than one value printer and no clipping happens
