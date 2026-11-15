@@ -186,9 +186,9 @@
                       undo (vec (for [e (remove nil? [(pdb/eid db :seon.task/id id) (pdb/eid db :seon.agent/key k)])
                                       dt (d/datoms h :eavt e) :when (= (:t started) (:tx dt))]
                                   [(if (:added dt) :db/retract :db/add) (:e dt) (:a dt) (:v dt)]))]
-                  @(c/transact-main! sys undo)
-                  @(c/transact-main! sys (conj (task/refused-tx @(:conn sys) id r)
-                                               {:seon.agent/key k :seon.agent/status :ended :seon.agent/ended-ms (System/currentTimeMillis)}))))
+                  ;; one transaction: the refusal read on the task as the undo leaves it
+                  @(c/transact-main! sys (into undo (conj (task/refused-tx (:db-after (pdb/with db undo)) id r)
+                                                          {:seon.agent/key k :seon.agent/status :ended :seon.agent/ended-ms (System/currentTimeMillis)})))))
               r)
           (do (when clone-of @(c/transact-main! sys (start ag)))
               (when replaced (c/kill! sys replaced))
