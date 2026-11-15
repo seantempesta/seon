@@ -530,7 +530,7 @@
   (seon.profile/opened, Jolt's record: a run with none keeps the tree), each checkout file read ([:file path], relative to the
   checkout) in place of [:tree]; a directory listed under the checkout keeps the tree (its names are a read no blob holds).
   Its edge: a read on a thread the test did not start (a pool's) is not noted. So an edit to a file the test never opened moves
-  none of its reads (a one-line docs edit moved 78 tests by [:tree], 2026-11-15). See docs/source.md#tests-run-by-reach."
+  none of its reads. See docs/source.md#tests-run-by-reach."
   {:malli/schema [:=> [:cat :map :symbol [:maybe [:or [:set :any] [:sequential :any]]]] :map]}
   [x t ks]
   (let [fns (conj (into #{} (map :var) (:fns x)) t)
