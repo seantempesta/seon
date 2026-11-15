@@ -24,9 +24,10 @@
   it is answered (seon.agent/record-answer!), and nothing else is written to the store.
   `:main` is the writer's commit notice (a sliding buffer of one: a notice is replaced by the next,
   a reader catches up from main's head): it keeps the latest main t for a request that names
-  none, and with :seon.config.proofs/prove-main-on-commit a commit that moves main's program
-  (seon.program/moves-program?) is a request to prove main at it, with no waiter: main is proved
-  at each program commit, whoever asks."
+  none, and with :seon.config.proofs/prove-main-on-commit a notice whose :program-t passed the last run asked is a
+  request to prove main at it, with no waiter: main is proved at each program move, whoever asks. Whether a commit moves
+  the program is decided once, in the writer (seon.writer/program-at, the one call of seon.program/moves-program?), and
+  carried on every notice; moves made during a run coalesce into the next (`main-wanted`)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.proofs :as proofs] [seon.program :as program] [seon.config :as cfg] [seon.fx :as fx]
             [clojure.core.async.flow :as flow] [clojure.string :as str] [seon.db :as pdb]))

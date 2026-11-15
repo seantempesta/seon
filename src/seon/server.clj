@@ -317,7 +317,8 @@
   (agents-answer sys))
 
 (defn- agent-reply
-  "An outside agent's request of agent ag as one reply (seon.turn/outside-reply!): {:responses [...]}, each eval's. The shape every eval of an agent takes, the old :code refused, saying so, with nothing run. See docs/server.md#ops."
+  "An outside agent's request of agent ag as one reply (seon.turn/outside-reply!): {:responses [...]}, each eval's, and :messages, the messages
+  its turn took when the reply is the agent's turn (docs/users.md#messages). The shape every eval of an agent takes, the old :code refused, saying so, with nothing run. See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.system/sys :keyword :map] :map]}
   [sys ag req]
   (let [{:keys [task env]} (work-of sys ag)
@@ -335,7 +336,7 @@
             r @(c/submit! sys ag (sedn/encode form) {:origin :context})]
         (cond (contract/error? r) r
               (:ex r) (:ex r)
-              :else {:responses (sedn/decode (:seon.print/code (:out r)))})))))
+              :else (sedn/decode (:seon.print/code (:out r))))))))
 
 (defmethod op-answer :eval [sys ag req]
   (if (= :root ag)
@@ -568,7 +569,9 @@
                            ;; handle, anything else whole by the printer (nothing could re-ask it)
                            (result {"content" [{"type" "text" "text" (cond (and (= :context op) (:context a)) (:context a)
                                                                            (:response a) (eval-text (:response a))
-                                                                           (:responses a) (str/join "\n\n" (map eval-text (:responses a)))
+                                                                           (:responses a) (str (when-let [ms (seq (:messages a))]
+                                                                                                 (str (str/join "\n" (for [m ms] (str "Message from " (or (:from m) "seon") ": " (:body m)))) "\n\n"))
+                                                                                               (str/join "\n\n" (map eval-text (:responses a))))
                                                                            (contract/error? a) (print/text a)
                                                                            (:again (ops op)) (let [p (print/print-value a {:handle (:again (ops op))})] (or (:text p) (:seon.error/message p)))
                                                                            :else (print/text (vary-meta a assoc :seon.print/full true)))}]}))))
