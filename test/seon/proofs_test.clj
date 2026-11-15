@@ -331,7 +331,7 @@
     (is (pos-int? (:ticks (ran 'app.pv-budget-test/after))) "each result carries the ticks it did")))
 
 ;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a test a test child ends from outside (its wall bound: the child throws
-;; :seon.test/deadlock into the test's fiber) is that test's own :error, named, and the namespace goes on. Red before: the throw ended the namespace, the test answered no verdict and every later test was reported
+;; :seon.test/wall-spent into the test's fiber) is that test's own :error, named, and the namespace goes on. Red before: the throw ended the namespace, the test answered no verdict and every later test was reported
 ;; red unrun ("run threw before this test reported"; tests' batch through 7888, 2026-11-13: 33 no-verdicts, 91 unrun reds)
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-test-ended-from-outside-is-its-own-error-and-the-namespace-goes-on
   (record (ts/test-db) 'user "(ns app.pv-ended-test (:require [clojure.test :refer [deftest is]]))"
@@ -344,12 +344,12 @@
                 (swap! notes conj x)
                 (when (= 'app.pv-ended-test/parks (:seon.test/started x))
                   (throw (ex-info "the test ran past its wall bound (#'app.pv-ended-test/parks)"
-                                  {:seon.error/type :seon.test/deadlock :test 'app.pv-ended-test/parks}))))
+                                  {:seon.error/type :seon.test/wall-spent :test 'app.pv-ended-test/parks}))))
         ran (proofs/run-tests! '[app.pv-ended-test/parks app.pv-ended-test/after] {} note! 50000000)
         ended (some #(when (and (= 'app.pv-ended-test/parks (:test %)) (= :error (get-in % [:seon.test/report :type]))) (:seon.test/report %)) @notes)]
     (is (= {:pass 0 :fail 0 :error 1} (select-keys (ran 'app.pv-ended-test/parks) [:pass :fail :error])) "the ended test is red")
     (is (not (:unreported (ran 'app.pv-ended-test/parks))) "reported as itself, never as a namespace's throw")
-    (is (= :seon.test/deadlock (:seon.error/type ended)) (str "its report carries the typed error that ended it: " (pr-str (dissoc ended :actual))))
+    (is (= :seon.test/wall-spent (:seon.error/type ended)) (str "its report carries the typed error that ended it: " (pr-str (dissoc ended :actual))))
     (is (re-find #"wall bound" (str (:message ended))) "and its message")
     (is (proofs/green? (ran 'app.pv-ended-test/after)) "and the next test ran, green")))
 
@@ -866,6 +866,18 @@
 ;; is answered as an :error naming why, :not-run: no verdict of its own, so it is never written to the cache. Found by runtime's
 ;; review, 2026-11-13: answer-ran left out only :reused and died reports, so that error was cached as a red at the test's real
 ;; digest, which a later run would reuse and never run the test. Estimate: one fold of three reports, ~50k ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-wall-time-end-is-no-verdict-and-never-cached
+  ;; docs/principles.md#6-nothing-changed-nothing-runs-a-change-costs-what-it-touched: a test ended at its wall bound
+  ;; (:seon.test/wall-spent, a peer root's bound in seon.test-store/ask) read the machine's load, not its own work: 21 root-starting tests ended so in the
+  ;; service at load, green alone, and their cached reds made them flaky at their digests (root.log, 2026-11-14). Its end stops the
+  ;; hang; it is never a verdict. Estimate: two reports read, ~0.1M
+  (let [answer {:reports [{:type :pass :var "#'a.x-test/ran"}
+                          {:type :error :var "#'a.p-test/waits" :seon.error/type :seon.test/wall-spent
+                           :message "Uncaught exception, not in assertion." :actual "the test ran past its wall bound of 36700 ms"}]
+                :digests {'a.x-test/ran "d1" 'a.p-test/waits "d2"}}
+        {:keys [ran]} (proofs/answer-ran answer)]
+    (is (= #{'a.x-test/ran} (set (keys ran))) "only the test that ended by its own work is a verdict to cache")))
+
 (deftest ^{:seon.test/estimate {:ticks 100000}} a-test-not-run-is-no-verdict-and-never-cached
   (let [answer {:reports [{:type :pass :var "#'a.x-test/ran"}
                           {:type :error :var "#'a.p-test/boots" :not-run true :message "a.p-test/boots reaches a process of its own"}]

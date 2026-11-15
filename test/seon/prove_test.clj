@@ -492,21 +492,34 @@
 
 ;; docs/principles.md#6-nothing-changed-nothing-runs-a-change-costs-what-it-touched: a wall-time end read the machine, so the service
 ;; answers it as no verdict and a :platform problem (the core's own, loud), never a red its cache keeps (root.log 2026-11-14: 21 such)
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-wall-time-end-is-a-platform-problem-never-a-red
+  (let [[st o1] (prove/ask-items (items-st 1) 7 :batch {['app.x-test/t "d1"] {:agent :a1 :ms 5}})
+        b (first (batches o1))
+        [st v] (step/answered st (:tag b))
+        ended {:pass 0 :fail 0 :error 1
+               :reports [{:type :error :var "#'app.x-test/t" :seon.error/type :seon.test/wall-spent :message "Uncaught exception, not in assertion."
+                          :actual "the test ran past its wall bound of 36700 ms"}]}
+        [st o2] (prove/batch-ended st (parse-long (second v)) ended)
+        r (get-in (answers o2) [7 :results 'app.x-test/t])]
+    (is (= :seon.prove/no-verdict (:seon.error/type r)) (str "no verdict, never a red: " (pr-str r)))
+    (is (some #(and (= :problem (:op %)) (= :platform (:class %))) o2) "and a :platform problem, loud")))
+
 ;; docs/merging.md#the-test-service: one test with no verdict voids only its own. A run's answer was the first item error
 ;; (seon.prove/settle): one test ending at its wall bound (seon.procs-test/the-render-proc-asks-for-root-s-view-once-per-round-trip)
 ;; made the first backlog task's whole run an error, the agent held it as :seon.agent/test-error, and every proof read unknown, so
 ;; the task closed (context, 2026-11-14). Estimate: one run of two items through the proc ~0.3M.
 (deftest ^{:seon.test/estimate {:ticks 500000}} a-test-with-no-verdict-voids-only-its-own
   (let [answer {:pass 1 :fail 0 :error 1 :ms 5 :digests {'a.b-test/t "d1" 'a.b-test/u "d2"}
-                ;; u was granted but its child reported nothing of it (died before its start): no verdict of its own
-                :reports [{:type :pass :var "#'a.b-test/t"}]}
+                :reports [{:type :pass :var "#'a.b-test/t"}
+                          {:type :error :var "#'a.b-test/u" :seon.error/type :seon.test/wall-spent :message "Uncaught exception, not in assertion."
+                           :actual "the test ran past its wall bound of 36700 ms"}]}
         [st outs] (feed (proc0) [(req 1 :main 5)])
         [_ all] (run-through st outs answer)
         r (:r (first (filter #(= :prove-answer (:op %)) all)))]
     (is (not (seon.contract/error? r)) (str "the run answers its verdicts, not the one test's error: " (pr-str r)))
     (is (= 1 (:pass r)) "the test that passed counts")
     (is (= [:seon.prove/no-verdict] (keep #(when (= "#'a.b-test/u" (:var %)) (:seon.error/type %)) (:reports r)))
-        "and the one with no report is its own no-verdict")))
+        "and the one ended at its wall bound is its own no-verdict")))
 
 ;; docs/merging.md#the-test-service: each asker is told an item's verdict as it lands, before it is answered, so a session's
 ;; bin/prove prints each test as it ends; an item with no verdict is told as :no-verdict, never left out
