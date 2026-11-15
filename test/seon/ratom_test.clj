@@ -669,3 +669,20 @@
     (flush! 10)
     (is (= [7] @seen) (str "the top ran once, on both sides' new values (3 + 4): " @seen))
     (doseq [x [d b c]] (dispose! x))))
+
+;; Estimate: three reactions, one that spins past a 2M-tick budget: ~2M ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-flush-ended-by-its-budget-leaves-the-reaction-dirty-and-the-rest-queued
+  ;; flow's review of e23cb9abc4: a step's tick budget (or an eval's interrupt) ends a flush mid-reaction; it is no error of that
+  ;; reaction, so it reaches the step, and the reaction it cut stays dirty and queued with the rest, for the owner's next step
+  (let [a (rv/atom 0)
+        spin (make-reaction #(when (pos? @a) (loop [i 0] (recur (inc i)))) :auto-run :queue)
+        rest (vec (for [i (range 2)] (make-reaction #(+ i @a) :auto-run :queue)))
+        _ (flush! 10)
+        _ (swap! a inc)
+        ended (try (jolt.host/run-interruptible (jolt.host/make-interrupt) #(flush! 10) 2000000 nil) nil
+                   (catch Throwable t (ex-data t)))]
+    (is (:jolt/interrupted ended) (str "the budget's end reached the step: " (pr-str ended)))
+    (is (nil? (rv/-get spin :caught)) "it is no error of the reaction it cut")
+    (is (rv/-get spin :dirty?) "which stays dirty")
+    (is (= 3 (rv/queued)) "and queued, with the rest")
+    (dispose! spin) (doseq [r rest] (dispose! r))))

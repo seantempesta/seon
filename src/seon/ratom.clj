@@ -22,7 +22,7 @@
   Reagent's own rule, and after a commit (`commit!`); a page's render queue is the walk's, drained
   in mount order. docs/render.md#reactive-renders."
   (:refer-clojure :exclude [defn defn- atom run!])
-  (:require [seon.contract :refer [defn defn-]] [datahike.reads :as reads] [datahike.index.interface] [clojure.core.async :as a] [seon.db :as pdb] [seon.config :as cfg]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.reads :as reads] [datahike.index.interface] [clojure.core.async :as a] [seon.db :as pdb] [seon.config :as cfg] [seon.intr :as intr]))
 
 (defprotocol IReaction
   "A reaction's own state, read and set by this namespace's functions (Reagent's JavaScript
@@ -440,8 +440,10 @@
          (if (or (empty? q) (zero? left))
            (count q)
            (let [[k [r g]] (first q)]
-             (vswap! (:queue o) dissoc k)
+             ;; the entry leaves the queue once its run completed: a run cut by the step's budget or an interrupt (escaping past
+             ;; every catch) leaves it, dirty, and the rest queued for the owner's next step
              (binding [*gen* g] (-queued-run r g))
+             (vswap! (:queue o) dissoc k)
              (recur (dec left))))))
      0)))
 
@@ -540,13 +542,14 @@
   (-handle-change [this sender oldval newval]
     ;; a store reaches it only when its index names it for the commit's datoms (Store's commit!); every other source by Reagent's watch
     (cond
-      (or (identical? oldval newval) dirty?) nil
+      (identical? oldval newval) nil
       ;; its own run moved what it reads: a cycle, its typed state (deref-capture clears dirty? after the run, so this would be lost
       ;; silently and the value left stale); a cycle through another reaction is the generation's (-queued-run)
       ;; (a source reaction pulled by this run and rerun notifies it too: that is the run reading its new value, never a cycle)
       (and (identical? *ratom-context* this) (not (instance? Reaction sender)))
       (let [e (seon.contract/error :seon.ratom/cycle 'seon.ratom/flush! "a reaction whose run moves what it reads" {:generation (or *gen* 0)})]
         (set! caught (ex-info (:seon.error/message e) e)))
+      dirty? nil
       :else
       ;; the dirty? guard above keeps a reaction in its owner's queue (or its port) at most once; inside an owner nothing runs inline (the review's (2): a run mid-commit saw half-updated siblings): it is dirtied and queued,
       ;; and its owner's flush! runs it by height; Reagent's inline auto-run stays only for a reaction with no owner
@@ -574,18 +577,21 @@
         ;; dirtied again by its own generation's runs: a cycle, its typed state, never rerun until the flush's bound
         (let [e (seon.contract/error :seon.ratom/cycle 'seon.ratom/flush! "a reaction run twice in one generation: its run dirties what it reads" {:generation gen})]
           (set! dirty? false) (set! caught (ex-info (:seon.error/message e) e)))
-        (do (set! ran-gen gen)
-            (cond (nil? auto-run) (-run this true)
-                  (or (true? auto-run) (= :queue auto-run)) (do (set! dirty? false) (-run this true))
-                  ;; an auto-run fn is the reaction's run too: its throw is the reaction's error (the catching edge)
-                  :else (do (set! dirty? false) (try (auto-run this) (catch Throwable e (set! caught e)))))))))
+        ;; dirty? is cleared by the run's own capture at its end (deref-capture), and ran-gen set once it completed: a run cut by a
+        ;; budget stays dirty, and its retry is no cycle
+        (do (cond (or (nil? auto-run) (true? auto-run) (= :queue auto-run)) (-run this true)
+                  ;; an auto-run fn is the reaction's run too: its throw is the reaction's error (the catching edge), never a step's end
+                  :else (do (try (auto-run this) (catch Throwable e (if (intr/interrupt? e) (throw e) (set! caught e))))
+                            (set! dirty? false)))
+            (set! ran-gen gen)))))
   (-run [this check]
     (let [oldstate state
           res (if check
                 ;; Reagent's _try-capture: a run that throws keeps the throw as its state, and its
                 ;; next deref throws it (docs/failure-points.md, a reaction's run)
                 (try (set! caught nil) (deref-capture f this)
-                     (catch Throwable e (set! state e) (set! caught e) (set! dirty? false)))
+                     ;; what ends the step (an interrupt, a budget's end) is no error of this run: it goes on to the step
+                     (catch Throwable e (if (intr/interrupt? e) (throw e) (do (set! state e) (set! caught e) (set! dirty? false)))))
                 (deref-capture f this))]
       (when-not nocache?
         (set! state res)
@@ -593,7 +599,7 @@
         (when-not (or (nil? watches) (= oldstate res))
           ;; a watch callback is part of the run: under check, its throw is this reaction's error and the flush goes on
           (if check
-            (try (notify-w this watches oldstate res) (catch Throwable e (set! caught e)))
+            (try (notify-w this watches oldstate res) (catch Throwable e (if (intr/interrupt? e) (throw e) (set! caught e))))
             (notify-w this watches oldstate res))))
       res))
   (-set-opts [this opts]
