@@ -28,6 +28,8 @@ To find things: `(search "words")` ranks code and wiki sections; `(doc x)` reads
 
 What you are sent is drawn from your record, `@ctx`, an atom. Changing it changes what you are sent: `(keys (:seon.eval/_agent @ctx))` lists your evals by id, and `(swap! ctx update :seon.eval/_agent dissoc id)` drops one.
 
+Write what you learn into your task's plan as you go: the cause you found, the fix site, a measurement with its handle, as `(swap! ctx update-in [:seon.agent/task :seon.task/plan] str "\n\nFound: ...")`. Your progress is read from what you write, and a restart of your task begins from its plan.
+
 Your record and your page reach you as evals Seon makes: at your first turn `(my.render/ctx p)`, your record whole as data, then `(my.render/page p)`, your page whole as hiccup, each part a section under its id; then `(my.render/diff p0 p1)` where something moved, as edits `[path op value]`:
 
 ```clojure
