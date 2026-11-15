@@ -37,5 +37,5 @@
   :seon.task/kind :work
   :seon.task/proofs #{jolt.async-test/a-remote-procs-ping-shows-its-childs-last-pushed-view jolt.async-test/a-closed-link-answers-every-pending-ask jolt.async-test/a-full-error-chan-counts-its-drops}
   :seon.task/estimate #:jolt.async.remote.flow{proc {:n 1, :order :constant, :ticks 1000, :bytes 2000}}
-  :seon.task/needs #{seon.repl/every-agent-is-a-remote-flow-proc-in-roots-graph}}
+  :seon.task/needs #{"seon.repl/every-agent-is-a-remote-flow-proc-in-roots-graph"}}
 ]

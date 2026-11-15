@@ -17,4 +17,4 @@
   :seon.task/kind :work
   :seon.task/proofs #{datahike.reads-test/a-recorded-pull-on-a-history-value-records-its-entity}
   :seon.task/estimate #:datahike.reads{datom-keys {:n 10, :order :linear, :ticks 3000, :bytes 4000}}
-  :seon.task/needs #{seon.ratom/a-commit-reaches-only-the-readers-of-what-it-moved datahike.pull-api/a-recorded-pull-on-a-temporal-value-answers}}]
+  :seon.task/needs #{"datahike.pull-api/a-recorded-pull-on-a-temporal-value-answers" "seon.ratom/a-commit-reaches-only-the-readers-of-what-it-moved"}}]
