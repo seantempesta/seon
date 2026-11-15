@@ -20,7 +20,7 @@ Told that ticks count Scheme work only (no foreign calls, GC copying, parked tim
 
 ### Tests never hardcode defaults
 
-He ruled that no test hardcodes a default (2026-11-15). A test reads a default through the one config resolver and asserts the behaviour around it, never a copy of its value, so a changed default cannot leave a stale assertion red on main (two did that day). Tests sweeps the existing ones.
+He ruled that no test hardcodes a default (2026-11-15). A test reads a default through the one config resolver and asserts the behaviour around it, never a copy of its value, so a changed default cannot leave a stale assertion red on main (two did that day). Tests sweeps the existing ones. A default itself lives in the schema: a `:default` property on the key's malli schema entry, applied by the one resolver (`malli.transform/default-value-transformer`); data plans it with the config scope.
 
 ### A new binary runs in parallel, is tested there, then takes over
 
