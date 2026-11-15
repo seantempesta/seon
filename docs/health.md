@@ -56,7 +56,7 @@ A public function, macro or def of Seon's own source whose docstring cites no `d
 
 ## A key with no schema
 
-Every key Seon names is one schema entry: each of Seon's own qualified keywords (a `seon` or `my` namespace) that a source form names (`:form/keywords`) and no entry defines (`:schema/key`) is an `:unschemed-key` (```seon.problems/unschemed-keys```), one row a key naming the vars that use it. A reverse ref and an enum's value are not keys. A branch that names a new key without its entry, or removes the entry of a key still named, is caused the row; it closes when the entry is written, with its `:description`.
+Every key Seon names is one schema entry: each of Seon's own qualified keywords (a `seon` or `my` namespace) that a source form names (`:form/keywords`) and no entry defines (`:schema/key`) is an `:unschemed-key` (```seon.problems/unschemed-keys```), one row a key naming the vars that use it and the form that clears it, `(my.schema/register! k ...)`, which the status shows beside the problem as it shows a red proof's (`seon.problems-test/a-caused-row-carries-the-form-that-clears-it`). A reverse ref and an enum's value are not keys. A branch that names a new key without its entry, or removes the entry of a key still named, is caused the row; it closes when the entry is written, with its `:description`.
 
 ## A retyped attribute
 
