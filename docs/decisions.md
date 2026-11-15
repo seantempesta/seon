@@ -18,6 +18,10 @@ The owner's rulings on the morning after the first night run on its own.
 
 Told that ticks count Scheme work only (no foreign calls, GC copying, parked time or interrupts-off time: chez `s/cpnanopass.ss:2966`, `s/event.ss:47`) and that the 161M/300M swing is unexplained, he chose deps' order: dumps that need no event check; CPU time and bytes per fiber per dispatch; steps scoped by the existing nesting measure `ticks-of`, with no new marker; a counter of foreign lookups; then one experiment that settles the swing before ticks can fail a test. Plan in `deps-ticks-soundness-2026-11-15` (deps' task).
 
+### A new binary runs in parallel, is tested there, then takes over
+
+"We could run a system in parallel; it doubles as the test harness, and if it passes we switch over. Drift is matched by replaying the program's evals since then" (from his phone; root's rewrite, his meaning). The new binary boots beside the standing system on the same store, the binary tests run against it, and green it catches up main's program (`seon.program/load-diff!`) and takes the writer; red, the standing system never stopped. Plan item 17 (runtime) and E's binary tests (tests).
+
 ### The user talks to root; root manages the agents for them
 
 "I want the average user to never know that there are sub agents. Root is responsible for knowing what their agents are doing and managing them; if I ask a question it either looks it up quickly or messages the right agent to retrieve the data, then displays it. Root is a principal product and project manager working for the user, meant to understand what they want done and translate it to the agents' specialties. All agents have the same chat abilities, so we aren't building separate systems; on `/` the user goes through root, and that is root's primary task" (from his phone; root's rewrite, his meaning). Web plans the person view on it; the system view moves to debug.
