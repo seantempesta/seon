@@ -7,7 +7,8 @@
   Run: bin/test seon.ratom-test"
   (:refer-clojure :exclude [run!])
   (:require [clojure.test :refer [deftest is testing]] [seon.ratom :as rv :refer [reaction run! dispose! flush! make-reaction running]]
-            [seon.ctx :as ctx] [seon.db :as pdb] [seon.test-store :as ts] [datahike.api :as d]))
+            [seon.ctx :as ctx] [seon.db :as pdb] [seon.test-store :as ts] [datahike.api :as d]
+            [seon.profile :as profile] [datahike.reads :as reads] [clojure.core.async :as a]))
 
 (def testite 10)
 
@@ -439,3 +440,105 @@
     (is (empty? @tracks) "disposed: its owner's cache lets it go")
     (is (= "a2" @(rv/track text ea)) "and once nothing watches it, Reagent's: f called")
     (is (= 3 @calls))))
+
+
+;; ---- the read index: a commit reaches only the readers of what it moved (task seon.ratom/a-commit-reaches-only-the-readers-of-what-it-moved) ----
+
+(defn- notes
+  "A test db with n notes, and their entities in order."
+  [n]
+  (let [db (pdb/db-with (ts/test-db) (vec (for [i (range n)] {:note/text (str "n" i) :note/agent :x})))]
+    [db (vec (sort (map :e (d/datoms db :aevt :note/text))))]))
+
+(defn- commit-ticks
+  "The least ticks of three commits to s of tx (each from s's db at the time), with readers made by mk over es: what a commit
+  costs them, the reruns of any reader it touched included."
+  [db es mk tx]
+  (let [s (rv/store db) rs (mapv #(mk s %) es)
+        t (reduce min (for [_ (range 3)]
+                        (let [rep (pdb/with @s (tx @s))] (:ticks (profile/measure! #(rv/commit! s (:db-after rep) (:tx-data rep)))))))]
+    (doseq [r rs] (dispose! r))
+    t))
+
+(defn- text-reader
+  "A reader of entity e's text on store s, run now and on each commit that touches it."
+  [s e] (run! (:v (first (d/datoms @s :eavt e :note/text)))))
+
+;; Estimate: three stores of 1,010 notes (~3M each) and 1,110 readers' first runs (~20k each, ~22M) and 9 commits; ~40M ticks
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-commit-costs-its-datoms-not-the-readers
+  ;; docs/reactive.md#what-it-does-not-do-yet: a commit of d datoms costs d x 5 index lookups, whatever the readers; today each reader
+  ;; checks every commit itself ([M root result/bcecbc16]: 53.6k, 538k, 4.41M ticks at 10, 100, 1,000 readers)
+  (let [[db es] (notes 1010) readers (subvec es 0 1000) moved (subvec es 1000)
+        tx (fn [_] (vec (for [e moved] [:db/add e :note/text (str "moved" (rand-int 1000000))])))
+        [t10 t100 t1000] (for [n [10 100 1000]] (commit-ticks db (subvec readers 0 n) text-reader tx))]
+    (is (<= t1000 (* 2 t10)) (str "a commit no reader read costs the same at 10 and 1,000 readers: " [t10 t100 t1000]))))
+
+;; Estimate: two stores (110 and 1,100 notes, ~4M), 200 readers' first runs (~4M), 6 commits; ~10M ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-commit-costs-its-datoms-not-the-store
+  ;; the same commit on a store 10x larger costs the same: nothing a commit does reads the store whole
+  (let [cost (fn [n] (let [[db es] (notes n)]
+                       (commit-ticks db (subvec es 0 100) text-reader
+                                     (fn [_] (vec (for [e (subvec es 100 110)] [:db/add e :note/text (str "moved" (rand-int 1000000))]))))))
+        small (cost 110) large (cost 1100)]
+    (is (<= large (* 2 small)) (str "10x the store, the same commit: " [small large]))))
+
+;; Estimate: one store of 110 notes, 100 readers of an attribute read whole (each a count over 110 datoms, ~50k a run), two commits
+;; and 100 reruns (~5M); ~10M ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-hot-attribute-reruns-each-of-its-readers-once
+  ;; a reader of an attribute read whole ([:a a]) reruns on any write of it: the fan-out is its readers, once each, and a write of
+  ;; another attribute reruns none of them
+  (let [[db es] (notes 110) s (rv/store db) runs (volatile! 0)
+        rs (vec (for [_ (range 100)] (run! (vswap! runs inc) (count (d/datoms @s :aevt :note/agent)))))
+        commit (fn [tx] (let [rep (pdb/with @s tx)] (rv/commit! s (:db-after rep) (:tx-data rep)) (flush!)))]
+    (is (= 100 @runs))
+    (commit [[:db/add (first es) :note/text "other attribute"]])
+    (is (= 100 @runs) "a write of another attribute reruns none")
+    (commit [[:db/add (first es) :note/agent :y]])
+    (is (= 200 @runs) "a write of the attribute reruns each of its 100 readers once")
+    (doseq [r rs] (dispose! r))))
+
+;; Estimate: 50 rounds over a 40-note store: 40 readers' runs (~20k each) and one commit a round; ~50M ticks
+(deftest ^{:seon.test/estimate {:ticks 50000000}} a-commit-reruns-exactly-the-readers-its-datoms-touch
+  ;; the index answers what each reader's own check over its key set answered (reads/reads-touched?, the oracle), on random readers and
+  ;; commits seeded with what the keys compare by value: card-one upserts, re-assertions, a value read as [:av], a schema datom
+  (let [[db es] (notes 40)
+        rng (java.util.Random. 42)
+        pick #(nth es (.nextInt rng (count es)))
+        read-kinds [(fn [s e] (:v (first (d/datoms @s :eavt e :note/text))))      ; [:ea e a]
+                    (fn [s e] (count (d/datoms @s :eavt e)))                         ; [:e e]
+                    (fn [s _] (count (d/datoms @s :avet :note/agent :y)))            ; [:av a v] through the value index
+                    (fn [s _] (count (d/datoms @s :aevt :note/agent)))]              ; [:a a]
+        s (rv/store db)
+        runs (atom {})
+        rs (vec (for [i (range 40) :let [e (pick) f (nth read-kinds (.nextInt rng (count read-kinds)))]]
+                  (make-reaction (fn [] (swap! runs update i (fnil inc 0)) (f s e)) :auto-run true)))
+        _ (doseq [r rs] @r)]
+    (dotimes [_ 50]
+      (let [e (pick)
+            tx (case (.nextInt rng 4)
+                 0 [[:db/add e :note/text (str "t" (.nextInt rng 5))]]          ; a card-one upsert (or a re-assertion of the same text)
+                 1 [[:db/add e :note/agent (if (.nextBoolean rng) :x :y)]]      ; a value the [:av] readers read, or not
+                 2 [[:db/add e :note/text (:v (first (d/datoms @s :eavt e :note/text)))]] ; a re-assertion: no datom moves
+                 3 [{:note/text (str "new" (.nextInt rng 1000)) :note/agent :y}]) ; a new entity
+            rep (pdb/with @s tx)
+            oracle (into #{} (keep-indexed (fn [i r] (when (reads/reads-touched? (rv/-get r :key-set) (:tx-data rep)) i))) rs)
+            before @runs]
+        (rv/commit! s (:db-after rep) (:tx-data rep))
+        (flush!)
+        (is (= oracle (into #{} (keep (fn [[i n]] (when (not= n (before i)) i))) @runs))
+            (str "the readers rerun are the ones whose keys the commit touched: " (pr-str tx)))))
+    (doseq [r rs] (dispose! r))))
+
+;; Estimate: one store, two owners, one reaction, one message; ~1M ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-reader-of-another-owners-store-registers-by-message
+  ;; docs/flow.md#the-five-rules: a store is its owner's state; a reaction owned by another proc that reads it never writes the
+  ;; store's index or watches from its own thread: its keys reach the store's owner as a message on its port, as a dirtied reaction does
+  (let [[db es] (notes 2)
+        port-a (a/chan 4)
+        owner-a (rv/owner port-a)
+        s (binding [rv/*owner* owner-a] (rv/store db))
+        r (binding [rv/*owner* (rv/owner (a/chan 4))] (run! (:v (first (d/datoms @s :eavt (first es) :note/text)))))
+        m (a/poll! port-a)]
+    (is (= :seon.ratom/keys (some #{:seon.ratom/keys} (keys m))) (str "the keys reach the store's owner as a message: " (pr-str m)))
+    (is (empty? (.getWatches s)) "and nothing was written to the store from the other owner's run")
+    (dispose! r)))
