@@ -666,7 +666,10 @@
                       :else [st (cond-> [{:op :problem :class :platform :error r}] asker (reply [asker] r))]))
     :results-branch (let [[st o] (verdicts-write st key (get-in st [:verdict-writes key]))] [st o])
     :full (if (= key (:key (:full st))) (full-answered st step r) [(update st :stale (fnil inc 0)) []])
-    :batch (let [[st outs] (batch-ended st (parse-long key) r)] (settle st outs))
+    ;; a batch's end can be a runner's last item, its run finished before it: the runner ends then (runner-done), and the held
+    ;; asks re-enter once the branch is free, never left waiting on a runner no finish will sweep
+    :batch (let [[st outs] (batch-ended st (parse-long key) r) [st o] (settle st outs) [st k] (runner-done st) [st h] (re-enter-held st)]
+             [st (-> o (into k) (into h))])
     (let [run (get-in st [:runs key])]
       (cond
         (nil? run) [(update st :stale (fnil inc 0)) []]
