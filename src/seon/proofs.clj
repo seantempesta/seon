@@ -645,23 +645,6 @@
   []
   (let [v (test-symbol (str (first t/*testing-vars*)))] (seed v (get *digests* v))))
 
-
-(def ^:dynamic *peer*
-  "The test in flight and its peer bound, {:test \"#'ns/name\" :ms n}, bound by the runner around each test (run-ns!): what a wait
-  on a peer root the test asks (seon.test-store/ask, an outside process: rule 4's edge) ends at, the one wall bound a test has.
-  nil outside a test. See docs/testing.md#a-test-waits-without-a-clock."
-  nil)
-
-(defn peer-ms
-  "Test var v's peer bound in ms: ten times its estimate, ^{:seon.test/estimate {:ticks n}}, at the slowest rate measured greens
-  ran (:seon.config.proofs/slow-ticks-per-ms: waiting included), so a peer that answers as slowly as the slowest ever did is never
-  cut; a test that states none takes :seon.config.proofs/unestimated-wall-ms. See docs/testing.md#a-test-waits-without-a-clock."
-  {:malli/schema [:=> [:cat :any] pos-int?]}
-  [v]
-  (if-let [est (:ticks (:seon.test/estimate (meta v)))]
-    (max 1 (quot (* 10 est) (cfg/value :seon.config.proofs/slow-ticks-per-ms)))
-    (cfg/value :seon.config.proofs/unestimated-wall-ms)))
-
 (defn- test-vars
   "clojure.test's test-vars for vars of namespace n (Jolt's: its :once fixtures around them, each
   var in its :each fixtures), each test with a budget of its own: ticks engine ticks of work (nil:
@@ -682,8 +665,7 @@
         ;; source), never past ticks; a test that states none runs under ticks (docs/merging.md#a-tests-tick-budget)
         budget (fn [v] (when ticks (if-let [e (:ticks (:seon.test/estimate (meta v)))] (min ticks (* 10 e)) ticks)))
         one (fn [v]
-              (try (binding [*peer* {:test (str v) :ms (peer-ms v)}]
-                     (jolt.host/run-interruptible (jolt.host/make-interrupt) #(t/test-var v) (budget v)))
+              (try (jolt.host/run-interruptible (jolt.host/make-interrupt) #(t/test-var v) (budget v))
                    ;; root's interrupt (a ThreadDeath, seon.intr) stops the run that holds this test: it passes
                    (catch ThreadDeath e (throw e))
                    ;; a throw that ends the test from outside its body (its budget; a test child's deadlock end, which can land in

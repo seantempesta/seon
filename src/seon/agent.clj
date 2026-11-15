@@ -1250,6 +1250,36 @@
       (swap! state assoc :fixtures-warm true)
       n)))
 
+(defn- wall-bound-ms
+  "Test t's (\"#'ns/name\") wall bound in ms: ten times its estimate, ^{:seon.test/estimate {:ticks n}}, at the slowest rate
+  measured greens ran (:seon.config.proofs/slow-ticks-per-ms: waiting included), so a test that waits as long as the slowest ever
+  did is never ended by it; a test that states none takes the class bound (:seon.config.proofs/unestimated-wall-ms). See
+  docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
+  {:malli/schema [:=> [:cat :string] pos-int?]}
+  [t]
+  (if-let [est (some-> t proofs/test-symbol resolve meta :seon.test/estimate :ticks)]
+    (max 1 (quot (* 10 est) (cfg/value :seon.config.proofs/slow-ticks-per-ms)))
+    (cfg/value :seon.config.proofs/unestimated-wall-ms)))
+
+(defn- arm-wall!
+  "Arm test t's wall bound of ms on the one timer (seon.step/put-after!) for fiber, the fiber running it: past it, Jolt's dump of
+  every fiber goes to stderr first (the evidence), then the typed :seon.test/wall-spent {:test :bound-ms :dump} is thrown into
+  fiber, so the test is its own :error. Answers {:fiber :test :cancel}: closing :cancel (the test's end) disarms it. See
+  docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
+  {:malli/schema [:=> [:cat :any :string pos-int?] [:map [:fiber :any] [:test :string] [:cancel :seon.host/chan]]]}
+  [fiber t ms]
+  (let [cancel (a/chan) due (a/chan 1)]
+    (step/put-after! due ms :due)
+    (a/go (let [[_ port] (a/alts! [cancel due])]
+            (when-not (= port cancel)
+              (let [dump (jolt.host/fiber-dump)
+                    msg (str "the test ran past its wall bound of " ms " ms (ten times its estimate at the slowest measured rate, "
+                             ":seon.config.proofs/slow-ticks-per-ms): it waits on what never comes (" t ")")]
+                (binding [*out* *err*] (println msg "\n" dump) (flush))
+                (jolt.host/fiber-interrupt! fiber (ex-info msg (contract/error :seon.test/wall-spent #'seon.agent/arm-wall! msg
+                                                                              {:test t :bound-ms ms :dump dump})))))))
+    {:fiber fiber :test t :cancel cancel}))
+
 (defn hold-env!
   "A process's first act: hold the environment of the branch it runs, db, whatever its parent held (the owner:
   \"Why does it matter what the config is that we are forking from\"). Its config is db's entries under its role's layers, args
@@ -1286,8 +1316,8 @@
   (test-run-step), opened by fork! over the one stream it holds: watched as seon.lib/fork!'s children are (seon.lib/end-with!,
   so it ends with the agent's starter), set up as bin/test's runner is, then tests run (run-tests-here), each value put on
   the end's :out, and last the run's answer; fork! then closes :out, awaits :sent and exits, a throw put last as ::flow/ex.
-  A test that can never move again is told by Jolt's quiescence (child-quiescent!), the typed :seon.test/deadlock thrown into
-  its own fiber, so its report and the run's answer still go out; a wait on a peer root ends at its peer bound (seon.test-store/ask). A put commits when the value enters :out's buffer, not when it is written (jolt.async.remote): after each, the child
+  A test that never returns is ended by its wall bound (wall-bound-ms, the one timer), its dump on stderr first, the typed
+  :seon.test/wall-spent thrown into its own fiber, so its report and the run's answer still go out. A put commits when the value enters :out's buffer, not when it is written (jolt.async.remote): after each, the child
   yields to the end's writer, so a death right after a test's start still names it. See
   docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
   {:malli/schema [:=> [:cat :map :map nat-int? [:sequential :qualified-symbol]] :any]}
@@ -1295,13 +1325,16 @@
   (let [{:keys [out fd]} end
         ;; the test in flight, the fiber running it and its wall timer's cancel, from its start to its end
         in-flight (atom nil)
-        ;; a test that never returns is ended by its tick budget when its wait spends ticks, and when it spends none by its
-        ;; source: Jolt's quiescence (child-quiescent!), a wait on the link being the agent's turn (putting); a wait on a peer
-        ;; root ends at the peer bound its ask carries (seon.test-store/ask): no timer in the child (docs/testing.md#a-test-waits-without-a-clock)
+        ;; a test that never returns is ended by its tick budget when its wait spends ticks, and by its wall bound when it spends
+        ;; none (a fiber parked on a full link's put): the wall bound is the one timer (core.async's timeout): its evidence first, Jolt's dump of every fiber on
+        ;; stderr and on the error, then the typed :seon.test/wall-spent thrown into its fiber, so it is its own :error and its
+        ;; namespace goes on (seon.proofs/test-vars). A deadlock is told by its source, Jolt's quiescence (child-quiescent!):
+        ;; a wait on the link is the agent's turn (putting), and the wall bound stays only for a wait on a peer the child
+        ;; cannot see (a root it asked over a socket), until that peer says its own deadlock (docs/testing.md#a-test-waits-without-a-clock)
         putting (volatile! false)
         put! (fn [v]
-               (cond (:seon.test/started v) (reset! in-flight {:fiber (jolt.host/current-fiber) :test (:seon.test/started v)})
-                     (:seon.test/ended v) (reset! in-flight nil))
+               (cond (:seon.test/started v) (reset! in-flight (arm-wall! (jolt.host/current-fiber) (:seon.test/started v) (wall-bound-ms (:seon.test/started v))))
+                     (:seon.test/ended v) (some-> (first (reset-vals! in-flight nil)) :cancel a/close!))
                (vreset! putting true) (a/>!! out v) (vreset! putting false) (jolt.fibers/yield))]
     ;; the starter's watch, armed again here as seon.lib/fork! arms it in each child: nothing it forked outlives root
     (lib/end-with!)

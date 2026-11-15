@@ -868,7 +868,7 @@
 ;; digest, which a later run would reuse and never run the test. Estimate: one fold of three reports, ~50k ticks.
 (deftest ^{:seon.test/estimate {:ticks 100000}} a-wall-time-end-is-no-verdict-and-never-cached
   ;; docs/principles.md#6-nothing-changed-nothing-runs-a-change-costs-what-it-touched: a test ended at its wall bound
-  ;; (:seon.test/wall-spent, a peer root's bound in seon.test-store/ask) read the machine's load, not its own work: 21 root-starting tests ended so in the
+  ;; (:seon.test/wall-spent, seon.agent/arm-wall!) read the machine's load, not its own work: 21 root-starting tests ended so in the
   ;; service at load, green alone, and their cached reds made them flaky at their digests (root.log, 2026-11-14). Its end stops the
   ;; hang; it is never a verdict. Estimate: two reports read, ~0.1M
   (let [answer {:reports [{:type :pass :var "#'a.x-test/ran"}

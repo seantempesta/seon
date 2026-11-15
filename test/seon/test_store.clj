@@ -4,7 +4,7 @@
   many branches, as in production; owner, 2026-10-21). Test-only, so it lives in test/, not
   in src (session DUP-HELPERS); it seeds and opens through seon.db's own seed! and open-main!."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [clojure.test] [seon.lib] [seon.program :as program] [seon.fx :as fx] [seon.task :as task] [seon.config :as config] [hasch.core :as hasch]
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [clojure.test] [seon.lib] [seon.program :as program] [seon.fx :as fx] [seon.task :as task] [seon.config :as config] [hasch.core :as hasch]
             [seon.ref :as ref] [seon.doc :as doc] [seon.template :as template]))
 
 (defn standing-targets-tx
@@ -529,8 +529,6 @@
     ;; the edge where the socket's failures become values (bin/ask's three)
     (try
       (with-open [s (java.net.Socket. "127.0.0.1" (int port))]
-        ;; the one wall bound a test has: a peer root is an outside process (rule 4), so its answer has the test's declared bound
-        (when-let [ms (:ms seon.proofs/*peer*)] (.setSoTimeout s (int ms)))
         (let [w (java.io.OutputStreamWriter. (.getOutputStream s) "UTF-8")
               r (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s) "UTF-8"))]
           (.write w (str (pr-str m) "\n"))
@@ -539,11 +537,6 @@
             (if (clojure.string/blank? line)
               {:error :eof}
               (clojure.edn/read-string {:default tagged-literal} line)))))
-      ;; the peer answered nothing within the test's bound: the machine's reading, so no verdict (seon.prove), with every fiber's dump
-      (catch java.net.SocketTimeoutException _
-        (let [{:keys [test ms]} seon.proofs/*peer* dump (jolt.host/fiber-dump)
-              msg (str "the root asked gave no answer within the test's peer bound of " ms " ms (" test ")")]
-          (throw (ex-info msg (contract/error :seon.test/wall-spent #'seon.test-store/ask msg {:test test :bound-ms ms :dump dump})))))
       (catch java.net.ConnectException _ {:error :refused})
       (catch java.io.IOException _ {:error :reset}))))
 

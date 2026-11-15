@@ -2813,8 +2813,8 @@
 
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 2}} a-test-waiting-on-a-subprocess-is-no-deadlock
   ;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a test that waits on a subprocess (a git call, here sleep) runs to its
-  ;; end: a wait on a subprocess is awaited I/O, which Jolt never counts as quiescent, so the child's deadlock handler
-  ;; (seon.agent/child-quiescent!) never ends it (red before Jolt counted a fiber parked on poller I/O as idle, 2026-11-12: tests that called git were ended as
+  ;; end: a wait is ended only by the test's wall bound, which its declared work sets (seon.agent/wall-bound-ms), never by a
+  ;; quiescence check (red before Jolt counted a fiber parked on poller I/O as idle, 2026-11-12: tests that called git were ended as
   ;; deadlocks in the standing system's test children). Estimate: one agent eval and one test child run of one test that waits about
   ;; a second, the test process's ticks a few million
   (let [t 'seon.problems-test/a-test-that-waits-on-a-subprocess
@@ -2846,20 +2846,24 @@
     (is (= {t :error} (:proofs (:value proved))) (pr-str proved))
     (is (= [:seon.test/deadlock] (mapv first (:failures (:value proved)))) (str "its own deadlock, told with no clock: " (pr-str proved)))))
 
-(deftest ^{:seon.test/estimate {:ticks 300000}} a-peer-root-that-never-answers-ends-at-the-tests-peer-bound
-  ;; docs/testing.md#a-test-waits-without-a-clock: the one wall bound a test has is on its wait for a peer root (an outside process,
-  ;; rule 4): seon.test-store/ask's socket carries the peer bound the runner binds (seon.proofs/*peer*), and past it throws the typed
-  ;; :seon.test/wall-spent with every fiber's dump (no verdict: it reads the machine). Red before: no bound, the read waited for good.
-  ;; Estimate: one socket, one 50 ms read timeout, one dump: ~300k ticks of this thread
-  (let [ss (java.net.ServerSocket. 0)
-        held (promise)
-        _ (future (let [c (.accept ss)] @held (.close c)))
-        e (try (binding [seon.proofs/*peer* {:test "#'app/asks" :ms 50}] (ts/ask {:port (.getLocalPort ss)} {:op :ping}) nil)
-               (catch Throwable t (ex-data t)))]
-    (deliver held true) (.close ss)
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-wall-bound-ends-a-parked-fiber-after-its-evidence
+  ;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a wait that spends no ticks (a fiber parked on a channel, as a test's
+  ;; start notice parks on a full link) is ended by its wall bound on the one timer: the typed :seon.test/wall-spent thrown into
+  ;; that fiber, carrying Jolt's dump of every fiber (the evidence, also on stderr); a bound disarmed by the test's end never fires.
+  ;; Estimate: two fibers, two timers, one dump: ~300k ticks of this thread
+  (let [ended (fn [arm]
+                (let [f (promise) r (promise)]
+                  (jolt.fibers/spawn (fn [] (deliver f (jolt.host/current-fiber))
+                                       (deliver r (try (a/<!! (a/chan)) :returned (catch Throwable e (ex-data e))))))
+                  (arm @f)
+                  r))
+        fired (ended #(#'agent/arm-wall! % "#'app/parks" 50))
+        disarmed (ended #(a/close! (:cancel (#'agent/arm-wall! % "#'app/parks" 50))))
+        e (deref fired 2000 :no-answer)]
     (is (= :seon.test/wall-spent (:seon.error/type e)) (pr-str (dissoc e :dump)))
-    (is (= [50 "#'app/asks"] [(:bound-ms e) (:test e)]) "naming its bound and its test")
-    (is (string? (:dump e)) "with the evidence")))
+    (is (= [50 "#'app/parks"] [(:bound-ms e) (:test e)]) "naming its bound and its test")
+    (is (string? (:dump e)) "with the evidence")
+    (is (= :still-waiting (deref disarmed 200 :still-waiting)) "a disarmed bound never fires")))
 
 ;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a test run's fold (seon.agent/test-run-step) answers once each child's two ends
 ;; are held, its link's end and its reaped exit, whichever comes first. Run here through the real plumbing but the fork: a
