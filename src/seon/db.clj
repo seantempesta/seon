@@ -161,6 +161,15 @@
      ;; the attributes marked {:seon.db/derived true}, on their own schema or their entity schema's: caches never merged (seon.merge), once
      :derived-attrs (into (into #{} (keep (fn [[a k]] (when (:seon.db/derived (form-props forms k)) a))) es)
                           (filter #(and (qualified-keyword? %) (:seon.db/derived (form-props forms %)))) (keys forms))
+     ;; the attributes whose values name a commit (their schema reaches :seon.db/commit, :seon.db/reference holding one): every commit a
+     ;; kept reference names, which a collection keeps (retain!), derived from the schemas, never listed, once
+     ;; a fixed point over each form's named keys, each form read once: the schemas that reach :seon.db/commit grow until none is added
+     ;; (as deep as the schemas nest, a few rounds), never a walk per attribute (300M ticks a test world, 2026-11-15)
+     :commit-attrs (let [named (into {} (for [[k f] forms] [k (into #{} (filter qualified-keyword?) (tree-seq coll? seq f))]))
+                         reach (loop [r #{:seon.db/commit}]
+                                 (let [r2 (into r (keep (fn [[k ks]] (when (and (not (r k)) (some r ks)) k))) named)]
+                                   (if (= r2 r) r (recur r2))))]
+                     (into #{} (filter reach) (keys es)))
      ;; the ref attributes some entity schema requires: what the write check's cascade follows from a retracted entity, once
      :required-refs (vec (sort (distinct (for [k (distinct (vals es)) a (required (get forms k)) :when (:seon.db/to (form-props forms a))] a))))
      ;; each schema that extends another, with all it extends and itself (`extends?` is one lookup), once
@@ -1059,7 +1068,8 @@
 (defn retain!
   "Sweep the commit snapshots of the store under conn older than main's newest keep commits, when that many have landed since the last sweep (main's :seon.system/retained),
   counted by the commit graph's generation, never a clock. Kept whole, whatever their age: each branch's head, its merge base with main, and each commit an agent's facts
-  name (:seon.agent/base-commit, :seon.agent/main-commit, :seon.agent/main-program), which is what a merge and a page read by id. Every datom, a branch's history and as-of reads stay: only reading
+  name (an attribute whose schema reaches :seon.db/commit: the entity index's :commit-attrs, an agent's bases and a turn's basis among them),
+  which is what a merge and a page read by id. Every datom, a branch's history and as-of reads stay: only reading
   another old commit by its id goes. Root calls it at boot, before any other process exists, so nothing live holds a swept commit, and as its sole writer. Answers
   {:swept :ms :generation}, written on main, or nil when none is due. See docs/storage.md#collection."
   {:malli/schema [:=> [:cat :seon.host/conn pos-int?] [:maybe :map]]}
@@ -1084,9 +1094,12 @@
             bases (mapcat (fn [b] (try [(d/merge-base conn b main)]
                                        (catch clojure.lang.ExceptionInfo e (or (:merge-bases (ex-data e)) []))))
                           (remove #{main} bs))
-            named (mapcat (fn [b] (let [h (d/branch-as-db store b)]
-                                    (mapcat #(map :v (d/datoms h :aevt %)) [:seon.agent/base-commit :seon.agent/main-commit :seon.agent/main-program])))
-                          bs)
+            ;; every commit a kept reference names (an attribute whose schema reaches :seon.db/commit: the entity index's :commit-attrs,
+            ;; derived from the schemas): an agent's bases, a turn's basis, a run's; whatever reads it by id reads it whole
+            commit-attrs (:commit-attrs (index))
+            named (into #{} (for [b bs :let [h (d/branch-as-db store b)] a commit-attrs d (d/datoms h :aevt a)
+                                  x (tree-seq coll? seq (:v d)) :when (uuid? x)]
+                              x))
             swept @(d/gc-storage conn cutoff {:datahike.gc/keep-commits (into #{} (remove nil?) (concat bases named))})
             r {:swept (count swept) :ms (profile/ms-since t0) :generation generation}]
         (when (seq swept) (compact-due! conn))

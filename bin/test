@@ -138,9 +138,11 @@ for (( i = 1; i <= ${#F}; i++ )); do
       print -r -- "$P" > "$OUT/shards.pid"
       (( STALL_MS > 0 )) && { "$ROOT/bin/stalls" $STALL_MS $END_MS "$OUT/stall-bounds" "${r%.edn}.log:$P[-1]" & W+=($!) }
     fi
-  elif (( s != 0 )); then
+  elif (( s != 0 )) || ! grep -q "^SHARD" "$log" || grep -q "^RED " "$log"; then
+    # a shard's verdict is its log, never its exit status alone: a test that ends the process with status 0 (a stray _exit)
+    # leaves no SHARD line, and a printed RED is red whatever the status says
     st=1
-    [[ -e $OUT/stopped ]] || grep -q "^SHARD" "$log" || echo "FAILED shard $f: exit $s, $(grep '^started' "$log" | tail -1) ($log)"
+    [[ -e $OUT/stopped ]] || grep -q "^SHARD" "$log" || echo "FAILED shard $f: exit $s and no SHARD line, $(grep '^started' "$log" | tail -1) ($log)"
   fi
 done
 (( ${#W} )) && kill $W 2>/dev/null

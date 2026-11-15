@@ -2363,7 +2363,14 @@
        (testing "a live agent's branch is its own to write"
          (d/transact conn {:tx-data [{:seon.agent/key "rp-live" :seon.agent/status :busy :seon.agent/branch b}] :tx-meta (pdb/tx-meta (:branch cfg))})
          (is (= "rp-live" (:agent (ask {:op :tx :branch b :tx-data [{:seon.agent/key "rp-2" :seon.agent/status :idle}]}))))
-         (is (contract/error? (ask {:op :reset-branch :branch b :to c0 :expected (d/commit-id (pdb/head conn b))}))))))))
+         (is (contract/error? (ask {:op :reset-branch :branch b :to c0 :expected (d/commit-id (pdb/head conn b))})))
+         (is (contract/error? (ask {:op :drop-branch :branch b})) "nor dropped while it lives"))
+       (testing "a branch no live agent holds is dropped; main never"
+         (d/transact conn {:tx-data [[:db/add [:seon.agent/key "rp-live"] :seon.agent/status :ended]] :tx-meta (pdb/tx-meta (:branch cfg))})
+         (is (= {:ok true :dropped true} (select-keys (ask {:op :drop-branch :branch b}) [:ok :dropped])))
+         (is (not (pdb/branch? conn b)) "its head is gone")
+         (is (= {:ok true :dropped false} (select-keys (ask {:op :drop-branch :branch b}) [:ok :dropped])) "a second drop finds none")
+         (is (contract/error? (ask {:op :drop-branch :branch (:branch cfg)})) "main is never dropped"))))))
 
 (deftest ^{:seon.test/estimate {:ticks 10000000}} the-writer-merges-main-into-a-branch-on-mains-program
   ;; docs/merging.md#a-branch-merges-main-in: agent lb76's branch held the old seon.merge, so merging itself it ran the old code; the
