@@ -21,7 +21,9 @@
   {:malli/schema [:=> [:cat :any] :boolean]}
   [x] (and (map? x) (contains? x ::raw)))
 
-(def ^:private void-tags #{"area" "base" "br" "col" "embed" "hr" "img" "input" "link" "meta" "source" "wbr"})
+(def ^:private void-tags
+  "The elements written with no end tag: :seon.web.html/void-element's members, read once (the schema is their one home)."
+  (set (seon.contract/enum-values :seon.web.html/void-element)))
 
 (defn escape
   "s with & < > \" escaped (no copy when there is nothing to escape): one pass over its characters, each escaped as it is
