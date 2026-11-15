@@ -98,6 +98,24 @@
         (let [[_ o2] (feed st [[:main {:t 8 :ops [[:db/add 903 :task/name "z" 8 true]] :db db :program-t 6}]])]
           (is (empty? (asks o2 :spawn)) "a later notice with the same :program-t starts no second run"))))))
 
+;; Estimate: three notices and two runs driven to their end, map ops and the harness's answers: ~1M ticks; 5,000,000
+(deftest ^{:seon.test/estimate {:ticks 5000000}} program-moves-during-a-main-run-make-one-more-run-at-the-newest
+  ;; docs/merging.md#the-test-service (tests-4's review): a main run in flight is never superseded, so it ends; the program moves made
+  ;; during it are coalesced into one more run, at the newest. Red before: each newer notice superseded the run in flight (request's
+  ;; slot rule), and with landings minutes apart main's run might never finish
+  (let [value seon.config/value]
+    (with-redefs [seon.config/value (fn [k] (if (= k :seon.config.proofs/prove-main-on-commit) true (value k)))
+                  seon.db/at-commit (fn [_ c] c)
+                  seon.program/run-digest (fn [c] (str "dg-" (name c)))]
+      (let [note (fn [t] [:main {:t t :ops [] :commit (keyword (str "c" t)) :program-t t}])
+            [st o1] (feed (proc0) [(note 6)])
+            [st o2] (feed st [(note 7) (note 8)])
+            [_ all] (run-through st (into o1 o2) test-run-answer)
+            spawns (asks all :spawn)]
+        (is (= 1 (count (asks o1 :spawn))) "the first move starts main's run")
+        (is (empty? (asks o2 :spawn)) "two more moves while it runs start nothing and supersede nothing")
+        (is (= 2 (count spawns)) (str "the run ends, then exactly one more runs: " (count spawns)))))))
+
 (deftest ^{:seon.test/estimate {:ticks 500000}} an-answer-whose-child-died-is-never-remembered
   ;; THE PLAN 0.7 (root, 2026-10-27): a judge's run whose test child died answered every later ask
   ;; of its key from memory, so the held task's next run (seon_done again, same branch, same
