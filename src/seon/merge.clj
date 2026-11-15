@@ -590,12 +590,15 @@
   values only for commits that kept no changes. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:tuple [:sequential :seon.host/datom] [:sequential :seon.host/datom]]]}
   [base head]
-  (let [from (d/commit-id base) to (d/commit-id head)
+  ;; a value made by d/with since its commit keeps that commit's id: only two committed values (no uncommitted datoms,
+  ;; datahike.core/with's meta) are their commits, so only they are read from the commits
+  (let [committed? (fn [db] (nil? (:datahike/uncommitted (meta db))))
+        from (when (committed? base) (d/commit-id base)) to (when (committed? head) (d/commit-id head))
         ch (when (and from to (not= from to))
              (try (d/changes head from to)
                   (catch clojure.lang.ExceptionInfo e
                     (when-not (#{:datahike/changes-unrecorded :datahike/changes-not-ancestor} (:type (ex-data e))) (throw e)))))]
-    (cond (= from to) [[] []]
+    (cond (and from (= from to)) [[] []]
           ch [(filterv (complement :added) ch) (filterv :added ch)]
           :else (d/datoms-diff base head :eavt []))))
 
