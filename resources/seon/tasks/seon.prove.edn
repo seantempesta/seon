@@ -87,10 +87,4 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.prove-test/a-test-that-dies-in-a-batch-fails-only-itself}
   :seon.task/estimate #:seon.agent{run-tests-forked {:n 2, :order :linear, :ticks 5000000, :bytes 20000000}}
-  :seon.task/needs #{}}
- {:seon.task/name "a-main-run-whose-agent-dies-is-asked-again-or-said"
-  :seon.task/plan "Root, 2026-11-15 16:10 (\"every wait ends with its value or a typed error that reaches someone\"). Measured [root result/b5d92ffb]: web's 2d60917377 moved main's program at 15:53; main's run spawned its prove agent b28a184127025e0e on :main/tests, which died at 15:53:07 with :seon.process/env-mismatch (seon.fx/runtime-for: the binary is not the tree's); the run then ended, :prove read 0 runs and 0 queued [root result/dea2b1e8], and main stayed unproved with no problem row anyone reads. PRIOR WORK to read before code: seon.prove's main run (request with mode :main, its :spawn ask and answered :spawn, the run's finish), the :problem outputs it already sends for a failed run (prove-proc's doc: {:op :problem} for a failed run), and seon.problems' :platform class. Fix at the run's end: a main run whose agent dies or whose spawn is refused is asked again on the next notice and, until a run of that program answers, is one :platform problem row naming the program's t, the agent and its error, so health shows main unproved. Proof, red first on the real death: replay the answered :spawn/death into prove's step as it arrived for b28a and see no problem row and no re-ask today. COST: one problem row a failed main run; nothing on a run that answers."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.prove-test/a-main-run-whose-agent-dies-is-a-problem-row}
-  :seon.task/estimate #:seon.prove{answered {:n 1, :order :constant, :ticks 100000, :bytes 1000000}}
   :seon.task/needs #{}}]
