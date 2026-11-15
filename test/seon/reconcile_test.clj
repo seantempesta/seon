@@ -2420,7 +2420,11 @@
     (is (= [:problem :platform :seon.reconcile/write-refused] [(:op p) (:class p) (get-in p [:error :seon.error/type])]) (pr-str outs))
     (is (= "t/a" (get-in p [:error :task])) "naming the task")
     (is (= refused (get-in p [:error :refused])) "and the refusal")
-    (is (= [] (second (#'seon.reconcile/advance st "t/a" :done {:ok true :t 5}))) "an answered write ends it with nothing to say")))
+    (is (= [] (second (#'seon.reconcile/advance st "t/a" :done {:ok true :t 5}))) "an answered write ends it with nothing to say")
+    ;; a task cancelled (or held) while its flight ran: its last write's cas meets the move, an expected refusal, no defect
+    ;; (e2e-calc's cancel of calc/neg, the land of 2026-11-15 08:20)
+    (let [st (assoc st :db (d/db-with (:db st) [{:seon.task/id "t/a" :seon.task/execution :cancelled}]))]
+      (is (= [] (second (#'seon.reconcile/advance st "t/a" :done refused))) "a cancelled task's refused write is no problem"))))
 
 ;; docs/server.md#ops: seon_done waits on its judge's own end (seon.reconcile/answer-judged), never on the whole root's quiet: a
 ;; :running task of anyone's kept the reconciler from quiet, and a judge that left its task :running waited for good (context's

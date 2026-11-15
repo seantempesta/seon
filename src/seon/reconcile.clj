@@ -1096,7 +1096,9 @@
       :ignored [st []]
       ;; the flight's last write; refused, the task is still :running with no flight, live for good: never a silent end
       ;; but the reconciler's :platform problem, which a wait on the task reads (seon.system/defect), and its waiter is answered (answer-judged)
-      :done (if (contract/error? r)
+      ;; a task cancelled or held while its flight ran (execution no longer :running) refuses that write by design: its cas met
+      ;; the move, and the task is not stuck
+      :done (if (and (contract/error? r) (= :running (:seon.task/execution (d/entity (:db st) [:seon.task/id id]) :running)))
               [(update st :flights dissoc id)
                [{:op :problem :class :platform
                  :error (contract/error :seon.reconcile/write-refused #'seon.reconcile/advance
