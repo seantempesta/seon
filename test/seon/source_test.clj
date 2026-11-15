@@ -1804,7 +1804,7 @@
       (finally (seon.lib/remove-tree! d)))))
 
 ;; Estimate: ~15 child calls (git; their own work is not ours) x 70k ~1M, a test db and two pulls 1M = 2000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 2000000}} a-merge-into-the-write-back-tree-moves-mains-source-fact-with-it
+(deftest ^{:seon.test/estimate {:ticks 2000000} :seon.test/execs ["git"]} a-merge-into-the-write-back-tree-moves-mains-source-fact-with-it
   ;; docs/source.md#commit-the-merges-branch. Pilot run 15 (2026-11-16): the first agent merge through seon_done reached main in the
   ;; store, and its write-back refused (:seon.git/commit-failed, "jolt/merges is at f5df674f82, not 0b667d45c0"): bin/land's bridge
   ;; moved main's source fact to the landed commit (landed-tx), then bin/update merged main into jolt/merges (my.root/merges-caught-up!,

@@ -199,9 +199,8 @@
           :else rt)))
 
 (defn merges-caught-up!
-  "Main merged into the write-back tree (:seon.config.source/root, its :seon.config.source/branch) by the :git effect, the one
-  writer of that tree, so an update's merge and a write-back never meet (task seon.system/a-landing-restarts-root-only-for-a-binary-change,
-  slice 2a): what bin/update asks before it builds, main's source fact moved to the merge when it named the commit merged in. Answers {:value {:sha :merged}} or the effect's typed error. See
+  "Main merged into the write-back tree by the :git effect, its one writer, and main's source fact moved to the merge when it
+  named the commit merged in; what bin/update asks before it builds. Answers {:value {:sha :merged}} or a typed error. See
   docs/source.md#commit-the-merges-branch."
   {:malli/schema [:=> [:cat :seon.system/sys] :map]}
   [sys]
