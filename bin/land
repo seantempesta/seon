@@ -150,7 +150,19 @@ LOG=$MAIN/target/land/$STAMP.log
 # lane), run by name, never the full plan; everything else here (merge, build, health, laws, the swap, the bridge, the update) is
 # the same, so sessions land themselves one swap at a time with no hand merging
 if [[ -n $FAST ]]; then
-  { nice -n 15 "$HERE/bin/test" ${(f)"$(<"$FAST")"}; st=$?; (( st == 0 )) && print "MERGE OK"; } > "$LOG" 2>&1 & PJ=$!
+  # the message root reviews carries its Deletes line and its estimate beside the measured number (AGENTS.md section 3)
+  [[ -n $MSG ]] && grep -q 'Deletes' "$MSG" && grep -qiE 'estimate|est\.' "$MSG" || fail "--fast needs -F MSGFILE with a Deletes line and the estimate beside the measured number"
+  # a name the branch does not define (a test it renamed or deleted, from a reach computed on main) is skipped and named, never fatal
+  NAMES=() SKIPPED=()
+  for n in ${(f)"$(<"$FAST")"}; do
+    [[ -z ${n// } ]] && continue
+    ns=${n%%/*} f=test/${${ns//./\/}//-/_}.clj
+    if [[ $n == */* ]]; then grep -qE "\(deftest[^ ]* ${n#*/}( |\$)" "$f" 2>/dev/null && NAMES+=$n || SKIPPED+=$n
+    else [[ -f $f ]] && NAMES+=$n || SKIPPED+=$n; fi
+  done
+  (( ${#SKIPPED} )) && print "fast lane: skipped ${#SKIPPED} names this branch does not define: ${SKIPPED[1,5]}"
+  (( ${#NAMES} )) || fail "--fast: no name in $FAST is defined on this branch"
+  { nice -n 15 "$HERE/bin/test" $NAMES; st=$?; (( st == 0 )) && print "MERGE OK"; } > "$LOG" 2>&1 & PJ=$!
 else
   nice -n 15 "$HERE/bin/prove" --out "$MAIN/target/land/$STAMP-run" --merge > "$LOG" 2>&1 & PJ=$!
 fi
