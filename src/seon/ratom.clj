@@ -512,7 +512,9 @@
       ;; a message, an auto-run one too, so no reaction runs under another owner's bindings. The dirty? guard above keeps at most one
       ;; message outstanding a reaction, so an owner's port holds at most as many as the reactions it owns
       (if (and (some? auto-run) (or (nil? owner) (identical? owner *owner*)))
-        (if (true? auto-run) (-run this false) (auto-run this))
+        ;; through the catching run (Reagent's _try-capture, failure-points.md's edge for a reaction's run): a reader that throws is its
+        ;; own error, and the commit that reached it goes on to every other reader (web's BUG 2)
+        (if (true? auto-run) (-run this true) (auto-run this))
         (do (set! dirty? true) (rea-enqueue this owner)))))
   (-update-watching [this derefed]
     ;; a reactive object is watched (Reagent's); a read through a view is no source: a walk kept as a value keeps it (`reads-of`)
@@ -526,7 +528,7 @@
   (-queued-run [this]
     (when (and dirty? (some? watching))
       (cond (nil? auto-run) (-run this true)
-            (true? auto-run) (do (set! dirty? false) (-run this false))
+            (true? auto-run) (do (set! dirty? false) (-run this true))
             :else (do (set! dirty? false) (auto-run this)))))
   (-run [this check]
     (let [oldstate state

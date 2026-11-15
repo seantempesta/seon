@@ -246,10 +246,13 @@
     (is (= runs (running)))))
 
 (deftest exception-recover
+  ;; Seon's rule over Reagent's (web's review of Land A, 2026-11-15): a reader's throw is its own error, raised when it is read; the flush,
+  ;; an owner's step, goes on to every other reader and never throws (task seon.ratom/a-commit-reaches-only-the-readers-of-what-it-moved)
   (let [runs (running) state (rv/atom 1) count (rv/atom 0)
         r (run! (swap! count inc) (when (> @state 1) (throw (ex-info "oops" {}))))]
     (is (= @count 1))
-    (is (thrown? Throwable (do (swap! state inc) (flush!))))
+    (swap! state inc) (flush!)
+    (is (thrown? Throwable @r) "the run's throw is its error, raised when it is read")
     (is (= @count 2))
     (swap! state dec)
     (flush!)
@@ -258,11 +261,14 @@
     (is (= runs (running)))))
 
 (deftest exception-recover-indirect
+  ;; Seon's rule over Reagent's (web's review of Land A, 2026-11-15): a reader's throw is its own error, raised when it is read; the flush,
+  ;; an owner's step, goes on to every other reader and never throws (task seon.ratom/a-commit-reaches-only-the-readers-of-what-it-moved)
   (let [runs (running) state (rv/atom 1) count (rv/atom 0)
         ref (reaction (when (= @state 2) (throw (ex-info "err" {}))))
         r (run! (swap! count inc) @ref)]
     (is (= @count 1))
-    (is (thrown? Throwable (do (swap! state inc) (flush!))))
+    (swap! state inc) (flush!)
+    (is (thrown? Throwable @r) "the run's throw is its error, raised when it is read")
     (is (= @count 2))
     (is (thrown? Throwable @ref))
     (swap! state inc)
@@ -279,7 +285,8 @@
     (swap! state assoc :val 2)
     (flush!)
     (swap! state assoc :error? true)
-    (is (thrown? Throwable (flush!)))
+    (flush!)
+    (is (thrown? Throwable @r3) "the throwing reader's error, raised when it is read; the flush went on")
     (flush!)
     (flush!)
     (dispose! r1)
@@ -291,7 +298,8 @@
   (let [runs (running) state (rv/atom {:val 1}) rstate (reaction (:val @state))
         r1 (run! (when (= @rstate 13) (throw (ex-info "fail" {}))))]
     (swap! state assoc :val 13)
-    (is (thrown? Throwable (flush!)))
+    (flush!)
+    (is (thrown? Throwable @r1) "the throwing reader's error, raised when it is read; the flush went on")
     (swap! state assoc :val 2)
     (flush!)
     (dispose! r1)
@@ -542,3 +550,24 @@
     (is (= :seon.ratom/keys (some #{:seon.ratom/keys} (keys m))) (str "the keys reach the store's owner as a message: " (pr-str m)))
     (is (empty? (.getWatches s)) "and nothing was written to the store from the other owner's run")
     (dispose! r)))
+
+;; Estimate: a 3-note store, two readers, one commit; ~1M ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-reader-that-throws-is-its-own-error-and-the-commit-reaches-the-rest
+  ;; task seon.ratom/a-commit-reaches-only-the-readers-of-what-it-moved (web's BUG 2, result/dc412954): a reader whose run throws (a
+  ;; malformed stored error, read by health's row in the render proc's step) is that reader's error, never a throw out of commit!:
+  ;; every other reader of what the commit moved is told, and the thrower answers its error, never its old value
+  (let [[db es] (notes 3)
+        e (first es)
+        s (rv/store db)
+        told (atom #{})
+        text #(:v (first (d/datoms @s :eavt e :note/text)))
+        bad (make-reaction (fn [] (swap! told conj :bad) (let [t (text)] (when (= t "boom") (throw (ex-info "boom" {}))) t)) :auto-run true)
+        good (make-reaction (fn [] (swap! told conj :good) (text)) :auto-run true)
+        _ (do @bad @good (reset! told #{}))
+        rep (pdb/with @s [[:db/add e :note/text "boom"]])
+        thrown (try (rv/commit! s (:db-after rep) (:tx-data rep)) (flush!) nil (catch Throwable t (ex-message t)))]
+    (is (nil? thrown) (str "the commit did not throw: " thrown))
+    (is (= #{:bad :good} @told) "both readers of the moved datom were told")
+    (is (= "boom" @good) "the other reader has the new value")
+    (is (= "boom" (try @bad :no-throw (catch Throwable t (ex-message t)))) "the thrower answers its error, never its old value")
+    (dispose! bad) (dispose! good)))
