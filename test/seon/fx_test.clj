@@ -2,7 +2,7 @@
   "The effect owner and worker step-fns as plain functions (no graph): admission by workers,
   priority order, budget refused, the queue bound, and a worker answering a defect."
   (:require [seon.lib] [clojure.test :refer [deftest is testing]] [jolt.deps] [seon.fx :as fx] [seon.config :as cfg] [seon.contract :as contract] [seon.proofs :as proofs]
-            [clojure.core.async.flow :as flow] [clojure.core.async :as a] [seon.model :as model] [clojure.java.shell]))
+            [clojure.core.async.flow :as flow] [clojure.core.async :as a] [seon.model :as model] [clojure.java.shell] [seon.program]))
 
 (defn- owner [workers] (fx/owner-proc {:kind :t :workers workers :work nil :back nil}))
 (defn- req [k & {:as more}] (merge {:req {:k k} :dest {:agent "boot/1" :op :fx-reply :k k}} more))
@@ -956,7 +956,7 @@
         (is (nil? (:call st)) "the worker is free for its next item")))))
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-process-on-another-runtime-answers-env-mismatch
   ;; task seon.fx/runtime-for-reads-the-pins-from-the-branch: the one check of which runtime a branch needs. target/seon's
-  ;; identity (target/seon.digest, bin/build's record of bin/binary-digest) answers the binary for the tree it was built
+  ;; identity (the :digest of its build record, seon.fx/binary-digest of the tree it was built from) answers the binary for the tree it was built
   ;; from, and a tree from before the last Chez pin moved (another runtime) answers :seon.process/env-mismatch naming both
   ;; digests, for its caller to build once. The estimate: two git ls-trees of the build inputs, ~30 ms each.
   (let [root (cfg/checkout)
@@ -972,7 +972,113 @@
     ;; the agreed interface (task seon.system/a-landing-restarts-root-only-for-a-binary-change): a mismatch names what a build
     ;; changes that differs, and a tree's digest is kept by its id, the one value every reader takes
     (is (some #{"reference-code/chez"} (:seon.process/differs other)) (str "differs " (:seon.process/differs other)))
-    (is (.isFile (java.io.File. (str root "/target/runtime-for/" before ".digest"))) "the tree's digest is kept by its id")
+    (is (.isFile (java.io.File. (str root "/target/runtime-for/" before "." (seon.lib/digest (seon.program/running-form 'seon.fx/binary-digest)) ".digest")))
+        "the tree's digest is kept by its id and the code that computed it")
     ;; :all, a process that runs the binary's baked program: the binary's own tree is current, with its src id
     (let [all (fx/runtime-for (clojure.string/trim (slurp (str root "/target/seon.tree"))) {:scope :all})]
       (is (string? (:program all)) (str "answered " all)))))
+
+;; docs/source.md#the-binary-records-its-program: the binary's identity, one implementation (seon.fx/binary-digest), checked on trees
+;; made from this checkout's own committed tree with one file changed (git's own index, blob and tree commands).
+(defn- scratch-repo
+  "A temporary repository that reads the checkout at root's objects (its alternates) and writes only its own: what a test makes
+  stays out of the checkout's repository. Its path."
+  [root]
+  (let [dir (.getPath (doto (java.io.File/createTempFile "seon-fx-repo" "") (.delete) (.mkdirs)))
+        objects (clojure.string/trim (:out (clojure.java.shell/sh "git" "-C" root "rev-parse" "--path-format=absolute" "--git-common-dir")))]
+    (clojure.java.shell/sh "git" "init" "-q" dir)
+    (spit (str dir "/.git/objects/info/alternates") (str objects "/objects\n"))
+    dir))
+
+(defn- tree-with
+  "Tree base, held by the repository at root, with each path of edits ({path text}) holding text: a temporary index, never the
+  checkout's, and root a scratch-repo, so the blobs and trees it writes are its own."
+  [root base edits]
+  (let [idx (doto (java.io.File/createTempFile "seon-fx-test" ".index") (.delete))
+        env (assoc (into {} (System/getenv)) "GIT_INDEX_FILE" (.getPath idx) "GIT_CONFIG_GLOBAL" "/dev/null" "GIT_CONFIG_NOSYSTEM" "1")
+        git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" root (concat args [:env env]))]
+                           (assert (zero? (:exit r)) (str args (:err r))) (clojure.string/trim (:out r))))]
+    (try
+      (git "read-tree" base)
+      (doseq [[p text] edits]
+        (let [blob (clojure.string/trim (:out (clojure.java.shell/sh "git" "-C" root "hash-object" "-w" "--stdin" :in text :env env)))]
+          (git "update-index" "--cacheinfo" (str "100644," blob "," p))))
+      (git "write-tree")
+      (finally (.delete idx)))))
+
+(deftest ^{:seon.test/estimate {:ticks 40000000} :seon.test/execs ["git" "rm"]} only-what-a-new-process-reads-moves-the-binary-digest
+  ;; 2026-11-15: bin/binary-digest found :seon.config/at-load and :seon.config/place keys by a line regex, which missed a schema
+  ;; file's first entry (9 of 57 keys: a web port change moved no identity) and never held jolt-compiler-options, which the
+  ;; compiler reads. The identity now holds the keys a schema marks :seon.config/build, at-load or place, read as data
+  ;; wherever their entry sits. Estimate: four git calls a digest, ~2M ticks [M root result/d0dfb0e6: 1.9M, 42 ms]
+  (let [root (scratch-repo (cfg/checkout))
+        base (clojure.string/trim (:out (clojure.java.shell/sh "git" "-C" (cfg/checkout) "rev-parse" "HEAD^{tree}")))
+        show (fn [p] (:out (clojure.java.shell/sh "git" "-C" root "show" (str base ":" p))))
+        cfg-p "resources/seon/config/default.edn" build-p "resources/seon/schemas/seon.config.build.edn"
+        cfg-text (show cfg-p) build-text (show build-p)
+        d0 (fx/binary-digest root base)
+        ;; the compiler's options: a build
+        opts (clojure.string/replace cfg-text #"(:seon\.config\.build/jolt-compiler-options) \"[^\"]*\"" "$1 \"{:image-fn-forms true}\"")
+        ;; a key read at load moves it (only a new process acts on it, wherever its entry sits: the regex missed 9 of 57);
+        ;; a key the branch holds and acts on in place does not
+        at-load (clojure.string/replace cfg-text #"(:seon\.config\.root/max-agents) \d+" "$1 7")
+        port (clojure.string/replace cfg-text #"(:seon\.config\.root/view-window) \d+" "$1 7")
+        ;; a key marked :seon.config/build as its file's first entry still counts (the regex's miss)
+        first-entry (fn [v] {build-p (clojure.string/replace-first build-text "{:seon.config.build/inputs"
+                                                                   "{:seon.config.build/zz-first [:string {:seon.config/build true}]\n :seon.config.build/inputs")
+                             cfg-p (str (clojure.string/replace cfg-text #"\}\s*$" "") " :seon.config.build/zz-first \"" v "\"}\n")})]
+    (try
+    (is (string? d0) (str "answered " d0))
+    (is (not= opts cfg-text) "the compiler's options are stated in default.edn")
+    (is (not= d0 (fx/binary-digest root (tree-with root base {cfg-p opts}))) "a change of what the compiler reads is a build")
+    (is (not= at-load cfg-text) "max-agents, read at load, is stated in default.edn")
+    (is (not= d0 (fx/binary-digest root (tree-with root base {cfg-p at-load}))) "a change of a key read at load is a new process's")
+    (is (not= port cfg-text) "view-window is stated in default.edn")
+    (is (= d0 (fx/binary-digest root (tree-with root base {cfg-p port}))) "a change of a key the branch holds is no build")
+    (is (not= (fx/binary-digest root (tree-with root base (first-entry "a")))
+              (fx/binary-digest root (tree-with root base (first-entry "b"))))
+        "a build key whose entry is its file's first moves the digest with its value")
+    (finally (clojure.java.shell/sh "rm" "-rf" root)))))
+
+(deftest ^{:seon.test/estimate {:ticks 20000000} :seon.test/execs ["git" "bin/tree" "rm"]} an-untracked-nested-repo-moves-no-tree
+  ;; 2026-11-15 15:53: an untracked clone in the main checkout (reference-code/core.async-flow) entered bin/tree's tree as a gitlink,
+  ;; and every reader of a gitlink took it for a pin: the build's identity moved (25fd5003 against c7311e6b) and spawns were refused.
+  ;; A pin is a gitlink .gitmodules names. Estimate: a tree id's few git calls, ~1M ticks each
+  (let [dir (.getPath (doto (java.io.File/createTempFile "seon-fx-tree" "") (.delete) (.mkdirs)))
+        sh (fn [d & args] (let [r (apply clojure.java.shell/sh (concat args [:dir d :env (assoc (into {} (System/getenv)) "GIT_CONFIG_GLOBAL" "/dev/null")]))]
+                            (assert (zero? (:exit r)) (str args (:err r))) (clojure.string/trim (:out r))))
+        commit! (fn [d] (sh d "git" "init" "-q") (spit (str d "/a") "a") (sh d "git" "add" "a")
+                  (sh d "git" "-c" "user.email=t@t" "-c" "user.name=t" "commit" "-qm" "a"))
+        bin-tree (fn [] (sh dir (str (cfg/checkout) "/bin/tree") dir))]
+    (try
+      (commit! dir)
+      (let [before (fx/tree-id dir)]
+        (.mkdirs (java.io.File. (str dir "/clone")))
+        (commit! (str dir "/clone"))
+        (is (= before (fx/tree-id dir)) "a nested repository .gitmodules does not name is no part of the tree")
+        (is (= before (bin-tree)) "and bin/tree names the same tree"))
+      (finally (sh "/" "rm" "-rf" dir)))))
+
+(deftest ^{:seon.test/estimate {:ticks 20000000} :seon.test/execs ["git"]} runtime-for-answers-for-the-running-binary
+  ;; 2026-11-15: root (pid 58108) ran digest c7311e6b while target/seon.digest said 76dc758d, a later build's, and runtime-for
+  ;; answered current off the file [M root result/aff6b6de, cf6571ca]. It compares the running binary's identity, its build
+  ;; record's :digest held since boot (seon.program/binary-program). Estimate: a tree's digest once, then a file read
+  (let [root (cfg/checkout)
+        tree (clojure.string/trim (:out (clojure.java.shell/sh "git" "-C" root "rev-parse" "HEAD^{tree}")))
+        d (fx/binary-digest root tree)]
+    (with-redefs [seon.program/binary-program (fn [] {:digest "another-build"})]
+      (let [r (fx/runtime-for tree)]
+        (is (= :seon.process/env-mismatch (:seon.error/type r)) (str "a running binary of another identity is told: " r))
+        (is (= "another-build" (:seon.process/binary-digest r)) "naming the running binary's identity")))
+    (with-redefs [seon.program/binary-program (fn [] {:digest d})]
+      (is (= d (:digest (fx/runtime-for tree))) "and its own tree's is current"))
+    ;; a tree this repository cannot read is the identity's typed error, never a digest of what could be read
+    (is (= :seon.fx/io-error (:seon.error/type (fx/runtime-for "0123456789abcdef0123456789abcdef01234567"))) "an unreadable tree is told")
+    ;; the kept digest is keyed by the code that computed it: a value a changed binary-digest computed is never read back
+    (let [kept (fn [code] (java.io.File. (str root "/target/runtime-for/" tree "." (seon.lib/digest code) ".digest")))]
+      (.delete ^java.io.File (kept "another-code"))
+      (try
+        (with-redefs [seon.program/running-form (fn [_] "another-code")]
+          (fx/runtime-for tree)
+          (is (.isFile ^java.io.File (kept "another-code")) "another code keeps its own value"))
+        (finally (.delete ^java.io.File (kept "another-code")))))))

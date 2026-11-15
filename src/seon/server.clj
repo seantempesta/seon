@@ -13,7 +13,7 @@
   printf '{:op :agents}\\n' | nc -w 5 127.0.0.1 PORT
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.system :as c] [my.root :as root] [seon.fx :as fx] [seon.config :as cfg] [seon.task :as task] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
+  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.system :as c] [my.root :as root] [seon.fx :as fx] [seon.config :as cfg] [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
             [seon.lib :as lib] [seon.edn :as sedn] [seon.db :as pdb] [seon.repl :as repl] [seon.print :as print] [seon.ctx.wire :as wire] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str] [clojure.walk] [clojure.core.async :as a] [jolt.fibers :as fibers]))
 
 (defn- refused
@@ -129,6 +129,22 @@
       (if (and a (not (seon.task/gone-statuses (:status a)))) [r nil] [nil r]))
     [nil nil]))
 
+(defn- template-task!
+  "Task id made from template (a name of seon.template/templates) on main, parked, as root's own session is made
+  (seon.system/root-agent-tx): a session's first seon_attach of session/<area> template=user makes its own agent's task, so the
+  reconciler starts nothing for it until attach! starts it. Answers nil, or the refusal. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.system/sys :seon.task/id :string] [:maybe :map]]}
+  [sys id template]
+  (let [db @(:conn sys) tp (tpl/templates (keyword template)) s (symbol id)]
+    (cond (not tp) (refused (str "no template " template ": the templates are " (str/join ", " (map name (keys tpl/templates)))))
+          (not (namespace s)) (refused (str "a task id is ns/name: " id))
+          :else (let [tx (tpl/request-tx db (tpl/from tp {:seon.task/ns (symbol (namespace s)) :seon.task/name (name s)
+                                                          :seon.task/plan (str "Made at its first attach from the " template " template.")}))]
+                  (if (contract/error? tx)
+                    tx
+                    (let [r @(c/transact-main! sys (conj (vec tx) {:seon.task/id id :seon.task/outcome :parked}))]
+                      (when (contract/error? r) r)))))))
+
 (defn- attach!
   "Start an outside agent on task id: its env's model is \"outside\" (the task keeps its own), so the
   reconciler starts no turn loop for it and does not kill it. The agent is spawned first;
@@ -145,16 +161,21 @@
   clone-of: the agent is that live agent's clone (seon.system/clone!: live values and all, its branch
   cut from the clone's once its writes commit), its own key and conversation (a fork's). client:
   who attached it (bin/mcp's id for its session), the agent's :holder: only that client's requests,
-  or ones that name the task, act on it (held).
+  or ones that name the task, act on it (held). template: a task id that does not exist is made from that template first
+  (template-task!): a session's own agent, session/<area> from :user.
   Answers {:agent :task}."
   {:malli/schema [:function [:=> [:cat :seon.system/sys :seon.task/id] :map]
-                  [:=> [:cat :seon.system/sys :seon.task/id [:map [:fresh? {:optional true} :boolean] [:clone-of {:optional true} :keyword] [:client {:optional true} [:maybe :string]]]] :map]]}
+                  [:=> [:cat :seon.system/sys :seon.task/id [:map [:fresh? {:optional true} :boolean] [:clone-of {:optional true} :keyword] [:client {:optional true} [:maybe :string]]
+                                                  [:template {:optional true} [:maybe :string]]]] :map]]}
   ([sys id] (attach! sys id {}))
-  ([sys id {:keys [fresh? clone-of client]}]
-  (let [db @(:conn sys)
+  ([sys id {:keys [fresh? clone-of client template]}]
+  (let [;; a task that does not exist is made from template, when one is named (a session's own: template-task!)
+        made (when (and template (not (task/task @(:conn sys) id))) (template-task! sys id template))
+        db @(:conn sys)
         t (task/task db id)
         [live dead] (if (or fresh? clone-of) [nil nil] (live-run sys db id))]
     (cond
+      made made
       (not t) (refused (str "no task " id))
       ;; its agent is live: it is the one to work it (a second spawn on its branch is refused)
       live {:agent (:agent live) :task id :shared true}
@@ -277,8 +298,9 @@
             :args {:ns {:type "string" :description "the task's namespace"} :name {:type "string" :description "its name"} :plan {:type "string" :description "what to do"}
                    :proofs {:type "array" :items {:type "string"} :description "qualified test names; optional"}}
             :required ["ns" "name" "plan"]}
-   :attach {:doc "Work a task as a Seon agent: root starts an agent on the task's branch (model outside) and answers its id and the next step. fresh: reset it, a new branch from main and an empty conversation (the old branch kept). from: fork that agent, a clone of it on a branch of its head working a sibling task."
+   :attach {:doc "Work a task as a Seon agent: root starts an agent on the task's branch (model outside) and answers its id and the next step. fresh: reset it, a new branch from main and an empty conversation (the old branch kept). from: fork that agent, a clone of it on a branch of its head working a sibling task. template: make a task that does not exist from that template first (a session's own agent: task=session/<area> template=user)."
             :args {:task {:type "string" :description "ns/name"} :fresh {:type "boolean" :description "reset: start the task again from main"}
+                   :template {:type "string" :description "make the task from this template when it does not exist (user: a session's own agent)"}
                    :from {:type "string" :description "fork: an agent id (a3) whose program, live values and branch the new agent goes on from, on a sibling of its task"}}}
    :prove {:doc "Run the tests a branch's change reaches, once per branch and tx however many ask (a session, an agent's turn): the one test service (seon.prove). Names an agent (its branch at its head), else main. Answers the run: its key, the counts, the red tests; a result already held for a test's digest is not run again."
            :args {:agent {:type "string" :description "an agent id whose branch to prove; omit for main"}
@@ -287,6 +309,8 @@
                   :tree {:type "string" :description "the checkout's tree id (seon.fx/tree-id, as bin/build records it): its branch's key"}
                   :mode {:type "string" :description "judge (default for a checkout), turn, or main (every key with no green at its digest, against no base: a whole tree)"}
                   :stream {:type "boolean" :description "EDN only: each test's verdict as a line as it ends, then the answer"}}}
+   :inbox {:doc "Wait for a message to an agent (its key, or its task: a session's agent is the one attached to its task session/<area>): answers at once with the messages main holds that its branch has not taken, else when one is written, else the typed :seon.server/no-message at :seon.config.root/inbox-wait-ms (ask again). It writes nothing: the agent's next reply delivers them. Run it in the background: its answer is your notification."
+           :args {:agent {:type "string" :description "an agent id"} :task {:type "string" :description "ns/name: its agent, instead of agent"}}}
    :done {:doc "Hand the task the agent works back to root: the agent writes its end (its proofs run, seon.turn/hand-back!), then root judges it, and merges it when the done rule has no reason. Answers the verdict when main holds it, as one line and a handle (seon.server/verdict-line): the task's outcome (done, merged, or closed with its task held) and reason, each red test with its first failure, and how main differs from the branch; the handle is the form that reads it whole at root. A defect of the reconciler that stops the judge, as that defect. It waits as long as the judge does (the run's proofs, a gate, a merge), so a caller's read timeout must allow minutes."
           :args {:agent {:type "string"} :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}} :required ["agent"]}))
 
@@ -317,8 +341,8 @@
   (agents-answer sys))
 
 (defn- agent-reply
-  "An outside agent's request of agent ag as one reply (seon.turn/outside-reply!): {:responses [...]}, each eval's, and :messages, the messages
-  its turn took when the reply is the agent's turn (docs/users.md#messages). The shape every eval of an agent takes, the old :code refused, saying so, with nothing run. See docs/server.md#ops."
+  "An outside agent's request of agent ag as one reply (seon.turn/outside-reply!): {:responses [...]}, each eval's, and :request, what the model's
+  next request adds, when the reply is the agent's turn (docs/users.md#messages). The shape every eval of an agent takes, the old :code refused, saying so, with nothing run. See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.system/sys :keyword :map] :map]}
   [sys ag req]
   (let [{:keys [task env]} (work-of sys ag)
@@ -373,8 +397,73 @@
             (cond (contract/error? r) r (:ex r) (:ex r) :else {:agent ag :task task :context (:seon.print/code (:out r))}))))
       (refused (if ag (str ag " works no task: attach one first") (str "no task " (:task req) ", and no agent named"))))))
 
+(defn connection-agent
+  "The key of the agent req's client holds (attach!'s :holder, running or parked), or nil, then the signed-in person. Read per
+  request, never kept. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.system/sys :map] [:maybe :string]]}
+  [sys req]
+  (when-let [c (:client req)]
+    (let [db @(:conn sys)
+          held (filter #(= c (:holder (:env %))) (concat (task/running db) (task/running db :parked)))]
+      ;; the session's own agent first: the one whose task is of kind :user (its template's property, docs/users.md#messages)
+      (:key (or (first (filter #(= :user (:seon.task/kind (task/task db (:task %)))) held)) (first held))))))
+
+;; Estimate: one :avet seek of the agent's message links and one id lookup each on its branch (~10.5k ticks a message [M]); a wait
+;; parks the connection's fiber (no worker, no thread) on await-message, one :avet seek a commit while held
+(defn- inbox-messages
+  "The messages main holds to agent key k that its branch has not taken (seon.task/undelivered), as a session reads them: {:id :from
+  :body :sent-ms}, :from by name. Reads only. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.system/sys :seon.host/db :string] [:vector :map]]}
+  [sys db k]
+  (let [br (:seon.agent/branch (d/entity db [:seon.agent/key k]))
+        bdb (if br (:db @(c/branch-db sys br)) db)]
+    (mapv #(update % :from task/sender-name) (task/undelivered db bdb k))))
+
+(defn- inbox-answer
+  "seon_inbox for request req: the agent (req's :agent, or its :task's agent), its new messages now, else the first ones written
+  while it waits (seon.system/await-message), else :seon.server/no-message at :seon.config.root/inbox-wait-ms (a put-after! of
+  that bound, an outside client's wait). Run on the connection's fiber, never a :server-op worker (serve-connection!). See
+  docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.system/sys :map] :map]}
+  [sys req]
+  (let [db @(:conn sys)
+        k (or (:agent req) (some->> (:task req) (task/agent-key db)))]
+    (if-not (and k (pdb/eid db :seon.agent/key k))
+      (refused (str "seon_inbox names no agent: give :agent (an agent key) or :task (a task id); asked agent " (:agent req) ", task " (:task req)))
+      ;; the wait starts at the t this check read: a message committed between the check and the wait still wakes it
+      (let [now (inbox-messages sys db k)]
+        (if (seq now)
+          {:agent k :messages now}
+          (let [ms (cfg/value :seon.config.root/inbox-wait-ms)
+                {:keys [p] wk :k} (c/await-message sys k (:max-tx db))
+                ;; the bound's end answers p itself, typed: the first of the message's commit and the bound wins
+                due (a/chan 1) h (step/put-after! due ms true)
+                _ (a/go (when (a/<! due)
+                          (deliver p (contract/error :seon.server/no-message #'seon.server/inbox-answer
+                                                     (str "no message to " k " in " ms " ms: ask again") {:agent k :waited-ms ms}))))
+                r @p]
+            (step/cancel! h) (a/close! due)
+            (cond (= :seon.server/no-message (:seon.error/type r)) (do (c/drop-wait! sys wk) r)
+                  (contract/error? r) r
+                  :else {:agent k :messages (inbox-messages sys @(:conn sys) k)})))))))
+
+(defmethod op-answer :inbox [sys _ req] (inbox-answer sys req))
+
+(defn- inline-op?
+  "Does request line run on its connection's fiber, never a :server-op worker: an op that waits on our own system's event
+  (seon_inbox) and would hold one of the 16 worker threads while it waits. Both protocols: EDN {:op :inbox} and MCP's tools/call
+  of seon_inbox. See docs/server.md#ops."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [line]
+  (boolean (and (str/includes? line "inbox")
+                (try (if (str/starts-with? (str/triml line) "{\"")
+                       (= "seon_inbox" (get-in (json/read-str line) ["params" "name"]))
+                       (= :inbox (:op (edn/read-string line))))
+                     (catch Exception _ false)))))
+
 (defmethod op-answer :message [sys ag req]
-  @(c/message! sys ag (:body req)))
+  ;; from the agent the connection works through (connection-agent), else the signed-in person
+  @(c/message! sys ag (:body req) (some->> (connection-agent sys req) (hash-map :from))))
 
 (defmethod op-answer :write_back [sys _ _] (root/write-back! sys))
 
@@ -387,7 +476,7 @@
 
 (defmethod op-answer :attach [sys _ req]
   (let [a (cond (:from req) (fork! sys (keyword (:from req)) (:client req))
-                (:task req) (attach! sys (:task req) {:fresh? (true? (:fresh req)) :client (:client req)})
+                (:task req) (attach! sys (:task req) {:fresh? (true? (:fresh req)) :client (:client req) :template (:template req)})
                 :else (refused "seon_attach needs task=ns/name, the task to work (or from=an-agent-id, to fork one)"))]
     (cond-> a
       (and (:agent a) (not (contract/error? a))) (assoc :next (str "seon_context with agent " (name (:agent a)) " reads what its model reads (wire true: the request body). "
@@ -569,9 +658,9 @@
                            ;; handle, anything else whole by the printer (nothing could re-ask it)
                            (result {"content" [{"type" "text" "text" (cond (and (= :context op) (:context a)) (:context a)
                                                                            (:response a) (eval-text (:response a))
-                                                                           (:responses a) (str (when-let [ms (seq (:messages a))]
-                                                                                                 (str (str/join "\n" (for [m ms] (str "Message from " (or (:from m) "seon") ": " (:body m)))) "\n\n"))
-                                                                                               (str/join "\n\n" (map eval-text (:responses a))))
+                                                                           (:responses a) (str (str/join "\n\n" (map eval-text (:responses a)))
+                                                                                               ;; what the model's next request adds (seon.turn/outside-reply!): the page's edits and the messages it took
+                                                                                               (when-let [t (not-empty (:request a))] (str "\n\nWhat your next request adds:\n\n" t)))
                                                                            (contract/error? a) (print/text a)
                                                                            (:again (ops op)) (let [p (print/print-value a {:handle (:again (ops op))})] (or (:text p) (:seon.error/message p)))
                                                                            :else (print/text (vary-meta a assoc :seon.print/full true)))}]}))))
@@ -621,7 +710,8 @@
               run (bound-fn [] (binding [*emit* (when-not mcp?
                                                   (fn [m] (.write out (.getBytes (str (sedn/encode m) "\n") "UTF-8")) (.flush out)))]
                                  (respond sys line)))
-              o @(c/effect! sys :server-op {:run run})
+              ;; an op that waits on our own system's event runs on this fiber, which parks: it holds no worker thread
+              o (if (inline-op? line) {:value (run)} @(c/effect! sys :server-op {:run run}))
               ;; the owner's own refusal (no worker, a stopped root) is this request's answer, in its protocol
               a (if (contract/error? o)
                   (if mcp? (json/write-str (rpc-error nil -32603 (print/text o))) (sedn/encode o))

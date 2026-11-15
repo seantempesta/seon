@@ -1,4 +1,5 @@
 #!/bin/zsh
+# DEVIATES (docs/decisions.md 2026-11-15: a script is thin over an op): starts a system and edits root's source roots before bin/mcp call eval; once a session evals at its own agent, a probe is that eval. Task jolt.host/deps-scripts-keep-only-a-job-the-runtime-cannot-do.
 # bin/deps-probe FILE   evaluate FILE's forms in this checkout's root, as a measurement in the built program sees
 # them (docs/cost.md#what-is-measured: a -M script compiles without the build's settings, so its numbers are
 # not the program's). Starts this checkout's system when none is up (bin/system start, which builds what

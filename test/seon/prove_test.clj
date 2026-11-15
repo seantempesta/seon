@@ -44,6 +44,13 @@
           (recur st (into all o) (inc (.indexOf all m))))
         [st all]))))
 
+;; Estimate: one state-view of a small state map: ~20k ticks; 200,000
+(deftest ^{:seon.test/estimate {:ticks 200000}} the-state-view-says-how-far-mains-proving-is-behind
+  ;; root's (c), 2026-11-15: main's proving never backlogs (moves during a run coalesce into one next run), and the sweep reads how
+  ;; far behind it is from the view root keeps (:prove-state), never a fact written per move. Red before: the view had no :main
+  (let [v (#'prove/state-view {:runs {} :items {} :pending {} :main-asked 5 :main-want {:t 12 :commit "c" :program-t 9}})]
+    (is (= {:asked 5 :wanted 9 :in-flight false} (:main v)) (pr-str v))))
+
 (deftest ^{:seon.test/estimate {:ticks 500000}} a-running-key-is-joined-and-every-waiter-is-answered-once
   (let [[st outs] (feed (proc0) [(req 1 :main 5) (req 2 :main 5) (req 3 :main 5)])]
     (is (= 1 (count (asks outs :spawn))) "three askers of one key: one run")

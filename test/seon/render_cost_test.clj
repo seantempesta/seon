@@ -629,7 +629,10 @@
                :growth :linear
                :fixed {:bytes 20000}
                :per-n {:bytes 7000}
-               :sizes [10 20 40]}))
+               ;; 2026-11-15 (context): sizes inside one leaf, where the diff is linear in the turns. At 40 the leaf's split, which moves
+               ;; with every schema entry anywhere, fell inside the range (landing 5's entries: 79k, 107k, 240k at 10, 20, 40, convex),
+               ;; and the verdict judged the store's layout, not seon.ctx/moved
+               :sizes [5 10 20]}))
 
 (defn walk-plus-one-of
   "The input at n: seon.render/walk's arguments for agent a1's request after one eval more (turn n+1), its walk at n turns kept from

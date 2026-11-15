@@ -1851,8 +1851,8 @@
                       ;; base's verdicts at the red tests' base digests, from the store's results branch (the image's own runs, :live: a
                       ;; green bin/test cached at one digest is no answer for a red here); none held, the red stays the branch's
                       rdb (when (seq bd) (results-db))
-                      stored (if rdb (proofs/verdicts-at rdb (into {} (keep (fn [[t s]] (when (and (#{:fail :error} s) (bd t)) [t (bd t)]))) reds)) {})]
-                  (assoc r :main-red (proofs/main-red reds digests bd stored))))
+                      found (if rdb (proofs/verdicts-at rdb (into {} (keep (fn [[t s]] (when (and (#{:fail :error} s) (bd t)) [t (bd t)]))) reds)) {})]
+                  (assoc r :main-red (proofs/main-red reds digests bd found) :unknown-reds (proofs/unknown-reds reds digests bd found))))
         (assoc :reused (count (filter reused selected)) :ran (count (distinct (keep :var (:reports res))))
                :selected selected :deferred deferred :at-judge (count judge)
                ;; each deferred test's digest as main held it (the plan's base): what the merge gate reads main's own verdict of it by
