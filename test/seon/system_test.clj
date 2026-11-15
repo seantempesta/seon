@@ -530,7 +530,8 @@
     (is (str/includes? (str seed) "SEED OK") (str seed))
     (is (true? (:listening? two)) (str "root resumed the store and listens: " two))
     ;; never refused for the program: the spawn reaches the agent's one start, where only the binary's identity is asked
-    ;; (seon.fx/runtime-for: this scratch tree names no build inputs, so another binary than target/seon)
+    ;; (seon.fx/runtime-for reads the tree in the source root's repository, the scratch one: it names no build inputs, so
+    ;; another binary than target/seon)
     (is (= :seon.process/env-mismatch spawned) (str "the agent's start asks its binary, nothing before it: " (pr-str (first (:also two)))))
     (is (not (str/includes? (str message) "git tree")) "no refusal names the trees")
     (doseq [act ["bin/system start --reindex" "bin/system next"]]

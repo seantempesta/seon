@@ -1842,7 +1842,8 @@
         (as-> r (let [reds (proofs/results r) bd (:base-digests plan)
                       stored (when (seq bd) (fx/stored-results (into {} (keep (fn [[t s]] (when (and (#{:fail :error} s) (bd t)) [t (bd t)]))) reds)))]
                   ;; a cache that cannot be read excuses nothing: the red stays the branch's
-                  (assoc r :main-red (proofs/main-red reds digests bd (if (or (nil? stored) (contract/error? stored)) {} stored)))))
+                  (let [found (if (or (nil? stored) (contract/error? stored)) {} stored)]
+                    (assoc r :main-red (proofs/main-red reds digests bd found) :unknown-reds (proofs/unknown-reds reds digests bd found)))))
         (assoc :reused (count (filter reused selected)) :ran (count (distinct (keep :var (:reports res))))
                :selected selected :deferred deferred :at-judge (count judge)
                ;; each deferred test's digest as main held it (the plan's base): what the merge gate reads main's own verdict of it by

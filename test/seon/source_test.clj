@@ -543,9 +543,9 @@
     (git "update-index" "--add" "--cacheinfo" (str "100644," (str/trim blob) "," path))
     (git "write-tree")))
 
-;; Estimate: three trees written as git objects and three runtime-for asks (bin/binary-digest once a tree, ~30 ms each), the
+;; Estimate: three trees written as git objects and three runtime-for asks (seon.fx/binary-digest once a tree, ~40 ms each), the
 ;; restart-for answers pure; ~2M ticks of this process's own work
-(deftest ^{:seon.test/estimate {:ticks 2000000} :seon.test/execs ["git" "bin/binary-digest"]} a-landing-restarts-only-when-a-build-input-moved
+(deftest ^{:seon.test/estimate {:ticks 2000000} :seon.test/execs ["git"]} a-landing-restarts-only-when-a-build-input-moved
   ;; task seon.system/a-landing-restarts-root-only-for-a-binary-change (deps' (2), in runtime's slice, root 2026-11-15): keep or
   ;; restart is seon.fx/runtime-for's answer for the landed tree and nothing else; a landing kept builds nothing (bin/update). On
   ;; real trees: the checkout's HEAD tree with a src form changed is kept (src is no build input: a boot loads the program as a

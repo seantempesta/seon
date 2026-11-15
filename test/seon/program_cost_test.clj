@@ -553,9 +553,12 @@
      :n "forms the branch added"
      :work "one diff of the branch against its base, one seek per carried datom's entity, the schema read once"
      :growth :linear
-     ;; measured: 14.0 / 21.3 / 49.2 / 134.7 MB and 5.2 / 8.7 / 22.2 / 63.7 M ticks at 10 / 30 / 100 / 300; with the schema read per datom, 285.8 MB at 10
-     :per-n {:bytes 400000.0}
-     :fixed {:bytes 10000000.0}
+     ;; measured: 14.0 / 21.3 / 49.2 / 134.7 MB and 5.2 / 8.7 / 22.2 / 63.7 M ticks at 10 / 30 / 100 / 300; with the schema read per datom, 285.8 MB at 10.
+     ;; The 10 MB fixed part hid ~12.7 MB a call of declaring the whole registry when one attribute (Datahike's own) was "lacking", then keeping
+     ;; none (seon.merge/attribute-declarations, 2026-11-15): now 1.50 / 4.24 MB at 3 / 30 [M result/d8dfbd43, result/a4fe1381]. The estimate:
+     ;; the schema map read once (~1.1 MB measured, seon.db/the-schema-map-is-read-once-a-value) and ~29 carried datoms a form at ~3.5 KB each
+     :per-n {:bytes 100000.0}
+     :fixed {:bytes 1200000.0}
      :sizes [3 10 30]}))
 
 (defn digested-of
