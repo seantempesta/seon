@@ -2449,8 +2449,9 @@
   First the end is a fact on main, durable (:seon.system/stopped {:boot :cause :at-ms}; cause
   :stop! unless the caller names it: :stdin-eof, :signal), so every clean end says why; a
   refused stop fact still stops root, and the answer carries it (:stop-fact-refused).
-  Answers {:stopped true :cause :drained .. :graph true|{::flow/running #{pids}} :ms :peak-processes}, the last the most processes
-  the root held at once (itself, its boot fork server, its live agents)."
+  Answers {:stopped true :cause :drained .. :graph true|{::flow/running #{pids}} :ms :peak-processes :phases}, :peak-processes the
+  most processes the root held at once (itself, its boot fork server, its live agents), :phases each part's {:ticks :ms} (:fact, :drain,
+  :flow-stop): a part whose wall is far above its ticks waits."
   {:malli/schema [:function [:=> [:cat :seon.system/sys] :map] [:=> [:cat :seon.system/sys :keyword] :map]]}
   ([sys] (stop! sys :stop!))
   ([sys cause]
@@ -2458,8 +2459,11 @@
   ;; between steps), and a fiber running then prints its frames at its next safe point, inside the stop's own bound, so an overrun's
   ;; evidence names the step that held it (docs/machine.md#reading-a-hang); ~91k ticks, 14 KB [M root result/b52f87ea]
   (binding [*out* *err*] (println "ROOT STOPPING: its fibers as the stop begins\n" (jolt.host/fiber-dump)) (flush))
-  (let [fact @(transact-main! sys [{:seon.system/id :root :seon.system/stopped {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)}}]
-                              {:flush? true})
+  ;; each part's ticks (this thread's work) beside its wall time: a part whose wall is far above its ticks waits, and the waiter is
+  ;; what a slow stop costs (docs/machine.md#reading-a-hang); on the answer as :phases
+  (let [part (fn [f] (let [m (profile/measure! f)] [(:value m) {:ticks (:ticks m) :ms (lib/r2 (/ (:wall-ns m) 1e6))}]))
+        [fact fact-part] (part #(deref (transact-main! sys [{:seon.system/id :root :seon.system/stopped {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)}}]
+                                                       {:flush? true})))
         t0 (profile/now-ns)
         ;; an api already closed (a root whose api ended on its own) answers at once that it is
         p (step/ask-edge (:ext sys) {:op :shutdown} (gone nil "root stopped"))]
@@ -2469,8 +2473,8 @@
     ;; parked on the drain, no bound: each agent interrupted and stopped exits (seon.agent-proc/stop!), the
     ;; writer flushes, the fork server ends; one that never does is a stall, recorded (task
     ;; seon.system/a-stop-or-crash-resumes-from-one-resume-point-and-says-what-it-lost)
-    (let [drained @p
-          graph (flow/stop (:graph sys))]
+    (let [[drained drain-part] (part #(deref p))
+          [graph stop-part] (part #(flow/stop (:graph sys)))]
       ;; a wait put on :judge that the stopped reconciler never took is answered here
       (loop [] (when-let [m (a/poll! (:judge sys))] (some-> (:p m) (deliver {:stopped true})) (recur)))
       (a/close! (:events-in sys))
@@ -2478,5 +2482,5 @@
       (d/release (:conn sys))
       (when (= :lmdb (:backend (:store (:cfg sys)))) (klmdb/close-env! (:store-path sys)))
       (cond-> {:stopped true :cause cause :drained drained :graph graph :agents-left 0 :ms (lib/r2 (profile/ms-since t0))
-               :peak-processes (:peak-processes drained)}
+               :peak-processes (:peak-processes drained) :phases {:fact fact-part :drain drain-part :flow-stop stop-part}}
         (contract/error? fact) (assoc :stop-fact-refused fact))))))

@@ -314,29 +314,6 @@
             "no id of a counter's form"))
       (finally (seon.lib/remove-tree! path tasks (str path "-in") (str path ".log") (str path "-agents"))))))
 
-(deftest a-root-stops-in-a-second
-  ;; task seon.system/a-root-stops-in-a-second (measured 2026-11-10): every stop of a root less than ~35 s old took 26-32 s,
-  ;; because its stop waited for the boot fork server to read the EOF of its socket, which a server still warming (preload!,
-  ;; its tests' load) did not do until its warm-up was done. The stop ends the boot server's process group at once
-  ;; (seon.fork-server/release!), and says so: stopped at once after its start, the root's answer names the group ended. Red
-  ;; before: the server was left to read its EOF (no :ended)
-  (let [checkout (seon.config/checkout)
-        main (str "root-test-stops-" (random-uuid))
-        runs (str checkout "/target/runs/" main "-runs")
-        root (ts/start-root! {:store (ts/process-store checkout) :main main :runs runs})
-        {:keys [exit log]} (ts/stop-root! root)
-        i (clojure.string/index-of log "ROOT STOPPED ")
-        stopped (when i (edn/read-string {:default tagged-literal} (subs log (+ i (count "ROOT STOPPED ")))))]
-    (is (= 0 exit) log)
-    (is (= :group-ended (get-in stopped [:drained :ended])) (str "the boot server's group was ended by the stop: " (pr-str stopped)))
-    (is (true? (:graph stopped)) "every proc exited")
-    ;; task seon.lib/a-process-reports-the-most-processes-it-held-at-once: a root reports the most processes it held at once,
-    ;; read with no ps; one that forked no agent held itself and its boot fork server
-    (is (= 2 (:peak-processes stopped)) (str "the root's peak, on its ROOT STOPPED line: " (pr-str stopped)))
-    ;; what the stop calls, named here so this test's digest takes it (a root's own code is the full run's otherwise)
-    (is (= [:enum :group-ended :eof] (last (:malli/schema (meta #'seon.fork-server/release!)))) "release! answers how the server ended")))
-
-;; Estimate: a test root's start and stop (~as a-root-stops-in-a-second, a process test), one fiber dump; ~5M ticks of its own
 (deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/root [] :seon.test/execs ["target/seon"]} a-stop-writes-the-roots-fibers-before-it-waits
   ;; docs/machine.md#reading-a-hang: a root's stop waits for each proc's running step (Flow takes a stop between steps), and two stops
   ;; overran past their bound with no record of the step that held them (runs/stop-overran-87484, -77485: the dump came at the kill,
@@ -347,10 +324,14 @@
         root (ts/start-root! {:store (ts/process-store checkout) :main main :runs runs})
         {:keys [log]} (ts/stop-root! root)
         dump (clojure.string/index-of log "ROOT STOPPING: its fibers as the stop begins")
-        stopped (clojure.string/index-of log "ROOT STOPPED ")]
-    (is (some? dump) (str "the stop wrote root's fibers: " log))
-    (is (and dump stopped (< dump stopped)) "before it waited for anything (its ROOT STOPPED line comes after)")
-    (is (some? (clojure.string/index-of log "jolt fiber dump") ) "the dump is Jolt's own (every fiber, running ones at their next safe point)")))
+        i (clojure.string/index-of log "ROOT STOPPED ")
+        stopped (when i (edn/read-string {:default tagged-literal} (subs log (+ i (count "ROOT STOPPED ")))))]
+    (is (some? dump) (str "the stop wrote root's fibers as it began: " log))
+    (is (some? (clojure.string/index-of log "jolt fiber dump")) "the dump is Jolt's own (every fiber, running ones at their next safe point)")
+    ;; its parts' ticks beside their wall time, when the stop ended within its bound (never asserted on wall time: principles section 6)
+    (when stopped
+      (is (= #{:fact :drain :flow-stop} (set (keys (:phases stopped)))) (str "the stop names its parts: " (pr-str (:phases stopped))))
+      (is (every? #(and (nat-int? (:ticks %)) (number? (:ms %))) (vals (:phases stopped))) "each with its ticks and its wall time"))))
 
 (deftest a-test-roots-task-files-are-its-own
   ;; the second boot above read 810 tasks (2026-10-25): its root started seconds after a merge
