@@ -768,3 +768,25 @@
         (is (and (seq gone) (not-any? :added gone)) "read from the commits' changes (a retraction), never a diff of the values (a datom of base)")
         ;; 20 commits: 20 changes values read (~20k ticks each) and their ~80 datoms
         (is (< dt 1000000) (str "read from its 20 commits: " dt " ticks"))))))
+
+;; docs/merging.md#a-branch-merges-main-in: a fact both sides changed differently since the base is a conflict the branch's agent can
+;; see and settle. Red before (found on tests' pilot branch at root, 2026-11-15, result/cad55069): the writer's merge-main-into
+;; refused the merge and wrote the conflict's entry, but seon.merge/unmerged (what my.branch/unmerged shows the agent) read the
+;; branch's content through program-of, which holds no datums, and showed nothing: the agent saw nothing to resolve while the merge
+;; stayed refused
+;; Estimate: the test branch ~3M + 4 small transactions ~1M + one merge-main-into ~3M = ~8M; 10000000
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-datum-conflict-is-shown-and-settled
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [b (pdb/on-main (:branch cfg) :dc-branch)
+           _ (d/transact conn {:tx-data [{:seon.agent/key "dc-agent" :seon.agent/model "base-model"}] :tx-meta (pdb/tx-meta (:branch cfg))})
+           _ (d/branch! conn (:branch cfg) b)
+           bc (pdb/connect (assoc cfg :branch b))]
+       (try
+         (d/transact bc {:tx-data [[:db/add [:seon.agent/key "dc-agent"] :seon.agent/model "branch-model"]] :tx-meta (pdb/tx-meta b)})
+         (d/transact conn {:tx-data [[:db/add [:seon.agent/key "dc-agent"] :seon.agent/model "main-model"]] :tx-meta (pdb/tx-meta (:branch cfg))})
+         (let [r (seon.writer/merge-main-into conn cfg b)
+               shown (pm/unmerged (pdb/head conn b))]
+           (is (false? (:ok r)) (str "both changed it differently: a conflict, nothing merged: " (pr-str r)))
+           (is (= 1 (count shown)) (str "and the agent is shown it to settle: " (pr-str shown))))
+         (finally (d/release bc)))))))
