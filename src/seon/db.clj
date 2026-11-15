@@ -1071,7 +1071,8 @@
   name (an attribute whose schema reaches :seon.db/commit: the entity index's :commit-attrs, an agent's bases and a turn's basis among them),
   which is what a merge and a page read by id. Every datom, a branch's history and as-of reads stay: only reading
   another old commit by its id goes. Root calls it at boot, before any other process exists, so nothing live holds a swept commit, and as its sole writer. Answers
-  {:swept :ms :generation}, written on main, or nil when none is due. See docs/storage.md#collection."
+  {:swept :ms :generation}, written on main, or nil when none is due; when a branch's merge base is unknown (d/merge-base refused
+  for a reason other than several bases), nothing is swept: the record names the branches and :seon.db/retain-refused answers. See docs/storage.md#collection."
   {:malli/schema [:=> [:cat :seon.host/conn pos-int?] [:maybe :map]]}
   [conn keep]
   (let [store (:store @conn)
@@ -1090,21 +1091,31 @@
                            (if-let [p (when (seq ps) (apply max-key #(:datahike/generation (record %) 0) ps))] (recur p (dec n)) c))))
             cutoff (let [{:keys [datahike/updated-at datahike/created-at]} (:meta (k/get store oldest nil {:sync? true}))] (or updated-at created-at))
             bs (d/branches conn)
-            ;; a branch with more than one best ancestor has each kept; its data says which (d/merge-base's refusal)
-            bases (mapcat (fn [b] (try [(d/merge-base conn b main)]
-                                       (catch clojure.lang.ExceptionInfo e (or (:merge-bases (ex-data e)) []))))
-                          (remove #{main} bs))
+            ;; a branch with more than one best ancestor has each kept; its data says which (d/merge-base's refusal); any other refusal
+            ;; is the branch's base unknown, and nothing is swept, never a sweep without it (43 of root's 66 bases were swept that way,
+            ;; 2026-11-15: every ExceptionInfo was read as no base)
+            answers (for [b (remove #{main} bs)]
+                      (try {:bases [(d/merge-base conn b main)]}
+                           (catch clojure.lang.ExceptionInfo e
+                             (if-let [ms (:merge-bases (ex-data e))] {:bases ms} {:refused {:branch b :message (ex-message e)}}))))
+            refused (into [] (comp (map :refused) (remove nil?)) answers)
+            bases (mapcat :bases answers)
             ;; every commit a kept reference names (an attribute whose schema reaches :seon.db/commit: the entity index's :commit-attrs,
             ;; derived from the schemas): an agent's bases, a turn's basis, a run's; whatever reads it by id reads it whole
             commit-attrs (:commit-attrs (index))
             named (into #{} (for [b bs :let [h (d/branch-as-db store b)] a commit-attrs d (d/datoms h :aevt a)
                                   x (tree-seq coll? seq (:v d)) :when (uuid? x)]
                               x))
-            swept @(d/gc-storage conn cutoff {:datahike.gc/keep-commits (into #{} (remove nil?) (concat bases named))})
-            r {:swept (count swept) :ms (profile/ms-since t0) :generation generation}]
+            swept (when (empty? refused) @(d/gc-storage conn cutoff {:datahike.gc/keep-commits (into #{} (remove nil?) (concat bases named))}))
+            ;; refused: nothing swept, the record keeps the last sweep's generation (the next boot asks again) and names the branches
+            r (cond-> {:swept (count swept) :ms (profile/ms-since t0) :generation (if (seq refused) last-g generation)}
+                (seq refused) (assoc :refused refused))]
         (when (seq swept) (compact-due! conn))
         (d/transact conn [{:seon.system/id :root :seon.system/retained r}])
-        r))))
+        (if (seq refused)
+          (contract/error :seon.db/retain-refused #'seon.db/retain! (str "no sweep: the merge base of " (count refused) " branch(es) is unknown, "
+                                                                         (str/join ", " (map :branch refused))) {:refused refused})
+          r)))))
 
 (defn after-fork!
   "Make this forked process (an agent, a clone) open the store itself: an LMDB env and the

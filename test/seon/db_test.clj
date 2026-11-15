@@ -1023,6 +1023,28 @@
       (d/release conn)
       (finally (seon.lib/remove-tree! path (str path ".compact"))))))
 
+;; Estimate: a store on disk ~20M + 12 commits ~10M + one retain! that sweeps nothing ~20M = 60000000
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-sweep-that-cannot-find-a-branchs-base-sweeps-nothing
+  ;; docs/storage.md#collection (root's store, 2026-11-15: 43 of 66 branches' merge bases swept): retain! read every refusal of
+  ;; d/merge-base as "no base" and swept the base; a refusal other than several bases is the base unknown, so nothing is swept, the
+  ;; record names the branch and the answer is the typed :seon.db/retain-refused
+  (let [path (str (seon.config/checkout) "/target/tmp/refused-" (random-uuid))
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+        note! (fn [c s] (d/transact c [{:note/text s :note/agent :t}]) (d/commit-id @c))]
+    (try
+      (note! conn "a")
+      (d/branch! conn :db :b)
+      (let [base (d/merge-base conn :b :db)]
+        (doseq [i (range 10)] (note! conn (str "n" i)))
+        (let [real d/merge-base
+              r (with-redefs [d/merge-base (fn [c b m] (if (= :b b) (throw (ex-info "the commit graph is unreadable here" {:type :test/refused})) (real c b m)))]
+                  (pdb/retain! conn 3))]
+          (is (= :seon.db/retain-refused (:seon.error/type r)) (pr-str r))
+          (is (some? (d/commit-as-db conn base)) "the branch's base is kept: nothing was swept")
+          (is (= [:b] (mapv :branch (:refused (:seon.system/retained (d/pull @conn [:seon.system/retained] [:seon.system/id :root]))))) "the record names it")))
+      (d/release conn)
+      (finally (seon.lib/remove-tree! path (str path ".compact"))))))
+
 ;; the rule a collection keeps beside "no agent live" (docs/storage.md#collection)
 (deftest a-root-that-shares-its-store-never-collects
   ;; seon.db/collect! with sole? false (:seon.config.store/sole-writer?, false where roots share
