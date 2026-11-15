@@ -1321,8 +1321,8 @@
         errs (rv/make-reaction #(es @s :seon.error/signature) :auto-run :queue)
         tasks (rv/make-reaction #(task-part @s @ans) :auto-run :queue)
         set-moved (volatile! true)]
-    ;; each first run tracked and its throw kept as its state (seon.ratom's catching run), never a deref that would throw here
-    (doseq [r [ans errs tasks]] (rv/-run r true))
+    ;; each first run is the owner's next bounded flush's (seon.ratom/make-reaction queues a :queue reaction's first capture), its
+    ;; throw kept as its state there, never a deref that would throw here
     ;; the set is diffed against the rows only when it moved, never on every sync (O(errors) a move otherwise)
     (add-watch errs set-moved (fn [_ _ _ _] (vreset! set-moved true)))
     (recorded-sync! {:store s :answers ans :errors errs :tasks tasks :rows {} :by-class {} :changed (volatile! #{}) :set-moved set-moved :report-cache (volatile! nil)} n))))
@@ -1341,9 +1341,16 @@
         ;; the step's share of the work (a bound on work, not a cut of text: subvec, never the printer's cut vars)
         fresh (subvec all-fresh 0 (min n (count all-fresh)))
         more? (< (count fresh) (count all-fresh))
-        row-of (fn [e] (let [r (rv/make-reaction #(error-row @store @answers e) :auto-run :queue)]
+        ;; a row reads its own entry of the answers, never the whole map (the review's (4): one answer moved reran all 4,066 rows): a
+        ;; small reaction per row takes its signature's answers and tells the row only when they differ, so an answers change costs a
+        ;; lookup a row and reruns the rows whose answers moved. O(1) per changed answer waits on views that wake (seon.ratom, fix 5)
+        row-of (fn [e] (let [sig (:v (first (d/datoms @store :eavt e :seon.error/signature)))
+                             mine (rv/make-reaction #(get-in @answers [:signature sig] []) :auto-run :queue)
+                             r (rv/make-reaction #(error-row @store {:signature {sig @mine}} e) :auto-run :queue)]
+                         (rv/add-on-dispose! r (fn [_] (rv/dispose! mine)))
+                         ;; its first run (the owner's next flush) moves it, and this watch names it for the next sync
                          (add-watch r changed (fn [_ _ _ _] (vswap! changed conj e)))
-                         (rv/-run r true) r))
+                         r))
         rows (as-> rows rs (reduce (fn [rs e] (rv/dispose! (rs e)) (dissoc rs e)) rs gone) (reduce (fn [rs e] (assoc rs e (row-of e))) rs fresh))
         moved (into (set fresh) @changed)
         drop-e (fn [bc e] (reduce-kv (fn [bc c m] (assoc bc c (dissoc m e))) bc bc))
@@ -1353,6 +1360,8 @@
         by-class (reduce (fn [bc e] (let [bc (drop-e bc e) r (rows e)]
                                       (vswap! thrown dissoc e)
                                       (cond (nil? r) bc
+                                            ;; not yet run (its first capture is queued): its first run names it again
+                                            (and (nil? (rv/-get r :state)) (nil? (rv/-get r :caught))) bc
                                             (rv/-get r :caught) (do (vswap! thrown assoc e (ex-data (rv/-get r :caught))) bc)
                                             :else (let [row (rv/-get r :state)] (update bc (:class row) (fnil assoc (sorted-map)) e row)))))
                          (reduce drop-e (:by-class live) gone) moved)]
