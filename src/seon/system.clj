@@ -534,8 +534,8 @@
 (defn- branch-holder
   "The live agent holding what opts asks to start, or nil: the session's agent under its key (one live process per agent), else an
   agent live on its branch. Live is a process: a live status (:seon.status/live) with its pid, or a spawn still answering its caller
-  (::spawning). An entry left by a kill, or a :spawning one with no process and no caller, holds nothing (data's pilot, 2026-11-15:
-  a resume refused by its own stale entry, result/df8817fb)."
+  (::spawning). An entry left by a kill, or a :spawning one with no process and no caller, holds nothing, so a resume is never
+  refused by its own stale entry."
   {:malli/schema [:=> [:cat :map :map] [:maybe :keyword]]}
   [st opts]
   (let [live? (fn [aid] (let [a (get-in st [:view :agents aid])]
