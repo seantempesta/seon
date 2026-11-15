@@ -429,6 +429,16 @@
     (is (= ["answered once"] (mapv :body (:messages first-r))) (pr-str first-r))
     (is (= :seon.server/no-message (:value again)) (str "asked again, nothing new: never the same message twice: " (pr-str again)))))
 
+;; Estimate: two server round trips (~0.5M each) and one delivery on the agent (~0.1M): ~1.1M; 2,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} an-inbox-answers-what-the-agents-delivery-placed
+  ;; the inbox answers what the agent's own delivery placed, never what it read before delivering: a message arriving between a read and
+  ;; the delivery would be delivered and never told. Red before: submit! answers one reply map ({:handle :value ...}), and the inbox took
+  ;; (:value (first r)) of it, nil, so it answered the read instead (flow's probe on main 26691a2ff6, result/d2fc4b27)
+  (let [[_ r] (at/in-agent (fn [{:keys [agent]}]
+                             [{:op :message :agent agent :body "placed by the delivery"}
+                              {:op :eval :agent "root" :code (str "(#'seon.server/inbox-deliver sys " (pr-str (name agent)) ")")}]))]
+    (is (= ["placed by the delivery"] (when (vector? (:value r)) (mapv :body (:value r)))) (str "the delivered messages, as a vector: " (pr-str r)))))
+
 (deftest ^{:seon.test/estimate {:ticks 300000}} an-inbox-line-runs-on-its-connection-and-holds-no-worker
   ;; part 2: seon_inbox waits, so it runs on the connection's fiber (which parks), never one of the 16 :server-op worker threads
   ;; (:seon.config.root/server-op-workers): eight waiting sessions would hold half of them. Both protocols. Red before: no inline op
