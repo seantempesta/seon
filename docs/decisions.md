@@ -18,6 +18,10 @@ The owner's rulings on the morning after the first night run on its own.
 
 Told that ticks count Scheme work only (no foreign calls, GC copying, parked time or interrupts-off time: chez `s/cpnanopass.ss:2966`, `s/event.ss:47`) and that the 161M/300M swing is unexplained, he chose deps' order: dumps that need no event check; CPU time and bytes per fiber per dispatch; steps scoped by the existing nesting measure `ticks-of`, with no new marker; a counter of foreign lookups; then one experiment that settles the swing before ticks can fail a test. Plan in `deps-ticks-soundness-2026-11-15` (deps' task).
 
+### Tests never hardcode defaults
+
+He ruled that no test hardcodes a default (2026-11-15). A test reads a default through the one config resolver and asserts the behaviour around it, never a copy of its value, so a changed default cannot leave a stale assertion red on main (two did that day). Tests sweeps the existing ones.
+
 ### A new binary runs in parallel, is tested there, then takes over
 
 "We could run a system in parallel; it doubles as the test harness, and if it passes we switch over. Drift is matched by replaying the program's evals since then" (from his phone; root's rewrite, his meaning). The new binary boots beside the standing system on the same store, the binary tests run against it, and green it catches up main's program (`seon.program/load-diff!`) and takes the writer; red, the standing system never stopped. Plan item 17 (runtime) and E's binary tests (tests).
