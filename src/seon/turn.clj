@@ -53,14 +53,14 @@
   (:turn (swap! agent/state assoc-in [:turn :stop] (cond-> {:outcome outcome} reason (assoc :reason reason)))))
 
 (defn- test-error!
-  "Record on this agent's branch whether its test run test-run failed as a whole: the error as data on
-  the agent (:seon.agent/test-error), retracted when a run answers;
+  "Record on this agent's branch whether its test run test-run failed as a whole: the error as data, whole (its own
+  keys too, as a no-verdict's :reported: what the run did report), on the agent (:seon.agent/test-error), retracted when a run answers;
   nothing written when it already says so (seon.ctx.status/status reads it)."
   {:malli/schema [:=> [:cat :any] :any]}
   [test-run]
   (let [k (:key @agent/state)
         held (:seon.agent/test-error (d/entity (agent/db) [:seon.agent/key k]))
-        err (when (contract/error? test-run) (select-keys test-run [:seon.error/type :seon.error/operation :seon.error/message]))]
+        err (when (contract/error? test-run) test-run)]
     (cond (and err (not= err held)) (agent/transact! [{:seon.agent/key k :seon.agent/test-error err}])
           (and held (not err)) (agent/transact! [[:db.fn/retractAttribute [:seon.agent/key k] :seon.agent/test-error]]))))
 
@@ -291,9 +291,11 @@
         _ (agent/commit!)
         ;; the request is the agent's model output, each turn's page message among it: made on the db that holds them
         db (agent/db)
-        {:keys [messages]} (wire/render db basis {:walk (repl/page-walk)})
-        ;; a hash of the bytes sent, which the debug page compares with its redraw
-        _ (agent/transact! [{:seon.model-call/id id :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}])
+        {:keys [messages parts]} (wire/render db basis {:walk (repl/page-walk)})
+        ;; a hash of the bytes sent, and what the turn sent, each message a
+        ;; part stored once, so debug reads it back as sent (seon.ctx.wire/sent-tx, sent-request)
+        _ (agent/transact! (into [{:seon.model-call/id id :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}]
+                                 (wire/sent-tx (agent/db) id (when (> n 1) (lib/call-id (:key @agent/state) (dec n))) n parts)))
         _ (agent/commit!)]
     ;; :call and :agent name this model call and its agent, so the reply is read as it streams (docs/flow.md#effects-one-owner-and-its-workers-per-kind)
     {:id id :t1 (profile/now-ns)
@@ -557,13 +559,25 @@
       :else (ask st))))
 
 (defn- merged-in
-  "A turn of run state st with main merged in: behind, the run ends :refork (no turn runs old code: root forks it again on main's
-  program); else it asks the task observed ({:observe}). See docs/merging.md#a-branch-merges-main-in."
+  "A turn of run state st with main merged in: behind, it asks its branch's program taken in place ({:load}, answered on a fiber, so no
+  turn runs old code); else the task observed ({:observe}). See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :map] :seon.turn/step]}
   [st]
   (if (:behind @agent/state)
-    [::end st :refork "merged main: the run goes on in a process forked on main's program" nil]
+    [st {:load {}}]
     [st {:observe (:task st)}]))
+
+(defn turn-loaded
+  "A {:load} output answered with errs (seon.agent/take-branch-program!'s load errors): each form that did not load is told to the agent
+  by its namespace, a :seon.agent/load-failed message its request reads, so it never trusts a half-applied main; then the task
+  observed ({:observe}). See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :map [:sequential :map]] :seon.turn/step]}
+  [st errs]
+  (doseq [{:keys [ns message form]} errs]
+    (tell-error! (contract/error :seon.agent/load-failed #'seon.turn/turn-loaded
+                                 (str "a form of " ns " that main changed did not load in this process" (when form (str " (" form ")")) ": " message) {:ns ns})
+                 "taking main's program in place at the turn's boundary"))
+  [st {:observe (:task st)}])
 
 (defn turn-begin
   "A turn begun: main merged in if it moved ({:merge}, `turn-merged`), else the task observed ({:observe}, `turn-observed`), each an
@@ -661,13 +675,14 @@
   [{:keys [prove model] :as out}]
   (try (cond prove {::verdict (agent/judge! (:names prove) (:reach? prove))}
              (:merge out) {::merged (branch/merge-main!)}
+             (:load out) {::loaded (agent/take-branch-program!)}
              (:observe out) {::observed (observe (:observe out))}
              :else {::answer (agent/fx! :model model {})})
        (catch Exception e {::threw e})))
 
 (defn step-run
   "A run's one driver: run state st and msg, the message its last output was answered with (nil: the run's first step), stepped
-  to its next output or its end. msg {::verdict v} goes to turn-verdict, {::merged m} to turn-merged, {::observed o} to turn-observed, {::answer a} to turn-end, {::threw e} to threw, and
+  to its next output or its end. msg {::verdict v} goes to turn-verdict, {::merged m} to turn-merged, {::loaded errs} to turn-loaded, {::observed o} to turn-observed, {::answer a} to turn-end, {::threw e} to threw, and
   {::stop true} (root is stopping) ends the run at once, :waiting, the call in flight dropped; a turn that answers ::next begins
   the next. Answers [st' {:prove ..}|{:model ..}] or [::end st outcome reason error]. Each step is called through its var, so a
   redefined one takes effect at the next turn. See docs/flow.md#the-step-fn-contract-every-proc-follows."
@@ -677,6 +692,7 @@
                     (contains? msg ::threw) (threw (dissoc st :pending) (::threw msg) false)
                     (contains? msg ::verdict) (turn-verdict st (::verdict msg))
                     (contains? msg ::merged) (turn-merged st (::merged msg))
+                    (contains? msg ::loaded) (turn-loaded st (::loaded msg))
                     (contains? msg ::observed) (turn-observed st (::observed msg))
                     (contains? msg ::answer) (turn-end st (::answer msg))
                     :else (turn-begin st))]

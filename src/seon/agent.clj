@@ -338,13 +338,6 @@
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
     (:result (await-reply k {:op :launch :k k :text text :template template}))))
 
-(defn focus!
-  "Ask root to move the signed-in user's view to the page of the agent with key k: root's answer, or its refusal (no user signed in, no such agent). See docs/users.md#whats-on-screen."
-  {:malli/schema [:=> [:cat :string] :any]}
-  [k]
-  (let [n (:tx-seq (swap! state update :tx-seq inc))]
-    (:result (await-reply n {:op :focus :k n :key k}))))
-
 (defn note-costs!
   "fns (seon.profile/touched of an eval) added to what this agent's process has measured since it started, (:fn-costs @state):
   an observation of this process on this machine, never written to the store; nothing in a process that is no agent's. See docs/sharing.md#a-functions-cost-is-a-fact."
@@ -1439,8 +1432,10 @@
 (defn- child-ended
   "st once test child cpid has ended (its link closed and its exit reaped): its proc gone from the graph, its run
   directory kept for removal after the answer (:run-dirs, run-answered), what it said folded into its shard (test-run-answer: a death is the one :error on the test it
-  was running), and the rest of the shard's tests forked to a new child when a death left any and named what it cost:
-  the death of one test never costs the run its other results. See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
+  was running), and the rest of the shard's tests forked to a new child when a death left any: the death of one test never
+  costs the run its other results. A death that named no running test with no test ended in that child is no progress, the
+  shard's :no-progress count (its own state, reset by any progress); at the second in a row the rest are each answered the
+  death as their own :error (its :exit, so no verdict is kept), never left unreported. See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
   {:malli/schema [:=> [:cat :map :keyword] :map]}
   [st cpid]
   (let [{:keys [shard os acc status]} (get-in st [:children cpid])
@@ -1449,14 +1444,20 @@
         done (into (:ended acc) (keep :var) died)
         sh (get-in st [:shards shard])
         rest-todo (filterv #(not (done (str "#'" %))) (:todo sh))
+        ;; progress: a test ended in this child, or its death named the test it cost
+        stalled (if (and (seq died) (empty? (:ended acc)) (not-any? :var died)) (inc (:no-progress sh 0)) 0)
+        give-up? (and (seq died) (seq rest-todo) (<= 2 stalled))
+        lost (when give-up?
+               (for [t rest-todo] {:type :error :var (str "#'" t) :exit status
+                                   :message (str "test process died twice with no test ended: " status ", before " t " ran")}))
         st (-> st (update :children dissoc cpid) (update :by-os dissoc os)
                (update :run-dirs (fnil conj []) (fx/run-dir os))
-               (assoc-in [:shards shard] (-> sh (update :reports #(-> % (into (:streamed acc)) (into (:reports ans))))
+               (assoc-in [:shards shard] (-> sh (update :reports #(-> % (into (:streamed acc)) (into (:reports ans)) (into lost)))
                                              (update :fns merge (:fns acc)) (update :heap merge (:heap acc)) (update :measured merge (:measured acc))
-                                             (assoc :todo rest-todo :pid os :exit status))))]
+                                             (assoc :todo rest-todo :pid os :exit status :no-progress stalled))))]
     (flow/update! (:flow @state) (fn [cfg] (-> cfg (update :procs dissoc cpid) (update :conns #(filterv (fn [[[p]]] (not= cpid p)) %)))))
     (swap! state #(cond-> % (= os (:test-child %)) (dissoc :test-child)))
-    (if (and (seq rest-todo) (seq died) (or (seq (:ended acc)) (some :var died)))
+    (if (and (seq rest-todo) (seq died) (not give-up?))
       (fork-test-child st shard rest-todo)
       (assoc-in st [:shards shard :done] true))))
 

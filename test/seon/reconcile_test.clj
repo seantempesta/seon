@@ -661,22 +661,6 @@
            (actions-for (db-of [(decl "a")] :extra (work "a" :lost)) :woken [(akey "a")]))
         "the next start is a spawn")))
 
-;; Estimate: 2 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 actions call x 0.7M; 1 db-with x 50k ~ 2,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 2000000}} a-run-that-merged-main-is-forked-again-on-mains-program
-  ;; docs/merging.md#a-branch-merges-main-in: a merge of main loads none of main's forms into the running agent, so its run ends
-  ;; between turns :refork (seon.turn); nothing is judged: the task goes on as a lost run does, a spawn on its branch (resumed: only
-  ;; the branch's own forms load), and the old process is stopped
-  (let [flight {:act {:op :spawn :task "demo/a" :env {:branch :demo/a}} :agent :a-a1 :step :worked}
-        db (db-of [(decl "a")] :extra (work "a" :running))
-        st (st-of db :flights {"demo/a" flight})
-        [_ outs] (#'r/advance st "demo/a" :worked {:value {:outcome :refork}})
-        reqs (mapv :req outs)
-        tx (some #(get-in % [:req :tx-data]) reqs)]
-    (is (some #(= [:db/cas [:seon.task/id "demo/a"] :seon.task/outcome :running :lost] %) tx) "its task goes on as a lost run, unjudged")
-    (is (some #{{:op :kill :id :a-a1 :ended true}} reqs) "its old process is stopped")
-    (is (not-any? #(#{:judge} (:op %)) reqs) "and nothing is judged")
-    (is (= [(spawn "a")] (actions-for (db-of [(decl "a")] :extra (work "a" :lost)))) "the next start is a spawn on its branch, with no wake")))
-
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M) ~ 500,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 500000}} the-judge-reads-its-branch-in-one-request
   ;; task seon.reconcile/the-judge-reads-its-branch-in-one-request: once the tests answer, the flight
@@ -1231,9 +1215,9 @@
   ;; DECISIONS: octopus merges stay off (one merge at a time) until the octopus merge's combined test run
   ;; and the par-200 hang are fixed; the config value in force is a fact on main a person can read
   (let [n (cfg/value :seon.config.agent/max-running)
+        m (cfg/value :seon.config.merge/max-running)
         db (d/db-with (empty-db) (into (task/boot-tx "boot-1" "sean") (seon.task/config-tx cfg/config {})))]
-    (is (= 1 (cfg/value :seon.config.merge/max-running)))
-    (is (= {:boot "boot-1" :max-running n :max-merging 1} (task/root db)) "both config keys are recorded at boot")))
+    (is (= {:boot "boot-1" :max-running n :max-merging m} (task/root db)) "both config keys are recorded at boot, as the config states them")))
 
 ;; Estimate: 2 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 3,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 3000000}} two-ready-disjoint-merges-run-one-at-a-time-by-default

@@ -316,6 +316,7 @@
  :seon.ratom/reached [:= {:description "The reason a handle is told a source changed: a path it read was reached by the change."} :seon.ratom/reached]
  :seon.turn/answer [:map {:description "A run's model call answered, as the message seon.turn/step-run takes: the call's outcome, {:value completion} or its typed failure. See docs/flow.md#flow-inside-an-agent."}]
  :seon.turn/merged [:map {:description "Main merged into a run's branch, as the message seon.turn/step-run takes: my.branch/merge-main!'s answer. See docs/flow.md#flow-inside-an-agent."}]
+ :seon.turn/loaded [:sequential {:description "The branch's program taken in place at a run's turn boundary, as the message seon.turn/step-run takes: seon.agent/take-branch-program!'s load errors, each a form that did not load. See docs/merging.md#a-branch-merges-main-in."} :seon.program/error]
  :seon.turn/observed [:map {:description "A run's task observed, as the message seon.turn/step-run takes: seon.turn/observe's answer, its test run and the task. See docs/flow.md#flow-inside-an-agent."}]
  :seon.turn/verdict [:map {:description "A run's proofs answered, as the message seon.turn/step-run takes: seon.agent/judge!'s answer. See docs/flow.md#flow-inside-an-agent."}]
  :seon.turn/threw [:and {:description "A run output's effect threw, as the message seon.turn/step-run takes: the throw, read as a throw inside a turn step is. See docs/flow.md#flow-inside-an-agent."} :seon.host/throwable]
@@ -332,6 +333,7 @@
  :seon/call [:qualified-symbol {:description "On a hiccup element, the var (marked ^:seon/callable) a click or submit of it calls in the system."}]
  :seon/agent [:keyword {:description "On a hiccup element, the agent that its :seon/call is made in: its address or id."}]
  :seon/args [:map {:description "On a hiccup element, the arguments its :seon/call is made with."}]
+ :seon/go [:string {:description "On a hiccup element with a :seon/call, the page to open once that call has answered (an offer's tap)."}]
  :seon/callable [:boolean {:description "On a var's metadata, true when the page may call it by name (seon.web/ui-call)."}]
  ;; the effect owner's outcome stamps and queue key (seon.fx)
  :seon.lib/load-refused [:and {:description "The error when the OS refuses the machine's load average (getloadavg)."} :seon.error/base [:map [:seon.error/type [:= :seon.lib/load-refused]]]]

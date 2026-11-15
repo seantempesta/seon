@@ -348,11 +348,18 @@
   or its id), its tabs, tab the one shown: root's conversation and what its model reads; an
   agent's chat (the page a person reads), @ctx (every render of its ctx) and debug (the timeline of
   what its model is sent). See docs/render.md#the-page."
-  {:malli/schema [:=> [:cat :any [:enum :chat :debug :context]] :any]}
-  [focus tab]
+  {:malli/schema [:function [:=> [:cat :any [:enum :chat :debug :context]] :any] [:=> [:cat :any [:enum :chat :debug :context] [:maybe :boolean]] :any]]}
+  ([focus tab] (top-bar focus tab false))
+  ([focus tab person?]
   (let [{:keys [address label]} (focus-of focus)
         link (fn [on? href label] [:a {:href href :class (str "rounded px-2 py-0.5 " (if on? "bg-base-800 text-text-50" "text-text-400 hover:text-text-100"))
                                       :aria-current (when on? "page")} label])]
+    (if person?
+      ;; the person's bar (docs/decisions.md, The page is a friendly chat): Seon's name, home, and one quiet way to the debug view, where
+      ;; the checkout line and the tabs are
+      [:nav {:class "seon-bar person-bar"}
+       [:a {:href "/" :class "text-lg font-semibold text-text-50 no-underline"} "Seon"]
+       [:a {:href "/root/debug" :class "ml-auto text-xs text-text-500 no-underline hover:text-text-300" :title "what Seon reads and the system's status"} "debug"]]
     [:nav {:class "seon-bar"}
      [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "hidden text-text-500 sm:inline"} "on jolt"]
      ;; which system this is (`system-source`, the system walk's unit the frame places on every page)
@@ -363,7 +370,7 @@
           (when (or (= :root focus) (not= :chat tab)) [:span {:class "mr-1 font-semibold text-text-100"} label])
           (if (= :root focus)
             (list (link (= :chat tab) base "chat") (link (= :context tab) "/root/debug" "debug"))
-            (list (link (= :chat tab) base "chat") (link (= :debug tab) (str base "/ctx") "@ctx") (link (= :context tab) (str base "/debug") "debug")))]))]))
+            (list (link (= :chat tab) base "chat") (link (= :debug tab) (str base "/ctx") "@ctx") (link (= :context tab) (str base "/debug") "debug")))]))]))))
 
 (defn shell
   "The document around a view's body: head, the stylesheet, Datastar, and the feed of that view's
@@ -436,6 +443,16 @@
                     [:td {:class (when (and m x (pos? x) (> (/ m x) 3)) "bad")}
                      (str (group3 m) " / " (group3 x) (when (and m x (pos? x)) (str " (" (fmt2 (/ m x)) "×)")))])])]]
       (render/hiccup (assoc opts :schema :seon.cost/verdict) verdict)]))
+
+(defn offer
+  "A place an agent offers the person (the declared html render of :seon.user/offer, the value my.user/focus! answers): a button in the
+  person's words; tapped, it calls seon.system/focus! (the person's web state, :seon.user/focus, set to its place) and, once that answers,
+  opens the place's page. Nothing is written until the tap. See docs/users.md#whats-on-screen."
+  {:seon.render/style ".offer { display: inline-block; margin: 0.25rem 0; padding: 0.625rem 1.125rem; border-radius: 1rem; font-size: 1.0625rem; font-weight: 600; background: var(--color-base-800); color: var(--color-text-50); border: 1px solid var(--color-base-700); }
+.offer:hover { border-color: var(--color-signal); }"
+   :malli/schema [:=> [:cat :seon.render/opts :seon.user/offer] :any]}
+  [_ {:seon.user/keys [place label]}]
+  [:button {:type "button" :seon/call 'seon.system/focus! :seon/args {:key (second place)} :seon/go (str "/agent/" (second place))} label])
 
 (defn person-input
   "The person's message box on root's chat (docs/decisions.md, The page is a friendly chat): like the good chat tools, a box that grows
@@ -854,7 +871,7 @@
                   [:=> [:cat :seon.host/db [:or pos-int? [:= :latest]] [:vector pos-int?] :boolean [:maybe :map]] [:maybe :map]]]}
   ([db at calls raw?] (debug-input db at calls raw? nil))
   ([db at calls raw? walk]
-  (let [pull #(d/pull db [:seon.model-call/basis :seon.model-call/sent-hash :seon.model-call/tokens :seon.model-call/cache-hit-tokens
+  (let [pull #(d/pull db [:seon.model-call/id :seon.model-call/basis :seon.model-call/sent-hash :seon.model-call/tokens :seon.model-call/cache-hit-tokens
                           :seon.model-call/cache-miss-tokens :seon.model-call/error :seon.model-call/ms :seon.model-call/model] %)
         last-e (peek calls)
         lb (some-> last-e pull :seon.model-call/basis)
@@ -877,7 +894,10 @@
             ;; with no request before it, nothing is marked: every message is the first request's
             since (some-> prev-e pull :seon.model-call/basis :turn)
             ;; the turn to come reads the render proc's kept walk of the branch (walk: its value at db), never a cold draw
-            w (wire/wire-turn tdb b since (when to-come? walk))
+            ;; a past turn reads what it sent, stored as its parts, never drawn again (the owner, 2026-11-15: "Debug shouldn't be a new
+            ;; interpretation of what's there"); the turn to come, and a turn from before the store kept them, are drawn
+            sent (when-not to-come? (some->> (:seon.model-call/id m) (wire/sent-request db)))
+            w (if sent (wire/wire-of tdb b since (:messages sent) (:parts sent)) (wire/wire-turn tdb b since (when to-come? walk)))
             sent-hash (:seon.model-call/sent-hash m)]
         {:at at :to-come? to-come? :turn (:turn b) :agent (:agent b) :origin (:origin b) :raw? raw? :swept? (boolean swept?)
          :body (:body w) :sources (:sources w) :new (:new w)
@@ -2526,7 +2546,7 @@
   its walk placed it (an append). opts {:units :view :input :caption :tab}; id, the page's focus; tab, which of its tabs it is
   (top-bar). See docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat :map :any] [:map [:seon.render/hiccup :any] [:seon.render/units [:vector :map]]]]}
-  [{:keys [units view input caption tab]} id]
+  [{:keys [units view input caption tab person?]} id]
   (let [page (some #(when (= render/root-container (:container %)) %) units)
         page (or page (let [[hc ids] (render/regions (bare-page)) html (h/html hc)]
                         {:id "p-bare" :container render/root-container :rev (hash html) :html html :regions ids}))
@@ -2536,7 +2556,7 @@
         unit page-unit]
     {:seon.render/hiccup
      [:div {:id "app" :class "seon-page" :data-view view}
-      (top-bar id tab)
+      (top-bar id tab person?)
       ;; the agents on the left, then the page: its render's columns (an agent's chat large in the middle and its context on the
       ;; right), each scrolling on its own (docs/render.md#where-things-go)
       [:div {:class "seon-columns"}

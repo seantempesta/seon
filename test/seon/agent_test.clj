@@ -1632,14 +1632,21 @@
     (is (= 0 (:model-calls end)) (str "the stop did not wait for the call in flight: " (pr-str end)))))
 
 ;; Estimate: as a-run-told-to-stop-ends-at-once, the world and one work! loop of 2 turns = ~6M: 6,000,000
-(deftest ^{:seon.test/estimate {:ticks 6000000}} a-run-that-merged-main-ends-between-turns-to-run-on-mains-program
-  ;; docs/merging.md#a-branch-merges-main-in: a merge of main loads none of main's forms into the running agent (seon.agent/merge-main!
-  ;; leaves it :behind), and no turn runs old code: the run ends :refork after the turn in flight, before its next model call, and
-  ;; root forks it again on main's program (seon.reconcile-test/a-run-that-merged-main-is-forked-again-on-mains-program)
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-run-that-merged-main-takes-mains-program-in-place
+  ;; docs/merging.md#a-branch-merges-main-in, THE PLAN item 5 (owner 2026-11-15): a merge of main leaves the agent :behind its branch,
+  ;; and at its next turn boundary it takes the branch's program in place (seon.agent/take-branch-program!, as an outside agent's turn
+  ;; does) and the run goes on in the same process: no run ends to be forked again. Red before: the run ended :refork, and root forked
+  ;; it again, 7.4 s median wall a time, 68 times on 2026-11-15 (task seon.turn/an-agent-takes-mains-changes-in-place-at-its-turn-boundary)
   (let [red {:reasons [{:reason :proof-red}]}
-        end (work-with (fn [st called!] (called!) (swap! agent/state assoc :behind true) st) (constantly red))]
-    (is (= :refork (:outcome end)) (pr-str end))
-    (is (= 1 (:model-calls end)) (str "the turn in flight finished, and no model call ran on the old program: " (pr-str end)))))
+        taken (atom 0)
+        first? (atom true)
+        end (with-redefs [agent/take-branch-program! (fn [] (swap! taken inc) (swap! agent/state assoc :behind false) [])]
+              ;; the first turn's merge of main leaves the agent :behind, as merge-main! does when main's program moved
+              (work-with (fn [st called!] (called!) (when (compare-and-set! first? true false) (swap! agent/state assoc :behind true)) st)
+                         (constantly red)))]
+    (is (not= :refork (:outcome end)) (str "the run went on, never ending to be forked again: " (pr-str end)))
+    (is (pos? @taken) "it took the branch's program in place at its turn boundary")
+    (is (< 1 (:model-calls end 0)) (str "and its next turn's model call ran in the same process: " (pr-str end)))))
 
 ;; Estimate: 200 generated runs x ~8 requests x ~3 proc steps at ~5k ticks = ~24M ticks
 (deftest ^{:seon.test/estimate {:ticks 30000000}} every-request-an-agent-proc-holds-is-released-by-any-of-its-ends
@@ -3012,7 +3019,29 @@
             (close! k2) (exit! k2) (close! k1)
             (is (nil? (a/poll! (:answer r))) "a child still running: no answer")
             (exit! k1)
-            (answered r 2))))
+            (answered r 2)))
+        ;; task seon.prove/a-test-that-dies-fails-only-itself: a child that dies before it names a running test, with none ended, is
+        ;; no progress. Red before: the shard was done there, its tests never reported, so the service answered each no verdict
+        (let [die! (fn [k] (let [{:keys [out sent] :as e} (:end k)] (a/close! out) (a/<!! sent) (remote/close! e) (a/<!! seen))
+                            (exit! k))]
+          (testing "a death with no progress runs the rest again in a new child"
+            (let [r (run 5 [['app.fold/t 'app.fold/u]]) [k1] @kids]
+              (die! k1)
+              (is (nil? (a/poll! (:answer r))) "the rest runs again, so no answer yet")
+              (a/<!! forked-c)
+              (let [[_ k2] @kids]
+                (close! k2) (exit! k2)
+                (let [[ans] (done r)]
+                  (is (= 1 (:pass ans)) (str "the new child's run is the shard's: " (pr-str ans)))))))
+          (testing "two deaths with no progress between them answer each remaining test the death, its own :error"
+            (let [r (run 6 [['app.fold/t 'app.fold/u]]) [k1] @kids]
+              (die! k1)
+              (a/<!! forked-c)
+              (let [[_ k2] @kids]
+                (die! k2)
+                (let [[ans] (done r)
+                      lost (into #{} (keep #(when (and (= :error (:type %)) (:exit %)) (:var %))) (:reports ans))]
+                  (is (= #{"#'app.fold/t" "#'app.fold/u"} lost) (str "each test ends with its own result, never unreported: " (pr-str ans)))))))))
       (is (nil? (a/poll! error-chan)) "no proc threw")
       (finally
         (flow/stop g)
