@@ -995,8 +995,9 @@
         (is (:bytes-after (pdb/compact-if-due! path)) "the sweep left its freed pages to compact"))
       (finally (seon.lib/remove-tree! path (str path ".compact"))))))
 
-;; Estimate: a store on disk ~20M + 3 rounds of 6 commits, a retain! sweep and a collect! each (~40M a round) = 150000000
-(deftest ^{:seon.test/estimate {:ticks 150000000}} every-branchs-merge-base-outlives-every-sweep
+;; Estimate: a store opened on disk ~5M + 21 small commits ~0.3M each ~6M + 3 sweeps of a small store ~3M each ~9M = 25000000
+;; (first stated 150M, counting a sweep as a large store's: measured 19-22M)
+(deftest ^{:seon.test/estimate {:ticks 25000000}} every-branchs-merge-base-outlives-every-sweep
   ;; docs/storage.md#collection (2026-11-15, root's store: 43 of 66 branches' merge bases swept, :main/tests' among them though its head
   ;; never moved): sweep after sweep while main moves, a branch made long ago, one that merged main by a two-parent commit (as
   ;; seon.writer/merge-main-into makes one) and a gone branch collected, each live branch's merge base reads whole after every sweep
@@ -1023,8 +1024,9 @@
       (d/release conn)
       (finally (seon.lib/remove-tree! path (str path ".compact"))))))
 
-;; Estimate: a store on disk ~20M + 12 commits ~10M + one retain! that sweeps nothing ~20M = 60000000
-(deftest ^{:seon.test/estimate {:ticks 60000000}} a-sweep-that-cannot-find-a-branchs-base-sweeps-nothing
+;; Estimate: a store opened on disk ~5M + 12 small commits ~4M + one retain! that asks every base and sweeps nothing ~10M = 25000000
+;; (first stated 60M: measured 18M)
+(deftest ^{:seon.test/estimate {:ticks 25000000}} a-sweep-that-cannot-find-a-branchs-base-sweeps-nothing
   ;; docs/storage.md#collection (root's store, 2026-11-15: 43 of 66 branches' merge bases swept): retain! read every refusal of
   ;; d/merge-base as "no base" and swept the base; a refusal other than several bases is the base unknown, so nothing is swept, the
   ;; record names the branch and the answer is the typed :seon.db/retain-refused
