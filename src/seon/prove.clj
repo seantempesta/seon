@@ -666,7 +666,10 @@
                       :else [st (cond-> [{:op :problem :class :platform :error r}] asker (reply [asker] r))]))
     :results-branch (let [[st o] (verdicts-write st key (get-in st [:verdict-writes key]))] [st o])
     :full (if (= key (:key (:full st))) (full-answered st step r) [(update st :stale (fnil inc 0)) []])
-    :batch (let [[st outs] (batch-ended st (parse-long key) r)] (settle st outs))
+    ;; a batch's end can be a runner's last item, its run finished before it: the runner ends then (runner-done), and the held
+    ;; asks re-enter once the branch is free, never left waiting on a runner no finish will sweep
+    :batch (let [[st outs] (batch-ended st (parse-long key) r) [st o] (settle st outs) [st k] (runner-done st) [st h] (re-enter-held st)]
+             [st (-> o (into k) (into h))])
     (let [run (get-in st [:runs key])]
       (cond
         (nil? run) [(update st :stale (fnil inc 0)) []]
@@ -731,7 +734,9 @@
        :ping-map-fn (fn [st] {:runs (count (:runs st)) :full (some-> st :full :key) :queued (count (:items st))
                               :main-t (:main-t st) :stale-answers (:stale st 0)
                               ;; main's run as the service decides it: what is wanted, the program t last asked, and a failed run's inputs
-                              :main-want (:main-want st) :main-asked (:main-asked st) :main-failed (:main-failed st)})})
+                              :main-want (:main-want st) :main-asked (:main-asked st) :main-failed (:main-failed st)
+                              ;; what the tests branch is held by and what waits on it: a hang's evidence (seon.system/stall-of)
+                              :runs-in-flight (vec (sort (keys (:runs st)))) :runners (:runners st) :held-main (count (:held-main st))})})
   ([args] {:rid 0 :pending {} :runs {} :done {} :items {} :askers {} :batches {} :conn (:conn args)
            ;; the running binary's built identity (seon.program/binary-program, what seon.fx/runtime-for compares), held for the proc's life
            :binary (some-> (program/binary-program) :digest)

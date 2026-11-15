@@ -129,8 +129,9 @@
 (deftest render-proc-has-no-beat
   (let [d (p/render-proc)]
     (is (not (contains? (:ins d) :tick)) "no beat in-port")
-    ;; :main, main's commits from the writer: a pass follows a commit, never a clock
-    (is (= #{:answers :from-web :main} (set (keys (:ins d)))))
+    ;; :main, main's commits from the writer: a pass follows a commit, never a clock; :health-wake is health's own next bounded
+    ;; step, put only by this proc's steps (health-more, the :health op), never a timer
+    (is (= #{:answers :from-web :main :health-wake} (set (keys (:ins d)))))
     (is (nil? (resolve 'seon.render.proc/SAMPLE-MS)))
     (is (nil? (resolve 'seon.render.proc/start-sampler!))))
   (testing "a proc's health from root's view: its declared procs, its defects by pid"
@@ -461,8 +462,9 @@
   "The render proc's state as it holds a read of main and of a3's branch: root's view (a3 busy;
   root's boot, b1, is its entity's on main), main's open problems."
   [main branch]
-  ;; its events chan as the proc has one (its tap of the events mult): health's next steps are this proc's own messages on it
-  {:events-ch (a/chan 1024) :rid 1 :pending {} :watch #{:root [:chat :a3]} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :user-walks {} :branches {:a3 {:db branch :branch :task-demo-f} [:chat :a3] {:db branch :branch :task-demo-f}}
+  ;; its events chan and its health wake as the proc makes them (render-proc's init: the events tap a sliding buffer of 4096, the
+  ;; wake a sliding buffer of one), so a burst drops here as it does there
+  {:events-ch (a/chan (a/sliding-buffer 4096)) :health-wake (a/chan (a/sliding-buffer 1)) :rid 1 :pending {} :watch #{:root [:chat :a3]} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :user-walks {} :branches {:a3 {:db branch :branch :task-demo-f} [:chat :a3] {:db branch :branch :task-demo-f}}
    ;; the one read of a3's branch every view of it shows (seon.render.proc/ask-branches)
    :branch-reads {:task-demo-f {:db branch}}
    :merges 0 :main-db main :view {:agents {:a3 {:status :busy :branch :task-demo-f}}}})
@@ -4669,6 +4671,20 @@
       (let [fold2 (reduce seon.error/fold fold (map occ (range 4 7)))
             [_ asked2] (#'seon.system/api-proc (assoc api :seon.system/errors fold2) :ext {:op :health :db main1 :p (promise)})
             [st2 out] (reduce (fn [[st _] m] (#'p/render-proc st :from-web m)) [st nil] (get asked2 [:render :from-web]))
+            ;; an ask on an unsettled report waits, and the proc's own bounded steps answer it at the step that settles. A burst of
+            ;; 5000 api events, past the events buffer, arrives while it waits: driven here only by what its channels hold (its
+            ;; wake when one is there, else an event), at most 100 steps. Red before (root's review of 30653cc9f7): the wake rode
+            ;; the shared events buffer and the burst dropped it, so the ask was never answered
+            _ (dotimes [i 5000] (a/put! (:events-ch st2) {:type :noise :i i}))
+            [st2 out] (loop [st st2 out out i 0]
+                        (if (or (some #(= :health-answer (:op %)) (get out :to-api)) (= i 100))
+                          [st out]
+                          (let [w (some-> (:health-wake st) a/poll!)
+                                e (when-not w (a/poll! (:events-ch st)))]
+                            (if-not (or w e)
+                              [st out]
+                              (let [[st o2] (if w (#'p/render-proc st :health-wake w) (#'p/render-proc st :events e))]
+                                (recur st (merge-with into out o2) (inc i)))))))
             answered (some #(when (= :health-answer (:op %)) (:r %)) (get out :to-api))
             banner2 (:html (second (filter #(= "#p-tiles" (:container %)) (:seon.render/units (#'p/page-value st2 [:debug :root])))))]
         (is (= 7 (count-of answered)) (str "the api's answer counts all seven: " (pr-str (count-of answered))))

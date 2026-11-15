@@ -967,3 +967,27 @@
     (is (= {} (proofs/stored-verdicts rdb w0 {t d2} [])) "never for a test that may not be reused by its reads")
     (let [w1 (mt/with w0 (mt/code 'pt.vr "(ns pt.vr)\n(defn add [x y] (+ y x))\n"))]
       (is (= {} (proofs/stored-verdicts rdb w1 {t d2} [t])) "and no longer once a function it called moved"))))
+;; docs/storage.md#what-a-read-scanned: reuse by reads consults a test's NEWEST green only (by its basis :t), as the plan's read-digests
+;; does: a cold plan walked every green of every test (median 9, max 36, of 21,715 verdicts), each ~410 read keys read and digested on
+;; db, and three session agents planned 16 min each at 17.2B ticks (root, 2026-11-16; runs/stop-overran-40284). Red before: an older
+;; green whose reads hold was reused though the newest's do not. Estimate: two worlds (~4M), one graph (~2M), two verdict-txs (~1M),
+;; one lookup: 8,000,000
+(deftest ^{:seon.test/estimate {:ticks 8000000}} reuse-by-reads-consults-a-tests-newest-green-only
+  (let [d1 (seon.lib/digest "older run") d2 (seon.lib/digest "newer run") d3 (seon.lib/digest "the plan's digest")
+        w0 (mt/with (mt/world) (mt/code 'pt.vr "(ns pt.vr)\n(defn add [x y] (+ x y))\n"))
+        w1 (mt/with w0 (mt/code 'pt.vr "(ns pt.vr)\n(defn add [x y] (+ y x))\n"))
+        t 'pt.vr-test/adds
+        basis (fn [n] {:seon.db/branch :db :seon.db/commit (parse-uuid (str "00000000-0000-0000-0000-00000000000" n)) :seon.db/t n})
+        older (proofs/verdict-tx w0 (program/reach-graph w0 nil) (basis 1) {t {:digest d1 :pass 1 :fail 0 :error 0}} {t [{:var 'pt.vr/add}]} {})
+        newer (proofs/verdict-tx w1 (program/reach-graph w1 nil) (basis 2) {t {:digest d2 :pass 1 :fail 0 :error 0}} {t [{:var 'pt.vr/add}]} {})
+        rdb (pdb/db-with w0 (into older newer))]
+    (is (= {} (proofs/stored-verdicts rdb w0 {t d3} [t]))
+        "the newest green's reads no longer hold on db: no reuse, though an older green's still do")
+    (is (= #{d3} (set (keys (proofs/stored-verdicts rdb w1 {t d3} [t])))) "and the newest's, holding, is reused")
+    ;; the batch digests what reads-digest digests one set at a time, byte for byte (root's review): every stored reads-digest still matches
+    (let [ks (into #{} (map :v) (d/datoms rdb :aevt :seon.proof/read-keys))]
+      (is (seq ks))
+      (is (= {:all (pdb/reads-digest w0 ks nil) :one (pdb/reads-digest w0 #{(first (sort ks))} nil)}
+             (pdb/reads-digests w0 {:all ks :one #{(first (sort ks))}}))
+          "reads-digests is reads-digest, for every set")
+      (is (= (seon.lib/digest "[[a] []]") (seon.lib/digest-parts [(.getBytes "[[") (.getBytes "a") (.getBytes "] []]")])) "and digest-parts is digest of the joined text"))))

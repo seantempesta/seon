@@ -381,7 +381,7 @@
      ;; whether the binary target/seon is (its build record, target/seon.program) is this tree's, its program included (a test that
      ;; starts a process runs the binary's baked program): nil, or why not, by the one binary identity (seon.fx/runtime-for
      ;; {:scope :all}; docs/source.md#the-binary-records-its-program)
-     :binary-current (let [r (fx/runtime-for tree {:scope :all})] (when (contract/error? r) (:seon.error/message r)))
+     :not-current (let [r (fx/runtime-for tree {:scope :all})] (when (contract/error? r) (:seon.error/message r)))
      :no-test (vec (sort-by str (concat (remove (set (map (comp symbol namespace key) all)) nss)
                                         (remove all vars))))
      :digests (update-vals idx :digest)
@@ -639,16 +639,16 @@
                   (fn [cand]
                     (let [r (read-results cand)]
                       (if (contract/error? r) (do (vreset! unread r) {}) r))))]
-    (cond-> (assoc p :binary-current (:binary-current reach) :waived (:waived reach) :static-reads (:static-reads reach) :rd (:rd reach)
+    (cond-> (assoc p :not-current (:not-current reach) :waived (:waived reach) :static-reads (:static-reads reach) :rd (:rd reach)
                    :fixture-tests (:fixture-tests reach))
       @unread (assoc :unread @unread))))
 
 (defn build-text
   "out/build's text, what bin/test builds target/seon for: when a selected key reaches the binary (bin-keys) and the binary is
-  not current for the tree (binary-current's answer, seon.fx/runtime-for), that answer; else empty, and nothing is
+  not current for the tree (seon.fx/runtime-for's refusal), that answer; else empty, and nothing is
   built. docs/source.md#the-binary-records-its-program."
-  [bin-keys binary-current]
-  (if (and (seq bin-keys) binary-current) (str (pr-str binary-current) "\n") ""))
+  [bin-keys not-current]
+  (if (and (seq bin-keys) not-current) (str (pr-str not-current) "\n") ""))
 
 (defn- prove!
   "The planning part of bin/prove and bin/test (what is tests, checks or both): plan-of's tests
@@ -670,7 +670,7 @@
         1)
   (let [dir (str "the verdict cache " (config/value :seon.config.proofs/results-dir))
         tests? (not= what "checks") checks? (not= what "tests")
-        {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky waived binary-current audit fixture-tests]} plan
+        {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky waived not-current audit fixture-tests]} plan
         ;; the reuse audit's tests run beside the plan's (seon.proofs/plan-of's :audit), never a slow one: a slow test runs
         ;; last, once all else is green (docs/merging.md#a-slow-test-runs-last)
         audit (let [ms (measured-ms audit) bound (config/value :seon.config.proofs/slow-test-ms)]
@@ -723,11 +723,11 @@
         _ (write! (str out "/binary") (str (str/join " " bin-keys) (when (seq bin-keys) "\n")))
         ;; out/build: what bin/test builds target/seon for, empty when the binary is current for this tree (seon.fx/runtime-for):
         ;; a change that reaches nothing root runs from its binary builds nothing (rule (a), docs/source.md#the-binary-records-its-program)
-        _ (write! (str out "/build") (build-text bin-keys binary-current))
+        _ (write! (str out "/build") (build-text bin-keys not-current))
         ;; this tree's inputs beside the binary (target/seon.inputs, keyed by their :tree): what a root booting on this tree with a
         ;; binary current for it by reach hands its agents (seon.system/booted-source), read as a file: root runs no git
         _ (write! (str (config/checkout) "/target/seon.inputs") (sedn/encode inputs))
-        _ (when (and (seq bin-keys) (not binary-current))
+        _ (when (and (seq bin-keys) (not not-current))
             (println "prove: target/seon is current for this tree (seon.fx/runtime-for): no build"))
         ;; the stall bound bin/test names a quiet test by (:seon.config.agent/stall-ms), and the end bound of a test with no
         ;; record (the step-end factor times it): "<stall ms> <end ms>"

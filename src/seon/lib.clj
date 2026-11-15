@@ -359,6 +359,17 @@
         h (Long/toHexString (.getLong (java.nio.ByteBuffer/wrap b)))]
     (str (subs "0000000000000000" (count h)) h)))
 
+(defn digest-parts
+  "digest of the string the byte arrays parts spell, joined in order, read part by part into one SHA-256 and never joined: the same
+  digits as (digest (apply str texts)) when each part is a text's .getBytes. A caller that digests many joins of shared parts makes
+  each part's bytes once (seon.db/reads-digests). See docs/source.md#a-result-is-a-function-of-its-digest."
+  {:malli/schema [:=> [:cat [:sequential :any]] :seon.lib/digest]}
+  [parts]
+  (let [md (java.security.MessageDigest/getInstance "SHA-256")]
+    (doseq [^bytes p parts] (.update md p))
+    (let [h (Long/toHexString (.getLong (java.nio.ByteBuffer/wrap (.digest md))))]
+      (str (subs "0000000000000000" (count h)) h))))
+
 (defn id
   "A name made of hex text h (a digest, a hash), safe in every Clojure reader: the same characters, its first hex
   digit 0-f written as a letter a-p, so it reads as a symbol, a keyword, a namespace segment and a qualified name (a

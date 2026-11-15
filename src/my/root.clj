@@ -198,15 +198,29 @@
                (str/join ", " (or (seq (:seon.process/differs rt)) [(:seon.error/message rt)])))
           :else rt)))
 
+(defn merge-moved-tx
+  "Main's source fact after an update's merge of main into the write-back tree (r, the :git effect's merge answer): its :commit
+  follows the merge, so the next write-back's compare-and-swap reads from the branch's head (seon.reconcile/source-moved-tx, only
+  while the fact names the commit merged in); its :tree never does. :tree is main's files' tree, what seon.system/restart-for and a
+  boot's catch-up compare with; moved to the write-back tree's (main's files plus the branch's own), every update restarted root.
+  See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat :seon.host/db :map :int] [:vector :any]]}
+  [db r t] (reconcile/source-moved-tx db (update r :value dissoc :tree) t))
+
 (defn merges-caught-up!
-  "Main merged into the write-back tree (:seon.config.source/root, its :seon.config.source/branch) by the :git effect, the one
-  writer of that tree, so an update's merge and a write-back never meet (task seon.system/a-landing-restarts-root-only-for-a-binary-change,
-  slice 2a): what bin/update asks before it builds. Answers {:value {:sha :merged}} or the effect's typed error. See
+  "Main merged into the write-back tree by the :git effect, its one writer, and main's source fact moved to the merge when it
+  named the commit merged in; what bin/update asks before it builds. Answers {:value {:sha :merged}} or a typed error. See
   docs/source.md#commit-the-merges-branch."
   {:malli/schema [:=> [:cat :seon.system/sys] :map]}
   [sys]
   (if-let [root (config/value :seon.config.source/root)]
-    @(root/effect! sys :git {:dir root :branch (config/value :seon.config.source/branch) :merge "main"})
+    ;; main's source fact follows the merge (seon.reconcile/source-moved-tx: only while it names the commit merged in), else the next
+    ;; write-back's compare-and-swap reads from a commit the branch left: pilot run 15's refused write-back
+    (let [r @(root/effect! sys :git {:dir root :branch (config/value :seon.config.source/branch) :merge "main"})
+          db @(:conn sys)
+          tx (merge-moved-tx db r (:t (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root])) 0))]
+      ;; a fact that could not move is answered, never the merge's success over it: the next write-back would refuse again unseen
+      (let [w (when (seq tx) @(root/transact-main! sys tx))] (if (contract/error? w) w r)))
     (contract/error :seon.system/no-source-root #'my.root/merges-caught-up! "no source root declared (:seon.config.source/root): no write-back tree to merge into" {})))
 
 (defn write-back!
