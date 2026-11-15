@@ -1170,6 +1170,8 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 "Does that look like a friendly chat window that my mom could use?"; "I don't want anything hidden". Stated in [render](render.md#the-page) and [the debug page](render.md#the-debug-page-is-the-wire-request).
 
+2026-11-15, to web: "This is supposed to be end user facing and I want my mom to able to use this. She's 75."; "I'm mostly viewing it through a portrait viewport"; "the html version is kinder and gentler and non technical user facing. So think beautiful typography, shorter more clear focus, messages by default and you can expand if you want to see what they are doing under the hood. Then the debug and ctx views can be technical and what an expert wants to see."; and that the model still gets the data it needs. Nothing is hidden: the person's view folds what is under the hood, and @ctx and debug show it whole. Task: `seon.render.ui/the-persons-chat-is-kind-plain-and-portrait-first`.
+
 ### Counts are tokens; what an agent writes is Markdown
 
 "only report tokens (estimates are fine) not characters". Agent text is Markdown. Stated in [prompt](prompt.md).
