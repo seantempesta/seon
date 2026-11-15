@@ -560,11 +560,12 @@
   (vec (sort (distinct (vals text-attrs)))))
 
 (defn- build-index
-  "The FTS5 index (seon.sqlite/fts-open) of every text attribute's texts on db: one row a text, its entity and
-  its attribute's number in `index-attrs`, one corpus whose bm25 `tokens` ranks."
+  "The FTS5 index (seon.sqlite/fts-open) of every text attribute's texts on db but the dependency source's: one row a text, its
+  entity and its attribute's number in `index-attrs`, one corpus whose bm25 `tokens` ranks."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
-  (sqlite/fts-open (for [[i a] (map-indexed vector index-attrs) {:keys [e v]} (d/datoms db :aevt a)] [e i (str v)])))
+  ;; the dependency source (:library) joins at the first grep that asks it (`with-library`), never at a warm start
+  (sqlite/fts-open (for [[i a] (map-indexed vector index-attrs) :when (not= a :seon.library/text) {:keys [e v]} (d/datoms db :aevt a)] [e i (str v)])))
 
 (defn- release!
   "Reader done with index ix: its count in the slot goes down, and an index no longer the slot's with no reader left is closed."
@@ -612,6 +613,21 @@
   {:malli/schema [:=> [:cat :seon.host/db ifn?] :any]}
   [db f]
   (let [ix (acquire! db)] (try (f ix) (finally (release! ix)))))
+
+(defn- with-library
+  "Index ix of db holding the dependency source's rows (:seon.library/text): added, all at once, at the first reader that asks for
+  them, and marked in the slot's per-index state (its counted map's ::library, gone with the index), so carry-index! keeps them
+  current after. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
+  [db ix]
+  (let [[_ cur counted] @indexes]
+    (when-not (and (identical? ix cur) (::library @counted))
+      (let [n (get (zipmap index-attrs (range)) :seon.library/text)
+            rows (for [{:keys [e v]} (d/datoms db :aevt :seon.library/text)] [e n (str v)])]
+        ;; a carried write may have added some already: each is replaced, never doubled
+        (sqlite/using ix #(sqlite/replace-rows! % (map (fn [[e n]] [e n]) rows) rows))
+        (when (identical? ix cur) (swap! counted assoc ::library true)))))
+  ix)
 
 (defn carry-index!
   "The text index held for db before (`text-index`) as the index of db after: the move's writes brought into it.
@@ -709,7 +725,7 @@
         numbers (attr-numbers kinds)
         indexed? (and indexed? (seq numbers))
         candidates (when indexed?
-                     (group-by second (map (fn [[e a]] [e (index-attrs a)]) (with-index db #(sqlite/fts-substring % pattern numbers)))))]
+                     (group-by second (map (fn [[e a]] [e (index-attrs a)]) (with-index db #(sqlite/fts-substring (cond->> % (kinds :library) (with-library db)) pattern numbers)))))]
     (->> (for [a (distinct (keep text-attrs kinds))
                ;; each text with its entity: a candidate's by one seek, every text off the attribute's own datoms (a text is
                ;; cardinality one, so its :aevt datom holds it: a seek of :eavt again cost 120 KB a text on main)

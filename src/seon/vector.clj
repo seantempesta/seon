@@ -12,7 +12,7 @@
   (native/vector.c)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.config :as cfg]
-            [seon.step :as step] [seon.sock :as sock] [jolt.ffi :as ffi] [datahike.api :as d] [seon.db :as pdb] [clojure.string :as str] [seon.error :as err]))
+            [seon.step :as step] [seon.sock :as sock] [jolt.ffi :as ffi] [datahike.api :as d] [seon.db :as pdb] [clojure.string :as str] [seon.error :as err] [seon.source :as source]))
 
 ;; ---- the pyramid (native/vector.c, in libprobe: no threads, every process loads it) ------
 
@@ -511,6 +511,30 @@
       [st [m]])
     [st []]))
 
+(defn- library-inputs
+  "What main's dependency source is read from, on db: its pins and the deps digest root's source fact holds (:seon.env/deps), as one
+  digest; the library is read again when it moves (`library-round`). See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db] :string]}
+  [db]
+  (lib/digest (pr-str [(into (sorted-map) (source/pins-of db))
+                       (get-in (d/pull db [:seon.system/source] [:seon.system/id :root]) [:seon.system/source :inputs :config :seon.env/deps])])))
+
+(defn- library-round
+  "A round with no text due (st, main db): when the dependency inputs moved from those the library was read at (`library-inputs`,
+  :seon.library/inputs) and were not asked already, the :library effect at the lowest :prio, reading only the roots whose identity
+  moved (since, :seon.library/roots); else the round ends. Derived data kept current by main's notice, as the vectors are. See
+  docs/vector.md#search."
+  {:malli/schema [:=> [:cat :map :seon.host/db] [:tuple :map [:vector :map]]]}
+  [st db]
+  (let [in (library-inputs db)
+        held (d/pull db [:seon.library/inputs :seon.library/roots] [:seon.system/id :root])]
+    (if (and (not= in (:seon.library/inputs held)) (not= in (:library-asked st)))
+      (let [[st m] (step/ask st [:vectors :answers] [:library in]
+                             {:op :fx :kind :library :prio -1
+                              :req {:root (cfg/checkout) :pins (source/pins-of db) :since (or (:seon.library/roots held) {})}})]
+        [(assoc st :running true :library-asked in) [m]])
+      (release (assoc st :running false)))))
+
 (defn- round
   "At main's commit (a notice {:t :commit}), the next round: the first :texts due (:seon.config.vector/texts; 0 asks nothing) go
   to the :embed effect. After a round (:clean, the commit it scanned at, and :owed, the entities it found due and left
@@ -549,7 +573,8 @@
             [st m] (step/ask st [:vectors :answers] [:embedded [(mapv first due) (mapv peek due) (select-keys m [:t :commit])]]
                              {:op :fx :kind :embed :req (cond-> {:texts (mapv second due)} more? (assoc :more true))})]
         [(assoc st :running true :more more?) [m]])
-      :else (release (assoc st :running false)))))
+      ;; nothing to embed: the round's room goes to the dependency source, when it moved
+      :else (library-round st db))))
 
 (defn vectors-proc
   "Keeps main's vectors current (docs/vector.md#what-is-embedded). At main's commit notice
@@ -603,6 +628,17 @@
                                          ;; a failed write commits nothing, so no notice follows: the spell ends here
                                          (contract/error? r) (release st)
                                          :else [st []]))
+;; the dependency source read (library-round): its files written through the one path with the inputs they were read at;
+                        ;; a failed read recorded as a failure is (seon.error/asked-tx), closed by the next read that writes
+                        :library (let [db (pdb/at-commit (:conn st) (:commit (or (:latest st) (:clean st))))
+                                       tx (if (contract/error? r)
+                                            (err/asked-tx db r :seon.library/inputs [])
+                                            (conj (source/library-tx db (:value r)) {:seon.system/id :root :seon.library/inputs es}))]
+                                   (if (seq tx)
+                                     (let [[st w] (step/ask st [:vectors :answers] (if (contract/error? r) [:recorded nil] [:written 0])
+                                                            {:op :write :req {:op :tx :branch :db :tx-data tx}})]
+                                       [st [w]])
+                                     (release (assoc st :running false))))
                         ;; the failure's own commit starts no round (it would ask again and fail again,
                         ;; on an idle main): the next round reads a commit after it
                         :recorded (let [st (cond-> (assoc st :running false) (not (contract/error? r)) (assoc :written-t (inc (:t r))))
