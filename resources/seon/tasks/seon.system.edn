@@ -173,4 +173,10 @@ Proofs, once ruled: a task file's declaration loads with the kind the ruling say
   :seon.task/kind :work
   :seon.task/proofs #{seon.fx-test/a-merge-and-a-write-back-sent-at-once-both-land-in-order}
   :seon.task/estimate #:seon.fx{git-commit {:n 2, :order :linear, :ticks 1000000, :bytes 500000}}
-  :seon.task/needs #{}}]
+  :seon.task/needs #{}}
+ {:seon.task/name "a-proc-mid-step-at-a-ping-is-named-by-its-site"
+  :seon.task/plan "Found by tests, 2026-11-16 06:4x [M, run target/prove/20261116T064157-20485 in the tests worktree]: seon.system-test/a-hangs-evidence-holds-roots-stall-state was red once in a 580-test run ('a proc that did not answer is named by its site': (every? map? (vals (:unanswered r))) false) and green alone right after, on the same tree. ```seon.system/stall-of``` gives an unanswered proc (Jolt's ping's ::flow/unanswered) its ::flow/site, which can be nil for a proc caught before its step set one [H], so the evidence a hang most needs is missing exactly then. Fix at the cause: Jolt's ping always gives an unanswered proc a site (at least its pid and the message it took), or stall-of says the site is unknown as data, never nil. PRIOR WORK: stall-of (system.clj ~275), Jolt's flow ping. Proof, red first: seon.system-test/a-proc-mid-step-with-no-site-is-named."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.system-test/a-proc-mid-step-with-no-site-is-named}
+  :seon.task/needs #{}
+  :seon.task/estimate #:seon.system{stall-of {:n 20, :order :linear, :ticks 50000, :bytes 100000}}}]
