@@ -36,4 +36,9 @@
   :seon.task/kind :work
   :seon.task/estimate #:seon.render.ui{stage-front {:n 100, :order :linear, :ticks 2000000, :bytes 4000000}}
   :seon.task/needs #{"seon.render.proc/a-page-keeps-its-renders-css-on-every-pass"}
-  :seon.task/proofs #{seon.render-test/the-persons-chat-holds-no-machinery-and-the-model-reads-it-whole}}]
+  :seon.task/proofs #{seon.render-test/the-persons-chat-holds-no-machinery-and-the-model-reads-it-whole}}
+ {:seon.task/name "chat-asks-last-misfits-are-markdowns-root-class"
+  :seon.task/plan "Web's. every-render-fits-the-hiccup pins seon.render.ui/chat-ask at {:class 5} (from 13, main 01a03c70ec: chat-ask's fold and toggle became rules by place). The 5 left are seon.render.ui/markdown's own root class (seon-md), one per markdown drawn on the test's pages, which every caller of markdown shares. Moving markdown's block classes (headings, lists, quote, pre) into a .seon-md style was tried and changed no count, since only its root class is counted there. A fall needs markdown's root styled by its place under each caller's rules, or a markdown render with its own :seon.render/style named by the walk. Check in the browser at portrait width (an agent's conversation: /root, Show as the conversation). Counts may only fall."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.render-test/every-render-fits-the-hiccup}
+  :seon.task/estimate #:seon.render.ui{markdown {:n 1, :order :constant, :ticks 1000, :bytes 2000}}}]
