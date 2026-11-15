@@ -1297,20 +1297,6 @@
   (if checkout (fx/checkout-env! checkout) (doseq [v fx/root-variables] (lib/c-unsetenv v)))
   (cfg/hold-args! args (cfg/entries db) (program/schema-changes db)))
 
-(defn- child-quiescent!
-  "A test child's quiescence handler (jolt.host/on-quiescent!): told that no fiber of it can run, no timer is pending and no
-  descriptor is awaited. With a test in flight and no put of it waiting on the link (the agent's turn, its fold reads it),
-  the test can never move again: the typed :seon.test/deadlock, with every fiber's dump, is thrown into the test's fiber, so
-  it is the test's own red, and its report and the run's answer still go out. No clock (docs/testing.md#a-test-waits-without-a-clock).
-  nil."
-  {:malli/schema [:=> [:cat :any :seon.host/volatile :string] :nil]}
-  [in-flight putting dump]
-  (when-let [{:keys [fiber test]} (when-not @putting @in-flight)]
-    (let [msg (str "the test can never move again: no fiber of its child can run and it waits on nothing outside (" test ")")]
-      (binding [*out* *err*] (println msg "\n" dump) (flush))
-      (jolt.host/fiber-interrupt! fiber (ex-info msg (contract/error :seon.test/deadlock #'seon.agent/child-quiescent! msg {:test test :dump dump})))))
-  nil)
-
 (defn- test-child-runs!
   "A test child's body (jolt.async.remote.flow/fork!'s child), end its end of the link to its run's fold proc
   (test-run-step), opened by fork! over the one stream it holds: watched as seon.lib/fork!'s children are (seon.lib/end-with!,
@@ -1328,14 +1314,12 @@
         ;; a test that never returns is ended by its tick budget when its wait spends ticks, and by its wall bound when it spends
         ;; none (a fiber parked on a full link's put): the wall bound is the one timer (core.async's timeout): its evidence first, Jolt's dump of every fiber on
         ;; stderr and on the error, then the typed :seon.test/wall-spent thrown into its fiber, so it is its own :error and its
-        ;; namespace goes on (seon.proofs/test-vars). A deadlock is told by its source, Jolt's quiescence (child-quiescent!):
-        ;; a wait on the link is the agent's turn (putting), and the wall bound stays only for a wait on a peer the child
-        ;; cannot see (a root it asked over a socket), until that peer says its own deadlock (docs/testing.md#a-test-waits-without-a-clock)
-        putting (volatile! false)
+        ;; namespace goes on (seon.proofs/test-vars). A child's quiescence can't stand for a deadlock: Jolt counts a wait on a
+        ;; peer as quiescent, and every test child waits on its link (fibers.ss's on-quiescent! contract)
         put! (fn [v]
                (cond (:seon.test/started v) (reset! in-flight (arm-wall! (jolt.host/current-fiber) (:seon.test/started v) (wall-bound-ms (:seon.test/started v))))
                      (:seon.test/ended v) (some-> (first (reset-vals! in-flight nil)) :cancel a/close!))
-               (vreset! putting true) (a/>!! out v) (vreset! putting false) (jolt.fibers/yield))]
+               (a/>!! out v) (jolt.fibers/yield))]
     ;; the starter's watch, armed again here as seon.lib/fork! arms it in each child: nothing it forked outlives root
     (lib/end-with!)
     ;; the run ends with its agent (a test ends by its own budget): the agent's end of this link closing raises SIGIO here
@@ -1353,8 +1337,6 @@
         ;; its tests run as bin/test's runner runs them: no interrupt or eval of the agent's
         ;; (task seon.agent/a-test-child-starts-as-a-test-runner-does)
         (intr/forked!)
-        ;; a test that could never move again is told by Jolt (its quiescence), not by a clock
-        (jolt.host/on-quiescent! (fn [dump] (child-quiescent! in-flight putting dump)))
         ;; its reads through its own env, never the agent's (own-store!); its writes stay its own value's (:test mode)
         (own-store! (:cfg @state) (:branch @state))
         ;; its first act on its own env: the branch's environment, whatever the agent it was forked from held (its reads of
