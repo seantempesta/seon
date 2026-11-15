@@ -53,14 +53,14 @@
   (:turn (swap! agent/state assoc-in [:turn :stop] (cond-> {:outcome outcome} reason (assoc :reason reason)))))
 
 (defn- test-error!
-  "Record on this agent's branch whether its test run test-run failed as a whole: the error as data on
-  the agent (:seon.agent/test-error), retracted when a run answers;
+  "Record on this agent's branch whether its test run test-run failed as a whole: the error as data, whole (its own
+  keys too, as a no-verdict's :reported: what the run did report), on the agent (:seon.agent/test-error), retracted when a run answers;
   nothing written when it already says so (seon.ctx.status/status reads it)."
   {:malli/schema [:=> [:cat :any] :any]}
   [test-run]
   (let [k (:key @agent/state)
         held (:seon.agent/test-error (d/entity (agent/db) [:seon.agent/key k]))
-        err (when (contract/error? test-run) (select-keys test-run [:seon.error/type :seon.error/operation :seon.error/message]))]
+        err (when (contract/error? test-run) test-run)]
     (cond (and err (not= err held)) (agent/transact! [{:seon.agent/key k :seon.agent/test-error err}])
           (and held (not err)) (agent/transact! [[:db.fn/retractAttribute [:seon.agent/key k] :seon.agent/test-error]]))))
 
