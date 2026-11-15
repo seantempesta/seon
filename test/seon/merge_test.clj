@@ -722,6 +722,20 @@
             onto (d/db-with main (pm/merge-tx main b0 head (keys (:ours r)) :all))]
         (is (empty? (d/datoms onto :eavt e)))))))
 
+;; Estimate: the world 0.5M (cached) + 3 small transactions ~1M + one merge-main ~3M + one unmerged read ~0.5M = 6000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-fact-conflict-is-an-unmerged-entry
+  ;; context-4 at Stage 0 (2026-11-15): lb76's merge of main stopped on two [:datum ...] conflicts, wrote their entries (its head moved), and
+  ;; my.branch/unmerged answered []: seon.merge/unmerged read the program with data-attrs #{}, so no fact's key; a merge stopped on a
+  ;; fact names it in the branch's unmerged entries (docs/merging.md#a-branch-merges-main-in)
+  (let [as (fn [db branch tx] (:db-after (d/with db {:tx-data tx :tx-meta {:seon.tx/branch branch}})))
+        b0 (as (base) :main [{:seon.agent/key "a1" :seon.agent/status :busy}])
+        head (as b0 :main/b [[:db/add [:seon.agent/key "a1"] :seon.agent/status :idle]])
+        main (as b0 :main [[:db/add [:seon.agent/key "a1"] :seon.agent/status :stopped]])
+        {:keys [conflicts]} (pm/merge-main b0 head main)
+        with-entry (as head :main/b (pm/unmerged-tx head conflicts (:max-tx main)))]
+    (is (seq conflicts))
+    (is (= (mapv :key conflicts) (mapv :key (pm/unmerged with-entry))) "the stopped merge's conflict is unmerged on the branch")))
+
 ;; Estimate: the world 0.5M (cached) + 5 small transactions + 3 merge-mains (each a diff of a few datoms, program-of on ~3 keys of three
 ;; dbs) ~10M = 15000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 15000000}} a-conflict-the-branch-resolved-merges-the-next-time
