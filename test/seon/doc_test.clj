@@ -548,6 +548,33 @@
     (is (= "  [k] :needle-ns)" (nth (clojure.string/split-lines (seon.source/file-text db 'app.gm)) 3)) "the line (lines 'app.gm) reads there")
     (is (= ["app.gm:3"] (map :at (doc/grep db "defmethod place :ns" #{:var} nil))) "its first line too")))
 
+;; docs/vector.md#search: round 2 (2026-11-15): two agents chasing a Jolt error found nothing with grep (the program holds no Jolt
+;; source) and grepped the whole checkout from the shell, a run that never ended. A loaded library's file is a text of its own kind,
+;; :library, held in the store (seon.source/library-tx), which grep reads when asked and the program's kinds never read.
+;; Estimate: the world (~3.2M ticks), the index built over it (~5M), two greps (~0.1M): ~9M; 20,000,000 ticks, 40,000,000 bytes
+(deftest ^{:seon.test/estimate {:ticks 20000000 :bytes 40000000}} a-grep-finds-a-librarys-source-line
+  (let [lib {"jolt/fake_backend.clj" "(ns jolt.fake-backend)\n(defn emit-quoted [form]\n  (throw (ex-info (str \"emit-quoted: unsupported quoted form \" form) {})))\n"}
+        db (mt/with (mt/world) (seon.source/library-tx (mt/world) {:roots {"jolt-embedded-resources.jar" "d1"}
+                                                                   :files (into {} (for [[p t] lib] [p {:text t :root "jolt-embedded-resources.jar" :rel p}]))}))
+        program (disj (set (keys doc/text-attrs)) :library)]
+    (is (= [{:at "jolt/fake_backend.clj:3" :kind :library :text "(throw (ex-info (str \"emit-quoted: unsupported quoted form \" form) {})))"}]
+           (doc/grep db "unsupported quoted form" #{:library} nil))
+        "a library's line is found, named by its file's path and line")
+    (is (= [] (doc/grep db "unsupported quoted form" program nil)) "the program's kinds never read a library's text")))
+
+;; docs/vector.md#search: a pin or deps.edn change costs the roots it moved. Estimate: the world and four entities: ~4M; 10,000,000
+(deftest ^{:seon.test/estimate {:ticks 10000000 :bytes 20000000}} a-library-import-writes-only-what-changed
+  (let [f (fn [root rel text] [(str root "/" rel) {:text text :root root :rel rel}])
+        r1 {:roots {"lib-a" "a@1" "lib-b" "b.jar"} :files (into {} [(f "lib-a" "a.clj" "(ns a)") (f "lib-a" "a2.clj" "(ns a2)") (f "lib-b" "b.clj" "(ns b)")])}
+        db (mt/with (mt/world) (seon.source/library-tx (mt/world) r1))
+        ;; lib-a moved (a new pin): a.clj unchanged, a2.clj gone, a3.clj new; lib-b gone from the classpath
+        tx (seon.source/library-tx db {:roots {"lib-a" "a@2"} :files (into {} [(f "lib-a" "a.clj" "(ns a)") (f "lib-a" "a3.clj" "(ns a3)")])})
+        written (set (keep :seon.library/path tx))
+        retracted (set (for [x tx :when (and (vector? x) (= :db/retractEntity (first x)))] (:seon.library/path (d/entity db (second x)))))]
+    (is (= #{"lib-a/a3.clj"} written) (str "an unchanged file is not written again: " (pr-str tx)))
+    (is (= #{"lib-a/a2.clj" "lib-b/b.clj"} retracted) "a file its re-read root no longer holds goes, and a vanished root's files")
+    (is (= {"lib-a" "a@2"} (some :seon.library/roots tx)) "the roots' identities it was read at are kept")))
+
 ;; docs/vector.md#search: a regex has no trigram to ask the index for, so grep reads every text of the kinds asked, once, off
 ;; the attribute's own datoms. Estimate (2026-11-12, main: 8191 texts, 7.7 M chars): the :aevt scan 1.4 M ticks and 7 MB,
 ;; the regex 16 M ticks, so about 2 k ticks and 1 KB a text; budget 4 k and 4 KB. Measured before: 82 KB a text (a seek

@@ -20,7 +20,7 @@ This is an ordinary process: files, the shell (`clojure.java.shell/sh`) and the 
 
 Your REPL starts in your task's namespace, a program namespace: a `def` there, or in any program namespace, changes the program, and the merge judges it. Keep a scratch value in a `let`, or define it after `(in-ns 'user)`.
 
-To find things: `(search "words")` ranks code and wiki sections; `(doc x)` reads a var, a schema key or a wiki section by its address; `(source ns/f)`, `(callers 'ns/f)`, `(callees 'ns/f)`, `(tests-reaching 'ns/f)`; `(grep "text")` for an exact text; `(help)` shows this message again.
+To find things: `(search "words")` ranks code and wiki sections; `(doc x)` reads a var, a schema key or a wiki section by its address; `(source ns/f)`, `(callers 'ns/f)`, `(callees 'ns/f)`, `(tests-reaching 'ns/f)`; `(grep "text")` for an exact text, and `(grep "text" {:in #{:library}})` in the source of the libraries the program loaded (Jolt, Datahike, malli, ...): never the shell over the checkout; `(help)` shows this message again.
 
 ## Your context
 

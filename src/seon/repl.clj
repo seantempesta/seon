@@ -1618,6 +1618,7 @@
       (let [missing (seon.task/agent-cites-missing (agent/db) (:key @agent/state))]
         (agent/hello! t-req-ns (cond-> {:interrupt-ok (:interrupt-ok @agent/state)}
                                   (seq (:load-errors @agent/state)) (assoc :load-errors (:load-errors @agent/state))
+                                  (:no-merge-base @agent/state) (assoc :seon.db/no-merge-base (:no-merge-base @agent/state))
                                   (seq missing) (assoc :seon.agent/missing-cites missing)
                                   (:misaligned @agent/state) (assoc :misaligned (:misaligned @agent/state))
                                   (:env-mismatch @agent/state) (assoc :seon.process/env-mismatch (:env-mismatch @agent/state))
