@@ -6,6 +6,18 @@ The owner's standing rulings, one entry each: his words and date, and where the 
 
 The owner's rulings on the morning after the first night run on its own.
 
+### Tests always have helpers making them millisecond tests of the goal
+
+"Tests needs to always have sub agents running (I think sonnet is fine) that are refactoring tests to test for 90% of the goal and make it a ms test and to drop any tests that are low quality and slow." The tests session keeps Sonnet helpers working at all times, in its one worktree, each on test files nobody else edits, slowest and most-reached first; a test is rewritten to prove the most important 90% of its goal in milliseconds, or dropped when it is low quality and slow, its `Deletes:` line naming what now proves its goal (`AGENTS.md` §2, helpers; §3, no functionality removed).
+
+### Flaky correctness first; load is not a cause
+
+"what does load have to do with correctness? Isn't it just slower when we have a high load? Fix any correctness issues that are flaky first." Every overrun on 2026-11-15 stopped at its 300 s bound at loads from 6.5 to 41: a hang, found and fixed at its wait. Stated in `AGENTS.md` §3.
+
+### Verdict reuse lands first
+
+"yeah I'm fucking pissed this isn't done yet. FInd out what is holding up the tests agent from getting this shit merged and prioritize this." Landing 12 (verdicts as entities with their read keys) is the first item of every session after the Jolt pin; its reviews preempt the reviewers' own work. Stated in [the plan](plan.md#the-order).
+
 ### No clock guesses when our own work finishes; the world outside gets declared timeouts
 
 "db/txInstant is fine. Update my wording so it's more accurate -- no clocks for guessing when things might finish -- be sure and use flow and blocking waits if you are sure it's going to come through but don't know when and we need proper timeout error config entries to handle timeouts for things like retrieving data from the web." A wait on our own system blocks on its Flow channel until the producer's value, typed error or death; a wait on the world outside has a spec'd timeout config entry and ends with a typed error. Ordering facts by `:db/txInstant` (the merge's `overtaken`) is not a clock deciding when work finishes, and stays. It refines the 2026-11-14 rulings on timers below. Stated in `AGENTS.md` §4 and [clocks](clocks.md#two-kinds-of-wait).
