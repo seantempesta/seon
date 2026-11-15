@@ -54,6 +54,26 @@ task must take. The priority (owner,
 2026-11-14) is one view: fix the broken processes that slow us down, and move Claude sessions off files and git onto the
 system, working, proving and merging as Seon agents do. Everything else in this plan stays, in order behind it.
 
+## Where things stand (root, 2026-11-16 06:2x)
+
+What a fresh root reads first: what works now, what to do next, and the lessons that cost time.
+
+- **The self-merge path works end to end once.** Pilot run 15 took `seon.db/an-eval-responses-parts-are-its-schemas-keys` through `seon_done` (judge, gate, merge) into main in the store. Seon wrote it back to git (85cc745c06 on jolt/merges), root reviewed the sync, and it landed as 7875387c3e.
+- **Restarts and the store.** Lands keep root running again (09e83a2d59). Boot's sweep syncs, so freed pages are reused (1a7c7d8526). Each boot still grows the store ~2 GB from writes made before the writer's first sync (`seon.system/a-write-before-the-writer-syncs-its-own-steps`). The 64 GiB store copy `runs/store-pre-compact-20261116.mdb` is kept until the owner says otherwise.
+- **Redraw.** A render a land redefines now redraws every kept walk (2409c17de3).
+- **Next, in order:**
+  1. The page walk onto the reactive core (`seon.ratom/web-reads-on-the-core`). `@ctx` is one immutable tree; a render re-runs only when its input subtree isn't `identical?`; a dropped subtree disposes its reaction; key sets only at the pulls. Delete the walk's own engine and the render index fallback with it; never thread an index through calls.
+  2. Inbox fixes: no process, merged-down messages, ended agent, duplicates (`seon.server/*` inbox tasks).
+  3. bin/land's ticks print sums the wrong field.
+  4. Read-keys as one value a verdict.
+  5. The pilot judges against a pinned main.
+- **How root found things (lessons):**
+  - Inboxes lapse at every restart: re-attach, and wake idle sessions directly.
+  - Name one owner the moment a cause is found.
+  - A land that restarts root needs `runtime-for` checked first.
+  - Before ordering any fix, ask which standard mechanism already does the job.
+  - Memory and notes files are per-login: state lives in tasks, schemas and this wiki.
+
 ## The order of work now
 
 Agreed 2026-11-14 by every area and the owner ([decisions](decisions.md#2026-11-14-rulings)). Each session works its items
