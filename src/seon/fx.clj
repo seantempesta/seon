@@ -785,6 +785,30 @@
           (git! env wt (cond-> ["commit" "-q" "--no-verify" "-m" message] allow-empty? (conj "--allow-empty")) nil)
           {:value {:sha (git! {} wt ["rev-parse" "HEAD"] nil) :files (count files)}}))))
 
+(defn- merge-in-tree!
+  "Merge ref into the branch worktree wt has checked out, through that tree, as the one writer of it (the :git owner's one worker,
+  task seon.system/a-landing-restarts-root-only-for-a-binary-change, slice 2a): refused, merging nothing, when the tree holds an
+  edit or a staged change of its own; a merge that conflicts is aborted, the tree left as it was found, and answered typed naming
+  the conflicting paths, so no later commit is made in a MERGING tree. {:value {:sha :merged ref}} or :seon.fx/io-error. See
+  docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat :string :map :string] :map]}
+  [wt env ref]
+  (let [run (fn [args] (git-run env wt args nil))
+        _ (run ["update-index" "-q" "--refresh" "--ignore-submodules"])
+        dirty (concat (str/split-lines (:out (run ["diff" "--name-only" "--ignore-submodules"])))
+                      (str/split-lines (:out (run ["diff" "--cached" "--name-only" "--ignore-submodules"]))))
+        dirty (vec (distinct (remove str/blank? dirty)))]
+    (if (seq dirty)
+      (error #'seon.fx/git-commit :seon.fx/io-error (str "refused, nothing merged: " wt " holds changes of its own: " (str/join ", " dirty)) {:path wt})
+      (let [r (run ["merge" "-q" "--no-edit" ref])]
+        (if (zero? (:exit r))
+          {:value {:sha (str/trim (:out (run ["rev-parse" "HEAD"]))) :merged ref}}
+          (let [conflicts (vec (remove str/blank? (str/split-lines (:out (run ["diff" "--name-only" "--diff-filter=U"])))))]
+            (run ["merge" "--abort"])
+            (error #'seon.fx/git-commit :seon.fx/io-error
+                   (str "merging " ref " into " wt " conflicts, aborted (the tree as it was): " (if (seq conflicts) (str/join ", " conflicts) (str/trim (:err r))))
+                   {:path wt})))))))
+
 (defn git-commit
   "Commit files ({relative path text}) on branch of the repository at dir, with message,
   through git's plumbing: blobs, a tree from the branch's own with the files replaced, a
@@ -798,7 +822,16 @@
   seon.doc/review-message). Each file is first read as its reader reads it (unreadable), and one that doesn't refuses the commit. :modes ({path git mode}) gives a file's mode, 100644 otherwise. Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing
   to write), or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [dir branch files message allow-empty? modes base expect]} :req}]
+  [{{:keys [dir branch files message allow-empty? modes base expect merge]} :req}]
+  (cond
+    ;; {:merge ref}: ref merged into the branch's checked-out tree, by this effect's one worker (merge-in-tree!)
+    merge (let [ref (str "refs/heads/" branch) wt (checked-out-at dir ref)]
+            (if wt
+              (try (merge-in-tree! wt (let [who (cfg/value :seon.config.source/committer-name) mail (cfg/value :seon.config.source/committer-email)]
+                                        {"GIT_AUTHOR_NAME" who "GIT_AUTHOR_EMAIL" mail "GIT_COMMITTER_NAME" who "GIT_COMMITTER_EMAIL" mail})
+                                   merge) (catch Throwable e (error #'seon.fx/git-commit :seon.fx/io-error (step/error-msg e) {:path dir})))
+              (error #'seon.fx/git-commit :seon.fx/io-error (str "no worktree has " branch " checked out: nothing to merge into") {:path dir})))
+    :else
   (if (and (empty? files) (not allow-empty?))
     {:value {:sha nil :files 0}}
     (try
@@ -823,7 +856,7 @@
             ;; only from the head read above; a new branch only if none appeared meanwhile
             (git! {} dir ["update-ref" ref sha (if have? parent "0000000000000000000000000000000000000000")] nil)
             {:value {:sha sha :files (count files)}}))))
-      (catch Throwable e (error #'seon.fx/git-commit :seon.fx/io-error (step/error-msg e) {:path dir})))))
+      (catch Throwable e (error #'seon.fx/git-commit :seon.fx/io-error (step/error-msg e) {:path dir}))))))
 
 ;; ---- the wiki's history: what each section was last written against -----------------------
 
