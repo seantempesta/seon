@@ -12,8 +12,10 @@
  :seon.cost/dims [:map {:closed true}
                   [:ticks {:optional true} :seon.cost/amount]
                   [:ns {:optional true} :seon.cost/amount]
-                  [:bytes {:optional true} :seon.cost/amount]]
- :seon.cost/dim [:enum :ticks :ns :bytes]
+                  [:bytes {:optional true} :seon.cost/amount]
+                  ;; no cost dimension (owner, 2026-11-15): admitted until main states it nowhere, never judged (seon.cost/exact)
+                  [:calls {:optional true} :seon.cost/amount]]
+ :seon.cost/dim [:enum :ticks :ns :bytes :calls]
  ;; one unit operation of the unit table (seon.cost/units): its measured cost on this runtime
  :seon.cost/unit [:map {:closed true} [:ticks {:optional true} [:double {:min 0.0}]] [:ns [:double {:min 0.0}]] [:bytes [:double {:min 0.0}]] [:what :string]]
  ;; an estimate: sized (stated per unit of W(n), measured at sizes of a built input), or
