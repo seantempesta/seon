@@ -45,12 +45,13 @@
   changed stops it, and each conflict stays on the branch as an unmerged entry (base, ours, theirs). Main's forms load at this
   process's next start, never here. Answers {:ok :applied
   :conflicts :unmerged} (unmerged: every entry still open, earlier ones included), printed by `merged-summary`: the whole
-  value stays under the eval's handle."
-  {:malli/schema [:=> [:cat] [:map [:ok :boolean]]]}
+  value stays under the eval's handle. The writer's typed error, when it merged nothing (a swept merge base), is answered as it is."
+  {:malli/schema [:=> [:cat] [:or [:map [:ok :boolean]] :seon.error/base]]}
   []
-  (let [r (agent/merge-main!)
-        db (agent/db)]
-    (with-meta (assoc r :unmerged (pm/unmerged db)) {:seon.render/schema :seon.branch/merged})))
+  (let [r (agent/merge-main!)]
+    (if (contract/error? r)
+      r
+      (with-meta (assoc r :unmerged (pm/unmerged (agent/db))) {:seon.render/schema :seon.branch/merged}))))
 
 (defn unmerged
   "The entries of this branch still unmerged: the conflicts no re-defn or resolve! has
