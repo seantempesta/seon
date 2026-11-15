@@ -180,8 +180,6 @@
 (defn- view! {:malli/schema [:=> [:cat :seon.system/api-state :seon.host/fn [:* :any]] :seon.system/api-state]}
   [st f & args] (apply update st :view f args))
 
-(def gone-statuses "Agent statuses of a process gone (:seon.agent/status)." (:seon.status/gone (contract/properties :seon.agent/status)))
-(def ^:private stopped-statuses (:seon.status/stopped (contract/properties :seon.agent/status)))
 
 (defn- failed
   "What went wrong in agent id's view change m (a its entry before), as the one error map,
@@ -221,11 +219,11 @@
           a' (cond-> (merge a (dissoc m :ready :evals-add))
                (and (:ready m) (= :spawning (:status a))) (assoc :status :idle)
                ;; a stall ends with the process
-               (and (:stalled a) (gone-statuses (:status m))) (assoc :stalled nil)
+               (and (:stalled a) (task/gone-statuses (:status m))) (assoc :stalled nil)
                (:evals-add m) (update :evals #(let [n (cfg/value :seon.config.root/view-window)] (reduce (fn [v x] (lib/push-window v (eval-head x) n)) (or % []) (:evals-add m)))))
           e (failed id a m)]
       ;; a gone process stays gone: a late live status (a request its proc took after its end) is not news
-      (cond-> (assoc-in st [:view :agents id] (if (and (gone-statuses (:status a)) (not (gone-statuses (:status a'))))
+      (cond-> (assoc-in st [:view :agents id] (if (and (task/gone-statuses (:status a)) (not (task/gone-statuses (:status a'))))
                                                 (assoc a' :status (:status a) :running nil)
                                                 a'))
         e (problem (err/occurrence e :agent {:agent id :task (:task a)} (System/currentTimeMillis)))
@@ -255,7 +253,7 @@
         ;; and the evals given at its spawn are the first things its REPL queue holds, before any request the answer makes
         (:ready m) (insert-evals o id)
         ;; the agents with an eval in flight: the stall check's set (a gone one never)
-        (contains? m :running) (update ::busy (fnil (if (and (:running m) (not (gone-statuses (:status a))) (not (gone-statuses (:status a')))) conj disj) #{}) id)))
+        (contains? m :running) (update ::busy (fnil (if (and (:running m) (not (task/gone-statuses (:status a))) (not (task/gone-statuses (:status a')))) conj disj) #{}) id)))
     st))
 
 (defn stall-state
@@ -425,7 +423,7 @@
         {:keys [branch]} (get-in st [:agents agent])
         v (get-in st [:view :agents agent])
         ;; stopped by root: a kill, or the end of its run (:ended); else it died
-        stop (stopped-statuses (:status v))
+        stop (task/stopped-statuses (:status v))
         ;; neither stopped by root nor killed: a death, with what root saw of it (session D2)
         died (when-not (or rid stop)
                (contract/error :seon.agent/died #'seon.system/end-agent (str "agent " (name agent) " died" (exit-text (:exit v)))
@@ -514,7 +512,7 @@
       holder (or (and (:key opts) (get-in st [:agents (keyword (:key opts))]) (keyword (:key opts)))
                  (and (:branch opts)
                   (some (fn [[aid a]] (when (and (= (:branch opts) (:branch a)) (not (:ended-ms a))
-                                                 (not (gone-statuses (:status a))))
+                                                 (not (task/gone-statuses (:status a))))
                                         aid))
                         (get-in st [:view :agents]))))]
   (cond
@@ -819,7 +817,7 @@
     (:ev m)
     (case (:ev m)
       :forked (do (step/out! o :events (step/event {:type :spawned :agent (:agent m) :pid (:pid m) :fork-ms (:fork-ms m)}))
-                  (when (stopped-statuses (get-in st [:view :agents (:agent m) :status])) (lib/kill! (:pid m) 9))
+                  (when (task/stopped-statuses (get-in st [:view :agents (:agent m) :status])) (lib/kill! (:pid m) 9))
                   ;; the most processes this root held at once: itself, its boot fork server and its live agents (a fold of
                   ;; their forks and exits, read with no ps), said on its stop (task seon.lib/a-process-reports-the-most-processes-it-held-at-once)
                   (-> st (update ::live (fnil conj #{}) (:pid m))
@@ -916,7 +914,7 @@
       ;; a defect in a root proc: recorded as data (its error map when it carries one), and
       ;; the message the step took answered with it (Flow's catch dropped the step's outputs):
       ;; the api's own throw answers every message its step took (::lost)
-      :error (if (stopped-statuses (get-in st [:view :agents (:to m) :status]))
+      :error (if (task/stopped-statuses (get-in st [:view :agents (:to m) :status]))
                ;; an output Flow dropped for an agent the api stopped on purpose (its cancel, stop or kill: :seon.status/stopped): the
                ;; stop meant to drop what was in flight to it, so it is no problem (seon.problems-test/a-drop-to-an-agent-stopped-on-purpose-is-no-problem)
                st
@@ -1061,11 +1059,8 @@
                  ::flow/in-ports {:ext (:ext args) :back (:back args)}
                  ::flow/out-ports {:to-writer (:to-writer args) :events (:events args)}))
   ([st tr]
-   ;; the stop transition: nothing accepted is left unanswered
-   (when (= tr ::flow/stop)
-     (doseq [[_ {:keys [p]}] (:pending st) :when (not (map? p))] (deliver p (gone nil "root stopped")))
-     (doseq [[_ {:keys [p]}] (::waits st)] (deliver p (gone nil "root stopped"))))
-   st)
+   ;; the stop transition: nothing accepted is left unanswered (seon.step/end-all: a proc's reply route is its own to end)
+   (if (= tr ::flow/stop) (step/end-all st (gone nil "root stopped") :pending ::waits) st))
   ([st in m]
    (let [o (volatile! {})
          before (get-in st [:view :agents])
@@ -2033,7 +2028,7 @@
   only through a merge task (seon.reconcile's octopus merge)."
   {:malli/schema [:=> [:cat :symbol [:maybe :seon.agent/id] [:maybe :map] [:maybe :map]] :map]}
   [op id args a]
-  (let [live? (boolean (and a (not (gone-statuses (:status a)))))
+  (let [live? (boolean (and a (not (task/gone-statuses (:status a)))))
         data-attrs (:data-attrs args :all)]
     (case op
       spawn! {:op :spawn :opts (or args {})}
@@ -2218,7 +2213,7 @@
          (kill! sys ag)
          (doto (promise) (deliver r)))
        (= b main) (ask nil (or mode :main))
-       :else (let [live (some (fn [[aid a]] (when (and (= b (:branch a)) (not (gone-statuses (:status a)))) aid)) (:agents (state sys)))
+       :else (let [live (some (fn [[aid a]] (when (and (= b (:branch a)) (not (task/gone-statuses (:status a)))) aid)) (:agents (state sys)))
                    ag (or live (spawn! sys {:branch b}))]
                (ask ag (or mode :turn)))))))
 
@@ -2271,7 +2266,7 @@
             (try
               ;; its agent stopped first: the kill's own answer, given once root's view holds it stopped (the api's :kill), is the
               ;; wait's end; never an end event read from a tap, which slides and can drop the one event waited for
-              (when (and ag (not (gone-statuses (get-in (state sys) [:agents ag :status]))))
+              (when (and ag (not (task/gone-statuses (get-in (state sys) [:agents ag :status]))))
                 @(request! sys 'kill! ag nil))
               @(write! sys {:op :drop-branch :branch b})
               nil
@@ -2333,7 +2328,7 @@
          (try
         (let [w @(write! sys {:op :branch-for-tree :branch b :tx (:tx c)})
               full (pdb/on-main (pdb/conn-main (:conn sys)) b)
-              live (fn [] (some (fn [[aid a]] (when (and (= full (:branch a)) (not (gone-statuses (:status a)))) aid)) (:agents (state sys))))
+              live (fn [] (some (fn [[aid a]] (when (and (= full (:branch a)) (not (task/gone-statuses (:status a)))) aid)) (:agents (state sys))))
               ;; the spawn's answer: the new agent, or, for an asker who came second, the refusal naming the live holder
               s (when-not (or (contract/error? w) (live)) @(request! sys 'spawn! nil {:branch b}))
               ag (when-not (contract/error? w) (or (live) (:id s) (:agent s)))
