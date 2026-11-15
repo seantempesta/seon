@@ -427,7 +427,8 @@
   "A cost proof's measurements against its estimate, row by size, then its verdict. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.render/cost-report] :any]}
   [opts {:keys [rows verdict]}]
-  (let [dims (filter (set (mapcat (comp keys :expected) rows)) [:ns :bytes :calls])]
+  ;; the dimensions its estimate states, in the verdict's order (seon.cost/dimensions, their one home)
+  (let [dims (filter (set (mapcat (comp keys :expected) rows)) cost/dimensions)]
          [:div {:class "cost"}
       [:table {:class "costrows"}
        [:thead [:tr [:th "n"] (for [d dims] [:th (str (name d) " measured / estimate")])]]
@@ -481,7 +482,8 @@
   {:malli/schema [:=> [:cat :map] :any]}
   [r]
   [:span {:class "tabular-nums text-text-400"}
-   (if (some r [:ms :ticks :bytes]) (emit/cost-text (select-keys r [:ms :ticks :bytes])) "not run")])
+   ;; its work as the one wording says it (its keys are emit/cost-text's); the result's tokens are said beside it, not here
+   (let [t (emit/cost-text (dissoc r :tok))] (if (str/blank? t) "not run" t))])
 
 (defn sender
   "Who sent a message or ran an eval, from the entity the pull joins as its :seon.message/from or :seon.eval/by, as a person reads it: an
@@ -2100,22 +2102,6 @@
      [#'chat-end {:wire/for "page"}]
      [#'proof-story {:wire/for "page"}]]))
 
-(def ^:private task-stands
-  "How a task's :seon.task/outcome reads to a person: [words tone]. :parked and :told are woken by a message (seon.reconcile/park-outcomes);
-  :cap is not: it waits for its agent's turns to be raised and the task released."
-  {:running ["working" :live] :parked ["parked" :ask] :told ["told" :ask] :cap ["stopped at its cap" :stopped]
-   :done ["done" :done] :merged ["merged" :done] :ready ["ready to merge" :quiet] :gate ["at the merge gate" :quiet] :behind ["behind main" :stopped]
-   :dead ["died" :failed] :lost ["stopped by a restart" :quiet] :killed ["killed" :failed] :refused ["refused" :failed] :closed ["closed" :quiet]})
-
-(def ^:private end-stands
-  "How the agent's own end (:seon.agent/outcome) reads where its task holds none: [words tone]."
-  {:green ["done" :done] :waiting ["parked" :ask] :cap ["stopped at its cap" :stopped] :red ["ended red" :failed]
-   :failed ["failed" :failed] :merge-failed ["merge failed" :failed] :error ["ended in error" :failed]})
-
-(def ^:private status-stands
-  "How an agent's process reads where nothing else says how its work stands (:seon.agent/status): [words tone]."
-  {:spawning ["starting" :live] :busy ["working" :live] :idle ["idle" :quiet] :ended ["finished" :quiet] :killed ["killed" :quiet] :dead ["stopped" :quiet]})
-
 (def ^:private tone-class
   "A standing's tone as the page's text colour."
   {:live "text-signal" :ask "text-info" :done "text-success" :failed "text-error" :stopped "text-warning" :quiet "muted"})
@@ -2136,19 +2122,22 @@
         turn (:seon.agent/turn a)
         end (when (and (:seon.agent/outcome a) (or (nil? turn) (= turn (:seon.agent/ended-turn a)))) (:seon.agent/outcome a))
         gone? (contains? gone status)
-        [from k] (cond (and gone? (= :running o)) [status-stands status]
-                       (and o (not= :running o)) [task-stands o]
-                       end [end-stands end]
-                       (and (= :running o) (= :spawning status)) [status-stands :spawning]
-                       o [task-stands o]
-                       :else [status-stands status])
-        [text tone] (get from k [(kname k) :quiet])
-        turns (when (= "stopped at its cap" text) (or (:seon.agent/ended-turn a) (:seon.agent/max-turns a)))
+        ;; which enum says it, and its value: its words and tone are that enum's (:seon.status/title, :seon.status/tone)
+        [from k] (cond (and gone? (= :running o)) [:seon.agent/status status]
+                       (and o (not= :running o)) [:seon.task/outcome o]
+                       end [:seon.agent/outcome end]
+                       (and (= :running o) (= :spawning status)) [:seon.agent/status :spawning]
+                       o [:seon.task/outcome o]
+                       :else [:seon.agent/status status])
+        props (contract/properties from)
+        text (get (:seon.status/title props) k (kname k))
+        tone (get (:seon.status/tone props) k :quiet)
+        turns (when (= :cap k) (or (:seon.agent/ended-turn a) (:seon.agent/max-turns a)))
         ;; what the task waits on, as a fact about it beside its word (Point's ruling within the owner's 2026-11-08 plain words,
         ;; 2026-11-10): no instruction to the person
         waits (cond (= k :parked) "waits for a message"
                     (= k :told) "ended, said how"
-                    (and (= from task-stands) (= k :running) (= :idle status)) "between turns")
+                    (and (= from :seon.task/outcome) (= k :running) (= :idle status)) "between turns")
         waiting? (or (= :waiting end) (#{:parked :told} o))
         ;; the done rule's reasons as the task holds them (:seon.task/reasons, data), each in its schema's words with what it is about as code;
         ;; a string only where no data stands behind it (a restart, a process gone): docs/render.md#how-the-work-stands
@@ -2156,7 +2145,7 @@
                       (map (fn [r] (str (reason-title (:reason r)) (some->> (or (:symbol r) (:key r) (:behind r)) (str " `") (#(str % "`"))))))
                       (str/join "; "))
         reason (when-not waiting? (some #(when-not (str/blank? %) %) [said (:seon.task/reason t) (:reason (:seon.task/failure t)) (when end (:seon.agent/reason a))]))]
-    (cond-> {:state (keyword (cond (= from task-stands) "task" (= from end-stands) "end" :else "status") (name (or k :none)))
+    (cond-> {:state (keyword (case from :seon.task/outcome "task" :seon.agent/outcome "end" "status") (name (or k :none)))
              :text text :tone tone :lit? (= :live tone)}
       turns (assoc :detail (str turns (if (= 1 turns) " turn" " turns")))
       waits (assoc :detail waits)
