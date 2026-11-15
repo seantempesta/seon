@@ -325,7 +325,7 @@
         asks (for [r (rows-with db nss [":messages"])
                    :when (some #(and (map? %) (contains? % :messages) (or (contains? % :turn) (contains? % :model))) (tree-seq coll? seq (:read r)))
                    v (named-by r)
-                   :when (not (or (some #{'seon.ctx.wire/render 'seon.ctx.wire/request} (:refs r))
+                   :when (not (or (some #{'seon.ctx.wire/render 'seon.ctx.wire/request 'seon.turn/request!} (:refs r))
                                   (#{'seon.model/request-body 'seon.ctx.wire/request 'seon.ctx.wire/wire-of 'my.root/first-moves!} v)))] v)]
     (set (concat by-ref role asks))))
 
