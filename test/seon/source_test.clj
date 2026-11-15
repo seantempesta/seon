@@ -238,10 +238,16 @@
     (is (nil? (get config/config :seon.config.source/root)) "this process names no source root, as a check mode's root does")
     ;; a shard loads test/'s namespaces as it plans: this one is taken out first, as a fork server holds none of them
     (remove-ns 'seon.required-whole)
-    (let [lf (program/live-forms db)
-          [whole errs] (#'program/required! db lf lf)]
-      (is (= [] errs))
-      (is (= #{'seon.required-whole} whole) "loaded whole by require, its file found under the tree main states it was imported from"))
+    ;; and its process's source roots hold no test/ of the checkout, as a prove agent's in the image held none (task
+    ;; seon.program/a-test-namespace-loads-whole-in-whatever-process-runs-it: red there, green in a bin/test child)
+    (let [roots0 (jolt.host/source-roots)]
+      (try
+        (jolt.host/set-source-roots! (vec (remove #(or (= % "test") (str/ends-with? (str %) "/test")) roots0)))
+        (let [lf (program/live-forms db)
+              [whole errs] (#'program/required! db lf lf)]
+          (is (= [] errs))
+          (is (= #{'seon.required-whole} whole) "loaded whole by require, its file found under the tree main states it was imported from, whichever process runs it"))
+        (finally (jolt.host/set-source-roots! roots0))))
     ;; a branch that removed a form of it (its def here): the file, main's, still holds that form, so it is no longer the
     ;; branch's namespace whole; required whole, it brought main's forms back over the branch's (a test child naming a var
     ;; its branch deleted, 2026-11-12)
