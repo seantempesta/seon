@@ -8,6 +8,7 @@ Every limit, bound and default of the platform is one key in one aero file, docu
 
 - **Profiles.** `--profile NAME` (default `:default`) is handed to aero's `#profile` (```seon.config/profile```) and kept as `:seon.config.root/profile`, a layer the loader supplies.
 - **Machine values are derived at load:** `#seon/checkout "p"` is `p` under the checkout; `#seon/cores nil` is the core count (`:seon.config.machine/cores`); `#seon/own-branch "b"` is `b` in the main tree and `b-<worktree>` in a worktree, since worktrees share refs (`:seon.config.source/branch`).
+- **A new key is three edits:** its value in `default.edn`, its schema entry in its namespace's schema file, and an optional entry in `:seon.config/config`'s closed map (`resources/seon/schemas/seon.config.edn`); without the last, every config load refuses the key as `unknown-key`, the build included, since ```seon.config/schema-forms``` are baked when `seon.config` compiles.
 - **No key decides by time** ([clocks](clocks.md)): the stall bounds (`:seon.config.agent/stall-ms`, `:seon.config.proofs/stall-factor`) only say when a stall is recorded.
 
 ## Layers
