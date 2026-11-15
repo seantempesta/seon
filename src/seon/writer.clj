@@ -210,16 +210,21 @@
     (try (d/transact bc arg-map) (finally (d/release bc)))))
 
 (defn merge-main-into
-  "Main merged into branch b on main's program (seon.merge/merge-main): a conflict writes only its unmerged entries; clean, one force-branch! onto b while b is at its head. Answers {:ok :conflicts :commit :t :main}, :main the commit merged. See docs/merging.md#a-branch-merges-main-in."
+  "Main merged into branch b on main's program (seon.merge/merge-main): a conflict writes only its unmerged entries; clean, one force-branch! onto b while b is at its head. Answers {:ok :conflicts :commit :t :main}, :main the commit merged, or the typed error of a branch with no merge base (seon.db/branch-base's: its base was swept), merged nothing. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :any :map :seon.db/branch] :map]}
   [conn cfg b]
   (let [main-b (pdb/conn-main conn) main @conn head (pdb/head conn b)
         base (pdb/branch-base conn main-b b)
-        _ (when (contract/error? base) (throw (ex-info (:seon.error/message base) base)))
-        r (pm/merge-main base head main)]
-    (if (:conflicts r)
+        ;; nothing to merge when the branch's base is main's head (a resume with main unmoved): no merge-main read
+        same? (and (not (contract/error? base)) (= (d/commit-id base) (d/commit-id main)))
+        r (when-not (or same? (contract/error? base)) (pm/merge-main base head main))]
+    (cond
+      (contract/error? base) base
+      same? {:ok true :keys 0 :main (d/commit-id main)}
+      (:conflicts r)
       (do (branch-tx! cfg b {:tx-data (pm/unmerged-tx head (vec (:conflicts r)) (:max-tx main)) :tx-meta (pdb/tx-meta b)})
         {:ok false :conflicts (:conflicts r) :main (d/commit-id main)})
+      :else
       (let [;; a merged task's cites are derived from its text: made again here, never carried (seon.task/merged-cites-tx)
             tx (into (:tx r) (task/merged-cites-tx (pdb/speculate-db main (:tx r)) (:keys r)))
             merged (:db-after (d/with main {:tx-data tx :tx-meta (pdb/tx-meta b {:seon.tx/merged main-b})}))
@@ -363,13 +368,19 @@
                                       (str "commit " commit " is gone from the store (collected): no session can be restored at it")
                                       (str "branch " branch " exists: a restore at commit " commit " makes a new branch"))
                                     {:branch branch :commit commit}))
-                 (let [resumed? (boolean (or resumed? commit))]
+                 (let [;; a resumed branch takes main first, on main's program (merge-main-into), so its process starts on main's
+                       ;; runtime and program, as every later turn would merge it (seon.fx/runtime-for reads the branch's own source
+                       ;; tree at init!); a conflict leaves its unmerged entries for the agent, a swept base answers its typed error
+                       ;; and the agent runs main's program (seon.agent/init!), either way on the reply (docs/merging.md#a-branch-merges-main-in)
+                       merged (when (and resumed? (not commit)) (merge-main-into conn (:cfg st) branch))
+                       resumed? (boolean (or resumed? commit))]
                    (when-not resumed? (d/branch! conn main branch))
                    ;; main's commit and t, which this branch starts at and the image it forks from holds
                    (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :task (:task m) :ns (:ns m) :fd (:fd m) :key (:key m)
                                                   :cfg (:cfg st) :resumed resumed?
                                                   :commit (d/commit-id @conn) :t (:max-tx @conn)})
-                   (reply st {:ok true :t (:max-tx @conn) :resumed resumed?}))))
+                   (reply st (cond-> {:ok true :t (:max-tx @conn) :resumed resumed?}
+                               merged (assoc :merged (select-keys merged [:ok :conflicts :commit :keys :main :seon.error/type :seon.error/message])))))))
       ;; a session's files as a branch of main, keyed by their tree (seon.system/prove-tree!): made once, from main's head, with
       ;; the catch-up of the checkout written on it; a second asker of one tree finds it made (:exists), never makes it again
       :branch-for-tree (reply st (if (exists? (:branch m))

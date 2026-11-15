@@ -560,13 +560,16 @@
 
 (defn turn-merged
   "A {:merge} output answered with m (merge-main!'s answer): at a turn's begin the turn goes on (`merged-in`); after a green status a
-  merge that brought nothing ends the run :green, else the next turn judges the combined program. See docs/flow.md#the-five-rules."
+  merge that brought nothing ends the run :green, else the next turn judges the combined program; the writer's typed error (it merged
+  nothing: a swept merge base) is the turn's throw, the agent's to read. See docs/flow.md#the-five-rules."
   {:malli/schema [:=> [:cat :map :map] :seon.turn/step]}
   [st m]
   (let [{:keys [merged status]} (:pending st) st (dissoc st :pending)]
-    (try (if (= :green merged)
+    (try (cond
+           (contract/error? m) (threw st (ex-info (str (:seon.error/message m)) m) false)
+           (= :green merged)
            (if (and (empty? (:applied m)) (empty? (:conflicts m))) [::end st :green (unjudged-reason status) nil] [::next st])
-           (merged-in st))
+           :else (merged-in st))
          (catch Exception e (threw st e false)))))
 
 (defn turn-observed
