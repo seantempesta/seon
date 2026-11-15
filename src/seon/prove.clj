@@ -403,8 +403,8 @@
     (cond-> {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :reports reports
              ;; an item answered an error has no verdict (its batch's error, a wall-time end): the platform failing, held typed for
              ;; its asker, never a red (docs/principles.md#6-nothing-changed-nothing-runs-a-change-costs-what-it-touched)
-             :no-verdict (into (sorted-map-by #(compare (str %1) (str %2)))
-                               (for [[t r] results :when (contract/error? r)] [t (select-keys r [:seon.error/type :seon.error/message])]))
+             ;; a plain map: an answer crosses the wire, which encodes no sorted collection of a comparator of its own
+             :no-verdict (into {} (for [[t r] results :when (contract/error? r)] [t (select-keys r [:seon.error/type :seon.error/message])]))
              :digests (into (or (:digests base) {}) (for [[_ r] results :when (map? (:answer r)) [t d] (:digests (:answer r))] [t d]))
              :fns (into {} (for [[_ r] results :when (map? (:answer r)) [t f] (:fns (:answer r))] [t f]))
              :measured (into {} (for [[_ r] results :when (map? (:answer r)) [t m] (:measured (:answer r))] [t m]))
