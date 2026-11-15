@@ -2337,6 +2337,34 @@
 
 ;; Estimate: the test branch 1M + 2 branches and 3 small transactions 2M + one merge-main in the writer (merge-main over a few datoms
 ;; ~3M, a with and a force-branch! commit ~2M) = 10000000 ticks
+;; Estimate: a test branch ~3M + 4 small transactions ~1M + 5 writer asks (a connect and a transact, or a force-branch, each ~0.5M) ~3M = 8000000
+(deftest ^{:seon.test/estimate {:ticks 8000000}} the-writer-repairs-a-branch-no-live-agent-holds
+  ;; docs/merging.md#root-repairs-a-failed-merge-from-its-repl (Stage 0, 2026-11-15): lb76 was repaired from root's REPL with d/force-branch! and
+  ;; a raw connect, since the writer had no op to write on a branch or move its head; now it has both, through the one path, refused
+  ;; while a live agent writes its own branch
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [w (volatile! (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 4) :events (a/chan 4)}))
+           ask (fn [req] (let [[st outs] (#'writer/writer-proc @w :in (assoc req :dest {:rid 1}))] (vreset! w st) (:r (first (:to-api outs)))))
+           b (pdb/on-main (:branch cfg) :repair-branch)
+           _ (d/branch! conn (:branch cfg) b)
+           c0 (d/commit-id (pdb/head conn b))
+           r (ask {:op :tx :branch b :tx-data [{:seon.agent/key "rp-own" :seon.agent/status :idle}]})
+           head (pdb/head conn b)]
+       (is (:ok r) (pr-str r))
+       (is (= :idle (:seon.agent/status (d/entity head [:seon.agent/key "rp-own"]))) "written on the branch")
+       (is (= b (:seon.tx/branch (d/entity head (:max-tx head)))) "by a transaction naming it")
+       (is (nil? (d/entity @conn [:seon.agent/key "rp-own"])) "and not on main")
+       (testing "its head moved back to a commit it held, while it is still where the asker saw it"
+         (is (contract/error? (ask {:op :reset-branch :branch b :to c0 :expected c0})) "a stale head is refused")
+         (let [r (ask {:op :reset-branch :branch b :to c0 :expected (d/commit-id head)})]
+           (is (:ok r) (pr-str r))
+           (is (nil? (d/entity (pdb/head conn b) [:seon.agent/key "rp-own"])) "the branch reads as it was")))
+       (testing "a live agent's branch is its own to write"
+         (d/transact conn {:tx-data [{:seon.agent/key "rp-live" :seon.agent/status :busy :seon.agent/branch b}] :tx-meta (pdb/tx-meta (:branch cfg))})
+         (is (= "rp-live" (:agent (ask {:op :tx :branch b :tx-data [{:seon.agent/key "rp-2" :seon.agent/status :idle}]}))))
+         (is (contract/error? (ask {:op :reset-branch :branch b :to c0 :expected (d/commit-id (pdb/head conn b))}))))))))
+
 (deftest ^{:seon.test/estimate {:ticks 10000000}} the-writer-merges-main-into-a-branch-on-mains-program
   ;; docs/merging.md#a-branch-merges-main-in: agent lb76's branch held the old seon.merge, so merging itself it ran the old code; the
   ;; merge is decided by the writer, where main's program runs, reading the branch as data, and written onto the branch as main's head
