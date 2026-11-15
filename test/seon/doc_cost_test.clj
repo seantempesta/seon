@@ -37,19 +37,15 @@
               "parent and link targets are map lookups. Nothing is written: the answer is []")
    :growth :linear
    ;; 2026-10-31 (shrink-tests-4): sizes [10 20 30] on the world (a size is a multiple of ten: pages of ten sections):
-   ;; 1.69 / 3.56 MB, 231 / 459 / 687 calls: exactly 3 + 22.8 a section (228 a page), the old sizes up to 250 read the same
-   ;; ~177 KB a section. Calls are counted exactly, so the test asserts them (below) and the growth needs no wide span
-   :per-n {:ns 170000 :bytes 190000 :calls 22.8}
-   :fixed {:ns 50000 :bytes 50000 :calls 3}
+   ;; 1.69 / 3.56 MB: the old sizes up to 250 read the same ~177 KB a section
+   :per-n {:ns 170000 :bytes 190000}
+   :fixed {:ns 50000 :bytes 50000}
    :sizes [10 20 30]})
 
 (deftest an-unchanged-reload-costs-a-parse-and-a-pull-per-section
-  ;; the claim: per section, a parse and a pull and a fixed number of contracted calls, nothing written. Calls are exact, so
-  ;; the growth is asserted by count: at evenly spaced sizes the calls are 3 + 228 for each page of ten sections (equal
-  ;; increments are linear), and the proof judges the bytes and ns against the estimate. Red if a section costs another call
-  ;; (the count moves), a pass over the whole wiki appears (the increments stop being equal), or bytes pass the estimate.
+  ;; the claim: per section, a parse and a pull, nothing written. The proof judges the bytes against the estimate: red if
+  ;; a pass over the whole wiki appears or a section costs more bytes than the estimate.
   (let [{:keys [rows verdict]} (cost/run reload-estimate)]
-    (is (= (map #(+ 3 (* 228 (quot % 10))) [10 20 30]) (map #(long (get-in % [:measured :calls])) rows)) "exactly 228 calls a page of ten sections")
     (is (:ok? verdict) (cost/explain reload-estimate rows verdict))))
 
 (defn view-of
@@ -71,7 +67,7 @@
                 "another section, so the work is that of the section's own fan, flat in the wiki's size")
      :growth :constant
      ;; measured 2026-10-25 at 10 sections: 33 contracted calls, 1.05 MB (the section's, its nine children's and its nine edges' pulls)
-     :fixed {:calls 33 :bytes 1050000}
+     :fixed {:bytes 1050000}
      :sizes [10 30 100]}))
 
 (defn search-input
@@ -120,7 +116,7 @@
                ;; with the texts' names): 1.66 MB / 132 calls at 100 and 300, 1.83 MB / 132 at 1,000. Here 323 KB / 32 calls at 20 and 60,
                ;; 340 KB at 200 (z-min 0.5, so the ten holding the word are the hits at every size; at 2 a small store's z leaves fewer)
                ;; with the FTS5 index (task seon.doc/the-text-index-is-fts5; no vocabulary to scan): 282 KB / 38 calls at 20 and 60, 300 KB at 200
-               :fixed {:bytes 305000 :calls 38}
+               :fixed {:bytes 305000}
                :sizes [20 60 200]}))
 
 (defn index-input
@@ -157,8 +153,8 @@
                ;; calls were the seed's texts)
                ;; the FTS5 index of every text attribute (task seon.doc/the-text-index-is-fts5): 238 KB at 60, 599 KB at 180,
                ;; 1.87 MB at 600, 20 calls at every size: ~3.7 KB a text (the text, its two C strings and its rows), the fixed part ~70 KB. Through seon.lib/defc's contracted bindings the same build is 21 calls and 7.5 KB a text (1,279 calls at 60 texts, 11,409 at 600), which is why the six a loop makes are locals of seon.sqlite/with-row-calls
-               :per-n {:bytes 3800 :calls 0}
-               :fixed {:bytes 72000 :calls 20}
+               :per-n {:bytes 3800}
+               :fixed {:bytes 72000}
                :sizes [60 180 600]}))
 
 (deftest search-costs-its-texts
@@ -175,8 +171,8 @@
                ;; the fixed part 2.62 MB (the 800 B a text was the seed's)
                ;; with the FTS5 index (task seon.doc/the-text-index-is-fts5): 2.52 / 2.54 / 2.57 MB, 210 calls (the query's contracted functions; 290 with the bindings contracted): ~50 B a text, the
                ;; fixed part 2.52 MB
-               :per-n {:bytes 55 :calls 0}
-               :fixed {:bytes 2530000 :calls 210}
+               :per-n {:bytes 55}
+               :fixed {:bytes 2530000}
                :sizes [100 300 1000]}))
 
 (defn citing-input
@@ -201,8 +197,8 @@
      :growth :linear
      ;; 2026-10-31 (shrink-tests-4): sizes [30 100 300], on the world
      ;; measured 2026-10-27: 332k ticks / 1.42 MB at 100, 1.04M / 4.65 MB at 300, 3.86M / 18.1 MB at 1,000
-     :per-n {:ticks 4000 :bytes 19000 :calls 0}
-     :fixed {:ticks 20000 :bytes 300000 :calls 4}
+     :per-n {:ticks 4000 :bytes 19000}
+     :fixed {:ticks 20000 :bytes 300000}
      :sizes [30 100 300]}))
 
 
@@ -238,7 +234,7 @@
                :n "words added to each text (none the query's)"
                :work "the fixed corpus's search: FTS5's rows of the word, its hits' names, relevance over a bounded pool reading each item's kept counts of the query's words"
                :growth :constant
-               :fixed {:ticks 600000 :bytes 1700000 :calls 200}
+               :fixed {:ticks 600000 :bytes 1700000}
                :sizes [10 100 1000]}))
 
 ;; See docs/vector.md#search
@@ -252,5 +248,5 @@
                :growth :constant
                ;; measured 2026-11-10 at 60, 240, 960 sections: before, 2.44, 2.77, 4.20 MB (0.78M, 0.83M, 1.02M ticks), every section's names read;
                ;; after, 2.00, 2.00, 2.01 MB (0.62M ticks), 190 calls each
-               :fixed {:bytes 2100000 :calls 200}
+               :fixed {:bytes 2100000}
                :sizes [60 240 960]}))

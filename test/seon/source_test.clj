@@ -1305,14 +1305,14 @@
               :work "read: the file's text read form by form; analyze: each form's account (Jolt's analyzer, not run)"
               :growth :constant
               ;; measured 2026-10-23: 294k ticks, 2.44 MB, 391 calls at every size (1.3 ms CPU)
-              :fixed {:ticks 300000 :bytes 2500000 :calls 391}
+              :fixed {:ticks 300000 :bytes 2500000}
               :sizes refresh-sizes}
              {:of 'seon.source/db-interface :input 'seon.source-test/interface-of
               :n "forms in the program's other files, every file requiring the hub"
               :work "the gate on dependents: the hub's forms (avet :form/ns) and their definitions read once"
               :growth :constant
               ;; measured 2026-10-23: 346k -> 351k ticks, 873 -> 887 KB, 25 calls (0.9 ms CPU)
-              :fixed {:ticks 360000 :bytes 910000 :calls 25}
+              :fixed {:ticks 360000 :bytes 910000}
               :sizes refresh-sizes}
              {:of 'seon.source/program-tx :input 'seon.source-test/diff-of
               :n "forms in the program's other files"
@@ -1320,7 +1320,7 @@
               :growth :constant
               ;; measured 2026-10-23: 1.20M -> 1.23M ticks, 3.37 -> 3.48 MB, 142 calls (3.3 ms CPU); 1.16M -> 1.19M
               ;; ticks before form-row read :form/source (seon.program/load-order's :source)
-              :fixed {:ticks 1260000 :bytes 3560000 :calls 142}
+              :fixed {:ticks 1260000 :bytes 3560000}
               :sizes refresh-sizes}
              {:of 'datahike.api/db-with :input 'seon.source-test/transact-of
               :n "forms in the program's other files"
@@ -1338,21 +1338,21 @@
               :growth :constant
               ;; measured 2026-10-23: 1.80M -> 1.84M ticks, 6.62 -> 6.76 MB, 563 calls (6-8 ms CPU); was 822k
               ;; ticks at 10 namespaces of one function each, +350 ticks and +1.1 KB per namespace
-              :fixed {:ticks 1900000 :bytes 6950000 :calls 563}
+              :fixed {:ticks 1900000 :bytes 6950000}
               :sizes refresh-sizes}
              {:of 'seon.source/refresh-tx :input 'seon.source-test/ns-edit-of
               :n "forms in the program's other files, every file requiring the edited one"
               :work "the edited file's read and analysis; the gate finds nothing lost (its names and macros are as they were: a dependent never reads another namespace's ns form), so no dependent is read"
               :growth :constant
               ;; measured 2026-10-27 at 10 forms: 1.28M ticks, 5.33 MB, 575 calls (the ns form re-read, no dependent)
-              :fixed {:ticks 1400000 :bytes 5600000 :calls 590}
+              :fixed {:ticks 1400000 :bytes 5600000}
               :sizes refresh-sizes}
              {:of 'seon.source/refresh-tx :input 'seon.source-test/hub-refresh-of
               :n "forms in the program's other files, every file requiring the edited one"
               :work "as a leaf's: the interface is unchanged, so no dependent is read"
               :growth :constant
               ;; measured 2026-10-23: as the leaf's, 1.80M -> 1.84M ticks, 6.61 -> 6.75 MB, 563 calls
-              :fixed {:ticks 1900000 :bytes 6950000 :calls 563}
+              :fixed {:ticks 1900000 :bytes 6950000}
               :sizes refresh-sizes}])
 
 (defn- prove-fixed
@@ -1418,8 +1418,8 @@
                :growth :linear
                ;; measured 2026-10-23: 813k -> 63.7M ticks, 2.19 -> 174 MB, 55 -> 4,015 calls from 10 to 1,000 forms;
                ;; main's file-text (a sort by :order): 789k -> 61.0M ticks, 1.99 -> 153 MB, 4,012 calls (load-order: +4% ticks, +14% bytes, three calls)
-               :per-n {:ticks 64000.0 :bytes 176000.0 :calls 4.0}
-               :fixed {:ticks 200000 :bytes 500000 :calls 15}
+               :per-n {:ticks 64000.0 :bytes 176000.0}
+               :fixed {:ticks 200000 :bytes 500000}
                :sizes [5 15 50]}))
 
 ;; Estimate: 8 child calls (git, bin/worktree --at) x 60k = 500000 ticks
@@ -1648,7 +1648,7 @@
                :n "source files in the tree, one of them changed"
                :work "the one changed file read; the others neither listed nor read"
                :growth :constant
-               :fixed {:bytes 500000 :calls 20}
+               :fixed {:bytes 500000}
                :sizes [10 100 1000]}))
 
 ;; Estimate: 7 ns-text-adding x 25k (a rewrite-clj parse of a 6-line form) = 200000 ticks

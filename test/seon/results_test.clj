@@ -183,7 +183,7 @@
                     :work "the one verdict written, its key's history read and rewritten, and the size file read and rewritten; no verdict already there is looked at"
                     :growth :constant
                     ;; raised from 16 calls and 60 KB by the owner, 2026-11-06, for seon.fx/history: measured 30 and 97 KB
-                    :fixed {:calls 31 :bytes 100000}
+                    :fixed {:bytes 100000}
                     ;; 1 to 100 spans the 100x a growth is judged on (docs/cost.md#how-we-measure); at 1,000 building the
                     ;; cache was the test (1,110 verdicts written, 27 M of its 28 M ticks), and a write that counts it is red at n=1
                     :sizes [1 10 100]})
@@ -199,7 +199,7 @@
                     :growth :linear
                     :per-n {:bytes 11500}
                     ;; raised from 20 calls by the owner, 2026-11-06, for seon.fx/history
-                    :fixed {:calls 34 :bytes 60000}
+                    :fixed {:bytes 60000}
                     ;; 10 to 100: below 10 the fixed part is all a write costs (36 calls, 127 KB at n=1, past what it states)
                     :sizes [10 30 100]})
        (finally (clean-costs!))))
@@ -212,8 +212,8 @@
                     :n "tests asked for, each with a green"
                     :work "two file checks and one touch a test; no verdict file is read"
                     :growth :linear
-                    :per-n {:bytes 5600 :calls 6}
-                    :fixed {:calls 10 :bytes 6000}
+                    :per-n {:bytes 5600}
+                    :fixed {:bytes 6000}
                     ;; 1 to 100 spans the 100x a growth is judged on; at 1,000 building the cache and touching it again on each
                     ;; settling call was the test (54 M ticks against 6 M), and a read of each green's file is red at n=1
                     :sizes [1 10 100]})

@@ -79,7 +79,7 @@
        ;; the index paths to the changed form), 6 contracted calls; reading both programs whole was
        ;; 400-450 ms a resumed spawn on Seon's program (seon.agent/spawn-phases' :base)
        :per-n {:bytes 85000.0}
-       :fixed {:bytes 480000.0 :calls 6}
+       :fixed {:bytes 480000.0}
        :sizes diff-sizes})
     (finally
       (doseq [n diff-sizes :let [path (#'pc/on-disk-path n)] :when (pdb/store? path)]

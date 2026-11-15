@@ -50,5 +50,5 @@
      :n "forms in main's program"
      :work "a key lookup: no commit since moved the program, so the graph is the one held (reach-update, which reads every live form, is not called)"
      :growth :constant
-     :fixed {:calls 1 :bytes 2000}
+     :fixed {:bytes 2000}
      :sizes [10 30 100]}))

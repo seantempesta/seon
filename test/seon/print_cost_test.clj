@@ -88,7 +88,7 @@
   ;; every test after it in the process, and a debug page's pass printed through it with 189 more
   ;; contracted calls (the debug page's pass of its rows, measured 2026-10-23: 420 alone, 609 after this test)
   (let [armed? (contract/armed? #'seon.print/print-value)
-        armed (fn [own calls per-call] (round (assoc own :bytes (+ (:bytes own) (* calls per-call)) :calls calls)))]
+        armed (fn [own calls per-call] (round (assoc own :bytes (+ (:bytes own) (* calls per-call)))))]
     (contract/instrument! '[seon.print seon.print.select seon.print.emit])
     (try
       (cost/proof

@@ -64,7 +64,7 @@
      ;; def-ref x2, the tempid makers x9 (form-tid x3, var-tid x2, ns-tid x4), method/impl keys none here: 23, whatever n (the 12 of
      ;; 2026-10-21 predates def-tx and var-attributes). Bytes: the transaction's own facts, as maps, ~21 KB in account-tx (the form's)
      ;; and ~14 KB in def-tx (the var's), and ~10 KB of seeks and entity reads (form-of, the eids): 48 KB, whatever n
-     :fixed {:ns 18000 :bytes 48000 :calls 23}
+     :fixed {:ns 18000 :bytes 48000}
      :sizes [30 100 300]
      ;; measured 2026-10-21 (source mode, load 5): 105 -> 114 us and 121 -> 138 KB from 100 to
      ;; 10k forms, on the whole process's count. Re-measured 2026-10-23 on the proof's own thread
@@ -93,7 +93,6 @@
      :growth :n-log-n
      :ops {:map/assoc 3 :map/get 4 :sort/compare 1 :vec/conj 2 :set/conj! 2}
      ;; itself, and the depth-first sort once for the namespaces and once per namespace (one here)
-     :fixed {:calls 3}
      :sizes [30 100 300]}))
 
 (def ^:private divergence-sizes "The sizes divergence's proof measures." [10 30 100])
@@ -164,7 +163,7 @@
        ;; has 87, ~0.4M ticks more: docs/cost.md#a-diff-per-attribute-costs-a-descent-each). What it replaced per turn: this, plus divergence three or four times (453-678 KB each), so a turn's
        ;; diff reads went from ~2.5-3.3 MB to one of these
        :per-n {}
-       :fixed {:ticks 1400000.0 :bytes 5000000.0 :calls 59}
+       :fixed {:ticks 1400000.0 :bytes 5000000.0}
        :sizes divergence-sizes})
     (finally (release-stores!))))
 
@@ -198,7 +197,7 @@
        ;; (~5 KB): ~24 KB / ~5k ticks for a branch, a leaf less. Measured 24.2 KB / 4.9k at a branch (100
        ;; forms), 16.4 KB / 3.7k at a leaf. The decode (8 KB, a record per datom and address) is the gap left.
        :per-n {}
-       :fixed {:ticks 5000.0 :bytes 25000.0 :calls 0}
+       :fixed {:ticks 5000.0 :bytes 25000.0}
        :sizes divergence-sizes})
     (finally (release-stores!))))
 
@@ -219,7 +218,7 @@
        :growth :constant
        :per-n {}
        ;; 4 calls since 2026-10-30: seon.merge/content-attr builds the filter's predicate, one contracted call
-       :fixed {:ticks 6000.0 :bytes 8000.0 :calls 4}
+       :fixed {:ticks 6000.0 :bytes 8000.0}
        :sizes divergence-sizes})
     (finally (release-stores!))))
 
@@ -235,7 +234,7 @@
        :growth :constant
        ;; measured 2026-10-27: 401 ticks, 1,968 bytes, 1 call at every size
        :per-n {}
-       :fixed {:ticks 1000.0 :bytes 4000.0 :calls 1}
+       :fixed {:ticks 1000.0 :bytes 4000.0}
        :sizes divergence-sizes})
     (finally (release-stores!))))
 
@@ -259,8 +258,8 @@
                 "was copied on every visit before: 446 KB at 100 leaves, quadratic)")
      :growth :linear
      ;; ticks measured 2026-10-23 (seon.cost's once): 12.9k at 100, 153k at 1,000
-     :per-n {:ticks 160 :bytes 1100 :calls 0}
-     :fixed {:ticks 2000 :bytes 2000 :calls 1}
+     :per-n {:ticks 160 :bytes 1100}
+     :fixed {:ticks 2000 :bytes 2000}
      :sizes [100 300 1000 10000]}))
 
 (defn knotted
@@ -280,8 +279,8 @@
                 "nodes, 1.6 ms / 2.2 MB at 1,000, 21 ms / 21.7 MB at 10,000 (~2 us, ~2.2 KB a node)")
      :growth :linear
      ;; ticks measured 2026-10-23 (seon.cost's once): 54k at 100, 559k at 1,000
-     :per-n {:ticks 560 :bytes 2000 :calls 0}
-     :fixed {:ticks 2000 :bytes 2000 :calls 1}
+     :per-n {:ticks 560 :bytes 2000}
+     :fixed {:ticks 2000 :bytes 2000}
      :sizes [100 300 1000 10000]}))
 
 (defn keyed-chain
@@ -343,10 +342,10 @@
      ;; 427k and 1.07M on 0d39edc3, whose protocol calls on a record stopped reading every field.
      ;; The fixed part fell with it (~714 ticks a form, so ~356k fixed): the old 420k left 7k
      ;; above it at 100 and the growth fit read n^1.96. calls 16
-     :per-n {:ticks 850 :bytes 5000 :calls 0}
+     :per-n {:ticks 850 :bytes 5000}
      ;; 18: reach-rows' two contracted calls the config and pin rules added (pin-rules once, config-reads
      ;; per added form), 2026-10-27; 19: computed-config-reader? once per added form (audit cuts 6 and 11)
-     :fixed {:ticks 350000 :bytes 4000000 :calls 50}
+     :fixed {:ticks 350000 :bytes 4000000}
      ;; from 100: at [30 100 300] the increment at 100 was 35k ticks on 373k at 30, so a few thousand ticks
      ;; of what the shard ran before read n^1.52 against the n^1.53 allowed (owner, 2026-11-01: fix the sizes;
      ;; task seon.cost/a-growth-fit-holds-whatever-ran-before)
@@ -384,9 +383,9 @@
                 "the held index's: the answers of the tests of the forms re-folded (here one), and of the namespaces "
                 "whose plain forms moved (none), dropped and named :stale: no walk of the tests or the answers")
      :growth :linear
-     :per-n {:ticks 850 :bytes 5000 :calls 0}
+     :per-n {:ticks 850 :bytes 5000}
      ;; measured: 414k ticks / 2.30 MB at 100, 1.11M / 6.72 MB at 1,000 (the same as with no index held: its part is nothing)
-     :fixed {:ticks 350000 :bytes 2000000 :calls 55}
+     :fixed {:ticks 350000 :bytes 2000000}
      :sizes [10 30 100]}))
 
 ;; Estimate: sizes 30+100+300 = 430 forms: branch-of 43M + reach-graph 41k a form = 18M + 46 tests' account-tx 5M + 3 updates ~0.5M each + 3 re-indexes ~3k: ~70M ticks.
@@ -403,7 +402,7 @@
      ;; measured: 2.3k ticks / 15.7 KB at 100, 2.4k / 16.3 KB at 1,000
      ;; calls 3 -> 5: the runner digest (seon.program/root-digest of the runner's reach, and its seon.lib/digest), recomputed
      ;; whenever a form moved, since a moved form may be the runner's (a few hundred ticks)
-     :fixed {:ticks 3500 :bytes 20000 :calls 5}
+     :fixed {:ticks 3500 :bytes 20000}
      :sizes [30 100 300]}))
 
 (defn- calls-form
@@ -443,8 +442,8 @@
      ;; measured 2026-10-23 (n 100 -> 10,000): 5.92 KB, 745 ticks and 9.6 contracted calls a step (vsym,
      ;; invoked, datum: 354 B each armed, seon.cost/units :fn/armed-call); 10.9 KB, 1,157 ticks and 12.4
      ;; calls before
-     :per-n {:ticks 750.0 :bytes 5950.0 :calls 9.6}
-     :fixed {:ticks 2000.0 :bytes 12000.0 :calls 7.0}
+     :per-n {:ticks 750.0 :bytes 5950.0}
+     :fixed {:ticks 2000.0 :bytes 12000.0}
      :sizes [100 300 1000 10000]}))
 
 (defn- keyword-form
@@ -480,8 +479,8 @@
      ;; measured 2026-10-25 (n 100 -> 10,000): 755 ticks, 3.13 KB and 9.6 contracted calls a step;
      ;; 74.9k ticks, 278 KB and 967 calls at 100 (the quoted-collection filter as a contracted
      ;; predicate was 989: one call an element)
-     :per-n {:ticks 760.0 :bytes 3150.0 :calls 9.6}
-     :fixed {:ticks 2000.0 :bytes 12000.0 :calls 7.0}
+     :per-n {:ticks 760.0 :bytes 3150.0}
+     :fixed {:ticks 2000.0 :bytes 12000.0}
      :sizes [100 300 1000 10000]}))
 
 (defn account-of
@@ -508,7 +507,7 @@
      :per-n {:ticks 1400.0 :bytes 13300.0}
      ;; and once a definition, its metadata read against the entity index for the facts a test's type is (def-facts:
      ;; var-attributes, seon.db/owners, extends?): 4 more contracted calls, each instrumented at ~25k ticks (tests, 2026-11-12)
-     :fixed {:ticks 125000.0 :bytes 60000.0 :calls 11.0}
+     :fixed {:ticks 125000.0 :bytes 60000.0}
      :sizes [100 300 1000 10000]}))
 
 (defn literals-of
@@ -593,8 +592,8 @@
                :n "vars the eval redefined, each with a changed docstring"
                :work "the tx-data walked once, then per var one entity read and one index seek of its citations"
                :growth :linear
-               :per-n {:bytes 60000 :calls 1}
-               :fixed {:bytes 200000 :calls 1}
+               :per-n {:bytes 60000}
+               :fixed {:bytes 200000}
                :sizes [10 100 300]}))
 
 
@@ -623,8 +622,8 @@
      ;; measured 2026-10-27: 752k ticks / 4.29 MB at 100, 1.12M / 6.55 MB at 300, 2.36M / 14.4 MB at 1,000, 10 calls;
      ;; reach-graph on the same dbs: 7.4M / 42 MB, 10.7M / 62 MB, 22.2M / 133 MB (9x more at 1,000). On Seon's
      ;; program (3,540 forms) a stored graph decodes in 23M ticks against 146M to build it.
-     :per-n {:ticks 1900 :bytes 11500 :calls 0}
-     :fixed {:ticks 580000 :bytes 3200000 :calls 50}
+     :per-n {:ticks 1900 :bytes 11500}
+     :fixed {:ticks 580000 :bytes 3200000}
      :sizes [10 30 100]}))
 
 (defn definition-input
@@ -667,7 +666,7 @@
          ;; each form's row on every text write: 762k, 923k, 1.60M ticks; 3.10, 4.06, 7.43 MB; 65 calls (red: over and steeper)
          ;; 105 since the write asks each touched entity's own required keys (seon.db: a test whose estimate went is a var again):
          ;; one lookup for each of the 3 entities a definition touches (tests, 2026-11-12)
-         :fixed {:calls 106 :bytes 1000000 :ticks 340000} ; 106 (data, 2026-11-14): the write's :seon.db/write-once check, one call a transaction ; 83 until the write checked every datom (the owner, 2026-11-06); 102
+         :fixed {:bytes 1000000 :ticks 340000} ; 106 (data, 2026-11-14): the write's :seon.db/write-once check, one call a transaction ; 83 until the write checked every datom (the owner, 2026-11-06); 102
          ;; since the check is a function, seon.db/checked, not a macro shaped to the count (the audit of 2026-11-09; the owner's
          ;; validation at transaction time, 2026-11-08). 380k ticks and 1.12 MB measured then, under the shared load of a full prove
          :sizes [30 100 300]})

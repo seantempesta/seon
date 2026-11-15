@@ -1898,7 +1898,7 @@
      :growth :linear
      ;; measured 2026-11-10: 7.1k / 19.6k / 63.2k ticks and 12.2 / 31.4 / 98.6 KB at 100 / 300 / 1,000: 63 ticks and 96 B a datom
      :per-n {:ticks 80 :bytes 120}
-     :fixed {:ticks 2000 :bytes 4000 :calls 4}
+     :fixed {:ticks 2000 :bytes 4000}
      :sizes [100 300 1000]}))
 
 (deftest a-datom-is-held-to-the-schema-in-effect-at-its-write
@@ -1937,7 +1937,7 @@
      ;; The rest is not the walk: it is decoding the leaves, about 750 ticks a datom, paid again on a second pass in that
      ;; process (495 M ticks), so its node cache did not hold them. This proof bounds the walk; the decode is another row
      :per-n {:ticks 22 :bytes 13}
-     :fixed {:ticks 7000 :bytes 4500 :calls 1}
+     :fixed {:ticks 7000 :bytes 4500}
      :sizes [100 300 1000]}))
 
 ;; docs/storage.md#the-write-checks-every-entity-it-touches (the owner, 2026-11-11: "We should never record two transaction
