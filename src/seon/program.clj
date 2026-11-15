@@ -560,9 +560,8 @@
   #{"form" "var" "ns" "method" "impl" "schema" "file" "db" "db.install" "db.type" "db.cardinality" "db.unique"})
 
 (defn moves-program?
-  "Whether a commit's resolved ops change the program (an attribute of attr-namespaces): what
-  moves the reach graph a fork hands its agent (seon.fork-server) and starts a run of main's
-  tests (seon.prove)."
+  "Whether a commit's resolved ops change the program (an attribute of attr-namespaces). Called once a commit, by the writer
+  (seon.writer/program-at), whose :program-t on each notice is what the fork server's reach graph and seon.prove's main runs read."
   {:malli/schema [:=> [:cat [:sequential :any]] :boolean]}
   [ops] (boolean (some (fn [[_ _ a]] (and (keyword? a) (attr-namespaces (namespace a)))) ops)))
 
@@ -2373,8 +2372,8 @@
 
 ;; ---- recorded reads: a test keyed by the vars its run called (docs/source.md#tests-run-by-reach) ----
 
-(defn- called-closure
-  "The rows a call of var v depends on in reach graph g: v's forms, its methods and impls, the schema entries they and its
+(defn called-closure
+  "The rows a call of var v depends on in reach graph g (var-digests' and seon.proofs/read-keys' one closure): v's forms, its methods and impls, the schema entries they and its
   contract name, and, followed, every var they reference that no contract counts (a data def, a macro, a test's helper):
   a contracted var they reference is in a run's call record only if it ran, so it is no dependency of a call that did not
   call it. With each row's namespace's plain forms (its ns form, a top-level form defining nothing); a host schema

@@ -650,7 +650,7 @@
                 "(window-moves): the new member pulled whole and assoc'd under its id, the oldest dissoc'd "
                 "and forgotten; every other member and join the same object; the environment set")
      :growth :constant
-     :fixed {:calls 25 :bytes 165000}
+     :fixed {:bytes 165000}
      :sizes [100 300 1000 3000]}))
 
 (deftest a-ref-asserted-back-leaves-its-member-as-it-was
@@ -697,7 +697,7 @@
      :n "members of the window (the agent's pattern's :limit)"
      :work "the new member assoc'd, the oldest dissoc'd: two map operations on a sorted map by id, one pull, one forget"
      :growth :constant
-     :fixed {:calls 25 :bytes 165000}
+     :fixed {:bytes 165000}
      :sizes [100 300 1000 3000]}))
 
 (deftest a-key-renders-by-its-own-schema
@@ -802,17 +802,17 @@
     {:of 'seon.ctx/patch :input 'seon.ctx-test/cited-redefined
      :n "evals in the session's record"
      :work "the var's datoms touch its :form join: the new form pulled whole, the old forgotten; the var, task and agent nodes copied up the path"
-     :growth :constant :fixed {:calls 23 :bytes 125000} :sizes [20 60 180]})
+     :growth :constant :fixed {:bytes 125000} :sizes [20 60 180]})
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/new-caller
      :n "evals in the session's record"
      :work "the form's :form/refs datom touches the var's :callers watch: its callers read and ordered by when each was written (a form's id is its content's, not in time order), the newest five kept, a new one pulled whole with the vars it defines (the :defines join: the callers' tests and defines are joined by the pull, where the cited part's draw used to query them; 24 calls before it, 31 since), the path copied up"
-     :growth :constant :fixed {:calls 31 :bytes 135000} :sizes [20 60 180]})
+     :growth :constant :fixed {:bytes 135000} :sizes [20 60 180]})
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/plan-edited
      :n "evals in the session's record"
      :work "the task's own datom: its attributes pulled again, every join kept, the path copied up"
-     :growth :constant :fixed {:calls 10 :bytes 90000} :sizes [20 60 180]}))
+     :growth :constant :fixed {:bytes 90000} :sizes [20 60 180]}))
 
 (deftest a-callers-window-costs-its-forms
   ;; a window of content-id members (a var's callers: a form's id is its content's, not in time
@@ -826,7 +826,7 @@
      :work "the new form's :form/refs datom touches the var's :callers watch: every form naming the var read from :avet and sorted by its ref's transaction, the newest five kept, the new one pulled whole with the vars it defines (the :defines join: the callers' tests and defines are joined by the pull, where the cited part's draw used to query them; 27 calls before it, 35 since), the path copied up"
      :growth :linear
      :per-n {:bytes 8800 :ticks 2600}
-     :fixed {:calls 35 :bytes 500000 :ticks 100000}
+     :fixed {:bytes 500000 :ticks 100000}
      :sizes [100 300 1000 3000]}))
 
 (defn one-eval-diff
@@ -844,7 +844,7 @@
      :n "evals in the session's record"
      :work "changes' walk: the root's keys, each the same object but the evals' window, whose members are each the same object but the new one (and the oldest that left); the new eval's value read once"
      :growth :constant
-     :fixed {:calls 5 :bytes 290000}
+     :fixed {:bytes 290000}
      :sizes [100 300 1000 3000]}))
 
 (deftest a-redefined-vars-record-holds-its-new-form
@@ -1473,7 +1473,9 @@
                 "ref-of for its value, and edits' own return); measured 5 calls, 2,709 ticks and 23,280 bytes "
                 "at 100 and at 1,000 evals")
      :growth :constant
-     :fixed {:calls 6}
+     ;; in ticks (the owner, 2026-11-15: calls are no cost): twelve key compares (~10 ticks each), the schema check of the one value
+     ;; (~1.5k), its datom (~200) and six contracted calls' wrappers (~15 each): ~2k ticks
+     :fixed {:ticks 2000}
      :sizes [100 300 1000 3000]}))
 
 (defn swap-input
@@ -1521,7 +1523,11 @@
      ;; paid before it), then seon.db/checked and seon.db/index-of (the check a function, not a macro shaped to this count, and
      ;; a branch's own entity schemas: the audit of 2026-11-09); read from the path, 118 measured. The owner accepted
      ;; validation at transaction time, 2026-11-08 ("a small price to pay. Make sure that implementation is efficient")
-     :fixed {:calls 118}
+     ;; in ticks (the owner, 2026-11-15: calls are no cost): the two checked transactions (the swap's seon.db/with and its citations'
+     ;; speculate: a d/with of a few datoms into the seeded db and its entity check, ~180k each), the sentence's parse (~30k) and the
+     ;; rest of the path's ~118 contracted calls at ~1.4k (~165k): ~550k. The first restatement priced only the calls (165k), and
+     ;; measured 534k at 100: the two transactions are the work it left out
+     :fixed {:ticks 550000}
      :sizes [100 300 1000 3000]})
   ;; no record left behind: an empty state builds none (as-agent!'s callers leave theirs too)
   (end-agent!))
@@ -1540,7 +1546,8 @@
      :n "evals in the session's record"
      :work "one seek of the entity's attribute (its one datom) and one pull of that datom's transaction: made-by's own call"
      :growth :constant
-     :fixed {:calls 1}
+     ;; in ticks (the owner, 2026-11-15: calls are no cost): one index seek (~3k ticks) and one pull of a transaction's attributes (~5k)
+     :fixed {:ticks 8000}
      :sizes [100 300 1000 3000]}))
 
 ;; ---- changes' bound, checked on generated records -----------------------------------------

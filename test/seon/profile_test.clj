@@ -249,7 +249,7 @@
         cap (seon.config/value :seon.config.proofs/cost-max-samples)
         m (seon.cost/measure (fn [] (swap! calls inc) (count (vec (range (- 100000 (* 100 @calls)))))) [] cap)]
     (is (= cap @calls) "it stopped at its cap")
-    (is (= {:calls cap :lowered-at cap} (:unsettled (meta m))) "and marks the answer")
+    (is (= {:samples cap :lowered-at cap} (:unsettled (meta m))) "and marks the answer")
     (is (pos? (:bytes m)))
     (is (nil? (:unsettled (meta (seon.cost/measure (fn [] (count (vec (range 100)))) [] cap)))) "a settled call carries no mark")
     (let [calls (atom 0)]

@@ -20,7 +20,11 @@
       (ts/drop-main! (test-store) main)
       (assoc r :res (edn/read-string (last (str/split-lines (:out r))))))))
 
-(deftest root-threads-are-what-root-declares
+;; Estimate: the test's own process only spawns the binary and reads one EDN line: one fork+exec (~65 ms, ~2e6 ticks) and a parse, ~3,000,000
+;; ticks. The one boot, three forked agents and the stop! it waits on are the child's (~10.7 s boot, docs/cost.md; ~3.5e8 child ticks), a root
+;; that must be live because the threads it counts exist only while it runs: no in-process data names them (seon.check/declared-threads reads Jolt's
+;; thread table). Measured 31-61 s under load 28 (was 185 s).
+(deftest ^{:seon.test/root [] :seon.test/execs ["target/seon"] :seon.test/estimate {:ticks 3000000}} root-threads-are-what-root-declares
   ;; one start!/stop! cycle, in a process of its own (a process boots root once,
   ;; a-second-boot-in-one-process-is-refused): while running (three agents just
   ;; evaluated) and after stop!, every thread is one seon.check/declared-threads
@@ -93,8 +97,8 @@
     (is (map? (:agents r)) "each agent proc's, by pid")
     (is (and (seq (:agents r)) (every? #(and (contains? % :stall-seen) (contains? % :last-frame-ms) (contains? % :holding) (= 0 (:held %))) (vals (:agents r)))) "with what its stall check reads, and the clone handshake it holds with what waits behind it (none here)")
     (is (map? (get-in r [:reconciler :flight-steps])) "the reconciler's flights by task and the step each waits at")
-    (is (and (boolean? (get-in r [:reconciler :quiet])) (vector? (get-in r [:reconciler :waits])) (int? (get-in r [:reconciler :live])))
-        "whether it is quiet, the waits on main it holds and its live tasks: what a parked await-db waits on")
+    (is (and (boolean? (get-in r [:reconciler :quiet])) (vector? (get-in r [:reconciler :waits])) (vector? (get-in r [:reconciler :live])))
+        "whether it is quiet, the waits on main it holds and its live tasks by id (the leak a hang's capture must name): what a parked await-db waits on")
     (is (some #{:api} (:answered r)) "and the procs that answered, root's api among them")))
 
 (deftest a-kill-is-answered-once-the-agents-end-is-recorded

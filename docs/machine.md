@@ -12,7 +12,7 @@ A `bin/check` run still going after 600 s (`SEON_CHECK_EVIDENCE_AFTER_S`) leaves
 
 ### Reading a number
 
-A wall time is only as good as what else ran: compare ticks, bytes and calls, and before believing a time read `uptime` and the top of `ps -axo rss,pcpu,command -r`. A big cost is usually one constant nobody looked at: ask how the number can be what it is, and split it by phase before guessing (a temporary `println` in `test/test_runner.clj`; a `bin/check` step under `SEON_CHECK_NICED=1 PS4='+%D{%s.%.} %N:%i> ' zsh -x bin/check --steps DIR`; a spawn's `:ready` event's `:phases`).
+A wall time is only as good as what else ran: compare ticks and bytes, and before believing a time read `uptime` and the top of `ps -axo rss,pcpu,command -r`. A big cost is usually one constant nobody looked at: ask how the number can be what it is, and split it by phase before guessing (a temporary `println` in `test/test_runner.clj`; a `bin/check` step under `SEON_CHECK_NICED=1 PS4='+%D{%s.%.} %N:%i> ' zsh -x bin/check --steps DIR`; a spawn's `:ready` event's `:phases`).
 
 Check that a check ran what it claims:
 - `bin/test NS` printing `TEST OK` with no `SHARD` line ran nothing (its digests did not move); `SEON_RESULTS_DIR=<fresh dir>` forces a run. A mutation counts only when it goes red with a `SHARD` line.
@@ -29,7 +29,7 @@ Check that a check ran what it claims:
 
 ### Reading a hang
 
-A hang's evidence is gone once it is killed, and `timeout` signals the whole group. Before killing a process stuck at 0% CPU, capture `kill -INFO PID` (a Jolt process's fiber dump on stderr; a run that goes on after it was stuck on a lost wake), `sample PID 5`, `lsof -p PID` and `ps -M -p PID`, and put them on the defect's task. Read the threads in condition waits and the parked fibers less the idle Flow procs on alts. A `:jolt/deadlock` or `jolt-main-carrier: stuck` is the detector's verdict and may be wrong. `bin/evidence` also asks a live root for ```seon.system/stall-state``` (read-only): root's stall check (`::stall-armed`, `::busy`, `::lost`) and each agent proc's (`:inflight`, `:fx-out`, `:stall-seen`, `:last-frame-ms`), with every proc that answered the ping.
+A hang's evidence is gone once it is killed, and `timeout` signals the whole group. Before killing a process stuck at 0% CPU, capture `kill -INFO PID` (a Jolt process's fiber dump on stderr; a run that goes on after it was stuck on a lost wake), `sample PID 5`, `lsof -p PID` and `ps -M -p PID`, and put them on the defect's task. Read the threads in condition waits and the parked fibers less the idle Flow procs on alts. A `:jolt/deadlock` or `jolt-main-carrier: stuck` is the detector's verdict and may be wrong. `bin/evidence` also asks a live root for ```seon.system/stall-state``` (read-only): root's stall check (`::stall-armed`, `::busy`, `::lost`) and each agent proc's (`:inflight`, `:fx-out`, `:stall-seen`, `:last-frame-ms`), with every proc that answered the ping. A root's stop writes its fiber dump first (`ROOT STOPPING`), so an overrun's step prints inside the stop's own bound, and its `ROOT STOPPED` line names each part's ticks beside its wall (`:phases` of ```seon.system/stop!```: `:fact`, `:drain`, `:flow-stop`): a part whose wall is far above its ticks waits, and under load it is read by which proc stopped last, never by the wall alone. A dump's ticks are each fiber's lifetime total, never its running step's.
 
 ### Reading a red
 

@@ -1068,8 +1068,8 @@
                  ;; attribute is a seek of its own, 35 seeks a task in place of the one :eavt range read '* made, so a task costs about
                  ;; 100k ticks and 320 KB (measured at 5 and 15). Deep fixes' named-pull item (a named pull reads the entity's
                  ;; :eavt range once) should bring it back under the old figure, 36k ticks and 180 KB a task
-                 :fixed {:ticks 200000.0 :bytes 600000.0 :calls 20.0}
-                 :per-n {:ticks 100000.0 :bytes 320000.0 :calls 11.0}
+                 :fixed {:ticks 200000.0 :bytes 600000.0}
+                 :per-n {:ticks 100000.0 :bytes 320000.0}
                  :sizes listed-sizes})))
 
 ;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 3 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 transacts or db-withs x 50k ~ 3,000,000 ticks
@@ -2010,12 +2010,49 @@
 ;; Estimate: 1 transacts or db-withs x 50k ~ 50,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 50000}} an-end-that-parks-runs-no-tests
   ;; docs/turn.md#parked: an agent with no proofs that says something and waits, or spends its turns, has claimed nothing, so nothing is judged by tests: a chat reply isn't "working" through a test run
-  (is (= :diffed (r/after-work {:value {:outcome :waiting}} nil)))
-  (is (= :tested (r/after-work {:value {:outcome :cap}} #{})) "a cap is an end, not a park: it is judged")
-  (is (= :tested (r/after-work {:value {:outcome :waiting}} #{'demo-test/t})) "a task with proofs has them judged, parked or not")
-  (is (= :tested (r/after-work {:value {:outcome :green}} nil)) "a claim of done is judged")
-  (is (= :tested (r/after-work {:value {:outcome :failed}} nil)))
-  (is (= :tested (r/after-work {:ex {:seon.error/message "threw"}} nil)) "and so is a loop that threw"))
+  (is (= :diffed (r/after-work {:value {:outcome :waiting}} nil :work)))
+  (is (= :tested (r/after-work {:value {:outcome :cap}} #{} :work)) "a cap is an end, not a park: it is judged")
+  (is (= :tested (r/after-work {:value {:outcome :waiting}} #{'demo-test/t} :work)) "a task with proofs has them judged, parked or not")
+  (is (= :tested (r/after-work {:value {:outcome :green}} nil :work)) "a claim of done is judged")
+  (is (= :tested (r/after-work {:value {:outcome :failed}} nil :work)))
+  (is (= :tested (r/after-work {:ex {:seon.error/message "threw"}} nil :work)) "and so is a loop that threw"))
+
+;; Estimate: 3 db-of x 0.5M; 2 judgings x 0.7M; 3 advances or starts x 0.2M; 4 db-withs x 50k ~ 3,500,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3500000}} a-persons-session-never-ends-held-or-dead
+  ;; docs/turn.md#parked, seon.task/ends-parked: a person's session (a :user task, request/root) waits for the person. On
+  ;; 2026-11-15 request/root's errored turn ("no model provider") went to a test batch, which answered no verdict, so it was held,
+  ;; then killed, and no message woke it (wake acts on :parked and :told). Every end of its run parks it, its reason kept, and
+  ;; it runs again only on a message (wake), so a turn that always fails costs one run a message
+  (let [p (-> (decl "p") (dissoc :seon.task/proofs) (assoc :seon.task/kind :user))
+        db (db-of [p] :extra (work "p" :running))
+        flight {:act {:op :spawn :task "demo/p" :env {:branch :demo/p}} :agent :a-p}
+        tx-of (fn [outs] (vec (mapcat #(get-in % [:req :req :tx-data]) outs)))
+        held? (fn [tx] (some #(= [:db/cas [:seon.task/id "demo/p"] :seon.task/execution :running :held] %) tx))
+        after (fn [tx] (task/task (d/db-with db tx) "demo/p"))]
+    (testing "its turn's end is read, never judged by a test batch, whatever it is"
+      (is (= :diffed (r/after-work {:value {:outcome :error}} nil :user)))
+      (is (= :diffed (r/after-work {:ex {:seon.error/message "threw"}} nil :user))))
+    (testing "an end that would hold a work task parks it"
+      (is (= :parked (:outcome (judgment-of db "p" {:end {:outcome :error}}))))
+      (is (= :parked (:outcome (judgment-of db "p" {:died {:seon.error/type :seon.agent/died}}))) "and so does a death"))
+    (testing "a typed error from its work: parked, not held, its error its reason"
+      (let [err (contract/error :seon.writer/refused 'seon.writer/refused "the run answered no verdict" {})
+            [_ outs] (#'r/advance (st-of db :flights {"demo/p" (assoc flight :step :worked)}) "demo/p" :worked err)
+            tx (tx-of outs)]
+        (is (not (held? tx)) "not held")
+        (is (= :parked (:seon.task/outcome (after tx))))
+        (is (re-find #"no verdict" (str (:seon.task/reason (after tx)))))))
+    (testing "its agent's death: parked, its execution still running"
+      (let [died (contract/error :seon.agent/died 'seon.system/end-agent "agent a-p died: signal 9" {:agent :a-p :exit {:signal 9}})
+            tk (after (#'r/dead-tx (st-of db) "demo/p" died nil))]
+        (is (= :parked (:seon.task/outcome tk)))
+        (is (= :running (:seon.task/execution tk)))))
+    (testing "a restart reaps it parked, not lost"
+      (let [db0 (db-of [p] :extra (work "p" :running :boot "boot-0"))
+            act (first (filter #(= :reap (:op %)) (actions-for db0)))
+            [_ outs] (#'r/start (st-of db0) act)]
+        (is (some? act) "the previous root's run is reaped")
+        (is (= :parked (:seon.task/outcome (task/task (d/db-with db0 (tx-of outs)) "demo/p"))))))))
 
 (defn- with-refine-section
   "db holding the section a refine cites (docs/tasks.md#a-refine-curates-its-own-task), as a root's store holds the wiki: a test

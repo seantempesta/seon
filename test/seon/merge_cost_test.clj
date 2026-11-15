@@ -109,7 +109,7 @@
        ;; attribute) and a transaction's entity bears no key (its instant, runtime and branch ride with its datoms): measured 47;
        ;; 49 since a datom a side added is its change only if base's history doesn't hold it (seon.merge/shared?, one per side here)
        ;; 58 since a side's own write older than base's at its key is a conflict (seon.merge/overtaken, one per changed key and side, ~9)
-       :fixed {:bytes 650000 :calls 58}
+       :fixed {:bytes 650000}
        :sizes [10 30 100]}))
 
 (defn embedded-of
@@ -224,7 +224,7 @@
      ;; 27 calls since 2026-10-30: seon.merge/content-attr, one contracted call per side's filter, was
      ;; uncontracted (as a contracted predicate asked of each attribute it was 1,771)
      ;; 28 since the base is checked for keys a side wrote before the other rewrote them (seon.merge/overtaken-base, one call, no key here)
-     :fixed {:bytes 4000000 :calls 28}
+     :fixed {:bytes 4000000}
      :sizes [10 30 100]}))
 
 (defn moved-main-of
@@ -262,7 +262,7 @@
        :work (str "the datoms the branch wrote since base (one diff of base and head), the keys they bear, and main's content at "
                   "those keys only: main's own moves are never read, so the same work however far main moved")
        :growth :constant
-       :fixed {:bytes 2000000 :calls 117}
+       :fixed {:bytes 2000000}
        :sizes [10 30 100]}))
 
 

@@ -563,7 +563,7 @@
   (let [[_ branch _] (paged-dbs conn)
         main0 (do (d/transact conn {:tx-data (seon.test-store/root-tx {:seon.config.agent/max-running 4})}) (:db-after (d/transact conn {:tx-data (seon.system/root-agent-boot-tx @conn)})))
         st (assoc (#'p/advance-main (dissoc (proc-state main0 branch) :main-db) main0) :conn conn)
-        tile (fn [st] (:html (second (filter #(= "#p-tiles" (:container %)) (:seon.render/units (#'p/page-value st :root))))))
+        tile (fn [st] (:html (second (filter #(= "#p-tiles" (:container %)) (:seon.render/units (#'p/page-value st [:debug :root]))))))
         main2 (:db-after (d/transact conn {:tx-data [{:seon.task/id "zz/dead" :seon.task/ns 'zz :seon.task/name "dead" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work
                                                       :seon.task/agent {:seon.agent/key "b/zz" :seon.agent/ended-ms 2}
                                                       :seon.task/outcome :dead :seon.task/reason "its agent died"
@@ -649,8 +649,8 @@
         input (fn [l] (first (filter #(= "p-input" (:id %)) (:seon.render/units l))))]
     (testing "root is an agent: its page and an agent's are each its lists in one chrome (seon.render.ui/page-chrome)"
       ;; the page (#p-page) is its layout's root unit, whose chat column (#p-chat) ends with the frame's caption and input
-      (is (= #{"#p-page" "#p-chat" "#c-side" "#p-head" "#p-task" "#c-rows" "#p-rules" "#p-tiles"} (set (map :container (top root))))
-          "root's: its agent's page (its tiles, its conversation) and, beside it, the system's own view (p-tiles)")
+      (is (= #{"#p-page" "#p-chat" "#p-head" "#p-task" "#c-rows" "#p-rules"} (set (map :container (top root))))
+          "root's chat is the person's: its agent's page (its conversation), and neither the sessions list nor the system's view (docs/decisions.md, The page is a friendly chat)")
       (is (= #{"#p-page" "#p-chat" "#c-side" "#p-head" "#p-task" "#c-rows" "#p-rules"} (set (map :container (top agent))))
           "an agent's: its task's list above its conversation; no eval of the fixture has a render of its own, so no tiles")
       (is (= 1 (count (filter #(= "#p-page" (:container %)) (:seon.render/units root)))) "one page: the system walk's own root unit is not placed")
@@ -659,16 +659,19 @@
         (is (some? p) (str (:id u) ": a nested unit's parent is a unit of the page"))
         (is (str/includes? (:html p) (str "id=\"" (subs (:container u) 1) "\"")) (str (:id u) ": its container is an element of its parent"))
         (is (str/includes? (:html p) (str "<!--s:" (:id u) "-->")) (str (:id u) ": its parent holds its slot"))))
-    (testing "the agents list is the signed-in user's, the same on every page: root first, then what the user started"
-      (is (= 2 (count (in root "#c-side")) (count (in agent "#c-side"))))
-      (is (= (map :html (in root "#c-side")) (map :html (in agent "#c-side"))))
-      (is (str/includes? (:html (first (in root "#c-side"))) "href=\"/root\"") "root's line links to its page")
-      (is (str/includes? (:html (second (in root "#c-side"))) "href=\"/agent/a3\"") "a link to its page, by its key"))
-    (testing "root's system view: its process, main's open problems and the evals sent to root, by their own renders; its input talks to root's session"
-      (is (= 3 (count (in root "#p-tiles"))))
-      (is (str/includes? (:html (first (in root "#p-tiles"))) "process"))
-      (is (str/includes? (:html (second (in root "#p-tiles"))) "problems"))
-      (is (str/includes? (:html (last (in root "#p-tiles"))) "sent to root"))
+    (testing "the agents list is the signed-in user's on an agent's page (an expert's), and none on root's chat, the person's"
+      (is (= 2 (count (in agent "#c-side"))))
+      (is (empty? (in root "#c-side")) "the person never sees a list of sessions")
+      (is (str/includes? (:html (first (in agent "#c-side"))) "href=\"/root\"") "root's line links to its page")
+      (is (str/includes? (:html (second (in agent "#c-side"))) "href=\"/agent/a3\"") "a link to its page, by its key"))
+    (testing "root's system view (its head, process, main's open problems, the evals sent to root) is on root's debug page, by their own renders; its input talks to root's session"
+      (is (empty? (in root "#p-tiles")) "not on the person's chat")
+      (let [dbg (#'p/page-value st [:debug :root])]
+        (is (= 3 (count (in dbg "#p-tiles"))))
+        (is (str/includes? (:html (first (in dbg "#p-tiles"))) "process"))
+        (is (str/includes? (:html (second (in dbg "#p-tiles"))) "problems"))
+        (is (str/includes? (:html (last (in dbg "#p-tiles"))) "sent to root"))
+        (is (some #(= "root-head" (:id %)) (:seon.render/units dbg)) "and the sentence of how the tasks stand"))
       (is (= [:seon.render/agent-input :root] [(:schema (input root)) (:id (:input (input root)))]) "a message to root's session, which starts the work"))
     (testing "an agent's focus: its REPL and messages at the top, live while root's view holds it in this boot"
       (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil :focus? true :busy? true :talks? true :address :a3}] [(:schema (input agent)) (:input (input agent))]))
@@ -738,9 +741,10 @@
         ;; 2026-11-12: root's session names its task (request/root, as any request's agent does), so its page draws it as an agent's does:
         ;; the task, its cite, how it stands, its turn and the chat's ask
         root0 #{"chat-ask" "cite-request_2Froot_20docs_2Fagent_2Emd_23working-for-a-person" "status" "task-view-request_2Froot" "turn"
-                "agent-a3" "agent-state" "agent-user" "app" "c-rows" "c-side" "eval-output-root-1" "eval-root-1" "evaluation-root-1" "p-agent-head" "p-caption" "p-head"
-                "p-input" "p-rules" "p-task" "p-tiles" "page-rules" "problems-tile" "process-tile" "root-evals" "root-head" "stage-as" "stage-front" "system-message"
-                "u-agent-a3" "u-root-side"}
+                "agent-state" "app" "c-rows" "c-side" "p-agent-head" "p-caption" "p-head"
+                "p-input" "p-rules" "p-task" "p-tiles" "page-rules" "stage-as" "stage-front" "system-message"}
+        ;; 2026-11-15, the owner's ruling (docs/decisions.md, The page is a friendly chat): root's chat is the person's, so the sessions list
+        ;; (agent-a3, agent-user, u-agent-a3, u-root-side) and the system's view (root-head, process-tile, problems-tile, root-evals with its eval root-1) left it for root's debug page
         ;; what the frame's page-chrome drew by hand is now the layout's: its root (the page), its columns and the frame's slot for it
         ;; and the top bar's region for which system it is (seon.render.ui/system-source; this fixture's root holds no source, so it is empty)
         added #(remove (fn [id] (or (#{"p-page" "p-agents" "p-chat" "p-context" "p-system"} id) (str/starts-with? id "agent-") (str/starts-with? id "stage-"))) (clojure.set/difference % %2))]
@@ -1058,7 +1062,7 @@
   ;; the request the debug page shows on latest is the render proc's kept branch walk's model answers (seon.ctx.wire/render's :walk),
   ;; byte for byte the request a cold draw at the same head makes, so no pass builds the agent's ctx again
   (let [[main branch eid] (paged-dbs)
-        kw (#'p/branch-walk nil branch (d/entity main eid))
+        kw (#'p/branch-walk nil branch (d/entity main eid) #{:seon.render/hiccup :seon.render/openai-compat})
         basis {:agent "a3" :task "demo/f" :turn 3 :max-turns 9 :origin :model :commit (d/commit-id branch) :t (:max-tx branch)}
         cold (seon.ctx.wire/render branch basis)
         kept (seon.ctx.wire/render branch basis {:walk (:p kw)})]
@@ -1067,10 +1071,28 @@
     (testing "a move adds an eval the model output places first and the page then: it runs once, never once a placement"
       (let [branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key "a3"} "e9" (seon.task/sender "a3")
                                                             {:seon.eval/call (seon.task/call-ref "a3" 1) :seon.eval/code "(h)" :seon.eval/response {:handle 'result/e9 :value 1}}))
-            kw' (#'p/branch-walk kw branch' (d/entity main eid))
+            kw' (#'p/branch-walk kw branch' (d/entity main eid) #{:seon.render/hiccup :seon.render/openai-compat})
             runs (fn [f] (reduce + (for [[g l] (:ledger (:p kw')) :when (= (str g) (str f))] (+ (:miss l 0) (:same l 0)))))]
         (is (= 2 (runs `ui/evaluation)) "the new eval's component ran once a placement, the model's then the page's, never more")
         (is (some #(re-find #"e9" (str (:id %))) (:units (r/laid-out (:p kw')))) (str "and the page draws it: " (pr-str (mapv :id (:units (r/laid-out (:p kw')))))))))))
+
+;; See docs/render.md#a-page-is-a-kept-walk
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-chat-draws-no-model-request-only-a-debug-view-reads-it
+  ;; 2026-11-15 [M]: the render proc's kept branch walk drew the model's request for every watched agent, so root's chat cost
+  ;; 6.8B ticks and 35.8 GB a cold draw against its page's 163M, and the render proc held every page for 20+ minutes. The model's
+  ;; request is read only by a debug view's latest turn (seon.render.proc/debug-value): a branch's walk draws it only while one is open
+  (let [[main branch] (paged-dbs)
+        st (root-state (proc-state main branch) main)
+        model (fn [st] (get-in st [:branch-reads :task-demo-f :walk :p :answers :seon.render/openai-compat]))
+        [st1 _] (pass-view st [:chat :a3])]
+    (is (some? (get-in st1 [:branch-reads :task-demo-f :walk])) "the chat keeps the branch's walk")
+    (is (empty? (model st1)) "and the walk draws no model request for a chat")
+    ;; a debug view of the agent open (its branch recorded as ask-branches records it): the walk its latest turn reads draws the request
+    (let [st2 (-> st1 (update :watch conj [:debug :a3]) (assoc-in [:branches [:debug :a3] :branch] :task-demo-f))
+          outs (#'p/branch-outputs st2 :task-demo-f)
+          kw (#'p/branch-walk (get-in st1 [:branch-reads :task-demo-f :walk]) branch (d/entity main (eid-of main [:seon.agent/key "a3"])) outs)]
+      (is (contains? outs :seon.render/openai-compat) "a debug view open on the agent asks for the model's request")
+      (is (seq (get-in kw [:p :answers :seon.render/openai-compat])) "and the branch's walk, made again for it, draws it"))))
 
 ;; See docs/render.md#the-debug-page-is-the-wire-request
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-debug-move-draws-the-rows-it-added
@@ -1277,7 +1299,9 @@
         [st1 _] (pass-view st :root)
         html (p/view-html st1 :root)
         ids (map second (re-seq #" id=\"([^\"]+)\"" html))]
-    (is (= 2 (count (re-seq #"href=\"/agent/a3\"" html))) "a3's entry is drawn twice: the list and under the person on root's page")
+    ;; 2026-11-15: root's chat is the person's and holds no sessions list (docs/decisions.md, The page is a friendly chat): a3 is drawn
+    ;; once, under the person in root's sessions; an agent's page draws the list
+    (is (= 1 (count (re-seq #"href=\"/agent/a3\"" html))) "a3's entry is drawn once on root's chat: under the person, no list")
     (is (empty? (for [[id n] (frequencies ids) :when (> n 1)] id)) (str "no element id twice: " (pr-str (for [[id n] (frequencies ids) :when (> n 1)] id))))))
 
 (deftest every-render-fits-the-hiccup
@@ -3186,6 +3210,51 @@
     (is (str/includes? html "bytes measured / estimate"))
     (is (< (str/index-of html "ticks measured") (str/index-of html "bytes measured")) "in the verdict's order")))
 
+;; See docs/render.md#the-page
+;; Estimate: two prints of a report of one class of 100 short rows (~20 nodes a row, ~2k ticks a node): ~8M ticks; 20M.
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-shared-problems-report-shows-a-few-rows-a-class
+  ;; root's home page held 1.4 MB in its problems tile: every row of every class, ~11,400 lines [M, 2026-11-15]. A report no tab opened
+  ;; (root's tile, one walk for every tab) shows each class's first :seon.config.render/recent-errors rows and how many more; a tab
+  ;; that opened the class sees them all
+  (let [rows (vec (for [i (range 100)] {:producer nil :owner-ns nil :evidence {} :proofs [] :answered-by [] :at-ms i :message (str "row " i) :count 1}))
+        report {:t 1 :classes {:hand-written-list {:n 100 :rows rows}}}
+        k (seon.config/value :seon.config.render/recent-errors)
+        shared (h/html (ui/problems {:seon.render/index (seon.db/index)} report))
+        opened (h/html (ui/problems {:seon.render/index (seon.db/index)} (assoc report :open #{"pc-hand-written-list"})))]
+    (is (= k (count (re-seq #"row \d+" shared))) (str "a few rows: " (count (re-seq #"row \d+" shared))))
+    (is (str/includes? shared (str "+" (- 100 k) " more")) "and how many more, with the form that reads them")
+    (is (= 100 (count (re-seq #"row \d+" opened))) "a tab that opened the class sees them all")))
+
+;; See docs/render.md#the-page
+;; Estimate: three prints of one step; the opened ones highlight 100 KB of code (~50 ticks a char): ~10M ticks; 30M.
+(deftest ^{:seon.test/estimate {:ticks 30000000}} a-closed-steps-code-is-cut-by-its-budget
+  ;; root's home page was 10.7 MB, 9.2 of it in seven closed steps whose whole code (a landed file's text) was drawn inside their closed
+  ;; <details> [M, 2026-11-15]. Closed, a step's code is the printer's cut under :seon.config.render/form-budget, its output still drawn
+  ;; (opening shows it at once); opened (seon.system/opened!'s fact), whole; with no agent to record an opening (an example session), whole
+  (let [code (str "(+ 1 2) ;" (apply str (repeat 100000 "x")))
+        e {:seon.eval/id "e1" :seon.eval/code code :seon.eval/intent "Add."}
+        step (fn [ctx e] (h/html (#'ui/eval-step {:seon.ctx/ctx ctx} e)))
+        closed (step {:seon.agent/key "a1"} e)]
+    (is (< (count closed) 10000) (str "closed, its code cut: " (count closed) " bytes"))
+    (is (str/includes? closed "seon-print-elision") "and the cut says what it left")
+    (is (str/includes? closed "Add.") "its line says what it set out to do")
+    (is (< 100000 (count (step {:seon.agent/key "a1"} (assoc e :seon.eval/opened true)))) "opened, its code whole")
+    (is (< 100000 (count (step {} e))) "with no agent to record an opening, whole")))
+
+;; See docs/render.md#an-entity-may-name-its-own-render
+;; Estimate: two hiccup-to-html prints of a short stage (~50 nodes each, ~2k ticks a node): ~0.2M ticks; 1M.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-stage-whose-session-died-says-so
+  ;; the owner, 2026-11-15: "I just went to a session and typed hi and nothing is working": root's session had died at its start
+  ;; ("agent root closed its socket"), and the stage said "Working on it" under the message forever. A failed standing says what
+  ;; happened and that the words wait; a live one still says it works on it
+  (let [dead (ui/standing {:seon.agent/status :dead} {:seon.task/outcome :dead :seon.task/reason "agent root closed its socket and was ended by root: exit 1"})
+        live (ui/standing {:seon.agent/status :busy} {:seon.task/outcome :running})
+        html (fn [stands] (h/html [:div (#'ui/stage-now ["hi"] nil false [] 0 stands)]))]
+    (is (str/includes? (html dead) "died: agent root closed its socket") (html dead))
+    (is (str/includes? (html dead) "waits until it runs again"))
+    (is (not (str/includes? (html dead) "Working on it")) "a dead session never says it works on it")
+    (is (str/includes? (html live) "Working on it") "a live one does")))
+
 ;; See docs/render.md#how-the-work-stands
 (deftest ^{:seon.test/estimate {:ticks 2000000}} an-agents-standing-is-its-enums-words
   ;; owner, 2026-11-14: a list that restates data is derived. How a value of :seon.agent/status, :seon.agent/outcome and
@@ -4493,7 +4562,7 @@
           st (assoc (#'p/advance-main (dissoc (proc-state main0 branch) :main-db) main0) :conn conn)
           [st _] (reduce (fn [[st _] m] (#'p/render-proc st :from-web m)) [st nil] (get asked [:render :from-web]))
           count-of (fn [h] (get-in h [:classes :eval :rows 0 :count]))
-          banner (:html (second (filter #(= "#p-tiles" (:container %)) (:seon.render/units (#'p/page-value st :root)))))]
+          banner (:html (second (filter #(= "#p-tiles" (:container %)) (:seon.render/units (#'p/page-value st [:debug :root])))))]
       (is (= 4 (count-of (seon.problems/health main1 fold))) "root counts the signature four times")
       (is (str/includes? banner "eval ×4") (str "the banner names root's count: " banner))
       ;; the audit of baaa7e10a8: the same main asked again after three more repeats, which only the fold holds, answers the new count
@@ -4501,7 +4570,7 @@
             [_ asked2] (#'seon.system/api-proc (assoc api :seon.system/errors fold2) :ext {:op :health :db main1 :p (promise)})
             [st2 out] (reduce (fn [[st _] m] (#'p/render-proc st :from-web m)) [st nil] (get asked2 [:render :from-web]))
             answered (some #(when (= :health-answer (:op %)) (:r %)) (get out :to-api))
-            banner2 (:html (second (filter #(= "#p-tiles" (:container %)) (:seon.render/units (#'p/page-value st2 :root)))))]
+            banner2 (:html (second (filter #(= "#p-tiles" (:container %)) (:seon.render/units (#'p/page-value st2 [:debug :root])))))]
         (is (= 7 (count-of answered)) (str "the api's answer counts all seven: " (pr-str (count-of answered))))
         (is (str/includes? banner2 "eval ×7") (str "and so does the banner: " banner2)))))))
 
@@ -4595,16 +4664,16 @@
 ;; root's quiet tab. A held task is one root's head counts (the tab is owed a patch); a namespace entity is nothing root's page reads,
 ;; so that commit owes the tab nothing, and a wait on it could only be met by bytes something else happened to send
 (defn- root-tab-after
-  "What the render proc sends root's tab when main moves by tx-data, from root's view walked and quiet on conn's main."
+  "What the render proc sends root's debug tab (where the system's view is, docs/decisions.md, The page is a friendly chat) when main moves by tx-data, from that view walked and quiet on conn's main."
   [conn tx-data]
   (let [[_ branch _] (paged-dbs conn)
         main0 (do (d/transact conn {:tx-data (seon.test-store/root-tx {:seon.config.agent/max-running 4})}) (:db-after (d/transact conn {:tx-data (seon.system/root-agent-boot-tx @conn)})))
-        st0 (#'p/pass (assoc (#'p/advance-main (assoc (proc-state main0 branch) :watch #{:root} :main-db nil) main0) :conn conn) (volatile! {}))
+        st0 (#'p/pass (assoc (#'p/advance-main (assoc (proc-state main0 branch) :watch #{[:debug :root]} :main-db nil) main0) :conn conn) (volatile! {}))
         st0 (#'p/pass st0 (volatile! {}))
         o (volatile! {})
         main1 (:db-after (d/transact conn {:tx-data tx-data}))]
     (#'p/pass (#'p/advance-main st0 main1) o)
-    (filter #(and (#{:patch :keyframe} (:op %)) (= :root (:view %))) (:to-web @o))))
+    (filter #(and (#{:patch :keyframe} (:op %)) (= [:debug :root] (:view %))) (:to-web @o))))
 
 (deftest a-commit-root-shows-reaches-a-quiet-root-tab
   (ts/test-branch! (fn [_ conn]
@@ -4625,12 +4694,12 @@
         ;; root's session, made at boot: root's page is its
         main (d/db-with main (seon.system/root-agent-boot-tx main))
         o (volatile! {})
-        st0 (#'p/pass (#'p/advance-main (assoc (proc-state main branch) :watch #{:root} :main-db nil) main) (volatile! {}))
+        st0 (#'p/pass (#'p/advance-main (assoc (proc-state main branch) :watch #{[:debug :root]} :main-db nil) main) (volatile! {}))
         _ (#'p/pass st0 (volatile! {}))
         st1 (#'p/on-event st0 {:type :spawn :agent :a9 :at-ms 1})
         view (assoc-in (:view st0) [:agents :a9] {:status :spawning :branch :task-demo-g})
         st2 (#'p/answered (assoc-in st1 [:pending 9] :state) o :state view)
-        to-root (filter #(and (#{:patch :keyframe} (:op %)) (= :root (:view %))) (:to-web @o))]
+        to-root (filter #(and (#{:patch :keyframe} (:op %)) (= [:debug :root] (:view %))) (:to-web @o))]
     (is (seq to-root) (str "the spawn reaches root's tab: " (pr-str (map :op (:to-web @o)))))
     (is (some? st2))))
 ;; focus is a ref on the user entity (docs/users.md#whats-on-screen): a tab opening an agent's page writes it, home reads it
