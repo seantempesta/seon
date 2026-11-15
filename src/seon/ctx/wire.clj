@@ -15,7 +15,7 @@
             [seon.agent :as agent]
             [seon.ctx :as ctx]
             [seon.ctx.session :as session]
-            [seon.ratom :as ratom] [seon.lib :as lib]))
+            [seon.ratom :as ratom] [seon.lib :as lib] [seon.edn :as sedn]))
 
 (declare render)
 
@@ -102,7 +102,7 @@
                    ;; no stored commit and no t (a world written without commits): the db handed in is the point
                    :else db))))
 
-(declare page-diff-msgs example-msgs reply-of)
+(declare page-diff-msgs example-msgs reply-of wire-of)
 
 (defn- part-ref
   "The ref and turn of message m the agent's model output holds, from src, the component whose own answer held it
@@ -200,8 +200,16 @@
   ([db basis since] (wire-turn db basis since nil))
   ([db basis since walk]
    ;; walk: the agent's kept walk value at db (the debug page's turn to come), read as `render`'s :walk, never drawn cold
-   (let [{:keys [messages parts]} (render db basis (if walk {:walk walk} {}))
-         p (provider-of db basis)
+   (let [{:keys [messages parts]} (render db basis (if walk {:walk walk} {}))]
+     (wire-of db basis since messages parts))))
+
+(defn wire-of
+  "Turn basis b's request on the wire from its messages and parts ({:messages :parts}, as `request` answers them, drawn or read back
+  as sent by `sent-request`), its provider read at db: {:body :provider :messages :sources :new :groups}, as `wire-turn` answers.
+  See docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.model-call/basis [:maybe nat-int?] [:vector :seon.model/message] [:vector :any]] :map]}
+  [db basis since messages parts]
+   (let [p (provider-of db basis)
          ;; of a turn after since, or since's own but for the messages it took, which that request read
          fresh? (fn [[ref _ n]] (boolean (and since n (or (> n since) (and (= n since) (not (#{:message :page} (first ref))))))))
          ;; each neutral message's ref and whether it is new, in order, then each wire message's by the one fold
@@ -213,7 +221,7 @@
       :sources (mapv (fn [is] (vec (distinct (map #(first (nth per %)) is)))) groups)
       :new (mapv (fn [is] (boolean (some #(second (nth per %)) is))) groups)
       ;; for each wire message, the indexes of the messages it folds (seon.model/wire-groups), so a reader sizes it by the one sizer
-      :groups groups})))
+      :groups groups}))
 
 (defn read-text
   "A read of messages, the request basis b makes on db, as an outside agent is answered it: the system prompt, then each record as the call made and its result; wire?: the request body as JSON, the bytes a provider is sent (`wire-turn`). See docs/server.md#ops."
@@ -493,24 +501,69 @@
                   'my.agent/describe (cond-> ["@ctx"] (seq path) (conj (pr-str path)))
                   (:value (render/model ix0 es {:ix ix0 :handle (symbol "@ctx")}) es))))
 
+(defn assembly-parts
+  "The parts model call id sent, [[ref turn digests] ...] in order, its assembly resolved: the first :keep parts of its
+  :seon.model-call/prev's, then its :add; a call with no prev holds them whole. nil when it stored none. Walks at most
+  :seon.config.ctx/assembly-checkpoint-turns calls. See docs/render.md#a-turn-stores-what-it-sent."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe [:vector :any]]]}
+  [db id]
+  (letfn [(of [e] (when-let [{:keys [keep add]} (:seon.model-call/assembly e)]
+                    (if-let [p (:seon.model-call/prev e)] (into (subvec (of p) 0 keep) add) add)))]
+    (some->> (pdb/eid db :seon.model-call/id id) (d/entity db) of)))
+
+(defn sent-tx
+  "The facts that keep what model call id sent at turn n: its new messages as parts, and its assembly as what changed since call
+  prev's (whole at a checkpoint). See docs/render.md#a-turn-stores-what-it-sent."
+  {:malli/schema [:=> [:cat :seon.host/db :string [:maybe :string] :int [:vector :any]] [:vector :map]]}
+  [db id prev n parts]
+  (let [dg #(lib/digest (sedn/encode (sedn/canonical %)))
+        as (mapv (fn [[ref ms t]] [ref t (mapv dg ms)]) parts)
+        before (when (and prev (pos? (mod n (cfg/value :seon.config.ctx/assembly-checkpoint-turns)))) (assembly-parts db prev))
+        k (if before (count (take-while true? (map = before as))) 0)]
+    (conj (into [] (comp (mapcat second) (distinct) (map (fn [m] {:seon.part/digest (dg m) :seon.part/message m}))) (drop k parts))
+          (cond-> {:seon.model-call/id id :seon.model-call/assembly {:keep k :add (subvec as k)}}
+            before (assoc :seon.model-call/prev [:seon.model-call/id prev])))))
+
+(defn sent-request
+  "The request model call id sent, read back from what it stored (`sent-tx`): {:messages :parts} as `request` answers them, joined
+  in their stored order, nothing drawn again; nil when the call stored none. See docs/render.md#a-turn-stores-what-it-sent."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]]}
+  [db id]
+  (when-let [as (assembly-parts db id)]
+    (let [ps (mapv (fn [[ref n ds]] [ref (mapv #(:seon.part/message (d/entity db [:seon.part/digest %])) ds) n]) as)]
+      {:messages (into [] (mapcat second) ps) :parts ps})))
+
+(defn stored-page
+  "Turn n's page messages of agent a (an entity id) as its model call stored them: its [:page n] parts, new at turn n, so among
+  the parts its own assembly adds (one seek for the call, one a part); nil when the call stored none. See
+  docs/render.md#a-turn-stores-what-it-sent."
+  {:malli/schema [:=> [:cat :seon.host/db :int :int] [:maybe [:vector :seon.model/message]]]}
+  [db a n]
+  (when-let [k (:seon.agent/key (d/entity db a))]
+    (when-let [as (some->> (pdb/eid db :seon.model-call/id (lib/call-id k n)) (d/entity db) :seon.model-call/assembly :add)]
+      (into [] (comp (filter (fn [[ref]] (= [:page n] ref))) (mapcat (fn [[_ _ ds]] ds))
+                     (map #(:seon.part/message (d/entity db [:seon.part/digest %]))))
+            as))))
+
 (defn page-diff-msgs
   "What agent a's page shows the model before its turn n, between basis p0 (nil: nothing before) and basis p1: generated evals,
   never written to the db. The first page (p0 nil) is the call `(my.render/page p1)` and its result the page parts whole; a later
   turn where something moved is `(my.render/diff p0 p1)` and its result the edits between the parts at the two points
   (seon.render/page-edits over forms-moved, as `page-edits-between` makes them); nothing moved, or a first page that shows nothing:
   no messages. Placed by the agent's model render before turn n's call, [#'page-diff-msgs opts a p0 p1 n], so the walk keeps each
-  pair as a component keyed by its points and a new turn runs only its own pair. The parts come from the draw of all the turns'
-  bases the placing render shares (`turn-entities`): opts' metadata :seon.ctx.wire/parts, a function answering this pair's two
-  (`pages-from`), metadata so the component's opts compare by what they say, never by that function; without it, the pair's own
-  chain is drawn (`page-parts-through`). See docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
+  pair as a component keyed by its points. A turn whose call stored what it sent is read (`stored-page`). The parts come from the draw of all the turns'
+  bases the placing render shares (`turn-entities`): opts' metadata :seon.ctx.wire/parts (`pages-from`); without it, the pair's
+  own chain is drawn (`page-parts-through`). See docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db] [:seon.render/index :map]] :int [:maybe :map] :map :int] [:vector :seon.model/message]]}
-  [{db :seon.db/db ix :seon.render/index :as opts} a p0 p1 _n]
+  [{db :seon.db/db ix :seon.render/index :as opts} a p0 p1 n]
   ;; every read here is of a db value at a fixed past point (its two points: a commit, an immutable value, or a past t), which no
   ;; later write can change; it reads nothing of the current db (the placing render, `turn-entities`, does, and those reads stay
   ;; tracked: seon.ctx.wire-test/a-write-reruns-the-placing-render-and-no-earlier-page-pair). Only those are not recorded
   ;; (Datahike's recorder unbound, datahike.reads: with-reads would also turn the query planner and cache off), so the walk tracks none of them and runs this pair again only when its points change, never for each
   ;; later write (the read of a test's agent's context drew every earlier turn's page again, ~17M ticks a pair, at each read)
   (binding [datahike.index.interface/*reads* nil]
+    ;; what the turn sent, when its call stored it: the same bytes, read, never drawn again at its points
+    (or (stored-page db a n)
         (let [q0 (some->> p0 (point-text db)) q1 (point-text db p1)
               id (lib/id (lib/digest (str "[" q0 " " q1 "]")))
               [h0 h1] (if-let [f (::parts (meta opts))] (f) (page-parts-through db a [p0 p1]))
@@ -521,7 +574,7 @@
                 ;; the first point: the record whole as data (Sean, 2026-11-11: "the @ctx and the hiccup displayed in full"), then the page
                 ;; the record described, never printed whole (owner, 2026-11-11: "Instead of dumping the whole @ctx value we are now doing
                 ;; this more metadata approach"), then the page
-                :else (into (describe-msgs db a p1 []) (page-message id 'my.render/page [q1] h1))))))
+                :else (into (describe-msgs db a p1 []) (page-message id 'my.render/page [q1] h1)))))))
 
 (defn model-call-msgs
   "A model call (:seon.model-call/fact) as the model reads it: what the model said and its reasoning. Whether those are sent is

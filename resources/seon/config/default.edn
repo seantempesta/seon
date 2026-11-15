@@ -973,6 +973,10 @@
  ;; Unit: keys. A keyword-keyed map or set of at most this many shows identity attributes and
  ;; short members first, then alphabetically; a larger one its own seq order (v1).
  :seon.config.render.agent/sort-bound 64
+ ;; Unit: reactions a step. The most reactions an owner proc (the render proc first) runs in one step; the rest are its next
+ ;; message, so ping and stop interleave and nothing is dropped. Provenance: flow's review of Land A, 2026-11-15: a recorded error's
+ ;; row ~39k ticks [runtime M result/d68abfc9], so 250 is ~10M ticks a step. At the bound: the rest wait one message.
+ :seon.config.render/flush-max 250
  ;; Unit: characters per printed line (session P1's printer, matching v1's corpus output).
  :seon.config.render/width 72
  ;; The one-printer law (docs/render.md#one-printer; owner: "Do not create more than one value printer and no clipping happens
@@ -1034,6 +1038,10 @@
  ;; read, 2026-11-10; between two requests of one agent there are a few commits (its evals', its read's). At the bound:
  ;; the page is drawn again, never advanced across another lineage.
  :seon.config.ctx/kept-walk-steps 16
+ ;; Unit: turns. A turn's assembly is what changed since the previous call's (the parts it keeps, then the ones it adds), stored
+ ;; whole every this many turns, so a read back walks at most this many calls and storage stays O(turns x new parts + turns/32 x
+ ;; parts). Provenance: root's arithmetic, 2026-11-15: at 1,000 turns of 3,000 parts, ~104k digests stored against 3M for whole vectors.
+ :seon.config.ctx/assembly-checkpoint-turns 32
  ;; Unit: tokens of a form's :form/src as the model reads it (seon.print.emit/chars-tokens, the printer's
  ;; one estimate), src and test alike: about a printed page. A live form longer than this is an open
  ;; :long-form problem row (seon.problems/long-forms), shown to a branch that adds one (attention, never

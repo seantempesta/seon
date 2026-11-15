@@ -11,4 +11,10 @@
  {:seon.task/name "a-runs-waste-is-folded-once"
   :seon.task/plan "Found by context's duplication audit, 2026-11-14 (the owner: no duplicated effort; plan item 7), both ends read [M]. An ended run's waste is folded from its evals three ways with three 'shown' sets: seon.turn/end! (its task's own proofs and cites, stored as :seon.agent/waste), seon.learn/run (passes {}, so nothing counts as re-read), and seon.ctx.status (cites, with the needs' proofs from pulled-accumulated). The refine agent and my.root/run-losses read a summary that differs from the stored one. Change: one function answers the shown set of a task on a db, read by all three; learn/run and run-losses read the stored summary when the run ended. Deletes: the {} fold and the second shown builder. Proof: learn/run of an ended run equals its stored :seon.agent/waste."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.learn-test/a-runs-waste-is-folded-once}}]
+  :seon.task/proofs #{seon.learn-test/a-runs-waste-is-folded-once}}
+ {:seon.task/name "progress-folds-each-commits-datoms"
+  :seon.task/plan "Owner: context; runtime reviews (the core's delta fold: state + a commit's datoms -> state'). The follow-up of seon.reconcile/an-agent-with-no-progress-by-turn-x-is-refined-and-restarted: seon.learn/progress is first a recompute per turn over the run's evals (O(evals), bounded by the cap: ~40 x 5M ticks a run); then a fold that takes each commit's own datoms (an eval's :recorded vars, the task's plan datoms) into the run's marks, O(datoms a commit wrote), health's fold its first caller. Proof: seon.learn-test/progress-folds-a-commit-at-the-cost-of-its-datoms."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.learn-test/progress-folds-a-commit-at-the-cost-of-its-datoms}
+  :seon.task/estimate #:seon.learn{progress {:n 20, :order :linear, :ticks 200000, :bytes 1000000}}
+  :seon.task/needs #{"seon.ratom/a-commit-reaches-only-the-readers-of-what-it-moved"}}]
