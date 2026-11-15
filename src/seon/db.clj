@@ -161,10 +161,6 @@
      ;; the attributes marked {:seon.db/derived true}, on their own schema or their entity schema's: caches never merged (seon.merge), once
      :derived-attrs (into (into #{} (keep (fn [[a k]] (when (:seon.db/derived (form-props forms k)) a))) es)
                           (filter #(and (qualified-keyword? %) (:seon.db/derived (form-props forms %)))) (keys forms))
-     ;; the attributes marked {:seon.db/root-only true}, on their own schema or their entity schema's: only root writes them, on main,
-     ;; so a merge never carries a branch's value of one (seon.merge/decide), once, as :derived-attrs is read
-     :root-only-attrs (into (into #{} (keep (fn [[a k]] (when (:seon.db/root-only (form-props forms k)) a))) es)
-                            (filter #(and (qualified-keyword? %) (:seon.db/root-only (form-props forms %)))) (keys forms))
      ;; the attributes whose values name a commit (their schema reaches :seon.db/commit, :seon.db/reference holding one): every commit a
      ;; kept reference names, which a collection keeps (retain!), derived from the schemas, never listed, once
      ;; a fixed point over each form's named keys, each form read once: the schemas that reach :seon.db/commit grow until none is added
@@ -483,25 +479,9 @@
   agent's test fork and a test's world write through it, as the writer's transact does. Answers the report; schemas
   are a branch's own ({:forms :registry}) or nil. A Datahike transaction call at a site docs/storage.md does not
   name is red (bin/laws transactions). See docs/storage.md#the-write-checks-every-entity-it-touches."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.db/tx-data] :seon.db/tx-report] [:=> [:cat :seon.host/db :seon.db/tx-data [:maybe :seon.db/branch-schemas]] :seon.db/tx-report]
-                  [:=> [:cat :seon.host/db :seon.db/tx-data [:maybe :seon.db/branch-schemas] [:maybe :map]] :seon.db/tx-report]
-                  [:=> [:cat :seon.host/db :seon.db/tx-data [:maybe :seon.db/branch-schemas] [:maybe :map] :boolean] :seon.db/tx-report]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.db/tx-data] :seon.db/tx-report] [:=> [:cat :seon.host/db :seon.db/tx-data [:maybe :seon.db/branch-schemas]] :seon.db/tx-report]]}
   ([db tx-data] (with db tx-data nil))
-  ([db tx-data schemas] (with db tx-data schemas nil))
-  ;; tx-meta: the transaction entity's own facts (a merge's replayed transaction names its source: seon.merge/decide)
-  ([db tx-data schemas tx-meta] (with db tx-data schemas tx-meta false))
-  ;; stored?: a value that will be committed (a merge's, force-branch!) takes its transaction id and fresh entity ids from the
-  ;; store's ids, as the writer's transact does (datahike.writing's with-store-ids), so no id is issued twice on any branch; a
-  ;; speculation takes none (docs/storage.md#ids)
-  ([db tx-data schemas tx-meta stored?]
-   (checked db tx-data schemas
-            (if stored?
-              #(let [ids (datahike.writing/ids db) r (datahike.core/with db % tx-meta ids)]
-                 (when ids
-                   (datahike.ids/-reach! ids :eid (get-in r [:db-after :max-eid]))
-                   (datahike.ids/-reach! ids :tx (get-in r [:db-after :max-tx])))
-                 r)
-              #(d/with db (cond-> {:tx-data %} tx-meta (assoc :tx-meta tx-meta)))))))
+  ([db tx-data schemas] (checked db tx-data schemas #(d/with db %))))
 
 (defn speculate
   "tx-data on db as a hypothetical (Datahike's `d/with`), unchecked: nothing of it is stored, so it is not data entering
