@@ -74,7 +74,7 @@ Every agent reads this page whole before any work: Claude sessions directly, Seo
 
 **Every claim is marked measured or hypothesis, and anything these principles rule out is reported at once, with its evidence, to whoever can fix it.**
 
-*Why.* You see a broken principle first, and a wrong claim passed on costs every reader a turn. A measured claim gives its number and source (command, log, file:line); a hypothesis names the observation that would settle it. A cause is named after both ends of its code path are read, a cost after it is measured warm, twice. The owner's words are quoted as said: a question or an aside is not a ruling.
+*Why.* You see a broken principle first, and a wrong claim passed on costs every reader a turn. A measured claim gives its number and source (command, log, file:line); a hypothesis names the observation that would settle it. A cause is named after both ends of its code path are read, a cost after it is measured warm, twice. The owner's meaning is stated in correct terms (Clojure's, its libraries', Jolt's, Datahike's, Flow's), never quoted and never in made-up words; where it is unclear he is asked first. A question or an aside is not a ruling.
 
 *Rules out.* A claim from one cold measurement, an old note, or a model of a library in place of its source. Working around a broken principle, or waiting for someone else to notice. A ruling widened beyond its sentence.
 

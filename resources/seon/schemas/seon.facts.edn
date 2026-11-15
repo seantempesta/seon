@@ -297,7 +297,7 @@
  :seon.agent/test-error [:and {:description "The error, as data, of a test run that failed as a whole; present only while it is so."} :seon.error/base]
  ;; how its work ended, as the agent writes it on its branch (seon.agent/write-end!), naming its turn: root reads it at judging
  ;; (seon.reconcile/pull-end), and an end whose turn is not past the wake's is none (:no-end)
- :seon.agent/outcome [:enum {:description "How the agent's work ended, as the agent writes it on its branch; :refork, a run that merged main and goes on in a process forked on main's program (seon.turn)."
+ :seon.agent/outcome [:enum {:description "How the agent's work ended, as the agent writes it on its branch; :refork, held only by runs before 2026-11-15, which ended after merging main to be forked again; a run now takes main's program in place at its turn boundary (seon.turn), so none ends so."
                               ;; how the agent's own end reads where its task holds none (seon.render.ui/standing)
                               :seon.status/title {:green "done" :waiting "parked" :cap "stopped at its cap" :red "ended red" :failed "failed" :merge-failed "merge failed" :error "ended in error"}
                               :seon.status/tone {:green :done :waiting :ask :cap :stopped :red :failed :failed :failed :merge-failed :failed :error :failed}} :green :red :waiting :cap :failed :merge-failed :error :refork]
