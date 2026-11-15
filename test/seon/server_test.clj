@@ -90,6 +90,61 @@
     (is (= (pr-str {:op :attach :task 5}) (:line defect)))
     (is (= 3 (:value ok)) "the server goes on")))
 
+;; See docs/server.md#ops
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} an-op-past-its-bound-answers-its-caller-and-the-server-goes-on
+  ;; Stage 1's safety item (the MCP relay answers each call on its own): an op runs under its declared work bound
+  ;; (:seon.config.fx/bounds :server-op, seon.intr/run in seon.server/answer), so one that runs past it is stopped and answers its caller,
+  ;; typed, and the next request is answered. Root's own :eval is the exception, unbounded as root-eval says (its interrupt ends it)
+  ;; the bound is set in root's process, where the server reads it, around the worker's own code (respond)
+  (let [[past ok] (at/in-agent [{:op :eval :agent "root"
+                                 :code (str "(let [v seon.config/value]"
+                                            " (with-redefs [seon.config/value (fn [k & more] (if (= k :seon.config.fx/bounds) {:server-op {:seon.bound/ticks 1000}} (apply v k more)))]"
+                                            "   (seon.edn/decode (#'seon.server/respond sys \"{:op :agents}\"))))")}
+                                {:op :eval :agent "root" :code "(reduce + (range 100000))"}])
+        past (:value past)]
+    (is (= :seon.server/defect (:seon.error/type past)) (str "the op past its bound is answered: " (pr-str (select-keys past [:seon.error/type :seon.error/message]))))
+    (is (= :seon.repl/ticks-spent (get-in past [:data :seon.error/type])) "with the bound's typed error")
+    (is (= 4999950000 (:value ok)) "and root's own eval runs unbounded, the server going on")))
+
+;; See docs/server.md#ops
+;; Estimate: the shard's shared root (~0 here), five root evals and two stops through the server (~0.25M each), two sockets
+;; (~10k ticks each): ~1.8M; 2,000,000 ticks, worked from the work.
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000} :seon.test/execs ["git"]} a-caller-stops-its-own-op
+  ;; Stage 1's safety item: a root eval has no work bound, so what ends one that waits for good is its caller's stop:
+  ;; seon_interrupt (EDN :interrupt, every op of its client) and MCP's notifications/cancelled (the one request id), each
+  ;; answered on the connection's fiber. The blocked eval is answered, and the server goes on. The residue, named: a client
+  ;; killed outright sends no cancel; a bounded op still ends at its bound, but root's :eval runs on until seon_interrupt or root's stop
+  (let [root @ts/shared-root-default
+        ask #(ts/ask root %)
+        tag (str "stop-" (System/nanoTime))
+        line! (fn [s l] (let [o (.getOutputStream ^java.net.Socket s)] (.write o (.getBytes (str l "\n") "UTF-8")) (.flush o)))
+        ;; a red that is never answered stalls on the read, and the runner ends it (seen red with the owner's stop! removed)
+        open! #(java.net.Socket. "127.0.0.1" (int (:port root)))
+        read! #(.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream ^java.net.Socket %) "UTF-8")))
+        started (fn [p] (str "(do (deliver root.repl/" p " true) @(promise))"))
+        _ (ask {:op :eval :agent "root" :code "(do (def e1 (promise)) (def e2 (promise)))"})
+        ;; EDN: an eval that waits for good, stopped by its client's seon_interrupt once it runs
+        s1 (open!)
+        _ (line! s1 (pr-str {:op :eval :agent "root" :client tag :code (started "e1")}))
+        _ (ask {:op :eval :agent "root" :code "@e1"})
+        stop1 (ask {:op :interrupt :client tag})
+        a1 (clojure.edn/read-string (read! s1))
+        ;; MCP: the same wait, as tools/call id 7, stopped by notifications/cancelled naming request 7
+        s2 (open!)
+        _ (line! s2 (clojure.data.json/write-str {"jsonrpc" "2.0" "id" 7 "method" "tools/call" "seon/client" (str tag "-mcp")
+                                                  "params" {"name" "seon_eval" "arguments" {"agent" "root" "code" (started "e2")}}}))
+        _ (ask {:op :eval :agent "root" :code "@e2"})
+        _ (with-open [s (open!)]
+            (line! s (clojure.data.json/write-str {"jsonrpc" "2.0" "method" "notifications/cancelled" "seon/client" (str tag "-mcp") "params" {"requestId" 7}})))
+        a2 (clojure.data.json/read-str (read! s2))
+        after (ask {:op :eval :agent "root" :code "(+ 1 2)"})]
+    (.close s1) (.close s2)
+    (is (= {:stopped 1 :dropped 0} stop1) "the stop finds the client's running op")
+    (is (re-find #"(?i)interrupt" (pr-str a1)) (str "the stopped eval is answered, interrupted: " (pr-str a1)))
+    (is (= 7 (get a2 "id")) "the cancelled MCP request is answered, by its id")
+    (is (re-find #"(?i)interrupt" (pr-str a2)) (str "interrupted: " (pr-str a2)))
+    (is (= 3 (ts/value-of (:response after))) "the server goes on")))
+
 (deftest the-server-speaks-mcp
   ;; root's server answers MCP's JSON-RPC
   ;; itself (bin/mcp only relays lines): initialize with a version it implements, ping,
@@ -407,15 +462,16 @@
 (deftest ^{:seon.test/estimate {:ticks 300000}} an-inbox-line-runs-on-its-connection-and-holds-no-worker
   ;; part 2: seon_inbox waits, so it runs on the connection's fiber (which parks), never one of the 16 :server-op worker threads
   ;; (:seon.config.root/server-op-workers): eight waiting sessions would hold half of them. Both protocols. Red before: no inline op
-  (is (#'seon.server/inline-op? "{:op :inbox :agent \"a1\"}") "EDN")
-  (is (#'seon.server/inline-op? "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"seon_inbox\",\"arguments\":{\"agent\":\"a1\"}}}") "MCP")
-  (is (not (#'seon.server/inline-op? "{:op :eval :agent \"root\" :code \"(inbox)\"}")) "an eval naming inbox is no inbox")
-  ;; root's reviewer on 6635b0cac2: the table decides (an op's :inline), never a name in code
-  (is (seq (filter (comp :inline val) seon.server/ops)) "some op declares :inline")
-  (doseq [[op v] seon.server/ops :when (:inline v)]
-    (is (#'seon.server/inline-op? (str "{:op " op "}")) (str op " declared :inline runs on its connection (EDN)"))
-    (is (#'seon.server/inline-op? (str "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"seon_" (name op) "\"}}")) (str op " (MCP)")))
-  (is (not (#'seon.server/inline-op? "{:op :agents}")) "an op that does not declare :inline runs on a worker"))
+  ;; read once by line-parts; the table decides (an op's :inline), never a name in code (root's reviewer on 6635b0cac2)
+  (let [inline? #(:inline? (#'seon.server/line-parts %))]
+    (is (inline? "{:op :inbox :agent \"a1\"}") "EDN")
+    (is (inline? "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"seon_inbox\",\"arguments\":{\"agent\":\"a1\"}}}") "MCP")
+    (is (not (inline? "{:op :eval :agent \"root\" :code \"(inbox)\"}")) "an eval naming inbox is no inbox")
+    (is (seq (filter (comp :inline val) seon.server/ops)) "some op declares :inline")
+    (doseq [[op v] seon.server/ops :when (:inline v)]
+      (is (inline? (str "{:op " op "}")) (str op " declared :inline runs on its connection (EDN)"))
+      (is (inline? (str "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"seon_" (name op) "\"}}")) (str op " (MCP)")))
+    (is (not (inline? "{:op :agents}")) "an op that does not declare :inline runs on a worker")))
 
 (deftest the-context-op-answers-what-a-model-is-sent
   ;; dogfood 2026-10-25: an outside agent read the task's data and turn sections only, not the system
@@ -448,7 +504,8 @@
 
 (deftest an-outside-agent-plays-the-model
   ;; docs/server.md#working-a-task-from-a-worktree: a read holds the conversation, as JSON the body a provider is sent;
-  ;; a seon_eval by the agent attached is one reply, a turn, as a model's is, and a blank intent is not run, as a model's is not
+  ;; a seon_eval by the agent attached is one reply, a turn, as a model's is, and a blank intent is not run, as a model's is not;
+  ;; plain {intent, code} on an agent is a reply of that one eval, for every caller (the :eval op, where bin/mcp's rewrite was)
   (let [[attach called stopped old turn-of moved-ns ns-after wire text]
         (at/in-agent (fn [{:keys [agent task]}]
                        [{:op :attach :task task}
@@ -471,9 +528,8 @@
     (is (= [2 4] (filterv number? (map :value (:responses called)))) "each eval answers, in order")
     (let [exs (keep #(:seon.error/type (:ex %)) (:responses stopped))]
       (is (= [:seon.turn/invalid-call] exs) "a call with no intent is answered invalid, and what follows it runs (owner, 2026-11-08)"))
-    (is (= :seon.system/refused (:seon.error/type old)) (pr-str old))
-    (is (clojure.string/includes? (:seon.error/message old) "message-md") "the old shape is told the new one, nothing run")
-    (is (= 2 (:value turn-of)) "each reply is a turn: no one growing turn 0")
+    (is (= ["old-shape-ran"] (mapv name (:recorded (first (:responses old))))) (str "plain code on an agent runs as one eval: " (pr-str old)))
+    (is (= 3 (:value turn-of)) "each reply is a turn, the plain one too: no one growing turn 0")
     (is (= ["seon.print"] (filterv string? (map :value (:responses ns-after)))) (str "the namespace a reply moved to is where the next one runs: " (pr-str moved-ns)))
     (is (= ["repl"] (mapv #(get-in % ["function" "name"]) (get body "tools"))) "the body holds the tool a model is given")
     (is (= (clojure.data.json/read-str (clojure.data.json/write-str seon.model/eval-tool)) (first (get body "tools"))) "that very tool")
@@ -482,7 +538,7 @@
     (is (= {"intent" "add one and one" "code" "(+ 1 1)"} args) "the first eval is a call of its own")
     (is (= {"intent" "then two and two" "code" "(+ 2 2)"} (clojure.data.json/read-str (get-in ecall2 ["function" "arguments"]))) "and the second")
     (is (= [true true] [(boolean (re-find #":value 2" (result-of ecall))) (boolean (re-find #":value 4" (result-of ecall2)))]) "each call answered by a tool message of its own")
-    (is (not-any? #(clojure.string/includes? (str (get % "content")) "old-shape-ran") msgs) "the old shape ran nothing")
+    (is (some #(some-> (get-in % ["tool_calls" 0 "function" "arguments"]) (clojure.string/includes? "old-shape-ran")) msgs) "the plain code ran as one eval, its intent its call's")
     (is (clojure.string/includes? (:context text) "(+ 1 1)") "the text read holds the conversation too")))
 
 (deftest roots-repl-names-what-has-no-branch
