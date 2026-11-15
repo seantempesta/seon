@@ -304,6 +304,18 @@
                                         " (mapv :body (:messages @f)))")}]))]
     (is (= ["while it waits"] (:value r)) (pr-str r))))
 
+;; Estimate: one server round trip (~0.5M); in root, one put-after! of 50 ms and the typed answer (~10k): ~0.6M; 2,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} an-inbox-with-nothing-new-ends-at-its-bound-typed
+  ;; part 2: past :seon.config.root/inbox-wait-ms with no message, seon_inbox answers the typed :seon.server/no-message, the bound's own
+  ;; answer to the wait (no sentinel), and drops its wait on main. The dial is turned at the read inbox-answer makes (seon.config/value
+  ;; reads held, config.clj): 50 ms for this key, every other key as held
+  (let [[r] (at/in-agent (fn [{:keys [agent]}]
+                           [{:op :eval :agent "root"
+                             :code (str "(let [v seon.config/value]"
+                                        " (with-redefs [seon.config/value (fn ([k] (if (= k :seon.config.root/inbox-wait-ms) 50 (v k))) ([k c] (v k c)))]"
+                                        " (select-keys (#'seon.server/inbox-answer sys {:agent " (pr-str (name agent)) "}) [:seon.error/type :waited-ms])))")}]))]
+    (is (= {:seon.error/type :seon.server/no-message :waited-ms 50} (:value r)) (pr-str r))))
+
 (deftest ^{:seon.test/estimate {:ticks 300000}} an-inbox-line-runs-on-its-connection-and-holds-no-worker
   ;; part 2: seon_inbox waits, so it runs on the connection's fiber (which parks), never one of the 16 :server-op worker threads
   ;; (:seon.config.root/server-op-workers): eight waiting sessions would hold half of them. Both protocols. Red before: no inline op

@@ -376,9 +376,8 @@
       (refused (if ag (str ag " works no task: attach one first") (str "no task " (:task req) ", and no agent named"))))))
 
 (defn connection-agent
-  "The key of the agent connection req's client works through, or nil (then the signed-in person, seon.system's :message): the agent
-  it holds (attach!'s :holder), among the running and the parked tasks' agents (a session's agent parks between requests). Two :avet
-  seeks; one connection's agent, read per request, never kept. See docs/users.md#messages."
+  "The key of the agent req's client holds (attach!'s :holder, running or parked), or nil, then the signed-in person. Read per
+  request, never kept. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.system/sys :map] [:maybe :string]]}
   [sys req]
   (when-let [c (:client req)]
@@ -407,20 +406,21 @@
   (let [db @(:conn sys)
         k (or (:agent req) (some->> (:task req) (task/agent-key db)))]
     (if-not (and k (pdb/eid db :seon.agent/key k))
-      (refused (str "seon_inbox names no agent: " (pr-str (select-keys req [:agent :task]))))
+      (refused (str "seon_inbox names no agent: give :agent (an agent key) or :task (a task id); asked agent " (:agent req) ", task " (:task req)))
       ;; the wait starts at the t this check read: a message committed between the check and the wait still wakes it
       (let [now (inbox-messages sys db k)]
         (if (seq now)
           {:agent k :messages now}
           (let [ms (cfg/value :seon.config.root/inbox-wait-ms)
                 {:keys [p] wk :k} (c/await-message sys k (:max-tx db))
-                due (a/chan 1) h (step/put-after! due ms ::due)
-                _ (a/go (when (a/<! due) (deliver p ::due)))
+                ;; the bound's end answers p itself, typed: the first of the message's commit and the bound wins
+                due (a/chan 1) h (step/put-after! due ms true)
+                _ (a/go (when (a/<! due)
+                          (deliver p (contract/error :seon.server/no-message #'seon.server/inbox-answer
+                                                     (str "no message to " k " in " ms " ms: ask again") {:agent k :waited-ms ms}))))
                 r @p]
             (step/cancel! h) (a/close! due)
-            (cond (= ::due r) (do (c/drop-wait! sys wk)
-                                  (contract/error :seon.server/no-message #'seon.server/inbox-answer
-                                                  (str "no message to " k " in " ms " ms: ask again") {:agent k :waited-ms ms}))
+            (cond (= :seon.server/no-message (:seon.error/type r)) (do (c/drop-wait! sys wk) r)
                   (contract/error? r) r
                   :else {:agent k :messages (inbox-messages sys @(:conn sys) k)})))))))
 

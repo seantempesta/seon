@@ -2193,9 +2193,8 @@
           :else r))))
 
 (defn await-message
-  "{:p promise :k wait}: promise answered with main's db at the first commit that links a message to agent key k after now (whoever
-  writes it), or the typed :seon.system/no-agent at root's stop: await-db's wait, unparked (no clock: a message is our own system's
-  event); wait, its key, which `drop-wait!` takes when the caller's own bound ends it first. See docs/users.md#messages."
+  "{:p :k}: p answered with main's db at the first commit after t0 (default now) linking a message to agent key k, or typed
+  :seon.system/no-agent at root's stop; k is the wait's key for `drop-wait!`. Pass t0 as the t you last read. See docs/users.md#messages."
   {:malli/schema [:function [:=> [:cat :seon.system/sys :string] [:map [:p :seon.host/promise] [:k :keyword]]]
                   [:=> [:cat :seon.system/sys :string :int] [:map [:p :seon.host/promise] [:k :keyword]]]]}
   ([sys k] (await-message sys k (:max-tx @(:conn sys))))
