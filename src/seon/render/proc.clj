@@ -942,11 +942,11 @@
         (health-more (update st :health-pending (fnil into []) moved)))
     st))
 
-(defn- health-more
-  "St with at most :seon.config.render/flush-max of health's reactions run and rows made in this step; while any are left, the next
-  step's own message (::health-more on the proc's events chan, never kept as an event), so ping and stop interleave and nothing is
-  dropped (flow's rule 2)."
-  {:malli/schema [:=> [:cat :map] :map]}
+(defn- health-step
+  "[st settled?]: at most :seon.config.render/flush-max of health's reactions run and rows made; settled? when nothing is left.
+  Published only once settled (flow, the review's (4)): :health-rev moves then, so health! reads the recorded classes again, never a
+  report that mixes two points of main."
+  {:malli/schema [:=> [:cat :map] [:tuple :map :boolean]]}
   [st]
   (let [n (config/value :seon.config.render/flush-max)
         [left live] (binding [rv/*owner* (:rv-owner st)]
@@ -954,10 +954,27 @@
                         ;; what is left after the sync: its new rows are queued, and the rows its flush moved not yet synced
                         [(+ (rv/queued) (count @(:changed live)) (if @(:set-moved live) 1 0)) live]))
         settled? (and (zero? left) (not (:more? live)))]
+    [(cond-> (assoc st :health-live live) settled? (update :health-rev (fnil inc 0))) settled?]))
+
+(defn- health-more
+  "St with one bounded step of health's reactions (health-step); while any are left, the next step's own message (::health-more on
+  the proc's events chan, never kept as an event), so ping and stop interleave and nothing is dropped (flow's rule 2)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
+  (let [[st settled?] (health-step st)]
     (when-not settled? (a/put! (:events-ch st) {::health-more true}))
-    ;; published only once settled (flow, the review's (4)): health! reads its recorded classes again at its next read (:health-rev),
-    ;; never a report that mixes two points of main
-    (cond-> (assoc st :health-live live) settled? (update :health-rev (fnil inc 0)))))
+    st))
+
+(defn- health-settled
+  "St with health's live report settled at the main it holds: health-step until nothing is left, so a reader asking (the :health
+  op, my.root/problems) gets the report OF the point it is told, never the last settled one stamped with a newer main (a race,
+  seon.agent-test/root-reads-the-health-the-render-proc-keeps). Bounded by the work main's moves made: each reaction runs at most
+  once a generation, and a cycle is typed (seon.ratom)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
+  (if (:health-live st)
+    (loop [st st] (let [[st settled?] (health-step st)] (if settled? st (recur st))))
+    st))
 
 (defn- advance-main
   "St with main as db when db is newer than the main it holds (main-info): root's walk advanced
@@ -1365,7 +1382,7 @@
                           ;; brought to the main the asker read (advance-main, health!), never read whole again, and
                           ;; at the counts the api's fold holds (with-fold: a repeat of a written signature is counted
                           ;; there, not yet on main), which it keeps to bring its next move of main from what it held
-                          :health (let [st (-> st (advance-main (:db m)) (assoc :fold (:fold m)) health!)
+                          :health (let [st (-> st (advance-main (:db m)) health-settled (assoc :fold (:fold m)) health!)
                                         h (some-> (:root-walk st) :p :tree :health)]
                                     ;; none held (no root walk yet): read whole, as health! does when it holds none
                                     ;; the point it was put at rides on it (its metadata's :db and :fold): a reader comparing
