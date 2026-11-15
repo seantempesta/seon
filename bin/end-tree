@@ -1,5 +1,6 @@
 #!/bin/zsh
 # bin/end-tree PID: every process under PID (not PID itself: its starter's to end or to let report), by their process groups (a held
+# DEVIATES (owner, 2026-11-15: every bin/ script is thin over an op): ends a process tree from the shell, outside the system's one fork; task seon.prove/the-shell-runner-is-deleted moves it inside.
 # command's is its own), ended at once with SIGKILL; the caller's own group is never one of them. Only what the caller started: the
 # tree is read from ps by parent, from PID down. bin/check ends an overran step's tree with it (PID the shell that times the step,
 # which reports its end), bin/stalls an overran test's shard (then the shard itself), each after bin/evidence
