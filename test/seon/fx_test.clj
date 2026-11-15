@@ -972,7 +972,8 @@
     ;; the agreed interface (task seon.system/a-landing-restarts-root-only-for-a-binary-change): a mismatch names what a build
     ;; changes that differs, and a tree's digest is kept by its id, the one value every reader takes
     (is (some #{"reference-code/chez"} (:seon.process/differs other)) (str "differs " (:seon.process/differs other)))
-    (is (.isFile (java.io.File. (str root "/target/runtime-for/" before ".digest"))) "the tree's digest is kept by its id")
+    (is (.isFile (java.io.File. (str root "/target/runtime-for/" before "." (seon.lib/digest (seon.program/running-form 'seon.fx/binary-digest)) ".digest")))
+        "the tree's digest is kept by its id and the code that computed it")
     ;; :all, a process that runs the binary's baked program: the binary's own tree is current, with its src id
     (let [all (fx/runtime-for (clojure.string/trim (slurp (str root "/target/seon.tree"))) {:scope :all})]
       (is (string? (:program all)) (str "answered " all)))))
@@ -1057,4 +1058,10 @@
         (is (= :seon.process/env-mismatch (:seon.error/type r)) (str "a running binary of another identity is told: " r))
         (is (= "another-build" (:seon.process/binary-digest r)) "naming the running binary's identity")))
     (with-redefs [seon.program/binary-program (fn [] {:digest d})]
-      (is (= d (:digest (fx/runtime-for tree))) "and its own tree's is current"))))
+      (is (= d (:digest (fx/runtime-for tree))) "and its own tree's is current"))
+    ;; the kept digest is keyed by the code that computed it: a value a changed binary-digest computed is never read back
+    (let [kept (fn [code] (java.io.File. (str root "/target/runtime-for/" tree "." (seon.lib/digest code) ".digest")))]
+      (.delete ^java.io.File (kept "another-code"))
+      (with-redefs [seon.program/running-form (fn [_] "another-code")]
+        (fx/runtime-for tree)
+        (is (.isFile ^java.io.File (kept "another-code")) "another code keeps its own value")))))

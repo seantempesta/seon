@@ -521,8 +521,9 @@
     (is (str/includes? (str seed) "SEED OK") (str seed))
     (is (true? (:listening? two)) (str "root resumed the store and listens: " two))
     ;; never refused for the program: the spawn reaches the agent's one start, where only the binary's identity is asked
-    ;; (seon.fx/runtime-for: this scratch tree names no build inputs, so another binary than target/seon)
-    (is (= :seon.process/env-mismatch spawned) (str "the agent's start asks its binary, nothing before it: " (pr-str (first (:also two)))))
+    ;; (seon.fx/runtime-for: this scratch tree is another binary's, or one this repository's git cannot read: either is the
+    ;; identity's typed answer; bin/binary-digest once digested an unreadable tree's partial lines, a swallowed error)
+    (is (#{:seon.process/env-mismatch :seon.fx/io-error} spawned) (str "the agent's start asks its binary, nothing before it: " (pr-str (first (:also two)))))
     (is (not (str/includes? (str message) "git tree")) "no refusal names the trees")
     (doseq [act ["bin/system start --reindex" "bin/system next"]]
       (is (str/includes? (str (:started two)) act) (str "bin/system start's last line names " act ": " (:started two))))

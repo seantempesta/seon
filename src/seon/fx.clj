@@ -440,12 +440,13 @@
     (catch Throwable e (error #'binary-digest :seon.fx/io-error (str "the binary identity of tree " tree ": " (step/error-msg e)) {:path root}))))
 
 (defn- tree-digest
-  "The binary identity of git tree tree (binary-digest): a tree is immutable, so its digest is computed once a checkout
-  and kept beside the builds, target/runtime-for/TREE.digest (derived data, as tree-diff's), which every later ask reads.
-  {:digest d} or binary-digest's error."
+  "The binary identity of git tree tree (binary-digest): a tree is immutable, so its digest is computed once a checkout for the
+  code that computes it and kept beside the builds, target/runtime-for/TREE.CODE.digest, CODE the digest of
+  (seon.program/running-form 'seon.fx/binary-digest): a change of binary-digest misses by construction. {:digest d} or
+  binary-digest's error."
   {:malli/schema [:=> [:cat :string :string] [:or [:map [:digest :string]] :seon.error/base]]}
   [root tree]
-  (let [f (java.io.File. (str root "/target/runtime-for/" tree ".digest"))]
+  (let [f (java.io.File. (str root "/target/runtime-for/" tree "." (lib/digest (program/running-form 'seon.fx/binary-digest)) ".digest"))]
     (if (.isFile f)
       {:digest (str/trim (slurp f))}
       (let [d (binary-digest root tree)]
