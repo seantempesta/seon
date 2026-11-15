@@ -637,7 +637,7 @@
  ;; root's last collection of the store (seon.db/collect!, run by the writer when no agent is
  ;; live): how many keys it swept, how long it took, the branches it saw (a later collection
  ;; runs only once one of them is gone) and how many were gone since the one before
- :seon.system/retained [:map [:swept :int] [:ms number?] [:generation :int]]
+ :seon.system/retained [:map [:swept :int] [:ms number?] [:generation :int] [:refused {:optional true} [:vector [:map [:branch :keyword] [:message [:maybe :string]]]]]]
  ;; no history: only the last collection is read (seon.db/collect!), and its history cost 4 nodes a write
  :seon.system/collected [:and {:seon.db/no-history? true} [:map [:swept :int] [:ms number?] [:branches [:set :keyword]] [:gone :int]]]
  ;; main's content mark: a t past every t main held before the commit that last moved main's content (a datom of an
