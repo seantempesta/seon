@@ -6,6 +6,13 @@ The owner's standing rulings, one entry each: his meaning in correct terms (neve
 
 The owner's rulings on the morning after the first night run on its own.
 
+### The self-merge path goes first, so the system stops needing hands (evening)
+
+The owner wants the plan's self-merge path finished as soon as possible, so the system is reliable and fast and nobody orders landings by hand. Three choices, made with root at about 17:30:
+1. **Landings:** a landing on the path goes first, always. The path is main proving in the system, `bin/test` and `bin/prove` as thin clients of `:prove` (E), admission and the update owner (D), one `:merge`, the `seon_done` pilot, and `bin/land` deleted (plan items 10, 11, 13, 14, 17, 18 and the Stage 1 safety list). A green feature landing goes only when no path landing is ready, so finished work does not drift from main.
+2. **Areas off the path move onto it:** web, flow and context land what is already green, then each owns a path item. Web makes the MCP relay answer each call on its own. Flow makes proving run as Flow procs admitted by backpressure, and reviews runtime's D. Context does plan items 8 and 9. Web's person view waits behind that.
+3. **The first real `seon_done`** is tried as soon as main's run proves green in the system and plan items 1, 2 and 4 are on main, not after the whole safety list. A failure is filed as a task. Until D lands, the three-land rule holds the load.
+
 ### Tests always have helpers making them millisecond tests of the goal
 
 "Tests always has subagents running (Sonnet is fine) that refactor tests to prove 90% of their goal in milliseconds, and drop tests that are low quality and slow" (from his phone; root's rewrite, his meaning). The tests session keeps Sonnet helpers working at all times, in its one worktree, each on test files nobody else edits, slowest first ("Have the agents run those conversions slowest first"); a test is rewritten to prove the most important 90% of its goal in milliseconds, or dropped when it is low quality and slow, its `Deletes:` line naming what now proves its goal (`AGENTS.md` §2, helpers; §3, no functionality removed).
