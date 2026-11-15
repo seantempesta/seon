@@ -42,6 +42,14 @@ The owner's rulings on the morning after the first night run on its own.
 
 "Agents keep falling back to just writing the code as quickly as possible rather than doing proper algorithmic estimation ahead of time. We need to get them doing this without being prompted automatically ... Most ops end up being 100x or more inefficient and it doesn't require heroics or genius level coding it just requires repl driven deveopment and measuring and basic common sense." Then: "We already built a lot of this so it might just be refactoring and wiring up. Every agent doing all work needs to first look for existing code and not to just write another implementation. They are to collapse duplicate implementation too whenever they find them." He chose all four: the estimate as task data, a live cost canary, bounds on hot paths, and cost beside bound in every eval's answer. Stated in [the plan](plan.md#the-order) (Track E).
 
+### History stores what was sent as its components; a switch resumes at the turn
+
+On storing each turn's request: "Yes we can store what we sent and we store what the model sent, but do not store full copies of rendered data just the components that we assemble." A turn keeps its assembly (components at their content digest, in order) and the model's output; a component's output is stored once by content. On a binary switch: in-flight evals end and resume at their turn boundary, flights and requests are facts, and nothing of ours is killed on wall time but one spec'd stall dial for native code (he chose the recommended answer). On the merge's time: "There was a reason I was told we needed to replay? Maybe it's inconsistent in terms of what happened and what really happened was separate txs? Dig into this more and find the proper solution that's also effiicent": open, with data and deps; it gates landing 3. Stated in [the plan](plan.md#the-order) (landings 3, 5, 12).
+
+### Long work is a message, never a blocking command
+
+"I saw you saying you were running them and you blocked for minutes and held up all updates. No commands should do that period. We should have long running systems be flow systems and sending a message can trigger a long running task that you can get notified for." And: "We know exactly what has changed and there are efficient solutions to everything in our design. If you see complicated garabge we need to step back and take a fresh approach ... always fix things at the data model first." Stated in `AGENTS.md` §4.
+
 ### Root fixes errors anywhere; the plan is A to B
 
 "You can and should fix all errors anywhere in the system. Distribute this work to expert agents as you need too." "We need a plan from where we are now A to where we want to go B. That's your job." The order he approved is in [the plan](plan.md#the-order).
