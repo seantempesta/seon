@@ -914,21 +914,22 @@
 ;; its run read is datom keys, so what moves it is found by seon.db/results-moved.
 ;; Estimate: a world with 2 forms (~2M), one graph (~2M), one verdict-tx and db-with (~0.5M), seeks and digests (<0.2M): 5,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 5000000}} a-verdict-is-written-to-the-store-and-found-by-one-seek
-  (let [w0 (mt/with (mt/world) (mt/code 'pt.vs "(ns pt.vs)\n(defn add [x y] (+ x y))\n"))
+  (let [d1 (seon.lib/digest "run one") d2 (seon.lib/digest "run two")
+        w0 (mt/with (mt/world) (mt/code 'pt.vs "(ns pt.vs)\n(defn add [x y] (+ x y))\n"))
         g (program/reach-graph w0 nil)
         t 'pt.vs-test/adds
         basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
-        tx (proofs/verdict-tx w0 g basis {t {:digest "d1" :pass 1 :fail 0 :error 0}} {t [{:var 'pt.vs/add}]} {})
+        tx (proofs/verdict-tx w0 g basis {t {:digest d1 :pass 1 :fail 0 :error 0}} {t [{:var 'pt.vs/add}]} {})
         db (pdb/db-with w0 tx)
         add-form (:e (first (d/datoms w0 :avet :form/id (first (get-in g [:defs 'pt.vs/add])))))]
-    (is (= {"d1" {:digest "d1" :pass 1 :fail 0 :error 0}} (proofs/verdicts-at db {t "d1"})) "found at its reach digest by one seek")
-    (is (= {} (proofs/verdicts-at db {t "d2"})) "and not at another digest")
-    (is (contains? (:seon.proof/read-keys (d/entity db [:seon.proof/id (proofs/verdict-id t "d1")])) (pr-str [:e add-form]))
+    (is (= {d1 {:digest d1 :pass 1 :fail 0 :error 0}} (proofs/verdicts-at db {t d1})) "found at its reach digest by one seek")
+    (is (= {} (proofs/verdicts-at db {t d2})) "and not at another digest")
+    (is (contains? (:seon.proof/read-keys (d/entity db [:seon.proof/id (proofs/verdict-id t d1)])) (pr-str [:e add-form]))
         "what it read holds the called function's form")
     (let [redefined (d/with db ((mt/code 'pt.vs "(ns pt.vs)\n(defn add [x y] (+ y x))\n") db))
           moved (pdb/results-moved db (:tx-data redefined))
-          ks (:seon.proof/read-keys (d/entity db [:seon.proof/id (proofs/verdict-id t "d1")]))]
-      (is (= #{(:db/id (d/entity db [:seon.proof/id (proofs/verdict-id t "d1")]))} moved)
+          ks (:seon.proof/read-keys (d/entity db [:seon.proof/id (proofs/verdict-id t d1)]))]
+      (is (= #{(:db/id (d/entity db [:seon.proof/id (proofs/verdict-id t d1)]))} moved)
           "redefining the function it called moves its verdict, found by what it read")
       (is (not= (pdb/reads-digest db ks nil) (pdb/reads-digest (:db-after redefined) ks nil))
           "and what it read no longer holds what it did"))))
@@ -937,15 +938,16 @@
 ;; still holds what it did (reuse by the one read record); a change to what it read ends the reuse.
 ;; Estimate: a world with 2 forms (~2M), one graph (~2M), a verdict written (~0.5M), three lookups with digests (<0.5M): 5,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 5000000}} a-plan-finds-a-verdict-and-reuses-a-green-while-its-reads-hold
-  (let [w0 (mt/with (mt/world) (mt/code 'pt.vr "(ns pt.vr)\n(defn add [x y] (+ x y))\n"))
+  (let [d1 (seon.lib/digest "run one") d2 (seon.lib/digest "run two")
+        w0 (mt/with (mt/world) (mt/code 'pt.vr "(ns pt.vr)\n(defn add [x y] (+ x y))\n"))
         g (program/reach-graph w0 nil)
         t 'pt.vr-test/adds
         basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
-        rdb (pdb/db-with w0 (proofs/verdict-tx w0 g basis {t {:digest "d1" :pass 1 :fail 0 :error 0}} {t [{:var 'pt.vr/add}]} {}))
+        rdb (pdb/db-with w0 (proofs/verdict-tx w0 g basis {t {:digest d1 :pass 1 :fail 0 :error 0}} {t [{:var 'pt.vr/add}]} {}))
         green {:pass 1 :fail 0 :error 0}]
-    (is (= {"d1" (assoc green :digest "d1")} (proofs/stored-verdicts rdb w0 {t "d1"} [t])) "found at its digest")
-    (is (= {"d2" (assoc green :digest "d2")} (proofs/stored-verdicts rdb w0 {t "d2"} [t]))
+    (is (= {d1 (assoc green :digest d1)} (proofs/stored-verdicts rdb w0 {t d1} [t])) "found at its digest")
+    (is (= {d2 (assoc green :digest d2)} (proofs/stored-verdicts rdb w0 {t d2} [t]))
         "at another digest, reused while what it read holds what it did")
-    (is (= {} (proofs/stored-verdicts rdb w0 {t "d2"} [])) "never for a test that may not be reused by its reads")
+    (is (= {} (proofs/stored-verdicts rdb w0 {t d2} [])) "never for a test that may not be reused by its reads")
     (let [w1 (mt/with w0 (mt/code 'pt.vr "(ns pt.vr)\n(defn add [x y] (+ y x))\n"))]
-      (is (= {} (proofs/stored-verdicts rdb w1 {t "d2"} [t])) "and no longer once a function it called moved"))))
+      (is (= {} (proofs/stored-verdicts rdb w1 {t d2} [t])) "and no longer once a function it called moved"))))

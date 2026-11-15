@@ -621,7 +621,7 @@
   (vec (for [[test-var r] ran
              :when (and (qualified-symbol? test-var) (:digest r) (not (:flaky r)) (not (:unreported r)))
              :let [ks (read-keys db g test-var (get fns test-var) (get static test-var))]]
-         {:seon.proof/id (verdict-id test-var (:digest r)) :seon.proof/test test-var :seon.proof/status (status-of r)
+         {:seon.proof/id (verdict-id test-var (:digest r)) :seon.proof/test test-var :seon.proof/reach-digest (:digest r) :seon.proof/status (status-of r)
           :seon.proof/route :live :seon.proof/basis basis
           :seon.proof/read-keys ks :seon.proof/reads-digest (pdb/reads-digest db ks nil)
           :seon.proof/reads {:seon.reads/branch (:seon.db/branch basis) :seon.reads/commit (:seon.db/commit basis)
