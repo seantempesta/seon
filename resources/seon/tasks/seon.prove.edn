@@ -93,5 +93,4 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.problems-test/main-unproved-past-a-program-move-is-a-row}
   :seon.task/estimate #:seon.problems{health {:n 1, :order :constant, :ticks 100000, :bytes 1000000}}
-  :seon.task/needs #{}}
- {:seon.task/name "a-turns-prove-answers-its-size-not-its-deferred-list", :seon.task/kind :work, :seon.task/proofs #{}, :seon.task/plan "Found by data in the first real seon_done (2026-11-15) [M]: seon_prove for one agent ran 1 test (green) and answered 77,389 characters, 1,425 lines, almost all of it :deferred, the names of the process tests left to the judge; the MCP client refused it as past its token bound, so a session reads it only from a saved file. What a reader needs is the counts and the reds; the deferred names are a query of the run (its key). PRIOR WORK: seon.prove's answer shape, seon.server's :prove op."}]
+  :seon.task/needs #{}}]
