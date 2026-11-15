@@ -5283,3 +5283,13 @@
     (is (not (contains? p :db-keys)) "no second set of the store's readers")
     (is (seq rs) "the move reaches a reader")
     (is (every? #(contains? (:cache p) %) rs) "and each is a component the walk holds")))
+
+;; See docs/server.md#ops
+(deftest ^{:seon.test/estimate {:ticks 2000000}} roots-debug-page-shows-each-running-server-op
+  ;; task seon.server/connections-park-on-fibers-and-ops-run-bounded, item 4: root's process tile lists each running server op and
+  ;; who asked it (the :server-op owner's running set, told to the api's view), so one held for long is seen and stopped
+  (let [hc (seon.render.ui/process-tile {:seon.ctx/ctx {:process {:writer nil :fork-server nil :health {} :events []
+                                                                   :server-ops [{:client "session-x" :id 7 :since-ns 1}]}}})
+        text (pr-str hc)]
+    (is (clojure.string/includes? text "session-x") "its client")
+    (is (clojure.string/includes? text "request 7") "and its MCP request id")))

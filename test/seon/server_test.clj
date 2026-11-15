@@ -127,6 +127,8 @@
         s1 (open!)
         _ (line! s1 (pr-str {:op :eval :agent "root" :client tag :code (started "e1")}))
         _ (ask {:op :eval :agent "root" :code "@e1"})
+        ;; item 4: the :server-op owner told the api's view its running set (seon.fx/running-told)
+        running (ask {:op :eval :agent "root" :code "(mapv :client (get-in (c/state sys) [:server-ops :server-op]))"})
         stop1 (ask {:op :interrupt :client tag})
         a1 (clojure.edn/read-string (read! s1))
         ;; MCP: the same wait, as tools/call id 7, stopped by notifications/cancelled naming request 7
@@ -139,6 +141,7 @@
         a2 (clojure.data.json/read-str (read! s2))
         after (ask {:op :eval :agent "root" :code "(+ 1 2)"})]
     (.close s1) (.close s2)
+    (is (some #{tag} (ts/value-of (:response running))) (str "root's view lists the running op's client: " (pr-str running)))
     (is (= {:stopped 1 :dropped 0} stop1) "the stop finds the client's running op")
     (is (re-find #"(?i)interrupt" (pr-str a1)) (str "the stopped eval is answered, interrupted: " (pr-str a1)))
     (is (= 7 (get a2 "id")) "the cancelled MCP request is answered, by its id")
