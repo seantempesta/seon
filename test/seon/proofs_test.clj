@@ -983,4 +983,11 @@
         rdb (pdb/db-with w0 (into older newer))]
     (is (= {} (proofs/stored-verdicts rdb w0 {t d3} [t]))
         "the newest green's reads no longer hold on db: no reuse, though an older green's still do")
-    (is (= #{d3} (set (keys (proofs/stored-verdicts rdb w1 {t d3} [t])))) "and the newest's, holding, is reused")))
+    (is (= #{d3} (set (keys (proofs/stored-verdicts rdb w1 {t d3} [t])))) "and the newest's, holding, is reused")
+    ;; the batch digests what reads-digest digests one set at a time, byte for byte (root's review): every stored reads-digest still matches
+    (let [ks (into #{} (map :v) (d/datoms rdb :aevt :seon.proof/read-keys))]
+      (is (seq ks))
+      (is (= {:all (pdb/reads-digest w0 ks nil) :one (pdb/reads-digest w0 #{(first (sort ks))} nil)}
+             (pdb/reads-digests w0 {:all ks :one #{(first (sort ks))}}))
+          "reads-digests is reads-digest, for every set")
+      (is (= (seon.lib/digest "[[a] []]") (seon.lib/digest-parts [(.getBytes "[[") (.getBytes "a") (.getBytes "] []]")])) "and digest-parts is digest of the joined text"))))

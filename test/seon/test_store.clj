@@ -4,7 +4,7 @@
   many branches, as in production; owner, 2026-10-21). Test-only, so it lives in test/, not
   in src (session DUP-HELPERS); it seeds and opens through seon.db's own seed! and open-main!."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [clojure.test] [seon.lib] [seon.program :as program] [seon.fx :as fx] [seon.task :as task] [seon.config :as config] [hasch.core :as hasch]
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [clojure.test] [seon.lib] [seon.program :as program] [seon.agent] [seon.config] [seon.fx :as fx] [seon.task :as task] [seon.config :as config] [hasch.core :as hasch]
             [seon.ref :as ref] [seon.doc :as doc] [seon.template :as template]))
 
 (defn standing-targets-tx
@@ -522,13 +522,22 @@
   {:error :root-did-not-listen :log}, its log, never a request to no port. A caller asserts on :error.
   In-process, not bin/ask: a perl process a request was ~17 ms of a cheap one's ~20 under load
   (docs/testing.md#a-root-costs-what-it-boots)."
-  {:malli/schema [:=> [:cat [:map [:port [:maybe :int]]] :map] :map]}
-  [{:keys [port log]} m]
+  {:malli/schema [:function [:=> [:cat [:map [:port [:maybe :int]]] :map] :map]
+                  [:=> [:cat [:map [:port [:maybe :int]]] :map pos-int?] :map]
+                  [:=> [:cat [:map [:port [:maybe :int]]] :map pos-int? :boolean] :map]]}
+  ([root m] (ask root m (if-let [v (first clojure.test/*testing-vars*)]
+                          ;; a test's ask ends before its wall bound, so it ends typed, with the root's state, never at the wall with none
+                          (max 1 (- (seon.agent/wall-bound-ms (str v)) (seon.config/value :seon.config.proofs/ask-margin-ms)))
+                          (seon.config/value :seon.config.proofs/ask-ms))))
+  ([root m bound-ms] (ask root m bound-ms false))
+  ;; evidence?: this ask is itself the evidence ask, so a silence there is no second evidence ask
+  ([{:keys [port log] :as root} m bound-ms evidence?]
   (if (nil? port)
     {:error :root-did-not-listen :log log}
-    ;; the edge where the socket's failures become values (bin/ask's three)
+    ;; the edge where the socket's failures become values (bin/ask's three), and its declared bound (docs/clocks.md#two-kinds-of-wait)
     (try
       (with-open [s (java.net.Socket. "127.0.0.1" (int port))]
+        (.setSoTimeout s (int bound-ms))
         (let [w (java.io.OutputStreamWriter. (.getOutputStream s) "UTF-8")
               r (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s) "UTF-8"))]
           (.write w (str (pr-str m) "\n"))
@@ -537,8 +546,17 @@
             (if (clojure.string/blank? line)
               {:error :eof}
               (clojure.edn/read-string {:default tagged-literal} line)))))
+      ;; no answer within the bound: what was asked and the root's state then, its own ask bounded by the margin; a root that answers
+      ;; that neither gives this same error as its state, never a second wait
+      (catch java.net.SocketTimeoutException _
+        (seon.contract/error :seon.test-store/no-answer #'ask
+                             (str "the test root answered nothing within " bound-ms " ms: " (pr-str (select-keys m [:op :agent :names])))
+                             {:asked m
+                              :root-state (when-not evidence?
+                                            (ask root {:op :eval :agent "root" :code "(seon.system/stall-state sys)"}
+                                                 (seon.config/value :seon.config.proofs/ask-margin-ms) true))}))
       (catch java.net.ConnectException _ {:error :refused})
-      (catch java.io.IOException _ {:error :reset}))))
+      (catch java.io.IOException _ {:error :reset})))))
 
 (defn stop-root!
   "Stop a root start-root! started (bin/system stop: its stdin closes, it stops cleanly, and the
