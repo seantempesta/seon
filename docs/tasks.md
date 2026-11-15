@@ -90,7 +90,7 @@ A task whose end was refused, or that its agent marked failed, is held for root:
 - An open problem the branch caused (`seon.problems/caused`) refuses.
 - A `:design` task may leave proofs red but not unknown, until its plan differs from the one it began with.
 - Every task is refused `:no-proofs` until it has one; the reason shows the form that registers one: ``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)`` (`seon.task/member-tx`). A red test not registered is a `:stray-red`. Proofs merge onto main with the plan, as task content (`seon.merge`'s `:task` key).
-- A red counts only when the branch made it: a non-proof test red on main (`seon.proofs/main-red`) is never a `:stray-red`; it stays main's. A proof of the task always counts.
+- A red counts only when the branch made it: a non-proof test red on main (`seon.proofs/main-red`) is never a `:stray-red`; it stays main's. A proof of the task always counts. A red whose verdict at its base digest nobody knows yet (`seon.proofs/unknown-reds`: main's own run has not reached it) is asked of main by name, and the judge and the gate wait on that answer (``seon.reconcile/ask-main``); red there, it is main's.
 - A contract gap is a function the branch defines without a contract: `seon.merge/uncontracted` over the merge's `:ours`, the same answer for the writer's merge gate, root's judge and the agent's own check (`seon.turn`).
 
 ## A task's facts and how they are read
