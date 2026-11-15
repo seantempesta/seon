@@ -1818,7 +1818,7 @@
   placed at its top (an own render's front, `stage-list`, `pull-list`, or `unresolved-list`), else the region (#p-head) the page's head
   fills, then the rules and the conversation, after which the frame puts the caption and the input; and the context (#p-context): the
   task's list and the region (#p-tiles) root's system view fills, inside the chat's column after the conversation, so the chat takes the
-  main space and its tiles scroll with it (owner, 2026-11-15; docs/decisions.md, The page is a friendly chat). Each region is an element
+  main space and its tiles scroll with it (docs/decisions.md, The page is a friendly chat). Each region is an element
   by its id: who fills it is not known here. The context is shown only when it holds a part (resources/public/css/input.css). Styled by
   the ids, so the layout writes no class."
   {:seon.render/style "@media (min-width: 64rem) {
