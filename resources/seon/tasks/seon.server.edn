@@ -73,4 +73,10 @@ PROOF (red first, once the waiter is found): seon.server-test/an-eval-at-root-wh
   :seon.task/kind :work
   :seon.task/proofs #{seon.server-test/a-claimed-client-stops-no-one-elses-op}
   :seon.task/estimate #:seon.server{line-parts {:n 1, :order :constant, :ticks 5000, :bytes 10000}}}
+ {:seon.task/name "an-inbox-wait-holds-no-state-of-its-own"
+  :seon.task/plan "Owner: flow. Root's review of 5e4c5d0ddb: seon.server/inbox-answer now holds a volatile! (the wait in flight) and a promise (the bound fired) so that one bound covers the whole call while a wait that wakes with nothing waits on. That is state outside Flow.\nPRIOR WORK: seon.system/await-message (the api proc holds each wait, answered by the commit that writes a message to the agent), seon.system/drop-wait!, seon.step/put-after!, seon.server/inbox-answer.\nDESIGN: the bound moves into the wait the api holds. await-message takes the call's bound; the api proc answers the wait typed :seon.server/no-message when it is reached. A commit whose delivery leaves the waiter nothing re-arms the same entry in the api's state, never answering it. inbox-answer becomes one deref, with no volatile!, no promise and no loop.\nCOST: one entry per wait in the api's state (as today); a wake with nothing costs one inbox read (~10.5k ticks a message [M]) and no new wait.\nProofs: seon.server-test/a-second-wait-a-delivery-woke-with-nothing-waits-on and seon.server-test/an-inbox-with-nothing-new-ends-at-its-bound-typed stay green, and health shows no inbox-answer row.\nDeletes: inbox-answer's loop, volatile! and promise (the api's wait does their job)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.server-test/a-second-wait-a-delivery-woke-with-nothing-waits-on}
+  :seon.task/needs #{}
+  :seon.task/estimate #:seon.server{inbox-answer {:n 3, :order :linear, :ticks 50000, :bytes 20000}}}
 ]
