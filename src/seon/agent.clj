@@ -2310,6 +2310,9 @@
         ;; reused through the node cache after-fork! kept (docs/storage.md#an-agents-reads-and-writes)
         db0 (pdb/at-commit store-conn (d/commit-id db0))
         index (some-> index (assoc :db db0))
+        ;; malli's default here is the branch over main as forked: a schema read with no options reads this agent's branch, as
+        ;; seon.contract/options does (one read of main's schema entries and their compile, ~1.8M ticks [M root])
+        _ (program/hold-registry! (contract/branch-over (program/schema-registry (program/schema-changes db0))))
         _ (mark! :connected)]
     ;; the config this process was forked holding (root read it; an agent reads no environment), the heap bound as its task
     ;; states it (docs/config.md#the-resolver): a task's own :seon.config.agent/heap-extra-bytes bounds its agent
