@@ -1873,10 +1873,15 @@
         db1 (errs (world) (map #(symbol "app" (str "f" %)) (range 40)))]
     (binding [rv/*owner* (rv/owner (a/chan 8))]
       (let [s (rv/store db1)
-            live (problems/recorded-live s)
+            ;; the owner's flushes and syncs until nothing is left, as the render proc's health-more steps do: each reaction's first
+            ;; capture is queued (seon.ratom/make-reaction), so the rows exist once the flushes ran them
+            settle (fn [live] (loop [live live] (let [left (rv/flush! 1000)]
+                                                   (if (and (zero? left) (empty? @(:changed live)) (not @(:set-moved live))) live
+                                                       (recur (problems/recorded-sync! live))))))
+            live (settle (problems/recorded-live s))
             move! (fn [live tx] (let [rep (pdb/with @s tx) m (profile/measure! #(do (rv/commit! s (:db-after rep) (:tx-data rep)) (rv/flush!)))
                                       changed @(:changed live)]
-                                  [(problems/recorded-sync! live) changed (:ticks m)]))]
+                                  [(settle (problems/recorded-sync! live)) changed (:ticks m)]))]
         (is (= (:classes (problems/report db1)) (:classes (problems/recorded-report live {}))) "the live report is report's, read whole")
         (let [held (:classes (problems/recorded-report live {}))
               [live changed ticks] (move! live (seon.task/create-tx @s [{:seon.task/ns 'trial :seon.task/name "untouched" :seon.task/plan "p"}]))]
@@ -1889,4 +1894,16 @@
                 [live changed _] (move! live tx)]
             (is (empty? changed) (str "a move adding one error reruns no existing error's row: " (count changed)))
             (is (= (inc before) (count (:rows live))) "and adds that error's row alone")
-            (is (= (:classes (problems/report @s)) (:classes (problems/recorded-report live {}))) "and the report is still report's")))))))
+            (is (= (:classes (problems/report @s)) (:classes (problems/recorded-report live {}))) "and the report is still report's")
+            ;; task seon.ratom/the-core-is-correct-before-a-reader-moves (4): a task answering one error moves the answers, and
+            ;; reruns that error's row alone (each row read the whole answers map: one answer reran every row)
+            (let [sig (:signature (first (vals (get-in live [:by-class :eval]))))
+                  [live changed ticks] (move! live [{:seon.task/id "fix/one" :seon.task/ns 'fix :seon.task/name "one" :seon.task/plan "p"
+                                                 :seon.task/execution :held :seon.task/branch :f :seon.task/kind :work
+                                                 :seon.task/evidence {:from "fix/other" :conflicts [] :unmerged [] :red [] :signature sig}}])]
+              (is (= 1 (count changed)) (str "one answer moved, one row changed: " (count changed)))
+              ;; estimate: 41 rows' answer lookups (~1.5k each) + one row's rerun (~40k) + the commit: ~120k; measured 138k, against 956k
+              ;; with each row reading the whole answers map (all 41 rows rerun)
+              (is (< ticks 400000) (str "and costs a lookup a row and that row's rerun, not every row's: " ticks " ticks"))
+              (is (= ["fix/one"] (:answered-by (first (filter #(= sig (:signature %)) (vals (get-in live [:by-class :eval])))))))
+                  "and that row is answered by the task")))))))

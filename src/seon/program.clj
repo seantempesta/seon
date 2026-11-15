@@ -1188,11 +1188,17 @@
   (seon.contract/arm!). Answers nil, or an error map naming the form (its id and its text's first
   line), so a load that fails says which definition failed."
   {:malli/schema [:=> [:cat :map] [:maybe :seon.program/error]]}
-  [{:keys [id ns src defines]}]
-  (let [named #(cond-> {:ns ns :message %} id (assoc :form id :lead (first (str/split-lines (str src)))))]
+  [{:keys [id ns src defines declares]}]
+  (let [named #(cond-> {:ns ns :message %} id (assoc :form id :lead (first (str/split-lines (str src)))))
+        ;; a form that only declares (declare ...): (def x) with no init keeps a bound var's binding but REPLACES its metadata, so a
+        ;; changed declare loaded after its defns took their contracts (context's seon.ctx.wire, 2026-11-15, result/c71b6489). Only the
+        ;; names not yet bound are declared: a bound one's forward reference is done
+        unbound (when (and (seq declares) (empty? defines)) (remove #(some-> (find-var %) .isBound) declares))]
     (try
       (binding [*ns* (ensure-ns! ns)]
-        (eval (read-string src)))
+        (if (and (seq declares) (empty? defines))
+          (when (seq unbound) (eval `(declare ~@(map (comp symbol name) unbound))))
+          (eval (read-string src))))
       (when id (note-loaded! (vec (keep (fn [[k s]] (when (= :var k) s)) defines)) id))
       (some (fn [[k s]]
               (when-let [v (and (= :var k) (find-var s))]
