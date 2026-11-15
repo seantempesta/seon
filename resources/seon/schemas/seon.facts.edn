@@ -269,21 +269,21 @@
  ;; an agent's id in root's process and its procs: the keyword whose name is its key; never stored
  :seon.agent/id [:keyword {:description "The agent's id in root's process and its procs: the keyword whose name is its key; never stored."}]
  :seon.agent/root [:and {:seon.db/to [:seon.system/root-fact] :description "The root that started this agent."} :seon.db/ref]
- :seon.agent/branch [:keyword {:description "The branch this agent works on."}]
+ :seon.agent/branch [:keyword {:seon.db/root-only true :description "The branch this agent works on."}]
  ;; the task it works (the agent's record pulls it, docs/ctx.md#the-pattern) and the turns it may take: raised to extend the agent
  ;; (the agent is the unit, seon.agent/the-agent-is-the-unit-not-the-run; max-turns is written from its cut 2, until then work!'s
  ;; :max-turns bounds the loop)
- :seon.agent/task [:and {:seon.db/to [:seon.task/task-fact] :description "The task this agent works. See docs/ctx.md#the-pattern."} :seon.db/ref]
+ :seon.agent/task [:and {:seon.db/root-only true :seon.db/to [:seon.task/task-fact] :description "The task this agent works. See docs/ctx.md#the-pattern."} :seon.db/ref]
  ;; the turns it may take, agent-wide: its :seon.agent/turn against it. Set at spawn from the config its task's environment names
  ;; (seon.reconcile/desired-env); raised, and the task released again (my.root/run!), it goes on (docs/turn.md#the-cap)
  ;; at least one turn: the environment it is read into (:seon.task/env) takes a positive count, one definition of it
- :seon.agent/max-turns [:and {:description "The turns the agent may take, agent-wide; raised to extend the agent. See docs/turn.md#the-cap."} pos-int?]
+ :seon.agent/max-turns [:and {:seon.db/root-only true :description "The turns the agent may take, agent-wide; raised to extend the agent. See docs/turn.md#the-cap."} pos-int?]
  ;; the agent's turn number (docs/turn.md#the-turn-is-a-number): moved by the model turn that starts (seon.turn/act!) in the
  ;; transaction of its model call's first facts, agent-wide and never restarting across wakes; every record takes the number in force
  :seon.agent/turn [:int {:description "The agent's turn number, agent-wide and never restarting across wakes. See docs/turn.md#the-turn-is-a-number."}]
  :seon.agent/description :seon.db/text
  ;; the model it works for, when its task names none of root's; the client that attached it, when an outside agent's (seon.server/held)
- :seon.agent/model [:string {:description "The model the agent works for, when its task names none of root's."}]
+ :seon.agent/model [:string {:seon.db/root-only true :description "The model the agent works for, when its task names none of root's."}]
  :seon.agent/holder [:string {:seon.db/root-only true :description "The client that attached this agent, when it is an outside agent's."}]
  ;; root's boot it was started in, and when (ms): the agent is live in a root when the boot is that root's and its task is :running
  :seon.agent/boot [:and {:seon.db/index true :seon.db/root-only true :description "The root boot the agent was started in; it is live in a root when the boot is that root's and its task is running."} :string]
@@ -316,7 +316,7 @@
  :seon.user/name [:and {:seon.db/identity true} :string]
  ;; who started this agent, a user or an agent: one ref on the child, written with the agent (seon.task/start-tx), so a fork is a
  ;; parent and a child from its first datom; the agents one started are the reverse, :seon.agent/_parent (docs/users.md#what-each-thing-is)
- :seon.agent/parent [:and {:seon.db/to [:seon.db/agent-fact] :description "The agent that started this one, a user or an agent; the agents an agent started are its :seon.agent/_parent. See docs/users.md#what-each-thing-is."} :seon.db/ref]
+ :seon.agent/parent [:and {:seon.db/root-only true :seon.db/to [:seon.db/agent-fact] :description "The agent that started this one, a user or an agent; the agents an agent started are its :seon.agent/_parent. See docs/users.md#what-each-thing-is."} :seon.db/ref]
  ;; the ids of its evals a reader of its page opened (seon.system/opened!), on main; its turn writes each
  ;; on its branch as the eval's :seon.eval/opened (seon.agent/untaken-facts)
  :seon.agent/opened [:set {:description "The ids of its evals that a reader of its page opened, kept on main."} :string]
@@ -698,10 +698,14 @@
  ;; the branch a catch-up merged (seon.agent/merge-main!): what it applied is that branch's, not
  ;; the agent's, though :seon.tx/branch names the branch it was written on
  :seon.tx/merged [:and {:description "The branch that a catch-up merged, when the transaction is a merge."} :seon.db/branch]
+ :seon.tx/source [:int {:description "The transaction this one replays, on the branch it was written on (seon.merge/decide's replay): a merged fact keeps where it was made. See docs/merging.md#a-branch-merges-main-in."}]
+ :seon.tx/at-ms [:int {:description "When the transaction this one replays was written (its :db/txInstant), in ms: a replayed transaction's own instant is the merge's, so as-of by date and by transaction agree (deps, 2026-11-15)."}]
  :seon.tx/meta [:map {:seon.db/attributes true} [:seon.tx/runtime {:optional true} :seon.tx/runtime]
                 [:seon.tx/branch {:optional true} :seon.tx/branch]
                 [:seon.tx/eval {:optional true} :seon.tx/eval]
                 [:seon.tx/merged {:optional true} :seon.tx/merged]
+                [:seon.tx/source {:optional true} :seon.tx/source]
+                [:seon.tx/at-ms {:optional true} :seon.tx/at-ms]
                 [:seon.tx/asker {:optional true} :seon.tx/asker]]
  ;; a message, one entity read by everyone it is to (docs/users.md#messages): written on main by root's writer at the send,
  ;; and on each recipient's branch whole when its next act delivers it (seon.agent/deliver!). from names a sender: an agent's
@@ -748,7 +752,7 @@
  ;; what it waits on (the request root last sent it: its kind and form, a test run's test); retracted when its
  ;; next frame arrives or it ends. An open :stalled problem while it holds (seon.problems/stalled-agents)
  :seon.process/stall [:map [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]
-  :seon.process/process-fact [:map {:seon.db/attributes true}
+  :seon.process/process-fact [:map {:seon.db/attributes true :seon.db/root-only true}
                           [:seon.process/id :seon.process/id] [:seon.process/agent {:optional true} :seon.process/agent]
                           [:seon.process/pid {:optional true} :seon.process/pid]
                           [:seon.process/running {:optional true} :seon.process/running]

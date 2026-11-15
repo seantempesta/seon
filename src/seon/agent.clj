@@ -583,7 +583,7 @@
 
 (defn merge-main!
   "git merge main into this agent's branch, decided on MAIN's program: root's writer runs the one merge (its :merge-main,
-  seon.merge/merge-main), never this branch's code. The branch becomes main's head plus its own datoms since the base, one commit
+  seon.merge/decide, then seon.writer/replay), never this branch's code. The branch becomes main's head plus its own transactions since the base, replayed, one commit
   only while the branch is still at the head this process committed; a key both changed stops it, and each conflict is an unmerged
   entry on the branch. This process writes nothing of its branch while it waits; the wait ends by the writer's answer, or, if
   its step throws, the typed error root answers the request's :dest with (seon.system/answer-taken), or root's end; then its connection follows the branch's moved head (datahike.connector/follow-head!). None of

@@ -257,7 +257,7 @@
 ;; calls each, and derived? was asked per datom, 13 times; now per attribute.) Nothing of main's n forms is read: constant in n
 (deftest ^{:seon.test/estimate {:ticks 60000000}} merge-main-costs-the-branchs-change-not-mains-moves
   (cost/proof
-      {:of 'seon.merge/merge-main :input 'seon.merge-cost-test/moved-main-of
+      {:of 'seon.merge/decide :input 'seon.merge-cost-test/moved-main-of
        :n "forms main defined since the branch's base"
        :work (str "the datoms the branch wrote since base (one diff of base and head), the keys they bear, and main's content at "
                   "those keys only: main's own moves are never read, so the same work however far main moved")

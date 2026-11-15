@@ -602,25 +602,7 @@
           ch [(filterv (complement :added) ch) (filterv :added ch)]
           :else (d/datoms-diff base head :eavt []))))
 
-(defn own-datoms
-  "The datoms head wrote since base, as [gone added] (`changed-datoms`: the commits' kept changes, else a diff): each a
-  fact head owns (`owned?`: its transaction names no branch of main's and is not base's history, `shared?`, or head held and let go of it), of no derived attribute
-  (the entity index's :derived-attrs) and no transaction's own facts. A value head holds only because main wrote it, or lacks because it never held it, is
-  main's and left out. What seon.merge/merge-main writes onto main's head. See docs/merging.md#a-branch-merges-main-in."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:tuple [:vector :seon.host/datom] [:vector :seon.host/datom]]]}
-  [base head main]
-  (let [mains (tx-branch main (:max-tx main))
-        tx? (fn [e] (some? (first (d/datoms head :eavt e :db/txInstant))))
-        [gone added] (changed-datoms base head)
-        ;; the derived attributes, as the entity index holds them (seon.db's :derived-attrs, made once), never asked per datom
-        derived (:derived-attrs (pdb/index))
-        kept (into #{} (filter #(and (keyword? %) (not= "db" (namespace %)) (not (derived %))))
-                   (into #{} (map :a) (concat gone added)))
-        fact? (fn [{:keys [e a]}] (and (kept a) (not (tx? e))))]
-    ;; datoms-diff compares whole datoms, tx included: one fact both hold, asserted in different transactions, is a gone and an added
-    ;; datom, and neither is a change; a fact is [e a v]
-    [(filterv #(and (fact? %) (empty? (d/datoms head :eavt (:e %) (:a %) (:v %))) (seq (d/datoms (d/history head) :eavt (:e %) (:a %) (:v %)))) gone)
-     (filterv #(and (fact? %) (empty? (d/datoms base :eavt (:e %) (:a %) (:v %))) (not (and mains (= mains (tx-branch head (:tx %))))) (not (shared? base %))) added)]))
+(declare entries entry-eids)
 
 (defn- facts
   "The facts from changed since base (`changed-datoms`), each {:e :a :v :tx :side}: :retract for one gone, :add for one added, the
@@ -635,8 +617,12 @@
         skip (into (:derived-attrs ix) (:root-only-attrs ix))
         txe (into #{} (map :tx) (concat gone added))
         fact? (fn [{:keys [e a]}] (and (not (txe e)) (keyword? a) (not= "db" (namespace a)) (not (skip a))))
-        as (fn [side] (fn [dt] {:e (:e dt) :a (:a dt) :v (:v dt) :tx (:tx dt) :side side}))]
-    (into (mapv (as :retract) (filter fact? gone)) (map (as :add)) (filter fact? added))))
+        as (fn [side] (fn [dt] {:e (:e dt) :a (:a dt) :v (:v dt) :tx (:tx dt) :side side}))
+        held? (fn [db {:keys [e a v]}] (some? (first (d/datoms db :eavt e a v))))]
+    ;; a fact is [e a v]: one both hold, asserted in different transactions (a diff compares whole datoms), is neither side's change
+    ;; (d8a0285ba8's regression on lb76: 712 facts both held were retracted)
+    (into (into [] (comp (filter fact?) (remove #(held? from %)) (map (as :retract))) gone)
+          (comp (filter fact?) (remove #(held? base %)) (map (as :add))) added)))
 
 (defn named
   "Entity e as an agent reads it: [identity-attribute value] on db, by the entity index's :identity-schemas, else e. A conflict is
@@ -659,63 +645,24 @@
         many? (fn [a] (= :db.cardinality/many (get-in (:schema from) [a :db/cardinality])))
         k-of (fn [{:keys [e a v]}] (if (many? a) [:datum e a v] [:datum e a]))
         at (fn [db [_ e a v :as k]] (if (= 4 (count k)) (some? (first (d/datoms db :eavt e a v))) (:v (first (d/datoms db :eavt e a)))))
-        conflicts (vec (for [k (into (sorted-set-by #(compare (pr-str %1) (pr-str %2))) (map k-of) fs)
-                             :let [b (at base k) i (at into-db k) f (at from k)]
-                             :when (and (not= b i) (not= b f) (not= i f))]
-                         (cond-> {:key k :entity (named from (second k))}
-                           (some? b) (assoc :base b) (some? f) (assoc :ours f) (some? i) (assoc :theirs i))))]
-    (if (seq conflicts)
-      {:conflicts conflicts}
-      {:txs (->> fs (group-by :tx) (sort-by key)
-                 (mapv (fn [[t ds]] {:source t :ops (mapv (fn [{:keys [e a v side]}] [(if (= :add side) :db/add :db/retract) e a v]) ds)})))})))
-
-(defn merge-main
-  "The one merge of main into a branch, decided: head's own datoms since base (`own-datoms`), their keys (program keys and facts,
-  `touched-by`), and main's content at those keys only, against base's: a key both changed, differently, is a conflict, and any
-  conflict stops it, writing nothing ({:conflicts}), unless the branch decided it (its unmerged entry resolved, while main's content
-  there is still the entry's theirs: the branch's value stands). Clean, the tx that makes main's head the merged branch, head's own datoms with
-  their transactions' facts and retractions ({:tx :keys}): main plus the branch's own change. Main's moves elsewhere are never read,
-  so it costs what the branch wrote, never how far main moved. See docs/merging.md#a-branch-merges-main-in."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:or [:map [:conflicts [:vector :map]]] [:map [:tx :seon.db/tx-data] [:keys [:vector :any]]]]]}
-  [base head main]
-  (let [[gone added] (own-datoms base head main)
-        ks (vec (touched-by base head :all (into gone added)))
-        b (program-of base ks :all)
-        ;; main's content at the branch's keys counts as main's change only if main wrote it (owned?)
-        m (reduce (fn [p k] (if (and (or (= :datum (first k)) (stated-keys (first k))) (not= (get p k) (get b k)) (not (owned? base main head k)))
-                              (if (contains? b k) (assoc p k (get b k)) (dissoc p k)) p))
-                  (program-of main ks :all) ks)
-        ;; and the branch's content there counts as its change only if the branch wrote it: a key of an entity it touched holds
-        ;; values it never wrote (a stale record, an attribute of its own agent entity root wrote on main)
-        o (reduce (fn [p k] (if (and (or (= :datum (first k)) (stated-keys (first k))) (not= (get p k) (get b k)) (not (owned? base head main k)))
-                              (if (contains? b k) (assoc p k (get b k)) (dissoc p k)) p))
-                  (program-of head ks :all) ks)
-        r (three-way (overtaken-base b base [[head main o] [main head m]] ks) o m)
-        ;; a conflict the branch has decided (git add): its entry is resolved, or the branch redefined the key since, and main's content
-        ;; there is still the entry's theirs, so the branch's value stands; main moving the key again is a new conflict
-        held (into {} (map (juxt :key identity)) (entries head))
-        ;; resolved (git add: my.branch/resolve!), and main's content there still the entry's theirs; an entry merely held (main's evidence
-        ;; of another task's conflict reaches a branch as a record) decides nothing
-        decided? (fn [{k :key}] (when-let [en (held k)] (and (:resolved? en) (= (get m k) (:theirs en)))))
-        conflicts (vec (remove decided? (:conflicts r)))
-        ;; the entries this merge decides, and only those, settle: a branch holds main's merge entries too (records merge), never its own
-        settled (into #{} (map :key) (filter decided? (:conflicts r)))]
-    (if (seq conflicts)
-      {:conflicts conflicts}
-      (let [unique? #(= :db.unique/identity (get-in (:schema head) [% :db/unique]))
-            ;; a fact of an entity main deleted whole has no subject on main: left out (its program keys were judged above)
-            added (into [] (remove #(deleted-by? base main (:e %))) added)
-            named (into #{} (keep #(when (unique? (:a %)) (:e %))) added)
-            txs (into (sorted-set) (map :tx) added)]
-        {:keys ks
-         :tx (-> (attribute-declarations main added)
-                 (into (for [{:keys [e a v]} gone] (if (and (unique? a) (not (named e))) [:db/retractEntity e] [:db/retract e a v])))
-                 (into added)
-                 (into (for [t txs dt (d/datoms head :eavt t)] dt))
-                 ;; the entries it decided settle: none of them stays on the merged branch
-                 (into (for [e (entry-eids head) :when (settled (:seon.merge/key (d/entity head e)))] [:db/retractEntity e])))}))))
-
-;; ---- what program code does not do ----------------------------------------------------
+        ;; a conflict from has decided (git add: its entry resolved, my.branch/resolve!) while into-db still holds the entry's theirs:
+        ;; from's value stands and the entry settles; into-db moving the key again is a new conflict
+        held (into {} (map (juxt :key identity)) (entries from))
+        decided? (fn [k i] (when-let [en (held k)] (and (:resolved? en) (= i (:theirs en)))))
+        judged (for [k (into (sorted-set-by #(compare (pr-str %1) (pr-str %2))) (map k-of) fs)
+                     :let [b (at base k) i (at into-db k) f (at from k)]
+                     :when (and (not= b i) (not= b f) (not= i f))]
+                 [(decided? k i) (cond-> {:key k :entity (named from (second k))}
+                                   (some? b) (assoc :base b) (some? f) (assoc :ours f) (some? i) (assoc :theirs i))])
+        conflicts (vec (keep (fn [[d c]] (when-not d c)) judged))
+        settled (into #{} (keep (fn [[d c]] (when d (:key c)))) judged)
+        txs (->> fs (group-by :tx) (sort-by key)
+                 (mapv (fn [[t ds]] {:source t :ops (mapv (fn [{:keys [e a v side]}] [(if (= :add side) :db/add :db/retract) e a v]) ds)})))]
+    (cond (seq conflicts) {:conflicts conflicts}
+          ;; the entries it decides settle: none stays on the merged value
+          (seq settled) {:txs (conj txs {:source (:max-tx from)
+                                         :ops (vec (for [e (entry-eids from) :when (settled (:seon.merge/key (d/entity from e)))] [:db/retractEntity e]))})}
+          :else {:txs txs})))
 
 (defn mutations
   "What the forms a branch adds (ours: its changes since base) do that program code does
