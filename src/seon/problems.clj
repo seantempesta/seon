@@ -1310,11 +1310,9 @@
      :failed (let [failed (mapv #(failed-row db ans %) (es db :seon.task/failure))] {:n (count failed) :rows (vec (sort-by #(- (or (:at-ms %) 0)) failed))})}))
 
 (defn recorded-live
-  "The recorded report as reactions over store s (seon.ratom/store of main), made in its owner's step: answers, the error entities
-  (one whole-attribute read, rerun when an error is added or gone), the task part (`task-part`), and one row a recorded error
-  (`recorded-sync!` keeps them). A commit reruns only the reactions whose reads it moved, so a move that touches no error reruns no
-  error row. Answers {:store :answers :errors :tasks :rows {} :by-class {}}; `recorded-report` reads it. See
-  docs/reactive.md#how-a-commit-reaches-its-readers-today."
+  "The recorded report as reactions over store s, made in its owner's step: answers, the error set, the task part and one row a
+  recorded error, so a commit reruns only what it moved. Answers the live value `recorded-sync!` keeps and `recorded-report` reads.
+  See docs/reactive.md#how-a-commit-reaches-its-readers-today."
   {:malli/schema [:function [:=> [:cat :any] :map] [:=> [:cat :any pos-int?] :map]]}
   ([s] (recorded-live s Long/MAX_VALUE))
   ;; n: the most rows its first sync makes (flow's rule 2); :more? on the answer says the next sync makes the rest
@@ -1326,13 +1324,13 @@
     ;; each first run tracked and its throw kept as its state (seon.ratom's catching run), never a deref that would throw here
     (doseq [r [ans errs tasks]] (rv/-run r true))
     ;; the set is diffed against the rows only when it moved, never on every sync (O(errors) a move otherwise)
-    (add-watch errs ::set (fn [_ _ _ _] (vreset! set-moved true)))
+    (add-watch errs set-moved (fn [_ _ _ _] (vreset! set-moved true)))
     (recorded-sync! {:store s :answers ans :errors errs :tasks tasks :rows {} :by-class {} :changed (volatile! #{}) :set-moved set-moved} n))))
 
 (defn recorded-sync!
-  "live (`recorded-live`) with one row reaction for each error entity its error set now holds: a new one made and read, a gone one
-  disposed and its row dropped from :by-class; and every row the last commit reran (its watch put it in :changed) in :by-class,
-  each class a sorted map by entity, so a change replaces its rows and nothing else. Called in the owner's step after its flush."
+  "live with a row reaction for each error its set holds (new made, gone disposed) and each row the last commit reran replaced in
+  its class's sorted map; a row whose run threw goes to :thrown. Called in the owner's step after its flush. See
+  docs/reactive.md#how-a-commit-reaches-its-readers-today."
   {:malli/schema [:function [:=> [:cat :map] :map] [:=> [:cat :map pos-int?] :map]]}
   ([live] (recorded-sync! live Long/MAX_VALUE))
   ;; n: the most new rows this step makes (flow's rule 2, :seon.config.render/flush-max); the rest are made at the next sync, :more? says so
@@ -1343,7 +1341,7 @@
         fresh (take n all-fresh)
         more? (< (count fresh) (count all-fresh))
         row-of (fn [e] (let [r (rv/make-reaction #(error-row @store @answers e) :auto-run :queue)]
-                         (add-watch r ::row (fn [_ _ _ _] (vswap! changed conj e)))
+                         (add-watch r changed (fn [_ _ _ _] (vswap! changed conj e)))
                          (rv/-run r true) r))
         rows (as-> rows rs (reduce (fn [rs e] (rv/dispose! (rs e)) (dissoc rs e)) rs gone) (reduce (fn [rs e] (assoc rs e (row-of e))) rs fresh))
         moved (into (set fresh) @changed)
@@ -1354,7 +1352,7 @@
         by-class (reduce (fn [bc e] (let [bc (drop-e bc e) r (rows e)]
                                       (vswap! thrown dissoc e)
                                       (cond (nil? r) bc
-                                            (rv/-get r :caught) (do (vswap! thrown assoc e (ex-message (rv/-get r :caught))) bc)
+                                            (rv/-get r :caught) (do (vswap! thrown assoc e (ex-data (rv/-get r :caught))) bc)
                                             :else (let [row (rv/-get r :state)] (update bc (:class row) (fnil assoc (sorted-map)) e row)))))
                          (reduce drop-e (:by-class live) gone) moved)]
     (vreset! changed #{})
@@ -1362,9 +1360,8 @@
     (assoc live :rows rows :by-class by-class :more? more? :thrown @thrown))))
 
 (defn recorded-report
-  "The recorded report of live (`recorded-live`, synced) as `report` answers it on its store's db: the counted classes from the kept
-  rows (in entity order, then by count with fold applied: `fold-counted`), the run classes and :failed from the task part.
-  The fold step reads every row once; the rows themselves are the reactions'."
+  "The recorded report of live as `report` answers it on its store's db, assembled from the kept rows with fold applied. See
+  docs/reactive.md#how-a-commit-reaches-its-readers-today."
   {:malli/schema [:=> [:cat :map :seon.error/fold] :seon.problems/report]}
   [{:keys [store tasks by-class]} fold]
   (let [db @store tp (or (when-not (rv/-get tasks :caught) (rv/-get tasks :state)) {:ended {} :failed {:n 0 :rows []}})]

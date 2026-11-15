@@ -1,6 +1,7 @@
 ;; Renders (seon.render, session W2; W1's render contract, the session design papers in git history): a
 ;; render is a function of a value and its opts (props) answering its hiccup. A schema declares its
-;; render in its own properties ({:seon.render/hiccup sym}); selection is
+;; render in its own properties ({:seon.render.proc/health-more [:boolean {:description "On a message the render proc puts on its own events chan: the next step of health's bounded flush (flush-max reactions a step), never kept as an event a stream shows."}]
+ :seon.render/hiccup sym}); selection is
 ;; the value's own override key, else the declared render (the schema, then its parents),
 ;; else the one value printer (seon.print). The values below are what root's web renders.
 {;; a value shown by its model render: its schema declares {:seon.render/model sym}, a function of opts and
