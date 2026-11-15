@@ -207,6 +207,7 @@ Root collects the store only as its only writer, at quiescence, with no agent li
 - With `:seon.config.store/sole-writer?` false (the `:scripted` profile of test shards and check steps, whose roots share a store) it sweeps and records nothing.
 - When a branch named in main's `:seon.system/collected` record is gone, it runs `datahike.api/gc-storage`, sweeping every key no branch reaches; when branches were only added it records them and sweeps nothing. A new main only records what it sees, so a check boot on a store of many branches does not sweep at its first quiescence.
 - The record (`{:swept :ms :branches :gone}`) is committed through the writer's batch.
+- A branch whose merge base a sweep took is read by its head and resumed on main's program: its agent's hello carries the typed `:seon.db/no-merge-base` under its own key, recorded as that agent's problem (```seon.procs-test/an-agent-whose-branchs-base-was-swept-starts-and-says-so```).
 - A branch dropped by the writer's `:drop-branch` is gone for good: the next sweep takes every commit only it reached, so a branch holding facts main lacks is merged first.
 - A sweep frees pages but never shrinks the file, so it leaves a mark, and the next boot first replaces the store by a copy of its pages in use (```seon.db/compact-if-due!```), atomically by rename.
 

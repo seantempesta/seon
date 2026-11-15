@@ -516,6 +516,23 @@
                (is (= :seon.agent/started-without-program (:seon.error/type (:started-without-program (deref p2 0 ::unanswered)))) "its spawn still answers typed")
                (is (not-any? #(= :tx (:op %)) (:to-writer @o2)) "and no second message is written")))))))))
 
+;; docs/storage.md#collection: a resumed agent whose branch's merge base was swept starts on main's program and says so in its hello, under its own
+;; key: root records the typed :seon.db/no-merge-base as that agent's problem and answers its spawn. Red before: the error rode in :load-errors,
+;; whose one reader builds a :seon.agent/load-failed from {:ns :message}, a construction refused for its nil :ns, so the hello's step threw,
+;; the spawn was never answered and every resume of a swept-base branch hung (tests-meas1, 2026-11-15: no frame in 887 s)
+;; Estimate: 1 step-fn call x 0.1M and one contract check of hello!'s argument ~ 300,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 300000}} an-agent-whose-branchs-base-was-swept-starts-and-says-so
+  (let [lost {:seon.error/type :seon.db/no-merge-base :seon.error/operation 'seon.db/branch-base
+              :seon.error/message "branch :agent-1 has no merge base with :main to read: its base was swept" :branch :agent-1 :commit (random-uuid)}
+        ap0 (#'ap/agent-proc {:id :a1 :end {:out (a/chan 4) :in (a/chan)} :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
+        [_ outs] (step #'ap/agent-proc ap0 :from {:op :hello :t 1 :start-ms 1.0 :mem-mb 1.0 :interrupt-ok true :seon.db/no-merge-base lost})
+        api (:to-api outs)]
+    (is (some #(get-in % [:set :ready]) api) (str "its hello makes it ready: " (pr-str api)))
+    (is (= [[:a1 lost]] (keep #(when (= :problem (:op %)) [(:agent %) (:error %)]) api)) "and the lost base is that agent's problem, as typed")
+    (testing "a lost base is no load error: hello! refuses one in :load-errors, so the wrong shape never leaves the agent"
+      (is (= :seon.instrument/contract-error
+             (:seon.error/type (try (agent/hello! 0 {:load-errors [lost]}) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))))))))
+
 ;; docs/references.md#an-entity-cites: an agent whose config cites a wiki section its store does not hold (a store older than its wiki) is
 ;; made citing the rest and says which are missing in its hello: each a recorded :seon.agent/cite-missing problem of that agent naming the
 ;; address, and its spawn's answer names them. Red before: the cite's lookup threw inside the fork server's step and no agent started
