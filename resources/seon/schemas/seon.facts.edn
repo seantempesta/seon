@@ -404,6 +404,13 @@
  ;; the agent whose page the person last opened: home is this page (docs/users.md#whats-on-screen); absent means root
  ;; or a task: an agent focuses the person on work it just launched (my.task/launch! answers the task), its agent made a moment later
  :seon.user/focus [:and {:seon.db/to [:seon.db/agent-fact :seon.task/task-fact]} :seon.db/ref]
+ ;; a place an agent offers the person (my.user/focus!): a value, never written, that draws itself as a button; tapped, it sets the
+ ;; person's web state (:seon.user/focus) to its place and opens it (docs/decisions.md, The page is a friendly chat)
+ :seon.user/place [:or {:description "The place an offer takes the person: the lookup :seon.user/focus holds, an agent's key or a task's id."}
+                   [:tuple [:= :seon.agent/key] :string] [:tuple [:= :seon.task/id] :string]]
+ :seon.user/label [:string {:description "An offer's words on its button, in plain words for the person."}]
+ :seon.user/offer [:map {:seon.render/hiccup seon.render.ui/offer :description "A place an agent offers the person: a button that, tapped, sets their web state there and takes them to it."}
+                   [:seon.user/place :seon.user/place] [:seon.user/label :seon.user/label]]
  ;; what an agent's entry reads where a user's pull joins the agents it started (seon.render.ui/agent's nested form): its identity, its
  ;; process's status, its branch and turns, when it started, its name when it is a user, its task; the agents it started again, to
  ;; :seon.config.render/agent-tree-depth levels (a depth join), and below the last only their ids (its :seon.ctx/below option), so an entry says how
