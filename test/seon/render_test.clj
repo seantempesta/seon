@@ -3159,6 +3159,33 @@
       (is (str/includes? head "1 task parked") "the head says so, in the state's plain word, with what it counts")
       (is (str/includes? head "1 task running") "a finished task is not running, whatever its execution still says"))))
 
+;; See docs/cost.md#what-is-measured
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-cost-report-shows-every-dimension-its-estimate-states
+  ;; seon.render.ui/cost-report's columns are seon.cost/dimensions its rows' estimates state; a hand list of them lacked :ticks, the
+  ;; owner's measure, so a proof held in ticks showed no ticks
+  (let [html (h/html (ui/cost-report {:seon.render/index (seon.db/index)}
+                                     {:rows [{:n 2 :measured {:ticks 900.0 :bytes 1000.0} :expected {:ticks 800.0 :bytes 2000.0}}]
+                                      :verdict {:ok? true :over [] :steeper [] :under [] :unmeasured []}}))]
+    (is (str/includes? html "ticks measured / estimate") html)
+    (is (str/includes? html "bytes measured / estimate"))
+    (is (< (str/index-of html "ticks measured") (str/index-of html "bytes measured")) "in the verdict's order")))
+
+;; See docs/render.md#how-the-work-stands
+(deftest ^{:seon.test/estimate {:ticks 2000000}} an-agents-standing-is-its-enums-words
+  ;; owner, 2026-11-14: a list that restates data is derived. How a value of :seon.agent/status, :seon.agent/outcome and
+  ;; :seon.task/outcome reads is that enum's :seon.status/title and :seon.status/tone, so a schema that says it otherwise is read
+  (binding [malli.registry/*registry* (malli.registry/composite-registry
+                                        (malli.core/default-schemas)
+                                        {:seon.agent/status [:enum {:seon.status/title {:idle "resting"} :seon.status/tone {:idle :ask}} :idle]})]
+    (let [s (ui/standing {:seon.agent/status :idle} nil)]
+      (is (= "resting" (:text s)) "its words are the schema's")
+      (is (= :ask (:tone s)) "and so is its tone")))
+  ;; every enum that states tones (each schema form whose properties hold :seon.status/tone) gives one to each value it titles
+  (let [toned (filter #(:seon.status/tone (seon.contract/properties %)) (keys seon.contract/forms))]
+    (is (<= 3 (count toned)) (str "the work's enums state their tones: " (vec toned)))
+    (is (every? (fn [k] (let [{:seon.status/keys [title tone]} (seon.contract/properties k)] (every? #(get tone %) (keys title)))) toned)
+        "every value with words has a tone")))
+
 (deftest how-an-agents-work-stands-is-said-from-its-data
   ;; owner, 2026-11-05: an agent whose task hit its turn cap read "waiting" and "idle", though a capped task is not woken
   ;; by a message. ui/standing is the one function the header and both agent lists ask (seon.reconcile/park-outcomes: a
