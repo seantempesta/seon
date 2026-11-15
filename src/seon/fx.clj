@@ -329,7 +329,7 @@
         (or (str/starts-with? p "resources/public/") (str/starts-with? p "web/")) :seon.env/web
         (= p "deps.edn") :seon.env/deps
         ;; the wiki and the task files, each read whole by its own reader (seon.doc/pages, seon.system/task-files): a class, so a
-        ;; wiki edit moves the tests that read the wiki and no other (a 4-line edit to docs/decisions.md ran 117 tests, 2026-11-11).
+        ;; wiki edit moves the tests that read the wiki and no other (a 4-line edit to docs/decisions.md ran 117 tests).
         ;; A .md file at the checkout's root (AGENTS.md, README.md) is the wiki's too, its top page (seon.doc): as the bin class,
         ;; which every process test and step takes, batch 77's AGENTS.md edit reran 463 of 1,785 tests and 36 of 40 steps
         (or (str/starts-with? p "docs/") (and (not (str/includes? p "/")) (str/ends-with? p ".md"))) :seon.env/docs
