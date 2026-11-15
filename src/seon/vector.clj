@@ -528,7 +528,7 @@
         held (d/pull db [:seon.library/inputs :seon.library/roots] [:seon.system/id :root])
         ;; a store never imported from a tree (a test's) holds no pins and no deps: nothing it depends on to read
         deps? (or (seq (source/pins-of db)) (get-in (d/pull db [:seon.system/source] [:seon.system/id :root]) [:seon.system/source :inputs :config :seon.env/deps]))]
-    (if (and deps? (not= in (:seon.library/inputs held)) (not= in (:library-asked st)))
+    (if (and (:library st) deps? (not= in (:seon.library/inputs held)) (not= in (:library-asked st)))
       (let [[st m] (step/ask st [:vectors :answers] [:library in]
                              {:op :fx :kind :library :prio -1
                               :req {:root (cfg/checkout) :pins (source/pins-of db) :since (or (:seon.library/roots held) {})}})]
@@ -589,12 +589,13 @@
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:conn "the store main's commits are read from (seon.db/at-commit)"
                 :model "the model id its vectors are made by (seon.vector/model-id)"
-                :texts "the texts one round asks for, :seon.config.vector/texts (0: none, the model never loads)"}
+                :texts "the texts one round asks for, :seon.config.vector/texts (0: none, the model never loads)"
+                :library "whether an idle round reads the dependency source, :seon.config.vector/library-source"}
        :ins {:main "main's commit notice {:t :commit}, a sliding buffer of one" :answers "the api's answers"}
        :outs {:to-api "its requests to the api: the :embed effect, the write to main"}
        :workload :io
        :ping-map-fn (fn [st] (-> (select-keys st [:running :embedded :written-t]) (assoc :unembeddable (count (:unembeddable st)))))})
-  ([args] {:rid 0 :pending {} :conn (:conn args) :model (:model args) :texts (:texts args) :running false :embedded 0 :written-t -1 :unembeddable #{} :owed [] :clean nil :seen nil})
+  ([args] {:rid 0 :pending {} :conn (:conn args) :model (:model args) :texts (:texts args) :library (boolean (:library args)) :running false :embedded 0 :written-t -1 :unembeddable #{} :owed [] :clean nil :seen nil})
   ([st _] st)
   ([st in m]
    (let [[st outs]

@@ -209,6 +209,7 @@
   [:seon.config.vector/batch-texts {:optional true} :seon.config.vector/batch-texts]
   [:seon.config.vector/max-tokens {:optional true} :seon.config.vector/max-tokens]
   [:seon.config.vector/texts {:optional true} :seon.config.vector/texts]
+  [:seon.config.vector/library-source {:optional true} :seon.config.vector/library-source]
   [:seon.config.vector/batch {:optional true} :seon.config.vector/batch]
   [:seon.config.vector/rrf-k {:optional true} :seon.config.vector/rrf-k]
   [:seon.config.vector/threads {:optional true} :seon.config.vector/threads]
