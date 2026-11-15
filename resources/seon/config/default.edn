@@ -1166,6 +1166,9 @@
  ;; holds the worker ~0.4 s, so a query waits behind at most one round. 0 embeds nothing and the
  ;; model never loads: bin/test's and bin/check's roots (SEON_EMBED_TEXTS), which never search.
  :seon.config.vector/texts #long #or [#env SEON_EMBED_TEXTS 64]
+ ;; Unit: files. How many text-index images seon.doc keeps in target/text-index/ (each ~52 MB on main), by content key: the newest
+ ;; are kept (the main's and a few branches' texts), the rest deleted when one is written (docs/vector.md#search).
+ :seon.config.vector/text-index-files-kept 3
  ;; Unit: requests. What one :embed step takes from the queue (seon.fx :batch): queries queued
  ;; behind a round are embedded together.
  :seon.config.vector/batch 16

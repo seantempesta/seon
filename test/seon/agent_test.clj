@@ -1153,15 +1153,20 @@
   ;; owner, 2026-10-22: a failure is task data and root reacts to it. The agent marks its
   ;; task failed on its branch, hands the task back (seon_done), and root, at the
   ;; agent's end, holds the task as :failed and reports it among the problems
+  ;; it waits on its own task's fact (the failure held on main), never the shared root's quiet: a sibling task kept live beside it
+  ;; (an attached outside agent, which no judge ends) held that quiet for good, and this test stopped at its 300 s bound 4 times on
+  ;; 2026-11-15, at loads 6.5 to 21 [M]; red before: await-quiet never answered while :live held the sibling
   (let [names (volatile! nil)
-        [_ f _ done seen] (in-agent (fn [{:keys [agent task] :as n}]
+        [_ f _ _ done seen] (in-agent (fn [{:keys [agent task ns] :as n}]
                                    (vreset! names n)
                                    [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} "(:reason (my.task/fail! \"the premise is refuted\" '(= 1 2)))"
+                                    {:op :attach :task (str ns "/s")}
                                     before-done {:op :done :agent agent}
                                     {:op :eval :agent "root"
-                                     :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
+                                     :code (str "(do (seon.system/await-db sys #(:seon.task/failure (datahike.api/entity % [:seon.task/id " (pr-str task) "])))"
                                                 " [(seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) " (pr-str task) ")"
-                                                " (select-keys (first (filter #(= " (pr-str task) " (:task %)) (get-in (my.root/problems sys) [:classes :failed :rows]))) [:task :reason :counterexample :open?])])")}]))]
+                                                " (select-keys (first (filter #(= " (pr-str task) " (:task %)) (get-in (my.root/problems sys) [:classes :failed :rows]))) [:task :reason :counterexample :open?])])")}])
+                                 {:decls [{:seon.task/name "s" :seon.task/plan "A sibling kept live." :seon.task/kind :work}]})]
     (is (= "the premise is refuted" (:value f)) (pr-str f))
     ;; and the answer says so itself: failed work is never reported done or merged
     (is (and (str/includes? (:line done) ":outcome :closed") (str/includes? (:line done) "the premise is refuted")) (pr-str done))
@@ -1183,11 +1188,15 @@
   ;; judged a task whose agent had no end, so it read "the agent wrote no end"
   ;; whatever its proofs said. The agent writes the end first, as a turn loop does: here its
   ;; one proof is not written, so the end is :red and names why
-  (let [[_ _ done seen] (in-agent (fn [{:keys [agent task]}]
+  ;; its end is read once :done answers (the judge settled the task before it answered, seon.system/judge!), never after the shared
+  ;; root's quiet, which a sibling task kept live (an attached outside agent) holds for good: this test stopped at its 300 s bound 5
+  ;; times on 2026-11-15 [M]; red before: await-quiet never answered while :live held the sibling
+  (let [[_ _ _ done seen] (in-agent (fn [{:keys [agent task ns]}]
                                     [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+                                     {:op :attach :task (str ns "/s")}
                                      before-done {:op :done :agent agent}
-                                     {:op :eval :agent "root"
-                                      :code (str "(do (seon.await/await-quiet sys (inc t-before-done)) " (ended-code task) ")")}]))
+                                     {:op :eval :agent "root" :code (ended-code task)}])
+                                  {:decls [{:seon.task/name "s" :seon.task/plan "A sibling kept live." :seon.task/kind :work}]})
         [t end] (:value seen)]
     (is (str/includes? (:line done) ":outcome :closed") (str "the answer is the verdict line: " (pr-str done)))
     (is (= :red (:outcome end)) (pr-str end))
@@ -3851,6 +3860,18 @@
         v (:value r)]
     (is (= :seon.process/env-mismatch (:type v)) (str "the spawn is answered with the refusal: " (pr-str v)))
     (is (nil? (:id v)) "and no agent is handed back to serve")))
+
+;; docs/source.md#the-binary-records-its-program: the tree an agent's binary is checked against is the one its program comes from. A
+;; resumed branch whose merge base was swept runs main's program as forked (seon.agent/init!), so it is checked against main's tree;
+;; red before: init! read the branch's own old source fact and refused every such resume :seon.process/env-mismatch (:main/tests,
+;; :main/tests-meas1 at root, 2026-11-15, result/b8473e2f), though it runs main's program
+;; Estimate: two test dbs and two pulls ~ 300,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-resume-whose-base-was-swept-is-checked-against-mains-tree
+  (let [at (fn [tree] (d/db-with (ts/test-db) [{:seon.system/id :root :seon.system/source {:tree tree :commit "c" :dirs ["src"]}}]))
+        main (at "main-tree") branch (at "old-tree")
+        lost {:seon.error/type :seon.db/no-merge-base :seon.error/operation 'seon.db/branch-base :seon.error/message "swept" :branch :b :commit nil}]
+    (is (= "main-tree" (agent/source-tree main branch lost)) "a swept base: the tree of main's program, which it runs")
+    (is (= "old-tree" (agent/source-tree main branch nil)) "a branch with its base: its own tree, as before")))
 
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-session-restored-at-an-older-commit-runs-that-commits-definitions
   ;; docs/storage.md#compiled-code: a spawn with {:branch b :commit C}
