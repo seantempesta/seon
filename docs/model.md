@@ -1,10 +1,10 @@
 # The model
 
-An agent's turns are answered by one function of a provider value and a request, `seon.model/complete`; the provider comes from the config profile, and there is none unless one is named.
+An agent's turns are answered by one function of a provider value and a request, `seon.model/complete`; the provider comes from the config profile, and with none named it is DeepSeek.
 
-## No default model
+## The default model
 
-A root started without `--profile NAME` ([config](config.md#layers)) has no model provider: an agent it starts ends at its first turn on `:seon.model/no-provider`, whose message names what to set. A test fixture must never run in production as if it were a model, so nothing is chosen for you.
+A root started without `--profile NAME` ([config](config.md#layers)) runs its agents on DeepSeek, as `--profile deepseek` does (owner, 2026-11-15: "just make deepseek the default"; a root restarted with no profile had left agents with no provider). `--set :seon.config.ai/provider=:none` turns paid calls off: an agent then ends at its first turn on `:seon.model/no-provider`, whose message names what to set. A test fixture never runs as a model: `bin/test`, `bin/check` and every test child run under `--profile scripted`.
 
 The profiles (aero's `#profile`, read by `seon.config/profile`):
 - `deepseek`: the OpenAI-compatible endpoint of `:seon.config.ai/providers`, model `:seon.config.ai/model` (deepseek-flash unless `SEON_AI_MODEL` says otherwise);
