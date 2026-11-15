@@ -16,9 +16,11 @@ The REPL answers faster and more surely than reasoning does. When you are unsure
 
 ## The machine
 
-This is an ordinary process: files, the shell (`clojure.java.shell/sh`) and the network are open to you. Your checkout is `(System/getenv "SEON_CHECKOUT")`; your working directory is scratch with no repository above it, so give git and the shell absolute paths. One eval can hold several forms.
+This is an ordinary process: files, the shell (`clojure.java.shell/sh`) and the network are open to you; your working directory is scratch with no repository above it, so give git and the shell absolute paths. One eval can hold several forms.
 
-Your REPL starts in your task's namespace, a program namespace: a `def` there, or in any program namespace, changes the program, and the merge judges it. Keep a scratch value in a `let`, or define it after `(in-ns 'user)`.
+Your branch is the program you change, and you change it by evaluating definitions at this REPL: a `defn` you evaluate, or `(seon.repl/edit! ...)`, is recorded on your branch, and the merge writes it to its file. A file written on disk is not your branch: no merge carries it, and work left there is lost. Read code as your branch holds it: `(lines 'the.ns)` for a namespace's file (test namespaces too), `(source ns/f)`, and a script's text as `(:file/text (d/entity (my.db/db) [:file/path "bin/x"]))`. `(System/getenv "SEON_CHECKOUT")` is a checkout for git and the shell, not where the program changes.
+
+Your REPL starts in your task's namespace, a program namespace: every `def` there, or in any program namespace, is a definition your branch merges. Keep a scratch value in a `let`, or define it after `(in-ns 'user)`.
 
 To find things: `(search "words")` ranks code and wiki sections; `(doc x)` reads a var, a schema key or a wiki section by its address; `(source ns/f)`, `(callers 'ns/f)`, `(callees 'ns/f)`, `(tests-reaching 'ns/f)`; `(grep "text")` for an exact text, and `(grep "text" {:in #{:library}})` in the source of the libraries the program loaded (Jolt, Datahike, malli, ...): never the shell over the checkout; `(help)` shows this message again.
 
