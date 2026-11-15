@@ -9,7 +9,7 @@
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.merge :as pm]
-            [seon.program :as program] [seon.doc] [seon.config] [seon.source] [seon.profile :as profile] [seon.task]
+            [seon.program :as program] [clojure.string :as str] [seon.doc] [seon.config] [seon.source] [seon.profile :as profile] [seon.task]
             [seon.edn :as sedn] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg]
             [my.schema :as schema]
             [seon.source :as source] [seon.writer]
@@ -321,12 +321,24 @@
     (is (and (seq @seen) (every? #(#{:schema/key :schema/form :schema/file} (:a %)) @seen))
         (str "only schema entries' datoms are speculated: " (vec (distinct (map :a @seen)))))))
 
-(deftest a-tree-the-binary-was-built-from-states-no-schema-change
+;; Estimate: 34 schema files read by git show and imported into an empty db; measured at root 84M ticks for two such reads [M result/d73745fb],
+;; so ~40M for one
+(deftest ^{:seon.test/execs ["git"] :seon.test/estimate {:ticks 50000000}} a-tree-the-binary-was-built-from-states-no-schema-change
   ;; docs/source.md#a-program-file: the shipped schema resources, imported as the import reads them (seon.source/file-tx), are no change against the binary built
   ;; from them, so a root and a checkout on one tree key a test alike (seon.agent/branch-inputs mixes changes into :seon.env/schemas). Red on any entry the import writes otherwise
-  (let [dir (java.io.File. (str (seon.config/checkout) "/" seon.config/schemas-dir))
-        files (sort-by #(.getName ^java.io.File %) (filter #(.endsWith (.getName ^java.io.File %) ".edn") (.listFiles dir)))
-        db (reduce (fn [db f] (d/db-with db (source/file-tx (str seon.config/schemas-dir "/" (.getName ^java.io.File f)) (slurp f)))) (empty-db) files)]
+  ;; the schema files are the binary's own tree's (binary-program's :inputs :tree), never the checkout's now: an agent forked from a
+  ;; root whose binary is older than the checkout read newer files against older baked forms, and the test was red on main's agents
+  ;; (root, deps' read, 2026-11-16: 13 schema entries had loaded in place since root's build). A process with no recorded binary tree
+  ;; (the source-run test runner) baked its forms from the checkout, so it reads the checkout
+  (let [tree (get-in (program/binary-program) [:inputs :tree])
+        co (seon.config/checkout)
+        names (if tree
+                (filter #(.endsWith ^String % ".edn") (str/split-lines (:out (clojure.java.shell/sh "git" "-C" co "ls-tree" "--name-only" tree (str seon.config/schemas-dir "/")))))
+                (map #(str seon.config/schemas-dir "/" (.getName ^java.io.File %))
+                     (filter #(.endsWith (.getName ^java.io.File %) ".edn") (.listFiles (java.io.File. (str co "/" seon.config/schemas-dir))))))
+        text (fn [path] (if tree (:out (clojure.java.shell/sh "git" "-C" co "show" (str tree ":" path))) (slurp (str co "/" path))))
+        files (sort names)
+        db (reduce (fn [db path] (d/db-with db (source/file-tx path (text path)))) (empty-db) files)]
     (is (< 20 (count files)) "the shipped resources were read")
     (is (< 500 (count (d/datoms db :aevt :schema/key))) "and their entries imported")
     (is (= {} (program/schema-changes db)))))
