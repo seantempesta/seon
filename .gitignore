@@ -24,3 +24,6 @@ claude_scratch/
 # the OS's own files (Finder's .DS_Store): never content. The tree id holds every untracked file git does not ignore, so one
 # made the standing root's binary stale ("reaches .DS_Store", 2026-11-12); docs/source.md#the-binary-records-its-program
 .DS_Store
+
+# Read-only reference checkouts (AGENTS.md section 3): never tracked, never a pin. Pins are the submodules in .gitmodules, which this pattern does not untrack.
+/reference-code/*
