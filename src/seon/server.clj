@@ -485,10 +485,12 @@
                             outcome #(:seon.task/outcome (d/pull % [:seon.task/outcome] [:seon.task/id task]))
                             ;; the judge's own end answers (seon.reconcile/answer-judged): the task judged and past its merge (it
                             ;; left :running and the gate), or the typed error of a judge that left it :running, or root stopped
-                            j @(c/judge! sys {:task task :env env :agent ag})
+                            j (c/judge! sys {:task task :env env :agent ag})
                             db @(:conn sys)]
                         (cond (contract/error? j) (assoc j :task task)
                               (:stopped j) (refused (str "root stopped while judging " task))
+                              ;; a reconciler step threw while judging: its flight never ends, the defect is the answer
+                              (:defect j) {:task task :defect (select-keys (:defect j) [:seon.error/type :seon.error/message])}
                               ;; green, behind main alone (seon.reconcile's judgment, bounded by max-behind): handed back again,
                               ;; which takes main first, as a model agent's turn loop does when it is told so
                               (= :behind (outcome db)) (op-answer sys ag req)

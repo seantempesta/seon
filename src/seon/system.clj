@@ -128,7 +128,7 @@
 (defn- exit-text {:malli/schema [:=> [:cat [:maybe :seon.lib/exit-status]] :string]}
   [x] (cond (:signal x) (str ": signal " (:signal x)) x (str ": exit " (:exit x)) :else ""))
 
-(declare deliver-rid answer-taken)
+(declare deliver-rid answer-taken defect)
 
 (def ^:private not-restored
   "What a spawn at a commit (:commit in its opts) does not restore, as the spawn's answer says it: only a session's definitions are in the store.
@@ -2107,11 +2107,21 @@
 (defn judge!
   "Hand an outside agent's task to the reconciler for judgement, as a turn loop's end
   is: proofs in a fork, the branch read, the agent retired. work {:task :env
-  :agent}. A promise of the judge's end, answered by the reconciler when the task has no flight left
-  (seon.reconcile/answer-judged): {:task :outcome}, the typed :seon.reconcile/judge-left-running, or {:stopped true} when
-  root stopped. The producer's own answer, never a quiet of the whole root."
-  {:malli/schema [:=> [:cat :seon.system/sys :map] :seon.host/promise]}
-  [sys work] (step/ask-edge (:judge sys) (assoc work :op :judge) {:stopped true}))
+  :agent}. Waits for the judge's end, answered by the reconciler when the task has no flight left
+  (seon.reconcile/answer-judged): {:task :outcome}, a typed :seon.reconcile/judge-left-running or judge-left-ready, or
+  {:stopped true} when root stopped; or {:defect problem} when a reconciler step threw after the ask (its flight then never
+  ends: a step that throws keeps its state), read on main as each commit lands (one promise, two producers, the first
+  answers). Never a quiet of the whole root."
+  {:malli/schema [:=> [:cat :seon.system/sys :map] :map]}
+  [sys work]
+  (let [p (promise)
+        t (:max-tx @(:conn sys))]
+    (step/ask-edge (:ext sys) {:op :await :k (keyword "seon.system" (str "await-" (lib/unique-id))) :pred #(some? (defect % t "seon.reconcile"))}
+                   {:stopped true} p)
+    (step/ask-edge (:judge sys) (assoc work :op :judge) {:stopped true} p)
+    (let [r @p]
+      ;; the defect edge answers main's db value; every other answer is a map of the judge's
+      (if (instance? datahike.db.DB r) {:defect (defect r t "seon.reconcile")} r))))
 
 (defn await-db
   "Main's first db value (now or as of a later commit) for which (pred db) holds. The wait is the api's state, checked in the

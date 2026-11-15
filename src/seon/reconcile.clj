@@ -1406,7 +1406,8 @@
 (defn- answer-judged
   "st with each wait on a task's judge (:judged, {task [promise]}) answered once the task has no flight: {:task :outcome} when it
   is settled?, the typed :seon.reconcile/judge-left-running when its flight ended and left it :running (nothing of root's will
-  move it); a task at :ready waits on, its merge to come as commits. Asked after every step, so the producer's own end answers
+  move it); a task at :ready waits on, its merge to come as commits, until root is quiet with it unmerged
+  (:seon.reconcile/judge-left-ready). Asked after every step, so the producer's own end answers
   its waiter, never a quiet of the whole root. O(waits)."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
@@ -1418,7 +1419,12 @@
                    (let [o (:seon.task/outcome (d/pull (:db st) [:seon.task/outcome] [:seon.task/id id]))
                          r (cond (settled? (:db st) id) {:task id :outcome o}
                                  (= :running o) (contract/error :seon.reconcile/judge-left-running #'seon.reconcile/answer-judged
-                                                                (str id "'s judge ended and left it :running: nothing root runs will move it") {:task id}))]
+                                                                (str id "'s judge ended and left it :running: nothing root runs will move it") {:task id})
+                                 ;; :ready (or :gate with nothing deferred) waits for its merge, until root is quiet with it unmerged:
+                                 ;; then nothing root runs will merge it (quiet: no flight, nothing live, nothing left to start)
+                                 (and (:quiet st) (nil? (:report st)) (empty? (:flights st)) (empty? (:live (:idx st))))
+                                 (contract/error :seon.reconcile/judge-left-ready #'seon.reconcile/answer-judged
+                                                 (str id " is " (name o) " and root went quiet without merging it") {:task id :outcome o}))]
                      (if r (do (doseq [p ps] (deliver p r)) (update st :judged dissoc id)) st))))
                st (:judged st))))
 

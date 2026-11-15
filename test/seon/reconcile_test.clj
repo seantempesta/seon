@@ -2417,7 +2417,10 @@
         (is (= {:task "demo/a" :outcome :failed} (deref p 0 :unanswered)) "its end answers it")))
     (testing "a task at :ready waits on for its merge"
       (let [p (promise) _ (step (st :ready) :judge {:op :judged :task "demo/a" :p p})]
-        (is (= :unanswered (deref p 0 :unanswered)))))))
+        (is (= :unanswered (deref p 0 :unanswered)))))
+    (testing "until root is quiet with it unmerged: nothing root runs will merge it (flow's review)"
+      (let [p (promise) _ (step (assoc (st :ready) :quiet true :idx {:live #{}}) :judge {:op :judged :task "demo/a" :p p})]
+        (is (= :seon.reconcile/judge-left-ready (:seon.error/type (deref p 0 :unanswered))))))))
 
 ;; docs/errors.md#nothing-crashes-and-nothing-hangs: an octopus merge whose request the writer answered with an error (a step that
 ;; threw, answered at its :dest) moved no member off :ready: (:results r) was nil, so each member's seon_done waited for its merge
