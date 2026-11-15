@@ -130,7 +130,7 @@ The order the areas work in now, each item with its owner; a later item starts w
 2. **Load within the machine:** proving goes through the one effects owner (`seon.fx/owner-proc`, a `:process` kind,
    admission from the cores) and `bin/prove` becomes its client; per-checkout shard sizing goes (tests; runtime reviews).
    Until it lands, no session starts a prove while the 1-minute load is over 18.
-3. **After boot, only Flow; nothing hangs** (owner: "once the flow system is up and running ... we must only use flow based systems for stateful processes. If we still have holdouts we need to port them"; runtime, the Flow specialist, ports every holdout: `seon.step/every-wait-past-a-bound-is-a-flow-message-from-the-one-timer`): every wait passes its declared bound and ends with `:seon.bound/reached` or a typed error:
+3. **After boot, only Flow; nothing hangs** (owner: "once the flow system is up and running ... we must only use flow based systems for stateful processes. If we still have holdouts we need to port them"; flow, the Flow specialist, ports each holdout with the area that owns it (runtime: effects, forks and loading): `seon.step/every-wait-past-a-bound-is-a-flow-message-from-the-one-timer`): every wait passes its declared bound and ends with `:seon.bound/reached` or a typed error:
    the fork (deps), the model call and the stalled eval (runtime's deadline slice; context's turn records the stall). Seven
    deadline mechanisms become this one.
 3a. **A process never runs a binary its branch doesn't name** (owner, 2026-11-14: "this shouldn't be possible"): a
