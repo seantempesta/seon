@@ -9,7 +9,7 @@
   and M1's proto.agents.task; the attributes are derived from resources/seon/schemas (session D1)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [datahike.db.utils :as dbu] [clojure.string :as str] [clojure.edn :as edn] [seon.merge :as pm] [seon.db :as pdb] [seon.edn :as sedn]
-            [seon.print :as print] [seon.ref :as ref] [seon.program :as program] [seon.config :as cfg] [seon.lib :as lib] [clojure.walk :as walk]))
+            [seon.print :as print] [seon.ref :as ref] [seon.program :as program] [seon.config :as cfg] [seon.lib :as lib]))
 
 ;; ---- identity --------------------------------------------------------------------
 

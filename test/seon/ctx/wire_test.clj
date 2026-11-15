@@ -547,7 +547,7 @@
       (let [part (fn [x] [[:message x] [{:role "user" :content x}] 1])
             id #(seon.lib/call-id "a1" %)
             turn! (fn [n prev xs] (let [ps (mapv (comp part str) xs)] (d/transact conn (wire/sent-tx @conn (id n) prev n ps)) ps))
-            digests (fn [ps] (mapv (fn [[ref ms t]] [ref t (mapv #(seon.lib/digest (seon.edn/encode (seon.edn/canonical %))) ms)]) ps))
+            digests (fn [ps] (mapv (fn [[ref ms t]] [ref t (mapv wire/part-digest ms)]) ps))
             back #(wire/assembly-parts @conn (id %))
             asm #(d/entity @conn [:seon.model-call/id (id %)])
             p1 (turn! 1 nil "ABC")

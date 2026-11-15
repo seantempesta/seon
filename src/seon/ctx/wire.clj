@@ -504,6 +504,14 @@
                   'my.agent/describe (cond-> ["@ctx"] (seq path) (conj (pr-str path)))
                   (:value (render/model ix0 es {:ix ix0 :handle (symbol "@ctx")}) es))))
 
+(defn part-digest
+  "The digest of message m as a stored part: its role, its content raw and length-prefixed, then the rest of it as canonical EDN
+  (seon.edn/canonical), so one message is one digest however it was built, and its content is never escaped to be hashed (pr-str of
+  a turn's 279k chars was 1.3M of sent-tx's 1.8M ticks). See docs/render.md#a-turn-stores-what-it-sent."
+  {:malli/schema [:=> [:cat :seon.model/message] :string]}
+  [{:keys [role content] :as m}]
+  (lib/digest (str role "\n" (count content) "\n" content (sedn/encode (sedn/canonical (dissoc m :role :content))))))
+
 (defn assembly-parts
   "The parts model call id sent, [[ref turn digests] ...] in order, its assembly resolved: the first :keep parts of its
   :seon.model-call/prev's, then its :add; a call with no prev holds them whole. nil when it stored none. Walks at most
@@ -527,7 +535,7 @@
   prev's (whole at a checkpoint). See docs/render.md#a-turn-stores-what-it-sent."
   {:malli/schema [:=> [:cat :seon.host/db :string [:maybe :string] :int [:vector :any]] [:vector :map]]}
   [db id prev n parts]
-  (let [dg #(lib/digest (sedn/encode (sedn/canonical %)))
+  (let [dg part-digest
         as (mapv (fn [[ref ms t]] [ref t (mapv dg ms)]) parts)
         before (when (and prev (pos? (mod n (cfg/value :seon.config.ctx/assembly-checkpoint-turns)))) (assembly-parts db prev))
         k (if before (count (take-while true? (map = before as))) 0)]
