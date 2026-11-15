@@ -158,7 +158,10 @@
       ;; every declared key is shipped; a key no schema declares is already refused by reading it (a branch's own key is declared by its schema: seon.config/of-entries)
       (is (= [] (remove (set (keys c)) (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.ai/temperature :seon.config.source/root :seon.config.source/gate-checkout :seon.config.root/profile :seon.config.proofs/max-cores :seon.config.proofs/max-load} (not= :scripted p) (conj :seon.config.ai/script))
                                                (config/keys-declared)))) p)))
-  (is (= {:kind :none} (config/provider (shipped :default))) "no profile: no provider, never the scripted model")
+  ;; no profile runs on the provider the shipped file states as its default, read through the resolver, never a literal here (owner
+  ;; 2026-11-15: tests don't hardcode defaults; the default itself is docs/decisions.md's, DeepSeek)
+  (is (= (:seon.config.ai/provider (shipped :default)) (:kind (config/provider (shipped :default)))) "no profile: the shipped default provider")
+  (is (not= :scripted (:kind (config/provider (shipped :default)))) "never the scripted model")
   (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider (shipped :scripted))))
   (is (= :openai-compat (:seon.config.ai/provider (shipped :deepseek)))))
 
@@ -345,7 +348,8 @@
         scripted (under ["--profile" "scripted"])
         deepseek (under ["--profile" "deepseek"])]
     ;; the profile's own values
-    (is (= :none (get-in none [:config :seon.config.ai/provider])))
+    (is (= (:seon.config.ai/provider (shipped :default)) (get-in none [:config :seon.config.ai/provider])) "no profile: the shipped default, as the resolver reads it")
+    (is (= :none (get-in (under ["--set" ":seon.config.ai/provider=:none"]) [:config :seon.config.ai/provider])) ":none only when set explicitly")
     (is (= :scripted (get-in scripted [:config :seon.config.ai/provider])))
     (is (= :openai-compat (get-in deepseek [:config :seon.config.ai/provider])))
     ;; recorded in the config in force, with its layer, and written as facts on main
@@ -588,3 +592,21 @@
           "and no layer of its parent's is left")
       (finally (reset! held h) (alter-var-root #'config/config (constantly c)) (alter-var-root #'config/sources (constantly s))
                (alter-var-root #'seon.config/built-layers (constantly layers0))))))
+
+;; Estimate: three layered resolutions of the shipped file, ~3M ticks each; ~10M ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-config-with-a-source-root-gates-on-it
+  ;; :seon.config.source/gate-checkout absent is the source root as it resolves, whatever layer names the root (the checkout's
+  ;; local.edn for the standing root). Derived once, in the one merge of the layers (config/layered), so every config this
+  ;; process holds has it: boot's own assoc lost it at 14:02 on 2026-11-15, when a landing moved a config entry and the writer
+  ;; wrote main's config again from the held config (seon.config/moved), so every process-test task ended :closed
+  (let [co (config/checkout)
+        base (config/load-layers co [])
+        at (fn [& layers] (config/layered (into base layers)))
+        {c :config srcs :sources} (at ["config/local.edn" {:seon.config.source/root "/merges"}])]
+    (is (= "/merges" (:seon.config.source/gate-checkout c)) "absent: the source root")
+    (is (= "config/local.edn" (get srcs :seon.config.source/gate-checkout)) "its layer is the root's")
+    (is (= "/gate" (:seon.config.source/gate-checkout
+                    (:config (at ["config/local.edn" {:seon.config.source/root "/merges" :seon.config.source/gate-checkout "/gate"}]))))
+        "a stated checkout wins")
+    (is (not (contains? (:config (at ["no root" {:seon.config.source/root nil}])) :seon.config.source/gate-checkout))
+        "no source root: none, and a merge reaching process tests is held saying so")))
