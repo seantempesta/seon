@@ -81,25 +81,36 @@
     (is (= {:seon.agent/key (seon.config/value :seon.config.root/user-name)} r) (str "a task released at root's REPL is the user's: " (pr-str resp)))))
 
 (deftest a-hangs-evidence-holds-roots-stall-state
+  ;; task seon.system/a-hangs-evidence-test-reads-only-its-own-agent: the root is shared with every test of the run, so other tests'
+  ;; agents and asks are in it, and a proc mid-step on their work past the ping's bound answers nothing (stall-state's contract: it
+  ;; is missing from :answered, never read as nil). So the test holds the shape of each part whose proc answered, and the whole of
+  ;; its OWN agent, idle and so answering; never what other tests left (red at 16:47 and 19:08 on the reconciler, mid-step)
   (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
         ;; with an agent of its own running, so an agent proc's state is read, then ended
-        r (ts/value-of (:response (ts/ask root {:op :eval :agent "root"
-                                                :code "(let [ag (seon.system/spawn! sys {}) s (seon.system/stall-state sys)] (seon.system/kill! sys ag) s)"})))]
-    (is (map? (:root r)) (pr-str r))
-    (is (every? #{:seon.system/stall-armed :seon.system/busy :seon.system/lost :pending :awaits} (keys (:root r))) "root's stall check and its open asks, nothing else of its state")
-    (is (map? (get-in r [:root :pending])) "every ask the api holds unanswered, by rid")
-    (is (and (seq (:fx r)) (every? #(every? (fn [k] (int? (get % k))) [:busy :in-flight :queued]) (vals (:fx r)))) "each effect owner's load")
-    (is (= #{:busy :in-flight :queued :done} (set (keys (get-in r [:fx :fx/server-op])))) "the server ops' owner among them: a parked connection's op is running, queued or answered")
-    ;; red before (batch 32's problems overrun): the api's ping answered only :agents :closing :pending, so :root was {} on every
-    ;; root and a hang's evidence never showed whether the stall check was armed or which agents it held busy
-    (is (boolean? (:seon.system/stall-armed (:root r))) "the armed flag, read whatever its value")
-    (is (set? (:seon.system/busy (:root r))) "the agents with an eval in flight, empty or not")
-    (is (map? (:agents r)) "each agent proc's, by pid")
-    (is (and (seq (:agents r)) (every? #(and (contains? % :stall-seen) (contains? % :last-frame-ms) (contains? % :holding) (= 0 (:held %))) (vals (:agents r)))) "with what its stall check reads, and the clone handshake it holds with what waits behind it (none here)")
-    (is (map? (get-in r [:reconciler :flight-steps])) "the reconciler's flights by task and the step each waits at")
-    (is (and (boolean? (get-in r [:reconciler :quiet])) (vector? (get-in r [:reconciler :waits])) (vector? (get-in r [:reconciler :live])))
-        "whether it is quiet, the waits on main it holds and its live tasks by id (the leak a hang's capture must name): what a parked await-db waits on")
-    (is (some #{:api} (:answered r)) "and the procs that answered, root's api among them")))
+        {:keys [ag s]} (ts/value-of (:response (ts/ask root {:op :eval :agent "root"
+                                                             :code "(let [ag (seon.system/spawn! sys {}) s (seon.system/stall-state sys)] (seon.system/kill! sys ag) {:ag ag :s s})"})))
+        r s
+        answered (set (:answered r))
+        mine (get-in r [:agents ag])]
+    (is (map? r) (pr-str r))
+    (is (contains? answered ag) "its own agent, idle, answered the ping")
+    (is (and (map? mine) (contains? mine :stall-seen) (contains? mine :last-frame-ms) (contains? mine :holding) (= 0 (:held mine)))
+        (str "with its stall fields and nothing held behind a handshake: " (pr-str mine)))
+    (is (every? #(contains? answered %) (keys (:agents r))) "an agent proc's state is read only from one that answered")
+    (when (contains? answered :api)
+      (is (every? #{:seon.system/stall-armed :seon.system/busy :seon.system/lost :pending :awaits} (keys (:root r))) "root's stall check and its open asks, nothing else")
+      (is (map? (get-in r [:root :pending])) "every ask the api holds unanswered, by rid")
+      ;; red before (batch 32's problems overrun): the api's ping answered only :agents :closing :pending, so :root was {} on every
+      ;; root and a hang's evidence never showed whether the stall check was armed or which agents it held busy
+      (is (boolean? (:seon.system/stall-armed (:root r))) "the armed flag, read whatever its value")
+      (is (set? (:seon.system/busy (:root r))) "the agents with an eval in flight, empty or not"))
+    (is (every? (fn [[_ m]] (every? #(int? (get m %)) [:busy :in-flight :queued])) (:fx r)) "each effect owner that answered gives its load")
+    (when (contains? answered :fx/server-op)
+      (is (= #{:busy :in-flight :queued :done} (set (keys (get-in r [:fx :fx/server-op])))) "the server ops' owner among them: a parked connection's op is running, queued or done"))
+    (when (contains? answered :reconciler)
+      (is (map? (get-in r [:reconciler :flight-steps])) "the reconciler's flights by task and the step each waits at")
+      (is (and (boolean? (get-in r [:reconciler :quiet])) (vector? (get-in r [:reconciler :waits])) (vector? (get-in r [:reconciler :live])))
+          "whether it is quiet, the waits on main it holds and its live tasks by id (the leak a hang's capture must name): what a parked await-db waits on"))))
 
 (deftest a-kill-is-answered-once-the-agents-end-is-recorded
   ;; docs/processes.md#the-agent-process: kill! answers the agent's view entry when its end is recorded, so a wait on it ends;
