@@ -42,6 +42,17 @@
     (vec (for [g order :let [[m :as same] (by g)]]
            (if (next same) (-> m (dissoc :assert) (assoc :asserts (mapv :assert same))) m)))))
 
+(defn- claims-of
+  "Who claims a test, as the status says it: a function of a test's name answering [{:task id :outcome o}], the tasks on db whose
+  :seon.task/proofs hold it, own (the asking task) left out. One scan of :seon.task/proofs, made at the first ask and shared by
+  every later one (round 2: an agent spent four turns of db queries learning whose test its change contradicted). See
+  docs/render.md#how-the-work-stands."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.task/id]] ifn?]}
+  [db own]
+  (let [m (delay (reduce (fn [m d] (update m (:v d) (fnil conj #{}) (:e d))) {} (d/datoms db :aevt :seon.task/proofs)))]
+    (fn [sym] (vec (for [e (sort (get @m sym)) :let [t (d/entity db e)] :when (not= own (:seon.task/id t))]
+                     (cond-> {:task (:seon.task/id t)} (:seon.task/outcome t) (assoc :outcome (:seon.task/outcome t))))))))
+
 (defn- refused
   "The done rule's reasons as the agent reads them, beyond its own red proofs (shown with
   the proofs): a red test names its failures and, as a red proof does, its source and the program
@@ -53,8 +64,8 @@
   the branch's work wrote or changed a test (its source differs from its merge base's): only such a stray red is
   offered the form that makes it a proof; another is main's test, which the work broke or its environment fails.
   See docs/render.md#how-the-work-stands."
-  {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done] [:vector :map] ifn? ifn? ifn?] [:vector :map]]}
-  [reasons reds src-of calls-of own?]
+  {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done] [:vector :map] ifn? ifn? ifn? ifn?] [:vector :map]]}
+  [reasons reds src-of calls-of own? claims]
   (let [rs (remove #(= :proof-red (:reason %)) reasons)
         defined? (comp some? src-of)
         gaps (vec (keep #(when (= :contract-gap (:reason %)) (:symbol %)) rs))
@@ -65,8 +76,10 @@
     (vec (concat
            (for [{:keys [reason symbol behind]} rs :when (not (#{:open :contract-gap :unmerged :open-problem} reason))]
              (case reason
-               (:regression :stray-red) (let [src (src-of symbol) calls (when src (calls-of symbol))]
+               (:regression :stray-red) (let [src (src-of symbol) calls (when src (calls-of symbol)) claimed (claims symbol)]
                                           (cond-> {:reason reason :test symbol}
+                                            ;; whose test it is: the tasks claiming it, so the agent knows in its first turn
+                                            (seq claimed) (assoc :claimed-by claimed)
                                             (seq (filter #(= symbol (:test %)) reds))
                                             (assoc :failures (failures (filter #(= symbol (:test %)) reds)))
                                             ;; its source and what it calls, as a red proof shows them
@@ -298,7 +311,8 @@
                    (task/unjudged db t (vec ds)))
         reds (vec (for [[p {:keys [failures]}] vs f failures] (assoc f :test p)))
         blockers (refused reasons reds #(doc/source-of db %) #(ctx/callees db %)
-                          #(or (nil? base) (not= (doc/source-of db %) (doc/source-of base %))))]
+                          #(or (nil? base) (not= (doc/source-of db %) (doc/source-of base %)))
+                          (claims-of db tid))]
     (cond-> {:reasons reasons
              ;; whether one of its proofs has been red on its branch (seon.turn/specified-tx writes it, once)
              :specified? (some? (:seon.task/specified-turn t))
