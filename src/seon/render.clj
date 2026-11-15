@@ -604,7 +604,8 @@
                             out (cond (::for env) nil
                                       as (do (vswap! outs assoc as (place as env' (apply f (dissoc o :seon.render/as) args))) nil)
                                       :else (with-id (emit w (let [raw (apply f o args)] (vreset! kept (:seon.render/kept (meta raw))) raw) env') (cond-> {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))} (var? f) (assoc :render (symbol f)))))]
-                        ;; an entity's own render for each other output, where no call answers that output for it
+                        ;; an entity's own render for each other output, where no call answers that output for it; told when the entity is
+                        ;; placed nested (in another's page), as its hiccup render is
                         ;; each in a run of its own at this edge (docs/failure-points.md, a component's render): a model render that throws
                         ;; is that output's defect, never the page's, which the person still reads; its error is data both see: a problem
                         ;; (health, the walk's :defects) and, in its place in the output, what the error schema's own render for that output answers
@@ -616,7 +617,7 @@
                                            (if-let [ef (some-> (render-for ix :seon.render/component-defect op) requiring-resolve)]
                                              (place op env' (ef {:seon.db/db ((:db w)) :seon.render/index ix} defect))
                                              [])))]
-                                    (try (place op env' (of {:seon.db/db ((:db w)) :seon.render/index ix} (or (first args) ev)))
+                                    (try (place op env' (of (cond-> {:seon.db/db ((:db w)) :seon.render/index ix} (:seon.render/nested opts) (assoc :seon.render/nested true)) (or (first args) ev)))
                                        (catch Exception e (model-defect e))
                                        (catch StackOverflowError e (model-defect e))))))
                         out)

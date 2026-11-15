@@ -1104,6 +1104,21 @@
     (is (= (:messages (seon.ctx.wire/request (cold db') db')) (:messages (seon.ctx.wire/request p1 db')))
         "its request after the write is the cold request of the same db")))
 
+;; See docs/render.md#a-page-is-a-kept-walk
+;; estimate: a seeded 3-eval agent (~5M), a walk drawn (~1M), ctx built whole again (~1M) and a walk drawn cold (~1M) = ~8M, 20000000
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-walk-after-ctx-is-built-whole-draws-cold
+  ;; seon.ctx/take-moved! answers :all when ctx was built whole since the last walk (a new agent, key or branch, or a db the state lost and
+  ;; got back); the kept walk is then drawn cold, never handed :all as what moved (red before: seon.render/walk's contract refused
+  ;; ":moved :all", and an outside seon_eval's page draw threw, data's pilot of 2026-11-15)
+  (let [db (seeded 3 nil)
+        [[p0 p1] _] (as-agent! db #(let [p0 (seon.repl/page-walk) d (:db @seon.agent/state)]
+                                     (swap! seon.agent/state assoc :db nil)
+                                     (swap! seon.agent/state assoc :db d)
+                                     [p0 (seon.repl/page-walk)]))]
+    (is (map? p0))
+    (is (and (map? p1) (= (:messages (seon.ctx.wire/request p0 db)) (:messages (seon.ctx.wire/request p1 db))))
+        "the walk after a whole build draws the same request, cold")))
+
 ;; See docs/render.md#the-page
 (deftest ^{:seon.test/estimate {:ticks 20000000}} an-agents-recent-errors-are-on-its-page-with-their-causes
   ;; estimate: a seeded 3-eval agent (~5M), a failed call and a failed eval written (~1M), its page and request drawn once (~3M)
