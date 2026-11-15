@@ -4726,19 +4726,16 @@
         (is (= [[:db.fn/retractAttribute [:seon.user/name "sean"] :seon.user/focus]] (txs o3)) "opening home retracts it")))
     (is (some? st1))))
 
-(deftest home-is-the-users-focus-else-roots-page
-  ;; docs/users.md#whats-on-screen: home is the signed-in person's focus, else root's page, which presents the system to them
-  ;; (owner, 2026-11-11: "the goal is mostly root running the presentation"; before, the person's own page)
-  (let [[main _ _] (paged-dbs)
-        a3 (fn [db] (:db/id (d/entity db [:seon.agent/key "a3"])))]
-    (is (= (#'p/location (signed-in-main main nil) :root) (#'p/location (signed-in-main main nil) :home)) "no focus: root's page")
-    (is (= (a3 (signed-in-main main "a3")) (#'p/location (signed-in-main main "a3") :home)) "a focus: its agent")
-    ;; a focused task (an agent launched it; its agent is made a moment later): root's page until its agent exists, then that agent's
+(deftest home-is-roots-chat-whatever-the-focus
+  ;; docs/decisions.md, The page is a friendly chat (2026-11-15): the person talks to root at /, and never learns other agents exist, so
+  ;; home is root's chat however the focus stands (a tab that opened an agent's page, or root's my.user/focus!, moved it before)
+  (let [[main _ _] (paged-dbs)]
+    (is (= (#'p/location (signed-in-main main nil) :root) (#'p/location (signed-in-main main nil) :home)) "no focus: root's chat")
+    (is (= (#'p/location (signed-in-main main "a3") :root) (#'p/location (signed-in-main main "a3") :home)) "a focus on an agent: still root's chat")
     (let [db (d/db-with (signed-in-main main nil) (seon.task/create-tx (signed-in-main main nil) [{:seon.task/ns 'request :seon.task/name "w" :seon.task/plan "Make w."}]))
-          db (d/db-with db [[:db/add [:seon.user/name "sean"] :seon.user/focus [:seon.task/id "request/w"]]])]
-      (is (= (#'p/location db :root) (#'p/location db :home)) "a focused task with no agent yet: root's page")
-      (let [db (d/db-with db [[:db/add [:seon.task/id "request/w"] :seon.task/agent [:seon.agent/key "a3"]]])]
-        (is (= (a3 db) (#'p/location db :home)) "its agent made: that agent's page")))))
+          db (d/db-with db [[:db/add [:seon.user/name "sean"] :seon.user/focus [:seon.task/id "request/w"]]
+                            [:db/add [:seon.task/id "request/w"] :seon.task/agent [:seon.agent/key "a3"]]])]
+      (is (= (#'p/location db :root) (#'p/location db :home)) "a focus on a task with its agent: still root's chat"))))
 
 ;; Stage 2a's walk (docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09): one pass over a pull renders the page and
 ;; the model's messages. A lab schema in a branch's index names each entity's two renders; recognition is the best match of the
