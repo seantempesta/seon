@@ -194,7 +194,7 @@ RUN=$(sed -nE 's/^(prove|test): run [^,]*, logs in (.*)$/\2/p' "$LOG" | tail -1)
 grep -q "proved green already" "$LOG" && print "proved by an earlier prove of this very tree: merging, nothing run"
 grep -E '^RED |^FAILED ' "$LOG" | cut -c1-200 | head -12
 LINE=$(grep -E ' bin/prove --merge .*: MERGE (OK|FAILED)' "$LOG" | tail -1)
-[[ -n $FAST ]] && LINE="fast lane: $(grep -cvE '^\s*$' "$FAST") tests by name, $(grep -E '^SHARD' "$LOG" | tail -1)"
+[[ -n $FAST ]] && LINE="fast lane: $(grep -cvE '^\s*$' "$FAST") tests by name, $(grep -E '^SHARD|^prove: nothing to run' "$LOG" | tail -1)"
 (( st == 0 )) && [[ $(tail -1 "$LOG") == "MERGE OK" ]] || fail "the proof is red: $LOG"
 [[ $(git rev-parse HEAD) == $PROVED ]] && git merge-base --is-ancestor "$OLD" HEAD || fail "the proved commit is not the commit that would land"
 { if [[ -n $MSG ]]; then cat "$MSG"; else print "Merge $B"; fi; print; print "$LINE"; } > "$LOG.msg"

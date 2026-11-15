@@ -270,7 +270,7 @@
 
 (defn changed-since
   "The files of the tree at root as it is on disk that differ from tree (a tree id seon.fx/tree-id made): git's diff of tree
-  against the files, submodules left out (a pin is a build input, which seon.system/binary-current judges), and each untracked
+  against the files, submodules left out (a pin is a build input, which seon.fx/runtime-for judges), and each untracked
   file git does not ignore whose content tree does not hold at its path, less :seon.config.source/tree-excludes' top-level paths. Each with its text (nil when gone), the mode
   of each the allow-list names, and, when any differs, the tree id now and HEAD's commit. About 40 ms on this checkout when
   nothing differs, where tree-id is ~0.4 s (git checking each submodule's files). Answers {:value {path text} :modes {path mode}
@@ -420,7 +420,7 @@
   git's or the reader's words."
   {:malli/schema [:=> [:cat :string :string] [:set :string]]}
   [root tree]
-  (let [lines (fn [args] (str/split-lines (git! {} root args nil)))
+  (let [lines (fn [args] (remove str/blank? (str/split-lines (git! {} root args nil))))
         ;; every EDN form a text holds, its tags kept as data (aero's #profile, #env): git show of several blobs is their texts end to end
         forms (fn [text] (let [r (java.io.PushbackReader. (java.io.StringReader. text)) end (Object.)]
                            (loop [acc []] (let [f (edn/read {:default tagged-literal :eof end} r)] (if (identical? end f) acc (recur (conj acc f)))))))
@@ -464,19 +464,23 @@
           (do (write-file {:req {:path (.getPath f) :text d}}) {:digest d}))))))
 
 (defn- build-differs
-  "What differs between the identity of the binary's tree (target/seon.tree) and tree's, named: each identity line the two do not
-  share, by its path (a build input or a pin) or its config key; the same lines binary-digest digests, so a mismatch always names
-  its cause. Every build input when the binary recorded no tree, or a tree's lines can't be read. Asked only on a mismatch."
-  {:malli/schema [:=> [:cat :string [:maybe :string] :string] [:vector :string]]}
-  [root built-tree tree]
-  (let [inputs (vec (cfg/value :seon.config.build/inputs))]
-    (if-not built-tree
-      inputs
-      (try
-        (let [a (identity-lines root built-tree) b (identity-lines root tree)
-              named (fn [l] (if (str/starts-with? l "[") (first (str/split (subs l 1) #"\s" 2)) (second (str/split l #"\t" 2))))]
-          (vec (distinct (map named (sort (concat (remove b a) (remove a b)))))))
-        (catch Throwable _ inputs)))))
+  "What differs between the identity of the binary's tree (in the checkout at root's repository) and tree's (in repo's), named: each identity line the two do not share, by its path
+  (a build input or a pin) or its config key; the same lines binary-digest digests, so a mismatch always names its cause. Every
+  build input when the binary recorded no tree. The :seon.fx/io-error of a tree whose lines can't be read; an interrupt passes.
+  Asked only on a mismatch."
+  {:malli/schema [:=> [:cat :string :string [:maybe :string] :string] [:or [:vector :string] :seon.error/base]]}
+  [root repo built-tree tree]
+  (if-not built-tree
+    (vec (cfg/value :seon.config.build/inputs))
+    (try
+      ;; each tree read where it was made: the binary's in this checkout's repository, the branch's in the source root's
+      (let [a (identity-lines root built-tree) b (identity-lines repo tree)
+            named (fn [l] (if (str/starts-with? l "[") (first (str/split (subs l 1) #"\s" 2)) (second (str/split l #"\t" 2))))]
+        (vec (distinct (map named (sort (concat (remove b a) (remove a b)))))))
+      (catch Throwable e
+        (if (intr/interrupt? e)
+          (throw e)
+          (error #'build-differs :seon.fx/io-error (str "what differs between trees " built-tree " and " tree ": " (step/error-msg e)) {:path root}))))))
 
 (defn runtime-for
   "The binary a process on tree's branch runs: {:binary its path :digest d} when the running binary's identity (its build record's
@@ -486,29 +490,33 @@
   check of which runtime a branch needs, made at every start (root's boot, an agent's, a test child's fork) and by the restart
   predicate; the program (src/'s forms) is not in it: a process loads its branch's forms as a diff. With {:scope :all}, for a
   process whose store holds no Seon program and so runs the binary's baked one, the src tree must be the binary's too, and the
-  answer adds :program, tree's src id. tree's digest is kept by tree id (tree-digest); a later ask costs one file read. See
+  answer adds :program, tree's src id. :record is the binary's build record to judge (default this process's,
+  seon.program/binary-program). tree's digest is kept by tree id (tree-digest); a later ask costs one file read. See
   docs/source.md#the-binary-records-its-program."
   {:malli/schema [:function [:=> [:cat :string] [:or [:map [:binary :string] [:digest :string]] :seon.error/base]]
-                  [:=> [:cat :string [:map [:scope {:optional true} [:enum :root :all]]]]
+                  [:=> [:cat :string [:map [:scope {:optional true} [:enum :root :all]] [:record {:optional true} [:maybe :map]]]]
                    [:or [:map [:binary :string] [:digest :string] [:program {:optional true} :string]] :seon.error/base]]]}
   ([tree] (runtime-for tree {}))
-  ([tree {:keys [scope] :or {scope :root}}]
+  ([tree {:keys [scope record] :or {scope :root record (program/binary-program)}}]
    (let [root (cfg/checkout)
          ;; a key a config may lack (seon.config's may-be-absent): absent, the checkout is the repository
          repo (or (get cfg/config :seon.config.source/root) root)
          read (fn [p] (let [f (java.io.File. (str root p))] (when (.isFile f) (str/trim (slurp f)))))
          ;; the RUNNING binary's identity, held since its boot (seon.program/binary-program): never target/seon's file, which a
          ;; later build replaces while this process still runs the old one (bin/update asked after its build, 2026-11-15)
-         built (:digest (program/binary-program))
+         built (:digest record)
          built-tree (read "/target/seon.tree")
          w (tree-digest root repo tree)
          src (fn [t] (when t (let [r (git-run {} repo ["rev-parse" "--verify" "--quiet" (str t ":src")] nil)]
                                (when (zero? (:exit r)) (str/trim (:out r))))))
          mismatch (fn [want why]
-                    (error #'runtime-for :seon.process/env-mismatch
-                           (str "target/seon's identity " (or built "(none recorded)") " is not tree " tree "'s " want ": " why)
-                           {:seon.process/binary-digest built :seon.process/branch-digest want :seon.process/tree tree
-                            :seon.process/differs (build-differs repo built-tree tree)}))]
+                    (let [differs (build-differs root repo built-tree tree)]
+                      (if (contract/error? differs)
+                        differs
+                        (error #'runtime-for :seon.process/env-mismatch
+                               (str "target/seon's identity " (or built "(none recorded)") " is not tree " tree "'s " want ": " why)
+                               {:seon.process/binary-digest built :seon.process/branch-digest want :seon.process/tree tree
+                                :seon.process/differs differs}))))]
      (cond (contract/error? w) w
            (not= built (:digest w)) (mismatch (:digest w) "build it")
            (= :all scope) (let [p (src tree)]
@@ -777,6 +785,30 @@
           (git! env wt (cond-> ["commit" "-q" "--no-verify" "-m" message] allow-empty? (conj "--allow-empty")) nil)
           {:value {:sha (git! {} wt ["rev-parse" "HEAD"] nil) :files (count files)}}))))
 
+(defn- merge-in-tree!
+  "Merge ref into the branch worktree wt has checked out, through that tree, as the one writer of it (the :git owner's one worker,
+  task seon.system/a-landing-restarts-root-only-for-a-binary-change, slice 2a): refused, merging nothing, when the tree holds an
+  edit or a staged change of its own; a merge that conflicts is aborted, the tree left as it was found, and answered typed naming
+  the conflicting paths, so no later commit is made in a MERGING tree. {:value {:sha :merged ref}} or :seon.fx/io-error. See
+  docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat :string :map :string] :map]}
+  [wt env ref]
+  (let [run (fn [args] (git-run env wt args nil))
+        _ (run ["update-index" "-q" "--refresh" "--ignore-submodules"])
+        dirty (concat (str/split-lines (:out (run ["diff" "--name-only" "--ignore-submodules"])))
+                      (str/split-lines (:out (run ["diff" "--cached" "--name-only" "--ignore-submodules"]))))
+        dirty (vec (distinct (remove str/blank? dirty)))]
+    (if (seq dirty)
+      (error #'seon.fx/git-commit :seon.fx/io-error (str "refused, nothing merged: " wt " holds changes of its own: " (str/join ", " dirty)) {:path wt})
+      (let [r (run ["merge" "-q" "--no-edit" ref])]
+        (if (zero? (:exit r))
+          {:value {:sha (str/trim (:out (run ["rev-parse" "HEAD"]))) :merged ref}}
+          (let [conflicts (vec (remove str/blank? (str/split-lines (:out (run ["diff" "--name-only" "--diff-filter=U"])))))]
+            (run ["merge" "--abort"])
+            (error #'seon.fx/git-commit :seon.fx/io-error
+                   (str "merging " ref " into " wt " conflicts, aborted (the tree as it was): " (if (seq conflicts) (str/join ", " conflicts) (str/trim (:err r))))
+                   {:path wt})))))))
+
 (defn git-commit
   "Commit files ({relative path text}) on branch of the repository at dir, with message,
   through git's plumbing: blobs, a tree from the branch's own with the files replaced, a
@@ -790,7 +822,16 @@
   seon.doc/review-message). Each file is first read as its reader reads it (unreadable), and one that doesn't refuses the commit. :modes ({path git mode}) gives a file's mode, 100644 otherwise. Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing
   to write), or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [dir branch files message allow-empty? modes base expect]} :req}]
+  [{{:keys [dir branch files message allow-empty? modes base expect merge]} :req}]
+  (cond
+    ;; {:merge ref}: ref merged into the branch's checked-out tree, by this effect's one worker (merge-in-tree!)
+    merge (let [ref (str "refs/heads/" branch) wt (checked-out-at dir ref)]
+            (if wt
+              (try (merge-in-tree! wt (let [who (cfg/value :seon.config.source/committer-name) mail (cfg/value :seon.config.source/committer-email)]
+                                        {"GIT_AUTHOR_NAME" who "GIT_AUTHOR_EMAIL" mail "GIT_COMMITTER_NAME" who "GIT_COMMITTER_EMAIL" mail})
+                                   merge) (catch Throwable e (error #'seon.fx/git-commit :seon.fx/io-error (step/error-msg e) {:path dir})))
+              (error #'seon.fx/git-commit :seon.fx/io-error (str "no worktree has " branch " checked out: nothing to merge into") {:path dir})))
+    :else
   (if (and (empty? files) (not allow-empty?))
     {:value {:sha nil :files 0}}
     (try
@@ -815,7 +856,7 @@
             ;; only from the head read above; a new branch only if none appeared meanwhile
             (git! {} dir ["update-ref" ref sha (if have? parent "0000000000000000000000000000000000000000")] nil)
             {:value {:sha sha :files (count files)}}))))
-      (catch Throwable e (error #'seon.fx/git-commit :seon.fx/io-error (step/error-msg e) {:path dir})))))
+      (catch Throwable e (error #'seon.fx/git-commit :seon.fx/io-error (step/error-msg e) {:path dir}))))))
 
 ;; ---- the wiki's history: what each section was last written against -----------------------
 
@@ -1288,9 +1329,10 @@
 
 (defn gate-answer
   "The system's answer a to the gate's run of tests (seon.system/prove-tree!'s, the run-tests-forked shape: :reports, :red,
-  :digests) as run-on-checkout answers it: {:results {test :pass|:fail} :failures {test [failure ...]} :digests}. A test
-  the run never reached (it is answered at its first red) is in none, so its branch keeps it deferred and asks again: never a
-  red it did not show. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  :digests) as run-on-checkout answers it: {:results {test :pass|:fail} :failures {test [failure ...]} :digests :no-verdict}. A test
+  the run never reached (it is answered at its first red), or one with no verdict (:no-verdict, its batch's error: the platform
+  failing), is in none, so its branch keeps it deferred and asks again: never a red it did not show. See
+  docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :map [:sequential :qualified-symbol]] :map]}
   [a tests]
   (let [red (set (:red a))
@@ -1299,7 +1341,8 @@
         results (into {} (for [t tests :let [s (cond (red t) :fail (passed t) :pass)] :when s] [t s]))]
     {:results results
      :failures (into {} (for [[t s] results :when (= :fail s) :let [fs (get fails t)] :when (seq fs)] [t (vec fs)]))
-     :digests (select-keys (:digests a) (keys results))}))
+     :digests (select-keys (:digests a) (keys results))
+     :no-verdict (select-keys (:no-verdict a) tests)}))
 
 (defn- kept-files
   "The files of a program store d a copy of it carries: its data, and the reach graphs and reads indexes kept for its trees
@@ -1324,7 +1367,7 @@
   cache (test-results), a run not all green keeping its logs beside its log; repo defaults to this checkout and branch
   to git's main (:seon.config.source/main); its failure is :seon.fx/io-error naming the step and its log."
   {:malli/schema [:=> [:cat [:maybe :seon.host/fn] :string :map] :map]}
-  [prove sha {:keys [repo files tests all? built?]}]
+  [prove sha {:keys [repo files tests all? built? candidate]}]
   (let [t0 (profile/now-ns)
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
@@ -1356,7 +1399,7 @@
               _ (when (and (empty? files) (.isFile (java.io.File. (str slot "/seon"))))
                   (doseq [n kept-build] (lib/sh "cp" "-c" (str slot "/" n) (str dir "/target/" n))))
               ;; the binary root runs, with its build record, over the clone bin/worktree --at took of the main tree's: what a gate's
-              ;; runner judges current for the candidate's tree (seon.system/binary-current) is the binary that is running
+              ;; runner judges current for the candidate's tree (seon.fx/runtime-for) is the binary that is running
               _ (when-not all?
                   (doseq [n ["seon" "seon.stamp" "seon.tree" "seon.program"]
                           :let [f (java.io.File. (str (cfg/checkout) "/target/" n))] :when (.isFile f)]
@@ -1376,7 +1419,7 @@
                       (doseq [n (kept-files d)]
                         (lib/sh "cp" "-c" (str (.getPath d) "/" n) (str to "/" n))))))
               ;; a gate's run builds only through its runner, when the binary is not current for the candidate's tree
-              ;; (bin/test's plan: seon.system/binary-current, rule (a)); the full run builds main's tree here, into its kept slot
+              ;; (bin/test's plan: seon.fx/runtime-for); the full run builds main's tree here, into its kept slot
               b (if (or all? built?) (apply lib/sh (concat clean ["nice" "-n" "15" "bin/build" "seon"] [:dir dir])) {:exit 0})
               _ (when (and all? (empty? files) (zero? (:exit b)))
                   (.mkdirs (java.io.File. ^String slot))
@@ -1388,13 +1431,19 @@
               ;; the gate: the system proves the candidate's checkout (prove, seon.system/prove-tree!, which root binds to this
               ;; effect's :ctx), named by exactly the deferred tests; its process tests run as items on dir, by the :process owner
               (let [a (if prove
-                        (prove {:checkout dir :tree (tree-id dir) :names (set tests) :mode :judge})
+                        (prove (cond-> {:checkout dir :tree (tree-id dir) :names (set tests) :mode :judge} candidate (assoc :candidate candidate)))
                         (error #'seon.fx/run-on-checkout :seon.fx/io-error "the gate has no system to prove its candidate on (the :tests effect's :ctx names no :prove-tree)" {:path dir}))]
                 (if (contract/error? a)
                   a
                   (let [v (gate-answer a tests)]
                     (vreset! green? (= (set tests) (set (keep (fn [[t s]] (when (= :pass s) t)) (:results v)))))
-                    {:value (assoc v :ms (profile/ms-since t0) :log log)})))
+                    (if (and (empty? (:results v)) (seq (:no-verdict v)))
+                      ;; no test has a verdict: the gate's answer is the platform's error, typed and held, never a red each
+                      (let [[t e] (first (:no-verdict v))]
+                        (contract/error :seon.prove/no-verdict #'seon.fx/run-on-checkout
+                                        (str "the gate's run answered no verdict for any of its " (count tests) " tests: " (:seon.error/type e) ": " (:seon.error/message e))
+                                        {:test t :no-verdict (:no-verdict v)}))
+                      {:value (assoc v :ms (profile/ms-since t0) :log log)}))))
             ;; the full run's shards cache their verdicts in this checkout's verdict cache, named to them,
             ;; so the verdicts read below are the ones its run wrote
             (let [out (str dir "/target/prove/run")
@@ -1427,7 +1476,10 @@
                                                         [t fs]))}
                             (not @green?) (assoc :kept kept))}))))))
         ;; the worktree's removal is recorded in the run's log: a failed one names what it left
-        (finally (let [run (java.io.File. (str dir "/target/prove/run"))
+        ;; the whole of target/prove: the full run's shard logs (run/) and the gate's item logs (items/: its build's, its seed's, each
+        ;; step's), which went with the worktree when only run/ was kept, so a gate whose build or seed failed kept no reason (the pilot
+        ;; gate of 2026-11-15 23:01, 277 of 281 tests failed with none)
+        (finally (let [run (java.io.File. (str dir "/target/prove"))
                        mv (when (and (not @green?) (.isDirectory run)) (lib/sh "mv" (.getPath run) kept))
                        rm (lib/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir)]
                    (spit log (str (when mv (str "\nkept the run's logs (not all green): " kept ": exit " (:exit mv) (:err mv)))
@@ -1653,7 +1705,7 @@
   "[st limits]: config-limits of the config this process holds, kept in the reader's own state st (under ::limits-of, with the
   config map it was derived from) and derived again only when the config in force is another value (seon.config/held is replaced
   only when a transaction touches an entry): a dial the owner turns reaches the next admission or grant, and every other one costs
-  one identical? compare, never a resolver read (~200k ticks a call). The :process owner's dispatch and seon.prove's grant read it.
+  one identical? compare, never a resolver read (~1k ticks a call, measured 953). The :process owner's dispatch and seon.prove's grant read it.
   See docs/config.md#the-test-services-three-limits."
   {:malli/schema [:=> [:cat :map] [:tuple :map [:map [:max-workers pos-int?] [:budget pos-int?] [:max-load [:maybe number?]]]]]}
   [st]
@@ -1761,6 +1813,17 @@
   [o dest r]
   (step/out! o :out {:dest dest :r r}))
 
+(defn- running-told
+  "The owner's running set ({:client :id :since-ns} of each request in flight its asker may stop, from :stoppable), told to the api's
+  view (seon.system's :server-ops) when it moved, so root's debug page lists each running server op; nil when none
+  moved. See docs/server.md#ops."
+  {:malli/schema [:=> [:cat :map :map :seon.host/volatile] :nil]}
+  [before st o]
+  (when-not (identical? (:stoppable before) (:stoppable st))
+    (step/out! o :out {:op :server-ops :kind (:kind st)
+                       :running (vec (for [[_ r] (:stoppable st)] (assoc (get-in r [:req :seon.fx/stop-key]) :since-ns (:in-ns r))))}))
+  nil)
+
 ;; an agent's failed effect is root's to count (seon.error, class :effect): the agent's facts of it
 ;; are on its branch, which health does not read; root code records its own (seon.error/asked-tx)
 (defn- outcome
@@ -1777,7 +1840,7 @@
                          :agent (get-in r [:dest :agent])}))
     (let [st (cond-> (charge st r)
                (:fkey (:request r)) (update :flight dissoc (:fkey (:request r)))
-               (::qk (:request r)) (update :stoppable dissoc (::qk (:request r)))
+               (::qk (:request r)) (as-> s (let [s' (update s :stoppable dissoc (::qk (:request r)))] (running-told s s' o) s'))
                (and (:seon.fx/class (:request r)) (:seon.fx/peak-processes (:outcome r)))
                (update-in [:peaks (:seon.fx/class (:request r))] (fnil max 0) (:seon.fx/peak-processes (:outcome r))))]
       (if (and limited? (:request r))
@@ -1866,7 +1929,9 @@
                           (wake-later (dissoc st :lim :read? :fresh :reading) m now))
             (= :run d) (let [[st ms] (batch (update st :queue dissoc qk) (assoc m ::qk qk))
                              ms (mapv #(cond-> % (:seon.fx/class %) (assoc :fkey (or (get-in % [:req :seon.prove/batch]) [:seq (:seon.fx/qk %)]))) ms)
-                             [st ms] (stoppable st ms)
+                             [st' ms] (stoppable st ms)
+                             _ (running-told st st' o)
+                             st st'
                              st (reduce (fn [st r] (if-let [k (:fkey r)]
                                                      (-> st (assoc-in [:flight k] {:class (:seon.fx/class r) :declared (:seon.fx/processes r) :tag (get-in r [:req :seon.prove/batch])
                                                                                    :test? (= :test (get-in r [:req :kind]))})

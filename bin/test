@@ -75,7 +75,7 @@ jobs=$(<$OUT/jobs)
 # a test or step that reaches a process of its own (a root, an agent, the binary) runs target/seon,
 # which its digest does not cover: that binary is built from this tree first (a no-op build costs
 # ~30-45 s) unless it is current for this tree, what differs reaching nothing root runs from its binary
-# (seon.system/binary-current, the plan's out/build). The plan names what it selected that reaches one (out/binary); nothing, no build
+# (seon.fx/runtime-for, the plan's out/build). The plan names what it selected that reaches one (out/binary); nothing, no build
 F=($OUT/shard-*.edn(N))
 # laws and health read the tree and answer in seconds, before any build: a run of their own beside the rest, whose red ends the run, shards and
 # steps, as no later result can make that tree mergeable and a red is reported as it stands (docs/merging.md#a-merge-runs-what-the-change-reaches)
@@ -90,7 +90,7 @@ FAST=(); if [[ ${WHAT:-} != tests && -s $OUT/steps ]]; then
   fi
 fi
 # built only when a selected key reaches it and it is not current for this tree (the plan's out/build:
-# seon.system/binary-current); bin/check and seon.system/booted-source ask the same rule (task
+# seon.fx/runtime-for); bin/check and seon.system/stale-binary ask the same identity (task
 # seon.system/every-reader-of-the-binarys-tree-asks-binary-current)
 if [[ -s $OUT/build ]]; then
   nice -n 15 "$ROOT/bin/build" seon > "$OUT/build.log" 2>&1 || { tail -5 "$OUT/build.log"; echo "TEST FAILED (bin/build seon: $OUT/build.log)"; exit 1 }

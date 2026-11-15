@@ -137,7 +137,7 @@
    "main's changes since the session's base"
    "host state: atoms, open files, sockets, fibers"])
 
-(declare answer-spawn insert-evals start-spawn no-room binary-current kill! prove-tree! stop! to-agent)
+(declare answer-spawn insert-evals start-spawn no-room kill! prove-tree! stop! to-agent)
 
 (defn- record-death
   "Agent aid's death, folded, and answered to the requests it died in (inflight): its died
@@ -507,21 +507,22 @@
     (seq (:evals opts)) (assoc-in [::inserting aid] (:evals opts)))))
 
 (defn stale-binary
-  "Why this root's binary is not current for its main, or nil: binary-current's answer for the tree main was last brought to
-  from outside (db's :seon.system/source :tree, moved only by an import or a landing), {:binary :tree :reaches}, where what differs
-  between the two trees reaches root's own code or a build input. What agents merged into main since is main's own and never a
-  mismatch (the db is the source of truth). Unknown is never current (binary-current's own rule: a main with a source tree on a binary whose build
-  recorded none names :missing :binary-tree), and a diff git cannot make is {:binary :tree :error}. Nil with no source tree
-  (a store seeded with no source: nothing known). Root's boot loads main's program over a stale binary's
-  (seon.program/load-all!), so agents fork from main's; what the answer names tells bin/system start to build. See
-  docs/source.md#a-boot-runs-mains-program."
+  "Why this root's binary is not current for its main, or nil: seon.fx/runtime-for's answer for the tree main was last brought to
+  from outside (db's :seon.system/source :tree, moved only by an import or a landing), the one binary identity:
+  {:binary the tree the running binary was built from :tree :reaches what differs (paths and config keys)}, or :error naming why when nothing
+  is named (no identity recorded, a tree git cannot read). What agents merged into main since is main's own and never a mismatch
+  (the db is the source of truth). Nil with no source tree (a store seeded with no source: nothing known). Root's boot loads main's
+  program over a stale binary's (seon.program/load-all!), so agents fork from main's; what the answer names tells bin/system start
+  to build. See docs/source.md#a-boot-runs-mains-program."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :map]]}
   [db]
-  (let [held (:tree (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root])))
-        built (program/binary-program)
-        r (binary-current db built held)]
-    ;; a diff git cannot make is no answer of current: held as what the row says
-    (if (contract/error? r) {:binary (get-in built [:inputs :tree]) :tree held :error (:seon.error/message r)} r)))
+  (when-let [held (:tree (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root])))]
+    (let [rt (fx/runtime-for held)]
+      (when (contract/error? rt)
+        (let [differs (seq (:seon.process/differs rt))]
+          (cond-> {:binary (get-in (program/binary-program) [:inputs :tree]) :tree held}
+            differs (assoc :reaches (vec differs))
+            (not differs) (assoc :error (:seon.error/message rt))))))))
 
 (defn- no-room
   "Why no agent can be started now, or nil: no fork server to fork it (refused before an agent proc and its socket are made: a socket the lost server closes would end that agent first, as a death), or too many live agents. n: the agents the start would leave, a Back's old one not among them."
@@ -531,18 +532,27 @@
     (= :lost (get-in st [:view :fork-server :status])) (fs/lost)
     (> n (cfg/value :seon.config.root/max-agents)) (refused 'seon.system/spawn! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)})))
 
+(defn- branch-holder
+  "The live agent holding what opts asks to start, or nil: the session's agent under its key (one live process per agent), else an
+  agent live on its branch. Live is a process: a live status (:seon.status/live) with its pid, or a spawn still answering its caller
+  (::spawning). An entry left by a kill, or a :spawning one with no process and no caller, holds nothing, so a resume is never
+  refused by its own stale entry."
+  {:malli/schema [:=> [:cat :map :map] [:maybe :keyword]]}
+  [st opts]
+  (let [live? (fn [aid] (let [a (get-in st [:view :agents aid])]
+                          (and a (not (:ended-ms a)) ((:seon.status/live (contract/properties :seon.agent/status)) (:status a))
+                               (or (:pid a) (get-in st [::spawning aid])))))]
+    (or (let [k (some-> (:key opts) keyword)] (when (and k (get-in st [:agents k]) (live? k)) k))
+        (and (:branch opts)
+             (some (fn [[aid a]] (when (and (= (:branch opts) (:branch a)) (live? aid)) aid))
+                   (get-in st [:view :agents]))))))
+
 (defn- spawn-agent
   "A new agent from opts, or the refusal answered to p: its branch held by a live agent, no fork server, too many agents. Answered at its hello (set-agent's :ready), or the end it meets first."
   {:malli/schema [:=> [:cat :seon.system/api-state :seon.host/volatile [:maybe [:or :seon.host/promise :map]] [:maybe :map]] :seon.system/api-state]}
   [st o p opts]
   (let [opts (cond-> opts (:branch opts) (update :branch #(pdb/on-main (pdb/conn-main (:conn st)) %)))
-      ;; one live process per agent: the session's agent (its key is its id) is not started again while one holds it
-      holder (or (and (:key opts) (get-in st [:agents (keyword (:key opts))]) (keyword (:key opts)))
-                 (and (:branch opts)
-                  (some (fn [[aid a]] (when (and (= (:branch opts) (:branch a)) (not (:ended-ms a))
-                                                 (not (task/gone-statuses (:status a))))
-                                        aid))
-                        (get-in st [:view :agents]))))]
+      holder (branch-holder st opts)]
   (cond
     holder (let [{:keys [task]} (get-in st [:view :agents holder])]
              (reply! st o p (refused 'seon.system/spawn! (str "branch " (:branch opts) " is held by live agent " holder
@@ -550,7 +560,12 @@
                                                           ": its seon_done or an end frees it")
                                      (cond-> {:branch (:branch opts) :agent holder} task (assoc :task task)))))
     (no-room st (inc (count (:agents st)))) (reply! st o p (no-room st (inc (count (:agents st)))))
-    :else (start-spawn st o p opts))))
+    ;; the resumed key's stale entry (no live process holds it: branch-holder) is reaped as an agent's end drops its own, so the
+    ;; spawn starts clean and nothing is left :spawning forever
+    :else (start-spawn (let [k (some-> (:key opts) keyword)]
+                         (cond-> st (and k (get-in st [:agents k]))
+                           (-> (update :agents dissoc k) (update :agent-procs dissoc k) (update ::inserting dissoc k) (assoc ::update true))))
+                       o p opts))))
 
 (defn- back-point
   "Where eval id of agent aid's branch (db, its head, named branch) stands, {:commit :branch :t}, or why it can't be gone back to: the earliest commit of the branch holding its code's and response's last write, a run again's included and a reader's opening of it not (seon.ctx.wire/at-t), and a new branch's name for it, which no earlier back to it holds, as the head has moved since. See docs/turn.md#an-agent-goes-back-to-an-eval."
@@ -717,7 +732,7 @@
               (if-not (and checkout (:branch (:source st)))
                 (reply! st o p (contract/error :seon.system/no-gate-checkout #'seon.system/ext-op "this root has no checkout to run process tests on (:seon.config.source/gate-checkout, or a source root)"))
                 (let [[st rid] (pend st p :gate nil)]
-                  (step/out! o :to-writer {:op :merge-candidate :branch (:branch m) :data-attrs :all :dest {:gate rid :tests (:tests m) :repo checkout :prio (:prio m 0)}})
+                  (step/out! o :to-writer {:op :merge-candidate :branch (:branch m) :data-attrs :all :dest {:gate rid :tests (:tests m) :repo checkout :prio (:prio m 0) :candidate (:branch m)}})
                   st)))
       ;; the test service (seon.prove): the request goes to its proc, the caller (a session, or an
       ;; agent's turn through its proc) is answered when the run it joined ends
@@ -819,7 +834,7 @@
                              (seq unread) (deliver-rid st o rid {:unread unread})
                              ;; no process test reached: the writer's analysis of the candidate was the check
                              (empty? (:tests dest)) (deliver-rid st o rid {:value {:results {}}})
-                             :else (do (step/out! o [:fx/tests :ask] {:req {:repo (:repo dest) :branch (:branch (:source st)) :files (:text r) :tests (:tests dest)}
+                             :else (do (step/out! o [:fx/tests :ask] {:req (cond-> {:repo (:repo dest) :branch (:branch (:source st)) :files (:text r) :tests (:tests dest)} (:candidate dest) (assoc :candidate (:candidate dest)))
                                                                      :prio (:prio dest 0) :dest {:rid rid}})
                                        st)))
         (:asked dest) (deliver-rid st o (:rid dest) (if (contract/error? r) r {:task (:asked dest)}))
@@ -981,6 +996,8 @@
       ;; an agent's errors since its last commit (seon.error/note, each of its class), counted across agents
       :errors (let [task (get-in st [:view :agents (:agent m) :task])]
                 (reduce (fn [st s] (problem st (err/sent->occurrence s (:agent m) task))) st (:entries m)))
+      ;; an effect owner's running set, replaced whole (seon.fx/running-told): root's debug page lists each running server op
+      :server-ops (if (= (:running m) (get-in st [:view :server-ops (:kind m)])) st (assoc-in st [:view :server-ops (:kind m)] (:running m)))
       ;; an effect owner's failed outcome (seon.fx/owner-proc)
       :problem (problem st (err/occurrence (:error m) (:class m) {:agent (:agent m) :task (get-in st [:view :agents (:agent m) :task])}
                                            (System/currentTimeMillis)))
@@ -1535,7 +1552,7 @@
   "The program of the tree at root as a seed indexes it, and the inputs bin/test keys verdicts by: {:program
   (seon.program/program-digest of the tree's index) :forms (the ids of its live forms, what seon.program/held? asks) :defs
   (its definition keys, seon.program/defined-keys: what a process on another program unmaps) :inputs
-  (seon.fx/inputs, whose :tree is the tree's git id: what binary-current and the source fact compare) :digest (seon.fx/binary-digest of that
+  (seon.fx/inputs, whose :tree is the tree's git id: what the source fact compares) :digest (seon.fx/binary-digest of that
   tree: the binary's identity, which seon.fx/runtime-for compares)}, or the error of a read, an analysis or the digest.
   The index is the build's cache, a store other than the one store because it is regenerable from the tree at any time
   and root never reads it: kept between builds under base (bin/build's target/seon.index, keyed by the schema and layout:
@@ -1584,7 +1601,7 @@
   test results by (seon.agent/test-inputs), and :program the binary's, the program those inputs describe; otherwise :program is
   main's at boot (main-digest, seon.program/program-digest) and no inputs. Another tree is seon.problems/stale-binary's row:
   stale, stale-binary's answer at this boot, is held as :stale-binary for the row. A binary built from
-  another tree and current for held's by reach (stale nil: what differs reaches nothing root runs, seon.system/binary-current)
+  another tree and current for held's by identity (stale nil: seon.fx/runtime-for answers current for held's tree)
   hands agents current-inputs, the inputs of held's tree (seon.fx/inputs of it), never its own: a binary current for
   another tree must not key verdicts by its own tree. Never imported. See docs/source.md#a-boot-resumes-from-the-db."
   {:malli/schema [:=> [:cat :map :string [:maybe :map] :string :map [:maybe :map] [:maybe :map]] :map]}
@@ -1620,107 +1637,6 @@
     (contract/error? rt) (str "the running binary is not current for " tree ": what differs is "
                               (str/join ", " (or (seq (:seon.process/differs rt)) [(:seon.error/message rt)])))
     (nil? inputs) "no inputs were written for the files (runs/root-inputs.edn)"))
-
-(defn- build-input?
-  "Is changed path p (with its git modes) something the binary bakes and no load of the db brings: a pin (a gitlink),
-  native code, deps.edn, bin/build, .gitmodules, or a class of resource the build compiles in (seon.fx/env-class: the
-  schemas, system.edn) or the shipped config. See docs/source.md#the-binary-records-its-program."
-  {:malli/schema [:=> [:cat :string :string :string] :boolean]}
-  [p old-mode new-mode]
-  (boolean (or (= "160000" old-mode) (= "160000" new-mode)
-               (str/starts-with? p "native/") (#{"deps.edn" "bin/build" ".gitmodules"} p)
-               (str/starts-with? p "resources/seon/config/")
-               (#{:seon.env/schemas :seon.env/system :seon.env/deps} (fx/env-class p)))))
-
-(defn- elsewhere?
-  "Does changed path p run from the checkout or from main, never the binary: tests, the wiki, task files, bin/'s scripts (but
-  bin/build), or a path the tree's id leaves out (:seon.config.source/tree-excludes, which no build reads)?"
-  {:malli/schema [:=> [:cat :string] :boolean]}
-  [p]
-  (boolean (or (str/starts-with? p "test/") (str/ends-with? p ".md") (str/starts-with? p "resources/seon/tasks/")
-               (and (str/starts-with? p "bin/") (not= p "bin/build"))
-               (some #(or (= p %) (str/starts-with? p (str % "/"))) (cfg/value :seon.config.source/tree-excludes)))))
-
-(defn baked-changes
-  "Of changed ([[path old-mode new-mode] ...], seon.fx/tree-diff's), the paths a binary bakes and no load of the db brings: every
-  build input (build-input?: a pin, native code, deps.edn, bin/build, the schemas, system.edn, the shipped config) and every
-  path no rule places (not src's .clj, nor run from the checkout or main: elsewhere?), such as the web assets the build compiles.
-  The one answer to \"what of this change can only a build of it run\": binary-current's, and prove-tree!'s refusal. See
-  docs/source.md#the-binary-records-its-program."
-  {:malli/schema [:=> [:cat [:vector [:tuple :string :string :string]]] [:vector :string]]}
-  [changed]
-  (vec (for [[p om nm] changed
-             :when (or (build-input? p om nm)
-                       (not (or (and (str/starts-with? p "src/") (str/ends-with? p ".clj")) (elsewhere? p))))]
-         p)))
-
-(defn- judged-path
-  "Where binary-current's answer for a binary built from tree from, judged for tree to over to's own program, is kept beside the
-  checkout's builds: target/binary-current/FROM-TO.edn for scope :root, FROM-TO.all.edn for :all (derived data, as
-  seon.fx/tree-diff's diff is). The answer is a function of the two trees and the scope, so whoever judged it with the tree's
-  program (the plan, bin/test) answers every later reader, a boot whose store holds another program among them. See
-  docs/source.md#the-binary-records-its-program."
-  {:malli/schema [:=> [:cat :string :string [:enum :root :all]] :string]}
-  [from to scope] (str (cfg/checkout) "/target/binary-current/" from "-" to (when (= :all scope) ".all") ".edn"))
-
-(defn binary-current
-  "Whether a binary built from built's tree (seon.program/binary-program's record, its :inputs :tree) runs tree's program as tree
-  would have it built: nil when it does, else {:binary its tree :tree tree :reaches [what differs that it bakes]}. Equal
-  trees are nil, and so is no tree (main holds no source fact: nothing known differs); a binary that recorded no tree
-  against a main that holds one is unknown, never current ({:missing :binary-tree}). What differs is git's changed paths between the two trees: a build
-  input (build-input?) is not current; a source file under src/ is not current when a var defined by one of its forms
-  that changed (its text on db, main holding tree's program, is not in the file as the binary's tree has it) is in
-  in scope, or when db holds no namespace of it (added or gone: what it held is unknown); a path
-  of none of these that does not run from the checkout or main (tests, the wiki, task files, bin/'s scripts) is not current. Anything
-  else (tests, the wiki, task files) is current. scope says which vars are in scope: :root (the default), root-reach of db's reach
-  graph, what root runs from its binary while its agents load the rest from main (a root booted on Seon's source: the stale-binary
-  row, a spawn refusal); :all, every var, for a process whose main holds no Seon source and so runs all of it from the binary
-  (bin/check's roots, on a store seeded with an example program; a test that runs the binary): the build bin/test's plan asks
-  and bin/check's steps. One answer for two trees and a scope: a caller holding the tree's own graph (opts' :graph, the plan's) keeps
-  both scopes' answers beside the builds (judged-path), which every later caller reads first, so a boot whose store holds another
-  program (a test's system) never answers otherwise than the plan did.
-  Cost: one git diff, one reach graph of db (or the caller's), O(changed files' forms).
-  See docs/source.md#the-binary-records-its-program."
-  {:malli/schema [:function [:=> [:cat :seon.host/db [:maybe :map] [:maybe :string]] [:maybe :map]]
-                  [:=> [:cat :seon.host/db [:maybe :map] [:maybe :string] [:map [:graph {:optional true} [:maybe :map]] [:scope {:optional true} [:enum :root :all]]]] [:maybe :map]]]}
-  ([db built tree] (binary-current db built tree {}))
-  ([db built tree {g :graph scope :scope :or {scope :root}}]
-   (let [from (get-in built [:inputs :tree])]
-     (cond
-       ;; no source fact: main was never brought to a tree, so nothing is known to differ
-       (nil? tree) nil
-       ;; a binary that recorded no tree, against a main that holds one, is unknown: never current
-       (nil? from) {:binary nil :tree tree :reaches [] :missing :binary-tree}
-       (= from tree) nil
-       ;; judged before over the tree's own program (the plan's graph, below): the answer for these two trees, whatever db asks
-       (.isFile (java.io.File. ^String (judged-path from tree scope))) (:answer (sedn/decode (slurp (judged-path from tree scope))))
-       :else
-       (let [changed (fx/tree-diff (cfg/checkout) from tree)]
-         (if (contract/error? changed)
-           ;; a diff git cannot make is no answer of current: the error, which a caller reads as not current
-           changed
-           (let [;; what the binary bakes: the build inputs and every path the rule cannot place (baked-changes)
-                 baked (baked-changes changed)
-                 src (for [[p] changed :when (and (str/starts-with? p "src/") (str/ends-with? p ".clj"))] p)
-                 given-g (some? g)
-                 g (or g (program/reach-graph db (fx/declared-refs graph/built-text)))
-                 reach (program/root-reach g cfg/config)
-                 ns-of (fn [p] (d/q '[:find ?n . :in $ ?p :where [?e :ns/file ?p] [?e :ns/name ?n]] db p))
-                 ;; a form changed when its text on db is not in the file as the binary's tree has it (required!'s test)
-                 changed-vars (fn [n p] (let [old (fx/tree-file (cfg/checkout) from p)]
-                                          (for [[id src] (d/q '[:find ?id ?src :in $ ?n :where [?ns :ns/name ?n] [?f :form/ns ?ns] [?f :form/id ?id] [?f :form/src ?src]] db n)
-                                                :when (not (and old (str/includes? old src)))
-                                                [k s] (:defines (get (:rows g) id)) :when (= :var k)] s)))
-                 ;; per changed file: its changed vars, or its path when db holds no namespace of it
-                 files (vec (for [p src :let [n (ns-of p)]] (if n {:vars (changed-vars n p)} {:path (symbol p)})))
-                 ;; the vars in scope (root's: root-reach; :all, every one) and every unheld path
-                 answer (fn [in?] (let [reaches (-> baked (into (for [{:keys [vars path]} files v (if path [path] (filter in? vars))] v)))]
-                                    (when (seq reaches) {:binary from :tree tree :reaches reaches})))
-                 r {:root (answer reach) :all (answer any?)}]
-             ;; a caller holding the tree's own graph (the plan's, bin/test) judged over the tree's program, so its answers are
-             ;; the two trees' and are kept for every later reader, a boot whose store holds another program among them
-             (when given-g (doseq [[sc a] r] (fx/write-file {:req {:path (judged-path from tree sc) :text (sedn/encode {:answer a})}})))
-             (r scope))))))))
 
 (defn- previous-end
   "How the root before this boot on main ended: the stop fact it wrote, or, when it wrote
@@ -2350,14 +2266,24 @@
   is proved here: its agent loads them as a diff. A tree whose identity differs would run its tests on this binary's build of what
   it changes, and store them at the tree's digests; it is proved by a build of its own (bin/prove --out DIR). A binary that
   recorded no identity is unknown, never current. See docs/merging.md#a-session-proves-through-root."
-  {:malli/schema [:=> [:cat :string] [:maybe :seon.error/base]]}
-  [tree]
-  (let [rt (fx/runtime-for tree)]
+  {:malli/schema [:=> [:cat [:maybe :map] :string] [:maybe :seon.error/base]]}
+  [record tree]
+  (let [rt (fx/runtime-for tree {:record record})]
     (when (contract/error? rt)
       (contract/error :seon.system/binary-not-current #'tree-refusal
                       (str "this tree can't be proved on the running system: " (:seon.error/message rt)
                            "; its tests would run on the system's build of what it changes. Prove it on its own build: bin/prove --out DIR")
                       {:binary (:seon.process/binary-digest rt) :tree tree :baked (vec (:seon.process/differs rt))}))))
+
+(defn prove-candidate!
+  "The merge gate's prove: the candidate's own store branch (candidate, the branch its :gate request names) proved by prove! in mode
+  (default :judge) on names, the deferred process tests, its process items, seed and build run on checkout at tree (the gate's
+  checkout, seon.fx/run-on-checkout). The branch's live agent answers the plan, or one spawned onto it: no tree branch, no catch-up of
+  files that came from the store. The run's answer, or its typed error. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  {:malli/schema [:=> [:cat :seon.system/sys [:map [:candidate :keyword] [:checkout :string] [:tree :string]]] :map]}
+  [sys {:keys [candidate checkout tree names mode]}]
+  @(prove! sys {:branch (pdb/on-main (pdb/conn-main (:conn sys)) candidate)} (set (map symbol names)) (or mode :judge)
+           {:checkout checkout :tree tree}))
 
 (defn prove-tree!
   "Prove the files of checkout (a worktree of this root's repository) at tree, its tree id (seon.fx/tree-id, what bin/build records):
@@ -2365,14 +2291,18 @@
   one :branch-for-tree op), its live agent or one forked onto it, and prove! of names in mode (default :judge). The run's answer,
   or a typed error: no tree on main to diff from, the catch-up's read failing, or a file it left out (:seon.system/catch-up-skipped,
   each named: a judgement of part of the files would be wrong). Once no run of it is in flight here, its agent ends and the branch
-  is dropped (tree-leave!); a run that comes meanwhile waits for the drop and makes the branch again.
+  is dropped (tree-leave!); a run that comes meanwhile waits for the drop and makes the branch again. With :candidate (the merge
+  gate's, through the :tests effect's :prove-tree), that store branch is proved instead (prove-candidate!).
   See docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :seon.system/sys [:map [:checkout :string] [:tree :string]]] :map]}
-  [sys {:keys [checkout tree names mode]}]
+  [sys {:keys [checkout tree names mode candidate] :as on}]
   (let [b (tree-branch tree)
-        refusal (tree-refusal tree)
-        c (when-not refusal (catch-up @(:conn sys) checkout {:fact? false}))]
+        refusal (when-not candidate (tree-refusal (program/binary-program) tree))
+        c (when-not (or candidate refusal) (catch-up @(:conn sys) checkout {:fact? false}))]
     (cond
+      ;; the merge gate's (its request names the candidate's store branch): that branch is proved on the checkout, with no tree
+      ;; branch and no catch-up (prove-candidate!). Here, not in the :prove-tree binding, so a running root takes it in place
+      candidate (prove-candidate! sys on)
       refusal refusal
       (nil? c) (refused 'seon.system/prove-tree! "main holds no tree of its checkout to diff a session's files from" {:checkout checkout})
       (contract/error? c) c

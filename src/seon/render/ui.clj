@@ -2459,7 +2459,7 @@
   stream's newest rows. It runs again only when :process changes."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
-  (let [{:keys [writer fork-server root-errors-total health events boot]} (ratom/realize (:process c))
+  (let [{:keys [writer fork-server root-errors-total health events boot server-ops]} (ratom/realize (:process c))
         stat (fn [label v & [means]] (when (some? v) [:span (cond-> {} means (assoc :title means)) [:span {:class "muted"} (str label " ")] (str v)]))
         sick (filter (fn [[_ h]] (pos? (:defects h 0))) health)]
     [:section [:h2 "root's process"]
@@ -2476,6 +2476,10 @@
         (cond (nil? boot) nil
               (or (nil? loaded) (zero? loaded)) "the image held main's program: no forms loaded"
               :else (str loaded " forms loaded" (when ms (str " in " ms " ms")))))]
+     ;; each running server op and who asked it, so one held for long is seen and stopped (seon_interrupt); a render reads no clock
+     (when (seq server-ops)
+       [:ul {:class "text-xs"} (for [{:keys [client id]} server-ops]
+                                 [:li (str "running: a server op of " client (when (some? id) (str ", request " id)))])])
      (when (seq sick)
        [:ul {:class "text-xs"} (for [[pid {:keys [defects newest]}] sick]
                                  [:li [:span {:class "text-error"} (str (kname pid) " ✕" defects)] " " [:span {:class "text-text-300"} (some-> newest (print/line (cell)))]])])

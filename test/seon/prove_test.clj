@@ -128,7 +128,7 @@
   ;; task seon.prove/a-main-run-whose-agent-dies-is-asked-again-or-said: main's run at a program move spawns its prove agent, which
   ;; dies at its start on another runtime (agent f3eb9fa024d0930d, 2026-11-15 16:34:36: its spawn answered
   ;; :seon.process/env-mismatch). Its failure is a :platform problem naming the program it could not prove and its owner, and main is
-  ;; asked again once a notice brings other inputs (a rebuilt binary), never again on the same ones (root). Red before: the want was
+  ;; asked again once a notice brings a newer program, never again on the same one (root). Red before: the want was
   ;; spent when asked, so nothing asked again until the program moved, and no problem named main unproved
   (let [value seon.config/value
         died (seon.contract/error :seon.process/env-mismatch 'seon.fx/runtime-for
@@ -151,6 +151,27 @@
             (str "its agent's death is a :platform problem naming its owner and the program left unproved: " (pr-str o2)))
         (is (empty? (asks o3 :spawn)) "the same inputs (program and binary) are not asked again: same inputs, same answer")
         (is (= 1 (count (asks o4 :spawn))) "a newer program is new inputs: main is asked again (a new binary is a new process, whose boot asks it)")))))
+
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-death-naming-another-binary-is-not-asked-again-on-the-same-program
+  ;; root's review of adf8de2a25: a failed main run's :binary is what its spawn's death names (target/seon on disk, read by
+  ;; seon.fx/runtime-for), which differs from the proc's own :binary (the running binary, fixed for the process) once target/seon is
+  ;; rebuilt under a running root. Same program, same process: the same inputs, so main is not asked again at each notice (it
+  ;; would spawn and die on every one). Red before: main-inputs-moved? compared the death's binary with the proc's, so every notice
+  ;; at the same program asked main again. Estimate: 3 notices and 1 answer through the step fn, ~20k ticks each = ~80k (measured 46k for its sibling in a shard)
+  (let [value seon.config/value
+        died (seon.contract/error :seon.process/env-mismatch 'seon.fx/runtime-for
+                                  "target/seon's identity 0b1d1e5 is not tree e6275967's 76dc758d: build it"
+                                  {:seon.process/differs [] :seon.process/binary-digest "0b1d1e5" :seon.process/branch-digest "76dc758d" :seon.process/tree "e6275967"})]
+    (with-redefs [seon.config/value (fn [k] (if (= k :seon.config.proofs/prove-main-on-commit) true (value k)))
+                  seon.db/at-commit (fn [_ c] c)
+                  seon.program/run-digest (fn [c] (str "dg-" (name c)))]
+      (let [note (fn [t pt] [:main {:t t :ops [] :commit (keyword (str "c" pt)) :program-t pt}])
+            [st o1] (feed (assoc (proc0) :binary "c7311e6b") [(note 6 6)])
+            [st _] (feed st [(answer-of (first (asks o1 :spawn)) died)])
+            [st o3] (feed st [(note 7 6)])
+            [_ o4] (feed st [(note 8 6)])]
+        (is (= {:program-t 6 :binary "0b1d1e5"} (:main-failed st)) "the failure keeps the binary its death named, as evidence")
+        (is (empty? (concat (asks o3 :spawn) (asks o4 :spawn))) "and no notice at the same program asks main again")))))
 
 (deftest ^{:seon.test/estimate {:ticks 500000}} an-answer-whose-child-died-is-never-remembered
   ;; THE PLAN 0.7 (root, 2026-10-27): a judge's run whose test child died answered every later ask
@@ -610,7 +631,24 @@
     (is (not (seon.contract/error? r)) (str "the run answers its verdicts, not the one test's error: " (pr-str r)))
     (is (= 1 (:pass r)) "the test that passed counts")
     (is (= [:seon.prove/no-verdict] (keep #(when (= "#'a.b-test/u" (:var %)) (:seon.error/type %)) (:reports r)))
-        "and the one ended at its wall bound is its own no-verdict")))
+        "and the one ended at its wall bound is its own no-verdict")
+    (is (not-any? #{'a.b-test/u} (:red r)) (str "a no-verdict is no red: " (pr-str (:red r))))
+    (is (= ['a.b-test/u] (keys (:no-verdict r))) "it is named as no verdict, with why")))
+
+;; docs/merging.md#the-test-service: a batch's own error (its child could not be forked, it died before a test began) is the platform
+;; failing: each of its items has no verdict, and the error holds, typed, for its asker; never a red per item. Red before: run-answer
+;; named every errored item in :red, and the gate (seon.fx/gate-answer) read each red as :fail: data's pilot, 2026-11-15 23:0x, met
+;; the merge gate's answer of 280 :fail from one batch's error (root). Estimate: one run-answer and one gate-answer of 2 items, ~50k.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-batchs-error-is-no-verdict-and-never-a-red
+  (let [died {:seon.error/type :seon.test/fork-refused :seon.error/message "the test child could not be forked"}
+        r (#'prove/run-answer {:selected ['a.b-test/t 'a.b-test/u] :digests {'a.b-test/t "d1" 'a.b-test/u "d2"}}
+                              {'a.b-test/t died 'a.b-test/u died})
+        g (fx/gate-answer r ['a.b-test/t 'a.b-test/u])]
+    (is (= [] (:red r)) (str "no item ran, so none is red: " (pr-str (:red r))))
+    (is (= #{'a.b-test/t 'a.b-test/u} (set (keys (:no-verdict r)))) "each is no verdict")
+    (is (= :seon.test/fork-refused (get-in r [:no-verdict 'a.b-test/t :seon.error/type])) "naming the batch's own error")
+    (is (= {} (:results g)) (str "the gate reads no :fail from it, so its branch keeps them deferred: " (pr-str g)))
+    (is (= :seon.test/fork-refused (get-in g [:no-verdict 'a.b-test/u :seon.error/type])) "and the gate's answer carries why")))
 
 ;; docs/merging.md#the-test-service: each asker is told an item's verdict as it lands, before it is answered, so a session's
 ;; bin/prove prints each test as it ends; an item with no verdict is told as :no-verdict, never left out

@@ -2228,7 +2228,7 @@
 
 (defn root-reach
   "The vars of reach graph g that root's process runs from its binary (root-forms' definitions). A change to one of them
-  is judged only by a binary built with it (seon.system/binary-current), and by every test that starts a root (root-digest).
+  is judged only by a binary built with it (seon.fx/runtime-for), and by every test that starts a root (root-digest).
   See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat :map :map] [:set :qualified-symbol]]}
   [{:keys [rows] :as g} cfg]

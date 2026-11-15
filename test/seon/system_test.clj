@@ -110,10 +110,10 @@
         mine (get-in r [:agents ag])]
     (is (map? (:root r)) (pr-str r))
     ;; its own agent, idle: it answered, and its state is whole
-    (is (or (contains? answered ag) (contains? (:unanswered r) ag)) "its own agent's proc, answered or named mid-step")
-    (when (contains? answered ag)
-      (is (and (map? mine) (contains? mine :stall-seen) (contains? mine :last-frame-ms) (contains? mine :holding) (= 0 (:held mine)))
-          (str "with its stall fields and nothing held behind a handshake: " (pr-str mine))))
+    ;; the one path that always asserts: its own agent was just spawned and is idle, so it answers, with its stall fields whole
+    (is (contains? answered ag) (str "its own agent, idle, answered the ping: " (pr-str (:unanswered r))))
+    (is (and (map? mine) (contains? mine :stall-seen) (contains? mine :last-frame-ms) (contains? mine :holding) (= 0 (:held mine)))
+        (str "with its stall fields and nothing held behind a handshake: " (pr-str mine)))
     ;; every other part is the shared root's (other tests' agents and asks are in it): its shape, never its contents; a proc
     ;; mid-step is named by its ::flow/site, never read as nil (red before, 2026-11-15 16:26: a stepping proc's state read as {})
     (is (empty? (filter answered (keys (:unanswered r)))) "a proc that did not answer is never listed as answered")
@@ -695,8 +695,9 @@
         (let [bridged (sh/sh (str checkout "/bin/land") "--bridge" checkout old new (str (:port root)))]
           (is (str/includes? (:out bridged) "entered main") (str "the bridge: " (:out bridged) (:err bridged))))
         (is (str/starts-with? (str (at-root doc)) marker) "the bridge's commit loaded the landed form into root")
-        (is (some #{'seon.system/held-inputs} (:reaches (at-root "(seon.system/stale-binary @(:conn sys))")))
-            "what the binary lacks is a form root runs: the case restart-for once restarted for")
+        ;; one binary identity (seon.fx/runtime-for): a src form the binary lacks is loaded in place, never a stale binary (the case
+        ;; restart-for once restarted for, and binary-current once named by reach)
+        (is (nil? (at-root "(seon.system/stale-binary @(:conn sys))")) "a src change is no stale binary: root loads it in place")
         (let [kept (at-root (str "(my.root/landed! sys " (pr-str tree) ")"))]
           ;; and builds nothing, though the binary lacks a form root runs (owner 2026-11-15: build only when a restart is about to boot,
           ;; or a build input moved): the running root holds the form, and a boot catches main's program up in place
@@ -733,17 +734,16 @@
                          blob (clojure.string/trim (:out (seon.lib/sh "git" "-C" here "hash-object" "-w" "--stdin" :in (str text "\n;; changed\n"))))]
                      (git env "update-index" "--add" "--cacheinfo" (str "100644," blob "," path))))
                  (let [t (clojure.string/trim (git env "write-tree"))] (.delete (java.io.File. idx)) t)))
-        refusal #(#'root/tree-refusal %)]
+        refusal #(#'root/tree-refusal (seon.program/binary-program) %)]
     (let [r (refusal (with "reference-code/jolt" :pin))]
       (is (= :seon.system/binary-not-current (:seon.error/type r)) (pr-str r))
-      (is (some #{"reference-code/jolt"} (:baked r)) "it names the pin the binary bakes")
+      (is (= ["reference-code/jolt"] (:baked r)) "it names the pin the binary bakes, and only it")
       (is (clojure.string/includes? (:seon.error/message r) "bin/prove --out") "and points at the tree's own build"))
     (is (nil? (refusal (with "src/seon/agent.clj" :src))) "a src change loads live: the system proves it")
     ;; context's driver, 2026-11-15: a branch changing src only was refused because main's schema files had moved since the
     ;; binary's build (the old rule diffed against the binary's tree); a schema is held and loaded as a diff, never baked
     (is (nil? (refusal (with "resources/seon/schemas/seon.facts.edn" :src))) "a schema change loads live: the system proves it")
-    (with-redefs [seon.program/binary-program (constantly nil)]
-      (is (= :seon.system/binary-not-current (:seon.error/type (refusal tree))) "a binary of no recorded identity is unknown, never current"))))
+    (is (= :seon.system/binary-not-current (:seon.error/type (#'root/tree-refusal nil tree))) "a binary of no recorded identity is unknown, never current")))
 
 (deftest ^{:seon.test/estimate {:ticks 1000000}} an-undeliverable-output-is-a-problem
   ;; docs/flow.md#the-proc-contract: Flow reports an output it can't deliver (a pid not in the graph, an unconnected out) and one
@@ -785,3 +785,17 @@
     (is (clojure.string/includes? other "Go on with your task") (str "another namespace's load is not the agent's task: " other))
     (is (not (clojure.string/includes? other "part of your task")) other)
     (is (clojure.string/includes? own "fixing that load is part of your task") (str "its own task's test namespace is: " own))))
+
+;; Estimate: four pure holder reads over a hand-made api state: ~50k ticks
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-resumed-agents-own-stale-entry-never-holds-its-branch
+  ;; data's pilot, 2026-11-15 [M result/df8817fb]: agent k159570deaf49ad6 was killed, and every resume of it was refused by its own
+  ;; entry: spawn!'s holder check counted the agent's :agents entry under its key whatever it was (killed, or :spawning with no pid
+  ;; and no caller waiting), and that entry was never reaped. A holder is a live process: a live status with a pid, or a spawn
+  ;; still answering its caller
+  (let [holder #'seon.system/branch-holder
+        st (fn [status pid spawning?] (cond-> {:agents {:k1 {:branch :b}} :view {:agents {:k1 {:branch :b :status status :pid pid}}}}
+                                        spawning? (assoc-in [:seon.system/spawning :k1] (promise))))]
+    (is (nil? (holder (st :killed nil false) {:key "k1" :branch :b})) "a killed agent's leftover entry holds nothing")
+    (is (nil? (holder (st :spawning nil false) {:key "k1" :branch :b})) "nor a :spawning entry with no process and no caller waiting")
+    (is (= :k1 (holder (st :idle 4242 false) {:key "k1" :branch :b})) "a live agent with its process holds its branch")
+    (is (= :k1 (holder (st :spawning nil true) {:key "k1" :branch :b})) "and a spawn still answering its caller holds it")))
