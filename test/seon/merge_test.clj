@@ -744,3 +744,27 @@
     (is (empty? (pm/entries merged)) "and the entry is settled")
     (testing "main moving the key again is a new conflict"
       (is (seq (:conflicts (pm/merge-main b0 resolved (as main :main (var-tx "f" "(- x)")))))))))
+
+;; Estimate: a test branch (~0.5M), 20 commits of one note each (~3M), changed-datoms over 20 commits (20 reads at ~20k and
+;; ~80 datoms: ~0.5M), one datoms-diff for the answer (~0.3M), ~4.5M = 4500000
+(deftest ^{:seon.test/estimate {:ticks 4500000}} a-branchs-change-is-read-from-its-commits
+  ;; deps, 2026-11-15: own-datoms read a branch's change by datoms-diff of base and head, ~3.1B ticks on lb76's change (30x
+  ;; its apply). Each commit keeps what it changed (Datahike d/changes), so changed-datoms reads the commits instead and
+  ;; answers what the diff answers, by [e a v]
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [e1 (get (:tempids (d/transact conn [{:db/id "a" :note/text "kept" :note/agent :k}])) "a")
+            base @conn
+            _ (dotimes [i 18] (d/transact conn [{:note/text (str "n" i) :note/agent :n}]))
+            _ (d/transact conn [[:db/retract e1 :note/text "kept"] [:db/add e1 :note/text "changed"]])
+            head @conn
+            fact (fn [ds] (into #{} (map (fn [x] [(:e x) (:a x) (:v x)])) (remove #(= :db/txInstant (:a %)) ds)))
+            t0 (jolt.host/ticks)
+            [gone added] (pm/changed-datoms base head)
+            dt (- (jolt.host/ticks) t0)
+            [dgone dadded] (d/datoms-diff base head :eavt [])]
+        (is (= (fact dadded) (fact added)) "what head added, as the diff answers it")
+        (is (= (fact dgone) (fact gone)) "and what it let go of")
+        (is (and (seq gone) (not-any? :added gone)) "read from the commits' changes (a retraction), never a diff of the values (a datom of base)")
+        ;; 20 commits: 20 changes values read (~20k ticks each) and their ~80 datoms
+        (is (< dt 1000000) (str "read from its 20 commits: " dt " ticks"))))))

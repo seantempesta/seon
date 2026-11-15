@@ -585,8 +585,25 @@
       tx)))
 
 
+(defn changed-datoms
+  "What head changed since base, as [gone added] datoms, read from the commits between them (d/changes); a diff of the two
+  values only for commits that kept no changes. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:tuple [:sequential :seon.host/datom] [:sequential :seon.host/datom]]]}
+  [base head]
+  ;; a value made by d/with since its commit keeps that commit's id: only two committed values (no uncommitted datoms,
+  ;; datahike.core/with's meta) are their commits, so only they are read from the commits
+  (let [committed? (fn [db] (nil? (:datahike/uncommitted (meta db))))
+        from (when (committed? base) (d/commit-id base)) to (when (committed? head) (d/commit-id head))
+        ch (when (and from to (not= from to))
+             (try (d/changes head from to)
+                  (catch clojure.lang.ExceptionInfo e
+                    (when-not (#{:datahike/changes-unrecorded :datahike/changes-not-ancestor} (:type (ex-data e))) (throw e)))))]
+    (cond (and from (= from to)) [[] []]
+          ch [(filterv (complement :added) ch) (filterv :added ch)]
+          :else (d/datoms-diff base head :eavt []))))
+
 (defn own-datoms
-  "The datoms head wrote since base, as [gone added] (datahike.api/datoms-diff of base and head, one read of what differs): each a
+  "The datoms head wrote since base, as [gone added] (`changed-datoms`: the commits' kept changes, else a diff): each a
   fact head owns (`owned?`: its transaction names no branch of main's and is not base's history, `shared?`, or head held and let go of it), of no derived attribute
   (the entity index's :derived-attrs) and no transaction's own facts. A value head holds only because main wrote it, or lacks because it never held it, is
   main's and left out. What seon.merge/merge-main writes onto main's head. See docs/merging.md#a-branch-merges-main-in."
@@ -594,7 +611,7 @@
   [base head main]
   (let [mains (tx-branch main (:max-tx main))
         tx? (fn [e] (some? (first (d/datoms head :eavt e :db/txInstant))))
-        [gone added] (d/datoms-diff base head :eavt [])
+        [gone added] (changed-datoms base head)
         ;; the derived attributes, as the entity index holds them (seon.db's :derived-attrs, made once), never asked per datom
         derived (:derived-attrs (pdb/index))
         kept (into #{} (filter #(and (keyword? %) (not= "db" (namespace %)) (not (derived %))))
