@@ -80,6 +80,21 @@
     (is (= [] (:answered v)) "no call of the agent's has an answer's time (a reply's or an error's): none was made")
     (is (zero? (:fx v -1)) "no effect is out")))
 
+;; Estimate: as a-turn-sends-its-model-call-and-returns: in-agent's setup ~1.5M + one ask ~0.25M; turn-merged's throw path writes one
+;; message on the branch (~0.2M) = ~2000000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :bytes 2000000 :asks 1}} a-merge-that-answers-an-error-is-the-turns-throw-never-green
+  ;; docs/merging.md#a-branch-merges-main-in: the writer answers a branch whose merge base was swept with its typed error, merging
+  ;; nothing; after a green status that read as "the merge brought nothing" and ended the run :green, unjudged
+  (let [[r] (at/in-agent (fn [{:keys [task]}]
+                           [(str "(let [st (assoc (seon.turn/start! {:task " (pr-str task) " :max-turns 3}) :pending {:merged :green :status {}})"
+                                 "      err (seon.contract/error :seon.db/no-merge-base 'seon.db/branch-base \"no merge base: swept\" {:branch :swept :commit nil})"
+                                 "      [k st'] (seon.turn/turn-merged st err)]"
+                                 "  {:k k :outcome (when (= :seon.turn/end k) (nth (seon.turn/turn-merged st err) 2)) :thrown (:thrown st')})")])
+                         {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
+        v (:value r)]
+    (is (not= :green (:outcome v)) (str "a merge that answered an error never ends the run green: " (pr-str r)))
+    (is (= 1 (:thrown v)) (str "it is the turn's throw, counted and the agent's to read: " (pr-str r)))))
+
 ;; Estimate: as seon.agent-test's work-with siblings: the world, built once a process (~3.2M), and one work! loop of 2 turns on it
 ;; (its start's reads and writes ~0.2M, a turn of a few datoms) = ~4M: 4000000; bytes: the world's seek and the two turns' facts,
 ;; ~4 MB; seconds: in-process work only, ~10 ms
