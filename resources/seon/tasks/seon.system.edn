@@ -172,4 +172,10 @@ Proofs, once ruled: a task file's declaration loads with the kind the ruling say
   :seon.task/kind :work
   :seon.task/proofs #{seon.server-test/a-sessions-checkout-is-proved-on-its-trees-branch}
   :seon.task/needs #{}
-  :seon.task/estimate #:seon.system{prove-tree! {:n 1, :order :constant, :ticks 5000000, :bytes 20000000}}}]
+  :seon.task/estimate #:seon.system{prove-tree! {:n 1, :order :constant, :ticks 5000000, :bytes 20000000}}}
+ {:seon.task/name "the-merges-tree-has-one-writer"
+  :seon.task/plan "Owner: runtime; reviewer flow (approved 2026-11-15, on slice 2a in seon.system/a-landing-restarts-root-only-for-a-binary-change, jolt/runtime fc25a5a948). The merge of main into .worktrees/merges becomes a request of the :git effect (seon.fx/git-commit {:merge ref}), whose one worker orders it against the write-back by construction. Conditions: (1) bin/update --merges-only goes and its one test moves onto the effect: a direct call of the perform is a second writer of the merges tree whenever a root runs on it (one owner per effect, docs/flow.md#effects-one-owner-and-its-workers-per-kind); (2) a conflicted merge runs git merge --abort and answers typed with the conflicting paths, so the next write-back never commits in a MERGING tree (prove it: a conflict, then a write-back that lands clean); (3) the git subprocess has its declared bound, so my.root/merges-caught-up!'s deref on a :server-op worker always ends. PROOF, red first: seon.fx-test/a-merge-and-a-write-back-sent-at-once-both-land-in-order."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.fx-test/a-merge-and-a-write-back-sent-at-once-both-land-in-order}
+  :seon.task/estimate #:seon.fx{git-commit {:n 2, :order :linear, :ticks 1000000, :bytes 500000}}
+  :seon.task/needs #{}}]
