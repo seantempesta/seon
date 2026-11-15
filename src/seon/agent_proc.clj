@@ -35,7 +35,7 @@
   descriptor is in its handshake (:holding), m waits in :held. The put never blocks this proc
   (core.async put!: one the channel cannot take now waits on it, in order, holding no thread):
   an agent that stops reading its socket left the blocking put (>!!) parked in this proc's
-  step, so the proc never took root's :stall? and no stall was recorded (docs/processes.md#a-stalled-agent).
+  step, so the proc took nothing more from its agent, its stall frame included (docs/processes.md#a-stalled-agent).
   An agent that reads nothing sends nothing, so the stall check sees it quiet."
   {:malli/schema [:=> [:cat :map :seon.wire/seon-msg] :map]}
   [st m]
@@ -127,9 +127,10 @@
                                           (= kind :eval) (assoc :running {:form (:forms msg)
                                                                           :since-ms (System/currentTimeMillis)})))]})]))
     :write [(cond-> (to-proc! st (:msg m)) (= :fx-reply (:op (:msg m))) (update :fx-out (fnil dec 1))) nil]
-    ;; root's stall check (seon.system's timer): a request in flight, no frame from the agent
-    ;; for longer than the stall bound and no effect of its outstanding is a stall, observed once
-    ;; per quiet spell
+    ;; root's stall check (seon.system's timer): a request in flight, no frame from the agent for longer than the stall bound
+    ;; and no effect of its outstanding is a stall, observed once per quiet spell. It stays only for what the agent cannot
+    ;; say itself (seon.agent/quiescent!): an eval pinned in a blocking foreign call; it goes with task
+    ;; jolt.host/a-blocking-call-on-a-main-carrier-parks
     :stall? (let [quiet (- (:now-ms m) (:last-frame-ms st (:now-ms m)))]
               (if (and (seq (:inflight st)) (not (:stall-seen st)) (> quiet (:stall-ms m)) (zero? (:fx-out st 0)) (not (:dead? st)))
                 [(assoc st :stall-seen true)
@@ -158,6 +159,15 @@
   [st o m]
   (let [id (:id st)]
     (case (:op m)
+      ;; the agent deadlocked (seon.agent/quiescent!: no fiber can run, nothing it asked root owed): its stall, said by its
+      ;; source, once per quiet spell (its evidence, the fiber dump among it, root's stall task captures); quiet since the frame before it
+      :stalled (let [quiet (- (System/currentTimeMillis) (:last-frame-ms st (System/currentTimeMillis)))]
+                 (when-not (:stall-seen st)
+                   (step/out! o :to-api {:op :stalled :agent id
+                                         :error (contract/error :seon.agent/stalled #'seon.agent-proc/agent-frame
+                                                                (str "agent " (name id) " deadlocked with a request in flight: no fiber can run, and it waits on nothing root owes it")
+                                                                {:agent id :quiet-ms quiet :last-op (:last-op st)})}))
+                 (assoc st :stall-seen true))
       ;; a test of its run started (seon.agent/run-tests-forked): what it waits on now, which a
       ;; stall names
       :testing (assoc st :last-op {:kind :tests :form (:test m)})
@@ -326,7 +336,7 @@
        :ping-map-fn (fn [st] {:id (:id st) :pid (:pid st) :dead? (boolean (:dead? st)) :noise (:noise st)
                               ;; what root asked of it and holds unanswered, rid and kind: what a stuck agent is owed
                               :inflight (into (sorted-map) (update-vals (:inflight st) :kind)) :fx-out (:fx-out st)
-                              ;; what its stall check reads (:stall?): whether it reported one, and when its last frame came (nil: none yet)
+                              ;; its stall: whether the agent said one (seon.agent/quiescent!), and when its last frame came (nil: none yet)
                               :stall-seen (boolean (:stall-seen st)) :last-frame-ms (:last-frame-ms st)
                               ;; a clone's handshake it holds (the request id) and how many messages wait behind it: a held agent reads as held
                               :holding (:holding st) :held (count (:held st))})})
@@ -347,8 +357,10 @@
      :in (agent-in st m)
      ;; a value from the agent; nil: the end's :in closed (the process is gone)
      :from (let [o (volatile! {})
-                 ;; any frame is progress (the stall check reads it); the first after a stall ends it
-                 _ (when (and (:stall-seen st) (some? m)) (step/out! o :to-api {:op :spoke :agent (:id st)}))
-                 st (agent-frame (assoc st :last-frame-ms (System/currentTimeMillis) :stall-seen false) o (if (nil? m) {:op :dead} m))]
-             [st @o])
+                 ;; any frame but the stall itself is progress: the first after a stall ends it
+                 progress? (and (some? m) (not= :stalled (:op m)))
+                 _ (when (and (:stall-seen st) progress?) (step/out! o :to-api {:op :spoke :agent (:id st)}))
+                 st (agent-frame (cond-> st progress? (assoc :stall-seen false)) o (if (nil? m) {:op :dead} m))]
+             ;; progress, or its end, is a frame the stall evidence reads as the agent speaking; the stall itself is not
+             [(cond-> st (or progress? (nil? m)) (assoc :last-frame-ms (System/currentTimeMillis))) @o])
      [st nil])))

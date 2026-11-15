@@ -61,19 +61,39 @@
   :transport proc's in-port (seon.repl/transport-step), the socket's one reader. Made when first
   asked on this connection (a clone's is its own: its connection is new).
   See docs/processes.md#the-socket-and-the-agent-proc."
-  {:malli/schema [:=> [:cat] :seon.host/chan]}
+  {:seon.flow/edge "an edge reader for a blocking read: root's socket, read by one fiber marked a pump that puts each frame on the transport's in-port" :malli/schema [:=> [:cat] :seon.host/chan]}
   []
   (let [{c :conn ch :ch} @link]
     (or ch
         ;; unbuffered: the reader parks with each message until the transport takes it, so root's
         ;; further frames wait in the socket's own buffer
         (let [ch (a/chan)]
-          (a/io-thread (loop [] (let [m (sock/recv! c)]
+          ;; the socket's reader is root's to end (its frames, its EOF), never this program's work: marked a pump, so a wait on
+          ;; it holds no quiescence off, and a deadlock of the agent's own fibers is told (`quiescent!`)
+          (a/io-thread (jolt.host/fiber-pump!)
+                       (loop [] (let [m (sock/recv! c)]
                                   (if (= :eof m) (a/close! ch) (when (a/>!! ch m) (recur))))))
           (swap! link assoc :ch ch)
           ch))))
 
 (declare commit!)
+
+(defn quiescent!
+  "This process's quiescence handler (jolt.host/on-quiescent!, set by seon.repl/serve!): told the moment no fiber can run and no
+  timer is pending. With a request in flight (:busy) and nothing it asked root still owed (:waits, :fx-pending: a wait on root is
+  root's turn, ended by root's answer or the request's declared bound), nothing can ever move it: a deadlock, said to root once
+  per request as {:op :stalled}, which root records as the agent's stall and whose evidence (every fiber's dump among it,
+  seon.fx/stall-evidence) root captures. No clock: the stall is an event from its source (docs/flow.md#the-five-rules, rule 3).
+  What it never sees, and what ends each: a loop that never parks (its eval's tick budget, counted work); a fiber pinned in a
+  blocking foreign call (no fiber can be told while its carrier is in C: rule 5, a blocking call is an effect with its bound or
+  runs on a declared thread; task jolt.host/a-blocking-call-on-a-main-carrier-parks). nil."
+  {:malli/schema [:=> [:cat :string] :nil]}
+  [_dump]
+  (let [s @state]
+    (when (and (:busy s) (not (:stall-told s)) (empty? (:waits s)) (empty? (:fx-pending s)))
+      (swap! state assoc :stall-told true)
+      (send! {:op :stalled})))
+  nil)
 
 ;; ---- the agent's own API ------------------------------------------------------
 
@@ -246,18 +266,19 @@
   ;; ms: the request's declared bound. Past it the one timer (seon.step/put-after!) delivers the typed :seon.bound/reached as the
   ;; answer, so the wait ends whatever root does; an answer that comes later goes where an unawaited one does (handle!)
   ([k m ms]
-   (let [p (promise)]
+   (let [p (promise)
+         ;; an answer disarms the bound and closes its channel, so neither the timer nor the go block outlives the wait
+         due (when ms (a/chan 1))
+         h (when ms (step/put-after! due ms :due))]
      (swap! state assoc-in [:waits k] p)
      (when ms
-       (let [due (a/chan 1)]
-         (step/put-after! due ms :due)
-         (a/go (a/<! due)
+       (a/go (when (a/<! due)
                (deliver p {:op :reply :k k :result (contract/error :seon.bound/reached #'seon.agent/await-reply
                                                                    (str "root did not answer " (:op m) " within its bound of " ms " ms")
                                                                    {:seon.bound/bound {:seon.bound/ms ms} :seon.bound/spent {:seon.bound/ms ms}
                                                                     :seon.bound/at (keyword "seon.agent" (name (:op m)))})}))))
      (try (send! m) @p
-          (finally (swap! state update :waits dissoc k))))))
+          (finally (step/cancel! h) (some-> due a/close!) (swap! state update :waits dissoc k))))))
 
 (defn program-db
   "The db of the program this process holds (its :program reference: the branch as it loaded it at its start), which
@@ -332,7 +353,7 @@
   (when (:store-conn @state)
     (swap! state #(assoc % :fn-costs (profile/accrue (:fn-costs % {}) fns (:eval %))))))
 
-(declare transact!)
+(declare transact! release-plan)
 
 (defn commit!
   "Commit the writes this agent applied (run-ahead) to its branch, once, through its own
@@ -1037,21 +1058,25 @@
   ;; inherits it and the turn's other readers find it held (branch-changes)
   (branch-changes (:base @state) (db))
   (let [k (:tx-seq (swap! state update :tx-seq inc))
+        ;; the run's digest: its run's plans are held (`hold-plan`) while this ask awaits it; the answer names its run's key
+        d (program/run-digest (db))
         answered (volatile! false)]
+    (swap! state assoc-in [:proving k] d)
     (try
       (let [;; its proofs, the task's and those asked for by name: the service answers past a red until each has its verdict
             ;; (seon.prove/item-ended; Sean, 2026-11-11: "have them fix that"), which an ask that named none never got
             proofs (into (or (some->> (:task @state) (task/task (db)) :seon.task/accumulated :proofs) #{}) (filter qualified-symbol?) names)
-            r (:result (await-reply k (cond-> {:op :prove :k k :t (:max-tx (db)) :digest (program/run-digest (db)) :mode mode}
+            r (:result (await-reply k (cond-> {:op :prove :k k :t (:max-tx (db)) :digest d :mode mode}
                                         (seq names) (assoc :names names)
                                         (seq proofs) (assoc :proofs proofs))))]
         (vreset! answered true)
         ;; its facts on this branch, once an ask, from the answer and this agent's plan of the run
         (if (and (map? r) (not (contract/error? r)))
-          (record-answer! r (:held-plan @state) (or (some->> (:task @state) (task/task (db)) :seon.task/accumulated :proofs) #{}))
+          (record-answer! r (get (:held-plans @state) (:key r)) (or (some->> (:task @state) (task/task (db)) :seon.task/accumulated :proofs) #{}))
           r))
       ;; an interrupt ended this wait, the only way one ends before its answer: the test child it was for goes too, so its run answers as a death (no verdict) and nothing is left running
-      (finally (when-not @answered (some-> (:test-child @state) (lib/kill! (jolt.host/signal-number "KILL")))))))))
+      (finally (swap! state release-plan k)
+               (when-not @answered (some-> (:test-child @state) (lib/kill! (jolt.host/signal-number "KILL")))))))))
 
 (defn- load-removed!
   "In a test child, define each of main's tests the branch removed that this run runs (test-plan's :removed, {test src}, of
@@ -1609,6 +1634,36 @@
    :plan (cond-> (select-keys (:plan sel) [:removed :process :base-digests :static-reads])
            (:reads-rd (:plan sel)) (assoc :reads-rd (force (:reads-rd (:plan sel)))))})
 
+;; docs/merging.md#the-test-service: runs of one branch overlap (a turn's prove!, root's :judge, a session's run, each its
+;; own ask of the service, at one digest or two), so a plan is held under its run's key, never in one slot the next plan overwrites
+(defn- hold-plan
+  "Agent state st holding plan (held-plan) of run key k at digest d (seon.prove/plan! names both), beside the plans of the
+  digests some prove! of this agent still awaits (:proving, {ask digest}); any other is dropped, so what is held is the runs
+  in flight plus the newest. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map [:maybe :string] [:maybe :string] :map] :map]}
+  [st k d plan]
+  (let [awaited (set (vals (:proving st)))]
+    (assoc st :newest-plan k
+              :held-plans (assoc (into {} (filter #(awaited (:digest (val %)))) (:held-plans st)) k (assoc plan :digest d)))))
+
+(defn- release-plan
+  "Agent state st with prove! ask k answered or ended: k leaves :proving, and the plans of its digest go when no other ask
+  awaits it, but for the newest: an ask the service answers from its done run, planning nothing, records with it, as the one
+  slot it replaces always did. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map :int] :map]}
+  [st k]
+  (let [d (get-in st [:proving k]) st (update st :proving dissoc k) n (:newest-plan st)]
+    (cond-> st (not-any? #{d} (vals (:proving st)))
+      (update :held-plans #(into {} (remove (fn [[pk p]] (and (= d (:digest p)) (not= pk n)))) %)))))
+
+(defn- held-plans
+  "The plans agent state st holds (`hold-plan`), the newest first: a grant's items run as the first that gave each its digest.
+  See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [st]
+  (let [hs (:held-plans st) n (:newest-plan st)]
+    (into (if (contains? hs n) [(hs n)] []) (vals (dissoc hs n)))))
+
 (defn- item-selection
   "The selection that runs items ({test digest}, the test service's grant) as held (held-plan, this agent's last plan of a
   run) planned them: each test alone, selected and run, reused and deferred nothing; nil when held gave any of them another
@@ -1638,15 +1693,15 @@
            :reused-reports (into (reused-reports reused here) refused))))
 
 (defn- grant-selection
-  "What a run selects: items given (the test service's grant, {test digest}) are what it runs, as held planned them
-  (item-selection), or, held gone or of another program, exactly those items as planned again (plan: run-plan of their names,
+  "What a run selects: items given (the test service's grant, {test digest}) are what it runs, as one of held (the plans this
+  agent holds, `hold-plan`) planned them (item-selection), or, none held or each of another program, exactly those items as planned again (plan: run-plan of their names,
   granted-selection: none dropped by the run's selection filter); given and empty, nothing (a grant of no items once ran
   every test, 1,765 of them); items not given (nil), a plan of its own. See docs/merging.md#the-test-service."
-  {:malli/schema [:=> [:cat [:maybe :map] [:maybe [:map-of :qualified-symbol :string]] :seon.host/fn] :map]}
+  {:malli/schema [:=> [:cat [:maybe [:sequential :map]] [:maybe [:map-of :qualified-symbol :string]] :seon.host/fn] :map]}
   [held items plan]
   (cond (nil? items) (plan)
-        (empty? items) {:plan (:plan held) :judge [] :selected [] :run [] :deferred [] :reused {} :reused-reports [] :digests {}}
-        :else (or (item-selection held items)
+        (empty? items) {:plan (:plan (first held)) :judge [] :selected [] :run [] :deferred [] :reused {} :reused-reports [] :digests {}}
+        :else (or (some #(item-selection % items) held)
                   (let [sel (plan)] (if (:unread sel) sel (granted-selection sel items))))))
 
 (defn child-count
@@ -1707,7 +1762,7 @@
     (contract/error :seon.agent/program-differs #'seon.agent/run-tests-forked
                     (str "this agent runs another program than its branch: " (str/join ", " (map :var differs)))
                     {:differs differs})
-  (let [{:keys [unread] :as sel} (cond-> (grant-selection (:held-plan @state) items #(run-plan proofs mode names))
+  (let [{:keys [unread] :as sel} (cond-> (grant-selection (held-plans @state) items #(run-plan proofs mode names))
                                     checkout (assoc-in [:plan :checkout] checkout)
                                     batch (assoc-in [:plan :seon.prove/batch] batch))]
   (if unread
@@ -2000,7 +2055,7 @@
                    ;; digests (each item's run records what it ran); main's run is main's prove's to write
                    ;; held for the items it grants this agent (item-selection), each run at the digest planned here, and for
                    ;; the facts its answer writes on this branch (record-answer!)
-                   _ (when-not (or (:unread sel) (:unread pp)) (swap! state assoc :held-plan (held-plan sel)))]
+                   _ (when-not (or (:unread sel) (:unread pp)) (swap! state hold-plan (:key m) (:digest m) (held-plan sel)))]
                [{:op :tests :id (:id m) :mem-mb (mem-mb)
                  :result (or (:unread sel) (:unread pp)
                              (cond-> {:items (select-keys (:digests sel) (:run sel)) :selected (:selected sel) :deferred (:deferred sel)

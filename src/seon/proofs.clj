@@ -663,7 +663,9 @@
   (let [each (t/join-fixtures (get @t/each-fixtures n []))
         ;; a test's budget: ten times the ticks its deftest states (^{:seon.test/estimate {:ticks n}}, in its digest, being its
         ;; source), never past ticks; a test that states none runs under ticks (docs/merging.md#a-tests-tick-budget)
-        budget (fn [v] (when ticks (if-let [e (:ticks (:seon.test/estimate (meta v)))] (min ticks (* 10 e)) ticks)))
+        ;; while ticks decide a verdict (:seon.config.proofs/ticks-decide), ten times the stated estimate; off (the owner's ruling until a
+        ;; test's count is its own work, task seon.proofs/a-tests-ticks-are-its-own-work), only the ceiling, which no honest test reaches
+        budget (fn [v] (when ticks (if-let [e (and (cfg/value :seon.config.proofs/ticks-decide) (:ticks (:seon.test/estimate (meta v))))] (min ticks (* 10 e)) ticks)))
         one (fn [v]
               (try (jolt.host/run-interruptible (jolt.host/make-interrupt) #(t/test-var v) (budget v))
                    ;; root's interrupt (a ThreadDeath, seon.intr) stops the run that holds this test: it passes

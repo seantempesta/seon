@@ -816,6 +816,12 @@
   (let [rec (assoc (record-details code r (assoc req :eval-id id)) :seon.eval/id id)]
     [(into {:handle (get-in rec [:seon.eval/response :handle])} r) rec]))
 
+(def ^:dynamic *run*
+  "Bound by the :repl proc (`agent-step`) to a volatile around an eval it runs: seon.turn/work! puts its run there
+  ({:st :step :effect :end}, the driver's vars) and returns, and the proc drives the run, its waits answered as messages. nil
+  anywhere else: work! drives its run in place. See docs/flow.md#flow-inside-an-agent."
+  nil)
+
 (defn eval-string
   "Evaluate code through the one REPL path (the handler and its middleware) and answer its one
   response (`response`) with the text its caller reads (:text, `text-of`) and what its forms
@@ -860,9 +866,12 @@
             ;; how main differs from the branch, said with the answer an outside agent's seon_eval gets, and never recorded
             ;; (seon.agent/main-difference): computed at t, so the agent is never surprised at done
             (let [fns (when (some :fns answers) (into [] (mapcat :fns) answers))
-                  res (record! (cond-> r text (assoc :text text) fns (assoc :fns fns))
-                               (cond-> rec fns (assoc :seon.eval/fns fns))
-                               code req)
+                  rec! #(record! (cond-> r text (assoc :text text) fns (assoc :fns fns))
+                                 (cond-> rec fns (assoc :seon.eval/fns fns))
+                                 code req)
+                  ;; an eval that handed the :repl proc a run (seon.turn/work!, `*run*`) is recorded at the run's end, under the turn in
+                  ;; force then, as it was when the run ran inside it: recorded now, an outside eval would name turn 0's call
+                  res (if-let [hand (and *run* @*run* *run*)] (do (vswap! hand assoc :record rec!) r) (rec!))
                   m (when (= :agent (:mode @agent/state)) (agent/main-difference))]
               (cond-> res m (assoc :main m))))
           ;; every way it ends: its value, its error, an interrupt
@@ -1333,22 +1342,93 @@
       (assoc-in (vec rs) [i :response :unrecorded] e)
       rs)))
 
+(declare serve-request)
+
+(defn- reply-run!
+  "The reply root is owed for the eval that started run state st's run (:rid, its response :resp): the run's end as its value,
+  or e's error map when the run's driver threw, sent once its writes are committed; the agent is no longer busy. See
+  docs/flow.md#flow-inside-an-agent."
+  {:malli/schema [:=> [:cat :map :any [:maybe :seon.host/throwable]] :nil]}
+  [st end e]
+  ;; the eval that started the run, recorded now (eval-string held it), under the turn in force at its end
+  (when-let [rec! (get-in st [:run :record])] (rec!))
+  (when (:dirty? @agent/state) (agent/commit!))
+  (swap! agent/state assoc :busy false)
+  (agent/send! {:op :reply :id (:rid st)
+                :response (agent/on-the-wire (if e (-> (:resp st) (dissoc :value) (assoc :ex (agent/error-map e 'seon.turn/work!))) (assoc (:resp st) :value end)))
+                :t (:max-tx (agent/db))})
+  nil)
+
+(defn- drive-run
+  "The :repl proc's state st with its run stepped on msg (nil: its first step; else its last output's answer, or {:seon.turn/stop
+  true}): the next output's effect started on a fiber of its own (the edge ask, rule 1's exception), whose answer comes back on
+  the proc's :run port, so the step never waits; or, at its end, root's reply sent and the requests queued meanwhile served in
+  order. Answers st. See docs/flow.md#the-five-rules."
+  {:malli/schema [:=> [:cat :map [:maybe :map]] :map]}
+  [st msg]
+  (let [{:keys [step effect end]} (:run st)
+        r (try (step (:run-st st) msg) (catch Throwable e [::threw e]))]
+    (cond
+      (= ::threw (first r)) (do (reply-run! st nil (second r)) (dissoc st :run :run-st :rid :resp))
+      (= :seon.turn/end (first r)) (let [v (try {:end (end r)} (catch Throwable e {:e e}))]
+                                     (reply-run! st (:end v) (:e v))
+                                     (dissoc st :run :run-st :rid :resp))
+      :else (let [[run-st out] r port (:run-port st)
+                  ;; this output's number: its answer carries it, and an answer to any other (a call a stop dropped, of a run since
+                  ;; ended) is dropped, never stepped into the run in force (context-4's review)
+                  n (inc (:out-n st 0))]
+              ;; the turn's writes are on the branch before its call goes out, as each eval's are before its answer
+              (when (:dirty? @agent/state) (agent/commit!))
+              ;; a fiber (Jolt's io-thread), never an OS thread: the agent stays one thread, so judge! forks its test children
+              (a/io-thread (a/put! port (assoc (effect out) ::out n)))
+              (assoc st :run-st run-st :out-n n)))))
+
+(defn- drain
+  "The :repl proc's state st with the requests queued while a run was out served in arrival order, until the queue is empty or one
+  of them starts a run (the rest wait for that run); a :stop among them ends such a run at once. Answers st. See
+  docs/flow.md#flow-inside-an-agent."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
+  (loop [st st]
+    (cond
+      (and (:run st) (some #(= :stop (:op %)) (:queue st))) (recur (drive-run st {:seon.turn/stop true}))
+      (or (:run st) (empty? (:queue st))) st
+      :else (let [m (peek (:queue st))] (recur (serve-request (update st :queue pop) m))))))
+
 (defn agent-step
   "The agent's :repl proc: the requests the :transport proc hands it, one at a time in arrival
   order: an eval ({:op :eval :id :forms}), its page's parts to draw ({:op :render :id}), Seon's
   ops that write its branch ({:op k ...}: :judge, :merge-main, :clone) and root's :stop, after
   which the process ends. It sends its replies to root itself (seon.agent/send!, one whole frame)
   and commits what a request applied. Its REPL state is the process's one state map
-  (seon.agent/state), which the code it evaluates reads, so the step's own state is empty. See
-  docs/processes.md#the-agent-process."
+  (seon.agent/state), which the code it evaluates reads. A run (seon.turn/work! in an eval) is held in this proc's
+  state and stepped on each answer arriving on its :run port, so it answers ping between its waits; requests that arrive
+  meanwhile wait in its queue, and a :stop ends the run at once. See docs/processes.md#the-agent-process."
   {:malli/schema :seon.step/step-fn}
   ([] {:ins {:in "the requests that run at the REPL or write the branch"} :outs {} :workload :io
-       :ping-map-fn (fn [_] {:evals (:n @agent/state)})})
-  ([_] {})
+       :ping-map-fn (fn [st] {:evals (:n @agent/state) :run (some-> (:run-st st) (select-keys [:task :turn])) :queued (count (:queue st))})})
+  ([_] (let [port (a/chan 4)] {:run-port port :queue clojure.lang.PersistentQueue/EMPTY ::flow/in-ports {:run port}}))
   ([st _] st)
-  ([st _ m]
-   (swap! agent/state assoc :busy true)
-   (let [rs (cond
+  ([st in m]
+   (cond
+     ;; the answer of the run's last output; one to any other output (a call a stop dropped, a run that ended) is dropped
+     (= :run in) [(if (and (:run st) (= (::out m) (:out-n st))) (drain (drive-run st (dissoc m ::out))) st) nil]
+     ;; root's stop ends a run at once, then the requests before it and the stop itself are served in order
+     (and (:run st) (= :stop (:op m))) [(drain (update (drive-run st {:seon.turn/stop true}) :queue conj m)) nil]
+     ;; a request while a run is out waits for it: nothing else touches the branch mid-turn
+     (:run st) [(update st :queue conj m) nil]
+     :else [(drain (serve-request st m)) nil])))
+
+(defn- serve-request
+  "The :repl proc's state st after request m is served (`agent-step`): an eval, a draw, a branch op or root's stop, its reply
+  sent and its writes committed; an eval that starts a run (seon.turn/work!, `*run*`) holds its reply for the run's end and
+  takes the run's first step. Answers st. See docs/processes.md#the-agent-process."
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [st m]
+  ;; a request in flight; its deadlock, if it comes, is told once (seon.agent/quiescent!)
+  (swap! agent/state assoc :busy true :stall-told false)
+  (let [hand (volatile! nil)
+        rs (cond
               ;; root's stop: the process ends after the requests before it, what they applied committed
               (= :stop (:op m)) (do (when (:dirty? @agent/state) (agent/commit!)) (lib/c-exit 0))
               ;; root's render proc asks for this agent's page: its parts, drawn here under its branch's
@@ -1367,17 +1447,21 @@
                 ;; its value goes with the reply only when it is plain data (seon.contract/plain?: what the socket and the wire carry);
                 ;; root keeps none of it (its view keeps the head: seon.system/eval-head), and the asker reads the value as data,
                 ;; never the printed text back, which is no EDN once the eval printed (its :out verbatim)
-                [{:op :reply :id (:id m) :response (let [r (eval-string (:forms m) (select-keys m [:ticks :origin]))] (agent/on-the-wire r))
-                  :t (:max-tx (agent/db))}])
+                (let [r (binding [*run* hand] (eval-string (:forms m) (select-keys m [:ticks :origin])))]
+                  (if @hand
+                    (do (vswap! hand assoc :resp r) [])
+                    [{:op :reply :id (:id m) :response (agent/on-the-wire r) :t (:max-tx (agent/db))}])))
               ;; evals given at its spawn (seon.system/spawn!'s :evals) or inserted later: run on this queue, in order, answering no one
               (= :evals (:op m)) (do (intr/clear-pending!) (insert! (:by m) (:evals m)) [])
               :else (agent/handle! m))]
-     ;; a branch is committed whenever a request is done (its writes ran ahead in memory), before its answer: a
-     ;; reply says what it did is on the branch, so one who reads the branch on hearing it never races the commit
-     (when (:dirty? @agent/state) (agent/commit!))
-     (doseq [r (told-refused rs)] (agent/send! r))
-     (swap! agent/state assoc :busy false)
-     [st nil])))
+    ;; a branch is committed whenever a request is done (its writes ran ahead in memory), before its answer: a
+    ;; reply says what it did is on the branch, so one who reads the branch on hearing it never races the commit
+    (when (:dirty? @agent/state) (agent/commit!))
+    (doseq [r (told-refused rs)] (agent/send! r))
+    (if-let [{run-st :st resp :resp :as run} @hand]
+      ;; the run is this proc's now: its first step taken, root's reply held for its end
+      (drive-run (assoc st :run (dissoc run :st :resp) :run-st run-st :rid (:id m) :resp resp) nil)
+      (do (swap! agent/state assoc :busy false) st))))
 
 (declare defect-answer)
 
@@ -1454,8 +1538,8 @@
        (= :pause op) (do (flow/pause-proc (:flow @agent/state) :repl) [st nil])
        ;; a paused proc reads only its control channel: a stop resumes the REPL first, so it ends the
        ;; process after the requests before it, paused or not
-       ;; and the run in flight learns at once that root is stopping, so it ends between turns (seon.turn/work!), never cut
-       (= :stop op) (do (swap! agent/state assoc :draining true) (flow/resume-proc (:flow @agent/state) :repl) [st {:repl [m]}])
+       ;; and a run the :repl proc holds ends at once (agent-step), its call in flight dropped
+       (= :stop op) (do (flow/resume-proc (:flow @agent/state) :repl) [st {:repl [m]}])
        (= :resume op) (do (flow/resume-proc (:flow @agent/state) :repl) [st nil])
        :else [st {:repl [m]}]))))
 
@@ -1493,8 +1577,12 @@
   ;; socket does: at the bound the transport waits to hand on the next (docs/flow.md#flow-inside-an-agent)
   (let [in {:in {:buf-or-n (cfg/value :seon.config.agent/inbox-size)}}
         g (flow/create-flow {:procs (update-vals agent-steps (fn [step] (cond-> {:proc (flow/process step)} (not= step #'transport-step) (assoc :chan-opts in))))
-                             :conns [[[:transport :repl] [:repl :in]] [[:transport :tests] [:tests :in]]]})
+                             :conns [[[:transport :repl] [:repl :in]] [[:transport :tests] [:tests :in]]]
+                             ;; what update! waits for a removed test-run proc's exit, the bound root's graph declares too
+                             :stop-timeout-ms (cfg/value :seon.config.root/flow-stop-ms)})
         {:keys [error-chan]} (flow/start g)]
+    ;; a deadlock is an event, never a timer of root's: the agent says it (docs/flow.md#the-five-rules, rule 3)
+    (jolt.host/on-quiescent! #'agent/quiescent!)
     (swap! agent/state assoc :flow g)
     (flow/resume g)
     (loop []

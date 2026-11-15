@@ -6,12 +6,20 @@ Time is measured and recorded, and decides only at the owner's exceptions. `bin/
 
 An idle system does no work: no proc steps, renders, pings, flushes or polls happen unless a message arrived. Work runs because it arrived, is admitted by its measured workload and parks when there is none. A proc reports its problems as facts and its changes as events, so health is the absence of open problem facts ([errors](errors.md#problems)) and nothing is polled to learn it; the `idle` check step holds it ([checks](checks.md#modes)). A clock, sleep, poll, deadline or fixed slot standing in for a dependency or a workload is the mistake this rules out (owner, 2026-10-30: "timeouts just mean we have the wrong design (most of the time)"): a wait ends on its value or on its producer's typed error ([errors](errors.md#nothing-crashes-and-nothing-hangs)).
 
+## Two kinds of wait
+
+A clock never guesses when something will finish (owner, 2026-11-15). Every wait is one of two kinds, and each ends one way:
+- **A wait on our own system** (a proc's answer, a root's reply, a merge, a test child, a writer's commit): the answer will come, only its time is unknown. It is a blocking wait on a Flow channel, ended by the producer's message: its value, its typed error, or its death delivered as a message. No deadline stands in for it, and if a wait of this kind can hang, the producer is the bug (`seon.agent-proc`'s holds, each released by every end of its request, are the pattern: `seon.agent-test/every-request-an-agent-proc-holds-is-released-by-any-of-its-ends`).
+- **A wait on the world outside** (a web fetch, a model provider, a subprocess, the OS): the answer may never come. It carries a declared timeout, a spec'd config entry with its reason (`:seon.config.fx/bounds`, `:seon.config.root/stop-ms`), armed through the one timer, and past it the wait ends with a typed error such as `:seon.bound/reached`.
+
+So a timeout in our own code, or a guess at how long our own work takes, is the mistake; a timeout at the edge of the world is required.
+
 ## Time decides (the owner's exceptions)
 
 The sites where the owner allowed time to decide: the delayed insert, the one timer, the cron, the kernel's TCP keepalive, and a run ended far past its measured time once its evidence is captured.
 
 - `seon.fx/wake-later`: the delayed insert, with its helpers `seon.fx/refill`, `seon.fx/admit`, `seon.fx/dispatch` and `seon.fx/owner-proc`. The provider's rate is a token bucket (halved by a rate-limit outcome, raised a twentieth toward the configured rate by any other); a request the bucket cannot cover yet is put back on the owner's `:tick` port once it refills, by `seon.step/put-after!`.
-- `seon.step/put-after!`: the one timer: a go block parks on a core.async `timeout`, then puts the message. The delayed insert, the cron's tick and root's stall check arm through it (`seon.step-test/timer-threads`).
+- `seon.step/put-after!`: the one timer: one entry on Jolt's deadline heap (`jolt.host/timer-at!`), whose thunk puts the message; nothing parks while it is armed, and `seon.step/cancel!` disarms it by the handle it answers. The delayed insert, the cron's tick, an effect's declared deadline and root's stall check arm through it (`seon.step-test/timer-threads`).
 - `seon.step/timer`, `seon.step/arm!` and `seon.step/fired!`: a self-timer's armed flag, a host object in the proc's state, so a step that took the timer's message and then threw cannot leave the timer armed for good.
 - `seon.cron/cron-proc`, with `seon.cron/next-fire-ms` and `seon.cron/epoch-ms`: the owner's one schedule. At `:seon.config.proofs/full-run-at` (UTC) it puts one full-run request for main on the test service's queue and arms the next day's; `epoch-ms` is its one clock read.
 - `bin/check`'s step bound ([decisions](decisions.md#a-run-far-past-its-measured-time-is-ended-after-its-evidence-owner-2026-11-10)): a `bin/prove` step's whole run, every phase of it (`bounded` in `bin/check`), past `:seon.config.check/step-end-factor` times the median of its measured runs (floored at `:seon.config.agent/stall-ms`; a step never measured takes the largest median, `seon.proofs/step-bounds`) is captured by `bin/evidence` (process tree, samples, fiber dumps, `seon.system/stall-state`), then ended and FAILED, `STEP-OVERRAN`, with the load: a step past its bound is a bug, recorded as an error and fixed.
@@ -40,10 +48,10 @@ Tests whose subject is itself a timeout or a measurement window.
 ## Time decides, owed its owner's fix
 
 Each is a defect named with the task that removes it; a new site is red, and a fixed one leaves this list in the fix's commit.
-- `seon.system/start!` (Flow's `:stop-timeout-ms`, `:seon.config.root/flow-stop-ms`; a proc still running is named in stop!'s `:graph`): task `seon.system/a-stop-or-crash-resumes-from-one-resume-point-and-says-what-it-lost`. An agent with an eval in flight is interrupted first (`seon.agent-proc/stop!`).
-- `seon.system/api-proc` (the stall timer): with `seon.system/back-op` (its `:stall-check`) and `seon.agent-proc/agent-proc` (the `:last-frame-ms` it compares), task `seon.system/a-stall-is-past-the-requests-own-bound`.
+- `seon.system/start!` (Flow's `:stop-timeout-ms`, `:seon.config.root/flow-stop-ms`; a proc still running is named in stop!'s `:graph`): task `seon.system/a-stop-or-crash-resumes-from-one-resume-point-and-says-what-it-lost`. An agent with an eval in flight is interrupted first (`seon.agent-proc/stop!`). `seon.repl/serve!` passes the same key to each agent's graph, what its update! waits for a removed test-run proc's exit; the reason is the edge's: a proc's step is the agent's own code, which can't be stopped from outside, so a stop past the bound names the proc still running rather than waiting for good. Same task.
+- `seon.system/api-proc` (the stall timer): with `seon.system/back-op` (its `:stall-check`) and `seon.agent-proc/agent-proc` (the `:last-frame-ms` it compares). It stays beside the agent's own stall (```seon.agent/quiescent!```, no clock) only for an eval pinned in a blocking foreign call, which nothing in the agent can tell; it goes with task `jolt.host/a-blocking-call-on-a-main-carrier-parks` (root's ruling: no functionality removed).
 - `bin/check`'s one capture of its steps at 600 s (`bin/evidence`): an observation that ends nothing.
-- `bin/stalls`' stall bound: every second it reads each running shard's last `started` line, and past `:seon.config.proofs/stall-factor` times the test's last recorded run (floored at `:seon.config.agent/stall-ms`) records `STALLED <test> <ms>` once; it ends nothing. Same task.
+- `bin/stalls`' stall bound: every second it reads each running shard's last `started` line, and past `:seon.config.proofs/stall-factor` times the test's last recorded run (floored at `:seon.config.agent/stall-ms`) records `STALLED <test> <ms>` once; it ends nothing: task `seon.step/every-wait-past-a-bound-is-a-flow-message-from-the-one-timer`.
 - `seon.web/web-proc` (the HTTP adapter's keep-alive and write timeouts, literals): task `seon.web/web-server-threads-are-joined-at-stop`.
 
 ## Decides by time, unmarked
@@ -78,7 +86,7 @@ A measured time chooses which work goes first, never whether a result is green.
 Clock reads whose value is recorded or shown, never compared to decide.
 
 - `seon.profile/now-ns`, `seon.profile/ms-since`: the one clock read ([machine](machine.md#the-clock)).
-- `seon.step/event`, `seon.agent-proc/agent-in`, `seon.system/end-agent`, `seon.system/record-death`, `seon.system/set-agent`, `seon.system/stall-task`, `seon.system/previous-end`, `seon.reconcile/judge-tx`, `seon.reconcile/start`, `seon.reconcile/dead-tx`, `seon.server/attach!`, `seon.server/held`, `seon.writer/main-commit`, `seon.writer/stored!`, `seon.writer/writer-proc`, `seon.repl/wrap-caught`, `seon.web/render-in`: a wall-clock stamp on an event, a death, an end, a problem, an error, a commit or a dashboard chunk.
+- `seon.step/event`, `seon.agent-proc/agent-in`, `seon.system/end-agent`, `seon.system/record-death`, `seon.system/set-agent`, `seon.system/stall-task`, `seon.system/previous-end`, `seon.reconcile/judge-tx`, `seon.reconcile/start`, `seon.reconcile/dead-tx`, `seon.server/attach!`, `seon.server/held`, `seon.writer/main-commit`, `seon.writer/stored!`, `seon.writer/writer-proc`, `seon.repl/wrap-caught`, `seon.web/render-in`, `seon.agent-proc/agent-frame`: a wall-clock stamp on an event, a death, an end, a problem, an error, a commit or a dashboard chunk, or the quiet a stall's evidence reports (an agent's `:stalled`, never a decision).
 - `seon.fx/stored-results`: sets a verdict file's mtime to now, so the cache evicts least recently used ([merging](merging.md#verdicts-are-a-cache)).
 - `seon.profile/measure!`: the one measurement of a call ([cost](cost.md)); its wall ns are a form's recorded ms, its CPU ns what a cost proof shows.
 - `seon.proofs/mg-run`: one generative check's ms, which orders the next deal into shards.
