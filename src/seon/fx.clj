@@ -425,14 +425,16 @@
           ;; every EDN form a text holds, its tags kept as data (aero's #profile, #env): git show of several blobs is their texts end to end
           forms (fn [text] (let [r (java.io.PushbackReader. (java.io.StringReader. text)) end (Object.)]
                              (loop [acc []] (let [f (edn/read {:default tagged-literal :eof end} r)] (if (identical? end f) acc (recur (conj acc f)))))))
-          cfg (first (forms (git! {} root ["show" (str tree ":resources/seon/config/default.edn")] nil)))
+          ;; a tree with no shipped config (a test's scratch tree) is digested with this checkout's build inputs and no config lines
+          shown (git-run {} root ["show" (str tree ":resources/seon/config/default.edn")] nil)
+          cfg (if (zero? (:exit shown)) (first (forms (:out shown))) {})
           schemas (filter #(re-find #"/seon\.config[^/]*\.edn$" %) (lines ["ls-tree" "--name-only" tree "resources/seon/schemas/"]))
-          marked (for [m (forms (git! {} root (into ["show"] (map #(str tree ":" %)) schemas) nil)) [k f] m
+          marked (for [m (when (seq schemas) (forms (git! {} root (into ["show"] (map #(str tree ":" %)) schemas) nil))) [k f] m
                        :when (and (vector? f) (map? (second f))
                                   (some (second f) [:seon.config/build :seon.config/at-load :seon.config/place]))]
                    k)]
       (lib/digest (str/join "\n" (into (sorted-set)
-                                       (concat (lines (into ["ls-tree" "-r" tree "--"] (:seon.config.build/inputs cfg)))
+                                       (concat (lines (into ["ls-tree" "-r" tree "--"] (or (:seon.config.build/inputs cfg) (cfg/value :seon.config.build/inputs))))
                                                (filter #(str/starts-with? % "160000 ") (lines ["ls-tree" "-r" tree]))
                                                (for [k marked :when (contains? cfg k)] (sedn/encode [k (get cfg k)])))))))
     (catch Throwable e (error #'binary-digest :seon.fx/io-error (str "the binary identity of tree " tree ": " (step/error-msg e)) {:path root}))))
