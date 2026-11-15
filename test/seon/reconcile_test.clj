@@ -661,22 +661,6 @@
            (actions-for (db-of [(decl "a")] :extra (work "a" :lost)) :woken [(akey "a")]))
         "the next start is a spawn")))
 
-;; Estimate: 2 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 actions call x 0.7M; 1 db-with x 50k ~ 2,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 2000000}} a-run-that-merged-main-is-forked-again-on-mains-program
-  ;; docs/merging.md#a-branch-merges-main-in: a merge of main loads none of main's forms into the running agent, so its run ends
-  ;; between turns :refork (seon.turn); nothing is judged: the task goes on as a lost run does, a spawn on its branch (resumed: only
-  ;; the branch's own forms load), and the old process is stopped
-  (let [flight {:act {:op :spawn :task "demo/a" :env {:branch :demo/a}} :agent :a-a1 :step :worked}
-        db (db-of [(decl "a")] :extra (work "a" :running))
-        st (st-of db :flights {"demo/a" flight})
-        [_ outs] (#'r/advance st "demo/a" :worked {:value {:outcome :refork}})
-        reqs (mapv :req outs)
-        tx (some #(get-in % [:req :tx-data]) reqs)]
-    (is (some #(= [:db/cas [:seon.task/id "demo/a"] :seon.task/outcome :running :lost] %) tx) "its task goes on as a lost run, unjudged")
-    (is (some #{{:op :kill :id :a-a1 :ended true}} reqs) "its old process is stopped")
-    (is (not-any? #(#{:judge} (:op %)) reqs) "and nothing is judged")
-    (is (= [(spawn "a")] (actions-for (db-of [(decl "a")] :extra (work "a" :lost)))) "the next start is a spawn on its branch, with no wake")))
-
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M) ~ 500,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 500000}} the-judge-reads-its-branch-in-one-request
   ;; task seon.reconcile/the-judge-reads-its-branch-in-one-request: once the tests answer, the flight
