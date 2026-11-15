@@ -158,8 +158,9 @@ if [[ -n $FAST ]]; then
     [[ -z ${n// } ]] && continue
     ns=${n%%/*} f=test/${${ns//./\/}//-/_}.clj
     # the name as an exact field of a (deftest line, whatever metadata comes before it (^{:seon.test/estimate ...}: an estimated
-    # test's metadata holds spaces, and a grep for "(deftest NAME" skipped 980 of 1,974 deftests, 2026-11-15)
-    if [[ $n == */* ]]; then awk -v t="${n#*/}" '/^\(deftest/ {for (i = 2; i <= NF; i++) if ($i == t) f = 1} END {exit !f}' "$f" 2>/dev/null && NAMES+=$n || SKIPPED+=$n
+    # test's metadata holds spaces, and a grep for "(deftest NAME" skipped 980 of 1,974 deftests, 2026-11-15), the head bare or
+    # qualified ((clojure.test/deftest NAME: 32 deftests, skipped as "not defined" by a bare match)
+    if [[ $n == */* ]]; then awk -v t="${n#*/}" '/^\((clojure\.test\/)?deftest/ {for (i = 2; i <= NF; i++) if ($i == t) f = 1} END {exit !f}' "$f" 2>/dev/null && NAMES+=$n || SKIPPED+=$n
     else [[ -f $f ]] && NAMES+=$n || SKIPPED+=$n; fi
   done
   (( ${#SKIPPED} )) && print "fast lane: skipped ${#SKIPPED} names this branch does not define: ${SKIPPED[1,5]}"
