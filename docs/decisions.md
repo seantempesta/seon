@@ -90,7 +90,6 @@ Context runs one watched task now, random rounds after the model call's bound. O
 
 "Make all hot paths optimal and make everything that can be into hot paths. No more 4 ways of doing the same thing. 2 ways of doing the same thing even has to justify itself." Every job routes through its one path, each path has one specialist who holds it to its lower bound, and a second way is a problem until justified. Stated in `AGENTS.md` §4.
 
-
 Then: "I think the perf readings are mostly a canary in the coal mine for us. If we get a crazy number like 10 seconds to write a transaction and we know it should be ms we don't allow it. Hot paths should make it so damn easy to do the right thing that agents want to use it." A cost far over its lower bound stops the work (AGENTS §3, 10x); a hot path's API is the easiest way to do its job.
 
 The why, in his words: "Clojure is kind of like this. It's very hard to write clojure that is stateful or even imperative. You are given great tools that always refocus on a few solid ways to thread through them so you end up building with tools that are optimized for their execution rather than supporting everything. This is what we are doing. We are adding constraints to our system to optimize. I want one best way of doing things reused everywhere." To be folded into [principles](principles.md#4-one-mechanism-per-job) at the next retrospective.

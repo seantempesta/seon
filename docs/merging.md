@@ -165,7 +165,6 @@ Root's REPL (`seon_eval` as root, or one EDN request a line to its port) repairs
 - **A held task:** raise the limit that held it on the task (`:seon.config.merge/max-conflicts`), then `(my.root/run! sys ["T"])`. A task stuck `:behind` has no repair yet (task `seon.system/a-behind-merge-ends-in-a-fact`); `(my.root/cancel! sys ["T"])` ends it.
 - **A failed write-back** (`:seon.git/commit-failed` on the task): remove the cause (a stale `.git/refs/heads/jolt/seon-merges.lock`), then `(my.root/write-back! sys ["T" ...])`.
 
-
 ## A merge change is proved on a real branch
 
 A rule of the merge is proved on data shaped like a real stale branch before it lands, not only on a synthetic fixture: an agent branch hours behind main, with its own records, main's lifecycle facts and history shared with the base (lb76's shape). On 2026-11-14 three rules each passed their fixture and failed on lb76: the merge read main's history as the branch's change, judged ownership on one side only, and compared whole datoms, transaction included, which retracted 712 facts both sides held. Each merge change also runs the merge candidate for a real branch (the writer's `:merge-candidate`, never committed) and shows that only the branch's own keys change.
