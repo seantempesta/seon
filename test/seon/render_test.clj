@@ -287,7 +287,7 @@
   "Each step of the one path to a provider, and who may reference it."
   '{seon.ctx.wire/request #{seon.ctx.wire/render}
     seon.model/wire-messages #{seon.model/request-body}
-    seon.model/request-body #{seon.model/openai-compat seon.ctx.wire/wire-turn}})
+    seon.model/request-body #{seon.model/openai-compat seon.ctx.wire/wire-of}})
 
 (defn- rows-with
   "The rows of the forms of db in namespaces nss whose source holds one of texts, each with :read, what its source reads as."
@@ -326,7 +326,7 @@
                    :when (some #(and (map? %) (contains? % :messages) (or (contains? % :turn) (contains? % :model))) (tree-seq coll? seq (:read r)))
                    v (named-by r)
                    :when (not (or (some #{'seon.ctx.wire/render 'seon.ctx.wire/request} (:refs r))
-                                  (#{'seon.model/request-body 'seon.ctx.wire/request 'my.root/first-moves!} v)))] v)]
+                                  (#{'seon.model/request-body 'seon.ctx.wire/request 'seon.ctx.wire/wire-of 'my.root/first-moves!} v)))] v)]
     (set (concat by-ref role asks))))
 
 (defn- action-sites
