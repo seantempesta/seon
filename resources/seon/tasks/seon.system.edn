@@ -166,4 +166,10 @@ Proofs, once ruled: a task file's declaration loads with the kind the ruling say
   :seon.task/kind :work
   :seon.task/proofs #{seon.system-test/a-landing-after-a-write-back-merge-keeps-mains-source-at-its-tree}
   :seon.task/needs #{}
-  :seon.task/estimate #:seon.system{restart-for {:n 1, :order :constant, :ticks 100000, :bytes 1000000}}}]
+  :seon.task/estimate #:seon.system{restart-for {:n 1, :order :constant, :ticks 100000, :bytes 1000000}}}
+ {:seon.task/name "a-trees-prove-in-a-test-root-always-answers"
+  :seon.task/plan "Found in data's seon_done pilot run 14, 2026-11-16 03:5x [flow M: the pilot agent's root.log:116-175]: seon.server-test/a-sessions-checkout-is-proved-on-its-trees-branch ended at its wall bound (:seon.test/wall-spent), its fiber blocked in seon.test-store/ask's readLine on {:op :prove :checkout :tree :names [seon.ref-test]}: the shared test root never answered. Green alone on main under bin/test, so the hang depends on what the shared root was doing. Ruled out [M, code]: the held-ask hold (7f4e842206) does not apply, since ```seon.system/prove!``` puts :agent on a tree's ask and the prove proc plans an agent's ask before the hold. Evidence now in place: since 13a1e8fef9 a test's ask ends before its wall with the typed :seon.test-store/no-answer carrying the root's ```seon.system/stall-state``` (the prove proc's runs in flight, runners and held asks among it), so its next occurrence names what the root waited on. Next: read that :root-state when it recurs, then fix the wait at its cause (```seon.system/prove-tree!```'s tree-enter!/tree-leave! drop, the spawn on the tree branch, or the prove proc)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.server-test/a-sessions-checkout-is-proved-on-its-trees-branch}
+  :seon.task/needs #{}
+  :seon.task/estimate #:seon.system{prove-tree! {:n 1, :order :constant, :ticks 5000000, :bytes 20000000}}}]
