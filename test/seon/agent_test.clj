@@ -2637,21 +2637,23 @@
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= "read: The reply itself." (:value r)) (pr-str r))))
 
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-root-with-no-provider-ends-the-work-on-its-typed-error
-  ;; a root whose provider is :none (set below; with no --profile it is DeepSeek) answers the
-  ;; first turn with :seon.model/no-provider; the error reaches whoever can act on it: the
-  ;; task's record on main and my.root/problems' :error rows
-  (let [q #(str "[:find (pull ?e [:seon.task/outcome :seon.task/error]) . :where [?e :seon.task/id \"" % "/m\"] [?e :seon.task/error]]")
-        [_ r] (in-agent (fn [{:keys [ns]}]
-                          [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root"
-                           :code (str "(do (my.root/run! sys [\"" ns "/m\"])"
-                                      " (let [a (datahike.api/q '" (q ns) " (seon.system/await-db sys #(datahike.api/q '" (q ns) " %)))]"
-                                      " [(:seon.task/outcome a) (:seon.error/type (:seon.task/error a))"
-                                      " (mapv #(get-in % [:error :seon.error/type]) (get-in (my.root/problems sys) [:classes :error :rows]))]))")}])
-                        {:config {:seon.config.ai/provider :none}
-                         :decls [{:seon.task/name "m" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
-    (is (= [:closed :seon.model/no-provider [:seon.model/no-provider]] (:value r)) (pr-str r))))
+;; Estimate: one seon.model/complete under {:kind :none} (a case and a typed-error map, ~5k ticks, contract check of the request and the
+;; failure ~50k) + one seon.turn/next-of on its answer (a valid?, a property lookup, a cond: ~30k) = ~100k ticks, ~1 MB, ~1 ms (was a spawned
+;; root and agent, 117,443 ms measured)
+(deftest ^{:seon.test/estimate {:ticks 200000 :bytes 1000000}} a-root-with-no-provider-ends-the-work-on-its-typed-error
+  ;; a root whose provider is :none (with no --profile it is DeepSeek) answers the first turn's model call with :seon.model/no-provider;
+  ;; the turn ends the work with that error (never retried: no turn changes the config), and the end carries the error the task's
+  ;; record on main and my.root/problems' :error rows read. The call is seon.model/complete, and its answer goes to the turn's
+  ;; decision (seon.turn/next-of) as the loop passes it
+  (let [request {:messages [{:role "user" :content "Work."}] :task "demo/m" :turn 1}
+        answer (seon.model/complete {:kind :none} request)
+        st {:task "demo/m" :turn 1 :max-turns 5}
+        [step st' outcome reason error] (@#'seon.turn/next-of st answer)]
+    (is (= :seon.model/no-provider (:seon.error/type answer)) (pr-str answer))
+    (is (= [:seon.turn/end :error] [step outcome]) "no provider ends the work: no next turn, no retry")
+    (is (= st st') "and the run's state is not counted as a retryable failure")
+    (is (= :seon.model/no-provider (:seon.error/type error)) "with its typed error for whoever can act on it")
+    (is (= (:seon.error/message answer) reason))))
 
 (defn- answers-gate
   "Agent code that answers this agent's gate at its seams (seon.agent/ask-gate, and send-gate! whose answer arrives for the next prove), each ask counted in user/gate-asks, with what user/gate-answer holds: a real
