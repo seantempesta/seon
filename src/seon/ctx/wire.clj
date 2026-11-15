@@ -502,13 +502,14 @@
                   (:value (render/model ix0 es {:ix ix0 :handle (symbol "@ctx")}) es))))
 
 (defn assembly-parts
-  "The parts model call id sent, [[ref turn digests] ...] in order, its assembly resolved: the first :keep parts of its :prev call's,
-  then its :add; a call with no :prev holds them whole. nil when it stored none. Walks at most
+  "The parts model call id sent, [[ref turn digests] ...] in order, its assembly resolved: the first :keep parts of its
+  :seon.model-call/prev's, then its :add; a call with no prev holds them whole. nil when it stored none. Walks at most
   :seon.config.ctx/assembly-checkpoint-turns calls. See docs/render.md#a-turn-stores-what-it-sent."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe [:vector :any]]]}
   [db id]
-  (when-let [{:keys [prev keep add]} (some->> (pdb/eid db :seon.model-call/id id) (d/entity db) :seon.model-call/assembly)]
-    (if prev (into (subvec (assembly-parts db prev) 0 keep) add) add)))
+  (letfn [(of [e] (when-let [{:keys [keep add]} (:seon.model-call/assembly e)]
+                    (if-let [p (:seon.model-call/prev e)] (into (subvec (of p) 0 keep) add) add)))]
+    (some->> (pdb/eid db :seon.model-call/id id) (d/entity db) of)))
 
 (defn sent-tx
   "The facts that keep what model call id sent at turn n: its new messages as parts, and its assembly as what changed since call
@@ -520,8 +521,8 @@
         before (when (and prev (pos? (mod n (cfg/value :seon.config.ctx/assembly-checkpoint-turns)))) (assembly-parts db prev))
         k (if before (count (take-while true? (map = before as))) 0)]
     (conj (into [] (comp (mapcat second) (distinct) (map (fn [m] {:seon.part/digest (dg m) :seon.part/message m}))) (drop k parts))
-          {:seon.model-call/id id
-           :seon.model-call/assembly (cond-> {:keep k :add (subvec as k)} before (assoc :prev prev))})))
+          (cond-> {:seon.model-call/id id :seon.model-call/assembly {:keep k :add (subvec as k)}}
+            before (assoc :seon.model-call/prev [:seon.model-call/id prev])))))
 
 (defn sent-request
   "The request model call id sent, read back from what it stored (`sent-tx`): {:messages :parts} as `request` answers them, joined

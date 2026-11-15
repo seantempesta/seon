@@ -803,11 +803,12 @@
  ;; what a turn sent, each message stored once by its content and named in order by the turn's assembly, so it reads back as sent
  ;; and a later request never draws a past point again (owner, 2026-11-15: "store what we sent ... just the components that we
  ;; assemble"; "Debug shouldn't be a new interpretation of what's there"; docs/render.md#a-turn-stores-what-it-sent)
- :seon.model-call/assembly [:map {:description "What the turn sent, as what changed since the previous call's: the first :keep parts of :prev's assembly, then :add, each part's ref, turn and messages' digests in order; no :prev, the parts whole. See docs/render.md#a-turn-stores-what-it-sent."}
-                            [:prev {:optional true} :string] [:keep [:int {:min 0}]]
+ :seon.model-call/assembly [:map {:description "What the turn sent, as what changed since the previous call's (:seon.model-call/prev): the first :keep parts of that call's, then :add, each part's ref, turn and messages' digests in order; with no prev, the parts whole. See docs/render.md#a-turn-stores-what-it-sent."}
+                            [:keep [:int {:min 0}]]
                             [:add [:vector [:tuple :seon.ctx.wire/ref [:maybe :int] [:vector :seon.part/digest]]]]]
  ;; what labels a part of a request (seon.ctx.wire/part-ref): [:page n], [:eval id], [:message id], [:reply id], [:section addresses],
  ;; [:session key], [:example key], or an entity's schema and id
+ :seon.model-call/prev [:and {:seon.db/to [:seon.model-call/fact] :description "The model call whose assembly this one's continues (seon.ctx.wire/assembly-parts); none at a checkpoint. See docs/render.md#a-turn-stores-what-it-sent."} :seon.db/ref]
  :seon.ctx.wire/ref [:or {:description "What labels a part of a request (seon.ctx.wire/part-ref): its kind, then what names it. See docs/render.md#a-turn-stores-what-it-sent."}
                      [:tuple [:= :page] :int] [:tuple [:= :eval] :string] [:tuple [:= :message] :string] [:tuple [:= :reply] :string]
                      [:tuple [:= :section] [:vector :any]] [:tuple [:= :session] [:maybe :string]] [:tuple [:= :example] :string] [:tuple :keyword :int]]
@@ -827,7 +828,7 @@
                           [:seon.model-call/cache-miss-tokens {:optional true} :seon.model-call/cache-miss-tokens]
                           [:seon.model-call/model {:optional true} :seon.model-call/model]
                           [:seon.model-call/basis {:optional true} :seon.model-call/basis] [:seon.model-call/sent-hash {:optional true} :seon.model-call/sent-hash]
-                          [:seon.model-call/assembly {:optional true} :seon.model-call/assembly]]
+                          [:seon.model-call/assembly {:optional true} :seon.model-call/assembly] [:seon.model-call/prev {:optional true} :seon.model-call/prev]]
  ;; ---- a first move scored (seon.judge, my.root/first-moves!) ----
  ;; the digest of the request it answers (seon.judge/digest): the same context is scored once
  :seon.judge/digest [:and {:seon.db/identity true :seon.db/content-id true} :string]
