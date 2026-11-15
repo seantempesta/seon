@@ -330,6 +330,12 @@
     (is (some? (clojure.string/index-of log "jolt fiber dump")) "the dump is Jolt's own (every fiber, running ones at their next safe point)")
     ;; its parts' ticks beside their wall time, when the stop ended within its bound (never asserted on wall time: principles section 6)
     (when stopped
+      ;; from the deleted a-root-stops-in-a-second (its wall-time bound went to task seon.system/a-stop-takes-no-wait-it-does-not-need):
+      ;; the stop ends the boot server's group at once (seon.fork-server/release!), every proc exits, and the root reports the most
+      ;; processes it held, read with no ps: itself and its boot fork server (task seon.lib/a-process-reports-the-most-processes-it-held-at-once)
+      (is (= :group-ended (get-in stopped [:drained :ended])) (str "the boot server's group was ended by the stop: " (pr-str stopped)))
+      (is (true? (:graph stopped)) "every proc exited")
+      (is (= 2 (:peak-processes stopped)) (str "the root's peak, on its ROOT STOPPED line: " (pr-str stopped)))
       (is (= #{:fact :drain :flow-stop} (set (keys (:phases stopped)))) (str "the stop names its parts: " (pr-str (:phases stopped))))
       (is (every? #(and (nat-int? (:ticks %)) (number? (:ms %))) (vals (:phases stopped))) "each with its ticks and its wall time"))))
 
