@@ -96,4 +96,5 @@ PROOF (red first, once the waiter is found): seon.server-test/an-eval-at-root-wh
   :seon.task/kind :work
   :seon.task/proofs #{seon.server-test/a-message-merged-down-from-main-is-still-in-the-inbox}
   :seon.task/needs #{}
-  :seon.task/estimate #:seon.task{undelivered {:n 30, :order :linear, :ticks 300000, :bytes 3000000}}}]
+  :seon.task/estimate #:seon.task{undelivered {:n 30, :order :linear, :ticks 300000, :bytes 3000000}}}
+ {:seon.task/name "an-inbox-answers-a-message-once", :seon.task/plan "Found 2026-11-16 (deps): bin/mcp call inbox task=session/deps answered root's message a64a52cdf3acdd65 (sent-ms 1794774494864) on three successive inbox calls (04:3x-04:4x, each run after the previous one returned), so seon.server/inbox-answer hands a message out without recording its delivery, or records it where the next inbox does not read. PRIOR WORK: seon.server/inbox-answer, the delivery datom of seon.server/a-message-merged-down-from-main-is-still-in-the-inbox's plan. Next: read inbox-answer's delivery write and the next call's read, red first: two inbox calls answer a message once.", :seon.task/kind :work, :seon.task/proofs #{seon.server-test/an-inbox-answers-a-message-once}, :seon.task/estimate #:seon.server{inbox-answer {:n 1, :order :constant, :ticks 300000, :bytes 3000000}}}]
