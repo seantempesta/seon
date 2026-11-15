@@ -525,8 +525,10 @@
   {:malli/schema [:=> [:cat :map :seon.host/db] [:tuple :map [:vector :map]]]}
   [st db]
   (let [in (library-inputs db)
-        held (d/pull db [:seon.library/inputs :seon.library/roots] [:seon.system/id :root])]
-    (if (and (not= in (:seon.library/inputs held)) (not= in (:library-asked st)))
+        held (d/pull db [:seon.library/inputs :seon.library/roots] [:seon.system/id :root])
+        ;; a store never imported from a tree (a test's) holds no pins and no deps: nothing it depends on to read
+        deps? (or (seq (source/pins-of db)) (get-in (d/pull db [:seon.system/source] [:seon.system/id :root]) [:seon.system/source :inputs :config :seon.env/deps]))]
+    (if (and deps? (not= in (:seon.library/inputs held)) (not= in (:library-asked st)))
       (let [[st m] (step/ask st [:vectors :answers] [:library in]
                              {:op :fx :kind :library :prio -1
                               :req {:root (cfg/checkout) :pins (source/pins-of db) :since (or (:seon.library/roots held) {})}})]
