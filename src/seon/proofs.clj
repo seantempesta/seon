@@ -656,7 +656,7 @@
   branch, by its basis :t, as the plan's read-digests looks a test up) whose read keys still hold on db what they held when it ran
   (seon.db/reads-digests equal to its :seon.proof/reads-digest), a green at the test's digest now. One seek of :seon.proof/test a
   test, then one batch of digests over every newest green's keys, each distinct key read once (a cold plan walked every green and
-  printed each one's ~410 keys: 88.8B ticks for 2,258 tests, 2026-11-16). See docs/storage.md#what-a-read-scanned."
+  printed each one's ~410 keys: 88.8B ticks for 2,258 tests). See docs/storage.md#what-a-read-scanned."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:map-of :any :string] [:map-of :string :map]] [:map-of :string :map]]}
   [rdb db cand found]
   (let [at (fn [e a] (:v (first (d/datoms rdb :eavt e a))))
