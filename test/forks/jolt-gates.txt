@@ -231,3 +231,5 @@ emitquotedvalues
 siginfodumpdisabled
 siginfodumpchild
 fibercost
+stepmeasure
+foreignlookups

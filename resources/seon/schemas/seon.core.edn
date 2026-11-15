@@ -277,7 +277,7 @@
  :seon.system/stall-armed [:boolean {:description "True when the api's stall-check timer is armed (what the stall task reads)."}]
  :seon.system/stall-timer [:and {:description "The stall check's armed flag: a host volatile the proc's state holds, so a thrown step does not undo it (seon.step/timer)."} :seon.host/volatile]
  :seon.system/taken [:and {:description "A host volatile of the messages the api's step took, kept so a throw can still answer them (seon.step)."} :seon.host/volatile]
- :seon.system/update [:boolean {:description "True when the agent procs changed and the flow graph is yet to be updated with them."}]
+ :seon.system/update [:boolean {:description "True when the agent procs changed and the flow graph is yet to be updated with them: root's process state, not a landing's update (that is :seon.system/last-update)."}]
  ;; keys the code names with no entry before (keys-schemas sweep): schema properties, metadata keys, map keys and the sentinels a function answers
  ;; a property a schema carries, read by seon.schema.datahike when it declares the attribute (docs/storage.md)
  :seon.db/attributes [:boolean {:description "On a schema's properties, true when it is an entity schema: the keys of its map are attributes, and an entity holding one is checked against its required keys. See docs/storage.md#the-write-checks-every-entity-it-touches."}]

@@ -1576,36 +1576,21 @@
       stale (assoc :stale-binary stale)
       inputs (assoc :inputs (update inputs :config merge config-input)))))
 
-(defn- loads-in-place?
-  "Does changed path p (a build input the binary bakes) load into a running system by the landing's own commit, so it is no
-  restart: a config entry (resources/seon/config/: seon.program/hold-config!) or a schema entry (the env-class schemas: its
-  dependents re-armed and root's registry held, seon.program/load-changes! and seon.writer's main-commit). The binary is built
-  again for the next boot (my.root/landed!'s :build), never restarted for it. See docs/source.md#a-landing-enters-main-as-data."
-  {:malli/schema [:=> [:cat :string] :boolean]}
-  [p]
-  (boolean (or (str/starts-with? p "resources/seon/config/") (= :seon.env/schemas (fx/env-class p)))))
-
 (defn restart-for
-  "Why a landing must restart this system, or nil when it can keep running: held, main's :seon.system/source after the landing's
-  bridge (seon.system/landed-tx moved its :tree); tree, the git tree of main's files now (bin/tree, where git runs); stale, the
-  binary's answer for held's tree (stale-binary); inputs, what bin/system start's `inputs` mode wrote for the files now
-  (held-inputs). A system keeps running, its agents with it, when main already holds the landed tree as data and what the
-  running binary lacks of it is forms: the bridge's commit loaded them into root in place (seon.writer's main-commit,
-  seon.program/load-changes!) and into the fork server, which forks every later agent, so only the source fact is written again
-  with the new inputs (booted-source); the next boot builds. Each other case is the restart's reason: no source fact; main not at
-  the files' tree (no bridge ran, so only a boot's catch-up reads them); a binary that was stale at its boot; what the binary
-  lacks holds a path no load brings (a build input, or a path no rule places, but a config or schema entry, which the landing's
-  commit loads: loads-in-place?), or is unknown (no tree recorded, a diff git
-  could not make); no inputs written. See docs/source.md#a-landing-enters-main-as-data."
-  {:malli/schema [:=> [:cat [:maybe :map] :string [:maybe :map] [:maybe :map]] [:maybe :string]]}
-  [held tree stale inputs]
+  "Why a landing must restart this system, or nil when it keeps running: held, main's :seon.system/source after the landing's
+  bridge; tree, the files' git tree; rt, seon.fx/runtime-for's answer for tree (the one binary identity); inputs, what bin/system
+  start's `inputs` mode wrote. A system keeps running when main holds the landed tree as data (the bridge's commit loaded its forms,
+  config and schema entries in place) and the running binary is tree's (rt not an error): nothing is built, a boot catches main's
+  program up in place. Each other case is the restart's reason: no source fact; main not at the files' tree (no bridge ran); a
+  binary not tree's, naming what differs (:seon.process/differs: a build input or a pin); no inputs written. See
+  docs/source.md#a-landing-enters-main-as-data."
+  {:malli/schema [:=> [:cat [:maybe :map] :string :any [:maybe :map]] [:maybe :string]]}
+  [held tree rt inputs]
   (cond
     (nil? held) "main holds no source fact"
     (not= tree (:tree held)) (str "main holds tree " (:tree held) ", not the files' " tree ": no landing brought it in as data")
-    (:stale-binary held) "this system's binary was stale at its boot"
-    (and stale (or (:error stale) (:missing stale) (some #(and (string? %) (not (loads-in-place? %))) (:reaches stale))))
-    (str "the running binary is not current for " tree
-               (if (:error stale) (str ": " (:error stale)) (str ": what differs reaches " (str/join ", " (or (seq (:reaches stale)) [(name (:missing stale :code))])))))
+    (contract/error? rt) (str "the running binary is not current for " tree ": what differs is "
+                              (str/join ", " (or (seq (:seon.process/differs rt)) [(:seon.error/message rt)])))
     (nil? inputs) "no inputs were written for the files (runs/root-inputs.edn)"))
 
 (defn- build-input?
