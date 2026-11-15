@@ -548,6 +548,30 @@
     (is (= "  [k] :needle-ns)" (nth (clojure.string/split-lines (seon.source/file-text db 'app.gm)) 3)) "the line (lines 'app.gm) reads there")
     (is (= ["app.gm:3"] (map :at (doc/grep db "defmethod place :ns" #{:var} nil))) "its first line too")))
 
+;; docs/vector.md#search: round 2 (2026-11-15): two agents chasing a Jolt error found nothing with grep (the program holds no Jolt
+;; source) and grepped the whole checkout from the shell, a run that never ended. A loaded library's file is a text of its own kind,
+;; :library, held in the store (seon.source/library-tx), which grep reads when asked and the program's kinds never read.
+;; Estimate: the world (~3.2M ticks), the index built over it (~5M), two greps (~0.1M): ~9M; 20,000,000 ticks, 40,000,000 bytes
+(deftest ^{:seon.test/estimate {:ticks 20000000 :bytes 40000000}} a-grep-finds-a-librarys-source-line
+  (let [lib {"jolt/fake_backend.clj" "(ns jolt.fake-backend)\n(defn emit-quoted [form]\n  (throw (ex-info (str \"emit-quoted: unsupported quoted form \" form) {})))\n"}
+        db (mt/with (mt/world) (seon.source/library-tx (mt/world) lib {"reference-code/jolt" "abc"}))
+        program #{:var :test :section :task :schema}]
+    (is (= [{:at "jolt/fake_backend.clj:3" :kind :library :text "(throw (ex-info (str \"emit-quoted: unsupported quoted form \" form) {})))"}]
+           (doc/grep db "unsupported quoted form" #{:library} nil))
+        "a library's line is found, named by its file's path and line")
+    (is (= [] (doc/grep db "unsupported quoted form" program nil)) "the program's kinds never read a library's text")))
+
+;; docs/vector.md#search: a pin change costs the files it changed. Estimate: the world and three entities: ~4M; 10,000,000
+(deftest ^{:seon.test/estimate {:ticks 10000000 :bytes 20000000}} a-library-import-writes-only-what-changed
+  (let [pins {"reference-code/datahike" "c1"}
+        db (mt/with (mt/world) (seon.source/library-tx (mt/world) {"a.clj" "(ns a)" "b.clj" "(ns b)"} pins))
+        tx (seon.source/library-tx db {"a.clj" "(ns a)" "c.clj" "(ns c)"} (assoc pins "reference-code/datahike" "c2"))
+        written (set (keep :seon.library/path tx))
+        retracted (set (for [x tx :when (and (vector? x) (= :db/retractEntity (first x)))] (:seon.library/path (d/entity db (second x)))))]
+    (is (= #{"c.clj"} written) (str "the unchanged file is not written again: " (pr-str tx)))
+    (is (= #{"b.clj"} retracted) "a file no longer loaded goes")
+    (is (= {"reference-code/datahike" "c2"} (some :seon.library/pins tx)) "and the pins it was read at are kept")))
+
 ;; docs/vector.md#search: a regex has no trigram to ask the index for, so grep reads every text of the kinds asked, once, off
 ;; the attribute's own datoms. Estimate (2026-11-12, main: 8191 texts, 7.7 M chars): the :aevt scan 1.4 M ticks and 7 MB,
 ;; the regex 16 M ticks, so about 2 k ticks and 1 KB a text; budget 4 k and 4 KB. Measured before: 82 KB a text (a seek

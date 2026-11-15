@@ -110,6 +110,12 @@
  :seon.db/schema-fact [:map {:seon.db/attributes true} [:schema/key :schema/key] [:schema/form :schema/form]
                         ;; a schema registered at the REPL (my.schema/register!) has no file until a sync writes it to disk
                         [:schema/file {:optional true} :schema/file]]
+ ;; a library's source file as the program loaded it (seon.fx/library-source): text an agent greps (seon.doc/text-attrs :library), never
+ ;; program: no import retracts it and no write-back writes it (docs/vector.md#search)
+ :seon.library/path [:and {:seon.db/identity true :description "A library file the program loaded, by the path its loader named it at (relative to its classpath root, e.g. datahike/pull_api.cljc)."} :string]
+ :seon.library/text [:string {:description "The library file's text as the loader read it."}]
+ :seon.library/pins [:map-of {:description "The pins ({path commit}) the store's library files were read at, on root's entity: a pin change reads them again."} :string :string]
+ :seon.library/file-fact [:map {:seon.db/attributes true} [:seon.library/path :seon.library/path] [:seon.library/text :seon.library/text]]
  :seon.db/file-fact [:map {:seon.db/attributes true} [:file/path :file/path] [:file/text :file/text] [:file/mode {:optional true} :file/mode]]
  ;; A file's mode as git records it: executable or not, all a tree holds of it. Written by the import from the file on disk, committed by the write-back
  ;; (seon.source/modes). A script (:script on the allow-list, docs/source.md#a-program-file): its text is the file's, and what follows is derived from it, for reading.
@@ -670,7 +676,8 @@
                           [:seon.system/tasks {:optional true} :seon.system/tasks]
                           [:seon.system/generation {:optional true} :seon.system/generation]
                           [:seon.system/collected {:optional true} :seon.system/collected] [:seon.system/retained {:optional true} :seon.system/retained]
-                          [:seon.system/content-t {:optional true} :seon.system/content-t]]
+                          [:seon.system/content-t {:optional true} :seon.system/content-t]
+                          [:seon.library/pins {:optional true} :seon.library/pins]]
  ;; ---- on every transaction Seon makes, in its tx-meta (seon.db/tx-meta) ----
  ;; the runtime that made it, as its compiled units are keyed (jolt.host/runtime-fingerprint:
  ;; Jolt's version, its runtime fingerprint, its trace tag; docs/storage.md#history)

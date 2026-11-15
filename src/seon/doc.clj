@@ -457,10 +457,10 @@
        vec))
 
 (def text-attrs
-  "Each searchable kind of text and the attribute holding it, the kinds seon.vector embeds: a form's
+  "Each searchable kind of text and the attribute holding it, what the text index holds (`text-index`): a form's
   source names a :var (or a :test), a wiki section's text a :section, a task's plan a :task, a
-  schema entry's form a :schema."
-  {:var :form/src :test :form/src :section :seon.doc/text :task :seon.task/plan :schema :schema/form})
+  schema entry's form a :schema, a loaded library's source file a :library (seon.fx/library-source)."
+  {:var :form/src :test :form/src :section :seon.doc/text :task :seon.task/plan :schema :schema/form :library :seon.library/text})
 
 (defn line-at
   "Where index i of text v falls: {:at the 1-based number of its line, :line the whole line it begins in, trimmed
@@ -489,7 +489,8 @@
                     (if i [{:kind kind :name n :line0 (count (filter #{\newline} (subs t 0 i)))}] []))))
     :seon.doc/text (when (kinds :section) [{:kind :section :name (:seon.doc/address (d/entity db e))}])
     :seon.task/plan (when (kinds :task) [{:kind :task :name (:seon.task/id (d/entity db e))}])
-    :schema/form (when (kinds :schema) [{:kind :schema :name (:schema/key (d/entity db e))}])))
+    :schema/form (when (kinds :schema) [{:kind :schema :name (:schema/key (d/entity db e))}])
+    :seon.library/text (when (kinds :library) [{:kind :library :name (:seon.library/path (d/entity db e))}])))
 
 (defn terms
   "Text s's terms, its identifier tokens, lower case: s split at every character that is no letter or digit

@@ -327,6 +327,20 @@
     (vec (for [[p c] (sort changes) :when (not= c (held p))]
            (if c {:seon.pin/path p :seon.pin/commit c} [:db/retractEntity [:seon.pin/path p]])))))
 
+(defn library-tx
+  "The facts that make db's library files exactly lib ({path text}, seon.fx/library-source's): a file whose text differs written, one
+  db holds that lib does not retracted, and pins, the pins they were read at, recorded on root's entity (:seon.library/pins), so the
+  next import reads them again only when the pins move. Only what differs: a pin change costs the files it changed. See
+  docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string] [:map-of :string :string]] :seon.db/tx-data]}
+  [db lib pins]
+  (let [held (into {} (for [{:keys [e v]} (d/datoms db :aevt :seon.library/path)] [v e]))]
+    (-> []
+        (into (for [[p t] lib :when (not= t (some->> (held p) (d/entity db) :seon.library/text))]
+                {:seon.library/path p :seon.library/text t}))
+        (into (for [[p e] held :when (not (contains? lib p))] [:db/retractEntity e]))
+        (conj {:seon.system/id :root :seon.library/pins pins}))))
+
 (defn pins-tx
   "The facts that make db's pins exactly pins ({path commit}, every gitlink a tree read): each pinned, and each db holds that pins
   does not retracted. See docs/source.md#indexing-a-tree."
