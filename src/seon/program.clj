@@ -2290,7 +2290,10 @@
                   (and (not roots?) (some #(:bin (flags %)) cs)) (conj [:binary]))
          ;; a test namespace's own call of a branch reader (test-class-of): an agent mixes its branch's point into this
          ;; digest (seon.agent/test-plan), as the inputs hold no branch
-         :data? (boolean (some #(contains? (:config (flags %)) :seon.env/data) cs))}))))
+         :data? (boolean (some #(contains? (:config (flags %)) :seon.env/data) cs))
+         ;; every config key its reach reads, held in its inputs or not: what an index under other inputs answers again
+         ;; (reach-indexed's input-moves), where :reads holds only the keys these inputs held
+         :takes (into #{} (mapcat #(:config (flags %))) cs)}))))
 
 (defn graph-index
   "{test {:digest :process? :binary?}} of graph g's tests under inputs (or of each key of
@@ -2313,11 +2316,26 @@
       (into {} (for [[k vars] roots :when (every? var-form vars)] [k (answer k (map var-form vars))]))
       (into {} (for [t tests :let [id (var-form t)] :when id] [t (answer t [id])])))))
 
+(defn- input-moves
+  "Which of a test answer's read keys moved between inputs held and inputs (a config key [:config k], [:tree], [:env]), and
+  :process when the process tests' config moved, or nil when an input every answer takes whole moved (:code, :data-refs, or
+  one unnamed here): then every test is answered again. See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat :map :map] [:maybe [:set :any]]]}
+  [held inputs]
+  (let [top (disj (into (set (keys held)) (keys inputs)) :config)
+        moved (filter #(not= (get held %) (get inputs %)) top)]
+    (when (every? #{:tree :env :test-system-config} moved)
+      (into (set (for [k moved] (if (= :test-system-config k) :process [k])))
+            (for [k (into (set (keys (:config held))) (keys (:config inputs)))
+                  :when (not= (get-in held [:config k]) (get-in inputs [:config k]))]
+              [:config k])))))
+
 (defn reach-indexed
   "Graph g holding the tests' index under inputs (graph-index's, with no roots): the answers it
   held still (reach-step drops those a change can move and names them :stale, so a graph updated
   from one holding an index answers only for what moved, never for the program), the rest
-  computed, all of them when it holds none or holds one under other inputs; and, when what root runs moved (root-digest),
+  computed; under other inputs, again only the answers that read an input that moved (input-moves: a config key, the tree,
+  the env, the process tests' config), all of them when it holds none or an input every answer takes moved; and, when what root runs moved (root-digest),
   the answers of the tests that took it (:rooted). The index is
   derived data, a function of the graph and inputs: regenerated whenever it is not held
   (docs/data-modeling.md#derived-data-is-a-cache-never-relied-on). Read it with index-of. See docs/source.md#tests-run-by-reach."
@@ -2325,9 +2343,12 @@
   [{:keys [defs tests] :as g} inputs]
   (let [index (:index g)
         fresh? (or (identical? inputs (:in index)) (= inputs (:in index)))
+        ;; under other inputs, the read keys that moved (nil: every answer again)
+        moves (when (and (not fresh?) (:in index)) (input-moves (:in index) inputs))
+        kept? (or fresh? (some? moves))
         ;; the tests whose answer took what root runs (root-digest): a change to it moves them all, whatever they reach.
         ;; The digest is asked only when one is held, and kept while the graph's component digests are the same value
-        rooted (if fresh? (:rooted index #{}) #{})
+        rooted (if kept? (:rooted index #{}) #{})
         root-now (delay (let [[roots k] (roots-of g index)]
                           (if (identical? (:cd g) (:root-cd index))
                             (select-keys index [:root :binary :roots :roots-key])
@@ -2338,8 +2359,13 @@
       (if (realized? root-now) (update g :index keep-root) g)
       (let [var-form #(peek (get defs %))
             answer (index-answer g inputs false)
-            new (for [t (if fresh? (into (set (:stale g)) (when moved? rooted)) tests) :let [id (var-form t)] :when id] [t (answer t [id])])
-            answers (into (if fresh? (:answers index) {}) new)
+            ;; under moved inputs, the held answers that read one of them (or, :process, a process test's)
+            readers (when (seq moves)
+                      (keep (fn [[t a]] (when (or (some moves (:reads a)) (some #(moves [:config %]) (:takes a))
+                                                  (and (moves :process) (:process? a))) t))
+                            (:answers index)))
+            new (for [t (if kept? (-> (set (:stale g)) (into (when moved? rooted)) (into readers)) tests) :let [id (var-form t)] :when id] [t (answer t [id])])
+            answers (into (if kept? (:answers index) {}) new)
             rooted (reduce (fn [r [t a]] (if (or (:process? a) (:binary? a)) (conj r t) (disj r t))) rooted new)]
         (when (seq rooted) @root-now)
         (assoc g :index (keep-root {:in inputs :answers answers :rooted rooted}) :stale #{}
