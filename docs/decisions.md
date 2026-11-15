@@ -28,7 +28,7 @@ The owner wants the slots, gaps and hand-ordering gone, with agents working insi
 
 ### Sessions' tools are thin over the system, and honest where they are not (evening)
 
-The owner wants Claude sessions' tools integrated with the running system. Every `bin/` script and MCP tool is a thin wrapper over a `seon.server` op, carrying no logic, state or decision of its own. Where one still does its work outside the runtime, its header says so plainly: what it does outside, and the task that moves it inside. Sessions and Seon agents feel the same problems, so pain a session hits with a tool is fixed in the shared mechanism (the op, the proc, the namespace function), so both gain, never in the script alone. Root keeps the list of scripts and how each deviates, and each gap is a task in its owning area.
+The owner wants Claude sessions' tools integrated with the running system. Every `bin/` script and MCP tool is a thin wrapper over a `seon.server` op, carrying no logic, state or decision of its own. Where one still does its work outside the runtime, its header says so plainly: what it does outside, and the task that moves it inside. Sessions and Seon agents feel the same problems, so pain a session hits with a tool is fixed in the shared mechanism (the op, the proc, the namespace function), so both gain, never in the script alone. Root keeps the list of scripts and how each deviates, and each gap is a task in its owning area. A script's outside logic is never ported into the runtime as it is: its task asks what job is left once the runtime's own mechanisms exist, and builds the runtime's design for that job, often better, or deletes the script outright.
 
 ### Tests always have helpers making them millisecond tests of the goal
 
