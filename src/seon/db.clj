@@ -1106,7 +1106,11 @@
             named (into #{} (for [b bs :let [h (d/branch-as-db store b)] a commit-attrs d (d/datoms h :aevt a)
                                   x (tree-seq coll? seq (:v d)) :when (uuid? x)]
                               x))
-            swept (when (empty? refused) @(d/gc-storage conn cutoff {:datahike.gc/keep-commits (into #{} (remove nil?) (concat bases named))}))
+            ;; a sync after each batch: under MDB_SAFENOSYNC no page freed after the last sync is reused, and the writer
+            ;; that syncs is not running yet, so an unsynced sweep grows the file by every page it touches (root went down at
+            ;; its map so: docs/storage.md#collection)
+            swept (when (empty? refused) @(d/gc-storage conn cutoff {:datahike.gc/keep-commits (into #{} (remove nil?) (concat bases named))
+                                                                     :datahike.gc/sweep-opts {:konserve.gc/batch-done (fn [_] (sync! (:config @conn)))}}))
             ;; refused: nothing swept, the record keeps the last sweep's generation (the next boot asks again) and names the branches
             r (cond-> {:swept (count swept) :ms (profile/ms-since t0) :generation (if (seq refused) last-g generation)}
                 (seq refused) (assoc :refused refused))]

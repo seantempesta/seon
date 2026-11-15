@@ -995,6 +995,32 @@
         (is (:bytes-after (pdb/compact-if-due! path)) "the sweep left its freed pages to compact"))
       (finally (seon.lib/remove-tree! path (str path ".compact"))))))
 
+;; docs/storage.md#collection (root down 2026-11-16: boot's sweep grew runs/store to its 64 GiB map, then to 128 GiB in 75 s): under
+;; MDB_SAFENOSYNC no page freed after the last sync is reused, and at boot no writer syncs, so retain! syncs after each batch it sweeps.
+;; Estimate: 6,000 keys of 2 KB written in one txn ~12 MB ~30M ticks + 5 small commits ~2M + a sweep of 6 batches, each one multi-dissoc
+;; and one env sync, ~10M = 45000000; measured 61M (the 6,000 keys' write cost more than counted: within 2x). The sweep grew the file
+;; 10,616,832 B (648 pages) unsynced, 3,162,112 B (193) synced; its 7 syncs cost 59 ms (93 -> 152 ms)
+(deftest ^{:seon.test/estimate {:ticks 45000000}} a-sweep-at-boot-reuses-the-pages-it-frees
+  (let [path (str (seon.config/checkout) "/target/tmp/sweep-reuse-" (random-uuid))
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+        size #(.length (java.io.File. (str path "/data.mdb")))
+        n 6000 pad (apply str (repeat 2000 "x"))]
+    (try
+      ;; keys nothing reaches, written before every commit the sweep keeps: six batches of the sweep's 1,000
+      (k/multi-assoc (:store @conn) (into {} (for [i (range n)] [(keyword "orphan" (str i)) pad])) {:sync? true})
+      (doseq [i (range 5)] (d/transact conn [{:note/text (str "n" i) :note/agent :t}]))
+      ;; the steady snapshot a boot starts from: the last sync before it
+      (pdb/sync! (:config @conn))
+      (let [before (size)
+            r (pdb/retain! conn 3)
+            grown (- (size) before)]
+        (is (<= n (:swept r)) (pr-str r))
+        (is (not (k/exists? (:store @conn) :orphan/0 {:sync? true})) "the orphans are gone")
+        ;; the orphans' leaf pages are ~n x 2 KB / 16 KB ~ 750; unsynced, every batch's rewritten pages come from the end (all of them),
+        ;; synced, the second batch on reuses the first's
+        (is (< grown (* 250 16384)) (str "the sweep grew the file " grown " bytes over " before)))
+      (finally (d/release conn) (seon.lib/remove-tree! path (str path ".compact"))))))
+
 ;; Estimate: a store opened on disk ~5M + 21 small commits ~0.3M each ~6M + 3 sweeps of a small store ~3M each ~9M = 25000000
 ;; (first stated 150M, counting a sweep as a large store's: measured 19-22M)
 (deftest ^{:seon.test/estimate {:ticks 25000000}} every-branchs-merge-base-outlives-every-sweep
