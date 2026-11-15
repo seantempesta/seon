@@ -13,6 +13,8 @@ The constants a lower bound is worked from (AGENTS.md §3a), measured on 2026-11
 - Reading source should allocate at most 20 bytes a character, against 56 today.
 - A system's first agent should be ready in under 2 s, against 16 s today; a system boot is 10.7 s today, which is a cost to remove, not a constant to plan with.
 - The whole suite should run in under 60 s of wall time, and a typical change's minimal set in seconds.
+- A process's first read of its binary's build record (```seon.program/binary-program```, 643 KB of EDN decoded once, about 12 ticks a byte) costs 7.9M ticks and 24 MB (measured 2026-11-16, result/bb8b9fd8): the first test in a child to start the prove proc pays it, so a test's estimate counts it when it can be first.
+- A cold test plan's reuse by reads over main's 2,258 tests costs 5.2B ticks and 25 GB (2026-11-16): 4.3B of it finding each test's newest green and reading its ~410 read-key datoms, against a bound of one seek and one value a candidate (```seon.proofs/reused-by-reads```; the read keys as one value a verdict is the fix).
 
 ## What is measured
 
