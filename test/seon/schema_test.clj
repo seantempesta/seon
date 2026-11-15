@@ -70,8 +70,7 @@
       (is (= {:schema/form ":int"} (entity :user/qty))))
     (is (nil? (d/q '[:find ?e . :where [?e :schema/key :x.schema-test/thing]] db)) "nothing of a refused registration is written")
     (testing "the branch's population, as the next eval reads it: the three registered beside what the imported tree holds beyond
-              the binary already, a schema landed and not yet built into it while root kept running (after dca8522605:
-              :seon.reconcile/done-input and :seon.reconcile/reason, whose binary predates them)"
+              the binary already (a schema landed and not yet built into it, which main kept running on)"
       (is (= (into (set (keys (program/schema-changes (main-db)))) #{:seon.task/outcome :seon.agent/invalid :user/qty})
              (set (keys (program/schema-changes db))))))))
 
