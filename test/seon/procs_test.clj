@@ -403,7 +403,7 @@
           n (first (:main outs))]
       (is (= 1 (count (:main outs))) "a group commit is one stored commit: one notice")
       (is (not-any? #(some? (:max-tx %)) (vals n)) "no db value in the notice")
-      (is (= #{:t :prev :ops :commit :ns} (set (keys n))))
+      (is (= #{:t :prev :ops :commit :ns :program-t} (set (keys n))) "with the t of main's last program move (seon.writer/program-at)")
       (is (= t0 (:prev n)))
       (is (= (:max-tx @conn) (:t n)))
       (is (= (:tx-data (first (:to-fork-server outs))) (:ops n)) "its ops are every report's ops, in order: the stored commit's")
