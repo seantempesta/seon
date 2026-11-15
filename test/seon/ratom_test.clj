@@ -571,3 +571,118 @@
     (is (= "boom" @good) "the other reader has the new value")
     (is (= "boom" (try @bad :no-throw (catch Throwable t (ex-message t)))) "the thrower answers its error, never its old value")
     (dispose! bad) (dispose! good)))
+
+;;; --- task seon.ratom/the-core-is-correct-before-a-reader-moves: root's review (notes reactive-core-review-2026-11-15-1725.md),
+;;; flow's shapes and review; each red on the core as Land A left it
+
+;; Estimate: one atom, one reaction, two bounded flushes: ~50k ticks
+(deftest ^{:seon.test/estimate {:ticks 50000}} a-queue-reaction-tracks-from-its-first-deref
+  ;; red [M result/bd1b9b1d]: a :queue reaction's first deref outside a run tracked nothing (0 watches), so no swap! ever dirtied
+  ;; it; Land A ran each one once by hand. Now its first capture is queued, and the owner's first bounded flush tracks it
+  (let [a (rv/atom 0)
+        r (make-reaction #(+ 10 @a) :auto-run :queue)]
+    (flush! 10)
+    (swap! a inc)
+    (flush! 10)
+    (is (= 11 (rv/-get r :state)) "a swap! of what it read reruns it at the owner's next flush")
+    (dispose! r)))
+
+;; Estimate: three reactions, one watch that throws, one flush: ~100k ticks
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-throw-mid-flush-leaves-the-rest-queued
+  ;; flow's ruling (1): flush! took its whole queue before running it, so any exit from one run lost the rest. A watch callback that
+  ;; throws is that reaction's own error; the reactions queued after it still run in the same flush
+  (let [a (rv/atom 0)
+        rs (vec (for [i (range 3)] (make-reaction #(+ i @a) :auto-run :queue)))
+        _ (flush! 10)
+        _ (add-watch (rs 0) :boom (fn [_ _ _ _] (throw (ex-info "a watch that throws" {}))))
+        _ (swap! a inc)
+        thrown (try (flush! 10) nil (catch Throwable t (ex-message t)))]
+    (is (nil? thrown) (str "the flush did not throw: " thrown))
+    (is (= [2 3] (map #(rv/-get % :state) (subvec rs 1))) "the reactions queued after the thrower ran")
+    (is (some? (rv/-get (rs 0) :caught)) "the throw is the thrower's own error")
+    (doseq [r rs] (dispose! r))))
+
+;; Estimate: two owners, one atom, two reactions, one cross-owner swap!: ~100k ticks
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-cross-owner-dirty-reaches-a-portless-owner-or-is-refused
+  ;; flow's ruling (1): a reaction dirtied in another owner's step reached its owner only through the owner's port, and an owner
+  ;; with no port dropped it silently, stale until someone happened to deref it. With a port it is a message; with none, the
+  ;; reaction's own typed error :seon.ratom/no-owner {:why :no-port}, never a silent drop
+  (let [a (rv/atom 0)
+        port (a/chan 10)
+        with-port (rv/owner port)
+        portless (rv/owner)
+        mk (fn [o] (binding [rv/*owner* o] (let [r (make-reaction #(deref a) :auto-run :queue)] (flush! 10) r)))
+        r1 (mk with-port)
+        r2 (mk portless)]
+    (swap! a inc)
+    (is (= r1 (:seon.ratom/dirty (a/poll! port))) "the owner with a port is sent its dirtied reaction")
+    (is (= :seon.ratom/no-owner (:seon.error/type (ex-data (rv/-get r2 :caught)))) "the portless owner's reaction is its typed error")
+    (is (= :no-port (:why (ex-data (rv/-get r2 :caught)))) "naming why")
+    (dispose! r1) (dispose! r2)))
+
+;; Estimate: eleven reactions, one swap!, one deref: ~100k ticks
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-deref-runs-only-its-own-chain
+  ;; flow's ruling (3): a non-reactive deref called (flush!), so every plain read ran the owner's whole queue, unbounded. It reruns
+  ;; only its own dirty chain
+  (let [a (rv/atom 0)
+        runs (atom {})
+        mk (fn [k] (make-reaction #(do (swap! runs update k (fnil inc 0)) @a) :auto-run :queue))
+        others (mapv mk (range 10))
+        r (mk :mine)]
+    (flush! 20)
+    (reset! runs {})
+    (swap! a inc)
+    (is (= 1 @r) "the deref answers the new value")
+    (is (= {:mine 1} @runs) (str "and ran only itself: " @runs))
+    (doseq [x (conj others r)] (dispose! x))))
+
+;; Estimate: one reaction that dirties itself, one bounded flush: ~100k ticks
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-cycle-is-a-typed-error-not-a-livelock
+  ;; flow's ruling (3): a reaction whose run dirties itself reran until the flush's bound, every step (a livelock under health-more).
+  ;; A second run in one generation is its typed error :seon.ratom/cycle, and it is queued no more
+  (let [a (rv/atom 0)
+        runs (atom 0)
+        ;; its first capture tracks a, so the self-dirtying starts with the next change from outside
+        r (make-reaction #(do (swap! runs inc) (let [v @a] (when (< 0 v 1000) (swap! a inc)) v)) :auto-run :queue)]
+    (flush! 100)
+    (reset! runs 0)
+    (swap! a inc)
+    (flush! 100)
+    (is (<= @runs 1) (str "it ran once for the change, its own re-dirtying stopped: " @runs))
+    (is (= :seon.ratom/cycle (:seon.error/type (ex-data (rv/-get r :caught))))
+        (str "its state is the typed cycle: " (pr-str {:caught (rv/-get r :caught) :ran-gen (rv/-get r :ran-gen) :dirty (rv/-get r :dirty?) :a @a :runs @runs})))
+    (is (zero? (flush! 100)) "and nothing is left queued")
+    (dispose! r)))
+
+;; Estimate: four reactions in a diamond, one swap!, one flush: ~100k ticks
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-diamonds-top-runs-once-a-commit
+  ;; the review's (2): reactions ran in queue order, so the top of a diamond could run between its two sides and see half an update
+  ;; (a glitch), then run again. Run by height, the top runs once, on both sides' new values
+  (let [a (rv/atom 1)
+        seen (atom [])
+        b (make-reaction #(+ @a 1) :auto-run :queue)
+        c (make-reaction #(* @a 2) :auto-run :queue)
+        d (make-reaction #(let [v (+ @b @c)] (swap! seen conj v) v) :auto-run :queue)]
+    (flush! 10)
+    (reset! seen [])
+    (swap! a inc)
+    (flush! 10)
+    (is (= [7] @seen) (str "the top ran once, on both sides' new values (3 + 4): " @seen))
+    (doseq [x [d b c]] (dispose! x))))
+
+;; Estimate: three reactions, one that spins past a 2M-tick budget: ~2M ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-flush-ended-by-its-budget-leaves-the-reaction-dirty-and-the-rest-queued
+  ;; flow's review of e23cb9abc4: a step's tick budget (or an eval's interrupt) ends a flush mid-reaction; it is no error of that
+  ;; reaction, so it reaches the step, and the reaction it cut stays dirty and queued with the rest, for the owner's next step
+  (let [a (rv/atom 0)
+        spin (make-reaction #(when (pos? @a) (loop [i 0] (recur (inc i)))) :auto-run :queue)
+        rest (vec (for [i (range 2)] (make-reaction #(+ i @a) :auto-run :queue)))
+        _ (flush! 10)
+        _ (swap! a inc)
+        ended (try (jolt.host/run-interruptible (jolt.host/make-interrupt) #(flush! 10) 2000000 nil) nil
+                   (catch Throwable t (ex-data t)))]
+    (is (:jolt/interrupted ended) (str "the budget's end reached the step: " (pr-str ended)))
+    (is (nil? (rv/-get spin :caught)) "it is no error of the reaction it cut")
+    (is (rv/-get spin :dirty?) "which stays dirty")
+    (is (= 3 (rv/queued)) "and queued, with the rest")
+    (dispose! spin) (doseq [r rest] (dispose! r))))

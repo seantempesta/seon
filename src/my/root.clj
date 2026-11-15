@@ -438,7 +438,7 @@
   source fact, tree, seon.fx/runtime-for's answer for it and the inputs bin/update wrote), main's source fact is written again as a boot
   writes it (seon.system/booted-source: this boot, main's program digest now, the inputs of the files now), so agents key their
   results by the landed files and every agent keeps running. Answers {:kept boot :tree} or {:restart why}, which bin/update
-  restarts on. A kept landing builds nothing: a boot catches main's program up in place, and a restart builds first. See
+  restarts on, or the typed error of a tree that could not be read, on which bin/update fails and the system keeps running. A kept landing builds nothing: a boot catches main's program up in place, and a restart builds first. See
   docs/source.md#a-landing-enters-main-as-data."
   {:malli/schema [:=> [:cat :seon.system/sys :string] :map]}
   [sys tree]
@@ -451,15 +451,17 @@
         ;; the update's outcome as a fact on main, written before bin/update acts on it, so a restart's reason outlives the restart; its
         ;; transaction's :db/txInstant is when
         update (cond-> {:tree tree :outcome (if why :restart :kept) :boot (:boot sys)}
-                 why (assoc :reason why)
+                 (string? why) (assoc :reason why)
                  (seq (:seon.process/differs rt)) (assoc :differs (vec (:seon.process/differs rt))))]
-    (if why
+    (cond
+      ;; the tree could not be read (runtime-for's io-error): the update's typed error, and the system keeps running
+      (contract/error? why) why
+      why
       (let [r @(root/transact-main! sys [{:seon.system/id :root :seon.system/last-update update}])]
         (if (contract/error? r) r {:restart why}))
+      :else
       (let [src (root/booted-source held (:boot sys) (program/binary-program) (program/program-digest db) (fx/config-input config/config (config/checkout)) nil inputs)
             r @(root/transact-main! sys [{:seon.system/id :root :seon.system/source src :seon.system/last-update update}])]
-        ;; kept, but the binary is not current for the landed tree (forms, config or schema entries it bakes): bin/update builds
-        ;; it now, with no restart, so the next boot is on main's build, never a stale one
         (if (contract/error? r) r {:kept (:boot sys) :tree tree})))))
 
 (defn build!

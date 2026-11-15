@@ -1608,13 +1608,15 @@
   start's `inputs` mode wrote. A system keeps running when main holds the landed tree as data (the bridge's commit loaded its forms,
   config and schema entries in place) and the running binary is tree's (rt not an error): nothing is built, a boot catches main's
   program up in place. Each other case is the restart's reason: no source fact; main not at the files' tree (no bridge ran); a
-  binary not tree's, naming what differs (:seon.process/differs: a build input or a pin); no inputs written. See
-  docs/source.md#a-landing-enters-main-as-data."
-  {:malli/schema [:=> [:cat [:maybe :map] :string :any [:maybe :map]] [:maybe :string]]}
+  binary not tree's, naming what differs (:seon.process/differs: a build input or a pin); no inputs written. Any other error of
+  runtime-for (the tree could not be read: :seon.fx/io-error) is answered as itself, never a reason to restart: the update fails
+  typed and the system keeps running. See docs/source.md#a-landing-enters-main-as-data."
+  {:malli/schema [:=> [:cat [:maybe :map] :string :any [:maybe :map]] [:or :nil :string :seon.error/base]]}
   [held tree rt inputs]
   (cond
     (nil? held) "main holds no source fact"
     (not= tree (:tree held)) (str "main holds tree " (:tree held) ", not the files' " tree ": no landing brought it in as data")
+    (and (contract/error? rt) (not= :seon.process/env-mismatch (:seon.error/type rt))) rt
     (contract/error? rt) (str "the running binary is not current for " tree ": what differs is "
                               (str/join ", " (or (seq (:seon.process/differs rt)) [(:seon.error/message rt)])))
     (nil? inputs) "no inputs were written for the files (runs/root-inputs.edn)"))
@@ -2129,10 +2131,9 @@
   ([sys agent-id opts] (request! sys 'clone! agent-id opts)))
 
 (defn submit!
-  "Send forms (a string) to the agent; a promise of the reply vector, one map per form.
-  opts {:ticks n}: each form stops after n engine ticks of work (an outside or ui origin
-  takes :seon.config.agent/form-ticks by default); {:origin :outside|:ui}: who asked, recorded
-  with each evaluation."
+  "Send forms (a string) to the agent; a promise of ONE reply map whatever the form count: :value is the form's value, or the
+  vector of several forms' values ((+ 1 2) (+ 3 4) answers [3 7]). opts {:ticks n}: each form's tick budget; {:origin
+  :outside|:ui}: who asked."
   {:malli/schema [:function [:=> [:cat :seon.system/sys :seon.agent/id :string] :seon.host/promise] [:=> [:cat :seon.system/sys :seon.agent/id :string [:maybe :map]] :seon.host/promise]]}
   ([sys agent-id forms-string] (submit! sys agent-id forms-string nil))
   ([sys agent-id forms-string opts] (request! sys 'submit! agent-id (assoc opts :forms forms-string))))
