@@ -1859,6 +1859,31 @@
       (is (every? (fn [[t d]] (not= d (judged t))) before) "a form the runner reaches changed: every test's digest moves"))
     (is (= before (digests (record db 'app.rn "(defn spare [x] (identity x))"))) "a form nothing of theirs reaches changed: none moves")))
 
+;; docs/cost.md#counting-calls: a form holding native (scm) definitions, changed and loaded in place (seon.program/load-diff!, as a
+;; landing loads root and the fork server), defines what the change added and keeps the state it held. Under a defonce the change
+;; was skipped: today's f9969ae8ca, every agent's init! threw on a procedure never defined. Estimate: 3 records and one load-diff
+;; of one form, ~3M ticks
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-native-block-changed-in-place-defines-what-it-added-and-keeps-its-state
+  (let [blk (fn [head extra] (str "(" head " blk (jolt.scheme/eval-string \"(define pt-native-n (if (top-level-bound? 'pt-native-n) pt-native-n 0)) (define (pt-native-inc!) (set! pt-native-n (+ pt-native-n 1)) pt-native-n)" extra "\"))"))
+        acct (fn [nsym src] {:id (str nsym "/blk-" (hash src)) :src src :ns nsym :ns-form? false :defs [{:var (symbol (str nsym) "blk") :meta #{}}]
+                             :declares #{} :methods [] :impls [] :refs '#{jolt.scheme/eval-string} :requires #{} :banned #{} :inline-defs #{}})
+        run (fn [nsym head]
+              (let [v1 (blk head "") v2 (blk head " (define (pt-native-two) 2)")
+                    db0 (record (empty-db) nsym v1)
+                    _ ((jolt.scheme/proc "pt-native-inc!"))
+                    db1 (d/db-with db0 (program/record-tx db0 (acct nsym v2)))
+                    errs (program/load-diff! db0 db1)]
+                {:errs errs
+                 :two (try ((jolt.scheme/proc "pt-native-two")) (catch Throwable _ :unbound))
+                 :n ((jolt.scheme/proc "pt-native-inc!"))}))]
+    (let [r (run 'app.pt-native-defonce "defonce")]
+      (is (= :unbound (:two r)) "under defonce the change is skipped: what it added is never defined (the class)"))
+    (jolt.scheme/eval-string "(define pt-native-n 0)")
+    (let [r (run 'app.pt-native-def "def")]
+      (is (= [] (:errs r)))
+      (is (= 2 (:two r)) "a plain def defines what the change added")
+      (is (= 2 (:n r)) "and keeps the state the block held (1 before the load, 2 after)"))))
+
 ;; Estimate: 2 tiny-file imports 2M + one graph 0.2M + 3 reverse walks over it ~0.1M, ~2.5M = 2500000
 (deftest ^{:seon.test/estimate {:ticks 2500000}} a-library-vars-tests-are-those-reaching-its-callers
   ;; deps, 2026-11-15: a library var has no form in the program, so tests-reaching answered [] for it, and the tests a

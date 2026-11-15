@@ -691,8 +691,9 @@
                                                               1    ; retyped-attributes' own contract, once a read (data, 2026-11-14)
                                                               13   ; the one-printer law's rule (seon.problems/printer-law): its four dials read once through the
                                                                    ; resolver for both sides (tests, measured 89 -> 102)
-                                                              2)} ; :unestimated reads the move's open tasks too: the moved task states no estimate,
+                                                              2    ; :unestimated reads the move's open tasks too: the moved task states no estimate,
                                                                    ; its row (derived-row) on base and head (data, 2026-11-15, measured 104 -> 106)
+                                                              2)} ; :native-in-defonce's reader on base and head for the move's forms (runtime, measured 106 -> 108)
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 25000000}} problems-cost-nothing-for-a-clean-program
@@ -1006,7 +1007,8 @@
                ;; as steeper growth (task seon.cost/a-speedup-never-reads-as-steeper)
                ;; 91 (main) + 13: the one-printer law's rule in the full read, its four dials read through the resolver (tests: 92 -> 99 at 10
                ;; before main's 91; measured 184 against a summed 178 on the merged tip, the sum having counted the dials' reads once)
-               :fixed {:ns 19500000 :bytes 17500000 :calls 104}
+               ;; +1: native-in-defonce, one contracted read of the forms reaching jolt.scheme/eval-string (none in this world)
+               :fixed {:ns 19500000 :bytes 17500000 :calls 105}
                :sizes [10 30 100]}))
 
 ;; ---- caused reads what changed (diff by value), and agrees with the full reading ---------------
@@ -1092,7 +1094,8 @@
                ;; (scan-form, seon.source/read-forms, literal-lists) on base and head; + 13: the one-printer law's rule, its four dials read
                ;; once for both sides (tests, measured 90 -> 103 before context's 97); + 4 (flow, 2026-11-14): :stateful-outside-flow's reader
                ;; on base and head, and on each side the seek of each changed var's namespace file
-               :fixed {:ticks 460000 :bytes 1800000 :calls 114} ; 90: and retyped-attributes' own contract, once a read (data, 2026-11-14)
+               ;; + 2 (runtime): :native-in-defonce's reader on base and head for the changed forms (measured 114 -> 116)
+               :fixed {:ticks 460000 :bytes 1800000 :calls 116} ; 90: and retyped-attributes' own contract, once a read (data, 2026-11-14)
                :sizes [10 30 100]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
@@ -1669,12 +1672,16 @@
         v 'app.calc/inc2
         planned (d/db-with db0 (seon.task/create-tx db0 [{:seon.task/ns 'app :seon.task/name "plan" :seon.task/kind :whole :seon.task/proofs #{'app-test/real}
                                                          :seon.task/plan (str "It changes `" v "`.")}]))
-        moved (d/db-with planned [{:var/name v :var/form -1} {:db/id -1 :form/id "f-inc2-new" :form/src "(defn inc2 [x] (+ x 2))"}])]
-    (doseq [[c base head] [[:leadless-section mapped paged] [:orphan-page mapped paged] [:uncited-task db0 tasked] [:stale-plan planned moved]]
+        moved (d/db-with planned [{:var/name v :var/form -1} {:db/id -1 :form/id "f-inc2-new" :form/src "(defn inc2 [x] (+ x 2))"}])
+        ;; a form evaluating native code inside a defonce, as the importer records it: its text and what it refers
+        defonced (d/db-with db0 [{:form/id "f-native-once" :form/ns [:ns/name 'app.calc] :form/refs ['jolt.scheme/eval-string]
+                                  :form/src "(defonce native (jolt.scheme/eval-string \"(define x 1)\"))"}])]
+    (doseq [[c base head] [[:leadless-section mapped paged] [:orphan-page mapped paged] [:uncited-task db0 tasked] [:stale-plan planned moved]
+                           [:native-in-defonce db0 defonced]]
             :let [[caused full] (made base head c)]]
       (is (seq full) (str (name c) ": the branch made a row"))
       (is (= full caused) (str (name c) ": caused-split answers it, as the full reading does")))
-    (is (= (set (keys {:stateful-outside-flow 1 :unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :unfocused-docstring 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1 :hand-written-list 1 :retyped-attribute 1}))
+    (is (= (set (keys {:stateful-outside-flow 1 :unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :unfocused-docstring 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1 :unestimated 1 :undeclared-test 1 :unschemed-key 1 :refused-value 1 :hand-written-list 1 :retyped-attribute 1 :native-in-defonce 1}))
            seon.problems/caused-classes)
         "the classes a branch is judged on are the content classes, as :seon.problems/class declares them")))
 
