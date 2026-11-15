@@ -13,7 +13,7 @@ How a fork's branches are named and where a pin sits.
 
 ## Fork work beside a Seon build
 
-A fork's checkout under `reference-code/` is also what Seon builds from. `bin/build` (and so `bin/test`, `bin/prove` and `bin/land`) moves every submodule back to its pin, which detaches a fork checkout that sits on a topic branch. `bin/tree` folds each submodule's checked-out commit into the tree's identity, so a fork checkout that moves while a run is going changes the identity under it: a test's root then reads a tree whose binary digest (`seon.fx/runtime-for`) is not target/seon's, and its spawns are refused with `:seon.process/env-mismatch` (deps, 2026-11-15: a Jolt commit during a prove turned `seon.system-test/a-second-boot-resumes-the-same-main` red). So fork work is committed on its `jolt/<topic>` branch before any Seon build, test, prove or land in that worktree, and no fork checkout moves while one runs. Commits on the branch survive the sync; uncommitted edits in a detached checkout are at risk.
+A fork's checkout under `reference-code/` is also what Seon builds from. `bin/build` (and so `bin/test`, `bin/prove` and `bin/land`) moves every submodule back to its pin, which detaches a fork checkout that sits on a topic branch. `bin/tree` folds each submodule's checked-out commit into the tree's identity, so a fork checkout that moves while a run is going changes the identity under it: a test's root then reads a tree whose binary digest (`seon.fx/runtime-for`) is not target/seon's, and its spawns are refused with `:seon.process/env-mismatch` (deps, 2026-11-15: a Jolt commit during a prove turned `seon.system-test/a-second-boot-resumes-the-same-main` red). So fork work is committed on its `jolt/<topic>` branch before any Seon build, test, prove or land in that worktree, and no fork checkout moves while one runs. Commits on the branch survive the sync; uncommitted edits in a detached checkout are at risk. A fork change is tested only once its gitlink is committed on the session's branch: `bin/build` checks every submodule out at the COMMITTED gitlink, so a build after an uncommitted bump compiles the old pin (deps, 2026-11-15 and 11-16, a test green on the edited tree and red on the pin).
 
 ## Following upstream
 
@@ -95,13 +95,14 @@ The open work is tasks `jolt.host/a-fibers-own-state-lives-in-its-slice`, `jolt.
 
 ## konserve
 
-`reference-code/konserve` at `4e84568` (``jolt/deps``), upstream ``replikativ/konserve`` head `63ad4ad` with our commits replayed on it. The fork's ``jolt/main`` is not under the pin.
+`reference-code/konserve` at `bd5c5d3` (``jolt/deps``), upstream ``replikativ/konserve`` head `63ad4ad` with our commits replayed on it. The fork's ``jolt/main`` is not under the pin.
 
 - Jolt stores over `jolt.ffi`: a POSIX filestore and an LMDB store, `konserve.store`'s `:file` and `:lmdb` backends on Jolt; an LMDB env lives as long as a store holds it, a read after its release is `{:type :lmdb-env-closed}`, envs under a deleted directory are closed first. Jolt.
 - A node read (`k/get-immutable`) takes no lock, probes or revision: a key written immutable never changes. Jolt.
 - An append is one transaction on a store that runs them, so two processes appending one log lose nothing. Generic.
 - Serialization: jfasl (a tagged fasl format: a sorted map or set by the default comparator and a queue store and come back as themselves; a function, an atom, an array, a regex or an exception has no stable encoding and is refused, naming it) and `FaslSerializer`; a value serialized once; LZ4 and zstd through liblz4 and libzstd (`JOLT_LZ4_LIB`, `JOLT_ZSTD_LIB`, [storage](storage.md#compression)); a store key's SHA-512 one libcrypto call. Jolt.
-- `sweep!` with ``:konserve.gc/sync-io?``; `compact-copy!` returns a sweep's freed pages. Generic, Jolt.
+- `sweep!` with ``:konserve.gc/sync-io?``, and ``:konserve.gc/batch-done`` called after each batch's deletes, where a caller whose store reuses freed space only once it is durable (LMDB under `MDB_SAFENOSYNC`) syncs; `compact-copy!` returns a sweep's freed pages. Generic, Jolt.
+- `open-env` opens the main dbi in a read txn on an `MDB_RDONLY` env, so a process reading beside the writer opens the store. Jolt.
 - The lock token channel is `(chan 1)`, a workaround for Jolt's `poll!`. Jolt.
 - Open: `konserve.jolt.fasl-store` names persistent-sorted-set node types; its cleaner home may be that fork.
 
