@@ -392,13 +392,6 @@
               " :fact (dissoc (:seon.system/source (datahike.api/pull db [:seon.system/source] root)) :boot :inputs :ms)"
               " :stale (mapv (juxt :binary :tree) (get-in (my.root/problems sys) [:classes :stale-binary :rows]))})")})
 
-(defn- objects-into-checkout!
-  "The objects of the scratch repository at dir's HEAD copied into this checkout's repository, no ref written: a root on the
-  checkout reads the scratch tree's identity there (seon.fx/runtime-for asks the checkout's git), as it reads a landed tree."
-  [dir]
-  (let [pack (sh/sh "git" "-C" dir "pack-objects" "--revs" "--stdout" :in "HEAD\n" :out-enc :bytes)]
-    (sh/sh "git" "-C" (config/checkout) "unpack-objects" "-q" :in (:out pack))))
-
 (defn- boots-on-a-tree
   "A store of its own (removed at the end) seeded (./seon seed-program) from a scratch repository under target/ holding
   the one file path (dirs resources/seon) as its first text, and with :wiki a page's text at docs/zz-broken.md; then
@@ -428,13 +421,11 @@
        (spit (str tree "/" path) seeded)
        (git "add" "-A")
        (git "commit" "-q" "-m" "seeded")
-       (objects-into-checkout! tree)
        (into [(:out (apply ts/binary-sh (concat ["./seon" "seed-program" store] args ["--profile" ts/root-profile :dir "target"])))]
              (for [text texts]
                (let [_ (spit (str tree "/" path) text)
                      _ (git "add" "-A")
                      _ (git "commit" "-q" "-m" "tree")
-                     _ (objects-into-checkout! tree)
                      out (root-answers store "main" (into [boot-probe] also) {:args args})
                      [probe & more] (str/split-lines out)
                      v (read-line probe)]
@@ -530,8 +521,8 @@
     (is (str/includes? (str seed) "SEED OK") (str seed))
     (is (true? (:listening? two)) (str "root resumed the store and listens: " two))
     ;; never refused for the program: the spawn reaches the agent's one start, where only the binary's identity is asked
-    ;; (seon.fx/runtime-for: this scratch tree, its objects in the checkout's repository, names no build inputs, so another binary
-    ;; than target/seon)
+    ;; (seon.fx/runtime-for reads the tree in the source root's repository, the scratch one: it names no build inputs, so
+    ;; another binary than target/seon)
     (is (= :seon.process/env-mismatch spawned) (str "the agent's start asks its binary, nothing before it: " (pr-str (first (:also two)))))
     (is (not (str/includes? (str message) "git tree")) "no refusal names the trees")
     (doseq [act ["bin/system start --reindex" "bin/system next"]]
