@@ -1347,7 +1347,7 @@
                 :system "a promise of the built system (its declared procs, for the health tile)"
                 :conn "the store main's commit notices are read from"}
        :ins {:answers "the api's answers" :from-web "views open, page and keyframe requests"
-             :health-wake "health's own next bounded step (health-more): a channel of one slot, sliding, since wake-ups subsume each other (docs/core-async.md's one lossy case)"
+             :health-wake "health's own next bounded step (health-more): a channel of one slot, sliding, since wake-ups subsume each other (docs/flow.md#channel-idioms: a lossy buffer only on one stream whose newest value subsumes the rest)"
              :main "main's commit notices from the writer {:t :prev :ops :commit}, read with seon.db/at-commit: each one's datoms find the pages whose reads they touched"}
        :outs {:to-api "requests to the api" :to-web "patches, keyframes, pages, the agents' index"}
        ;; a pass renders what changed; it never waits. :mixed: one thread of its own for
