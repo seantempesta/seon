@@ -82,4 +82,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.agent-test/an-agent-is-a-remote-flow-proc-in-roots-graph seon.agent-test/an-agents-request-to-root-is-a-flow-message-answered-once}
   :seon.task/estimate #:seon.agent{send! {:n 1, :order :constant, :ticks 20000, :bytes 4000}}}
+ {:seon.task/name "the-template-instructions-test-ends"
+  :seon.task/plan "Root, 2026-11-16: seon.repl-test/the-template-instructions-and-the-help-page-run stalls, ending only at its bound. A test that ends at its bound waits on something that never comes (AGENTS.md section 3, docs/clocks.md#two-kinds-of-wait).\n\nFirst: capture the stalled test's waits (seon.system/stall-state's :unanswered site, as a test's capture records it) and name what it blocks on; fix that wait at its cause. Never raise the bound.\n\nPRIOR WORK: the test itself (test/seon/repl_test.clj); stall-state."
+  :seon.task/proofs #{seon.repl-test/the-template-instructions-and-the-help-page-run}}
 ]
