@@ -666,7 +666,10 @@
         (let [kept (at-root (str "(my.root/landed! sys " (pr-str tree) ")"))]
           ;; and builds nothing, though the binary lacks a form root runs (owner 2026-11-15: build only when a restart is about to boot,
           ;; or a build input moved): the running root holds the form, and a boot catches main's program up in place
-          (is (= {:kept boot :tree tree} kept) (str "landed! keeps the system running and asks for no build: " (pr-str kept))))
+          (is (= {:kept boot :tree tree} kept) (str "landed! keeps the system running and asks for no build: " (pr-str kept)))
+          ;; and the update's outcome is a fact on main, the one place a restart's reason is kept (root 2026-11-15)
+          (is (= [tree :kept] ((juxt :tree :outcome) (at-root "(:seon.system/update (datahike.api/pull @(:conn sys) [:seon.system/update] [:seon.system/id :root]))")))
+              "the update's outcome is main's fact"))
         (is (= [tree boot] ((juxt :tree :boot) (at-root "(:seon.system/source (datahike.api/pull @(:conn sys) [:seon.system/source] [:seon.system/id :root]))")))
             "main's source fact is at the landed tree, under the same boot")
         (is (= root-pid (at-root "(seon.lib/c-getpid)")) "root is the same process")
