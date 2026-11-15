@@ -51,17 +51,15 @@
         "an attribute the schema does not define: the same answer inside the recorder as outside")))
 
 ;; Estimate: a seeded db, 200 pulls of one attribute under one recorder ~1M; one planned join query ~0.2M; 3 d/with ~0.2M = ~1500000
-(deftest ^{:seon.test/estimate {:ticks 1500000}} a-recorder-holds-one-range-a-key-and-the-planner-records
+(deftest ^{:seon.test/estimate {:ticks 1500000}} a-recorder-holds-one-range-a-key
   ;; task datahike.reads/a-lazy-read-records-into-the-read-it-belongs-to (2) and context's T9: the recorder kept one range a
-  ;; read, so 200 reads of one attribute held 200 ranges for one key (565 B each); it holds each range once. And a query the
-  ;; planner runs records what it read: with-reads no longer turns the planner off (on Jolt its cursors read through the
-  ;; index protocol, which records), so a commit to what a planned join read reaches it.
+  ;; read, so 200 reads of one attribute held 200 ranges for one key (565 B each); it holds each range once. And a recorded
+  ;; join records what it read, so a commit to what it read reaches it (the planner's case: a-recorded-join-is-touched-by-each-attribute-it-read).
   (let [[db t1 t2] (seeded)
         one (count (second (d/with-reads #(d/pull db [:seon.task/plan] t1))))
         [_ rs] (d/with-reads #(dotimes [_ 200] (d/pull db [:seon.task/plan] t1)))
         q '[:find ?id :in $ ?e :where [?e :seon.task/needs ?n] [?n :seon.task/id ?id]]
-        ;; the planner on, whatever with-reads binds: what this asks is that the planner's reads are recorded
-        [v qrs] (d/with-reads #(binding [datahike.query/*disable-planner* false] (d/q q db t1)))
+        [v qrs] (d/with-reads #(d/q q db t1))
         idx (d/reads-index qrs)
         tx (fn [tx-data] (:tx-data (d/with db tx-data)))]
     (is (= one (count rs)) (str "200 pulls of one attribute hold what one pull holds (" one "): " (count rs)))
@@ -69,6 +67,23 @@
     (is (d/reads-touched? idx (tx [{:db/id t1 :seon.task/needs [{:seon.task/id "r/t3"}]}])) "a need added to the entity it joined from")
     (is (d/reads-touched? idx (tx [[:db/retract t2 :seon.task/id "r/t2"]])) "the joined entity's id, retracted")
     (is (not (d/reads-touched? idx (tx [{:db/id t2 :seon.task/plan "Other."}]))) "an attribute the join did not read")))
+
+;; Estimate: the test db with one entity added (~0.4M, missed first: measured 0.83M red), one recorded q, two with-txs and the q again, ~0.9M = 900000
+(deftest ^{:seon.test/estimate {:ticks 900000}} a-recorded-join-is-touched-by-each-attribute-it-read
+  ;; deps' audit, 2026-11-15 [M]: with the planner on while recording (Datahike b1ef15b0), an entity-group merge read its
+  ;; card-one attribute by lookupGE on the eavt set, past the index protocol, and recorded nothing for it: this q recorded
+  ;; only [:a :note/text], so a commit to the entity's :note/agent changed the answer and touched no read (a stale
+  ;; reaction or render). Every attribute a recorded q read reaches its reads
+  (let [db (d/db-with (ts/test-db) [{:db/id "n" :note/text "keep" :note/agent :c1}])
+        e (d/q '[:find ?e . :where [?e :note/text "keep"]] db)
+        q '[:find ?a :where [?e :note/text ?t] [(= ?t "keep")] [?e :note/agent ?a]]
+        [v rs] (d/with-reads #(d/q q db))
+        tx (fn [tx-data] (:tx-data (d/with db tx-data)))]
+    (is (= #{[:c1]} v))
+    (is (= #{[:c9]} (d/q q (d/db-with db [[:db/add e :note/agent :c9]]))) "the commit below changes the answer")
+    (is (d/reads-touched? (d/reads-index rs) (tx [[:db/add e :note/agent :c9]]))
+        (str "so it touches the read: " (pr-str (d/reads-index rs))))
+    (is (d/reads-touched? (d/reads-index rs) (tx [{:note/text "keep" :note/agent :c2}])) "and a new entity the scan would find")))
 
 ;; Estimate: a seeded db and two pulls under nested recorders, ~0.2M = 200000
 (deftest ^{:seon.test/estimate {:ticks 200000}} a-nested-with-reads-records-into-the-outer
@@ -80,6 +95,56 @@
                                              (d/with-reads (fn [] (d/pull db [:seon.task/plan] t1)))))]
     (is (= #{[:ea t1 :seon.task/plan]} (d/reads-index inner)) (pr-str (d/reads-index inner)))
     (is (= #{[:ea t1 :seon.task/plan] [:ea t2 :seon.task/id]} (d/reads-index outer)) (pr-str (d/reads-index outer)))))
+
+;; Estimate: a test branch (~1M) and four recorded q runs with the planner off (~1M each on the seed, measured 0.96M: the
+;; planner's probes do not record, so a recorded q runs without it, task datahike.query/the-planners-probes-record), ~5M
+;; = 5000000 (measured 5.03M; 3.5M first, missing the branch and the recorded warm-up)
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-cached-read-records-what-it-read
+  ;; task datahike.reads/a-cached-read-records-what-it-read: recording switched the q result cache off, so every recorded
+  ;; read recomputed what an unrecorded one served cached. A recorded q the cache holds is served by it and records what
+  ;; its computation read: the same keys as an uncached recorded run. On a live connection's committed value: the result
+  ;; cache admits only those (datahike.query/db-cache-key).
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [db @conn
+            q '[:find ?a :where [?e :db/ident ?a] [?e :db/cardinality :db.cardinality/many]]
+            ticks (fn [f] (let [t (jolt.host/ticks)] (f) (- (jolt.host/ticks) t)))
+            cold (d/reads-index (second (d/with-reads #(binding [datahike.query/*query-result-cache?* false] (d/q q db)))))
+            ;; warmed by a recorded run: an unrecorded one runs the planner, which is in the cache key
+            _ (d/with-reads #(d/q q db))
+            [[v warm] dt] (let [t (jolt.host/ticks) r (d/with-reads #(d/q q db))] [r (- (jolt.host/ticks) t)])
+            uncached-dt (ticks #(d/with-reads (fn [] (binding [datahike.query/*query-result-cache?* false] (d/q q db)))))]
+        (is (seq v) "the seed holds cardinality-many attributes")
+        (is (= cold (d/reads-index warm)) (str "a cached recorded read records what it read: " (pr-str (d/reads-index warm)) " vs " (pr-str cold)))
+        (is (< (* 3 dt) uncached-dt) (str "and the cache served it: " dt " ticks against " uncached-dt " uncached"))))))
+
+;; Estimate: test-branch! ~1M, 3 transacts ~0.5M, 6 recorded q runs on the seed's ~2k datoms ~0.5M = ~2000000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-cached-read-on-a-later-commit-records-what-a-fresh-run-reads
+  ;; task datahike.reads/a-cached-read-records-what-it-read (root's review): an entry a later commit inherits
+  ;; (datahike.query/inheritable-entry) replays the ranges of its first computation. Ranges are keys, never values: a
+  ;; commit that adds keys inside a range read, the answer unchanged, leaves the recorded keys a fresh run records; and an
+  ;; inherited entry (no attribute read moved) records what a fresh run on the new value records
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn [{:note/text "keep" :note/agent :c1}])
+      (let [q '[:find ?a :where [?e :note/text ?t] [(= ?t "keep")] [?e :note/agent ?a]]
+            fresh (fn [db] (d/with-reads #(binding [datahike.query/*query-result-cache?* false] (d/q q db))))
+            served (fn [db] (d/q q db) (d/with-reads #(d/q q db)))
+            same (fn [db what]
+                   (let [[v1 r1] (fresh db) [v2 r2] (served db)]
+                     (is (= #{[:c1]} v1 v2) what)
+                     (is (= (d/reads-index r1) (d/reads-index r2))
+                         (str what ": " (pr-str (d/reads-index r2)) " replayed vs " (pr-str (d/reads-index r1)) " fresh"))))]
+        (same @conn "the first commit")
+        (d/transact conn [{:note/text "other" :note/agent :c2}])
+        (same @conn "a commit adding keys inside both ranges read, the answer unchanged")
+        (d/with-reads #(d/q q @conn))
+        (d/transact conn [{:seon.agent/key "reads-test/unread" :seon.ctx/pattern '[["a/b" 0.5]]}])
+        (let [db @conn
+              t0 (jolt.host/ticks) _ (d/with-reads #(d/q q db)) inherited (- (jolt.host/ticks) t0)
+              t1 (jolt.host/ticks) _ (fresh db) computed (- (jolt.host/ticks) t1)]
+          (is (< (* 3 inherited) computed) (str "a commit to an attribute the query does not read inherits the entry: " inherited " ticks against " computed))
+          (same db "and the inherited entry records what a fresh run reads"))))))
 
 (deftest a-transaction-touches-only-what-a-read-scanned
   (let [[db t1 t2] (seeded)
