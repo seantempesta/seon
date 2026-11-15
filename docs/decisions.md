@@ -18,6 +18,10 @@ The owner's rulings on the morning after the first night run on its own.
 
 Told that ticks count Scheme work only (no foreign calls, GC copying, parked time or interrupts-off time: chez `s/cpnanopass.ss:2966`, `s/event.ss:47`) and that the 161M/300M swing is unexplained, he chose deps' order: dumps that need no event check; CPU time and bytes per fiber per dispatch; steps scoped by the existing nesting measure `ticks-of`, with no new marker; a counter of foreign lookups; then one experiment that settles the swing before ticks can fail a test. Plan in `deps-ticks-soundness-2026-11-15` (deps' task).
 
+### Root no longer moves the person's page
+
+With `/` always root's chat, he retired `my.user/focus!` and root's prompt lines that used it (2026-11-15): nothing moves what the person sees, and the debug view picks its agent by its own link.
+
 ### Messaging is flow's: a wake that never blocks, the person included
 
 He ruled that the inbox and the rest of messaging belong to flow, not web: it must be done right from Flow's side, waking an agent without blocking, and it must work for the user, who is also an agent driving a session through the page's input box (2026-11-15). One path serves a Claude session's inbox, a Seon agent's wake and a person's message; flow asks web and runtime for what it needs, and web draws what the path delivers.
