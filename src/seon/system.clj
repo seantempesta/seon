@@ -214,7 +214,8 @@
     (let [;; its hello names what of the program it was forked with did not load: the agent runs, and that is its first fact and its spawn's answer
           swp (when (and (:ready m) (seq (:load-errors m)))
                 (contract/error :seon.agent/started-without-program #'seon.system/set-agent
-                                (str "this agent started without part of its program: " (str/join ", " (distinct (map :ns (:load-errors m)))) " did not load")
+                                (str "this agent started without part of its program: "
+                                     (str/join "; " (distinct (map #(if (:ns %) (str (:ns %) " did not load") (:seon.error/message %)) (:load-errors m)))))
                                 {:errors (vec (:load-errors m))}))
           a' (cond-> (merge a (dissoc m :ready :evals-add))
                (and (:ready m) (= :spawning (:status a))) (assoc :status :idle)
@@ -525,18 +526,21 @@
     :else (start-spawn st o p opts))))
 
 (defn- back-point
-  "Where eval id of agent a's branch stands, {:commit :branch :t}, or why it can't be gone back to: the earliest commit of the branch holding its code's and response's last write, a run again's included and a reader's opening of it not (seon.ctx.wire/at-t), and a new branch's name for it, which no earlier back to it holds, as the head has moved since. See docs/turn.md#an-agent-goes-back-to-an-eval."
-  {:malli/schema [:=> [:cat :seon.system/api-state :map :string] :map]}
-  [st a id]
-  (let [db (pdb/head (:conn st) (:branch a))
-        e (pdb/eid db :seon.eval/id id)
+  "Where eval id of agent aid's branch (db, its head, named branch) stands, {:commit :branch :t}, or why it can't be gone back to: the earliest commit of the branch holding its code's and response's last write, a run again's included and a reader's opening of it not (seon.ctx.wire/at-t), and a new branch's name for it, which no earlier back to it holds, as the head has moved since. See docs/turn.md#an-agent-goes-back-to-an-eval."
+  {:malli/schema [:=> [:cat :seon.host/db :keyword :keyword :string] :map]}
+  [db branch aid id]
+  (let [e (pdb/eid db :seon.eval/id id)
+        ;; a branch holds every agent's records once merges are whole (docs/merging.md#a-branch-merges-main-in): the eval is this agent's
+        ;; only when its record says so
+        owner (some-> e (->> (d/entity db)) :seon.eval/agent :seon.agent/key)
         t (when e (apply max (map :tx (mapcat #(d/datoms db :eavt e %) [:seon.eval/code :seon.eval/response :seon.eval/result]))))
         at (when t (wire/at-t db t))
         commit (when (and at (= t (:max-tx at))) (d/commit-id at))]
     (cond
       (nil? e) (refused 'seon.system/back! (str "no eval " id " on this agent's branch") {:eval id})
+      (and owner (not= owner (name aid))) (refused 'seon.system/back! (str "eval " id " is agent " owner "'s, not " (name aid) "'s") {:eval id :agent owner})
       (nil? commit) (refused 'seon.system/back! (str "eval " id " has no commit of its own: a sweep took it, or a later eval shares it") {:eval id})
-      :else {:commit commit :t t :branch (keyword (namespace (:branch a)) (str (name (:branch a)) "-back-" (:max-tx db)))})))
+      :else {:commit commit :t t :branch (keyword (namespace branch) (str (name branch) "-back-" (:max-tx db)))})))
 
 (defn request-name
   "The name of the request task text asks for on db: its first sentence's words (a sentence ends at a . ! or ? before a space or
@@ -589,7 +593,7 @@
                 (not= :idle (:status a)) (reply! st o p (refused 'seon.system/back! (str id " is " (name (:status a)) ": it goes back when it is idle") {:agent id :status (:status a)}))
                 (get-in st [::backing id]) (reply! st o p (refused 'seon.system/back! (str id " is already going back") {:agent id}))
                 (no-room st (count (:agents st))) (reply! st o p (no-room st (count (:agents st))))
-                :else (let [pt (back-point st a (:eval m))]
+                :else (let [pt (back-point (pdb/head (:conn st) (:branch a)) (:branch a) id (:eval m))]
                         (if (contract/error? pt)
                           (reply! st o p pt)
                           (do (step/out! o :to-writer {:op :clone-branch :from (:commit pt) :branch (:branch pt) :dest {:back id}})

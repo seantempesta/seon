@@ -17,7 +17,8 @@
   (if-let [un (:union st)]
     (let [conn (:conn st) main (pdb/conn-main conn)
           from (if-let [cid (get-in un [:applied b])] (d/commit-as-db conn cid) (pdb/branch-base conn main b))]
-      (assoc st :union (union/catch-up un b from head)))
+      ;; a branch whose base can't be read (seon.db/no-merge-base) stays out of the union, never breaking it for the rest
+      (if (contract/error? from) st (assoc st :union (union/catch-up un b from head))))
     st))
 
 (defn- union-built
@@ -28,7 +29,7 @@
   (if (:union st)
     st
     (let [conn (:conn st) main (pdb/conn-main conn)]
-      (assoc st :union (reduce (fn [un b] (union/catch-up un b (pdb/branch-base conn main b) (pdb/head conn b)))
+      (assoc st :union (reduce (fn [un b] (let [base (pdb/branch-base conn main b)] (if (contract/error? base) un (union/catch-up un b base (pdb/head conn b)))))
                                (union/of-history (union/empty-union @conn) main @conn)
                                (map #(pdb/on-main main %) (pdb/of-main main (set (d/branches conn)))))))))
 
@@ -87,6 +88,8 @@
   {:malli/schema [:=> [:cat :seon.writer/state :seon.db/branch :seon.merge/data-attrs] [:tuple :seon.host/db :seon.merge/result :seon.host/db]]}
   [{:keys [conn]} b data-attrs]
   (let [head (pdb/head conn b) base (pdb/branch-base conn (pdb/conn-main conn) b)]
+    ;; no base to read: the op's answer is that typed error (writer-one's one catch answers it to the asker)
+    (when (contract/error? base) (throw (ex-info (:seon.error/message base) base)))
     [head (pm/delta-three-way base head @conn data-attrs) base]))
 
 (defn- written
@@ -205,6 +208,7 @@
   [conn cfg b]
   (let [main-b (pdb/conn-main conn) main @conn head (pdb/head conn b)
         base (pdb/branch-base conn main-b b)
+        _ (when (contract/error? base) (throw (ex-info (:seon.error/message base) base)))
         r (pm/merge-main base head main)]
     (if (:conflicts r)
       (do (branch-tx! cfg b {:tx-data (pm/unmerged-tx head (vec (:conflicts r)) (:max-tx main)) :tx-meta (pdb/tx-meta b)})
@@ -378,7 +382,8 @@
                                     {:ok true :commit (d/force-branch! to (:branch m) #{(:to m)} {:expected-current-commit (:expected m)}) :from (:expected m)}
                                     (refused (str "no commit " (:to m)) {:to (:to m)}))))
       ;; a branch dropped, any but main (a tree's once no proof of it runs, seon.system/tree-leave!; one a merge left inconsistent, by root's
-      ;; go): its head goes, its commits stay in history; refused while a live agent holds it; one already gone answers so
+      ;; go): its head goes, and the next collection (seon.db/collect!) sweeps every commit only it reached, so a drop is never undone;
+      ;; refused while a live agent holds it; one already gone answers so
       :drop-branch (reply st (cond (= main (:branch m)) (refused "main is never dropped" {:branch (:branch m)})
                                    (not (exists? (:branch m))) {:ok true :dropped false}
                                    :else (or (branch-held conn main (:branch m))
@@ -420,7 +425,7 @@
                    (reply st (cond
                                (= main b) {:ok true :db @conn}
                                (exists? b) (let [base (pdb/branch-base conn main b)]
-                                             {:ok true :db (pdb/head conn b) :base base :base-t (:max-tx base)})
+                                             (if (contract/error? base) base {:ok true :db (pdb/head conn b) :base base :base-t (:max-tx base)}))
                                :else (refused (str "no branch " b) {}))))
       ;; root's collection of the store (seon.db/collect!), asked at quiescence: swept when a
       ;; branch the last one saw is gone, and recorded on main through the batch; then root's

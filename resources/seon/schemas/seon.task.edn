@@ -87,6 +87,8 @@
  ;; an agent as the reconciler's index holds it: what root decides on of its process and environment (the entity's attributes,
  ;; seon.task/agent-value)
  :seon.reconcile/agent [:map [:seon.agent/key :string] [:seon.agent/boot {:optional true} :string]
+                        ;; when its process started and ended (an end after its start: its task is not live, seon.reconcile's classify)
+                        [:seon.agent/started-ms {:optional true} :int] [:seon.agent/ended-ms {:optional true} :int]
                         ;; the id of the task it works now (its :seon.agent/task): a task it left at its cap no longer waits on it
                         [:seon.agent/task {:optional true} :seon.task/id]
                         [:seon.agent/env {:optional true} :seon.task/env]]
