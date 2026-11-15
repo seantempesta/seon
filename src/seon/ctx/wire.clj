@@ -501,33 +501,46 @@
                   'my.agent/describe (cond-> ["@ctx"] (seq path) (conj (pr-str path)))
                   (:value (render/model ix0 es {:ix ix0 :handle (symbol "@ctx")}) es))))
 
+(defn assembly-parts
+  "The parts model call id sent, [[ref turn digests] ...] in order, its assembly resolved: the first :keep parts of its :prev call's,
+  then its :add; a call with no :prev holds them whole. nil when it stored none. Walks at most
+  :seon.config.ctx/assembly-checkpoint-turns calls. See docs/render.md#a-turn-stores-what-it-sent."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe [:vector :any]]]}
+  [db id]
+  (when-let [{:keys [prev keep add]} (some->> (pdb/eid db :seon.model-call/id id) (d/entity db) :seon.model-call/assembly)]
+    (if prev (into (subvec (assembly-parts db prev) 0 keep) add) add)))
+
 (defn sent-tx
-  "The facts that keep what model call id sent, from its request's parts: each message a part by its canonical digest, stored once,
-  and the call's assembly of refs, turns and digests in order. See docs/render.md#a-turn-stores-what-it-sent."
-  {:malli/schema [:=> [:cat :string [:vector :any]] [:vector :map]]}
-  [id parts]
+  "The facts that keep what model call id sent at turn n, from its request's parts: each message a part by its canonical digest,
+  stored once, and the call's assembly: what changed since call prev's (the parts it keeps, then the ones it adds), whole every
+  :seon.config.ctx/assembly-checkpoint-turns turns or with no prev. See docs/render.md#a-turn-stores-what-it-sent."
+  {:malli/schema [:=> [:cat :seon.host/db :string [:maybe :string] :int [:vector :any]] [:vector :map]]}
+  [db id prev n parts]
   (let [dg #(lib/digest (sedn/encode (sedn/canonical %)))
-        as (mapv (fn [[ref ms n]] [ref n (mapv dg ms)]) parts)]
-    (conj (into [] (comp (mapcat second) (distinct) (map (fn [m] {:seon.part/digest (dg m) :seon.part/message m}))) parts)
-          {:seon.model-call/id id :seon.model-call/assembly as})))
+        as (mapv (fn [[ref ms t]] [ref t (mapv dg ms)]) parts)
+        before (when (and prev (pos? (mod n (cfg/value :seon.config.ctx/assembly-checkpoint-turns)))) (assembly-parts db prev))
+        k (if before (count (take-while true? (map = before as))) 0)]
+    (conj (into [] (comp (mapcat second) (distinct) (map (fn [m] {:seon.part/digest (dg m) :seon.part/message m}))) (drop k parts))
+          {:seon.model-call/id id
+           :seon.model-call/assembly (cond-> {:keep k :add (subvec as k)} before (assoc :prev prev))})))
 
 (defn sent-request
   "The request model call id sent, read back from what it stored (`sent-tx`): {:messages :parts} as `request` answers them, joined
-  in their stored order, nothing drawn again; nil when the call stored none (a call made before the store kept them). See
-  docs/render.md#a-turn-stores-what-it-sent."
+  in their stored order, nothing drawn again; nil when the call stored none. See docs/render.md#a-turn-stores-what-it-sent."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]]}
   [db id]
-  (when-let [as (some->> (pdb/eid db :seon.model-call/id id) (d/entity db) :seon.model-call/assembly)]
+  (when-let [as (assembly-parts db id)]
     (let [ps (mapv (fn [[ref n ds]] [ref (mapv #(:seon.part/message (d/entity db [:seon.part/digest %])) ds) n]) as)]
       {:messages (into [] (mapcat second) ps) :parts ps})))
 
 (defn stored-page
-  "Turn n's page messages of agent a (an entity id) as its model call stored them (`sent-tx`): its [:page n] parts; nil when the call
-  stored none. See docs/render.md#a-turn-stores-what-it-sent."
+  "Turn n's page messages of agent a (an entity id) as its model call stored them: its [:page n] parts, new at turn n, so among
+  the parts its own assembly adds (one seek for the call, one a part); nil when the call stored none. See
+  docs/render.md#a-turn-stores-what-it-sent."
   {:malli/schema [:=> [:cat :seon.host/db :int :int] [:maybe [:vector :seon.model/message]]]}
   [db a n]
   (when-let [k (:seon.agent/key (d/entity db a))]
-    (when-let [as (some->> (pdb/eid db :seon.model-call/id (lib/call-id k n)) (d/entity db) :seon.model-call/assembly)]
+    (when-let [as (some->> (pdb/eid db :seon.model-call/id (lib/call-id k n)) (d/entity db) :seon.model-call/assembly :add)]
       (into [] (comp (filter (fn [[ref]] (= [:page n] ref))) (mapcat (fn [[_ _ ds]] ds))
                      (map #(:seon.part/message (d/entity db [:seon.part/digest %]))))
             as))))

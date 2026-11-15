@@ -490,7 +490,7 @@
   (let [request (fn [n] (let [b {:commit (d/commit-id @conn) :task "demo/f" :turn n :max-turns 4 :origin :model :agent "a1"}
                               _ (d/transact conn (ts/turn-tx "a1" n {:seon.model-call/basis b}))
                               {:keys [messages parts]} (wire/render @conn b)]
-                          (d/transact conn (wire/sent-tx (seon.lib/call-id "a1" n) parts))
+                          (d/transact conn (wire/sent-tx @conn (seon.lib/call-id "a1" n) (when (> n 1) (seon.lib/call-id "a1" (dec n))) n parts))
                           (d/transact conn (turn-of b n))
                           [b messages]))
         [_ r1] (request 1)
@@ -529,7 +529,14 @@
                (wire/stored-page @conn (pdb/eid @conn :seon.agent/key "a1") 2))
             "its page parts are what a later request reads")
         (is (= 1 (count (filter #(= "system" (:role (:seon.part/message (d/entity @conn (:e %))))) (d/datoms @conn :aevt :seon.part/message))))
-            "the system message, sent by every turn, is one part")))))
+            "the system message, sent by every turn, is one part")
+        ;; root's session never ends: a turn stores what changed since the turn before, never the whole list again (root, 2026-11-15)
+        (let [a3 (:seon.model-call/assembly (d/entity @conn [:seon.model-call/id (seon.lib/call-id "a1" 3)]))
+              whole (wire/assembly-parts @conn (seon.lib/call-id "a1" 3))]
+          (is (= (seon.lib/call-id "a1" 2) (:prev a3)) "turn 3's assembly names turn 2's")
+          (is (< (count (:add a3)) (count whole)) "and adds only the parts turn 2 did not send")
+          (is (= (+ (:keep a3) (count (:add a3))) (count whole)) "the parts it keeps, then the ones it adds, are its request's")
+          (is (nil? (:prev (:seon.model-call/assembly (d/entity @conn [:seon.model-call/id (seon.lib/call-id "a1" 1)])))) "the first turn's is whole"))))))
 
 ;; See docs/render.md#a-turn-stores-what-it-sent
 (deftest ^{:seon.test/estimate {:ticks 3000000}} one-message-is-one-part-however-it-was-built
@@ -538,7 +545,7 @@
     (fn [_ conn]
       (let [m1 {:role "assistant" :content "My page changed: status." :tool-calls [{:id "x" :intent "Show." :code "(my.render/diff p q)"}]}
             m2 (array-map :tool-calls [(array-map :code "(my.render/diff p q)" :intent "Show." :id "x")] :content "My page changed: status." :role "assistant")
-            tx (fn [k m] (wire/sent-tx (seon.lib/call-id k 1) [[[:page 1] [m] 1]]))]
+            tx (fn [k m] (wire/sent-tx @conn (seon.lib/call-id k 1) nil 1 [[[:page 1] [m] 1]]))]
         (is (= m1 m2) "the same message")
         (is (not= (seon.edn/encode m1) (seon.edn/encode m2)) "whose plain encodings differ")
         (d/transact conn (ts/turn-tx "a1" 1 {}))

@@ -1034,6 +1034,10 @@
  ;; read, 2026-11-10; between two requests of one agent there are a few commits (its evals', its read's). At the bound:
  ;; the page is drawn again, never advanced across another lineage.
  :seon.config.ctx/kept-walk-steps 16
+ ;; Unit: turns. A turn's assembly is what changed since the previous call's (the parts it keeps, then the ones it adds), stored
+ ;; whole every this many turns, so a read back walks at most this many calls and storage stays O(turns x new parts + turns/32 x
+ ;; parts). Provenance: root's arithmetic, 2026-11-15: at 1,000 turns of 3,000 parts, ~104k digests stored against 3M for whole vectors.
+ :seon.config.ctx/assembly-checkpoint-turns 32
  ;; Unit: tokens of a form's :form/src as the model reads it (seon.print.emit/chars-tokens, the printer's
  ;; one estimate), src and test alike: about a printed page. A live form longer than this is an open
  ;; :long-form problem row (seon.problems/long-forms), shown to a branch that adds one (attention, never

@@ -295,7 +295,7 @@
         ;; a hash of the bytes sent, and what the turn sent, each message a
         ;; part stored once, so debug reads it back as sent (seon.ctx.wire/sent-tx, sent-request)
         _ (agent/transact! (into [{:seon.model-call/id id :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}]
-                                 (wire/sent-tx id parts)))
+                                 (wire/sent-tx (agent/db) id (when (> n 1) (lib/call-id (:key @agent/state) (dec n))) n parts)))
         _ (agent/commit!)]
     ;; :call and :agent name this model call and its agent, so the reply is read as it streams (docs/flow.md#effects-one-owner-and-its-workers-per-kind)
     {:id id :t1 (profile/now-ns)
