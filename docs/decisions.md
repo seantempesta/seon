@@ -82,6 +82,30 @@ Round 1's transcript showed agents re-forked into a cold process every turn: eac
 
 "I want it to be like a repl connecting to separate systems. They can attach to a remote repl for any existing agent or they can make their own agent." On evals sent from outside: "Make sure they are treated the same so the mechnaism records the turns the same way. No duplicate systems. Anywhere. Be vigilant and tell me when you see them and propose and just fix if it's clear." Stated in [server](server.md#ops) once the change lands.
 
+### Config has scopes; the db holds it after boot
+
+"Files are for boot to land into the system db, from there the db is the source of truth. I want the concept of scope where there is a global default config that is either real or are schema malli defaults ... and you can override locally for agents or wherever we need it. So three agents can be running on different model providers because they have their configs on their entity." Who drives an agent, its model or a Claude session through the REPL, is one such config ("make this standard or a config option ... root is not special that's just its agent name"). Stated in task `seon.system/the-system-entity-and-root-as-an-agent` until [config](config.md) carries it.
+
+### A merge is proved where it will run; no separate main run
+
+"I want to not need a separate run. If we can make a merge branch with main and run the entire proof on a fork of this ... We should also have a version that does a full build of the binary from the branched code (I don't want to depend on the files on disk those are merged last only when all checks have passed and we merge to main). ... proper mappings to git so the branches align." Then: only digests that moved re-run; a binary is built only for tests that can't run in a fork, and only when what they read moved ("I always want the MINIMUM amount of tests that ACCURATELY tests the system ... we insist not on guardrails, but putting agents on rails so it's not possible to do the wrong thing"); a store branch is a git branch of the same name. And: "Make sure all solutions are incremental in nature. A proof that fails because a single doc is updated should not start over." Until test digests come from one source, a main run stays as the net. Stated in [the plan](plan.md#the-order).
+
+### An agent's REPL is standard and live
+
+"Make sure this is standardized so we can live connect and issue repl commands and it's not blocked by other threads on the agent and it parks and does nothing if it isn't used. have flow design it." The system process is read as data and changed through ops; it is not an agent.
+
+### Restarts wait for turns; caches move with the reactive core; the erase keeps what the import holds
+
+A pin or native change waits until no agent is mid-turn. The system process's caches (reconciler index, text index, vector rows) move when the reactive core lands. The one erase keeps what the files import plus replayed run history.
+
+### Dependency source is indexed through the same system
+
+"I want to be able to index all the code we depend on for exactly these situations where we need to detect and pull in code for reference. schedule it so we can do this cheaply and all through the same system when the time is right": on change, in the idle queue, never at boot. Its attributes are its own (`:seon.library/*`), decided on evidence (the program digest hashes every `:file/text`). Task `seon.vector/grep-reads-every-dependencys-source`.
+
+### Messages reach whoever drives an agent
+
+The messaging audit's parts 1-4 approved: a reply carries the messages new since the driver's last read; a parked `seon_inbox` op; who drives is data; a session's message is from its agent. Sessions move their own messages onto Seon after 1-4 are proved on the standing system. Task `seon.server/a-message-reaches-the-session-that-drives-its-agent`.
+
 ### Names follow the code; one entity may match several schemas
 
 "Are these new attribute names good? Look for where the code is that the functions are predominantly being run with those schemas and prefer those names unless the code is the conflicting root stuff and then ask the specialst agents for their advice before just choosing. Names and schemas are very important. Do not duplicate data and make usre our concepts hold. You can have a single entity match several schemas if they are differnt ideas or extensions of ideas." On the erase: "you can erase when you're sure any improtant data is written to disk -- look at where we import data from into a fresh store." Stated in [data modeling](data-modeling.md) and the task above.
