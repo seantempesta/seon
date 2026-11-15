@@ -1,7 +1,7 @@
 (ns datahike.versioning-test
   "Datahike's commits as Seon's merge and reactions read them: what a commit changed, kept beside it
   (task datahike.versioning/a-commits-changes-are-kept-and-read-in-their-size)."
-  (:require [clojure.test :refer [deftest is]] [datahike.api :as d] [seon.test-store :as ts] [seon.db :as pdb]))
+  (:require [clojure.test :refer [deftest is]] [datahike.api :as d] [seon.test-store :as ts] [seon.db :as pdb] [konserve.core] [datahike.writing]))
 
 (defn- facts
   "datoms as [e a v added] facts, a set: what a change is, its transaction aside."
@@ -39,7 +39,13 @@
             "a fact added and retracted between the two nets out")
         ;; three commits: three commit records and three changes values read, ~20k ticks each, and their ~10 datoms; flat in
         ;; the store's size (a merge's diff at d = 7,163 is ~139M, lb76's own-datoms ~3.1B)
-        (is (< dt 200000) (str "and costs its three commits, never the index: " dt " ticks (the diff here: " diff-dt ")"))))))
+        (is (< dt 200000) (str "and costs its three commits, never the index: " dt " ticks (the diff here: " diff-dt ")"))
+        ;; what a commit writes for its changes, as the store encodes it (konserve.jolt.fasl-store, before zstd): estimate
+        ;; 81-87 B a datom measured on main's datoms, plus the key and :base, under 300 B
+        (let [ser @(requiring-resolve 'konserve.jolt.fasl-store/serialize)
+              ch (konserve.core/get (:store @conn) (datahike.writing/commit-changes-key c3) nil {:sync? true})
+              n (count (:datoms ch)) bytes (count (ser ch))]
+          (is (<= bytes (+ 300 (* 100 n))) (str "a commit's changes cost their datoms: " bytes " B for " n " datoms")))))))
 
 ;; Estimate: a test branch (~0.5M), one transact and commit (~0.15M), a d/with and its force-branch! (~0.3M), the
 ;; head followed (~0.05M), d/changes over two commits (~0.05M), ~1M = 1000000
