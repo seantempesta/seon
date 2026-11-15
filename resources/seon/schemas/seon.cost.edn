@@ -12,9 +12,8 @@
  :seon.cost/dims [:map {:closed true}
                   [:ticks {:optional true} :seon.cost/amount]
                   [:ns {:optional true} :seon.cost/amount]
-                  [:bytes {:optional true} :seon.cost/amount]
-                  [:calls {:optional true} :seon.cost/amount]]
- :seon.cost/dim [:enum :ticks :ns :bytes :calls]
+                  [:bytes {:optional true} :seon.cost/amount]]
+ :seon.cost/dim [:enum :ticks :ns :bytes]
  ;; one unit operation of the unit table (seon.cost/units): its measured cost on this runtime
  :seon.cost/unit [:map {:closed true} [:ticks {:optional true} [:double {:min 0.0}]] [:ns [:double {:min 0.0}]] [:bytes [:double {:min 0.0}]] [:what :string]]
  ;; an estimate: sized (stated per unit of W(n), measured at sizes of a built input), or
@@ -79,4 +78,4 @@
                      ;; that is not the proof's largest (:wrong-size, :largest the size measured)
                      [:waiver-fault {:optional true} [:map [:fault [:enum :no-task :no-size :wrong-size]] [:task :string] [:n {:optional true} pos-int?] [:largest {:optional true} pos-int?]]]]
  ;; keys-schemas sweep
- :seon.cost/bound [:and {:description "In a function's metadata beside its :malli/schema, the cost bound of one call: a function of the same arguments answering {:ticks :bytes :calls} and :out. See docs/cost.md#a-bound-in-the-contract."} :seon.host/fn]}
+ :seon.cost/bound [:and {:description "In a function's metadata beside its :malli/schema, the cost bound of one call: a function of the same arguments answering {:ticks :bytes} and :out. See docs/cost.md#a-bound-in-the-contract."} :seon.host/fn]}

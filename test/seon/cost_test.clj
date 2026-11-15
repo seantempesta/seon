@@ -194,14 +194,14 @@
       "with ticks and bytes stated and measured, it judges"))
 
 ;; owner, 2026-11-15: "calls are no cost dimension, drop it" (the count takes every thread's calls, so it is not a
-;; test's own work). Red before: an estimate stating only :calls was judged (and green), and a measure answered :calls.
+;; test's own work). Red before: an estimate stating only :calls was judged (and green), and a measure answered :calls; now
+;; :seon.cost/dims admits no :calls, so such an estimate is refused at the judge's contract.
 (deftest calls-are-no-cost-dimension
   (let [e (assoc linear :per-n {:calls 1.0} :fixed {:calls 1.0})
-        m (fn [n] {:ns (* 60.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})
-        v (cost/judge e (rows e m))]
-    (is (not (:ok? v)) "an estimate stating only calls states no counted dimension")
-    (is (:uncounted v))
-    (is (re-find #"NO COUNTED DIMENSION" (cost/explain e (rows e m) v))))
+        refused (try (cost/judge e (rows linear (fn [n] {:ns (* 60.0 n) :bytes (* 50.0 n)}))) nil
+                     (catch clojure.lang.ExceptionInfo x (ex-data x)))]
+    (is (= :seon.instrument/contract-error (:seon.error/type refused)) "an estimate stating calls is refused by its schema (:seon.cost/dims)")
+    (is (re-find #":calls" (str (:seon.error/message refused))) (pr-str refused)))
   (is (= #{:ticks :bytes} cost/exact) "what a verdict is decided on")
   (is (= [:ticks :ns :bytes] cost/dimensions))
   (is (not (contains? cost/slack :calls)))

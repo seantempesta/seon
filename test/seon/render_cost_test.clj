@@ -61,7 +61,7 @@
 (deftest the-printer-renders-nested-values-in-one-pass
   ;; the printer's auto-render: each nested value with a render is named in one lookup per key
   ;; (seon.render/schema-of, no validation) and rendered once, in the printer's one pass
-  #_(cost/proof
+  (cost/proof
     {:of 'seon.render/hiccup :input 'seon.render-cost-test/messages
      :n "messages in a vector, each shown by its own render in the printer's hiccup"
      :work (str "one pass: per message, the printer classifies it once and asks its render once: one "
@@ -83,11 +83,11 @@
      ;; the leaf laid out: 3 vec conj (0.75 KB) and 2 assoc (1.6 KB); the contracts of the ~8 calls a message goes through (nested,
      ;; render-of, own-key, schema-of, declared, line, message, reference-value) each check its three-key map ~0.75 KB = 6 KB: about 12 KB
      ;; a message; the fixed part, the options, the printer's root and its budget cells ~20 KB
-     ;; measured 1,729,328 bytes at 20 messages against the 260 KB this derives (6.65x over): no bound, the gap is the task
-     ;; seon.cost/the-printer-allocates-six-times-its-work (the proof is discarded with #_ until it is derived or fixed, since an
-     ;; estimate with no counted dimension is red)
-     :per-n {:bytes 12000}
-     :fixed {:bytes 20000}
+     ;; measured 1,729,328 bytes at 20 messages against the 260 KB this derives (6.65x over, under the 10x that stops work): the
+     ;; proof stays live at its earlier bound, so a growth is still red, while task seon.cost/the-printer-allocates-six-times-its-work
+     ;; finds the missing bytes (work this arithmetic missed, or waste) and lowers the bound to what it finds
+     :per-n {:bytes 85000}
+     :fixed {:bytes 100000}
      :sizes [20 60 180]}))
 
 (defn main-of

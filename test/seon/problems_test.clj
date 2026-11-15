@@ -1679,8 +1679,8 @@
 ;; proof's verdict reads as a :cost row of health (docs/health.md): estimate one world (~10 M ticks, as
 ;; seeded's) and two health reads of a db of one task, ~40 M ticks.
 (deftest ^{:seon.test/estimate {:ticks 60000000}} a-judged-cost-verdict-reads-as-a-cost-problem
-  (let [rows [{:n 1 :calls 10} {:n 10 :calls 100} {:n 100 :calls 2000}]
-        red {:ok? false :over [{:dim :calls :n 100 :ratio 2.0}] :steeper [] :under [] :unmeasured []}
+  (let [rows [{:n 1 :ticks 10} {:n 10 :ticks 100} {:n 100 :ticks 2000}]
+        red {:ok? false :over [{:dim :ticks :n 100 :ratio 2.0}] :steeper [] :under [] :unmeasured []}
         green {:ok? true :over [] :steeper [] :under [] :unmeasured []}
         db (d/db-with (world)
                       [(ended "t/slow" {:seon.task/proofs #{'app.t/f-cost 'app.t/g-cost}

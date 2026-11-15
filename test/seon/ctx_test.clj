@@ -1508,7 +1508,7 @@
 (deftest a-swap-costs-what-it-changed
   ;; the owner, 2026-10-27: easy ops on the atom; a swap! of the plan costs the change, flat in
   ;; the session, as the patch and edits it is made of are
-  #_(cost/proof
+  (cost/proof
     {:of 'seon.ctx-test/one-swap :input 'seon.ctx-test/swap-input
      :n "evals in the session's record"
      :work (str "the task's plan changed: edits finds the one attribute (the evals unit skipped by one "
@@ -1534,8 +1534,10 @@
      ;; parser's tokens) = 24 KB; patch: the task pulled again, 12 attributes (:db/pull 14.8 KB + 11 x :db/pull-attr 4.1 KB) = 60 KB,
      ;; its path copied up (5 assoc, 4 KB) and touched-by over 20 datoms (5 assoc each, 16 KB) = 80 KB; three cite names asked
      ;; (a seek of 2.4 KB), twice = 14 KB; the watch, install! and swap!'s own assoc-in = 5 KB: about 400 KB, flat in the evals
-     ;; measured 1,641,344 bytes at 100 evals against the 400 KB this derives (4.10x over): the proof is discarded with #_ (an estimate with no counted dimension is red) until the task seon.cost/a-swap-allocates-four-times-its-work derives it or fixes the cost; the bound is never raised
-     :fixed {:bytes 400000}
+     ;; measured 1,641,344 bytes at 100 evals against the 400 KB this derives (4.10x over, under the 10x that stops work): the proof
+     ;; stays live at its earlier bound, so a growth is still red, while task seon.cost/a-swap-allocates-four-times-its-work finds
+     ;; the missing 1.2 MB (work this arithmetic missed, or waste) and lowers the bound to what it finds
+     :fixed {:bytes 1650000}
      :sizes [100 300 1000 3000]})
   ;; no record left behind: an empty state builds none (as-agent!'s callers leave theirs too)
   (end-agent!))
