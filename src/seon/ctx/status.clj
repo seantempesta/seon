@@ -230,6 +230,17 @@
         (and src (seq others)) (assoc :helpers (vec (sort (map symbol (filter named (heads src))))))
         src (assoc :example src))))))
 
+(defn- clearing-forms
+  "Blockers bs, each :open-problem one given the form that clears it (:do), as a red proof carries its own: the :do of each of rows
+  (seon.problems/caused-split's, a row each open problem the work made true) its :problems names by message; a do of them when
+  several. See docs/health.md#a-key-with-no-schema."
+  {:malli/schema [:=> [:cat [:maybe [:sequential :map]] [:sequential :map]] [:vector :map]]}
+  [rows bs]
+  (let [do-of (into {} (keep (fn [r] (when (:do r) [(:message r) (:do r)]))) rows)]
+    (mapv (fn [b] (let [fs (when (= :open-problem (:reason b)) (seq (keep do-of (:problems b))))]
+                    (cond-> b fs (assoc :do (if (next fs) (cons 'do fs) (first fs))))))
+          bs)))
+
 (defn status
   "How the agent of record rec (its ctx: its :db/id and its task) works on its task stands on its branch db, as data (task
   seon.ctx/the-context-is-the-agents-evals-and-seons, R2b-1): each proof by the verdict its var
@@ -308,13 +319,10 @@
         unjudged (when-let [ds (seq (sort-by str (keep (fn [[t {st :status}]] (when (= :deferred st) t)) vs)))]
                    (task/unjudged db t (vec ds)))
         reds (vec (for [[p {:keys [failures]}] vs f failures] (assoc f :test p)))
-        ;; each open problem the work made true carries the form that clears it (its row's :do), as a red proof carries its own
-        do-of (into {} (keep (fn [r] (when (:do r) [(:message r) (:do r)]))) (:rows split))
-        blockers (mapv (fn [b] (let [fs (when (= :open-problem (:reason b)) (seq (keep do-of (:problems b))))]
-                         (cond-> b fs (assoc :do (if (next fs) (cons 'do fs) (first fs))))))
-                       (refused reasons reds #(doc/source-of db %) #(ctx/callees db %)
-                                #(or (nil? base) (not= (doc/source-of db %) (doc/source-of base %)))
-                                (claims-of db tid)))]
+        blockers (clearing-forms (:rows split)
+                                 (refused reasons reds #(doc/source-of db %) #(ctx/callees db %)
+                                          #(or (nil? base) (not= (doc/source-of db %) (doc/source-of base %)))
+                                          (claims-of db tid)))]
     (cond-> {:reasons reasons
              ;; whether one of its proofs has been red on its branch (seon.turn/specified-tx writes it, once)
              :specified? (some? (:seon.task/specified-turn t))
