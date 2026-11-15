@@ -83,7 +83,10 @@ if bin/system status >/dev/null 2>&1; then
       # and the restart path below builds first
       print "UPDATE OK: kept running on tree $tree (no build, no restart: its agents go on)"; exit 0
     fi
-    # the reason restart-for gave (the {:restart "..."} answer's text), else the whole answer: a refused connection or an error
+    # a typed error of landed! (the landed tree could not be read: runtime-for's io-error) fails the update and keeps the system
+    # running: no restart is owed for what could not be read (root 15:0x, the 14:51 restart)
+    if [[ $kept == *':seon.error/type'* && $kept != *':restart '* ]]; then print -r -- "UPDATE FAILED: kept running: ${kept}"; exit 1; fi
+    # the reason restart-for gave (the {:restart "..."} answer's text), else the whole answer: a refused connection
     if [[ $kept == *':restart "'* ]]; then print -r -- "restart: ${${kept#*:restart \"}%%\"*}"; else print -r -- "restart: ${kept}"; fi
   else
     print "restart: the tree or the inputs of main's files could not be read"
