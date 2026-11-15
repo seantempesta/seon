@@ -557,16 +557,25 @@
       :else (ask st))))
 
 (defn- merged-in
-  "A turn of run state st with main merged in: behind, this process takes its branch's program in place first (seon.agent/take-branch-program!:
-  the forms main changed since its last boundary, load-diff!), so no turn runs old code and the run goes on in the same process, each form
-  that did not load told to the agent as a :seon.agent/load-failed message its next request reads; then it asks the task observed
-  ({:observe}). See docs/merging.md#a-branch-merges-main-in."
+  "A turn of run state st with main merged in: behind, it asks its branch's program taken in place ({:load}, `turn-loaded`), an output
+  answered on its own fiber (the :repl proc's edge ask), so no step holds the load and the turn waits at its boundary for it: no turn
+  runs old code or half-loaded code; else it asks the task observed ({:observe}). See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :map] :seon.turn/step]}
   [st]
-  (when (:behind @agent/state)
-    (doseq [{:keys [ns message]} (agent/take-branch-program!)]
-      (tell-error! (contract/error :seon.agent/load-failed #'seon.turn/merged-in (str "a form of " ns " that main changed did not load: " message) {:ns ns})
-                   "taking main's program in place at the turn's boundary")))
+  (if (:behind @agent/state)
+    [st {:load {}}]
+    [st {:observe (:task st)}]))
+
+(defn turn-loaded
+  "A {:load} output answered with errs (seon.agent/take-branch-program!'s load errors): each form that did not load is told to the agent
+  by its namespace, a :seon.agent/load-failed message its request reads, so it never trusts a half-applied main; then the task
+  observed ({:observe}). See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :map [:sequential :map]] :seon.turn/step]}
+  [st errs]
+  (doseq [{:keys [ns message form]} errs]
+    (tell-error! (contract/error :seon.agent/load-failed #'seon.turn/turn-loaded
+                                 (str "a form of " ns " that main changed did not load in this process" (when form (str " (" form ")")) ": " message) {:ns ns})
+                 "taking main's program in place at the turn's boundary"))
   [st {:observe (:task st)}])
 
 (defn turn-begin
@@ -667,13 +676,14 @@
   [{:keys [prove model] :as out}]
   (try (cond prove {::verdict (agent/judge! (:names prove) (:reach? prove))}
              (:merge out) {::merged (branch/merge-main!)}
+             (:load out) {::loaded (agent/take-branch-program!)}
              (:observe out) {::observed (observe (:observe out))}
              :else {::answer (agent/fx! :model model {})})
        (catch Exception e {::threw e})))
 
 (defn step-run
   "A run's one driver: run state st and msg, the message its last output was answered with (nil: the run's first step), stepped
-  to its next output or its end. msg {::verdict v} goes to turn-verdict, {::merged m} to turn-merged, {::observed o} to turn-observed, {::answer a} to turn-end, {::threw e} to threw, and
+  to its next output or its end. msg {::verdict v} goes to turn-verdict, {::merged m} to turn-merged, {::loaded errs} to turn-loaded, {::observed o} to turn-observed, {::answer a} to turn-end, {::threw e} to threw, and
   {::stop true} (root is stopping) ends the run at once, :waiting, the call in flight dropped; a turn that answers ::next begins
   the next. Answers [st' {:prove ..}|{:model ..}] or [::end st outcome reason error]. Each step is called through its var, so a
   redefined one takes effect at the next turn. See docs/flow.md#the-step-fn-contract-every-proc-follows."
@@ -683,6 +693,7 @@
                     (contains? msg ::threw) (threw (dissoc st :pending) (::threw msg) false)
                     (contains? msg ::verdict) (turn-verdict st (::verdict msg))
                     (contains? msg ::merged) (turn-merged st (::merged msg))
+                    (contains? msg ::loaded) (turn-loaded st (::loaded msg))
                     (contains? msg ::observed) (turn-observed st (::observed msg))
                     (contains? msg ::answer) (turn-end st (::answer msg))
                     :else (turn-begin st))]
