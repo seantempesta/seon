@@ -490,25 +490,30 @@
       (let [now (inbox-messages sys db k)
             ;; what the agent's own delivery placed, else (no live process) what main holds
             delivered (fn [held] (let [d (inbox-deliver sys k)] (if (vector? d) d held)))]
-        (if (seq now)
-          {:agent k :messages (delivered now)}
+        ;; what main holds now, as the agent's delivery placed it: empty when another wait on the agent took it, and then this one waits
+        (if-let [msgs (when (seq now) (not-empty (delivered now)))]
+          {:agent k :messages msgs}
           ;; the bound's end answers the wait in flight itself, typed: the first of a message's commit and the bound wins. The bound is the
           ;; call's, not a wait's: a commit that wakes this wait but leaves it nothing (another wait on the agent took the message, root's
           ;; 2026-11-15 23:20) waits on, from that commit, for what the bound has left, never an empty answer
           (let [ms (cfg/value :seon.config.root/inbox-wait-ms)
-                end (+ (System/currentTimeMillis) ms)]
-            (loop [t0 (:max-tx db)]
-              (let [{:keys [p] wk :k} (c/await-message sys k t0)
-                    due (a/chan 1) h (step/put-after! due (max 0 (- end (System/currentTimeMillis))) true)
-                    _ (a/go (when (a/<! due)
-                              (deliver p (contract/error :seon.server/no-message #'seon.server/inbox-answer
-                                                         (str "no message to " k " in " ms " ms: ask again") {:agent k :waited-ms ms}))))
-                    r @p]
-                (step/cancel! h) (a/close! due)
-                (cond (= :seon.server/no-message (:seon.error/type r)) (do (c/drop-wait! sys wk) r)
-                      (contract/error? r) r
-                      :else (let [db2 @(:conn sys) msgs (delivered (inbox-messages sys db2 k))]
-                              (if (seq msgs) {:agent k :messages msgs} (recur (:max-tx db2)))))))))))))
+                bound (fn [] (contract/error :seon.server/no-message #'seon.server/inbox-answer
+                                             (str "no message to " k " in " ms " ms: ask again") {:agent k :waited-ms ms}))
+                ;; one bound for the call, armed once: its end answers the wait in flight (cur), and fired says so to a wait made after it
+                cur (volatile! nil) fired (promise)
+                due (a/chan 1) h (step/put-after! due ms true)
+                _ (a/go (when (a/<! due) (deliver fired true) (some-> @cur (deliver (bound)))))
+                r (loop [t0 (:max-tx db)]
+                    (let [{:keys [p] wk :k} (c/await-message sys k t0)
+                          _ (vreset! cur p)
+                          _ (when (realized? fired) (deliver p (bound)))
+                          r @p]
+                      (cond (= :seon.server/no-message (:seon.error/type r)) (do (c/drop-wait! sys wk) r)
+                            (contract/error? r) r
+                            :else (let [db2 @(:conn sys) msgs (delivered (inbox-messages sys db2 k))]
+                                    (if (seq msgs) {:agent k :messages msgs} (recur (:max-tx db2)))))))]
+            (step/cancel! h) (a/close! due)
+            r))))))
 
 (defmethod op-answer :inbox [sys _ req] (inbox-answer sys req))
 
