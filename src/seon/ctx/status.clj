@@ -43,10 +43,8 @@
            (if (next same) (-> m (dissoc :assert) (assoc :asserts (mapv :assert same))) m)))))
 
 (defn- claims-of
-  "Who claims a test, as the status says it: a function of a test's name answering [{:task id :outcome o}], the tasks on db whose
-  :seon.task/proofs hold it, own (the asking task) left out. One scan of :seon.task/proofs, made at the first ask and shared by
-  every later one (round 2: an agent spent four turns of db queries learning whose test its change contradicted). See
-  docs/render.md#how-the-work-stands."
+  "A function of a test's name answering the tasks on db that claim it ([{:task :outcome}]), own left out; one scan of
+  :seon.task/proofs at the first ask, shared. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.task/id]] ifn?]}
   [db own]
   (let [m (delay (reduce (fn [m d] (update m (:v d) (fnil conj #{}) (:e d))) {} (d/datoms db :aevt :seon.task/proofs)))]
