@@ -39,18 +39,6 @@ Build a failure message only on failure: `clojure.test` evaluates an `is` messag
 
 Its input is the smallest that still shows the claim. To make a test cheaper, restate its claim and find the input that shows exactly that; shrinking sizes is the last resort, and a cost proof shrunk too far can no longer judge growth.
 
-## A test waits without a clock
-
-A test ends by its result, or by a deadlock event; never by a clock ([flow](flow.md#the-five-rules), rules 1 and 3). So:
-- **It parks only on its answer:** a request with credit and exactly one answer, or a channel it awaits; no sleep, timeout, timed deref or `alts!` with a timeout in test code (`bin/laws clocks` reads test/ too, and a site must be named in [clocks](clocks.md)).
-- **The one "stuck" signal is quiescence:** each test child is a main-carrier process whose Jolt quiescence handler is armed by the harness; told, it reads what the child is owed: an ask outstanding to a peer (its root, an agent) is that peer's turn, and nothing owed is a deadlock, the test's `:seon.test/deadlock` with every fiber's dump.
-- **A peer speaks for itself:** an agent says its own deadlock (```seon.agent/quiescent!```); a root, which runs threads, by its graph's count of messages reaching zero with an ask open (task `clojure.core.async.flow/a-graph-counts-its-messages-and-says-when-it-is-quiet`).
-- **A loop that never parks** ends by its tick budget ([merging](merging.md#a-tests-tick-budget)); a blocking call into C parks its fiber (Jolt's FIFO and device opens run on a thread while the fiber parks).
-- **An effect the test does not provide answers at once** (`:seon.fx/in-test`; a model call with no provider, its typed error), never at a bound.
-- **A child's end is an event** (its link's end of file, its exit on the poller), and its process group ends with its test; a full queue parks its putter, and quiescence names the queue when its reader is parked too.
-- **What a test makes is its own:** its agents, branches and asks on a shared root are released at its end, in O(what it made).
-The wall bounds this replaces (`seon.agent/arm-wall!`, `bin/stalls`, the no-verdict cap, a test's step-end bound) go as each is ported: task `seon.step/every-wait-past-a-bound-is-a-flow-message-from-the-one-timer`.
-
 ## A root costs what it boots
 
 A test that runs a process (a root, its fork server, an agent) waits on boots, not on its own work. A root boots to `ROOT LISTENING` in a few seconds; the fork server does the first fork's work as the boot ends (```seon.fork-server/preload```), so a later spawn takes 0.1-0.3 s; `bin/build seon` warms the binary's compile cache with the tests (```seon.check/warm-tests```). So:

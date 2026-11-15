@@ -73,8 +73,6 @@ Every design that waits, steps or bounds follows these; the Flow specialist revi
 4. **Time only at the outside edge:** an effect on the outside world (the model, a shell, the network) has its declared deadline, one entry on Jolt's deadline heap (```seon.step/put-after!```), cancelled when it is answered (```seon.step/cancel!```). This is the only clock after boot.
 5. **The residue is named, not timed:** a blocking native call that may never return is closed at its source, as an effect with its bound or with a bound of its own (the fork's `:seon.config.agent/fork-wait-ms`).
 
-A test follows the same rules: it ends by its result or a deadlock event, never a clock ([testing](testing.md#a-test-waits-without-a-clock)).
-
 ## Where Jolt's Flow differs from upstream
 
 `flow.clj` and `flow/impl/graph.clj` are upstream's `dev-flow-alpha` plus `update!` (`graph.clj` adds the `Update` protocol); `flow/spi.clj` is upstream's; `flow/impl.clj` is Jolt's:
