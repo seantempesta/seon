@@ -3138,6 +3138,26 @@
     (is (= [:error :seon.fx/io-error] (:value refused)) (pr-str refused))
     (is (= [:verdict {t :error}] (:value unreached)) (pr-str unreached))))
 
+;; docs/merging.md#a-merge-runs-what-the-change-reaches: a gate's answer that holds a test with no verdict (its batch's error,
+;; seon.prove/run-answer's :no-verdict) is the agent's typed error naming why, never a silence: the gate wrote only its verdicts, and the
+;; why was lost (data's pilot gate, 2026-11-15 23:0x: 280 tests, no message recorded anywhere; result/a1a99fa9). The gate answered at its seam.
+;; Estimate: in-agent's setup and teardown ~1.5M + 4 asks at ~0.25M = ~2.5M
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 6}} a-gate-answer-with-no-verdict-is-the-proves-error
+  (let [t 'seon.repl-test/a-proof-the-gate-left-with-no-verdict
+        _ '[seon.agent/judge! seon.agent/ask-gate seon.proofs/gate-tx]
+        seam (str "(do (in-ns 'user) (def gate-reply (atom nil))"
+                  " (alter-var-root #'seon.agent/send-gate! (constantly (fn [k tests _] (seon.agent/handle! {:op :reply :k k :result (@gate-reply tests)}) nil))) :ok)")
+        prove "(let [r (my.agent/prove)] (if (seon.contract/error? r) [:error (:seon.error/type r) (:seon.error/message r)] [:verdict (:proofs r)]))"
+        [_ _ _ _ answered]
+        (in-agent (fn [_] [seam (process-proof "a-proof-the-gate-left-with-no-verdict" 2)
+                           (str "(reset! user/gate-reply (fn [tests] {:value {:results {} :digests {} :no-verdict (zipmap tests (repeat {:seon.error/type :seon.test/fork-refused"
+                                " :seon.error/message \"the test child could not be forked\"}))}}))")
+                           prove prove])
+                  {:proofs #{t}})
+        [kind type message] (:value answered)]
+    (is (= [:error :seon.prove/no-verdict] [kind type]) (pr-str answered))
+    (is (some-> message (str/includes? "the test child could not be forked")) (str "naming the batch's own error: " (pr-str message)))))
+
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-hand-back-with-a-red-process-test-is-no-green-end
   ;; the same class through seon_done: an outside agent that hands back an unjudged process test ends on its verdict. The hand-back itself, in the agent, the gate

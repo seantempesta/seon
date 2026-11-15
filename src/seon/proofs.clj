@@ -27,12 +27,12 @@
 (defn results
   "{test-symbol status} of a test run: :error or :fail when any assertion of the test was,
   else :pass. A test with no assertion has no entry (a proof missing here is :none), nor has a
-  test the run's child died in (a report with its :exit, seon.agent/test-run-answer): a death is
-  no verdict, so a proof it took is unknown and a test the change never reached is nothing to
-  the judge."
+  test the run's child died in (a report with its :exit, seon.agent/test-run-answer), nor one its batch's error left with
+  none (:no-verdict, seon.prove/run-answer): a death is no verdict, so a proof it took is unknown and a test the change never
+  reached is nothing to the judge."
   {:malli/schema [:=> [:cat [:map [:reports [:sequential :map]]]] :seon.proof/results]}
   [test-run]
-  (let [died (into #{} (keep #(when (:exit %) (test-symbol (:var %)))) (:reports test-run))]
+  (let [died (into #{} (keep #(when (or (:exit %) (:no-verdict %)) (test-symbol (:var %)))) (:reports test-run))]
     (reduce (fn [acc {:keys [type var]}]
               (if-let [t (test-symbol var)]
                 (if (died t)
@@ -84,7 +84,8 @@
   [test-run]
   (reduce (fn [acc {:keys [type var] :as r}]
             (let [t (test-symbol var)]
-              (if (and t (#{:fail :error} type))
+              ;; a test with no verdict (:no-verdict, its batch's error) has no failing assertion: it never ran
+              (if (and t (#{:fail :error} type) (not (:no-verdict r)))
                 (update acc t (fnil conj []) (select-keys r [:type :message :expected :actual :got :at :flaky :seon.error/type]))
                 acc)))
           {} (:reports test-run)))
