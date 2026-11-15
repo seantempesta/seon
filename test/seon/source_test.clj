@@ -13,7 +13,7 @@
             [seon.merge :as pm]
             [seon.program :as program]
             [seon.source :as source]
-            [seon.program-test :as pt] [seon.system :as root] [seon.doc] [seon.graph] [seon.agent] [test-runner]))
+            [seon.program-test :as pt] [my.root] [seon.system :as root] [seon.doc] [seon.graph] [seon.agent] [test-runner]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -1823,3 +1823,14 @@
           db2 (d/db-with db1 (:tx i2))]
       (is (= {a (sha "c")} (source/pins-of db2)) "a moved pin is the new commit, a removed one is gone")
       (is (empty? (d/datoms db2 :avet :seon.pin/path b)) "the removed submodule's entity is retracted whole"))))
+
+;; Estimate: three runtime-for asks on real trees (four git calls each the first time): ~2M ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["git"]} a-tree-says-before-it-lands-whether-it-restarts-root
+  ;; task seon.system/a-landing-restarts-root-only-for-a-binary-change (slice 2b, item 7): a session asked the running root's
+  ;; runtime-for by hand before landing, after a land predicted from a file diff restarted root (2026-11-15). my.root/would-restart?
+  ;; is that question as a function: nil when the running binary is the tree's (the land keeps root), else why, writing nothing
+  (let [co (config/checkout)
+        src (tree-with "src/seon/lib.clj" (str (slurp (str co "/src/seon/lib.clj")) "\n;; a comment a landing added\n"))
+        deps (tree-with "deps.edn" (str (slurp (str co "/deps.edn")) "\n;; a build input changed\n"))]
+    (is (nil? (my.root/would-restart? src)) "a src change keeps root running")
+    (is (re-find #"deps.edn" (str (my.root/would-restart? deps))) (str "a build input restarts it, naming the input: " (my.root/would-restart? deps)))))

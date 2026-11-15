@@ -1068,23 +1068,31 @@
   ;; costs under a tenth of the whole read.
   ;; the whole read is made at the point the held answer was put at (its metadata's :db and :fold), never a later main or fold: an
   ;; error recorded between the two reads (load, a stall) once made them differ, and the test raced
-  (let [same "(let [h (my.root/problems sys) {at :db f :fold} (meta h) w (seon.problems/health at f)] [(= (:classes h) (:classes w)) (count (:classes h))])"
+  (let [same "(let [h (my.root/problems sys) {at :db f :fold} (meta h) w (seon.problems/health at f) ks (into (set (keys (:classes h))) (keys (:classes w)))] [(= (:classes h) (:classes w)) (count (:classes h)) (vec (for [k ks :when (not= (get-in h [:classes k]) (get-in w [:classes k]))] [k (count (:rows (get-in h [:classes k]))) (count (:rows (get-in w [:classes k])))]))])"
         between (str "(let [h (my.root/problems sys) n (count (seon.system/errors sys))"
                      " _ (clojure.core.async/>!! (:back sys) (seon.system/uncaught-message nil (ex-info \"recorded between the reads\" {})))"
                      " _ (loop [i 0] (when (and (< i 1000) (<= (count (seon.system/errors sys)) n)) (recur (inc i))))"
                      " {at :db f :fold} (meta h) w (seon.problems/health at f)] [(= (:classes h) (:classes w)) (> (count (seon.system/errors sys)) n)])")
         cost "(let [m (fn [f] (let [b (seon.profile/alloc-bytes)] (f) (- (seon.profile/alloc-bytes) b)))] (my.root/problems sys) [(m #(my.root/problems sys)) (m #(seon.problems/health @(:conn sys) (seon.system/errors sys)))])"
-        [booted moved costs raced]
+        ;; a burst of distinct errors (letters, since a cause normalises a message's digits) past one flush's bound (:seon.config.render/flush-max) moves main just before the read: the held
+        ;; answer is the report OF the point it names, never the last settled one stamped with the newer main (order-dependent in
+        ;; lands: what earlier tests left was such a backlog)
+        burst (str "(let [n (count (seon.system/errors sys))"
+                   " _ (dotimes [i 300] (clojure.core.async/>!! (:back sys) (seon.system/uncaught-message nil (ex-info (str \"burst \" (char (+ 97 (quot i 26))) (char (+ 97 (rem i 26)))) {}))))"
+                   " _ (loop [i 0] (when (and (< i 100000) (< (count (seon.system/errors sys)) (+ n 300))) (recur (inc i))))] " same ")")
+        [booted moved costs raced burst-read]
         (in-agent (fn [{:keys [task]}]
                     [{:op :eval :agent "root" :code same}
                      {:op :eval :agent "root" :code (str "(do @(seon.system/transact-main! sys [{:seon.task/id " (pr-str task) " :seon.task/failure {:reason \"provoked\"}}]) " same ")")}
                      {:op :eval :agent "root" :code cost}
-                     {:op :eval :agent "root" :code between}]))
+                     {:op :eval :agent "root" :code between}
+                     {:op :eval :agent "root" :code burst}]))
         [held whole] (:value costs)]
     (is (= true (first (:value booted))) (str "after boot, held and whole agree: " (pr-str booted)))
     (is (= true (first (:value moved))) (str "after main moved, held and whole agree: " (pr-str moved)))
     (is (< (* 10 held) whole) (str "a held read allocated " held " bytes; a whole read " whole))
-    (is (= [true true] (:value raced)) (str "an error recorded between the two reads leaves them agreeing, each at the held answer's point: " (pr-str raced)))))
+    (is (= [true true] (:value raced)) (str "an error recorded between the two reads leaves them agreeing, each at the held answer's point: " (pr-str raced)))
+    (is (= true (first (:value burst-read))) (str "after a burst past one flush's bound, held and whole agree: " (pr-str burst-read)))))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 5 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2750k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} an-agents-first-search-reads-the-index-it-inherited
