@@ -128,10 +128,4 @@
   :seon.task/kind :work
   :seon.task/needs #{"seon.program/a-merge-loaded-in-place-unbinds-what-it-deletes"}
   :seon.task/estimate #:seon.program{load-diff! {:n 10, :order :linear, :ticks 5000000, :bytes 10000000}}}
- {:seon.task/name "a-test-namespace-loads-whole-in-whatever-process-runs-it"
-  :seon.task/plan "Found 2026-11-15 (root, data's seon_done pilot): seon.source-test/a-test-namespace-loads-whole-from-the-tree-main-was-imported-from was red at 18:11/18:12 (verdicts 109b0d0e03f639c0, a9a8469c050ad7fb, run in the image by a prove agent on :main/tests) and green at 18:15 in a bin/test child on jolt/tests, with no change reaching it [M root result/d0bd6f13: runtime's ad0f05702c's three changed vars do not reach it]. Its failures [data M]: (1) errs held {:ns seon.required-whole :message \"require of its file: Could not locate seon/required_whole.jolt (or .clj/.cljc) on the source roots\"}; (2) whole was #{}. So the test depends on the process's source roots holding the tree main was imported from: a bin/test child's do (the checkout), a prove agent's in the image do not. A third state-dependent test today. PRIOR WORK to read before code: seon.program/required! and how it finds a namespace's file (the :seon.system/source fact's :root, the process's source roots), and how an agent's process sets its source roots. Fix at the cause, not the test: required! finds the file under the root main's :seon.system/source fact names (the test's own claim), whichever process runs it; or, if a process in the image has no checkout, the test states the place it runs in. Proof red first: the test run in an agent's forked child on the standing system."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.source-test/a-test-namespace-loads-whole-from-the-tree-main-was-imported-from}
-  :seon.task/estimate #:seon.program{required! {:n 1, :order :constant, :ticks 2000000, :bytes 10000000}}
-  :seon.task/needs #{}}
 ]
