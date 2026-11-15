@@ -2338,11 +2338,11 @@
   ;; docs/source.md#commit-the-merges-branch: a write-back committed on git's main from the commit main was imported from moves main's
   ;; source fact to it (its commit and tree), in the same write; a commit on the merges branch, or a refusal, moves nothing
   (let [db (d/db-with (ts/test-db) [{:seon.system/id :root :seon.system/source {:tree "t0" :commit "c0" :dirs ["src"]}}])]
-    (is (= [{:seon.system/id :root :seon.system/source {:tree "t1" :commit "c1" :dirs ["src"]}}]
-           (r/source-moved-tx db {:value {:sha "c1" :files 1 :expected "c0" :tree "t1"}})))
-    (is (= [] (r/source-moved-tx db {:value {:sha "c1" :files 1}})) "the merges branch: main's files are not in git's main")
-    (is (= [] (r/source-moved-tx db {:value {:sha "c1" :files 1 :expected "c9" :tree "t1"}})) "a catch-up moved main's fact in between: never written over")
-    (is (= [] (r/source-moved-tx db {:seon.error/type :seon.fx/ref-moved :expected "c0" :found "c2"})) "refused: nothing moved")))
+    (is (= [{:seon.system/id :root :seon.system/source {:tree "t1" :commit "c1" :dirs ["src"] :t 7}}]
+           (r/source-moved-tx db {:value {:sha "c1" :files 1 :expected "c0" :tree "t1"}} 7)))
+    (is (= [] (r/source-moved-tx db {:value {:sha "c1" :files 1}} 7)) "the merges branch: main's files are not in git's main")
+    (is (= [] (r/source-moved-tx db {:value {:sha "c1" :files 1 :expected "c9" :tree "t1"}} 7)) "a catch-up moved main's fact in between: never written over")
+    (is (= [] (r/source-moved-tx db {:seon.error/type :seon.fx/ref-moved :expected "c0" :found "c2"} 7)) "refused: nothing moved")))
 
 ;; Estimate: four calls of a pure function = 100000 ticks
 ;; task seon.fx/proving-runs-as-flow (agreed with data): the source fact says which main t its tree holds, so the merge gate's base

@@ -644,15 +644,14 @@
   was imported from (seon.fx/git-commit :expect) and main's fact still names that commit: main holds the commit's files now, so a
   catch-up reads from it. Its :tree is the tree's id when the tree followed, and :t the t of main whose files it wrote (the merge gate's
   base knows how far it lags main). None for any other answer. See docs/source.md#commit-the-merges-branch."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :any]] [:=> [:cat :seon.host/db :map [:maybe :int]] [:vector :any]]]}
-  ([db r] (source-moved-tx db r nil))
-  ([db r t]
+  {:malli/schema [:=> [:cat :seon.host/db :map :int] [:vector :any]]}
+  [db r t]
   (let [held (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))]
     ;; a compare-and-swap in the store as in git: only while main's fact still names the commit the write was made from, so a
     ;; catch-up written in between is never written over
     (if-let [{:keys [sha tree]} (when (and (:commit held) (= (:commit held) (get-in r [:value :expected]))) (:value r))]
-      [{:seon.system/id :root :seon.system/source (cond-> (assoc held :commit sha) tree (assoc :tree tree) t (assoc :t t))}]
-      []))))
+      [{:seon.system/id :root :seon.system/source (cond-> (assoc held :commit sha :t t) tree (assoc :tree tree))}]
+      [])))
 
 (defn commit-tx
   "Main's write of the :git effect's answer r for the tasks of members, which wanted paths written
