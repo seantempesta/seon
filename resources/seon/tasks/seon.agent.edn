@@ -112,4 +112,8 @@
   :seon.task/proofs #{seon.agent-test/a-namespace-that-does-not-load-fails-only-its-own-tests}
   :seon.task/estimate #:seon.agent{load-program {:n 300, :order :linear, :ticks 100000, :bytes 100000}}
   :seon.task/needs #{}}
-]
+ {:seon.task/name "a-run-that-just-merged-main-does-not-merge-it-again"
+  :seon.task/plan "Found by context (2026-11-15, landing seon.turn's no-wait steps, flow agreed). [M] seon.turn/start! merges main (my.branch/merge-main!), and the run's first turn-begin then finds (seon.agent/main-moved? (:base @agent/state) (agent/heard-main)) true again, so it asks a second {:merge} that brings nothing: ~2.3M ticks / ~12 MB a run (seon.turn-test/a-turn-sends-its-model-call-and-returns' profile: my.branch/merge-main! 2.3M, seon.agent/merge-main! 1.8M). Cause to find, both ends read first: start!'s merge leaves :base or the heard main behind what main-moved? compares (H: heard-main is read before the merge's commit, or :base is not the merged commit). Fix at the cause: after a merge the agent's base is the main it merged, so main-moved? is false until main moves. Estimate: the second merge removed, 0 ticks added; main-moved? stays one commit-id compare."
+  :seon.task/kind :work
+  :seon.task/estimate {seon.agent/main-moved? {:n 1 :order :constant :ticks 1000 :bytes 1000}}
+  :seon.task/proofs #{seon.turn-test/a-runs-first-turn-after-its-start-merge-asks-no-merge}}]
