@@ -1310,6 +1310,26 @@
     (is (= 1 (count (re-seq #"href=\"/agent/a3\"" html))) "a3's entry is drawn once on root's chat: under the person, no list")
     (is (empty? (for [[id n] (frequencies ids) :when (> n 1)] id)) (str "no element id twice: " (pr-str (for [[id n] (frequencies ids) :when (> n 1)] id))))))
 
+(deftest a-nested-agents-model-render-answers-nothing
+  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: an agent placed in another's page (the person under root's) is drawn
+  ;; as its entry (seon.render.ui/agent nested), and its model render answers nothing, since its conversation is no one's request but its own.
+  ;; Red before: each nested agent's conversation was drawn for root's request and read by nothing (root's cold read on 2026-11-15: 38 page
+  ;; messages of the agents on its page, 57.6 of 59 GB, result/ce491daf)
+  (let [[main _ _] (paged-dbs)
+        a3 (:db/id (d/entity main [:seon.agent/key "a3"]))
+        main (d/db-with (signed-in main [a3]) (root-works-for [:seon.agent/key "user"]))
+        ix (seon.program/index-of-db main)
+        root (:db/id (d/entity main [:seon.agent/key "root"]))
+        user (:db/id (d/entity main [:seon.agent/key "user"]))
+        t (seon.ctx/agent-ctx ix main root)
+        p (r/walk nil {:db main :tree t :root (r/render-var-of ix (merge {:seon.agent/key "root"} t)) :index ix :changes seon.ctx/changes
+                       :model-only true :once true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})
+        pages-of (fn [a] (filter #(and (= #'seon.ctx.wire/page-diff-msgs (:f (val %))) (= a (second (key %)))) (:cache p)))]
+    (is (contains? (:cache p) ['seon.render.ui/agent "user"]) "the person is on root's page, nested")
+    (is (seq (pages-of root)) "root's own model render draws its turns")
+    (is (empty? (pages-of user)) (str "the person's, nested, draws none: " (pr-str (map key (pages-of user)))))
+    (is (= "system" (:role (first (:messages (seon.ctx.wire/request p main))))) "root's request is whole")))
+
 (deftest every-render-fits-the-hiccup
   ;; docs/render.md#the-hiccup-is-checked: what each render writes that the intermediate refuses (seon.render/misfits: :class, :style,
   ;; :wire marks, other qualified keys, attribute values that are no plain value), counted on the pages the test world draws (an agent's,

@@ -743,12 +743,16 @@
 (defn agent-msgs
   "An agent (:seon.db/agent-fact) as the model reads it: its system message (`agent-system-text`: the doc sections
   :seon.agent/system names, else the system prompt; a placed example is answered by its own call, so it has none), each example session its task names as a placed call of `example-msgs`, what opens its own session, then its turns'
-  entities (`turn-entities`). The task is read in the page parts alone, never here. See docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
+  entities (`turn-entities`). The task is read in the page parts alone, never here. An agent placed in another's page (opts
+  :seon.render/nested, as seon.render.ui/agent draws only its entry there) answers nothing: its conversation is its own request's alone.
+  See docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db] [:seon.render/index :map]] :map] [:vector :any]]}
-  [{db :seon.db/db ix :seon.render/index} a]
+  [{db :seon.db/db ix :seon.render/index nested :seon.render/nested} a]
   (let [k (:seon.agent/key a)]
-    ;; no prompt on db: no system message, so the request is refused by its own check (a typed error), not thrown inside the render
-    (-> (if-let [t (agent-system-text db a)] [{:role "system" :content t}] [])
-        (into (map (fn [ek] [#'example-msgs {} ek])) (session/session-examples db a))
-        (into (when k [{:role "user" :content (session/session-open k)}]))
-        (into (turn-entities db ix a)))))
+    (if nested
+      []
+      ;; no prompt on db: no system message, so the request is refused by its own check (a typed error), not thrown inside the render
+      (-> (if-let [t (agent-system-text db a)] [{:role "system" :content t}] [])
+          (into (map (fn [ek] [#'example-msgs {} ek])) (session/session-examples db a))
+          (into (when k [{:role "user" :content (session/session-open k)}]))
+          (into (turn-entities db ix a))))))
