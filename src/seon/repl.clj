@@ -1312,7 +1312,8 @@
         whole? (or whole? (:walk-whole? st))
         held (:walk st) l (layout) ix (agent/branch-index)
         moved (ctx/take-moved!)
-        warm (when (and held (= l (:root held)) (identical? ix (:index held)) (= whole? (:whole? held))) held)
+        ;; ctx built whole since the last walk (take-moved!'s :all): nothing says what moved, so the walk draws cold
+        warm (when (and held (not= :all moved) (= l (:root held)) (identical? ix (:index held)) (= whole? (:whole? held))) held)
         p (assoc (render/walk warm (cond-> {:db (agent/db) :tree @ctx/ctx :root l :index ix :changes ctx/changes
                                              :outputs #{:seon.render/hiccup :seon.render/openai-compat} :model-only (not whole?)}
                                      warm (assoc :moved (or moved []))
