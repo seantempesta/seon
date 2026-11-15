@@ -587,6 +587,8 @@
           unstored-mg (when (and same? (seq mg-ran))
                         (record-run! run mg-ran mg-failures))
           red (+ (count (remove proofs/green? (vals ran))) (count mg-failures))]
+      ;; a shard with a red keeps its shared roots' logs beside its own, before the shutdown hook deletes their runs
+      (when (pos? red) (doseq [f (ts/keep-root-logs! (.getParent (io/file file)))] (println "KEPT" f)))
       (when-not same? (println "the tree changed since the plan: no result stored"))
       (doseq [u (concat unstored unstored-mg)] (println "UNRECORDED" (:key u) (:message u)))
       (println (str "SHARD " (+ (count ran) (count mg-ran)) " tests, " (- (+ (count ran) (count mg-ran)) red) " green (" (count @reused) " reused from another run), " red " red, in "

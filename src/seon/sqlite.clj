@@ -20,6 +20,12 @@
 (defc c-prepare "sqlite3_prepare_v2" [:pointer :string :int :pointer :pointer] :int)
 (defc c-finalize "sqlite3_finalize" [:pointer] :int)
 (defc c-errmsg "sqlite3_errmsg" [:pointer] :string)
+;; a database's image, for an index kept on disk by its content (seon.doc's text index): serialized whole, loaded by deserialize into a
+;; :memory: connection, so a fork inherits it as it inherits a built one (docs/vector.md#search)
+(defc c-serialize "sqlite3_serialize" [:pointer :string :pointer :int] :pointer)
+(defc c-deserialize "sqlite3_deserialize" [:pointer :string :pointer :int64 :int64 :int] :int)
+(defc c-malloc64 "sqlite3_malloc64" [:int64] :pointer)
+(defc c-free "sqlite3_free" [:pointer] :void)
 
 (defmacro ^:private with-row-calls
   "body with c-bind-text, c-bind-int, c-step, c-reset, c-column-int and c-column-double bound to the C functions
@@ -175,6 +181,63 @@
     (swap! st assoc :counts (insert-rows! h rows))
     (exec! h :commit "COMMIT")
     {:h h :state st :arena arena}))
+
+(defn fts-image
+  "Index ix as its database file's bytes (sqlite3_serialize), what `fts-load` takes back: an index kept on disk by its content, so a
+  later process loads it rather than building it. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat [:map [:h :seon.ffi/address]]] bytes?]}
+  [{:keys [h]}]
+  (ffi/with-arena [a]
+    (let [psz (ffi/alloc a 8) buf (c-serialize h "main" psz 0) n (ffi/read psz :int64) bs (byte-array n)]
+      (when (zero? n) (refused h :serialize 7))
+      ;; bytes, never read-bytes, which decodes them as text
+      (ffi/read-into! buf :int8 bs)
+      (c-free buf)
+      bs)))
+
+(defn- whole-image?
+  "Whether bs is a whole SQLite database file: its header's page size (bytes 16-17; 1 is 65536) times its page count (bytes 28-31)
+  is its length, so a truncated file is never loaded."
+  {:malli/schema [:=> [:cat bytes?] :boolean]}
+  [^bytes bs]
+  (boolean (and (>= (alength bs) 100)
+                (let [u (fn [i] (bit-and (aget bs i) 0xff))
+                      ps (let [v (bit-or (bit-shift-left (u 16) 8) (u 17))] (if (= 1 v) 65536 v))
+                      pc (bit-or (bit-shift-left (u 28) 24) (bit-shift-left (u 29) 16) (bit-shift-left (u 30) 8) (u 31))]
+                  (= (alength bs) (* ps pc))))))
+
+(defn- row-counts
+  "The rows of each attribute of the index on connection h, {a rows}, read from its r table: what a loaded index counts."
+  {:malli/schema [:=> [:cat :seon.ffi/address] [:map-of :int :int]]}
+  [h]
+  (let [st (prepare h :counts "SELECT a, count(*) FROM r GROUP BY a")]
+    (with-row-calls
+      (try (loop [out (transient {})]
+             (let [rc (c-step st)]
+               (cond (= SQLITE_ROW rc) (recur (assoc! out (c-column-int st 0) (c-column-int st 1)))
+                     (= SQLITE_DONE rc) (persistent! out)
+                     :else (refused h :counts rc))))
+           (finally (c-finalize st))))))
+
+(defn fts-load
+  "The index image bs holds (`fts-image`'s bytes) in a :memory: connection, as `fts-open` answers one (so a fork inherits it), or nil
+  when bs is no whole image (truncated); a corrupt one answers :seon.sqlite/refused from its first read. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat bytes?] [:maybe [:map [:h :seon.ffi/address]]]]}
+  [^bytes bs]
+  (loaded!)
+  (when (whole-image? bs)
+    (let [h (open!)
+          n (alength bs)
+          p (c-malloc64 n)
+          st (atom {:uses 0 :retired? false :closed? false :counts {}})
+          arena (ffi/auto-arena)]
+      (ffi/write-array p :int8 bs)
+      ;; FREEONCLOSE | RESIZEABLE: the connection owns the buffer, and a later replace-rows! may grow it
+      (let [rc (c-deserialize h "main" p n n 3)]
+        (when-not (zero? rc) (try (refused h :deserialize rc) (finally (c-close h)))))
+      (ffi/reinterpret h 1 arena (fn [p] (settle! st p #(assoc % :retired? true))))
+      (swap! st assoc :counts (row-counts h))
+      {:h h :state st :arena arena})))
 
 (defn replace-rows!
   "Index ix moved by one write, in one transaction: gone [[e a] ...], the texts it holds that the write changed or

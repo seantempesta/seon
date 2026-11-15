@@ -731,9 +731,9 @@
 
 (defn problems
   "Main's problems (the declared html render of :seon.problems/report): each class with rows,
-  its count, and its rows a line each (`problem-row`), open ones first, rendered only when the
-  tab opened the class (its id in :open, the /open toggle's; a report shown with no :open shows
-  every class's rows). It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
+  its count, and its rows a line each (`problem-row`), open ones first, rendered whole when the
+  tab opened the class (its id in :open, the /open toggle's); a report shown with no :open (root's system tiles, one walk for every
+  tab) shows each class's first :seon.config.render/recent-errors rows and how many more, with the form that reads them all. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.problems/report] :any]}
   [opts {:keys [classes open]}]
   (let [cs (for [[c {:keys [n rows]}] (sort-by (comp str key) classes) :when (seq rows)] [c n rows])]
@@ -743,7 +743,14 @@
        (for [[c n rows] cs :let [id (str "pc-" (name c)) shown? (or (nil? open) (contains? open id))]]
          [:details (cond-> (toggle id) (and open shown?) (assoc :open true))
           [:summary {:class "cursor-pointer" :title (kname c)} (str (class-words c) ": " n)]
-          (when shown? (for [r (sort-by #(if (false? (:open? %)) 1 0) rows)] (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.problems/row} (assoc r :class c))))]))]))
+          (when shown?
+            (let [sorted (sort-by #(if (false? (:open? %)) 1 0) rows)
+                  ;; a report no tab opened (a tile every tab shares) draws a few rows a class, never the whole history: the page
+                  ;; held 1.4 MB of the problems tile's rows, 2026-11-15; the rest is one call away
+                  k (if open (count rows) (config/value :seon.config.render/recent-errors))]
+              (list (for [r (take k sorted)] (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.problems/row} (assoc r :class c)))
+                    (when (< k (count rows))
+                      [:p {:class "seon-note"} (str "+" (- (count rows) k) " more: (get-in (my.root/problems) [:classes " c " :rows])")]))))]))]))
 
 (defn problems-model
   "The problems report as the model is sent it (the declared model render of :seon.problems/report):
@@ -1228,7 +1235,7 @@
                        (when (seq calls)
                          [:div {:key :calls} [:p "It calls " (str/join ", " (map #(str "`" (:var %) "`") calls)) "."]
                           (for [{v :var src :source} calls :when src] [:pre {:key (str v)} [:code src]])])))])
-            (for [{:keys [reason test vars keys problems do]} others :let [x (or test vars keys problems) is (items x)]]
+            (for [{:keys [reason test vars keys problems do claimed-by]} others :let [x (or test vars keys problems) is (items x)]]
               (if (next is)
                 ;; several things under one reason: each its own element beside the label (an element holding text is one value),
                 ;; so one that comes or goes is one named edit
@@ -1237,6 +1244,8 @@
                  (when do [:p "To clear it: " (form-hiccup do)])]
                 [:li {:key (or test reason)}
                  (str "[ ] " (reason-title reason) (cond (seq is) (str ": " (first is)) (some? x) (str ": " (as-text x))))
+                 (when (seq claimed-by)
+                   [:span {:key :claimed-by} ". Claimed by " (str/join ", " (map #(str (:task %) (when-let [o (:outcome %)] (str " (" (name o) ")"))) claimed-by))])
                  (when do [:span ". To clear it: " (form-hiccup do)])]))))
      ;; a test namespace a proof goes in, once: its requires, fixtures, helpers and a test to copy, its own, so a proof written moves none
      (for [[n us] (group-by #(:ns (:shape %)) unwritten) :let [{:keys [requires fixtures helpers example]} (:shape (first us))]
@@ -1378,9 +1387,9 @@
 (defn- eval-step
   "Eval e (a record, or a view of one a walk placed) as a step of the chat (docs/render.md#the-page): one quiet line, a mark only when it
   threw, what it set out to do (its intent as Markdown, else its code's first line); opened, its code and what came of it (`eval-output`,
-  a component for the page alone, placed when the walk gives a db). Opening it is posted by the page's agent, the walk's ctx's
-  (:seon.agent/key: root's page and an example session called directly hold none, and post nothing). Its <details> carries its handle's
-  anchor (eval-<id>)."
+  a component for the page alone, placed when the walk gives a db), its code cut by the printer's budget until it is opened. Opening it
+  is posted by the page's agent, the walk's ctx's (:seon.agent/key: an example session called directly holds none, posts nothing, and is
+  drawn whole). Its <details> carries its handle's anchor (eval-<id>)."
   {:malli/schema [:=> [:cat :map :map] :any]}
   [{db :seon.db/db c :seon.ctx/ctx} e]
   ;; each attribute it shows read alone, so a change to one it does not show (who ran it, its call) reruns nothing
@@ -1401,10 +1410,16 @@
                ;; the agent's message is Markdown, rendered (owner, 2026-10-29); the model reads it as written
                [:div {:class "seon-text seon-md-inline min-w-0 flex-1"} [#'markdown intent {:inline? true}]]
                [:code {:class "seon-form min-w-0 flex-1 truncate"} (first (str/split-lines (or code "")))])])
-      ;; inside the closed details, so opening it shows it at once, on a live agent's page and on one root draws from its branch
+      ;; its code and what came of it, inside the closed details, so opening it shows it at once. Closed, its code is the printer's cut
+      ;; under :seon.config.render/form-budget, whole once opened (seon.system/opened!'s fact): root's home page held 9.2 of its 10.7 MB in
+      ;; seven closed steps' code, whole files a session evaluated, 2026-11-15. With no agent to record an opening (an example session), whole
       [:div {:class "ml-4 flex min-w-0 max-w-full flex-col gap-1 overflow-x-auto py-1"}
-       ;; the code as the agent wrote it, whole, highlighted
-       [:div {:class "min-w-0"} [#'emit/marked-hiccup :seon.print/code (or code "")]]
+       [:div {:class "min-w-0"}
+        (if (or opened (nil? key))
+          [#'emit/marked-hiccup :seon.print/code (or code "")]
+          (let [{:keys [shown truncated? omitted lines]} (print/plain (or code "") (form-budget) {})]
+            (list [#'emit/marked-hiccup :seon.print/code shown]
+                  (when truncated? [:span {:class "seon-print-elision"} (emit/cut-words omitted lines nil)]))))]
        (when db [#'eval-output {:key id :agent (some-> key keyword) :wire/for "page"} e])]]]))
 
 (defn- eval-shown
@@ -1669,7 +1684,7 @@
 
 (declare agent-parts conversation-list tiles)
 
-(declare standing task-name agent-address tone-class members started-agents agents-list)
+(declare standing standing-of task-name agent-address tone-class members started-agents agents-list)
 
 (defn- last-exchange
   "The newest message a person sent agent e (a seek of :seon.message/to, the newest by eid, from a :seon.user/name) and its task
@@ -1708,7 +1723,7 @@
   (let [a (into {} (for [k [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/turn :seon.agent/outcome :seon.agent/ended-turn]
                          :let [v (ratom/realize (get c k))] :when (some? v)] [k v]))
         t (ratom/realize (get c :seon.agent/task))
-        stands (standing a t)
+        stands (standing-of c)
         ;; the person's newest message to it and its answer (owner, 2026-11-08: never an answer to an earlier one under a later question):
         ;; one seek of the messages to it, which the pull cannot order by transaction (`last-exchange`)
         {:keys [asked reply]} (if db (last-exchange db (:db/id (ratom/untracked c)) t) {:reply (:seon.task/reason t)})
@@ -1823,7 +1838,8 @@
 (defn- stage-now
   "What the stage says now: what a person said that no turn has read yet, else the last exchange (its ask, its answer, or that the agent
   works on it, or that its turn ended without one, and the values it made), else a welcome and how many sessions the person's tree
-  holds. See docs/render.md#an-entity-may-name-its-own-render."
+  holds. While the session cannot answer (its standing, `standing`, failed: it died, was killed or refused), it says so and why,
+  never that it works on it. See docs/render.md#an-entity-may-name-its-own-render."
   {:seon.render/style ".stage-front h1 { font-size: 2.25rem; line-height: 1.15; font-weight: 600; letter-spacing: -0.01em; }
 .stage-front > p, .stage-front blockquote { font-size: 1.375rem; line-height: 1.5; }
 .stage-front blockquote { color: var(--color-text-300); border-left: 3px solid var(--color-base-700); padding-left: 1rem; }
@@ -1833,18 +1849,23 @@
 .stage-front [data-working] { color: var(--color-text-300); }
 .stage-front [data-working]::after { content: '…'; display: inline-block; animation: stage-pulse 1.2s ease-in-out infinite; }
 @keyframes stage-pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }"
-   :malli/schema [:=> [:cat [:sequential :string] [:maybe :map] :boolean [:sequential :any] nat-int?] :any]}
-  [waiting now working? values held]
+   :malli/schema [:=> [:cat [:sequential :string] [:maybe :map] :boolean [:sequential :any] nat-int? :map] :any]}
+  [waiting now working? values held stands]
+  (let [;; what a person waits on: the session working on it, or, when it cannot (its standing failed), what happened and that the words wait
+        works (if (= :failed (:tone stands))
+                [:p {:data-stopped ""} (str "Its session " (:text stands) (when-let [r (:reason stands)] (str ": " r))
+                                            ". What you said waits until it runs again.")]
+                [:p {:data-working ""} "Working on it"])]
   (cond
-    (seq waiting) (list [:blockquote (str/join "\n\n" waiting)] [:p {:data-working ""} "Working on it"])
+    (seq waiting) (list [:blockquote (str/join "\n\n" waiting)] works)
     now (list [:blockquote (:asked now)]
               (cond (not (str/blank? (:reply now))) [#'markdown (:reply now) {:inline? true}]
-                    working? [:p {:data-working ""} "Working on it"]
+                    working? works
                     :else [:p "It ended its turn without an answer. Its steps are in the conversation."])
               (seq values))
     :else (list [:h1 "Hello."]
                 [:p "Say what you would like done, in a sentence. The answer comes back here, with whatever it makes drawn as it is."]
-                (when (pos? held) [:p (str held (if (= 1 held) " session is" " sessions are") " in the list beside: ask about any of them.")]))))
+                (when (pos? held) [:p (str held (if (= 1 held) " session is" " sessions are") " in the list beside: ask about any of them.")])))))
 
 (defn- stage-folds
   "The stage's two folds, each named so one appearing before the other is no morph of it: the exchanges before the one in front, and the
@@ -1883,8 +1904,10 @@
         {:keys [exchanges waiting]} (if k (stage-exchanges db ix c k turn) {:exchanges [] :waiting []})
         now (peek exchanges)
         ;; the sessions forked from root's session (the first agent's tree, its :seon.agent/_parent)
-        held (count (started-agents ix c))]
-    [:section (stage-now waiting now working? (if now (stage-values db ix c k now) []) held) (stage-folds exchanges (boolean (seq waiting)))]))
+        held (count (started-agents ix c))
+        ;; how its work stands, tracked: its death draws the stage again
+        stands (standing-of c)]
+    [:section (stage-now waiting now working? (if now (stage-values db ix c k now) []) held stands) (stage-folds exchanges (boolean (seq waiting)))]))
 
 (defn stage-list
   "The stage's own list (p-head), for the page alone: `stage-front` over the agent's pull. See docs/render.md#an-entity-may-name-its-own-render."
@@ -2187,6 +2210,20 @@
       turns (assoc :detail (str turns (if (= 1 turns) " turn" " turns")))
       waits (assoc :detail waits)
       reason (assoc :reason reason))))
+
+(def ^:private standing-reads
+  "What `standing` reads: the agent's attributes, and its task's (through :seon.agent/task). Its one statement, read by `standing-of`."
+  {:agent [:seon.agent/status :seon.agent/outcome :seon.agent/turn :seon.agent/ended-turn :seon.agent/max-turns :seon.agent/reason]
+   :task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/reasons :seon.task/failure]})
+
+(defn- standing-of
+  "How agent view c's work stands (`standing`), each attribute it reads read alone (`standing-reads`), so a change to one it does not read
+  reruns nothing. See docs/render.md#how-the-work-stands."
+  {:malli/schema [:=> [:cat :any] :map]}
+  [c]
+  (let [read (fn [m ks] (into {} (for [k ks :let [v (ratom/realize (get m k))] :when (some? v)] [k v])))
+        tv (get c :seon.agent/task)]
+    (standing (read c (:agent standing-reads)) (when tv (read tv (:task standing-reads))))))
 
 (defn agent-head
   "An agent's head (on its page and in its pill's title): its id, status,

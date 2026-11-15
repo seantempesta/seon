@@ -78,8 +78,8 @@
       (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))
 
 (deftest armed-printing-adds-only-its-contracted-calls
-  ;; as root runs it: every contracted printer function armed. Calls are exact; bytes are the
-  ;; own work's plus what each call's checks allocate. An armed call takes no try (task
+  ;; as root runs it: every contracted printer function armed. Bytes are the own work's plus what each
+  ;; contracted call's checks allocate (the calls price the bytes; they are no bound of their own: the owner, 2026-11-15). An armed call takes no try (task
   ;; seon.contract/an-armed-call-costs-its-checks: :fn/armed-call's one-int row is ~0 B), but the
   ;; printer's contracts check maps, and a map's validator allocates: measured 2026-10-23, armed
   ;; minus unarmed, 62 B a call per entry (3,020 against 2,460 B an entry, nine calls) and ~170 B
@@ -88,7 +88,7 @@
   ;; every test after it in the process, and a debug page's pass printed through it with 189 more
   ;; contracted calls (the debug page's pass of its rows, measured 2026-10-23: 420 alone, 609 after this test)
   (let [armed? (contract/armed? #'seon.print/print-value)
-        armed (fn [own calls per-call] (round (assoc own :bytes (+ (:bytes own) (* calls per-call)) :calls calls)))]
+        armed (fn [own calls per-call] (round (assoc own :bytes (+ (:bytes own) (* calls per-call)))))]
     (contract/instrument! '[seon.print seon.print.select seon.print.emit])
     (try
       (cost/proof

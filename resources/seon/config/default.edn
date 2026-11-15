@@ -991,8 +991,9 @@
  ;; Unit: tokens for a value shown inside another: a refused argument, a test's expected and
  ;; actual, ex-data (session P1).
  :seon.config.render/part-budget 256
- ;; Unit: errors. An agent's newest failures its open problems show, each with its cause (plan Stage 0.3): enough to see a run of one
- ;; kind and the one before it, never the whole history.
+ ;; Unit: rows. How many rows of a problem list a page shows: an agent's newest failures its open problems show, each with its cause
+ ;; (plan Stage 0.3), and each class of a problems report no tab opened (root's tile): enough to see a run of one kind and the one
+ ;; before it, never the whole history; the rest is one call away.
  :seon.config.render/recent-errors 5
  ;; Unit: tokens for a form echoed back (session P1).
  :seon.config.render/form-budget 600
@@ -1162,6 +1163,9 @@
  ;; holds the worker ~0.4 s, so a query waits behind at most one round. 0 embeds nothing and the
  ;; model never loads: bin/test's and bin/check's roots (SEON_EMBED_TEXTS), which never search.
  :seon.config.vector/texts #long #or [#env SEON_EMBED_TEXTS 64]
+ ;; Unit: files. How many text-index images seon.doc keeps in target/text-index/ (each ~52 MB on main), by content key: the newest
+ ;; are kept (the main's and a few branches' texts), the rest deleted when one is written (docs/vector.md#search).
+ :seon.config.vector/text-index-files-kept 3
  ;; Unit: requests. What one :embed step takes from the queue (seon.fx :batch): queries queued
  ;; behind a round are embedded together.
  :seon.config.vector/batch 16

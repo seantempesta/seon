@@ -168,7 +168,7 @@
        ;; flat but for the commit's diff, log n deep; before, every round behind scanned all n texts (about 2.3k ticks each)
        :growth :log
        :per-n {:ticks 15000.0 :bytes 50000.0}
-       :fixed {:ticks 560000.0 :bytes 1800000.0 :calls 130}
+       :fixed {:ticks 560000.0 :bytes 1800000.0}
        :sizes [30 100 300]})
     (finally nil)))
 
@@ -193,6 +193,6 @@
        ;; 2026-10-29 (a-vector-is-its-own-entity): the written text's vector is found through :seon.vector/of
        ;; (seon.vector/vector-e), one contracted call and seek more: 301k / 1.01 MB / 15 calls at 100
        :per-n {:ticks 70.0 :bytes 150.0}
-       :fixed {:ticks 310000.0 :bytes 1000000.0 :calls 15}
+       :fixed {:ticks 310000.0 :bytes 1000000.0}
        :sizes [30 100 300]})
     (finally nil)))
