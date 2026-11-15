@@ -479,9 +479,8 @@
 
 ;; See docs/render.md#a-turn-stores-what-it-sent
 (defn- stored-turns!
-  "Three turns of agent a1 on conn as seon.turn/model-request! makes them: each turn and its basis, its request drawn on the db that
-  holds them, then what it sent stored (seon.ctx.wire/sent-tx) and its call recorded; the cited var and the plan move between them.
-  Answers [r1 r2 r3 b3]: the three requests and turn 3's basis."
+  "Three turns of agent a1 on conn as seon.turn/model-request! makes them, each storing what it sent: [r1 r2 r3 b3], the three requests
+  and turn 3's basis. See docs/render.md#a-turn-stores-what-it-sent."
   [conn]
   (wiki! conn)
   (d/transact conn (program-facts '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))" []]]))
