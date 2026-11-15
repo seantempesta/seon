@@ -1,4 +1,5 @@
 #!/bin/zsh
+# DEVIATES (docs/decisions.md 2026-11-15: a script is thin over an op): runs Jolt's gates with its own bound and verdict file; its job left is proving a pin through the test service by reach. Task jolt.host/deps-scripts-keep-only-a-job-the-runtime-cannot-do.
 # bin/jolt-gates [GATE ...] — Jolt's own gates on this checkout's Jolt pin and this checkout's Chez: what a Jolt
 # pin owes before it is handed over (docs/merging.md#conflicts-and-pins), every gate of test/forks/jolt-gates.txt
 # (or the ones named): Jolt built once, then the gates in parallel, each worker a clonefile copy of the build with its own HOME and TMPDIR, niced, each gate bounded (bin/bounded, 1,100 s), its output kept in target/jolt-gates/logs/GATE.out.

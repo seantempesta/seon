@@ -1519,7 +1519,8 @@
   "The program of the tree at root as a seed indexes it, and the inputs bin/test keys verdicts by: {:program
   (seon.program/program-digest of the tree's index) :forms (the ids of its live forms, what seon.program/held? asks) :defs
   (its definition keys, seon.program/defined-keys: what a process on another program unmaps) :inputs
-  (seon.fx/inputs, whose :tree is the tree's git id: what binary-current and the source fact compare)}, or the error of a read or an analysis.
+  (seon.fx/inputs, whose :tree is the tree's git id: what binary-current and the source fact compare) :digest (seon.fx/binary-digest of that
+  tree: the binary's identity, which seon.fx/runtime-for compares)}, or the error of a read, an analysis or the digest.
   The index is the build's cache, a store other than the one store because it is regenerable from the tree at any time
   and root never reads it: kept between builds under base (bin/build's target/seon.index, keyed by the schema and layout:
   seon.db/kept-store!, so one of another layout is dropped, never opened), brought to the tree as a seed brings a store
@@ -1536,7 +1537,15 @@
                             (if (:error a) a (assoc a :forms (into (sorted-set) (map :v) (d/datoms @conn :aevt :form/id))
                                                     :defs (program/defined-keys @conn)))))
          r (kept-index! (str (pdb/kept-store! base) "/index") index inputs roots)]
-     (if (:error r) (:error r) {:program (:program r) :forms (:forms r) :defs (:defs r) :inputs (assoc-in inputs [:config :seon.env/index] (or (:indexed-by r) "none"))}))))
+     (if (:error r)
+       (:error r)
+       ;; and its binary identity (seon.fx/binary-digest of the tree it is built from): what seon.fx/runtime-for compares, held with the
+       ;; record from the running binary's boot, so a later build never changes what a running process says it is
+       ;; a tree with no shipped config (a test's scratch tree) has no identity: its record names none, and runtime-for says so
+       (let [d (fx/binary-digest root (:tree inputs))]
+         (cond-> {:program (:program r) :forms (:forms r) :defs (:defs r)
+                  :inputs (assoc-in inputs [:config :seon.env/index] (or (:indexed-by r) "none"))}
+           (string? d) (assoc :digest d)))))))
 
 (defn held-inputs
   "The inputs of the files this system's checkout holds, as bin/system start (or bin/update's no-restart landing) last computed

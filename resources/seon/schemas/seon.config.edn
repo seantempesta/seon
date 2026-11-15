@@ -263,5 +263,6 @@
  ;; keys-schemas sweep: the properties of a config key's schema, and an option of the config reader
  :seon.config/at-load [:boolean {:description "On a config key's schema, true when the value is read once at load and a branch's change of it does not act until a rebuild."}]
  :seon.config/place [:boolean {:description "On a config key's schema, true when it names a place (a port, a path) read before any db, so a branch's statement of it does not act until a rebuild."}]
+ :seon.config/build [:boolean {:description "On a config key's schema, true when the compiler reads its value at a build (bin/env, bin/build), so the binary's identity (seon.fx/binary-digest) holds it and a change of it is a build."}]
  :seon.config/unit [:string {:description "On a config key's schema, the unit its value is in (\"ms\", \"bytes\", \"path\"), shown beside it."}]
  :seon.config/checkout [:string {:description "In the options the config file is read with, the absolute path of the checkout that #seon/checkout paths are read under."}]}
