@@ -350,10 +350,7 @@
       ;; what no gate will run stays unjudged, said here because it ends no run (seon.task/unjudged)
       unjudged (assoc :unjudged unjudged)
       test-error (assoc :test-run {:failed [(:seon.error/message test-error)]})
-      ;; a datum entry shown by its entity's name (seon.merge/named), as the merge names a conflict: the form that settles it names it so
-      (seq unmerged) (assoc :unmerged (mapv #(cond-> (select-keys % [:key :base :ours :theirs])
-                                               (= :datum (first (:key %))) (assoc :entity (pm/named db (second (:key %)))))
-                                            unmerged))
+      (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :base :ours :theirs]) unmerged))
       (seq gaps) (assoc :without-a-contract gaps)
       (seq (:caused split)) (assoc :caused (:caused split))
       (seq (:attention split)) (assoc :attention (:attention split))

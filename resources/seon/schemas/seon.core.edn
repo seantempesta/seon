@@ -99,7 +99,7 @@
  :seon.db/entity-index-shape [:map [:forms :map] [:entity-schemas [:map-of :keyword :qualified-keyword]] [:identity-schemas [:map-of :keyword :qualified-keyword]]
                         [:schema-identities [:map-of :qualified-keyword :keyword]] [:drawn-schemas [:set :qualified-keyword]] [:history-schemas [:set :qualified-keyword]]
                         [:required-keys [:map-of :qualified-keyword [:vector :keyword]]] [:own-required [:map-of :qualified-keyword [:vector :keyword]]]
-                        [:targets [:map-of :keyword [:vector :qualified-keyword]]] [:required-refs [:vector :qualified-keyword]] [:derived-attrs [:set :keyword]] [:root-only-attrs [:set :keyword]] [:commit-attrs [:set :keyword]]
+                        [:targets [:map-of :keyword [:vector :qualified-keyword]]] [:required-refs [:vector :qualified-keyword]] [:derived-attrs [:set :keyword]] [:commit-attrs [:set :keyword]]
                         [:ancestors [:map-of :qualified-keyword [:set :qualified-keyword]]] [:reaching [:map-of :qualified-keyword [:vector :qualified-keyword]]]
                         [:specs {:optional true} :any]]
  :seon.db/open [:map [:cfg :seon.db/cfg] [:conn :seon.host/conn] [:recovered? :boolean]]
@@ -161,7 +161,7 @@
  ;; an agent's lifecycle as root's view holds it, in the dashboard's order: live, then gone
  ;; (stopped by root: a kill, or the end of its run; or dead). The sets are the
  ;; lifecycle's one declaration (seon.system/gone, seon.render.ui/live): a new status is one entry
- :seon.agent/status [:enum {:seon.db/root-only true :seon.status/live #{:spawning :busy :idle} :seon.status/stopped #{:ended :killed}
+ :seon.agent/status [:enum {:seon.status/live #{:spawning :busy :idle} :seon.status/stopped #{:ended :killed}
                             :seon.status/gone #{:ended :killed :dead}
                             ;; how a process reads where nothing else says how its work stands (seon.render.ui/standing)
                             :seon.status/title {:spawning "starting" :busy "working" :idle "idle" :ended "finished" :killed "killed" :dead "stopped"}
@@ -286,7 +286,6 @@
  :seon.db/identity [:boolean {:description "On an attribute's schema, true when its value identifies its entity, a lookup ref (Datahike's :db.unique/identity)."}]
  :seon.contract/valid [:map-of {:description "In a value's metadata, each named schema its maker checked it against (seon.contract/checked-once) to the value's hash then: a [:seon.contract/once shape] contract admits it at once while its hash is the same. See docs/checks.md#contracts-armed-at-definition."} :qualified-keyword :int]
  :seon.db/derived [:boolean {:description "On an entity schema's properties, true when its entities are derived from other facts (an embedding of a text, a cite of a plan): a cache each branch computes, never merged (docs/merging.md#a-branch-merges-main-in)."}]
- :seon.db/root-only [:boolean {:description "On a schema's properties (an attribute's, or an entity schema's for all its attributes), true when only root writes it, on main (the system entity, an agent's run record, a recorded error): a merge never carries a branch's value of it, so it never conflicts (seon.merge/decide). See docs/merging.md#a-branch-merges-main-in."}]
  :seon.db/index [:boolean {:description "On an attribute's schema, true when its values are indexed for lookup by value (Datahike's :db/index)."}]
  :seon.db/tagged [:boolean {:description "On an attribute's schema, true when each of its values names the schema it satisfies by :seon.db/tag and is held to it at the write (seon.db/invalid-datom)."}]
  :seon.db/to [:vector {:description "On a ref attribute's schema, the entity schemas the entity it refers to may be."} :qualified-keyword]

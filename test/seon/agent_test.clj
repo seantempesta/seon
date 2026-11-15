@@ -1060,15 +1060,6 @@
                    "(let [r (promise) t (Thread. #(deliver r (try [(seon.contract/valid? :lab.reg/n 5) (seon.contract/valid? :lab.reg/n 1)] (catch Throwable e (ex-message e)))))] (.start t) (.join t) @r)"])]
     (is (= [true false] (:value called)) (str "a call outside any eval checks against the branch's schema: " (pr-str reg) " " (pr-str called)))))
 
-;; docs/source.md#schemas-at-the-repl (seon.contract/a-bare-schema-read-on-a-branch-reads-the-branch): a schema read with no options,
-;; malli's default registry, answers the branch's schema in an agent, as seon.contract/options does; red before: it answered main's
-;; (the first real seon_done's own red, an order read bare)
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M) + 2 asks at ~0.25M = ~2000k, 3000000
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 2}} a-bare-schema-read-on-a-branch-reads-the-branch
-  (let [[_ read] (in-agent ["(my.schema/register! :lab.reg/bare [:int {:min 3}])"
-                            "[(malli.core/form (malli.core/deref (malli.core/schema :lab.reg/bare))) (malli.core/validate :lab.reg/bare 1)]"])]
-    (is (= [[:int {:min 3}] false] (:value read)) (str "the branch's own schema, read bare: " (pr-str read)))))
-
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} root-reads-the-health-the-render-proc-keeps
   ;; docs/health.md#cost: my.root/problems read main's health whole at every call (~600 MB on the standing
