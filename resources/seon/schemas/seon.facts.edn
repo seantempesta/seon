@@ -284,11 +284,11 @@
  :seon.agent/description :seon.db/text
  ;; the model it works for, when its task names none of root's; the client that attached it, when an outside agent's (seon.server/held)
  :seon.agent/model [:string {:description "The model the agent works for, when its task names none of root's."}]
- :seon.agent/holder [:string {:description "The client that attached this agent, when it is an outside agent's."}]
+ :seon.agent/holder [:string {:seon.db/root-only true :description "The client that attached this agent, when it is an outside agent's."}]
  ;; root's boot it was started in, and when (ms): the agent is live in a root when the boot is that root's and its task is :running
- :seon.agent/boot [:and {:seon.db/index true :description "The root boot the agent was started in; it is live in a root when the boot is that root's and its task is running."} :string]
- :seon.agent/started-ms [:int {:description "When the agent was started, in ms."}]
- :seon.agent/ended-ms [:int {:description "When the agent ended, in ms."}]
+ :seon.agent/boot [:and {:seon.db/index true :seon.db/root-only true :description "The root boot the agent was started in; it is live in a root when the boot is that root's and its task is running."} :string]
+ :seon.agent/started-ms [:int {:seon.db/root-only true :description "When the agent was started, in ms."}]
+ :seon.agent/ended-ms [:int {:seon.db/root-only true :description "When the agent ended, in ms."}]
  ;; a test run that failed as a whole (its fork refused, a namespace did not load): the error as data (its type, message and
  ;; data keys), written on the agent's branch by its turn (seon.turn/observe) and retracted when a run answers;
  ;; present only while it is so (seon.ctx.status/status)
@@ -667,7 +667,7 @@
  :seon.system/stopped :seon.system/end
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean
  :seon.system/previous-end :seon.system/end
- :seon.system/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.system/id :seon.system/boot :seon.system/generation :seon.system/quiescent] :seon.ctx/pattern [* {:seon.system/config [*]} {[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true] [* {[:seon.agent/task :as :task] [:seon.task/id :seon.task/outcome :seon.task/reason]} {[:seon.process/_agent :as :processes] [*]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/hiccup seon.render.ui/root}
+ :seon.system/root-fact [:map {:seon.db/attributes true :seon.db/root-only true :seon.render/keys [:seon.system/id :seon.system/boot :seon.system/generation :seon.system/quiescent] :seon.ctx/pattern [* {:seon.system/config [*]} {[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true] [* {[:seon.agent/task :as :task] [:seon.task/id :seon.task/outcome :seon.task/reason]} {[:seon.process/_agent :as :processes] [*]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/hiccup seon.render.ui/root}
                           [:seon.system/id :seon.system/id]
                           ;; a seeded store's root holds no boot until a root first boots on it (seon.task/entity-value reads it so)
                           [:seon.system/boot {:optional true} :seon.system/boot] [:seon.system/signed-in {:optional true} :seon.system/signed-in]

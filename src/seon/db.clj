@@ -161,6 +161,10 @@
      ;; the attributes marked {:seon.db/derived true}, on their own schema or their entity schema's: caches never merged (seon.merge), once
      :derived-attrs (into (into #{} (keep (fn [[a k]] (when (:seon.db/derived (form-props forms k)) a))) es)
                           (filter #(and (qualified-keyword? %) (:seon.db/derived (form-props forms %)))) (keys forms))
+     ;; the attributes marked {:seon.db/root-only true}, on their own schema or their entity schema's: only root writes them, on main,
+     ;; so a merge never carries a branch's value of one (seon.merge/decide), once, as :derived-attrs is read
+     :root-only-attrs (into (into #{} (keep (fn [[a k]] (when (:seon.db/root-only (form-props forms k)) a))) es)
+                            (filter #(and (qualified-keyword? %) (:seon.db/root-only (form-props forms %)))) (keys forms))
      ;; the attributes whose values name a commit (their schema reaches :seon.db/commit, :seon.db/reference holding one): every commit a
      ;; kept reference names, which a collection keeps (retain!), derived from the schemas, never listed, once
      ;; a fixed point over each form's named keys, each form read once: the schemas that reach :seon.db/commit grow until none is added

@@ -622,6 +622,53 @@
     [(filterv #(and (fact? %) (empty? (d/datoms head :eavt (:e %) (:a %) (:v %))) (seq (d/datoms (d/history head) :eavt (:e %) (:a %) (:v %)))) gone)
      (filterv #(and (fact? %) (empty? (d/datoms base :eavt (:e %) (:a %) (:v %))) (not (and mains (= mains (tx-branch head (:tx %))))) (not (shared? base %))) added)]))
 
+(defn- facts
+  "The facts from changed since base (`changed-datoms`), each {:e :a :v :tx :side}: :retract for one gone, :add for one added, the
+  side taken from which list it is in, never a datom's own flag (a diff's gone datoms are stored datoms, :added true). A
+  transaction's own facts, Datahike's own attributes, the derived attributes (the entity index's :derived-attrs, made again after
+  a merge) and root's own (:root-only-attrs, written by root on main alone) are left out. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :map]]}
+  [base from]
+  (let [[gone added] (changed-datoms base from)
+        ix (pdb/index)
+        ;; derived values are made again after a merge, root's own facts only root writes on main: a merge carries neither
+        skip (into (:derived-attrs ix) (:root-only-attrs ix))
+        txe (into #{} (map :tx) (concat gone added))
+        fact? (fn [{:keys [e a]}] (and (not (txe e)) (keyword? a) (not= "db" (namespace a)) (not (skip a))))
+        as (fn [side] (fn [dt] {:e (:e dt) :a (:a dt) :v (:v dt) :tx (:tx dt) :side side}))]
+    (into (mapv (as :retract) (filter fact? gone)) (map (as :add)) (filter fact? added))))
+
+(defn named
+  "Entity e as an agent reads it: [identity-attribute value] on db, by the entity index's :identity-schemas, else e. A conflict is
+  shown by its entity's name, never an entity id. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :any]}
+  [db e]
+  (or (some (fn [[a]] (some->> (first (d/datoms db :eavt e a)) :v (vector a))) (:identity-schemas (pdb/index))) e))
+
+(defn decide
+  "The one merge of from into into-db, decided over facts: from's since base (`facts`), and at each [e a] they touch (each [e a v]
+  of a cardinality-many attribute) the values base, into-db and from hold. A conflict is a key both sides changed since base, to
+  different values: {:conflicts [{:key [:datum e a] or [:datum e a v], :entity its name (`named`), :base :ours :theirs}]}, nothing
+  applied; :ours is from's, :theirs into-db's, a value (cardinality one) or whether the [e a v] is held. Clean: {:txs [{:source t
+  :ops}]}, from's source transactions in order, each the facts it changed as ops, replayed as new transactions. The same for main and
+  any branch. Costs O(d), d the facts from changed: one seek a key on each of three dbs (tests' pilot branch, 1,266 datoms: 69 ms,
+  result/b9f7c2bf). See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:or [:map [:conflicts [:vector :seon.merge/conflict]]] [:map [:txs [:vector [:map [:source :int] [:ops :seon.db/tx-data]]]]]]]}
+  [base from into-db]
+  (let [fs (facts base from)
+        many? (fn [a] (= :db.cardinality/many (get-in (:schema from) [a :db/cardinality])))
+        k-of (fn [{:keys [e a v]}] (if (many? a) [:datum e a v] [:datum e a]))
+        at (fn [db [_ e a v :as k]] (if (= 4 (count k)) (some? (first (d/datoms db :eavt e a v))) (:v (first (d/datoms db :eavt e a)))))
+        conflicts (vec (for [k (into (sorted-set-by #(compare (pr-str %1) (pr-str %2))) (map k-of) fs)
+                             :let [b (at base k) i (at into-db k) f (at from k)]
+                             :when (and (not= b i) (not= b f) (not= i f))]
+                         (cond-> {:key k :entity (named from (second k))}
+                           (some? b) (assoc :base b) (some? f) (assoc :ours f) (some? i) (assoc :theirs i))))]
+    (if (seq conflicts)
+      {:conflicts conflicts}
+      {:txs (->> fs (group-by :tx) (sort-by key)
+                 (mapv (fn [[t ds]] {:source t :ops (mapv (fn [{:keys [e a v side]}] [(if (= :add side) :db/add :db/retract) e a v]) ds)})))})))
+
 (defn merge-main
   "The one merge of main into a branch, decided: head's own datoms since base (`own-datoms`), their keys (program keys and facts,
   `touched-by`), and main's content at those keys only, against base's: a key both changed, differently, is a conflict, and any
