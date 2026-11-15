@@ -1188,7 +1188,10 @@
       ;; the merged members' namespaces that are Seon's own source are written back: main's
       ;; files after the octopus merge, committed on the merges branch (:git), the sha recorded on
       ;; each merged task (the self-improvement loop: the next generation builds it)
-      :octopus-merged (let [merged (keep (fn [[m x]] (when (:merged? x) [m x])) (map vector (:members act) (:results r)))
+      :octopus-merged (let [;; an error answer (the writer's step threw, answered at the request's :dest) is every member's: each moves off
+                            ;; :ready as a refused merge does, never left :ready for its seon_done to wait on and the next pass to merge again
+                            results (if (contract/error? r) (repeat (count (:members act)) r) (:results r))
+                            merged (keep (fn [[m x]] (when (:merged? x) [m x])) (map vector (:members act) results))
                             paths (vec (sort (distinct (mapcat (comp :files second) merged))))
                             back? (and (:source st) (seq paths) (cfg/value :seon.config.source/write-back-on-merge))]
                         (one (write (cond-> st back? (assoc-in [:flights id :writeback] {:files paths :members (vec (for [[m x] merged :when (seq (:files x))] m))}))
@@ -1211,7 +1214,7 @@
                                                        (task/move-tx task :ready :behind {:seon.task/reason (:seon.error/message r) :seon.task/error r})
                                                        :else (hold-tx (:db st) task (task/move-tx task :ready :closed {:seon.task/reason problem :seon.task/error r})
                                                                       problem {:conflicts (:seon.task/conflicts t) :unmerged (:seon.task/unmerged t)}))))
-                                                 (:members act) (:results r))
+                                                 (:members act) results)
                                          ;; the live agents of the tasks a merged one unblocks are told, in this write, which wakes each
                                          ;; (seon.task/landed-tx; plan Stage 1.8)
                                          (task/landed-tx (:db st) (mapv (comp :task first) merged) (System/currentTimeMillis)))))))

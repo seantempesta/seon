@@ -2418,3 +2418,17 @@
     (testing "a task at :ready waits on for its merge"
       (let [p (promise) _ (step (st :ready) :judge {:op :judged :task "demo/a" :p p})]
         (is (= :unanswered (deref p 0 :unanswered)))))))
+
+;; docs/errors.md#nothing-crashes-and-nothing-hangs: an octopus merge whose request the writer answered with an error (a step that
+;; threw, answered at its :dest) moved no member off :ready: (:results r) was nil, so each member's seon_done waited for its merge
+;; for good, and the next pass merged them again (root's question, 2026-11-15). Now each member moves :ready -> :closed, held, naming
+;; the error. Red before: no member moved. Estimate: one step over a db of two tasks, ~1M
+(deftest ^{:seon.test/estimate {:ticks 1500000}} a-merge-answered-an-error-moves-every-member-off-ready
+  (let [db (d/db-with (seon.db/empty-db true) [{:seon.task/id "demo/a" :seon.task/outcome :ready} {:seon.task/id "demo/b" :seon.task/outcome :ready}])
+        st {:db db :boot "b" :pending {} :rid 0 :idx {:tasks {"demo/a" {:seon.task/outcome :ready} "demo/b" {:seon.task/outcome :ready}}}
+            :flights {"demo/a" {:act {:op :octopus-merge :task "demo/a" :members [{:task "demo/a"} {:task "demo/b"}]}}}}
+        e (seon.contract/error :seon.system/proc-defect #'seon.system/flow-error "the octopus merge threw" {})
+        [_ outs] (#'seon.reconcile/advance st "demo/a" :octopus-merged e)
+        tx (set (mapcat #(get-in % [:req :req :tx-data]) outs))]
+    (doseq [id ["demo/a" "demo/b"]]
+      (is (contains? tx [:db/cas [:seon.task/id id] :seon.task/outcome :ready :closed]) (str id " moves off :ready: " (pr-str tx))))))
