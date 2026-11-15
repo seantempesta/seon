@@ -439,7 +439,8 @@
   {:malli/schema [:=> [:cat :seon.system/sys :string] :any]}
   [sys k]
   (let [r @(c/submit! sys (keyword k) "(mapv #(update % :from seon.task/sender-name) (seon.agent/deliver!))" {:origin :outside})]
-    (if (contract/error? r) r (:value (first r)))))
+    ;; submit! answers one reply map for its one form ({:handle :value ...}), so the delivered vector is its :value
+    (if (contract/error? r) r (:value r))))
 
 (defn- inbox-answer
   "seon_inbox for request req: the agent (req's :agent, or its :task's agent), its new messages now, else the first ones written
