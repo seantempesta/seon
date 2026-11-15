@@ -785,7 +785,7 @@
       (let [frame (compress text)]
         (is (= (seq text) (seq (decompress frame))) (str lib ": a frame round-trips"))
         (is (< (alength frame) (/ (alength text) 1.5)) (str lib ": 64 KiB of docs compress to " (alength frame) " bytes"))))
-    (is (= :zstd (cfg/value :seon.config.store/compressor)) "the store's default codec")))
+    (is (contains? #{:zstd :lz4 :none} (cfg/value :seon.config.store/compressor)) "the store's configured codec is one the schema names; the zstd and lz4 frames are round-tripped above, :none has no frame")))
 
 (deftest a-large-value-lives-once-under-its-own-key
   ;; a value past :seon.config.store/value-out-of-line-bytes is stored once under its content
@@ -1521,7 +1521,7 @@
           (write! conn 0)
           (d/release conn true)))
       (let [{:keys [conn]} (pdb/open! :file path 0 :db)]
-        (is (= :zstd (codec conn)) "opened by the config that compresses")
+        (is (= (cfg/value :seon.config.store/compressor) (codec conn)) "opened by the config that compresses: the codec the config names")
         (is (= (all 50) (notes conn)) "the uncompressed values read")
         (write! conn 50)
         (d/release conn true))

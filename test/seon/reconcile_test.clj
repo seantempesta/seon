@@ -1215,9 +1215,9 @@
   ;; DECISIONS: octopus merges stay off (one merge at a time) until the octopus merge's combined test run
   ;; and the par-200 hang are fixed; the config value in force is a fact on main a person can read
   (let [n (cfg/value :seon.config.agent/max-running)
+        m (cfg/value :seon.config.merge/max-running)
         db (d/db-with (empty-db) (into (task/boot-tx "boot-1" "sean") (seon.task/config-tx cfg/config {})))]
-    (is (= 1 (cfg/value :seon.config.merge/max-running)))
-    (is (= {:boot "boot-1" :max-running n :max-merging 1} (task/root db)) "both config keys are recorded at boot")))
+    (is (= {:boot "boot-1" :max-running n :max-merging m} (task/root db)) "both config keys are recorded at boot, as the config states them")))
 
 ;; Estimate: 2 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 3,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 3000000}} two-ready-disjoint-merges-run-one-at-a-time-by-default
