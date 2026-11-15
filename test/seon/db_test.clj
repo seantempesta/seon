@@ -2169,16 +2169,15 @@
 ;; Estimate: a store of 20 commits ~3M ticks, a read-only connect and one query ~1M: 5,000,000 ticks.
 (deftest ^{:seon.test/estimate {:ticks 5000000}} a-read-only-connect-reads-the-store
   (let [path (str (seon.config/checkout) "/target/db-test-ro-" (random-uuid))
-        cfg (assoc (pdb/store-cfg :lmdb path) :schema-flexibility :read)]
+        {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)]
+    (swap! stores-made conj path)
     (try
-      (d/create-database cfg)
-      (let [c (d/connect cfg)]
-        (dotimes [i 20] (d/transact c {:tx-data [{:k/n i}]}))
-        (pdb/sync! cfg)
-        (d/release c))
+      (d/transact conn {:tx-data (vec (for [i (range 20)] {:note/text (str "ro" i) :note/agent :t}))})
+      (pdb/sync! cfg)
+      (d/release conn)
       (let [ro (assoc-in cfg [:store :lmdb :flags] (bit-or 0x20000 0x10000 0x8000))
             r (try (let [c (d/connect ro)]
-                     (try (d/q '[:find (count ?e) . :where [?e :k/n]] @c) (finally (d/release c))))
+                     (try (d/q '[:find (count ?e) . :where [?e :note/text]] @c) (finally (d/release c))))
                    (catch Exception e (ex-message e)))]
         (is (= 20 r) (str "a read-only connect reads the store: " r)))
-      (finally (seon.lib/remove-tree! path)))))
+      (finally (run! seon.lib/remove-tree! @stores-made) (reset! stores-made [])))))
