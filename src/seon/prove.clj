@@ -424,11 +424,28 @@
       (let [[st m] (step/ask st [:prove :answers] [:killed (:key run)] {:op :kill :id a})] [st [m]])
       [st []])))
 
+(defn- binary-identity
+  "This root's checkout's binary identity (target/seon.digest, what bin/build wrote), or \"unbuilt\": one small file read, made only
+  once a main run has failed, to see whether its inputs moved. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat] :string]}
+  []
+  (let [f (java.io.File. (str (cfg/checkout) "/target/seon.digest"))] (if (.isFile f) (str/trim (slurp f)) "unbuilt")))
+
+(defn- main-inputs-moved?
+  "Whether a notice at program t pt brings main's run inputs other than the failed run's (:main-failed, {:program-t :binary}):
+  a newer program, or another binary. Same inputs, same answer: a run that failed is never asked again on them. See
+  docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map :int] :boolean]}
+  [st pt]
+  (let [{fpt :program-t fb :binary :as failed} (:main-failed st)]
+    (boolean (and failed (or (not= pt fpt) (not= fb (binary-identity)))))))
+
 (defn- finish
   "Run k ended with answer r: every waiter answered once. A run answered green with nothing died is remembered under its
   slot (a key asked again gets that answer, nothing runs); an error, a death or a red is not, so asking again runs it
-  again. An error is a :platform problem too, but :seon.system/ended (the agent it asked ended: a cancel, its run's end).
-  Answers [st outputs]."
+  again. An error is a :platform problem too, but :seon.system/ended (the agent it asked ended: a cancel, its run's end), except a
+  main run's: main left unproved is always said, the program t it could not prove and the owner of its error's operation named
+  on it; and a failed main run keeps the inputs it failed on (:main-failed), so main is asked again only when they move. Answers [st outputs]."
   {:malli/schema [:=> [:cat :map :string :any] [:tuple :map [:vector :map]]]}
   [st k r]
   (let [{:keys [waiters] :as run} (get-in st [:runs k])
@@ -438,8 +455,19 @@
         r (if err? r (assoc r :key k :red (vec (sort-by str (distinct (concat (:red r) (keys (proofs/failures r))))))))
         ;; asked again, it ran nothing for that asker: each verdict reads as reused at its digest, with no measure to add
         st (remember (-> st (update :runs dissoc k) (assoc :last (:branch run))) run r)
-        [st kill] (runner-done st run)]
-    [st (cond-> (into (reply [] waiters r) kill) (and err? (not ended?)) (conj {:op :problem :class :platform :error r}))]))
+        [st kill] (runner-done st run)
+        main? (and (= :main (:mode run)) (= :main (:branch run)))
+        ;; a main run that failed keeps main wanted with the inputs it failed on, asked again when a notice brings others
+        ;; (main-inputs-moved?); one that answered clears them
+        st (cond (and main? err? (not= :seon.prove/superseded (:seon.error/type r)))
+                 (assoc st :main-failed {:program-t (:main-asked st 0) :binary (or (:seon.process/binary-digest r) (binary-identity))})
+                 main? (dissoc st :main-failed)
+                 :else st)
+        owner (some-> (:seon.error/operation r) namespace symbol)]
+    [st (cond-> (into (reply [] waiters r) kill)
+          (and err? (or (not ended?) main?))
+          (conj {:op :problem :class :platform
+                 :error (cond-> r main? (assoc :seon.prove/main-unproved (:main-asked st 0)) owner (assoc :seon.problems/owner owner))}))]))
 
 (defn- settle
   "Outputs of the queue (ask-items, batch-ended) carried out: an :asker-answered of run k finishes it with its answer
@@ -659,7 +687,9 @@
    :open (vec (sort-by str (vals (:pending st))))
    ;; main's proving, the gauge the sweep reads: the program-t its last run asked, the newer one wanted (moves made meanwhile, coalesced
    ;; into one next run), and whether a main run is in flight
-   :main {:asked (:main-asked st) :wanted (some-> (:main-want st) :program-t) :in-flight (boolean (main-run? st))}})
+   :main (cond-> {:asked (:main-asked st) :wanted (some-> (:main-want st) :program-t) :in-flight (boolean (main-run? st))}
+           ;; a main run that failed, and the inputs it failed on: asked again only when they move (main-inputs-moved?)
+           (:main-failed st) (assoc :failed (:main-failed st)))})
 
 (defn prove-proc
   "The test service (see the namespace doc). In :req (requests the api forwards, {:rid :branch :t :digest :agent :names
@@ -673,7 +703,9 @@
        :outs {:to-api "requests, and the answers to the waiters"}
        :workload :io
        :ping-map-fn (fn [st] {:runs (count (:runs st)) :full (some-> st :full :key) :queued (count (:items st))
-                              :main-t (:main-t st) :stale-answers (:stale st 0)})})
+                              :main-t (:main-t st) :stale-answers (:stale st 0)
+                              ;; main's run as the service decides it: what is wanted, the program t last asked, and a failed run's inputs
+                              :main-want (:main-want st) :main-asked (:main-asked st) :main-failed (:main-failed st)})})
   ([args] {:rid 0 :pending {} :runs {} :done {} :items {} :askers {} :batches {} :conn (:conn args)
            })
   ([st _tr] st)
@@ -687,7 +719,8 @@
                      ;; below once no main run is in flight (main-wanted)
                      :main (let [st (assoc st :main-t (:t m))
                                  pt (:program-t m)]
-                             [(cond-> st (and (cfg/value :seon.config.proofs/prove-main-on-commit) pt (> pt (:main-asked st 0)))
+                             [(cond-> st (and (cfg/value :seon.config.proofs/prove-main-on-commit) pt
+                                              (or (> pt (:main-asked st 0)) (main-inputs-moved? st pt)))
                                 (assoc :main-want (select-keys m [:t :commit :program-t])))
                               []]))
          [st outs] (main-wanted st outs)]

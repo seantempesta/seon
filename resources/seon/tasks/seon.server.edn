@@ -63,4 +63,9 @@ PROOF (red first, once the waiter is found): seon.server-test/an-eval-at-root-wh
   :seon.task/kind :work
   :seon.task/estimate {seon.server/serve-connection! {:n 1 :order :constant :ticks 100000 :bytes 100000}}
   :seon.task/proofs #{seon.server-test/an-eval-at-root-whose-answer-is-lost-is-answered-with-its-error}}
+ {:seon.task/name "a-closed-run-tells-the-session-how-to-go-on"
+  :seon.task/plan "Owner: flow (the server's reply). Found by the first Sonnet seon-drivers (2026-11-15 19:35-19:53, round 4's tasks on fresh branches; notes/context-random-round-4): after seon_done closed the namespace-load driver's task, its next seon_eval was refused \"works no task now\" until it re-attached (without fresh), and nothing said so. CHANGE: the refusal names the form that goes on: seon_attach task=<its task> (its branch kept), as an open problem names its clearing form. PRIOR WORK: seon.server/agent-reply's refusal (server.clj ~330). COST: none. Proof: seon.server-test/a-refused-reply-after-a-close-names-the-attach."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.server-test/a-refused-reply-after-a-close-names-the-attach}
+  :seon.task/estimate #:seon.server{agent-reply {:n 1, :order :constant, :ticks 10000, :bytes 100000}}}
 ]
