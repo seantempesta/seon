@@ -15,7 +15,7 @@ The delimiter around a citation decides how much of what it cites is pulled.
 - A bare word holding a `/` is its **summary**, and counts only when it names something. A var's `#'` is punctuation; the name's own trailing `!` or `?` is not (`seon.ref-test/a-text-word-keeps-its-names-bang`). A word inside a `"..."` string is data, never a citation (`seon.ref-test/a-string-literal-in-text-cites-nothing`).
 - One backtick, or a link, is its **doc**.
 - Three or more backticks are its **code**.
-- Two backticks are a literal, never a reference: write ``ns/name`` to mention a name without citing it.
+- Two backticks are a literal, never a reference: write ``ns/name`` to mention a name without citing it. A task's plan names a var its own change deletes this way: a single-backtick cite of it holds the task's file to a var the candidate no longer defines, and the merge gate's seed refuses the tree (`seon.db/no-target`).
 
 Only a span of exactly one qualified symbol or keyword is a name; a form, an alias form such as `str/join`, a name followed by words, or a name ending in `*` is not. A span whose first segment is a top-level entry of the checkout is a path. A `path:N` citation is marked `:line-reference` (line numbers go stale: cite the var). ```seon.ref/cited``` keeps each name once, at its strongest depth.
 
