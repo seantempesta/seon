@@ -123,7 +123,12 @@
                :n "wiki sections with vectors"
                :work "the task read with its accumulated plan, its references parsed and each resolved, its proofs' forms, the cited sections viewed, similar off: eighteen contracted calls, flat in the wiki"
                :growth :constant
-               :fixed {:bytes 500000}
+               ;; derived from task-data's code on this input (the plan "Say it." cites nothing, so no section, no write set, no proof), priced
+               ;; by the unit table, never from a run: the contract's check of the task map, ~15 keys x 300 B = 4.5 KB, and of the empty cites
+               ;; 0.3 KB; search/program-vars and program-names over no names: the config read of :seon.config.source/program-dirs (a seek,
+               ;; 2.4 KB), the dirs mapv, the empty set and vec 0.5 KB; select-keys of three keys and the plan assoc 0.5 KB; the empty
+               ;; sorted-map and the answer's map literals 0.6 KB; the contracts of the two inner calls 1 KB: about 10 KB, flat in the wiki
+               :fixed {:bytes 10000}
                :sizes [10 100 1000]}))
 
 (defn request-of
