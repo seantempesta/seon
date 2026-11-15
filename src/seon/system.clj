@@ -272,19 +272,13 @@
         (contains? m :running) (update ::busy (fnil (if (and (:running m) (not (task/gone-statuses (:status a))) (not (task/gone-statuses (:status a')))) conj disj) #{}) id)))
     st))
 
-(defn stall-state
-  "What root's stall check and each agent proc hold now, a hang's evidence (bin/evidence asks it through root's server
-  before a run past its bound is ended; it reads, never writes): the api proc's ::stall-armed, ::busy, ::lost and :pending (its
-  ping's: every ask it holds unanswered), each effect owner's :busy, :in-flight, :queued and :done (:fx), and
-  each agent proc's :inflight (each request's kind), :fx-out, :stall-seen, :last-frame-ms, :holding and :held (a clone's handshake held, and how many wait behind it), read by one Flow ping of
-  the graph, with :answered, every proc that answered it, and :unanswered, each proc mid-step when it was sent by its
-  ::flow/site (what it steps, since when): such a proc's evidence is {:site ...} in place of its state, never read as nil. See docs/clocks.md#time-decides-the-owners-exceptions."
-  {:malli/schema [:=> [:cat :seon.system/sys] [:map [:root [:map [:seon.system/stall-armed {:optional true}] [:seon.system/busy {:optional true}]
-                                                               [:seon.system/lost {:optional true}]]]
-                                                   [:agents :map] [:answered [:vector :keyword]] [:unanswered :map]]]}
-  [sys]
-  (let [states (flow/ping (:graph sys) :timeout-ms (cfg/value :seon.config.check/ping-ms))
-        ;; a proc mid-step when the ping is sent answers nothing: Jolt's ping names it in ::flow/unanswered and gives only its
+(defn stall-of
+  "stall-state's evidence from one Flow ping answer, states ({pid ping-entry}, its metadata's ::flow/unanswered the procs that
+  were mid-step): a pure read, so both its paths, a proc that answered and one named by its site, are tested on a value. See
+  docs/clocks.md#time-decides-the-owners-exceptions."
+  {:malli/schema [:=> [:cat :map] [:map [:root :map] [:agents :map] [:answered [:vector :keyword]] [:unanswered :map]]]}
+  [states]
+  (let [;; a proc mid-step when the ping is sent answers nothing: Jolt's ping names it in ::flow/unanswered and gives only its
         ;; ::flow/site (what it steps, since when, the message), the evidence a hang most needs, so that site stands in for its state
         unanswered (set (::flow/unanswered (meta states)))
         site #(::flow/site (get states %))
@@ -304,6 +298,18 @@
                      [pid (assoc (select-keys s [:fx-out :stall-seen :last-frame-ms :holding :held]) :inflight (update-vals (:inflight s) :kind))]))
      :answered (vec (sort (remove unanswered (keys states))))
      :unanswered (into (sorted-map) (for [pid unanswered] [pid (site pid)]))}))
+
+(defn stall-state
+  "What root's stall check and each agent proc hold now, a hang's evidence (bin/evidence asks it through root's server
+  before a run past its bound is ended; it reads, never writes): the api proc's ::stall-armed, ::busy, ::lost and :pending (its
+  ping's: every ask it holds unanswered), each effect owner's :busy, :in-flight, :queued and :done (:fx), and
+  each agent proc's :inflight (each request's kind), :fx-out, :stall-seen, :last-frame-ms, :holding and :held (a clone's handshake held, and how many wait behind it), read by one Flow ping of
+  the graph, with :answered, every proc that answered it, and :unanswered, each proc mid-step when it was sent by its
+  ::flow/site (what it steps, since when): such a proc's evidence is {:site ...} in place of its state, never read as nil. See docs/clocks.md#time-decides-the-owners-exceptions."
+  {:malli/schema [:=> [:cat :seon.system/sys] [:map [:root [:map [:seon.system/stall-armed {:optional true}] [:seon.system/busy {:optional true}]
+                                                               [:seon.system/lost {:optional true}]]]
+                                                   [:agents :map] [:answered [:vector :keyword]] [:unanswered :map]]]}
+  [sys] (stall-of (flow/ping (:graph sys) :timeout-ms (cfg/value :seon.config.check/ping-ms))))
 
 (defn- stall-task
   "Root's task to deal with agent id's stall s, when it works a task (seon.template/stall: one per
@@ -1602,13 +1608,15 @@
   start's `inputs` mode wrote. A system keeps running when main holds the landed tree as data (the bridge's commit loaded its forms,
   config and schema entries in place) and the running binary is tree's (rt not an error): nothing is built, a boot catches main's
   program up in place. Each other case is the restart's reason: no source fact; main not at the files' tree (no bridge ran); a
-  binary not tree's, naming what differs (:seon.process/differs: a build input or a pin); no inputs written. See
-  docs/source.md#a-landing-enters-main-as-data."
-  {:malli/schema [:=> [:cat [:maybe :map] :string :any [:maybe :map]] [:maybe :string]]}
+  binary not tree's, naming what differs (:seon.process/differs: a build input or a pin); no inputs written. Any other error of
+  runtime-for (the tree could not be read: :seon.fx/io-error) is answered as itself, never a reason to restart: the update fails
+  typed and the system keeps running. See docs/source.md#a-landing-enters-main-as-data."
+  {:malli/schema [:=> [:cat [:maybe :map] :string :any [:maybe :map]] [:or :nil :string :seon.error/base]]}
   [held tree rt inputs]
   (cond
     (nil? held) "main holds no source fact"
     (not= tree (:tree held)) (str "main holds tree " (:tree held) ", not the files' " tree ": no landing brought it in as data")
+    (and (contract/error? rt) (not= :seon.process/env-mismatch (:seon.error/type rt))) rt
     (contract/error? rt) (str "the running binary is not current for " tree ": what differs is "
                               (str/join ", " (or (seq (:seon.process/differs rt)) [(:seon.error/message rt)])))
     (nil? inputs) "no inputs were written for the files (runs/root-inputs.edn)"))
@@ -2123,10 +2131,9 @@
   ([sys agent-id opts] (request! sys 'clone! agent-id opts)))
 
 (defn submit!
-  "Send forms (a string) to the agent; a promise of the reply vector, one map per form.
-  opts {:ticks n}: each form stops after n engine ticks of work (an outside or ui origin
-  takes :seon.config.agent/form-ticks by default); {:origin :outside|:ui}: who asked, recorded
-  with each evaluation."
+  "Send forms (a string) to the agent; a promise of ONE reply map whatever the form count: :value is the form's value, or the
+  vector of several forms' values ((+ 1 2) (+ 3 4) answers [3 7]). opts {:ticks n}: each form's tick budget; {:origin
+  :outside|:ui}: who asked."
   {:malli/schema [:function [:=> [:cat :seon.system/sys :seon.agent/id :string] :seon.host/promise] [:=> [:cat :seon.system/sys :seon.agent/id :string [:maybe :map]] :seon.host/promise]]}
   ([sys agent-id forms-string] (submit! sys agent-id forms-string nil))
   ([sys agent-id forms-string opts] (request! sys 'submit! agent-id (assoc opts :forms forms-string))))
