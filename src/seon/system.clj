@@ -279,7 +279,7 @@
      :fx (into (sorted-map) (for [[pid m] states :let [s (::flow/state m)] :when (and (contains? s :in-flight) (contains? s :queued))]
                               [pid (select-keys s [:busy :in-flight :queued :done])]))
      ;; the reconciler's flights by task and the step each waits at: a judge that never settles is named
-     :reconciler (select-keys (state :reconciler) [:flights :flight-steps :quiet :t :waits :report :live :pending :behind])
+     :reconciler (select-keys (state :reconciler) [:flights :flight-steps :quiet :t :waits :report :live :pending :behind :judged])
      :agents (into (sorted-map)
                    (for [[pid m] states :let [s (::flow/state m)] :when (contains? s :inflight)]
                      [pid (assoc (select-keys s [:fx-out :stall-seen :last-frame-ms :holding :held]) :inflight (update-vals (:inflight s) :kind))]))
@@ -728,6 +728,11 @@
                 (step/out! o [:render :from-web] {:op :health :rid rid :db (:db m) :fold (::errors st)})
                 st)
       :shutdown (assoc st :shutdown-p p)
+      ;; a wait on an event the api itself records, answered in the step that records it, never a scan per commit: today a
+      ;; reconciler defect (judge!'s second producer). An ordinary pending entry, so a stop ends it as it ends every other; the
+      ;; entries a first producer already answered are dropped as a new one comes (bounded by the waits in flight)
+      :wait (let [st (update st :pending #(into {} (remove (fn [[_ v]] (and (= (:on m) (:kind v)) (realized? (:p v))))) %))]
+              (first (pend st p (:on m) nil)))
       (cond-> st p (reply! o p (refused 'seon.system/request (str op " is not one of root's requests") {}))))))
 
 (defn- back-op
@@ -926,6 +931,8 @@
                ;; the defect is an event too, so whoever waits on root's events for what that proc
                ;; owed (a check awaiting :fork-server-up) hears that it never will, not silence
                (step/out! o :events (step/event {:type :proc-defect :pid (:pid m) :message (:seon.error/message e)}))
+               ;; the waits on a reconciler defect (:wait :on :reconciler-defect, judge!'s) are answered by this one
+               (doseq [[_ v] (:pending st) :when (and (= :reconciler (:pid m)) (= :reconciler-defect (:kind v)))] (deliver (:p v) {:defect e}))
                ;; the view keeps the newest :seon.config.root/view-window and counts them all (renders say how many it left)
                (-> (reduce (fn [st x] (answer-taken st o (:pid m) x e)) (cond-> st (= :api (:pid m)) (dissoc ::lost)) taken)
                    ;; a proc whose transition threw reads nothing again: what is sent it from here is answered with this error (answer-down)
@@ -2104,10 +2111,18 @@
 (defn judge!
   "Hand an outside agent's task to the reconciler for judgement, as a turn loop's end
   is: proofs in a fork, the branch read, the agent retired. work {:task :env
-  :agent}. nil."
-  {:seon.flow/edge "an outside caller's put into the graph (the server's op): its wait is the :judge in-port's back-pressure, the point"
-   :malli/schema [:=> [:cat :seon.system/sys :map] :nil]}
-  [sys work] (a/>!! (:judge sys) (assoc work :op :judge)) nil)
+  :agent}. Waits for the judge's end, answered by the reconciler when the task has no flight left
+  (seon.reconcile/answer-judged): {:task :outcome}, a typed :seon.reconcile/judge-left-running or judge-left-ready, or
+  {:stopped true} when root stopped; or {:defect error} when a reconciler step threw after the ask (its flight then never
+  ends: a step that throws keeps its state), answered by the api in the step that records it (:wait :on :reconciler-defect):
+  one promise, two producers, the first answers. Never a quiet of the whole root, never a scan per commit."
+  {:seon.flow/edge "an outside caller's put into the graph (the server's op): its wait is the judge's own answer, or a reconciler defect"
+   :malli/schema [:=> [:cat :seon.system/sys :map] :map]}
+  [sys work]
+  (let [p (promise)]
+    (step/ask-edge (:ext sys) {:op :wait :on :reconciler-defect} {:stopped true} p)
+    (step/ask-edge (:judge sys) (assoc work :op :judge) {:stopped true} p)
+    @p))
 
 (defn await-db
   "Main's first db value (now or as of a later commit) for which (pred db) holds. The wait is the api's state, checked in the

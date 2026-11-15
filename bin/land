@@ -1,5 +1,5 @@
 #!/bin/zsh
-# bin/land [--check] [-F MSGFILE] — land this worktree's branch on main: the one way any session, Claude's or
+# bin/land [--check] [--fast NAMESFILE] [-F MSGFILE] — land this worktree's branch on main: the one way any session, Claude's or
 # Seon's, merges (docs/merging.md#a-branch-lands-with-binland). Run in the branch's worktree
 # (bin/worktree NAME), never the main tree, which stays on main and clean.
 #   1. merge main into the branch (a conflict stops it: resolve, commit, run it again), and build the runtime its pins
@@ -91,10 +91,11 @@ MSG=
 [[ ${1:-} == --dropped ]] && { dropped "${@:2}"; exit }
 [[ ${1:-} == --completes ]] && { completes; exit }
 [[ ${1:-} == --bridge ]] && { MAIN=$(git rev-parse --path-format=absolute --git-common-dir)/..; MAIN=${MAIN:A}; bridge "${@:2}"; exit }
-CHECK=
+CHECK= FAST=
 while (( $# )); do
   case $1 in
     --check) CHECK=1; shift ;;
+    --fast) FAST=${2:A}; [[ -f $FAST ]] || fail "no test-names file $2"; shift 2 ;;
     -F) MSG=${2:A}; [[ -f $MSG ]] || fail "no message file $2"; shift 2 ;;
     *) fail "unknown arguments: $*" ;;
   esac
@@ -144,7 +145,15 @@ LOG=$MAIN/target/land/$STAMP.log
   # this checkout's own build and runner. The standing system's items are forks of an agent started in the main tree and
   # carry its loaded config and libraries (jolt/runtime's land, 2026-11-12), so it proves no landing until its run loads the
   # branch whole as ruled.
+# --fast NAMESFILE (owner, 2026-11-15, until the one queue lands: "pick and implement the best ideas even if it means we are
+# not doing full runs"): the proof is the tests the file names (the change's reach and its last reds, AGENTS.md section 3's fast
+# lane), run by name, never the full plan; everything else here (merge, build, health, laws, the swap, the bridge, the update) is
+# the same, so sessions land themselves one swap at a time with no hand merging
+if [[ -n $FAST ]]; then
+  { nice -n 15 "$HERE/bin/test" ${(f)"$(<"$FAST")"}; st=$?; (( st == 0 )) && print "MERGE OK"; } > "$LOG" 2>&1 & PJ=$!
+else
   nice -n 15 "$HERE/bin/prove" --out "$MAIN/target/land/$STAMP-run" --merge > "$LOG" 2>&1 & PJ=$!
+fi
 trap 'kill -TERM -$PJ 2>/dev/null || kill -TERM $PJ 2>/dev/null; fail "stopped: its proof was ended with it"' TERM INT HUP
 wait $PJ; st=$?; trap - TERM INT HUP
 RUN=$(sed -nE 's/^(prove|test): run [^,]*, logs in (.*)$/\2/p' "$LOG" | tail -1)
@@ -152,6 +161,7 @@ RUN=$(sed -nE 's/^(prove|test): run [^,]*, logs in (.*)$/\2/p' "$LOG" | tail -1)
 grep -q "proved green already" "$LOG" && print "proved by an earlier prove of this very tree: merging, nothing run"
 grep -E '^RED |^FAILED ' "$LOG" | cut -c1-200 | head -12
 LINE=$(grep -E ' bin/prove --merge .*: MERGE (OK|FAILED)' "$LOG" | tail -1)
+[[ -n $FAST ]] && LINE="fast lane: $(grep -cvE '^\s*$' "$FAST") tests by name, $(grep -E '^SHARD' "$LOG" | tail -1)"
 (( st == 0 )) && [[ $(tail -1 "$LOG") == "MERGE OK" ]] || fail "the proof is red: $LOG"
 [[ $(git rev-parse HEAD) == $(git rev-parse "$B") ]] && git merge-base --is-ancestor "$OLD" HEAD || fail "the branch moved during its proof"
 { if [[ -n $MSG ]]; then cat "$MSG"; else print "Merge $B"; fi; print; print "$LINE"; } > "$HERE/target/land-msg"
