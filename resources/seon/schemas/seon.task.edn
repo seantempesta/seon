@@ -42,7 +42,7 @@
                          [:seon.task/model {:optional true} :seon.task/model]
                          [:seon.task/config {:optional true} :seon.task/config]
                          [:seon.task/kind {:optional true} :seon.task/kind]
-                         [:seon.task/evidence {:optional true} :seon.task/evidence]
+                         [:seon.task/evidence {:optional true} :seon.task/evidence] [:seon.task/estimate {:optional true} :seon.task/estimate]
                          [:seon.task/cause {:optional true} :seon.task/cause]
                          [:seon.task/causes {:optional true} :seon.task/causes]]
  ;; a task as the reconciler reads it (needs as ids)
@@ -56,7 +56,7 @@
                  [:seon.task/model {:optional true} :seon.task/model]
                  [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
                  [:seon.task/kind :seon.task/kind]
-                 [:seon.task/evidence {:optional true} :seon.task/evidence]
+                 [:seon.task/evidence {:optional true} :seon.task/evidence] [:seon.task/estimate {:optional true} :seon.task/estimate]
                  [:seon.task/failure {:optional true} :seon.task/failure]
                  ;; how its work stands and ended (judged by root, docs/reconcile.md#a-task-holds-how-its-work-ended), the agent as its key
                  [:seon.task/agent {:optional true} :string] [:seon.task/outcome {:optional true} :seon.task/outcome]

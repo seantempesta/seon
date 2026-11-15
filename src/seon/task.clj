@@ -698,7 +698,7 @@
   "The task attributes a declaration states (its members, config flattened), as stored: what load-tx writes beside
   :seon.task/declared, so one newer than it is an edit made on main since its file was read (seon.problems/unsynced?)."
   [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
-   :seon.task/kind :seon.task/evidence :seon.task/examples
+   :seon.task/kind :seon.task/evidence :seon.task/examples :seon.task/estimate
    :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
 
 (def ^:private task-pull
