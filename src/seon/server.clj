@@ -287,6 +287,8 @@
                   :tree {:type "string" :description "the checkout's tree id (seon.fx/tree-id, as bin/build records it): its branch's key"}
                   :mode {:type "string" :description "judge (default for a checkout), turn, or main (every key with no green at its digest, against no base: a whole tree)"}
                   :stream {:type "boolean" :description "EDN only: each test's verdict as a line as it ends, then the answer"}}}
+   :inbox {:doc "Wait for a message to an agent (its key, or its task: a session's agent is the one attached to its task session/<area>): answers at once with the messages main holds that its branch has not taken, else when one is written, else the typed :seon.server/no-message at :seon.config.root/inbox-wait-ms (ask again). It writes nothing: the agent's next reply delivers them. Run it in the background: its answer is your notification."
+           :args {:agent {:type "string" :description "an agent id"} :task {:type "string" :description "ns/name: its agent, instead of agent"}}}
    :done {:doc "Hand the task the agent works back to root: the agent writes its end (its proofs run, seon.turn/hand-back!), then root judges it, and merges it when the done rule has no reason. Answers the verdict when main holds it, as one line and a handle (seon.server/verdict-line): the task's outcome (done, merged, or closed with its task held) and reason, each red test with its first failure, and how main differs from the branch; the handle is the form that reads it whole at root. A defect of the reconciler that stops the judge, as that defect. It waits as long as the judge does (the run's proofs, a gate, a merge), so a caller's read timeout must allow minutes."
           :args {:agent {:type "string"} :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}} :required ["agent"]}))
 
@@ -383,6 +385,57 @@
     (let [db @(:conn sys)]
       (some (fn [{:keys [env key]}] (when (= c (:holder env)) key))
             (concat (task/running db) (task/running db :parked))))))
+
+;; Estimate: one :avet seek of the agent's message links and one id lookup each on its branch (~10.5k ticks a message [M]); a wait
+;; parks the connection's fiber (no worker, no thread) on await-message, one :avet seek a commit while held
+(defn- inbox-messages
+  "The messages main holds to agent key k that its branch has not taken (seon.task/undelivered), as a session reads them: {:id :from
+  :body :sent-ms}, :from by name. Reads only. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.system/sys :string] [:vector :map]]}
+  [sys k]
+  (let [db @(:conn sys) br (:seon.agent/branch (d/entity db [:seon.agent/key k]))
+        bdb (if br (:db @(c/branch-db sys br)) db)]
+    (mapv #(update % :from task/sender-name) (task/undelivered db bdb k))))
+
+(defn- inbox-answer
+  "seon_inbox for request req: the agent (req's :agent, or its :task's agent), its new messages now, else the first ones written
+  while it waits (seon.system/await-message), else :seon.server/no-message at :seon.config.root/inbox-wait-ms (a put-after! of
+  that bound, an outside client's wait). Run on the connection's fiber, never a :server-op worker (serve-connection!). See
+  docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.system/sys :map] :map]}
+  [sys req]
+  (let [db @(:conn sys)
+        k (or (:agent req) (some->> (:task req) (task/agent-key db)))]
+    (if-not (and k (pdb/eid db :seon.agent/key k))
+      (refused (str "seon_inbox names no agent: " (pr-str (select-keys req [:agent :task]))))
+      (let [now (inbox-messages sys k)]
+        (if (seq now)
+          {:agent k :messages now}
+          (let [ms (cfg/value :seon.config.root/inbox-wait-ms)
+                {:keys [p] wk :k} (c/await-message sys k)
+                due (a/chan 1) h (step/put-after! due ms ::due)
+                _ (a/go (when (a/<! due) (deliver p ::due)))
+                r @p]
+            (step/cancel! h) (a/close! due)
+            (cond (= ::due r) (do (c/drop-wait! sys wk)
+                                  (contract/error :seon.server/no-message #'seon.server/inbox-answer
+                                                  (str "no message to " k " in " ms " ms: ask again") {:agent k :waited-ms ms}))
+                  (contract/error? r) r
+                  :else {:agent k :messages (inbox-messages sys k)})))))))
+
+(defmethod op-answer :inbox [sys _ req] (inbox-answer sys req))
+
+(defn- inline-op?
+  "Does request line run on its connection's fiber, never a :server-op worker: an op that waits on our own system's event
+  (seon_inbox) and would hold one of the 16 worker threads while it waits. Both protocols: EDN {:op :inbox} and MCP's tools/call
+  of seon_inbox. See docs/server.md#ops."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [line]
+  (boolean (and (str/includes? line "inbox")
+                (try (if (str/starts-with? (str/triml line) "{\"")
+                       (= "seon_inbox" (get-in (json/read-str line) ["params" "name"]))
+                       (= :inbox (:op (edn/read-string line))))
+                     (catch Exception _ false)))))
 
 (defmethod op-answer :message [sys ag req]
   ;; from the agent the connection works through (connection-agent), else the signed-in person
@@ -633,7 +686,8 @@
               run (bound-fn [] (binding [*emit* (when-not mcp?
                                                   (fn [m] (.write out (.getBytes (str (sedn/encode m) "\n") "UTF-8")) (.flush out)))]
                                  (respond sys line)))
-              o @(c/effect! sys :server-op {:run run})
+              ;; an op that waits on our own system's event runs on this fiber, which parks: it holds no worker thread
+              o (if (inline-op? line) {:value (run)} @(c/effect! sys :server-op {:run run}))
               ;; the owner's own refusal (no worker, a stopped root) is this request's answer, in its protocol
               a (if (contract/error? o)
                   (if mcp? (json/write-str (rpc-error nil -32603 (print/text o))) (sedn/encode o))

@@ -275,13 +275,41 @@
   (let [k (volatile! nil)
         [before after] (at/in-agent (fn [{:keys [agent]}]
                                       (vreset! k (name agent))
-                                      [{:op :eval :agent "root" :code (str "(def inbox-p (seon.system/await-message sys " (pr-str (name agent)) ")) (realized? inbox-p)")}
+                                      [{:op :eval :agent "root" :code (str "(def inbox-p (:p (seon.system/await-message sys " (pr-str (name agent)) "))) (realized? inbox-p)")}
                                        {:op :eval :agent "root"
                                         :code (str "(do @(seon.system/message! sys " (pr-str (keyword (name agent))) " \"wake up\")"
                                                    " (seon.system/await-db sys #(seq (datahike.api/q '[:find ?m :where [?m :seon.message/body \"wake up\"]] %)))"
                                                    " [(realized? inbox-p) (some? (:max-tx @inbox-p))])")}]))]
     (is (false? (last (:value before))) (str "nothing answers it before a message: " (pr-str before)))
     (is (= [true true] (:value after)) (str "answered with main's db at the commit that wrote the message: " (pr-str after)))))
+
+;; Estimate: in this process, three server round trips (~0.5M each): ~1.5M; 2,000,000. In root: the inbox's seek of the agent's message
+;; links and their lookups on its branch (~10.5k ticks a message [M])
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} an-inbox-answers-at-once-with-what-the-branch-has-not-taken
+  ;; part 2: seon_inbox answers the messages main holds that the agent's branch has not taken, at once, and writes nothing (the agent's
+  ;; next reply delivers them, part 1, so its branch has one writer). Red before: no inbox op (a session polled seon_context)
+  (let [[_ inbox] (at/in-agent (fn [{:keys [agent]}]
+                                 [{:op :message :agent agent :body "for the session's inbox"}
+                                  {:op :inbox :agent (name agent)}]))]
+    (is (= ["for the session's inbox"] (mapv :body (:messages inbox))) (pr-str inbox))))
+
+;; Estimate: in this process, one server round trip (~0.5M); in root, one future, a message write and the wait's seek a commit: ~1M; 2,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} an-inbox-that-waits-is-answered-by-the-message-written
+  ;; part 2: with nothing new, seon_inbox waits on seon.system/await-message (no clock of ours: a message is our own event) until a
+  ;; commit writes one, then answers it. Red before: no inbox
+  (let [[r] (at/in-agent (fn [{:keys [agent]}]
+                           [{:op :eval :agent "root"
+                             :code (str "(let [f (future (#'seon.server/inbox-answer sys {:agent " (pr-str (name agent)) "}))]"
+                                        " @(seon.system/message! sys " (pr-str (keyword (name agent))) " \"while it waits\")"
+                                        " (mapv :body (:messages @f)))")}]))]
+    (is (= ["while it waits"] (:value r)) (pr-str r))))
+
+(deftest ^{:seon.test/estimate {:ticks 300000}} an-inbox-line-runs-on-its-connection-and-holds-no-worker
+  ;; part 2: seon_inbox waits, so it runs on the connection's fiber (which parks), never one of the 16 :server-op worker threads
+  ;; (:seon.config.root/server-op-workers): eight waiting sessions would hold half of them. Both protocols. Red before: no inline op
+  (is (#'seon.server/inline-op? "{:op :inbox :agent \"a1\"}") "EDN")
+  (is (#'seon.server/inline-op? "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"seon_inbox\",\"arguments\":{\"agent\":\"a1\"}}}") "MCP")
+  (is (not (#'seon.server/inline-op? "{:op :eval :agent \"root\" :code \"(inbox)\"}")) "an eval naming inbox is no inbox"))
 
 (deftest the-context-op-answers-what-a-model-is-sent
   ;; dogfood 2026-10-25: an outside agent read the task's data and turn sections only, not the system

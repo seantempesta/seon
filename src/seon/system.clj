@@ -736,6 +736,8 @@
       :state (reply! st o p (:view st))
       ;; a wait on main (await-db): checked now on main as it is, then as of every commit until it holds
       :await (check-waits (assoc-in st [::waits (:k m)] {:pred (:pred m) :p p}) @(:conn st))
+      ;; a wait its caller stopped waiting on: it leaves (drop-wait!)
+      :await-drop (do (deliver p true) (update st ::waits dissoc (:k m)))
       :errors (reply! st o p (::errors st))
       ;; main's health (my.root/problems): the render proc's, kept by what each move of main changed
       ;; (seon.render.proc/health!), brought to (:db m) there and answered by rid at the fold's counts
@@ -2191,15 +2193,22 @@
           :else r))))
 
 (defn await-message
-  "A promise answered with main's db at the first commit that links a message to agent key k after now (whoever writes it), or
-  the typed :seon.system/no-agent at root's stop: await-db's wait, unparked (no clock: a message is our own system's event).
-  See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.system/sys :string] :seon.host/promise]}
+  "{:p promise :k wait}: promise answered with main's db at the first commit that links a message to agent key k after now (whoever
+  writes it), or the typed :seon.system/no-agent at root's stop: await-db's wait, unparked (no clock: a message is our own system's
+  event); wait, its key, which `drop-wait!` takes when the caller's own bound ends it first. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.system/sys :string] [:map [:p :seon.host/promise] [:k :keyword]]]}
   [sys k]
   (let [t0 (:max-tx @(:conn sys))
         ;; a message linked to k after t0: one seek of k's :seon.message/to links a commit, O(its messages), while the wait is held
         new? (fn [db] (when-let [e (pdb/eid db :seon.agent/key k)] (some #(> (:tx %) t0) (d/datoms db :avet :seon.message/to e))))]
-    (step/ask-edge (:ext sys) {:op :await :k (keyword "seon.system" (str "await-" (lib/unique-id))) :pred new?} (gone nil "root stopped"))))
+    (let [wk (keyword "seon.system" (str "await-" (lib/unique-id)))]
+      {:p (step/ask-edge (:ext sys) {:op :await :k wk :pred new?} (gone nil "root stopped")) :k wk})))
+
+(defn drop-wait!
+  "Drop the wait on main keyed wk (await-message's :k) that its caller stopped waiting on (an outside bound ended it first): it leaves
+  the api's waits, so a wait nobody reads is never held. nil."
+  {:malli/schema [:=> [:cat :seon.system/sys :keyword] :nil]}
+  [sys wk] (step/ask-edge (:ext sys) {:op :await-drop :k wk} nil) nil)
 
 (defn defect
   "A root proc's defect (a :platform problem) whose record main wrote after t, or nil: a step

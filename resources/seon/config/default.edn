@@ -1229,6 +1229,9 @@
  ;; :done waiting on its judge) holds its worker, never a carrier or another connection. Provenance: the sessions working at once
  ;; (seven tonight), doubled; an op past them waits its turn at the :server-op owner.
  :seon.config.root/server-op-workers 16
+ ;; Unit: ms. A seon_inbox call's wait for a message, then :seon.server/no-message and the session asks again. Provenance: root's
+ ;; ruling 2026-11-15 (600000, an outside client's bound; its sender is often a person or another session).
+ :seon.config.root/inbox-wait-ms 600000
  ;; Unit: pid. The process this root ends with (seon.lib/end-with!, armed once its boot has forked the fork server):
  ;; a test's root names its test process (seon.test-store/start-root! sets SEON_END_WITH), so however that process
  ;; ends, -9 included, its roots and their agents end too (2026-11-08: 12 process groups outlived a stopped prove). 0: none.
