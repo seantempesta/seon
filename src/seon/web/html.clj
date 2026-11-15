@@ -73,13 +73,15 @@
   its own fields, and is reset after)."
   {:malli/schema [:=> [:cat :string :map] :map]}
   [tag attrs]
-  (let [{f :seon/call args :seon/args agent :seon/agent} attrs
-        attrs (dissoc attrs :seon/call :seon/args :seon/agent)]
+  (let [{f :seon/call args :seon/args agent :seon/agent go :seon/go} attrs
+        attrs (dissoc attrs :seon/call :seon/args :seon/agent :seon/go)]
     (if-not f
       attrs
       (if (= tag "form")
         (assoc attrs (keyword "data-on:submit") (str "@post('" (call-url agent f args) "', {contentType:'form'}); el.reset()"))
-        (assoc attrs (keyword "data-on:click") (str "@post('" (call-url agent f args) "')"))))))
+        ;; :seon/go, a page to open once the call has answered (an offer's tap: its write first, then the place)
+        (assoc attrs (keyword "data-on:click") (str "@post('" (call-url agent f args) "')"
+                                                    (when go (str ".then(() => { location.href = '" go "' })"))))))))
 
 (defn- write-attrs! {:malli/schema [:=> [:cat :any :map] :any]}
   [^StringBuilder sb attrs]
