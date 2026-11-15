@@ -538,24 +538,29 @@
     (is (some? (d/entity db1 [:var/name 'app.landed/f])) "and the landed file's facts are main's")))
 
 (defn- tree-with
-  "The git tree of the checkout's HEAD with path's blob replaced by text, written as git objects through an index of its own (the
-  checkout and its index untouched)."
+  "The git tree of the checkout's HEAD with path's blob replaced by text, written as git objects through an index of its own,
+  deleted after (the checkout, its index and refs untouched). The blob and tree are loose objects in the checkout's repository,
+  which runtime-for reads (as boots-on-a-tree's objects-into-checkout! does): no ref names them, so git's gc prunes them."
   [path text]
-  (let [co (config/checkout) idx (str (System/getProperty "java.io.tmpdir") "/rt-index-" (random-uuid))
-        env (assoc (into {} (System/getenv)) "GIT_INDEX_FILE" idx)
-        git (fn [& args] (let [r (apply sh/sh "git" "-C" co (concat args [:env env]))] (assert (zero? (:exit r)) (:err r)) (str/trim (:out r))))
-        blob (:out (sh/sh "git" "-C" co "hash-object" "-w" "--stdin" :in text))]
-    (git "read-tree" "HEAD")
-    (git "update-index" "--add" "--cacheinfo" (str "100644," (str/trim blob) "," path))
-    (git "write-tree")))
+  (let [co (config/checkout) idx (java.io.File/createTempFile "rt-index-" "")
+        env (assoc (into {} (System/getenv)) "GIT_INDEX_FILE" (.getPath idx))
+        git (fn [& args] (let [r (apply sh/sh "git" "-C" co (concat args [:env env]))] (assert (zero? (:exit r)) (:err r)) (str/trim (:out r))))]
+    (try
+      (.delete idx)
+      (let [blob (:out (sh/sh "git" "-C" co "hash-object" "-w" "--stdin" :in text))]
+        (git "read-tree" "HEAD")
+        (git "update-index" "--add" "--cacheinfo" (str "100644," (str/trim blob) "," path))
+        (git "write-tree"))
+      (finally (.delete idx)))))
 
-;; Estimate: three trees written as git objects and three runtime-for asks (seon.fx/binary-digest once a tree, ~40 ms each), the
-;; restart-for answers pure; ~2M ticks of this process's own work
-(deftest ^{:seon.test/estimate {:ticks 2000000} :seon.test/execs ["git"]} a-landing-restarts-only-when-a-build-input-moved
+;; Estimate: six trees written as git objects and six runtime-for asks (seon.fx/binary-digest once a tree: four git calls), the
+;; restart-for answers pure; ~4M ticks of this process's own work
+(deftest ^{:seon.test/estimate {:ticks 4000000} :seon.test/execs ["git"]} a-landing-restarts-only-when-a-build-input-moved
   ;; task seon.system/a-landing-restarts-root-only-for-a-binary-change (deps' (2), in runtime's slice, root 2026-11-15): keep or
   ;; restart is seon.fx/runtime-for's answer for the landed tree and nothing else; a landing kept builds nothing (bin/update). On
   ;; real trees: the checkout's HEAD tree with a src form changed is kept (src is no build input: a boot loads the program as a
-  ;; diff); with deps.edn changed, or root's graph (system.edn, a boot reads the binary's copy), it restarts naming the path.
+  ;; diff), as are a config entry and a schema entry (a landing's commit loads them in place); with deps.edn changed, root's graph
+  ;; (system.edn, a boot reads the binary's copy) or a config entry a process reads only at its start, it restarts.
   ;; Red before: restart-for read stale-binary's tree compare, never runtime-for
   (let [held (fn [t] {:root "/r" :dirs ["src"] :tree t :commit "c1"})
         inputs {:tree "tm" :env "e" :code "c" :config {}}
@@ -563,10 +568,20 @@
         co (config/checkout)
         src (tree-with "src/seon/lib.clj" (str (slurp (str co "/src/seon/lib.clj")) "\n;; a comment a landing added\n"))
         deps (tree-with "deps.edn" (str (slurp (str co "/deps.edn")) "\n;; a build input changed\n"))
-        graph (tree-with "resources/seon/system.edn" (str (slurp (str co "/resources/seon/system.edn")) "\n;; root's graph changed\n"))]
+        graph (tree-with "resources/seon/system.edn" (str (slurp (str co "/resources/seon/system.edn")) "\n;; root's graph changed\n"))
+        default (slurp (str co "/resources/seon/config/default.edn"))
+        ;; a config entry a load holds in place (seon.program/hold-config!), and one a process reads once at its start (:seon.config/at-load)
+        cfg (tree-with "resources/seon/config/default.edn" (str/replace default ":seon.config.render/flush-max 250" ":seon.config.render/flush-max 251"))
+        at-load (tree-with "resources/seon/config/default.edn" (str/replace default ":seon.config.agent/stall-ms 30000" ":seon.config.agent/stall-ms 30001"))
+        ;; a schema entry, which the landing's commit loads in place (its dependents re-armed)
+        schema (tree-with "resources/seon/schemas/seon.facts.edn" (str (slurp (str co "/resources/seon/schemas/seon.facts.edn")) "\n;; a schema file changed\n"))]
+    (is (not= cfg at-load) "the two config trees differ (each replace found its line)")
     (is (nil? (why src)) "a landing that moves only src keeps the system running and builds nothing")
     (is (re-find #"deps.edn" (str (why deps))) (str "a landing that moves a build input restarts, naming it: " (why deps)))
-    (is (re-find #"system.edn" (str (why graph))) (str "and root's graph is one: " (why graph)))))
+    (is (re-find #"system.edn" (str (why graph))) (str "and root's graph is one: " (why graph)))
+    (is (nil? (why cfg)) (str "a config entry loads in place: kept: " (why cfg)))
+    (is (some? (why at-load)) "a config entry a process reads only at its start is a restart")
+    (is (nil? (why schema)) (str "a schema entry loads in place: kept: " (why schema)))))
 
 (deftest ^{:seon.test/estimate {:ticks 400000}} a-landing-keeps-the-system-running-only-when-nothing-calls-for-a-restart
   ;; docs/source.md#a-landing-enters-main-as-data: after the bridge moved main's source fact to the landed tree, bin/update keeps
@@ -582,6 +597,10 @@
       (is (re-find #"no landing brought it in" (why held "t2" current inputs)) "main is not at the files' tree (no bridge ran): restart, whose boot catches up")
       (is (re-find #"what differs is deps.edn" (why held "t1" differs inputs)) "runtime-for says the binary is not tree's: restart, naming what differs")
       (is (re-find #"no inputs" (why held "t1" current nil)) "no inputs written for the files: restart")
+      ;; a failure to read the tree is no reason to restart (root 15:0x, the 14:51 restart: a docs-only landing printed restart
+      ;; because the inputs could not be read): it is the update's typed error, and the system keeps running
+      (let [unread (contract/error :seon.fx/io-error 'seon.fx/binary-digest "the binary identity of tree t1: no such tree" {:path "/r"})]
+        (is (= :seon.fx/io-error (:seon.error/type (why held "t1" unread inputs))) "runtime-for's io-error is answered as itself, never a restart's reason"))
       (is (re-find #"no source fact" (why nil "t1" current inputs)) "main never brought to a tree: restart")))
   ;; kept, root writes its source fact again for this boot (my.root/landed!, booted-source): an agent's plan keys its tests by
   ;; the landed files' inputs once its db holds that fact (a fork of main, or a merge of main), with no restart
