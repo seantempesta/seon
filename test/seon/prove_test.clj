@@ -152,12 +152,14 @@
         (is (empty? (asks o3 :spawn)) "the same inputs (program and binary) are not asked again: same inputs, same answer")
         (is (= 1 (count (asks o4 :spawn))) "a newer program is new inputs: main is asked again (a new binary is a new process, whose boot asks it)")))))
 
-(deftest ^{:seon.test/estimate {:ticks 100000}} a-death-naming-another-binary-is-not-asked-again-on-the-same-program
+(deftest ^{:seon.test/estimate {:ticks 8500000}} a-death-naming-another-binary-is-not-asked-again-on-the-same-program
   ;; root's review of adf8de2a25: a failed main run's :binary is what its spawn's death names (target/seon on disk, read by
   ;; seon.fx/runtime-for), which differs from the proc's own :binary (the running binary, fixed for the process) once target/seon is
   ;; rebuilt under a running root. Same program, same process: the same inputs, so main is not asked again at each notice (it
   ;; would spawn and die on every one). Red before: main-inputs-moved? compared the death's binary with the proc's, so every notice
-  ;; at the same program asked main again. Estimate: 3 notices and 1 answer through the step fn, ~20k ticks each = ~80k (measured 46k for its sibling in a shard)
+  ;; at the same program asked main again. Estimate: 3 notices and 1 answer through the step fn, ~20k ticks each = ~80k, plus, when it is
+  ;; its child's first test to start the proc, the init's one read of the binary's build record (seon.program/binary-program: 643 KB
+  ;; decoded, 7.9M ticks measured at root, result/bb8b9fd8; root pays it once at boot) = ~8M. Was 80k: the estimate missed that read (measured 7.96M alone, 46k for its sibling after it)
   (let [value seon.config/value
         died (seon.contract/error :seon.process/env-mismatch 'seon.fx/runtime-for
                                   "target/seon's identity 0b1d1e5 is not tree e6275967's 76dc758d: build it"
