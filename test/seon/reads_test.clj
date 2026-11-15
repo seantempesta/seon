@@ -22,7 +22,7 @@
 
 ;; See docs/storage.md#what-a-read-scanned: the shared interfaces other areas build on validate the shapes they will hold
 (deftest ^{:seon.test/estimate {:ticks 400000}} the-shared-read-bound-effect-and-proof-shapes-validate-what-they-name
-  (let [rs {:seon.reads/branch :main :seon.reads/commit #uuid "00000000-0000-0000-0000-000000000001"
+  (let [rs {:seon.reads/branch :main :seon.reads/commit (parse-uuid "00000000-0000-0000-0000-000000000001")
             :seon.reads/keys #{[:ea 10 :seon.task/plan] [:a :seon.task/proofs] [:av :seon.task/outcome :running] :any}
             :seon.reads/outside #{{:seon.fx.read/path "deps.edn" :seon.fx.read/digest "abc"} {:seon.fx.read/env "HOME" :seon.fx.read/value "/x"}}}]
     (is (contract/valid? :seon.reads/set rs))
@@ -36,16 +36,16 @@
                                           :seon.fx/indeterminate true :seon.bound/spent {:seon.bound/ms 50}}))
     (is (contract/valid? :seon.proof/proof-fact {:seon.proof/id "0123456789abcdef" :seon.proof/test 'seon.x-test/t :seon.proof/reads-digest "0123456789abcdef"
                                                  :seon.proof/reads rs :seon.proof/read-keys (set (map pr-str (:seon.reads/keys rs))) :seon.proof/status :pass :seon.proof/route :live
-                                                 :seon.proof/basis {:seon.db/branch :main :seon.db/commit #uuid "00000000-0000-0000-0000-000000000001" :seon.db/t 7}
+                                                 :seon.proof/basis {:seon.db/branch :main :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 7}
                                                  :seon.bound/spent {:seon.bound/ticks 5}}))))
 
 (defn- proof
   "A result of test t that read keys ks, at db's basis, as tests' T-1 writes one."
   [db t ks status]
   {:seon.proof/id (seon.lib/digest (str t ks)) :seon.proof/test t :seon.proof/reads-digest (pdb/reads-digest db (set (map pr-str ks)) nil)
-   :seon.proof/reads {:seon.reads/branch :db :seon.reads/commit #uuid "00000000-0000-0000-0000-000000000001" :seon.reads/keys (set ks)}
+   :seon.proof/reads {:seon.reads/branch :db :seon.reads/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.reads/keys (set ks)}
    :seon.proof/read-keys (set (map pr-str ks)) :seon.proof/status status :seon.proof/route :live
-   :seon.proof/basis {:seon.db/branch :db :seon.db/commit #uuid "00000000-0000-0000-0000-000000000001" :seon.db/t (:max-tx db)}})
+   :seon.proof/basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t (:max-tx db)}})
 
 ;; See docs/storage.md#what-a-read-scanned: a result is read back by seek from what moved, and its status is written once
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-result-is-found-by-what-moved-and-its-status-is-written-once
