@@ -3186,6 +3186,35 @@
     (is (str/includes? html "bytes measured / estimate"))
     (is (< (str/index-of html "ticks measured") (str/index-of html "bytes measured")) "in the verdict's order")))
 
+;; See docs/render.md#the-page
+;; Estimate: three prints of one step; the opened ones highlight 100 KB of code (~50 ticks a char): ~10M ticks; 30M.
+(deftest ^{:seon.test/estimate {:ticks 30000000}} a-closed-step-is-its-one-line
+  ;; root's home page was 10.7 MB, 9.2 of it in seven closed steps whose whole code (a landed file's text) and output were drawn inside
+  ;; their closed <details> [M, 2026-11-15]. Closed, a step is its line; opened (seon.system/opened!'s fact), it draws its code;
+  ;; with no agent to record an opening (an example session), it is drawn whole
+  (let [code (str "(+ 1 2) ;" (apply str (repeat 100000 "x")))
+        e {:seon.eval/id "e1" :seon.eval/code code :seon.eval/intent "Add."}
+        step (fn [ctx e] (h/html (#'ui/eval-step {:seon.ctx/ctx ctx} e)))
+        closed (step {:seon.agent/key "a1"} e)]
+    (is (< (count closed) 3000) (str "closed, its line alone: " (count closed) " bytes"))
+    (is (str/includes? closed "Add.") "its line says what it set out to do")
+    (is (< 100000 (count (step {:seon.agent/key "a1"} (assoc e :seon.eval/opened true)))) "opened, its code whole")
+    (is (< 100000 (count (step {} e))) "with no agent to record an opening, whole")))
+
+;; See docs/render.md#an-entity-may-name-its-own-render
+;; Estimate: two hiccup-to-html prints of a short stage (~50 nodes each, ~2k ticks a node): ~0.2M ticks; 1M.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-stage-whose-session-died-says-so
+  ;; the owner, 2026-11-15: "I just went to a session and typed hi and nothing is working": root's session had died at its start
+  ;; ("agent root closed its socket"), and the stage said "Working on it" under the message forever. A failed standing says what
+  ;; happened and that the words wait; a live one still says it works on it
+  (let [dead (ui/standing {:seon.agent/status :dead} {:seon.task/outcome :dead :seon.task/reason "agent root closed its socket and was ended by root: exit 1"})
+        live (ui/standing {:seon.agent/status :busy} {:seon.task/outcome :running})
+        html (fn [stands] (h/html [:div (#'ui/stage-now ["hi"] nil false [] 0 stands)]))]
+    (is (str/includes? (html dead) "died: agent root closed its socket") (html dead))
+    (is (str/includes? (html dead) "waits until it runs again"))
+    (is (not (str/includes? (html dead) "Working on it")) "a dead session never says it works on it")
+    (is (str/includes? (html live) "Working on it") "a live one does")))
+
 ;; See docs/render.md#how-the-work-stands
 (deftest ^{:seon.test/estimate {:ticks 2000000}} an-agents-standing-is-its-enums-words
   ;; owner, 2026-11-14: a list that restates data is derived. How a value of :seon.agent/status, :seon.agent/outcome and
