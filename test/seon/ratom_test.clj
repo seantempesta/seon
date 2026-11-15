@@ -686,3 +686,15 @@
     (is (rv/-get spin :dirty?) "which stays dirty")
     (is (= 3 (rv/queued)) "and queued, with the rest")
     (dispose! spin) (doseq [r rest] (dispose! r))))
+
+;; Estimate: a ladder of 20 diamonds (61 reactions), one clean deref of the top: one visit a reaction, ~61 x ~1k = ~0.1M ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-clean-deref-visits-each-source-once
+  ;; root's review of 8af10f0d9b [H]: a plain deref's stale check walked every path down its sources, so a ladder of d diamonds
+  ;; cost 2^d visits; each source is visited once
+  (let [a (rv/atom 0)
+        top (reduce (fn [below _] (let [l (make-reaction #(inc @below) :auto-run :queue) r (make-reaction #(dec @below) :auto-run :queue)]
+                                    (make-reaction #(+ @l @r) :auto-run :queue)))
+                    (make-reaction #(deref a) :auto-run :queue) (range 20))]
+    (flush! 1000)
+    (let [m (profile/measure! #(deref top))]
+      (is (< (:ticks m) 2000000) (str "a clean deref of a 20-diamond ladder visits each source once: " (:ticks m) " ticks")))))

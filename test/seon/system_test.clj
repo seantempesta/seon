@@ -110,10 +110,10 @@
         mine (get-in r [:agents ag])]
     (is (map? (:root r)) (pr-str r))
     ;; its own agent, idle: it answered, and its state is whole
-    (is (or (contains? answered ag) (contains? (:unanswered r) ag)) "its own agent's proc, answered or named mid-step")
-    (when (contains? answered ag)
-      (is (and (map? mine) (contains? mine :stall-seen) (contains? mine :last-frame-ms) (contains? mine :holding) (= 0 (:held mine)))
-          (str "with its stall fields and nothing held behind a handshake: " (pr-str mine))))
+    ;; the one path that always asserts: its own agent was just spawned and is idle, so it answers, with its stall fields whole
+    (is (contains? answered ag) (str "its own agent, idle, answered the ping: " (pr-str (:unanswered r))))
+    (is (and (map? mine) (contains? mine :stall-seen) (contains? mine :last-frame-ms) (contains? mine :holding) (= 0 (:held mine)))
+        (str "with its stall fields and nothing held behind a handshake: " (pr-str mine)))
     ;; every other part is the shared root's (other tests' agents and asks are in it): its shape, never its contents; a proc
     ;; mid-step is named by its ::flow/site, never read as nil (red before, 2026-11-15 16:26: a stepping proc's state read as {})
     (is (empty? (filter answered (keys (:unanswered r)))) "a proc that did not answer is never listed as answered")
