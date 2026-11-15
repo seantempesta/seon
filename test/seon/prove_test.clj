@@ -128,7 +128,7 @@
   ;; task seon.prove/a-main-run-whose-agent-dies-is-asked-again-or-said: main's run at a program move spawns its prove agent, which
   ;; dies at its start on another runtime (agent f3eb9fa024d0930d, 2026-11-15 16:34:36: its spawn answered
   ;; :seon.process/env-mismatch). Its failure is a :platform problem naming the program it could not prove and its owner, and main is
-  ;; asked again once a notice brings other inputs (a rebuilt binary), never again on the same ones (root). Red before: the want was
+  ;; asked again once a notice brings a newer program, never again on the same one (root). Red before: the want was
   ;; spent when asked, so nothing asked again until the program moved, and no problem named main unproved
   (let [value seon.config/value
         died (seon.contract/error :seon.process/env-mismatch 'seon.fx/runtime-for
@@ -151,6 +151,27 @@
             (str "its agent's death is a :platform problem naming its owner and the program left unproved: " (pr-str o2)))
         (is (empty? (asks o3 :spawn)) "the same inputs (program and binary) are not asked again: same inputs, same answer")
         (is (= 1 (count (asks o4 :spawn))) "a newer program is new inputs: main is asked again (a new binary is a new process, whose boot asks it)")))))
+
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-death-naming-another-binary-is-not-asked-again-on-the-same-program
+  ;; root's review of adf8de2a25: a failed main run's :binary is what its spawn's death names (target/seon on disk, read by
+  ;; seon.fx/runtime-for), which differs from the proc's own :binary (the running binary, fixed for the process) once target/seon is
+  ;; rebuilt under a running root. Same program, same process: the same inputs, so main is not asked again at each notice (it
+  ;; would spawn and die on every one). Red before: main-inputs-moved? compared the death's binary with the proc's, so every notice
+  ;; at the same program asked main again. Estimate: 3 notices and 1 answer through the step fn, ~20k ticks each = ~80k (measured 46k for its sibling in a shard)
+  (let [value seon.config/value
+        died (seon.contract/error :seon.process/env-mismatch 'seon.fx/runtime-for
+                                  "target/seon's identity 0b1d1e5 is not tree e6275967's 76dc758d: build it"
+                                  {:seon.process/differs [] :seon.process/binary-digest "0b1d1e5" :seon.process/branch-digest "76dc758d" :seon.process/tree "e6275967"})]
+    (with-redefs [seon.config/value (fn [k] (if (= k :seon.config.proofs/prove-main-on-commit) true (value k)))
+                  seon.db/at-commit (fn [_ c] c)
+                  seon.program/run-digest (fn [c] (str "dg-" (name c)))]
+      (let [note (fn [t pt] [:main {:t t :ops [] :commit (keyword (str "c" pt)) :program-t pt}])
+            [st o1] (feed (assoc (proc0) :binary "c7311e6b") [(note 6 6)])
+            [st _] (feed st [(answer-of (first (asks o1 :spawn)) died)])
+            [st o3] (feed st [(note 7 6)])
+            [_ o4] (feed st [(note 8 6)])]
+        (is (= {:program-t 6 :binary "0b1d1e5"} (:main-failed st)) "the failure keeps the binary its death named, as evidence")
+        (is (empty? (concat (asks o3 :spawn) (asks o4 :spawn))) "and no notice at the same program asks main again")))))
 
 (deftest ^{:seon.test/estimate {:ticks 500000}} an-answer-whose-child-died-is-never-remembered
   ;; THE PLAN 0.7 (root, 2026-10-27): a judge's run whose test child died answered every later ask
