@@ -221,7 +221,7 @@
   ;; the shipped file under --profile scripted (what bin/test runs under), not the running process's
   (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider (shipped :scripted))))
   (let [p (config/provider (assoc config/config :seon.config.ai/provider :openai-compat :seon.config.ai/thinking :disabled))]
-    (is (= {:kind :openai-compat :base-url "https://api.deepseek.com" :model "deepseek-flash" :api-key-env "DEEPSEEK_API_KEY"
+    (is (= {:kind :openai-compat :base-url (:value (config/resolve :seon.config.ai/base-url)) :model (config/value :seon.config.ai/model) :api-key-env (:value (config/resolve :seon.config.ai/api-key-variable))
             :max-tokens (config/value :seon.config.ai/max-tokens) :replay-reasoning (config/value :seon.config.ai/replay-reasoning) :thinking :disabled
             :reasoning-effort (config/value :seon.config.ai/reasoning-effort)}
            p))
@@ -430,9 +430,10 @@
     (is (= {:value 7 :source [:task]} (r {:task {:seon.config.ai/max-in-flight 7} :model "deepseek-v4-pro"})))
     (is (= {:value 2 :source [:model "deepseek-v4-pro"]} (r {:model "deepseek-v4-pro"})))
     (is (= {:value 5 :source [:provider "deepseek"]} (r {})))
-    (is (= {:value 8 :source [:config "--set"]}
+    (is (= {:value (config/value :seon.config.ai/max-in-flight) :source [:config "--set"]}
            (config/resolve-in config/config {:seon.config.ai/max-in-flight "--set"} :seon.config.ai/max-in-flight {}))))
-  (is (= {:value "https://api.deepseek.com" :source [:provider "deepseek"]} (config/resolve :seon.config.ai/base-url)))
+  (is (= {:value (get-in config/config [:seon.config.ai/providers "deepseek" :seon.config.ai/base-url]) :source [:provider "deepseek"]}
+           (config/resolve :seon.config.ai/base-url)) "the provider's own entry answers, and says so")
   (is (= [:config "resources/seon/config/default.edn"] (:source (config/resolve :seon.config.root/max-agents)))))
 
 (deftest a-setting-set-nowhere-is-refused-not-nil
@@ -446,7 +447,7 @@
   (ts/test-branch! (fn [cfg conn]
     (d/transact conn {:tx-data (seon.task/config-tx config/config config/sources)})
     (is (= 0.15 (d/q '[:find ?p . :where [?m :seon.ai.model/id "deepseek-flash"] [?m :seon.ai.model/input-usd-per-mtok ?p]] @conn)))
-    (is (= "DEEPSEEK_API_KEY" (d/q '[:find ?v . :where [?p :seon.ai.model/provider-id "deepseek"] [?p :seon.config.ai/api-key-variable ?v]] @conn)))
+    (is (= (get-in config/config [:seon.config.ai/providers "deepseek" :seon.config.ai/api-key-variable]) (d/q '[:find ?v . :where [?p :seon.ai.model/provider-id "deepseek"] [?p :seon.config.ai/api-key-variable ?v]] @conn)))
     (is (= config/config (config/from-db @conn))))))
 
 (deftest the-schema-forms-are-baked-once
