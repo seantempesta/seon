@@ -2989,6 +2989,13 @@
     (let [db2 (d/db-with db (seon.system/root-agent-boot-tx db))
           same (fn [d] [(dissoc (d/pull d '[*] [:seon.agent/key "root"]) :db/id) (dissoc (d/pull d '[*] [:seon.task/id "request/root"]) :db/id)])]
       (is (= (same db) (same db2)) "a boot after changes nothing of it"))
+    ;; a main made by an older binary holds that binary's plan text, which root's session read until a boot wrote it again (round 3:
+    ;; main's plan named my.user/sessions, gone from the code)
+    (let [stale (d/db-with db [{:seon.task/id "request/root" :seon.task/plan "An older text."}])
+          db3 (d/db-with stale (seon.system/root-agent-boot-tx stale))]
+      (is (= (:seon.task/plan (d/entity db [:seon.task/id "request/root"])) (:seon.task/plan (d/entity db3 [:seon.task/id "request/root"])))
+          "a boot writes the binary's plan over a stale one")
+      (is (str/includes? (:seon.task/plan (d/entity db3 [:seon.task/id "request/root"])) "plainly") "which tells it to talk plainly"))
     (let [fresh (d/db-with (my.test/world) (into (seon.task/boot-tx "b1" "sean") (seon.system/root-agent-boot-tx (my.test/world))))]
       (is (some? (d/entity fresh [:seon.agent/key "root"])) "a root no one has messaged has its session from its boot")
       (is (= :parked (:seon.task/outcome (d/entity fresh [:seon.task/id "request/root"]))) "parked until a message"))))
