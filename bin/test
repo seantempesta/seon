@@ -90,8 +90,7 @@ FAST=(); if [[ ${WHAT:-} != tests && -s $OUT/steps ]]; then
   fi
 fi
 # built only when a selected key reaches it and it is not current for this tree (the plan's out/build:
-# seon.fx/runtime-for); bin/check and seon.system/stale-binary ask the same identity (task
-# seon.system/every-reader-of-the-binarys-tree-asks-binary-current)
+# seon.fx/runtime-for); bin/check and seon.system/stale-binary ask the same identity
 if [[ -s $OUT/build ]]; then
   nice -n 15 "$ROOT/bin/build" seon > "$OUT/build.log" 2>&1 || { tail -5 "$OUT/build.log"; echo "TEST FAILED (bin/build seon: $OUT/build.log)"; exit 1 }
 fi

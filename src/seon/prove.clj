@@ -421,13 +421,24 @@
       (some (comp :unstored :answer) (vals results)) (assoc :unstored (vec (mapcat (comp :unstored :answer) (vals results)))))))
 
 (defn- runner-done
-  "outputs with the request that ends run's prove agent (main's run), once no item of the queue is that agent's."
-  {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
-  [st run]
-  (let [a (:runner run)]
-    (if (and a (not-any? #(= a (:agent %)) (vals (:items st))))
-      (let [[st m] (step/ask st [:prove :answers] [:killed (:key run)] {:op :kill :id a})] [st [m]])
-      [st []])))
+  "outputs with the requests that end the prove agents of the tests branch (main's runs' runners, :runners {run-key agent}) whose
+  run has ended and that no item of the queue is still the agent of, each asked once (:killing): a runner that still held an
+  item at its own run's end is ended at a later finish, never left holding the branch. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map] [:tuple :map [:vector :map]]]}
+  [st]
+  (reduce (fn [[st outs] [k a]]
+            (if (and (nil? (get-in st [:runs k])) (not (contains? (:killing st) k)) (not-any? #(= a (:agent %)) (vals (:items st))))
+              (let [[st m] (step/ask (update st :killing (fnil conj #{}) k) [:prove :answers] [:killed k] {:op :kill :id a})] [st (conj outs m)])
+              [st outs]))
+          [st []] (sort-by key (:runners st))))
+
+(defn- tests-branch-busy?
+  "Whether a prove agent of the tests branch is in flight, whatever its run's slot: a main run spawning one, or a runner not yet
+  ended (:runners). A second spawn on the branch then is refused (seon.system/spawn!: branch held), so an agentless main ask waits
+  (:held-main) instead. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [st]
+  (boolean (or (seq (:runners st)) (some #(and (nil? (:agent %)) (= :spawn (:stage %))) (vals (:runs st))))))
 
 (defn- main-inputs-moved?
   "Whether a notice at program t pt brings main's run inputs other than the failed run's (:main-failed, {:program-t :binary}):
@@ -455,7 +466,7 @@
         r (if err? r (assoc r :key k :red (vec (sort-by str (distinct (concat (:red r) (keys (proofs/failures r))))))))
         ;; asked again, it ran nothing for that asker: each verdict reads as reused at its digest, with no measure to add
         st (remember (-> st (update :runs dissoc k) (assoc :last (:branch run))) run r)
-        [st kill] (runner-done st run)
+        [st kill] (runner-done st)
         main? (and (= :main (:mode run)) (= :main (:branch run)))
         ;; a main run that failed keeps main wanted with the inputs it failed on, asked again when a notice brings others
         ;; (main-inputs-moved?); one that answered clears them
@@ -554,10 +565,24 @@
             [st o2] (request st m)]
         [st (into outs o2)])
       (:agent req) (plan! (assoc-in st [:runs key] (assoc req :waiters rids)) key)
+      ;; the tests branch's runner is in flight (another slot's main run): this ask waits for it, held in order and asked again
+      ;; when the branch is free (re-enter-held), never a second spawn the branch refuses; a held notice (no :rid) keeps only the newest
+      (tests-branch-busy? st) [(update st :held-main (fn [h] (conj (if rid (vec h) (filterv :rid h)) m))) []]
       ;; main: a prove agent on the tests branch, forked from the fork server's main, plans it
       :else (let [st (assoc-in st [:runs key] (assoc req :waiters rids :stage :spawn))
                   [st m] (step/ask st [:prove :answers] [:spawn key] {:op :spawn :opts {:branch :tests}})]
               [st [m]])))))
+
+(defn- re-enter-held
+  "The held main asks (:held-main, held while the tests branch was busy) asked again, in order, through request's own rule, once
+  the branch is free: the first spawns its runner and the rest are held again behind it. Answers [st outputs]. See
+  docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map] [:tuple :map [:vector :map]]]}
+  [st]
+  (if (or (empty? (:held-main st)) (tests-branch-busy? st))
+    [st []]
+    (reduce (fn [[st outs] m] (let [[st o] (request st m)] [st (into outs o)]))
+            [(dissoc st :held-main) []] (:held-main st))))
 
 (defn- plan-items
   "The items of plan r ({:process {test digest} :steps {step {:digest :binary? :bound}} :build {:tree :needed?}}, seon.agent's
@@ -626,7 +651,7 @@
   {:malli/schema [:=> [:cat :map [:tuple :keyword :string] :any] [:tuple :map [:vector :map]]]}
   [st [step key] r]
   (case step
-    :killed [st []]
+    :killed (re-enter-held (-> st (update :killing disj key) (update :runners dissoc key)))
     ;; a batch's verdicts written (verdicts-write): done; the results branch missing, the writer makes it from main
     ;; (:clone-branch) and the same write is asked again; any other refusal, a :platform problem (the verdicts run again)
     :verdicts (let [tx (get-in st [:verdict-writes key]) st (update st :verdict-writes dissoc key)
@@ -645,8 +670,9 @@
     (let [run (get-in st [:runs key])]
       (cond
         (nil? run) [(update st :stale (fnil inc 0)) []]
-        (contract/error? r) (finish st key r)
-        (= :spawn step) (plan! (update-in st [:runs key] assoc :runner (:id r) :agent (:id r)) key)
+        ;; a run that died at its spawn holds no runner: the held asks are asked again
+        (contract/error? r) (let [[st o] (finish st key r) [st o2] (re-enter-held st)] [st (into o o2)])
+        (= :spawn step) (plan! (-> st (update-in [:runs key] assoc :runner (:id r) :agent (:id r)) (assoc-in [:runners key] (:id r))) key)
         (= :plan step) (let [st (assoc-in st [:runs key :base] (dissoc r :items :ms :process :steps :build))
                              prio (if (= :turn (:mode run)) :turn :batch)
                              items (into (plan-items run r) (for [[t d] (:items r)] [[t d] (cond-> {:agent (:agent run) :mode (:mode run) :kind :test} (get-in r [:ms t]) (assoc :ms (get-in r [:ms t]))
