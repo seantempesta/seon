@@ -37,12 +37,14 @@
   `touched`. Root's counts are approximate; nothing in root reads them as proof."
   (:require [jolt.scheme :as scm]))
 
-(defonce ^:private scheme-defs
+(def ^:private scheme-defs
+  "The counting cells and procedures, in Scheme: a plain def whose state defines keep their value, so a change loaded in place
+  redefines the procedures and keeps the counters. See docs/health.md#native-code-in-a-defonce."
   (scm/eval-string
-    "(define seon-profile-epoch 0)
-     (define seon-profile-touched '())
-     (define seon-profile-reads-mark 0)
-     (define seon-profile-reads '())
+    "(define seon-profile-epoch (if (top-level-bound? 'seon-profile-epoch) seon-profile-epoch 0))
+     (define seon-profile-touched (if (top-level-bound? 'seon-profile-touched) seon-profile-touched '()))
+     (define seon-profile-reads-mark (if (top-level-bound? 'seon-profile-reads-mark) seon-profile-reads-mark 0))
+     (define seon-profile-reads (if (top-level-bound? 'seon-profile-reads) seon-profile-reads '()))
      ;; jolt.host/monotonic-ns: the platform's monotonic clock, Jolt's to name
      (define seon-profile-now (lambda () (jolt-monotonic-ns)))
      ;; the calling thread's own allocation, never another thread's or the collector's copying
@@ -52,8 +54,8 @@
      (define (seon-profile-cell sym) (vector 0 -1 0 0 0 0 sym -1))
      ;; the ticks and bytes the calls running inside the current one have done so far: saved
      ;; and zeroed as a call starts, so its self is what it did less what they did
-     (define seon-profile-kid-ticks 0)
-     (define seon-profile-kid-bytes 0)
+     (define seon-profile-kid-ticks (if (top-level-bound? 'seon-profile-kid-ticks) seon-profile-kid-ticks 0))
+     (define seon-profile-kid-bytes (if (top-level-bound? 'seon-profile-kid-bytes) seon-profile-kid-bytes 0))
      ;; count one call (a cell first touched in this epoch starts from zero)
      (define (seon-profile-hit! c)
        (unless (fx= (vector-ref c 7) seon-profile-reads-mark)
@@ -73,7 +75,7 @@
        (set! seon-profile-kid-bytes (+ kb db)))
      ;; true while work that is not the running call's runs (a signal handler, seon-profile-aside):
      ;; its calls are not counted, and its ticks and bytes are a callee's to the call it interrupted
-     (define seon-profile-off #f)
+     (define seon-profile-off (if (top-level-bound? 'seon-profile-off) seon-profile-off #f))
      (define-syntax seon-profile-call
        (syntax-rules ()
          [(_ c e) (if seon-profile-off e
@@ -131,15 +133,13 @@
 
 (def ^:private canary-defs
   ;; the live cost canary's state (docs/cost.md#a-call-past-the-floor): a call whose whole (ticks or bytes, callees included) passes
-  ;; a floor calls the hook (sym ticks bytes), once a stack (kid-over: a callee already did). A plain def, never inside scheme-defs'
-  ;; defonce: a change loaded in place (a landing's update, root and the fork server) re-evaluates it before procs resolves
-  ;; :over!, so no process holds a procs naming a procedure it never defined (2026-11-15: every agent's init! threw on a nil
-  ;; :over! until this). Floors start past every fixnum, so nothing fires until seon-profile-over! sets them
+  ;; a floor calls the hook (sym ticks bytes), once a stack (kid-over: a callee already did). A plain def, so a change loaded in place
+  ;; redefines it before procs resolves :over! (docs/health.md#native-code-in-a-defonce). Floors start past every fixnum, so nothing fires until seon-profile-over! sets them; a reload keeps them
   (scm/eval-string
-    "(define seon-profile-floor-ticks (greatest-fixnum))
-     (define seon-profile-floor-bytes (greatest-fixnum))
-     (define seon-profile-kid-over #f)
-     (define seon-profile-over-hook #f)
+    "(define seon-profile-floor-ticks (if (top-level-bound? 'seon-profile-floor-ticks) seon-profile-floor-ticks (greatest-fixnum)))
+     (define seon-profile-floor-bytes (if (top-level-bound? 'seon-profile-floor-bytes) seon-profile-floor-bytes (greatest-fixnum)))
+     (define seon-profile-kid-over (if (top-level-bound? 'seon-profile-kid-over) seon-profile-kid-over #f))
+     (define seon-profile-over-hook (if (top-level-bound? 'seon-profile-over-hook) seon-profile-over-hook #f))
      (define (seon-profile-over! ft fb hook)
        (set! seon-profile-floor-ticks ft) (set! seon-profile-floor-bytes fb) (set! seon-profile-over-hook hook))"))
 
@@ -148,10 +148,9 @@
   (into {} (for [k [:cell :counted :begin! :fold :calls :now :alloc :cpu :aside :reads-begin! :reads-fold]]
              [k (scm/proc (str "seon-profile-" (name k)))])))
 
-(defonce ^:private opened-defs
-  ;; Jolt's own record of the files a thread reads (io-file-read-sink, the AOT cache's: a file read through slurp, io/reader or
-  ;; io/resource, a directory listed, a missing file probed), bound fresh by reads-begin! on the test's thread, which the
-  ;; threads it starts inherit. A defonce of its own, so a process that loaded the cells' block before it gets these on reload
+(def ^:private opened-defs
+  "The procedures over Jolt's record of the files a thread reads (io-file-read-sink), bound fresh by reads-begin! on the test's
+  thread and inherited by the threads it starts. See docs/source.md#tests-run-by-reach."
   (scm/eval-string
     "(define (seon-profile-opened-reset!) (io-file-read-sink (vector '())))
      (define (seon-profile-opened-list) (let ((s (io-file-read-sink))) (apply jolt-vector (if (vector? s) (vector-ref s 0) '()))))"))

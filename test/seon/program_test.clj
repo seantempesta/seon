@@ -791,6 +791,25 @@
         (is (= (ts/reach-index db0 in2) (program/index-of g)))
         (is (not= (program/index-of g0) (program/index-of g)))))))
 
+;; Estimate: calc-db 2.4M + 2 records 0.6M; one graph 0.25M; two indexings 0.1M; two rebuilds 0.5M. Estimated 4,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} an-index-under-a-moved-input-answers-again-only-its-readers
+  ;; docs/source.md#tests-run-by-reach: a held index under inputs that differ in one config key answers again only the tests
+  ;; reading that key; every other answer is kept. Re-answering every test when any input differed cost each test plan
+  ;; 68M ticks and 467 MB (2,158 tests, 2026-11-15), as a plan's first graph is indexed before :seon.env/index joins its inputs
+  (let [db (-> (calc-db)
+               (record 'app.pt-calc "(defn limit [] (seon.config/value :seon.config.agent/stall-ms))")
+               (record 'app.pt-calc-test "(deftest limit-test (is (some? (app.pt-calc/limit))))"))
+        in1 {:env "e" :tree "t" :config {:seon.config.agent/stall-ms "1"}}
+        in2 (assoc-in in1 [:config :seon.config.agent/stall-ms] "2")
+        g1 (program/reach-indexed (program/reach-graph db nil) in1)
+        g2 (program/reach-indexed g1 in2)
+        a1 (program/index-of g1) a2 (program/index-of g2)]
+    (is (= (ts/reach-index db in2) a2) "the index under the moved input is a rebuild's")
+    (is (not= (get-in a1 ['app.pt-calc-test/limit-test :digest]) (get-in a2 ['app.pt-calc-test/limit-test :digest]))
+        "the key's reader is answered again")
+    (is (every? #(identical? (get a1 %) (get a2 %)) (remove #{'app.pt-calc-test/limit-test} (keys a1)))
+        "every other test's answer is the one held, not answered again")))
+
 (defn- with-dir
   "f called with a fresh verdict cache directory under this checkout's target/tmp, removed after."
   [f] (let [dir (str (seon.config/checkout) "/target/tmp/verdicts-" (random-uuid))]
@@ -1858,6 +1877,31 @@
     (let [judged (digests (record db 'app.rn "(defn judge [r] (contains? #{:ok} r))"))]
       (is (every? (fn [[t d]] (not= d (judged t))) before) "a form the runner reaches changed: every test's digest moves"))
     (is (= before (digests (record db 'app.rn "(defn spare [x] (identity x))"))) "a form nothing of theirs reaches changed: none moves")))
+
+;; docs/cost.md#counting-calls: a form holding native (scm) definitions, changed and loaded in place (seon.program/load-diff!, as a
+;; landing loads root and the fork server), defines what the change added and keeps the state it held. Under a defonce the change
+;; was skipped: today's f9969ae8ca, every agent's init! threw on a procedure never defined. Estimate: 3 records and one load-diff
+;; of one form, ~3M ticks
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-native-block-changed-in-place-defines-what-it-added-and-keeps-its-state
+  (let [blk (fn [head extra] (str "(" head " blk (jolt.scheme/eval-string \"(define pt-native-n (if (top-level-bound? 'pt-native-n) pt-native-n 0)) (define (pt-native-inc!) (set! pt-native-n (+ pt-native-n 1)) pt-native-n)" extra "\"))"))
+        acct (fn [nsym src] {:id (str nsym "/blk-" (hash src)) :src src :ns nsym :ns-form? false :defs [{:var (symbol (str nsym) "blk") :meta #{}}]
+                             :declares #{} :methods [] :impls [] :refs '#{jolt.scheme/eval-string} :requires #{} :banned #{} :inline-defs #{}})
+        run (fn [nsym head]
+              (let [v1 (blk head "") v2 (blk head " (define (pt-native-two) 2)")
+                    db0 (record (empty-db) nsym v1)
+                    _ ((jolt.scheme/proc "pt-native-inc!"))
+                    db1 (d/db-with db0 (program/record-tx db0 (acct nsym v2)))
+                    errs (program/load-diff! db0 db1)]
+                {:errs errs
+                 :two (try ((jolt.scheme/proc "pt-native-two")) (catch Throwable _ :unbound))
+                 :n ((jolt.scheme/proc "pt-native-inc!"))}))]
+    (let [r (run 'app.pt-native-defonce "defonce")]
+      (is (= :unbound (:two r)) "under defonce the change is skipped: what it added is never defined (the class)"))
+    (jolt.scheme/eval-string "(define pt-native-n 0)")
+    (let [r (run 'app.pt-native-def "def")]
+      (is (= [] (:errs r)))
+      (is (= 2 (:two r)) "a plain def defines what the change added")
+      (is (= 2 (:n r)) "and keeps the state the block held (1 before the load, 2 after)"))))
 
 ;; Estimate: 2 tiny-file imports 2M + one graph 0.2M + 3 reverse walks over it ~0.1M, ~2.5M = 2500000
 (deftest ^{:seon.test/estimate {:ticks 2500000}} a-library-vars-tests-are-those-reaching-its-callers
