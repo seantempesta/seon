@@ -263,9 +263,9 @@
                                        {:op :eval :agent "root"
                                         :code (str "(do @(seon.system/message! sys " (pr-str (keyword (name agent))) " \"wake up\")"
                                                    " (seon.system/await-db sys #(seq (datahike.api/q '[:find ?m :where [?m :seon.message/body \"wake up\"]] %)))"
-                                                   " [(realized? inbox-p) (when (realized? inbox-p) @inbox-p)])")}]))]
+                                                   " [(realized? inbox-p) (some? (:max-tx @inbox-p))])")}]))]
     (is (false? (last (:value before))) (str "nothing answers it before a message: " (pr-str before)))
-    (is (= [true {:woken @k}] (:value after)) (str "answered by the commit that wrote the message: " (pr-str after)))))
+    (is (= [true true] (:value after)) (str "answered with main's db at the commit that wrote the message: " (pr-str after)))))
 
 (deftest the-context-op-answers-what-a-model-is-sent
   ;; dogfood 2026-10-25: an outside agent read the task's data and turn sections only, not the system

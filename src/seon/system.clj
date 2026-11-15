@@ -736,8 +736,6 @@
       :state (reply! st o p (:view st))
       ;; a wait on main (await-db): checked now on main as it is, then as of every commit until it holds
       :await (check-waits (assoc-in st [::waits (:k m)] {:pred (:pred m) :p p}) @(:conn st))
-      ;; a wait for a message to agent k (await-message): held until a commit carries one (wake-inbox), or root stops (end-all)
-      :inbox (update-in st [::inbox (:key m)] (fnil conj []) {:p p})
       :errors (reply! st o p (::errors st))
       ;; main's health (my.root/problems): the render proc's, kept by what each move of main changed
       ;; (seon.render.proc/health!), brought to (:db m) there and answered by rid at the fold's counts
@@ -1039,23 +1037,6 @@
     (cond-> st (get-in st [::spawning (:agent x)]) (spawn-failed o (:agent x) (:seon.error/message e) nil))
     :else st))
 
-;; Estimate: O(d) a commit, d its ops, only while a wait is held; one entity read a message datom: ~1k ticks a commit of 10 ops
-(defn- wake-inbox
-  "st with each wait on a message (::inbox, {key [{:p}]}) to an agent that main's commit notice m (its :ops) writes a message to
-  answered {:woken key}: one rule for every writer of a message (an agent's send, a person's, the reconciler's notices). See
-  docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.system/api-state :map] :seon.system/api-state]}
-  [st m]
-  (let [es (into #{} (keep (fn [[op _ a v]] (when (and (= :db/add op) (= :seon.message/to a)) v))) (:ops m))]
-    (if (empty? es)
-      st
-      (let [db (d/commit-as-db (:store @(:conn st)) (:commit m))
-            ks (into #{} (keep #(:seon.agent/key (d/entity db %))) es)]
-        (reduce (fn [st k] (if-let [ws (get-in st [::inbox k])]
-                             (do (doseq [w ws] (deliver (:p w) {:woken k})) (update st ::inbox dissoc k))
-                             st))
-                st ks)))))
-
 (defn- api-one {:malli/schema [:=> [:cat :seon.system/api-state :seon.host/volatile :keyword [:maybe :map]] :seon.system/api-state]}
   [st o in m]
   (some->> m (vswap! (::taken st) conj))
@@ -1067,9 +1048,7 @@
     (= in :ext) (ext-op st o m)
     (nil? m) st
     ;; a commit makes a db only for the waits open on it: with none, a commit costs the api nothing
-    (= in :main) (cond-> st
-                   (seq (::inbox st)) (wake-inbox m)
-                   (seq (::waits st)) (check-waits (d/commit-as-db (:store @(:conn st)) (:commit m))))
+    (= in :main) (if (seq (::waits st)) (check-waits st (d/commit-as-db (:store @(:conn st)) (:commit m))) st)
     :else (back-op st o m)))
 
 (defn api-proc
@@ -1089,8 +1068,6 @@
                               :pending (into (sorted-map) (for [[r {:keys [kind agent]}] (:pending st)] [r [kind agent]]))
                               ;; the waits on main it checks at each commit (await-db's preds), by key
                               :awaits (vec (sort (keys (::waits st))))
-                              ;; the waits for a message, agent key -> how many wait on it
-                              :inbox (into (sorted-map) (for [[k ws] (::inbox st)] [k (count ws)]))
                               ;; the stall check, a hang's evidence (stall-state): its armed flag, the agents it holds busy, what a throw lost
                               ::stall-armed (boolean (some-> (::stall-timer st) deref)) ::busy (or (::busy st) #{}) ::lost (::lost st)})})
   ;; :system is the root graph's declared procs and conns as built (seon.graph), changed by
@@ -1105,13 +1082,11 @@
                  ::errors {}
                  ;; the waits on main (await-db), {k {:pred :p}}: each checked as of every commit until it holds
                  ::waits {}
-                 ;; the waits for a message to an agent (await-message), {key [{:p}]}: answered by the commit that writes one
-                 ::inbox {}
                  ::flow/in-ports {:ext (:ext args) :back (:back args)}
                  ::flow/out-ports {:to-writer (:to-writer args) :events (:events args)}))
   ([st tr]
    ;; the stop transition: nothing accepted is left unanswered (seon.step/end-all: a proc's reply route is its own to end)
-   (if (= tr ::flow/stop) (step/end-all st (gone nil "root stopped") :pending ::waits ::inbox) st))
+   (if (= tr ::flow/stop) (step/end-all st (gone nil "root stopped") :pending ::waits) st))
   ([st in m]
    (let [o (volatile! {})
          before (get-in st [:view :agents])
@@ -2211,14 +2186,15 @@
           :else r))))
 
 (defn await-message
-  "A promise answered {:woken k} when a commit of main writes a message to agent key k (the api's wake-inbox, one rule for every
-  writer of a message), or the typed :seon.system/no-agent when root stops. No clock: a message is our own system's event, so
-  the wait ends at its producer (docs/clocks.md#two-kinds-of-wait); a waiter that went away is cleared by the next message
-  to k. What seon_inbox waits on before it delivers. See docs/users.md#messages."
-  {:seon.flow/edge "an outside caller's put into the graph (the server's seon_inbox): its wait is the commit of a message to k, or root's stop"
-   :malli/schema [:=> [:cat :seon.system/sys :string] :seon.host/promise]}
+  "A promise answered with main's db at the first commit that links a message to agent key k after now (whoever writes it), or
+  the typed :seon.system/no-agent at root's stop: await-db's wait, unparked (no clock: a message is our own system's event).
+  See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.system/sys :string] :seon.host/promise]}
   [sys k]
-  (step/ask-edge (:ext sys) {:op :inbox :key k} (gone nil "root stopped")))
+  (let [t0 (:max-tx @(:conn sys))
+        ;; a message linked to k after t0: one seek of k's :seon.message/to links a commit, O(its messages), while the wait is held
+        new? (fn [db] (when-let [e (pdb/eid db :seon.agent/key k)] (some #(> (:tx %) t0) (d/datoms db :avet :seon.message/to e))))]
+    (step/ask-edge (:ext sys) {:op :await :k (keyword "seon.system" (str "await-" (lib/unique-id))) :pred new?} (gone nil "root stopped"))))
 
 (defn defect
   "A root proc's defect (a :platform problem) whose record main wrote after t, or nil: a step
