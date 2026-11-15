@@ -5,7 +5,7 @@
   is keyed like a test by what its functions reach, and the run is shards whose greens are
   stored."
   (:require [seon.lib] [seon.agent] [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d] [clojure.java.shell]
-            [seon.test-store :as ts] [seon.db :as pdb] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
+            [seon.test-store :as ts] [my.test :as mt] [seon.db :as pdb] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
             [seon.program-test :refer [record]] [seon.source :as source] [seon.fx :as fx] [seon.config] [seon.contract :as contract] [seon.profile :as profile] [test-runner :as runner] [konserve.jolt.lmdb :as klmdb]))
 
 (defn- prog []
@@ -909,3 +909,26 @@
     (is (= ks (:keys (proofs/run-reads {:files #{(str root "/docs")}} 'a/t ks))) "a directory listed keeps the tree")
     (is (= ks (:keys (proofs/run-reads {} 'a/t ks))) "a run that noted nothing keeps the tree")
     (is (= #{} (:files (proofs/run-reads {:files #{"/tmp/x.edn"}} 'a/t ks))) "a file outside the checkout is no read of it")))
+
+;; docs/merging.md#verdicts-are-a-cache: a verdict is a :seon.proof entity in the store, found by one seek of its identity, and what
+;; its run read is datom keys, so what moves it is found by seon.db/results-moved.
+;; Estimate: a world with 2 forms (~2M), one graph (~2M), one verdict-tx and db-with (~0.5M), seeks and digests (<0.2M): 5,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-verdict-is-written-to-the-store-and-found-by-one-seek
+  (let [w0 (mt/with (mt/world) (mt/code 'pt.vs "(ns pt.vs)\n(defn add [x y] (+ x y))\n"))
+        g (program/reach-graph w0 nil)
+        t 'pt.vs-test/adds
+        basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
+        tx (proofs/verdict-tx w0 g basis {t {:digest "d1" :pass 1 :fail 0 :error 0}} {t [{:var 'pt.vs/add}]} {})
+        db (pdb/db-with w0 tx)
+        add-form (:e (first (d/datoms w0 :avet :form/id (first (get-in g [:defs 'pt.vs/add])))))]
+    (is (= {"d1" {:digest "d1" :pass 1 :fail 0 :error 0}} (proofs/verdicts-at db {t "d1"})) "found at its reach digest by one seek")
+    (is (= {} (proofs/verdicts-at db {t "d2"})) "and not at another digest")
+    (is (contains? (:seon.proof/read-keys (d/entity db [:seon.proof/id (proofs/verdict-id t "d1")])) (pr-str [:e add-form]))
+        "what it read holds the called function's form")
+    (let [redefined (d/with db ((mt/code 'pt.vs "(ns pt.vs)\n(defn add [x y] (+ y x))\n") db))
+          moved (pdb/results-moved db (:tx-data redefined))
+          ks (:seon.proof/read-keys (d/entity db [:seon.proof/id (proofs/verdict-id t "d1")]))]
+      (is (= #{(:db/id (d/entity db [:seon.proof/id (proofs/verdict-id t "d1")]))} moved)
+          "redefining the function it called moves its verdict, found by what it read")
+      (is (not= (pdb/reads-digest db ks nil) (pdb/reads-digest (:db-after redefined) ks nil))
+          "and what it read no longer holds what it did"))))

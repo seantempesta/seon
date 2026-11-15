@@ -2373,8 +2373,8 @@
 
 ;; ---- recorded reads: a test keyed by the vars its run called (docs/source.md#tests-run-by-reach) ----
 
-(defn- called-closure
-  "The rows a call of var v depends on in reach graph g: v's forms, its methods and impls, the schema entries they and its
+(defn called-closure
+  "The rows a call of var v depends on in reach graph g (var-digests' and seon.proofs/read-keys' one closure): v's forms, its methods and impls, the schema entries they and its
   contract name, and, followed, every var they reference that no contract counts (a data def, a macro, a test's helper):
   a contracted var they reference is in a run's call record only if it ran, so it is no dependency of a call that did not
   call it. With each row's namespace's plain forms (its ns form, a top-level form defining nothing); a host schema

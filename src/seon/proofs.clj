@@ -8,7 +8,8 @@
   loop and root's judge."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.config :as cfg] [seon.program :as program] [seon.edn :as sedn] [seon.error :as error] [seon.profile :as profile] [seon.print :as print]
-            [clojure.edn :as edn] [clojure.string :as str] [clojure.test :as t] [malli.core :as m] [malli.generator :as mg]))
+            [clojure.edn :as edn] [clojure.string :as str] [clojure.test :as t] [malli.core :as m] [malli.generator :as mg]
+            [seon.db :as pdb] [datahike.api :as d]))
 
 (defn test-symbol
   "The qualified symbol of a report's :var (\"#'ns/name\" or \"ns/name\"), or nil."
@@ -587,6 +588,55 @@
              [t (or (some (fn [v] (when (and (seq (:reads v)) (every? (fn [[k dg]] (and (= dg (get rd k)) (or (some? dg) (covered? rd k)))) (:reads v))) (:digest v)))
                           (get held t))
                     d)])))
+
+(defn verdict-id
+  "A verdict's identity (:seon.proof/id): the content id of test t at its reach digest d, so a lookup computes it and seeks it
+  once (task seon.proofs/a-verdict-is-an-entity-that-names-its-environment). See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :qualified-symbol :string] :seon.lib/digest]}
+  [test-var d] (lib/digest (str test-var " " d)))
+
+(defn read-keys
+  "What test test-var's run read, as datom keys (datahike.reads' shape, each its pr-str) on db, its program's reach graph g:
+  each form the closure of a function it called holds ([:e form]), a schema entry among them ([:av :schema/key k]), and each
+  config key and file its static reads name ([:av :config/key k], [:av :file/path p]). The one record of what a run read:
+  seon.db/reads-digest digests it and seon.db/results-moved finds what moved it. fns: the run's called functions
+  ([{:var ...}], seon.profile/touched); static: its static reads (graph-index's :reads). See docs/storage.md#what-a-read-scanned."
+  {:malli/schema [:=> [:cat :seon.host/db :map :qualified-symbol [:maybe [:sequential :map]] [:maybe [:or [:set :any] [:sequential :any]]]] [:set :string]]}
+  [db g test-var fns static]
+  (let [rows (into #{} (mapcat #(program/called-closure g %)) (conj (set (map :var fns)) test-var))
+        row-key (fn [id] (if (str/starts-with? id "schema ")
+                           [:av :schema/key (edn/read-string (subs id 7))]
+                           (some->> (pdb/eid db :form/id id) (vector :e))))
+        input-key (fn [k] (when (vector? k) (case (first k) :config [:av :config/key (second k)] :file [:av :file/path (second k)] nil)))]
+    (into #{} (map pr-str) (concat (keep row-key rows) (keep input-key static)))))
+
+(defn verdict-tx
+  "tx-data writing ran ({test result}) as :seon.proof entities: each test's verdict at its reach digest (verdict-id), its
+  status written once, what it read as read keys (read-keys) with their content's digest at db (seon.db/reads-digest), and
+  basis, the {:seon.db/branch :seon.db/commit :seon.db/t} it ran at. A result with no digest, judged flaky or unreported,
+  writes nothing, as the file cache keeps it. fns: {test [called function]}; static: {test static reads}. See
+  docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :seon.host/db :map :map [:map-of :any :map] :map :map] [:vector :map]]}
+  [db g basis ran fns static]
+  (vec (for [[test-var r] ran
+             :when (and (qualified-symbol? test-var) (:digest r) (not (:flaky r)) (not (:unreported r)))
+             :let [ks (read-keys db g test-var (get fns test-var) (get static test-var))]]
+         {:seon.proof/id (verdict-id test-var (:digest r)) :seon.proof/test test-var :seon.proof/status (status-of r)
+          :seon.proof/route :live :seon.proof/basis basis
+          :seon.proof/read-keys ks :seon.proof/reads-digest (pdb/reads-digest db ks nil)
+          :seon.proof/reads {:seon.reads/branch (:seon.db/branch basis) :seon.reads/commit (:seon.db/commit basis)
+                             :seon.reads/keys (into #{} (map edn/read-string) ks)}})))
+
+(defn verdicts-at
+  "{digest result} of the verdicts db holds for cand ({test digest}): one seek of each verdict's identity (verdict-id) and its
+  status, read with d/datoms, never a pull (3.3k ticks a seek against 14.3k, measured by deps); a green
+  {:digest :pass 1 :fail 0 :error 0}, a red its status counted once. See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :any :string]] [:map-of :string :map]]}
+  [db cand]
+  (into {} (for [[test-var d] cand :when (qualified-symbol? test-var)
+                 :let [e (:e (first (d/datoms db :avet :seon.proof/id (verdict-id test-var d))))] :when e
+                 :let [st (:v (first (d/datoms db :eavt e :seon.proof/status)))]]
+             [d {:digest d :pass (if (= :pass st) 1 0) :fail (if (= :fail st) 1 0) :error (if (#{:error :none} st) 1 0)}])))
 
 (defn plan-of
   "What bin/prove and bin/test run on a program: the tests of names (or all) and the bin/check
