@@ -210,7 +210,7 @@
   With :since (the tree id of the last import, and no :paths; :since-dirs, the dirs that import read), only the files under dirs that differ from it, and every file of a dir it didn't read, are read, so what main merged and the tree never held stays main's. A tree git can no longer find reads whole.
   With :library-since (the pins the store's library files were read at, or :none) and :program (the namespaces the program holds),
   also :library, the loaded library files (`library-source`), when the pins differ from it.
-  Answers {:value {path text} :modes {path git mode, of each file the allow-list names} :commit sha :branch name (nil when detached) :tree id :paths paths-when-read-by-them :pins {path sha} :library {path text}} or :seon.fx/io-error.
+  Answers {:value {path text} :modes {path git mode, of each file the allow-list names} :commit sha :branch name (nil when detached) :tree id :paths paths-when-read-by-them :pins {path sha} :library {path text}} or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [root dirs paths since since-dirs library-since program]} :req}]
   (try
