@@ -122,9 +122,4 @@
   :seon.task/kind :work
   :seon.task/needs #{"seon.program/a-merge-loaded-in-place-unbinds-what-it-deletes"}
   :seon.task/estimate #:seon.program{load-diff! {:n 10, :order :linear, :ticks 5000000, :bytes 10000000}}}
- {:seon.task/name "a-changed-declare-never-resets-a-bound-vars-metadata"
-  :seon.task/plan "Owner: runtime (the in-place loader); found by context 2026-11-15 20:0x [M root result/c71b6489]. After cd7e4df498 loaded in place, seon.ctx.wire's page-diff-msgs, example-msgs and wire-of lost their :malli/schema metadata while their armed contracts stayed, so every agent's page threw (the walk's inputs read the contract from a var's metadata); a cold boot was fine. Cause: the land changed the (declare ...) form naming them; the in-place load (seon.program/load-diff!, program.clj:1529) re-evaluated that changed declare after the defns, and Clojure's (def x) with no init keeps the root binding but REPLACES the var's metadata. The class: a top-level form that defines vars another form also defines (declare, a second def) is loaded as its own change, out of the file's order. Fix at the loader: a changed declare names vars, and a var already bound by its defn is not re-declared (the declare's only job, the forward reference, is done); or the load evaluates a file's changed forms in file order, declares first. PRIOR WORK, to search first: seon.program/diff-plan (program.clj:1451) and how it orders changed forms; seon.program/a-namespace-defining-a-var-twice-is-red (a law for the twice-defined var); seon.program/a-merge-loaded-in-place-unbinds-what-it-deletes. COST: one bound? check per declared name in a changed declare, O(names). Proof, red first: a declare changed in place after its defn keeps the defn's :malli/schema."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.program-test/a-changed-declare-keeps-the-defns-metadata}
-  :seon.task/estimate #:seon.program{load-diff! {:n 3, :order :linear, :ticks 100000, :bytes 200000}}}
 ]
