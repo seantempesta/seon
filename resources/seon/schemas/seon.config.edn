@@ -48,6 +48,8 @@
   ;; the machine
   [:seon.config.machine/memory-mb {:optional true} :seon.config.machine/memory-mb]
   [:seon.config.machine/relay-mb {:optional true} :seon.config.machine/relay-mb]
+  [:seon.config.machine/call-floor-ticks {:optional true} :seon.config.machine/call-floor-ticks]
+  [:seon.config.machine/call-floor-bytes {:optional true} :seon.config.machine/call-floor-bytes]
   [:seon.config.machine/cores {:optional true} :seon.config.machine/cores]
   ;; the check harness
   [:seon.config.check/ping-ms {:optional true} :seon.config.check/ping-ms]
@@ -192,6 +194,7 @@
   [:seon.config.render/relevance-features {:optional true} :seon.config.render/relevance-features]
   [:seon.config.render/relevance-calibration {:optional true} :seon.config.render/relevance-calibration]
   [:seon.config.render/relevance-summary {:optional true} :seon.config.render/relevance-summary]
+  [:seon.config.render/search-source-tokens {:optional true} :seon.config.render/search-source-tokens]
   [:seon.config.render/relevance-pool {:optional true} :seon.config.render/relevance-pool]
   [:seon.config.render/relevance-eps {:optional true} :seon.config.render/relevance-eps]
   [:seon.config.render/search {:optional true} :seon.config.render/search]

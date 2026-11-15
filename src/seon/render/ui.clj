@@ -1073,12 +1073,31 @@
     (when-let [src (src-of)] (str (reader/arglists src (symbol (namespace n)))))
     line))
 
+(defn- hit-items
+  "The list items of search hits on db, best first: a function at :seon.config.render/relevance-summary or above with its source while
+  :seon.config.render/search-source-tokens has room, every other hit its line (`hit-line`). See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] [:vector :any]]}
+  [db hits]
+  (let [cut (config/value :seon.config.render/relevance-summary)]
+    (first (reduce (fn [[lis room] {:keys [kind name line relevance]}]
+                     (let [src (when (and (= :var kind) relevance (>= relevance cut)) (doc/source-of db name))
+                           cost (when src (emit/chars-tokens (count src)))]
+                       (if (and src (<= cost room))
+                         [(conj lis [:li [:details {:data-preserve-attr "open"} [:summary [:code (str name)]] (source-block src)]]) (- room cost)]
+                         (let [line (hit-line line name #(doc/source-of db name))]
+                           [(conj lis (if (seq line)
+                                        [:li [:details {:data-preserve-attr "open"} [:summary [:code (str name)]] [:p line]]]
+                                        [:li [:code (str name)]]))
+                            room]))))
+                   [[] (config/value :seon.config.render/search-source-tokens)] hits))))
+
 (defn searched
   "Search s (the declared html render of :seon.search/search-fact, a component over the db), drawn as one compact hiccup that the
   page shows and the model is sent as it is: its query searched on main as the agent's branch last merged it (:seon.agent/base-commit), so the agent's own writes move no hit,
   by seon.ctx.search/search (exact words, meaning once its query has a vector, and the names it holds;
   functions, wiki sections and schema keys, no relevance cut), its :seon.search/k hits (else
-  :seon.config.render/search's), each a line: its name and the line of its text holding a word of the query, as grep
+  :seon.config.render/search's), best first: a function at :seon.config.render/relevance-summary or above with its source while
+  :seon.config.render/search-source-tokens has room, every other hit a line: its name and the line of its text holding a word of the query, as grep
   shows a hit (a bare name was passed over; its first sentence, ~90 tokens a hit, added nothing a model used: docs/vector.md#search); the hits left out are not drawn (my.agent/search answers them);
   nothing until its query has a vector, since words alone match as weakly when nothing is to be found. A change of its query (a swap! on ctx)
   redraws this part alone, and the model is sent what changed of it
@@ -1111,11 +1130,10 @@
            ;; each hit with the line of its text that holds a word of the query, as grep shows a hit: a bare name was passed over
            ;; (curated pair 1, 2026-11-10) where a line says why it matters
            ;; each hit its name, the line folded under it: a person reads the names and opens one (folding is presentation)
-           (into [:ol] (for [{:keys [name line]} hits
-                             :let [line (hit-line line name #(doc/source-of at name))]]
-                         (if (seq line)
-                           [:li [:details {:data-preserve-attr "open"} [:summary [:code (str name)]] [:p line]]]
-                           [:li [:code (str name)]])))])))))
+           ;; a function at the relevance cut or above is drawn with its source, best first while
+           ;; :seon.config.render/search-source-tokens has room (an agent shown the functions it needed as lines spent its turns
+           ;; on (source ..) of each, docs/vector.md#search); the rest each its line
+           (into [:ol] (hit-items at hits))])))))
 
 (defn- reason-title
   "What reason r of the done rule (seon.reconcile/done-explain, a :seon.reconcile/reason) says to a person and the model, read from that
