@@ -2372,6 +2372,35 @@
          (is (= {:ok true :dropped false} (select-keys (ask {:op :drop-branch :branch b}) [:ok :dropped])) "a second drop finds none")
          (is (contract/error? (ask {:op :drop-branch :branch (:branch cfg)})) "main is never dropped"))))))
 
+;; Estimate: the test branch's store and the writer proc ~5M + one merge of main into a branch (~2.3M, measured at root) + one fresh
+;; branch! ~0.5M = ~8M, 10000000
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-resumed-spawn-merges-main-into-its-branch-before-the-fork
+  ;; docs/merging.md#a-branch-merges-main-in: a task resumed across a pin kept its branch's old root source tree, so its process was
+  ;; refused at init! (seon.fx/runtime-for) before any turn merged main, and every retry was killed at its hello (the owner's chat,
+  ;; 2026-11-15). The writer's :spawn of a branch that exists merges main into it first; a fresh branch is main's head as before
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [w (volatile! (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 4) :events (a/chan 4)}))
+           ask (fn [req] (let [[st outs] (#'writer/writer-proc @w :in (assoc req :dest {:rid 1}))] (vreset! w st) (:r (first (:to-api outs)))))
+           b (pdb/on-main (:branch cfg) :rs-branch)
+           fresh (pdb/on-main (:branch cfg) :rs-fresh)
+           _ (d/branch! conn (:branch cfg) b)
+           bc (pdb/connect (assoc cfg :branch b))]
+       (try
+         (d/transact bc {:tx-data [{:seon.agent/key "rs-own" :seon.agent/status :busy}] :tx-meta (pdb/tx-meta b)})
+         ;; main moves after the branch was cut (a pin's landing moves main's root facts the same way)
+         (d/transact conn {:tx-data [{:seon.agent/key "rs-main" :seon.agent/status :idle}] :tx-meta (pdb/tx-meta (:branch cfg))})
+         (let [r (ask {:op :spawn :agent :rs1 :branch b}) head (pdb/head conn b)]
+           (is (and (:ok r) (:resumed r)) (pr-str r))
+           (is (:ok (:merged r)) (str "the spawn answers the merge it made: " (pr-str (:merged r))))
+           (is (some? (d/entity head [:seon.agent/key "rs-main"])) "the resumed branch holds what main gained since it was cut")
+           (is (some? (d/entity head [:seon.agent/key "rs-own"])) "and keeps its own work"))
+         (let [r (ask {:op :spawn :agent :rs1b :branch b})]
+           (is (= 0 (:keys (:merged r))) (str "spawned again with main unmoved, its base is main's head: nothing merged: " (pr-str (:merged r)))))
+         (let [r (ask {:op :spawn :agent :rs2 :branch fresh})]
+           (is (and (:ok r) (not (:resumed r)) (nil? (:merged r))) (str "a fresh branch is main's head, no merge: " (pr-str r))))
+         (finally (d/release bc)))))))
+
 (deftest ^{:seon.test/estimate {:ticks 10000000}} the-writer-merges-main-into-a-branch-on-mains-program
   ;; docs/merging.md#a-branch-merges-main-in: agent lb76's branch held the old seon.merge, so merging itself it ran the old code; the
   ;; merge is decided by the writer, where main's program runs, reading the branch as data, and written onto the branch as main's head

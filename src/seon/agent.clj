@@ -590,8 +590,9 @@
   main's forms loads here: its program stays the one :program names (program-db) and :behind says so, so the run re-forks at its
   next turn boundary (seon.turn) and its test children load the branch's difference first (load-diff!). Answers {:ok :merged
   :applied :conflicts :t}: :merged the main commit merged, nil when main had not moved; :applied the program keys main changed since
-  the old base (main-changes, the pair main-line already holds). See docs/merging.md#a-branch-merges-main-in."
-  {:malli/schema [:=> [:cat] [:map [:ok :boolean]]]}
+  the old base (main-changes, the pair main-line already holds); or the writer's typed error (a branch whose merge base was
+  swept: seon.db/branch-base's), merged nothing. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat] [:or [:map [:ok :boolean]] :seon.error/base]]}
   []
   (commit!)
   (let [conn (:store-conn @state)
