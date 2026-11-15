@@ -2,6 +2,9 @@
 # bin/land [--check] [--fast NAMESFILE] [-F MSGFILE] — land this worktree's branch on main: the one way any session, Claude's or
 # Seon's, merges (docs/merging.md#a-branch-lands-with-binland). Run in the branch's worktree
 # (bin/worktree NAME), never the main tree, which stays on main and clean.
+# DEVIATES from a thin wrapper over an op (owner's ruling, decisions.md 2db6386065): its checks (Completes, dropped task entries,
+# Deletes, the estimate, health, the laws) and its merge run here in shell, so seon_done has none of them. They become data on the one
+# :merge (task seon.merge/one-merge-system), then this is a thin wrapper over it, then it goes (task seon.merge/a-session-lands-through-seon-done).
 #   0. the branch tip (its HEAD: commit what should land) is checked out beside everything else, a throwaway detached checkout
 #      in the main tree's target/land/ (bin/worktree --at, its products cloned from this worktree's: the same mechanism as the
 #      gate's checkout), and every later step runs there, never in this worktree: what is proved is the tree that lands, and
