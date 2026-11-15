@@ -2279,11 +2279,16 @@
   "The merge gate's prove: the candidate's own store branch (candidate, the branch its :gate request names) proved by prove! in mode
   (default :judge) on names, the deferred process tests, its process items, seed and build run on checkout at tree (the gate's
   checkout, seon.fx/run-on-checkout). The branch's live agent answers the plan, or one spawned onto it: no tree branch, no catch-up of
-  files that came from the store. The run's answer, or its typed error. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  files that came from the store. An agent spawned for it ends once the run answers, however it ends, so the branch is free for the
+  task's next attach (an agent left live on the branch refuses every seon_attach of
+  its task). The run's answer, or its typed error. See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :seon.system/sys [:map [:candidate :keyword] [:checkout :string] [:tree :string]]] :map]}
   [sys {:keys [candidate checkout tree names mode]}]
-  @(prove! sys {:branch (pdb/on-main (pdb/conn-main (:conn sys)) candidate)} (set (map symbol names)) (or mode :judge)
-           {:checkout checkout :tree tree}))
+  (let [b (pdb/on-main (pdb/conn-main (:conn sys)) candidate)
+        live (some (fn [[aid a]] (when (and (= b (:branch a)) (not (task/gone-statuses (:status a)))) aid)) (:agents (state sys)))
+        ag (or live (spawn! sys {:branch b}))]
+    (try @(prove! sys {:branch b} (set (map symbol names)) (or mode :judge) {:checkout checkout :tree tree})
+         (finally (when-not live (kill! sys ag))))))
 
 (defn prove-tree!
   "Prove the files of checkout (a worktree of this root's repository) at tree, its tree id (seon.fx/tree-id, what bin/build records):
