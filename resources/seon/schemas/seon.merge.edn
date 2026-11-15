@@ -38,8 +38,6 @@
  :seon.merge/entry-value [:map [:key :seon.merge/program-key]
                             [:base {:optional true} :any] [:ours {:optional true} :any] [:theirs {:optional true} :any]
                             [:main-t :int] [:resolved? :boolean]]
- ;; a replayed transaction the write check refused (seon.writer/replay): the merge writes nothing
- :seon.merge/replay-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/replay-refused]] [:tx :int] [:entity :any] [:error :any]]]
  :seon.merge/result [:map [:ours :seon.merge/changes] [:theirs :seon.merge/changes]
                       [:apply [:vector :seon.merge/program-key]] [:conflicts [:vector :seon.merge/conflict]]]
  ;; a branch whose program calls intern, alter-var-root, eval or load-string, or defines inside a
