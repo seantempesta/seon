@@ -270,7 +270,7 @@
 
 (defn changed-since
   "The files of the tree at root as it is on disk that differ from tree (a tree id seon.fx/tree-id made): git's diff of tree
-  against the files, submodules left out (a pin is a build input, which seon.system/binary-current judges), and each untracked
+  against the files, submodules left out (a pin is a build input, which seon.fx/runtime-for judges), and each untracked
   file git does not ignore whose content tree does not hold at its path, less :seon.config.source/tree-excludes' top-level paths. Each with its text (nil when gone), the mode
   of each the allow-list names, and, when any differs, the tree id now and HEAD's commit. About 40 ms on this checkout when
   nothing differs, where tree-id is ~0.4 s (git checking each submodule's files). Answers {:value {path text} :modes {path mode}
@@ -1372,7 +1372,7 @@
               _ (when (and (empty? files) (.isFile (java.io.File. (str slot "/seon"))))
                   (doseq [n kept-build] (lib/sh "cp" "-c" (str slot "/" n) (str dir "/target/" n))))
               ;; the binary root runs, with its build record, over the clone bin/worktree --at took of the main tree's: what a gate's
-              ;; runner judges current for the candidate's tree (seon.system/binary-current) is the binary that is running
+              ;; runner judges current for the candidate's tree (seon.fx/runtime-for) is the binary that is running
               _ (when-not all?
                   (doseq [n ["seon" "seon.stamp" "seon.tree" "seon.program"]
                           :let [f (java.io.File. (str (cfg/checkout) "/target/" n))] :when (.isFile f)]
@@ -1392,7 +1392,7 @@
                       (doseq [n (kept-files d)]
                         (lib/sh "cp" "-c" (str (.getPath d) "/" n) (str to "/" n))))))
               ;; a gate's run builds only through its runner, when the binary is not current for the candidate's tree
-              ;; (bin/test's plan: seon.system/binary-current, rule (a)); the full run builds main's tree here, into its kept slot
+              ;; (bin/test's plan: seon.fx/runtime-for); the full run builds main's tree here, into its kept slot
               b (if (or all? built?) (apply lib/sh (concat clean ["nice" "-n" "15" "bin/build" "seon"] [:dir dir])) {:exit 0})
               _ (when (and all? (empty? files) (zero? (:exit b)))
                   (.mkdirs (java.io.File. ^String slot))
