@@ -1,4 +1,5 @@
 #!/bin/zsh
+# DEVIATES (docs/decisions.md 2026-11-15: a script is thin over an op): computes seon.fx/tree-id's tree in shell, as bin/build's first step before any binary exists; to be deleted onto seon.fx/tree-id, never ported. Task seon.program/a-process-runs-its-branchs-program.
 # bin/tree [DIR] — the tree DIR (default: this checkout) is as git names it: HEAD's tree (none before
 # a first commit) with every changed and untracked unignored file added, in an index of its own
 # (the repository's untouched; a copy of it, with its mtime, when it is HEAD's tree with no skipped entry). bin/build records it beside the binary (target/seon.tree);
@@ -24,4 +25,13 @@ elif git -C "$ROOT" rev-parse --verify --quiet HEAD > /dev/null; then
 fi
 [[ -n $REV ]] || GIT_INDEX_FILE=$idx git -C "$ROOT" add -A || exit 1
 (( $#EX )) && { GIT_INDEX_FILE=$idx git -C "$ROOT" rm -r --cached -q --ignore-unmatch -- ${^EX/#/:(top)} || exit 1 }
+# a pin is a gitlink the checkout tracks: a nested repository only add -A takes in (an untracked clone left in the checkout,
+# git's "embedded repository") is no part of the tree, so it moves no tree and no binary identity (seon.fx/tree-id, the same
+# rule). A commit's tree (REV) is as committed.
+if [[ -z $REV ]]; then
+  held=(${(f)"$(git -C "$ROOT" ls-files -s 2>/dev/null | awk '$1 == "160000" {print $4}')"})
+  extra=(${(f)"$(GIT_INDEX_FILE=$idx git -C "$ROOT" ls-files -s | awk '$1 == "160000" {print $4}')"})
+  extra=(${extra:|held})
+  (( $#extra )) && { GIT_INDEX_FILE=$idx git -C "$ROOT" rm --cached -f -q -- ${^extra/#/:(top)} || exit 1 }
+fi
 GIT_INDEX_FILE=$idx git -C "$ROOT" write-tree
