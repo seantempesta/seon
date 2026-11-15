@@ -474,6 +474,27 @@
     (is (= [{:var 'app.pt-doc/told :meta #{:arglists} :doc "the file's own doc"}] (:defs (first accounts)))
         "the account of the file's form holds the file's docstring")))
 
+;; Estimate: 1 eval-account 0.15M + 1 source/accounts 0.15M. Estimated 300,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-file-analyzed-keeps-its-own-contract
+  ;; docs/source.md#another-trees-program-analyzed-beside-this-image: a file read without running (main's forms imported by a
+  ;; root running older code) records the contract its text holds, not the one the running image's var has: with the image's,
+  ;; the store held 61 stale contracts and keyed 2,026 of 2,104 tests unlike their text, so no green was reused
+  (eval-account 'app.pt-con "(defn told {:malli/schema [:=> [:cat :int] :string]} [x] (str x))")
+  (let [{:keys [accounts]} (source/accounts 'app.pt-con "(defn told {:malli/schema [:=> [:cat :any] :any]} [x] x)\n")]
+    (is (= [:=> [:cat :int] :string] (:malli/schema (meta (find-var 'app.pt-con/told)))) "the image holds the other contract")
+    (is (= "[:=> [:cat :any] :any]" (:contract (first (:defs (first accounts)))))
+        "the account of the file's form holds the file's contract")))
+
+;; Estimate: 1 eval-account 0.15M + 1 source/accounts 0.15M. Estimated 300,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-macro-analyzed-without-running-keeps-its-doc-and-arglists
+  ;; Jolt's analyzer gives a defmacro's account only :macro (no :doc, no :arglists), so an analysis without running that took
+  ;; the text alone dropped every macro's docstring and arglists from the store (14 macros at the 2026-11-15 re-import)
+  (eval-account 'app.pt-mac "(defmacro twice-of \"Twice x, as a macro.\" [x] `(* 2 ~x))")
+  (let [{:keys [accounts]} (source/accounts 'app.pt-mac "(defmacro twice-of \"Twice x, as a macro.\" [x] `(* 2 ~x))\n")
+        d (first (:defs (first accounts)))]
+    (is (= "Twice x, as a macro." (:doc d)) "the macro's docstring")
+    (is (contains? (:meta d) :arglists) "and its arglists")))
+
 ;; Estimate: 4 records 1.2M; text-tx 0.4M, accounts 0.4M, account-diff-tx 0.2M; 3 pm/program reads 0.9M; merge-tx 0.5M; 6 lookups small. Estimated 4,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 4000000}} a-namespace-holds-its-docstring
   ;; a namespace's docstring was never written: readers (seon.ref's help, seon.render.ui/cite-model) answered nil. It is

@@ -995,6 +995,80 @@
         (is (:bytes-after (pdb/compact-if-due! path)) "the sweep left its freed pages to compact"))
       (finally (seon.lib/remove-tree! path (str path ".compact"))))))
 
+;; Estimate: a store opened on disk ~5M + 21 small commits ~0.3M each ~6M + 3 sweeps of a small store ~3M each ~9M = 25000000
+;; (first stated 150M, counting a sweep as a large store's: measured 19-22M)
+(deftest ^{:seon.test/estimate {:ticks 25000000}} every-branchs-merge-base-outlives-every-sweep
+  ;; docs/storage.md#collection (2026-11-15, root's store: 43 of 66 branches' merge bases swept, :main/tests' among them though its head
+  ;; never moved): sweep after sweep while main moves, a branch made long ago, one that merged main by a two-parent commit (as
+  ;; seon.writer/merge-main-into makes one) and a gone branch collected, each live branch's merge base reads whole after every sweep
+  (let [path (str (seon.config/checkout) "/target/tmp/bases-" (random-uuid))
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+        note! (fn [c s] (d/transact c [{:note/text s :note/agent :t}]) (d/commit-id @c))
+        base-reads? (fn [b] (some? (d/commit-as-db conn (d/merge-base conn b :db))))]
+    (try
+      (note! conn "a")
+      (d/branch! conn :db :old)
+      (note! conn "b")
+      (d/branch! conn :db :m)
+      (d/branch! conn :db :gone)
+      (let [m (pdb/connect (assoc (:config @conn) :branch :m))] (note! m "on m") (d/release m))
+      (doseq [round (range 3)]
+        (doseq [i (range 6)] (note! conn (str "r" round "-" i)))
+        ;; :m merges main: main's head plus its own, one commit with both parents, forced onto :m while it is at its head
+        (let [head (pdb/head conn :m) merged (:db-after (d/with @conn {:tx-data [{:note/text (str "m merged " round) :note/agent :t}]}))]
+          (d/force-branch! merged :m #{(d/commit-id head) (d/commit-id @conn)} {:expected-current-commit (d/commit-id head)}))
+        (when (= 1 round) (d/delete-branch! conn :gone) (pdb/collect! conn true))
+        (pdb/retain! conn 3)
+        (doseq [b [:old :m]]
+          (is (base-reads? b) (str "round " round ": " b "'s merge base reads after the sweep"))))
+      (d/release conn)
+      (finally (seon.lib/remove-tree! path (str path ".compact"))))))
+
+;; Estimate: a store opened on disk ~5M + 12 small commits ~4M + one retain! that asks every base and sweeps nothing ~10M = 25000000
+;; (first stated 60M: measured 18M)
+(deftest ^{:seon.test/estimate {:ticks 25000000}} a-sweep-that-cannot-find-a-branchs-base-sweeps-nothing
+  ;; docs/storage.md#collection (root's store, 2026-11-15: 43 of 66 branches' merge bases swept): retain! read every refusal of
+  ;; d/merge-base as "no base" and swept the base; a refusal other than several bases is the base unknown, so nothing is swept, the
+  ;; record names the branch and the answer is the typed :seon.db/retain-refused
+  (let [path (str (seon.config/checkout) "/target/tmp/refused-" (random-uuid))
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+        note! (fn [c s] (d/transact c [{:note/text s :note/agent :t}]) (d/commit-id @c))]
+    (try
+      (note! conn "a")
+      (d/branch! conn :db :b)
+      (let [base (d/merge-base conn :b :db)]
+        (doseq [i (range 10)] (note! conn (str "n" i)))
+        (let [real d/merge-base
+              r (with-redefs [d/merge-base (fn [c b m] (if (= :b b) (throw (ex-info "the commit graph is unreadable here" {:type :test/refused})) (real c b m)))]
+                  (pdb/retain! conn 3))]
+          (is (= :seon.db/retain-refused (:seon.error/type r)) (pr-str r))
+          (is (some? (d/commit-as-db conn base)) "the branch's base is kept: nothing was swept")
+          (is (= [:b] (mapv :branch (:refused (:seon.system/retained (d/pull @conn [:seon.system/retained] [:seon.system/id :root]))))) "the record names it")))
+      (d/release conn)
+      (finally (seon.lib/remove-tree! path (str path ".compact"))))))
+
+;; Estimate: a store opened on disk ~5M + 8 small commits ~3M + one raw sweep ~5M + a merge-base ~1M = 15000000
+(deftest ^{:seon.test/estimate {:ticks 15000000}} a-branch-whose-base-was-swept-is-told-so
+  ;; docs/storage.md#collection (root's session agent died at start, 2026-11-15: its branch's base was swept and branch-base answered nil,
+  ;; which its contract refused): a base the commit graph names but no snapshot holds is the typed :seon.db/no-merge-base
+  (let [path (str (seon.config/checkout) "/target/tmp/nobase-" (random-uuid))
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+        note! (fn [c s] (d/transact c [{:note/text s :note/agent :t}]) (d/commit-id @c))]
+    (try
+      (note! conn "a")
+      (d/branch! conn :db :b)
+      ;; the branch moves on from its base, so its head no longer is it
+      (let [bc (pdb/connect (assoc (:config @conn) :branch :b))] (note! bc "on b") (d/release bc))
+      (doseq [i (range 6)] (note! conn (str "n" i)))
+      (let [cutoff (java.util.Date.)]
+        (note! conn "after")
+        @(d/gc-storage conn cutoff))
+      (let [r (pdb/branch-base conn :db :b)]
+        (is (= :seon.db/no-merge-base (:seon.error/type r)) (pr-str r))
+        (is (= :b (:branch r)) "naming the branch"))
+      (d/release conn)
+      (finally (seon.lib/remove-tree! path (str path ".compact"))))))
+
 ;; the rule a collection keeps beside "no agent live" (docs/storage.md#collection)
 (deftest a-root-that-shares-its-store-never-collects
   ;; seon.db/collect! with sole? false (:seon.config.store/sole-writer?, false where roots share

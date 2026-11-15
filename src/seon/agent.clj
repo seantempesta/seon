@@ -824,11 +824,13 @@
         v))))
 
 (defn judges?
-  "Whether test var t judges a branch, as the test plan selects (test-plan): a deftest (:test) of a
-  namespace that is not scratch (seon.program/scratch-ns?: user, or ^:scratch), which never merges."
-  {:malli/schema [:=> [:cat :qualified-symbol] :boolean]}
-  [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
-        (boolean (and (:test m) (not (program/scratch-ns? (:ns m)))))))
+  "Whether test t judges a branch, as the test plan selects (test-plan): a deftest of the program reach graph g holds (its :tests,
+  the store's program facts, so a process that loaded no test namespace, root, judges as an agent does; a scratch namespace,
+  seon.program/scratch-ns?, never becomes program facts, so never judges), and, for a stall task's proofs
+  (seon.template/stall-proofs, which read that task's cause), only when proofs names it. See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat :map [:set :qualified-symbol] :qualified-symbol] :boolean]}
+  [g proofs t]
+  (boolean (and (contains? (:tests g) t) (or (contains? proofs t) (not (contains? template/stall-proofs t))))))
 
 (defn test-inputs
   "The reach inputs of db's tests: [shared in], shared the :inputs root's binary was built with
@@ -969,7 +971,7 @@
         in (branch-inputs in db (or base (:base @state)) (:config (cfg/in-force)))
         g (program/reach-indexed g in)
         ;; a stall task's proofs read that task's cause, so they judge only a task that names them
-        idx (into {} (filter (fn [[t _]] (and (judges? t) (or (contains? proofs t) (not (template/stall-proofs t)))))) (program/index-of g))
+        idx (into {} (filter (fn [[t _]] (judges? g proofs t))) (program/index-of g))
         ;; a proof over the branch's data (:data?: its own call of a branch reader, seon.program/test-class-of) reads db's
         ;; point, which no reach holds: it is one more input of its digest (docs/merging.md#verdicts-are-a-cache)
         point (let [[c t] (pdb/point db)] (str c " " t))
@@ -2276,7 +2278,12 @@
     ;; :base is the branch's merge base with main: a new branch's is the image (main as it
     ;; forked); a resumed one's is older than main, and comparing against main's head would
     ;; read main's later changes as the branch's (branch-changes)
-    (let [base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0)
+    ;; a resumed branch whose base can't be read (seon.db/no-merge-base: swept) loads its program from the image it was forked with
+    ;; instead (main's program as forked, then the branch's difference from it: the branch head's program all the same, a larger
+    ;; diff), and the missing base goes to root as this agent's problem: it starts, never dies of it
+    (let [base-or-err (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0)
+          no-base (when (contract/error? base-or-err) base-or-err)
+          base (if no-base db0 base-or-err)
           ;; a kept branch, resumed: this process (forked holding main's program) runs the
           ;; branch's own changes since its base on top, as merging main would; from main's
           ;; head it would unmap all main gained since (step E run #11: test/'s namespaces)
@@ -2295,7 +2302,7 @@
                              r (when tree (fx/runtime-for tree))]
                          (when (contract/error? r) r))
           _ (mark! :runtime-for)
-          load-errors (concat program-errors (when resumed (program/load-diff! base @store-conn)))
+          load-errors (concat program-errors (when no-base [no-base]) (when resumed (program/load-diff! base @store-conn)))
           _ (mark! :base)
           misaligned (when-not resumed (misaligned commit t @store-conn db0))
           _ (mark! :misaligned)]

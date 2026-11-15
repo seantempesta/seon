@@ -792,7 +792,7 @@
 
 (def ^:private agent-pull "The attributes of an agent the reconciler's index reads. See docs/reconcile.md#a-task-holds-how-its-work-ended."
   '[:seon.agent/key :seon.agent/branch :seon.agent/model :seon.agent/holder :seon.agent/max-turns
-                           :seon.agent/boot :seon.agent/started-ms])
+                           :seon.agent/boot :seon.agent/started-ms :seon.agent/ended-ms])
 
 (defn- agent-value
   "A pulled agent as :seon.reconcile/agent: what root decides on of it, its environment (the one desired-env compares)
@@ -803,7 +803,8 @@
     ;; an environment only with a branch and max-turns: a task's start always writes both (seon.task/start-tx), an agent
     ;; root starts with no task has neither. A branch alone is a valid agent-fact its contract must answer for (the
     ;; generated check), so it has no environment (the audit of 2026-11-09 asked for a loud refusal: the contract is no place for it)
-    (cond-> (select-keys a [:seon.agent/key :seon.agent/boot])
+    ;; when it started and ended: a :running task whose agent ended after it started is not live (seon.reconcile's classify)
+    (cond-> (select-keys a [:seon.agent/key :seon.agent/boot :seon.agent/started-ms :seon.agent/ended-ms])
       (and branch max-turns) (assoc :seon.agent/env (cond-> {:branch branch :model model :max-turns max-turns} holder (assoc :holder holder))))))
 
 (defn- indexed-agent
