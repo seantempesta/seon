@@ -12,7 +12,7 @@
             [seon.fx :as fx] [seon.contract :as contract]
             [seon.merge :as pm]
             [seon.program :as program]
-            [seon.source :as source]
+            [seon.source :as source] [seon.reconcile :as reconcile]
             [seon.program-test :as pt] [my.root] [seon.system :as root] [seon.doc] [seon.graph] [seon.agent] [test-runner]))
 
 (defn- empty-db [] (ts/test-db))
@@ -1801,6 +1801,38 @@
         (is (= "" (g "status" "--short")) "the tree as it was found"))
       (let [w (fx/git-commit {:req {:dir d :branch "jolt/merges" :files {"b.txt" "b\n"} :message "a write-back"}})]
         (is (string? (get-in w [:value :sha])) (str "the next write-back lands clean: " (pr-str w))))
+      (finally (seon.lib/remove-tree! d)))))
+
+;; Estimate: ~15 child calls (git; their own work is not ours) x 70k ~1M, a test db and two pulls 1M = 2000000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000} :seon.test/execs ["git"]} a-merge-into-the-write-back-tree-moves-mains-source-fact-with-it
+  ;; docs/source.md#commit-the-merges-branch. Pilot run 15 (2026-11-16): the first agent merge through seon_done reached main in the
+  ;; store, and its write-back refused (:seon.git/commit-failed, "jolt/merges is at f5df674f82, not 0b667d45c0"): bin/land's bridge
+  ;; moved main's source fact to the landed commit (landed-tx), then bin/update merged main into jolt/merges (my.root/merges-caught-up!,
+  ;; a merge commit of its own), and nothing moved the fact, so the write-back's compare-and-swap (:expect, the fact's commit) refused
+  ;; after every land. The merge answers what it merged and the tree after (:expected, :tree), and source-moved-tx moves the fact as a
+  ;; write-back's does. Red before: the merge's answer held no :expected, the fact stayed, and the write-back refused
+  (let [here (config/checkout)
+        d (str here "/target/tmp/merge-moves-fact-" (random-uuid))
+        g (fn [& args] (let [r (apply sh/sh "git" "-C" d args)] (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))]
+    (try
+      (.mkdirs (java.io.File. d))
+      (g "init" "-q" "-b" "main") (g "config" "user.name" "t") (g "config" "user.email" "t@t")
+      (spit (str d "/a.txt") "a\n") (g "add" "a.txt") (g "commit" "-q" "-m" "one")
+      ;; the write-back tree: jolt/merges checked out, with a commit main lacks (a review's empty commit)
+      (g "checkout" "-q" "-b" "jolt/merges") (g "commit" "-q" "--allow-empty" "-m" "a review")
+      ;; a land moves main, and its bridge names the landed commit as main's source (landed-tx)
+      (g "update-ref" "refs/heads/main" (g "commit-tree" "-m" "landed" "-p" "main" (g "rev-parse" "main^{tree}")))
+      (let [landed (g "rev-parse" "main")
+            db (d/db-with (ts/test-db) [{:seon.system/id :root :seon.system/source {:branch "jolt/merges" :commit landed :tree "t0" :dirs ["src"] :t 5}}])
+            held #(:seon.system/source (d/pull % [:seon.system/source] [:seon.system/id :root]))
+            r (fx/git-commit {:req {:dir d :branch "jolt/merges" :merge "main"}})
+            tx (reconcile/source-moved-tx db r 5)
+            db' (d/db-with db tx)]
+        (is (= (g "rev-parse" "jolt/merges") (:commit (held db'))) (str "the fact names the merge commit: " (pr-str r)))
+        (is (= 5 (:t (held db'))) "and the main t its tree holds, unchanged: the merge brought no file of main's in")
+        (let [w (fx/git-commit {:req (merge (reconcile/write-back-target (held db') "jolt/merges")
+                                            {:dir d :files {"b.txt" "b\n"} :message "a write-back"})})]
+          (is (string? (get-in w [:value :sha])) (str "the next write-back lands: " (pr-str w)))))
       (finally (seon.lib/remove-tree! d)))))
 
 (deftest ^{:seon.test/estimate {:ticks 30000000}} an-imported-branch-holds-its-pins

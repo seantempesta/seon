@@ -492,6 +492,20 @@
 (defn- answers [outs] (into {} (for [o outs :when (= :asker-answered (:op o))] [(:asker o) (:r o)])))
 (def ^:private green-of (fn [& ts] {:pass (count ts) :fail 0 :error 0 :reports (mapv #(hash-map :type :pass :var (str "#'" %)) ts)}))
 
+;; docs/merging.md#the-test-service: a runner ends when its last item does. A runner still owning a running item when its run finished
+;; was ended only by a later finish, so with none, it held the tests branch and every held main ask waited for good (task
+;; seon.prove/a-runner-ends-when-its-last-item-does; found reading for pilot 14). Red before: the item's batch ended and no kill was asked.
+;; Estimate: one batch through the step fn ~0.1M.
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-runner-ends-when-its-last-item-does
+  (let [[st o1] (prove/ask-items (items-st 1) 7 :batch {['app.x-test/t "d1"] {:agent :p1 :ms 5}})
+        b (first (batches o1))
+        ;; the run that spawned runner :p1 has finished; its item still runs
+        st (assoc st :runners {"k0" :p1})
+        [st o2] (feed st [(answer-of b (green-of 'app.x-test/t))])]
+    (is (= [:p1] (mapv #(get-in % [:req :id]) (asks o2 :kill))) "the item's end ends its runner")
+    (is (contains? (:killing st) "k0") "asked once")))
+
+
 ;; docs/merging.md#the-test-service: ten askers of one item run it once, and each is answered when its last item is green
 (deftest ^{:seon.test/estimate {:ticks 200000}} an-item-many-ask-runs-once-and-answers-each
   (let [it {:agent :a1 :ms 50}
@@ -684,7 +698,7 @@
     ;; every reader of a run's tests reads them as no verdict (root's review of f4ca2f3a4c): the agent's record (seon.proofs/results) and
     ;; the done rule's ask of main (seon.reconcile/main-answer), where a red would make the change's red main's
     (is (= {} (proofs/results r)) "no result for a test that never ran")
-    (is (= {:red #{} :unknown #{'a.b-test/u}} (#'seon.reconcile/main-answer #{'a.b-test/u} r)) "main answered nothing of it: unknown, never main's red")))
+    (is (= {:red #{} :unknown #{'a.b-test/u}} (select-keys (#'seon.reconcile/main-answer #{'a.b-test/u} r) [:red :unknown])) "main answered nothing of it: unknown, never main's red")))
 
 ;; docs/merging.md#the-test-service: each asker is told an item's verdict as it lands, before it is answered, so a session's
 ;; bin/prove prints each test as it ends; an item with no verdict is told as :no-verdict, never left out
