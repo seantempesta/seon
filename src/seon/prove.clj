@@ -734,7 +734,9 @@
        :ping-map-fn (fn [st] {:runs (count (:runs st)) :full (some-> st :full :key) :queued (count (:items st))
                               :main-t (:main-t st) :stale-answers (:stale st 0)
                               ;; main's run as the service decides it: what is wanted, the program t last asked, and a failed run's inputs
-                              :main-want (:main-want st) :main-asked (:main-asked st) :main-failed (:main-failed st)})})
+                              :main-want (:main-want st) :main-asked (:main-asked st) :main-failed (:main-failed st)
+                              ;; what the tests branch is held by and what waits on it: a hang's evidence (seon.system/stall-of)
+                              :runs-in-flight (vec (sort (keys (:runs st)))) :runners (:runners st) :held-main (count (:held-main st))})})
   ([args] {:rid 0 :pending {} :runs {} :done {} :items {} :askers {} :batches {} :conn (:conn args)
            ;; the running binary's built identity (seon.program/binary-program, what seon.fx/runtime-for compares), held for the proc's life
            :binary (some-> (program/binary-program) :digest)

@@ -1259,7 +1259,7 @@
       (swap! state assoc :fixtures-warm true)
       n)))
 
-(defn- wall-bound-ms
+(defn wall-bound-ms
   "Test t's (\"#'ns/name\") wall bound in ms: ten times its estimate, ^{:seon.test/estimate {:ticks n}}, at the slowest rate
   measured greens ran (:seon.config.proofs/slow-ticks-per-ms: waiting included), so a test that waits as long as the slowest ever
   did is never ended by it; a test that states none takes the class bound (:seon.config.proofs/unestimated-wall-ms). See
@@ -1977,7 +1977,8 @@
                            (and (seq rest-tests) (not reach?)) "the tests your change reaches run when your status is clear")]
         (if err
           err
-          (let [nv @nvs
+          ;; a test a later gate answered green is no longer without a verdict (root's review: nvs only grew)
+          (let [nv (into {} (remove (fn [[t _]] (= :green (:seon.test/status (pull-of t))))) @nvs)
                 [t e] (first (sort-by (comp str key) nv))
                 why (when t (str "the gate answered no verdict for " (count nv) " of your process tests (" t " first): "
                                  (:seon.error/type e) ": " (:seon.error/message e)))]

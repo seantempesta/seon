@@ -293,6 +293,8 @@
                               [pid (select-keys s [:busy :in-flight :queued :done])]))
      ;; the reconciler's flights by task and the step each waits at: a judge that never settles is named
      :reconciler (evidence :reconciler)
+     ;; the test service's runs in flight, the tests branch's runners and the asks held on it (its :ping-map-fn): a prove never answered is named
+     :prove (evidence :prove)
      :agents (into (sorted-map)
                    (for [[pid m] states :let [s (::flow/state m)] :when (contains? s :inflight)]
                      [pid (assoc (select-keys s [:fx-out :stall-seen :last-frame-ms :holding :held]) :inflight (update-vals (:inflight s) :kind))]))

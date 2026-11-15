@@ -633,6 +633,13 @@
  ;; tests, a test root's boot ~20 s then ~0.5 s a test, 253 in a large gate ~150 s: ~250 s; ten times that (AGENTS 3, the one factor).
  ;; At the bound: the judge answers :seon.bound/reached (no verdict), a :platform problem.
  :seon.config.proofs/gate-ms 2500000
+ ;; Unit: ms. A test's ask of a test root (seon.test-store/ask) ends this far before the test's own wall bound (seon.agent/wall-bound-ms),
+ ;; so it ends typed with the root's state (seon.system/stall-state) instead of at the wall with none; and the evidence ask's own bound.
+ ;; Worked from the work: one eval of stall-state at a live root, a ping of its procs, ~10 ms; 3 s leaves room on a loaded machine.
+ :seon.config.proofs/ask-margin-ms 3000
+ ;; Unit: ms. The bound of an ask of a test root made outside any test (a REPL): every wait ends. Worked from the work: the longest
+ ;; ask a test makes is a prove of a process test, a root boot ~20 s and a run ~60 s; ten times that.
+ :seon.config.proofs/ask-ms 600000
  ;; Unit: engine ticks a ms. The slowest rate green tests ran at, waiting included: the 5th percentile of ticks/ms over every stored
  ;; green (88,534 greens, 2026-11-13: p5 149, median 116,069). A test child ends a test that never returns at ten times its estimate
  ;; at this rate (seon.agent/wall-bound-ms): a wall bound derived from the test's own declared work, never a typed-in time.

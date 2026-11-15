@@ -134,6 +134,8 @@
   [:seon.config.proofs/recent-verdicts {:optional true} :seon.config.proofs/recent-verdicts]
   [:seon.config.proofs/test-ticks-cap {:optional true} :seon.config.proofs/test-ticks-cap]
   [:seon.config.proofs/slow-ticks-per-ms {:optional true} :seon.config.proofs/slow-ticks-per-ms]
+  [:seon.config.proofs/ask-margin-ms {:optional true} :seon.config.proofs/ask-margin-ms]
+  [:seon.config.proofs/ask-ms {:optional true} :seon.config.proofs/ask-ms]
   [:seon.config.proofs/gate-ms {:optional true} :seon.config.proofs/gate-ms]
   [:seon.config.proofs/unestimated-wall-ms {:optional true} :seon.config.proofs/unestimated-wall-ms]
   [:seon.config.proofs/system-test-asks-cap {:optional true} :seon.config.proofs/system-test-asks-cap]
