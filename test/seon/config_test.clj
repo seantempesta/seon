@@ -158,7 +158,8 @@
       ;; every declared key is shipped; a key no schema declares is already refused by reading it (a branch's own key is declared by its schema: seon.config/of-entries)
       (is (= [] (remove (set (keys c)) (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.ai/temperature :seon.config.source/root :seon.config.source/gate-checkout :seon.config.root/profile :seon.config.proofs/max-cores :seon.config.proofs/max-load} (not= :scripted p) (conj :seon.config.ai/script))
                                                (config/keys-declared)))) p)))
-  (is (= {:kind :none} (config/provider (shipped :default))) "no profile: no provider, never the scripted model")
+  ;; owner 2026-11-15 (docs/decisions.md, DeepSeek is the default provider): no profile runs on DeepSeek; :none only when set
+  (is (= :openai-compat (:kind (config/provider (shipped :default)))) "no profile: DeepSeek, never the scripted model")
   (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider (shipped :scripted))))
   (is (= :openai-compat (:seon.config.ai/provider (shipped :deepseek)))))
 
@@ -345,7 +346,7 @@
         scripted (under ["--profile" "scripted"])
         deepseek (under ["--profile" "deepseek"])]
     ;; the profile's own values
-    (is (= :none (get-in none [:config :seon.config.ai/provider])))
+    (is (= :openai-compat (get-in none [:config :seon.config.ai/provider])) "no profile: DeepSeek, the default (owner 2026-11-15)")
     (is (= :scripted (get-in scripted [:config :seon.config.ai/provider])))
     (is (= :openai-compat (get-in deepseek [:config :seon.config.ai/provider])))
     ;; recorded in the config in force, with its layer, and written as facts on main
