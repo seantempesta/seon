@@ -824,11 +824,13 @@
         v))))
 
 (defn judges?
-  "Whether test var t judges a branch, as the test plan selects (test-plan): a deftest (:test) of a
-  namespace that is not scratch (seon.program/scratch-ns?: user, or ^:scratch), which never merges."
-  {:malli/schema [:=> [:cat :qualified-symbol] :boolean]}
-  [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
-        (boolean (and (:test m) (not (program/scratch-ns? (:ns m)))))))
+  "Whether test t judges a branch, as the test plan selects (test-plan): a deftest of the program reach graph g holds (its :tests,
+  the store's program facts, so a process that loaded no test namespace, root, judges as an agent does; a scratch namespace,
+  seon.program/scratch-ns?, never becomes program facts, so never judges), and, for a stall task's proofs
+  (seon.template/stall-proofs, which read that task's cause), only when proofs names it. See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat :map [:set :qualified-symbol] :qualified-symbol] :boolean]}
+  [g proofs t]
+  (boolean (and (contains? (:tests g) t) (or (contains? proofs t) (not (contains? template/stall-proofs t))))))
 
 (defn test-inputs
   "The reach inputs of db's tests: [shared in], shared the :inputs root's binary was built with
@@ -969,7 +971,7 @@
         in (branch-inputs in db (or base (:base @state)) (:config (cfg/in-force)))
         g (program/reach-indexed g in)
         ;; a stall task's proofs read that task's cause, so they judge only a task that names them
-        idx (into {} (filter (fn [[t _]] (and (judges? t) (or (contains? proofs t) (not (template/stall-proofs t)))))) (program/index-of g))
+        idx (into {} (filter (fn [[t _]] (judges? g proofs t))) (program/index-of g))
         ;; a proof over the branch's data (:data?: its own call of a branch reader, seon.program/test-class-of) reads db's
         ;; point, which no reach holds: it is one more input of its digest (docs/merging.md#verdicts-are-a-cache)
         point (let [[c t] (pdb/point db)] (str c " " t))

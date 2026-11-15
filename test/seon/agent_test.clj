@@ -3977,3 +3977,14 @@
              (is (nil? (n 'seon.program/load-form!)) "and none of main's forms is loaded into this process")
              (is (= (d/commit-id before) (d/commit-id (agent/program-db))) "its program is still the one it started on")))
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+
+;; docs/source.md#tests-run-by-reach: a test judges by the program's facts, never by what the asking process loaded
+;; Estimate: 5 judges? calls, each a set lookup under its contract, well under 100k ticks
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-test-judges-by-the-programs-facts-not-what-the-process-loaded
+  (let [t 'seon.never-loaded-test/a-test s 'seon.stall-proofs/a-bug-is-filed
+        g {:tests #{t s}}]
+    (is (nil? (find-ns 'seon.never-loaded-test)) "the test's namespace is not loaded here, as at root")
+    (is (true? (agent/judges? g #{} t)) "a deftest the program holds judges, though this process never loaded it")
+    (is (false? (agent/judges? g #{} 'seon.never-loaded-test/not-a-test)) "a name the program holds no deftest of does not")
+    (is (false? (agent/judges? g #{} s)) "a stall task's proof judges only a task that names it")
+    (is (true? (agent/judges? g #{s} s)) "and does judge the task that names it")))
