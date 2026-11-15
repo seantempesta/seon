@@ -467,7 +467,7 @@
 (defn main-red
   "The red tests of results ({test status}) that are main's, not the branch's change: red as its base holds them, the
   digest the branch has base's own (nothing it changed reaches the test) or base's verdict at base's digest red (base's
-  digests, base-found {digest result}: seon.fx/stored-results of the red tests' base digests). A test with no base digest
+  digests, base-found {digest result}: verdicts-at of the red tests' base digests on the results branch). A test with no base digest
   is new on the branch, so its red is the branch's. The done rule never closes a task on one (docs/tasks.md#the-done-rule).
   Cost: one lookup per red test."
   {:malli/schema [:=> [:cat :seon.proof/results [:map-of :qualified-symbol :string] [:maybe [:map-of :qualified-symbol :string]] [:map-of :string :map]] [:set :qualified-symbol]]}
@@ -476,17 +476,6 @@
                               (and b (#{:fail :error} (get results t))
                                    (or (= b (get cand t)) (red? (get base-found b)))))))
         (keys results)))
-
-(defn unknown-reds
-  "The red tests of results ({test status}) whose verdict at base nobody knows yet: red here, with a base digest (base, as
-  main-red reads it) the change moved (cand), and no verdict found at it (base-found {digest result}, as main-red reads it).
-  main-red reads each as the branch's; the reconciler asks the test service main's verdict of them by name and waits on that
-  answer before the done rule reads it, never reading whatever the cache holds (seon.reconcile's :main-asked). {test base-digest}. Cost: one lookup per red test. See docs/tasks.md#the-done-rule."
-  {:malli/schema [:=> [:cat :seon.proof/results [:map-of :qualified-symbol :string] [:maybe [:map-of :qualified-symbol :string]] [:map-of :string :map]] [:map-of :qualified-symbol :string]]}
-  [results cand base base-found]
-  (into {} (keep (fn [[t s]] (let [b (get base t)]
-                               (when (and b (#{:fail :error} s) (not= b (get cand t)) (nil? (get base-found b))) [t b]))))
-        results))
 
 (defn plan
   "What a change runs: of cand ({key digest}, the candidate's), base (the base's {key digest},
@@ -644,12 +633,17 @@
   "{digest result} of the verdicts db holds for cand ({test digest}): one seek of each verdict's identity (verdict-id) and its
   status, read with d/datoms, never a pull (3.3k ticks a seek against 14.3k, measured by deps); a green
   {:digest :pass 1 :fail 0 :error 0}, a red its status counted once, its :failures, and its writer, {:branch b} of its basis
-  (a red is reused only by the branch that ran it: a digest does not see the machine). See docs/merging.md#verdicts-are-a-cache."
+  (a red is reused only by the branch that ran it: a digest does not see the machine); only a :live or :full verdict, never one
+  :seeded from bin/test's file cache. See docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :any :string]] [:map-of :string :map]]}
   [db cand]
   (into {} (for [[test-var d] cand :when (qualified-symbol? test-var)
                  :let [e (:e (first (d/datoms db :avet :seon.proof/id (verdict-id test-var d))))] :when e
-                 :let [st (:v (first (d/datoms db :eavt e :seon.proof/status)))]]
+                 :let [st (:v (first (d/datoms db :eavt e :seon.proof/status)))
+                       route (:v (first (d/datoms db :eavt e :seon.proof/route)))]
+                 ;; only the image's own runs answer for the image: a verdict carried from bin/test's file cache (:seeded) may differ
+                 ;; where the two runners do (a verdict that depends on which process runs it)
+                 :when (#{:live :full} route)]
              [d (cond-> {:digest d :pass (if (= :pass st) 1 0) :fail (if (= :fail st) 1 0) :error (if (#{:error :none} st) 1 0)}
                   (not= :pass st) (assoc :writer {:branch (:seon.db/branch (:v (first (d/datoms db :eavt e :seon.proof/basis))))})
                   (not= :pass st) (assoc :failures (or (:v (first (d/datoms db :eavt e :seon.proof/failures))) [])))])))

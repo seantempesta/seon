@@ -238,10 +238,16 @@
     (is (nil? (get config/config :seon.config.source/root)) "this process names no source root, as a check mode's root does")
     ;; a shard loads test/'s namespaces as it plans: this one is taken out first, as a fork server holds none of them
     (remove-ns 'seon.required-whole)
-    (let [lf (program/live-forms db)
-          [whole errs] (#'program/required! db lf lf)]
-      (is (= [] errs))
-      (is (= #{'seon.required-whole} whole) "loaded whole by require, its file found under the tree main states it was imported from"))
+    ;; and its process's source roots hold no test/ of the checkout, as a prove agent's in the image held none (task
+    ;; seon.program/a-test-namespace-loads-whole-in-whatever-process-runs-it: red there, green in a bin/test child)
+    (let [roots0 (jolt.host/source-roots)]
+      (try
+        (jolt.host/set-source-roots! (vec (remove #(or (= % "test") (str/ends-with? (str %) "/test")) roots0)))
+        (let [lf (program/live-forms db)
+              [whole errs] (#'program/required! db lf lf)]
+          (is (= [] errs))
+          (is (= #{'seon.required-whole} whole) "loaded whole by require, its file found under the tree main states it was imported from, whichever process runs it"))
+        (finally (jolt.host/set-source-roots! roots0))))
     ;; a branch that removed a form of it (its def here): the file, main's, still holds that form, so it is no longer the
     ;; branch's namespace whole; required whole, it brought main's forms back over the branch's (a test child naming a var
     ;; its branch deleted, 2026-11-12)
@@ -519,13 +525,16 @@
   ;; docs/source.md#a-landing-enters-main-as-data: what the bridge writes (seon.system/landed-tx) moves root's source fact to
   ;; the landed tree, so the next re-index reads what differs from it, not every file landed since the last import
   (let [db0 (pdb/empty-db false)
-        held {:root "/r" :dirs ["src"] :tree "t0" :commit "c0" :digest "d0" :files 1 :forms 0 :ms 1.0}
+        held {:root "/r" :dirs ["src"] :tree "t0" :commit "c0" :digest "d0" :files 1 :forms 0 :ms 1.0 :t 5}
         db (:db-after (pdb/with db0 [{:seon.system/id :root :seon.system/source held}]))
         db1 (:db-after (pdb/with db (root/landed-tx db {"src/app/landed.clj" "(ns app.landed)\n(defn f [] 1)\n"} {} "t1" "c1")))
         fact (:seon.system/source (d/pull db1 [:seon.system/source] [:seon.system/id :root]))]
     (is (= ["t1" "c1"] [(:tree fact) (:commit fact)]) "the landed tree and commit")
     (is (not= "d0" (:digest fact)) "its digest is the landed tree's")
     (is (= ["/r" ["src"]] [(:root fact) (:dirs fact)]) "what the import read from stays")
+    ;; the tree holds at least main as of the db the landing read (seon.fx/proving-runs-as-flow: the merge gate's base); red before: it
+    ;; kept the last write-back's :t, a fact claiming an older main than its files
+    (is (= (:max-tx db) (:t fact)) "its :t is the t of the main it landed on, never an older write-back's")
     (is (some? (d/entity db1 [:var/name 'app.landed/f])) "and the landed file's facts are main's")))
 
 (defn- tree-with

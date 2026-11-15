@@ -440,16 +440,16 @@
     (catch Throwable e (error #'binary-digest :seon.fx/io-error (str "the binary identity of tree " tree ": " (step/error-msg e)) {:path root}))))
 
 (defn- tree-digest
-  "The binary identity of git tree tree (binary-digest): a tree is immutable, so its digest is computed once a checkout for the
-  code that computes it and kept beside the builds, target/runtime-for/TREE.CODE.digest, CODE the digest of
-  (seon.program/running-form 'seon.fx/binary-digest): a change of binary-digest misses by construction. {:digest d} or
-  binary-digest's error."
-  {:malli/schema [:=> [:cat :string :string] [:or [:map [:digest :string]] :seon.error/base]]}
-  [root tree]
+  "The binary identity of git tree tree, read in the repository at repo (binary-digest): a tree is immutable, so its digest is
+  computed once for the code that computes it and kept beside the builds of the checkout at root,
+  target/runtime-for/TREE.CODE.digest, CODE the digest of (seon.program/running-form 'seon.fx/binary-digest): a change of
+  binary-digest misses by construction. {:digest d} or binary-digest's error."
+  {:malli/schema [:=> [:cat :string :string :string] [:or [:map [:digest :string]] :seon.error/base]]}
+  [root repo tree]
   (let [f (java.io.File. (str root "/target/runtime-for/" tree "." (lib/digest (program/running-form 'seon.fx/binary-digest)) ".digest"))]
     (if (.isFile f)
       {:digest (str/trim (slurp f))}
-      (let [d (binary-digest root tree)]
+      (let [d (binary-digest repo tree)]
         (if (contract/error? d)
           d
           (do (write-file {:req {:path (.getPath f) :text d}}) {:digest d}))))))
@@ -470,8 +470,9 @@
                p))))))
 
 (defn runtime-for
-  "The binary a process on tree's branch runs: {:binary its path :digest d} when target/seon's identity (target/seon.digest, what
-  bin/build wrote: bin/binary-digest, the digest of what only a build can change) is tree's, else :seon.process/env-mismatch
+  "The binary a process on tree's branch runs: {:binary its path :digest d} when the running binary's identity (its build record's
+  :digest, seon.program/binary-program) is tree's (seon.fx/binary-digest, read in the source root's repository, where a tree is
+  made: :seon.config.source/root, else the checkout), else :seon.process/env-mismatch
   naming both digests and :seon.process/differs (the build inputs and pins that differ), for its caller to build once. The one
   check of which runtime a branch needs, made at every start (root's boot, an agent's, a test child's fork) and by the restart
   predicate; the program (src/'s forms) is not in it: a process loads its branch's forms as a diff. With {:scope :all}, for a
@@ -484,19 +485,21 @@
   ([tree] (runtime-for tree {}))
   ([tree {:keys [scope] :or {scope :root}}]
    (let [root (cfg/checkout)
+         ;; a key a config may lack (seon.config's may-be-absent): absent, the checkout is the repository
+         repo (or (get cfg/config :seon.config.source/root) root)
          read (fn [p] (let [f (java.io.File. (str root p))] (when (.isFile f) (str/trim (slurp f)))))
          ;; the RUNNING binary's identity, held since its boot (seon.program/binary-program): never target/seon's file, which a
          ;; later build replaces while this process still runs the old one (bin/update asked after its build, 2026-11-15)
          built (:digest (program/binary-program))
          built-tree (read "/target/seon.tree")
-         w (tree-digest root tree)
-         src (fn [t] (when t (let [r (git-run {} root ["rev-parse" "--verify" "--quiet" (str t ":src")] nil)]
+         w (tree-digest root repo tree)
+         src (fn [t] (when t (let [r (git-run {} repo ["rev-parse" "--verify" "--quiet" (str t ":src")] nil)]
                                (when (zero? (:exit r)) (str/trim (:out r))))))
          mismatch (fn [want why]
                     (error #'runtime-for :seon.process/env-mismatch
                            (str "target/seon's identity " (or built "(none recorded)") " is not tree " tree "'s " want ": " why)
                            {:seon.process/binary-digest built :seon.process/branch-digest want :seon.process/tree tree
-                            :seon.process/differs (build-differs root built-tree tree)}))]
+                            :seon.process/differs (build-differs repo built-tree tree)}))]
      (cond (contract/error? w) w
            (not= built (:digest w)) (mismatch (:digest w) "build it")
            (= :all scope) (let [p (src tree)]
@@ -1506,8 +1509,7 @@
                     (let [at (reds-at (into {} (for [[t s] results :let [b (get base t)] :when (and b (not= :pass s))] [t b])))]
                       (when-not (contract/error? at) (into {} (for [[t f] at] [(get base t) {:pass 0 :fail 1 :error 0 :failures [f]}])))))]
         (if (and (seq base) (map? results))
-          (-> r (assoc-in [:value :main-red] (proofs/main-red results (or digests {}) base (or found {})))
-              (assoc-in [:value :unknown-reds] (proofs/unknown-reds results (or digests {}) base (or found {}))))
+          (assoc-in r [:value :main-red] (proofs/main-red results (or digests {}) base (or found {})))
           r)))))
 
 ;; ---- a session's items (Flow step 4) -------------------------------------------------

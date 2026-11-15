@@ -1644,6 +1644,22 @@
 ;; docs/health.md#two-kinds-of-problem: a branch is judged on the content it makes, every class of it (the owner, 2026-11-12:
 ;; nothing switched off). For each content class a branch can make, the rows caused-split answers from what the branch moved are
 ;; the rows health reads in full on head and not on base
+;; The owner's ruling (2026-11-15, decisions.md: once running, nothing inside Seon crashes or hangs): :stateful-outside-flow is a
+;; ratchet. A branch that adds state or a wait outside a Flow proc fails (:caused, never :attention), unless the var names why it
+;; must stay at an edge (:seon.flow/edge); what main holds stays listed until each is moved. Red before: the class was attention.
+;; Estimate: two caused-split reads of a one-form change (~2M each, as a-catch-its-page-does-not-name-is-a-law-problem's health): 5,000,000
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-branch-that-adds-state-outside-flow-fails-unless-it-names-its-edge
+  (let [db0 (world)
+        v 'app.calc/inc2
+        fe (:db/id (:var/form (d/entity db0 [:var/name v])))
+        ns-e (:db/id (:var/ns (d/entity db0 (:e (first (d/datoms db0 :avet :var/name v))))))
+        base (d/db-with db0 [[:db/add ns-e :ns/file "src/app/m.clj"]])
+        head (d/db-with base [[:db/add fe :form/src "(def inc2 (atom 0))"]])
+        edged (d/db-with head [[:db/add (pdb/eid head :var/name v) :var/meta :seon.flow/edge]])
+        caused-of (fn [b h] (filterv #(str/includes? % "outside a Flow proc") (:caused (problems/caused-split b h))))]
+    (is (= 1 (count (caused-of base head))) (str "an atom added outside Flow fails the branch: " (pr-str (problems/caused-split base head))))
+    (is (= [] (caused-of base edged)) "one that names its edge (:seon.flow/edge) does not")))
+
 (deftest ^{:seon.test/estimate {:ticks 15000000}} a-branch-is-caused-each-content-class-it-makes
   (let [made (fn [base head c]
                (let [msgs (fn [db] (into #{} (map :message) (get-in (problems/health db) [:classes c :rows])))]
@@ -1686,6 +1702,17 @@
     (is (not (contains? (keys-of (d/db-with head entry)) :seon.zz/new-key)) "its entry closes it")
     (is (some #(str/includes? % ":seon.zz/new-key") (problems/caused base head)) "a branch that names a new key with no entry is caused it")
     (is (not-any? #(str/includes? % ":seon.zz/new-key") (problems/caused base (d/db-with head entry))) "and one that writes the entry too is not")))
+
+;; See docs/health.md#a-key-with-no-schema
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-caused-row-carries-the-form-that-clears-it
+  ;; round 4 (2026-11-15): two of four runs reached their fix and stopped on an open problem their work made true, told in words with no
+  ;; form to clear it; a red proof carries its :do, and so does each caused row the status shows (seon.ctx.status)
+  (let [base (d/db-with (world) [{:db/id "ns" :ns/name 'seon.zz :ns/file "src/seon/zz.clj"}])
+        head (d/db-with base [{:db/id "a" :form/id "f-a" :form/src "(def k :seon.zz/new-key)" :form/ns [:ns/name 'seon.zz] :form/keywords #{:seon.zz/new-key}}])
+        row (first (filter #(str/includes? (:message %) ":seon.zz/new-key") (:rows (problems/caused-split base head))))]
+    (is (some? row) "the branch is caused the unschemed key")
+    (is (= 'my.schema/register! (first (:do row))) (str "its row carries the form that writes the entry: " (pr-str (:do row))))
+    (is (= :seon.zz/new-key (second (:do row))) "naming the key")))
 
 (deftest ^{:seon.test/estimate {:ticks 8000000}} a-branch-that-tightens-an-entry-is-caused-the-stored-values-it-refuses
   ;; docs/health.md#a-stored-value-its-entry-refuses: a value written before its attribute's entry tightened is held to the new entry

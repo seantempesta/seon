@@ -92,25 +92,32 @@
         r s
         answered (set (:answered r))
         mine (get-in r [:agents ag])]
-    (is (map? r) (pr-str r))
-    (is (contains? answered ag) "its own agent, idle, answered the ping")
-    (is (and (map? mine) (contains? mine :stall-seen) (contains? mine :last-frame-ms) (contains? mine :holding) (= 0 (:held mine)))
-        (str "with its stall fields and nothing held behind a handshake: " (pr-str mine)))
-    (is (every? #(contains? answered %) (keys (:agents r))) "an agent proc's state is read only from one that answered")
-    (when (contains? answered :api)
-      (is (every? #{:seon.system/stall-armed :seon.system/busy :seon.system/lost :pending :awaits} (keys (:root r))) "root's stall check and its open asks, nothing else")
-      (is (map? (get-in r [:root :pending])) "every ask the api holds unanswered, by rid")
-      ;; red before (batch 32's problems overrun): the api's ping answered only :agents :closing :pending, so :root was {} on every
-      ;; root and a hang's evidence never showed whether the stall check was armed or which agents it held busy
-      (is (boolean? (:seon.system/stall-armed (:root r))) "the armed flag, read whatever its value")
-      (is (set? (:seon.system/busy (:root r))) "the agents with an eval in flight, empty or not"))
-    (is (every? (fn [[_ m]] (every? #(int? (get m %)) [:busy :in-flight :queued])) (:fx r)) "each effect owner that answered gives its load")
-    (when (contains? answered :fx/server-op)
-      (is (= #{:busy :in-flight :queued :done} (set (keys (get-in r [:fx :fx/server-op])))) "the server ops' owner among them: a parked connection's op is running, queued or done"))
-    (when (contains? answered :reconciler)
-      (is (map? (get-in r [:reconciler :flight-steps])) "the reconciler's flights by task and the step each waits at")
-      (is (and (boolean? (get-in r [:reconciler :quiet])) (vector? (get-in r [:reconciler :waits])) (vector? (get-in r [:reconciler :live])))
-          "whether it is quiet, the waits on main it holds and its live tasks by id (the leak a hang's capture must name): what a parked await-db waits on"))))
+    (is (map? (:root r)) (pr-str r))
+    ;; its own agent, idle: it answered, and its state is whole
+    (is (or (contains? answered ag) (contains? (:unanswered r) ag)) "its own agent's proc, answered or named mid-step")
+    (when (contains? answered ag)
+      (is (and (map? mine) (contains? mine :stall-seen) (contains? mine :last-frame-ms) (contains? mine :holding) (= 0 (:held mine)))
+          (str "with its stall fields and nothing held behind a handshake: " (pr-str mine))))
+    ;; every other part is the shared root's (other tests' agents and asks are in it): its shape, never its contents; a proc
+    ;; mid-step is named by its ::flow/site, never read as nil (red before, 2026-11-15 16:26: a stepping proc's state read as {})
+    (is (empty? (filter answered (keys (:unanswered r)))) "a proc that did not answer is never listed as answered")
+    (is (every? map? (vals (:unanswered r))) "a proc that did not answer is named by its site")
+    (if (:site (:root r))
+      (is (:stepping (:site (:root r))) (str "the api mid-step, named by what it steps: " (pr-str (:root r))))
+      (do (is (every? #{:seon.system/stall-armed :seon.system/busy :seon.system/lost :pending :awaits} (keys (:root r))) "root's stall check and its open asks, nothing else")
+          (is (map? (get-in r [:root :pending])) "every ask the api holds unanswered, by rid")
+          ;; red before (batch 32's problems overrun): the api's ping answered only :agents :closing :pending, so :root was {} on every
+          ;; root and a hang's evidence never showed whether the stall check was armed or which agents it held busy
+          (is (boolean? (:seon.system/stall-armed (:root r))) "the armed flag, read whatever its value")
+          (is (set? (:seon.system/busy (:root r))) "the agents with an eval in flight, empty or not")))
+    (is (every? (fn [[_ m]] (or (:site m) (every? #(int? (get m %)) [:busy :in-flight :queued]))) (:fx r)) "each effect owner gives its load, or its site")
+    (let [rc (:reconciler r)]
+      (if (:site rc)
+        (is (:stepping (:site rc)) (str "the reconciler mid-step, named by what it steps: " (pr-str rc)))
+        (do (is (map? (:flight-steps rc)) "the reconciler's flights by task and the step each waits at")
+            (is (and (boolean? (:quiet rc)) (vector? (:waits rc)) (vector? (:live rc)))
+                "whether it is quiet, the waits on main it holds and its live tasks by id (the leak a hang's capture must name): what a parked await-db waits on"))))
+    (is (or (contains? answered :api) (contains? (:unanswered r) :api)) "and root's api answered, or is named mid-step")))
 
 (deftest a-kill-is-answered-once-the-agents-end-is-recorded
   ;; docs/processes.md#the-agent-process: kill! answers the agent's view entry when its end is recorded, so a wait on it ends;
@@ -403,13 +410,6 @@
               " :fact (dissoc (:seon.system/source (datahike.api/pull db [:seon.system/source] root)) :boot :inputs :ms)"
               " :stale (mapv (juxt :binary :tree) (get-in (my.root/problems sys) [:classes :stale-binary :rows]))})")})
 
-(defn- objects-into-checkout!
-  "The objects of the scratch repository at dir's HEAD copied into this checkout's repository, no ref written: a root on the
-  checkout reads the scratch tree's identity there (seon.fx/runtime-for asks the checkout's git), as it reads a landed tree."
-  [dir]
-  (let [pack (sh/sh "git" "-C" dir "pack-objects" "--revs" "--stdout" :in "HEAD\n" :out-enc :bytes)]
-    (sh/sh "git" "-C" (config/checkout) "unpack-objects" "-q" :in (:out pack))))
-
 (defn- boots-on-a-tree
   "A store of its own (removed at the end) seeded (./seon seed-program) from a scratch repository under target/ holding
   the one file path (dirs resources/seon) as its first text, and with :wiki a page's text at docs/zz-broken.md; then
@@ -439,13 +439,11 @@
        (spit (str tree "/" path) seeded)
        (git "add" "-A")
        (git "commit" "-q" "-m" "seeded")
-       (objects-into-checkout! tree)
        (into [(:out (apply ts/binary-sh (concat ["./seon" "seed-program" store] args ["--profile" ts/root-profile :dir "target"])))]
              (for [text texts]
                (let [_ (spit (str tree "/" path) text)
                      _ (git "add" "-A")
                      _ (git "commit" "-q" "-m" "tree")
-                     _ (objects-into-checkout! tree)
                      out (root-answers store "main" (into [boot-probe] also) {:args args})
                      [probe & more] (str/split-lines out)
                      v (read-line probe)]
@@ -541,8 +539,8 @@
     (is (str/includes? (str seed) "SEED OK") (str seed))
     (is (true? (:listening? two)) (str "root resumed the store and listens: " two))
     ;; never refused for the program: the spawn reaches the agent's one start, where only the binary's identity is asked
-    ;; (seon.fx/runtime-for: this scratch tree, its objects in the checkout's repository, names no build inputs, so another binary
-    ;; than target/seon)
+    ;; (seon.fx/runtime-for reads the tree in the source root's repository, the scratch one: it names no build inputs, so
+    ;; another binary than target/seon)
     (is (= :seon.process/env-mismatch spawned) (str "the agent's start asks its binary, nothing before it: " (pr-str (first (:also two)))))
     (is (not (str/includes? (str message) "git tree")) "no refusal names the trees")
     (doseq [act ["bin/system start --reindex" "bin/system next"]]

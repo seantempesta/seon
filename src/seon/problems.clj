@@ -227,7 +227,10 @@
              :when (and (not (except (str nsym))) (not (named v)) (contains? @program nsym) (site-of f nsym))
              :let [s (str "unnamed-site " (name law) " " v)]]
          (derived-row ans s nsym (str v " has a " (name law) " site that " page " does not name")
-                      {:kind :unnamed-site :law law :site v :page page} {:law law :site v :page page}))))))
+                      {:kind :unnamed-site :law law :site v :page page}
+                      ;; the form that clears it: the law's page (its section when it has one) naming the site, through the branch
+                      {:law law :site v :page page
+                       :do (list 'seon.repl/edit! (or section page) "<a line of it>" (str "<that line>\n- `" v "`: why it " (name law) "es here"))}))))))
 
 (def pins
   "Where the wiki states each customized library's pin: the page, and the line that states one
@@ -752,7 +755,9 @@
                 :let [nsym (symbol (namespace k)) s (str "unschemed-key " k)
                       vars (vec (sort (keep #(some-> (first (d/datoms db :eavt % :form/defines)) :v (->> (d/entity db)) :var/name) es)))]]
             (derived-row ans s nsym (str k " is named in src by " (count vars) " vars (the row's :vars) and no schema entry defines it: write its entry, with a :description")
-                         {:kind :unschemed-key :key k :vars vars} {:key k :vars vars}))))))
+                         {:kind :unschemed-key :key k :vars vars}
+                         ;; the form that clears it, as a red proof carries its :do (seon.ctx.status shows it beside the problem)
+                         {:key k :vars vars :do (list 'my.schema/register! k [:any {:description "what it is, in a sentence"}])}))))))
 
 (defn waived-proofs
   "Each cost proof of a test form of the program that carries an `:overrun` (a waiver: seon.cost/proof), as a
@@ -988,7 +993,7 @@
   (let [{:keys [made closed]} (split-rows base head {} ch moved)
         attention? (:seon.problems/attention (contract/properties :seon.problems/class))
         messages (fn [pred] (vec (sort (into #{} (comp (filter pred) (map :message)) made))))
-        shown (fn [rs] (vec (sort-by (juxt (comp str :class) :message) (into #{} (map #(select-keys % [:class :message])) rs))))]
+        shown (fn [rs] (vec (sort-by (juxt (comp str :class) :message) (into #{} (map #(select-keys % [:class :message :do])) rs))))]
     {:caused (messages (complement (comp attention? :class))) :attention (messages (comp attention? :class))
      :rows (shown made) :closed (shown closed)})))
 

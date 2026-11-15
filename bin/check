@@ -1,5 +1,6 @@
 #!/bin/zsh
 # bin/check [N] — the platform's end-to-end checks on target/seon (bin/build seon), each a
+# DEVIATES (owner, 2026-11-15: every bin/ script is thin over an op): runs the end-to-end checks as processes of its own, not as tests on the test service; not ported: seon.check/check-steps-are-tests-on-the-service asks what job is left once the runtime's mechanisms do theirs (owner: never port the outside logic as it is).
 # mode of seon.check (laws is bin/laws and health bin/test --health, neither on the binary): contracts, mg-check, fx, config, system, mcp, agent-checks, threads, instrument, record,
 # smoke, lifecycle, hotreload, idle, orphan,
 # window, e2e tasks and scenarios,

@@ -9,7 +9,7 @@
   and M1's proto.agents.task; the attributes are derived from resources/seon/schemas (session D1)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [datahike.db.utils :as dbu] [clojure.string :as str] [clojure.edn :as edn] [seon.merge :as pm] [seon.db :as pdb] [seon.edn :as sedn]
-            [seon.print :as print] [seon.ref :as ref] [seon.program :as program] [seon.config :as cfg] [seon.lib :as lib] [clojure.walk :as walk]))
+            [seon.print :as print] [seon.ref :as ref] [seon.program :as program] [seon.config :as cfg] [seon.lib :as lib]))
 
 ;; ---- identity --------------------------------------------------------------------
 
@@ -842,15 +842,19 @@
   (boolean (finished (:v (first (d/datoms db :eavt te :seon.task/outcome))))))
 
 (defn running
-  "The tasks whose agents work on db (outcome :running), each as {:task id :agent the agent's id :key its key :env its
-  environment}: one AVET seek of the outcome, the task and its agent pulled."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.task/running]]}
-  [db]
-  (vec (for [{e :e} (d/datoms db :avet :seon.task/outcome :running)
+  "The tasks whose agents work on db (outcome :running; with outcome, those at it: :parked, a session between requests), each as
+  {:task id :agent the agent's id :key its key :env its environment}: one AVET seek of the outcome, the task and its agent pulled."
+  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :seon.task/running]]
+                  [:=> [:cat :seon.host/db :keyword] [:vector :seon.task/running]]]}
+  ([db] (running db :running))
+  ([db outcome]
+  (vec (for [{e :e} (d/datoms db :avet :seon.task/outcome outcome)
              :let [t (d/pull db [:seon.task/id {:seon.task/agent agent-pull}] e)
                    a (some-> (:seon.task/agent t) agent-value)]]
          (cond-> {:task (:seon.task/id t)}
-           a (assoc :agent (keyword (:seon.agent/key a)) :key (:seon.agent/key a) :env (:seon.agent/env a))))))
+           a (assoc :agent (keyword (:seon.agent/key a)) :key (:seon.agent/key a))
+           ;; a parked session's agent (root's) may hold no env: none is written, never a nil
+           (:seon.agent/env a) (assoc :env (:seon.agent/env a)))))))
 
 (defn root
   "Root's boot and the config keys it reads on db: {:boot :max-running :max-merging :gate-checkout :started-by}, the config's

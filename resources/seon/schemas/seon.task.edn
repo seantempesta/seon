@@ -152,6 +152,8 @@
                              [:deferred {:optional true} [:set :qualified-symbol]]
                              ;; the red tests that are main's, not this branch's change (red as base holds them): never a stray red
                              [:main-red {:optional true} [:set :qualified-symbol]]
+                             ;; the red tests main was asked of and answered nothing (a process test): held, never a stray red
+                             [:main-unknown {:optional true} [:set :qualified-symbol]]
                              ;; whether the branch changed a program key or carried task content since its merge base (absent: not measured)
                              [:changed? {:optional true} :boolean]
                              ;; a refine's: whether the task it refines names a function its plan did not at the merge base (absent: no refine)
@@ -161,8 +163,9 @@
                                                     :regression "green on main, red here" :stray-red "red test that is no proof" :contract-gap "functions without a contract"
                                                     :unmerged "unmerged entries" :no-design "plan unchanged since the run began" :open-problem "problems to clear"
                                                     :behind "judged before main moved" :no-change "nothing changed on its branch since it began"
-                                                    :no-change-site "the task it refines names no function it did not before"}}
-                         :open :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem :behind :no-change :no-change-site]
+                                                    :no-change-site "the task it refines names no function it did not before"
+                                                    :main-unknown "red here, main's verdict of it unknown"}}
+                         :open :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem :behind :no-change :no-change-site :main-unknown]
  :seon.reconcile/not-done [:map {:closed true :description "One reason a judged task is not done, as its :seon.task/reasons holds them: the reason, and what it is about (the test or var, the key of an unmerged entry, how many transactions main moved). See docs/tasks.md#the-done-rule."}
                           [:reason :seon.reconcile/reason]
                           [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string] [:behind {:optional true} pos-int?]]

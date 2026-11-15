@@ -325,7 +325,7 @@
         asks (for [r (rows-with db nss [":messages"])
                    :when (some #(and (map? %) (contains? % :messages) (or (contains? % :turn) (contains? % :model))) (tree-seq coll? seq (:read r)))
                    v (named-by r)
-                   :when (not (or (some #{'seon.ctx.wire/render 'seon.ctx.wire/request} (:refs r))
+                   :when (not (or (some #{'seon.ctx.wire/render 'seon.ctx.wire/request 'seon.turn/request!} (:refs r))
                                   (#{'seon.model/request-body 'seon.ctx.wire/request 'seon.ctx.wire/wire-of 'my.root/first-moves!} v)))] v)]
     (set (concat by-ref role asks))))
 
@@ -585,9 +585,12 @@
   (let [[main branch] (paged-dbs)
         st (-> (proc-state main branch) (assoc :watch #{}) (root-state main))
         main2 (d/db-with (:main-db st) [{:seon.task/id "zz/one" :seon.task/ns 'zz :seon.task/name "one" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work}])
-        n (atom 0) diff d/datoms-diff
-        st2 (with-redefs [d/datoms-diff (fn [& args] (swap! n inc) (apply diff args))] (#'p/advance-main st main2))]
-    (is (= 1 @n) (str "one diff a move of main, " @n " made"))
+        ;; the diff is seon.ctx/moved (a contracted function: seon.profile counts its calls, exactly, where every walk reads main's move);
+        ;; no library var is redefined to count it
+        _ (seon.profile/begin!)
+        st2 (#'p/advance-main st main2)
+        n (some #(when (= 'seon.ctx/moved (:var %)) (:calls %)) (seon.profile/touched))]
+    (is (= 1 n) (str "one diff a move of main, " n " made"))
     (is (identical? main2 (get-in st2 [:root-walk :db])) "root's walk is at the new main")))
 
 (deftest the-problems-tile-counts-what-still-holds
