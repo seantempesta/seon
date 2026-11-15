@@ -100,8 +100,10 @@ setup() {
     # and delete while this copies (a directory deleted under cp failed the copy: seon.source-test's
     # bin/worktree --at went red in full proves, never alone)
     for e in "$FROM"/target/*.stamp(N); do
-      # and NAME.program, the program the binary was built from (seon.system/binary-current reads it: without it a gate's binary is unknown, and builds)
-      for p in $e ${e%.stamp} ${e%.stamp}.build ${e%.stamp}.tree ${e%.stamp}.program; do
+      # and NAME.program, the program the binary was built from (seon.system/binary-current reads it: without it a gate's binary is unknown, and builds),
+      # and NAME.digest, its identity (seon.fx/runtime-for reads it at every start: without it every attach in a land's checkout was refused,
+      # "identity (none recorded)", flow's 16:43 land, 2026-11-15)
+      for p in $e ${e%.stamp} ${e%.stamp}.build ${e%.stamp}.tree ${e%.stamp}.program ${e%.stamp}.digest; do
         if [[ -e $p ]]; then cp -cR "$p" "$WT/target/"; fi
       done
     done

@@ -18,7 +18,7 @@ The REPL answers faster and more surely than reasoning does. When you are unsure
 
 This is an ordinary process: files, the shell (`clojure.java.shell/sh`) and the network are open to you; your working directory is scratch with no repository above it, so give git and the shell absolute paths. One eval can hold several forms.
 
-Your branch is the program you change, and you change it by evaluating definitions at this REPL: a `defn` you evaluate, or `(seon.repl/edit! ...)`, is recorded on your branch, and the merge writes it to its file. A file written on disk is not your branch: no merge carries it, and work left there is lost. Read code as your branch holds it: `(lines 'the.ns)` for a namespace's file (test namespaces too), `(source ns/f)`, and a script's text as `(:file/text (d/entity (my.db/db) [:file/path "bin/x"]))`. `(System/getenv "SEON_CHECKOUT")` is a checkout for git and the shell, not where the program changes.
+Your branch is the program you change, and you change it by evaluating definitions at this REPL: a `defn` you evaluate, or `(seon.repl/edit! ...)`, is recorded on your branch, and the merge writes it to its file. A new namespace, a test namespace too, is an `(ns app.x-test (:require ...))` evaluated here, then its `deftest`s. A file written on disk is not your branch: no merge carries it, and work left there is lost. Read code as your branch holds it: `(lines 'the.ns)` for a namespace's file (test namespaces too), `(lines 'the.ns/f)` for one definition whole (a grep hit's `:at` without its line number), `(source ns/f)`, and a script's text as `(:file/text (d/entity (my.db/db) [:file/path "bin/x"]))`. `(System/getenv "SEON_CHECKOUT")` is a checkout for git and the shell, not where the program changes.
 
 Your REPL starts in your task's namespace, a program namespace: every `def` there, or in any program namespace, is a definition your branch merges. Keep a scratch value in a `let`, or define it after `(in-ns 'user)`.
 
@@ -27,6 +27,8 @@ To find things: `(search "words")` ranks code and wiki sections; `(doc x)` reads
 ## Your context
 
 What you are sent is drawn from your record, `@ctx`, an atom. Changing it changes what you are sent: `(keys (:seon.eval/_agent @ctx))` lists your evals by id, and `(swap! ctx update :seon.eval/_agent dissoc id)` drops one.
+
+Write what you learn into your task's plan as you go: the cause you found, the fix site, a measurement with its handle, as `(swap! ctx update-in [:seon.agent/task :seon.task/plan] str "\n\nFound: ...")`. Your progress is read from what you write, and a restart of your task begins from its plan.
 
 Your record and your page reach you as evals Seon makes: at your first turn `(my.render/ctx p)`, your record whole as data, then `(my.render/page p)`, your page whole as hiccup, each part a section under its id; then `(my.render/diff p0 p1)` where something moved, as edits `[path op value]`:
 
