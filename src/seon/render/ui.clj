@@ -1306,12 +1306,10 @@
      (when (seq unmerged)
        [:div {:key :unmerged}
         [:p "Main changed these too, so they are unmerged. Settle each: keep yours, or take main's."]
-        (for [{:keys [key entity ours theirs]} unmerged]
-          [:div {:key key} [:p [:code (str (if entity (str entity " " (nth key 2)) key))] ". Yours:"] [:pre [:code (as-text ours)]] [:p "Main's:"] [:pre [:code (as-text theirs)]]
-           ;; settled by its entity's name ([:var/name sym] as the symbol), an entity with no name by its key (my.branch/resolve!'s contract)
-           (let [arg (cond (and (vector? entity) (= :var/name (first entity))) (second entity)
-                           (vector? entity) entity
-                           :else key)]
+        (for [{:keys [key ours theirs]} unmerged]
+          [:div {:key key} [:p [:code (str key)] ". Yours:"] [:pre [:code (as-text ours)]] [:p "Main's:"] [:pre [:code (as-text theirs)]]
+           ;; a var's entry is settled by its name, any other program key by the key itself (my.branch/resolve!'s contract)
+           (let [arg (if (= :var (first key)) (second key) key)]
              [:p "Keep yours: " [:code (str "(my.branch/resolve! '" arg ")")] ". Take main's: " [:code (str "(my.branch/resolve! '" arg " :theirs)")] "."])])])
      (when (seq (:conflicts merge)) [:p {:key :conflicts} (str (count (:conflicts merge)) " things conflict with main; they are listed above.")])
      (when main-moved [:p {:key :main-moved} main-moved])
@@ -2235,7 +2233,7 @@
         props (contract/properties from)
         text (get (:seon.status/title props) k (kname k))
         tone (get (:seon.status/tone props) k :quiet)
-        turns (when (= :cap k) (or (:seon.agent/ended-turn a) (:seon.agent/max-turns a) (config/value :seon.config.agent/max-turns)))
+        turns (when (= :cap k) (or (:seon.agent/ended-turn a) (:seon.agent/max-turns a)))
         ;; what the task waits on, as a fact about it beside its word (Point's ruling within the owner's 2026-11-08 plain words,
         ;; 2026-11-10): no instruction to the person
         waits (cond (= k :parked) "waits for a message"
