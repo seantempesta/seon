@@ -1461,7 +1461,8 @@
                     (let [at (reds-at (into {} (for [[t s] results :let [b (get base t)] :when (and b (not= :pass s))] [t b])))]
                       (when-not (contract/error? at) (into {} (for [[t f] at] [(get base t) {:pass 0 :fail 1 :error 0 :failures [f]}])))))]
         (if (and (seq base) (map? results))
-          (assoc-in r [:value :main-red] (proofs/main-red results (or digests {}) base (or found {})))
+          (-> r (assoc-in [:value :main-red] (proofs/main-red results (or digests {}) base (or found {})))
+              (assoc-in [:value :unknown-reds] (proofs/unknown-reds results (or digests {}) base (or found {}))))
           r)))))
 
 ;; ---- a session's items (Flow step 4) -------------------------------------------------
