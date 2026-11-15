@@ -2339,23 +2339,19 @@
   [tree] (keyword (str "tree-" tree)))
 
 (defn- tree-refusal
-  "Why the running binary can't prove checkout tree, or nil: what the tree changes that the binary bakes (baked-changes, against
-  the tree the binary was built from), whose tests would run on this binary's build of them, never the tree's, and be stored at the
-  tree's digests (deps' pin branch: a seek measured 3.2 KB on main's build against 1.76 KB on its own). Such a tree
-  is proved by a build of its own (bin/prove --out DIR). A binary that recorded no tree, or a diff git can't make, is unknown,
-  never current. See docs/merging.md#a-session-proves-through-root."
-  {:malli/schema [:=> [:cat [:maybe :string] :string] [:maybe :seon.error/base]]}
-  [built tree]
-  (let [changed (when built (fx/tree-diff (cfg/checkout) built tree))
-        why (cond (nil? built) "the running binary recorded no tree it was built from"
-                  (contract/error? changed) (str "git can't diff the binary's tree " built " against " tree ": " (:seon.error/message changed))
-                  :else (when-let [baked (seq (baked-changes changed))]
-                          (str "it changes what the running binary bakes (" (str/join " " baked) ")")))]
-    (when why
+  "Why the running binary can't prove checkout tree, or nil: seon.fx/runtime-for's answer for it, the one binary identity (the
+  build inputs, the tracked pins and the config keys only a new process acts on). A tree that changes src, tests or schemas only
+  is proved here: its agent loads them as a diff. A tree whose identity differs would run its tests on this binary's build of what
+  it changes, and store them at the tree's digests; it is proved by a build of its own (bin/prove --out DIR). A binary that
+  recorded no identity is unknown, never current. See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat :string] [:maybe :seon.error/base]]}
+  [tree]
+  (let [rt (fx/runtime-for tree)]
+    (when (contract/error? rt)
       (contract/error :seon.system/binary-not-current #'tree-refusal
-                      (str "this tree can't be proved on the running system: " why
-                           "; its tests would run on the system's build of them. Prove it on its own build: bin/prove --out DIR")
-                      {:binary built :tree tree :baked (if (vector? changed) (baked-changes changed) [])}))))
+                      (str "this tree can't be proved on the running system: " (:seon.error/message rt)
+                           "; its tests would run on the system's build of what it changes. Prove it on its own build: bin/prove --out DIR")
+                      {:binary (:seon.process/binary-digest rt) :tree tree :baked (vec (:seon.process/differs rt))}))))
 
 (defn prove-tree!
   "Prove the files of checkout (a worktree of this root's repository) at tree, its tree id (seon.fx/tree-id, what bin/build records):
@@ -2368,7 +2364,7 @@
   {:malli/schema [:=> [:cat :seon.system/sys [:map [:checkout :string] [:tree :string]]] :map]}
   [sys {:keys [checkout tree names mode]}]
   (let [b (tree-branch tree)
-        refusal (tree-refusal (get-in (program/binary-program) [:inputs :tree]) tree)
+        refusal (tree-refusal tree)
         c (when-not refusal (catch-up @(:conn sys) checkout {:fact? false}))]
     (cond
       refusal refusal
