@@ -258,12 +258,15 @@
             ;; a merged task's cites are derived from its text: made again here, never carried (seon.task/merged-cites-tx)
             settled (pdb/with replayed (:settle-ops r) nil meta)
             cites (task/merged-cites-tx (:db-after settled) (mapv (fn [[e a]] [:datum e a]) ks))
-            merged (if (seq cites) (:db-after (pdb/with (:db-after settled) cites nil meta)) (:db-after settled))
+            cited (when (seq cites) (pdb/with (:db-after settled) cites nil meta))
+            merged (if cited (:db-after cited) (:db-after settled))
+            ;; the keys the cites wrote, read from their datoms (cites-tx gives entity maps), the transaction's own facts left out
+            cite-keys (for [dt (:tx-data cited) :when (not= (:e dt) (:tx dt))] [(:e dt) (:a dt)])
             ;; the entities touched whole: each a merge re-identifies (both ids), each it retracts whole, each entry it settles
             whole (distinct (concat (mapcat identity (:remapped c))
                                     (for [{:keys [ops]} (:txs c) [o e] ops :when (= :db/retractEntity o)] e)
                                     (map second (:settle-ops r))))
-            ds (pm/merge-record head merged [gone added] (into ks (for [[_ e a] cites :when (keyword? a)] [e a])) whole)
+            ds (pm/merge-record head merged [gone added] (into ks cite-keys) whole)
             cid (d/force-branch! merged b #{(d/commit-id head) (d/commit-id main)}
                                  {:expected-current-commit (d/commit-id head) :changes {:base (d/commit-id head) :datoms ds}})]
         {:ok true :commit cid :keys (count ks) :t (:max-tx merged) :main (d/commit-id main)}))))
