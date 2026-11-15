@@ -1405,7 +1405,7 @@
   ;; a stop answers every wait still held: root stopped, nothing will answer it
   ([st transition]
    (if (= transition ::flow/stop)
-     (do (doseq [w (:waits st)] (deliver (:p w) {:stopped true})) (assoc st :waits []))
+     (step/end-all st {:stopped true} :waits)
      st))
   ([st in m]
    (case in

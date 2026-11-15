@@ -1345,7 +1345,7 @@
 (declare serve-request)
 
 (defn- reply-run!
-  "The reply root is owed for the eval that started run state st's run (:rid, its response :resp): the run's end as its value,
+  "The reply root is owed for the eval that started run state st's run (:reply-to, its response :resp): the run's end as its value,
   or e's error map when the run's driver threw, sent once its writes are committed; the agent is no longer busy. See
   docs/flow.md#flow-inside-an-agent."
   {:malli/schema [:=> [:cat :map :any [:maybe :seon.host/throwable]] :nil]}
@@ -1355,7 +1355,7 @@
   (let [resp (if-let [rec! (get-in st [:run :record])] (rec!) (:resp st))]
   (when (:dirty? @agent/state) (agent/commit!))
   (swap! agent/state assoc :busy false)
-  (agent/send! {:op :reply :id (:rid st)
+  (agent/send! {:op :reply :id (:reply-to st)
                 :response (agent/on-the-wire (if e (-> resp (dissoc :value) (assoc :ex (agent/error-map e 'seon.turn/work!))) (assoc resp :value end)))
                 :t (:max-tx (agent/db))}))
   nil)
@@ -1370,19 +1370,19 @@
   (let [{:keys [step effect end]} (:run st)
         r (try (step (:run-st st) msg) (catch Throwable e [::threw e]))]
     (cond
-      (= ::threw (first r)) (do (reply-run! st nil (second r)) (dissoc st :run :run-st :rid :resp))
+      (= ::threw (first r)) (do (reply-run! st nil (second r)) (dissoc st :run :run-st :reply-to :resp))
       (= :seon.turn/end (first r)) (let [v (try {:end (end r)} (catch Throwable e {:e e}))]
                                      (reply-run! st (:end v) (:e v))
-                                     (dissoc st :run :run-st :rid :resp))
+                                     (dissoc st :run :run-st :reply-to :resp))
       :else (let [[run-st out] r port (:run-port st)
                   ;; this output's number: its answer carries it, and an answer to any other (a call a stop dropped, of a run since
                   ;; ended) is dropped, never stepped into the run in force (context-4's review)
-                  n (inc (:out-n st 0))]
+                  [st n] (step/pend st :run-output)]
               ;; the turn's writes are on the branch before its call goes out, as each eval's are before its answer
               (when (:dirty? @agent/state) (agent/commit!))
               ;; a fiber (Jolt's io-thread), never an OS thread: the agent stays one thread, so judge! forks its test children
               (a/io-thread (a/put! port (assoc (effect out) ::out n)))
-              (assoc st :run-st run-st :out-n n)))))
+              (assoc st :run-st run-st)))))
 
 (defn- drain
   "The :repl proc's state st with the requests queued while a run was out served in arrival order, until the queue is empty or one
@@ -1408,12 +1408,12 @@
   {:malli/schema :seon.step/step-fn}
   ([] {:ins {:in "the requests that run at the REPL or write the branch"} :outs {} :workload :io
        :ping-map-fn (fn [st] {:evals (:n @agent/state) :run (some-> (:run-st st) (select-keys [:task :turn])) :queued (count (:queue st))})})
-  ([_] (let [port (a/chan 4)] {:run-port port :queue clojure.lang.PersistentQueue/EMPTY ::flow/in-ports {:run port}}))
+  ([_] (let [port (a/chan 4)] {:run-port port :rid 0 :pending {} :queue clojure.lang.PersistentQueue/EMPTY ::flow/in-ports {:run port}}))
   ([st _] st)
   ([st in m]
    (cond
      ;; the answer of the run's last output; one to any other output (a call a stop dropped, a run that ended) is dropped
-     (= :run in) [(if (and (:run st) (= (::out m) (:out-n st))) (drain (drive-run st (dissoc m ::out))) st) nil]
+     (= :run in) (let [[st v] (step/answered st (::out m))] [(if (and v (:run st)) (drain (drive-run st (dissoc m ::out))) st) nil])
      ;; root's stop ends a run at once, then the requests before it and the stop itself are served in order
      (and (:run st) (= :stop (:op m))) [(drain (update (drive-run st {:seon.turn/stop true}) :queue conj m)) nil]
      ;; a request while a run is out waits for it: nothing else touches the branch mid-turn
@@ -1461,7 +1461,7 @@
     (doseq [r (told-refused rs)] (agent/send! r))
     (if-let [{run-st :st resp :resp :as run} @hand]
       ;; the run is this proc's now: its first step taken, root's reply held for its end
-      (drive-run (assoc st :run (dissoc run :st :resp) :run-st run-st :rid (:id m) :resp resp) nil)
+      (drive-run (assoc st :run (dissoc run :st :resp) :run-st run-st :reply-to (:id m) :resp resp) nil)
       (do (swap! agent/state assoc :busy false) st))))
 
 (declare defect-answer)
