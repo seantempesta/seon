@@ -20,7 +20,7 @@ Told that ticks count Scheme work only (no foreign calls, GC copying, parked tim
 
 ### Claude agents are driven through Seon's own turns
 
-He asked that Claude agents be driven through the Seon MCP turns, with context launching Sonnet agents on real tasks to learn what works and what confuses, using tools as close as possible to a Seon agent's (2026-11-15). A driver is a project agent type allowed only the `seon_*` tools (attach, context, eval, done, message), reading `seon_context` as its whole view and acting only through `seon_eval`; its runs sit beside model runs of the same tasks, and their difference is the finding. Context runs it.
+He asked that Claude agents be driven through the Seon MCP turns, with context launching Sonnet agents on real tasks to learn what works and what confuses, using tools as close as possible to a Seon agent's (2026-11-15). A driver is a project agent type allowed only the `seon_*` tools (attach, context, eval, done, message), reading `seon_context` as its whole view and acting only through `seon_eval`; its runs sit beside model runs of the same tasks, and their difference is the finding. A driver gets each turn's changes exactly as a model agent does (what moved, in each `seon_eval` reply, from the one turn assembly), reading `seon_context` once at attach; where the outside path differs, it is fixed. Context runs it.
 
 ### A binary is built only when it is needed
 
