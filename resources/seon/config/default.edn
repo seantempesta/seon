@@ -1083,6 +1083,12 @@
  ;; were starved and sections and keys half noise (docs/vector.md#relevance). At the bound: an item at
  ;; exactly this chance is shown.
  :seon.config.render/relevance-summary 0.4
+ ;; Unit: tokens. The source a search's part draws of its nearest functions (seon.render.ui/searched).
+ ;; Provenance: round 1 (2026-11-15), task seon.agent/a-test-child-starts-on-its-branchs-environment: its
+ ;; request's search held hold-env!, agent-frame and test-child-runs! (relevance 0.40-0.48) as lines and
+ ;; the agent spent turns on (source ..) of each; their sources are ~500, ~4,400 and ~2,000 tokens, so
+ ;; 10,000 draws a task's nearest three to five whole, sent once in the cached prefix.
+ :seon.config.render/search-source-tokens 10000
  ;; Unit: items of each kind. How many of the nearest by meaning relevance's pool takes
  ;; (seon.vector/near), beside the seeds and their neighbourhood, and how many of a seed's
  ;; neighbours each read of who names it takes (seon.ctx.search/neighbours: a plan citing
