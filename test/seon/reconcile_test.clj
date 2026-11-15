@@ -2382,7 +2382,7 @@
 ;; docs/errors.md#nothing-crashes-and-nothing-hangs: a flight's last write (its :done step) that the writer refused left the task
 ;; :running with no flight and no problem: it stayed live, the reconciler never went quiet, and seon_done's await-db waited for
 ;; good (root's read, 2026-11-15: reconcile.clj's :done dropped the flight whatever its answer). Now a refused :done is the
-;; reconciler's :platform problem, which done-settled?'s defect branch reads. Red before: no output. Estimate: one step of a map, ~0.1M
+;; reconciler's :platform problem, which the server's :done reads beside its judge's answer (answer-judged). Red before: no output. Estimate: one step of a map, ~0.1M
 (deftest ^{:seon.test/estimate {:ticks 300000}} a-flights-refused-last-write-is-a-problem-never-a-silent-end
   (let [st {:db (seon.db/empty-db false) :boot "b" :flights {"t/a" {:act {:op :spawn :task "t/a"} :agent :a1}} :pending {} :rid 0}
         refused (seon.contract/error :seon.writer/refused #'seon.writer/commit-batch "the cas found :ready, not :running" {})
@@ -2393,3 +2393,28 @@
     (is (= "t/a" (get-in p [:error :task])) "naming the task")
     (is (= refused (get-in p [:error :refused])) "and the refusal")
     (is (= [] (second (#'seon.reconcile/advance st "t/a" :done {:ok true :t 5}))) "an answered write ends it with nothing to say")))
+
+;; docs/server.md#ops: seon_done waits on its judge's own end (seon.reconcile/answer-judged), never on the whole root's quiet: a
+;; :running task of anyone's kept the reconciler from quiet, and a judge that left its task :running waited for good (context's
+;; 06:31 capture [M]: flights 0, live 1, quiet false, the :done pending). Each order of the judge's end and the wait, red first.
+;; Estimate: three steps of the reconciler over a db of one task, ~1M
+(deftest ^{:seon.test/estimate {:ticks 1500000}} a-judges-waiter-is-answered-by-the-judges-end-in-either-order
+  (let [db (fn [o] (d/db-with (seon.db/empty-db false) [{:seon.task/id "demo/a" :seon.task/outcome o}]))
+        st (fn [o] {:db (db o) :boot "b" :flights {} :pending {} :rid 0 :waits [] :judged {} :behind []})
+        step (fn [st in m] (first (r/reconciler-proc st in m)))]
+    (testing "the wait after the judge's end (no flight left): answered at once from the db, no window"
+      (let [p (promise) _ (step (st :closed) :judge {:op :judged :task "demo/a" :p p})]
+        (is (= {:task "demo/a" :outcome :closed} (deref p 0 :unanswered)))))
+    (testing "the judge left its task :running: the typed error, never a wait for good"
+      (let [p (promise) _ (step (st :running) :judge {:op :judged :task "demo/a" :p p})]
+        (is (= :seon.reconcile/judge-left-running (:seon.error/type (deref p 0 :unanswered))))))
+    (testing "the wait before the judge's end: held while its flight is in the air, answered by the step that ends it"
+      (let [p (promise)
+            s (assoc (st :running) :flights {"demo/a" {:act {:op :spawn :task "demo/a"} :agent :a1}})
+            s (step s :judge {:op :judged :task "demo/a" :p p})]
+        (is (= :unanswered (deref p 0 :unanswered)) "held: the judge is still in the air")
+        (#'seon.reconcile/answer-judged (assoc s :flights {} :db (db :failed)))
+        (is (= {:task "demo/a" :outcome :failed} (deref p 0 :unanswered)) "its end answers it")))
+    (testing "a task at :ready waits on for its merge"
+      (let [p (promise) _ (step (st :ready) :judge {:op :judged :task "demo/a" :p p})]
+        (is (= :unanswered (deref p 0 :unanswered)))))))

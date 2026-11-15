@@ -279,7 +279,7 @@
      :fx (into (sorted-map) (for [[pid m] states :let [s (::flow/state m)] :when (and (contains? s :in-flight) (contains? s :queued))]
                               [pid (select-keys s [:busy :in-flight :queued :done])]))
      ;; the reconciler's flights by task and the step each waits at: a judge that never settles is named
-     :reconciler (select-keys (state :reconciler) [:flights :flight-steps :quiet :t :waits :report :live :pending :behind])
+     :reconciler (select-keys (state :reconciler) [:flights :flight-steps :quiet :t :waits :report :live :pending :behind :judged])
      :agents (into (sorted-map)
                    (for [[pid m] states :let [s (::flow/state m)] :when (contains? s :inflight)]
                      [pid (assoc (select-keys s [:fx-out :stall-seen :last-frame-ms :holding :held]) :inflight (update-vals (:inflight s) :kind))]))
@@ -2107,9 +2107,11 @@
 (defn judge!
   "Hand an outside agent's task to the reconciler for judgement, as a turn loop's end
   is: proofs in a fork, the branch read, the agent retired. work {:task :env
-  :agent}. nil."
-  {:malli/schema [:=> [:cat :seon.system/sys :map] :nil]}
-  [sys work] (a/>!! (:judge sys) (assoc work :op :judge)) nil)
+  :agent}. A promise of the judge's end, answered by the reconciler when the task has no flight left
+  (seon.reconcile/answer-judged): {:task :outcome}, the typed :seon.reconcile/judge-left-running, or {:stopped true} when
+  root stopped. The producer's own answer, never a quiet of the whole root."
+  {:malli/schema [:=> [:cat :seon.system/sys :map] :seon.host/promise]}
+  [sys work] (step/ask-edge (:judge sys) (assoc work :op :judge) {:stopped true}))
 
 (defn await-db
   "Main's first db value (now or as of a later commit) for which (pred db) holds. The wait is the api's state, checked in the

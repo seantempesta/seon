@@ -473,19 +473,6 @@
         (seq (:red r)) (assoc :failures (into (sorted-map) (for [[t fs] (proofs/failures r)] [t (first fs)])))
         (seq (:deferred r)) (assoc :deferred (:deferred r) :why (:why r))))))
 
-(defn- done-settled?
-  "Whether seon_done may answer on db: task's own work is judged, so its outcome has left :running and :ready (judged green,
-  waiting for its merge, minutes at most), or a root defect stopped the judge (defect, a fn of db). At :gate the judge has
-  decided the task's own proofs and the merge gate runs the process tests its change reaches, which can take as long as the
-  run (242 items, ~30 min on the standing system, longer than an MCP client waits): done answers there, saying so, and the
-  gate's verdict reaches the agent's page and the task's outcome. A gate with no process test to run (:seon.task/deferred
-  empty: only the candidate is analyzed) is its merge, minutes at most, so done waits through it as through :ready.
-  See docs/server.md#ops."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id ifn?] :boolean]}
-  [db task defect]
-  (let [{o :seon.task/outcome ts :seon.task/deferred} (d/pull db [:seon.task/outcome :seon.task/deferred] [:seon.task/id task])]
-    (boolean (or (not (or (#{:running :ready} o) (and (= :gate o) (empty? ts)))) (defect db)))))
-
 (defmethod op-answer :done [sys ag req]
   (if-let [{:keys [task env]} (work-of sys ag)]
     ;; the end first, as a turn loop's end is written, so the judge reads it
@@ -496,14 +483,12 @@
             (:ex r) (:ex r)
             (:text r) (let [t (:max-tx @(:conn sys))
                             outcome #(:seon.task/outcome (d/pull % [:seon.task/outcome] [:seon.task/id task]))
-                            ;; judged and past its merge: the task left :running and the gate (the reconciler merged, parked,
-                            ;; held or refused it), or a root defect stopped the judge
-                            _ (c/judge! sys {:task task :env env :agent ag})
-                            db (c/await-db sys (str "the judge of " task)
-                                          #(done-settled? % task (fn [db] (c/defect db t "seon.reconcile"))))]
-                        ;; a judge that has not moved by root's quiet never will: that, or root
-                        ;; stopped, is the answer
-                        (cond (contract/error? db) (assoc db :task task)
+                            ;; the judge's own end answers (seon.reconcile/answer-judged): the task judged and past its merge (it
+                            ;; left :running and the gate), or the typed error of a judge that left it :running, or root stopped
+                            j @(c/judge! sys {:task task :env env :agent ag})
+                            db @(:conn sys)]
+                        (cond (contract/error? j) (assoc j :task task)
+                              (:stopped j) (refused (str "root stopped while judging " task))
                               ;; green, behind main alone (seon.reconcile's judgment, bounded by max-behind): handed back again,
                               ;; which takes main first, as a model agent's turn loop does when it is told so
                               (= :behind (outcome db)) (op-answer sys ag req)

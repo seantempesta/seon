@@ -1095,7 +1095,7 @@
     (case step
       :ignored [st []]
       ;; the flight's last write; refused, the task is still :running with no flight, live for good: never a silent end
-      ;; but the reconciler's :platform problem, which a wait on the task reads (seon.server's done-settled?, seon.system/defect)
+      ;; but the reconciler's :platform problem, which a wait on the task reads (seon.system/defect), and its waiter is answered (answer-judged)
       :done (if (contract/error? r)
               [(update st :flights dissoc id)
                [{:op :problem :class :platform
@@ -1391,6 +1391,34 @@
         [st more] (if (and aid (not (get-in st [:flights aid])) (:db st)) (pass st) [st []])]
     [st (into outs more)]))
 
+(defn settled?
+  "Whether task id's work is judged on db, so a wait on its judge (seon_done) answers: its outcome left :running and :ready, or
+  it is at :gate with no process test deferred (its merge, minutes at most). The one rule a judge's waiter reads. See
+  docs/server.md#ops."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] :boolean]}
+  [db id]
+  (let [{o :seon.task/outcome ts :seon.task/deferred} (d/pull db [:seon.task/outcome :seon.task/deferred] [:seon.task/id id])]
+    (not (or (contains? #{:running :ready} o) (and (= :gate o) (empty? ts))))))
+
+(defn- answer-judged
+  "st with each wait on a task's judge (:judged, {task [promise]}) answered once the task has no flight: {:task :outcome} when it
+  is settled?, the typed :seon.reconcile/judge-left-running when its flight ended and left it :running (nothing of root's will
+  move it); a task at :ready waits on, its merge to come as commits. Asked after every step, so the producer's own end answers
+  its waiter, never a quiet of the whole root. O(waits)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
+  (if (or (empty? (:judged st)) (nil? (:db st)))
+    st
+    (reduce-kv (fn [st id ps]
+                 (if (get-in st [:flights id])
+                   st
+                   (let [o (:seon.task/outcome (d/pull (:db st) [:seon.task/outcome] [:seon.task/id id]))
+                         r (cond (settled? (:db st) id) {:task id :outcome o}
+                                 (= :running o) (contract/error :seon.reconcile/judge-left-running #'seon.reconcile/answer-judged
+                                                                (str id "'s judge ended and left it :running: nothing root runs will move it") {:task id}))]
+                     (if r (do (doseq [p ps] (deliver p r)) (update st :judged dissoc id)) st))))
+               st (:judged st))))
+
 (defn reconciler-proc
   "The reconciler. In :main (main's commit notices {:t :prev :ops :commit}, in order, a blocking buffer; it makes the db of the commit when it takes the notice), :answers (the
   api's answers to its requests) and :wake ({:agent key}: a message reached that agent, written by root's writer and answered; the api puts one
@@ -1399,7 +1427,7 @@
   Starts deepest-first (finish chains under way)."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:boot "root's boot id"
-                :judge "outside agents' tasks to judge {:op :judge :task :env :agent}, and waits on main {:op :quiet :after t :p promise}, each answered at the first quiet at or after t (external; seon.system/await-db)"}
+                :judge "outside agents' tasks to judge {:op :judge :task :env :agent :p}, answered at the judge's end (answer-judged), a wait on a judge {:op :judged :task :p}, and waits on main {:op :quiet :after t :p promise}, each answered at the first quiet at or after t (external; seon.system/await-db)"}
        :ins {:main "main's commits" :answers "the api's answers" :wake "an agent a message reached, {:agent key}"} :outs {:to-api "requests"}
        :workload :io
        :ping-map-fn (fn [st] {:seen (:seen st 0) :lists (:lists st 0) :t (:t st) :flights (count (:flights st))
@@ -1407,13 +1435,17 @@
                               :flight-steps (into (sorted-map) (for [[id f] (:flights st)] [id (or (:step f) (get-in f [:act :op]))])) :pending (count (:pending st)) :behind (count (:behind st))
                               :quiet (boolean (:quiet st)) :root-causes (count (:root-causes (:quiescent st)))
                               ;; the waits on main it holds ({:after t}) and its quiet report's write until answered: what a parked await-db waits on
-                              :waits (mapv :after (:waits st)) :report (:report st) :live (count (:live (:idx st)))})})
-  ([args] (assoc (dissoc args :judge) :seen 0 :rid 0 :flights {} :pending {} :waits [] :behind []
+                              :waits (mapv :after (:waits st)) :report (:report st) :live (count (:live (:idx st)))
+                              ;; the tasks whose judge a caller waits on (seon_done): answered at each one's end
+                              :judged (vec (sort (keys (:judged st))))})})
+  ([args] (assoc (dissoc args :judge) :seen 0 :rid 0 :flights {} :pending {} :waits [] :judged {} :behind []
                  ::flow/in-ports {:judge (:judge args)}))
   ;; a stop answers every wait still held: root stopped, nothing will answer it
   ([st transition]
    (if (= transition ::flow/stop)
-     (do (doseq [w (:waits st)] (deliver (:p w) {:stopped true})) (assoc st :waits []))
+     (do (doseq [w (:waits st)] (deliver (:p w) {:stopped true}))
+         (doseq [ps (vals (:judged st)) p ps] (deliver p {:stopped true}))
+         (assoc st :waits [] :judged {}))
      st))
   ([st in m]
    (case in
@@ -1448,14 +1480,18 @@
                  [st outs] (reduce (fn [[st outs] a] (let [[st more] (take-answer st a)] [st (into outs more)]))
                                    [(update st :behind (fn [as] (filterv #(behind? st %) as))) outs]
                                    (remove #(behind? st %) (:behind st)))]
-             [(answer-waits st) {:to-api (into [{:op :stat :k :main-seen-us :v (/ (- (profile/now-ns) (:ns m)) 1000.0)}] outs)}])
+             [(answer-judged (answer-waits st)) {:to-api (into [{:op :stat :k :main-seen-us :v (/ (- (profile/now-ns) (:ns m)) 1000.0)}] outs)}])
      ;; a wait on main (:op :quiet): answered now if the reconciler is quiet past its :after,
      ;; else held. Otherwise an outside agent handed its run back: judged as a turn loop's end is
      :judge (case (:op m)
               :quiet [(answer-waits (update st :waits (fnil conj []) (select-keys m [:after :p]))) {}]
+              ;; a wait on task's judge with no judge handed it now: answered at once when its task has no flight
+              :judged [(answer-judged (update-in st [:judged (:task m)] (fnil conj []) (:p m))) {}]
               :judge (let [{:keys [task env agent]} m
-                  ;; a flight: the quiet spell ends, and a wait behind this judge waits for it
-                  st (-> st (assoc-in [:flights task] {:act {:op :spawn :task task :env env} :agent agent}) (assoc :quiet false))
+                  ;; a flight: the quiet spell ends; its caller's wait (:p) is the flight's from the step that starts it, so no
+                  ;; window opens between the judge and the wait (answer-judged answers it when the flight ends)
+                  st (cond-> (-> st (assoc-in [:flights task] {:act {:op :spawn :task task :env env} :agent agent}) (assoc :quiet false))
+                       (:p m) (update-in [:judged task] (fnil conj []) (:p m)))
                   [st o] (request st task :tested {:op :judge :id agent})]
               [st {:to-api [o]}]))
      ;; a message reached an agent (the api, once the writer answered its commit): woken if it waits, else held until it parks (wake).
@@ -1464,10 +1500,10 @@
              (let [idx (wake (:idx st) (:db st) (:agent m))
                    st (cond-> (assoc st :idx idx) (not= (:woken idx) (:woken (:idx st))) (assoc :quiet false))
                    [st outs] (pass st)]
-               [(answer-waits st) {:to-api outs}])
+               [(answer-judged (answer-waits st)) {:to-api outs}])
              [st {}])
      ;; an answer to a write main has not reached waits for main's commit of it (taken by :main)
      :answers (if (behind? st m)
                 [(update st :behind conj m) {}]
                 (let [[st outs] (take-answer st m)]
-                  [(answer-waits st) {:to-api outs}])))))
+                  [(answer-judged (answer-waits st)) {:to-api outs}])))))
