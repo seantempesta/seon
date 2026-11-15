@@ -478,46 +478,59 @@
           (is (str/includes? (:content (peek r2)) "quadruple")))))))
 
 ;; See docs/render.md#a-turn-stores-what-it-sent
+(defn- stored-turns!
+  "Three turns of agent a1 on conn as seon.turn/model-request! makes them: each turn and its basis, its request drawn on the db that
+  holds them, then what it sent stored (seon.ctx.wire/sent-tx) and its call recorded; the cited var and the plan move between them.
+  Answers [r1 r2 r3 b3]: the three requests and turn 3's basis."
+  [conn]
+  (wiki! conn)
+  (d/transact conn (program-facts '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))" []]]))
+  (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/f``` triple."
+                                           :seon.task/proofs #{'demo-test/f-test}}]))
+  (d/transact conn [{:seon.task/id "demo/f" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/f"}}}])
+  (let [request (fn [n] (let [b {:commit (d/commit-id @conn) :task "demo/f" :turn n :max-turns 4 :origin :model :agent "a1"}
+                              _ (d/transact conn (ts/turn-tx "a1" n {:seon.model-call/basis b}))
+                              {:keys [messages parts]} (wire/render @conn b)]
+                          (d/transact conn (wire/sent-tx (seon.lib/call-id "a1" n) parts))
+                          (d/transact conn (turn-of b n))
+                          [b messages]))
+        [_ r1] (request 1)
+        _ (d/transact conn (program-facts '[[demo/f "(defn f \"Triples.\" [x] (* 3 x))" []]]))
+        [_ r2] (request 2)
+        _ (d/transact conn [[:db/add [:seon.task/id "demo/f"] :seon.task/plan "Make ```demo/f``` quadruple."]])
+        [b3 r3] (request 3)]
+    [r1 r2 r3 b3]))
+
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-cold-request-reads-each-turns-stored-page
   ;; a cold request drew every earlier turn's page again at its past points (a 30-turn agent: 11B ticks, 37.6 GB, the pages 773k of
   ;; its 966k chars [M root result/a444fa99]); a turn now keeps what it sent, so a request made again draws only its own turn's pair
   (ts/test-branch!
     (fn [_ conn]
-      (wiki! conn)
-      (d/transact conn (program-facts '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))" []]]))
-      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/f``` triple."
-                                               :seon.task/proofs #{'demo-test/f-test}}]))
-      (d/transact conn [{:seon.task/id "demo/f" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/f"}}}])
-      (let [;; as seon.turn/model-request! goes: the turn and its basis, the request made on the db that holds them, then what it sent kept
-            request (fn [n] (let [b {:commit (d/commit-id @conn) :task "demo/f" :turn n :max-turns 4 :origin :model :agent "a1"}
-                                  _ (d/transact conn (ts/turn-tx "a1" n {:seon.model-call/basis b}))
-                                  {:keys [messages parts]} (wire/render @conn b)]
-                              (d/transact conn (wire/sent-tx (seon.lib/call-id "a1" n) parts))
-                              (d/transact conn (turn-of b n))
-                              [b messages]))
-            [_ r1] (request 1)
-            _ (d/transact conn (program-facts '[[demo/f "(defn f \"Triples.\" [x] (* 3 x))" []]]))
-            [_ r2] (request 2)
-            _ (d/transact conn [[:db/add [:seon.task/id "demo/f"] :seon.task/plan "Make ```demo/f``` quadruple."]])
-            [b3 r3] (request 3)
+      (let [[r1 r2 r3 b3] (stored-turns! conn)
             drawn (atom [])
             real wire/page-parts-through
             again (with-redefs [wire/page-parts-through (fn [db a chain] (swap! drawn conj (count chain)) (real db a chain))]
                     (:messages (wire/render @conn b3)))]
         (is (= r3 again) "made again cold, the request is the one the turn sent, byte for byte")
         (is (= [2] @drawn) "only turn 3's own pair is drawn (its call held no assembly when its request was made); turns 1 and 2 read what they stored")
-        (is (= (subvec r2 0 (count r1)) r1) "and the prefix holds")
-        (is (= (wire/stored-page @conn (pdb/eid @conn :seon.agent/key "a1") 2)
-               (into [] (comp (filter (fn [[ref]] (= [:page 2] ref))) (mapcat second)) (:parts (wire/render @conn b3))))
-            "turn 2's stored page is what its request sent")
-        ;; debug reads what was sent, never a new interpretation (the owner, 2026-11-15): the request joined from its stored parts is
-        ;; the one sent, and hashes as the turn hashed it (seon.turn/model-request!'s :seon.model-call/sent-hash)
-        (let [back (wire/sent-request @conn (seon.lib/call-id "a1" 2))
-              h #(seon.lib/digest (seon.edn/encode (seon.edn/canonical %)))]
-          (is (= r2 (:messages back)) "turn 2's request read back from its parts is what it sent")
-          (is (= (h r2) (h (:messages back))) "its digest is the sent hash")
-          (is (= 1 (count (filter #(= "system" (:role (:seon.part/message (d/entity @conn (:e %))))) (d/datoms @conn :aevt :seon.part/message))))
-              "the system message, sent by every turn, is one part"))))))
+        (is (= (subvec r2 0 (count r1)) r1) "and the prefix holds")))))
+
+;; See docs/render.md#a-turn-stores-what-it-sent
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-past-turn-reads-back-as-it-was-sent
+  ;; debug reads what was sent, never a new interpretation (the owner, 2026-11-15: "Debug shouldn't be a new interpretation of what's
+  ;; there"): the request joined from its stored parts is the one sent, and hashes as the turn hashed it (:seon.model-call/sent-hash)
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[_ r2] (stored-turns! conn)
+            back (wire/sent-request @conn (seon.lib/call-id "a1" 2))
+            h #(seon.lib/digest (seon.edn/encode (seon.edn/canonical %)))]
+        (is (= r2 (:messages back)) "turn 2's request read back from its parts is what it sent")
+        (is (= (h r2) (h (:messages back))) "its digest is the sent hash")
+        (is (= (into [] (comp (filter (fn [[ref]] (= [:page 2] ref))) (mapcat second)) (:parts back))
+               (wire/stored-page @conn (pdb/eid @conn :seon.agent/key "a1") 2))
+            "its page parts are what a later request reads")
+        (is (= 1 (count (filter #(= "system" (:role (:seon.part/message (d/entity @conn (:e %))))) (d/datoms @conn :aevt :seon.part/message))))
+            "the system message, sent by every turn, is one part")))))
 
 ;; See docs/render.md#a-turn-stores-what-it-sent
 (deftest ^{:seon.test/estimate {:ticks 3000000}} one-message-is-one-part-however-it-was-built

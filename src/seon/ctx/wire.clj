@@ -502,9 +502,8 @@
                   (:value (render/model ix0 es {:ix ix0 :handle (symbol "@ctx")}) es))))
 
 (defn sent-tx
-  "What the turn whose model call is id sent, as facts: each message of the request's parts (`request`'s [ref messages turn], in
-  order) a part named by its canonical digest, stored once whoever sends it, and the call's :seon.model-call/assembly listing each
-  part's ref, turn and digests in order, so the request reads back as sent (`sent-request`). See docs/render.md#a-turn-stores-what-it-sent."
+  "The facts that keep what model call id sent, from its request's parts: each message a part by its canonical digest, stored once,
+  and the call's assembly of refs, turns and digests in order. See docs/render.md#a-turn-stores-what-it-sent."
   {:malli/schema [:=> [:cat :string [:vector :any]] [:vector :map]]}
   [id parts]
   (let [dg #(lib/digest (sedn/encode (sedn/canonical %)))
