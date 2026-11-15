@@ -94,6 +94,10 @@ Round 1's transcript showed agents re-forked into a cold process every turn: eac
 
 "You can and should fix all errors anywhere in the system. Distribute this work to expert agents as you need too." "We need a plan from where we are now A to where we want to go B. That's your job." The order he approved is in [the plan](plan.md#the-order).
 
+### An agent changes the program at its REPL; no fence around the checkout
+
+"don't put up guards or fences. An agent can do anything that the repl can eval. Good defaults and instructions are how we steer agents." Then: "try and fix systems so the class we are worried about can't occur or accept the risk of allowing agents to have power and to act responsibly for now. We need simplificity and de-duping over safety and guards and fences." Round 2's agents wrote their changes as files into the main tree through `SEON_CHECKOUT` and merged scratch definitions. Decided (runtime and context, root confirmed): the checkout stays main's tree for reads, config, git and the shell; the program changes only by evaluating definitions on the agent's branch; the prompt says so. No per-agent tree unless a round shows a need beyond editing `bin/` shell, which no task asks for any more (curation). It replaces the earlier "the branch's own tree". Stated in [prompt](prompt.md).
+
 ## 2026-11-14 rulings
 
 The owner's rulings of this day and the night before, each with his words where recorded and where it is now stated.
