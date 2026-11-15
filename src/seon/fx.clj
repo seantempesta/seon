@@ -1427,7 +1427,10 @@
                                                         [t fs]))}
                             (not @green?) (assoc :kept kept))}))))))
         ;; the worktree's removal is recorded in the run's log: a failed one names what it left
-        (finally (let [run (java.io.File. (str dir "/target/prove/run"))
+        ;; the whole of target/prove: the full run's shard logs (run/) and the gate's item logs (items/: its build's, its seed's, each
+        ;; step's), which went with the worktree when only run/ was kept, so a gate whose build or seed failed kept no reason (the pilot
+        ;; gate of 2026-11-15 23:01, 277 of 281 tests failed with none)
+        (finally (let [run (java.io.File. (str dir "/target/prove"))
                        mv (when (and (not @green?) (.isDirectory run)) (lib/sh "mv" (.getPath run) kept))
                        rm (lib/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir)]
                    (spit log (str (when mv (str "\nkept the run's logs (not all green): " kept ": exit " (:exit mv) (:err mv)))
