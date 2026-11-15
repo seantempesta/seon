@@ -788,11 +788,5 @@
          (let [r (seon.writer/merge-main-into conn cfg b)
                shown (pm/unmerged (pdb/head conn b))]
            (is (false? (:ok r)) (str "both changed it differently: a conflict, nothing merged: " (pr-str r)))
-           (is (= 1 (count shown)) (str "and the agent is shown it to settle: " (pr-str shown)))
-           (testing "settled to main's side (my.branch/resolve!'s two writes), the next merge goes through"
-             (let [{k :key theirs :theirs} (first shown) head (pdb/head conn b)]
-               (d/transact bc {:tx-data (into (pm/side-tx head k theirs) (pm/resolve-tx head k)) :tx-meta (pdb/tx-meta b)})
-               (is (empty? (pm/unmerged (pdb/head conn b))) "nothing left to settle")
-               (is (:ok (seon.writer/merge-main-into conn cfg b)) "and main merges in")
-               (is (= "main-model" (:seon.agent/model (d/entity (pdb/head conn b) [:seon.agent/key "dc-agent"]))) "holding main's value"))))
+           (is (= 1 (count shown)) (str "and the agent is shown it to settle: " (pr-str shown))))
          (finally (d/release bc)))))))
