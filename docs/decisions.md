@@ -18,6 +18,10 @@ The owner's rulings on the morning after the first night run on its own.
 
 Told that ticks count Scheme work only (no foreign calls, GC copying, parked time or interrupts-off time: chez `s/cpnanopass.ss:2966`, `s/event.ss:47`) and that the 161M/300M swing is unexplained, he chose deps' order: dumps that need no event check; CPU time and bytes per fiber per dispatch; steps scoped by the existing nesting measure `ticks-of`, with no new marker; a counter of foreign lookups; then one experiment that settles the swing before ticks can fail a test. Plan in `deps-ticks-soundness-2026-11-15` (deps' task).
 
+### A binary is built only when it is needed
+
+He ruled that the binary is rebuilt only when a change needs it: when a build input changed and the new binary must be tested (the parallel system), or when the system is about to restart; never on every land (2026-11-15). A kept-running land builds nothing, since a boot catches up main's program in place. Runtime carries it in plan item 17; E removes the per-land build of the land's own checkout.
+
 ### Tests never hardcode defaults
 
 He ruled that no test hardcodes a default (2026-11-15). A test reads a default through the one config resolver and asserts the behaviour around it, never a copy of its value, so a changed default cannot leave a stale assertion red on main (two did that day). Tests sweeps the existing ones. A default itself lives in the schema: a `:default` property on the key's malli schema entry, applied by the one resolver (`malli.transform/default-value-transformer`); data plans it with the config scope.
