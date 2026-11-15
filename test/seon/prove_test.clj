@@ -44,6 +44,36 @@
           (recur st (into all o) (inc (.indexOf all m))))
         [st all]))))
 
+;; docs/merging.md#the-test-service: a judge's named ask on main while main's own run holds the tests branch waits for that runner,
+;; never a second spawn the branch refuses (data, 2026-11-16, result/bbd0ab17: every pilot judged during a main run read its reds
+;; :unknown from :seon.system/refused). Estimate: a few messages through the step fn, ~20k ticks each = ~0.3M.
+(defn- named-ask [rid t] [:req {:rid rid :branch :main :t t :digest (str "d" t) :names #{'a.b-test/t} :mode :judge}])
+
+(deftest ^{:seon.test/estimate {:ticks 500000}} two-asks-held-on-the-tests-branch-are-both-answered
+  (let [[st o] (feed (proc0) [(req 1 :main 5) (named-ask 2 5) (named-ask 3 6)])
+        _ (is (= 1 (count (asks o :spawn))) "one runner on the tests branch; the two asks wait for it, never a refused spawn")
+        [st all] (run-through st o test-run-answer)]
+    (is (= [1 2 3] (waiters-answered all)) "each asker answered, in turn")
+    (is (every? #(= 1 (count %)) (vals (group-by :tag (asks all :spawn)))) "one spawn at a time")
+    (is (empty? (:held-main st)) "nothing left held")))
+
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-named-ask-during-mains-run-is-answered-with-its-verdicts
+  (let [[st o] (feed (proc0) [(req 1 :main 5) (named-ask 2 5)])
+        _ (is (= 1 (count (asks o :spawn))) "while main's runner is in flight the ask asks no second runner, which the branch would refuse")
+        [_ all] (run-through st o test-run-answer)
+        r (:r (first (filter #(and (= :prove-answer (:op %)) (= 2 (:rid %))) all)))]
+    (is (not (seon.contract/error? r)) (str "answered, never refused: " (pr-str r)))
+    (is (= {'a.b-test/t :pass} (proofs/results r)) "with its test's verdict")))
+
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-dying-main-run-answers-its-waiters-and-the-held-ask-runs
+  (let [[st o] (feed (proc0) [(req 1 :main 5) (named-ask 2 5)])
+        died (seon.contract/error :seon.system/refused 'seon.system/spawn! "the fork server could not fork it" {})
+        [st o2] (feed st [(answer-of (first (asks o :spawn)) died)])]
+    (is (= [1] (waiters-answered o2)) "the dying run answers its own waiter")
+    (is (seon.contract/error? (:r (first (filter #(= :prove-answer (:op %)) o2)))) "with its typed error")
+    (is (= 1 (count (asks o2 :spawn))) "and the held ask spawns its own runner")
+    (is (empty? (:held-main st)))))
+
 ;; Estimate: one state-view of a small state map: ~20k ticks; 200,000
 (deftest ^{:seon.test/estimate {:ticks 200000}} the-state-view-says-how-far-mains-proving-is-behind
   ;; root's (c), 2026-11-15: main's proving never backlogs (moves during a run coalesce into one next run), and the sweep reads how
