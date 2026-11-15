@@ -595,6 +595,18 @@
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [st] (if-let [rw (:root-walk st)] (list-units (:units (:p (laid rw))) "#p-system") []))
 
+(def ^:private system-views
+  "The views a move of the system walk (root's runtime values: its process, health, root evals) draws again: root's chat, whose top bar
+  holds the source line, and root's debug page, which holds the system's own view (`system-view-units`). See docs/render.md#the-page."
+  #{:root [:debug :root]})
+
+(defn- system-view-units
+  "The system's own view (seon.render.ui/root: how the tasks stand, root's process, main's problems, the evals sent to root), the system
+  walk's units in their regions (#p-head, #p-tiles), less its own root unit and its source line (`system-units`, every page's): what
+  root's debug page places, never the person's chat (docs/decisions.md, The page is a friendly chat). See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [st] (if-let [rw (:root-walk st)] (into [] (comp (remove #(#{render/root-container "#p-system"} (:container %))) (map ui/page-unit)) (:units (:p (laid rw)))) []))
+
 (defn- agent-view
   "View's page when it names an agent (entity eid on main db): its components as its process drew
   them (ask-parts, seon.repl/render-ctx: the units of its walk) at the branch root read or later, else, with no process
@@ -677,21 +689,18 @@
         ;; every agent's page draws its own agents list; the frame shows the signed-in user's on every page, one walk's (`user-sides`)
         own-side (set (map :id (list-units (or units []) "#c-side")))
         units (vec (remove (comp own-side :id) units))
-        sides (user-sides @sw)
-        ;; root's session (the agent keyed "root", the reserved key `location` names for root's page): beside its page, the
-        ;; system's own view (its head, process and problems: root's runtime values, never written) from the system's walk, placed by
-        ;; the frame as the agents list is, the same mechanism
-        system? (= "root" (:seon.agent/key e))
-        ;; the system walk fills regions of this page, so its own root unit (its page) is not placed
-        ;; and its source line, which every page holds (system-units), is placed once
-        system (when (and chat? system?) (some->> (:root-walk st) laid :p :units (remove #(#{render/root-container "#p-system"} (:container %)))))
+        ;; root's session (the agent keyed "root", the reserved key `location` names for root's page): its chat is the person's, who talks to
+        ;; root alone and is shown no list of sessions; the system's own view is on root's debug page (`system-view-units`)
+        ;; (docs/decisions.md, The page is a friendly chat)
+        person? (and chat? (= "root" (:seon.agent/key e)))
+        sides (if person? [] (user-sides @sw))
         head (cond-> (or (d/pull db [:seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/description :seon.agent/max-turns {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure]} {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid) {:seon.agent/key (:seon.agent/key e)})
                ;; an earlier boot's process recorded no end (its root went away): its pid names nothing now
                (not (task/this-boots db e)) (dissoc :processes))
         head-unit {:id "p-agent-head" :container "#p-head" :rev (hash head)
                    :html (h/html [:section {:id "p-agent-head" :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (ui/agent-head {} head)])}]
     ;; the walks this page made or advanced, for the pass to write to st (`pass-view`)
-    (assoc (ui/page-chrome {:units (vec (concat (system-units st) sides [head-unit] system units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
+    (assoc (ui/page-chrome {:units (vec (concat (system-units st) sides [head-unit] units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
                       ;; never a wait: drawn from its branch until its process answers, the page says so
                       :caption (when (and chat? (not own?))
                                  (when (:error held) (str "Its process didn't answer, so this may be behind: " (:seon.error/message (:error held)))))
@@ -729,7 +738,7 @@
       (let [;; root's process (process!), health and turns (turns!) are root's own data beside the pull: kept across a move of main
             {p :process h :health ts :turns} (:tree (:p rw))
             rw (advance-walk! rw db :main #(cond-> % p (assoc :process p) h (assoc :health h) ts (assoc :turns ts)) {:from held :moved moved})]
-        (update (assoc st :root-walk rw) :dirty (fnil conj #{}) :root)))))
+        (update (assoc st :root-walk rw) :dirty (fnil into #{}) system-views)))))
 
 (defn- process!
   "St with root's process value p (root's ruling on root's process values, option a: the writer's, the fork
@@ -743,7 +752,7 @@
     (if (= p (:process (:tree (:p rw))))
       st
       (-> (assoc st :root-walk (rewalk rw #(assoc % :process p)))
-          (update :dirty (fnil conj #{}) :root)))
+          (update :dirty (fnil into #{}) system-views)))
     st))
 
 (defn- turns!
@@ -757,7 +766,7 @@
       (if (= ts (:turns (:tree (:p rw))))
         st
         (-> (assoc st :root-walk (rewalk rw #(assoc % :turns ts)))
-            (update :dirty (fnil conj #{}) :root)))
+            (update :dirty (fnil into #{}) system-views)))
       st)))
 
 (defn- view-turns
@@ -814,7 +823,7 @@
           (if (= (:classes h) (:classes prev))
             st
             (-> (assoc st :root-walk (rewalk rw #(assoc % :health h)))
-                (update :dirty (fnil conj #{}) :root))))))
+                (update :dirty (fnil into #{}) system-views))))))
     st))
 
 (defn- with-context
@@ -853,7 +862,8 @@
     (cond
      ;; root's page is its session's, made at boot: none yet, nothing to draw
      (= :root view) (when (and eid (:seon.agent/key (d/entity db eid))) (agent-view st view db eid))
-     (and eid (= :debug (first-of view))) (debug-value st view)
+     ;; root's debug page holds the system's own view beside its session's requests
+     (and eid (= :debug (first-of view))) (cond-> (debug-value st view) (= :root (second view)) (some-> (update :seon.render/units into (system-view-units st))))
      (and eid (= :chat (first-of view)) (agent-of db (second view))) (agent-view st view db eid)
      (and eid (agent-of db view)) (agent-view st view db eid)
      (= :home (second-of view)) (ui/page-chrome {:units (conj (system-units st) {:id "p-sign-in" :container "#p-head" :rev 0 :html (h/html (ui/sign-in {:seon.db/db db}))}) :view (ui/view-param view) :tab :chat} :root)

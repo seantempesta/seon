@@ -2485,6 +2485,16 @@
   {:malli/schema [:=> [:cat] :any]}
   [] [:div {:id "p-bare"} [:main {:id "p-chat"} [:div {:id "p-head"}] [:ol {:id "c-rows"}]]])
 
+(defn page-unit
+  "A walk's laid-out unit u as a page's unit (the render proc's step-units input): its revision is its input, so the proc sends it only
+  when its output changed; an agent's own draw is marked :own?. The one shape every page's units take (page-chrome, root's debug page's
+  system view). See docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [u]
+  (cond-> {:id (:id u) :input (cond-> {:rev (:rev u)} (:own? u) (assoc :own? true)) :html (:html u) :container (:container u)}
+    (:parent u) (assoc :parent (:parent u))
+    (:regions u) (assoc :regions (:regions u))))
+
 (defn page-chrome
   "A page in root's chrome (root's, an agent's): the top bar, the agents list (#c-side, the signed-in user's walk's, unless the page
   holds its own), the page itself (#p-page: the unit of the page's root render, seon.render/placed-units' first, else `bare-page`'s),
@@ -2501,9 +2511,7 @@
         holds (set (:regions page))
         ;; the caption and the input end the page's chat column, else they follow the page
         chat (when (holds "p-chat") "#p-chat")
-        unit (fn [u] (cond-> {:id (:id u) :input (cond-> {:rev (:rev u)} (:own? u) (assoc :own? true)) :html (:html u) :container (:container u)}
-                       (:parent u) (assoc :parent (:parent u))
-                       (:regions u) (assoc :regions (:regions u))))]
+        unit page-unit]
     {:seon.render/hiccup
      [:div {:id "app" :class "seon-page" :data-view view}
       (top-bar id tab)
@@ -2578,6 +2586,10 @@
                                       "Its page as it reads it: the render of its ctx, each component's hiccup by its id, the text /context.txt serves, drawn again when its ctx changes."
                                       "A bar is one request to the model: its height the tokens sent, blue what the provider's cache served. Below, the request chosen, as it went on the wire, each message by its role; open one to read its fields as sent.")]]
       (when (= :root focus) (root-tools))
+      ;; root's: the system's own view (seon.render.ui/root's head and tiles, the system walk's units), placed here and never on the
+      ;; person's chat (docs/decisions.md, The page is a friendly chat)
+      (when (= :root focus)
+        [:section {:id "p-system-view" :class "seon-stack"} [:div {:id "p-head"} (render/region "p-head")] [:aside {:id "p-tiles" :class "seon-stack"} (render/region "p-tiles")]])
       (when context (slot (:id context)))
       ;; an agent's: its strip and its turn are units, so its layout never moves: a step, a turn added or the first
       ;; turn patches them in place (a patch reaches only the elements the tab holds)
