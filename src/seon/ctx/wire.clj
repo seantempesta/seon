@@ -505,9 +505,8 @@
                   (:value (render/model ix0 es {:ix ix0 :handle (symbol "@ctx")}) es))))
 
 (defn part-digest
-  "The digest of message m as a stored part: its role, its content raw and length-prefixed, then the rest of it as canonical EDN
-  (seon.edn/canonical), so one message is one digest however it was built, and its content is never escaped to be hashed (pr-str of
-  a turn's 279k chars was 1.3M of sent-tx's 1.8M ticks). See docs/render.md#a-turn-stores-what-it-sent."
+  "Message m's digest as a stored part: its content hashed raw, the rest as canonical EDN, so one message is one digest however
+  built. See docs/render.md#a-turn-stores-what-it-sent."
   {:malli/schema [:=> [:cat :seon.model/message] :string]}
   [{:keys [role content] :as m}]
   (lib/digest (str role "\n" (count content) "\n" content (sedn/encode (sedn/canonical (dissoc m :role :content))))))
