@@ -560,9 +560,8 @@
   (vec (sort (distinct (vals text-attrs)))))
 
 (defn- index-key
-  "The content key of db's texts: each text attribute's revision, else the conservative one (Datahike's cache context: a commit
-  whose datoms of that attribute equal db's), digested; nil for a value that is no commit (a speculation's revisions are its own).
-  Equal keys hold equal texts, on any branch and after any restart. See docs/vector.md#search."
+  "The content key of db's texts: each text attribute's revision, else the conservative one, digested; nil for a value that is no
+  commit. Equal keys hold equal texts on any branch, after any restart. See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :string]]}
   [db]
   (let [c (:cache-context db)]
@@ -580,7 +579,7 @@
   loads half a file; the directory then keeps its :seon.config.vector/text-index-files-kept newest images. nil."
   {:malli/schema [:=> [:cat :string :map] :nil]}
   [k ix]
-  (let [f (image-file k) dir (.getParentFile f) tmp (io/file dir (str k "." (lib/digest (str (System/nanoTime))) ".tmp"))]
+  (let [f (image-file k) dir (.getParentFile f) tmp (io/file dir (str k "." (.pid (ProcessHandle/current)) ".tmp"))]
     (.mkdirs dir)
     (java.nio.file.Files/write (.toPath tmp) ^bytes (sqlite/fts-image ix) (make-array java.nio.file.OpenOption 0))
     (java.nio.file.Files/move (.toPath tmp) (.toPath f) (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/ATOMIC_MOVE java.nio.file.StandardCopyOption/REPLACE_EXISTING]))
@@ -590,10 +589,8 @@
     nil))
 
 (defn- build-index
-  "The FTS5 index (seon.sqlite/fts-open) of every text attribute's texts on db but the dependency source's: one row a text, its
-  entity and its attribute's number in `index-attrs`, one corpus whose bm25 `tokens` ranks. Kept on disk by its content
-  (`index-key`): a db whose texts an earlier process indexed loads that image (~70 ms on main) instead of building (~1 s), and a
-  build writes its image; a truncated or refused image is built again, never trusted. See docs/vector.md#search."
+  "The FTS5 index of db's texts but the dependency source's, one row a text: loaded from its image on disk when one has its content
+  key (`index-key`), else built and its image written; a truncated or refused image is built again. See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
   (let [k (index-key db) f (when k (image-file k))]

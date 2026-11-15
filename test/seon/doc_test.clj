@@ -577,9 +577,9 @@
 
 ;; docs/vector.md#search: the text index is kept on disk by its content (the text attributes' revisions), so a restart whose texts did
 ;; not change loads it (~70 ms on main) instead of building it (~1 s), the first fix of "boot re-derives what didn't change"; a changed
-;; text builds once; a truncated image is built again, never trusted. Estimate: three builds of a test store's index (~25M ticks each
-;; on main's 9 M chars; a test store's texts are fewer) and two loads: <= 200M ticks, 1 GB
-(deftest ^{:seon.test/estimate {:ticks 200000000 :bytes 1000000000}} a-restart-loads-the-text-index-an-earlier-one-built
+;; text builds once; a truncated image is built again, never trusted. Estimate: three builds of a test store's index (main's 9 M chars
+;; cost 25M ticks a build; a test store holds fewer texts) and a load: <= 90M ticks, 600 MB
+(deftest ^{:seon.test/estimate {:ticks 90000000 :bytes 600000000}} a-restart-loads-the-text-index-an-earlier-one-built
   (ts/test-branch!
     (fn [_ conn]
       (let [built (atom 0)
