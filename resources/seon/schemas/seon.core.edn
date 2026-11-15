@@ -314,6 +314,8 @@
  :seon.ratom/paths [:= {:description "The key of the watch a source ref holds while a reaction reads paths of it."} :seon.ratom/paths]
  :seon.ratom/reached [:= {:description "The reason a handle is told a source changed: a path it read was reached by the change."} :seon.ratom/reached]
  :seon.turn/answer [:map {:description "A run's model call answered, as the message seon.turn/step-run takes: the call's outcome, {:value completion} or its typed failure. See docs/flow.md#flow-inside-an-agent."}]
+ :seon.turn/merged [:map {:description "Main merged into a run's branch, as the message seon.turn/step-run takes: my.branch/merge-main!'s answer. See docs/flow.md#flow-inside-an-agent."}]
+ :seon.turn/observed [:map {:description "A run's task observed, as the message seon.turn/step-run takes: seon.turn/observe's answer, its test run and the task. See docs/flow.md#flow-inside-an-agent."}]
  :seon.turn/verdict [:map {:description "A run's proofs answered, as the message seon.turn/step-run takes: seon.agent/judge!'s answer. See docs/flow.md#flow-inside-an-agent."}]
  :seon.turn/threw [:and {:description "A run output's effect threw, as the message seon.turn/step-run takes: the throw, read as a throw inside a turn step is. See docs/flow.md#flow-inside-an-agent."} :seon.host/throwable]
  :seon.turn/stop [:boolean {:description "Root's stop, as the message seon.turn/step-run takes: the run ends at once, :waiting, its call in flight dropped. See docs/flow.md#flow-inside-an-agent."}]

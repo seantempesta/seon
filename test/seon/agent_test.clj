@@ -1567,7 +1567,8 @@
   (let [red {:reasons [{:reason :proof-red}]}
         out (volatile! nil)
         end (work-with (fn [st called!] (called!) st) (constantly red)
-                       (fn [arg] (let [[st o] (seon.turn/step-run (seon.turn/start! arg) nil)]
+                       (fn [arg] (let [go (fn go [[st o]] (if (or (:merge o) (:observe o)) (go (seon.turn/step-run st (@#'seon.turn/effect-answer o))) [st o]))
+                                       [st o] (go (seon.turn/step-run (seon.turn/start! arg) nil))]
                                    (vreset! out (set (keys o)))
                                    (@#'seon.turn/end-of (seon.turn/step-run st {:seon.turn/stop true})))))]
     (is (= #{:model} @out) "the run's model call was out when the stop came")
@@ -2602,7 +2603,7 @@
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-root-with-no-provider-ends-the-work-on-its-typed-error
-  ;; root's ruling 2026-10-22: a root with no model provider (no --profile) answers the
+  ;; a root whose provider is :none (set below; with no --profile it is DeepSeek) answers the
   ;; first turn with :seon.model/no-provider; the error reaches whoever can act on it: the
   ;; task's record on main and my.root/problems' :error rows
   (let [q #(str "[:find (pull ?e [:seon.task/outcome :seon.task/error]) . :where [?e :seon.task/id \"" % "/m\"] [?e :seon.task/error]]")

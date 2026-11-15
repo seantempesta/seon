@@ -38,7 +38,7 @@ A session's `seon_*` tools reach the root of the checkout the session started in
 ```
 bin/worktree NAME; cd "$(bin/worktree --path NAME)"
 nice -n 15 bin/build seon                             # only when this root must run this tree's code
-bin/system start                                      # its own ports and store, no provider
+bin/system start                                      # its own ports and store; its agents call DeepSeek (paid)
 bin/mcp call attach task=ns/name                      # the agent's id
 bin/mcp call context agent=ID                         # wire=true: the request body
 bin/mcp call eval agent=ID message-md='Reading.' intent='how it stands' code=- <<'EOF'
