@@ -101,3 +101,14 @@
           (is (= [[:v2 4 3] 1] (a/<!! out3)) "it starts fresh; the source kept its count")
           (is (= [[:v2 4 3] 2] (a/<!! out2)) "the other kept proc kept its count")))
       (finally (alter-var-root #'running-src (constantly old)) (flow/stop g)))))
+
+;; Estimate: three entries answered and one table emptied, a few map ops: ~5k ticks; 100,000
+(deftest ^{:seon.test/estimate {:ticks 100000}} every-pending-request-is-answered-at-each-end
+  ;; docs/flow.md#the-five-rules, rule 3 (seon.step/every-request-is-answered-at-each-end-of-its-holder): a holder's end answers every
+  ;; request it holds, whatever shape its table keeps them in ({rid {:p p}}, {k p}, [{:p p}]), and a proc's reply route (a map, not a
+  ;; promise) is left to that proc's own end. Red before: no one function; each holder answered its own tables, or none
+  (let [ps (repeatedly 4 promise)
+        held {:pending {1 {:p (nth ps 0)} 2 {:p {:route [:x :in] :tag 2}}} :waits {:k (nth ps 1)} :judged {"t" [(nth ps 2) (nth ps 3)]}}
+        st (step/end-all held {:stopped true} :pending :waits :judged)]
+    (is (every? #(= {:stopped true} (deref % 0 :unanswered)) ps) "every promise held is answered")
+    (is (= {:pending {} :waits {} :judged {}} st) "and every table is emptied")))
