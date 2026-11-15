@@ -693,7 +693,9 @@
                                                                    ; resolver for both sides (tests, measured 89 -> 102)
                                                               2    ; :unestimated reads the move's open tasks too: the moved task states no estimate,
                                                                    ; its row (derived-row) on base and head (data, 2026-11-15, measured 104 -> 106)
-                                                              2)} ; :native-in-defonce's reader on base and head for the move's forms (runtime, measured 106 -> 108)
+                                                              2    ; :native-in-defonce's reader on base and head for the move's forms (runtime, measured 106 -> 108)
+                                                              -5)} ; the four classes split-rows reads from what moved are carried, never read whole again: task-reads,
+                                                                   ; uncited-tasks, stale-plans, waived-proofs, unschemed-keys gone from the move (runtime, 108 -> 103)
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 25000000}} problems-cost-nothing-for-a-clean-program

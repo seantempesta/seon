@@ -93,8 +93,8 @@
     (is (map? (:agents r)) "each agent proc's, by pid")
     (is (and (seq (:agents r)) (every? #(and (contains? % :stall-seen) (contains? % :last-frame-ms) (contains? % :holding) (= 0 (:held %))) (vals (:agents r)))) "with what its stall check reads, and the clone handshake it holds with what waits behind it (none here)")
     (is (map? (get-in r [:reconciler :flight-steps])) "the reconciler's flights by task and the step each waits at")
-    (is (and (boolean? (get-in r [:reconciler :quiet])) (vector? (get-in r [:reconciler :waits])) (int? (get-in r [:reconciler :live])))
-        "whether it is quiet, the waits on main it holds and its live tasks: what a parked await-db waits on")
+    (is (and (boolean? (get-in r [:reconciler :quiet])) (vector? (get-in r [:reconciler :waits])) (vector? (get-in r [:reconciler :live])))
+        "whether it is quiet, the waits on main it holds and its live tasks by id (the leak a hang's capture must name): what a parked await-db waits on")
     (is (some #{:api} (:answered r)) "and the procs that answered, root's api among them")))
 
 (deftest a-kill-is-answered-once-the-agents-end-is-recorded
@@ -314,27 +314,30 @@
             "no id of a counter's form"))
       (finally (seon.lib/remove-tree! path tasks (str path "-in") (str path ".log") (str path "-agents"))))))
 
-(deftest a-root-stops-in-a-second
-  ;; task seon.system/a-root-stops-in-a-second (measured 2026-11-10): every stop of a root less than ~35 s old took 26-32 s,
-  ;; because its stop waited for the boot fork server to read the EOF of its socket, which a server still warming (preload!,
-  ;; its tests' load) did not do until its warm-up was done. The stop ends the boot server's process group at once
-  ;; (seon.fork-server/release!), and says so: stopped at once after its start, the root's answer names the group ended. Red
-  ;; before: the server was left to read its EOF (no :ended)
+(deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/root [] :seon.test/execs ["target/seon"]} a-stop-writes-the-roots-fibers-before-it-waits
+  ;; docs/machine.md#reading-a-hang: a root's stop waits for each proc's running step (Flow takes a stop between steps), and two stops
+  ;; overran past their bound with no record of the step that held them (runs/stop-overran-87484, -77485: the dump came at the kill,
+  ;; before the running fibers reached a safe point). The stop writes its fibers first, so a running fiber's frames land in its bound
   (let [checkout (seon.config/checkout)
-        main (str "root-test-stops-" (random-uuid))
+        main (str "root-test-stop-dump-" (random-uuid))
         runs (str checkout "/target/runs/" main "-runs")
         root (ts/start-root! {:store (ts/process-store checkout) :main main :runs runs})
-        {:keys [exit log]} (ts/stop-root! root)
+        {:keys [log]} (ts/stop-root! root)
+        dump (clojure.string/index-of log "ROOT STOPPING: its fibers as the stop begins")
         i (clojure.string/index-of log "ROOT STOPPED ")
         stopped (when i (edn/read-string {:default tagged-literal} (subs log (+ i (count "ROOT STOPPED ")))))]
-    (is (= 0 exit) log)
-    (is (= :group-ended (get-in stopped [:drained :ended])) (str "the boot server's group was ended by the stop: " (pr-str stopped)))
-    (is (true? (:graph stopped)) "every proc exited")
-    ;; task seon.lib/a-process-reports-the-most-processes-it-held-at-once: a root reports the most processes it held at once,
-    ;; read with no ps; one that forked no agent held itself and its boot fork server
-    (is (= 2 (:peak-processes stopped)) (str "the root's peak, on its ROOT STOPPED line: " (pr-str stopped)))
-    ;; what the stop calls, named here so this test's digest takes it (a root's own code is the full run's otherwise)
-    (is (= [:enum :group-ended :eof] (last (:malli/schema (meta #'seon.fork-server/release!)))) "release! answers how the server ended")))
+    (is (some? dump) (str "the stop wrote root's fibers as it began: " log))
+    (is (some? (clojure.string/index-of log "jolt fiber dump")) "the dump is Jolt's own (every fiber, running ones at their next safe point)")
+    ;; its parts' ticks beside their wall time, when the stop ended within its bound (never asserted on wall time: principles section 6)
+    (when stopped
+      ;; from the deleted a-root-stops-in-a-second (its wall-time bound went to task seon.system/a-stop-takes-no-wait-it-does-not-need):
+      ;; the stop ends the boot server's group at once (seon.fork-server/release!), every proc exits, and the root reports the most
+      ;; processes it held, read with no ps: itself and its boot fork server (task seon.lib/a-process-reports-the-most-processes-it-held-at-once)
+      (is (= :group-ended (get-in stopped [:drained :ended])) (str "the boot server's group was ended by the stop: " (pr-str stopped)))
+      (is (true? (:graph stopped)) "every proc exited")
+      (is (= 2 (:peak-processes stopped)) (str "the root's peak, on its ROOT STOPPED line: " (pr-str stopped)))
+      (is (= #{:fact :drain :flow-stop} (set (keys (:phases stopped)))) (str "the stop names its parts: " (pr-str (:phases stopped))))
+      (is (every? #(and (nat-int? (:ticks %)) (number? (:ms %))) (vals (:phases stopped))) "each with its ticks and its wall time"))))
 
 (deftest a-test-roots-task-files-are-its-own
   ;; the second boot above read 810 tasks (2026-10-25): its root started seconds after a merge

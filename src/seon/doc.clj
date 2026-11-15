@@ -559,13 +559,49 @@
   "The text attributes in the order the index numbers them (its rows' attribute column)."
   (vec (sort (distinct (vals text-attrs)))))
 
+(defn- index-key
+  "The content key of db's texts: each text attribute's revision, else the conservative one, digested; nil for a value that is no
+  commit. Equal keys hold equal texts on any branch, after any restart. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :string]]}
+  [db]
+  (let [c (:cache-context db)]
+    (when (:datahike.cache/committed? c)
+      (lib/digest (str/join "\n" (for [a index-attrs]
+                                   (str a " " (or (get-in c [:datahike.cache/attribute-revisions a]) (:datahike.cache/conservative-revision c)))))))))
+
+(defn- image-file
+  "Where the text index of content key k is kept: target/text-index/<k>.db in this process's checkout."
+  {:malli/schema [:=> [:cat :string] :any]}
+  [k] (io/file (cfg/checkout) "target" "text-index" (str k ".db")))
+
+(defn- keep-image!
+  "Index ix written as the image of key k (sqlite/fts-image) whole or not at all: to a temporary name, then renamed, so no process
+  loads half a file; the directory then keeps its :seon.config.vector/text-index-files-kept newest images. nil."
+  {:malli/schema [:=> [:cat :string :map] :nil]}
+  [k ix]
+  (let [f (image-file k) dir (.getParentFile f) tmp (io/file dir (str k "." (.pid (ProcessHandle/current)) ".tmp"))]
+    (.mkdirs dir)
+    (java.nio.file.Files/write (.toPath tmp) ^bytes (sqlite/fts-image ix) (make-array java.nio.file.OpenOption 0))
+    (java.nio.file.Files/move (.toPath tmp) (.toPath f) (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/ATOMIC_MOVE java.nio.file.StandardCopyOption/REPLACE_EXISTING]))
+    (doseq [old (drop (cfg/value :seon.config.vector/text-index-files-kept)
+                      (sort-by #(- (.lastModified ^java.io.File %)) (filter #(.endsWith (.getName ^java.io.File %) ".db") (.listFiles dir))))]
+      (.delete ^java.io.File old))
+    nil))
+
 (defn- build-index
-  "The FTS5 index (seon.sqlite/fts-open) of every text attribute's texts on db but the dependency source's: one row a text, its
-  entity and its attribute's number in `index-attrs`, one corpus whose bm25 `tokens` ranks."
+  "The FTS5 index of db's texts but the dependency source's, one row a text: loaded from its image on disk when one has its content
+  key (`index-key`), else built and its image written; a truncated or refused image is built again. See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
-  ;; the dependency source (:library) joins at the first grep that asks it (`with-library`), never at a warm start
-  (sqlite/fts-open (for [[i a] (map-indexed vector index-attrs) :when (not= a :seon.library/text) {:keys [e v]} (d/datoms db :aevt a)] [e i (str v)])))
+  (let [k (index-key db) f (when k (image-file k))]
+    (or (when (and f (.isFile ^java.io.File f))
+          (try (sqlite/fts-load (java.nio.file.Files/readAllBytes (.toPath ^java.io.File f)))
+               ;; a corrupt image: built again below and written over
+               (catch clojure.lang.ExceptionInfo e (when-not (= :seon.sqlite/refused (:seon.error/type (ex-data e))) (throw e)))))
+        ;; the dependency source (:library) joins at the first grep that asks it (`with-library`), never at a warm start
+        (let [ix (sqlite/fts-open (for [[i a] (map-indexed vector index-attrs) :when (not= a :seon.library/text) {:keys [e v]} (d/datoms db :aevt a)] [e i (str v)]))]
+          (when k (keep-image! k ix))
+          ix))))
 
 (defn- release!
   "Reader done with index ix: its count in the slot goes down, and an index no longer the slot's with no reader left is closed."

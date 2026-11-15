@@ -98,6 +98,9 @@ launch() {
   # seon.problems/stale-binary), not a tree read here at every start (0.3 s a root, every process test's); when they
   # differ the root prints ROOT STALE BINARY (the acts that bring them into agreement) before listening, and start's
   # last line is that line (docs/source.md#files-and-the-db-two-directions)
+  # the previous start's log is kept beside this one (a restart must not erase a hang's evidence: three seon_eval hangs left
+  # none, 2026-11-15); this start's readers read $LOG alone
+  [[ -s $LOG ]] && mv -f "$LOG" "$LOG.prev"
   : > "$LOG"
   rm -f "$PIDS" "$PORTF" "$READY" "$DONE"; mkfifo "$READY" "$DONE"
   # the one holder (bin/held, detached) owns the root's stdin and output and waits on it: it
