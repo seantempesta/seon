@@ -519,13 +519,16 @@
   ;; docs/source.md#a-landing-enters-main-as-data: what the bridge writes (seon.system/landed-tx) moves root's source fact to
   ;; the landed tree, so the next re-index reads what differs from it, not every file landed since the last import
   (let [db0 (pdb/empty-db false)
-        held {:root "/r" :dirs ["src"] :tree "t0" :commit "c0" :digest "d0" :files 1 :forms 0 :ms 1.0}
+        held {:root "/r" :dirs ["src"] :tree "t0" :commit "c0" :digest "d0" :files 1 :forms 0 :ms 1.0 :t 5}
         db (:db-after (pdb/with db0 [{:seon.system/id :root :seon.system/source held}]))
         db1 (:db-after (pdb/with db (root/landed-tx db {"src/app/landed.clj" "(ns app.landed)\n(defn f [] 1)\n"} {} "t1" "c1")))
         fact (:seon.system/source (d/pull db1 [:seon.system/source] [:seon.system/id :root]))]
     (is (= ["t1" "c1"] [(:tree fact) (:commit fact)]) "the landed tree and commit")
     (is (not= "d0" (:digest fact)) "its digest is the landed tree's")
     (is (= ["/r" ["src"]] [(:root fact) (:dirs fact)]) "what the import read from stays")
+    ;; the tree holds at least main as of the db the landing read (seon.fx/proving-runs-as-flow: the merge gate's base); red before: it
+    ;; kept the last write-back's :t, a fact claiming an older main than its files
+    (is (= (:max-tx db) (:t fact)) "its :t is the t of the main it landed on, never an older write-back's")
     (is (some? (d/entity db1 [:var/name 'app.landed/f])) "and the landed file's facts are main's")))
 
 ;; Estimate: 8 restart-for x 5k + 2 empty-db and checked writes 0.2M + booted-source and 2 test-inputs pulls 0.1M = 400000 ticks

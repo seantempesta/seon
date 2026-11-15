@@ -1425,7 +1425,9 @@
     ;; the tasks the landed commits say they complete, done (landed-completes)
     (cond-> (into (changed-tx db changed modes (cfg/value :seon.config.source/tasks-dir) (landed-completes held commit)) (source/pin-changes-tx db pin-changes))
       held (conj {:seon.system/id :root
-                  :seon.system/source (assoc (dissoc held :pins) :tree tree :commit commit :digest (source-digest {:tree tree :pins pins} (:dirs held [])))})))))
+                  :seon.system/source (assoc (dissoc held :pins) :tree tree :commit commit :digest (source-digest {:tree tree :pins pins} (:dirs held []))
+                                              ;; the tree holds at least main as of the db it landed on (the merge gate's base, docs/source.md)
+                                              :t (:max-tx db))})))))
 
 (defn catch-up
   "What brings db's index of its checkout up to date with the files at root as they are now (docs/source.md#a-boot-catches-up-with-its-checkout):
