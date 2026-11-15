@@ -531,18 +531,27 @@
     (= :lost (get-in st [:view :fork-server :status])) (fs/lost)
     (> n (cfg/value :seon.config.root/max-agents)) (refused 'seon.system/spawn! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)})))
 
+(defn- branch-holder
+  "The live agent holding what opts asks to start, or nil: the session's agent under its key (one live process per agent), else an
+  agent live on its branch. Live is a process: a live status (:seon.status/live) with its pid, or a spawn still answering its caller
+  (::spawning). An entry left by a kill, or a :spawning one with no process and no caller, holds nothing, so a resume is never
+  refused by its own stale entry."
+  {:malli/schema [:=> [:cat :map :map] [:maybe :keyword]]}
+  [st opts]
+  (let [live? (fn [aid] (let [a (get-in st [:view :agents aid])]
+                          (and a (not (:ended-ms a)) ((:seon.status/live (contract/properties :seon.agent/status)) (:status a))
+                               (or (:pid a) (get-in st [::spawning aid])))))]
+    (or (let [k (some-> (:key opts) keyword)] (when (and k (get-in st [:agents k]) (live? k)) k))
+        (and (:branch opts)
+             (some (fn [[aid a]] (when (and (= (:branch opts) (:branch a)) (live? aid)) aid))
+                   (get-in st [:view :agents]))))))
+
 (defn- spawn-agent
   "A new agent from opts, or the refusal answered to p: its branch held by a live agent, no fork server, too many agents. Answered at its hello (set-agent's :ready), or the end it meets first."
   {:malli/schema [:=> [:cat :seon.system/api-state :seon.host/volatile [:maybe [:or :seon.host/promise :map]] [:maybe :map]] :seon.system/api-state]}
   [st o p opts]
   (let [opts (cond-> opts (:branch opts) (update :branch #(pdb/on-main (pdb/conn-main (:conn st)) %)))
-      ;; one live process per agent: the session's agent (its key is its id) is not started again while one holds it
-      holder (or (and (:key opts) (get-in st [:agents (keyword (:key opts))]) (keyword (:key opts)))
-                 (and (:branch opts)
-                  (some (fn [[aid a]] (when (and (= (:branch opts) (:branch a)) (not (:ended-ms a))
-                                                 (not (task/gone-statuses (:status a))))
-                                        aid))
-                        (get-in st [:view :agents]))))]
+      holder (branch-holder st opts)]
   (cond
     holder (let [{:keys [task]} (get-in st [:view :agents holder])]
              (reply! st o p (refused 'seon.system/spawn! (str "branch " (:branch opts) " is held by live agent " holder
@@ -550,7 +559,12 @@
                                                           ": its seon_done or an end frees it")
                                      (cond-> {:branch (:branch opts) :agent holder} task (assoc :task task)))))
     (no-room st (inc (count (:agents st)))) (reply! st o p (no-room st (inc (count (:agents st)))))
-    :else (start-spawn st o p opts))))
+    ;; the resumed key's stale entry (no live process holds it: branch-holder) is reaped as an agent's end drops its own, so the
+    ;; spawn starts clean and nothing is left :spawning forever
+    :else (start-spawn (let [k (some-> (:key opts) keyword)]
+                         (cond-> st (and k (get-in st [:agents k]))
+                           (-> (update :agents dissoc k) (update :agent-procs dissoc k) (update ::inserting dissoc k) (assoc ::update true))))
+                       o p opts))))
 
 (defn- back-point
   "Where eval id of agent aid's branch (db, its head, named branch) stands, {:commit :branch :t}, or why it can't be gone back to: the earliest commit of the branch holding its code's and response's last write, a run again's included and a reader's opening of it not (seon.ctx.wire/at-t), and a new branch's name for it, which no earlier back to it holds, as the head has moved since. See docs/turn.md#an-agent-goes-back-to-an-eval."
