@@ -2207,3 +2207,20 @@
                    (catch Exception e (ex-message e)))]
         (is (= 20 r) (str "a read-only connect reads the store: " r)))
       (finally (run! seon.lib/remove-tree! @stores-made) (reset! stores-made [])))))
+
+;; docs/users.md#what-each-thing-is: an eval's response keeps as its result the attributes the result entity's schema declares (its
+;; identity, the hash, apart) and reads back whole, its keys in the order :seon.repl/answer declares; red under a hand list that
+;; leaves an attribute out or orders the keys otherwise
+;; Estimate: two schema reads (~3k ticks) and one response written and read (~11k): ~14k, 2000000 with the harness's own
+(deftest ^{:seon.test/estimate {:ticks 2000000}} an-eval-responses-parts-are-its-schemas-keys
+  (let [ix (seon.db/index)
+        id (get (:schema-identities ix) :seon.result/result-fact)
+        r {:handle 'result/abcd1234 :forms 2 :value [1 2] :recorded ['x] :out {:seon.print/code "o"} :err {:seon.print/code "e"} :ms 1.0 :ticks 10 :bytes 20}
+        held (set (for [a (seon.db/attributes-of ix :seon.result/result-fact) :when (and (not= id a) (contains? r (keyword (name a))))] a))
+        order (seon.db/own-keys (malli.core/form (malli.core/deref (malli.core/schema :seon.repl/answer seon.contract/options))))
+        e (seon.db/with-response {:seon.eval/id "x"} r)
+        back (seon.db/response-of nil e)]
+    (is (= #{:value :out :err :forms} (set (map (comp keyword name) held))) "this response holds four of the result's attributes")
+    (is (= held (set (keys (dissoc (:seon.eval/result e) :seon.result/hash)))) "its result holds each attribute the result schema declares that it has")
+    (is (= r back) "and the response reads back whole")
+    (is (= (keys back) (filter (set (keys r)) order)) "its keys in the order :seon.repl/answer declares")))
