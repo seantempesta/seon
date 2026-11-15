@@ -100,6 +100,34 @@
         (is (= cold (d/reads-index warm)) (str "a cached recorded read records what it read: " (pr-str (d/reads-index warm)) " vs " (pr-str cold)))
         (is (< (* 3 dt) uncached-dt) (str "and the cache served it: " dt " ticks against " uncached-dt " uncached"))))))
 
+;; Estimate: test-branch! ~1M, 3 transacts ~0.5M, 6 recorded q runs on the seed's ~2k datoms ~0.5M = ~2000000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-cached-read-on-a-later-commit-records-what-a-fresh-run-reads
+  ;; task datahike.reads/a-cached-read-records-what-it-read (root's review): an entry a later commit inherits
+  ;; (datahike.query/inheritable-entry) replays the ranges of its first computation. Ranges are keys, never values: a
+  ;; commit that adds keys inside a range read, the answer unchanged, leaves the recorded keys a fresh run records; and an
+  ;; inherited entry (no attribute read moved) records what a fresh run on the new value records
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn [{:note/text "keep" :note/agent :c1}])
+      (let [q '[:find ?a :where [?e :note/text ?t] [(= ?t "keep")] [?e :note/agent ?a]]
+            fresh (fn [db] (d/with-reads #(binding [datahike.query/*query-result-cache?* false] (d/q q db))))
+            served (fn [db] (d/q q db) (d/with-reads #(d/q q db)))
+            same (fn [db what]
+                   (let [[v1 r1] (fresh db) [v2 r2] (served db)]
+                     (is (= #{[:c1]} v1 v2) what)
+                     (is (= (d/reads-index r1) (d/reads-index r2))
+                         (str what ": " (pr-str (d/reads-index r2)) " replayed vs " (pr-str (d/reads-index r1)) " fresh"))))]
+        (same @conn "the first commit")
+        (d/transact conn [{:note/text "other" :note/agent :c2}])
+        (same @conn "a commit adding keys inside both ranges read, the answer unchanged")
+        (d/with-reads #(d/q q @conn))
+        (d/transact conn [{:seon.agent/key "reads-test/unread" :seon.ctx/pattern '[["a/b" 0.5]]}])
+        (let [db @conn
+              t0 (jolt.host/ticks) _ (d/with-reads #(d/q q db)) inherited (- (jolt.host/ticks) t0)
+              t1 (jolt.host/ticks) _ (fresh db) computed (- (jolt.host/ticks) t1)]
+          (is (< (* 3 inherited) computed) (str "a commit to an attribute the query does not read inherits the entry: " inherited " ticks against " computed))
+          (same db "and the inherited entry records what a fresh run reads"))))))
+
 (deftest a-transaction-touches-only-what-a-read-scanned
   (let [[db t1 t2] (seeded)
         point (d/reads-index (second (d/with-reads #(d/q '[:find ?e . :in $ ?id :where [?e :seon.task/id ?id]] db "r/t2"))))
