@@ -894,3 +894,18 @@
   (is (runner/kept-report? {:type :pass :actual {:rows [] :verdict {:ok? true :accepted {:task "t/x"}}}}) "a waived pass")
   (is (not (runner/kept-report? {:type :pass :actual {:rows [] :verdict {:ok? true}}})) "a plain pass")
   (is (runner/kept-report? {:type :fail :message "over"}) "a failure"))
+
+;; docs/source.md#tests-run-by-reach: a test that reads the checkout raw keys its green by the files it read, not the whole tree
+;; Estimate: 5 run-reads calls, each a few string compares and one stat, under 1M ticks, plus one slurp of a page
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-green-that-read-the-checkout-raw-keys-the-files-it-read
+  (let [root (seon.config/checkout) ks [[:env] [:tree] [:config :seon.env/schemas]]]
+    (profile/reads-begin!)
+    (slurp (str root "/docs/prompt.md"))
+    (is (= {:fns #{'a/t} :files #{"docs/prompt.md"} :keys [[:env] [:config :seon.env/schemas]]}
+           (proofs/run-reads {:fns [] :files (profile/opened)} 'a/t ks))
+        "the page it read, through Jolt's own record, in place of [:tree]")
+    (is (= (conj ks [:root]) (:keys (proofs/run-reads {:files #{(str root "/docs/prompt.md")}} 'a/t (conj ks [:root]))))
+        "a test reaching a process keeps the tree: what the process reads is out of sight")
+    (is (= ks (:keys (proofs/run-reads {:files #{(str root "/docs")}} 'a/t ks))) "a directory listed keeps the tree")
+    (is (= ks (:keys (proofs/run-reads {} 'a/t ks))) "a run that noted nothing keeps the tree")
+    (is (= #{} (:files (proofs/run-reads {:files #{"/tmp/x.edn"}} 'a/t ks))) "a file outside the checkout is no read of it")))
