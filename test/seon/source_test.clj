@@ -1826,9 +1826,12 @@
             db (d/db-with (ts/test-db) [{:seon.system/id :root :seon.system/source {:branch "jolt/merges" :commit landed :tree "t0" :dirs ["src"] :t 5}}])
             held #(:seon.system/source (d/pull % [:seon.system/source] [:seon.system/id :root]))
             r (fx/git-commit {:req {:dir d :branch "jolt/merges" :merge "main"}})
-            tx (reconcile/source-moved-tx db r 5)
+            tx (my.root/merge-moved-tx db r 5)
             db' (d/db-with db tx)]
         (is (= (g "rev-parse" "jolt/merges") (:commit (held db'))) (str "the fact names the merge commit: " (pr-str r)))
+        ;; the fact's :tree is main's files' tree (what restart-for and a boot's catch-up compare with), never the write-back tree's:
+        ;; moved to it, every update restarted root (main held b82f07645f, the merges tree; the files 406387db53; 2026-11-16 05:06, 05:18)
+        (is (= "t0" (:tree (held db'))) (str "and its :tree stays main's files' tree: " (pr-str (:tree (held db')))))
         (is (= 5 (:t (held db'))) "and the main t its tree holds, unchanged: the merge brought no file of main's in")
         (let [w (fx/git-commit {:req (merge (reconcile/write-back-target (held db') "jolt/merges")
                                             {:dir d :files {"b.txt" "b\n"} :message "a write-back"})})]
