@@ -1837,3 +1837,16 @@
     (let [judged (digests (record db 'app.rn "(defn judge [r] (contains? #{:ok} r))"))]
       (is (every? (fn [[t d]] (not= d (judged t))) before) "a form the runner reaches changed: every test's digest moves"))
     (is (= before (digests (record db 'app.rn "(defn spare [x] (identity x))"))) "a form nothing of theirs reaches changed: none moves")))
+
+;; Estimate: 2 tiny-file imports 2M + one graph 0.2M + 3 reverse walks over it ~0.1M, ~2.5M = 2500000
+(deftest ^{:seon.test/estimate {:ticks 2500000}} a-library-vars-tests-are-those-reaching-its-callers
+  ;; deps, 2026-11-15: a library var has no form in the program, so tests-reaching answered [] for it, and the tests a
+  ;; pin reaches were computed by hand at the REPL from :form/refs. The graph's refd holds the forms that name a var,
+  ;; library ones too: a library var's tests are those reaching its callers, a test that calls it among them
+  (let [srcs {"src/app/lib_reach.clj" "(ns app.lib-reach (:require [clojure.string :as str]))\n(defn shout [s] (str/upper-case s))\n(defn quiet [s] s)\n"
+              "test/app/lib_reach_test.clj" "(ns app.lib-reach-test (:require [clojure.test :refer [deftest is]] [clojure.set] [app.lib-reach]))\n(deftest shouts (is (= \"A\" (app.lib-reach/shout \"a\"))))\n(deftest unions (is (= #{1 2} (clojure.set/union #{1} #{2}))))\n(deftest quiets (is (= \"a\" (app.lib-reach/quiet \"a\"))))\n"}
+        db (let [db (empty-db)] (d/db-with db (source/import-tx db srcs)))
+        g (program/reach-graph db nil)]
+    (is (= ['app.lib-reach-test/shouts] (program/tests-reaching g 'clojure.string/upper-case)) "the test reaching a caller of the library var")
+    (is (= ['app.lib-reach-test/unions] (program/tests-reaching g 'clojure.set/union)) "a test calling it itself")
+    (is (= [] (program/tests-reaching g 'clojure.string/lower-case)) "and none for a library var nothing calls")))
