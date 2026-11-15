@@ -996,6 +996,8 @@
       ;; an agent's errors since its last commit (seon.error/note, each of its class), counted across agents
       :errors (let [task (get-in st [:view :agents (:agent m) :task])]
                 (reduce (fn [st s] (problem st (err/sent->occurrence s (:agent m) task))) st (:entries m)))
+      ;; an effect owner's running set, replaced whole (seon.fx/running-told): root's debug page lists each running server op
+      :server-ops (if (= (:running m) (get-in st [:view :server-ops (:kind m)])) st (assoc-in st [:view :server-ops (:kind m)] (:running m)))
       ;; an effect owner's failed outcome (seon.fx/owner-proc)
       :problem (problem st (err/occurrence (:error m) (:class m) {:agent (:agent m) :task (get-in st [:view :agents (:agent m) :task])}
                                            (System/currentTimeMillis)))
