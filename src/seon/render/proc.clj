@@ -453,6 +453,14 @@
   [{:keys [p db ident id-prefix outputs] :as kw} f]
   (assoc kw :p (walk-of p db (f (:tree p)) (:index p) ident [] (cond-> {} id-prefix (assoc :id-prefix id-prefix) outputs (assoc :outputs outputs)))))
 
+(defn- redefined-walk
+  "Kept walk kw walked again over the db it holds with datoms as what moved: a landing's :var/form datoms on main, which a branch's
+  walk never reads from its branch, so seon.render/queue-moved-renders! draws again the components whose render they redefine. See
+  docs/render.md#reactive-renders."
+  {:malli/schema [:=> [:cat :map [:sequential :any]] :map]}
+  [{:keys [p db ident id-prefix outputs] :as kw} datoms]
+  (assoc kw :p (walk-of p db (:tree p) (:index p) ident (vec datoms) (cond-> {} id-prefix (assoc :id-prefix id-prefix) outputs (assoc :outputs outputs)))))
+
 (defn- take-walk-defects
   "St with the defects its kept walks hold (root's, each branch read's, each user's: the components that threw in a walk since
   the last take) taken: [st' defects], for root to record each as a problem. See docs/health.md."
@@ -985,8 +993,14 @@
     (if (and held (<= (:max-tx db) (:max-tx held)))
       st
       ;; one diff a move of main: the index, every kept walk and the views it touched read the same datoms
-      (let [moved (when held (ctx/moved held db nil))]
+      (let [moved (when held (ctx/moved held db nil))
+            ;; a landing's definitions: every kept branch walk takes them as moved (its branch never carries main's), the users' and
+            ;; root's walks read them from main's own move
+            defs (let [fs (filterv #(= :var/form (:a %)) moved)]
+                   ;; with each var's name as main holds it, so a branch that holds no entity for it still finds its render
+                   (into fs (mapcat #(d/datoms db :eavt (:e %) :var/name)) fs))]
         (cond-> (user-walks (root-walk (main-info st db moved) db held moved) db (when held {:from held :moved moved}))
+          (seq defs) (update :branch-reads update-vals #(cond-> % (:walk %) (update :walk redefined-walk defs)))
           (seq moved) (update :dirty (fnil into #{}) (touched st moved))
           (seq moved) (health-advanced db moved)
           ;; a landing kept in place loaded the new program, then wrote root's source fact (my.root/landed!): every held view drew with
