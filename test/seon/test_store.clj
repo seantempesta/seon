@@ -611,8 +611,7 @@
         ;; what killed shards left (their hooks never ran) goes before this one makes its own
         _ (reclaim! checkout store)
         root (start-root! {:store store :main main :runs (str checkout "/target/runs/" main "-runs")
-                           ;; it says it is shared, so a wait on its whole quiet is refused (seon.await/await-quiet)
-                           :args (into ["--set" (str ":seon.config.source/branch=" (pr-str branch)) "--set" ":seon.config.root/shared=true"] args)})]
+                           :args (into ["--set" (str ":seon.config.source/branch=" (pr-str branch))] args)})]
     (.addShutdownHook (Runtime/getRuntime)
                       (Thread. ^Runnable (fn [] (let [s (stop-root! root)] (when-not (:exit s) (binding [*out* *err*] (println "shared root" main "not stopped:" (pr-str s)))))
                                                (drop-main! store main) (seon.lib/remove-tree! (:runs root))
