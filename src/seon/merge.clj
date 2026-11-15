@@ -586,10 +586,8 @@
 
 
 (defn changed-datoms
-  "What head changed since base, as [gone added] datoms: the commits' own changes between base's commit and head's (d/changes,
-  what each commit kept beside it: O(commits + datoms), never the indexes), else, for commits written before commits kept them
-  or a base off head's lineage, datahike.api/datoms-diff of the two values (O(the nodes that differ)). See
-  docs/merging.md#a-branch-merges-main-in."
+  "What head changed since base, as [gone added] datoms, read from the commits between them (d/changes); a diff of the two
+  values only for commits that kept no changes. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:tuple [:sequential :seon.host/datom] [:sequential :seon.host/datom]]]}
   [base head]
   (let [from (d/commit-id base) to (d/commit-id head)
