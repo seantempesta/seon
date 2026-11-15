@@ -6,6 +6,61 @@ The owner's standing rulings, one entry each: his meaning in correct terms (neve
 
 The owner's rulings on the morning after the first night run on its own.
 
+### The self-merge path goes first, so the system stops needing hands (evening)
+
+The owner wants the plan's self-merge path finished as soon as possible, so the system is reliable and fast and nobody orders landings by hand. Three choices, made with root at about 17:00:
+1. **Landings:** a landing on the path goes first, always. The path is main proving in the system, `bin/test` and `bin/prove` as thin clients of `:prove` (E), admission and the update owner (D), one `:merge`, the `seon_done` pilot, and `bin/land` deleted (plan items 10, 11, 13, 14, 17, 18 and the Stage 1 safety list). A green feature landing goes only when no path landing is ready, so finished work does not drift from main.
+2. **Areas off the path move onto it:** web, flow and context land what is already green, then each owns a path item. Web makes the MCP relay answer each call on its own. Flow makes proving run as Flow procs admitted by backpressure, and reviews runtime's D. Context does plan items 8 and 9. Web's person view waits behind that.
+3. **The first real `seon_done`** is tried as soon as main's run proves green in the system and plan items 1, 2 and 4 are on main, not after the whole safety list. A failure is filed as a task. Until D lands, the three-land rule holds the load.
+4. **Drivers first, right after deps' pin:** the context session runs its `seon-driver` Claude agents (Sonnet, only the `seon_*` tools) on real tasks as soon as deps' pin restarts root, before plan items 8 and 9. First a parity check of a driver's reply against a model agent's request, then two drivers beside the DeepSeek rounds. What a driver can't do through `seon_*` is filed as a task.
+
+### Once running, Seon cannot crash or hang; a wait inside it is a design defect (evening)
+
+The owner's rule: once a process is past boot and running, nothing inside it can crash it or hang it. Everything that can block, fail or crash goes to an edge with one owner (the OS, files, the network, the model, native code, git), and the edge turns it into a value or a typed error. Inside, everything is Flow procs and immutable values, so a block, a lock or an unbounded wait found inside the runtime is a design problem to fix in the design, never to guard or retry. The core areas split it:
+- **flow** reviews, fixes and implements Flow and Seon's use of it, and owns the list of state and waits outside Flow (health's `:stateful-outside-flow`);
+- **runtime** owns reactions (`seon.ratom`, the reactive core), and moves each derive or track onto it;
+- **deps** owns the interfaces to the libraries and native code (Jolt, Chez, Datahike, foreign calls), so a failure there reaches Seon as data at the edge.
+Each area works the others through agreed interfaces, recorded in the task they concern.
+
+### Sessions switch to REPL-driven work through the MCP tools once every part works, on one owner's plan (evening)
+
+The goal is that every session works as a Seon agent does: attached to its agent, it edits with `seon.repl/edit!` through `seon_eval`, proves through `:prove` and merges through `seon_done`, so the separate systems (worktrees, per-checkout systems, `bin/land`) can go. Sessions keep the Edit tool and the import hook until every part of that path is shown working. One owner plans the switch ahead and pushes it: the context session, since its `seon-driver` agents already work only through the `seon_*` tools. Its plan lists each kind of edit a session makes and whether the path serves it, with what a driver lacked filed against the shared tools, and the gate that says everyone switches.
+
+Every edit goes through the branch: `edit!` writes onto the agent's branch, and the change reaches main only through the merge's conflict check, the tests its reach selects, and the merge itself. Nobody writes a file directly. So `edit!` must address every kind of entry the system is built from as a branch-held place: definitions (functions, vars, macros, tests), namespaces (created, changed, deleted), schema entries, config keys, task entries, doc sections and pages, test fixtures, scripts, and build inputs (pins, `deps.edn`). Its raw disk write is refused for anything in the program's tree.
+
+### Tonight: rounds may spend $25; a new binary takes over in parallel, so no restart ends live work (evening)
+
+Before going out, the owner set three things:
+- The rounds and drivers may spend up to $25 of the model budget tonight.
+- Nothing is held for his review: root reads every landed diff, and the reviewer runs every two hours.
+- A land that needs a new binary must not end live agents. The plan in `seon.system/an-update-loses-nothing` is finished first: the new binary is built, boots beside the standing system on the same store, runs every test against itself, catches up main's program by evaluating the forms that changed (`seon.program/load-diff!`), and takes the system over only if it passes. A red leaves the standing system running as it was.
+- State lives in one of two places, each built to start and stop properly: the db, which a clean close leaves byte-identical, and Flow procs, which drain and start under Flow's lifecycle. A switch-over is the db closed cleanly plus every proc drained. State anywhere else (a process-global atom, a forked process outside a Flow graph, a cache with no owner) is the design defect to move into one of the two, never special-cased at switch-over.
+
+Runtime builds this right after the update owner, which it extends. Until it lands, a path land that must restart root goes ahead, and context re-releases its round agents on the new root, told before the land starts.
+
+### Sessions land as soon as a land is ready (night)
+
+The owner wants sessions to merge and update as soon as everything is ready, with no wait for root's word. Ready means: main merged in; laws, health and the reach tests green; `runtime-for` says the land keeps root running; and no other land running at that moment. A land that would restart root still waits for root's word, because restarts are batched until flow's drain lands. A session reports each landing to root through Seon messaging. This supersedes the rule that every land starts on root's word.
+
+### Three priorities tonight: tests inside the system, the core infrastructure in use, messaging (late evening)
+
+The owner named three priorities, all at once, and this supersedes the entry below where they differ:
+1. **Tests run inside the system:** one runner, `:prove`, through E. The old runner goes.
+2. **The system uses its core infrastructure:** every hand-built derived value and incremental update moves onto reactions and ratoms (`seon.ratom`), and each move deletes the duplicated code it replaces. Runtime fixes the core first (the review's five changes). Then each area's reader lands as soon as its REPL prototype measures well, without waiting for D.
+3. **Messaging:** sessions and agents talk through Seon's messages (`seon_message`, `seon_inbox`, attached session agents).
+
+### The reactive switch-over: the design gate now, reader landings after the self-merge path (evening)
+
+The reactive switch-over's design gate runs now, beside the self-merge path. All area entries `seon.ratom/<area>-reads-on-the-core` reach main, an independent reviewer judges the core against Reagent and re-frame, and each area measures its reader against its engine as a REPL prototype. The reader landings that delete each hand-built engine go after runtime's update owner and D, and take no landing slot from the path.
+
+### Iterate on real agents; nothing lands on them unproved (evening)
+
+The owner wants the slots, gaps and hand-ordering gone, with agents working inside a system that adapts and is fast, and that end reached by iterating, never by pushing untried mechanisms onto agents. A change on the path agents use is done only when a real agent has used it: a round of DeepSeek agents or a `seon-driver` works a real task through it, and its turns-to-merged are compared before and after. A change that adds turns or confuses agents is reworked or reverted, not defended. Rounds and drivers run continuously once deps' pin restarts root, and what they lose re-ranks the work (`my.root/run-losses`).
+
+### Sessions' tools are thin over the system, and honest where they are not (evening)
+
+The owner wants Claude sessions' tools integrated with the running system. Every `bin/` script and MCP tool is a thin wrapper over a `seon.server` op, carrying no logic, state or decision of its own. Where one still does its work outside the runtime, its header says so plainly: what it does outside, and the task that moves it inside. Sessions and Seon agents feel the same problems, so pain a session hits with a tool is fixed in the shared mechanism (the op, the proc, the namespace function), so both gain, never in the script alone. Root keeps the list of scripts and how each deviates, and each gap is a task in its owning area. A script's outside logic is never ported into the runtime as it is: its task asks what job is left once the runtime's own mechanisms exist, and builds the runtime's design for that job, often better, or deletes the script outright.
+
 ### Tests always have helpers making them millisecond tests of the goal
 
 "Tests always has subagents running (Sonnet is fine) that refactor tests to prove 90% of their goal in milliseconds, and drop tests that are low quality and slow" (from his phone; root's rewrite, his meaning). The tests session keeps Sonnet helpers working at all times, in its one worktree, each on test files nobody else edits, slowest first ("Have the agents run those conversions slowest first"); a test is rewritten to prove the most important 90% of its goal in milliseconds, or dropped when it is low quality and slow, its `Deletes:` line naming what now proves its goal (`AGENTS.md` §2, helpers; §3, no functionality removed).
@@ -17,6 +72,34 @@ The owner's rulings on the morning after the first night run on its own.
 ### Jolt's instrumentation, in deps' order
 
 Told that ticks count Scheme work only (no foreign calls, GC copying, parked time or interrupts-off time: chez `s/cpnanopass.ss:2966`, `s/event.ss:47`) and that the 161M/300M swing is unexplained, he chose deps' order: dumps that need no event check; CPU time and bytes per fiber per dispatch; steps scoped by the existing nesting measure `ticks-of`, with no new marker; a counter of foreign lookups; then one experiment that settles the swing before ticks can fail a test. Plan in `deps-ticks-soundness-2026-11-15` (deps' task).
+
+### Debug inspects what was rendered; it never interprets again
+
+He ruled that debugging shows the rendered versions that exist, exactly as they were sent, never a new interpretation of the records, which would defeat its purpose (2026-11-15). A debug view joins the components a turn actually assembled, each stored once by content digest, and nothing is re-rendered; its result's digest equals the turn's `:seon.model-call/sent-hash`. Rendering itself is driven by the pull and the schemas the one walk detects on each entity as it recurses; a render function may also query the db.
+
+### An agent offers the person a place; it never moves their page
+
+With `/` always root's chat, he first retired `my.user/focus!`, then revised it the same day (2026-11-15): keep and adapt it. The person's web state stays data any agent may update; an agent never moves the page under the person, but offers a button in the chat that takes them to the right place when they tap it, its action the one function that updates their web state. Root's prompt says to offer such a button.
+
+### Messaging is flow's: a wake that never blocks, the person included
+
+He ruled that the inbox and the rest of messaging belong to flow, not web: it must be done right from Flow's side, waking an agent without blocking, and it must work for the user, who is also an agent driving a session through the page's input box (2026-11-15). One path serves a Claude session's inbox, a Seon agent's wake and a person's message; flow asks web and runtime for what it needs, and web draws what the path delivers.
+
+### Claude agents are driven through Seon's own turns
+
+He asked that Claude agents be driven through the Seon MCP turns, with context launching Sonnet agents on real tasks to learn what works and what confuses, using tools as close as possible to a Seon agent's (2026-11-15). A driver is a project agent type allowed only the `seon_*` tools (attach, context, eval, done, message), reading `seon_context` as its whole view and acting only through `seon_eval`; its runs sit beside model runs of the same tasks, and their difference is the finding. A driver gets each turn's changes exactly as a model agent does (what moved, in each `seon_eval` reply, from the one turn assembly), reading `seon_context` once at attach; where the outside path differs, it is fixed. Context runs it.
+
+### A binary is built only when it is needed
+
+He ruled that the binary is rebuilt only when a change needs it: when a build input changed and the new binary must be tested (the parallel system), or when the system is about to restart; never on every land (2026-11-15). A kept-running land builds nothing, since a boot catches up main's program in place. Runtime carries it in plan item 17; E removes the per-land build of the land's own checkout.
+
+### Safe self-landing before the reactive switch-over continues
+
+Asked to order runtime's three items after the health land, he chose (2026-11-15): one owner for updates first (lands never collide; a binary is built only when needed), then admission by weight (the system schedules proofs, replacing the hand gate and root's ordering), then the reactive switch-over's next land. The goal they serve: agents prove whenever they want, the system schedules, and agents land safely on their own.
+
+### Every compaction leaves a principal engineer's prompt
+
+He ruled that a session about to compact leaves its successor a prompt he can paste into a fresh session, casting it as the principal engineer leading its area on the company's most important project, turning a working prototype into a real product, with rigor, correctness and a sharpness that makes it a pleasure to work with (2026-11-15). Stated in `AGENTS.md` §3.
 
 ### Tests never hardcode defaults
 
