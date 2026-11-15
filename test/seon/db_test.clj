@@ -2075,15 +2075,13 @@
     (finally (run! seon.lib/remove-tree! @stores-made) (reset! stores-made []))))
 
 (defn- mark-reads
-  "The konserve reads one fresh mark of db's :eavt makes and the keys it marks: [reads marked], the reads as konserve reports them
-  (konserve.metrics: each value read is one :io event, :read-immutable or :read-edn), never a redefinition of the reader, which a
-  compiled caller in the binary does not call through."
+  "The konserve reads one fresh mark of db's :eavt makes and the keys it marks: [reads marked]."
   {:malli/schema [:=> [:cat :seon.host/db] [:tuple :int [:set :any]]]}
   [db]
-  (let [n (atom 0)]
-    (km/add-sink! ::mark-reads (fn [e] (when (and (= :io (:level e)) (#{:read-immutable :read-edn} (:op e))) (swap! n inc))))
-    (try (let [marked (psi/mark (:eavt db))] [@n marked])
-         (finally (km/remove-sink! ::mark-reads)))))
+  (let [n (atom 0) g k/get gi k/get-immutable]
+    (with-redefs [k/get (fn [& args] (swap! n inc) (apply g args))
+                  k/get-immutable (fn [& args] (swap! n inc) (apply gi args))]
+      (let [marked (psi/mark (:eavt db))] [@n marked]))))
 
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-collections-mark-reads-each-node-once
   ;; docs/storage.md#collection: a collection's mark (datahike.gc, under seon.db/retain! at every root boot) walks each
