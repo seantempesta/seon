@@ -311,7 +311,7 @@
                              :seon.problems/caused #{:retyped-attribute :unnamed-site :native-in-defonce :stale-section :uncited-var :long-form :unfocused-docstring :leadless-section :orphan-page :waived-proof :uncited-task :stale-plan :unestimated :undeclared-test :unschemed-key :refused-value :hand-written-list :stateful-outside-flow}
                              ;; shown, never a reason to refuse done (root's ruling, 2026-10-23: every var edit stales the sections that cite it;
                              ;; and the plans that cite it, an agent's own task's among them)
-                             :seon.problems/attention #{:stale-section :uncited-var :long-form :unfocused-docstring :stale-plan :hand-written-list :stateful-outside-flow}
+                             :seon.problems/attention #{:stale-section :uncited-var :long-form :unfocused-docstring :stale-plan :hand-written-list}
                              :seon.problems/areas [[:docs #{:stale-pin :stale-section :orphan-page :leadless-section :uncited-var :unfocused-docstring}] [:tests #{:red :cost :waived-proof :unestimated :undeclared-test}]
                                                     [:laws #{:unnamed-site :native-in-defonce :long-form :unschemed-key :refused-value :hand-written-list :retyped-attribute :stateful-outside-flow}] [:merges #{:merge :task-conflict :unrun :unsynced}] [:tasks #{:failed :uncited-task :stale-plan}]
                                                     [:agents #{:stalled :dead :error :waste}] [:errors #{:platform :eval :agent :effect}] [:health #{:problem-unlinked :stale-binary}]]
