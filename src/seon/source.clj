@@ -328,16 +328,19 @@
            (if c {:seon.pin/path p :seon.pin/commit c} [:db/retractEntity [:seon.pin/path p]])))))
 
 (defn library-tx
-  "The facts that make db's library files exactly lib ({path text}) read at pins: only the files whose text differs written, the
-  gone ones retracted, pins kept on root's entity so a boot whose pins stand reads none. See docs/vector.md#search."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string] [:map-of :string :string]] :seon.db/tx-data]}
-  [db lib pins]
-  (let [held (into {} (for [{:keys [e v]} (d/datoms db :aevt :seon.library/path)] [v e]))]
+  "The facts that bring db's dependency source to read, seon.fx/library-source's {:roots :files}: each file whose text differs
+  written, a re-read or vanished root's files no longer there retracted, and the roots' identities kept on root's entity. A change
+  costs the roots it moved. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db [:map [:roots [:map-of :string :string]] [:files :map]]] :seon.db/tx-data]}
+  [db {:keys [roots files]}]
+  (let [held-ids (or (:seon.library/roots (d/pull db [:seon.library/roots] [:seon.system/id :root])) {})
+        due (into #{} (remove #(= (roots %) (held-ids %))) (keys roots))
+        held (for [{:keys [e v]} (d/datoms db :aevt :seon.library/path)] [v e (:v (first (d/datoms db :eavt e :seon.library/root)))])]
     (-> []
-        (into (for [[p t] lib :when (not= t (some->> (held p) (d/entity db) :seon.library/text))]
-                {:seon.library/path p :seon.library/text t}))
-        (into (for [[p e] held :when (not (contains? lib p))] [:db/retractEntity e]))
-        (conj {:seon.system/id :root :seon.library/pins pins}))))
+        (into (for [[p {:keys [text root rel]}] files :when (not= text (some->> (pdb/eid db :seon.library/path p) (d/entity db) :seon.library/text))]
+                {:seon.library/path p :seon.library/text text :seon.library/root root :seon.library/rel rel}))
+        (into (for [[p e r] held :when (or (not (contains? roots r)) (and (due r) (not (contains? files p))))] [:db/retractEntity e]))
+        (conj {:seon.system/id :root :seon.library/roots roots}))))
 
 (defn pins-tx
   "The facts that make db's pins exactly pins ({path commit}, every gitlink a tree read): each pinned, and each db holds that pins

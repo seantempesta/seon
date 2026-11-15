@@ -14,7 +14,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str] [jolt.ffi :as ffi] [jolt.deps :as deps]
-            [seon.edn :as sedn] [clojure.edn :as edn] [jolt.loader] [seon.proofs :as proofs] [seon.reader :as reader]))
+            [seon.edn :as sedn] [clojure.edn :as edn] [clojure.java.io :as io] [seon.proofs :as proofs] [seon.reader :as reader]))
 
 (defn- error
   "An effect's declared failure, as the one error map (its variant registered in
@@ -176,23 +176,39 @@
   [^String p] (boolean (or (.endsWith p ".clj") (.endsWith p ".edn") (cfg/file-kind p))))
 
 (defn library-source
-  "{path text} of the library files this process loaded (each non-program namespace's :file), read through Jolt's loader over
-  root's classpath, else the binary's resources. Imported once a pin set (seon.source/library-tx). See docs/vector.md#search."
-  {:malli/schema [:=> [:cat :string [:set :symbol]] [:map-of :string :string]]}
-  [root program]
-  (let [deps (edn/read-string (slurp (str root "/deps.edn")))
-        roots (filterv #(.exists (java.io.File. ^String %))
-                       (into (mapv #(str root "/" %) (:paths deps)) (:roots (deps/resolve-deps (:deps deps) root))))
-        cl (jolt.loader/as-classloader (jolt.loader/classpath roots))
-        rels (into (sorted-set)
-                   (keep (fn [n] (when-not (program (ns-name n))
-                                   (some (fn [[_ v]] (when (var? v) (:file (meta v)))) (ns-interns n)))))
-                   (all-ns))]
-    (into (sorted-map)
-          (for [r rels
-                :let [u (or (.getResource cl r) (clojure.java.io/resource r))]
-                :when (and u (seq (str u)))]
-            [r (slurp u)]))))
+  "The source of what the program depends on, read for the :library effect: every classpath root (deps.edn's :paths under a
+  pinned submodule, and its :deps as jolt.deps resolves them) and the binary's embedded archive (Jolt's own), each root by its
+  identity (a pinned dir's pin commit, a versioned jar or gitlib its path, the archive the binary's digest); only the roots
+  whose identity differs from since are read. {:value {:roots {root identity} :files {path {:text :root :rel}}}}: a jar's file
+  path is root!/rel, rel what each var's :file names. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [root pins since]} :req}]
+  (try
+    (let [base (.getCanonicalPath (java.io.File. ^String root))
+          rel-of (fn [p] (if (str/starts-with? p (str base "/")) (subs p (inc (count base))) p))
+          pinned (fn [rr] (some (fn [[pp c]] (when (or (= rr pp) (str/starts-with? rr (str pp "/"))) (str pp "@" c))) pins))
+          src? #(re-find #"\.(clj|cljc|cljs|jolt)$" %)
+          deps (edn/read-string (slurp (str base "/deps.edn")))
+          roots (->> (concat (keep #(when (pinned %) (str base "/" %)) (:paths deps)) (:roots (deps/resolve-deps (:deps deps) base)))
+                     (filter #(.exists (java.io.File. ^String %))) distinct)
+          digest (let [f (java.io.File. (str base "/target/seon.digest"))] (if (.isFile f) (str/trim (slurp f)) "unbuilt"))
+          ids (into {"jolt-embedded-resources.jar" digest} (for [r roots :let [rr (rel-of r)]] [rr (or (pinned rr) rr)]))
+          due (into #{} (remove #(= (ids %) (get since %))) (keys ids))
+          entries (fn [^java.util.zip.ZipFile z rr]
+                    (for [e (enumeration-seq (.entries z)) :when (src? (.getName e))]
+                      [(str rr "!/" (.getName e)) {:text (slurp (.getInputStream z e)) :root rr :rel (.getName e)}]))
+          files (into (sorted-map)
+                      (concat
+                        (for [r roots :let [rr (rel-of r)] :when (due rr) kv (if (.isDirectory (java.io.File. ^String r))
+                                                                             (for [f (file-seq (java.io.File. ^String r)) :when (and (.isFile ^java.io.File f) (src? (.getName ^java.io.File f)))
+                                                                                   :let [rel (subs (.getPath ^java.io.File f) (inc (count r)))]]
+                                                                               [(str rr "/" rel) {:text (slurp f) :root rr :rel rel}])
+                                                                             (entries (java.util.zip.ZipFile. ^String r) rr))]
+                          kv)
+                        (when (due "jolt-embedded-resources.jar")
+                          (entries (.getJarFile ^java.net.JarURLConnection (.openConnection (io/resource "jolt/ir.clj"))) "jolt-embedded-resources.jar"))))]
+      {:value {:roots ids :files files}})
+    (catch Throwable e (error #'seon.fx/library-source :seon.fx/io-error (step/error-msg e) {:path root}))))
 
 (defn read-source
   "The text of every .clj and .edn file under root's dirs (relative paths, e.g.
@@ -205,11 +221,9 @@
   :tree, the id of the whole tree as it is on disk (tree-id: git's own index makes it the cost of
   what changed), which stands for every file's content.
   With :since (the tree id of the last import, and no :paths; :since-dirs, the dirs that import read), only the files under dirs that differ from it, and every file of a dir it didn't read, are read, so what main merged and the tree never held stays main's. A tree git can no longer find reads whole.
-  With :library-since (the pins the store's library files were read at, or :none) and :program (the namespaces the program holds),
-  also :library, the loaded library files (`library-source`), when the pins differ from it.
-  Answers {:value {path text} :modes {path git mode, of each file the allow-list names} :commit sha :branch name (nil when detached) :tree id :paths paths-when-read-by-them :pins {path sha} :library {path text}} or :seon.fx/io-error."
+  Answers {:value {path text} :modes {path git mode, of each file the allow-list names} :commit sha :branch name (nil when detached) :tree id :paths paths-when-read-by-them :pins {path sha}} or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [root dirs paths since since-dirs library-since program]} :req}]
+  [{{:keys [root dirs paths since since-dirs]} :req}]
   (try
     (let [base (.getCanonicalPath (java.io.File. ^String root))
           head (when (checked-out? base) (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"]))
@@ -242,11 +256,9 @@
                                                                      (git! {} base ["ls-files" "-s" "--" "reference-code"] nil))]
                                                [p sha])))
                      paths (assoc :paths paths))]
-      ;; the library files, read only when the pins moved from those the store's library files were read at (library-since; a
-      ;; store holding none asks with :none): a boot whose pins stand reads none (docs/vector.md#search)
-      (cond-> (assoc src-read :modes (into {} (for [[p t] (:value src-read) :when (and t (cfg/file-kind p))]
-                                        [p (if (.canExecute (java.io.File. (str base "/" p))) "100755" "100644")])))
-        (and library-since program (:pins src-read) (not= library-since (:pins src-read))) (assoc :library (library-source base program))))
+      ;; each file the allow-list names, as git records its mode
+      (assoc src-read :modes (into {} (for [[p t] (:value src-read) :when (and t (cfg/file-kind p))]
+                                        [p (if (.canExecute (java.io.File. (str base "/" p))) "100755" "100644")]))))
     (catch Throwable e (error #'seon.fx/read-source :seon.fx/io-error (step/error-msg e) {:path root}))))
 
 (defn messages-since

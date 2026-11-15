@@ -1208,8 +1208,7 @@
           {:digest digest :fact (assoc (fact-on db (count files)) :error (:seon.error/message bad)) :error bad}
           (let [tx (cond-> (into (vec tx) (source/modes-tx db (:modes r)))
                      ;; the gitlinks a git read found: the branch's pins are exactly these (a read with none, no git, leaves them)
-                     (contains? r :pins) (into (source/pins-tx db (:pins r)))
-                     (contains? r :library) (into (source/library-tx db (:library r) (:pins r))))]
+                     (contains? r :pins) (into (source/pins-tx db (:pins r))))]
             {:digest digest :tx tx
              ;; the counts read three attributes after tx: only their part of it is applied (seon.db/project-tx), never the whole import
              :fact (assoc (fact-on (pdb/speculate-db db (pdb/project-tx tx #{:form/id :ns/name :ns/file :schema/key :schema/file})) (count files))
@@ -1293,11 +1292,7 @@
   {:malli/schema [:=> [:cat :seon.host/conn [:map [:root :string] [:dirs [:sequential :string]]] :int] :map]}
   [conn {:keys [root dirs] :as source} t0]
   (let [held (:seon.system/source (d/pull @conn [:seon.system/source] [:seon.system/id :root]))
-        db @conn
-        r (fx/read-source {:req (cond-> {:root root :dirs dirs
-                                         ;; the library files are read again only when the pins moved from those they were read at
-                                         :library-since (or (:seon.library/pins (d/pull db [:seon.library/pins] [:seon.system/id :root])) :none)
-                                         :program (set (map :v (d/datoms db :aevt :ns/name)))}
+        r (fx/read-source {:req (cond-> {:root root :dirs dirs}
                                   ;; only what the tree changed since its last import: what main merged and the tree never held stays main's
                                   (and (:digest held) (:tree held)) (assoc :since (:tree held) :since-dirs (:dirs held [])))})
         {:keys [digest tx fact error]} (import-of @conn held r source t0)]
