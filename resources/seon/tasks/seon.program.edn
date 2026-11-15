@@ -117,4 +117,10 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.program-test/a-change-to-a-schema-entry-reaches-the-tests-that-read-its-properties}
   :seon.task/estimate #:seon.program{graph-index {:n 2150, :order :linear, :ticks 310000000, :bytes 1450000000}}}
+ {:seon.task/name "a-call-built-as-data-is-reached"
+  :seon.task/plan "Found by context, 2026-11-15 17:12 [M jolt/context]: seon.server-test/a-message-to-an-attached-agent-is-in-the-next-reply was reused green at its digest after seon.turn/outside-reply! was mutated (its :request emptied); run with --all it is red (2 fails). The server builds the agent's call as data, (list 'seon.turn/outside-reply! ...) in seon.server/agent-reply (server.clj ~336), a quoted symbol, so the test's reach never holds outside-reply! and its digest does not move with it. Every process test that drives an agent through an op may share the hole. PRIOR WORK to read before code: seon.program's reach step (reach-step) and the form's :form/quoted (program.clj form-sets): tests already add edges by a quoted vector (\"_ '[seon.agent/run-selection ...] an edge each (seon.program/reach-step)\", agent_test.clj), so quoted symbols are followed somewhere; find why the quoted symbol in a src form's (list 'ns/f ...) is not, and make a quoted qualified symbol naming a var an edge wherever it stands (one rule, no hand list of call-builders). COST: one more edge kind over the forms already read, O(quoted symbols). Proof red first: the server test's digest moves when outside-reply!'s form changes."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.program-test/a-quoted-call-a-src-form-builds-is-reached}
+  :seon.task/estimate #:seon.program{reach-graph {:n 7000, :order :linear, :ticks 300000000, :bytes 1500000000}}
+  :seon.task/needs #{}}
 ]
