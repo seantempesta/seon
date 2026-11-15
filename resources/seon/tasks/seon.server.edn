@@ -73,4 +73,9 @@ PROOF (red first, once the waiter is found): seon.server-test/an-eval-at-root-wh
   :seon.task/kind :work
   :seon.task/proofs #{seon.server-test/a-claimed-client-stops-no-one-elses-op}
   :seon.task/estimate #:seon.server{line-parts {:n 1, :order :constant, :ticks 5000, :bytes 10000}}}
+ {:seon.task/name "the-server-op-bound-is-worked-from-what-the-op-draws"
+  :seon.task/plan "Web's. Root's reviewer on 3bfa064d5c, two points, after web's held land. (1) The :server-op bound (default.edn :seon.config.fx/bounds) is 40B ticks / 40 GB, ten times an estimate of 4 GB for the heaviest op, but root measured :context's cold request at 37.6 GB [result/a444fa99]: the bound sits 1.06x over a real op and the estimate is 9x low. What the 4 GB missed: a cold request draws one page pair per turn (seon.ctx.wire, T turns), not one page, and each draw allocates far more than its chars (~39 KB a char measured). Work the estimate again from that (turns x per-turn draw at the measured bytes per char, against context's own fixes: 9fb813b20e took root's request from 59 GB to 11.1 GB), then either set the bound from the corrected estimate or, with context, fix the op's cost at its cause (seon.ctx/moved's datoms-diff, ~950 MB a turn, moving onto d/changes). (2) seon.intr's stopped (intr.clj:32, defonce atom {}): show its entries are removed, or move it into the owner proc. Today an entry is removed when the stopped run ends (finally) or when the thread's next run consumes it; a stop! of a run that ends before it records leaves an entry until that thread runs again, at most one a thread. Proof, red first: seon.intr-test/a-stop-of-an-ended-run-leaves-no-entry."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.intr-test/a-stop-of-an-ended-run-leaves-no-entry seon.server-test/an-op-past-its-bound-answers-its-caller-and-the-server-goes-on}
+  :seon.task/estimate #:seon.server{answer {:n 1, :order :constant, :ticks 1000, :bytes 3000}}}
 ]
