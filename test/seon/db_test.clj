@@ -2162,3 +2162,23 @@
     (is (not (contains? (d/reads-index reads) [:ea t :seon.task/plan])) "the set answered at the return is what was read by then")
     (let [[_ outer] (d/with-reads #(:seon.task/id e))]
       (is (contains? (d/reads-index outer) [:ea t :seon.task/id]) "read under another recorder, it records there"))))
+
+;; docs/storage.md#lmdb-durability: a process reading beside the writer (a candidate binary testing itself on the live store,
+;; task seon.system/the-store-half-of-an-update-that-loses-nothing) opens the store MDB_RDONLY. konserve opened its main dbi in a
+;; write transaction, which a read-only env refuses (MDB_IS_READONLY), so a read-only connect failed before it read anything.
+;; Estimate: a store of 20 commits ~3M ticks, a read-only connect and one query ~1M: 5,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-read-only-connect-reads-the-store
+  (let [path (str (seon.config/checkout) "/target/db-test-ro-" (random-uuid))
+        cfg (assoc (pdb/store-cfg :lmdb path) :schema-flexibility :read)]
+    (try
+      (d/create-database cfg)
+      (let [c (d/connect cfg)]
+        (dotimes [i 20] (d/transact c {:tx-data [{:k/n i}]}))
+        (pdb/sync! cfg)
+        (d/release c))
+      (let [ro (assoc-in cfg [:store :lmdb :flags] (bit-or 0x20000 0x10000 0x8000))
+            r (try (let [c (d/connect ro)]
+                     (try (d/q '[:find (count ?e) . :where [?e :k/n]] @c) (finally (d/release c))))
+                   (catch Exception e (ex-message e)))]
+        (is (= 20 r) (str "a read-only connect reads the store: " r)))
+      (finally (seon.lib/remove-tree! path)))))
