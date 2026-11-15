@@ -695,8 +695,9 @@
         (let [bridged (sh/sh (str checkout "/bin/land") "--bridge" checkout old new (str (:port root)))]
           (is (str/includes? (:out bridged) "entered main") (str "the bridge: " (:out bridged) (:err bridged))))
         (is (str/starts-with? (str (at-root doc)) marker) "the bridge's commit loaded the landed form into root")
-        (is (some #{'seon.system/held-inputs} (:reaches (at-root "(seon.system/stale-binary @(:conn sys))")))
-            "what the binary lacks is a form root runs: the case restart-for once restarted for")
+        ;; one binary identity (seon.fx/runtime-for): a src form the binary lacks is loaded in place, never a stale binary (the case
+        ;; restart-for once restarted for, and binary-current once named by reach)
+        (is (nil? (at-root "(seon.system/stale-binary @(:conn sys))")) "a src change is no stale binary: root loads it in place")
         (let [kept (at-root (str "(my.root/landed! sys " (pr-str tree) ")"))]
           ;; and builds nothing, though the binary lacks a form root runs (owner 2026-11-15: build only when a restart is about to boot,
           ;; or a build input moved): the running root holds the form, and a boot catches main's program up in place

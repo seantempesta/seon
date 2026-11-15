@@ -509,7 +509,7 @@
 (defn stale-binary
   "Why this root's binary is not current for its main, or nil: seon.fx/runtime-for's answer for the tree main was last brought to
   from outside (db's :seon.system/source :tree, moved only by an import or a landing), the one binary identity:
-  {:binary the running binary's identity :tree :reaches what differs (paths and config keys)}, or :error naming why when nothing
+  {:binary the tree the running binary was built from :tree :reaches what differs (paths and config keys)}, or :error naming why when nothing
   is named (no identity recorded, a tree git cannot read). What agents merged into main since is main's own and never a mismatch
   (the db is the source of truth). Nil with no source tree (a store seeded with no source: nothing known). Root's boot loads main's
   program over a stale binary's (seon.program/load-all!), so agents fork from main's; what the answer names tells bin/system start
@@ -520,7 +520,7 @@
     (let [rt (fx/runtime-for held)]
       (when (contract/error? rt)
         (let [differs (seq (:seon.process/differs rt))]
-          (cond-> {:binary (:seon.process/binary-digest rt) :tree held}
+          (cond-> {:binary (get-in (program/binary-program) [:inputs :tree]) :tree held}
             differs (assoc :reaches (vec differs))
             (not differs) (assoc :error (:seon.error/message rt))))))))
 
