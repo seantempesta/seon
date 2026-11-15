@@ -785,3 +785,17 @@
     (is (clojure.string/includes? other "Go on with your task") (str "another namespace's load is not the agent's task: " other))
     (is (not (clojure.string/includes? other "part of your task")) other)
     (is (clojure.string/includes? own "fixing that load is part of your task") (str "its own task's test namespace is: " own))))
+
+;; Estimate: four pure holder reads over a hand-made api state: ~50k ticks
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-resumed-agents-own-stale-entry-never-holds-its-branch
+  ;; data's pilot, 2026-11-15 [M result/df8817fb]: agent k159570deaf49ad6 was killed, and every resume of it was refused by its own
+  ;; entry: spawn!'s holder check counted the agent's :agents entry under its key whatever it was (killed, or :spawning with no pid
+  ;; and no caller waiting), and that entry was never reaped. A holder is a live process: a live status with a pid, or a spawn
+  ;; still answering its caller
+  (let [holder #'seon.system/branch-holder
+        st (fn [status pid spawning?] (cond-> {:agents {:k1 {:branch :b}} :view {:agents {:k1 {:branch :b :status status :pid pid}}}}
+                                        spawning? (assoc-in [:seon.system/spawning :k1] (promise))))]
+    (is (nil? (holder (st :killed nil false) {:key "k1" :branch :b})) "a killed agent's leftover entry holds nothing")
+    (is (nil? (holder (st :spawning nil false) {:key "k1" :branch :b})) "nor a :spawning entry with no process and no caller waiting")
+    (is (= :k1 (holder (st :idle 4242 false) {:key "k1" :branch :b})) "a live agent with its process holds its branch")
+    (is (= :k1 (holder (st :spawning nil true) {:key "k1" :branch :b})) "and a spawn still answering its caller holds it")))
