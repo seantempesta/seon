@@ -430,7 +430,9 @@
         kw (#'seon.render.proc/laid kw)]
     [(:p (#'seon.render.proc/advance-walk! kw later :b identity))]))
 
-(deftest a-move-lays-out-only-what-it-touched
+;; Estimate: three inputs drawn cold (kept walks of 10, 40 and 160 turns, ~0.6M ticks a turn: ~126M) and 17 warm samples a size of a
+;; layout under 250k (~13M): ~140M ticks, worked from the work.
+(deftest ^{:seon.test/estimate {:ticks 140000000}} a-move-lays-out-only-what-it-touched
   ;; task seon.ratom/web-reads-on-the-core, slice 1 (the layout as reactions): after a move, laying the page out runs the units the
   ;; move reached and the chain of subtrees above them, never a pass over the whole page. Red before: placed-units walks every
   ;; component at each read (2.31M ticks on root's page for a 5-datom move, result/bc63792d)

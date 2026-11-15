@@ -922,10 +922,8 @@
     {:id (:id rc) :container root-container :parent nil :rev (hash html) :html html :regions ids}))
 
 (defn- layout
-  "Walk p's layout as reactions (docs/reactive.md): a ratom a component's entry, a reaction a unit (its html with its children's
-  slots), a reaction each placement subtree [k sel parent] (`placed`'s walk, one component's places at a time), the page's own unit
-  over the root and the lists it draws, and the page's units over them, auto-run, under the layout's owner. Kept on p (:layout) and
-  carried by a warm walk, made under owner (its reactions run only in owner's flush), so a move resets the entries it changed and reruns only what they reach. See
+  "Walk p's layout as reactions made under owner: a ratom a component's entry, a reaction a unit and a placement subtree, and :all,
+  the page's units, auto-run. A warm walk carries it (:layout), so a move reruns only what its changed entries reach. See
   docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [p owner]
@@ -962,9 +960,8 @@
     {:atoms atoms :rs rs :defects defects :index (:index p) :root rk :all all :owner owner}))
 
 (defn- layout-sync!
-  "Layout l given walk cache cache: an entry not identical to the one its ratom holds is reset (a move resets what it changed), a new
-  one gets its ratom, and a component gone has its reactions and its ratom let go (a reaction under an owner never disposes itself).
-  nil."
+  "Layout l given walk cache cache: a changed entry's ratom reset, a new one made, a gone one's reactions disposed (under an owner a
+  reaction never disposes itself). nil. See docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat :map :map] :nil]}
   [l cache]
   (let [atoms (:atoms l)]
