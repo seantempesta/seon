@@ -4118,6 +4118,31 @@
         (is (str/includes? (pr-str before) "app.srch/untaken-entries") (str "the search finds what main held: " (pr-str before)))
         (is (= before after) (str "the agent's own definition moves no hit: " (pr-str after)))))))
 
+(deftest ^{:seon.test/estimate {:ticks 20000000 :bytes 60000000}} a-requests-nearest-functions-are-drawn-with-their-source
+  ;; docs/vector.md#search: round 1 (2026-11-15) showed its agent hold-env!, agent-frame and test-child-runs! as lines and it
+  ;; spent its turns on (source ..) of each. A function at the relevance cut or above is drawn whole while the source budget has room,
+  ;; best first; one past the room, one below the cut and a section each show their line
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn ((my.test/code 'app.near (str "(ns app.near)\n"
+                                                     "(defn hold-env!\n  \"Holds the branch's environment for its children.\"\n  [env] (assoc env :held true))\n"
+                                                     "(defn spawn!\n  \"Starts a child.\"\n  [x] x)\n"
+                                                     "(defn huge\n  \"A function past the room.\"\n  [] \"" (apply str (repeat 40000 "x")) "\")\n")) @conn))
+      (let [cut (seon.config/value :seon.config.render/relevance-summary)
+            hits [{:kind :var :name 'app.near/huge :relevance (+ cut 0.2) :line "(defn huge"}
+                  {:kind :var :name 'app.near/hold-env! :relevance (+ cut 0.08) :line "(defn hold-env!"}
+                  {:kind :var :name 'app.near/spawn! :relevance (- cut 0.1) :line "  \"Starts a child.\""}
+                  {:kind :section :name "docs/x.md#y" :relevance (+ cut 0.3) :line "A section."}]
+            items (#'seon.render.ui/hit-items @conn hits)
+            text (pr-str items)]
+        (is (= 4 (count items)) "one item a hit, in the hits' order")
+        (is (str/includes? (pr-str (nth items 1)) "(assoc env :held true)") (str "a function at the cut or above is drawn with its source: " (pr-str (nth items 1))))
+        (is (str/includes? (pr-str (nth items 1)) "Holds the branch's environment") "its source whole, its doc in it")
+        (is (not (str/includes? text "xxxxxxxxxx")) "a function whose source is past the room shows its line, never a cut source")
+        (is (str/includes? (pr-str (nth items 2)) "Starts a child.") "one below the cut: its line")
+        (is (not (str/includes? (pr-str (nth items 2)) "[x] x")) "one below the cut: no source")
+        (is (str/includes? (pr-str (nth items 3)) "A section.") "a section: its line")))))
+
 (defn some-lists-part "A component (it reads ctx) with an element of its own that has an id, inside its root."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}] [:section [:p {:id "inner"} (:v c)]])
