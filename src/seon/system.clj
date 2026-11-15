@@ -956,7 +956,14 @@
                    (cond-> (:down m) (assoc-in [::down (:pid m)] e))
                    (view! update :root-errors #(lib/push-window %1 %2 (cfg/value :seon.config.root/view-window)) (merge {:pid (:pid m) :message (:message m)} (:data m)))
                    (view! update :root-errors-total (fnil inc 0))
-                   (problem (err/occurrence e :platform {} (System/currentTimeMillis))))))
+                   (problem (err/occurrence e :platform {} (System/currentTimeMillis)))
+                   ;; an agent's proc that threw dropped a frame of the agent's conversation (its hello, a reply), which nothing can
+                   ;; answer again: that is the agent's end, by the one path a refused spawn takes (its spawn and every request in flight
+                   ;; to it answered, the agent told it failed, so it hangs up and its :ended ends the rest), never a waiter left
+                   ;; on a frame that will not come (data's hello, 887 s, 2026-11-15; docs/flow.md#the-five-rules, rule 3)
+                   (as-> s (if (contains? (:agent-procs s) (:pid m))
+                             (spawn-failed s o (:pid m) (str "its proc's step threw on a frame of its own: " (:seon.error/message e)) e)
+                             s)))))
       ;; an agent's errors since its last commit (seon.error/note, each of its class), counted across agents
       :errors (let [task (get-in st [:view :agents (:agent m) :task])]
                 (reduce (fn [st s] (problem st (err/sent->occurrence s (:agent m) task))) st (:entries m)))
