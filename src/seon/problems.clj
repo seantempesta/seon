@@ -1325,7 +1325,7 @@
     (doseq [r [ans errs tasks]] (rv/-run r true))
     ;; the set is diffed against the rows only when it moved, never on every sync (O(errors) a move otherwise)
     (add-watch errs set-moved (fn [_ _ _ _] (vreset! set-moved true)))
-    (recorded-sync! {:store s :answers ans :errors errs :tasks tasks :rows {} :by-class {} :changed (volatile! #{}) :set-moved set-moved} n))))
+    (recorded-sync! {:store s :answers ans :errors errs :tasks tasks :rows {} :by-class {} :changed (volatile! #{}) :set-moved set-moved :report-cache (volatile! nil)} n))))
 
 (defn recorded-sync!
   "live with a row reaction for each error its set holds (new made, gone disposed) and each row the last commit reran replaced in
@@ -1337,8 +1337,9 @@
   ([{:keys [store answers errors rows changed set-moved] :as live} n]
   (let [now (when @set-moved (set (rv/-get errors :state)))
         gone (when now (remove now (keys rows)))
-        all-fresh (when now (remove #(contains? rows %) now))
-        fresh (take n all-fresh)
+        all-fresh (vec (when now (remove #(contains? rows %) now)))
+        ;; the step's share of the work (a bound on work, not a cut of text: subvec, never the printer's cut vars)
+        fresh (subvec all-fresh 0 (min n (count all-fresh)))
         more? (< (count fresh) (count all-fresh))
         row-of (fn [e] (let [r (rv/make-reaction #(error-row @store @answers e) :auto-run :queue)]
                          (add-watch r changed (fn [_ _ _ _] (vswap! changed conj e)))
@@ -1363,12 +1364,19 @@
   "The recorded report of live as `report` answers it on its store's db, assembled from the kept rows with fold applied. See
   docs/reactive.md#how-a-commit-reaches-its-readers-today."
   {:malli/schema [:=> [:cat :map :seon.error/fold] :seon.problems/report]}
-  [{:keys [store tasks by-class]} fold]
-  (let [db @store tp (or (when-not (rv/-get tasks :caught) (rv/-get tasks :state)) {:ended {} :failed {:n 0 :rows []}})]
-    ^{:seon.render/schema :seon.problems/report}
-    {:t (:max-tx db)
-     :classes (merge (fold-counted (into {} (for [c counted-classes] [c {:rows (vec (vals (get by-class c)))}])) db fold)
-                     (:ended tp) {:failed (:failed tp)})}))
+  [{:keys [store tasks by-class report-cache]} fold]
+  (let [db @store tp (or (when-not (rv/-get tasks :caught) (rv/-get tasks :state)) {:ended {} :failed {:n 0 :rows []}})
+        ;; the fold sorts every counted row: done again only when a row, the task part or the fold moved, never on a read that moved none
+        k [by-class tp fold]
+        held (some-> report-cache deref)]
+    (if (and held (every? true? (map identical? k (:k held))))
+      (assoc (:v held) :t (:max-tx db))
+      (let [v ^{:seon.render/schema :seon.problems/report}
+               {:t (:max-tx db)
+                :classes (merge (fold-counted (into {} (for [c counted-classes] [c {:rows (vec (vals (get by-class c)))}])) db fold)
+                                (:ended tp) {:failed (:failed tp)})}]
+        (some-> report-cache (vreset! {:k k :v v}))
+        v))))
 
 (defn- other-derived
   "The derived classes `caused-split` does not read, their rows on db, read whole by both readers of health (they are cheap, or the

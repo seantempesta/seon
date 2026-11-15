@@ -1851,8 +1851,10 @@
                                       changed @(:changed live)]
                                   [(problems/recorded-sync! live) changed (:ticks m)]))]
         (is (= (:classes (problems/report db1)) (:classes (problems/recorded-report live {}))) "the live report is report's, read whole")
-        (let [[live changed ticks] (move! live (seon.task/create-tx @s [{:seon.task/ns 'trial :seon.task/name "untouched" :seon.task/plan "p"}]))]
+        (let [held (:classes (problems/recorded-report live {}))
+              [live changed ticks] (move! live (seon.task/create-tx @s [{:seon.task/ns 'trial :seon.task/name "untouched" :seon.task/plan "p"}]))]
           (is (empty? changed) "a move that touches no error reruns no error row")
+          (is (identical? held (:classes (problems/recorded-report live {}))) "nor folds the report again: the held value is read")
           (is (< ticks 2000000) (str "and costs its index lookup and the reruns it touched, not the 40 rows: " ticks " ticks"))
           (let [[_ tx] (err/flush-tx (err/fold {} (occ (invalid 'app/new 1) :a1 2000)) @s)
                 before (count (:rows live))
