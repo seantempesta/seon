@@ -24,6 +24,10 @@
  :seon.db/no-history [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/no-history]]]]
  ;; compacting the store failed (seon.db/compact-if-due!): the copy is removed and the store left as it was; :path is the store
  :seon.db/compact-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/compact-failed]] [:path :string]]]
+ ;; a branch whose merge base cannot be read: none in the commit graph, or its snapshot swept (seon.db/branch-base)
+ :seon.db/no-merge-base [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/no-merge-base]] [:branch :keyword] [:commit [:maybe :uuid]]]]
+ ;; a collection that would have swept a branch's merge base it could not find: nothing swept (seon.db/retain!)
+ :seon.db/retain-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/retain-refused]] [:refused [:vector :map]]]]
  ;; what seon.db/history or at was asked to read and the store does not hold: an :entity, :branch, :commit or :t (a t this branch never
  ;; had: t ids are unique across the store, so another branch's t is none of this one's)
  :seon.db/unresolved [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/unresolved]] [:kind [:enum :entity :branch :commit :t]] [:value :any]]]

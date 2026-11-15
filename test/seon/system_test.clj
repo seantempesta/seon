@@ -710,3 +710,17 @@
     (is (= :seon.system/undeliverable (get-in (report->error {:clojure.core.async.flow/dropped-on-stop [:src :out]}) [:data :seon.error/type]))
         "an output a stop dropped, the same")
     (is (nil? (report->error {:clojure.core.async.flow/pid :x :something :else})) "a report that loses nothing is no problem")))
+
+;; Estimate: a test branch ~3M + two evals of two agents ~1M + two back-points ~1M = 6000000
+(deftest ^{:seon.test/estimate {:ticks 6000000}} going-back-takes-only-this-agents-eval
+  ;; docs/turn.md#an-agent-goes-back-to-an-eval (seon.merge/a-reader-of-an-agents-records-names-its-agent): once merges are whole a branch
+  ;; holds every agent's evals, so an eval named by id is gone back to only when its record is the asking agent's
+  (ts/test-branch!
+   (fn [cfg conn]
+     (d/transact conn {:tx-data [{:seon.agent/key "mine"} {:seon.agent/key "theirs"}
+                                 {:seon.eval/id "e-mine" :seon.eval/agent [:seon.agent/key "mine"] :seon.eval/code "(def a 1)" :seon.eval/response {}}
+                                 {:seon.eval/id "e-theirs" :seon.eval/agent [:seon.agent/key "theirs"] :seon.eval/code "(def b 2)" :seon.eval/response {}}]
+                       :tx-meta (pdb/tx-meta (:branch cfg))})
+     (let [db @conn b (:branch cfg)]
+       (is (not (seon.contract/error? (#'seon.system/back-point db b :mine "e-mine"))) "its own eval")
+       (is (re-find #"is agent theirs's" (str (:seon.error/message (#'seon.system/back-point db b :mine "e-theirs")))) "never another agent's")))))
