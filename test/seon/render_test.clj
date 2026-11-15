@@ -674,7 +674,7 @@
         (is (some #(= "root-head" (:id %)) (:seon.render/units dbg)) "and the sentence of how the tasks stand"))
       (is (= [:seon.render/agent-input :root] [(:schema (input root)) (:id (:input (input root)))]) "a message to root's session, which starts the work"))
     (testing "an agent's focus: its REPL and messages at the top, live while root's view holds it in this boot"
-      (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil :focus? true :busy? true :talks? true :address :a3}] [(:schema (input agent)) (:input (input agent))]))
+      (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil :focus? true :busy? true :talks? true :address :a3 :person? false}] [(:schema (input agent)) (:input (input agent))]))
       (let [ctx-page (#'p/page-value st :a3)]
         (is (false? (:focus? (:input (input ctx-page)))) "@ctx's input takes no focus: a focused field at the page's end scrolls the page to its bottom")))
     (testing "a location naming no entity is that error, never an empty page; a branch that could not be read is shown as its error"
@@ -1651,6 +1651,25 @@
     (is (and (str/includes? cut "line-0") (not (str/includes? cut "line-2999"))) "output over the value budget is cut")
     (is (< (count cut) 6000) (str "cut by the value's budget: " (count cut) " chars"))
     (is (str/includes? cut "(subs (:seon.print/code (:out result/e23))") "and the cut says how to read the rest")))
+
+;; See docs/render.md#the-page
+(deftest ^{:seon.test/estimate {:ticks 2000000}} roots-chat-has-the-persons-message-box
+  ;; docs/decisions.md, The page is a friendly chat (2026-11-15): the person's box is like the good chat tools: it grows with its text, has a
+  ;; clear Send button, and Enter sends; an agent's page (an expert's) keeps its REPL input with its prompt and interrupt
+  (let [[main branch eid] (paged-dbs)
+        main (signed-in main [eid])
+        st (root-state (proc-state main branch) main)
+        html-of (fn [page] (:html (some #(when (= "p-input" (:id %)) %) (:seon.render/units page))))
+        input-of (fn [page] (some #(when (= "p-input" (:id %)) %) (:seon.render/units page)))
+        root (#'p/page-value st :root)
+        agent (#'p/page-value st [:chat :a3])
+        rendered (fn [page] (let [u (input-of page)] (h/html (r/hiccup {:schema (:schema u) :unit "p-input" :seon.render/index (seon.db/index)} (:input u)))))]
+    (is (str/includes? (rendered root) ">Send</button>") "root's chat: a Send button")
+    (is (str/includes? (rendered root) "placeholder=\"Message Seon\"") "and the person's words")
+    (is (not (str/includes? (rendered root) "root=&gt;")) "no REPL prompt")
+    (is (str/includes? (rendered root) "evt.key===") "Enter sends")
+    (is (str/includes? (rendered agent) "a3=&gt;") "an agent's page keeps its REPL prompt")
+    (is (not (str/includes? (rendered agent) ">Send</button>")) "and no person's box")))
 
 (deftest the-repl-input-takes-focus-only-on-the-chat
   ;; owner, 2026-11-05: @ctx opened scrolled to its very bottom. The REPL's textarea is the page's last element and was
@@ -4713,32 +4732,39 @@
   (let [a (get (d/schema (ts/test-db)) :seon.user/focus)]
     (is (= :db.type/ref (:db/valueType a)) "an optional ref on the user")))
 
-(deftest opening-an-agents-page-writes-the-signed-in-users-focus
+;; Estimate: one render-proc :views step on a paged fixture (its build ~1.5M) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} opening-a-page-writes-no-focus
+  ;; docs/decisions.md, The page is a friendly chat (2026-11-15): the person's place changes only when they tap an offer; a tab opening a
+  ;; page writes nothing (it wrote the focus before)
   (let [[main branch _] (paged-dbs)
         st (assoc (proc-state (signed-in-main main nil) branch) :watch #{:root})
-        txs (fn [outs] (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= [:focus] (:tag %)) (:to-api outs)))))
-        [st1 o1] (#'p/render-proc st :from-web {:op :views :views #{:root :a3} :tabs 1})]
-    (is (= [[:db/add [:seon.user/name "sean"] :seon.user/focus [:seon.agent/key "a3"]]] (txs o1)) "the agent's page is the focus")
-    (let [st2 (assoc st :main-db (signed-in-main main "a3") :watch #{:root :a3})
-          [_ o2] (#'p/render-proc st2 :from-web {:op :views :views #{:root :a3} :tabs 2})]
-      (is (empty? (txs o2)) "written only when it changes")
-      (let [[_ o3] (#'p/render-proc st2 :from-web {:op :views :views #{:root :a3 :home} :tabs 2})]
-        (is (= [[:db.fn/retractAttribute [:seon.user/name "sean"] :seon.user/focus]] (txs o3)) "opening home retracts it")))
-    (is (some? st1))))
+        writes (fn [outs] (filter #(= :write (get-in % [:req :op])) (:to-api outs)))
+        [_ o1] (#'p/render-proc st :from-web {:op :views :views #{:root :a3} :tabs 1})]
+    (is (empty? (writes o1)) "an agent's page opened: no write")))
 
-(deftest home-is-the-users-focus-else-roots-page
-  ;; docs/users.md#whats-on-screen: home is the signed-in person's focus, else root's page, which presents the system to them
-  ;; (owner, 2026-11-11: "the goal is mostly root running the presentation"; before, the person's own page)
-  (let [[main _ _] (paged-dbs)
-        a3 (fn [db] (:db/id (d/entity db [:seon.agent/key "a3"])))]
-    (is (= (#'p/location (signed-in-main main nil) :root) (#'p/location (signed-in-main main nil) :home)) "no focus: root's page")
-    (is (= (a3 (signed-in-main main "a3")) (#'p/location (signed-in-main main "a3") :home)) "a focus: its agent")
-    ;; a focused task (an agent launched it; its agent is made a moment later): root's page until its agent exists, then that agent's
+;; Estimate: one offer value drawn by its schema's render ~ 200,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 200000}} an-offer-is-a-button-that-writes-only-when-tapped
+  ;; docs/decisions.md, The page is a friendly chat: an agent offers the person a place (my.user/focus!), a value that draws itself as a
+  ;; button by its schema's render; the tap calls seon.system/focus! (the person's web state) and, once it answers, opens the place
+  (let [offer (with-meta {:seon.user/place [:seon.agent/key "a3"] :seon.user/label "Open the test results"} {:seon.render/schema :seon.user/offer})
+        html (h/html (r/hiccup {:seon.render/index (seon.db/index)} offer))]
+    (is (str/includes? html "Open the test results") "the label is the button's words")
+    (is (str/includes? html "<button") "a button")
+    (is (str/includes? html "seon.system%2Ffocus%21") "its action is the focus! call")
+    (is (str/includes? html "location.href") "and, once it answers, the place opens")
+    (is (str/includes? html "/agent/a3") "the place's page")))
+
+;; Estimate: 3 location reads on a paged fixture (its build ~1.5M) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} home-is-roots-chat-whatever-the-focus
+  ;; docs/decisions.md, The page is a friendly chat (2026-11-15): the person talks to root at /, and never learns other agents exist, so
+  ;; home is root's chat however the focus stands (a tab that opened an agent's page, or root's my.user/focus!, moved it before)
+  (let [[main _ _] (paged-dbs)]
+    (is (= (#'p/location (signed-in-main main nil) :root) (#'p/location (signed-in-main main nil) :home)) "no focus: root's chat")
+    (is (= (#'p/location (signed-in-main main "a3") :root) (#'p/location (signed-in-main main "a3") :home)) "a focus on an agent: still root's chat")
     (let [db (d/db-with (signed-in-main main nil) (seon.task/create-tx (signed-in-main main nil) [{:seon.task/ns 'request :seon.task/name "w" :seon.task/plan "Make w."}]))
-          db (d/db-with db [[:db/add [:seon.user/name "sean"] :seon.user/focus [:seon.task/id "request/w"]]])]
-      (is (= (#'p/location db :root) (#'p/location db :home)) "a focused task with no agent yet: root's page")
-      (let [db (d/db-with db [[:db/add [:seon.task/id "request/w"] :seon.task/agent [:seon.agent/key "a3"]]])]
-        (is (= (a3 db) (#'p/location db :home)) "its agent made: that agent's page")))))
+          db (d/db-with db [[:db/add [:seon.user/name "sean"] :seon.user/focus [:seon.task/id "request/w"]]
+                            [:db/add [:seon.task/id "request/w"] :seon.task/agent [:seon.agent/key "a3"]]])]
+      (is (= (#'p/location db :root) (#'p/location db :home)) "a focus on a task with its agent: still root's chat"))))
 
 ;; Stage 2a's walk (docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09): one pass over a pull renders the page and
 ;; the model's messages. A lab schema in a branch's index names each entity's two renders; recognition is the best match of the

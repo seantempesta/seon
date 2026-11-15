@@ -296,29 +296,11 @@
   (cond (vector? view) (location db (second view))
         ;; root's page is root's agent's (its session, the agent keyed "root", made at boot), drawn as any agent's is
         (= :root view) (or (:db/id (d/entity db [:seon.agent/key "root"])) (:db/id (d/entity db [:seon.system/id :root])))
-        ;; home: the signed-in person's focus (docs/users.md#whats-on-screen); with none, root's page, which presents the system
-        ;; to them (owner, 2026-11-11: "the goal is mostly root running the presentation"); no one signed in, the sign-in page
-        (= :home view) (let [u (:seon.system/signed-in (d/entity db [:seon.system/id :root])) f (:seon.user/focus u)]
-                         ;; a focused task is its agent's page once its agent exists
-                         (when u (or (:db/id (if (:seon.task/id f) (:seon.task/agent f) f)) (location db :root))))
+        ;; home: root's chat, the person's one conversation (docs/decisions.md, The page is a friendly chat: the person talks to root and
+        ;; never learns other agents exist), whatever their focus holds; no one signed in, the sign-in page
+        (= :home view) (when (:seon.system/signed-in (d/entity db [:seon.system/id :root])) (location db :root))
         (keyword? view) (agent-named db (address-of view))
         :else view))
-
-(defn- focus-tx
-  "The transaction that moves the signed-in user's focus to the newest of opened (the views a tab just opened): the agent its page is, or
-  root's (:root or :home) retracting it; nil when none of them names a page, the user is not signed in, or the focus already is that. See docs/users.md#whats-on-screen."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:sequential :any]] [:maybe [:vector :any]]]}
-  [db opened]
-  (when-let [u (some-> db (d/entity [:seon.system/id :root]) :seon.system/signed-in)]
-    (let [named (fn [v] (let [x (if (vector? v) (second v) v)]
-                          (cond (#{:root :home} x) ::root
-                                (keyword? x) (let [e (some->> (location db x) (d/entity db))] (when (:seon.agent/key e) (:seon.agent/key e))))))
-          to (last (keep named opened))
-          held (:seon.agent/key (:seon.user/focus u))
-          who [:seon.user/name (:seon.user/name u)]]
-      (cond (nil? to) nil
-            (= ::root to) (when held [[:db.fn/retractAttribute who :seon.user/focus]])
-            (not= to held) [[:db/add who :seon.user/focus [:seon.agent/key to]]]))))
 
 (defn- focus
   "The focus of view's page for its bar and its head (seon.render.ui/focus-of): :root, else the agent its address names on main db:
@@ -707,7 +689,7 @@
                       ;; its REPL and its messages while its process runs; its held task's release. Root's session is talked to as any
                       ;; agent (a message wakes it, and it starts the work); only a user's page, no agent to talk to, asks for a task
                       :input (if (:seon.user/name e) {:schema :seon.render/root-input :value {}} {:schema :seon.render/agent-input
-                              :value {:id (keyword (:seon.agent/key e)) :address (keyword (:seon.agent/key e)) :live? (live? st id) :focus? chat?
+                              :value {:id (keyword (:seon.agent/key e)) :address (keyword (:seon.agent/key e)) :live? (live? st id) :focus? chat? :person? person?
                               ;; what its process can answer: a form running is interrupted (busy)
                               :busy? (= :busy (:seon.agent/status e)) :talks? (some? (or (:seon.agent/task e) (first (:seon.task/_agent e))))
                                       :held (d/q '[:find ?id . :in $ ?a :where [?a :seon.agent/task ?t] [?t :seon.task/execution :held] [?t :seon.task/id ?id]] db eid)}})}
@@ -1310,8 +1292,6 @@
                            :else st))
               :from-web (case (:op m)
                           :views (let [w (:views m)
-                                       _ (when-let [tx (focus-tx (:main-db st) (remove #(contains? (:watch st) %) w))]
-                                           (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data tx}} :route [:render :answers] :tag [:focus]}))
                                        ;; a view no tab watches keeps nothing: its retained page, its branch read, its rows
                                        drop #(into {} (filter (fn [[v]] (contains? w v))) %)]
                                    (ask-state (-> (reduce drop-view st (remove #(contains? w %) (keys (:views st))))
