@@ -424,7 +424,7 @@
             d (str/trim (str (:out r)))]
         (if (and (zero? (:exit r)) (seq d))
           (do (write-file {:req {:path (.getPath f) :text d}}) {:digest d})
-          (error #'runtime-for :seon.fx/io-error (str "bin/binary-digest " tree ": " (:err r)) {:path root}))))))
+          (error #'tree-digest :seon.fx/io-error (str "bin/binary-digest " tree ": " (:err r)) {:path root}))))))
 
 (defn- build-differs
   "The build inputs (:seon.config.build/inputs) and pins (gitlinks) that differ between the binary's tree (target/seon.tree)
