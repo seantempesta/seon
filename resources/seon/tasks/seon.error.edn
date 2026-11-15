@@ -4,4 +4,9 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.error-test/naming-where-a-defect-threw-costs-its-top-frames}
   :seon.task/needs #{}}
+ {:seon.task/name "an-error-is-one-entity-per-cause-routed-to-its-owner-and-closed-by-its-fix"
+  :seon.task/plan "Owner: flow (routing an error to its owner is the messaging path); data reviews the shape (root 2026-11-15 16:0x). Filed by runtime from Land A's measurement. MEASURED [runtime's agent on main, result/bbe7a3d3, c54cc39f]: 4,066 recorded error rows, ALL open and NONE ever answered (class: platform 2,626, agent 1,243, eval 192, effect 5); 30 distinct :seon.error/type and 62 operations behind them, four types 90%: :seon.prove/no-verdict 1,954 (seon.prove/batch-ended), :seon.agent/died 923 (seon.system/end-agent), :seon.render/component-defect 506 (seon.render/render!), :seon.agent/failed 289. Health shows every one and rebuilds each row on every move of main (160M ticks a move until Land A makes them reactions). That breaks principle 5 and AGENTS section 4: an error flows to whoever can fix it. Design (root): one entity per cause, with a count, not a row per occurrence; routed to the owning area as a message; closed when its cause's fix lands. PRIOR WORK to read first: seon.error/fold (counted classes and their observer fold), seon.problems/answers (:answered-by), seon.problems/error-row and counted-classes. Proof, red first: a repeated error adds to its cause's count and writes no new row; an answered cause leaves health; a cause whose fix merged closes."
+  :seon.task/proofs #{seon.error-test/a-repeated-error-adds-to-its-causes-count-and-writes-no-row}
+ :seon.task/kind :work
+  :seon.task/estimate {seon.problems/report {:n 30, :order :linear, :ticks 1500000, :bytes 8000000}}}
 ]

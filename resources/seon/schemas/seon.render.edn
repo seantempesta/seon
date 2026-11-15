@@ -3,7 +3,8 @@
 ;; render in its own properties ({:seon.render/hiccup sym}); selection is
 ;; the value's own override key, else the declared render (the schema, then its parents),
 ;; else the one value printer (seon.print). The values below are what root's web renders.
-{;; a value shown by its model render: its schema declares {:seon.render/model sym}, a function of opts and
+{:seon.render.proc/health-more [:boolean {:description "On a message the render proc puts on its own events chan: the next step of health's bounded flush (flush-max reactions a step), never kept as an event a stream shows."}]
+ ;; a value shown by its model render: its schema declares {:seon.render/model sym}, a function of opts and
  ;; the value answering the value to show in its place (seon.render/model), which the one printer
  ;; prints. The agent's process state: a Datahike db, the reach graph and host handles are shown by
  ;; name and size, each with the form that reads it (seon.agent/state-summary)
