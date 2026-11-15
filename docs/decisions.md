@@ -12,7 +12,7 @@ The owner's rulings on the morning after the first night run on its own.
 
 ### Everyone switches over once a change is verified
 
-"Okay so we are changing agent behavior after it lands? I want everyone to merge fork main and immediately switch over once it's tested and verified." A verified change to shared machinery is the one way from its landing: every session merges main at once, agents fork from it, and no transitional second way waits for a later landing. For landing 12 this replaces root's ruling that `bin/test` keep its file cache until E: its next slice moves `bin/test`'s verdicts onto the store and deletes the file cache. Stated in [the plan](plan.md#the-order).
+"Okay so we are changing agent behavior after it lands? I want everyone to merge fork main and immediately switch over once it's tested and verified." Then: "Merge main not fork." A verified change to shared machinery is the one way from its landing: every session and every running agent merges main at once (an agent loads main's changes in place at its turn boundary), and no transitional second way waits for a later landing. For landing 12 this replaces root's ruling that `bin/test` keep its file cache until E: its next slice moves `bin/test`'s verdicts onto the store and deletes the file cache. Stated in [the plan](plan.md#the-order).
 
 ### A land proves a copy of its commit
 
