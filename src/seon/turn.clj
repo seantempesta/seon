@@ -537,10 +537,8 @@
       :else (ask st))))
 
 (defn- merged-in
-  "A turn of run state st once main is merged in: behind, the run ends :refork; else the task is observed ({:observe}, `turn-observed`).
-  A merge of main loaded none of main's forms here (seon.agent/merge-main!): no turn runs old code, so the run ends between turns and
-  root forks it again on main's program, its branch's own forms loaded at that start (load-diff!); the next run goes on from the
-  branch's facts (docs/merging.md#a-branch-merges-main-in)."
+  "A turn of run state st with main merged in: behind, the run ends :refork (no turn runs old code: root forks it again on main's
+  program); else it asks the task observed ({:observe}). See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :map] :seon.turn/step]}
   [st]
   (if (:behind @agent/state)
@@ -561,9 +559,8 @@
       (catch Exception e (threw st e false)))))
 
 (defn turn-merged
-  "A {:merge} output answered with m, seon.agent/merge-main!'s answer: at a turn's begin the turn goes on (`merged-in`); after a green
-  status (decide), a merge that brought nothing ends the run :green, else the next turn judges the combined program (git's CI after the
-  merge: a green run that ended behind main's newer merges was judged behind, swarm's s9). See docs/flow.md#the-five-rules."
+  "A {:merge} output answered with m (merge-main!'s answer): at a turn's begin the turn goes on (`merged-in`); after a green status a
+  merge that brought nothing ends the run :green, else the next turn judges the combined program. See docs/flow.md#the-five-rules."
   {:malli/schema [:=> [:cat :map :map] :seon.turn/step]}
   [st m]
   (let [{:keys [merged status]} (:pending st) st (dissoc st :pending)]
