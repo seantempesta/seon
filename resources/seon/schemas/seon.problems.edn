@@ -43,6 +43,8 @@
  :seon.system/catch-up-skipped [:and {:description "A session's files the system could not all read, so none is proved (seon.system/prove-tree!): each skipped path with why. See docs/merging.md#a-session-proves-through-root."} :seon.error/base [:map [:seon.error/type [:= :seon.system/catch-up-skipped]] [:skipped [:vector :map]]]]
  ;; a wait on main (seon.system/await-db) whose pred was false when the reconciler went quiet at
  ;; t: nothing in flight will make it true (an outside commit still may)
+ :seon.server/no-message [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/no-message]] [:agent :string] [:waited-ms :int]]]
+ :seon.await/shared-root [:and :seon.error/base [:map [:seon.error/type [:= :seon.await/shared-root]] [:seon.error/fix :string]]]
  :seon.system/quiet-before-true [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/quiet-before-true]] [:t :int] [:waits-on :string]]]
  :seon.system/wait-threw [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/wait-threw]] [:t :int]]]
  ;; a request to an agent after it ended (root stopped it, or it died): not gone, it was
@@ -309,7 +311,7 @@
                              :seon.problems/caused #{:retyped-attribute :unnamed-site :native-in-defonce :stale-section :uncited-var :long-form :unfocused-docstring :leadless-section :orphan-page :waived-proof :uncited-task :stale-plan :unestimated :undeclared-test :unschemed-key :refused-value :hand-written-list :stateful-outside-flow}
                              ;; shown, never a reason to refuse done (root's ruling, 2026-10-23: every var edit stales the sections that cite it;
                              ;; and the plans that cite it, an agent's own task's among them)
-                             :seon.problems/attention #{:stale-section :uncited-var :long-form :unfocused-docstring :stale-plan :hand-written-list :stateful-outside-flow}
+                             :seon.problems/attention #{:stale-section :uncited-var :long-form :unfocused-docstring :stale-plan :hand-written-list}
                              :seon.problems/areas [[:docs #{:stale-pin :stale-section :orphan-page :leadless-section :uncited-var :unfocused-docstring}] [:tests #{:red :cost :waived-proof :unestimated :undeclared-test}]
                                                     [:laws #{:unnamed-site :native-in-defonce :long-form :unschemed-key :refused-value :hand-written-list :retyped-attribute :stateful-outside-flow}] [:merges #{:merge :task-conflict :unrun :unsynced}] [:tasks #{:failed :uncited-task :stale-plan}]
                                                     [:agents #{:stalled :dead :error :waste}] [:errors #{:platform :eval :agent :effect}] [:health #{:problem-unlinked :stale-binary}]]

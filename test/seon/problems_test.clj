@@ -1644,6 +1644,22 @@
 ;; docs/health.md#two-kinds-of-problem: a branch is judged on the content it makes, every class of it (the owner, 2026-11-12:
 ;; nothing switched off). For each content class a branch can make, the rows caused-split answers from what the branch moved are
 ;; the rows health reads in full on head and not on base
+;; The owner's ruling (2026-11-15, decisions.md: once running, nothing inside Seon crashes or hangs): :stateful-outside-flow is a
+;; ratchet. A branch that adds state or a wait outside a Flow proc fails (:caused, never :attention), unless the var names why it
+;; must stay at an edge (:seon.flow/edge); what main holds stays listed until each is moved. Red before: the class was attention.
+;; Estimate: two caused-split reads of a one-form change (~2M each, as a-catch-its-page-does-not-name-is-a-law-problem's health): 5,000,000
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-branch-that-adds-state-outside-flow-fails-unless-it-names-its-edge
+  (let [db0 (world)
+        v 'app.calc/inc2
+        fe (:db/id (:var/form (d/entity db0 [:var/name v])))
+        ns-e (:db/id (:var/ns (d/entity db0 (:e (first (d/datoms db0 :avet :var/name v))))))
+        base (d/db-with db0 [[:db/add ns-e :ns/file "src/app/m.clj"]])
+        head (d/db-with base [[:db/add fe :form/src "(def inc2 (atom 0))"]])
+        edged (d/db-with head [[:db/add (pdb/eid head :var/name v) :var/meta :seon.flow/edge]])
+        caused-of (fn [b h] (filterv #(str/includes? % "outside a Flow proc") (:caused (problems/caused-split b h))))]
+    (is (= 1 (count (caused-of base head))) (str "an atom added outside Flow fails the branch: " (pr-str (problems/caused-split base head))))
+    (is (= [] (caused-of base edged)) "one that names its edge (:seon.flow/edge) does not")))
+
 (deftest ^{:seon.test/estimate {:ticks 15000000}} a-branch-is-caused-each-content-class-it-makes
   (let [made (fn [base head c]
                (let [msgs (fn [db] (into #{} (map :message) (get-in (problems/health db) [:classes c :rows])))]

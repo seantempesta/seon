@@ -277,27 +277,33 @@
   before a run past its bound is ended; it reads, never writes): the api proc's ::stall-armed, ::busy, ::lost and :pending (its
   ping's: every ask it holds unanswered), each effect owner's :busy, :in-flight, :queued and :done (:fx), and
   each agent proc's :inflight (each request's kind), :fx-out, :stall-seen, :last-frame-ms, :holding and :held (a clone's handshake held, and how many wait behind it), read by one Flow ping of
-  the graph, with :answered, every proc that answered it. The ping's bound is :seon.config.check/ping-ms: a proc
-  mid-step that long answers nothing and is missing from :answered (an agent in ::busy and not there is mid-step), never
-  read as nil. See docs/clocks.md#time-decides-the-owners-exceptions."
+  the graph, with :answered, every proc that answered it, and :unanswered, each proc mid-step when it was sent by its
+  ::flow/site (what it steps, since when): such a proc's evidence is {:site ...} in place of its state, never read as nil. See docs/clocks.md#time-decides-the-owners-exceptions."
   {:malli/schema [:=> [:cat :seon.system/sys] [:map [:root [:map [:seon.system/stall-armed {:optional true}] [:seon.system/busy {:optional true}]
                                                                [:seon.system/lost {:optional true}]]]
-                                                   [:agents :map] [:answered [:vector :keyword]]]]}
+                                                   [:agents :map] [:answered [:vector :keyword]] [:unanswered :map]]]}
   [sys]
   (let [states (flow/ping (:graph sys) :timeout-ms (cfg/value :seon.config.check/ping-ms))
-        state #(::flow/state (get states %))]
+        ;; a proc mid-step when the ping is sent answers nothing: Jolt's ping names it in ::flow/unanswered and gives only its
+        ;; ::flow/site (what it steps, since when, the message), the evidence a hang most needs, so that site stands in for its state
+        unanswered (set (::flow/unanswered (meta states)))
+        site #(::flow/site (get states %))
+        state #(when-not (unanswered %) (::flow/state (get states %)))
+        ;; each proc's evidence is what its own :ping-map-fn shows (it chooses), or its site when it did not answer
+        evidence (fn [pid] (if (unanswered pid) {:site (site pid)} (state pid)))]
     ;; as the api's ping answers it (its :ping-map-fn): the armed flag (seon.step/timer), the busy set, what a throw lost
-    {:root (select-keys (state :api) [::stall-armed ::busy ::lost :pending :awaits])
+    {:root (evidence :api)
      ;; each effect owner's workers busy, requests in flight and queued: an op the api holds pending is named running, waiting
      ;; or answered and lost (a server op's connection parked with no worker busy, context's overrun 2026-11-15)
      :fx (into (sorted-map) (for [[pid m] states :let [s (::flow/state m)] :when (and (contains? s :in-flight) (contains? s :queued))]
                               [pid (select-keys s [:busy :in-flight :queued :done])]))
      ;; the reconciler's flights by task and the step each waits at: a judge that never settles is named
-     :reconciler (select-keys (state :reconciler) [:flights :flight-steps :quiet :t :waits :report :live :pending :behind :judged])
+     :reconciler (evidence :reconciler)
      :agents (into (sorted-map)
                    (for [[pid m] states :let [s (::flow/state m)] :when (contains? s :inflight)]
                      [pid (assoc (select-keys s [:fx-out :stall-seen :last-frame-ms :holding :held]) :inflight (update-vals (:inflight s) :kind))]))
-     :answered (vec (sort (keys states)))}))
+     :answered (vec (sort (remove unanswered (keys states))))
+     :unanswered (into (sorted-map) (for [pid unanswered] [pid (site pid)]))}))
 
 (defn- stall-task
   "Root's task to deal with agent id's stall s, when it works a task (seon.template/stall: one per
@@ -736,6 +742,8 @@
       :state (reply! st o p (:view st))
       ;; a wait on main (await-db): checked now on main as it is, then as of every commit until it holds
       :await (check-waits (assoc-in st [::waits (:k m)] {:pred (:pred m) :p p}) @(:conn st))
+      ;; a wait its caller stopped waiting on: it leaves (drop-wait!)
+      :await-drop (do (deliver p true) (update st ::waits dissoc (:k m)))
       :errors (reply! st o p (::errors st))
       ;; main's health (my.root/problems): the render proc's, kept by what each move of main changed
       ;; (seon.render.proc/health!), brought to (:db m) there and answered by rid at the fold's counts
@@ -1417,7 +1425,9 @@
     ;; the tasks the landed commits say they complete, done (landed-completes)
     (cond-> (into (changed-tx db changed modes (cfg/value :seon.config.source/tasks-dir) (landed-completes held commit)) (source/pin-changes-tx db pin-changes))
       held (conj {:seon.system/id :root
-                  :seon.system/source (assoc (dissoc held :pins) :tree tree :commit commit :digest (source-digest {:tree tree :pins pins} (:dirs held [])))})))))
+                  :seon.system/source (assoc (dissoc held :pins) :tree tree :commit commit :digest (source-digest {:tree tree :pins pins} (:dirs held []))
+                                              ;; the tree holds at least main as of the db it landed on (the merge gate's base, docs/source.md)
+                                              :t (:max-tx db))})))))
 
 (defn catch-up
   "What brings db's index of its checkout up to date with the files at root as they are now (docs/source.md#a-boot-catches-up-with-its-checkout):
@@ -2071,7 +2081,7 @@
       ;; :judge, which keys the run by its head's digest): recorded on main, one run with any other asker's
       run-tests! {:op :judge :id id}
       kill! {:op :kill :id id}
-      message! {:op :message :id id :body (:body args)}
+      message! (cond-> {:op :message :id id :body (:body args)} (:from args) (assoc :from (:from args)))
       ;; my.root/run!'s one transaction: the held task (:task) released, its next run the reconciler's
       release! {:op :write :req {:op :tx :branch :db :tx-data (task/execution-tx [(:task args)] :running)}}
       ;; a reader opened an eval of agent key's page: the fact on the agent's entity on main (opened!), named by a lookup ref:
@@ -2122,9 +2132,11 @@
   ([sys agent-id forms-string opts] (request! sys 'submit! agent-id (assoc opts :forms forms-string))))
 
 (defn message!
-  "Send the signed-in user's message body (a string) to the agent: one message fact on main through root's writer (`message-write`), which wakes it, whether or not its process lives; the agent's next act delivers it. A promise of the writer's answer for that fact's transaction, or refused when main holds no agent of that id or key. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.system/sys :seon.agent/id :string] :seon.host/promise]}
-  [sys agent-id body] (request! sys 'message! agent-id {:body body}))
+  "Send message body (a string) to the agent, from the agent keyed :from when given (a session's, seon.server/connection-agent), else the signed-in user: one message fact on main through root's writer (`message-write`), which wakes it, whether or not its process lives; the agent's next act delivers it. A promise of the writer's answer for that fact's transaction, or refused when main holds no agent of that id or key. See docs/users.md#messages."
+  {:malli/schema [:function [:=> [:cat :seon.system/sys :seon.agent/id :string] :seon.host/promise]
+                  [:=> [:cat :seon.system/sys :seon.agent/id :string [:maybe [:map [:from :string]]]] :seon.host/promise]]}
+  ([sys agent-id body] (message! sys agent-id body nil))
+  ([sys agent-id body {:keys [from]}] (request! sys 'message! agent-id (cond-> {:body body} from (assoc :from from)))))
 
 (defn release!
   "Release the held task task-id (my.root/run!'s one transaction): the reconciler runs its next
@@ -2186,15 +2198,24 @@
           :else r))))
 
 (defn await-message
-  "A promise answered with main's db at the first commit that links a message to agent key k after now (whoever writes it), or
-  the typed :seon.system/no-agent at root's stop: await-db's wait, unparked (no clock: a message is our own system's event).
-  See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.system/sys :string] :seon.host/promise]}
-  [sys k]
-  (let [t0 (:max-tx @(:conn sys))
+  "{:p :k}: p answered with main's db at the first commit after t0 (default now) linking a message to agent key k, or typed
+  :seon.system/no-agent at root's stop; k is the wait's key for `drop-wait!`. Pass t0 as the t you last read. See docs/users.md#messages."
+  {:malli/schema [:function [:=> [:cat :seon.system/sys :string] [:map [:p :seon.host/promise] [:k :keyword]]]
+                  [:=> [:cat :seon.system/sys :string :int] [:map [:p :seon.host/promise] [:k :keyword]]]]}
+  ([sys k] (await-message sys k (:max-tx @(:conn sys))))
+  ;; t0: the t the caller last read (its check that nothing was new), so a message committed between that read and this wait wakes it
+  ([sys k t0]
+  (let [
         ;; a message linked to k after t0: one seek of k's :seon.message/to links a commit, O(its messages), while the wait is held
         new? (fn [db] (when-let [e (pdb/eid db :seon.agent/key k)] (some #(> (:tx %) t0) (d/datoms db :avet :seon.message/to e))))]
-    (step/ask-edge (:ext sys) {:op :await :k (keyword "seon.system" (str "await-" (lib/unique-id))) :pred new?} (gone nil "root stopped"))))
+    (let [wk (keyword "seon.system" (str "await-" (lib/unique-id)))]
+      {:p (step/ask-edge (:ext sys) {:op :await :k wk :pred new?} (gone nil "root stopped")) :k wk}))))
+
+(defn drop-wait!
+  "Drop the wait on main keyed wk (await-message's :k) that its caller stopped waiting on (an outside bound ended it first): it leaves
+  the api's waits, so a wait nobody reads is never held. nil."
+  {:malli/schema [:=> [:cat :seon.system/sys :keyword] :nil]}
+  [sys wk] (step/ask-edge (:ext sys) {:op :await-drop :k wk} nil) nil)
 
 (defn defect
   "A root proc's defect (a :platform problem) whose record main wrote after t, or nil: a step
