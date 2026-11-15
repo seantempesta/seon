@@ -8,7 +8,7 @@ The owner's rulings on the morning after the first night run on its own.
 
 ### Tests always have helpers making them millisecond tests of the goal
 
-"Tests needs to always have sub agents running (I think sonnet is fine) that are refactoring tests to test for 90% of the goal and make it a ms test and to drop any tests that are low quality and slow." The tests session keeps Sonnet helpers working at all times, in its one worktree, each on test files nobody else edits, slowest and most-reached first; a test is rewritten to prove the most important 90% of its goal in milliseconds, or dropped when it is low quality and slow, its `Deletes:` line naming what now proves its goal (`AGENTS.md` §2, helpers; §3, no functionality removed).
+"Tests needs to always have sub agents running (I think sonnet is fine) that are refactoring tests to test for 90% of the goal and make it a ms test and to drop any tests that are low quality and slow." The tests session keeps Sonnet helpers working at all times, in its one worktree, each on test files nobody else edits, slowest first ("Have the agents run those conversions slowest first"); a test is rewritten to prove the most important 90% of its goal in milliseconds, or dropped when it is low quality and slow, its `Deletes:` line naming what now proves its goal (`AGENTS.md` §2, helpers; §3, no functionality removed).
 
 ### Flaky correctness first; load is not a cause
 
