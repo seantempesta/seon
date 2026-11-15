@@ -24,11 +24,11 @@ The owner's rulings on the morning after the first night run on its own.
 
 ### The store is the source of truth; a clean, green branch merges by itself
 
-"We are moving away from git being the source of truth to it being the db and the internal updates get merged to git. Yes we still need hooks for your claude agents to update code on their branches." "Yes I want the auto merge behavior if there are no conflicts"; asked what a branch needs, he chose: no conflict and the tests its change reaches green, then it merges with no release. Stated in `AGENTS.md` §0 and [the plan](plan.md#the-order-owner-2026-11-15-approved-as-written) (M5).
+"We are moving away from git being the source of truth to it being the db and the internal updates get merged to git. Yes we still need hooks for your claude agents to update code on their branches." "Yes I want the auto merge behavior if there are no conflicts"; asked what a branch needs, he chose: no conflict and the tests its change reaches green, then it merges with no release. Stated in `AGENTS.md` §0 and [the plan](plan.md#the-order) (M5).
 
 ### The test system queues with Flow; no hacks
 
-"I want the test system we are trying to build where all agents can request tests whenever they want and it properly queues with flow. Focus on getting that not hacks." Asked about a load gate in the frozen scripts, he chose this instead. Stated in [the plan](plan.md#the-order-owner-2026-11-15-approved-as-written) (M3).
+"I want the test system we are trying to build where all agents can request tests whenever they want and it properly queues with flow. Focus on getting that not hacks." Asked about a load gate in the frozen scripts, he chose this instead. Stated in [the plan](plan.md#the-order) (M3).
 
 ### Every waiver goes; calls are no cost dimension
 
@@ -40,11 +40,11 @@ The owner's rulings on the morning after the first night run on its own.
 
 ### Estimating is automatic, from what is built
 
-"Agents keep falling back to just writing the code as quickly as possible rather than doing proper algorithmic estimation ahead of time. We need to get them doing this without being prompted automatically ... Most ops end up being 100x or more inefficient and it doesn't require heroics or genius level coding it just requires repl driven deveopment and measuring and basic common sense." Then: "We already built a lot of this so it might just be refactoring and wiring up. Every agent doing all work needs to first look for existing code and not to just write another implementation. They are to collapse duplicate implementation too whenever they find them." He chose all four: the estimate as task data, a live cost canary, bounds on hot paths, and cost beside bound in every eval's answer. Stated in [the plan](plan.md#the-order-owner-2026-11-15-approved-as-written) (Track E).
+"Agents keep falling back to just writing the code as quickly as possible rather than doing proper algorithmic estimation ahead of time. We need to get them doing this without being prompted automatically ... Most ops end up being 100x or more inefficient and it doesn't require heroics or genius level coding it just requires repl driven deveopment and measuring and basic common sense." Then: "We already built a lot of this so it might just be refactoring and wiring up. Every agent doing all work needs to first look for existing code and not to just write another implementation. They are to collapse duplicate implementation too whenever they find them." He chose all four: the estimate as task data, a live cost canary, bounds on hot paths, and cost beside bound in every eval's answer. Stated in [the plan](plan.md#the-order) (Track E).
 
 ### Root fixes errors anywhere; the plan is A to B
 
-"You can and should fix all errors anywhere in the system. Distribute this work to expert agents as you need too." "We need a plan from where we are now A to where we want to go B. That's your job." The order he approved is in [the plan](plan.md#the-order-owner-2026-11-15-approved-as-written).
+"You can and should fix all errors anywhere in the system. Distribute this work to expert agents as you need too." "We need a plan from where we are now A to where we want to go B. That's your job." The order he approved is in [the plan](plan.md#the-order).
 
 ## 2026-11-14 rulings
 

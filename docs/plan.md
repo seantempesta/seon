@@ -118,9 +118,9 @@ integrating with main"): every turn syncs main down (cost O(d)); every green, co
 never batched; a code change loads live. The test is each branch's drift from main (time and changes since its last
 sync), shown on the dashboard: drift is a problem, not a merge-time surprise.
 
-### The order (owner, 2026-11-15: approved as written)
+### The order
 
-Five milestones on one critical path, two tracks beside them. Each names its done-test and owners; a later milestone starts
+The owner approved this order as written on 2026-11-15. Five milestones on one critical path, two tracks beside them. Each names its done-test and owners; a later milestone starts
 when what it needs has landed. Every piece first looks for the existing code that does its job, wires that up, and collapses
 the duplicates it finds (owner, 2026-11-15: "We already built a lot of this so it might just be refactoring and wiring up").
 1. **M1, verdicts mean what they say.** A run with a RED line or no result line fails (tests); a schema on an unarmed defn
