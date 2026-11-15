@@ -155,20 +155,18 @@
    {:law :printer :fact :form/refs :page "docs/render.md" :section "docs/render.md#one-printer" :except #{} :rule printer-law}])
 
 (defn native-in-defonce
-  "Each live form that evaluates native code (it reaches jolt.scheme/eval-string) inside a defonce, as a :native-in-defonce row:
-  a change to it loaded in place (a landing's update, root and the fork server) is skipped, so the process runs code whose native
-  half was never defined (every agent's start then throws). The fix is a plain def whose state defines keep their value.
-  Cost: one index seek of the forms reaching eval-string, then each one's text. See docs/health.md#native-code-in-a-defonce."
+  "Each live form that evaluates native code (it reaches jolt.scheme/eval-string) inside a defonce, as a :native-in-defonce row: a
+  change to it loaded in place is skipped. Cost: one index seek, then each hit's text. See docs/health.md#native-code-in-a-defonce."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
   [db ans]
   (vec (for [dt (d/datoms db :avet :form/refs 'jolt.scheme/eval-string)
              :let [e (:e dt) src (:v (first (d/datoms db :eavt e :form/src)))]
              :when (and src (str/starts-with? src "(defonce") (program/live? db e))
              :let [nsym (some->> (first (d/datoms db :eavt e :form/ns)) :v (d/entity db) :ns/name)
-                   head (subs src 0 (min 60 (count src)))]]
-         (derived-row ans (str "native-in-defonce " (:v (first (d/datoms db :eavt e :form/id)))) nsym
-                      (str nsym " evaluates native code inside a defonce, so a change to it never loads in place: " head)
-                      {:kind :native-in-defonce :form head} {:form head}))))
+                   id (:v (first (d/datoms db :eavt e :form/id)))]]
+         (derived-row ans (str "native-in-defonce " id) nsym
+                      (str nsym " evaluates native code inside a defonce, so a change to it never loads in place: form " id)
+                      {:kind :native-in-defonce :form id} {:form id}))))
 
 (defn unnamed-sites
   "Each site of a law (`laws`) its page does not name: a live form carrying the law's fact, by
