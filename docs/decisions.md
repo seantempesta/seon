@@ -34,6 +34,7 @@ Before going out, the owner set three things:
 - The rounds and drivers may spend up to $25 of the model budget tonight.
 - Nothing is held for his review: root reads every landed diff, and the reviewer runs every two hours.
 - A land that needs a new binary must not end live agents. The plan in `seon.system/an-update-loses-nothing` is finished first: the new binary is built, boots beside the standing system on the same store, runs every test against itself, catches up main's program by evaluating the forms that changed (`seon.program/load-diff!`), and takes the system over only if it passes. A red leaves the standing system running as it was.
+- State lives in one of two places, each built to start and stop properly: the db, which a clean close leaves byte-identical, and Flow procs, which drain and start under Flow's lifecycle. A switch-over is the db closed cleanly plus every proc drained. State anywhere else (a process-global atom, a forked process outside a Flow graph, a cache with no owner) is the design defect to move into one of the two, never special-cased at switch-over.
 
 Runtime builds this right after the update owner, which it extends. Until it lands, a path land that must restart root goes ahead, and context re-releases its round agents on the new root, told before the land starts.
 
