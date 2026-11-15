@@ -1017,6 +1017,23 @@
                    kw0 [3 4 3 1 5 0 4 4 2])]
     (is (empty? (:defects (:p kw))) "no component drew an error")))
 
+;; See docs/render.md#reactive-renders. Estimate: paged-dbs' two dbs (~1M), the kept walk built once (~0.3M), one advance by one datom
+;; (the diff, the patch, the components that read it: ~0.2M) = ~1.5M ticks, ~10 MB, ~0.1 s: 2,000,000.
+(deftest ^{:seon.test/estimate {:ticks 2000000 :bytes 10000000}} a-commit-of-one-attribute-reruns-only-what-shows-it
+  ;; owner via root, 2026-11-14 21:41: a commit that moves one attribute reruns exactly the components that show it. The layout
+  ;; (seon.render.ui/agent-parts) asked which keys the agent holds by iterating it, which every value replaced reached: an agent's
+  ;; status moved reran it to the same output. It reads the key set alone (seon.ratom/key-set), so only a key added or gone does
+  (let [[_ branch _] (paged-dbs)
+        kw (step-walk branch)
+        a3 (seon.db/eid branch :seon.agent/key "a3")
+        was (:seon.agent/status (d/entity branch a3))
+        db (d/db-with branch [[:db/add a3 :seon.agent/status (if (= :busy was) :idle :busy)]])
+        ran (:ran (:p (#'p/advance-walk! kw db :task-demo-f identity)))
+        renders (set (map (comp first key) ran))]
+    (is (seq ran) "a component showing the status ran")
+    (is (not (contains? renders 'seon.render.ui/agent-parts)) (str "the layout is not among them: " (pr-str ran)))
+    (is (not-any? #{:same} (vals ran)) (str "no component ran to draw what it drew before: " (pr-str ran)))))
+
 ;; See docs/render.md#the-debug-page-is-the-wire-request
 ;; Estimate: paged-dbs' two dbs (~1M), the branch's kept walk built once (~0.3M), and two requests read at the head, one cold (~0.5M)
 ;; and one from the kept walk's answers (~0.05M): ~1.9M; 2,000,000 ticks, worked from the work.

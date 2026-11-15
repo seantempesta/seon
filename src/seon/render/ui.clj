@@ -1320,14 +1320,14 @@
   "The keys the agent added to ctx c: any qualified key outside its own :seon.agent/* attributes,
   its schema's pattern, the reverse joins its pattern holds (:seon.eval/_agent: an attribute read from the entity it points at), the joins
   of its own pattern (seon.render/entity-pattern in the entity index ix: what they join is drawn as tiles, `tiles`) and
-  the environment, in order. It reads ctx's own key set and its pattern only."
+  the environment, in order. It reads ctx's own key set (seon.ratom/key-set: a value replaced reruns nothing) and its pattern only."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:sequential :qualified-keyword]]}
   [ix c]
   (let [joined (set (map first (pattern-joins (or (when ix (render/entity-pattern ix c)) []))))
         ;; what its schema's own pattern names (a user's :seon.user/name) is the entity's, never a key it added
         declared (set (filter keyword? (when ix (some->> (render/schema-property ix (render/entity-schema ix c nil) :seon.ctx/pattern) (render/expanded ix)))))]
     (filter #(and (qualified-keyword? %) (not (#{"seon.agent" "db" "seon.ctx"} (namespace %))) (not (str/starts-with? (name %) "_")) (not (joined %)) (not (declared %)))
-            (sort-by str (keys c)))))
+            (sort-by str (ratom/key-set c)))))
 
 (defn ctx-keys
   "The keys the agent added to its ctx (a component over ctx, placed when there is one), each a
@@ -2088,9 +2088,9 @@
   (let [k (ratom/realize (:seon.agent/key c))
         ;; where each message was read, once for every turn (a turn is given its own, so a message delivered runs this list and the turn it reached)
         placed (when k (ctx/placed-messages ix c))
-        ;; the turn number and whether a task is held are read untracked: placed-messages reads c's key set tracked, which a turn moved
-        ;; or a task set or unset reaches (seon.ratom: a node's key set is reached by a direct value replaced), so a read of each here
-        ;; was a second read of one change; with no key there is nothing placed and nothing to draw for either
+        ;; the turn number and whether a task is held are read untracked: placed-messages reads c's key set tracked (seon.ratom/key-set,
+        ;; reached by a key added or gone), and a turn is drawn by its own component, so a read of each here would rerun this list for
+        ;; every turn moved; with no key there is nothing placed and nothing to draw for either
         plain (ratom/untracked c)
         turn (or (:seon.agent/turn plain) 0)]
     [:ol {:id "c-rows"}
