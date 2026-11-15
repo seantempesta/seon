@@ -193,8 +193,8 @@
   reverse walk (seon.program/tests-reaching). A cited var's page lists only its direct tests; run
   this on the function you will change, before writing its proof, to find the test that goes red
   first. A test of a scratch namespace is left out, as the plan leaves it (seon.agent/judges?); a
-  library's var, which the reach graph holds no form of, answers []. A symbol that names no var
-  answers so (:my.agent/no-var)."
+  library's var, which the reach graph holds no form of, answers the tests reaching its callers (a
+  pin's tests: name the library vars it changed). A symbol that names no var answers so (:my.agent/no-var)."
   {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:or [:vector :qualified-symbol] :my.agent/no-var]]}
   [x]
   (let [db (agent/db) x (if (var? x) (named x) (asked x))]

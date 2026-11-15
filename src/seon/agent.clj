@@ -966,9 +966,12 @@
         g (branch-graph db (or base (:base @state)) in)
         ;; the index class the shell's runner takes (seon.program/with-index-code), from this graph, before base is indexed
         in (cond-> in (nil? (get-in in [:config :seon.env/index])) (as-> x (program/with-index-code g x)))
-        b (when base (base-graph base in))
+        held (:config (cfg/in-force))
+        ;; the base digested under the same derivation as the branch (its schema entries beyond the binary's, the held config), so
+        ;; only what the branch changed moves a test (seon.agent-test/a-branch-that-changes-no-schema-selects-no-test-for-its-schemas)
+        b (when base (base-graph base (branch-inputs in base nil held)))
         g (branch-graph db (or base (:base @state)) in)
-        in (branch-inputs in db (or base (:base @state)) (:config (cfg/in-force)))
+        in (branch-inputs in db (or base (:base @state)) held)
         g (program/reach-indexed g in)
         ;; a stall task's proofs read that task's cause, so they judge only a task that names them
         idx (into {} (filter (fn [[t _]] (judges? g proofs t))) (program/index-of g))

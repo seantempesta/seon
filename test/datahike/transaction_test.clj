@@ -53,3 +53,25 @@
         (str "linear in the attributes: " (quot (:bytes a150) 1048576) " MB for 150, " (quot (:bytes a450) 1048576) " MB for " (count attrs)))
     (is (< (:bytes a450) (* 100 1048576)) "a store's whole schema costs under 100 MB")))
 
+
+;; Estimate: a test branch (~1M), two loads of 3 source transactions (~0.1M each), two transacts (~0.3M), ~2M = 2000000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-load-of-several-transactions-takes-an-id-for-each
+  ;; deps, 2026-11-15 [M] (the merge-time question with data-2): load-entities gives each source transaction a tx id
+  ;; of its own, but took only the first from the store's ids (datahike.ids) and counted the rest past the db's
+  ;; max-tx, then left :max-tx at the first: the next transaction took an id the load had used. Every transaction
+  ;; a load makes has an id issued once, and the next transaction's is past them all
+  (let [ents (vec (for [g (range 3) a [:note/text :note/agent]]
+                    [(+ 100000000 g) a (if (= a :note/text) (str "load " g) :load) (+ 536900000 g) true]))
+        loaded (fn [db] (sort (set (map :tx (d/datoms db :avet :note/agent :load)))))]
+    (let [db (:db-after (datahike.core/load-entities-with (ts/test-db) ents nil))
+          next-tx (:tx (first (d/datoms (d/db-with db [{:note/text "after" :note/agent :after}]) :avet :note/agent :after)))]
+      (is (= 3 (count (loaded db))) "a speculation: three source transactions, three ids")
+      (is (every? #(< % next-tx) (loaded db)) (str "and the next transaction's id is past them: " next-tx " after " (pr-str (loaded db)))))
+    (ts/test-branch!
+      (fn [_ conn]
+        @(d/load-entities conn ents)
+        (let [db @conn
+              _ (d/transact conn [{:note/text "after" :note/agent :after}])
+              next-tx (:tx (first (d/datoms @conn :avet :note/agent :after)))]
+          (is (= 3 (count (loaded db))) "through the writer: three ids")
+          (is (every? #(< % next-tx) (loaded db)) (str "each issued once, the next past them: " next-tx " after " (pr-str (loaded db)))))))))
