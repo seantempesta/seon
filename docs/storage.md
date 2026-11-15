@@ -34,6 +34,9 @@ A store is opened ``MDB_SAFENOSYNC`` (```seon.db/store-cfg```): the flusher's ``
 
 ## The map is address space
 
+A store's pages are read with the LMDB fork's own `mdb_stat` (`reference-code/lmdb/libraries/liblmdb`: `mdb_stat.c mdb.c midl.c module.c`, built `-pthread -DMDB_USE_ROBUST` as `bin/build` builds the library); a system `mdb_stat` refuses the store (`MDB_INVALID`, or `MDB_VERSION_MISMATCH` while root holds it). `mdb_stat -efr` answers pages used and free, the last txn and the reader table, read-only, safe beside a live root.
+
+
 LMDB's map (`:seon.config.store/lmdb-map-bytes`, 128 GiB) is address space only: an open or a fork costs the same at any size, and the file grows only as it is used. Anything that walks a map page by page pays for its size under a lock every process mapping the store shares, so a process's memory is read with one `task_info` call (`jolt.host/process-footprint-bytes`, `jolt.process-test/a-process-reads-its-own-footprint`). A smaller map is no fix: at 1 GiB Datahike's commit failed.
 
 ## The proof: what a commit costs
