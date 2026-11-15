@@ -1259,7 +1259,7 @@
       (swap! state assoc :fixtures-warm true)
       n)))
 
-(defn- wall-bound-ms
+(defn wall-bound-ms
   "Test t's (\"#'ns/name\") wall bound in ms: ten times its estimate, ^{:seon.test/estimate {:ticks n}}, at the slowest rate
   measured greens ran (:seon.config.proofs/slow-ticks-per-ms: waiting included), so a test that waits as long as the slowest ever
   did is never ended by it; a test that states none takes the class bound (:seon.config.proofs/unestimated-wall-ms). See
