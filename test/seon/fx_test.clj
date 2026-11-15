@@ -119,12 +119,14 @@
 (deftest ^{:seon.test/estimate {:ticks 20000}} a-grant-reads-no-config
   ;; AGENTS.md 3a.3, root's review of b8eea50e59: the dials are derived once a config change, held by the reader, never read
   ;; through the resolver at each admission or grant (~200k ticks a call)
+  ;; proved by identity, this call's own value, never by the process-wide call record (seon.profile/touched): a config read
+  ;; anywhere else in the process (the shared root's procs, another test) counted as the grant's, and the test was flaky (task
+  ;; seon.fx/a-grant-reads-no-config-is-its-own-reads-only, deps' run). A recompute builds a new limits map; the held read
+  ;; answers the one it holds
   (let [[st l1] (fx/limits-held {})
-        _ (seon.profile/begin!)
-        [st2 l2] (fx/limits-held st)
-        called (into #{} (map :var) (seon.profile/touched))]
+        [st2 l2] (fx/limits-held st)]
     (is (= l1 l2) "the config unchanged: the same limits")
-    (is (not-any? called '[seon.fx/config-limits seon.config/value seon.config/resolve]) (str "and no config read: " (sort-by str called)))
+    (is (identical? l1 l2) "and no config read: the held limits themselves, never derived again")
     (let [c (:config (seon.config/in-force))]
       (with-redefs [seon.config/in-force (fn [] {:config (assoc c :seon.config.proofs/max-workers 3)})]
         (is (= 3 (:max-workers (second (fx/limits-held st2)))) "a turned dial reaches the next read")))))

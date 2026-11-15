@@ -1702,7 +1702,7 @@
   "[st limits]: config-limits of the config this process holds, kept in the reader's own state st (under ::limits-of, with the
   config map it was derived from) and derived again only when the config in force is another value (seon.config/held is replaced
   only when a transaction touches an entry): a dial the owner turns reaches the next admission or grant, and every other one costs
-  one identical? compare, never a resolver read (~200k ticks a call). The :process owner's dispatch and seon.prove's grant read it.
+  one identical? compare, never a resolver read (~1k ticks a call, measured 953). The :process owner's dispatch and seon.prove's grant read it.
   See docs/config.md#the-test-services-three-limits."
   {:malli/schema [:=> [:cat :map] [:tuple :map [:map [:max-workers pos-int?] [:budget pos-int?] [:max-load [:maybe number?]]]]]}
   [st]
