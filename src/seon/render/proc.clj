@@ -682,7 +682,7 @@
         head-unit {:id "p-agent-head" :container "#p-head" :rev (hash head)
                    :html (h/html [:section {:id "p-agent-head" :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (ui/agent-head {} head)])}]
     ;; the walks this page made or advanced, for the pass to write to st (`pass-view`)
-    (assoc (ui/page-chrome {:units (vec (concat (when-not person? (system-units st)) sides [head-unit] units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
+    (assoc (ui/page-chrome {:units (vec (concat (when-not person? (system-units st)) sides [head-unit] units)) :view (ui/view-param view) :tab (if chat? :chat :debug) :person? person?
                       ;; never a wait: drawn from its branch until its process answers, the page says so
                       :caption (when (and chat? (not own?))
                                  (when (:error held) (str "Its process didn't answer, so this may be behind: " (:seon.error/message (:error held)))))

@@ -1676,7 +1676,10 @@
         st (root-state (proc-state main branch) main)
         bar (fn [page] (h/html (nth (:seon.render/hiccup page) 2)))
         root (#'p/page-value st :root)
+        home (#'p/page-value st [:chat :home])
         dbg (#'p/page-value st [:debug :root])]
+    (is (str/includes? (bar home) ">Seon<") "/ (the person's home) has the person's bar")
+    (is (not (str/includes? (bar home) "on jolt")) "and no build name")
     (is (str/includes? (bar root) ">Seon<") "the person's bar names Seon")
     (is (str/includes? (bar root) "href=\"/root/debug\"") "and a quiet way to the debug view")
     (is (not (str/includes? (bar root) "on jolt")) "no build name")
