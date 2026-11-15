@@ -52,7 +52,7 @@
  :seon.reads/keys [:set :seon.reads/key]
  :seon.reads/index [:map-of {:description "Each read key to the readers that recorded it (a reader is any value its holder names it by)."} :seon.reads/key [:set :any]]
  :seon.reads/branch [:and {:description "The branch a read set was read on."} :seon.db/branch]
- :seon.reads/commit [:uuid {:description "The commit a read set was read at."}]
+ :seon.reads/commit [:and {:description "The commit a read set was read at."} :seon.db/commit]
  :seon.reads/outside [:set {:description "The reads outside the store, as effects answered them."} :seon.fx/read]
  :seon.reads/unreusable [:set {:description "The effects a run used whose answer its inputs don't decide (clock, network, model: :seon.fx/reuse :never). A run with any is recorded, never reused."} :qualified-keyword]
  :seon.reads/set [:map {:description "What a run read: its basis, its keys, and its reads outside the store."}
@@ -99,7 +99,7 @@
  :seon.db/entity-index-shape [:map [:forms :map] [:entity-schemas [:map-of :keyword :qualified-keyword]] [:identity-schemas [:map-of :keyword :qualified-keyword]]
                         [:schema-identities [:map-of :qualified-keyword :keyword]] [:drawn-schemas [:set :qualified-keyword]] [:history-schemas [:set :qualified-keyword]]
                         [:required-keys [:map-of :qualified-keyword [:vector :keyword]]] [:own-required [:map-of :qualified-keyword [:vector :keyword]]]
-                        [:targets [:map-of :keyword [:vector :qualified-keyword]]] [:required-refs [:vector :qualified-keyword]] [:derived-attrs [:set :keyword]]
+                        [:targets [:map-of :keyword [:vector :qualified-keyword]]] [:required-refs [:vector :qualified-keyword]] [:derived-attrs [:set :keyword]] [:commit-attrs [:set :keyword]]
                         [:ancestors [:map-of :qualified-keyword [:set :qualified-keyword]]] [:reaching [:map-of :qualified-keyword [:vector :qualified-keyword]]]
                         [:specs {:optional true} :any]]
  :seon.db/open [:map [:cfg :seon.db/cfg] [:conn :seon.host/conn] [:recovered? :boolean]]
