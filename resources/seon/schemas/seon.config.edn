@@ -48,6 +48,8 @@
   ;; the machine
   [:seon.config.machine/memory-mb {:optional true} :seon.config.machine/memory-mb]
   [:seon.config.machine/relay-mb {:optional true} :seon.config.machine/relay-mb]
+  [:seon.config.machine/call-floor-ticks {:optional true} :seon.config.machine/call-floor-ticks]
+  [:seon.config.machine/call-floor-bytes {:optional true} :seon.config.machine/call-floor-bytes]
   [:seon.config.machine/cores {:optional true} :seon.config.machine/cores]
   ;; the check harness
   [:seon.config.check/ping-ms {:optional true} :seon.config.check/ping-ms]
