@@ -1331,9 +1331,6 @@
         ;; the test child's own ceiling, from its own heap at its fork: the agent's absolute ceiling
         ;; left a child of a grown agent less room than any test needs (docs/machine.md#what-a-process-owns-in-memory)
         (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)) (cfg/value :seon.config.agent/trip-bytes))
-        ;; a batch the test service granted: every process this child starts carries it, so the service reads what its
-        ;; running batches hold (seon.fx/held-processes)
-        (when-let [b (:seon.prove/batch plan)] (lib/c-setenv "SEON_PROVE_BATCH" b 1))
         ;; its tests run as bin/test's runner runs them: no interrupt or eval of the agent's
         ;; (task seon.agent/a-test-child-starts-as-a-test-runner-does)
         (intr/forked!)
