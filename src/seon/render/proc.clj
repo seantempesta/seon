@@ -296,11 +296,9 @@
   (cond (vector? view) (location db (second view))
         ;; root's page is root's agent's (its session, the agent keyed "root", made at boot), drawn as any agent's is
         (= :root view) (or (:db/id (d/entity db [:seon.agent/key "root"])) (:db/id (d/entity db [:seon.system/id :root])))
-        ;; home: the signed-in person's focus (docs/users.md#whats-on-screen); with none, root's page, which presents the system
-        ;; to them (owner, 2026-11-11: "the goal is mostly root running the presentation"); no one signed in, the sign-in page
-        (= :home view) (let [u (:seon.system/signed-in (d/entity db [:seon.system/id :root])) f (:seon.user/focus u)]
-                         ;; a focused task is its agent's page once its agent exists
-                         (when u (or (:db/id (if (:seon.task/id f) (:seon.task/agent f) f)) (location db :root))))
+        ;; home: root's chat, the person's one conversation (docs/decisions.md, The page is a friendly chat: the person talks to root and
+        ;; never learns other agents exist), whatever their focus holds; no one signed in, the sign-in page
+        (= :home view) (when (:seon.system/signed-in (d/entity db [:seon.system/id :root])) (location db :root))
         (keyword? view) (agent-named db (address-of view))
         :else view))
 
@@ -707,7 +705,7 @@
                       ;; its REPL and its messages while its process runs; its held task's release. Root's session is talked to as any
                       ;; agent (a message wakes it, and it starts the work); only a user's page, no agent to talk to, asks for a task
                       :input (if (:seon.user/name e) {:schema :seon.render/root-input :value {}} {:schema :seon.render/agent-input
-                              :value {:id (keyword (:seon.agent/key e)) :address (keyword (:seon.agent/key e)) :live? (live? st id) :focus? chat?
+                              :value {:id (keyword (:seon.agent/key e)) :address (keyword (:seon.agent/key e)) :live? (live? st id) :focus? chat? :person? person?
                               ;; what its process can answer: a form running is interrupted (busy)
                               :busy? (= :busy (:seon.agent/status e)) :talks? (some? (or (:seon.agent/task e) (first (:seon.task/_agent e))))
                                       :held (d/q '[:find ?id . :in $ ?a :where [?a :seon.agent/task ?t] [?t :seon.task/execution :held] [?t :seon.task/id ?id]] db eid)}})}
