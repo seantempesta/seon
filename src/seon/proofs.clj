@@ -477,17 +477,6 @@
                                    (or (= b (get cand t)) (red? (get base-found b)))))))
         (keys results)))
 
-(defn unknown-reds
-  "The red tests of results ({test status}) whose verdict at base nobody knows yet: red here, with a base digest (base, as
-  main-red reads it) the change moved (cand), and no verdict found at it (base-found {digest result}, as main-red reads it).
-  main-red reads each as the branch's; the reconciler asks the test service main's verdict of them by name and waits on that
-  answer before the done rule reads it, never reading whatever the cache holds (seon.reconcile's :main-asked). {test base-digest}. Cost: one lookup per red test. See docs/tasks.md#the-done-rule."
-  {:malli/schema [:=> [:cat :seon.proof/results [:map-of :qualified-symbol :string] [:maybe [:map-of :qualified-symbol :string]] [:map-of :string :map]] [:map-of :qualified-symbol :string]]}
-  [results cand base base-found]
-  (into {} (keep (fn [[t s]] (let [b (get base t)]
-                               (when (and b (#{:fail :error} s) (not= b (get cand t)) (nil? (get base-found b))) [t b]))))
-        results))
-
 (defn plan
   "What a change runs: of cand ({key digest}, the candidate's), base (the base's {key digest},
   nil: none), found ({digest result}, the verdicts cached at cand's digests: seon.fx/stored-results) and proofs
