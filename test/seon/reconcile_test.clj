@@ -2488,3 +2488,14 @@
     (is (not (contains? (:live (c (idx 20))) "t/a")) "its agent ended after it started: not live")
     (is (contains? (:reap (c (idx 20))) "t/a") "reaped")
     (is (contains? (:live (c (idx 5))) "t/a") "an end from before this start (the session's earlier process) is no end of it")))
+
+;; docs/reconcile.md#the-reconcilers-index: the index's agent row is pulled from the store (seon.task/indexed-agent), so the rule
+;; that an ended agent's task is not live holds only if the pull carries the end. Red before: the pull read no :seon.agent/ended-ms
+;; (nor started-ms), so landing 1's rule never fired in production (web-2's 09:48 overrun) while its classify test passed on a
+;; hand-made index. Estimate: one pull of one entity, ~0.2M ticks
+(deftest ^{:seon.test/estimate {:ticks 500000}} the-indexed-agent-carries-when-it-started-and-ended
+  (let [db (d/db-with (seon.db/empty-db false) [{:seon.agent/key "k7" :seon.agent/boot "b" :seon.agent/started-ms 10 :seon.agent/ended-ms 20}])
+        e (:db/id (d/entity db [:seon.agent/key "k7"]))
+        a (#'seon.task/indexed-agent db e)]
+    (is (= 10 (:seon.agent/started-ms a)) (pr-str a))
+    (is (= 20 (:seon.agent/ended-ms a)) "the end the index's live rule reads")))
