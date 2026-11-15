@@ -727,6 +727,23 @@
     (is (= [{:reason :main-unknown :symbol 'demo-test/p}] (j {:main-unknown #{'demo-test/p}})) "main's verdict unknown: held, named so")
     (is (= [] (j {:main-red #{'demo-test/p} :main-unknown #{'demo-test/p}})) "main's red wins")))
 
+;; Estimate: 1 db-of x 0.5M + 3 advance calls (one run-digest of a small main ~0.3M) ~ 1,500,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1500000}} the-judge-writes-what-it-asked-main-and-how-it-read-it
+  ;; docs/tasks.md#the-done-rule: a judged end carries what the judge asked main of the run's reds and how it read the answer
+  ;; (:seon.task/main-asked), so a reader sees why a red was main's, unknown or the task's. Red before: nothing of it was written,
+  ;; and the pilot's run 11 judged two of main's reds stray with no trace of main's answer
+  (let [db (db-of [(decl "a")] :extra (work "a" :running))
+        x 'demo-test/x y 'demo-test/y
+        flight {:act {:op :spawn :task "demo/a" :env {:branch :demo/a}} :agent :a-a}
+        st (st-of db :flights {"demo/a" (assoc flight :step :tested)})
+        [st1 _] (#'r/advance st "demo/a" :tested {:reports [{:var "#'demo-test/x" :type :fail} {:var "#'demo-test/y" :type :fail}] :main-red #{}})
+        [st2 _] (#'r/advance st1 "demo/a" :main-asked {:reports [{:var "#'demo-test/x" :type :fail}]})
+        [_ outs] (#'r/advance st2 "demo/a" :diffed {:ok true :db db :base db :base-t (:max-tx db) :ours [] :theirs 0 :conflicts 0
+                                                     :unmerged [] :uncontracted [] :caused [] :vars #{}})
+        tx (some #(get-in % [:req :req :tx-data]) outs)
+        asked (some #(when (and (vector? %) (= :seon.task/main-asked (nth % 2 nil))) (nth % 3)) tx)]
+    (is (= {:main-red #{x} :asked {x :fail y :unknown}} asked) (pr-str tx))))
+
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 transacts or db-withs x 50k ~ 600,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 600000}} a-typed-error-from-work-or-the-judge-holds-the-task-and-is-no-death
   ;; docs/errors.md: an error flows to whoever can fix it. :briefed, :worked and :tested each took any typed error for the

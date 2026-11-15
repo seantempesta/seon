@@ -560,6 +560,7 @@
                           [:seon.task/commit {:optional true} :seon.task/commit]
                           [:seon.task/merged-t {:optional true} :seon.task/merged-t] [:seon.task/specified-turn {:optional true} :seon.task/specified-turn] [:seon.task/error {:optional true} :seon.task/error]
                           [:seon.task/deferred {:optional true} :seon.task/deferred] [:seon.task/deferred-results {:optional true} :seon.task/deferred-results]
+                          [:seon.task/main-asked {:optional true} :seon.task/main-asked]
                           [:seon.task/gate-unread {:optional true} :seon.task/gate-unread] [:seon.task/changed {:optional true} :seon.task/changed]
                           [:seon.task/conflicts {:optional true} :seon.task/conflicts] [:seon.task/unmerged {:optional true} :seon.task/unmerged]
                           [:seon.task/task-conflicts {:optional true} :seon.task/task-conflicts] [:seon.task/failures {:optional true} :seon.task/failures]
@@ -603,6 +604,8 @@
  ;; it tested another tree than the one that merges, so none of its results counts as a pass
  :seon.task/deferred [:map-of {:description "The process tests that the task's change reaches, which its merge runs on a checkout, each with its digest as main held it at the task's base: the key by which the gate reads main's own verdict of that test (seon.proofs/main-red); nil when the test is new on the branch, so its red is the task's. An observation; the gate's results are :seon.task/deferred-results."} :qualified-symbol [:maybe :string]]
  :seon.task/deferred-results [:and {:description "The gate's run of the deferred tests, each test's status."} :seon.proof/results]
+ :seon.task/main-asked [:map {:description "What the judge asked main of the run's reds and what main answered (seon.reconcile/ask-main): :main-red, the reds judged main's (the run's own read and main's answer); :asked, each red asked and main's status of it (:unknown when main answered nothing of it); :error, the type of main's answer when it was an error. See docs/tasks.md#the-done-rule."}
+                        [:main-red [:set :qualified-symbol]] [:asked [:map-of :qualified-symbol [:enum :pass :fail :error :unknown]]] [:error {:optional true} :keyword]]
  :seon.task/gate-unread [:vector {:description "The changed namespaces that the gate could not read from the branch, each with why."} [:map [:ns :symbol] [:reason :string]]]
  ;; measured at its end from the branch (seon.merge/three-way's :ours): the printed program keys it changed since its merge base
  ;; (each seon.edn/encode of a :seon.merge/program-key, so generated ones are too); the octopus merge admits on them
