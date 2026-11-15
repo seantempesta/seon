@@ -484,11 +484,24 @@
   are a branch's own ({:forms :registry}) or nil. A Datahike transaction call at a site docs/storage.md does not
   name is red (bin/laws transactions). See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.db/tx-data] :seon.db/tx-report] [:=> [:cat :seon.host/db :seon.db/tx-data [:maybe :seon.db/branch-schemas]] :seon.db/tx-report]
-                  [:=> [:cat :seon.host/db :seon.db/tx-data [:maybe :seon.db/branch-schemas] [:maybe :map]] :seon.db/tx-report]]}
+                  [:=> [:cat :seon.host/db :seon.db/tx-data [:maybe :seon.db/branch-schemas] [:maybe :map]] :seon.db/tx-report]
+                  [:=> [:cat :seon.host/db :seon.db/tx-data [:maybe :seon.db/branch-schemas] [:maybe :map] :boolean] :seon.db/tx-report]]}
   ([db tx-data] (with db tx-data nil))
   ([db tx-data schemas] (with db tx-data schemas nil))
   ;; tx-meta: the transaction entity's own facts (a merge's replayed transaction names its source: seon.merge/decide)
-  ([db tx-data schemas tx-meta] (checked db tx-data schemas #(d/with db (cond-> {:tx-data %} tx-meta (assoc :tx-meta tx-meta))))))
+  ([db tx-data schemas tx-meta] (with db tx-data schemas tx-meta false))
+  ;; stored?: a value that will be committed (a merge's, force-branch!) takes its transaction id and fresh entity ids from the
+  ;; store's ids, as the writer's transact does (datahike.writing's with-store-ids), so no id is issued twice on any branch; a
+  ;; speculation takes none (docs/storage.md#ids)
+  ([db tx-data schemas tx-meta stored?]
+   (checked db tx-data schemas
+            (if stored?
+              #(let [ids (datahike.writing/ids db) r (datahike.core/with db % tx-meta ids)]
+                 (when ids
+                   (datahike.ids/-reach! ids :eid (get-in r [:db-after :max-eid]))
+                   (datahike.ids/-reach! ids :tx (get-in r [:db-after :max-tx])))
+                 r)
+              #(d/with db (cond-> {:tx-data %} tx-meta (assoc :tx-meta tx-meta)))))))
 
 (defn speculate
   "tx-data on db as a hypothetical (Datahike's `d/with`), unchecked: nothing of it is stored, so it is not data entering

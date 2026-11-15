@@ -219,7 +219,7 @@
   [into-db from txs meta]
   (reduce (fn [db {:keys [source ops]}]
             ;; the named edge (docs/failure-points.md): the write check refuses a replayed transaction with its typed error
-            (try (:db-after (pdb/with db ops nil (assoc meta :seon.tx/source source :seon.tx/at-ms (some-> ^java.util.Date (:db/txInstant (d/entity from source)) .getTime))))
+            (try (:db-after (pdb/with db ops nil (assoc meta :seon.tx/source source :seon.tx/at-ms (some-> ^java.util.Date (:db/txInstant (d/entity from source)) .getTime)) true))
                  (catch clojure.lang.ExceptionInfo e
                    (reduced (contract/error :seon.merge/replay-refused #'seon.writer/replay
                                             (str "the merge replays transaction " source " and the write check refuses it: " (ex-message e))
@@ -256,9 +256,9 @@
             ;; the keys the branch touched (its carried facts): only these can differ from main's change, so only these are read on both sides
             ks (vec (distinct (for [{:keys [ops]} (:txs c) [o e a] ops :when (not= :db/retractEntity o)] [e a])))
             ;; a merged task's cites are derived from its text: made again here, never carried (seon.task/merged-cites-tx)
-            settled (pdb/with replayed (:settle-ops r) nil meta)
+            settled (pdb/with replayed (:settle-ops r) nil meta true)
             cites (task/merged-cites-tx (:db-after settled) (mapv (fn [[e a]] [:datum e a]) ks))
-            cited (when (seq cites) (pdb/with (:db-after settled) cites nil meta))
+            cited (when (seq cites) (pdb/with (:db-after settled) cites nil meta true))
             merged (if cited (:db-after cited) (:db-after settled))
             ;; the keys the cites wrote, read from their datoms (cites-tx gives entity maps), the transaction's own facts left out
             cite-keys (for [dt (:tx-data cited) :when (not= (:e dt) (:tx dt))] [(:e dt) (:a dt)])
