@@ -498,7 +498,8 @@
    ;; main's content mark moves at the writer's start: what a boot wrote before it ran (a seed, a catch-up) bears no mark of
    ;; its own, so no branch's base shares the mark main carries from here (docs/storage.md#mains-content-mark)
    (d/transact (:conn args) {:tx-data (mark-tx @(:conn args)) :tx-meta (pdb/tx-meta (pdb/conn-main (:conn args)))})
-   (assoc args :tx-count 0 :commits 0 :batches 0
+   ;; :program-t seeded at main's t: a root booted onto main proves it once (seon.prove's :main), never waits for the next program move
+   (assoc args :tx-count 0 :commits 0 :batches 0 :program-t (:max-tx @(:conn args))
           ::flow/in-ports {:in (:to-writer args)} ::flow/out-ports {:events (:events args)}))
   ([st tr]
    st)
