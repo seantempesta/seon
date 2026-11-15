@@ -689,8 +689,10 @@
                                                               2    ; :stateful-outside-flow's reader on base and head for the move's changed vars (flow,
                                                                    ; 2026-11-14, measured 89 -> 91)
                                                               1    ; retyped-attributes' own contract, once a read (data, 2026-11-14)
-                                                              13)} ; the one-printer law's rule (seon.problems/printer-law): its four dials read once through the
+                                                              13   ; the one-printer law's rule (seon.problems/printer-law): its four dials read once through the
                                                                    ; resolver for both sides (tests, measured 89 -> 102)
+                                                              2)} ; :unestimated reads the move's open tasks too: the moved task states no estimate,
+                                                                   ; its row (derived-row) on base and head (data, 2026-11-15, measured 104 -> 106)
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 25000000}} problems-cost-nothing-for-a-clean-program
