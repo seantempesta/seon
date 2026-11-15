@@ -114,6 +114,6 @@ Questions for root: (a) admission: do root tasks take places under `:seon.config
  {:seon.task/name "a-pilots-verdict-reads-main-at-a-pinned-commit"
   :seon.task/plan "Root's order 2026-11-16 (cleanup): pilot runs 11-14 of seon.db/an-eval-responses-parts-are-its-schemas-keys were decided by main moving under them, not by the agent's work: run 11 judged two of main's reds stray [M result/d0185068]; run 12's ask of main was refused while main's own run held :main/tests, so every red read :unknown [M result/bbd0ab17]; run 14 was voided by a main test's wall-bound hang (seon.server-test/a-sessions-checkout-is-proved-on-its-trees-branch). Run 15 merged only once main held still. PRIOR WORK: seon.reconcile/ask-main and main-answer (main's verdict per red at :t and run-digest), the gate's base, the merge gate's candidate. Fix: a pilot's judge and gate read main at one pinned commit, the base its run forked from (its :t), so main's moving reds and runs never decide its verdict, and a red is main's when main at that commit holds it. COST: as today, one ask a judge; no new run."
   :seon.task/kind :work
-  :seon.task/proofs #{}
+  :seon.task/proofs #{seon.reconcile-test/a-pilots-judge-reads-main-at-its-pinned-commit}
   :seon.task/needs #{}
   :seon.task/estimate #:seon.reconcile{ask-main {:n 10, :order :linear, :ticks 2500000, :bytes 10000000}}}]
