@@ -84,4 +84,10 @@ PROOF (red first, once the waiter is found): seon.server-test/an-eval-at-root-wh
   :seon.task/proofs #{seon.server-test/a-second-wait-a-delivery-woke-with-nothing-waits-on}
   :seon.task/needs #{}
   :seon.task/estimate #:seon.server{inbox-answer {:n 3, :order :linear, :ticks 50000, :bytes 20000}}}
+ {:seon.task/name "an-inbox-on-an-ended-agent-says-so"
+  :seon.task/plan "Owner: flow. Found 2026-11-16 05:20 [M result/db94fafd, result/ddf04647]: after root's 05:18 restart, session/flow's agent process had ended (status :ended) though its attach had answered. seon_inbox then answered root's one message three times.\nCAUSE [read server.clj inbox-answer, inbox-deliver]: with no live process, inbox-deliver gets submit!'s refusal, and inbox-answer answers what main holds without delivering ('delivered at its next act'). A session's agent has no next act but the inbox, so every call answers the same messages.\nPRIOR WORK: seon.server/inbox-answer, inbox-deliver, attach! (its spawn of a session's agent), seon.task/undelivered; data's seon.server/a-message-is-delivered-only-by-its-delivery (the delivery fact).\nDESIGN: an inbox whose agent has no live process answers typed :seon.server/agent-ended, naming the agent and the attach that starts it again (SEON_MCP_CLIENT=<area> bin/mcp call attach task=<its task>). It never answers messages it cannot deliver. A session then re-attaches and asks again; the attach is the one way an agent's process starts.\nCOST: one look in root's agents view a call (O(1)), no new wait.\nPROOF, red first: seon.server-test/an-inbox-on-an-ended-agent-answers-agent-ended (red today: answers main's messages, and again on the next call).\nDeletes: inbox-answer's read-without-delivery fallback (the typed answer does its job)."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.server-test/an-inbox-on-an-ended-agent-answers-agent-ended}
+  :seon.task/estimate #:seon.server{inbox-answer {:n 3, :order :linear, :ticks 50000, :bytes 20000}}
+  :seon.task/needs #{}}
 ]
