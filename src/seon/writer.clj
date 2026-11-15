@@ -42,7 +42,7 @@
   (stored!). Answers st."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/t :seon.db/t :seon.db/resolved-tx :seon.host/db] :seon.writer/state]}
   [st o prev t ops db]
-  (step/out! o :main {:t t :prev prev :ops ops :commit (d/commit-id @(:conn st)) :ns (profile/now-ns)})
+  (step/out! o :main {:t t :prev prev :ops ops :commit (d/commit-id @(:conn st)) :ns (profile/now-ns) :program-t (:program-t st)})
   (when-let [errs (seq (program/load-changes! db ops {:tests? false}))]
     (step/out! o :events (step/event {:type :load-errors :errors (vec errs)})))
   ;; root holds main: a moved schema entry (a retraction included: a deleted key leaves the registry) is its registry now
@@ -77,8 +77,15 @@
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/resolved-tx] :nil]}
   [st o ops]
   (let [db @(:conn st)]
-    (step/out! o :to-fork-server {:op :tx :t (:max-tx db) :commit (d/commit-id db) :ns (profile/now-ns) :tx-data ops})
+    (step/out! o :to-fork-server {:op :tx :t (:max-tx db) :commit (d/commit-id db) :ns (profile/now-ns) :tx-data ops :program-t (:program-t st)})
     nil))
+
+(defn- program-at
+  "Writer state st with :program-t, the t of main's last commit whose ops move the program (seon.program/moves-program?), brought to
+  commit t of ops: computed here once a commit, where every commit is seen, and carried on each notice, so a reader that takes only
+  the newest (seon.prove's sliding :main) still learns the program moved. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map :seon.db/t :seon.db/resolved-tx] :map]}
+  [st t ops] (cond-> st (program/moves-program? ops) (assoc :program-t t)))
 
 (defn- branch-merge
   "seon.merge/three-way of branch b against main, from their merge base over Datahike's
@@ -243,6 +250,7 @@
                             (pdb/tx-meta (pdb/conn-main conn)))
             t (:max-tx (:db-after rep))
             ops (pdb/report->tx rep)
+            st (program-at st t ops)
             _ (stored! st o ops)]
         [(main-commit st o (:max-tx (:db-before rep)) t ops (:db-after rep))
          {:tx t :datoms (count ops)
@@ -281,7 +289,8 @@
         (map? c)
         ;; one stored commit, one notice: the last report's t, every report's ops in order, the mark's after them
         (let [ops (into ops (some-> (:mark c) pdb/report->tx))
-              t (:max-tx (:db c))]
+              t (:max-tx (:db c))
+              st (program-at st t ops)]
           (stored! st o ops)
           (doseq [[m rep] (map vector ms reps)]
             (if (map? rep) (answer o (:dest m) {:ok true :t (:max-tx (:db-after rep)) :datoms (count (pdb/report->tx rep))}) (refuse m rep)))
