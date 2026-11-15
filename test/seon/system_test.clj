@@ -337,7 +337,7 @@
     (is (= [:enum :group-ended :eof] (last (:malli/schema (meta #'seon.fork-server/release!)))) "release! answers how the server ended")))
 
 ;; Estimate: a test root's start and stop (~as a-root-stops-in-a-second, a process test), one fiber dump; ~5M ticks of its own
-(deftest ^{:seon.test/estimate {:ticks 5000000}} a-stop-writes-the-roots-fibers-before-it-waits
+(deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/root [] :seon.test/execs ["target/seon"]} a-stop-writes-the-roots-fibers-before-it-waits
   ;; docs/machine.md#reading-a-hang: a root's stop waits for each proc's running step (Flow takes a stop between steps), and two stops
   ;; overran past their bound with no record of the step that held them (runs/stop-overran-87484, -77485: the dump came at the kill,
   ;; before the running fibers reached a safe point). The stop writes its fibers first, so a running fiber's frames land in its bound
