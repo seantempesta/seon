@@ -38,6 +38,10 @@ He asked that Claude agents be driven through the Seon MCP turns, with context l
 
 He ruled that the binary is rebuilt only when a change needs it: when a build input changed and the new binary must be tested (the parallel system), or when the system is about to restart; never on every land (2026-11-15). A kept-running land builds nothing, since a boot catches up main's program in place. Runtime carries it in plan item 17; E removes the per-land build of the land's own checkout.
 
+### Every compaction leaves a principal engineer's prompt
+
+He ruled that a session about to compact leaves its successor a prompt he can paste into a fresh session, casting it as the principal engineer leading its area on the company's most important project, turning a working prototype into a real product, with rigor, correctness and a sharpness that makes it a pleasure to work with (2026-11-15). Stated in `AGENTS.md` §3.
+
 ### Tests never hardcode defaults
 
 He ruled that no test hardcodes a default (2026-11-15). A test reads a default through the one config resolver and asserts the behaviour around it, never a copy of its value, so a changed default cannot leave a stale assertion red on main (two did that day). Tests sweeps the existing ones. A default itself lives in the schema: a `:default` property on the key's malli schema entry, applied by the one resolver (`malli.transform/default-value-transformer`); data plans it with the config scope.
