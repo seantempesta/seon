@@ -3818,6 +3818,18 @@
     (is (= :seon.process/env-mismatch (:type v)) (str "the spawn is answered with the refusal: " (pr-str v)))
     (is (nil? (:id v)) "and no agent is handed back to serve")))
 
+;; docs/source.md#the-binary-records-its-program: the tree an agent's binary is checked against is the one its program comes from. A
+;; resumed branch whose merge base was swept runs main's program as forked (seon.agent/init!), so it is checked against main's tree;
+;; red before: init! read the branch's own old source fact and refused every such resume :seon.process/env-mismatch (:main/tests,
+;; :main/tests-meas1 at root, 2026-11-15, result/b8473e2f), though it runs main's program
+;; Estimate: two test dbs and two pulls ~ 300,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-resume-whose-base-was-swept-is-checked-against-mains-tree
+  (let [at (fn [tree] (d/db-with (ts/test-db) [{:seon.system/id :root :seon.system/source {:tree tree :commit "c" :dirs ["src"]}}]))
+        main (at "main-tree") branch (at "old-tree")
+        lost {:seon.error/type :seon.db/no-merge-base :seon.error/operation 'seon.db/branch-base :seon.error/message "swept" :branch :b :commit nil}]
+    (is (= "main-tree" (agent/source-tree main branch lost)) "a swept base: the tree of main's program, which it runs")
+    (is (= "old-tree" (agent/source-tree main branch nil)) "a branch with its base: its own tree, as before")))
+
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-session-restored-at-an-older-commit-runs-that-commits-definitions
   ;; docs/storage.md#compiled-code: a spawn with {:branch b :commit C}
   ;; makes b from the session's commit C and forks it from main's image with the program at C loaded over it, the way a resumed
