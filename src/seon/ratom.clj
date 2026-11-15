@@ -500,6 +500,8 @@
   {:malli/schema [:=> [:cat :any :any :any :any] :any]}
   [this sender old new] (-handle-change this sender old new))
 
+(declare stale-chain?)
+
 (deftype Reaction [^:volatile-mutable f ^:volatile-mutable state ^:volatile-mutable dirty? ^:volatile-mutable nocache?
                    ^:volatile-mutable watching ^:volatile-mutable watches ^:volatile-mutable auto-run
                    ^:volatile-mutable caught ^:volatile-mutable captured ^:volatile-mutable last-captured
@@ -532,8 +534,7 @@
   (compareAndSet [a old new] (if (identical? old state) (do (.reset a new) true) false))
   IReaction
   (-get [this k]
-    (case k :stale? (or dirty? (boolean (some #(and (instance? Reaction %) (-get % :stale?)) (keys watching))))
-            :captured captured :last last-captured :watching watching :dirty? dirty? :state state
+    (case k :captured captured :last last-captured :watching watching :dirty? dirty? :state state
             :auto-run auto-run :key-set key-set :caught caught :height height :ran-gen ran-gen
             :peek (binding [*ratom-context* nil] (.deref this))))
   (-set! [_ k v]
@@ -622,7 +623,7 @@
         (do (notify-deref-watcher! this)
             ;; stale: it, or a reaction down its chain, is dirty; its run derefs its sources, each pulled the same way, and a source's
             ;; rerun that dirties it again is this run's own (its queued entry then finds it clean)
-            (when (-get this :stale?) (-run this false) (set! dirty? false)))))
+            (when (stale-chain? this) (-run this false) (set! dirty? false)))))
     state)
   IDisposable
   (dispose! [this]
@@ -636,6 +637,18 @@
       (when (some? on-dispose) (on-dispose s))
       (doseq [g on-dispose-arr] (g this))))
   (add-on-dispose! [_ g] (set! on-dispose-arr (conj (or on-dispose-arr []) g))))
+
+(defn- stale-chain?
+  "Is reaction r dirty, or is a reaction down its sources dirty: what a plain deref pulls. Each source is visited once (a seen set),
+  so a ladder of diamonds costs its reactions, never every path through them (2^depth: 235M ticks for 20 diamonds before)."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [r]
+  (let [seen (volatile! #{})]
+    ((fn walk [x] (cond (-get x :dirty?) true
+                        (contains? @seen x) false
+                        :else (do (vswap! seen conj x)
+                                  (boolean (some #(and (instance? Reaction %) (walk %)) (keys (-get x :watching)))))))
+     r)))
 
 (defn make-reaction
   "A Reaction of f (no arguments), Reagent's: :auto-run, run now and on each change of what it
