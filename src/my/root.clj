@@ -211,8 +211,8 @@
     (let [r @(root/effect! sys :git {:dir root :branch (config/value :seon.config.source/branch) :merge "main"})
           db @(:conn sys)
           tx (reconcile/source-moved-tx db r (:t (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root])) 0))]
-      (when (seq tx) @(root/transact-main! sys tx))
-      r)
+      ;; a fact that could not move is answered, never the merge's success over it: the next write-back would refuse again unseen
+      (let [w (when (seq tx) @(root/transact-main! sys tx))] (if (contract/error? w) w r)))
     (contract/error :seon.system/no-source-root #'my.root/merges-caught-up! "no source root declared (:seon.config.source/root): no write-back tree to merge into" {})))
 
 (defn write-back!
