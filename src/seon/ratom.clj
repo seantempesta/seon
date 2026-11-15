@@ -269,7 +269,7 @@
      (~'containsKey [~'_ ~'k] (notify-deref-watcher! [~'src (conj ~'path ~'k) :shallow]) (contains? ~'m ~'k))
      (~'entryAt [~'this ~'k] (when (contains? ~'m ~'k) (clojure.lang.MapEntry. ~'k (.valAt ~'this ~'k))))
      clojure.lang.IPersistentCollection
-     (~'count [~'_] (notify-deref-watcher! [~'src ~'path :keys]) (count ~'m))
+     (~'count [~'_] (notify-deref-watcher! [~'src ~'path :key-set]) (count ~'m))
      (~'cons [~'this ~'x] (conj (unwrap ~'this) ~'x))
      (~'empty [~'_] (empty ~'m))
      (~'equiv [~'this ~'o] (= (unwrap ~'this) (if (view? ~'o) (unwrap ~'o) ~'o)))
@@ -280,8 +280,8 @@
      ;; what a persistent map's = asks of the other side (APersistentMap.equiv), so (= m view)
      ;; holds as (= view m) does
      java.util.Map
-     (~'size [~'_] (notify-deref-watcher! [~'src ~'path :keys]) (count ~'m))
-     (~'isEmpty [~'_] (notify-deref-watcher! [~'src ~'path :keys]) (empty? ~'m))
+     (~'size [~'_] (notify-deref-watcher! [~'src ~'path :key-set]) (count ~'m))
+     (~'isEmpty [~'_] (notify-deref-watcher! [~'src ~'path :key-set]) (empty? ~'m))
      (~'get [~'this ~'k] (.valAt ~'this ~'k))
      (~'entrySet [~'this] (set (seq ~'this)))
      (~'keySet [~'_] (notify-deref-watcher! [~'src ~'path :key-set]) (set (keys ~'m)))
