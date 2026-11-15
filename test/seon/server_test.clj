@@ -109,7 +109,7 @@
 ;; See docs/server.md#ops
 ;; Estimate: the shard's shared root (~0 here), five root evals and two stops through the server (~0.25M each), two sockets
 ;; (~10k ticks each): ~1.8M; 2,000,000 ticks, worked from the work.
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} a-caller-stops-its-own-op
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000} :seon.test/execs ["git"]} a-caller-stops-its-own-op
   ;; Stage 1's safety item: a root eval has no work bound, so what ends one that waits for good is its caller's stop:
   ;; seon_interrupt (EDN :interrupt, every op of its client) and MCP's notifications/cancelled (the one request id), each
   ;; answered on the connection's fiber. The blocked eval is answered, and the server goes on. The residue, named: a client
@@ -118,8 +118,8 @@
         ask #(ts/ask root %)
         tag (str "stop-" (System/nanoTime))
         line! (fn [s l] (let [o (.getOutputStream ^java.net.Socket s)] (.write o (.getBytes (str l "\n") "UTF-8")) (.flush o)))
-        ;; the world's wait, declared: a red that never answers ends here, typed by the socket, never at the test's bound
-        open! #(doto (java.net.Socket. "127.0.0.1" (int (:port root))) (.setSoTimeout 20000))
+        ;; a red that is never answered stalls on the read, and the runner ends it (seen red with the owner's stop! removed)
+        open! #(java.net.Socket. "127.0.0.1" (int (:port root)))
         read! #(.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream ^java.net.Socket %) "UTF-8")))
         started (fn [p] (str "(do (deliver root.repl/" p " true) @(promise))"))
         _ (ask {:op :eval :agent "root" :code "(do (def e1 (promise)) (def e2 (promise)))"})

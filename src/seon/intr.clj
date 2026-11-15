@@ -102,6 +102,31 @@
    (when (and wake? (jolt.host/main-carrier?)) (poller/wake-on-signals! [lib/SIGIO]))
    true))
 
+(defn- rethrow
+  "What a run that threw ex throws: its budget's typed error, a ThreadDeath when root or its asker stopped it (entry e),
+  else ex itself."
+  {:malli/schema [:=> [:cat :any :map [:maybe pos-int?] [:maybe pos-int?]] :any]}
+  [ex e ticks bytes]
+  (let [d (ex-data ex)]
+    (cond
+      (:jolt/bytes-spent d)
+      (throw (ex-info "the form spent its byte budget"
+                      (contract/error :seon.repl/bytes-spent #'seon.intr/run
+                                      (str "the form allocated " (:jolt/bytes-spent d) " bytes, its budget of " bytes
+                                           ", and was stopped: a value growing without end, or more data than one form should make")
+                                      {:bytes (:jolt/bytes-spent d) :budget bytes})))
+      (:jolt/ticks-spent d)
+      (throw (ex-info "the form spent its tick budget"
+                      (contract/error :seon.repl/ticks-spent #'seon.intr/run
+                                      (str "the form ran " (:jolt/ticks-spent d) " engine ticks (procedure calls and loop"
+                                           " back-edges), its budget of " ticks ", and was stopped: a loop that never ends,"
+                                           " or more work than one form should do")
+                                      {:ticks (:jolt/ticks-spent d) :budget ticks})))
+      ;; root's interrupt, whichever way it ended the form: the escape, or a
+      ;; blocked wait thrown out by the thread's interrupt flag
+      (or (:jolt/interrupted d) (= :interrupted @(:cause e))) (throw (ThreadDeath.))
+      :else (throw ex)))
+
 (defn run
   "(thunk) under its own token, stopped by root's SIGUSR1, once it has run ticks engine ticks, or
   once it has allocated bytes (nil: no budget of that kind). Throws a java.lang.ThreadDeath (an Error: every (catch Exception e) lets it pass) when
@@ -125,36 +150,15 @@
     (when (empty? mine) (Thread/interrupted))
     (swap! stack conj e)
     (try (if (or ticks bytes) (jolt.host/run-interruptible tok thunk ticks bytes) (jolt.host/run-interruptible tok thunk))
-         (catch Throwable ex
-           (let [d (ex-data ex)]
-             (cond
-               (:jolt/bytes-spent d)
-               (throw (ex-info "the form spent its byte budget"
-                               (contract/error :seon.repl/bytes-spent #'seon.intr/run
-                                               (str "the form allocated " (:jolt/bytes-spent d) " bytes, its budget of " bytes
-                                                    ", and was stopped: a value growing without end, or more data than one form should make")
-                                               {:bytes (:jolt/bytes-spent d) :budget bytes})))
-               (:jolt/ticks-spent d)
-               (throw (ex-info "the form spent its tick budget"
-                               (contract/error :seon.repl/ticks-spent #'seon.intr/run
-                                               (str "the form ran " (:jolt/ticks-spent d) " engine ticks (procedure calls and loop"
-                                                    " back-edges), its budget of " ticks ", and was stopped: a loop that never ends,"
-                                                    " or more work than one form should do")
-                                               {:ticks (:jolt/ticks-spent d) :budget ticks})))
-               ;; root's interrupt, whichever way it ended the form: the escape, or a
-               ;; blocked wait thrown out by the thread's interrupt flag
-               (or (:jolt/interrupted d) (= :interrupted @(:cause e))) (throw (ThreadDeath.))
-               :else (throw ex))))
+         (catch Throwable ex (rethrow ex e ticks bytes))
          (finally
            (swap! stack (fn [s] (doall (remove #(identical? % e) s))))
            ;; the flag on-usr1 set is this eval's: never the next request's
            (Thread/interrupted))))))
 
 (defn stop!
-  "Stop the run under token tok, as root's SIGUSR1 stops every run but for that one alone: its entry and every run nested
-  inside it on its thread are set (a nested run polls its own token), and its thread is interrupted, so a blocked wait
-  ends too. A token whose run has not started yet is set, and that run stops as it starts. Called from another thread:
-  the run stops at its next poll (each 100,000 ticks). true when the run was live."
+  "Stop the run under token tok as SIGUSR1 stops all: it and the runs nested on its thread are set and its thread
+  interrupted (a blocked wait ends too); a run not yet started stops as it starts. true when the run was live."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [tok]
   (let [es @stack

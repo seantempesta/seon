@@ -1827,10 +1827,7 @@
                           (wake-later (dissoc st :lim :read? :fresh :reading) m now))
             (= :run d) (let [[st ms] (batch (update st :queue dissoc qk) (assoc m ::qk qk))
                              ms (mapv #(cond-> % (:seon.fx/class %) (assoc :fkey (or (get-in % [:req :seon.prove/batch]) [:seq (:seon.fx/qk %)]))) ms)
-                             ;; a request its asker may stop (:seon.fx/stop-key): the token its run goes under, made here and kept
-                             ;; until its outcome, so a stop finds the run whichever worker took it (stop)
-                             ms (mapv #(cond-> % (get-in % [:req :seon.fx/stop-key]) (assoc-in [:req :seon.fx/token] (jolt.host/make-interrupt))) ms)
-                             st (reduce (fn [st r] (cond-> st (and (::qk r) (get-in r [:req :seon.fx/token])) (assoc-in [:stoppable (::qk r)] r))) st ms)
+                             [st ms] (stoppable st ms)
                              st (reduce (fn [st r] (if-let [k (:fkey r)]
                                                      (-> st (assoc-in [:flight k] {:class (:seon.fx/class r) :declared (:seon.fx/processes r) :tag (get-in r [:req :seon.prove/batch])
                                                                                    :test? (= :test (get-in r [:req :kind]))})
@@ -1853,11 +1850,17 @@
                       (recur (update st :queue dissoc qk)))))
         (dissoc st :lim :read? :fresh :reading)))))
 
+(defn- stoppable
+  "Requests ms as dispatched: each whose asker may stop it (:seon.fx/stop-key) gets the token its run goes under, made here and
+  kept in st's :stoppable until its outcome, so a stop finds it whichever worker took it (stop). Answers [st ms]."
+  {:malli/schema [:=> [:cat :map [:sequential :map]] [:tuple :map [:vector :map]]]}
+  [st ms]
+  (let [ms (mapv #(cond-> % (get-in % [:req :seon.fx/stop-key]) (assoc-in [:req :seon.fx/token] (jolt.host/make-interrupt))) ms)]
+    [(reduce (fn [st r] (cond-> st (and (::qk r) (get-in r [:req :seon.fx/token])) (assoc-in [:stoppable (::qk r)] r))) st ms) ms]))
+
 (defn- stop
-  "The owner at a stop {:req {:seon.fx/stop k}} (an asker's, on :ask, so it never waits behind the work it stops): every
-  request whose :seon.fx/stop-key holds each entry of k is stopped, a queued one answered :seon.fx/stopped and dropped, a
-  running one stopped under the token dispatch made (seon.intr/stop!), its worker answering it as the run ends. The stop
-  is answered {:value {:stopped n :dropped n}}. See docs/flow.md#effects-one-owner-and-its-workers-per-kind."
+  "The owner at a stop {:req {:seon.fx/stop k}} on :ask: each request whose :seon.fx/stop-key holds k is stopped (queued:
+  answered :seon.fx/stopped; running: seon.intr/stop! on its token). Answers {:value {:stopped n :dropped n}}. See docs/server.md#ops."
   {:malli/schema [:=> [:cat :map :seon.host/volatile :map] :map]}
   [st o m]
   (let [k (get-in m [:req :seon.fx/stop])

@@ -336,8 +336,7 @@
 
 (defn- agent-reply
   "An outside agent's request of agent ag as one reply (seon.turn/outside-reply!): {:responses [...]}, each eval's, and :messages, the messages
-  its turn took when the reply is the agent's turn (docs/users.md#messages). The shape every eval of an agent takes (the :eval op makes
-  a plain {intent, code} one reply of that eval). See docs/server.md#ops."
+  its turn took when the reply is the agent's turn (docs/users.md#messages). See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.system/sys :keyword :map] :map]}
   [sys ag req]
   (let [{:keys [task env]} (work-of sys ag)
@@ -553,11 +552,8 @@
   #{:done :eval :message})
 
 (defn answer
-  "One request's answer: its op's (op-answer), or held's refusal for an op on an agent another client holds. The op runs
-  under its own interrupt token with its declared work bound (seon.intr/run, :seon.config.fx/bounds :server-op), so an op
-  past it throws the typed :seon.repl/ticks-spent or bytes-spent, which respond answers its caller; its token is the one
-  the :server-op owner made (*token*), so its caller can stop it (seon_interrupt). Root's own :eval is run as root-eval
-  says, under the token with no bound. See docs/server.md#ops."
+  "One request's answer: its op's (op-answer), or held's refusal. The op runs under its owner's token (*token*) and its
+  work bound (:seon.config.fx/bounds :server-op), past which it throws typed; root's own :eval has no bound. See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.system/sys :map] :map]}
   [sys req]
   (let [ag (some-> (:agent req) (#(if (= "root" %) :root (keyword %))))
@@ -670,10 +666,8 @@
   [{{:keys [run] :as req} :req}] {:value (run (:seon.fx/token req))})
 
 (defn- line-parts
-  "What a connection reads from one request line before it runs: whether it is answered on the fiber (inline-ops, MCP's
-  notifications/cancelled), and who may stop it ({:client :id}: bin/mcp's seon/client and the MCP request id, or an EDN
-  request's :client; nil when it names no client), and :msg, the line read once, which respond takes. A line that does not
-  read is neither: respond reads it again and answers its defect."
+  "One request line read once: :msg (respond takes it), :inline? (a stop, answered on the fiber) and :stop-key ({:client
+  :id}, who may stop it; nil: no client). A line that does not read is none of them. See docs/server.md#ops."
   {:malli/schema [:=> [:cat :string] [:map [:inline? :boolean] [:stop-key [:maybe :seon.fx/stop-key]] [:msg :any]]]}
   [line]
   (let [msg (try (if (str/starts-with? (str/triml line) "{\"") (json/read-str line) (edn/read-string line)) (catch Exception _ nil))]
