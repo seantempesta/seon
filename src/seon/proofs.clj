@@ -326,7 +326,9 @@
   [answer]
   (let [reports {:reports (vec (:reports answer))}
         ;; a child that died, and a test ended at its wall bound, which read the machine's load, not its own work: no verdict
-        died (set (keep #(when (or (:exit %) (= :seon.test/wall-spent (:seon.error/type %))) (test-symbol (:var %))) (:reports answer)))
+        died (into (set (keep #(when (or (:exit %) (= :seon.test/wall-spent (:seon.error/type %))) (test-symbol (:var %))) (:reports answer)))
+                   ;; a test its batch's error left with no verdict (seon.prove/run-answer's :no-verdict)
+                   (keys (:no-verdict answer)))
         reused (set (keep #(when (or (:reused %) (:not-run %)) (test-symbol (:var %))) (:reports answer)))
         cost-of (costs reports)]
     {:ran (into {} (for [[t s] (results reports) :let [dg (get-in answer [:digests t])] :when (and dg (not (died t)) (not (reused t)))]

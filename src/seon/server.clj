@@ -603,7 +603,7 @@
     ;; process tests left to the judge with why (seon.agent/run-tests-forked's :deferred :why)
     (if (contract/error? r)
       r
-      (cond-> (select-keys r [:key :ran :pass :fail :error :red :reused :ms])
+      (cond-> (select-keys r [:key :ran :pass :fail :error :red :reused :ms :no-verdict])
         (seq (:red r)) (assoc :failures (into (sorted-map) (for [[t fs] (proofs/failures r)] [t (first fs)])))
         (seq (:deferred r)) (assoc :deferred (:deferred r) :why (:why r))))))
 
