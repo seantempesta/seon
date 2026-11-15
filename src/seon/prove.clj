@@ -584,6 +584,24 @@
                          (settle st (into outs apart)))
         :else [(update st :stale (fnil inc 0)) []]))))
 
+(defn- main-run?
+  "Whether a run of main by the service's own notice (:branch :main, mode :main) is in flight in st. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [st] (boolean (some (fn [[_ r]] (and (= :main (:branch r)) (= :main (:mode r)))) (:runs st))))
+
+(defn- main-wanted
+  "st and outs with main's wanted run (:main-want, the newest notice whose :program-t passed the last asked) asked once no main run is
+  in flight: never superseding one, so every main run ends, and the program moves between coalesce into the next. Its digest is
+  computed only here, once a run (1.6-2.5M ticks [M, tests-4]). A run that ends in error is asked again at the next program move, never
+  in a loop: its failure is a :platform problem (finish). Answers [st outs]. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map [:vector :map]] [:tuple :map [:vector :map]]]}
+  [st outs]
+  (if-let [w (and (not (main-run? st)) (:main-want st))]
+    (let [[st o] (request (-> st (dissoc :main-want) (assoc :main-asked (:program-t w)))
+                          {:branch :main :t (:t w) :digest (program/run-digest (pdb/at-commit (:conn st) (:commit w))) :mode :main})]
+      [st (into (vec outs) o)])
+    [st outs]))
+
 (defn- state-view
   "What the service holds, as data: the runs in flight (each key's stage and waiters), the queue (items queued and running),
   and the api's asks it has open. A hang in the chain is read from it (seon.system's stall task records it)."
@@ -614,13 +632,15 @@
          [st outs] (case in
                      :req (request st m)
                      :answers (let [[st v] (step/answered st (:tag m))] (if v (answered st v (:r m)) [(update st :stale (fnil inc 0)) []]))
-                     ;; the program moved since the last run asked: the writer's :program-t, which the newest notice carries for every
-                     ;; commit the sliding buffer replaced (seon.writer/program-at), never this notice's own ops
+                     ;; the program moved past the last main run asked: the writer's :program-t, which the newest notice carries for every
+                     ;; commit the sliding buffer replaced (seon.writer/program-at), never this notice's own ops. It is wanted, and asked
+                     ;; below once no main run is in flight (main-wanted)
                      :main (let [st (assoc st :main-t (:t m))
                                  pt (:program-t m)]
-                             (if (and (cfg/value :seon.config.proofs/prove-main-on-commit) pt (> pt (:main-program-t st 0)))
-                               (request (assoc st :main-program-t pt) {:branch :main :t (:t m) :digest (program/run-digest (pdb/at-commit (:conn st) (:commit m))) :mode :main})
-                               [st []])))]
+                             [(cond-> st (and (cfg/value :seon.config.proofs/prove-main-on-commit) pt (> pt (:main-asked st 0)))
+                                (assoc :main-want (select-keys m [:t :commit :program-t])))
+                              []]))
+         [st outs] (main-wanted st outs)]
      (let [outs (cond-> (vec outs) (not= (state-view st) (state-view st0)) (conj {:op :prove-state :r (state-view st)}))
            ;; credit (docs/flow.md, request and answer): its asks are answered on :answers, which holds reconciler-buf; with that many
            ;; open it reads only :answers, so the api never parks putting an answer while this parks putting an ask
