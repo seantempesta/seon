@@ -435,7 +435,7 @@
 
 (defn landed!
   "A landing kept in place (bin/update after bin/land's bridge): when nothing calls for a restart (seon.system/restart-for of main's
-  source fact, tree, the binary's answer for it and the inputs bin/update wrote), main's source fact is written again as a boot
+  source fact, tree, seon.fx/runtime-for's answer for it and the inputs bin/update wrote), main's source fact is written again as a boot
   writes it (seon.system/booted-source: this boot, main's program digest now, the inputs of the files now), so agents key their
   results by the landed files and every agent keeps running. Answers {:kept boot :tree} or {:restart why}, which bin/update
   restarts on. A kept landing builds nothing: a boot catches main's program up in place, and a restart builds first. See
@@ -445,8 +445,8 @@
   (let [db @(:conn sys)
         held (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))
         inputs (root/held-inputs)
-        stale (when (= tree (:tree held)) (root/stale-binary db))
-        why (root/restart-for held tree stale inputs)]
+        ;; the one binary identity (deps' seon.fx/runtime-for, kept by tree): kept when it is tree's, else a restart naming what differs
+        why (root/restart-for held tree (fx/runtime-for tree) inputs)]
     (if why
       {:restart why}
       (let [src (root/booted-source held (:boot sys) (program/binary-program) (program/program-digest db) (fx/config-input config/config (config/checkout)) nil inputs)
