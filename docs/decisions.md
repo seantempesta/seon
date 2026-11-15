@@ -22,6 +22,10 @@ The owner's rule: once a process is past boot and running, nothing inside it can
 - **deps** owns the interfaces to the libraries and native code (Jolt, Chez, Datahike, foreign calls), so a failure there reaches Seon as data at the edge.
 Each area works the others through agreed interfaces, recorded in the task they concern.
 
+### Iterate on real agents; nothing lands on them unproved (evening)
+
+The owner wants the slots, gaps and hand-ordering gone, with agents working inside a system that adapts and is fast, and that end reached by iterating, never by pushing untried mechanisms onto agents. A change on the path agents use is done only when a real agent has used it: a round of DeepSeek agents or a `seon-driver` works a real task through it, and its turns-to-merged are compared before and after. A change that adds turns or confuses agents is reworked or reverted, not defended. Rounds and drivers run continuously once deps' pin restarts root, and what they lose re-ranks the work (`my.root/run-losses`).
+
 ### Sessions' tools are thin over the system, and honest where they are not (evening)
 
 The owner wants Claude sessions' tools integrated with the running system. Every `bin/` script and MCP tool is a thin wrapper over a `seon.server` op, carrying no logic, state or decision of its own. Where one still does its work outside the runtime, its header says so plainly: what it does outside, and the task that moves it inside. Sessions and Seon agents feel the same problems, so pain a session hits with a tool is fixed in the shared mechanism (the op, the proc, the namespace function), so both gain, never in the script alone. Root keeps the list of scripts and how each deviates, and each gap is a task in its owning area.
