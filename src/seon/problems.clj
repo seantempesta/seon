@@ -595,6 +595,43 @@
                          (str v " holds a hand-made list " ms ": judge it a dial (spec'd config with its reason), a patch over a missing mechanism (fix the root) or held data restated (derive it)")
                          {:kind :hand-written-list :var v :members m} {:var v :members m})))))
 
+(def ^:private stateful-refs
+  "What a form refers to that holds state or waits outside a Flow proc, by kind: the reads health's :stateful-outside-flow
+  takes (docs/health.md#state-or-a-wait-outside-flow)."
+  {:mutates '#{clojure.core/swap! clojure.core/reset!}
+   :blocks '#{clojure.core.async/<!! clojure.core.async/>!! clojure.core.async/alts!!}
+   :threads '#{clojure.core.async/io-thread clojure.core.async/thread clojure.core/future}})
+
+(defn stateful-outside-flow
+  "A :stateful-outside-flow row for each var of src/ among names (nil: every var on db) that holds process-global state outside a Flow
+  proc (a def or defonce of an atom, volatile, promise or java.util.concurrent value), mutates such a var, waits on a channel
+  outside go (<!!, >!!, alts!!) or starts a thread (io-thread, thread, future, Thread.), each with what it does, for its owner
+  to move into a proc. A var whose metadata names :seon.flow/edge (the reason it must stay outside: an edge reader for a
+  blocking read, the interrupt stack, an OS signal's hook) is left out: the reason travels with its code. One seek a var, its
+  refs read from the program's own index, so it costs O(vars read). See docs/health.md#state-or-a-wait-outside-flow."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:maybe [:set :symbol]]] [:vector :seon.problems/row]]}
+  [db ans names]
+  (let [vars (if names (keep #(some->> (pdb/eid db :var/name %) (d/entity db)) names) (map #(d/entity db (:e %)) (d/datoms db :aevt :var/form)))
+        src? (fn [ve] (some-> ve :var/ns :ns/file (str/starts-with? "src/")))
+        global? (fn [src] (boolean (re-find #"^\(def(once)?\s+(\^\S+\s+)?\S+\s+(\"(?:[^\"\\]|\\.)*\"\s+)?\((atom|volatile!|promise|java\.util\.concurrent)" src)))
+        ;; a ref is process-global state when its own var's form is a def of one: one seek a ref, never a scan of every form
+        global-var? (fn [r] (some->> (pdb/eid db :var/name r) (d/entity db) :var/form :form/src global?))]
+    (vec (for [ve (sort-by (comp str :var/name) vars)
+               :when (and (src? ve) (not (contains? (:var/meta ve) :seon.flow/edge)))
+               :let [v (:var/name ve) form (:var/form ve) refs (set (:form/refs form)) src (or (:form/src form) "")
+                     kinds (cond-> []
+                             (global? src) (conj :holds)
+                             (and (some (:mutates stateful-refs) refs) (some #(and (qualified-symbol? %) (global-var? %)) refs)) (conj :mutates)
+                             (some (:blocks stateful-refs) refs) (conj :blocks)
+                             (or (some (:threads stateful-refs) refs) (re-find #"\(Thread\." src)) (conj :threads))]
+               :when (seq kinds)
+               :let [s (str "stateful-outside-flow " v)]]
+           (derived-row ans s (some-> (namespace v) symbol)
+                        (str v " " (str/join ", " (map {:holds "holds process-global state" :mutates "mutates process-global state"
+                                                         :blocks "waits on a channel outside go" :threads "starts a thread"} kinds))
+                             " outside a Flow proc: move it into a proc's state and ports, or name why it must stay (:seon.flow/edge)")
+                        {:kind :stateful-outside-flow :var v :what kinds} {:var v :what kinds})))))
+
 (defn unfocused-docstrings
   "An :unfocused-docstring row for each named Seon var whose docstring is over :seon.config.shrink/docstring-words words or
   holds a measurement, a date or a wiki page cited twice. One seek a var. See docs/health.md#an-unfocused-docstring."
@@ -866,6 +903,7 @@
                          (map #(assoc % :class :uncited-var) (uncited-vars db ans moved-vars))
                          (map #(assoc % :class :long-form) (long-forms db ans moved-vars))
                          (map #(assoc % :class :hand-written-list) (hand-written-lists db ans moved-vars))
+                         (map #(assoc % :class :stateful-outside-flow) (stateful-outside-flow db ans moved-vars))
                          (map #(assoc % :class :unfocused-docstring) (unfocused-docstrings db ans moved-vars))
                          (map #(assoc % :class :unestimated-test) (unestimated-tests db ans moved-vars))
                          (map #(assoc % :class :undeclared-test) (undeclared-tests db ans moved-vars))

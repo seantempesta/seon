@@ -1531,11 +1531,12 @@
     (is (str/includes? r1 ":value 11") "and the call after it runs")))
 
 (defn- work-with
-  "seon.turn/work! of the world's task for 3 turns, in this process as an agent's test fork on the world (my.test/eval-in's state),
+  "seon.turn/work! (or run, given, of the same argument) of the world's task for 3 turns, in this process as an agent's test fork on the world (my.test/eval-in's state),
   its turn's model call (seon.turn/model-request!, the request made ready; seon.turn/act!, its answer acted on) answered by (act st), its status by (status): what the loop decides from what
   a turn answers. What reads a store or root stands in (main, the proofs, the end's write), the decisions of the loop are its
   own. Answers its end, with the model calls act made (:model-calls)."
-  [act status]
+  ([act status] (work-with act status seon.turn/work!))
+  ([act status run]
   (let [old @agent/state
         calls (volatile! 0)
         ;; a model call answered: the agent's turn moves, as open-turn! writes it, and the request is the one it sent
@@ -1553,23 +1554,26 @@
                        seon.turn/act! (fn [st _ _] (act st called!))
                        seon.turn/end! (fn [{:keys [turn]} outcome reason _]
                                         (cond-> {:outcome outcome :results {} :uncontracted #{} :turns turn :model-calls @calls} reason (assoc :reason reason)))]
-           (seon.turn/work! {:task "app.calc/total-is-exact" :max-turns 3}))
-         (finally (reset! agent/state old)))))
+           (run {:task "app.calc/total-is-exact" :max-turns 3}))
+         (finally (reset! agent/state old))))))
 
-;; Estimate: the world, built once a process (~3.2M measured here; my.test/world's docstring says ~0.6M), and three work! loops of
-;; at most 3 turns on it (each: its start's reads and writes on the value ~0.2M, ~3 turns of a few datoms and an error map,
-;; agent/error-map ~0.3M each; first put at 50k a turn, which missed the error map and the world) = ~6M: 6,000,000
-(deftest ^{:seon.test/estimate {:ticks 6000000}} a-run-told-to-stop-ends-between-turns
-  ;; task seon.system/a-stop-or-crash-resumes-from-one-resume-point-and-says-what-it-lost (one stop, one drain, agreed by
-  ;; runtime, tests and web, 2026-11-14): a stop lets each item in flight end by its own bound. An agent working a task holds
-  ;; one request for the whole run, so the item is the turn: told to stop (root's :stop, read at once by its transport), the run
-  ;; ends :waiting after the turn in flight, never cut inside it. Estimate: as its sibling below, the world and one work! loop
+;; Estimate: the world, built once a process (~3.2M), one start! and one turn-begin on it (~0.2M), and the stop's end step: ~3.5M; 6,000,000
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-run-told-to-stop-ends-at-once
+  ;; docs/flow.md#flow-inside-an-agent: root's :stop is a message to the :repl proc holding the run, which ends it at once :waiting,
+  ;; with what its turns committed, never waiting out a model call in flight (minutes; context-4's ruling, 2026-11-15): the call's
+  ;; answer, when it comes, finds no run and is dropped. Red before: a stop was the :draining flag, read only between turns, so the run
+  ;; waited for the call in flight and its turn's end
   (let [red {:reasons [{:reason :proof-red}]}
-        end (work-with (fn [st called!] (swap! agent/state assoc :draining true) (called!) st) (constantly red))]
+        out (volatile! nil)
+        end (work-with (fn [st called!] (called!) st) (constantly red)
+                       (fn [arg] (let [[st o] (seon.turn/step-run (seon.turn/start! arg) nil)]
+                                   (vreset! out (set (keys o)))
+                                   (@#'seon.turn/end-of (seon.turn/step-run st {:seon.turn/stop true})))))]
+    (is (= #{:model} @out) "the run's model call was out when the stop came")
     (is (= :waiting (:outcome end)) (pr-str end))
-    (is (= 1 (:model-calls end)) (str "the turn in flight finished (its one model call), and no other began: " (pr-str end)))))
+    (is (= 0 (:model-calls end)) (str "the stop did not wait for the call in flight: " (pr-str end)))))
 
-;; Estimate: as a-run-told-to-stop-ends-between-turns, the world and one work! loop of 2 turns = ~6M: 6,000,000
+;; Estimate: as a-run-told-to-stop-ends-at-once, the world and one work! loop of 2 turns = ~6M: 6,000,000
 (deftest ^{:seon.test/estimate {:ticks 6000000}} a-run-that-merged-main-ends-between-turns-to-run-on-mains-program
   ;; docs/merging.md#a-branch-merges-main-in: a merge of main loads none of main's forms into the running agent (seon.agent/merge-main!
   ;; leaves it :behind), and no turn runs old code: the run ends :refork after the turn in flight, before its next model call, and
@@ -3849,6 +3853,33 @@
     (is (= "d-green" (base 'a/unchanged)) "a test whose reach is base's takes its recorded-reads digest on base's side too")
     (is (= "d-base" (base 'a/moved)) "a test whose reach moved keeps base's own digest")
     (is (= '[a/moved] sel) "so the branch's change is the test its reach moved, never one some run recorded reads for")))
+
+;; docs/merging.md#the-test-service: runs of one branch overlap (a turn's prove!, root's :judge, a session's run; tests-4 read it
+;; 2026-11-14: root forwards each :tests with no per-agent exclusion, system.clj's pend), at two digests or at one (a turn and a
+;; :judge of an unchanged branch, whose plans differ by mode), so a plan is held under its run's key.
+;; Red before: one :held-plan slot, so the second run's plan replaced the first's while its prove! awaited, and the first recorded its
+;; answer with the second's selection. Estimate: a few assocs and two item checks over three plans, ~15k ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000}} an-overlapping-runs-plan-is-its-own
+  (let [plan (fn [t d sel] {:digests {t d} :plan {} :selected sel})
+        st (-> {:proving {1 "dA" 2 "dA"}}
+               (#'agent/hold-plan "b@dA!turn" "dA" (plan 'a.x-test/one "1a" [:turn]))
+               (#'agent/hold-plan "b@dA" "dA" (plan 'a.x-test/one "1a" [:judge]))
+               (#'agent/hold-plan "b@dB" "dB" (plan 'a.x-test/one "1b" [:b])))
+        sel #(#'agent/grant-selection (#'agent/held-plans %1) %2 (fn [] :planned-again))]
+    (is (= [:turn] (get-in st [:held-plans "b@dA!turn" :selected])) "a turn's plan stays beside a :judge's at the same digest")
+    (is (= [:judge] (get-in st [:held-plans "b@dA" :selected])) "and the :judge's beside it")
+    (is (= "1b" (get-in st [:held-plans "b@dB" :digests 'a.x-test/one])) "beside the newest, at another digest")
+    (is (= ['a.x-test/one] (:run (sel st {'a.x-test/one "1a"}))) "an item of the first digest runs as its plan planned it")
+    (is (= ['a.x-test/one] (:run (sel st {'a.x-test/one "1b"}))) "and one of the second as its")
+    (is (= [:b] (:selected (first (#'agent/held-plans st)))) "the newest plan is first")
+    (let [one (#'agent/release-plan st 1)]
+      (is (= 3 (count (:held-plans one))) "an answered ask's digest's plans stay while another ask awaits that digest")
+      (let [after (#'agent/release-plan one 2)]
+        (is (= #{"b@dB"} (set (keys (:held-plans after)))) "and go once none does")
+        (is (= #{"b@dB"} (set (keys (:held-plans (#'agent/release-plan (assoc-in after [:proving 3] "dB") 3)))))
+            "but the newest stays past its ask's answer: a second ask at its digest the service answers from its done run records with it")
+        (is (= #{"b@dC"} (set (keys (:held-plans (#'agent/hold-plan after "b@dC" "dC" (plan 'a.x-test/one "1c" []))))))
+            "a plan no ask awaits is dropped by the next: what is held is the runs in flight plus the newest")))))
 
 ;; docs/merging.md#the-test-service: a grant the agent planned again (its held plan gave an item another digest) answers exactly
 ;; the granted items, never what the run's own selection filter keeps. Found 2026-11-13: the loop task held by

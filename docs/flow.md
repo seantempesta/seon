@@ -63,6 +63,16 @@ How Seon meets each need with channels.
 - **Failure:** a throw inside `go` kills that fiber and closes its result channel; `(go-monitor ch)` yields the throwable (a clean finish just closes it), and the throw also goes to the uncaught-exception handler. `jolt.fibers/monitor!` and `join` take a fiber (`jolt.fibers/spawn`), never a `go` channel. Answer errors as values on the reply channel.
 - **Quiet:** core.async alone cannot see it; count messages ([flow](flow.md#idioms-for-seon)).
 
+## The five rules
+
+Every design that waits, steps or bounds follows these; the Flow specialist reviews each such design before it is built.
+
+1. **A proc waits only by parking on its in-port for the thing itself,** and steps when it arrives. A step never waits inside: a call out is an output, its answer a message on the proc's own in-port (a model call, an ask of root, a test run). A step that waits inside can be neither pinged nor stopped until it returns. The one exception is an eval: the agent's own code, which may ask root and use the answer as a REPL caller expects (`(my.agent/prove)` returns its verdict). Its ask is an edge ask (```seon.step/ask-edge```, and an agent's own asks of root through ```seon.agent/await-reply```), ended by root's answer, its effect's deadline, root's interrupt, or rule 3; it is the one sanctioned wait in a step, not a violation of this rule.
+2. **Control never waits:** a lifecycle command is a `put!` (never blocks, arrives in order), a ping an `offer!` that names who did not answer, and a closed control channel is the proc's exit. A proc stuck in a step then wedges nothing else.
+3. **"Nothing hangs" comes from sources, never from a watcher.** Every way a thing can fail to answer is a message from where it happens: its answer; its death (the socket's end of file); its deadlock, which Jolt tells as an event (``jolt.host/on-quiescent!`` on a main carrier), read against what the process itself is owed (a wait on a peer it asked is the peer's turn, not a deadlock); a loop that never parks, by its tick budget (counted work). No proc polls another's quiet.
+4. **Time only at the outside edge:** an effect on the outside world (the model, a shell, the network) has its declared deadline, one entry on Jolt's deadline heap (```seon.step/put-after!```), cancelled when it is answered (```seon.step/cancel!```). This is the only clock after boot.
+5. **The residue is named, not timed:** a blocking native call that may never return is closed at its source, as an effect with its bound or with a bound of its own (the fork's `:seon.config.agent/fork-wait-ms`).
+
 ## Where Jolt's Flow differs from upstream
 
 `flow.clj` and `flow/impl/graph.clj` are upstream's `dev-flow-alpha` plus `update!` (`graph.clj` adds the `Update` protocol); `flow/spi.clj` is upstream's; `flow/impl.clj` is Jolt's:
@@ -166,7 +176,7 @@ An agent is a Flow graph of three `:io` procs on its main carrier, so it stays o
 - **One active thread:** such a graph keeps one active thread through `start`, `resume`, `inject`, `ping` and `stop`, so a fork succeeds at each (`seon.lib/fork!`) ([machine](machine.md#what-a-spawn-costs)).
 - **A wait inside a step is an edge's ask:** the `:repl` proc's eval may wait for root's answer to its own request; that wait is a promise the `:transport` proc delivers by key (```seon.agent/await-reply```), and the fiber parks meanwhile. Root's interrupt stops a parked eval; a busy loop that never parks is stopped only by its tick budget or root's signal.
 - **A fiber's allocation is its own:** a byte or tick budget (`jolt.host/run-interruptible`) counts only its eval's fiber, never the `:tests` proc's work beside it.
-- **Hazards 1 and 2 hold inside it:** `:repl` is inside one step for a whole work (`seon.turn/work!`), so nothing in the agent pings or stops its graph; root's stop is a `:stop` message the REPL takes in order.
+- **A run is the `:repl` proc's state:** `seon.turn/work!` in an eval hands its run to the proc (```seon.repl/*run*```), which steps it with ```seon.turn/step-run``` on each answer: a model call or a verdict runs on a fiber of its own (the edge ask) and comes back on the proc's `:run` port, so between its waits the run answers ping and stop. Requests that arrive meanwhile wait in the proc's queue and run in order after it; root's `:stop` ends the run at once, `:waiting`, its call in flight dropped (its owner does not cancel it yet: task `seon.fx/a-model-call-is-cancelled-at-its-owner`). Root's reply to the `work!` eval is sent at the run's end (```seon.turn-test/a-run-answers-ping-and-stop-between-turns```).
 - **The bound:** the `:repl` and `:tests` in-ports each hold `:seon.config.agent/inbox-size`; at it the transport stops reading until one is taken.
 
 ## Effects: one owner and its workers per kind
