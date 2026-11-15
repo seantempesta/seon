@@ -518,8 +518,8 @@
         (let [{:keys [keep add]} (:seon.model-call/assembly e)
               p (:seon.model-call/prev e)]
           (if p
-            (recur p (min need keep) (conj segs (take (max 0 (- need keep)) add)))
-            (into [] cat (conj segs (take need add)))))))))
+            (recur p (min need keep) (conj segs (subvec add 0 (min (count add) (max 0 (- need keep))))))
+            (into [] cat (conj segs (subvec add 0 (min (count add) need)))))))))))
 
 (defn sent-tx
   "The facts that keep what model call id sent at turn n: its new messages as parts, and its assembly as what changed since call
