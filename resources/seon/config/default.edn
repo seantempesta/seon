@@ -132,9 +132,9 @@
  ;; reached 747 MB and two agents died on Datahike's fatal-commit-error while recording. The map
  ;; is address space, not memory or disk: without MDB_WRITEMAP (the flags are MDB_NOSYNC|MDB_SAFENOSYNC) the
  ;; file grows only as it is used, so LMDB's guidance is a map as large as the store may ever
- ;; grow. 128 GiB since root went down at 64 GiB (MDB_MAP_FULL in seon.db/retain!): the sweep's per-batch commits
- ;; grow the file from its end while it frees, as the free list's own record needs a contiguous run; the fix is
- ;; retain!'s (task seon.db/a-store-near-its-map-is-compacted-at-boot).
+ ;; grow. 128 GiB since root went down at 64 GiB (MDB_MAP_FULL in seon.db/retain!): under MDB_SAFENOSYNC no page freed
+ ;; after the last sync is reused, and boot's sweep ran before the writer with no sync, so it grew the file by every page
+ ;; it touched; retain! now syncs after each batch (docs/storage.md#durability-is-continuous-group-commit).
  :seon.config.store/lmdb-map-bytes 137438953472
  ;; Unit: children per index node. A commit rewrites the nodes it touched, so smaller nodes
  ;; mean fewer bytes printed and written per commit. Provenance: dev/dur.clj measured 512 -> 64
