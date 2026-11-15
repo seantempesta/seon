@@ -682,7 +682,7 @@
         head-unit {:id "p-agent-head" :container "#p-head" :rev (hash head)
                    :html (h/html [:section {:id "p-agent-head" :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (ui/agent-head {} head)])}]
     ;; the walks this page made or advanced, for the pass to write to st (`pass-view`)
-    (assoc (ui/page-chrome {:units (vec (concat (system-units st) sides [head-unit] units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
+    (assoc (ui/page-chrome {:units (vec (concat (when-not person? (system-units st)) sides [head-unit] units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
                       ;; never a wait: drawn from its branch until its process answers, the page says so
                       :caption (when (and chat? (not own?))
                                  (when (:error held) (str "Its process didn't answer, so this may be behind: " (:seon.error/message (:error held)))))
@@ -845,7 +845,7 @@
      ;; root's page is its session's, made at boot: none yet, nothing to draw
      (= :root view) (when (and eid (:seon.agent/key (d/entity db eid))) (agent-view st view db eid))
      ;; root's debug page holds the system's own view beside its session's requests
-     (and eid (= :debug (first-of view))) (cond-> (debug-value st view) (= :root (second view)) (some-> (update :seon.render/units into (system-view-units st))))
+     (and eid (= :debug (first-of view))) (some-> (debug-value st view) (update :seon.render/units into (concat (map ui/page-unit (system-units st)) (when (= :root (second view)) (system-view-units st)))))
      (and eid (= :chat (first-of view)) (agent-of db (second view))) (agent-view st view db eid)
      (and eid (agent-of db view)) (agent-view st view db eid)
      (= :home (second-of view)) (ui/page-chrome {:units (conj (system-units st) {:id "p-sign-in" :container "#p-head" :rev 0 :html (h/html (ui/sign-in {:seon.db/db db}))}) :view (ui/view-param view) :tab :chat} :root)
@@ -928,7 +928,10 @@
       ;; one diff a move of main: the index, every kept walk and the views it touched read the same datoms
       (let [moved (when held (ctx/moved held db nil))]
         (cond-> (user-walks (root-walk (main-info st db moved) db held moved) db (when held {:from held :moved moved}))
-          (seq moved) (update :dirty (fnil into #{}) (touched st moved)))))))
+          (seq moved) (update :dirty (fnil into #{}) (touched st moved))
+          ;; a landing kept in place loaded the new program, then wrote root's source fact (my.root/landed!): every held view drew with
+          ;; the old renders and may read nothing that moved, so each walks again (a component whose render fn changed runs, render!)
+          (some #(= :seon.system/source (:a %)) moved) (update :dirty (fnil into #{}) (keys (:views st))))))))
 
 (defn- error-page
   "A view's page that is its error e, by the error's render, in the root every page has (#app): a page sent

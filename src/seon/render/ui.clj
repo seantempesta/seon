@@ -353,6 +353,12 @@
   (let [{:keys [address label]} (focus-of focus)
         link (fn [on? href label] [:a {:href href :class (str "rounded px-2 py-0.5 " (if on? "bg-base-800 text-text-50" "text-text-400 hover:text-text-100"))
                                       :aria-current (when on? "page")} label])]
+    (if (and (= :root focus) (= :chat tab))
+      ;; the person's bar (docs/decisions.md, The page is a friendly chat): Seon's name, home, and one quiet way to the debug view, where
+      ;; the checkout line and the tabs are
+      [:nav {:class "seon-bar person-bar"}
+       [:a {:href "/" :class "text-lg font-semibold text-text-50 no-underline"} "Seon"]
+       [:a {:href "/root/debug" :class "ml-auto text-xs text-text-500 no-underline hover:text-text-300" :title "what Seon reads and the system's status"} "debug"]]
     [:nav {:class "seon-bar"}
      [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "hidden text-text-500 sm:inline"} "on jolt"]
      ;; which system this is (`system-source`, the system walk's unit the frame places on every page)
@@ -363,7 +369,7 @@
           (when (or (= :root focus) (not= :chat tab)) [:span {:class "mr-1 font-semibold text-text-100"} label])
           (if (= :root focus)
             (list (link (= :chat tab) base "chat") (link (= :context tab) "/root/debug" "debug"))
-            (list (link (= :chat tab) base "chat") (link (= :debug tab) (str base "/ctx") "@ctx") (link (= :context tab) (str base "/debug") "debug")))]))]))
+            (list (link (= :chat tab) base "chat") (link (= :debug tab) (str base "/ctx") "@ctx") (link (= :context tab) (str base "/debug") "debug")))]))])))
 
 (defn shell
   "The document around a view's body: head, the stylesheet, Datastar, and the feed of that view's

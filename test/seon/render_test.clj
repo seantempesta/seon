@@ -769,7 +769,7 @@
 
 (deftest every-page-says-which-system-it-is
   ;; docs/render.md#the-page: the system's source (root's :seon.system/source, as an index of the checkout writes it) is drawn by its
-  ;; schema's render in the top bar of every page, an agent's and root's alike, from the system walk once
+  ;; schema's render in the top bar of every expert page, an agent's and root's debug page alike, from the system walk once
   (let [[main branch eid] (paged-dbs)
         src {:root "/Users/x/src/seon-next/.worktrees/frame" :commit "4a74777e2a0123456789abcdef0123456789abcd" :branch "jolt/frame"
              :tree "f3832a894ee0322bc9f1e079aeadb949b9c5c84b" :dirs ["src"] :files 3 :forms 9 :ms 1.5}
@@ -777,9 +777,12 @@
         st (root-state (proc-state main branch) main)
         [st1 _] (pass-view st [:chat :a3])
         [st2 _] (pass-view st1 :root)
+        [st3 _] (pass-view st2 [:debug :root])
         ;; what follows the top bar's region, to the end of the bar
         line (fn [html] (when-let [i (str/index-of html "id=\"p-system\"")] (subs html i (or (str/index-of html "</nav>" i) (count html)))))]
-    (doseq [[v html] [[[:chat :a3] (p/view-html st2 [:chat :a3])] [:root (p/view-html st2 :root)]]]
+    ;; 2026-11-15 (docs/decisions.md, The page is a friendly chat): root's chat is the person's, its bar plain; the line is on its debug page
+    (is (empty? (re-seq #"class=\"[^\"]*\bsource-line\b" (p/view-html st3 :root))) "root's chat, the person's: no checkout line")
+    (doseq [[v html] [[[:chat :a3] (p/view-html st3 [:chat :a3])] [[:debug :root] (p/view-html st3 [:debug :root])]]]
       (is (str/includes? (str (line html)) "frame · jolt/frame · <span class=\"commit\">4a74777e2a0123456789abcdef0123456789abcd</span>") (str v ": the checkout, its branch and its commit, in the top bar"))
       (is (= 1 (count (re-seq #"class=\"[^\"]*\bsource-line\b" html))) (str v ": once")))))
 
@@ -1651,6 +1654,35 @@
     (is (and (str/includes? cut "line-0") (not (str/includes? cut "line-2999"))) "output over the value budget is cut")
     (is (< (count cut) 6000) (str "cut by the value's budget: " (count cut) " chars"))
     (is (str/includes? cut "(subs (:seon.print/code (:out result/e23))") "and the cut says how to read the rest")))
+
+;; Estimate: one advance-main on a paged fixture, its root walk (~1.5M) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-landing-kept-in-place-redraws-every-held-view
+  ;; docs/render.md#a-page-is-a-kept-walk: a landing kept in place loads the new program into root, then writes root's source fact
+  ;; (my.root/landed!). A held view drew with the old renders, and nothing it reads moved, so it kept the old page until some read moved
+  ;; [M 2026-11-15: / kept the old top bar after a landing]. The source fact's move walks every held view again
+  (let [[main branch _] (paged-dbs)
+        st (root-state (proc-state main branch) main)
+        st (assoc st :views {:root {:units {}} [:chat :a3] {:units {}}} :dirty #{})
+        main2 (d/db-with (:main-db st) [{:seon.system/id :root :seon.system/source {:root "/x" :tree "t2" :commit "c2" :dirs ["src"]}}])
+        st2 (#'p/advance-main st main2)]
+    (is (= #{:root [:chat :a3]} (clojure.set/intersection #{:root [:chat :a3]} (:dirty st2))) "both held views walk again")))
+
+;; See docs/render.md#the-page
+(deftest ^{:seon.test/estimate {:ticks 3000000}} roots-chat-has-the-persons-plain-bar
+  ;; docs/decisions.md, The page is a friendly chat (2026-11-15): the person's bar is Seon's name and a quiet way to the debug view; the
+  ;; checkout, branch and commit line and the tabs are the debug view's
+  (let [[main branch eid] (paged-dbs)
+        main (signed-in main [eid])
+        st (root-state (proc-state main branch) main)
+        bar (fn [page] (h/html (nth (:seon.render/hiccup page) 2)))
+        root (#'p/page-value st :root)
+        dbg (#'p/page-value st [:debug :root])]
+    (is (str/includes? (bar root) ">Seon<") "the person's bar names Seon")
+    (is (str/includes? (bar root) "href=\"/root/debug\"") "and a quiet way to the debug view")
+    (is (not (str/includes? (bar root) "on jolt")) "no build name")
+    (is (not (str/includes? (bar root) "p-system")) "no checkout line")
+    (is (not-any? #(= "#p-system" (:container %)) (:seon.render/units root)) "and no unit for it")
+    (is (str/includes? (h/html (:seon.render/hiccup dbg)) "p-system") "the debug view has the checkout line's place")))
 
 ;; See docs/render.md#the-page
 (deftest ^{:seon.test/estimate {:ticks 2000000}} roots-chat-has-the-persons-message-box
