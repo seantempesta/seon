@@ -461,7 +461,8 @@
   "The render proc's state as it holds a read of main and of a3's branch: root's view (a3 busy;
   root's boot, b1, is its entity's on main), main's open problems."
   [main branch]
-  {:rid 1 :pending {} :watch #{:root [:chat :a3]} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :user-walks {} :branches {:a3 {:db branch :branch :task-demo-f} [:chat :a3] {:db branch :branch :task-demo-f}}
+  ;; its events chan as the proc has one (its tap of the events mult): health's next steps are this proc's own messages on it
+  {:events-ch (a/chan 1024) :rid 1 :pending {} :watch #{:root [:chat :a3]} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :user-walks {} :branches {:a3 {:db branch :branch :task-demo-f} [:chat :a3] {:db branch :branch :task-demo-f}}
    ;; the one read of a3's branch every view of it shows (seon.render.proc/ask-branches)
    :branch-reads {:task-demo-f {:db branch}}
    :merges 0 :main-db main :view {:agents {:a3 {:status :busy :branch :task-demo-f}}}})
@@ -1714,7 +1715,13 @@
     (is (not-any? #(= "#p-system" (:container %)) (:seon.render/units root)) "and no unit for it")
     (is (str/includes? (h/html (:seon.render/hiccup dbg)) "p-system") "the debug view has the checkout line's place")
     (is (not (str/includes? (h/html (:seon.render/hiccup home)) "id=\"p-agents\"")) "no agents column on the person's page (it drew an empty one)")
-    (is (str/includes? (h/html (:seon.render/hiccup (#'p/page-value st [:chat :a3]))) "id=\"p-agents\"") "an agent's page keeps it")))
+    (is (str/includes? (h/html (:seon.render/hiccup (#'p/page-value st [:chat :a3]))) "id=\"p-agents\"") "an agent's page keeps it")
+    (is (re-find #"href=\"/user/[^\"]+\"[^>]*>agents<" (bar home)) "the person's bar opens the agents working for them")
+    ;; an agent's full page: its context (task list, tiles) inside the chat's column, after the conversation, so it scrolls with it
+    (let [a3 (p/view-html (first (pass-view st [:chat :a3])) [:chat :a3])
+          chat-at (str/index-of a3 "id=\"p-chat\"") ctx-at (str/index-of a3 "id=\"p-context\"") rows-at (str/index-of a3 "id=\"c-rows\"")]
+      (is (and chat-at ctx-at rows-at (< chat-at rows-at ctx-at)) "the context follows the conversation in the chat's column")
+      (is (< ctx-at (or (str/index-of a3 "</main>" ctx-at) 0)) "inside the chat's column"))))
 
 ;; See docs/render.md#the-page
 (deftest ^{:seon.test/estimate {:ticks 2000000}} roots-chat-has-the-persons-message-box

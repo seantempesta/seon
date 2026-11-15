@@ -348,18 +348,20 @@
   or its id), its tabs, tab the one shown: root's conversation and what its model reads; an
   agent's chat (the page a person reads), @ctx (every render of its ctx) and debug (the timeline of
   what its model is sent). See docs/render.md#the-page."
-  {:malli/schema [:function [:=> [:cat :any [:enum :chat :debug :context]] :any] [:=> [:cat :any [:enum :chat :debug :context] [:maybe :boolean]] :any]]}
-  ([focus tab] (top-bar focus tab false))
-  ([focus tab person?]
+  {:malli/schema [:function [:=> [:cat :any [:enum :chat :debug :context]] :any] [:=> [:cat :any [:enum :chat :debug :context] [:maybe :string]] :any]]}
+  ([focus tab] (top-bar focus tab nil))
+  ([focus tab person]
   (let [{:keys [address label]} (focus-of focus)
         link (fn [on? href label] [:a {:href href :class (str "rounded px-2 py-0.5 " (if on? "bg-base-800 text-text-50" "text-text-400 hover:text-text-100"))
                                       :aria-current (when on? "page")} label])]
-    (if person?
+    (if person
       ;; the person's bar (docs/decisions.md, The page is a friendly chat): Seon's name, home, and one quiet way to the debug view, where
       ;; the checkout line and the tabs are
       [:nav {:class "seon-bar person-bar"}
        [:a {:href "/" :class "text-lg font-semibold text-text-50 no-underline"} "Seon"]
-       [:a {:href "/root/debug" :class "ml-auto text-xs text-text-500 no-underline hover:text-text-300" :title "what Seon reads and the system's status"} "debug"]]
+       ;; the agents doing their work, each with its full page, one tap away (their page: /user/<name>, the agents they started)
+       [:a {:href (str "/user/" person) :class "ml-auto text-sm text-text-300 no-underline hover:text-text-100" :title "the agents working for you"} "agents"]
+       [:a {:href "/root/debug" :class "text-xs text-text-500 no-underline hover:text-text-300" :title "what Seon reads and the system's status"} "debug"]]
     [:nav {:class "seon-bar"}
      [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "hidden text-text-500 sm:inline"} "on jolt"]
      ;; which system this is (`system-source`, the system walk's unit the frame places on every page)
@@ -1815,14 +1817,22 @@
   list in its column (`agents-aside`; the frame draws the signed-in user's on every other page); the chat (#p-chat): head, the list
   placed at its top (an own render's front, `stage-list`, `pull-list`, or `unresolved-list`), else the region (#p-head) the page's head
   fills, then the rules and the conversation, after which the frame puts the caption and the input; and the context (#p-context): the
-  task's list and the region (#p-tiles) root's system view fills. Each region is an element by its id: who fills it is not known here.
-  The context is shown only when it holds a part (resources/public/css/input.css). Styled by the ids, so the layout writes no class."
-  {:malli/schema [:=> [:cat :any :any] :any]}
+  task's list and the region (#p-tiles) root's system view fills, inside the chat's column after the conversation, so the chat takes the
+  main space and its tiles scroll with it (docs/decisions.md, The page is a friendly chat). Each region is an element
+  by its id: who fills it is not known here. The context is shown only when it holds a part (resources/public/css/input.css). Styled by
+  the ids, so the layout writes no class."
+  {:seon.render/style "@media (min-width: 64rem) {
+  #app .seon-columns { grid-template-columns: 11rem minmax(0, 1fr); }
+  #app .seon-columns:not(:has(#p-agents)) { grid-template-columns: minmax(0, 1fr); }
+  #app #p-chat { overflow-y: auto; scrollbar-width: thin; }
+  #app #p-chat #c-rows { flex: none; overflow: visible; }
+}"
+   :malli/schema [:=> [:cat :any :any] :any]}
   [c head]
   [:div
    (when (get c :seon.user/name) (agents-aside [#'agents-list {}]))
-   [:main {:id "p-chat"} (or head [:div {:id "p-head"}]) [#'rules-list {}] [#'conversation-list {}]]
-   [:aside {:id "p-context"} [#'agent-parts {} c] [:div {:id "p-tiles"}]]])
+   [:main {:id "p-chat"} (or head [:div {:id "p-head"}]) [#'rules-list {}] [#'conversation-list {}]
+    [:aside {:id "p-context"} [#'agent-parts {} c] [:div {:id "p-tiles"}]]]])
 
 (defn agent
   "An agent's page, the render of its pull c, the one tree the model and the person read (the declared html render of
@@ -2545,7 +2555,7 @@
   its walk placed it (an append). opts {:units :view :input :caption :tab}; id, the page's focus; tab, which of its tabs it is
   (top-bar). See docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat :map :any] [:map [:seon.render/hiccup :any] [:seon.render/units [:vector :map]]]]}
-  [{:keys [units view input caption tab person?]} id]
+  [{:keys [units view input caption tab person]} id]
   (let [page (some #(when (= render/root-container (:container %)) %) units)
         page (or page (let [[hc ids] (render/regions (bare-page)) html (h/html hc)]
                         {:id "p-bare" :container render/root-container :rev (hash html) :html html :regions ids}))
@@ -2555,12 +2565,12 @@
         unit page-unit]
     {:seon.render/hiccup
      [:div {:id "app" :class "seon-page" :data-view view}
-      (top-bar id tab person?)
+      (top-bar id tab person)
       ;; the agents on the left, then the page: its render's columns (an agent's chat large in the middle and its context on the
       ;; right), each scrolling on its own (docs/render.md#where-things-go)
       [:div {:class "seon-columns"}
        ;; the person's page draws no agents column (docs/decisions.md, The page is a friendly chat)
-       (when-not (or person? (holds "c-side")) (agents-aside [:ol {:id "c-side"} (render/region "c-side")]))
+       (when-not (or person (holds "c-side")) (agents-aside [:ol {:id "c-side"} (render/region "c-side")]))
        [:div {:id "p-page"} (render/region "p-page")]
        (when-not chat (list (slot "p-caption") (when input (slot "p-input"))))]]
      :seon.render/units

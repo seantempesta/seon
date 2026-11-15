@@ -1715,6 +1715,12 @@
   (let [n-or (fn [n d] (Long/parseLong (or n d)))]
     (sorted-map
      "warm-tests" (fn [n more] (warm-tests))
+     ;; whether this binary runs tree N, its program included (bin/check's roots seed an example program and run the binary's
+     ;; baked one): seon.fx/runtime-for {:scope :all}, the one binary identity. RUNTIME CURRENT, else the reason and exit 1
+     "runtime-for" (fn [n more] (let [r (seon.fx/runtime-for n {:scope :all})]
+                                  (if (contract/error? r)
+                                    (do (out! (:seon.error/message r)) (lib/c-exit 1))
+                                    (do (out! "RUNTIME CURRENT " (:digest r)) (lib/c-exit 0)))))
      "seed" (fn [n more] (seed (n-or n "2000")))
      "drop" (fn [n more] (drop-mains (remove nil? (cons n more))))
      ;; the store bin/check is given, its size and branch count: "PATH KB BRANCHES"

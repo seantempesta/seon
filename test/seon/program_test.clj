@@ -1915,3 +1915,19 @@
     (is (= ['app.lib-reach-test/shouts] (program/tests-reaching g 'clojure.string/upper-case)) "the test reaching a caller of the library var")
     (is (= ['app.lib-reach-test/unions] (program/tests-reaching g 'clojure.set/union)) "a test calling it itself")
     (is (= [] (program/tests-reaching g 'clojure.string/lower-case)) "and none for a library var nothing calls")))
+
+;; Estimate: one namespace, one defn and one declare evaluated: ~200k ticks
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-changed-declare-keeps-the-defns-metadata
+  ;; task seon.program/a-changed-declare-never-resets-a-bound-vars-metadata (context, 2026-11-15 [M root result/c71b6489]): a land
+  ;; changed seon.ctx.wire's (declare ...) and the in-place load ran it after the defns; (def x) with no init keeps the binding but
+  ;; replaces the var's metadata, so three contracted fns lost :malli/schema and every agent's page threw. A declare of vars already
+  ;; bound does nothing: its one job, the forward reference, is done
+  (let [nsym (symbol (str "decl-trial-" (random-uuid)))
+        load! #'seon.program/load-form!]
+    (is (nil? (load! {:ns nsym :src "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)" :defines #{[:var (symbol (str nsym) "f")]} :declares #{}})))
+    (is (nil? (load! {:ns nsym :src "(declare f g)" :defines #{} :declares #{(symbol (str nsym) "f") (symbol (str nsym) "g")}})))
+    (let [v (find-var (symbol (str nsym) "f"))]
+      (is (contains? (meta v) :malli/schema) (str "the defn's contract is still its metadata: " (pr-str (keys (meta v)))))
+      (is (= 3 (@v 3)) "and its binding"))
+    (is (some? (find-var (symbol (str nsym) "g"))) "a declared var not yet bound is declared")
+    (remove-ns nsym)))

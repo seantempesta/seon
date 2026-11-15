@@ -682,7 +682,7 @@
         head-unit {:id "p-agent-head" :container "#p-head" :rev (hash head)
                    :html (h/html [:section {:id "p-agent-head" :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (ui/agent-head {} head)])}]
     ;; the walks this page made or advanced, for the pass to write to st (`pass-view`)
-    (assoc (ui/page-chrome {:units (vec (concat (when-not person? (system-units st)) sides [head-unit] units)) :view (ui/view-param view) :tab (if chat? :chat :debug) :person? person?
+    (assoc (ui/page-chrome {:units (vec (concat (when-not person? (system-units st)) sides [head-unit] units)) :view (ui/view-param view) :tab (if chat? :chat :debug) :person (when person? (some-> signed :seon.user/name))
                       ;; never a wait: drawn from its branch until its process answers, the page says so
                       :caption (when (and chat? (not own?))
                                  (when (:error held) (str "Its process didn't answer, so this may be behind: " (:seon.error/message (:error held)))))
@@ -796,7 +796,8 @@
       (if (and (= pt from) (= fold (:health-fold st)) (= (:health-rev st) (:health-rev-at st)))
         st
         (let [base (when (and prev from (not= pt from)) (seon.db/at-commit (:conn st) (first from)))
-              own (or (:rv-owner st) (rv/owner))
+              ;; its port is this proc's events chan: a reaction another owner's step dirties reaches this proc as a message (seon.ratom)
+              own (or (:rv-owner st) (rv/owner (:events-ch st)))
               ;; the recorded classes are the live report's: its reactions reran only what main's moves touched (health-advanced)
               live (or (:health-live st) (binding [rv/*owner* own] (problems/recorded-live (rv/store db) (config/value :seon.config.render/flush-max))))
               recorded (:classes (problems/recorded-report live {}))
@@ -809,8 +810,9 @@
                       :else (problems/health db))
               h (if (seq fold) (problems/with-fold h db fold) h)
               st (assoc st :health-at pt :health-fold fold :health-live live :rv-owner own :health-pending [] :health-rev-at (:health-rev st))]
-          ;; a live report first made bounded (flush-max rows a step) makes the rest in the proc's next steps
-          (when (:more? live) (a/put! (:events-ch st) {::health-more true}))
+          ;; a live report first made (its reactions' first captures queued, seon.ratom/make-reaction) or made bounded (flush-max rows
+          ;; a step) runs and makes the rest in the proc's next steps
+          (when (or (:more? live) (pos? (binding [rv/*owner* own] (rv/queued)))) (a/put! (:events-ch st) {::health-more true}))
           (if (= (:classes h) (:classes prev))
             st
             (-> (assoc st :root-walk (rewalk rw #(assoc % :health h)))
@@ -946,10 +948,14 @@
   [st]
   (let [n (config/value :seon.config.render/flush-max)
         [left live] (binding [rv/*owner* (:rv-owner st)]
-                      (let [left (rv/flush! n)] [left (problems/recorded-sync! (:health-live st) n)]))]
-    (when (or (pos? left) (:more? live)) (a/put! (:events-ch st) {::health-more true}))
-    ;; the live report moved: health! reads its recorded classes again at its next read (:health-rev)
-    (-> st (assoc :health-live live) (update :health-rev (fnil inc 0)))))
+                      (let [_ (rv/flush! n) live (problems/recorded-sync! (:health-live st) n)]
+                        ;; what is left after the sync: its new rows are queued, and the rows its flush moved not yet synced
+                        [(+ (rv/queued) (count @(:changed live)) (if @(:set-moved live) 1 0)) live]))
+        settled? (and (zero? left) (not (:more? live)))]
+    (when-not settled? (a/put! (:events-ch st) {::health-more true}))
+    ;; published only once settled (flow, the review's (4)): health! reads its recorded classes again at its next read (:health-rev),
+    ;; never a report that mixes two points of main
+    (cond-> (assoc st :health-live live) settled? (update :health-rev (fnil inc 0)))))
 
 (defn- advance-main
   "St with main as db when db is newer than the main it holds (main-info): root's walk advanced
@@ -1172,9 +1178,14 @@
   recorded by its id (ask-branches reads its branch again)."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [st ev]
-  (if (::health-more ev)
+  (cond
     ;; this proc's own next step of health's flush, never an event a stream shows
-    (if (:health-live st) (health-more st) st)
+    (::health-more ev) (if (:health-live st) (health-more st) st)
+    ;; a reaction of this proc's owner, dirtied in another owner's step: queued here, and run by the next bounded flush
+    (:seon.ratom/dirty ev) (do (binding [rv/*owner* (:rv-owner st)] (rv/take-dirty! ev))
+                               (when (:health-live st) (a/put! (:events-ch st) {::health-more true}))
+                               st)
+    :else
   (cond-> (update st :new-events conj ev)
     ;; an agent's commit moves its branch: a page of it reads the branch again (its turns and evaluations are written there)
     (and (= :commit (:type ev)) (:agent ev)) (assoc-in [:commits (:agent ev)] (:t ev)))))

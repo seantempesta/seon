@@ -176,6 +176,10 @@
  :seon.test/bytes-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/bytes-spent]] [:bytes :int] [:budget :int]
                                                 [:test {:optional true} :string]]]
  :seon.fx/io-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/io-error]]]]
+ :seon.ratom/no-owner [:and {:description "A reaction that cannot reach its owner's flush: made :auto-run :queue with no owner bound (:why :unbound), or dirtied from another owner's step while its owner has no port to wake it (:why :no-port); seon.ratom, docs/reactive.md."}
+                      :seon.error/base [:map [:seon.error/type [:= :seon.ratom/no-owner]] [:why [:enum :unbound :no-port]]]]
+ :seon.ratom/cycle [:and {:description "A reaction run twice in one generation (the commit or change that dirtied it): its run dirties what it reads, so it is stopped as this typed state, never rerun until the bound (seon.ratom/flush!)."}
+                   :seon.error/base [:map [:seon.error/type [:= :seon.ratom/cycle]] [:generation :int]]]
  :seon.process/binary-digest [:maybe {:description "The running binary's identity as bin/build recorded it with the binary (target/seon.program's :digest, held since the process's boot), or nil when none was recorded."} :string]
  :seon.process/branch-digest [:string {:description "A branch tree's binary identity (seon.fx/binary-digest at that tree)."}]
  :seon.process/tree [:string {:description "A git tree id, as bin/tree and the import name it."}]
@@ -196,6 +200,10 @@
  :seon.fx/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/defect]]]]
  :seon.fx/unknown-kind [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/unknown-kind]]]]
  :seon.fx/in-test [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/in-test]]]]
+ ;; a request its asker stopped while it was queued (seon.fx/stop): dropped, never run
+ :seon.fx/stopped [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/stopped]] [:seon.fx/stop :seon.fx/stop]]]
+ ;; a server op its caller stopped (seon_interrupt, or MCP's notifications/cancelled) while it ran: seon.server/respond
+ :seon.server/interrupted [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/interrupted]] [:line :string]]]
  ;; the provider's HTTP 429: transient, the :model owner keeps the request and pauses (its Retry-After when given)
  :seon.model/rate-limited [:and {:seon.model/retryable "the provider may answer next time, after its rate window"} :seon.error/base [:map [:seon.error/type [:= :seon.model/rate-limited]] [:status {:optional true} :int]
                                                   [:body {:optional true} :string] [:retry-after-ms {:optional true} :int]]]

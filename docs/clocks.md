@@ -97,7 +97,7 @@ Clock reads whose value is recorded or shown, never compared to decide.
 - `seon.system/state`: the writer's transactions per second, shown.
 - `seon.system/stop!`: the stop fact's `:at-ms` and the stop's duration; it waits on answers, none on a clock.
 - `seon.render.proc/pass`: a render pass's duration and the events' age, shown.
-- `seon.agent/handle!`, `seon.system/ext-op`, `seon.system/start-spawn`, `seon.system/back-op` (a Back to here's `:seon.agent/started-ms`), `seon.reconcile/advance`, `seon.reconcile/reconciler-proc`: stamps and durations.
+- `seon.agent/handle!`, `seon.system/ext-op`, `seon.system/start-spawn`, `seon.system/back-op` (a Back to here's `:seon.agent/started-ms`), `seon.reconcile/advance-step`, `seon.reconcile/reconciler-proc`: stamps and durations.
 - `seon.agent/init!`, `seon.agent/hello!`: a spawn's phases (`seon.agent/spawn-phases`), shown on root's `:ready` event.
 - `seon.system/deliver-message`: the stamp of the problem recorded for a send to an agent main does not have.
 - `seon.system/message-write`, `seon.reconcile/write` and `seon.turn/tell-error!`: `:seon.message/sent-ms`, which orders messages.
