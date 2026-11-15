@@ -22,7 +22,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.set] [clojure.edn :as edn]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [ring-chez.adapter :as adapter]
-            [seon.lib :as lib] [seon.contract :as contract] [seon.config :as config] [seon.render :as render] [seon.render.ui :as ui] [seon.web.html :as h] [seon.step :as step] [seon.system :as c] [seon.reader :as reader]))
+            [seon.lib :as lib] [seon.contract :as contract] [seon.config :as config] [seon.render :as render] [seon.render.ui :as ui] [seon.web.html :as h] [seon.step :as step] [seon.task] [seon.system :as c] [seon.reader :as reader]))
 
 ;;; --- the files it serves ------------------------------------------------------------
 
@@ -88,7 +88,7 @@
       seon.system/spawn! (vec (repeat (min 100 (max 1 (or (:n args) 1))) [(c/request 'spawn! nil (cond-> {} (not (str/blank? (:task args))) (assoc :task (:task args))) nil) nil]))
       ;; what a person types: its words a message the agent reads, its forms its REPL's, told apart by the one reader (seon.reader/words-and-forms); to every agent, forms alone
       seon.system/submit! (cond (str/blank? forms) []
-                              (= :all agent) (vec (for [[id a] (sort-by (comp str key) index) :when (not (c/gone-statuses (:status a)))] [(c/request 'submit! id {:forms forms :origin :ui} a) id]))
+                              (= :all agent) (vec (for [[id a] (sort-by (comp str key) index) :when (not (seon.task/gone-statuses (:status a)))] [(c/request 'submit! id {:forms forms :origin :ui} a) id]))
                               :else (let [{:keys [words] code :forms} (reader/words-and-forms forms)]
                                       (cond-> []
                                         (not (str/blank? words)) (into (one 'message! agent {:body words}))
@@ -373,7 +373,7 @@
   "St keeping only the streams, and the in-flight elements tabs hold, of agents whose process lives in root's index."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
-  (let [live (into #{} (keep (fn [a] (when-not (c/gone-statuses (:status a)) (:key a)))) (vals (:index st)))
+  (let [live (into #{} (keep (fn [a] (when-not (seon.task/gone-statuses (:status a)) (:key a)))) (vals (:index st)))
         st (update st :streams #(into {} (filter (fn [[[agent]]] (contains? live agent))) %))
         ins (into #{} (map :in) (vals (:streams st)))]
     (update st :tabs update-vals #(update % :has (fn [s] (into #{} (filter ins) s))))))

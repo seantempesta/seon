@@ -388,7 +388,6 @@
                 context)
         kw (assoc ::walks {:branch [b kw]}))))))
 
-(def ^:private gone "The agent statuses of an ended process (:seon.agent/status)." (:seon.status/gone (contract/properties :seon.agent/status)))
 
 (defn- agent-of
   "The agent entity view names on main db, and its id in root's boot (nil for an earlier boot's):
@@ -513,7 +512,7 @@
 (defn- live?
   "Is agent id a process root's view holds, running (it answers what it is asked)?"
   {:malli/schema [:=> [:cat :map :any] :boolean]}
-  [st id] (let [a (when id (get-in st [:view :agents id]))] (boolean (and a (not (gone (:status a)))))))
+  [st id] (let [a (when id (get-in st [:view :agents id]))] (boolean (and a (not (task/gone-statuses (:status a)))))))
 
 (defn- ask-parts
   "Ask each live agent a watched chat shows for its page's parts ({:op :render}, seon.repl/render-ctx)
@@ -875,7 +874,7 @@
     {:tab (get-in st [:tab view]) :error (get-in st [:branches view :error])
      ;; whether its branch is read at all: what moved on it after that is its datoms-diff
      :branch? (some? (get-in st [:branches view :db]))
-     :live (when id (ui/live (ui/shown-status (get-in st [:view :agents id] {}))))}))
+     :live (when id (task/live-statuses (ui/shown-status (get-in st [:view :agents id] {}))))}))
 
 (defn- walk?
   "Does view's page walk this pass: not held yet, a transaction touched what it read (:dirty),
