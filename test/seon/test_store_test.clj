@@ -110,7 +110,7 @@
         (doseq [r started] (seon.lib/remove-tree! (:runs r)) (ts/drop-main! store (:main r)))))))
 
 ;; Estimate: the shard's shared root (warmed by its fixture) and one copy of its log (~100 KB): ~1M ticks; 2,000,000
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} a-shard-with-a-red-keeps-its-shared-roots-log
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000} :seon.test/execs ["bin/system"]} a-shard-with-a-red-keeps-its-shared-roots-log
   ;; root's ask, 2026-11-15: two shared roots died while booting at load 44 and their shard's shutdown hook deleted their runs,
   ;; so no log said why. A shard that ends with a red copies each shared root's log beside its own (test_runner shard!).
   ;; Red before: no keep-root-logs!

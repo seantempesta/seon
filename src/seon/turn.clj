@@ -395,12 +395,9 @@
      text)))
 
 (defn- turn-messages
-  "The messages turn n took, as its driver reads them ({:id :from :body :sent-ms}, :from by name, seon.task/sender-name), in the order they
-  were linked: those whose link to this agent (the :seon.message/to datom) is after turn n-1's basis and at or before basis, turn n's.
-  It's the edge seon.ctx/placed-messages places a model's messages by, so a session hears each message in the reply whose turn
-  took it, as a model reads it in that turn's request. t is one sequence across the store's branches, so a message main's merge brought
-  keeps a t after the turn before it. One seek of the agent's message links (O(m), m its messages) and an entity read of each new one.
-  See docs/users.md#messages."
+  "The messages turn n took ({:id :from :body :sent-ms}), in link order: linked to this agent after turn n-1's basis t and at or
+  before basis's, the edge seon.ctx/placed-messages places a model's by, so the session driving it hears each once. See
+  docs/users.md#messages."
   {:malli/schema [:=> [:cat pos-int? :map] [:vector [:map [:id :string] [:from [:maybe :string]] [:body :string] [:sent-ms :int]]]]}
   [n basis]
   (let [db (agent/db) k (:key @agent/state)

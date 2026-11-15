@@ -557,10 +557,8 @@
 
 ;; Estimate: one copy a shared root's log (~100 KB): ~1M ticks, at a shard's end, only when it had a red
 (defn keep-root-logs!
-  "Each shared root this process started (shared-roots), its log (runs/root.log) copied into dir as shared-root-<its runs
-  dir>.log: a shard that ended with a red keeps its roots' evidence, which the shutdown hook deletes with their runs. Two shared
-  roots that died while booting at load 44 left no log (2026-11-15, context's 13:32 land [M]). Answers the files written.
-  See docs/testing.md#a-root-costs-what-it-boots."
+  "The files written: each shared root's log copied into dir, before the shutdown hook deletes its runs; a shard with a red
+  calls it. See docs/testing.md#a-root-costs-what-it-boots."
   {:malli/schema [:=> [:cat :string] [:vector :string]]}
   [dir]
   (vec (for [d (vals shared-roots)

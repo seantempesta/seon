@@ -233,7 +233,7 @@
 ;; Estimate: in this process, four server round trips and the answers' reads (~0.5M ticks each, as a-message-reaches-the-agent's): ~2M; 3,000,000.
 ;; The reply's own cost at the agent: a seek of the messages linked to it, O(m) datoms (m its messages: here 1), and an entity read of each
 ;; new one, ~10.5k ticks a message [M result/b45faee3]
-(deftest ^{:seon.test/estimate {:ticks 3000000}} a-message-to-an-attached-agent-is-in-the-next-reply
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} a-message-to-an-attached-agent-is-in-the-next-reply
   ;; task seon.server/a-message-reaches-the-session-that-drives-its-agent (docs/users.md#messages): a session driving an agent through
   ;; MCP hears a message to it in its next reply, as a model hears one in its next request: the messages its turn took, each once. Red
   ;; before: the reply carried its evals' responses alone, and main's merge had already put the message on the branch, so it read as
