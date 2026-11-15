@@ -1278,10 +1278,8 @@
               (conj (vec tx) {:db/id "root-task" :seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked :seon.task/started-by user}))))))
 
 (defn root-agent-boot-tx
-  "At boot, root's session: made when main has none (`root-agent-tx`; the owner's ruling, root's agent is there from boot), else
-  its task's plan written when main's differs from this binary's (`root-session-plan`), so an edit of the text reaches a main made
-  before it; its pattern names its role's, so an edit of the agent's or the user's pattern reaches it with no write. See
-  docs/users.md#roots-agent."
+  "At boot, root's session made when main has none (`root-agent-tx`), else its task's plan written when main's differs from this
+  binary's (`root-session-plan`), so an edit of the text reaches a main made before it. See docs/users.md#roots-agent."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
   [db] (cond (nil? (pdb/eid db :seon.agent/key "root")) (root-agent-tx db)
              (not= root-session-plan (:seon.task/plan (d/entity db [:seon.task/id "request/root"])))
