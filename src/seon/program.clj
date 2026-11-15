@@ -1247,9 +1247,10 @@
 
 (defn hold-registry!
   "Make registry reg (schema-registry's) this process's: malli's default registry, which every contract
-  reads beneath a binding (seon.contract/options). Called by the act of holding main, nowhere else: root's boot
-  (seon.system/start!) and each main commit (seon.writer's main-commit), the fork server's warm start per main move. An agent's
-  branch is its slot's, read by seon.contract/layers; the loaders never set it, since tests call them on throwaway dbs.
+  reads beneath a binding (seon.contract/options). Called by the act of holding a program: root's boot
+  (seon.system/start!) and each main commit (seon.writer's main-commit), the fork server's warm start per main move, and an
+  agent's start, which holds its branch over main (seon.contract/branch-over: its slot, read at each lookup); the loaders
+  never set it, since tests call them on throwaway dbs.
   Answers nil. See docs/source.md#schemas-at-the-repl."
   {:malli/schema [:=> [:cat :seon.host/registry] :nil]}
   [reg] (mr/set-default-registry! reg) nil)
