@@ -20,7 +20,7 @@ Told that ticks count Scheme work only (no foreign calls, GC copying, parked tim
 
 ### Debug inspects what was rendered; it never interprets again
 
-He ruled that debugging shows the rendered versions that exist, exactly as they were sent, never a new interpretation of the records, which would defeat its purpose (2026-11-15). A debug view joins the components a turn actually assembled, each stored once by content digest, and nothing is re-rendered; its result's digest equals the turn's `:seon.model-call/sent-hash`.
+He ruled that debugging shows the rendered versions that exist, exactly as they were sent, never a new interpretation of the records, which would defeat its purpose (2026-11-15). A debug view joins the components a turn actually assembled, each stored once by content digest, and nothing is re-rendered; its result's digest equals the turn's `:seon.model-call/sent-hash`. Rendering itself is driven by the pull and the schemas the one walk detects on each entity as it recurses; a render function may also query the db.
 
 ### An agent offers the person a place; it never moves their page
 
