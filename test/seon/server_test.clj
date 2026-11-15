@@ -786,14 +786,13 @@
    (fn [_ conn]
      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}]))
      (let [at (fn [o] (d/transact conn [{:seon.task/id "demo/g" :seon.task/outcome o}]) @conn)
-           settled? (fn [db] (#'seon.server/done-settled? db "demo/g" (constantly nil)))]
+           settled? (fn [db] (seon.reconcile/settled? db "demo/g"))]
        (is (not (settled? (at :running))) "still working: wait")
        (is (not (settled? (at :ready))) "judged green, its merge next: wait (minutes)")
        (is (not (settled? (at :gate))) "a gate with no process test to run is its merge (minutes): wait, as at :ready")
        (d/transact conn [{:seon.task/id "demo/g" :seon.task/deferred {'demo-test/p "d-p"}}])
        (is (settled? (at :gate)) "its gate running process tests: answer now, the verdict comes to the page")
-       (is (settled? (at :merged)))
-       (is (#'seon.server/done-settled? (at :running) "demo/g" (constantly {:seon.error/type :x})) "a defect stopped the judge: answer")))))
+       (is (settled? (at :merged)))))))
 
 ;; docs/errors.md#nothing-crashes-and-nothing-hangs: a streamed prove whose run throws answers that throw as a typed defect: a
 ;; spawned fiber keeps its throw for a joiner, and nobody joined this one, so its reader waited on done for good (code read,
