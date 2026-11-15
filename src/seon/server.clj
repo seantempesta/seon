@@ -178,7 +178,12 @@
       made made
       (not t) (refused (str "no task " id))
       ;; its agent is live: it is the one to work it (a second spawn on its branch is refused)
-      live {:agent (:agent live) :task id :shared true}
+      live (do
+             ;; the session's own area client takes over its live agent's hold (root's ruling 2026-11-15: a hold taken before bin/mcp call kept a
+             ;; session's SEON_MCP_CLIENT stayed under checkout-<path>); any other client only shares it, so no session takes another's agent
+             (when (and client (= id (str "session/" client)) (not= client (get-in live [:env :holder])))
+               @(c/transact-main! sys [[:db/add [:seon.agent/key (:key live)] :seon.agent/holder client]]))
+             {:agent (:agent live) :task id :shared true})
       :else
       (let [restart (when fresh? (task/restart-tx db id))
             env (cond-> (assoc (r/desired-env t) :model "outside")

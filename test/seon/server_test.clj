@@ -384,6 +384,26 @@
                               {:op :eval :agent "root" :code (str "(#'seon.server/inbox-deliver sys " (pr-str (name agent)) ")")}]))]
     (is (= ["placed by the delivery"] (when (vector? (:value r)) (mapv :body (:value r)))) (str "the delivered messages, as a vector: " (pr-str r)))))
 
+;; Estimate: five server round trips (~0.5M each): ~2.5M; 4,000,000. In root: one :db/add of the holder
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000}} a-sessions-own-area-client-takes-over-its-hold
+  ;; root's ruling 2026-11-15 evening: a session agent attached before bin/mcp call kept a session's SEON_MCP_CLIENT held its hold under
+  ;; checkout-<path> for its life (session/context's, repaired by hand with transact-main!, result/dc7c8582). A re-attach of a LIVE
+  ;; session/<area> by the client named <area> takes over the hold (the same session under its own name); any other named client still
+  ;; gets :shared, so no session takes another's agent. Red before: the live branch answered :shared and never moved the hold
+  (let [[one two who three who-after] (at/in-agent (fn [{:keys [ns]}]
+                                                     (let [i (str "session/" ns) area (str ns)]
+                                                       [{:op :attach :task i :template "user" :client "checkout-old"}
+                                                        {:op :attach :task i :template "user" :client area}
+                                                        {:op :eval :agent "root" :code (str "(seon.server/connection-agent sys {:client " (pr-str area) "})")}
+                                                        {:op :attach :task i :template "user" :client "another-session"}
+                                                        {:op :eval :agent "root" :code (str "(seon.server/connection-agent sys {:client " (pr-str area) "})")}
+                                                        (end-session-form i)])))]
+    (is (some? (:agent one)) (pr-str one))
+    (is (= (:agent one) (:agent two)) "the same agent")
+    (is (= (name (:agent one)) (:value who)) (str "its own area client now holds it: " (pr-str who)))
+    (is (:shared three) (str "another named client only shares it: " (pr-str three)))
+    (is (= (name (:agent one)) (:value who-after)) "and the hold stays with the area's own client")))
+
 (deftest ^{:seon.test/estimate {:ticks 300000}} an-inbox-line-runs-on-its-connection-and-holds-no-worker
   ;; part 2: seon_inbox waits, so it runs on the connection's fiber (which parks), never one of the 16 :server-op worker threads
   ;; (:seon.config.root/server-op-workers): eight waiting sessions would hold half of them. Both protocols. Red before: no inline op
