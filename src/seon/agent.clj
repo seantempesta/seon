@@ -2278,9 +2278,10 @@
     ;; :base is the branch's merge base with main: a new branch's is the image (main as it
     ;; forked); a resumed one's is older than main, and comparing against main's head would
     ;; read main's later changes as the branch's (branch-changes)
-    ;; a resumed branch whose base can't be read (seon.db/no-merge-base: swept) loads its program from the image it was forked with
-    ;; instead (main's program as forked, then the branch's difference from it: the branch head's program all the same, a larger
-    ;; diff), and the missing base goes to root as this agent's problem: it starts, never dies of it
+    ;; a resumed branch whose base can't be read (seon.db/no-merge-base: swept) runs main's program as forked, its own forms not
+    ;; loaded: its difference from the image would unmap what main gained since the branch was cut (a branch older than a var main
+    ;; calls lost it: unbound seon.program/file-reading-macros, 2026-11-15); the missing base goes to root as this agent's problem
+    ;; and its own work comes back by the replay of its source transactions (docs/merging.md#a-branch-merges-main-in)
     (let [base-or-err (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0)
           no-base (when (contract/error? base-or-err) base-or-err)
           base (if no-base db0 base-or-err)
@@ -2302,7 +2303,7 @@
                              r (when tree (fx/runtime-for tree))]
                          (when (contract/error? r) r))
           _ (mark! :runtime-for)
-          load-errors (concat program-errors (when no-base [no-base]) (when resumed (program/load-diff! base @store-conn)))
+          load-errors (concat program-errors (when no-base [no-base]) (when (and resumed (not no-base)) (program/load-diff! base @store-conn)))
           _ (mark! :base)
           misaligned (when-not resumed (misaligned commit t @store-conn db0))
           _ (mark! :misaligned)]
