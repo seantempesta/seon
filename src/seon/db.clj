@@ -163,12 +163,13 @@
                           (filter #(and (qualified-keyword? %) (:seon.db/derived (form-props forms %)))) (keys forms))
      ;; the attributes whose values name a commit (their schema reaches :seon.db/commit, :seon.db/reference holding one): every commit a
      ;; kept reference names, which a collection keeps (retain!), derived from the schemas, never listed, once
-     :commit-attrs (let [reaches? (fn reaches? [seen k]
-                                    (or (= k :seon.db/commit)
-                                        (boolean (when-not (seen k)
-                                                   (some #(and (qualified-keyword? %) (reaches? (conj seen k) %))
-                                                         (tree-seq coll? seq (get forms k)))))))]
-                     (into #{} (filter #(reaches? #{} %)) (keys es)))
+     ;; a fixed point over each form's named keys, each form read once: the schemas that reach :seon.db/commit grow until none is added
+     ;; (as deep as the schemas nest, a few rounds), never a walk per attribute (300M ticks a test world, 2026-11-15)
+     :commit-attrs (let [named (into {} (for [[k f] forms] [k (into #{} (filter qualified-keyword?) (tree-seq coll? seq f))]))
+                         reach (loop [r #{:seon.db/commit}]
+                                 (let [r2 (into r (keep (fn [[k ks]] (when (and (not (r k)) (some r ks)) k))) named)]
+                                   (if (= r2 r) r (recur r2))))]
+                     (into #{} (filter reach) (keys es)))
      ;; the ref attributes some entity schema requires: what the write check's cascade follows from a retracted entity, once
      :required-refs (vec (sort (distinct (for [k (distinct (vals es)) a (required (get forms k)) :when (:seon.db/to (form-props forms a))] a))))
      ;; each schema that extends another, with all it extends and itself (`extends?` is one lookup), once

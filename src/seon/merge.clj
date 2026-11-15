@@ -725,9 +725,8 @@
   keys only (program-of)."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.merge/entry-value]]}
   [db]
-  ;; every key a merge can stop on, a fact's [:datum ...] included: read with data-attrs :all, the merge's own, or a datum's entry is never unmerged
   (let [es (entries db)
-        prog (program-of db (mapv :key es) :all)]
+        prog (program-of db (mapv :key es) #{})]
     (filterv #(and (not (:resolved? %)) (same? (:key %) (:ours %) (get prog (:key %)))) es)))
 
 (defn content-tx
