@@ -1825,7 +1825,8 @@
 
 (defn- hold-told
   "st with a restart's asker (:hold, its :dest) answered once nothing is in flight (no worker busy, no run asked of the api): the
-  turn boundary of every agent whose call this owner holds, so a restart there loses no turn. Answers st, :told once told."
+  turn boundary of every agent whose call this owner holds, so a restart there loses no turn. Answers st, :told once told. See
+  docs/flow.md#effects-one-owner-and-its-workers-per-kind."
   {:malli/schema [:=> [:cat :map :seon.host/volatile] :map]}
   [st o]
   (if (and (:hold st) (not (get-in st [:hold :told])) (zero? (:busy st)) (empty? (:pending st)))
@@ -1849,7 +1850,7 @@
                 :tick "its clock's channel (external in-port, with :rate): a :tick when the bucket refilled"
                 :limits "its admission dials (limits' map; nil: config-limits, read at each admission)"
                 :load-fn "reads the machine's load (lib/load-average)" :held-fn "reads the processes by tag (held-processes)"}
-       :ins {:in "requests, addressed [:fx/<kind> :in] by any proc" :ask "root's own requests, never held back by the bound" :done "its workers' outcomes"
+       :ins {:in "requests, addressed [:fx/<kind> :in] by any proc" :ask "root's own requests, never held back by the bound, and a restart's hold (:seon.fx/hold)" :done "its workers' outcomes"
               :answers "the api's answers to the requests it asked (:seon.fx/ask), one each"} :outs {}
        ;; admission and routing only: never blocks, never computes long
        :workload :io
