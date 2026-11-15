@@ -1145,8 +1145,10 @@
                                             (str t " is red on main without this change (at the gate of " id ")") {:tests [t]})}))]))
 
 
-(defn- advance
-  "Task id's flight takes answer r of its step. Answers [st outputs]."
+(declare advance)
+
+(defn- advance-step
+  "Task id's flight takes answer r of its step (`advance`, which holds a flight in progress). Answers [st outputs]."
   {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :seon.reconcile/step :any] [:tuple :seon.reconcile/state [:vector :map]]]}
   [st id step r]
   (let [{:keys [act agent] :as f} (get-in st [:flights id])
@@ -1342,6 +1344,14 @@
                                                               (get-in r [:value :tree-unmoved]) "; bring the tree in (git read-tree -m -u)")
                                                          {:sha (get-in r [:value :sha])})}))])
                    (done st)))))
+
+(defn- advance
+  "Task id's flight takes answer r of its step; an answer for a task with no flight in progress (it ended: closed, its agent
+  killed, a second hand-back) is no step of any flight and advances nothing, never a flight made of the answer alone. Answers
+  [st outputs]. See docs/reconcile.md."
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :seon.reconcile/step :any] [:tuple :seon.reconcile/state [:vector :map]]]}
+  [st id step r]
+  (if (get-in st [:flights id]) (advance-step st id step r) [st []]))
 
 (defn- quiet
   "Report quiescence positively, once per quiet spell: when no flight is in the air and no

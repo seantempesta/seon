@@ -708,6 +708,17 @@
       (let [[_ outs] (#'r/advance st "demo/a" :tested {:reports [{:var "#'demo-test/x" :type :fail}] :main-red #{x}})]
         (is (= [{:op :write :req {:op :branch-diff :branch :demo/a}}] (mapv :req outs)))))))
 
+;; Estimate: 1 db-of x 0.5M + 2 advance calls ~ 700,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 700000}} an-answer-for-a-flight-that-ended-advances-nothing
+  ;; docs/reconcile.md: an answer that arrives after its flight ended (the task closed, its agent killed, a second hand-back)
+  ;; is no step of any flight: red before, :main-asked made a flight of the answer alone, with no :act and no :results, and
+  ;; judged it (seon.reconcile/done-input refused results nil: the pilot's seventh seon_done, 2026-11-15)
+  (let [db (db-of [(decl "a")] :extra (work "a" :running))
+        st (st-of db)
+        [st' outs] (#'r/advance st "demo/a" :main-asked {:reports [{:var "#'demo-test/x" :type :fail}]})]
+    (is (= [] outs) "nothing asked, nothing written")
+    (is (nil? (get-in st' [:flights "demo/a"])) "and no flight made of the answer")))
+
 ;; Estimate: the done rule is a pure function over a small map: ~50,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 50000}} a-red-whose-main-verdict-is-unknown-holds-and-is-no-stray
   ;; docs/tasks.md#the-done-rule: a red main was asked of and answered nothing is :main-unknown, never :stray-red
