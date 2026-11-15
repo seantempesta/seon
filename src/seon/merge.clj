@@ -659,36 +659,35 @@
   (->> fs (group-by :tx) (sort-by key) (mapv (fn [[t ds]] {:source t :ops (vec (distinct (map op ds)))}))))
 
 (defn decide
-  "The one merge of from into into-db, decided over facts: from's since base (`mapped`), and at each [e a] they touch (each [e a v]
-  of a cardinality-many attribute) the values base, into-db and from hold. A conflict is a key both sides changed since base, to
-  different values: {:conflicts [{:key [:datum e a] or [:datum e a v], :entity its name (`named`), :base :ours :theirs}]}, nothing
-  applied; :ours is into-db's, :theirs from's (git's words merging from into into-db), a value (cardinality one) or whether the [e a v]
-  is held. A conflict into-db decided (its entry resolved, my.branch/resolve!, while from still holds the entry's theirs) is no
-  conflict: into-db's value stands. Clean: {:settled keys :settle-ops (retracting their entries on into-db) :txs (from's source
-  transactions, the settled keys left out, replayable onto into-db)}. Costs O(d), d the facts from changed: one seek a key on each of
-  three dbs. See docs/merging.md#a-branch-merges-main-in."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:or [:map [:conflicts [:vector :seon.merge/conflict]]] [:map [:txs [:vector [:map [:source :int] [:ops :seon.db/tx-data]]]]]]]}
-  [base from into-db]
-  (let [{:keys [fs k-of k0s ref? to-into op]} (mapped base from into-db)
+  "The one merge of main into branch, decided over the branch's facts since base (`mapped`: its entities as main's of the same
+  identity), and at each [e a] they touch (each [e a v] of a cardinality-many attribute) the values base, main and the branch hold: a
+  conflict is a key both sides changed since base, to different values, and only the branch's keys can be one, so it costs O(d), d
+  what the branch changed, never main's churn (one seek a key on each of three dbs). {:conflicts [{:key [:datum e a] or [:datum e a v]
+  as the branch names it (its entries' key), :entity its name (`named`), :base :ours :theirs}]}, :ours the branch's, :theirs main's
+  (git's words merging main into the branch), a value (cardinality one) or whether the [e a v] is held, nothing applied. A conflict the
+  branch decided (its entry resolved, my.branch/resolve!, while main still holds the entry's theirs) is no conflict: the branch's value
+  stands. Clean: {:settled keys :settle-ops (retracting those entries)}. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:or [:map [:conflicts [:vector :seon.merge/conflict]]] [:map [:settled [:set :any]] [:settle-ops :seon.db/tx-data]]]]}
+  [base branch main]
+  (let [{:keys [fs k-of k0s ref? to-into]} (mapped base branch main)
         at (fn [db [_ e a v :as k]] (if (= 4 (count k)) (some? (first (d/datoms db :eavt e a v))) (:v (first (d/datoms db :eavt e a)))))
-        ;; from's value read where from holds it, a ref as into-db's entity
-        at-from (fn [k] (let [[_ _ a :as k0] (k0s k) v (at from k0)] (if (and (ref? a) (number? v)) (to-into v) v)))
-        name-of (fn [e] (let [n (named into-db e)] (if (= n e) (named from e) n)))
-        held (into {} (map (juxt :key identity)) (entries into-db))
-        decided? (fn [k f] (when-let [en (held k)] (and (:resolved? en) (= f (:theirs en)))))
+        ;; the branch's value read where the branch holds it, a ref as main's entity
+        at-branch (fn [k] (let [[_ _ a :as k0] (k0s k) v (at branch k0)] (if (and (ref? a) (number? v)) (to-into v) v)))
+        name-of (fn [e] (let [n (named branch e)] (if (= n e) (named main e) n)))
+        held (into {} (map (juxt :key identity)) (entries branch))
+        decided? (fn [k0 i] (when-let [en (held k0)] (and (:resolved? en) (= i (:theirs en)))))
         judged (for [k (into (sorted-set-by #(compare (pr-str %1) (pr-str %2))) (map k-of) fs)
-                     :let [b (at base k) i (at into-db k) f (at-from k)]
+                     :let [k0 (k0s k) b (at base k) i (at main k) f (at-branch k)]
                      :when (and (not= b i) (not= b f) (not= i f))]
-                 [(decided? k f) (cond-> {:key k :entity (name-of (second k))}
-                                   (some? b) (assoc :base b) (some? i) (assoc :ours i) (some? f) (assoc :theirs f))])
+                 [(decided? k0 i) (cond-> {:key k0 :entity (name-of (second k0))}
+                                    (some? b) (assoc :base b) (some? f) (assoc :ours f) (some? i) (assoc :theirs i))])
         conflicts (vec (keep (fn [[d c]] (when-not d c)) judged))
         settled (into #{} (keep (fn [[d c]] (when d (:key c)))) judged)]
     (if (seq conflicts)
       {:conflicts conflicts}
       {:settled settled
        ;; the entries it decides settle: none stays on the merged value
-       :settle-ops (vec (for [e (entry-eids into-db) :when (settled (:seon.merge/key (d/entity into-db e)))] [:db/retractEntity e]))
-       :txs (by-tx (remove #(settled (k-of %)) fs) op)})))
+       :settle-ops (vec (for [e (entry-eids branch) :when (settled (:seon.merge/key (d/entity branch e)))] [:db/retractEntity e]))})))
 
 (defn carry
   "From's own change since base as transactions replayable onto into-db (`mapped`: its entities as into-db's of the same identity), and
@@ -847,3 +846,17 @@
                 (for [[kind v] (:remove (program/diff-plan db-from db-to)) :when (= :var kind)
                       dt (d/datoms db-to :avet :form/refs v) :when (program/live? db-to (:e dt))]
                   {:ref v :form (:form/id (d/entity db-to (:e dt)))}))))
+
+(defn merge-record
+  "What a merge of main into a branch moved for the branch, as datoms of merged's last transaction: main's change since the base
+  ([gone added], changed-datoms) at every key the branch never touched, as main recorded it, and the change between head and merged
+  read on both sides (`change-record`) at the keys it did touch and the entities it re-identified, deleted or settled whole. Exact by
+  net presence (seon.merge-test/a-merge-states-what-main-moved-for-the-branch); costs main's records once and O(what the branch
+  touched) seeks, never both values whole. A transaction's own facts are left out. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:tuple [:sequential :any] [:sequential :any]] [:sequential [:tuple :int :keyword]] [:sequential :int]] [:vector :any]]}
+  [head merged [gone added] touched whole]
+  (let [t (:max-tx merged) touched (set touched) whole-set (set whole) txe (into #{} (map :tx) (concat gone added))]
+    (into (change-record head merged (vec touched) (vec whole) t)
+          (for [[added? dts] [[false gone] [true added]] dt dts
+                :when (and (keyword? (:a dt)) (not (txe (:e dt))) (not (touched [(:e dt) (:a dt)])) (not (whole-set (:e dt))))]
+            (datahike.datom/datom (:e dt) (:a dt) (:v dt) t added?)))))

@@ -227,8 +227,8 @@
           into-db txs))
 
 (defn merge-main-into
-  "Main merged into branch b on main's program. Decided by seon.merge/decide (main's facts since the base against the branch's at the
-  same keys): a conflict writes only its unmerged entries. Clean: the branch's own change since the base carried onto main's head
+  "Main merged into branch b on main's program. Decided by seon.merge/decide (the branch's facts since the base against main's at the
+  same keys, O(what the branch changed)): a conflict writes only its unmerged entries. Clean: the branch's own change since the base carried onto main's head
   (seon.merge/carry, replayed through the write check, `replay`: O(what the branch changed), never main's churn replayed), its decided
   entries settled and its moved tasks' cites made again, and one force-branch! onto b with both parents, stating its change against the
   branch head it replaces (seon.merge/change-record: what main moved for this branch, at the keys either side touched), so a reader on
@@ -240,7 +240,7 @@
         base (pdb/branch-base conn main-b b)
         ;; nothing to merge when the branch's base is main's head (a resume with main unmoved): nothing decided
         same? (and (not (contract/error? base)) (= (d/commit-id base) (d/commit-id main)))
-        r (when-not (or same? (contract/error? base)) (pm/decide base main head))
+        r (when-not (or same? (contract/error? base)) (pm/decide base head main))
         c (when (and r (not (:conflicts r))) (pm/carry base head main))
         meta (pdb/tx-meta b {:seon.tx/merged main-b})
         replayed (when c (replay main head (:txs c) meta))]
@@ -253,9 +253,8 @@
       (contract/error? replayed) replayed
       :else
       (let [[gone added] (pm/changed-datoms base main)
-            ;; the keys either side touched: the branch's carried facts and main's change since the base
-            ks (vec (distinct (concat (for [{:keys [ops]} (:txs c) [o e a] ops :when (not= :db/retractEntity o)] [e a])
-                                      (for [dt (concat gone added) :when (keyword? (:a dt))] [(:e dt) (:a dt)]))))
+            ;; the keys the branch touched (its carried facts): only these can differ from main's change, so only these are read on both sides
+            ks (vec (distinct (for [{:keys [ops]} (:txs c) [o e a] ops :when (not= :db/retractEntity o)] [e a])))
             ;; a merged task's cites are derived from its text: made again here, never carried (seon.task/merged-cites-tx)
             settled (pdb/with replayed (:settle-ops r) nil meta)
             cites (task/merged-cites-tx (:db-after settled) (mapv (fn [[e a]] [:datum e a]) ks))
@@ -264,7 +263,7 @@
             whole (distinct (concat (mapcat identity (:remapped c))
                                     (for [{:keys [ops]} (:txs c) [o e] ops :when (= :db/retractEntity o)] e)
                                     (map second (:settle-ops r))))
-            ds (pm/change-record head merged (concat ks (for [[_ e a] cites :when (keyword? a)] [e a])) whole (:max-tx merged))
+            ds (pm/merge-record head merged [gone added] (into ks (for [[_ e a] cites :when (keyword? a)] [e a])) whole)
             cid (d/force-branch! merged b #{(d/commit-id head) (d/commit-id main)}
                                  {:expected-current-commit (d/commit-id head) :changes {:base (d/commit-id head) :datoms ds}})]
         {:ok true :commit cid :keys (count ks) :t (:max-tx merged) :main (d/commit-id main)}))))

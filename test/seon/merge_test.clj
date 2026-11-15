@@ -629,7 +629,7 @@
   "What the writer's merge of main into the branch head makes, from base b0 (seon.merge/decide, then the branch's change carried onto main, seon.merge/carry and seon.writer/replay): {:conflicts},
   {:refused} with the replay's typed refusal, or {:db} the merged value."
   [b0 head main]
-  (let [r (pm/decide b0 main head)]
+  (let [r (pm/decide b0 head main)]
     (if (:conflicts r)
       r
       (let [db (seon.writer/replay main head (:txs (pm/carry b0 head main)) {})]
@@ -827,9 +827,8 @@
         {:keys [db]} (merged-of b0 head main)
         [gone added] (pm/changed-datoms b0 main)
         c (pm/carry b0 head main)
-        ks (distinct (concat (for [{:keys [ops]} (:txs c) [o e a] ops :when (not= :db/retractEntity o)] [e a])
-                             (for [dt (concat gone added) :when (keyword? (:a dt))] [(:e dt) (:a dt)])))
-        ds (pm/change-record head db ks (mapcat identity (:remapped c)) (:max-tx db))
+        ks (distinct (for [{:keys [ops]} (:txs c) [o e a] ops :when (not= :db/retractEntity o)] [e a]))
+        ds (pm/merge-record head db [gone added] ks (mapcat identity (:remapped c)))
         ;; the facts of a value by net presence, transactions' own facts left out
         facts (fn [v] (into #{} (comp (remove #(seq (d/datoms v :eavt (:e %) :db/txInstant))) (map (juxt :e :a :v))) (d/datoms v :eavt)))
         [h m] [(facts head) (facts db)]
