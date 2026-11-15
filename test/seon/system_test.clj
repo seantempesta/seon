@@ -799,3 +799,29 @@
     (is (nil? (holder (st :spawning nil false) {:key "k1" :branch :b})) "nor a :spawning entry with no process and no caller waiting")
     (is (= :k1 (holder (st :idle 4242 false) {:key "k1" :branch :b})) "a live agent with its process holds its branch")
     (is (= :k1 (holder (st :spawning nil true) {:key "k1" :branch :b})) "and a spawn still answering its caller holds it")))
+
+;; Estimate: one empty store made and dropped (~1M ticks) and two calls of prove-candidate! over stubs; 3,000,000
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-gates-agent-ends-with-its-answer
+  ;; docs/merging.md#the-merge-gate: the gate proves the candidate's own branch (prove-candidate!), spawning an agent onto it when none
+  ;; is live; that agent ends once the run answers, so the task's next attach finds its branch free; a live agent it found is left
+  ;; alone. Red before: data, 2026-11-16 00:4x, the pilot's gate left o12c0c0c2d70f9bf live on its branch and every seon_attach of the
+  ;; task was refused. The spawn, the run and the kill are stubbed: what is proved is which agent ends
+  (let [path (str (seon.config/checkout) "/target/tmp/gate-agent-" (random-uuid))
+        cfg (pdb/store-cfg :file path)
+        _ (d/create-database cfg)
+        c (pdb/connect cfg)
+        sys {:graph nil :ext (clojure.core.async/chan) :conn c}
+        run (fn [agents]
+              (let [killed (atom [])
+                    r (with-redefs [root/state (fn [_] {:agents agents})
+                                    root/spawn! (fn [_ _] :o-gate)
+                                    root/prove! (fn [_ ref _ _ _] (doto (promise) (deliver {:green true :branch (:branch ref)})))
+                                    root/kill! (fn [_ ag] (swap! killed conj ag) nil)]
+                        (root/prove-candidate! sys {:candidate :task-x :checkout "/c" :tree "t" :names ['a/t]}))]
+                [r @killed]))]
+    (try
+      (let [[r killed] (run {})]
+        (is (= {:green true :branch :task-x} r) "the run's answer is the gate's")
+        (is (= [:o-gate] killed) "the agent it spawned ends with the answer"))
+      (is (= [] (second (run {:o-live {:branch :task-x :status :idle}}))) "a live agent of the branch is left running")
+      (finally (d/release c) (seon.lib/remove-tree! path)))))
