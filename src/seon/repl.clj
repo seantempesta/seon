@@ -1350,13 +1350,14 @@
   docs/flow.md#flow-inside-an-agent."
   {:malli/schema [:=> [:cat :map :any [:maybe :seon.host/throwable]] :nil]}
   [st end e]
-  ;; the eval that started the run, recorded now (eval-string held it), under the turn in force at its end
-  (when-let [rec! (get-in st [:run :record])] (rec!))
+  ;; the eval that started the run, recorded now (eval-string held it), under the turn in force at its end: its response as recorded
+  ;; (its :text, which an outside caller reads, seon.server's :done) is the reply's, with the run's end as its value
+  (let [resp (if-let [rec! (get-in st [:run :record])] (rec!) (:resp st))]
   (when (:dirty? @agent/state) (agent/commit!))
   (swap! agent/state assoc :busy false)
   (agent/send! {:op :reply :id (:rid st)
-                :response (agent/on-the-wire (if e (-> (:resp st) (dissoc :value) (assoc :ex (agent/error-map e 'seon.turn/work!))) (assoc (:resp st) :value end)))
-                :t (:max-tx (agent/db))})
+                :response (agent/on-the-wire (if e (-> resp (dissoc :value) (assoc :ex (agent/error-map e 'seon.turn/work!))) (assoc resp :value end)))
+                :t (:max-tx (agent/db))}))
   nil)
 
 (defn- drive-run

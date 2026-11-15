@@ -136,7 +136,7 @@
   them: a session's next task has a boot unchanged but a start time that moved). Not its
   :seon.agent/branch as root observes it (seon.task/agent-tx writes that too, under the store's name for the branch). Asked inline, once per
   datom of a move: a contracted call each would make a move cost its datoms in calls (seon.render-cost-test/a-move-of-main-costs-what-moved). See docs/reconcile.md#the-reconcilers-index."
-  #{:seon.agent/boot :seon.agent/started-ms})
+  #{:seon.agent/boot :seon.agent/started-ms :seon.agent/ended-ms})
 
 (def park-outcomes
   "An agent's own ends that park its session instead of ending it (docs/turn.md#parked): a
@@ -293,7 +293,10 @@
         ;; started in this boot's root: it is live while it works, its process is parked while it waits, and stays until
         ;; its task is cancelled or held (docs/turn.md#parked)
         here? (and t (= (:boot (:root idx)) (:seon.agent/boot a)))
-        live? (and here? (= :running o))
+        ;; its process ended after it started (a test ended its outside agent, an attach's process died): no work is under way, so
+        ;; it holds no quiet; reaped :lost, typed (an end from the session's earlier process, before this start, is no end of it)
+        ended? (when-let [e (:seon.agent/ended-ms a)] (>= e (:seon.agent/started-ms a 0)))
+        live? (and here? (= :running o) (not ended?))
         parked? (and here? (= :parked o))
         env (:seon.agent/env a)
         kill (cond
@@ -867,7 +870,13 @@
                ;; the session's agent continues (docs/turn.md#parked); kept on the flight for its start
                (one (request (cond-> st k (assoc-in [:flights id :key] k)) id :spawned
                              {:op :spawn :opts (cond-> {:branch (get-in act [:env :branch]) :task id} k (assoc :key k))})))
-      :reap (one (write st id :done (into (task/move-tx id :running :lost {:seon.task/reason "root restarted"}) (ended-ms-tx db id now))))
+      :reap (let [a (get-in st [:idx :agents (get-in st [:idx :tasks id :seon.task/agent])])
+                  ended? (and (= (:boot (:root (:idx st))) (:seon.agent/boot a)) (:seon.agent/ended-ms a))
+                  why (if ended? "its agent ended with the task :running" "root restarted")]
+              (one (write st id :done (into (task/move-tx id :running :lost
+                                                          (cond-> {:seon.task/reason why}
+                                                            ended? (assoc :seon.task/error (contract/error :seon.reconcile/agent-ended-running #'seon.reconcile/start why {:task id}))))
+                                            (when-not ended? (ended-ms-tx db id now))))))
       ;; a judged task whose execution is no longer running: closed
       :close (one (write st id :done (task/move-tx id from :closed {})))
       ;; a live task, or a parked one (its process idle) whose task was cancelled or held
@@ -1094,7 +1103,17 @@
                              [st [o1 o2]]))]
     (case step
       :ignored [st []]
-      :done (done st)
+      ;; the flight's last write; refused, the task is still :running with no flight, live for good: never a silent end
+      ;; but the reconciler's :platform problem, which a wait on the task reads (seon.system/defect), and its waiter is answered (answer-judged)
+      ;; a task cancelled or held while its flight ran (execution no longer :running) refuses that write by design: its cas met
+      ;; the move, and the task is not stuck
+      :done (if (and (contract/error? r) (= :running (:seon.task/execution (d/entity (:db st) [:seon.task/id id]) :running)))
+              [(update st :flights dissoc id)
+               [{:op :problem :class :platform
+                 :error (contract/error :seon.reconcile/write-refused #'seon.reconcile/advance
+                                        (str "the last write of " id "'s flight was refused, so its task stays " (name (or (:seon.task/outcome (d/entity (:db st) [:seon.task/id id])) :running)) ": " (:seon.error/message r))
+                                        {:task id :refused r})}]]
+              (done st))
       :dead-read (one (write st id :done (dead-tx st id (:died f) (let [k (:key (agent-of (:db st) id))] (when (and k (:db r)) (pull-end (:db r) k))))))
       ;; root answers a spawn at its agent's hello, or at the end the agent met first: a death,
       ;; a failed spawn or a stop (each names the agent) is this task's death, its start
@@ -1180,7 +1199,10 @@
       ;; the merged members' namespaces that are Seon's own source are written back: main's
       ;; files after the octopus merge, committed on the merges branch (:git), the sha recorded on
       ;; each merged task (the self-improvement loop: the next generation builds it)
-      :octopus-merged (let [merged (keep (fn [[m x]] (when (:merged? x) [m x])) (map vector (:members act) (:results r)))
+      :octopus-merged (let [;; an error answer (the writer's step threw, answered at the request's :dest) is every member's: each moves off
+                            ;; :ready as a refused merge does, never left :ready for its seon_done to wait on and the next pass to merge again
+                            results (if (contract/error? r) (repeat (count (:members act)) r) (:results r))
+                            merged (keep (fn [[m x]] (when (:merged? x) [m x])) (map vector (:members act) results))
                             paths (vec (sort (distinct (mapcat (comp :files second) merged))))
                             back? (and (:source st) (seq paths) (cfg/value :seon.config.source/write-back-on-merge))]
                         (one (write (cond-> st back? (assoc-in [:flights id :writeback] {:files paths :members (vec (for [[m x] merged :when (seq (:files x))] m))}))
@@ -1203,7 +1225,7 @@
                                                        (task/move-tx task :ready :behind {:seon.task/reason (:seon.error/message r) :seon.task/error r})
                                                        :else (hold-tx (:db st) task (task/move-tx task :ready :closed {:seon.task/reason problem :seon.task/error r})
                                                                       problem {:conflicts (:seon.task/conflicts t) :unmerged (:seon.task/unmerged t)}))))
-                                                 (:members act) (:results r))
+                                                 (:members act) results)
                                          ;; the live agents of the tasks a merged one unblocks are told, in this write, which wakes each
                                          ;; (seon.task/landed-tx; plan Stage 1.8)
                                          (task/landed-tx (:db st) (mapv (comp :task first) merged) (System/currentTimeMillis)))))))
@@ -1383,6 +1405,42 @@
         [st more] (if (and aid (not (get-in st [:flights aid])) (:db st)) (pass st) [st []])]
     [st (into outs more)]))
 
+(defn settled?
+  "Whether task id's work is judged on db, so a wait on its judge (seon_done) answers: its outcome left :running and :ready, or
+  it is at :gate with no process test deferred (its merge, minutes at most). The one rule a judge's waiter reads. See
+  docs/server.md#ops."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] :boolean]}
+  [db id]
+  (let [{o :seon.task/outcome ts :seon.task/deferred} (d/pull db [:seon.task/outcome :seon.task/deferred] [:seon.task/id id])]
+    (not (or (contains? #{:running :ready} o) (and (= :gate o) (empty? ts))))))
+
+(defn- answer-judged
+  "st with each wait on a task's judge (:judged, {task [promise]}) answered once the task has no flight: {:task :outcome} when it
+  is settled?, the typed :seon.reconcile/judge-left-running when its flight ended and left it :running (nothing of root's will
+  move it); a task at :ready waits on, its merge to come as commits, until root is quiet with it unmerged
+  (:seon.reconcile/judge-left-ready): no octopus merge flying and no live merge task. Asked after every step, so the producer's own end answers
+  its waiter, never a quiet of the whole root. O(waits)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
+  (if (or (empty? (:judged st)) (nil? (:db st)))
+    st
+    (reduce-kv (fn [st id ps]
+                 (if (get-in st [:flights id])
+                   st
+                   (let [o (:seon.task/outcome (d/pull (:db st) [:seon.task/outcome] [:seon.task/id id]))
+                         r (cond (settled? (:db st) id) {:task id :outcome o}
+                                 (= :running o) (contract/error :seon.reconcile/judge-left-running #'seon.reconcile/answer-judged
+                                                                (str id "'s judge ended and left it :running: nothing root runs will move it") {:task id})
+                                 ;; :ready (or :gate with nothing deferred) waits for its merge, until nothing will merge it: this step's pass
+                                 ;; ran first and starts an octopus merge whenever no merge is in flight, so with no octopus merge flying and no
+                                 ;; live merge task, none is coming for it (scoped to merging, never to every agent's work: flow's review)
+                                 (and (not-any? #(= :octopus-merge (get-in % [:act :op])) (vals (:flights st)))
+                                      (not (some (:live (:idx st)) (:merging (:idx st)))))
+                                 (contract/error :seon.reconcile/judge-left-ready #'seon.reconcile/answer-judged
+                                                 (str id " is " (name o) " and no merge of it is in flight or coming") {:task id :outcome o}))]
+                     (if r (do (doseq [p ps] (deliver p r)) (update st :judged dissoc id)) st))))
+               st (:judged st))))
+
 (defn reconciler-proc
   "The reconciler. In :main (main's commit notices {:t :prev :ops :commit}, in order, a blocking buffer; it makes the db of the commit when it takes the notice), :answers (the
   api's answers to its requests) and :wake ({:agent key}: a message reached that agent, written by root's writer and answered; the api puts one
@@ -1391,7 +1449,7 @@
   Starts deepest-first (finish chains under way)."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:boot "root's boot id"
-                :judge "outside agents' tasks to judge {:op :judge :task :env :agent}, and waits on main {:op :quiet :after t :p promise}, each answered at the first quiet at or after t (external; seon.system/await-db)"}
+                :judge "outside agents' tasks to judge {:op :judge :task :env :agent :p}, answered at the judge's end (answer-judged), a wait on a judge {:op :judged :task :p}, and waits on main {:op :quiet :after t :p promise}, each answered at the first quiet at or after t (external; seon.system/await-db)"}
        :ins {:main "main's commits" :answers "the api's answers" :wake "an agent a message reached, {:agent key}"} :outs {:to-api "requests"}
        :workload :io
        :ping-map-fn (fn [st] {:seen (:seen st 0) :lists (:lists st 0) :t (:t st) :flights (count (:flights st))
@@ -1399,13 +1457,17 @@
                               :flight-steps (into (sorted-map) (for [[id f] (:flights st)] [id (or (:step f) (get-in f [:act :op]))])) :pending (count (:pending st)) :behind (count (:behind st))
                               :quiet (boolean (:quiet st)) :root-causes (count (:root-causes (:quiescent st)))
                               ;; the waits on main it holds ({:after t}) and its quiet report's write until answered: what a parked await-db waits on
-                              :waits (mapv :after (:waits st)) :report (:report st) :live (count (:live (:idx st)))})})
-  ([args] (assoc (dissoc args :judge) :seen 0 :rid 0 :flights {} :pending {} :waits [] :behind []
+                              :waits (mapv :after (:waits st)) :report (:report st) :live (count (:live (:idx st)))
+                              ;; the tasks whose judge a caller waits on (seon_done): answered at each one's end
+                              :judged (vec (sort (keys (:judged st))))})})
+  ([args] (assoc (dissoc args :judge) :seen 0 :rid 0 :flights {} :pending {} :waits [] :judged {} :behind []
                  ::flow/in-ports {:judge (:judge args)}))
   ;; a stop answers every wait still held: root stopped, nothing will answer it
   ([st transition]
    (if (= transition ::flow/stop)
-     (do (doseq [w (:waits st)] (deliver (:p w) {:stopped true})) (assoc st :waits []))
+     (do (doseq [w (:waits st)] (deliver (:p w) {:stopped true}))
+         (doseq [ps (vals (:judged st)) p ps] (deliver p {:stopped true}))
+         (assoc st :waits [] :judged {}))
      st))
   ([st in m]
    (case in
@@ -1440,14 +1502,18 @@
                  [st outs] (reduce (fn [[st outs] a] (let [[st more] (take-answer st a)] [st (into outs more)]))
                                    [(update st :behind (fn [as] (filterv #(behind? st %) as))) outs]
                                    (remove #(behind? st %) (:behind st)))]
-             [(answer-waits st) {:to-api (into [{:op :stat :k :main-seen-us :v (/ (- (profile/now-ns) (:ns m)) 1000.0)}] outs)}])
+             [(answer-judged (answer-waits st)) {:to-api (into [{:op :stat :k :main-seen-us :v (/ (- (profile/now-ns) (:ns m)) 1000.0)}] outs)}])
      ;; a wait on main (:op :quiet): answered now if the reconciler is quiet past its :after,
      ;; else held. Otherwise an outside agent handed its run back: judged as a turn loop's end is
      :judge (case (:op m)
               :quiet [(answer-waits (update st :waits (fnil conj []) (select-keys m [:after :p]))) {}]
+              ;; a wait on task's judge with no judge handed it now: answered at once when its task has no flight
+              :judged [(answer-judged (update-in st [:judged (:task m)] (fnil conj []) (:p m))) {}]
               :judge (let [{:keys [task env agent]} m
-                  ;; a flight: the quiet spell ends, and a wait behind this judge waits for it
-                  st (-> st (assoc-in [:flights task] {:act {:op :spawn :task task :env env} :agent agent}) (assoc :quiet false))
+                  ;; a flight: the quiet spell ends; its caller's wait (:p) is the flight's from the step that starts it, so no
+                  ;; window opens between the judge and the wait (answer-judged answers it when the flight ends)
+                  st (cond-> (-> st (assoc-in [:flights task] {:act {:op :spawn :task task :env env} :agent agent}) (assoc :quiet false))
+                       (:p m) (update-in [:judged task] (fnil conj []) (:p m)))
                   [st o] (request st task :tested {:op :judge :id agent})]
               [st {:to-api [o]}]))
      ;; a message reached an agent (the api, once the writer answered its commit): woken if it waits, else held until it parks (wake).
@@ -1456,10 +1522,10 @@
              (let [idx (wake (:idx st) (:db st) (:agent m))
                    st (cond-> (assoc st :idx idx) (not= (:woken idx) (:woken (:idx st))) (assoc :quiet false))
                    [st outs] (pass st)]
-               [(answer-waits st) {:to-api outs}])
+               [(answer-judged (answer-waits st)) {:to-api outs}])
              [st {}])
      ;; an answer to a write main has not reached waits for main's commit of it (taken by :main)
      :answers (if (behind? st m)
                 [(update st :behind conj m) {}]
                 (let [[st outs] (take-answer st m)]
-                  [(answer-waits st) {:to-api outs}])))))
+                  [(answer-judged (answer-waits st)) {:to-api outs}])))))
