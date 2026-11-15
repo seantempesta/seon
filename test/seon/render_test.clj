@@ -4732,18 +4732,27 @@
   (let [a (get (d/schema (ts/test-db)) :seon.user/focus)]
     (is (= :db.type/ref (:db/valueType a)) "an optional ref on the user")))
 
-(deftest opening-an-agents-page-writes-the-signed-in-users-focus
+;; Estimate: one render-proc :views step on a paged fixture (its build ~1.5M) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} opening-a-page-writes-no-focus
+  ;; docs/decisions.md, The page is a friendly chat (2026-11-15): the person's place changes only when they tap an offer; a tab opening a
+  ;; page writes nothing (it wrote the focus before)
   (let [[main branch _] (paged-dbs)
         st (assoc (proc-state (signed-in-main main nil) branch) :watch #{:root})
-        txs (fn [outs] (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= [:focus] (:tag %)) (:to-api outs)))))
-        [st1 o1] (#'p/render-proc st :from-web {:op :views :views #{:root :a3} :tabs 1})]
-    (is (= [[:db/add [:seon.user/name "sean"] :seon.user/focus [:seon.agent/key "a3"]]] (txs o1)) "the agent's page is the focus")
-    (let [st2 (assoc st :main-db (signed-in-main main "a3") :watch #{:root :a3})
-          [_ o2] (#'p/render-proc st2 :from-web {:op :views :views #{:root :a3} :tabs 2})]
-      (is (empty? (txs o2)) "written only when it changes")
-      (let [[_ o3] (#'p/render-proc st2 :from-web {:op :views :views #{:root :a3 :home} :tabs 2})]
-        (is (= [[:db.fn/retractAttribute [:seon.user/name "sean"] :seon.user/focus]] (txs o3)) "opening home retracts it")))
-    (is (some? st1))))
+        writes (fn [outs] (filter #(= :write (get-in % [:req :op])) (:to-api outs)))
+        [_ o1] (#'p/render-proc st :from-web {:op :views :views #{:root :a3} :tabs 1})]
+    (is (empty? (writes o1)) "an agent's page opened: no write")))
+
+;; Estimate: one offer value drawn by its schema's render ~ 200,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 200000}} an-offer-is-a-button-that-writes-only-when-tapped
+  ;; docs/decisions.md, The page is a friendly chat: an agent offers the person a place (my.user/focus!), a value that draws itself as a
+  ;; button by its schema's render; the tap calls seon.system/focus! (the person's web state) and, once it answers, opens the place
+  (let [offer (with-meta {:seon.user/place [:seon.agent/key "a3"] :seon.user/label "Open the test results"} {:seon.render/schema :seon.user/offer})
+        html (h/html (r/hiccup {:seon.render/index (seon.db/index)} offer))]
+    (is (str/includes? html "Open the test results") "the label is the button's words")
+    (is (str/includes? html "<button") "a button")
+    (is (str/includes? html "seon.system%2Ffocus%21") "its action is the focus! call")
+    (is (str/includes? html "location.href") "and, once it answers, the place opens")
+    (is (str/includes? html "/agent/a3") "the place's page")))
 
 ;; Estimate: 3 location reads on a paged fixture (its build ~1.5M) ~ 2,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 2000000}} home-is-roots-chat-whatever-the-focus
