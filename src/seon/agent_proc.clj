@@ -188,6 +188,9 @@
                                                                 "root's interrupt (SIGUSR1) does not reach this agent: its handler did not run at boot, so a runaway eval can only be killed" {})}))
                  ;; its program did not load: main's as it was forked (seon.fork-server/stood), or its branch's where it resumed; each failure
                  ;; a recorded problem of this agent, so no agent starts without its program silently
+                 ;; its branch's merge base was swept (docs/storage.md#collection): it runs main's program, and the lost base is its problem, as typed
+                 (when-let [e (:seon.db/no-merge-base m)]
+                   (step/out! o :to-api {:op :problem :class :agent :agent id :error e}))
                  (doseq [{:keys [ns message form lead]} (:load-errors m)]
                    (step/out! o :to-api {:op :problem :class :agent :agent id
                                          :error (contract/error :seon.agent/load-failed #'seon.agent-proc/agent-frame
