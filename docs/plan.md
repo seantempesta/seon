@@ -118,47 +118,49 @@ integrating with main"): every turn syncs main down (cost O(d)); every green, co
 never batched; a code change loads live. The test is each branch's drift from main (time and changes since its last
 sync), shown on the dashboard: drift is a problem, not a merge-time surprise.
 
-### The order
+### The order (owner, 2026-11-15: approved as written)
 
-The order the areas work in now, each item with its owner; a later item starts when what it needs has landed.
-
-1. **Stage 0's merge.** "Main's reds" were on the agent's branch: merging main into it lost main's task lifecycle datoms
-   and kept callers of definitions main deleted. Data's one merge (`seon.merge/a-tasks-content-is-a-key-of-the-one-merge`) fixes it: it takes every
-   datom main wrote that the branch did not also change at the same entity and attribute, and only that conflict stops it
-   (owner: "Facts are facts at a certain tx time"); `carried-platform-attrs` and `carry-tx` are deleted; then context runs the first task's `seon_done` again, watched, alone. Main stays clean:
-   a red on main is its owner's first item.
-2. **Load within the machine:** proving goes through the one effects owner (`seon.fx/owner-proc`, a `:process` kind,
-   admission from the cores) and `bin/prove` becomes its client; per-checkout shard sizing goes (tests; runtime reviews).
-   Until it lands, no session starts a prove while the 1-minute load is over 18.
-3. **After boot, only Flow; nothing hangs** (owner: "once the flow system is up and running ... we must only use flow based systems for stateful processes. If we still have holdouts we need to port them"; runtime, the Flow specialist, ports every holdout: `seon.step/every-wait-past-a-bound-is-a-flow-message-from-the-one-timer`): every wait passes its declared bound and ends with `:seon.bound/reached` or a typed error:
-   the fork (deps), the model call and the stalled eval (runtime's deadline slice; context's turn records the stall). Seven
-   deadline mechanisms become this one.
-3a. **A process never runs a binary its branch doesn't name** (owner, 2026-11-14: "this shouldn't be possible"): a
-   binary's identity is the digest of what only a build can change (pins, `deps.edn`, native code, `bin/build`, shipped
-   schemas and config): a mismatch builds, once. Its program is a second identity, the branch's forms: at the one start
-   a process loads exactly the forms its binary's recorded program differs by (load-diff, O(d)), so it always runs its
-   branch's program, with no guess. "Current by reach" (`seon.system/stale-binary`,
-   `binary-current`'s reach) and `seon.problems/stale-binary`'s own check are deleted; `bin/land`, `bin/prove`,
-   `bin/update`, `restart-for` and the test service ask the one answer (deps, as `runtime-for`'s core; runtime reviews).
-4. **The reaction's core** (context builds it as one tip with its first production writer, the index and Reagent's
-   `reaction`/`track` over it; data reviews the schema; deps the recorder): the lazy-read gap and the
-   planner's two seeks recorded (deps); one stored index; the writer's commit datoms; the 8 `*reads* nil` bypasses removed.
-5. **Each area moves onto it, deleting its copy in the same landing** (in parallel):
-   - tests: verdict files, `.recent`, `reads.edn`, `:seon.test/*` facts, the two flaky judges; reuse is "no read key
-     moved". The static reach graph stays only for a test with no recorded reads, and goes in the landing whose mutation
-     proof shows recording is complete;
-   - web: the walk's `:readers`, the proc's `read-index`, `render-reach`, the reactive holder, the second drawer;
-   - context: status computed twice, turns derived twice, waste folded three ways, wire's second walk, `placed-messages`;
-   - data: the five "moved?" lists, the program's reach flags, the loaders, `:seon.task/cause`, the readers atom;
-   - runtime: the one catch-up (the `bin/land` bridge, `landed-tx`'s 6-arity, `import-of`'s pins, `my.root/import!`,
-     `load-changes!`/`load-diff!`, `restart-for`'s classes);
-   - deps: Datahike's search memo and q result cache, once reactions hold results.
-6. **Stage 0.6:** an agent's redefinition never breaks its own turn: deps routes only the vars a run redefines (Jolt), and
-   context's turn runs on it.
-7. **The backlog curated** before the next random round (context).
-
-Waits: the cost work (recorder with the cache on, merge cost, page search, konserve's read cost), W-3 and one drawer per
-page beyond what item 5 deletes, the hand-written lists class, `runtime-for`, `hold-env!` slice 2, the judge's re-index.
+Five milestones on one critical path, two tracks beside them. Each names its done-test and owners; a later milestone starts
+when what it needs has landed. Every piece first looks for the existing code that does its job, wires that up, and collapses
+the duplicates it finds (owner, 2026-11-15: "We already built a lot of this so it might just be refactoring and wiring up").
+1. **M1, verdicts mean what they say.** A run with a RED line or no result line fails (tests); a schema on an unarmed defn
+   makes no false green: the reach reads an "armed" fact, `:var/contract` stays (tests, data reviews); a recorded `q` records
+   its entity-bound reads (deps, Datahike); a test's ticks are its own fiber's work, then ticks judge again and every
+   `:overrun` waiver goes, each limit owned or removed (tests, deps); `:calls` is no cost dimension (web). **Done when:** a
+   mutation of any function a test reaches turns it red, and one digest gives one status across 10 runs at load.
+2. **M2, one agent change merges through Seon (Stage 0).** What each turn sent the model is stored as history, never
+   re-derived from collected commits (context); collection keeps every commit a reference attribute names, derived from the
+   schema (data); a conflicted merge records its entries (data); the end-to-end proof "an outside agent's src change merges
+   through `seon_done`" runs in every prove that reaches the path (context); the `:done` waits end on the judge's own end
+   (runtime). **Done when:** lb76 merges with no hand repair and the end-to-end proof is green on main.
+3. **M3, the test system as Flow** (Stage 1's first two safety items; owner: "all agents can request tests whenever they
+   want and it properly queues with flow. Focus on getting that not hacks"). An item is a test at its digest; one owner
+   queue; worker procs (warm-forked test children) pull; the `:process` owner admits workers from the cores and memory; a
+   death ends only its item; bounds come from ticks, quiescence and the peer's end, never the wall; verdicts are entities
+   with their read keys (read-keyed reuse). `bin/test` and `bin/prove` become thin clients. Deletes the up-front deal, the
+   per-list files, `bin/stalls`, `:seon.config.proofs/jobs` and per-session load checks (tests plans and builds; flow and
+   runtime review; runtime builds admission). **Done when:** three agents and two sessions prove at once with load within
+   the cores, and a typical change proves within 2x of Stage 1.5's lower bound.
+4. **M4, updates lose nothing** (Stage 1's third safety item). What a restart drops today (forked agents, the reconciler's
+   `:flights`, server promises) is held as facts, so a new root resumes it; a pin builds the next binary and switches to
+   it with agents re-attaching; the fork server loads only changed forms; a binary's identity has one computation
+   (runtime, deps). Deletes holds and the tree-compare stale-binary check. **Done when:** a pin lands during a watched
+   `seon_done` and it ends green.
+5. **M5, sessions work inside; git follows the store.** A pilot area (data and runtime, asked) attaches, edits through
+   the import hook, proves with `seon_prove` and merges with `seon_done` (no conflict and reached tests green merges with
+   no release: owner, 2026-11-15); the write-back moves git's main. Then every area. Deletes `bin/land`, the bridge,
+   worktrees and per-checkout systems. **Done when:** one area lands a week with no worktree and no `bin/land`.
+- **Track R, the reactive core goes live** (beside M2-M4): jolt/flow's per-owner queue lands; runtime's `advance!` and
+  owner step feed commits to stores in root, the fork server and each agent; then each area moves its change detection
+  onto it and deletes its own (render's read index first, then health, verdict reuse in M3, readiness, the model's request).
+  **Done when:** a commit reaches only the readers of what it moved, O(d), in production.
+- **Track E, estimating is automatic** (owner, 2026-11-15): the estimate is task data shown when missing and recorded
+  beside the measured cost at `seon_done`; a live canary makes a call past 10x its bound (or growing with the store when
+  its input did not) a problem on the agent's page with its profile; hot paths carry `:seon.cost/bound` (`docs/cost.md`),
+  ranked by measured cost; every `seon_eval` answer shows its cost beside its bound. Wired from what exists (web
+  inventories and plans; data, runtime, tests and context build a slice each).
+- **Track D, real rounds:** context drives deepseek agents on random backlog tasks now, filing every problem a run hits as
+  a task in its owner's namespace; merges count once M2 is in.
 
 ## Stage 0: one happy path (now)
 

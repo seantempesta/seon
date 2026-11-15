@@ -18,6 +18,34 @@ The owner's rulings on the morning after the first night run on its own.
 
 "Reflect on both your instructions, your agents instructions, how they faired and lets come up with documentation and task updates ... I think we learned a lot and I want to encode it into the wiki not just update the plan." Each lesson goes to the section that owns it: [clocks](clocks.md#two-kinds-of-wait), [merging](merging.md#a-merge-change-is-proved-on-a-real-branch), [cost](cost.md#what-is-measured), [sessions](sessions.md#the-managing-session), `AGENTS.md` §9; each problem left open is a task with its proof.
 
+### Work from inside the runtime
+
+"The mindset must be that we are transitioning away from claude agents being focused on building infrastructure that only works from the outside. The view of the system from the runtime should be the focus and seon agents working inside the system itself and claude agents using the internal systems via mcp repl and thin wrapper scripts." Also: "We are migrating away from the command line tools and the traditional offline build and run tests approach. Everything is moving to a runtime where the system forks and checks itself and we can even build a replacement binary and switch over to it. Mostly we should be able to just eval the latest code ... and the runtime tracks main." Stated in `AGENTS.md` §0 (five working rules) and §6.
+
+### The store is the source of truth; a clean, green branch merges by itself
+
+"We are moving away from git being the source of truth to it being the db and the internal updates get merged to git. Yes we still need hooks for your claude agents to update code on their branches." "Yes I want the auto merge behavior if there are no conflicts"; asked what a branch needs, he chose: no conflict and the tests its change reaches green, then it merges with no release. Stated in `AGENTS.md` §0 and [the plan](plan.md#the-order-owner-2026-11-15-approved-as-written) (M5).
+
+### The test system queues with Flow; no hacks
+
+"I want the test system we are trying to build where all agents can request tests whenever they want and it properly queues with flow. Focus on getting that not hacks." Asked about a load gate in the frozen scripts, he chose this instead. Stated in [the plan](plan.md#the-order-owner-2026-11-15-approved-as-written) (M3).
+
+### Every waiver goes; calls are no cost dimension
+
+"I do want to remove all the waivers and to either own the limits and tweak them until they work or remove them if we can't reliably measure them." On `:calls`, which counts every thread: drop it. Stated in `AGENTS.md` §3 step 2 and §3a.9.
+
+### No "shard": Flow's words and Flow's way
+
+"Can we stop using the term shard? Switch to proper flow terms and do things the flow way." Its words are worker, item and batch ([vocabulary](vocabulary.md#words-we-do-not-use)); its shape is M3.
+
+### Estimating is automatic, from what is built
+
+"Agents keep falling back to just writing the code as quickly as possible rather than doing proper algorithmic estimation ahead of time. We need to get them doing this without being prompted automatically ... Most ops end up being 100x or more inefficient and it doesn't require heroics or genius level coding it just requires repl driven deveopment and measuring and basic common sense." Then: "We already built a lot of this so it might just be refactoring and wiring up. Every agent doing all work needs to first look for existing code and not to just write another implementation. They are to collapse duplicate implementation too whenever they find them." He chose all four: the estimate as task data, a live cost canary, bounds on hot paths, and cost beside bound in every eval's answer. Stated in [the plan](plan.md#the-order-owner-2026-11-15-approved-as-written) (Track E).
+
+### Root fixes errors anywhere; the plan is A to B
+
+"You can and should fix all errors anywhere in the system. Distribute this work to expert agents as you need too." "We need a plan from where we are now A to where we want to go B. That's your job." The order he approved is in [the plan](plan.md#the-order-owner-2026-11-15-approved-as-written).
+
 ## 2026-11-14 rulings
 
 The owner's rulings of this day and the night before, each with his words where recorded and where it is now stated.
