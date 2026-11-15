@@ -426,13 +426,14 @@
 
 (defn- main-inputs-moved?
   "Whether a notice at program t pt brings main's run inputs other than the failed run's (:main-failed, {:program-t :binary}):
-  a newer program, or another binary than the one this proc runs on (:binary, the running binary's built identity, held since
-  its boot: a new binary is a new process, whose boot asks main again). Same inputs, same answer: a run that failed is never asked
-  again on them. See docs/merging.md#the-test-service."
+  a newer program. The binary is fixed for this process (a new binary is a new process, whose boot asks main again), so the
+  :binary the failure keeps (what its death named) is evidence, never an input compared: compared with this proc's :binary, a
+  target/seon rebuilt under a running root asked main again at every notice. Same inputs, same answer: a run that failed is never
+  asked again on them. See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :map :int] :boolean]}
   [st pt]
-  (let [{fpt :program-t fb :binary :as failed} (:main-failed st)]
-    (boolean (and failed (or (not= pt fpt) (not= fb (:binary st)))))))
+  (let [{fpt :program-t :as failed} (:main-failed st)]
+    (boolean (and failed (not= pt fpt)))))
 
 (defn- finish
   "Run k ended with answer r: every waiter answered once. A run answered green with nothing died is remembered under its
