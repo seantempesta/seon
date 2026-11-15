@@ -136,9 +136,4 @@ Proof: an agent whose change stales a section reads, in its status, each section
   :seon.task/kind :work
   :seon.task/proofs #{seon.ctx.status-test/the-status-names-each-reached-tests-claiming-task}
   :seon.task/estimate #:seon.ctx.status{status {:n 20, :order :linear, :ticks 5000000, :bytes 5000000}}}
- {:seon.task/name "an-agent-changes-the-program-only-at-its-repl"
-  :seon.task/plan "Found in round 2 (2026-11-15) [M result/cb745720, b059a5f7]: two agents wrote their changes as files under SEON_CHECKOUT (the main tree), which blocked every update and left a merge carrying a test without its fix, and defined scratch values (seon.test-store/ck2, drive, lib, proto, proto2) in a program namespace, which merged. The owner (12:0x): no guards or fences; good defaults and instructions steer agents. Decision (runtime and context, root to confirm): SEON_CHECKOUT stays main's for reads, config, git and the shell; docs/prompt.md says the program changes by evaluating definitions on the branch, a file written on disk is no part of it, code is read through lines/source and a script's :file/text, and scratch values go in a let or user. Completed by the prompt change."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.repl-test/the-template-instructions-and-the-help-page-run}
-  :seon.task/estimate {}}
 ]
