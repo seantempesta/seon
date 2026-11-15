@@ -415,6 +415,26 @@
     (is (= {1 true 2 true} (update-vals (answers o3) :green)) "both answered green from the one run")
     (is (= {} (:items st)) "and the item has left the service: its verdict is the cache's")))
 
+;; docs/merging.md#verdicts-are-a-cache: a batch's verdicts (its agent's :seon.proof tx-data) are written by the prove proc, one write
+;; a batch, never by the batch's agent; a results branch the store lacks is made from main, and the same write asked again.
+;; Estimate: one item asked, its batch ended, three answers stepped: 300,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-batchs-verdicts-are-written-by-the-prove-proc-once-a-batch
+  (let [vt [{:seon.proof/id "v1" :seon.proof/test 'app.x-test/t :seon.proof/status :pass}]
+        writes (fn [outs op] (filter #(= op (get-in % [:req :req :op])) (filter #(= :write (get-in % [:req :op])) (map unwrap outs))))
+        [st o1] (prove/ask-items (items-st 4) 1 :batch {['app.x-test/t "d1"] {:agent :a1 :ms 50}})
+        [st m] (step/answered st (:tag (first (batches o1))))
+        [st o2] (prove/batch-ended st (parse-long (second m)) (assoc (green-of 'app.x-test/t) :verdict-tx vt))
+        [w] (writes o2 :tx)]
+    (is (= vt (get-in w [:req :req :tx-data])) "the batch's verdicts, asked of the writer once")
+    (is (= (seon.config/value :seon.config.proofs/results-branch) (get-in w [:req :req :branch])) "on the results branch")
+    (let [[st k] (step/answered st (:tag w))
+          [st o3] (#'prove/answered st k {:seon.error/type :seon.writer/refused :seon.error/message "Database does not exist."})
+          [c] (writes o3 :clone-branch)
+          _ (is (= :db (get-in c [:req :req :from])) "a results branch the store lacks is made from main")
+          [st k2] (step/answered st (:tag c))
+          [_ o4] (#'prove/answered st k2 {:ok true})]
+      (is (= vt (get-in (first (writes o4 :tx)) [:req :req :tx-data])) "and the same write asked again"))))
+
 ;; an asker wants to know whether its tests pass: its first red answers it at once, and the work only it wanted is dropped
 (deftest ^{:seon.test/estimate {:ticks 200000}} a-red-answers-its-asker-at-once-and-drops-what-only-it-wanted
   ;; a red asker no longer waits on the rest: an item asked of the owner already ends with no one to answer, and one still

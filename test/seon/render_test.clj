@@ -1058,7 +1058,7 @@
   ;; the request the debug page shows on latest is the render proc's kept branch walk's model answers (seon.ctx.wire/render's :walk),
   ;; byte for byte the request a cold draw at the same head makes, so no pass builds the agent's ctx again
   (let [[main branch eid] (paged-dbs)
-        kw (#'p/branch-walk nil branch (d/entity main eid))
+        kw (#'p/branch-walk nil branch (d/entity main eid) #{:seon.render/hiccup :seon.render/openai-compat})
         basis {:agent "a3" :task "demo/f" :turn 3 :max-turns 9 :origin :model :commit (d/commit-id branch) :t (:max-tx branch)}
         cold (seon.ctx.wire/render branch basis)
         kept (seon.ctx.wire/render branch basis {:walk (:p kw)})]
@@ -1067,10 +1067,28 @@
     (testing "a move adds an eval the model output places first and the page then: it runs once, never once a placement"
       (let [branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key "a3"} "e9" (seon.task/sender "a3")
                                                             {:seon.eval/call (seon.task/call-ref "a3" 1) :seon.eval/code "(h)" :seon.eval/response {:handle 'result/e9 :value 1}}))
-            kw' (#'p/branch-walk kw branch' (d/entity main eid))
+            kw' (#'p/branch-walk kw branch' (d/entity main eid) #{:seon.render/hiccup :seon.render/openai-compat})
             runs (fn [f] (reduce + (for [[g l] (:ledger (:p kw')) :when (= (str g) (str f))] (+ (:miss l 0) (:same l 0)))))]
         (is (= 2 (runs `ui/evaluation)) "the new eval's component ran once a placement, the model's then the page's, never more")
         (is (some #(re-find #"e9" (str (:id %))) (:units (r/laid-out (:p kw')))) (str "and the page draws it: " (pr-str (mapv :id (:units (r/laid-out (:p kw')))))))))))
+
+;; See docs/render.md#a-page-is-a-kept-walk
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-chat-draws-no-model-request-only-a-debug-view-reads-it
+  ;; 2026-11-15 [M]: the render proc's kept branch walk drew the model's request for every watched agent, so root's chat cost
+  ;; 6.8B ticks and 35.8 GB a cold draw against its page's 163M, and the render proc held every page for 20+ minutes. The model's
+  ;; request is read only by a debug view's latest turn (seon.render.proc/debug-value): a branch's walk draws it only while one is open
+  (let [[main branch] (paged-dbs)
+        st (root-state (proc-state main branch) main)
+        model (fn [st] (get-in st [:branch-reads :task-demo-f :walk :p :answers :seon.render/openai-compat]))
+        [st1 _] (pass-view st [:chat :a3])]
+    (is (some? (get-in st1 [:branch-reads :task-demo-f :walk])) "the chat keeps the branch's walk")
+    (is (empty? (model st1)) "and the walk draws no model request for a chat")
+    ;; a debug view of the agent open (its branch recorded as ask-branches records it): the walk its latest turn reads draws the request
+    (let [st2 (-> st1 (update :watch conj [:debug :a3]) (assoc-in [:branches [:debug :a3] :branch] :task-demo-f))
+          outs (#'p/branch-outputs st2 :task-demo-f)
+          kw (#'p/branch-walk (get-in st1 [:branch-reads :task-demo-f :walk]) branch (d/entity main (eid-of main [:seon.agent/key "a3"])) outs)]
+      (is (contains? outs :seon.render/openai-compat) "a debug view open on the agent asks for the model's request")
+      (is (seq (get-in kw [:p :answers :seon.render/openai-compat])) "and the branch's walk, made again for it, draws it"))))
 
 ;; See docs/render.md#the-debug-page-is-the-wire-request
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-debug-move-draws-the-rows-it-added
@@ -3185,6 +3203,51 @@
     (is (str/includes? html "ticks measured / estimate") html)
     (is (str/includes? html "bytes measured / estimate"))
     (is (< (str/index-of html "ticks measured") (str/index-of html "bytes measured")) "in the verdict's order")))
+
+;; See docs/render.md#the-page
+;; Estimate: two prints of a report of one class of 100 short rows (~20 nodes a row, ~2k ticks a node): ~8M ticks; 20M.
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-shared-problems-report-shows-a-few-rows-a-class
+  ;; root's home page held 1.4 MB in its problems tile: every row of every class, ~11,400 lines [M, 2026-11-15]. A report no tab opened
+  ;; (root's tile, one walk for every tab) shows each class's first :seon.config.render/recent-errors rows and how many more; a tab
+  ;; that opened the class sees them all
+  (let [rows (vec (for [i (range 100)] {:producer nil :owner-ns nil :evidence {} :proofs [] :answered-by [] :at-ms i :message (str "row " i) :count 1}))
+        report {:t 1 :classes {:hand-written-list {:n 100 :rows rows}}}
+        k (seon.config/value :seon.config.render/recent-errors)
+        shared (h/html (ui/problems {:seon.render/index (seon.db/index)} report))
+        opened (h/html (ui/problems {:seon.render/index (seon.db/index)} (assoc report :open #{"pc-hand-written-list"})))]
+    (is (= k (count (re-seq #"row \d+" shared))) (str "a few rows: " (count (re-seq #"row \d+" shared))))
+    (is (str/includes? shared (str "+" (- 100 k) " more")) "and how many more, with the form that reads them")
+    (is (= 100 (count (re-seq #"row \d+" opened))) "a tab that opened the class sees them all")))
+
+;; See docs/render.md#the-page
+;; Estimate: three prints of one step; the opened ones highlight 100 KB of code (~50 ticks a char): ~10M ticks; 30M.
+(deftest ^{:seon.test/estimate {:ticks 30000000}} a-closed-steps-code-is-cut-by-its-budget
+  ;; root's home page was 10.7 MB, 9.2 of it in seven closed steps whose whole code (a landed file's text) was drawn inside their closed
+  ;; <details> [M, 2026-11-15]. Closed, a step's code is the printer's cut under :seon.config.render/form-budget, its output still drawn
+  ;; (opening shows it at once); opened (seon.system/opened!'s fact), whole; with no agent to record an opening (an example session), whole
+  (let [code (str "(+ 1 2) ;" (apply str (repeat 100000 "x")))
+        e {:seon.eval/id "e1" :seon.eval/code code :seon.eval/intent "Add."}
+        step (fn [ctx e] (h/html (#'ui/eval-step {:seon.ctx/ctx ctx} e)))
+        closed (step {:seon.agent/key "a1"} e)]
+    (is (< (count closed) 10000) (str "closed, its code cut: " (count closed) " bytes"))
+    (is (str/includes? closed "seon-print-elision") "and the cut says what it left")
+    (is (str/includes? closed "Add.") "its line says what it set out to do")
+    (is (< 100000 (count (step {:seon.agent/key "a1"} (assoc e :seon.eval/opened true)))) "opened, its code whole")
+    (is (< 100000 (count (step {} e))) "with no agent to record an opening, whole")))
+
+;; See docs/render.md#an-entity-may-name-its-own-render
+;; Estimate: two hiccup-to-html prints of a short stage (~50 nodes each, ~2k ticks a node): ~0.2M ticks; 1M.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-stage-whose-session-died-says-so
+  ;; the owner, 2026-11-15: "I just went to a session and typed hi and nothing is working": root's session had died at its start
+  ;; ("agent root closed its socket"), and the stage said "Working on it" under the message forever. A failed standing says what
+  ;; happened and that the words wait; a live one still says it works on it
+  (let [dead (ui/standing {:seon.agent/status :dead} {:seon.task/outcome :dead :seon.task/reason "agent root closed its socket and was ended by root: exit 1"})
+        live (ui/standing {:seon.agent/status :busy} {:seon.task/outcome :running})
+        html (fn [stands] (h/html [:div (#'ui/stage-now ["hi"] nil false [] 0 stands)]))]
+    (is (str/includes? (html dead) "died: agent root closed its socket") (html dead))
+    (is (str/includes? (html dead) "waits until it runs again"))
+    (is (not (str/includes? (html dead) "Working on it")) "a dead session never says it works on it")
+    (is (str/includes? (html live) "Working on it") "a live one does")))
 
 ;; See docs/render.md#how-the-work-stands
 (deftest ^{:seon.test/estimate {:ticks 2000000}} an-agents-standing-is-its-enums-words

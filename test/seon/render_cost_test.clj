@@ -47,9 +47,7 @@
                 "a node (its render; the serializer's write! of the call, the element, its text and its children's "
                 "seq; callback, write-attrs!, attr-name twice, escape for the attribute and the text)")
      :growth :linear
-     :per-n {:calls 11 :bytes (Math/round (bytes-of per-node))}
-     ;; html itself, the root's write! and its StringBuilder
-     :fixed {:calls 3}
+     :per-n {:bytes (Math/round (bytes-of per-node))}
      :sizes [100 300 1000 10000]}))
 
 (defn messages
@@ -78,8 +76,11 @@
      ;; 2026-11-10, step 2 (senders as refs): bound 170 -> 171 calls a message, the +1 the one call of seon.render/reference-value per
      ;; sender (a printed reference is its identity value); measured 3,657 at 20 and 10,497 at 60 (170.6 a message, 168 before). Ruled
      ;; by Point for the owner on 2026-11-10, awaiting his word. The +1 is the reference rule's own call, which no other fix removes: the ~200 calls a message of a one-key sender map were seon.render's hook path before that rule, and the printer alone shows no namespace cost (seon.print-cost-test/a-nested-maps-key-namespace-costs-nothing-more)
-     :per-n {:calls 171}
-     :fixed {:calls 260}
+     ;; 2026-11-15 (web, the owner's "Drop :calls"): the same work in ticks. ~171 contracted calls a message and ~260 once, at ~1.4k
+     ;; ticks a contracted call on this render path (seon.render-cost-test/a-request-made-again-costs-what-moved: 3.65M ticks over 2,598
+     ;; calls): ~240k ticks a message, ~360k once
+     :per-n {:ticks 240000}
+     :fixed {:ticks 360000}
      :sizes [20 60 180]}))
 
 (defn main-of
@@ -106,7 +107,7 @@
      :growth :constant
      ;; the contracted calls a first read of main makes, whatever main holds, never one per record;
      ;; and its bytes, which a walk over every datom would grow with the records
-     :per-n {:calls 33 :bytes 4000000}
+     :per-n {:bytes 4000000}
      :sizes [10 40 100]}))
 
 (defn moved-of
@@ -133,7 +134,7 @@
      :growth :constant
      ;; measured 2026-10-29: 9.1 KB and 3 calls at the sizes; before, one datoms-diff for each of the 90 watched
      ;; attributes: 14.6 MB at 25 tasks, 20.1 MB at 50
-     :per-n {:calls 4 :bytes 12000}
+     :per-n {:bytes 12000}
      :sizes [25 50 100]}))
 
 (defn agent-of
@@ -183,7 +184,7 @@
      :growth :linear
      ;; measured 2026-10-24: 207 KB / 2.06 MB / 21.2 MB at 100 / 1,000 / 10,000 datoms; one contracted call
      :per-n {:bytes 2120}
-     :fixed {:calls 1 :bytes 2000}
+     :fixed {:bytes 2000}
      :sizes [100 300 1000 10000]}))
 
 (deftest matching-a-commit-is-flat-in-the-pages-watched
@@ -193,7 +194,7 @@
      :work "the 100 datoms' keys, each one map lookup, whatever the index holds"
      :growth :constant
      ;; measured 2026-10-24: 209 / 207 / 207 KB at 10 / 100 / 1,000 pages
-     :fixed {:calls 1 :bytes 212000}
+     :fixed {:bytes 212000}
      :sizes [100 300 1000 10000]}))
 
 (defn latest-of
@@ -325,8 +326,8 @@
                 "changed paths reach by index; the diff walks every key of the changed collection, which is linear. 379 contracted calls "
                 "at 100 turns, the owner's 2026-11-05: cull the calls later if the perf is bad; 394 and a bound of 400 by the owner's yes, 2026-11-07, reading an eval's result by its ref (seon.db/response-of)")
      :growth :linear
-     :per-n {:calls 0 :bytes 3400}
-     :fixed {:calls 400 :bytes 150000}
+     :per-n {:bytes 3400}
+     :fixed {:bytes 150000}
      :sizes [30 100 300]}))
 
 ;; See docs/render.md#a-change-is-edits-by-name
@@ -348,11 +349,11 @@
                 "Linear in the children in bytes and flat in contracted calls, whatever the rest of the page holds; ticks 27k at 10 children, 326k at 100, "
                 "17.6M at 1,000, the map reads being an array map's")
      :growth :linear
-     :per-n {:calls 12 :bytes 12500}
+     :per-n {:bytes 12500}
      ;; 2026-11-14 (web, W-5): every reader of an output asks one marker test a node and one element split an element (seon.render/marker-key,
      ;; element-parts, private: checked in tests, not on a production call), contracted calls the inline tests were not: +12 a member (the edited component's
      ;; output holds a row a member, each row's markers tested and elements split; the inline tests counted none) and +22 fixed
-     :fixed {:calls 31 :bytes 60000}
+     :fixed {:bytes 60000}
      :sizes [10 30 100 300]}))
 
 ;; See docs/render.md#components
@@ -393,8 +394,8 @@
                 "again; nothing per member of who holds it but the one that moved")
      :growth :linear
      ;; measured 2026-11-06: 702 calls and 431 KB at 100
-     :per-n {:calls 7 :bytes 4200}
-     :fixed {:calls 30 :bytes 40000}
+     :per-n {:bytes 4200}
+     :fixed {:bytes 40000}
      :sizes [100 300 1000]}))
 
 (deftest a-step-costs-what-changed
@@ -415,8 +416,8 @@
      ;; 11.31 MB at 10 turns under the test binary's contracts, 8 calls and 36 KB a turn, as before them; the fixed part is the
      ;; renders the model now reads drawn on a step. 1,365 at 10 since the turn line holds no number and the cost line is sized once
      ;; (seon.print/response-text); the owner approved 250 for a change's 379, and said cull later
-     :per-n {:calls 8.2 :bytes 37000}
-     :fixed {:calls 1285 :bytes 11250000}
+     :per-n {:bytes 37000}
+     :fixed {:bytes 11250000}
      :sizes [10 40 160]}))
 
 ;; On disk, the one-store rule's last resort (docs/cost.md#how-we-measure): a page advanced from one turn's basis to the next
@@ -484,10 +485,10 @@
                      ;; (9.7M, 12.9M, 19.9M ticks); before, the four views each reading the diff: 61.5 MB / 220 calls
                      ;; at 1, 80.9 MB / 1,309 at 10, 124.7 MB / 3,729 at 30 (21.8M, 28.7M, 44.3M ticks)
 ;; +2 calls a function: caused asks each changed var of the :long-form class (its seek and its form's text)
-                     :per-n {:bytes 1100000 :calls 72}
+                     :per-n {:bytes 1100000}
                      ;; +3 calls 2026-10-30: seon.merge/content-attr, one contracted call a merge-diff read, was uncontracted
 ;; +10 calls: caused asks the :long-form class (seon.problems/long-forms) of the changed vars, its bound read once
-                     :fixed {:bytes 27000000 :calls 136}
+                     :fixed {:bytes 27000000}
                      :sizes [1 10 30]})))))
 
 (def ^:dynamic *sels*
@@ -562,8 +563,8 @@
                        ;; old estimate (200 a turn, 700 fixed) left every size over, so each was measured again 18-43 times: the
                        ;; proof cost ~1.0B ticks for ~63M of draws and ~155M of building its input. The tree tracking of a draw no
                        ;; one advances (~30% of the calls) is the cost to cut next: task seon.render/a-model-render-draws-each-turns-diff
-                       :per-n {:calls 850 :bytes 1200000}
-                       :fixed {:calls 6700 :bytes 12500000}
+                       :per-n {:bytes 1200000}
+                       :fixed {:bytes 12500000}
                        :sizes [10 20 40]}))))))
 
 (defn- session-eval
@@ -626,7 +627,7 @@
                ;; corrected 11-13 (data's probe, both trees): the first estimate (:log, 20k + 25k a level) left out the leaf decoded whole, so
                ;; 30 schema datoms elsewhere (data's branch) moved the split and the bytes at 40 turns went 140k -> 278k. Linear to a leaf:
                :growth :linear
-               :fixed {:calls 1 :bytes 20000}
+               :fixed {:bytes 20000}
                :per-n {:bytes 7000}
                :sizes [10 20 40]}))
 
@@ -700,7 +701,7 @@
                :growth :constant
                ;; calls: rules, and css? once for each var of seon.render.ui, counted from the namespace itself: a restated count went red
                ;; at each new render (163, then 164 with turns-tile)
-               :fixed {:calls (inc (count (ns-interns 'seon.render.ui))) :bytes 240000 :ticks 45000}
+               :fixed {:bytes 240000 :ticks 45000}
                :sizes [1 4 16]}))
 
 ;; See docs/render.md#a-page-is-a-kept-walk
@@ -736,8 +737,8 @@
                ;; 2026-11-15 (web): +15 fixed calls: the new eval's step and its call's view read each attribute they show alone
                ;; (ratom/realize a call, contracted), not the entity whole, so a commit of one they do not show reruns neither
                ;; (seon.render-test/a-record-rerun-only-by-what-it-shows); measured 2,929 at 10 against 2,916
-               :per-n {:calls 176 :bytes 156000}
-               :fixed {:calls 1171 :bytes 1850000}
+               :per-n {:bytes 156000}
+               :fixed {:bytes 1850000}
                :sizes [10 20 40]})
   (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/walk-same-of
                :n "turns of the agent, an eval each"
@@ -746,7 +747,7 @@
                ;; measured 2026-11-12 on jolt/web by the test runner: 17 calls, 19.0 KB, 3.5k ticks at every size; 18 and 20.2 KB once the
                ;; queueing of what moved became its own function (walk's form was over the token bound)
                ;; 19 and 23.3 KB once walk's answer is its own function and the page's drawn renders are two kept cells (the render proc's page walks, step 1)
-               :fixed {:calls 19 :bytes 24000}
+               :fixed {:bytes 24000}
                :sizes [10 20 40]}))
 
 (defn newest-pair-of
@@ -779,7 +780,7 @@
            :n "turns the agent has worked, each a commit holding an eval"
            :work "the page parts pulled and rendered at two bases, and the edits between them"
            :growth :constant
-           :fixed {:calls 2000 :bytes 4000000}
+           :fixed {:bytes 4000000}
            :sizes [4 16 64]})))))
 
 (defn val-member
@@ -817,10 +818,10 @@
      :growth :linear
      ;; measured 2026-11-10: 81 calls at 10, 40 and 160; 99 KB, 124 KB, 217 KB. 2026-11-12: 87 at 10, 88 KB: the reactions' read index
      ;; is the one value index a walk kept as a value reads too (seon.ratom/read-index, reached), a call each where it was inline
-     :per-n {:calls 0 :bytes 900}
+     :per-n {:bytes 900}
      ;; 2026-11-14 (web): +3, the changed member's two runs each derive their tree reads' datom keys (seon.render/entity-read-keys), and
      ;; its re-run takes the entity keys it held out of the walk's index (forget-readers!), which a tree-only reader never held before
-     :fixed {:calls 91 :bytes 100000}
+     :fixed {:bytes 100000}
      :sizes [10 40 160]}))
 
 (defn big-member
@@ -861,7 +862,7 @@
      ;; attribute's part and an escape per text: ~23), ~28 calls; its html, its placements and the value's new cache entries, ~35 KB
      ;; 2026-11-14 (web, W-5): every reader of an output asks one marker test a node and one element split an element (seon.render/marker-key,
      ;; element-parts, private: checked in tests, not on a production call), contracted calls the inline tests were not: +8 (the placed list's nodes)
-     :fixed {:calls 38 :bytes 40000}
+     :fixed {:bytes 40000}
      :sizes [10 100 1000]}))
 
 
@@ -881,6 +882,6 @@
      ;; measured 2026-11-11: 41 calls and 26.4 KB at 10, within 4 calls and 3 KB an element at 100 and 1000 (seon.contract/fits? an element)
      ;; 2026-11-14 (web, W-5): every reader of an output asks one marker test a node and one element split an element (seon.render/marker-key,
      ;; element-parts, private: checked in tests, not on a production call), contracted calls the inline tests were not: +3 a member (its row's nodes)
-     :per-n {:calls 7 :bytes 3000}
-     :fixed {:calls 5 :bytes 5000}
+     :per-n {:bytes 3000}
+     :fixed {:bytes 5000}
      :sizes [10 100 1000]}))

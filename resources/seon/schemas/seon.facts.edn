@@ -219,7 +219,8 @@
  :seon.cause/warm-state [:map {:description "A result depended on state its reads don't name (a cache's warmth, a process's loaded code): what it was and both readings."}
                          [:seon.db/tag [:= :seon.cause/warm-state]] [:seon.cause/held :seon.cause/held] [:seon.cause/expected :seon.cause/expected]]
  ;; a test's result, keyed by what it read: reused on any branch while nothing its reads name moved (docs/merging.md#verdicts-are-a-cache)
- :seon.proof/id [:and {:seon.db/identity true :seon.db/content-id true :description "The result's identity: the digest of its test and its reads' digest."} :seon.lib/digest]
+ :seon.proof/id [:and {:seon.db/identity true :seon.db/content-id true :description "The result's identity: the content id of its test and its reach digest (seon.proofs/verdict-id), so a lookup computes it and seeks once."} :seon.lib/digest]
+ :seon.proof/reach-digest [:and {:description "The test's reach digest when it ran (seon.program/graph-index): what its identity is taken over beside the test."} :seon.lib/digest]
  :seon.proof/test [:qualified-symbol {:seon.db/index true :description "The test the result is of."}]
  :seon.proof/reads-digest [:and {:description "The digest of the content each read key held at the basis, basis excluded (seon.reads/content-digest): equal content gives one result on any branch."} :seon.lib/digest]
  ;; read back by seek: a moved datom's five keys (datahike.reads/datom-keys, each its pr-str) find the results they move, one AVET seek each
@@ -232,9 +233,10 @@
  :seon.proof/program [:and {:description "The digest of the program the running binary was built from (seon.program/binary-program)."} :seon.lib/digest]
  :seon.proof/profile [:keyword {:description "The config profile the run resolved under."}]
  :seon.proof/failures [:vector {:description "The assertions that failed."} :seon.problems/assertion]
- :seon.proof/route [:enum {:description "How it was proved: :live, the branch's forms loaded into the running runtime; :full, a binary built from it."} :live :full]
+ :seon.proof/route [:enum {:description "How it was proved: :live, the branch's forms loaded into the running runtime; :full, a binary built from it; :seeded, carried over from the file cache once (no reads recorded, reused by its digest only, retired when its test runs again)."} :live :full :seeded]
  :seon.proof/proof-fact [:map {:seon.db/attributes true}
                          [:seon.proof/id :seon.proof/id] [:seon.proof/test :seon.proof/test] [:seon.proof/reads-digest :seon.proof/reads-digest]
+                         [:seon.proof/reach-digest {:optional true} :seon.proof/reach-digest]
                          [:seon.proof/reads :seon.proof/reads] [:seon.proof/read-keys {:optional true} :seon.proof/read-keys] [:seon.proof/status :seon.proof/status] [:seon.proof/route :seon.proof/route]
                          [:seon.proof/basis :seon.proof/basis]
                          [:seon.proof/unreusable {:optional true} :seon.proof/unreusable]
@@ -478,7 +480,7 @@
  :seon.task/branch [:keyword {:description "The branch the task's work is on."}]
  :seon.task/model [:string {:description "The model that works the task."}]
  :seon.task/execution [:and {:seon.db/index true :description "Whether the task is held, running or cancelled."} [:enum :held :running :cancelled]]
- :seon.task/kind [:enum {:description "What kind of work the task is."} :user :work :design :implement :test :merge :whole]
+ :seon.task/kind [:enum {:description "What kind of work the task is." :seon.task/ends-parked #{:user}} :user :work :design :implement :test :merge :whole]
  ;; measured evidence a task starts from: its last failed run's conflicts, unmerged keys, red
  ;; proofs and problem (seon.reconcile/hold-tx), read by the run root releases next
  ;; what the task's plan says its hot functions should cost, before their code carries :seon.cost/bound (the one home once it does):

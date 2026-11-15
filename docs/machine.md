@@ -12,7 +12,7 @@ A `bin/check` run still going after 600 s (`SEON_CHECK_EVIDENCE_AFTER_S`) leaves
 
 ### Reading a number
 
-A wall time is only as good as what else ran: compare ticks, bytes and calls, and before believing a time read `uptime` and the top of `ps -axo rss,pcpu,command -r`. A big cost is usually one constant nobody looked at: ask how the number can be what it is, and split it by phase before guessing (a temporary `println` in `test/test_runner.clj`; a `bin/check` step under `SEON_CHECK_NICED=1 PS4='+%D{%s.%.} %N:%i> ' zsh -x bin/check --steps DIR`; a spawn's `:ready` event's `:phases`).
+A wall time is only as good as what else ran: compare ticks and bytes, and before believing a time read `uptime` and the top of `ps -axo rss,pcpu,command -r`. A big cost is usually one constant nobody looked at: ask how the number can be what it is, and split it by phase before guessing (a temporary `println` in `test/test_runner.clj`; a `bin/check` step under `SEON_CHECK_NICED=1 PS4='+%D{%s.%.} %N:%i> ' zsh -x bin/check --steps DIR`; a spawn's `:ready` event's `:phases`).
 
 Check that a check ran what it claims:
 - `bin/test NS` printing `TEST OK` with no `SHARD` line ran nothing (its digests did not move); `SEON_RESULTS_DIR=<fresh dir>` forces a run. A mutation counts only when it goes red with a `SHARD` line.
