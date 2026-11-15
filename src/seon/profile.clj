@@ -71,15 +71,6 @@
        (vector-set! c 5 (+ (- db seon-profile-kid-bytes) (vector-ref c 5)))
        (set! seon-profile-kid-ticks (+ kt dt))
        (set! seon-profile-kid-bytes (+ kb db)))
-     ;; the live cost canary (docs/cost.md#a-call-past-the-floor): a call whose own whole (ticks or bytes, callees included) passes
-     ;; a floor calls the hook (sym ticks bytes), once a stack: the deepest call past it, never each frame above it (kid-over
-     ;; says a callee already did). Floors start past every fixnum, so nothing fires until seon-profile-over! sets them
-     (define seon-profile-floor-ticks (greatest-fixnum))
-     (define seon-profile-floor-bytes (greatest-fixnum))
-     (define seon-profile-kid-over #f)
-     (define seon-profile-over-hook #f)
-     (define (seon-profile-over! ft fb hook)
-       (set! seon-profile-floor-ticks ft) (set! seon-profile-floor-bytes fb) (set! seon-profile-over-hook hook))
      ;; true while work that is not the running call's runs (a signal handler, seon-profile-aside):
      ;; its calls are not counted, and its ticks and bytes are a callee's to the call it interrupted
      (define seon-profile-off #f)
@@ -138,9 +129,23 @@
        (let loop ([cs seon-profile-touched] [n 0])
          (if (null? cs) n (loop (cdr cs) (+ n (vector-ref (car cs) 0))))))"))
 
+(def ^:private canary-defs
+  ;; the live cost canary's state (docs/cost.md#a-call-past-the-floor): a call whose whole (ticks or bytes, callees included) passes
+  ;; a floor calls the hook (sym ticks bytes), once a stack (kid-over: a callee already did). A plain def, never inside scheme-defs'
+  ;; defonce: a change loaded in place (a landing's update, root and the fork server) re-evaluates it before procs resolves
+  ;; :over!, so no process holds a procs naming a procedure it never defined (2026-11-15: every agent's init! threw on a nil
+  ;; :over! until this). Floors start past every fixnum, so nothing fires until seon-profile-over! sets them
+  (scm/eval-string
+    "(define seon-profile-floor-ticks (greatest-fixnum))
+     (define seon-profile-floor-bytes (greatest-fixnum))
+     (define seon-profile-kid-over #f)
+     (define seon-profile-over-hook #f)
+     (define (seon-profile-over! ft fb hook)
+       (set! seon-profile-floor-ticks ft) (set! seon-profile-floor-bytes fb) (set! seon-profile-over-hook hook))"))
+
 (def ^:private procs
   "The Scheme procedures above, by name (host procedures, resolved once)."
-  (into {} (for [k [:cell :counted :begin! :fold :calls :now :alloc :cpu :aside :reads-begin! :reads-fold :over!]]
+  (into {} (for [k [:cell :counted :begin! :fold :calls :now :alloc :cpu :aside :reads-begin! :reads-fold]]
              [k (scm/proc (str "seon-profile-" (name k)))])))
 
 (defonce ^:private opened-defs
@@ -197,7 +202,9 @@
   "Arm the live cost canary in this process: a counted call whose whole passes floor-ticks or floor-bytes calls (hook sym ticks
   bytes), once a stack (the deepest call past the floor), its work uncounted (aside); a nil hook disarms it. See docs/cost.md#a-call-past-the-floor."
   {:malli/schema [:=> [:cat pos-int? pos-int? [:maybe :seon.host/fn]] :any]}
-  [floor-ticks floor-bytes hook] ((:over! procs) floor-ticks floor-bytes hook))
+  ;; resolved where it is called (once an agent's start), never through procs: a change loaded in place reloads only the forms
+  ;; it changed, so a procs resolved before canary-defs ran would hold nil for it
+  [floor-ticks floor-bytes hook] ((scm/proc "seon-profile-over!") floor-ticks floor-bytes hook))
 
 (defn aside
   "(thunk) run with its calls not counted, its work counted as a callee's of the call it interrupted:
