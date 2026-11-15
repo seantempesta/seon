@@ -50,6 +50,10 @@ On storing each turn's request: "Yes we can store what we sent and we store what
 
 "I saw you saying you were running them and you blocked for minutes and held up all updates. No commands should do that period. We should have long running systems be flow systems and sending a message can trigger a long running task that you can get notified for." And: "We know exactly what has changed and there are efficient solutions to everything in our design. If you see complicated garabge we need to step back and take a fresh approach ... always fix things at the data model first." Stated in `AGENTS.md` §4.
 
+### The overhaul halves the code
+
+"I want our codebase cut in half when we are doing overhauling everything so de-duplication of ideas is essential." And: "Collapse all duplicate systems in favor of good tools and systems we can use everywhere." `src` is 43,312 lines on 2026-11-15; the target is about 21,600, by collapsing duplicate ideas, never by removing functionality. Stated in [the plan](plan.md#the-order).
+
 ### Root fixes errors anywhere; the plan is A to B
 
 "You can and should fix all errors anywhere in the system. Distribute this work to expert agents as you need too." "We need a plan from where we are now A to where we want to go B. That's your job." The order he approved is in [the plan](plan.md#the-order).
