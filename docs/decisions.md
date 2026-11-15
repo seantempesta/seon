@@ -14,6 +14,10 @@ The owner's rulings on the morning after the first night run on its own.
 
 "I want everyone to merge main and switch over immediately, once it's tested and verified" (written from his phone; root's rewrite, his meaning). A verified change to shared machinery is the one way from its landing: every session and every running agent merges main at once (an agent loads main's changes in place at its turn boundary), and no transitional second way waits for a later landing. For landing 12 this replaces root's ruling that `bin/test` keep its file cache until E: its next slice moves `bin/test`'s verdicts onto the store and deletes the file cache. Stated in [the plan](plan.md#the-order).
 
+### Jolt's instrumentation, in deps' order
+
+Told that ticks count Scheme work only (no foreign calls, GC copying, parked time or interrupts-off time: chez `s/cpnanopass.ss:2966`, `s/event.ss:47`) and that the 161M/300M swing is unexplained, he chose deps' order: dumps that need no event check; CPU time and bytes per fiber per dispatch; steps scoped by the existing nesting measure `ticks-of`, with no new marker; a counter of foreign lookups; then one experiment that settles the swing before ticks can fail a test. Plan in `deps-ticks-soundness-2026-11-15` (deps' task).
+
 ### No landing past a red; a bad test is deleted, then backfilled
 
 Asked whether a land may merge when its only red is a known test already red on main: "I don't want to set a bad precedent. Is the test bad? Just delete it and backfill it later if it's not" (from his phone; root's rewrite, his meaning). No land merges past a red; a test that asserts what principles §6 rules out (wall time, load) is deleted and its goal filed as a backfill task, named in the Deletes line. First case: `seon.system-test/a-root-stops-in-a-second` (wall time), backfilled as a step's declared ticks.
