@@ -3264,17 +3264,31 @@
     (is (some #{"(my.turn/wait)"} sent-codes) (str "it sent the model's own eval: " (pr-str sent-codes) " of " (pr-str r)))
     (is (not-any? #(str/includes? % "seon.turn/work!") sent-codes) (pr-str sent-codes))))
 
-;; Estimate: in-agent's own setup and teardown (3 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~5250k, 6000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 6000000 :asks 3}} a-task-at-its-cap-is-recorded-cap-never-waiting
+;; Estimate: three calls of seon.turn's end checks (decide) on a status of one red proof, with the agent's db, turn number, specified-tx and
+;; request stood in (no store read, no agent, no model call): ~3 x 30k ticks of the checks and a cond = ~100k, ~1 MB, ~1 ms (was 3 spawned
+;; agents, 195,864 ms measured)
+(deftest ^{:seon.test/estimate {:ticks 100000 :bytes 1000000}} a-task-at-its-cap-is-recorded-cap-never-waiting
   ;; root, 2026-10-26: a run whose last turn waits spent its budget, so it ends :cap, which a
   ;; live view reads as the budget spent, not as a wait for a message; a wait before the cap is
-  ;; :waiting, and the agent's own fail! at the cap is :failed (its verdict holds the task)
-  (let [outcome (fn [script max-turns]
-                  (:outcome (:value (first (in-agent #(vector (str "(seon.turn/work! {:task " (pr-str (:task %)) " :max-turns " max-turns "})"))
-                                                     {:config {:seon.config.ai/script (symbol "seon.fixtures" script)}})))))]
-    (is (= :cap (outcome "wait-call" 1)) "a wait on the last turn: the budget spent")
-    (is (= :waiting (outcome "wait-call" 2)) "a wait with turns left: waiting")
-    (is (= :failed (outcome "fail-call" 1)) "fail! on the last turn: the agent's verdict")))
+  ;; :waiting, and the agent's own fail! at the cap is :failed (its verdict holds the task).
+  ;; The decision is seon.turn/decide's end checks, so it is called as the loop calls it: the turn in force, the stop the turn's
+  ;; forms requested (my.turn/wait and my.task/fail! are request-stop!), and a status that is not green
+  (let [old @seon.agent/state
+        red {:reasons [{:reason :proof-red :symbol 'app.calc-test/total-sums}]}
+        outcome (fn [stop max-turns]
+                  (with-redefs [seon.agent/db (constantly nil)
+                                seon.agent/turn-now (constantly 1)
+                                seon.turn/specified-tx (fn [& _] nil)
+                                seon.turn/model-request! (fn [& _] {:id "k/2" :request {}})]
+                    (reset! seon.agent/state (assoc old :turn {}))
+                    (apply seon.turn/request-stop! stop)
+                    (let [[_ _ outcome] (@#'seon.turn/decide {:task "app.calc/total-is-exact" :max-turns max-turns} {} red)]
+                      outcome)))]
+    (try
+      (is (= :cap (outcome [:waiting nil] 1)) "a wait on the last turn: the budget spent")
+      (is (= :waiting (outcome [:waiting nil] 2)) "a wait with turns left: waiting")
+      (is (= :failed (outcome [:failed "premise refuted"] 1)) "fail! on the last turn: the agent's verdict")
+      (finally (reset! seon.agent/state old)))))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-failed-call-keeps-what-it-sent
