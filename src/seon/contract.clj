@@ -223,13 +223,6 @@
   default): where a key registered beyond the built forms is found, on every path of a process."
   (mr/composite-registry (mr/dynamic-registry) branch-registry (mr/custom-default-registry)))
 
-(clojure.core/defn branch-over
-  "Registry reg with the branch an agent process holds above it (branch-registry, its schema slot read at each lookup): malli's
-  default in an agent (seon.agent/init!), so a schema read with no options on a branch reads the branch, as options does, and
-  falls to reg (main as the agent forked) where the branch holds nothing of its own. See docs/source.md#schemas-at-the-repl."
-  {:malli/schema [:=> [:cat :any] :any]}
-  [reg] (mr/composite-registry branch-registry reg))
-
 (clojure.core/defn properties
   "The properties map of named schema k's form ([:type {props} ...]), or nil: what a
   schema declares of its values (a status set, a render, a unit), read here only. The layers

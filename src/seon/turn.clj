@@ -657,8 +657,10 @@
         _ (swap! agent/state assoc :turn {} :requests nil)
         _ (agent/clear-end!)
         _ (begin! task)
-        ;; the agent's own budget (:seon.agent/max-turns, root's on main, raised to extend it; root passes it) bounds the loop; the
-        ;; page's turn line reads it as the branch holds main's (one writer per attribute: never copied here, docs/users.md)
+        ;; the agent's own budget (:seon.agent/max-turns on main, raised to extend it; root passes it) bounds the loop, and is
+        ;; the cap its page's turn line reads (seon.render.ui/agent-state)
+        _ (when-not (= max-turns (:seon.agent/max-turns (d/entity (agent/db) [:seon.agent/key (:key @agent/state)])))
+            (agent/transact! [{:seon.agent/key (:key @agent/state) :seon.agent/max-turns max-turns}]))
         t0-task (task/task (agent/db) task)
         merge? (task/merges-on? (agent/db) task)
         merge-cfg (r/merge-limits t0-task)]
