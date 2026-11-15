@@ -741,10 +741,10 @@
         ;; 2026-11-12: root's session names its task (request/root, as any request's agent does), so its page draws it as an agent's does:
         ;; the task, its cite, how it stands, its turn and the chat's ask
         root0 #{"chat-ask" "cite-request_2Froot_20docs_2Fagent_2Emd_23working-for-a-person" "status" "task-view-request_2Froot" "turn"
-                "agent-state" "app" "c-rows" "c-side" "p-agent-head" "p-caption" "p-head"
+                "agent-state" "app" "c-rows" "p-agent-head" "p-caption" "p-head"
                 "p-input" "p-rules" "p-task" "p-tiles" "page-rules" "stage-as" "stage-front" "system-message"}
         ;; 2026-11-15, the owner's ruling (docs/decisions.md, The page is a friendly chat): root's chat is the person's, so the sessions list
-        ;; (agent-a3, agent-user, u-agent-a3, u-root-side) and the system's view (root-head, process-tile, problems-tile, root-evals with its eval root-1) left it for root's debug page
+        ;; (agent-a3, agent-user, u-agent-a3, u-root-side) and the system's view (root-head, process-tile, problems-tile, root-evals with its eval root-1) left it for root's debug page, and the frame's empty agents column (c-side) with them
         ;; what the frame's page-chrome drew by hand is now the layout's: its root (the page), its columns and the frame's slot for it
         ;; and the top bar's region for which system it is (seon.render.ui/system-source; this fixture's root holds no source, so it is empty)
         added #(remove (fn [id] (or (#{"p-page" "p-agents" "p-chat" "p-context" "p-system"} id) (str/starts-with? id "agent-") (str/starts-with? id "stage-"))) (clojure.set/difference % %2))]
@@ -1687,7 +1687,9 @@
     (is (not (str/includes? (bar root) "on jolt")) "no build name")
     (is (not (str/includes? (bar root) "p-system")) "no checkout line")
     (is (not-any? #(= "#p-system" (:container %)) (:seon.render/units root)) "and no unit for it")
-    (is (str/includes? (h/html (:seon.render/hiccup dbg)) "p-system") "the debug view has the checkout line's place")))
+    (is (str/includes? (h/html (:seon.render/hiccup dbg)) "p-system") "the debug view has the checkout line's place")
+    (is (not (str/includes? (h/html (:seon.render/hiccup home)) "id=\"p-agents\"")) "no agents column on the person's page (it drew an empty one)")
+    (is (str/includes? (h/html (:seon.render/hiccup (#'p/page-value st [:chat :a3]))) "id=\"p-agents\"") "an agent's page keeps it")))
 
 ;; See docs/render.md#the-page
 (deftest ^{:seon.test/estimate {:ticks 2000000}} roots-chat-has-the-persons-message-box
