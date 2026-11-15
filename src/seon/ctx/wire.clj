@@ -510,9 +510,16 @@
   :seon.config.ctx/assembly-checkpoint-turns calls. See docs/render.md#a-turn-stores-what-it-sent."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe [:vector :any]]]}
   [db id]
-  (letfn [(of [e] (when-let [{:keys [keep add]} (:seon.model-call/assembly e)]
-                    (if-let [p (:seon.model-call/prev e)] (into (subvec (of p) 0 keep) add) add)))]
-    (some->> (pdb/eid db :seon.model-call/id id) (d/entity db) of)))
+  ;; one walk back to the checkpoint, taking of each call's :add only the parts the calls after it keep, then one build: O(calls walked
+  ;; + parts), never a list copied a level (a read chain of n copied n lists: its bytes grew with each read)
+  (when-let [e (some->> (pdb/eid db :seon.model-call/id id) (d/entity db))]
+    (when (:seon.model-call/assembly e)
+      (loop [e e need Long/MAX_VALUE segs ()]
+        (let [{:keys [keep add]} (:seon.model-call/assembly e)
+              p (:seon.model-call/prev e)]
+          (if p
+            (recur p (min need keep) (conj segs (take (max 0 (- need keep)) add)))
+            (into [] cat (conj segs (take need add)))))))))
 
 (defn sent-tx
   "The facts that keep what model call id sent at turn n: its new messages as parts, and its assembly as what changed since call
