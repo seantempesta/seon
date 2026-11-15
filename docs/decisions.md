@@ -14,6 +14,10 @@ The owner wants the plan's self-merge path finished as soon as possible, so the 
 3. **The first real `seon_done`** is tried as soon as main's run proves green in the system and plan items 1, 2 and 4 are on main, not after the whole safety list. A failure is filed as a task. Until D lands, the three-land rule holds the load.
 4. **Drivers first, right after deps' pin:** the context session runs its `seon-driver` Claude agents (Sonnet, only the `seon_*` tools) on real tasks as soon as deps' pin restarts root, before plan items 8 and 9. First a parity check of a driver's reply against a model agent's request, then two drivers beside the DeepSeek rounds. What a driver can't do through `seon_*` is filed as a task.
 
+### Sessions' tools are thin over the system, and honest where they are not (evening)
+
+The owner wants Claude sessions' tools integrated with the running system. Every `bin/` script and MCP tool is a thin wrapper over a `seon.server` op, carrying no logic, state or decision of its own. Where one still does its work outside the runtime, its header says so plainly: what it does outside, and the task that moves it inside. Sessions and Seon agents feel the same problems, so pain a session hits with a tool is fixed in the shared mechanism (the op, the proc, the namespace function), so both gain, never in the script alone. Root keeps the list of scripts and how each deviates, and each gap is a task in its owning area.
+
 ### Tests always have helpers making them millisecond tests of the goal
 
 "Tests always has subagents running (Sonnet is fine) that refactor tests to prove 90% of their goal in milliseconds, and drop tests that are low quality and slow" (from his phone; root's rewrite, his meaning). The tests session keeps Sonnet helpers working at all times, in its one worktree, each on test files nobody else edits, slowest first ("Have the agents run those conversions slowest first"); a test is rewritten to prove the most important 90% of its goal in milliseconds, or dropped when it is low quality and slow, its `Deletes:` line naming what now proves its goal (`AGENTS.md` §2, helpers; §3, no functionality removed).
