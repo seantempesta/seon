@@ -309,7 +309,7 @@
                   :tree {:type "string" :description "the checkout's tree id (seon.fx/tree-id, as bin/build records it): its branch's key"}
                   :mode {:type "string" :description "judge (default for a checkout), turn, or main (every key with no green at its digest, against no base: a whole tree)"}
                   :stream {:type "boolean" :description "EDN only: each test's verdict as a line as it ends, then the answer"}}}
-   :inbox {:doc "Wait for a message to an agent (its key, or its task: a session's agent is the one attached to its task session/<area>): answers at once with the messages main holds that its branch has not taken, else when one is written, else the typed :seon.server/no-message at :seon.config.root/inbox-wait-ms (ask again). It writes nothing: the agent's next reply delivers them. Run it in the background: its answer is your notification."
+   :inbox {:doc "Wait for a message to an agent (its key, or its task: a session's agent is the one attached to its task session/<area>): answers at once with the messages main holds that its branch has not taken, else when one is written, else the typed :seon.server/no-message at :seon.config.root/inbox-wait-ms (ask again). It delivers what it answers (the agent's one delivery), so the next call answers only what came after. Run it in the background: its answer is your notification."
            :args {:agent {:type "string" :description "an agent id"} :task {:type "string" :description "ns/name: its agent, instead of agent"}}}
    :done {:doc "Hand the task the agent works back to root: the agent writes its end (its proofs run, seon.turn/hand-back!), then root judges it, and merges it when the done rule has no reason. Answers the verdict when main holds it, as one line and a handle (seon.server/verdict-line): the task's outcome (done, merged, or closed with its task held) and reason, each red test with its first failure, and how main differs from the branch; the handle is the form that reads it whole at root. A defect of the reconciler that stops the judge, as that defect. It waits as long as the judge does (the run's proofs, a gate, a merge), so a caller's read timeout must allow minutes."
           :args {:agent {:type "string"} :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}} :required ["agent"]}))
@@ -419,6 +419,15 @@
         bdb (if br (:db @(c/branch-db sys br)) db)]
     (mapv #(update % :from task/sender-name) (task/undelivered db bdb k))))
 
+(defn- inbox-deliver
+  "The messages to agent key k delivered by the agent's own one delivery (seon.agent/deliver!, run on its branch, whose one writer is
+  its process), :from by name: what an inbox answers, so the next answers only what came after. An agent with no live process answers
+  its refusal, and the caller answers what main holds instead (read, not delivered). See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.system/sys :string] :any]}
+  [sys k]
+  (let [r @(c/submit! sys (keyword k) "(mapv #(update % :from seon.task/sender-name) (seon.agent/deliver!))" {:origin :outside})]
+    (if (contract/error? r) r (:value (first r)))))
+
 (defn- inbox-answer
   "seon_inbox for request req: the agent (req's :agent, or its :task's agent), its new messages now, else the first ones written
   while it waits (seon.system/await-message), else :seon.server/no-message at :seon.config.root/inbox-wait-ms (a put-after! of
@@ -431,9 +440,11 @@
     (if-not (and k (pdb/eid db :seon.agent/key k))
       (refused (str "seon_inbox names no agent: give :agent (an agent key) or :task (a task id); asked agent " (:agent req) ", task " (:task req)))
       ;; the wait starts at the t this check read: a message committed between the check and the wait still wakes it
-      (let [now (inbox-messages sys db k)]
+      (let [now (inbox-messages sys db k)
+            ;; what the agent's own delivery placed, else (no live process) what main holds
+            delivered (fn [held] (let [d (inbox-deliver sys k)] (if (vector? d) d held)))]
         (if (seq now)
-          {:agent k :messages now}
+          {:agent k :messages (delivered now)}
           (let [ms (cfg/value :seon.config.root/inbox-wait-ms)
                 {:keys [p] wk :k} (c/await-message sys k (:max-tx db))
                 ;; the bound's end answers p itself, typed: the first of the message's commit and the bound wins
@@ -445,7 +456,7 @@
             (step/cancel! h) (a/close! due)
             (cond (= :seon.server/no-message (:seon.error/type r)) (do (c/drop-wait! sys wk) r)
                   (contract/error? r) r
-                  :else {:agent k :messages (inbox-messages sys @(:conn sys) k)})))))))
+                  :else {:agent k :messages (delivered (inbox-messages sys @(:conn sys) k))})))))))
 
 (defmethod op-answer :inbox [sys _ req] (inbox-answer sys req))
 

@@ -322,7 +322,7 @@ The page (```seon.render.ui/debug```) is a timeline of the branch's model calls,
 
 Everything a model is sent is read from the tree through one conversion, and an action on the page is in the model's reading or is named here with what the model has for it.
 
-`seon.render-test/one-path-to-the-model` reads the compiler's facts: ```seon.ctx.wire/request``` is referenced by ```seon.ctx.wire/render``` alone, ```seon.model/request-body``` by the provider's call and the debug page's (```seon.ctx.wire/wire-of```, over a request drawn by ```seon.ctx.wire/render``` or read back as sent by ```seon.ctx.wire/sent-request```), and a form holding a message (`:role` and `:content`) outside the model renders, or a request that does not read ```seon.ctx.wire/render```, is red. It cannot see a message built from computed keys or text sent by a process outside src.
+`seon.render-test/one-path-to-the-model` reads the compiler's facts: ```seon.ctx.wire/request``` is referenced by ```seon.ctx.wire/render``` alone, ```seon.model/request-body``` by the provider's call and the debug page's (```seon.ctx.wire/wire-of```, over a request drawn by ```seon.ctx.wire/render``` or read back as sent by ```seon.ctx.wire/sent-request```), and a form holding a message (`:role` and `:content`) outside the model renders, or a request that does not read ```seon.ctx.wire/render``` (itself, or through ```seon.turn/request!```, the one way a turn's request is made), is red. It cannot see a message built from computed keys or text sent by a process outside src.
 
 `seon.render-test/an-action-on-the-page-is-the-models-too` lists every render whose hiccup holds an action (`:seon/call` or a `data-on` handler). Each is named below; a new one is red until it says what the model has for it.
 
