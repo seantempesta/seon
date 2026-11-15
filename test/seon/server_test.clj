@@ -228,6 +228,45 @@
     (is (true? (:ok sent)) (pr-str sent))
     (is (= @k (:value from)) (str "from the agent the connection holds: " (pr-str from)))))
 
+(defn- end-session-form
+  "Root's eval ending task id's agents, live or parked: a test's session agent is its own, never left on the shard's root."
+  [id]
+  {:op :eval :agent "root"
+   :code (str "(let [db @(:conn sys)] (doseq [r (concat (seon.task/running db) (seon.task/running db :parked)) :when (= " (pr-str id) " (:task r))] (seon.system/kill! sys (:agent r))))")})
+
+;; Estimate: in this process, four server round trips (~0.5M each, as a-message-reaches-the-agent's): ~2M; 3,000,000. In root: one
+;; request-tx of one task (~0.1M) and one spawn (its fork, root's own work)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} a-session-agent-is-made-for-its-area-once
+  ;; task seon.server/a-message-reaches-the-session-that-drives-its-agent, attach-at-start: a session's first seon_attach of
+  ;; session/<area> template=user makes its own agent's task from the :user template (as root's request/root is made), and a second
+  ;; attach is the same agent on the same one task. Red before: attach of a task that did not exist was refused "no task"
+  (let [id (volatile! nil)
+        [one two made] (at/in-agent (fn [{:keys [ns]}]
+                                      (let [i (vreset! id (str "session/" ns))]
+                                        [{:op :attach :task i :template "user" :client "s-once"}
+                                         {:op :attach :task i :template "user" :client "s-once"}
+                                         {:op :eval :agent "root"
+                                          :code (str "(let [db @(:conn sys)] [(:seon.task/kind (seon.task/task db " (pr-str i) "))"
+                                                     " (count (datahike.api/q '[:find ?e :in $ ?id :where [?e :seon.task/id ?id]] db " (pr-str i) "))])")}
+                                         (end-session-form i)])))]
+    (is (some? (:agent one)) (str "the first attach makes the task and its agent: " (pr-str one)))
+    (is (= (:agent one) (:agent two)) (str "the second is the same agent: " (pr-str two)))
+    (is (= [:user 1] (:value made)) (str "one task, of the :user template's kind: " (pr-str made)))))
+
+;; Estimate: four server round trips (~0.5M each): ~2M; 3,000,000. In root: connection-agent's two scans (~90k [M result/a00e44fe])
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} a-connections-agent-is-its-sessions-own
+  ;; part 3: a session holds its own agent (session/<area>, kind :user) and the task it works; its connection's agent, the :from of
+  ;; what it sends and the started-by of what it attaches, is its own, never the task's. Red before: connection-agent took the first
+  ;; agent the client held
+  (let [[sess who] (at/in-agent (fn [{:keys [ns]}]
+                                  (let [i (str "session/" ns)]
+                                    [{:op :attach :task i :template "user" :client "s-pref"}
+                                     {:op :eval :agent "root" :code "(seon.server/connection-agent sys {:client \"s-pref\"})"}
+                                     (end-session-form i)]))
+                                {:client "s-pref"})]
+    (is (some? (:agent sess)) (pr-str sess))
+    (is (= (name (:agent sess)) (:value who)) (str "the session's own agent, not the task's: " (pr-str who)))))
+
 (deftest a-message-reaches-the-agent
   ;; (parity row 73): the owner's message, sent as
   ;; the page's message bar sends it (seon.system/message!, here through the server's :message

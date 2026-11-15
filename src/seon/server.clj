@@ -13,7 +13,7 @@
   printf '{:op :agents}\\n' | nc -w 5 127.0.0.1 PORT
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.system :as c] [my.root :as root] [seon.fx :as fx] [seon.config :as cfg] [seon.task :as task] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
+  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.system :as c] [my.root :as root] [seon.fx :as fx] [seon.config :as cfg] [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
             [seon.lib :as lib] [seon.edn :as sedn] [seon.db :as pdb] [seon.repl :as repl] [seon.print :as print] [seon.ctx.wire :as wire] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str] [clojure.walk] [clojure.core.async :as a] [jolt.fibers :as fibers]))
 
 (defn- refused
@@ -129,6 +129,22 @@
       (if (and a (not (seon.task/gone-statuses (:status a)))) [r nil] [nil r]))
     [nil nil]))
 
+(defn- template-task!
+  "Task id made from template (a name of seon.template/templates) on main, parked, as root's own session is made
+  (seon.system/root-agent-tx): a session's first seon_attach of session/<area> template=user makes its own agent's task, so the
+  reconciler starts nothing for it until attach! starts it. Answers nil, or the refusal. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :seon.system/sys :seon.task/id :string] [:maybe :map]]}
+  [sys id template]
+  (let [db @(:conn sys) tp (tpl/templates (keyword template)) s (symbol id)]
+    (cond (not tp) (refused (str "no template " template ": the templates are " (str/join ", " (map name (keys tpl/templates)))))
+          (not (namespace s)) (refused (str "a task id is ns/name: " id))
+          :else (let [tx (tpl/request-tx db (tpl/from tp {:seon.task/ns (symbol (namespace s)) :seon.task/name (name s)
+                                                          :seon.task/plan (str "Made at its first attach from the " template " template.")}))]
+                  (if (contract/error? tx)
+                    tx
+                    (let [r @(c/transact-main! sys (conj (vec tx) {:seon.task/id id :seon.task/outcome :parked}))]
+                      (when (contract/error? r) r)))))))
+
 (defn- attach!
   "Start an outside agent on task id: its env's model is \"outside\" (the task keeps its own), so the
   reconciler starts no turn loop for it and does not kill it. The agent is spawned first;
@@ -145,16 +161,21 @@
   clone-of: the agent is that live agent's clone (seon.system/clone!: live values and all, its branch
   cut from the clone's once its writes commit), its own key and conversation (a fork's). client:
   who attached it (bin/mcp's id for its session), the agent's :holder: only that client's requests,
-  or ones that name the task, act on it (held).
+  or ones that name the task, act on it (held). template: a task id that does not exist is made from that template first
+  (template-task!): a session's own agent, session/<area> from :user.
   Answers {:agent :task}."
   {:malli/schema [:function [:=> [:cat :seon.system/sys :seon.task/id] :map]
-                  [:=> [:cat :seon.system/sys :seon.task/id [:map [:fresh? {:optional true} :boolean] [:clone-of {:optional true} :keyword] [:client {:optional true} [:maybe :string]]]] :map]]}
+                  [:=> [:cat :seon.system/sys :seon.task/id [:map [:fresh? {:optional true} :boolean] [:clone-of {:optional true} :keyword] [:client {:optional true} [:maybe :string]]
+                                                  [:template {:optional true} [:maybe :string]]]] :map]]}
   ([sys id] (attach! sys id {}))
-  ([sys id {:keys [fresh? clone-of client]}]
-  (let [db @(:conn sys)
+  ([sys id {:keys [fresh? clone-of client template]}]
+  (let [;; a task that does not exist is made from template, when one is named (a session's own: template-task!)
+        made (when (and template (not (task/task @(:conn sys) id))) (template-task! sys id template))
+        db @(:conn sys)
         t (task/task db id)
         [live dead] (if (or fresh? clone-of) [nil nil] (live-run sys db id))]
     (cond
+      made made
       (not t) (refused (str "no task " id))
       ;; its agent is live: it is the one to work it (a second spawn on its branch is refused)
       live {:agent (:agent live) :task id :shared true}
@@ -277,8 +298,9 @@
             :args {:ns {:type "string" :description "the task's namespace"} :name {:type "string" :description "its name"} :plan {:type "string" :description "what to do"}
                    :proofs {:type "array" :items {:type "string"} :description "qualified test names; optional"}}
             :required ["ns" "name" "plan"]}
-   :attach {:doc "Work a task as a Seon agent: root starts an agent on the task's branch (model outside) and answers its id and the next step. fresh: reset it, a new branch from main and an empty conversation (the old branch kept). from: fork that agent, a clone of it on a branch of its head working a sibling task."
+   :attach {:doc "Work a task as a Seon agent: root starts an agent on the task's branch (model outside) and answers its id and the next step. fresh: reset it, a new branch from main and an empty conversation (the old branch kept). from: fork that agent, a clone of it on a branch of its head working a sibling task. template: make a task that does not exist from that template first (a session's own agent: task=session/<area> template=user)."
             :args {:task {:type "string" :description "ns/name"} :fresh {:type "boolean" :description "reset: start the task again from main"}
+                   :template {:type "string" :description "make the task from this template when it does not exist (user: a session's own agent)"}
                    :from {:type "string" :description "fork: an agent id (a3) whose program, live values and branch the new agent goes on from, on a sibling of its task"}}}
    :prove {:doc "Run the tests a branch's change reaches, once per branch and tx however many ask (a session, an agent's turn): the one test service (seon.prove). Names an agent (its branch at its head), else main. Answers the run: its key, the counts, the red tests; a result already held for a test's digest is not run again."
            :args {:agent {:type "string" :description "an agent id whose branch to prove; omit for main"}
@@ -381,9 +403,10 @@
   {:malli/schema [:=> [:cat :seon.system/sys :map] [:maybe :string]]}
   [sys req]
   (when-let [c (:client req)]
-    (let [db @(:conn sys)]
-      (some (fn [{:keys [env key]}] (when (= c (:holder env)) key))
-            (concat (task/running db) (task/running db :parked))))))
+    (let [db @(:conn sys)
+          held (filter #(= c (:holder (:env %))) (concat (task/running db) (task/running db :parked)))]
+      ;; the session's own agent first: the one whose task is of kind :user (its template's property, docs/users.md#messages)
+      (:key (or (first (filter #(= :user (:seon.task/kind (task/task db (:task %)))) held)) (first held))))))
 
 ;; Estimate: one :avet seek of the agent's message links and one id lookup each on its branch (~10.5k ticks a message [M]); a wait
 ;; parks the connection's fiber (no worker, no thread) on await-message, one :avet seek a commit while held
@@ -453,7 +476,7 @@
 
 (defmethod op-answer :attach [sys _ req]
   (let [a (cond (:from req) (fork! sys (keyword (:from req)) (:client req))
-                (:task req) (attach! sys (:task req) {:fresh? (true? (:fresh req)) :client (:client req)})
+                (:task req) (attach! sys (:task req) {:fresh? (true? (:fresh req)) :client (:client req) :template (:template req)})
                 :else (refused "seon_attach needs task=ns/name, the task to work (or from=an-agent-id, to fork one)"))]
     (cond-> a
       (and (:agent a) (not (contract/error? a))) (assoc :next (str "seon_context with agent " (name (:agent a)) " reads what its model reads (wire true: the request body). "
