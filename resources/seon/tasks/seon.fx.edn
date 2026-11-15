@@ -75,4 +75,9 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.fx-test/a-grant-reads-no-config}
   :seon.task/estimate #:seon.fx{limits-held {:n 1, :order :constant, :ticks 20000, :bytes 40000}}}
+ {:seon.task/name "a-git-subprocess-ends-at-its-declared-bound"
+  :seon.task/plan "Owner: runtime (found by flow's review of slice 2a, 2026-11-15 23:5x). Every git the system runs goes through seon.fx/git-run (fx.clj:61), which calls seon.lib/sh (lib.clj), and sh has no bound: a git that hangs (a lock held by a dead process, a network remote, a pager) parks the :git owner's one worker forever, and every write-back and update merge behind it, and a caller that derefs the effect (my.root/merges-caught-up!, write-back!) on a :server-op worker never gets its answer. The rule (AGENTS 4): a wait on the world outside has a declared, spec'd timeout and ends typed. Change: seon.lib/sh takes a bound (a config key, :seon.config.source/git-ms, with its schema entry and reason), and a child past it is ended (its process group) and answered :seon.lib/shell-timed-out naming the command; git-run passes the git bound. PRIOR WORK, to read first: seon.lib/sh (Jolt's sh on a fiber), how Jolt's sh exposes the child to end it, and any bound another sh caller already declares. COST: none on a git that answers; one timer a call. Proof, red first: a git that never answers (a fake git on PATH that sleeps) ends at the bound with :seon.lib/shell-timed-out."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.lib-test/a-shell-past-its-bound-ends-typed}
+  :seon.task/estimate #:seon.lib{sh {:n 1, :order :constant, :ticks 50000, :bytes 100000}}}
 ]

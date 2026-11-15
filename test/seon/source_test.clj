@@ -1762,7 +1762,9 @@
   (let [here (config/checkout)
         d (str here "/target/tmp/update-merges-" (random-uuid))
         g (fn [& args] (let [r (apply sh/sh "git" "-C" d args)] (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
-        update #(sh/sh (str here "/bin/update") "--merges-only" d)]
+        ;; the merge is the :git effect's (seon.fx/git-commit's {:merge ref}), the merges tree's one writer: slice 2a of
+        ;; seon.system/a-landing-restarts-root-only-for-a-binary-change (bin/update --merges-only, a second writer, is gone)
+        update #(fx/git-commit {:req {:dir d :branch "jolt/merges" :merge "main"}})]
     (try
       (.mkdirs (java.io.File. d))
       (g "init" "-q" "-b" "main") (g "config" "user.name" "t") (g "config" "user.email" "t@t")
@@ -1781,16 +1783,24 @@
       ;; main moves on
       (g "update-ref" "refs/heads/main" (g "commit-tree" "-m" "two" "-p" "main" (g "rev-parse" "main^{tree}")))
       (let [r (update)]
-        (is (= 1 (:exit r)) (str (:out r) (:err r)))
-        (is (str/includes? (:err r) "staged changes its HEAD does not hold") "refused, naming the staged change")
-        (is (str/includes? (:out r) "UPDATE FAILED")))
-      ;; the tree brought to its HEAD: the update merges main and says so
+        (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r))
+        (is (str/includes? (str (:seon.error/message r)) "src/demo/half.clj") "refused, naming the staged change"))
+      ;; the tree brought to its HEAD: the effect merges main and says so
       (g "read-tree" "-u" "--reset" "HEAD")
       (let [r (update)]
-        (is (= 0 (:exit r)) (str (:out r) (:err r)))
-        (is (str/includes? (:out r) "UPDATE OK"))
+        (is (= "main" (get-in r [:value :merged])) (pr-str r))
         (is (zero? (:exit (sh/sh "git" "-C" d "merge-base" "--is-ancestor" "main" "HEAD"))) "HEAD contains main")
         (is (.isFile (java.io.File. (str d "/src/demo/half.clj"))) "and the merged file is kept"))
+      ;; flow's review: a merge that conflicts is aborted, the tree left as it was, and the next write-back lands clean
+      (g "checkout" "-q" "main") (spit (str d "/a.txt") "main's\n") (g "commit" "-q" "-am" "main's a")
+      (g "checkout" "-q" "jolt/merges") (spit (str d "/a.txt") "merges'\n") (g "commit" "-q" "-am" "merges' a")
+      (let [r (update)]
+        (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r))
+        (is (str/includes? (str (:seon.error/message r)) "a.txt") "the conflict names its path")
+        (is (not (.exists (java.io.File. (str d "/.git/MERGE_HEAD")))) "and the merge was aborted: no MERGING tree")
+        (is (= "" (g "status" "--short")) "the tree as it was found"))
+      (let [w (fx/git-commit {:req {:dir d :branch "jolt/merges" :files {"b.txt" "b\n"} :message "a write-back"}})]
+        (is (string? (get-in w [:value :sha])) (str "the next write-back lands clean: " (pr-str w))))
       (finally (seon.lib/remove-tree! d)))))
 
 (deftest ^{:seon.test/estimate {:ticks 30000000}} an-imported-branch-holds-its-pins
