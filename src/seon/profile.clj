@@ -129,6 +129,24 @@
   (into {} (for [k [:cell :counted :begin! :fold :calls :now :alloc :cpu :aside :reads-begin! :reads-fold]]
              [k (scm/proc (str "seon-profile-" (name k)))])))
 
+(defonce ^:private opened-defs
+  ;; Jolt's own record of the files a thread reads (io-file-read-sink, the AOT cache's: a file read through slurp, io/reader or
+  ;; io/resource, a directory listed, a missing file probed), bound fresh by reads-begin! on the test's thread, which the
+  ;; threads it starts inherit. A defonce of its own, so a process that loaded the cells' block before it gets these on reload
+  (scm/eval-string
+    "(define (seon-profile-opened-reset!) (io-file-read-sink (vector '())))
+     (define (seon-profile-opened-list) (let ((s (io-file-read-sink))) (apply jolt-vector (if (vector? s) (vector-ref s 0) '()))))"))
+
+(def ^:private opened-procs
+  "The opened record's Scheme procedures, by name."
+  (into {} (for [k [:opened-list :opened-reset!]] [k (scm/proc (str "seon-profile-" (name k)))])))
+
+(defn opened
+  "The paths read on this thread (and the threads it started) since reads-begin!, each once, as Jolt noted them: each file
+  read, each directory listed, each missing file probed. See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat] [:set :string]]}
+  [] (into #{} (map str) ((:opened-list opened-procs))))
+
 (defn now-ns
   "Nanoseconds on the machine's monotonic clock (CLOCK_UPTIME_RAW): Seon's one clock, the
   same timeline in every process (docs/machine.md#the-clock)."
@@ -177,7 +195,7 @@
 (defn reads-begin!
   "Start the record of what ran (reads), which no nested epoch (begin!: an eval or a cost measurement inside the caller) resets. nil."
   {:malli/schema [:=> [:cat] :any]}
-  [] ((:reads-begin! procs)) nil)
+  [] ((:reads-begin! procs)) ((:opened-reset! opened-procs)) nil)
 
 (defn reads
   "The contracted functions called since reads-begin!, each once, nested epochs included: what a test read of the program. See docs/cost.md#counting-calls."

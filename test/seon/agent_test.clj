@@ -1552,8 +1552,9 @@
                        seon.turn/tell-error! (constantly nil)
                        seon.turn/model-request! (fn [_ _ _] {:id "test-agent/call" :t1 0 :request {}})
                        seon.turn/act! (fn [st _ _] (act st called!))
+                       ;; a hand-back's end has no turns (the outside model's, unknown here): absent, as seon.turn/end! leaves it
                        seon.turn/end! (fn [{:keys [turn]} outcome reason _]
-                                        (cond-> {:outcome outcome :results {} :uncontracted #{} :turns turn :model-calls @calls} reason (assoc :reason reason)))]
+                                        (cond-> {:outcome outcome :results {} :uncontracted #{} :model-calls @calls} turn (assoc :turns turn) reason (assoc :reason reason)))]
            (run {:task "app.calc/total-is-exact" :max-turns 3}))
          (finally (reset! agent/state old))))))
 
