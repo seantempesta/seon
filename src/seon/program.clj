@@ -491,8 +491,11 @@
         defs (vec (for [d (:defs a)
                         ;; the live var only when this form ran here: an analysis without running (another tree's file, main's
                         ;; forms imported by a root on older code) holds its text's contract, meta and facts, never the image's
-                        ;; (seon.program-test/a-file-analyzed-keeps-its-own-contract), as its docstring does
-                        :let [v (when ran? (find-var (:var d)))
+                        ;; (seon.program-test/a-file-analyzed-keeps-its-own-contract), as its docstring does. A macro still reads
+                        ;; the live var: Jolt's analyzer gives a defmacro's account no :doc or :arglists, so its text alone
+                        ;; would drop them (seon.program-test/a-macro-analyzed-without-running-keeps-its-doc-and-arglists); this
+                        ;; clause goes when the analyzer records them (task jolt.analyzer/a-defmacro-account-holds-its-doc-and-arglists)
+                        :let [v (when (or ran? (:macro? d)) (find-var (:var d)))
                               multi? (contains? (:multis a) (:var d))]
                         :when (and (not (and (:declare? d) (not multi?))) (set? d))
                         :let [facts (def-facts v d)]]
