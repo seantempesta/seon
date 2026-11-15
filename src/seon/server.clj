@@ -178,7 +178,12 @@
       made made
       (not t) (refused (str "no task " id))
       ;; its agent is live: it is the one to work it (a second spawn on its branch is refused)
-      live {:agent (:agent live) :task id :shared true}
+      live (do
+             ;; the session's own area client takes over its live agent's hold (root's ruling 2026-11-15: a hold taken before bin/mcp call kept a
+             ;; session's SEON_MCP_CLIENT stayed under checkout-<path>); any other client only shares it, so no session takes another's agent
+             (when (and client (= id (str "session/" client)) (not= client (get-in live [:env :holder])))
+               @(c/transact-main! sys [[:db/add [:seon.agent/key (:key live)] :seon.agent/holder client]]))
+             {:agent (:agent live) :task id :shared true})
       :else
       (let [restart (when fresh? (task/restart-tx db id))
             env (cond-> (assoc (r/desired-env t) :model "outside")
@@ -269,7 +274,8 @@
 (def ops
   "The server's ops, the one table, keyed by a request's :op (an EDN request is a
   keyword-keyed map, {:op :agents}; a line opening `{\"` is MCP's, respond): each op's
-  description and its arguments (JSON Schema properties; :required, the ones it needs); its
+  description and its arguments (JSON Schema properties; :required, the ones it needs; :inline, an op that waits on our own system's
+  event and so runs on its connection's fiber, never a :server-op worker: inline-op?); its
   answer is op-answer's method of its key. MCP lists each as the tool seon_<op> (mcp-reply)."
   (array-map
    :agents {:doc "Live agents (id, branch, status, task); the tasks running or with an agent, newest first (execution, done, blocked-by, its agent and outcome, problem); every other task counted by execution, and the form that lists them all."
@@ -309,7 +315,8 @@
                   :tree {:type "string" :description "the checkout's tree id (seon.fx/tree-id, as bin/build records it): its branch's key"}
                   :mode {:type "string" :description "judge (default for a checkout), turn, or main (every key with no green at its digest, against no base: a whole tree)"}
                   :stream {:type "boolean" :description "EDN only: each test's verdict as a line as it ends, then the answer"}}}
-   :inbox {:doc "Wait for a message to an agent (its key, or its task: a session's agent is the one attached to its task session/<area>): answers at once with the messages main holds that its branch has not taken, else when one is written, else the typed :seon.server/no-message at :seon.config.root/inbox-wait-ms (ask again). It delivers what it answers (the agent's one delivery), so the next call answers only what came after. Run it in the background: its answer is your notification."
+   :inbox {:inline true
+           :doc "Wait for a message to an agent (its key, or its task: a session's agent is the one attached to its task session/<area>): answers at once with the messages main holds that its branch has not taken, else when one is written, else the typed :seon.server/no-message at :seon.config.root/inbox-wait-ms (ask again). It delivers what it answers (the agent's one delivery), so the next call answers only what came after. Run it in the background: its answer is your notification."
            :args {:agent {:type "string" :description "an agent id"} :task {:type "string" :description "ns/name: its agent, instead of agent"}}}
    :done {:doc "Hand the task the agent works back to root: the agent writes its end (its proofs run, seon.turn/hand-back!), then root judges it, and merges it when the done rule has no reason. Answers the verdict when main holds it, as one line and a handle (seon.server/verdict-line): the task's outcome (done, merged, or closed with its task held) and reason, each red test with its first failure, and how main differs from the branch; the handle is the form that reads it whole at root. A defect of the reconciler that stops the judge, as that defect. It waits as long as the judge does (the run's proofs, a gate, a merge), so a caller's read timeout must allow minutes."
           :args {:agent {:type "string"} :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}} :required ["agent"]}))
@@ -462,16 +469,18 @@
 (defmethod op-answer :inbox [sys _ req] (inbox-answer sys req))
 
 (defn- inline-op?
-  "Does request line run on its connection's fiber, never a :server-op worker: an op that waits on our own system's event
-  (seon_inbox) and would hold one of the 16 worker threads while it waits. Both protocols: EDN {:op :inbox} and MCP's tools/call
-  of seon_inbox. See docs/server.md#ops."
+  "Does request line run on its connection's fiber, never a :server-op worker: an op that declares :inline in ops (it waits on our
+  own system's event and would hold one of the 16 worker threads while it waits). Both protocols: EDN {:op op} and MCP's tools/call
+  of seon_<op>. See docs/server.md#ops."
   {:malli/schema [:=> [:cat :string] :boolean]}
   [line]
-  (boolean (and (str/includes? line "inbox")
-                (try (if (str/starts-with? (str/triml line) "{\"")
-                       (= "seon_inbox" (get-in (json/read-str line) ["params" "name"]))
-                       (= :inbox (:op (edn/read-string line))))
-                     (catch Exception _ false)))))
+  ;; the ops that declare :inline (the one table, never a name in code); a line naming none of them is not parsed here
+  (let [inline (into #{} (keep (fn [[op v]] (when (:inline v) op))) ops)]
+    (boolean (and (some #(str/includes? line (name %)) inline)
+                  (try (inline (if (str/starts-with? (str/triml line) "{\"")
+                                 (some-> (get-in (json/read-str line) ["params" "name"]) (str/replace-first #"\Aseon_" "") keyword)
+                                 (:op (edn/read-string line))))
+                       (catch Exception _ false))))))
 
 (defmethod op-answer :message [sys ag req]
   ;; from the agent the connection works through (connection-agent), else the signed-in person
