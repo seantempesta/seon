@@ -102,7 +102,7 @@
                    ;; no stored commit and no t (a world written without commits): the db handed in is the point
                    :else db))))
 
-(declare page-diff-msgs example-msgs reply-of wire-of)
+(declare page-diff-msgs example-msgs reply-of wire-of messages-text)
 
 (defn- part-ref
   "The ref and turn of message m the agent's model output holds, from src, the component whose own answer held it
@@ -227,9 +227,12 @@
   "A read of messages, the request basis b makes on db, as an outside agent is answered it: the system prompt, then each record as the call made and its result; wire?: the request body as JSON, the bytes a provider is sent (`wire-turn`). See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.host/db :seon.model-call/basis [:vector :seon.model/message] :boolean] :string]}
   [db basis messages wire?]
-  (if wire?
-    (json/write-str (:body (wire-turn db basis)))
-    (str/join "\n\n" (remove str/blank? (mapcat (fn [{:keys [content tool-calls]}] (concat (map #(str (:intent %) "\n" (:code %)) tool-calls) [content])) messages)))))
+  (if wire? (json/write-str (:body (wire-turn db basis))) (messages-text messages)))
+
+(defn messages-text
+  "Messages ms as a person reads them: each call's intent and code, then each content, apart. See docs/server.md#ops."
+  {:malli/schema [:=> [:cat [:sequential :seon.model/message]] :string]}
+  [ms] (str/join "\n\n" (remove str/blank? (mapcat (fn [{:keys [content tool-calls]}] (concat (map #(str (:intent %) "\n" (:code %)) tool-calls) [content])) ms))))
 
 ;; ---- model renders: an entity of each schema as the model reads it (stage 2b, docs/users.md#the-stages-agreed-2026-11-09) ----
 ;; Each is (f {:seon.db/db db} entity): a vector of :seon.model/message values and the entities it places, in its order; the one
@@ -501,28 +504,55 @@
                   'my.agent/describe (cond-> ["@ctx"] (seq path) (conj (pr-str path)))
                   (:value (render/model ix0 es {:ix ix0 :handle (symbol "@ctx")}) es))))
 
+(defn part-digest
+  "Message m's digest as a stored part: its content hashed raw, the rest as canonical EDN, so one message is one digest however
+  built. See docs/render.md#a-turn-stores-what-it-sent."
+  {:malli/schema [:=> [:cat :seon.model/message] :string]}
+  [{:keys [role content] :as m}]
+  (lib/digest (str role "\n" (count content) "\n" content (sedn/encode (sedn/canonical (dissoc m :role :content))))))
+
 (defn assembly-parts
   "The parts model call id sent, [[ref turn digests] ...] in order, its assembly resolved: the first :keep parts of its
   :seon.model-call/prev's, then its :add; a call with no prev holds them whole. nil when it stored none. Walks at most
   :seon.config.ctx/assembly-checkpoint-turns calls. See docs/render.md#a-turn-stores-what-it-sent."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe [:vector :any]]]}
   [db id]
-  (letfn [(of [e] (when-let [{:keys [keep add]} (:seon.model-call/assembly e)]
-                    (if-let [p (:seon.model-call/prev e)] (into (subvec (of p) 0 keep) add) add)))]
-    (some->> (pdb/eid db :seon.model-call/id id) (d/entity db) of)))
+  ;; one walk back to the checkpoint, taking of each call's :add only the parts the calls after it keep, then one build: O(calls walked
+  ;; + parts), never a list copied a level (a read chain of n copied n lists: its bytes grew with each read)
+  (when-let [e (some->> (pdb/eid db :seon.model-call/id id) (d/entity db))]
+    (when (:seon.model-call/assembly e)
+      (loop [e e need Long/MAX_VALUE segs ()]
+        (let [{:keys [keep add]} (:seon.model-call/assembly e)
+              p (:seon.model-call/prev e)
+              upto (fn [n] (subvec add 0 (min (count add) (max 0 n))))]
+          (if p
+            (recur p (min need keep) (conj segs (upto (- need keep))))
+            (into [] cat (conj segs (upto need)))))))))
+
+(defn sent-digests
+  "The digests of messages ms, taken again only where a message is not identical to the one at its place in pm (the request before,
+  digests pd). See docs/render.md#a-turn-stores-what-it-sent."
+  {:malli/schema [:=> [:cat [:maybe [:vector :any]] [:maybe [:vector :string]] [:vector :seon.model/message]] [:vector :string]]}
+  [pm pd ms]
+  (into [] (map-indexed (fn [i m] (if (and pm (< i (count pm)) (identical? m (nth pm i))) (nth pd i) (part-digest m)))) ms))
 
 (defn sent-tx
   "The facts that keep what model call id sent at turn n: its new messages as parts, and its assembly as what changed since call
-  prev's (whole at a checkpoint). See docs/render.md#a-turn-stores-what-it-sent."
-  {:malli/schema [:=> [:cat :seon.host/db :string [:maybe :string] :int [:vector :any]] [:vector :map]]}
-  [db id prev n parts]
-  (let [dg #(lib/digest (sedn/encode (sedn/canonical %)))
-        as (mapv (fn [[ref ms t]] [ref t (mapv dg ms)]) parts)
-        before (when (and prev (pos? (mod n (cfg/value :seon.config.ctx/assembly-checkpoint-turns)))) (assembly-parts db prev))
-        k (if before (count (take-while true? (map = before as))) 0)]
-    (conj (into [] (comp (mapcat second) (distinct) (map (fn [m] {:seon.part/digest (dg m) :seon.part/message m}))) (drop k parts))
-          (cond-> {:seon.model-call/id id :seon.model-call/assembly {:keep k :add (subvec as k)}}
-            before (assoc :seon.model-call/prev [:seon.model-call/id prev])))))
+  prev's (whole at a checkpoint); ds, its messages' digests in order (`part-digest`), when the caller holds them. See
+  docs/render.md#a-turn-stores-what-it-sent."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :string [:maybe :string] :int [:vector :any]] [:vector :map]]
+                  [:=> [:cat :seon.host/db :string [:maybe :string] :int [:vector :any] [:vector :string]] [:vector :map]]]}
+  ([db id prev n parts] (sent-tx db id prev n parts (into [] (comp (mapcat second) (map part-digest)) parts)))
+  ([db id prev n parts ds]
+   (let [ds (vec ds)
+         as (second (reduce (fn [[i as] [ref ms t]] [(+ i (count ms)) (conj as [ref t (subvec ds i (+ i (count ms)))])]) [0 []] parts))
+         before (when (and prev (pos? (mod n (cfg/value :seon.config.ctx/assembly-checkpoint-turns)))) (assembly-parts db prev))
+         k (if before (count (take-while true? (map = before as))) 0)]
+     (conj (into [] (comp (mapcat (fn [[[_ ms] [_ _ pds]]] (map vector ms pds))) (distinct)
+                          (map (fn [[m dg]] {:seon.part/digest dg :seon.part/message m})))
+                 (subvec (mapv vector parts as) k))
+           (cond-> {:seon.model-call/id id :seon.model-call/assembly {:keep k :add (subvec as k)}}
+             before (assoc :seon.model-call/prev [:seon.model-call/id prev]))))))
 
 (defn sent-request
   "The request model call id sent, read back from what it stored (`sent-tx`): {:messages :parts} as `request` answers them, joined
@@ -532,6 +562,16 @@
   (when-let [as (assembly-parts db id)]
     (let [ps (mapv (fn [[ref n ds]] [ref (mapv #(:seon.part/message (d/entity db [:seon.part/digest %])) ds) n]) as)]
       {:messages (into [] (mapcat second) ps) :parts ps})))
+
+(defn sent-delta
+  "The messages model call id's stored request adds past call from's (nil from: all of it): its parts after the ones the two share
+  first, read back as sent, so a session driving an agent is answered what its model's next request adds. See
+  docs/render.md#a-turn-stores-what-it-sent."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :string] :string] [:vector :seon.model/message]]}
+  [db from id]
+  (let [ps (assembly-parts db id)
+        k (if from (count (take-while true? (map = (assembly-parts db from) ps))) 0)]
+    (into [] (comp (drop k) (mapcat (fn [[_ _ ds]] ds)) (map #(:seon.part/message (d/entity db [:seon.part/digest %])))) ps)))
 
 (defn stored-page
   "Turn n's page messages of agent a (an entity id) as its model call stored them: its [:page n] parts, new at turn n, so among
