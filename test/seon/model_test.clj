@@ -365,8 +365,8 @@
      :n "lines of a tool call's arguments, each 8 characters"
      :work "per line: its JSON read, its fragment appended to the call's pieces, its 8 characters decoded by the string reader and sent as one message"
      :growth :linear
-     :per-n {:calls 5 :ticks 8800 :bytes 28500}
-     :fixed {:calls 20 :ticks 20000 :bytes 70000}
+     :per-n {:ticks 8800 :bytes 28500}
+     :fixed {:ticks 20000 :bytes 70000}
      :sizes [10 100 1000]}))
 
 ;; Estimate: two complete calls over loopback (client connect, request JSON, 7 chunk lines each read and parsed ~10k a line) ~1M each, read-lines! and the steps ~0.5M; the server thread's work is its own: ~3M ticks.

@@ -166,7 +166,7 @@ A config key added is no input of a test that does not read it: a `:map`'s field
 
 A green is reused forever, by any checkout or agent, so everything a result depends on is in its digest or out of the test.
 - **Seeds.** A generative check draws from a seed derived from its digest (```seon.proofs/seed```, `:seon.config.proofs/seed-salt`; ```seon.proofs/test-seed```, bound by ```seon.proofs/run-tests!```; each mg-check contract by its own reach digest, [checks](checks.md#the-generative-check-is-per-function)), so a failure prints a reproducible seed. A randomized property test draws `:seon.config.proofs/seeds` seeds: one in an automatic run, five under `bin/test --all`.
-- **Work, not time.** A cost proof is judged on ticks, bytes and calls (```seon.cost/exact```, [cost](cost.md)); CPU time is shown, never red.
+- **Work, not time.** A cost proof is judged on ticks and bytes (```seon.cost/exact```, [cost](cost.md)); CPU time is shown, never red.
 - **Dependencies as they are.** A submodule with uncommitted edits is its class by content (```seon.fx/pin```); a clean one is its gitlink.
 - **The tree held.** A shard stores results only if the tree is the plan's before and after its run.
 - Still open: shard co-residency (a test leaving state behind), the kept stores in `target/`, the inherited environment, renders named by symbol in schemas, and deadlines and picked ports (which can only turn a result red).
