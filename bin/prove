@@ -1,6 +1,6 @@
 #!/bin/zsh
 # bin/prove [NS ...] | bin/prove --merge [NS ...] — asks the standing system (the main tree's, runs/root.port) to prove this
-# DEVIATES (owner, 2026-11-15: every bin/ script is thin over an op): falls back to bin/test and judges in the shell where the test service should answer; task seon.proofs/a-test-forks-from-the-standing-system-and-a-binary-test-reruns-only-for-its-binary moves it inside.
+# DEVIATES (owner, 2026-11-15: every bin/ script is thin over an op): falls back to bin/test and judges in the shell where the test service should answer; not ported: seon.proofs/a-test-forks-from-the-standing-system-and-a-binary-test-reruns-only-for-its-binary asks what job is left once the runtime's mechanisms do theirs (owner: never port the outside logic as it is).
 # checkout through its test service (docs/merging.md#the-test-service): one queue for the machine, process tests in forks,
 # every verdict reused by digest by every asker; each verdict prints as it lands; PROVE OK / PROVE FAILED, and with --merge
 # the merge line and MERGE OK / MERGE FAILED that bin/land reads. No standing system answering is PROVE FAILED.

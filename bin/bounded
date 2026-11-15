@@ -1,6 +1,6 @@
 #!/bin/zsh
 # bin/bounded MS DIR CMD ARG...: CMD run in a process group of its own (bin/held), ended whole past MS ms. Under the bound it is CMD
-# DEVIATES (owner, 2026-11-15: every bin/ script is thin over an op): bounds a shell command's process group outside the system's one fork; task seon.prove/the-shell-runner-is-deleted moves it inside.
+# DEVIATES (owner, 2026-11-15: every bin/ script is thin over an op): bounds a shell command's process group outside the system's one fork; not ported: seon.prove/the-shell-runner-is-deleted asks what job is left once the runtime's mechanisms do theirs (owner: never port the outside logic as it is).
 # itself: its output and its exit status, and what it left running in its group is ended as it ends. Past it (the owner's fourth clock exception, docs/clocks.md#time-decides-the-owners-exceptions):
 # its evidence first (bin/evidence DIR PID), DIR/overran written with MS, then every process of its group ended with SIGKILL, an
 # orphan reparented to pid 1 included, and bin/end-tree PID for any group started under it; the exit status is then 124. A group of

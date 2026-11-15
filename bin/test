@@ -1,6 +1,6 @@
 #!/bin/zsh
 # bin/test [--all] [NS|NS/TEST ...] — (--all, the one flag, first; a flag it does not know, or a name that is no
-# DEVIATES (owner, 2026-11-15: every bin/ script is thin over an op): runs its own cold processes, plan and verdict files outside the system; task seon.prove/the-shell-runner-is-deleted moves it inside.
+# DEVIATES (owner, 2026-11-15: every bin/ script is thin over an op): runs its own cold processes, plan and verdict files outside the system; not ported: seon.prove/the-shell-runner-is-deleted asks what job is left once the runtime's mechanisms do theirs (owner: never port the outside logic as it is).
 # test namespace or deftest, is TEST FAILED) test/'s deftests (every *_test namespace, the ones named,
 # or one deftest by its qualified name, as bin/prove prints the ones it leaves out) with
 # no green result at their reach digest, the rest reused from the results directory every
