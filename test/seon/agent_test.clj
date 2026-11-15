@@ -716,24 +716,35 @@
     (is (false? (:target (:value after))) "the test's relative write is not in the agents' working directory")
     (is (not (.exists (java.io.File. (str "/tmp/seon-agents/tests/" (second (:value run)))))) "and its directory is removed")))
 
+(defn- store-verdict
+  "Agent code writing test t's verdict at the digest digest-code evaluates to, as a run on branch (branch-code) would have
+  written it: result ({:pass :fail :error}, with :failures for a red), through the prove proc's :verdicts request, the one
+  writer of the results branch (seon.prove/verdicts-request). See docs/merging.md#verdicts-are-a-cache."
+  [t digest-code result branch-code]
+  (str "(let [db (seon.agent/db) [c tt] (seon.db/point db) d " digest-code
+       " vt (seon.proofs/verdict-tx db (:graph (seon.agent/test-plan db nil #{'" t "})) {:seon.db/branch " branch-code " :seon.db/commit c :seon.db/t tt}"
+       " {'" t " (assoc '" (pr-str result) " :digest d)} {} {})"
+       " k (:tx-seq (swap! seon.agent/state update :tx-seq inc))]"
+       " (:result (seon.agent/await-reply k {:op :prove :k k :verdicts vt})))"))
+
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 7 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3250k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 7}} a-red-at-its-digest-is-reused-with-its-failures
-  ;; task seon.proofs/a-red-at-its-digest-is-reused: this agent's run cached r red at its digest; r is green
+  ;; task seon.proofs/a-red-at-its-digest-is-reused: a run on this branch stored r red at its digest (the results branch); r is green
   ;; if it runs, so a run would say :pass. The judge reuses the red, with the failure its run
   ;; cached, and forks nothing. Another's red is not reused: a digest does not see the machine, and it runs
-  (let [[_ dg _ judge _ other]
+  (let [[_ dg _ judge _ _ other]
         (in-agent ["(ns reds-test (:require [clojure.test :refer [deftest is]]))
                    (deftest r (is true))"
                    "(get (:digests (seon.agent/test-plan (seon.agent/db) nil #{'reds-test/r})) 'reds-test/r)"
-                   "(seon.fx/write-verdicts! {:id \"main@1\" :key (:key @seon.agent/state)}
-                                             {'reds-test/r {:test 'reds-test/r :digest (get (:digests (seon.agent/test-plan (seon.agent/db) nil #{'reds-test/r})) 'reds-test/r) :pass 0 :fail 1 :error 0}}
-                                             {'reds-test/r [{:type :fail :message \"the recorded failure\" :expected \"1\" :actual \"2\"}]})"
+                   (store-verdict 'reds-test/r "(get (:digests (seon.agent/test-plan (seon.agent/db) nil #{'reds-test/r})) 'reds-test/r)"
+                                  {:pass 0 :fail 1 :error 0 :failures [{:type :fail :message "the recorded failure" :expected "1" :actual "2"}]}
+                                  "(:branch @seon.agent/state)")
                    "(let [r (seon.agent/run-tests-forked 100000000 #{'reds-test/r} :judge)]
                       [(seon.proofs/results r) (:ran r) (:reused r) (some? (:pid r)) (:fail r) (mapv (juxt :message :reused) (:reports r))])"
-                   "(do (deftest other-red (is true))
-                        (let [dg (get (:digests (seon.agent/test-plan (seon.agent/db) nil #{'reds-test/other-red})) 'reds-test/other-red)]
-                          (seon.fx/write-verdicts! {:id \"another\" :key \"another/a9\"} {'reds-test/other-red {:test 'reds-test/other-red :digest dg :pass 0 :fail 1 :error 0}}
-                                                   {'reds-test/other-red [{:type :fail :message \"another's failure\" :expected \"1\" :actual \"2\"}]})))"
+                   "(do (deftest other-red (is true)) :ok)"
+                   (store-verdict 'reds-test/other-red "(get (:digests (seon.agent/test-plan (seon.agent/db) nil #{'reds-test/other-red})) 'reds-test/other-red)"
+                                  {:pass 0 :fail 1 :error 0 :failures [{:type :fail :message "another's failure" :expected "1" :actual "2"}]}
+                                  ":another")
                    "(let [r (seon.agent/run-tests-forked 100000000 #{'reds-test/other-red} :judge)] [(get (seon.proofs/results r) 'reds-test/other-red) (:ran r)])"]
                   {:proofs #{}})]
     (is (string? (:value dg)) (pr-str dg))
@@ -2781,7 +2792,7 @@
         ;; an edge each (seon.program/reach-step): what this judges runs across prove!'s message, which no reference shows, so a fix to it moved no digest here
         _ '[seon.agent/run-selection seon.agent/test-plan seon.agent/run-tests-forked]
         digest (str "(get (:digests (seon.agent/test-plan (seon.agent/db) (:base @seon.agent/state) #{'" t "})) '" t ")")
-        hold (fn [verdict] (str "(seon.fx/write-verdicts! {:id \"another\" :key \"another\"} {'" t " (assoc " (pr-str verdict) " :digest " digest ")} {})"))
+        hold (fn [verdict] (store-verdict t digest verdict ":another"))
         prove "(let [r (my.agent/prove)] {:proofs (:proofs r) :deferred (:deferred r)})"
         [_ _ _ red asked-on-red _ _ green asks before _ after _ after-script]
         (in-agent (fn [_] [(answers-gate t) (process-proof "a-process-proof-already-green" 2)
@@ -2824,7 +2835,7 @@
                            (process-proof "a-deferred-non-proof" 2) (process-proof "a-cached-non-proof" 2)
                            "(do (in-ns 'seon.repl-test) (clojure.test/deftest the-in-process-proof (clojure.test/is true)) (in-ns 'user) :ok)"
                            "(seon.agent/commit!)"
-                           (str "(seon.fx/write-verdicts! {:id \"another\" :key \"another\"} {'" u " {:pass 1 :fail 0 :error 0 :digest " digest "}} {})")
+                           (store-verdict u digest {:pass 1 :fail 0 :error 0} ":another")
                            judge (status t) (status u) judge])
                   {:proofs #{p}})]
     (is (= [] (:deferred (:value first-judge))) (pr-str first-judge))

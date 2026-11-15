@@ -613,7 +613,8 @@
 (defn verdict-tx
   "tx-data writing ran ({test result}) as :seon.proof entities: each test's verdict at its reach digest (verdict-id), its
   status written once, what it read as read keys (read-keys) with their content's digest at db (seon.db/reads-digest), and
-  basis, the {:seon.db/branch :seon.db/commit :seon.db/t} it ran at. A result with no digest, judged flaky or unreported,
+  basis, the {:seon.db/branch :seon.db/commit :seon.db/t} it ran at; a red's :failures (the assertions its run reported), so a
+  reuse of it judges as it did (verdicts-at). A result with no digest, judged flaky or unreported,
   writes nothing, as the file cache keeps it. fns: {test [called function]}; static: {test static reads}. See
   docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :seon.host/db :map :map [:map-of :any :map] :map :map] [:vector :map]]}
@@ -621,22 +622,26 @@
   (vec (for [[test-var r] ran
              :when (and (qualified-symbol? test-var) (:digest r) (not (:flaky r)) (not (:unreported r)))
              :let [ks (read-keys db g test-var (get fns test-var) (get static test-var))]]
-         {:seon.proof/id (verdict-id test-var (:digest r)) :seon.proof/test test-var :seon.proof/reach-digest (:digest r) :seon.proof/status (status-of r)
-          :seon.proof/route :live :seon.proof/basis basis
-          :seon.proof/read-keys ks :seon.proof/reads-digest (pdb/reads-digest db ks nil)
-          :seon.proof/reads {:seon.reads/branch (:seon.db/branch basis) :seon.reads/commit (:seon.db/commit basis)
-                             :seon.reads/keys (into #{} (map edn/read-string) ks)}})))
+         (cond-> {:seon.proof/id (verdict-id test-var (:digest r)) :seon.proof/test test-var :seon.proof/reach-digest (:digest r) :seon.proof/status (status-of r)
+                  :seon.proof/route :live :seon.proof/basis basis
+                  :seon.proof/read-keys ks :seon.proof/reads-digest (pdb/reads-digest db ks nil)
+                  :seon.proof/reads {:seon.reads/branch (:seon.db/branch basis) :seon.reads/commit (:seon.db/commit basis)
+                                     :seon.reads/keys (into #{} (map edn/read-string) ks)}}
+           (and (not (green? r)) (seq (:failures r))) (assoc :seon.proof/failures (vec (:failures r)))))))
 
 (defn verdicts-at
   "{digest result} of the verdicts db holds for cand ({test digest}): one seek of each verdict's identity (verdict-id) and its
   status, read with d/datoms, never a pull (3.3k ticks a seek against 14.3k, measured by deps); a green
-  {:digest :pass 1 :fail 0 :error 0}, a red its status counted once. See docs/merging.md#verdicts-are-a-cache."
+  {:digest :pass 1 :fail 0 :error 0}, a red its status counted once, its :failures, and its writer, {:branch b} of its basis
+  (a red is reused only by the branch that ran it: a digest does not see the machine). See docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :any :string]] [:map-of :string :map]]}
   [db cand]
   (into {} (for [[test-var d] cand :when (qualified-symbol? test-var)
                  :let [e (:e (first (d/datoms db :avet :seon.proof/id (verdict-id test-var d))))] :when e
                  :let [st (:v (first (d/datoms db :eavt e :seon.proof/status)))]]
-             [d {:digest d :pass (if (= :pass st) 1 0) :fail (if (= :fail st) 1 0) :error (if (#{:error :none} st) 1 0)}])))
+             [d (cond-> {:digest d :pass (if (= :pass st) 1 0) :fail (if (= :fail st) 1 0) :error (if (#{:error :none} st) 1 0)}
+                  (not= :pass st) (assoc :writer {:branch (:seon.db/branch (:v (first (d/datoms db :eavt e :seon.proof/basis))))})
+                  (not= :pass st) (assoc :failures (or (:v (first (d/datoms db :eavt e :seon.proof/failures))) [])))])))
 
 (defn reused-by-reads
   "{digest result} for the tests of cand ({test digest}) found holds no verdict for: each one's green on rdb (the results

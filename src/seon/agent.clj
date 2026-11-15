@@ -1016,9 +1016,9 @@
           rdb (when (and rb (pdb/branch? conn rb)) (pdb/head conn rb))
           stored (if rdb (proofs/stored-verdicts rdb db cd (proofs/reads-reusable idx)) {})
           unread nil
-          ;; a green is anyone's. A red is this agent's own, so its judge need not run what its turn just recorded, never another's: a digest does not
-          ;; see the machine, so another's red, under load, would be told to this agent as its work
-          found (when-not unread (into {} (remove (fn [[_ r]] (and (proofs/red? r) (not (:flaky r)) (not= (:key @state) (get-in r [:writer :key]))))) stored))]
+          ;; a green is anyone's. A red is this branch's own (its verdict's basis, seon.proofs/verdicts-at's :writer), so its judge need not run what
+          ;; its turn just recorded, never another's: a digest does not see the machine, so another's red, under load, would be told to this agent as its work
+          found (when-not unread (into {} (remove (fn [[_ r]] (and (proofs/red? r) (not (:flaky r)) (not= (:branch @state) (get-in r [:writer :branch]))))) stored))]
       (cond-> (-> (proofs/plan bd cd (if unread {} found) proofs)
                   (update :selected into (keys removed))
                   (update :run into (keys removed))
@@ -1811,14 +1811,18 @@
                             (into {} (for [[t x] ran] [t (cond-> x (proofs/green? x)
                                                            (assoc :reads (proofs/reads-key rd (proofs/run-reads (assoc x :fns (get-in r [:fns t])) t (get-in plan [:static-reads t])))))]))
                             ran)
-                      ;; a batch the test service granted (items): its verdicts go back with its answer as :seon.proof tx-data, which the
-                      ;; prove proc writes to the results branch, one write a batch (one writer a branch: never this agent). The file
-                      ;; cache is still written for every run: its readers (fx/read-verdict, held-reads, an agent's named results) move
-                      ;; to the store in landing 12's slice 2, which deletes this write (task seon.proofs/a-verdict-is-an-entity-that-names-its-environment)
-                      vt (when items
-                           (let [[c t] (pdb/point (db))]
-                             (proofs/verdict-tx (db) (:graph plan) {:seon.db/branch (:branch @state) :seon.db/commit c :seon.db/t t}
-                                                ran (:fns r) (:static-reads plan))))
+                      ;; every run's verdicts as :seon.proof entities, written to the results branch by the prove proc, its one writer
+                      ;; (never this agent): a batch the test service granted (items) sends them with its answer, which the prove proc
+                      ;; writes once a batch; any other run sends them as data in a :prove request of their own and waits for the write
+                      ;; (seon.prove/verdicts-request), so the next plan reads them whatever route ran them. The file cache is still
+                      ;; written for every run: its readers (fx/read-verdict, held-reads, an agent's named results) move to the store
+                      ;; with the cache's deletion (task seon.proofs/a-verdict-is-an-entity-that-names-its-environment)
+                      vt (let [[c t] (pdb/point (db))]
+                           (proofs/verdict-tx (db) (:graph plan) {:seon.db/branch (:branch @state) :seon.db/commit c :seon.db/t t}
+                                              (into {} (for [[t x] ran] [t (cond-> x (seq (get failures t)) (assoc :failures (get failures t)))]))
+                                              (:fns r) (:static-reads plan)))
+                      sent (when (and (not items) (seq vt))
+                             (let [k (:tx-seq (swap! state update :tx-seq inc))] (:result (await-reply k {:op :prove :k k :verdicts vt}))))
                       w (fx/write-verdicts! {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state) :agent (:id @state) :key (:key @state)} ran failures)]
                   ;; beside the cache, the same run's results as facts on this branch (the record shows them); an item the test service
                   ;; granted writes the cache only: its asker's answer writes the facts once (record-answer!)
@@ -1826,8 +1830,9 @@
                   (let [rec (when-not (or (= :main mode) items) (record-results! ran failures (select-keys reused selected) digests (set deferred)
                                                                      (select-keys (proofs/results r) (keys (:removed plan))) proofs))]
                   (-> (cond-> r (contract/error? w) (assoc :unstored [(:seon.error/message w)])
+                        (contract/error? sent) (update :unstored (fnil conj []) (:seon.error/message sent))
                         (contract/error? rec) (assoc :unrecorded [(:seon.error/message rec)])
-                        (seq vt) (assoc :verdict-tx vt))
+                        (and items (seq vt)) (assoc :verdict-tx vt))
                       ;; an item's measure goes with its answer: its asker's answer writes the test's sums (record-answer!)
                       (cond-> (not items) (dissoc :measured))))))
         (update :reports into reused-reports)

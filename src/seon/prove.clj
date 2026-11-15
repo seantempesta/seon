@@ -475,12 +475,29 @@
                                                           (and checkout (not= :turn mode)) (assoc :process? true)))]
     [(assoc-in st [:runs k :stage] :plan) [m]]))
 
+(defn- verdicts-request
+  "Request m of the api carrying a run's verdicts as data ({:rid :verdicts}: the :seon.proof entities seon.proofs/verdict-tx
+  makes): written by this proc's one per-batch write (verdicts-write), the asker answered {:written n} once they are
+  (answered :verdicts). Only :seon.proof attributes: this proc is the one writer of the verdict shape, never a generic write
+  of a client's tx (flow, 2026-11-15); each entity is checked against its schema by the write. Answers [st outputs]. See
+  docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
+  [st {:keys [rid verdicts]}]
+  (let [vs (vec verdicts) rids (if rid #{rid} #{})]
+    (if (every? (fn [v] (and (map? v) (every? #(= "seon.proof" (namespace %)) (keys v)))) vs)
+      (let [k (str "v" rid) [st o] (verdicts-write (cond-> st rid (assoc-in [:verdict-askers k] rid)) k vs)]
+        (if (seq o) [st o] [(update st :verdict-askers dissoc k) (reply [] rids {:written 0})]))
+      [st (reply [] rids (contract/error :seon.prove/not-verdicts #'seon.prove/verdicts-request "a :verdicts request carries only :seon.proof entities"
+                                         {:keys (into #{} (comp (filter map?) (mapcat keys) (remove #(= "seon.proof" (namespace %)))) vs)}))])))
+
 (defn- request
   "Admit request m ({:rid :branch :t :digest :agent :names :mode}) of the api, keyed by its :digest (run-key); one with no
   :rid (main's commit notice) is a run nobody waits on. A run in flight for the same slot at another digest is superseded first:
   its waiters answered :seon.prove/superseded, its items no one else waits on dropped. Answers [st outputs]."
   {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
   [st {:keys [rid branch] :as m}]
+  (if (contains? m :verdicts)
+    (verdicts-request st m)
   (let [rids (if rid #{rid} #{})
         t (or (:t m) (:main-t st))
         names (not-empty (:names m))
@@ -511,7 +528,7 @@
       ;; main: a prove agent on the tests branch, forked from the fork server's main, plans it
       :else (let [st (assoc-in st [:runs key] (assoc req :waiters rids :stage :spawn))
                   [st m] (step/ask st [:prove :answers] [:spawn key] {:op :spawn :opts {:branch :tests}})]
-              [st [m]]))))
+              [st [m]])))))
 
 (defn- plan-items
   "The items of plan r ({:process {test digest} :steps {step {:digest :binary? :bound}} :build {:tree :needed?}}, seon.agent's
@@ -584,13 +601,15 @@
     ;; a batch's verdicts written (verdicts-write): done; the results branch missing, the writer makes it from main
     ;; (:clone-branch) and the same write is asked again; any other refusal, a :platform problem (the verdicts run again)
     :verdicts (let [tx (get-in st [:verdict-writes key]) st (update st :verdict-writes dissoc key)
-                    rb (cfg/value :seon.config.proofs/results-branch)]
-                (cond (not (contract/error? r)) [st []]
+                    rb (cfg/value :seon.config.proofs/results-branch)
+                    asker (get-in st [:verdict-askers key])
+                    st (cond-> st asker (update :verdict-askers dissoc key))]
+                (cond (not (contract/error? r)) [st (if asker (reply [] [asker] {:written (count tx)}) [])]
                       ;; the writer's refusal of a :tx on a branch the store lacks [M]: "Database does not exist."
                       (and tx (= :seon.writer/refused (:seon.error/type r)) (str/includes? (str (:seon.error/message r)) "does not exist"))
                       (let [[st m] (step/ask st [:prove :answers] [:results-branch key] {:op :write :req {:op :clone-branch :from :db :branch rb}})]
-                        [(assoc-in st [:verdict-writes key] tx) [m]])
-                      :else [st [{:op :problem :class :platform :error r}]]))
+                        [(cond-> (assoc-in st [:verdict-writes key] tx) asker (assoc-in [:verdict-askers key] asker)) [m]])
+                      :else [st (cond-> [{:op :problem :class :platform :error r}] asker (reply [asker] r))]))
     :results-branch (let [[st o] (verdicts-write st key (get-in st [:verdict-writes key]))] [st o])
     :full (if (= key (:key (:full st))) (full-answered st step r) [(update st :stale (fnil inc 0)) []])
     :batch (let [[st outs] (batch-ended st (parse-long key) r)] (settle st outs))
