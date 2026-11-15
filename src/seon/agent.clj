@@ -1811,13 +1811,14 @@
                                                            (assoc :reads (proofs/reads-key rd (proofs/run-reads (assoc x :fns (get-in r [:fns t])) t (get-in plan [:static-reads t])))))]))
                             ran)
                       ;; a batch the test service granted (items): its verdicts go back with its answer as :seon.proof tx-data, which the
-                      ;; prove proc writes to the results branch, one write a batch (one writer a branch: never this agent); any other run
-                      ;; caches files until it is a client of the service (task seon.proofs/a-verdict-is-an-entity-that-names-its-environment)
+                      ;; prove proc writes to the results branch, one write a batch (one writer a branch: never this agent). The file
+                      ;; cache is still written for every run: its readers (fx/read-verdict, held-reads, an agent's named results) move
+                      ;; to the store in landing 12's slice 2, which deletes this write (task seon.proofs/a-verdict-is-an-entity-that-names-its-environment)
                       vt (when items
                            (let [[c t] (pdb/point (db))]
                              (proofs/verdict-tx (db) (:graph plan) {:seon.db/branch (:branch @state) :seon.db/commit c :seon.db/t t}
                                                 ran (:fns r) (:static-reads plan))))
-                      w (when-not items (fx/write-verdicts! {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state) :agent (:id @state) :key (:key @state)} ran failures))]
+                      w (fx/write-verdicts! {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state) :agent (:id @state) :key (:key @state)} ran failures)]
                   ;; beside the cache, the same run's results as facts on this branch (the record shows them); an item the test service
                   ;; granted writes the cache only: its asker's answer writes the facts once (record-answer!)
                   ;; not main's run: it judges main's tree (no :base), whose facts are main's prove's to write
