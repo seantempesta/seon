@@ -791,6 +791,25 @@
         (is (= (ts/reach-index db0 in2) (program/index-of g)))
         (is (not= (program/index-of g0) (program/index-of g)))))))
 
+;; Estimate: calc-db 2.4M + 2 records 0.6M; one graph 0.25M; two indexings 0.1M; two rebuilds 0.5M. Estimated 4,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} an-index-under-a-moved-input-answers-again-only-its-readers
+  ;; docs/source.md#tests-run-by-reach: a held index under inputs that differ in one config key answers again only the tests
+  ;; reading that key; every other answer is kept. Re-answering every test when any input differed cost each test plan
+  ;; 68M ticks and 467 MB (2,158 tests, 2026-11-15), as a plan's first graph is indexed before :seon.env/index joins its inputs
+  (let [db (-> (calc-db)
+               (record 'app.pt-calc "(defn limit [] (seon.config/value :seon.config.agent/stall-ms))")
+               (record 'app.pt-calc-test "(deftest limit-test (is (some? (app.pt-calc/limit))))"))
+        in1 {:env "e" :tree "t" :config {:seon.config.agent/stall-ms "1"}}
+        in2 (assoc-in in1 [:config :seon.config.agent/stall-ms] "2")
+        g1 (program/reach-indexed (program/reach-graph db nil) in1)
+        g2 (program/reach-indexed g1 in2)
+        a1 (program/index-of g1) a2 (program/index-of g2)]
+    (is (= (ts/reach-index db in2) a2) "the index under the moved input is a rebuild's")
+    (is (not= (get-in a1 ['app.pt-calc-test/limit-test :digest]) (get-in a2 ['app.pt-calc-test/limit-test :digest]))
+        "the key's reader is answered again")
+    (is (every? #(identical? (get a1 %) (get a2 %)) (remove #{'app.pt-calc-test/limit-test} (keys a1)))
+        "every other test's answer is the one held, not answered again")))
+
 (defn- with-dir
   "f called with a fresh verdict cache directory under this checkout's target/tmp, removed after."
   [f] (let [dir (str (seon.config/checkout) "/target/tmp/verdicts-" (random-uuid))]
