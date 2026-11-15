@@ -416,9 +416,10 @@
   "The binary identity of git tree tree in the repository at root: the digest (seon.lib/digest) of what only a build can change
   there, one line each: the git ls-tree lines of the paths and prefixes tree's :seon.config.build/inputs names, every pin (a
   gitlink; seon.fx/tree-id keeps only those .gitmodules names), and the value tree's default.edn states for each config key a
-  schema of tree's marks :seon.config/build, read by the compiler at a build (read as EDN data, wherever its entry sits in its
-  file). A key read at load or a place is not in it: the same binary acts on its change at a reload or a restart
-  (seon.config/waiting names them).
+  schema of tree's marks :seon.config/build (read by the compiler at a build), :seon.config/at-load or :seon.config/place
+  (read once at load or before any db, so only a new process acts on a change), each read as EDN data wherever its entry sits
+  in its file. A key read at load or a place leaves it once a landing reloads its readers in place and restarts for a place
+  (seon.config/waiting): task seon.program/a-process-runs-its-branchs-program.
   What bin/build records with the binary (seon.system/built-program's :digest) and seon.fx/runtime-for compares. The program
   (src/'s forms) is not in it: a process loads its branch's forms as a diff. Four git calls. See
   docs/source.md#the-binary-records-its-program."
@@ -432,7 +433,8 @@
           cfg (first (forms (git! {} root ["show" (str tree ":resources/seon/config/default.edn")] nil)))
           schemas (filter #(re-find #"/seon\.config[^/]*\.edn$" %) (lines ["ls-tree" "--name-only" tree "resources/seon/schemas/"]))
           marked (for [m (forms (git! {} root (into ["show"] (map #(str tree ":" %)) schemas) nil)) [k f] m
-                       :when (and (vector? f) (map? (second f)) (:seon.config/build (second f)))]
+                       :when (and (vector? f) (map? (second f))
+                                  (some (second f) [:seon.config/build :seon.config/at-load :seon.config/place]))]
                    k)]
       (lib/digest (str/join "\n" (into (sorted-set)
                                        (concat (lines (into ["ls-tree" "-r" tree "--"] (:seon.config.build/inputs cfg)))

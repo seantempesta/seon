@@ -406,8 +406,8 @@
  ;; branch's digest differs is built for, once (seon.fx/runtime-for). The program (src/'s forms) is not
  ;; here: a process loads it from its branch as a diff (docs/source.md#the-binary-records-its-program). Nor are the
  ;; config and schemas (a process holds its branch's: seon.program/hold-config!, seon.agent/schema-moved): only the config
- ;; keys a schema marks :seon.config/build, which the compiler reads at a build, enter the digest. A key read at load or a
- ;; place is acted on by a reload or a restart of the same binary (seon.config/waiting). resources/seon/system.edn is: a
+ ;; keys a schema marks :seon.config/build (the compiler reads it), :seon.config/at-load or :seon.config/place (only a new
+ ;; process acts on them) enter the digest, read as data. resources/seon/system.edn is: a
  ;; boot reads the binary's copy (seon.graph/read-decl's built-text), and nothing applies a changed one in place yet
  ;; (seon.system/apply!, uncalled), so a changed graph restarts on a build. INTERIM (root 2026-11-15): system.edn leaves this
  ;; list when G swaps changed procs through Flow's update! with no restart (task

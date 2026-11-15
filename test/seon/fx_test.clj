@@ -994,11 +994,11 @@
       (git "write-tree")
       (finally (.delete idx)))))
 
-(deftest ^{:seon.test/estimate {:ticks 40000000}} only-what-the-compiler-reads-moves-the-binary-digest
+(deftest ^{:seon.test/estimate {:ticks 40000000}} only-what-a-new-process-reads-moves-the-binary-digest
   ;; 2026-11-15: bin/binary-digest found :seon.config/at-load and :seon.config/place keys by a line regex, which missed a schema
-  ;; file's first entry (9 of 57 keys: a web port change moved no identity) and counted keys no build reads (c7311e6b -> 76dc758d,
-  ;; no build input changed). The identity now holds the config keys a schema marks :seon.config/build, read as data wherever
-  ;; their entry sits. Estimate: four git calls a digest, ~2M ticks [M root result/d0dfb0e6: 1.9M, 42 ms]
+  ;; file's first entry (9 of 57 keys: a web port change moved no identity) and never held jolt-compiler-options, which the
+  ;; compiler reads. The identity now holds the keys a schema marks :seon.config/build, at-load or place, read as data
+  ;; wherever their entry sits. Estimate: four git calls a digest, ~2M ticks [M root result/d0dfb0e6: 1.9M, 42 ms]
   (let [root (cfg/checkout)
         base (fx/tree-id root)
         show (fn [p] (:out (clojure.java.shell/sh "git" "-C" root "show" (str base ":" p))))
@@ -1007,8 +1007,10 @@
         d0 (fx/binary-digest root base)
         ;; the compiler's options: a build
         opts (clojure.string/replace cfg-text #"(:seon\.config\.build/jolt-compiler-options) \"[^\"]*\"" "$1 \"{:image-fn-forms true}\"")
-        ;; a key read at load (as a place, read before any db): a reload or a restart of the same binary, never a build
-        port (clojure.string/replace cfg-text #"(:seon\.config\.root/max-agents) \d+" "$1 7")
+        ;; a key read at load moves it (only a new process acts on it, wherever its entry sits: the regex missed 9 of 57);
+        ;; a key the branch holds and acts on in place does not
+        at-load (clojure.string/replace cfg-text #"(:seon\.config\.root/max-agents) \d+" "$1 7")
+        port (clojure.string/replace cfg-text #"(:seon\.config\.root/view-window) \d+" "$1 7")
         ;; a key marked :seon.config/build as its file's first entry still counts (the regex's miss)
         first-entry (fn [v] {build-p (clojure.string/replace-first build-text "{:seon.config.build/inputs"
                                                                    "{:seon.config.build/zz-first [:string {:seon.config/build true}]\n :seon.config.build/inputs")
@@ -1016,8 +1018,10 @@
     (is (string? d0) (str "answered " d0))
     (is (not= opts cfg-text) "the compiler's options are stated in default.edn")
     (is (not= d0 (fx/binary-digest root (tree-with root base {cfg-p opts}))) "a change of what the compiler reads is a build")
-    (is (not= port cfg-text) "max-agents, read at load, is stated in default.edn")
-    (is (= d0 (fx/binary-digest root (tree-with root base {cfg-p port}))) "a change of a key read at load is no build")
+    (is (not= at-load cfg-text) "max-agents, read at load, is stated in default.edn")
+    (is (not= d0 (fx/binary-digest root (tree-with root base {cfg-p at-load}))) "a change of a key read at load is a new process's")
+    (is (not= port cfg-text) "view-window is stated in default.edn")
+    (is (= d0 (fx/binary-digest root (tree-with root base {cfg-p port}))) "a change of a key the branch holds is no build")
     (is (not= (fx/binary-digest root (tree-with root base (first-entry "a")))
               (fx/binary-digest root (tree-with root base (first-entry "b"))))
         "a build key whose entry is its file's first moves the digest with its value")))
