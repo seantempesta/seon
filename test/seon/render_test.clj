@@ -3203,15 +3203,16 @@
 
 ;; See docs/render.md#the-page
 ;; Estimate: three prints of one step; the opened ones highlight 100 KB of code (~50 ticks a char): ~10M ticks; 30M.
-(deftest ^{:seon.test/estimate {:ticks 30000000}} a-closed-step-is-its-one-line
-  ;; root's home page was 10.7 MB, 9.2 of it in seven closed steps whose whole code (a landed file's text) and output were drawn inside
-  ;; their closed <details> [M, 2026-11-15]. Closed, a step is its line; opened (seon.system/opened!'s fact), it draws its code;
-  ;; with no agent to record an opening (an example session), it is drawn whole
+(deftest ^{:seon.test/estimate {:ticks 30000000}} a-closed-steps-code-is-cut-by-its-budget
+  ;; root's home page was 10.7 MB, 9.2 of it in seven closed steps whose whole code (a landed file's text) was drawn inside their closed
+  ;; <details> [M, 2026-11-15]. Closed, a step's code is the printer's cut under :seon.config.render/form-budget, its output still drawn
+  ;; (opening shows it at once); opened (seon.system/opened!'s fact), whole; with no agent to record an opening (an example session), whole
   (let [code (str "(+ 1 2) ;" (apply str (repeat 100000 "x")))
         e {:seon.eval/id "e1" :seon.eval/code code :seon.eval/intent "Add."}
         step (fn [ctx e] (h/html (#'ui/eval-step {:seon.ctx/ctx ctx} e)))
         closed (step {:seon.agent/key "a1"} e)]
-    (is (< (count closed) 3000) (str "closed, its line alone: " (count closed) " bytes"))
+    (is (< (count closed) 10000) (str "closed, its code cut: " (count closed) " bytes"))
+    (is (str/includes? closed "seon-print-elision") "and the cut says what it left")
     (is (str/includes? closed "Add.") "its line says what it set out to do")
     (is (< 100000 (count (step {:seon.agent/key "a1"} (assoc e :seon.eval/opened true)))) "opened, its code whole")
     (is (< 100000 (count (step {} e))) "with no agent to record an opening, whole")))

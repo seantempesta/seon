@@ -1385,7 +1385,7 @@
 (defn- eval-step
   "Eval e (a record, or a view of one a walk placed) as a step of the chat (docs/render.md#the-page): one quiet line, a mark only when it
   threw, what it set out to do (its intent as Markdown, else its code's first line); opened, its code and what came of it (`eval-output`,
-  a component for the page alone, placed when the walk gives a db), drawn only once it is opened, so a closed step is one line. Opening it
+  a component for the page alone, placed when the walk gives a db), its code cut by the printer's budget until it is opened. Opening it
   is posted by the page's agent, the walk's ctx's (:seon.agent/key: an example session called directly holds none, posts nothing, and is
   drawn whole). Its <details> carries its handle's anchor (eval-<id>)."
   {:malli/schema [:=> [:cat :map :map] :any]}
@@ -1408,15 +1408,17 @@
                ;; the agent's message is Markdown, rendered (owner, 2026-10-29); the model reads it as written
                [:div {:class "seon-text seon-md-inline min-w-0 flex-1"} [#'markdown intent {:inline? true}]]
                [:code {:class "seon-form min-w-0 flex-1 truncate"} (first (str/split-lines (or code "")))])])
-      ;; its code and what came of it, drawn once it is opened (the opening is a fact, seon.system/opened!, so the page draws it then):
-      ;; closed, a step is its one line, so a page holds a line an eval, never every eval's whole code and output (root's home page held
-      ;; 9.2 of its 10.7 MB in seven closed steps, 2026-11-15). Where no agent records an opening (no key: an example session drawn as of
-      ;; its end), it is drawn whole, as it cannot be opened later
-      (when (or opened (nil? key))
-        [:div {:class "ml-4 flex min-w-0 max-w-full flex-col gap-1 overflow-x-auto py-1"}
-         ;; the code as the agent wrote it, whole, highlighted
-         [:div {:class "min-w-0"} [#'emit/marked-hiccup :seon.print/code (or code "")]]
-         (when db [#'eval-output {:key id :agent (some-> key keyword) :wire/for "page"} e])])]]))
+      ;; its code and what came of it, inside the closed details, so opening it shows it at once. Closed, its code is the printer's cut
+      ;; under :seon.config.render/form-budget, whole once opened (seon.system/opened!'s fact): root's home page held 9.2 of its 10.7 MB in
+      ;; seven closed steps' code, whole files a session evaluated, 2026-11-15. With no agent to record an opening (an example session), whole
+      [:div {:class "ml-4 flex min-w-0 max-w-full flex-col gap-1 overflow-x-auto py-1"}
+       [:div {:class "min-w-0"}
+        (if (or opened (nil? key))
+          [#'emit/marked-hiccup :seon.print/code (or code "")]
+          (let [{:keys [shown truncated? omitted lines]} (print/plain (or code "") (form-budget) {})]
+            (list [#'emit/marked-hiccup :seon.print/code shown]
+                  (when truncated? [:span {:class "seon-print-elision"} (emit/cut-words omitted lines nil)]))))]
+       (when db [#'eval-output {:key id :agent (some-> key keyword) :wire/for "page"} e])]]]))
 
 (defn- eval-shown
   "Of eval view e, what the person's pieces read: not whether it is open, so opening it runs the line alone. Its response
