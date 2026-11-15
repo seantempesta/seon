@@ -29,7 +29,7 @@
   ours and theirs as data, until the branch's content for its key changes or it is
   resolved (`resolve-tx`). Every function here is pure over db values."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [datahike.datom] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program] [seon.edn :as sedn] [seon.config :as cfg]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [datahike.datom] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program] [seon.edn :as sedn] [seon.config :as cfg] [seon.schema.datahike :as sd]))
 
 (def ^:private stated-keys
   "The program keys one entity's stated attributes hold, by key kind, as data: :id the identity naming the entity, :stated each attribute its content
@@ -534,15 +534,18 @@
   "The Datahike declarations, from the built registry, of the attributes the datoms of tx use
   that onto's schema lacks: what a branch cut before an attribute needs before main's datoms of it
   can land (Datahike refuses an attribute its schema does not define). Empty when onto holds
-  them all. One pass over tx's attributes, then the registry's declarations only when one is
-  lacking."
+  them all. One pass over tx's attributes, then one declaration for each lacking one, sorted by name (O(lacking): it
+  declared the whole registry, ~1,300 entries and ~9 MB a merge, to keep a few); one the registry does not hold (Datahike's
+  own) has none, and an unstorable one throws, as the registry's declarations do."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:vector :seon.schema/declaration]]}
   [onto tx]
   (let [have (d/schema onto)
-        lacking (into #{} (comp (map :a) (filter #(and (keyword? %) (not (contains? have %))))) tx)]
-    (if (empty? lacking)
-      []
-      (filterv #(contains? lacking (:db/ident %)) (program/schema-declarations onto contract/registry)))))
+        lacking (into (sorted-set) (comp (map :a) (filter #(and (keyword? %) (not (contains? have %))))) tx)]
+    (into [] (keep (fn [a] (let [dcl (sd/declaration contract/registry a)]
+                             (cond (not (contract/error? dcl)) dcl
+                                   (= :seon.schema.datahike/absent (:seon.schema/reason dcl)) nil
+                                   :else (throw (ex-info (:seon.error/message dcl) dcl))))))
+          lacking)))
 
 (defn- deleted-by?
   "Whether entity e is one base held and db holds nothing of: db deleted it, whole. A fact another side wrote of it since has no
