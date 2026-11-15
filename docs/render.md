@@ -286,7 +286,11 @@ One generic function reads a component's hiccup before the diff (```seon.render/
 
 No clock decides the output: `seon.render/component-edits` passes `:vec-timeout nil` ([clocks](clocks.md)). `seon.render-test/a-change-speaks-in-names`.
 
-A turn's page message is the edits between the page parts at two bases. The parts along the turns' bases are drawn by one walk (```seon.ctx.wire/page-parts-through```), advanced point to point (```seon.ctx/moved```, ```seon.ctx/patch```), so a cold request of T turns costs one draw and what moved at each turn. The edits between two points are one function (```seon.ctx.wire/page-edits-between```), what the message prints and `my.render/diff` answers. Nothing is stored: a rendering is made again from its point in time. Cost: `seon.render-cost-test/edits-cost-the-component`, `seon.render-cost-test/a-turns-page-edits-cost-the-same-at-any-length`.
+A turn's page message is the edits between the page parts at two bases. The parts along the turns' bases are drawn by one walk (```seon.ctx.wire/page-parts-through```), advanced point to point (```seon.ctx/moved```, ```seon.ctx/patch```), so a cold request of T turns costs one draw and what moved at each turn. The edits between two points are one function (```seon.ctx.wire/page-edits-between```), what the message prints and `my.render/diff` answers. Cost: `seon.render-cost-test/edits-cost-the-component`, `seon.render-cost-test/a-turns-page-edits-cost-the-same-at-any-length`.
+
+### A turn stores what it sent
+
+What a turn sent that reads the db at a past point, its page message, is kept with the turn: each message once by the digest of its EDN (`:seon.part/digest`, `:seon.part/message`), and the call's `:seon.model-call/assembly` naming them in order (```seon.ctx.wire/sent-tx```, written with `:seon.model-call/sent-hash` by `seon.turn/model-request!`). A later request reads a turn's page from it (```seon.ctx.wire/stored-page```), one seek for the call and one a part, and draws only a turn whose call holds none (the request being made, or a turn from before the store kept them). Records are not copied: an eval's, a message's or a reply's message is a function of its record alone. The owner, 2026-11-15: "do not store full copies of rendered data just the components that we assemble".
 
 ### A layout places its lists
 

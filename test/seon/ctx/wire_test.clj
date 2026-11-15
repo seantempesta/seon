@@ -477,6 +477,57 @@
           (is (= (at :model) (at :outside)) "an outside agent's read is the request a model's turn is sent, its conversation in it")
           (is (str/includes? (:content (peek r2)) "quadruple")))))))
 
+;; See docs/render.md#a-turn-stores-what-it-sent
+(deftest a-cold-request-reads-each-turns-stored-page
+  ;; a cold request drew every earlier turn's page again at its past points (a 30-turn agent: 11B ticks, 37.6 GB, the pages 773k of
+  ;; its 966k chars [M root result/a444fa99]); a turn now keeps what it sent, so a request made again draws only its own turn's pair
+  (ts/test-branch!
+    (fn [_ conn]
+      (wiki! conn)
+      (d/transact conn (program-facts '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))" []]]))
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/f``` triple."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+      (d/transact conn [{:seon.task/id "demo/f" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/f"}}}])
+      (let [;; as seon.turn/model-request! goes: the turn and its basis, the request made on the db that holds them, then what it sent kept
+            request (fn [n] (let [b {:commit (d/commit-id @conn) :task "demo/f" :turn n :max-turns 4 :origin :model :agent "a1"}
+                                  _ (d/transact conn (ts/turn-tx "a1" n {:seon.model-call/basis b}))
+                                  {:keys [messages parts]} (wire/render @conn b)]
+                              (d/transact conn (wire/sent-tx "a1" n parts))
+                              (d/transact conn (turn-of b n))
+                              [b messages]))
+            [_ r1] (request 1)
+            _ (d/transact conn (program-facts '[[demo/f "(defn f \"Triples.\" [x] (* 3 x))" []]]))
+            [_ r2] (request 2)
+            _ (d/transact conn [[:db/add [:seon.task/id "demo/f"] :seon.task/plan "Make ```demo/f``` quadruple."]])
+            [b3 r3] (request 3)
+            drawn (atom [])
+            real wire/page-parts-through
+            again (with-redefs [wire/page-parts-through (fn [db a chain] (swap! drawn conj (count chain)) (real db a chain))]
+                    (:messages (wire/render @conn b3)))]
+        (is (= r3 again) "made again cold, the request is the one the turn sent, byte for byte")
+        (is (= [2] @drawn) "only turn 3's own pair is drawn (its call held no assembly when its request was made); turns 1 and 2 read what they stored")
+        (is (= (subvec r2 0 (count r1)) r1) "and the prefix holds")
+        (is (= (wire/stored-page @conn (pdb/eid @conn :seon.agent/key "a1") 2)
+               (into [] (comp (filter (fn [[ref]] (= [:page 2] ref))) (mapcat second)) (:parts (wire/render @conn b3))))
+            "turn 2's stored page is what its request sent")))))
+
+;; See docs/render.md#a-turn-stores-what-it-sent
+(deftest one-message-is-one-part-however-it-was-built
+  ;; a digest of an encoding that kept insertion order would name one message twice, and nothing would be shared (data, 2026-11-15)
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [m1 {:role "assistant" :content "My page changed: status." :tool-calls [{:id "x" :intent "Show." :code "(my.render/diff p q)"}]}
+            m2 (array-map :tool-calls [(array-map :code "(my.render/diff p q)" :intent "Show." :id "x")] :content "My page changed: status." :role "assistant")
+            tx (fn [k m] (wire/sent-tx k 1 [[[:page 1] [m] 1]]))]
+        (is (= m1 m2) "the same message")
+        (is (not= (seon.edn/encode m1) (seon.edn/encode m2)) "whose plain encodings differ")
+        (d/transact conn (ts/turn-tx "a1" 1 {}))
+        (d/transact conn (ts/turn-tx "a2" 1 {}))
+        (d/transact conn (tx "a1" m1))
+        (d/transact conn (tx "a2" m2))
+        (is (= 1 (count (d/datoms @conn :aevt :seon.part/digest))) "one part, shared by both turns")
+        (is (= [m1] (wire/stored-page @conn (pdb/eid @conn :seon.agent/key "a2") 1)) "and read back as the message sent")))))
+
 (deftest each-section-is-told-once-on-the-page
   ;; the old request sent the task, its references and its sections in the first turn's context
   ;; and again in the current block, every turn; on the page each is one part: the plan in
