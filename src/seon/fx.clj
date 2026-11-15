@@ -412,31 +412,40 @@
   (let [r (git-run {} root ["show" (str tree ":" path)] nil)]
     (when (zero? (:exit r)) (:out r))))
 
+(defn- identity-lines
+  "The lines a binary's identity is the digest of, for git tree tree in the repository at root, as a sorted set: tree's build
+  inputs' and pins' git ls-tree lines (:seon.config.build/inputs; with no shipped config, this checkout's) and, for each config
+  key a schema of tree's marks :seon.config/build, :seon.config/at-load or :seon.config/place, [key value] as default.edn states
+  it, read as EDN data. binary-digest digests them; build-differs names the ones two trees do not share. Four git calls; throws
+  git's or the reader's words."
+  {:malli/schema [:=> [:cat :string :string] [:set :string]]}
+  [root tree]
+  (let [lines (fn [args] (str/split-lines (git! {} root args nil)))
+        ;; every EDN form a text holds, its tags kept as data (aero's #profile, #env): git show of several blobs is their texts end to end
+        forms (fn [text] (let [r (java.io.PushbackReader. (java.io.StringReader. text)) end (Object.)]
+                           (loop [acc []] (let [f (edn/read {:default tagged-literal :eof end} r)] (if (identical? end f) acc (recur (conj acc f)))))))
+        ;; a tree with no shipped config (a test's scratch tree) is digested with this checkout's build inputs and no config lines
+        shown (git-run {} root ["show" (str tree ":resources/seon/config/default.edn")] nil)
+        cfg (if (zero? (:exit shown)) (first (forms (:out shown))) {})
+        schemas (filter #(re-find #"/seon\.config[^/]*\.edn$" %) (lines ["ls-tree" "--name-only" tree "resources/seon/schemas/"]))
+        marked (for [m (when (seq schemas) (forms (git! {} root (into ["show"] (map #(str tree ":" %)) schemas) nil))) [k f] m
+                     :when (and (vector? f) (map? (second f))
+                                (some (second f) [:seon.config/build :seon.config/at-load :seon.config/place]))]
+                 k)]
+    (into (sorted-set)
+          (concat (lines (into ["ls-tree" "-r" tree "--"] (or (:seon.config.build/inputs cfg) (cfg/value :seon.config.build/inputs))))
+                  (filter #(str/starts-with? % "160000 ") (lines ["ls-tree" "-r" tree]))
+                  (for [k marked :when (contains? cfg k)] (sedn/encode [k (get cfg k)]))))))
+
 (defn binary-digest
-  "The binary identity of git tree tree in the repository at root: the digest of what only a new binary or process acts on: tree's
-  build inputs (:seon.config.build/inputs), its pins, and the value default.edn states for each config key a schema marks
-  :seon.config/build, :seon.config/at-load or :seon.config/place, read as EDN data. What seon.system/built-program records with
-  the binary and seon.fx/runtime-for compares; the program (src/'s forms) is not in it. Four git calls. See
-  docs/source.md#the-binary-records-its-program."
+  "The binary identity of git tree tree in the repository at root: the digest (seon.lib/digest) of its identity-lines, what only
+  a new binary or process acts on: tree's build inputs, its pins and the config keys a schema marks :seon.config/build,
+  :seon.config/at-load or :seon.config/place. What seon.system/built-program records with the binary and seon.fx/runtime-for
+  compares; the program (src/'s forms) is not in it. See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat :string :string] [:or :seon.lib/digest :seon.error/base]]}
   [root tree]
   (try
-    (let [lines (fn [args] (str/split-lines (git! {} root args nil)))
-          ;; every EDN form a text holds, its tags kept as data (aero's #profile, #env): git show of several blobs is their texts end to end
-          forms (fn [text] (let [r (java.io.PushbackReader. (java.io.StringReader. text)) end (Object.)]
-                             (loop [acc []] (let [f (edn/read {:default tagged-literal :eof end} r)] (if (identical? end f) acc (recur (conj acc f)))))))
-          ;; a tree with no shipped config (a test's scratch tree) is digested with this checkout's build inputs and no config lines
-          shown (git-run {} root ["show" (str tree ":resources/seon/config/default.edn")] nil)
-          cfg (if (zero? (:exit shown)) (first (forms (:out shown))) {})
-          schemas (filter #(re-find #"/seon\.config[^/]*\.edn$" %) (lines ["ls-tree" "--name-only" tree "resources/seon/schemas/"]))
-          marked (for [m (when (seq schemas) (forms (git! {} root (into ["show"] (map #(str tree ":" %)) schemas) nil))) [k f] m
-                       :when (and (vector? f) (map? (second f))
-                                  (some (second f) [:seon.config/build :seon.config/at-load :seon.config/place]))]
-                   k)]
-      (lib/digest (str/join "\n" (into (sorted-set)
-                                       (concat (lines (into ["ls-tree" "-r" tree "--"] (or (:seon.config.build/inputs cfg) (cfg/value :seon.config.build/inputs))))
-                                               (filter #(str/starts-with? % "160000 ") (lines ["ls-tree" "-r" tree]))
-                                               (for [k marked :when (contains? cfg k)] (sedn/encode [k (get cfg k)])))))))
+    (lib/digest (str/join "\n" (identity-lines root tree)))
     (catch Throwable e (error #'binary-digest :seon.fx/io-error (str "the binary identity of tree " tree ": " (step/error-msg e)) {:path root}))))
 
 (defn- tree-digest
@@ -455,19 +464,19 @@
           (do (write-file {:req {:path (.getPath f) :text d}}) {:digest d}))))))
 
 (defn- build-differs
-  "The build inputs (:seon.config.build/inputs) and pins (gitlinks) that differ between the binary's tree (target/seon.tree)
-  and tree, as paths; every input and pin when the binary recorded no tree. Asked only on a mismatch."
+  "What differs between the identity of the binary's tree (target/seon.tree) and tree's, named: each identity line the two do not
+  share, by its path (a build input or a pin) or its config key; the same lines binary-digest digests, so a mismatch always names
+  its cause. Every build input when the binary recorded no tree, or a tree's lines can't be read. Asked only on a mismatch."
   {:malli/schema [:=> [:cat :string [:maybe :string] :string] [:vector :string]]}
   [root built-tree tree]
-  (let [inputs (cfg/value :seon.config.build/inputs)]
+  (let [inputs (vec (cfg/value :seon.config.build/inputs))]
     (if-not built-tree
-      (vec inputs)
-      (let [r (git-run {} root ["diff" "--raw" "--no-renames" built-tree tree] nil)]
-        (vec (for [l (str/split-lines (str (:out r))) :when (not (str/blank? l))
-                   :let [[meta p] (str/split l #"\t" 2) [om nm] (str/split (subs meta 1) #" ")]
-                   :when (or (= "160000" om) (= "160000" nm)
-                             (some #(or (= p %) (and (str/ends-with? % "/") (str/starts-with? p %))) inputs))]
-               p))))))
+      inputs
+      (try
+        (let [a (identity-lines root built-tree) b (identity-lines root tree)
+              named (fn [l] (if (str/starts-with? l "[") (first (str/split (subs l 1) #"\s" 2)) (second (str/split l #"\t" 2))))]
+          (vec (distinct (map named (sort (concat (remove b a) (remove a b)))))))
+        (catch Throwable _ inputs)))))
 
 (defn runtime-for
   "The binary a process on tree's branch runs: {:binary its path :digest d} when the running binary's identity (its build record's
