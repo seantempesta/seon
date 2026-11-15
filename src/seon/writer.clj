@@ -210,29 +210,66 @@
   (let [bc (pdb/connect (assoc cfg :branch b))]
     (try (d/transact bc arg-map) (finally (d/release bc)))))
 
+(defn replay
+  "into-db with txs, from's source transactions as seon.merge/decide answers them, replayed in order: each a new transaction through
+  the write check (seon.db/with), carrying meta and naming its source (:seon.tx/source) and the source's instant (:seon.tx/at-ms). The db
+  after them, or, when the check refuses one, :seon.merge/replay-refused naming that transaction and the entity it wrote, and nothing
+  applied: the replay is a value, so it is all or none. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:vector :map] :map] [:or :seon.host/db :seon.error/base]]}
+  [into-db from txs meta]
+  (reduce (fn [db {:keys [source ops]}]
+            ;; the named edge (docs/failure-points.md): the write check refuses a replayed transaction with its typed error
+            (try (:db-after (pdb/with db ops nil (assoc meta :seon.tx/source source :seon.tx/at-ms (some-> ^java.util.Date (:db/txInstant (d/entity from source)) .getTime)) true))
+                 (catch clojure.lang.ExceptionInfo e
+                   (reduced (contract/error :seon.merge/replay-refused #'seon.writer/replay
+                                            (str "the merge replays transaction " source " and the write check refuses it: " (ex-message e))
+                                            {:tx source :entity (let [x (second (first ops)) n (pm/named into-db x)] (if (= n x) (pm/named from x) n)) :error (ex-data e)})))))
+          into-db txs))
+
 (defn merge-main-into
-  "Main merged into branch b on main's program (seon.merge/merge-main): a conflict writes only its unmerged entries; clean, one
-  force-branch! onto b. Answers {:ok :conflicts :commit :t :main}, or the typed error of a swept merge base. See
-  docs/merging.md#a-branch-merges-main-in."
+  "Main merged into branch b on main's program. Decided by seon.merge/decide (the branch's facts since the base against main's at the
+  same keys, O(what the branch changed)): a conflict writes only its unmerged entries. Clean: the branch's own change since the base carried onto main's head
+  (seon.merge/carry, replayed through the write check, `replay`: O(what the branch changed), never main's churn replayed), its decided
+  entries settled and its moved tasks' cites made again, and one force-branch! onto b with both parents, stating its change against the
+  branch head it replaces (seon.merge/change-record: what main moved for this branch, at the keys either side touched), so a reader on
+  the branch wakes on what moved, never on its own facts made again. Answers {:ok :conflicts :commit :keys :t :main}, or the typed
+  error of a swept merge base or a refused replay. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :any :map :seon.db/branch] :map]}
   [conn cfg b]
   (let [main-b (pdb/conn-main conn) main @conn head (pdb/head conn b)
         base (pdb/branch-base conn main-b b)
-        ;; nothing to merge when the branch's base is main's head (a resume with main unmoved): no merge-main read
+        ;; nothing to merge when the branch's base is main's head (a resume with main unmoved): nothing decided
         same? (and (not (contract/error? base)) (= (d/commit-id base) (d/commit-id main)))
-        r (when-not (or same? (contract/error? base)) (pm/merge-main base head main))]
+        r (when-not (or same? (contract/error? base)) (pm/decide base head main))
+        c (when (and r (not (:conflicts r))) (pm/carry base head main))
+        meta (pdb/tx-meta b {:seon.tx/merged main-b})
+        replayed (when c (replay main head (:txs c) meta))]
     (cond
       (contract/error? base) base
       same? {:ok true :keys 0 :main (d/commit-id main)}
       (:conflicts r)
-      (do (branch-tx! cfg b {:tx-data (pm/unmerged-tx head (vec (:conflicts r)) (:max-tx main)) :tx-meta (pdb/tx-meta b)})
+      (do (branch-tx! cfg b {:tx-data (pm/unmerged-tx head (mapv #(dissoc % :entity) (:conflicts r)) (:max-tx main)) :tx-meta (pdb/tx-meta b)})
         {:ok false :conflicts (:conflicts r) :main (d/commit-id main)})
+      (contract/error? replayed) replayed
       :else
-      (let [;; a merged task's cites are derived from its text: made again here, never carried (seon.task/merged-cites-tx)
-            tx (into (:tx r) (task/merged-cites-tx (pdb/speculate-db main (:tx r)) (:keys r)))
-            merged (:db-after (d/with main {:tx-data tx :tx-meta (pdb/tx-meta b {:seon.tx/merged main-b})}))
-            cid (d/force-branch! merged b #{(d/commit-id head) (d/commit-id main)} {:expected-current-commit (d/commit-id head)})]
-        {:ok true :commit cid :keys (count (:keys r)) :t (:max-tx merged) :main (d/commit-id main)}))))
+      (let [[gone added] (pm/changed-datoms base main)
+            ;; the keys the branch touched (its carried facts): only these can differ from main's change, so only these are read on both sides
+            ks (vec (distinct (for [{:keys [ops]} (:txs c) [o e a] ops :when (not= :db/retractEntity o)] [e a])))
+            ;; a merged task's cites are derived from its text: made again here, never carried (seon.task/merged-cites-tx)
+            settled (pdb/with replayed (:settle-ops r) nil meta true)
+            cites (task/merged-cites-tx (:db-after settled) (mapv (fn [[e a]] [:datum e a]) ks))
+            cited (when (seq cites) (pdb/with (:db-after settled) cites nil meta true))
+            merged (if cited (:db-after cited) (:db-after settled))
+            ;; the keys the cites wrote, read from their datoms (cites-tx gives entity maps), the transaction's own facts left out
+            cite-keys (for [dt (:tx-data cited) :when (not= (:e dt) (:tx dt))] [(:e dt) (:a dt)])
+            ;; the entities touched whole: each a merge re-identifies (both ids), each it retracts whole, each entry it settles
+            whole (distinct (concat (mapcat identity (:remapped c))
+                                    (for [{:keys [ops]} (:txs c) [o e] ops :when (= :db/retractEntity o)] e)
+                                    (map second (:settle-ops r))))
+            ds (pm/merge-record head merged [gone added] (into ks cite-keys) whole)
+            cid (d/force-branch! merged b #{(d/commit-id head) (d/commit-id main)}
+                                 {:expected-current-commit (d/commit-id head) :changes {:base (d/commit-id head) :datoms ds}})]
+        {:ok true :commit cid :keys (count ks) :t (:max-tx merged) :main (d/commit-id main)}))))
 
 (defn- octopus-merge
   "Merge branches into main in ONE commit (an octopus merge, session R3, as git's, every

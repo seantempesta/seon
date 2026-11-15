@@ -2232,17 +2232,20 @@
     (is (str/includes? h "Every box is checked") (str "and it says so: " h))))
 
 (deftest ^{:seon.test/estimate {:ticks 1000000}} an-unmerged-entrys-form-is-one-resolve-takes
-  ;; docs/render.md#how-the-work-stands: the form the page offers for an unmerged entry runs as written. A var's entry is settled by
-  ;; its name (my.branch/resolve!'s contract); context's first-task merge, 11-14, got '[:var seon.repl/wrap-instrument] from the page
-  ;; and a contract error from resolve!. Any other program key (a task's) is settled by the key itself
-  (let [h (h/html (ui/status-hiccup {} {:unmerged [{:key '[:var app.m/f] :ours "(defn f [] 1)" :theirs "(defn f [] 2)"}
-                                                   {:key [:task "app/t"] :ours {:seon.task/plan "a"} :theirs {:seon.task/plan "b"}}]}))]
-    (is (str/includes? h "(my.branch/resolve! 'app.m/f)") (str "a var's, by its name: " h))
+  ;; docs/render.md#how-the-work-stands: the form the page offers for an unmerged entry runs as written. An entry is a fact's key
+  ;; ([:datum e a]) shown by its entity's name (seon.merge/named, given by seon.ctx.status): a var's settled by its symbol, any other
+  ;; named entity by its name, one with no name by the key itself (my.branch/resolve!'s contract); context's first-task merge, 11-14,
+  ;; got '[:var seon.repl/wrap-instrument] from the page and a contract error from resolve!
+  (let [h (h/html (ui/status-hiccup {} {:unmerged [{:key [:datum 7 :var/form] :entity '[:var/name app.m/f] :ours 11 :theirs 12}
+                                                   {:key [:datum 8 :seon.task/plan] :entity [:seon.task/id "app/t"] :ours "a" :theirs "b"}]}))]
+    (is (str/includes? h "(my.branch/resolve! 'app.m/f)") (str "a var's, by its symbol: " h))
     (is (str/includes? h "(my.branch/resolve! 'app.m/f :theirs)") "both sides")
-    (is (not (str/includes? h "'[:var")) "never its key")
-    (is (some #{"(my.branch/resolve! '[:task \"app/t\"])"}
-              (tree-seq coll? seq (ui/status-hiccup {} {:unmerged [{:key [:task "app/t"] :ours {:seon.task/plan "a"} :theirs {:seon.task/plan "b"}}]})))
-        "a task's, by its key, as the code it runs")))
+    (is (str/includes? h "[:var/name app.m/f] :var/form") "shown by its name and attribute")
+    (is (not (str/includes? h "'[:datum 7")) "never its key when it has a name")
+    (is (some #{"(my.branch/resolve! '[:seon.task/id \"app/t\"])"} (tree-seq coll? seq (ui/status-hiccup {} {:unmerged [{:key [:datum 8 :seon.task/plan] :entity [:seon.task/id "app/t"] :ours "a" :theirs "b"}]})))
+        "a task's, by its name, as the code it runs")
+    (is (some #{"(my.branch/resolve! '[:datum 9 :seon.agent/model])"} (tree-seq coll? seq (ui/status-hiccup {} {:unmerged [{:key [:datum 9 :seon.agent/model] :entity 9 :ours "x" :theirs "y"}]})))
+        "an entity with no name, by its key")))
 
 (deftest ^{:seon.test/estimate {:ticks 1000000}} an-unspecified-task-is-told-specifying-is-first
   ;; plan Stage 1.2 (task seon.ctx.status/a-task-is-specified-once-a-proof-was-red): until one of its proofs has been red on its branch

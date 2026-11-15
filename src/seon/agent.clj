@@ -436,6 +436,11 @@
     ;; the branch's own schema changes go with the write: the one transaction path checks it (seon.db/with, the writer's 'transact!)
     (let [schemas (let [{:keys [key registry]} (branch-schemas)] (when (seq key) {:forms key :registry registry}))]
     (when-let [e (program/config-refused (db) tx-data)] (throw (ex-info (:seon.error/message e) e)))
+    ;; this process is its branch's one writer: an attribute only root writes, on main ({:seon.db/root-only true}: what root observes
+    ;; of an agent, the system entity, a recorded error) is never written here, so no merge meets it changed on both sides
+    (when-let [ra (seq (distinct (filter (:root-only-attrs (pdb/index)) (mapcat #(cond (map? %) (keys %) (vector? %) [(nth % 2 nil)]) tx-data))))]
+      (let [e (contract/error :seon.agent/root-only-write #'seon.agent/transact! (str "only root writes " (str/join ", " ra) ", on main") {:attributes (vec ra)})]
+        (throw (ex-info (:seon.error/message e) e))))
     (if (= :test (:mode @state))
       (let [r (pdb/with (db) tx-data schemas) attrs (into #{} (map :a) (:tx-data r))]
         (doc/carry-index! (:db-before r) (:db-after r) (map (juxt :e :a) (:tx-data r)))
@@ -576,7 +581,7 @@
 
 (defn merge-main!
   "git merge main into this agent's branch, decided on MAIN's program: root's writer runs the one merge (its :merge-main,
-  seon.merge/merge-main), never this branch's code. The branch becomes main's head plus its own datoms since the base, one commit
+  seon.merge/decide, then seon.writer/replay), never this branch's code. The branch becomes main's head plus its own transactions since the base, replayed, one commit
   only while the branch is still at the head this process committed; a key both changed stops it, and each conflict is an unmerged
   entry on the branch. This process writes nothing of its branch while it waits; the wait ends by the writer's answer, or, if
   its step throws, the typed error root answers the request's :dest with (seon.system/answer-taken), or root's end; then its connection follows the branch's moved head (datahike.connector/follow-head!). None of
@@ -2254,10 +2259,13 @@
   its record holds them and its own cite! and uncite! change them, and a merge of main never brings one back."
   {:malli/schema [:=> [:cat :seon.task/id] :any]}
   [task]
+  ;; :seon.agent/task is root's alone, on main (one writer per attribute, docs/users.md): the agent reads it as it hears main, so
+  ;; begun is this process's own state, never a write of root's fact on the branch (two writers disagreed at a whole task's stage move)
   (let [k (:key @state) e (d/entity (db) [:seon.agent/key k])]
-    (when-not (= task (:seon.task/id (:seon.agent/task e)))
-      (let [made? (nil? (:seon.agent/task e))]
+    (when-not (= task (:begun @state))
+      (let [made? (or (nil? e) (empty? (task/cites-of (db) (:db/id e))))]
         (begin-run-tx! task)
+        (swap! state assoc :begun task)
         (when made? (transact! (task/agent-cites-tx (db) [:seon.agent/key k] k)))))))
 
 (defn begin-run-tx
@@ -2267,10 +2275,10 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :string] :seon.db/tx-data]}
   [db task k]
   [{:seon.task/id task :seon.task/execution :running}
-   ;; the agent's task, which its record pulls (the agent is the unit, docs/ctx.md#the-pattern)
-   ;; what it reads as its system message: the system prompt's page, its top section and all below (seon.ctx.wire/agent-system-text)
+   ;; what it reads as its system message: the system prompt's page, its top section and all below (seon.ctx.wire/agent-system-text);
+   ;; its task is root's (:seon.agent/task, written on main by seon.task/start-tx), never written here
    (let [sys (ref/page-top db doc/system-page)]
-     (cond-> {:db/id k :seon.agent/key k :seon.agent/task {:seon.task/id task}} sys (assoc :seon.agent/system [sys])))])
+     (cond-> {:db/id k :seon.agent/key k} sys (assoc :seon.agent/system [sys])))])
 
 (defn- begin-run-tx!
   "Task written on this agent's branch (begin-run!'s write): the task as main declares it when the
@@ -2323,6 +2331,9 @@
         ;; reused through the node cache after-fork! kept (docs/storage.md#an-agents-reads-and-writes)
         db0 (pdb/at-commit store-conn (d/commit-id db0))
         index (some-> index (assoc :db db0))
+        ;; malli's default here is the branch over main as forked: a schema read with no options reads this agent's branch, as
+        ;; seon.contract/options does (one read of main's schema entries and their compile, ~1.8M ticks [M root])
+        _ (program/hold-registry! (contract/branch-over (program/schema-registry (program/schema-changes db0))))
         _ (mark! :connected)]
     ;; the config this process was forked holding (root read it; an agent reads no environment), the heap bound as its task
     ;; states it (docs/config.md#the-resolver): a task's own :seon.config.agent/heap-extra-bytes bounds its agent
