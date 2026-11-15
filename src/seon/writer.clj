@@ -283,6 +283,20 @@
               (do (refuse (first ms) c) (dissoc st :pend))))))
     st))
 
+(defn- branch-held
+  "A refusal naming the live agent that holds branch b on main's db (its :seon.agent/branch, its status live), or nil: a live agent
+  writes its own branch, so a repair waits for it to stop. See docs/merging.md#root-repairs-a-failed-merge-from-its-repl."
+  {:malli/schema [:=> [:cat :seon.host/conn :keyword :keyword] [:maybe :map]]}
+  [conn main b]
+  (let [db @conn
+        live (:seon.status/live (contract/properties :seon.agent/status))]
+    (when-let [k (first (for [d (d/datoms db :aevt :seon.agent/branch)
+                              :when (= b (pdb/on-main main (:v d)))
+                              :let [e (d/entity db (:e d))]
+                              :when (contains? live (:seon.agent/status e))]
+                          (:seon.agent/key e)))]
+      (refused (str "agent " k " is live on " b ": its branch is its own to write") {:agent k :branch b}))))
+
 (defn- other-op
   "Every request but :tx. Answers the new state."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.writer/request] :seon.writer/state]}
@@ -347,6 +361,19 @@
                                        {:ok true :exists false})))
       ;; a tree's branch dropped once no proof of it runs (seon.system/prove-tree!; the owner's ruling, 2026-11-11): only a tree-<id>
       ;; branch, never another; one already gone answers so
+      ;; a branch's repair (docs/merging.md#root-repairs-a-failed-merge-from-its-repl): a write on branch b through the one path, stamped with
+      ;; b, or b's head moved to commit :to (its db, :to its one parent) while b is still at :expected; refused while a live agent
+      ;; holds b, since that agent is its branch's one writer
+      :tx (reply st (or (branch-held conn main (:branch m))
+                        (let [bc (pdb/connect (assoc (:cfg st) :branch (:branch m)))]
+                          (try (let [rep (d/transact bc {:tx-data (vec (:tx-data m))})]
+                                 {:ok true :t (:max-tx (:db-after rep)) :datoms (count (:tx-data rep)) :commit (d/commit-id (:db-after rep))})
+                               (finally (d/release bc))))))
+      :reset-branch (reply st (or (when-not (exists? (:branch m)) (refused (str "no branch " (:branch m)) {}))
+                                  (branch-held conn main (:branch m))
+                                  (if-let [to (d/commit-as-db conn (:to m))]
+                                    {:ok true :commit (d/force-branch! to (:branch m) #{(:to m)} {:expected-current-commit (:expected m)}) :from (:expected m)}
+                                    (refused (str "no commit " (:to m)) {:to (:to m)}))))
       :drop-tree-branch (reply st (cond (not (pdb/tree-branch? (:branch m))) (refused (str "not a tree's branch: " (:branch m)) {})
                                         (exists? (:branch m)) (do (d/delete-branch! conn (:branch m)) {:ok true :dropped true})
                                         :else {:ok true :dropped false}))
@@ -405,7 +432,8 @@
   outside the catch, so a refused op never hands back a state from before a commit Datahike made."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.writer/request] :seon.writer/state]}
   [st o {:keys [op] :as m}]
-  (if (= op :tx)
+  ;; a :tx on main joins the batch; one naming another branch is a branch repair, run alone (other-op's :tx)
+  (if (and (= op :tx) (contains? #{nil (pdb/conn-main (:conn st))} (some->> (:branch m) (pdb/on-main (pdb/conn-main (:conn st))))))
     ;; the batch's transact checks it (seon.db/transact-checked): a refusal is answered to its requester alone
     (update st :pend (fnil conj []) m)
     (let [st (commit-batch st o)]

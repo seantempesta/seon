@@ -973,6 +973,7 @@
             r (pdb/retain! conn 3)]
         (is (pos? (:swept r)) (pr-str r))
         (is (= (:generation r) (:generation (:seon.system/retained (d/pull @conn [:seon.system/retained] [:seon.system/id :root])))) "and it is written on main")
+        (is (= :db (:seon.tx/branch (d/entity @conn (:max-tx @conn)))) "by a transaction that names its branch, as every write does (an unnamed one read as a branch's own in a merge, lb76 2026-11-15)")
         (is (nil? (pdb/retain! conn 3)) "with nothing new landed, none is due")
         (is (= (conj (vec main-before)) (notes-of @conn)) "main's head reads the same")
         (is (<= hist-before (hist @conn)) "its history too")
