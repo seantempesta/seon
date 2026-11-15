@@ -13,6 +13,7 @@ A clock never guesses when something will finish (owner, 2026-11-15). Every wait
 - **A wait on the world outside** (a web fetch, a model provider, a subprocess, the OS): the answer may never come. It carries a declared timeout, a spec'd config entry with its reason (`:seon.config.fx/bounds`, `:seon.config.root/stop-ms`), armed through the one timer, and past it the wait ends with a typed error such as `:seon.bound/reached`.
 
 So a timeout in our own code, or a guess at how long our own work takes, is the mistake; a timeout at the edge of the world is required.
+
 ## Time decides (the owner's exceptions)
 
 The sites where the owner allowed time to decide: the delayed insert, the one timer, the cron, the kernel's TCP keepalive, and a run ended far past its measured time once its evidence is captured.
