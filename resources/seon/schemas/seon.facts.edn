@@ -312,11 +312,11 @@
  :seon.agent/opened [:set {:description "The ids of its evals that a reader of its page opened, kept on main."} :string]
  ;; main's head and its branch's merge base as it last heard them (seon.agent's state :main, :base), the commits the
  ;; page's branch views read, written by its turn, so a cold build draws what the live page does
- :seon.agent/main-commit [:uuid {:description "Main's head as the agent last heard it, the commit that its page's branch views read."}]
+ :seon.agent/main-commit [:and {:description "Main's head as the agent last heard it, the commit that its page's branch views read."} :seon.db/commit]
  ;; of those mains, the newest whose content (seon.merge/content-datoms) moved: what seon.ctx.status/status reads, as a commit that moved
  ;; none of it, root's note of an agent's status on each eval, changes no answer it gives (docs/render.md#how-the-work-stands)
- :seon.agent/main-program [:uuid {:description "The newest commit of main whose program changed, as the agent last heard it; its status reads it. See docs/render.md#how-the-work-stands."}]
- :seon.agent/base-commit [:uuid {:description "The agent branch's merge base as it last heard it."}]
+ :seon.agent/main-program [:and {:description "The newest commit of main whose program changed, as the agent last heard it; its status reads it. See docs/render.md#how-the-work-stands."} :seon.db/commit]
+ :seon.agent/base-commit [:and {:description "The agent branch's merge base as it last heard it."} :seon.db/commit]
  ;; its env and options, written by the fork that makes it and never changed (the one-unit spec, section 1): the point of its parent it
  ;; was forked at, which with :seon.agent/branch is its kept reference {:branch :commit :t}, and what its process runs
  :seon.agent/commit [:uuid {:description "The commit of its parent's branch the agent was forked at: its parent's state exactly, its writes committed first."}]
@@ -773,7 +773,7 @@
  ;; holds (the proofs' results, red assertions, reasons, the run's errors), whether the
  ;; branch's unmerged entries show, and the last evaluations' transcript while no earlier turn
  ;; shows them. seon.ctx.wire/render makes the exact user message from it on that commit.
- :seon.model-call/basis [:map {:description "What the reader's context was built from, never its text: the commit it read, its task, turn and observations no db holds."} [:commit :uuid] [:t {:optional true} :int] [:task :seon.task/id]
+ :seon.model-call/basis [:map {:description "What the reader's context was built from, never its text: the commit it read, its task, turn and observations no db holds."} [:commit :seon.db/commit] [:t {:optional true} :int] [:task :seon.task/id]
                    [:turn :int] [:max-turns :int] [:origin :seon.model-call/origin]
                    [:merge? {:optional true} :boolean]
                    ;; the agent whose record the request renders (its key)

@@ -523,6 +523,30 @@
   (into {} (for [k (concat fns (map #(vector :schema %) entities) (map #(vector :config %) config) (map #(vector :file %) files) keys)]
              [k (get rd k)])))
 
+(defn run-reads
+  "What reads-key takes of test t's run x ({:fns :files}, its measured record) beside its static reads ks: the functions it
+  called and itself, and ks; when ks hold the whole tree ([:tree]: a test form reads the checkout raw), runs no process or
+  binary of its own ([:root], [:binary]: what those read is out of this process's sight) and the run carries the files it read
+  (seon.profile/opened, Jolt's record: a run with none keeps the tree), each checkout file read ([:file path], relative to the
+  checkout) in place of [:tree]; a directory listed under the checkout keeps the tree (its names are a read no blob holds).
+  Its edge: a read on a thread the test did not start (a pool's) is not noted. So an edit to a file the test never opened moves
+  none of its reads. See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat :map :symbol [:maybe [:or [:set :any] [:sequential :any]]]] :map]}
+  [x t ks]
+  (let [fns (conj (into #{} (map :var) (:fns x)) t)
+        root (str (cfg/checkout) "/")
+        rel (fn [p] (let [p (cond-> p (str/starts-with? p "file:") (subs 5))
+                          p (cond (str/starts-with? p root) (subs p (count root))
+                                  (str/starts-with? p "/") nil
+                                  :else (str/replace p #"^(\./)+" ""))]
+                      (when (and p (not (str/includes? p "../")) (not (str/includes? p ":"))) p)))
+        fs (keep rel (:files x))
+        narrow? (and (some #{[:tree]} ks) (some? (:files x)) (not-any? #{[:root] [:binary]} ks)
+                     (not-any? #(or (= "" %) (.isDirectory (java.io.File. (str root %)))) fs))]
+    (if narrow?
+      {:fns fns :files (set fs) :keys (vec (remove #{[:tree]} ks))}
+      {:fns fns :keys ks})))
+
 (defn- covered?
   "Does rd (a reads index) hold every input of read key k's kind (a var, [:schema k], [:config k], [:file p]; rd's
   :seon.proofs/covers), so that k missing from it is a miss, not an input it cannot see?"
@@ -693,7 +717,7 @@
                                            :message (str "the test allocated " (:bytes m) " bytes against its budget of " (* 10 eb)
                                                          ": ten times the bytes its estimate states (docs/merging.md#a-tests-tick-budget). Ten times over is "
                                                          "the finding: fix the work, or, when the estimate was wrong, restate it worked from its parts")}))
-                           (done v (assoc (dissoc m :value :thrown) :fns (profile/with-reads (profile/touched)) :budget (budget v)))
+                           (done v (assoc (dissoc m :value :thrown) :fns (profile/with-reads (profile/touched)) :files (profile/opened) :budget (budget v)))
                            (when-let [e (:thrown m)] (throw e))))
         body #((t/join-fixtures (get @t/once-fixtures n []))
                (fn [] (doseq [v vars :when (and (:test (meta v)) (not (skip? v)))] (each (fn [] (measured v))))))]
@@ -738,7 +762,7 @@
                    :let [counts (volatile! {}) ran (volatile! {}) out (java.io.StringWriter.)
                          done! (fn [tv m] (let [v (test-symbol (str tv))
                                                 r (assoc (merge {:pass 0 :fail 0 :error 0} (@counts v)) :test v :digest (digests v)
-                                                         :ms (quot (:wall-ns m) 1000000) :ticks (:ticks m) :bytes (:bytes m) :fns (:fns m) :budget (:budget m))]
+                                                         :ms (quot (:wall-ns m) 1000000) :ticks (:ticks m) :bytes (:bytes m) :fns (:fns m) :files (:files m) :budget (:budget m))]
                                             (vswap! ran assoc v r)
                                             (note! r)))
                          thrown (binding [t/*test-out* out
