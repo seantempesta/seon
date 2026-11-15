@@ -129,8 +129,9 @@
 (deftest render-proc-has-no-beat
   (let [d (p/render-proc)]
     (is (not (contains? (:ins d) :tick)) "no beat in-port")
-    ;; :main, main's commits from the writer: a pass follows a commit, never a clock
-    (is (= #{:answers :from-web :main} (set (keys (:ins d)))))
+    ;; :main, main's commits from the writer: a pass follows a commit, never a clock; :health-wake is health's own next bounded
+    ;; step, put only by this proc's steps (health-more, the :health op), never a timer
+    (is (= #{:answers :from-web :main :health-wake} (set (keys (:ins d)))))
     (is (nil? (resolve 'seon.render.proc/SAMPLE-MS)))
     (is (nil? (resolve 'seon.render.proc/start-sampler!))))
   (testing "a proc's health from root's view: its declared procs, its defects by pid"
@@ -461,8 +462,9 @@
   "The render proc's state as it holds a read of main and of a3's branch: root's view (a3 busy;
   root's boot, b1, is its entity's on main), main's open problems."
   [main branch]
-  ;; its events chan as the proc has one (its tap of the events mult): health's next steps are this proc's own messages on it
-  {:events-ch (a/chan 1024) :rid 1 :pending {} :watch #{:root [:chat :a3]} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :user-walks {} :branches {:a3 {:db branch :branch :task-demo-f} [:chat :a3] {:db branch :branch :task-demo-f}}
+  ;; its events chan and its health wake as the proc makes them (render-proc's init: the events tap a sliding buffer of 4096, the
+  ;; wake a sliding buffer of one), so a burst drops here as it does there
+  {:events-ch (a/chan (a/sliding-buffer 4096)) :health-wake (a/chan (a/sliding-buffer 1)) :rid 1 :pending {} :watch #{:root [:chat :a3]} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :user-walks {} :branches {:a3 {:db branch :branch :task-demo-f} [:chat :a3] {:db branch :branch :task-demo-f}}
    ;; the one read of a3's branch every view of it shows (seon.render.proc/ask-branches)
    :branch-reads {:task-demo-f {:db branch}}
    :merges 0 :main-db main :view {:agents {:a3 {:status :busy :branch :task-demo-f}}}})
@@ -4669,6 +4671,20 @@
       (let [fold2 (reduce seon.error/fold fold (map occ (range 4 7)))
             [_ asked2] (#'seon.system/api-proc (assoc api :seon.system/errors fold2) :ext {:op :health :db main1 :p (promise)})
             [st2 out] (reduce (fn [[st _] m] (#'p/render-proc st :from-web m)) [st nil] (get asked2 [:render :from-web]))
+            ;; an ask on an unsettled report waits, and the proc's own bounded steps answer it at the step that settles. A burst of
+            ;; 5000 api events, past the events buffer, arrives while it waits: driven here only by what its channels hold (its
+            ;; wake when one is there, else an event), at most 100 steps. Red before (root's review of 30653cc9f7): the wake rode
+            ;; the shared events buffer and the burst dropped it, so the ask was never answered
+            _ (dotimes [i 5000] (a/put! (:events-ch st2) {:type :noise :i i}))
+            [st2 out] (loop [st st2 out out i 0]
+                        (if (or (some #(= :health-answer (:op %)) (get out :to-api)) (= i 100))
+                          [st out]
+                          (let [w (some-> (:health-wake st) a/poll!)
+                                e (when-not w (a/poll! (:events-ch st)))]
+                            (if-not (or w e)
+                              [st out]
+                              (let [[st o2] (if w (#'p/render-proc st :health-wake w) (#'p/render-proc st :events e))]
+                                (recur st (merge-with into out o2) (inc i)))))))
             answered (some #(when (= :health-answer (:op %)) (:r %)) (get out :to-api))
             banner2 (:html (second (filter #(= "#p-tiles" (:container %)) (:seon.render/units (#'p/page-value st2 [:debug :root])))))]
         (is (= 7 (count-of answered)) (str "the api's answer counts all seven: " (pr-str (count-of answered))))
@@ -5296,3 +5312,29 @@
         text (pr-str hc)]
     (is (clojure.string/includes? text "session-x") "its client")
     (is (clojure.string/includes? text "request 7") "and its MCP request id")))
+
+;; See docs/render.md#reactive-renders
+(deftest ^{:seon.test/estimate {:ticks 30000000}} a-landing-redraws-what-a-branch-walk-drew
+  ;; task seon.render.proc/a-render-a-land-redefines-redraws-what-it-drew: a landing redefined seon.render.ui/chat-ask on main and root's
+  ;; page kept its old output: an agent's chat is its branch's walk, which reads its branch's datoms, never main's. A main move that
+  ;; carries a render's :var/form reaches every kept branch walk, which draws that render's components again
+  (let [[main branch _] (paged-dbs)
+        st (root-state (branch-state main branch) main)
+        [st1 _] (pass-view st [:chat :a3])
+        b (some (fn [[b r]] (when (:walk r) b)) (:branch-reads st1))
+        drew (into #{} (map (comp symbol :f val)) (get-in st1 [:branch-reads b :walk :p :cache]))
+        r (some #(when (drew %) %) ['seon.render.ui/conversation-turn 'seon.render.ui/turn 'seon.render.ui/chat-end 'seon.render.ui/agent])
+        ;; main as root holds it (root-state wrote root's boot on it): a db no newer than the held main advances nothing
+        main' (d/db-with (:main-db st1) [{:db/id "v" :var/name r :var/form "f"}
+                               {:db/id "f" :form/id (str "landed-" (random-uuid)) :form/src "(defn redefined [])" :form/defines #{"v"}}])
+        ;; walked again with nothing moved first, so :ran holds what the landing alone reaches, never the walk's cold draw
+        st1 (update-in st1 [:branch-reads b :walk] #'seon.render.proc/redefined-walk [])
+        quiet (get-in st1 [:branch-reads b :walk :p :ran])
+        st2 (#'seon.render.proc/advance-main st1 main')
+        ran (get-in st2 [:branch-reads b :walk :p :ran])]
+    (is (some? (:main-db st1)) "root's render state holds main (advance-main diffs from it)")
+    (is (seq (filter #(= :var/form (:a %)) (seon.ctx/moved (:main-db st1) main' nil))) (str "main's move carries the :var/form: " (pr-str (:max-tx (:main-db st1))) " " (:max-tx main')))
+    (is (some? b) "an agent's chat is kept as a branch walk")
+    (is (some? r) (str "it drew a render a landing can redefine: " (pr-str drew)))
+    (is (not-any? #(= r (first %)) (keys quiet)) (str "with nothing moved it draws nothing again: " (pr-str quiet)))
+    (is (some #(= r (first %)) (keys ran)) (str "the redefined render's components draw again in the branch walk: " (pr-str (keys ran))))))

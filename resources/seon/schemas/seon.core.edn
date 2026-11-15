@@ -121,6 +121,8 @@
                       [:ping-map-fn :seon.host/fn]]
  :seon.step/outputs [:maybe [:map-of [:or :keyword [:tuple :keyword :keyword]] [:sequential :any]]]
  :seon.step/transition [:enum :clojure.core.async.flow/stop :clojure.core.async.flow/pause :clojure.core.async.flow/resume]
+ :seon.flow/held [:map {:description "In a proc's ping map, the work it holds outside its channels that a drain must account for (flow's rule 5): each kind apart, never summed, so a reader knows which is held; the render proc's: health's queued reactions and the :health asks waiting on its settle."}
+                   [:queue :int] [:waiting :int]]
  :seon.flow/edge [:string {:description "On a var's metadata, why it holds state or waits outside a Flow proc (an edge reader for a blocking read, the interrupt stack, an OS signal's hook): the reason travels with the code, and health's :stateful-outside-flow leaves the var out (docs/health.md#state-or-a-wait-outside-flow)."}]
  :seon.step/step-fn [:function
                      [:=> [:cat] :seon.step/describe]
@@ -202,26 +204,27 @@
  :seon.repl/answer [:map {:seon.render/hiccup seon.render.ui/evaluation :description "What an eval answers: a map under a handle. A key appears only when it has something to say."}
                       ;; none on a call of root's from the page, recorded with what root answered (seon.render.proc/web-answered)
                       [:handle {:optional true :description "The name this result is kept under. Use it like any value: (:value result/a3f9c1d2)."} :qualified-symbol]
-                      [:value {:optional true :description "What the code answered. With :forms, a vector holding one value per form."} :any]
-                      ;; the namespace the REPL is in after it, as every nREPL response carries: where the next eval runs
-                      [:ns {:optional true :description "The namespace your next call runs in."} :symbol]
                       ;; code of several top-level forms: how many ran, its :value each one's in order (seon.repl/response)
                       [:forms {:optional true :description "How many top-level forms ran, when more than one."} [:int {:min 2}]]
-                      ;; what the forgiving reader changed of the call's code before it ran (seon.ctx.search/repaired)
-                      [:repaired {:optional true :description "What the reader changed of your code before it ran."} :seon.eval/repairs]
+                      [:value {:optional true :description "What the code answered. With :forms, a vector holding one value per form."} :any]
+                      [:recorded {:optional true :description "The vars this eval made program on your branch (a method as [multi dispatch]); they merge with your task. If you only meant to try something, take it back with (ns-unmap 'the.ns 'the-name) and define such things in your own namespace."} [:vector [:or :symbol [:vector :any]]]]
                       ;; each existing var whose contract or docstring this eval changed, its before and
                       ;; after and the wiki sections citing it (seon.program/meaning-changes); absent when none
                       [:redefined {:optional true :description "Each function whose contract or docstring this eval changed, before and after, with the wiki sections that cite it."} [:vector :seon.program/meaning-change]]
+                      [:unmapped {:optional true :description "The definitions it removed from your branch's program: a var by its name, a method by [multimethod dispatch-value]."} [:vector [:or :qualified-symbol [:tuple :qualified-symbol :any]]]]
+                      [:fns {:optional true} [:vector :map]]
                       ;; what its definitions warn (seon.repl/instrument): an uncontracted definition, a contract not armed
                       [:warnings {:optional true :description "Problems with your definitions, each with its fix."} [:vector [:map [:seon.repl/finding :keyword]]]]
-                      [:out {:optional true :description "What it printed."} [:map [:seon.print/code :string]]]
-                      [:err {:optional true :description "What it printed to the error stream."} [:map [:seon.print/code :string]]] [:ex {:optional true :description "The error that stopped it."} :seon.error/base]
-                      [:ms {:optional true} number?] [:ticks {:optional true} :int] [:bytes {:optional true} :int]
+                      [:out {:optional true :description "What it printed."} [:map [:seon.print/code :string]]] [:err {:optional true :description "What it printed to the error stream."} [:map [:seon.print/code :string]]]
+                      [:ex {:optional true :description "The error that stopped it."} :seon.error/base] [:ms {:optional true} number?] [:ticks {:optional true} :int]
+                      [:bytes {:optional true} :int]
+                      ;; the namespace the REPL is in after it, as every nREPL response carries: where the next eval runs
+                      [:ns {:optional true :description "The namespace your next call runs in."} :symbol]
+                      ;; what the forgiving reader changed of the call's code before it ran (seon.ctx.search/repaired)
+                      [:repaired {:optional true :description "What the reader changed of your code before it ran."} :seon.eval/repairs]
                       ;; the branch refused this eval's record (seon.repl/record!, :seon.agent/unrecorded), or the commit that followed its writes (seon.agent/commit!, :seon.agent/commit-refused: the writes were dropped)
                       [:unrecorded {:optional true :description "Your result was not recorded on your branch, and why."} :seon.error/base]
                       [:text {:optional true} :string] [:record {:optional true} :string]
-                      [:recorded {:optional true :description "The vars this eval made program on your branch (a method as [multi dispatch]); they merge with your task. If you only meant to try something, take it back with (ns-unmap 'the.ns 'the-name) and define such things in your own namespace."} [:vector [:or :symbol [:vector :any]]]]
-                      [:unmapped {:optional true :description "The definitions it removed from your branch's program: a var by its name, a method by [multimethod dispatch-value]."} [:vector [:or :qualified-symbol [:tuple :qualified-symbol :any]]]] [:fns {:optional true} [:vector :map]]
                       ;; seon.repl/edit!'s: the var it changed and the lines around the change, [line text] each
                       [:edited {:optional true :description "What an edit changed: the var and the lines around the change."} [:map [:var :symbol] [:lines [:vector [:tuple pos-int? :string]]]]]]
  ;; what an eval changed of an existing var's meaning (seon.program/meaning: its contract, its

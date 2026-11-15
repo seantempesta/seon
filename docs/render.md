@@ -166,7 +166,7 @@ One pass over the pull renders every output asked of it ([users](users.md#the-st
 
 Your page and your model's context are renders of `@ctx`, and a render runs again only when a path it read changes: read the narrowest path you need, and give each member of a list its own component. A rerun moves only the reads it gained or lost in the walk's path index (```seon.ratom/read-index```; `seon.ratom-test/a-rerun-indexes-only-the-reads-it-gained-or-lost`), but a layout that lists every member still reruns at O(members).
 
-**A render is an input of what it draws, as the data is.** A move of a definition (`:var/form`) queues each component whose render reaches it through `:form/refs` (`seon.render/queue-moved-renders!`, `seon.render-test/a-render-that-changes-draws-again`); it costs nothing until a definition moves.
+**A render is an input of what it draws, as the data is.** A move of a definition (`:var/form`) queues each component whose render reaches it through `:form/refs` (`seon.render/queue-moved-renders!`, `seon.render-test/a-render-that-changes-draws-again`); it costs nothing until a definition moves. A landing moves definitions on main, which an agent's branch walk never reads, so main's move hands its `:var/form` datoms, with each var's `:var/name`, to every kept branch walk (`seon.render.proc/advance-main`, `seon.render-test/a-landing-redraws-what-a-branch-walk-drew`).
 
 **Writing one.** A render is a function `[opts & args]` answering hiccup; it is a component when its opts contract names `:seon.ctx/ctx` or `:seon.db/db`. A call `[#'f {} arg]` in a render's hiccup draws f there as a component of its own, keyed by f and its args:
 
@@ -358,7 +358,7 @@ Equal values print the same bytes. A vector, a list and a sorted map keep their 
 Text for the wire, storage, a digest, a file, a URL, a command line or code to evaluate is `seon.edn/encode` (EDN that reads back, whole), and only these print beside the printer:
 
 - `seon.edn/encode`: EDN for storage and the wire, whole.
-- `seon.db/reads-digest`, `seon.db/results-moved`, `seon.proofs/read-keys`: a read key as `:seon.proof/read-keys` stores it (its pr-str), storage.
+- `seon.db/reads-digest`, `seon.db/reads-digests`, `seon.db/results-moved`, `seon.proofs/read-keys`: a read key as `:seon.proof/read-keys` stores it (its pr-str), storage.
 - `seon.program/form-ids`: a form's code digest text, under `seon.edn/encode`'s bindings ([source](source.md#what-a-test-takes-of-a-forms-text)).
 - `seon.repl/unmapped`: a removed method's dispatch value as its stored `:method/key` holds it (its pr-str, ```seon.program/method-key```), storage.
 - `seon.render.ui/table-cells`: telling a Markdown table's rule row from its rows; a cut of data, not output.

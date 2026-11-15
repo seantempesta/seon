@@ -1259,7 +1259,7 @@
       (swap! state assoc :fixtures-warm true)
       n)))
 
-(defn- wall-bound-ms
+(defn wall-bound-ms
   "Test t's (\"#'ns/name\") wall bound in ms: ten times its estimate, ^{:seon.test/estimate {:ticks n}}, at the slowest rate
   measured greens ran (:seon.config.proofs/slow-ticks-per-ms: waiting included), so a test that waits as long as the slowest ever
   did is never ended by it; a test that states none takes the class bound (:seon.config.proofs/unestimated-wall-ms). See
@@ -1937,6 +1937,9 @@
             named? (fn [t] (or (task/proof? tk t) (contains? names t) (contains? names (symbol (namespace t)))))
             pull-of (fn [t] (d/pull (db) [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes] [:var/name t]))
             open (filterv #(contains? #{nil :deferred} (:seon.test/status (pull-of %))) (remove (set (:tests closed)) (:deferred r)))
+            ;; the tests a gate answered no verdict for (its batch's error, seon.prove/run-answer's :no-verdict), each with why: held
+            ;; deferred and said on the answer, never the run's error (one test's hang voided every verdict: data's pilot run 14)
+            nvs (volatile! {})
             ;; a gate's answer g for tests, written where the status reads them; its error or nil
             apply-gate! (fn [tests g]
                         (cond
@@ -1950,13 +1953,9 @@
                           :else (let [nv (get-in g [:value :no-verdict])]
                                   (transact! (proofs/gate-tx (into {} (map (juxt identity pull-of)) tests) (:value g)))
                                   (commit!)
-                                  ;; a test the gate left with no verdict (its batch's error, seon.prove/run-answer's :no-verdict) stays
-                                  ;; deferred, and why is the answer: never a silence
-                                  (when-let [[t e] (first (sort-by (comp str key) nv))]
-                                    (contract/error :seon.prove/no-verdict #'judge!
-                                                    (str "the gate answered no verdict for " (count nv) " of your process tests (" t " first): "
-                                                         (:seon.error/type e) ": " (:seon.error/message e))
-                                                    {:test t :no-verdict nv})))))
+                                  ;; a test the gate left with no verdict stays deferred and is said on the answer (nvs), never a silence
+                                  (vswap! nvs merge nv)
+                                  nil)))
             ;; one stage's tests through the gate, waited on: the judge's own run (reach?), never an eval's
             gate! (fn [tests prio] (when (seq tests) (apply-gate! tests (ask-gate tests prio))))
             ;; the answers of gates an eval asked (gate-later!) that arrived since, written first, each once
@@ -1978,7 +1977,14 @@
                            (and (seq rest-tests) (not reach?)) "the tests your change reaches run when your status is clear")]
         (if err
           err
-          (cond-> (with-gate-verdicts r) unjudged (assoc :unjudged unjudged)))))))
+          ;; a test a later gate answered green is no longer without a verdict (root's review: nvs only grew)
+          (let [nv (into {} (remove (fn [[t _]] (= :green (:seon.test/status (pull-of t))))) @nvs)
+                [t e] (first (sort-by (comp str key) nv))
+                why (when t (str "the gate answered no verdict for " (count nv) " of your process tests (" t " first): "
+                                 (:seon.error/type e) ": " (:seon.error/message e)))]
+            (cond-> (with-gate-verdicts r)
+              (seq nv) (assoc :no-verdict nv)
+              (or unjudged why) (assoc :unjudged (str/join "; " (remove nil? [unjudged why]))))))))))
 
 ;; ---- the loop ----------------------------------------------------------------------
 

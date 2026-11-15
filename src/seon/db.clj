@@ -524,14 +524,14 @@
   {:malli/schema [:=> [:cat :seon.host/db :keyword :any] [:maybe :seon.db/eid]]}
   [db a v] (:e (first (d/datoms db :avet a v))))
 
-(def ^:private result-parts
-  "The keys of an eval's response that are its result (:seon.result/*): what an answer is, and what the handle hashes."
-  {:value :seon.result/value :ex :seon.result/ex :out :seon.result/out :err :seon.result/err :forms :seon.result/forms})
-
-(def ^:private response-rank
-  "The order an eval's response keys have always been held in (seon.repl/response), so what a reader prints of it does not move
-  when its result is kept apart; any other key follows."
-  {:handle 0 :forms 1 :value 2 :recorded 3 :redefined 4 :unmapped 5 :warnings 6 :out 7 :err 8 :ex 9 :ms 10 :ticks 11 :bytes 12})
+(defn- result-keys
+  "The keys of an eval's response that are its result, {key attribute}: the result entity's attributes (:seon.result/result-fact, by
+  the entity index) but its identity, the hash, each under its name: what an answer is, and what the handle hashes. See
+  docs/users.md#what-each-thing-is."
+  {:malli/schema [:=> [:cat] [:map-of :keyword :qualified-keyword]]}
+  []
+  (let [ix (index) id (get (:schema-identities ix) :seon.result/result-fact)]
+    (into (array-map) (for [a (attributes-of ix :seon.result/result-fact) :when (not= id a)] [(keyword (name a)) a]))))
 
 (defn with-response
   "Eval e holding whole response r as it is kept: its value, error, output and forms in its result (:seon.eval/result, a nested map
@@ -540,13 +540,21 @@
   them. See docs/users.md#what-each-thing-is."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [e r]
-  (let [parts (select-keys r (keys result-parts))
+  (let [rk (result-keys)
+        parts (select-keys r (keys rk))
         v (:value r)
         v (if (and (map? v) (not (record? v)) (contains? v :handle)) (dissoc v :handle :ms :ticks :bytes :fns :record) v)]
-    (cond-> (assoc e :seon.eval/response (apply dissoc r (keys result-parts)))
+    (cond-> (assoc e :seon.eval/response (apply dissoc r (keys rk)))
       (seq parts) (assoc :seon.eval/result (into {:seon.result/hash (str (hasch/uuid [v (:ex r) (:out r) (:err r) (:forms r)]))}
                                                  (keep (fn [[k a]] (when (some? (get parts k)) [a (get parts k)])))
-                                                 result-parts)))))
+                                                 rk)))))
+
+(defn- response-order
+  "{key place} for an eval's response: its keys in the order :seon.repl/answer declares them, so what a reader prints of it does not
+  move when its result is kept apart; any other key follows. See docs/users.md#what-each-thing-is."
+  {:malli/schema [:=> [:cat] [:map-of :keyword :int]]}
+  []
+  (zipmap (own-keys (malli.core/form (malli.core/deref (malli.core/schema :seon.repl/answer contract/options)))) (range)))
 
 (defn response-of
   "Eval e's whole response, as an eval has always answered it: what it keeps itself (:seon.eval/response) with its result's value,
@@ -559,9 +567,9 @@
         r (cond (nil? x) nil (contains? x :seon.result/hash) x :else (d/pull db '[*] (:db/id x)))]
     (if (nil? r)
       resp
-      (let [parts (into {} (keep (fn [[k a]] (when (contains? r a) [k (get r a)]))) result-parts)
+      (let [parts (into {} (keep (fn [[k a]] (when (contains? r a) [k (get r a)]))) (result-keys))
             parts (cond-> parts (not (or (contains? parts :value) (contains? parts :ex))) (assoc :value nil))]
-        (into (array-map) (sort-by (fn [[k]] (get response-rank k 99)) (concat resp parts)))))))
+        (apply array-map (mapcat identity (sort-by (let [rank (response-order)] (fn [[k]] (get rank k 99))) (concat resp parts))))))))
 
 (defn seed-tx
   "Transactions of an example program sized by n (the test store's and the check store's
@@ -1106,7 +1114,11 @@
             named (into #{} (for [b bs :let [h (d/branch-as-db store b)] a commit-attrs d (d/datoms h :aevt a)
                                   x (tree-seq coll? seq (:v d)) :when (uuid? x)]
                               x))
-            swept (when (empty? refused) @(d/gc-storage conn cutoff {:datahike.gc/keep-commits (into #{} (remove nil?) (concat bases named))}))
+            ;; a sync after each batch: under MDB_SAFENOSYNC no page freed after the last sync is reused, and the writer
+            ;; that syncs is not running yet, so an unsynced sweep grows the file by every page it touches (root went down at
+            ;; its map so: docs/storage.md#collection)
+            swept (when (empty? refused) @(d/gc-storage conn cutoff {:datahike.gc/keep-commits (into #{} (remove nil?) (concat bases named))
+                                                                     :datahike.gc/sweep-opts {:konserve.gc/batch-done (fn [_] (sync! (:config @conn)))}}))
             ;; refused: nothing swept, the record keeps the last sweep's generation (the next boot asks again) and names the branches
             r (cond-> {:swept (count swept) :ms (profile/ms-since t0) :generation (if (seq refused) last-g generation)}
                 (seq refused) (assoc :refused refused))]
@@ -1313,6 +1325,20 @@
   [db keys outside]
   (lib/digest (pr-str [(vec (for [s (sort keys)] [s (key-content db (clojure.edn/read-string s))]))
                        (vec (sort-by pr-str outside))])))
+
+(defn reads-digests
+  "reads-digest of each read-key set of sets ({id keys}, no outside reads) on db, each distinct key's content read and printed
+  once across them all: the same digests as reads-digest gives one set at a time (its printed vector assembled from the shared
+  pieces), at the cost of the distinct keys, never of every set's keys (a plan's reuse by reads: ~1,900 sets of ~410 keys over
+  far fewer distinct keys). See docs/storage.md#what-a-read-scanned."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :any [:set :string]]] [:map-of :any :seon.lib/digest]]}
+  [db sets]
+  ;; each distinct key's printed pair as bytes once; a set's digest reads its pieces into one hash in order, never joining them
+  ;; (joined, each set's string repeated its large pieces: 30 GB for 2,184 sets)
+  (let [piece (into {} (for [s (into #{} cat (vals sets))] [s (.getBytes ^String (pr-str [s (key-content db (clojure.edn/read-string s))]))]))
+        open (.getBytes "[[") sep (.getBytes " ") close (.getBytes "] []]")]
+    (into {} (for [[id ks] sets]
+               [id (lib/digest-parts (concat [open] (interpose sep (map piece (sort ks))) [close]))]))))
 
 (defn results-moved
   "The results (:seon.proof/proof-fact entities) on db a move's datoms reach: one AVET seek of :seon.proof/read-keys for each of a

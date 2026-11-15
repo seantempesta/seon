@@ -788,7 +788,10 @@
   {:malli/schema [:=> [:cat :map [:sequential :any]] :nil]}
   [w datoms]
   (let [db ((:db w))
-        moved (into #{} (keep #(when (= :var/form (:a %)) (:var/name (d/entity db (:e %))))) datoms)
+        ;; a var's name, from the walk's db, or from a :var/name datom handed with it (a branch walk takes main's: its branch may hold
+        ;; no entity for a var main added since it forked)
+        moved (into (into #{} (keep #(when (= :var/form (:a %)) (:var/name (d/entity db (:e %))))) datoms)
+                    (keep #(when (= :var/name (:a %)) (:v %))) datoms)
         reach (render-reach db moved)]
     (doseq [[k c] @(:cache w) :when (and (var? (:f c)) (reach (symbol (:f c))))]
       (vswap! (:queue w) conj k))

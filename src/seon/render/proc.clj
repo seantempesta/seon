@@ -453,6 +453,14 @@
   [{:keys [p db ident id-prefix outputs] :as kw} f]
   (assoc kw :p (walk-of p db (f (:tree p)) (:index p) ident [] (cond-> {} id-prefix (assoc :id-prefix id-prefix) outputs (assoc :outputs outputs)))))
 
+(defn- redefined-walk
+  "Kept walk kw walked again over the db it holds with datoms as what moved: a landing's :var/form datoms on main, which a branch's
+  walk never reads from its branch, so seon.render/queue-moved-renders! draws again the components whose render they redefine. See
+  docs/render.md#reactive-renders."
+  {:malli/schema [:=> [:cat :map [:sequential :any]] :map]}
+  [{:keys [p db ident id-prefix outputs] :as kw} datoms]
+  (assoc kw :p (walk-of p db (:tree p) (:index p) ident (vec datoms) (cond-> {} id-prefix (assoc :id-prefix id-prefix) outputs (assoc :outputs outputs)))))
+
 (defn- take-walk-defects
   "St with the defects its kept walks hold (root's, each branch read's, each user's: the components that threw in a walk since
   the last take) taken: [st' defects], for root to record each as a problem. See docs/health.md."
@@ -814,7 +822,7 @@
               st (assoc st :health-at pt :health-fold fold :health-live live :rv-owner own :health-pending [] :health-rev-at (:health-rev st))]
           ;; a live report first made (its reactions' first captures queued, seon.ratom/make-reaction) or made bounded (flush-max rows
           ;; a step) runs and makes the rest in the proc's next steps
-          (when (or (:more? live) (pos? (binding [rv/*owner* own] (rv/queued)))) (a/put! (:events-ch st) {::health-more true}))
+          (when (or (:more? live) (pos? (binding [rv/*owner* own] (rv/queued)))) (a/put! (:health-wake st) true))
           (if (= (:classes h) (:classes prev))
             st
             (-> (assoc st :root-walk (rewalk rw #(assoc % :health h)))
@@ -956,25 +964,23 @@
         settled? (and (zero? left) (not (:more? live)))]
     [(cond-> (assoc st :health-live live) settled? (update :health-rev (fnil inc 0))) settled?]))
 
+(declare health-answer)
+
 (defn- health-more
-  "St with one bounded step of health's reactions (health-step); while any are left, the next step's own message (::health-more on
-  the proc's events chan, never kept as an event), so ping and stop interleave and nothing is dropped (flow's rule 2)."
+  "St with one bounded step of health's reactions (health-step); while any are left, the next step's own wake (:health-wake, its own one-slot
+  channel, never the shared events buffer), so ping and stop interleave and nothing is dropped (flow's rule 2). The step that
+  settles answers every :health ask waiting on it (:health-waiting), with the report of that point (at or after the point each ask
+  advanced to: main only moves forward), as replies the step sends through its outputs (:health-replies)."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
   (let [[st settled?] (health-step st)]
-    (when-not settled? (a/put! (:events-ch st) {::health-more true}))
-    st))
-
-(defn- health-settled
-  "St with health's live report settled at the main it holds: health-step until nothing is left, so a reader asking (the :health
-  op, my.root/problems) gets the report OF the point it is told, never the last settled one stamped with a newer main (a race,
-  seon.agent-test/root-reads-the-health-the-render-proc-keeps). Bounded by the work main's moves made: each reaction runs at most
-  once a generation, and a cycle is typed (seon.ratom)."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [st]
-  (if (:health-live st)
-    (loop [st st] (let [[st settled?] (health-step st)] (if settled? st (recur st))))
-    st))
+    (cond
+      (not settled?) (do (a/put! (:health-wake st) true) st)
+      (seq (:health-waiting st))
+      (let [waiting (:health-waiting st)
+            st (-> st (assoc :fold (:fold (peek waiting))) health!)]
+        (-> st (dissoc :health-waiting) (update :health-replies (fnil into []) (map #(health-answer st (:rid %)) waiting))))
+      :else st)))
 
 (defn- advance-main
   "St with main as db when db is newer than the main it holds (main-info): root's walk advanced
@@ -987,8 +993,14 @@
     (if (and held (<= (:max-tx db) (:max-tx held)))
       st
       ;; one diff a move of main: the index, every kept walk and the views it touched read the same datoms
-      (let [moved (when held (ctx/moved held db nil))]
+      (let [moved (when held (ctx/moved held db nil))
+            ;; a landing's definitions: every kept branch walk takes them as moved (its branch never carries main's), the users' and
+            ;; root's walks read them from main's own move
+            defs (let [fs (filterv #(= :var/form (:a %)) moved)]
+                   ;; with each var's name as main holds it, so a branch that holds no entity for it still finds its render
+                   (into fs (mapcat #(d/datoms db :eavt (:e %) :var/name)) fs))]
         (cond-> (user-walks (root-walk (main-info st db moved) db held moved) db (when held {:from held :moved moved}))
+          (seq defs) (update :branch-reads update-vals #(cond-> % (:walk %) (update :walk redefined-walk defs)))
           (seq moved) (update :dirty (fnil into #{}) (touched st moved))
           (seq moved) (health-advanced db moved)
           ;; a landing kept in place loaded the new program, then wrote root's source fact (my.root/landed!): every held view drew with
@@ -1180,7 +1192,9 @@
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
   (let [q #(some-> % lib/summ)]
-    {:passes (:passes st 0) :pass-ms (q (:pass-ms st)) :patch-pass-ms (q (:patch-pass-ms st)) :quiet-pass-ms (q (:quiet-pass-ms st))
+    {;; what a drain must account for (docs/flow.md#the-step-fn-contract-every-proc-follows, :seon.flow/held's schema entry): health's queued reactions and the :health asks waiting on its settle, apart
+     :seon.flow/held {:queue (if-let [o (:rv-owner st)] (binding [rv/*owner* o] (rv/queued)) 0) :waiting (count (:health-waiting st))}
+     :passes (:passes st 0) :pass-ms (q (:pass-ms st)) :patch-pass-ms (q (:patch-pass-ms st)) :quiet-pass-ms (q (:quiet-pass-ms st))
      :patch-bytes (q (:patch-bytes st)) :event-age-ms (q (:event-age-ms st)) :rendered (get-in st [:counts :rendered] 0) :same-bytes (get-in st [:counts :same] 0)
      :agents (count (get-in st [:view :agents])) :views (vec (keys (:views st)))
      :pending (count (:pending st)) :main-t (get-in st [:main :t])}))
@@ -1192,17 +1206,25 @@
   {:malli/schema [:=> [:cat :any :seon.host/chan :int] [:vector :any]]}
   [x ch n] (loop [acc [x]] (if-let [y (and (< (count acc) n) (a/poll! ch))] (recur (conj acc y)) acc)))
 
+(defn- health-answer
+  "The api's answer to :health ask rid: the health the root walk holds, at the point it was put at (its metadata's :db and :fold: a
+  reader comparing it reads there, never a later main or fold, seon.agent-test/root-reads-the-health-the-render-proc-keeps); with
+  none held (no root walk yet), read whole."
+  {:malli/schema [:=> [:cat :map :int] :map]}
+  [st rid]
+  (let [h (some-> (:root-walk st) :p :tree :health)]
+    {:op :health-answer :rid rid :db (:main-db st)
+     :r (with-meta (or h (problems/health (:main-db st))) {:db (:main-db st) :fold (:fold st)})}))
+
 (defn- on-event
   "An event: kept for the stream, and the view asked for; an agent's commit
   recorded by its id (ask-branches reads its branch again)."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [st ev]
   (cond
-    ;; this proc's own next step of health's flush, never an event a stream shows
-    (::health-more ev) (if (:health-live st) (health-more st) st)
     ;; a reaction of this proc's owner, dirtied in another owner's step: queued here, and run by the next bounded flush
     (:seon.ratom/dirty ev) (do (binding [rv/*owner* (:rv-owner st)] (rv/take-dirty! ev))
-                               (when (:health-live st) (a/put! (:events-ch st) {::health-more true}))
+                               (when (:health-live st) (a/put! (:health-wake st) true))
                                st)
     :else
   (cond-> (update st :new-events conj ev)
@@ -1325,6 +1347,7 @@
                 :system "a promise of the built system (its declared procs, for the health tile)"
                 :conn "the store main's commit notices are read from"}
        :ins {:answers "the api's answers" :from-web "views open, page and keyframe requests"
+             :health-wake "health's own next bounded step (health-more): a channel of one slot, sliding, since wake-ups subsume each other (docs/core-async.md's one lossy case)"
              :main "main's commit notices from the writer {:t :prev :ops :commit}, read with seon.db/at-commit: each one's datoms find the pages whose reads they touched"}
        :outs {:to-api "requests to the api" :to-web "patches, keyframes, pages, the agents' index"}
        ;; a pass renders what changed; it never waits. :mixed: one thread of its own for
@@ -1335,11 +1358,15 @@
        :ping-map-fn stats})
   ([args]
    ;; no beat: a pass happens on an event, an api answer or a tab's request, never on a clock
-   (let [events (a/chan (a/sliding-buffer 4096))]
+   (let [events (a/chan (a/sliding-buffer 4096))
+         ;; health's wake (health-more's next bounded step), its own in-port: on the shared events buffer a burst of api events
+         ;; dropped it and a held :health ask waited on nothing (root's review of 30653cc9f7). One slot, sliding: a wake already
+         ;; there is the same wake, so the newest loses nothing
+         wake (a/chan (a/sliding-buffer 1))]
      (a/tap (:events-mult args) events)
-     {:user-walks {} :events-ch events :mult (:events-mult args) :system-p (:system args) :conn (:conn args) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{}
+     {:health-wake wake :user-walks {} :events-ch events :mult (:events-mult args) :system-p (:system args) :conn (:conn args) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{}
       :new-events [] :events [] :views {} :branches {}
-      ::flow/in-ports {:events events}}))
+      ::flow/in-ports {:events events :health-wake wake}}))
   ([st tr]
    (when (= tr ::flow/stop)
      (a/untap (:mult st) (:events-ch st)))
@@ -1349,6 +1376,8 @@
          busy? (seq (:pending st))
          st (case in
               :events (if (nil? m) st (ask-state (reduce on-event st (drain m (:events-ch st) 2048)) o))
+              ;; health's own next bounded step (its wake, never on the shared events buffer)
+              :health-wake (if (:health-live st) (health-more st) st)
               ;; a commit on main: the pages its datoms touched walk in the pass
               ;; a commit on main (a sliding buffer of one: the newest, its datoms since the main held
               ;; found by their diff, so a lagging proc never parks the writer)
@@ -1382,14 +1411,16 @@
                           ;; brought to the main the asker read (advance-main, health!), never read whole again, and
                           ;; at the counts the api's fold holds (with-fold: a repeat of a written signature is counted
                           ;; there, not yet on main), which it keeps to bring its next move of main from what it held
-                          :health (let [st (-> st (advance-main (:db m)) health-settled (assoc :fold (:fold m)) health!)
-                                        h (some-> (:root-walk st) :p :tree :health)]
-                                    ;; none held (no root walk yet): read whole, as health! does when it holds none
-                                    ;; the point it was put at rides on it (its metadata's :db and :fold): a reader comparing
-                                    ;; it reads there, never a later main or fold (seon.agent-test/root-reads-the-health-the-render-proc-keeps)
-                                    (step/out! o :to-api {:op :health-answer :rid (:rid m) :db (:main-db st)
-                                                          :r (with-meta (or h (problems/health (:main-db st))) {:db (:main-db st) :fold (:fold st)})})
-                                    (pass st o))
+                          ;; main's health for the api, never a loop in this step (flow's rule 2): one bounded step of the live report;
+                                          ;; settled, answered now; else the ask waits (:health-waiting) and the next bounded step is put in
+                                          ;; flight here (flow's condition 1: nothing waits on a settle no one drives), and the step that settles
+                                          ;; answers it (health-more)
+                          :health (let [st (-> st (advance-main (:db m)) (assoc :fold (:fold m)))
+                                        [st settled?] (if (:health-live st) (health-step st) [st true])]
+                                    (if settled?
+                                      (let [st (health! st)] (step/out! o :to-api (health-answer st (:rid m))) (pass st o))
+                                      (do (a/put! (:health-wake st) true)
+                                          (pass (update st :health-waiting (fnil conj []) {:rid (:rid m) :fold (:fold m)}) o))))
                           :context (let [st (-> st health! with-context)] (step/out! o :to-web {:op :text :k (:k m) :text (get-in st [:context :text] "")}) st)
                           ;; the debug timeline stepped to a turn, or to latest
                           :at (if (contains? (:watch st) (:view m)) (pass (assoc-in st [:tab (:view m) :at] (:turn m)) o) st)
@@ -1403,4 +1434,7 @@
      ;; nothing asked is in flight after what was, or after what went to the tabs: their
      ;; views are current (the web proc says so on each feed; seon.check/idle waits on it)
      (when (and (empty? (:pending st)) (or busy? (seq (:to-web @o)))) (step/out! o :to-web {:op :settled}))
-     [st @o])))
+     ;; the :health asks a settling step answered, in whichever step it settled (:health-wake, :main, :health), sent through
+     ;; this step's outputs at its one exit (flow's condition 2)
+     (doseq [r (:health-replies st)] (step/out! o :to-api r))
+     [(dissoc st :health-replies) @o])))

@@ -789,7 +789,8 @@
   "Merge ref into the branch worktree wt has checked out, through that tree, as the one writer of it (the :git owner's one worker,
   task seon.system/a-landing-restarts-root-only-for-a-binary-change, slice 2a): refused, merging nothing, when the tree holds an
   edit or a staged change of its own; a merge that conflicts is aborted, the tree left as it was found, and answered typed naming
-  the conflicting paths, so no later commit is made in a MERGING tree. {:value {:sha :merged ref}} or :seon.fx/io-error. See
+  the conflicting paths, so no later commit is made in a MERGING tree. {:value {:sha :merged ref :expected :tree}} (:expected ref's
+  commit, :tree the tree's id after) or :seon.fx/io-error. See
   docs/source.md#commit-the-merges-branch."
   {:malli/schema [:=> [:cat :string :map :string] :map]}
   [wt env ref]
@@ -804,8 +805,11 @@
         (cond
           ;; the merge said done, and HEAD contains ref: what bin/update's ancestry check did (a merge that did nothing once gave
           ;; eight false UPDATE OKs), now the effect's own answer
+          ;; :expected, the commit merged in, and :tree, the tree's id after: what main's source fact moves to when it named that commit
+          ;; (seon.reconcile/source-moved-tx, as a write-back's answer), so the next write-back's compare-and-swap reads from this merge
           (and (zero? (:exit r)) (zero? (:exit (run ["merge-base" "--is-ancestor" ref "HEAD"]))))
-          {:value {:sha (str/trim (:out (run ["rev-parse" "HEAD"]))) :merged ref}}
+          {:value {:sha (str/trim (:out (run ["rev-parse" "HEAD"]))) :merged ref
+                   :expected (str/trim (:out (run ["rev-parse" "--verify" (str ref "^{commit}")]))) :tree (tree-id wt)}}
           (zero? (:exit r))
           (error #'seon.fx/git-commit :seon.fx/io-error (str "merging " ref " into " wt " answered done, but HEAD does not contain " ref) {:path wt})
           :else
