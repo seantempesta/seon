@@ -8,9 +8,10 @@
   [ds]
   (into #{} (map (fn [x] [(:e x) (:a x) (:v x) (:added x)])) ds))
 
-;; Estimate: a test branch (~1M), three transacts and their commits (~1M), one d/changes over three commits
-;; (3 reads, ~10 datoms: ~0.1M), one datoms-diff of the branch's start and head for the answer (~5M), ~7M = 7000000
-(deftest ^{:seon.test/estimate {:ticks 7000000}} a-commits-changes-are-read-in-their-size
+;; Estimate: a test branch (~0.5M), three transacts and their commits (~0.4M), one d/changes over three commits
+;; (3 commit records and 3 changes read, ~10 datoms: ~0.06M), one datoms-diff of the branch's start and head for the
+;; answer (~0.1M: few nodes differ), ~1.2M = 1200000 (7M first, the diff taken as a merge's; measured 1.08M)
+(deftest ^{:seon.test/estimate {:ticks 1200000}} a-commits-changes-are-read-in-their-size
   ;; every "what changed between X and Y" diffed whole index values (seon.merge/own-datoms ~3.1B ticks on lb76's change,
   ;; 30x its apply): each commit's changes are kept beside it, and d/changes reads the commits between two, netted by
   ;; [e a v], never the indexes
@@ -36,4 +37,6 @@
             (str "the commits' net change is the diff's: " (pr-str (facts changed)) " against " (pr-str want)))
         (is (not-any? #(= [e1 :note/text "first"] [(:e %) (:a %) (:v %)]) changed)
             "a fact added and retracted between the two nets out")
-        (is (< (* 10 dt) diff-dt) (str "and costs what changed, not the index: " dt " ticks against the diff's " diff-dt))))))
+        ;; three commits: three commit records and three changes values read, ~20k ticks each, and their ~10 datoms; flat in
+        ;; the store's size (a merge's diff at d = 7,163 is ~139M, lb76's own-datoms ~3.1B)
+        (is (< dt 200000) (str "and costs its three commits, never the index: " dt " ticks (the diff here: " diff-dt ")"))))))
