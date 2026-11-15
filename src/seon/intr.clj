@@ -29,6 +29,10 @@
 ;; process's one interrupt cell.
 (defonce ^{:private true :seon.flow/edge "the interrupt stack Chez's interrupt handler reads, outside any step: physics, not a proc's state"} stack (atom ()))
 
+;; The stops stop! made, by the thread whose flag it set ({thread token}): a flag one of them set after its run ended is that stop's, which
+;; the thread's next run consumes; any other flag found at a run's start is an interrupt that came between runs, and stops that run.
+(defonce ^{:private true :seon.flow/edge "which stop set a thread's interrupt flag, read where the flag is: physics, not a proc's state"} stopped (atom {}))
+
 (defn- set-token!
   "Set e's token for cause: true when it was not set before."
   {:malli/schema [:=> [:cat :map :keyword] :boolean]}
@@ -156,13 +160,19 @@
     ;; thread's stopped run, a server op stop! ended on another worker, is not this one's)
     (when (or @pending (some #(deref (:cause %)) mine))
       (throw (ThreadDeath.)))
-    ;; the outermost run on its thread: a flag stop! set just after the run before it ended was that run's, never this one's
-    (when (empty? mine) (Thread/interrupted))
+    ;; the outermost run on its thread: a flag stop! set after the run before it ended was that stop's (recorded in stopped), and is
+    ;; consumed; a flag no stop explains is an interrupt that came between runs, and this run does not start (never cleared unread)
+    (when (and (empty? mine) (Thread/interrupted))
+      (let [stale (get @stopped (:thread e))]
+        (swap! stopped dissoc (:thread e))
+        (when-not stale (throw (ThreadDeath.)))))
     (swap! stack conj e)
     (try (if (or ticks bytes) (jolt.host/run-interruptible tok thunk ticks bytes) (jolt.host/run-interruptible tok thunk))
          (catch Throwable ex (rethrow ex e ticks bytes))
          (finally
            (swap! stack (fn [s] (doall (remove #(identical? % e) s))))
+           ;; a stop of this run that set its flag while it ran is answered by this run's end (the flag is cleared below)
+           (swap! stopped (fn [m] (if (identical? tok (get m (:thread e))) (dissoc m (:thread e)) m)))
            ;; the flag on-usr1 set is this eval's: never the next request's
            (Thread/interrupted))))))
 
@@ -175,6 +185,9 @@
         e (some #(when (identical? tok (:token %)) %) es)]
     (if e
       (do (run! #(set-token! % :interrupted) (filter #(= (:thread e) (:thread %)) es))
+          ;; recorded before the flag is set, so the thread's next run knows the flag for this stop's if this run has ended meanwhile.
+          ;; The one window left (the run ends between the two) stops the next run loudly, typed, never silently
+          (swap! stopped assoc (:thread e) tok)
           (.interrupt ^Thread (:thread e))
           true)
       (do (jolt.host/interrupt! tok) false))))

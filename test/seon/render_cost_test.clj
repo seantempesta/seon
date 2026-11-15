@@ -420,6 +420,32 @@
      :fixed {:bytes 11250000}
      :sizes [10 40 160]}))
 
+;; See docs/render.md#a-page-is-a-kept-walk
+(defn laid-after
+  "The input of size n: an agent's page kept over n-1 turns (`step-of`), laid out once as the render proc lays it out, then advanced
+  to the n-th turn: [p], the advanced walk whose layout seon.render/laid-out answers."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
+  [n]
+  (let [[kw _ later] (step-of n)
+        kw (#'seon.render.proc/laid kw)]
+    [(:p (#'seon.render.proc/advance-walk! kw later :b identity))]))
+
+;; Estimate: three inputs drawn cold (kept walks of 10, 30 and 90 turns, ~0.6M ticks a turn: ~78M) and 17 warm samples a size of a
+;; layout under 250k (~13M): ~90M ticks, worked from the work.
+(deftest ^{:seon.test/estimate {:ticks 90000000}} a-move-lays-out-only-what-it-touched
+  ;; task seon.ratom/web-reads-on-the-core, slice 1 (the layout as reactions): after a move, laying the page out runs the units the
+  ;; move reached and the chain of subtrees above them, never a pass over the whole page. Red before: placed-units walks every
+  ;; component at each read (2.31M ticks on root's page for a 5-datom move, result/bc63792d)
+  (cost/proof
+    {:of 'seon.render/laid-out :input 'seon.render-cost-test/laid-after
+     :n "turns the agent took before the one the move adds"
+     :work (str "the new turn's units drawn (its turn, its eval, its tiles), the list holding them gaining one member, and the subtrees "
+                "above them concatenated: the touched units' html and a chain as deep as the page, whatever the turns before it")
+     :growth :constant
+     ;; estimate from the arithmetic, before the build: the touched units' html ~0.1M ticks, the chain and concat ~0.15M
+     :fixed {:ticks 250000 :bytes 1000000}
+     :sizes [10 30 90]}))
+
 ;; On disk, the one-store rule's last resort (docs/cost.md#how-we-measure): a page advanced from one turn's basis to the next
 ;; takes the datoms between the two commits (seon.ctx/moved, d/datoms-diff), which skips the subtrees they share by address; the
 ;; in-memory test store gives its nodes no address, so there the diff walks the whole index each advance (4 MB a turn measured)
