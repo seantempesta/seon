@@ -102,6 +102,8 @@
    (when (and wake? (jolt.host/main-carrier?)) (poller/wake-on-signals! [lib/SIGIO]))
    true))
 
+(declare run)
+
 (defn- rethrow
   "What a run that threw ex throws: its budget's typed error, a ThreadDeath when root or its asker stopped it (entry e),
   else ex itself."
