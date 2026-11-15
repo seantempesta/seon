@@ -56,6 +56,8 @@ system, working, proving and merging as Seon agents do. Everything else in this 
 
 ## Where things stand (root, 2026-11-16 06:2x)
 
+What a fresh root reads first: what works now, what to do next, and the lessons that cost time.
+
 - **The self-merge path works end to end once.** Pilot run 15 took `seon.db/an-eval-responses-parts-are-its-schemas-keys` through `seon_done` (judge, gate, merge) into main in the store. Seon wrote it back to git (85cc745c06 on jolt/merges), root reviewed the sync, and it landed as 7875387c3e.
 - **Restarts and the store.** Lands keep root running again (09e83a2d59). Boot's sweep syncs, so freed pages are reused (1a7c7d8526). Each boot still grows the store ~2 GB from writes made before the writer's first sync (`seon.system/a-write-before-the-writer-syncs-its-own-steps`). The 64 GiB store copy `runs/store-pre-compact-20261116.mdb` is kept until the owner says otherwise.
 - **Redraw.** A render a land redefines now redraws every kept walk (2409c17de3).
