@@ -347,7 +347,7 @@
   {:malli/schema [:=> [:cat :map :seon.host/fn [:vector :any] :map [:maybe :map]] :map]}
   [src db-fn root ix kept]
   {:src src :db db-fn :root root :index (volatile! ix) :queue (volatile! #{}) :ledger (volatile! {}) :gone (volatile! #{}) :defects (volatile! [])
-   :cache (volatile! (:cache kept {})) :mounts (volatile! (:mounts kept 0)) :out (volatile! (:out kept)) :db-keys (volatile! (:db-keys kept #{}))
+   :cache (volatile! (:cache kept {})) :mounts (volatile! (:mounts kept 0)) :out (volatile! (:out kept))
    :readers (volatile! (:readers kept {})) :forms (volatile! (:forms kept {})) :inputs (volatile! (:inputs kept {}))
    :tree-readers (volatile! (:tree-readers kept)) :drawn-fns (volatile! (:drawn-fns kept {})) :skipped (volatile! (:skipped kept #{}))})
 
@@ -393,12 +393,6 @@
           attrs (cond-> attrs (and (:class attrs) (string? own) (not (str/blank? own))) (update :class str " " own))]
       (if (map? (first more)) (into [tag (merge (first more) attrs)] (rest more)) (into [tag attrs] more)))
     :else [:div attrs hc]))
-
-(defn- forget-readers!
-  "Component k out of walk w's index of readers, for the read keys it held. See docs/render.md#components."
-  {:malli/schema [:=> [:cat :map [:vector :any] [:maybe [:set :any]]] :nil]}
-  [w k read-keys]
-  (doseq [rk read-keys] (vswap! (:readers w) update rk disj k)))
 
 
 (declare entity-schema)
@@ -662,10 +656,9 @@
         (let [was (or (:tree-reads prev) #{}) now (or @tree-reads #{})]
           (when-not (= was now)
             (vswap! (:tree-readers w) ratom/move-reads k was now)))
-        ;; the components that read the db: the ones a transaction's datoms are matched against
-        (vswap! (:db-keys w) (if (seq read-keys) conj disj) k)
-        (when (or (:reads prev) (:entity-reads prev)) (forget-readers! w k (into (or (:reads prev) #{}) (:entity-reads prev))))
-        (doseq [rk (into (or read-keys #{}) @entity-reads)] (vswap! (:readers w) update rk (fnil conj #{}) k))
+        ;; who read what of the store, in seon.db's one index (docs/storage.md#what-a-read-scanned): last run's keys out, this run's in
+        (when (or (:reads prev) (:entity-reads prev)) (vswap! (:readers w) pdb/reads-drop k (into (or (:reads prev) #{}) (:entity-reads prev))))
+        (vswap! (:readers w) pdb/reads-add k (into (or read-keys #{}) @entity-reads))
         [::child k]))))
 
 (defn kept-of
@@ -681,8 +674,7 @@
   (when-let [c (get @(:cache w) k)]
     (vswap! (:cache w) dissoc k)
     (vswap! (:queue w) disj k)
-    (vswap! (:db-keys w) disj k)
-    (forget-readers! w k (into (or (:reads c) #{}) (:entity-reads c)))
+    (vswap! (:readers w) pdb/reads-drop k (into (or (:reads c) #{}) (:entity-reads c)))
     (when (:tree-reads c) (vswap! (:tree-readers w) ratom/read-index k (:tree-reads c) disj))
     (some->> (:form c) (vswap! (:forms w) dissoc))
     (doseq [ch (:children c) :when (contains? @(:cache w) ch)]
@@ -1272,7 +1264,7 @@
   "The parts of a walker a walk kept as a value (`walk`) carries from one call to the next: each component's entry, who read
   what, the components that read the db, the root's key, the mount counter, each render var's inputs and the components a walk only the model read left out (:skipped). The rest are made anew.
   See docs/render.md#a-page-is-a-kept-walk."
-  [:cache :readers :db-keys :out :mounts :inputs :tree-readers :forms :drawn-fns :skipped])
+  [:cache :readers :out :mounts :inputs :tree-readers :forms :drawn-fns :skipped])
 
 (defn- queue-what-moved!
   "Walk w holding prev's parts (`walker`), each component queued that what moved since reaches: who read a tree path under one the
@@ -1281,10 +1273,8 @@
   [w prev tree changes moved]
   (when-not (identical? tree (:tree prev)) (vswap! (:queue w) into (ratom/reached @(:tree-readers w) (changes (:tree prev) tree))))
   (when (some #(= :var/form (:a %)) moved) (queue-moved-renders! w moved))
-  (let [ks (into #{} (mapcat reads/datom-keys) moved)]
-    (if (contains? ks :all)
-      (vswap! (:queue w) into @(:db-keys w))
-      (doseq [rk ks] (vswap! (:queue w) into (get @(:readers w) rk #{})))))
+  ;; the one index's readers of the moved datoms (a schema datom reaches every reader)
+  (vswap! (:queue w) into (pdb/readers @(:readers w) moved))
   nil)
 
 (defn- walk-answer
