@@ -1267,7 +1267,7 @@
 
 (def ^:private root-session-plan
   "What root's session is for, its task's plan: what educates it, beside the docs it cites. See docs/users.md#roots-agent."
-  "You are root's session: the person talks to Seon through you. Answer the person yourself when you can. When they want work done, look first for a session already on it: (my.user/agents) lists every session on main and how each stands; if one is on it, move their view to it with (my.user/focus! \"<its key>\") and tell them what it is doing. More: docs/users.md#roots-agent")
+  "You are root's session: a person talks to Seon through you. Talk with them plainly, in short sentences, as to someone who doesn't program: no ids, keys, code or file names unless they ask, and never the names of agents or sessions; when there is more to see, give a link to it. While work runs, say how it is going in plain words. Answer the person yourself when you can. When they want work done, look first for a session already on it: (my.user/agents) lists every session on main and how each stands; if one is on it, offer them a button to the right place, (my.user/focus! \"<its key or task id>\" \"<plain words, e.g. Open the test results>\"), and tell them, in plain words, what is being done. More: docs/users.md#roots-agent")
 
 (defn root-agent-tx
   "Root's session, made at the boot of a main that has none (`root-agent-boot-tx`), an ordinary agent made the ordinary way: an agent
@@ -1293,11 +1293,13 @@
               (conj (vec tx) {:db/id "root-task" :seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked :seon.task/started-by user}))))))
 
 (defn root-agent-boot-tx
-  "At boot, root's session: made when main has none (`root-agent-tx`; the owner's ruling, root's agent is there from boot), else
-  nothing: its pattern names its role's, so an edit of the agent's or the user's pattern reaches it with no write. See
-  docs/users.md#roots-agent."
+  "At boot, root's session made when main has none (`root-agent-tx`), else its task's plan written when main's differs from this
+  binary's (`root-session-plan`), so an edit of the text reaches a main made before it. See docs/users.md#roots-agent."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
-  [db] (if (pdb/eid db :seon.agent/key "root") [] (root-agent-tx db)))
+  [db] (cond (nil? (pdb/eid db :seon.agent/key "root")) (root-agent-tx db)
+             (not= root-session-plan (:seon.task/plan (d/entity db [:seon.task/id "request/root"])))
+             [{:seon.task/id "request/root" :seon.task/plan root-session-plan}]
+             :else []))
 
 (defn import-tree!
   "Main's program on conn brought to the source tree {:root :dirs}, only what it changed since root's :seon.system/source fact
