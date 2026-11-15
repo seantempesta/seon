@@ -90,6 +90,18 @@
     (is (= (pr-str {:op :attach :task 5}) (:line defect)))
     (is (= 3 (:value ok)) "the server goes on")))
 
+;; See docs/server.md#ops
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} an-op-past-its-bound-answers-its-caller-and-the-server-goes-on
+  ;; Stage 1's safety item (the MCP relay answers each call on its own): an op runs under its declared work bound
+  ;; (:seon.config.fx/bounds :server-op, seon.intr/run in seon.server/answer), so one that runs past it is stopped and answers its caller,
+  ;; typed, and the next request is answered. Root's own :eval is the exception, unbounded as root-eval says (its interrupt ends it)
+  (let [v seon.config/value
+        [past ok] (with-redefs [seon.config/value (fn [k & more] (if (= k :seon.config.fx/bounds) {:server-op {:seon.bound/ticks 1000}} (apply v k more)))]
+                    (at/in-agent [{:op :agents} {:op :eval :agent "root" :code "(reduce + (range 100000))"}]))]
+    (is (= :seon.server/defect (:seon.error/type past)) (str "the op past its bound is answered: " (pr-str (select-keys past [:seon.error/type :seon.error/message]))))
+    (is (= :seon.repl/ticks-spent (get-in past [:data :seon.error/type])) "with the bound's typed error")
+    (is (= 4999950000 (:value ok)) "and root's own eval runs unbounded, the server going on")))
+
 (deftest the-server-speaks-mcp
   ;; root's server answers MCP's JSON-RPC
   ;; itself (bin/mcp only relays lines): initialize with a version it implements, ping,
