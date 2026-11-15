@@ -1324,7 +1324,7 @@
   cache (test-results), a run not all green keeping its logs beside its log; repo defaults to this checkout and branch
   to git's main (:seon.config.source/main); its failure is :seon.fx/io-error naming the step and its log."
   {:malli/schema [:=> [:cat [:maybe :seon.host/fn] :string :map] :map]}
-  [prove sha {:keys [repo files tests all? built?]}]
+  [prove sha {:keys [repo files tests all? built? candidate]}]
   (let [t0 (profile/now-ns)
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
@@ -1388,7 +1388,7 @@
               ;; the gate: the system proves the candidate's checkout (prove, seon.system/prove-tree!, which root binds to this
               ;; effect's :ctx), named by exactly the deferred tests; its process tests run as items on dir, by the :process owner
               (let [a (if prove
-                        (prove {:checkout dir :tree (tree-id dir) :names (set tests) :mode :judge})
+                        (prove (cond-> {:checkout dir :tree (tree-id dir) :names (set tests) :mode :judge} candidate (assoc :candidate candidate)))
                         (error #'seon.fx/run-on-checkout :seon.fx/io-error "the gate has no system to prove its candidate on (the :tests effect's :ctx names no :prove-tree)" {:path dir}))]
                 (if (contract/error? a)
                   a

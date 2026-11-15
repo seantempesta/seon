@@ -509,23 +509,29 @@
         calls (atom [])
         ;; one red and one test the run never reached (it is answered at its first red): nothing green is held
         prove (fn [on] (reset! asked (assoc on :file (slurp (str (:checkout on) "/src/a.clj")) :tree-now (fx/tree-id (:checkout on))))
+                ;; an item's log, as run-tree-item writes a build's: a run not all green keeps it
+                (spit (doto (java.io.File. (str (:checkout on) "/target/prove/items/build-d.log")) (-> .getParentFile .mkdirs)) "the build's own error")
                 {:red ['a/t] :reports [{:type :fail :var "#'a/t" :message "red"}] :digests {'a/t "d"}})]
     (try
       (git "init" "-q" "-b" "main")
       ;; target/ ignored, as the repository's is: the checkout's cloned products are no part of its tree
       (spit (str repo "/.gitignore") "/target/\n/runs/\n") (spit (str repo "/f") "1") (git "add" "-A") (git "commit" "-q" "-m" "one")
       (let [r (with-redefs [seon.lib/sh (checkout-sh calls (fn [& _] (is false "the gate runs no runner of its own")))]
-                (fx/run-tests {:req {:repo repo :branch "main" :files {"src/a.clj" (str "(ns a) ; " (random-uuid))} :tests ['a/t 'a/u]}
+                (fx/run-tests {:req {:repo repo :branch "main" :files {"src/a.clj" (str "(ns a) ; " (random-uuid))} :tests ['a/t 'a/u]
+                                     :candidate :task-a}
                                :ctx {:prove-tree prove}}))]
         (is (= {'a/t :fail} (get-in r [:value :results])) (pr-str r))
         (is (= ["red"] (map :message (get-in r [:value :failures 'a/t]))))
         (is (= #{'a/t 'a/u} (:names @asked)) "named by exactly the deferred tests")
         (is (= :judge (:mode @asked)))
+        (is (= :task-a (:candidate @asked)) "the candidate's own store branch is what is proved (seon.system/prove-candidate!), never a tree branch caught up from the checkout")
+        (is (= "the build's own error" (let [f (java.io.File. (str (:checkout @asked) ".run/items/build-d.log"))] (when (.isFile f) (slurp f))))
+            "a run not all green keeps its items' logs")
         (is (clojure.string/starts-with? (str (:file @asked)) "(ns a)") "the candidate's files are on the checkout it asks to prove")
         (is (= (:tree-now @asked) (:tree @asked)) "named by the checkout's tree")
         (is (not-any? (fn [[cmd]] (some #(clojure.string/ends-with? % "bin/build") cmd)) @calls) "nothing is built for it")
         (is (not (.exists (java.io.File. (str (:checkout @asked))))) "and the checkout is removed after"))
-      (finally (seon.lib/remove-tree! repo)))))
+      (finally (seon.lib/remove-tree! repo) (some-> @asked :checkout (str ".run") seon.lib/remove-tree!)))))
 
 
 (deftest a-gate-runs-on-the-head-a-new-merges-branch-would-start-at
