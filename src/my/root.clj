@@ -184,6 +184,31 @@
     (cond-> (if (seq tx) @(root/transact-main! sys tx) {:ok true :changed 0})
       (seq unknown) (assoc :unknown unknown))))
 
+(defn would-restart?
+  "Would landing git tree tree restart this root: nil when the running binary is tree's (seon.fx/runtime-for, the one judge: the
+  land loads in place and keeps root running), else why: the build inputs and pins that differ, or runtime-for's typed error.
+  Writes nothing; a session or a land asks it before main moves (task seon.system/a-landing-restarts-root-only-for-a-binary-change).
+  See docs/source.md#a-landing-enters-main-as-data."
+  {:malli/schema [:=> [:cat :string] [:maybe [:or :string :seon.error/base]]]}
+  [tree]
+  (let [rt (fx/runtime-for tree)]
+    (cond (not (contract/error? rt)) nil
+          (= :seon.process/env-mismatch (:seon.error/type rt))
+          (str "the running binary is not current for " tree ": what differs is "
+               (str/join ", " (or (seq (:seon.process/differs rt)) [(:seon.error/message rt)])))
+          :else rt)))
+
+(defn merges-caught-up!
+  "Main merged into the write-back tree (:seon.config.source/root, its :seon.config.source/branch) by the :git effect, the one
+  writer of that tree, so an update's merge and a write-back never meet (task seon.system/a-landing-restarts-root-only-for-a-binary-change,
+  slice 2a): what bin/update asks before it builds. Answers {:value {:sha :merged}} or the effect's typed error. See
+  docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat :seon.system/sys] :map]}
+  [sys]
+  (if-let [root (config/value :seon.config.source/root)]
+    @(root/effect! sys :git {:dir root :branch (config/value :seon.config.source/branch) :merge "main"})
+    (contract/error :seon.system/no-source-root #'my.root/merges-caught-up! "no source root declared (:seon.config.source/root): no write-back tree to merge into" {})))
+
 (defn write-back!
   "Sync main's changed files to disk: the files the merged tasks ids (none: every merged task whose files no commit holds) wait on, read from main as
   it is now and committed on the merges branch in one :git effect. What the git effect answers is recorded by seon.reconcile/commit-tx: the sha on each task, which

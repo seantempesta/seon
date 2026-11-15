@@ -845,10 +845,11 @@
  ;; call's bound is of quiet, re-armed by each chunk (seon.fx/stream-due), so a long reasoning reply
  ;; that keeps streaming is never cut; a call that does not stream waits this long in all. A kind not
  ;; named waits unbounded until its bound is measured (seon.agent/fx!).
- ;; :server-op is a work bound on each server op (seon.server/answer, seon.intr/run), worked out as arithmetic: the heaviest op draws a
- ;; whole request (:context), at most a 1M-token context, ~4M chars; a draw's walk, printer and html at ~1k ticks and ~1 KB a char is
- ;; ~4B ticks and ~4 GB; the bound is ten times that, so an op that loops for good is stopped and answers its caller typed, and its
- ;; worker goes on. Root's own :eval takes none (seon.server/root-eval: a whole-program load allocates tens of GB); an interrupt ends it.
+ ;; :server-op is a work bound on each server op (seon.server/answer, seon.intr/run), worked out as arithmetic: the heaviest op is a
+ ;; cold :context request, which draws one page (its past turns are read from the store, as sent) of at most a 1M-token context, ~4M
+ ;; chars; a draw's walk, printer and html at ~1k ticks and ~1 KB a char is ~4B ticks and ~4 GB, the lower bound. The bound is ten
+ ;; times that, so an op that loops for good is stopped and answers its caller typed, and its worker goes on. Measured [M]: the op
+ ;; at 11.1 GB on root's session, 2.8x the lower bound and 3.6x under the bound; the rest is a known cost being taken out. Root's own :eval takes none (seon.server/root-eval: a whole-program load allocates tens of GB); an interrupt ends it.
  :seon.config.fx/bounds {:model {:seon.bound/ms 240000}
                          :server-op {:seon.bound/ticks 40000000000 :seon.bound/bytes 40000000000}}
 

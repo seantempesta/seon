@@ -1608,19 +1608,29 @@
   "What was asked, the chat's first message, a person's on the right (a component over ctx): the
   task's plan as it accumulated: its start, then the whole as Markdown when asked, so a long plan leaves the
   conversation to read. The model reads the plan in the task's part. See docs/render.md#the-page."
-  {:seon.render/style ".chat-ask { max-width: 85%; align-self: flex-end; border-radius: 1rem; border-top-right-radius: 0.125rem; background: var(--color-base-800); padding: 0.625rem 1rem; color: var(--color-text-100); }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  {:seon.render/style ".chat-ask { max-width: 85%; align-self: flex-end; border-radius: 1rem; border-top-right-radius: 0.125rem; background: var(--color-base-800); padding: 0.625rem 1rem; color: var(--color-text-100); }
+.chat-ask, .chat-ask p, .chat-ask li { font-family: var(--font-text); font-size: 0.9rem; line-height: 1.55; }
+.chat-ask summary { list-style: none; cursor: pointer; }
+.chat-ask summary::-webkit-details-marker { display: none; }
+.chat-ask details[open] > summary > div { display: none; }
+.chat-ask summary > span { font-size: 0.75rem; }
+.chat-ask summary > span > span:first-child { color: var(--color-text-400); }
+.chat-ask summary > span > span:nth-child(2), .chat-ask summary > span > span:nth-child(3) { text-decoration: underline; }
+.chat-ask details[open] > summary > span > span:first-child, .chat-ask details[open] > summary > span > span:nth-child(2) { display: none; }
+.chat-ask details:not([open]) > summary > span > span:nth-child(3) { display: none; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
   (when-let [plan (some-> (:seon.agent/task c) ratom/realize :seon.task/plan)]
     (let [{:keys [shown truncated? omitted lines]} (print/plain plan (config/value :seon.config.render/line-budget))]
+      ;; its look is its rules (:seon.render/style): the fold, the note and the Read all / Show less toggle by their place, no class
       [:section
        (if truncated?
          ;; the start, or the whole in its place, never both
-         [:details {:class "group seon-message"}
-          [:summary {:class "list-none"}
-           [:div {:class "group-open:hidden"} (markdown shown {:inline? true})]
-           [:span {:class "text-xs"} [:span {:class "muted group-open:hidden"} (str (emit/cut-words omitted lines nil) " ")] [:span {:class "underline group-open:hidden"} "Read all"] [:span {:class "hidden underline group-open:inline"} "Show less"]]]
+         [:details
+          [:summary
+           [:div (markdown shown {:inline? true})]
+           [:span [:span (str (emit/cut-words omitted lines nil) " ")] [:span "Read all"] [:span "Show less"]]]
           (markdown plan {:inline? true})]
-         [:div {:class "seon-message"} (markdown plan {:inline? true})])])))
+         [:div (markdown plan {:inline? true})])])))
 
 (defn chat-end
   "How the work ended, the chat's last card (a component over ctx and the db): the end its agent wrote (:seon.agent/outcome and
@@ -2457,7 +2467,7 @@
   stream's newest rows. It runs again only when :process changes."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
-  (let [{:keys [writer fork-server root-errors-total health events boot]} (ratom/realize (:process c))
+  (let [{:keys [writer fork-server root-errors-total health events boot server-ops]} (ratom/realize (:process c))
         stat (fn [label v & [means]] (when (some? v) [:span (cond-> {} means (assoc :title means)) [:span {:class "muted"} (str label " ")] (str v)]))
         sick (filter (fn [[_ h]] (pos? (:defects h 0))) health)]
     [:section [:h2 "root's process"]
@@ -2474,6 +2484,10 @@
         (cond (nil? boot) nil
               (or (nil? loaded) (zero? loaded)) "the image held main's program: no forms loaded"
               :else (str loaded " forms loaded" (when ms (str " in " ms " ms")))))]
+     ;; each running server op and who asked it, so one held for long is seen and stopped (seon_interrupt); a render reads no clock
+     (when (seq server-ops)
+       [:ul {:class "text-xs"} (for [{:keys [client id]} server-ops]
+                                 [:li (str "running: a server op of " client (when (some? id) (str ", request " id)))])])
      (when (seq sick)
        [:ul {:class "text-xs"} (for [[pid {:keys [defects newest]}] sick]
                                  [:li [:span {:class "text-error"} (str (kname pid) " ✕" defects)] " " [:span {:class "text-text-300"} (some-> newest (print/line (cell)))]])])

@@ -732,7 +732,7 @@
               (if-not (and checkout (:branch (:source st)))
                 (reply! st o p (contract/error :seon.system/no-gate-checkout #'seon.system/ext-op "this root has no checkout to run process tests on (:seon.config.source/gate-checkout, or a source root)"))
                 (let [[st rid] (pend st p :gate nil)]
-                  (step/out! o :to-writer {:op :merge-candidate :branch (:branch m) :data-attrs :all :dest {:gate rid :tests (:tests m) :repo checkout :prio (:prio m 0)}})
+                  (step/out! o :to-writer {:op :merge-candidate :branch (:branch m) :data-attrs :all :dest {:gate rid :tests (:tests m) :repo checkout :prio (:prio m 0) :candidate (:branch m)}})
                   st)))
       ;; the test service (seon.prove): the request goes to its proc, the caller (a session, or an
       ;; agent's turn through its proc) is answered when the run it joined ends
@@ -834,7 +834,7 @@
                              (seq unread) (deliver-rid st o rid {:unread unread})
                              ;; no process test reached: the writer's analysis of the candidate was the check
                              (empty? (:tests dest)) (deliver-rid st o rid {:value {:results {}}})
-                             :else (do (step/out! o [:fx/tests :ask] {:req {:repo (:repo dest) :branch (:branch (:source st)) :files (:text r) :tests (:tests dest)}
+                             :else (do (step/out! o [:fx/tests :ask] {:req (cond-> {:repo (:repo dest) :branch (:branch (:source st)) :files (:text r) :tests (:tests dest)} (:candidate dest) (assoc :candidate (:candidate dest)))
                                                                      :prio (:prio dest 0) :dest {:rid rid}})
                                        st)))
         (:asked dest) (deliver-rid st o (:rid dest) (if (contract/error? r) r {:task (:asked dest)}))
@@ -996,6 +996,8 @@
       ;; an agent's errors since its last commit (seon.error/note, each of its class), counted across agents
       :errors (let [task (get-in st [:view :agents (:agent m) :task])]
                 (reduce (fn [st s] (problem st (err/sent->occurrence s (:agent m) task))) st (:entries m)))
+      ;; an effect owner's running set, replaced whole (seon.fx/running-told): root's debug page lists each running server op
+      :server-ops (if (= (:running m) (get-in st [:view :server-ops (:kind m)])) st (assoc-in st [:view :server-ops (:kind m)] (:running m)))
       ;; an effect owner's failed outcome (seon.fx/owner-proc)
       :problem (problem st (err/occurrence (:error m) (:class m) {:agent (:agent m) :task (get-in st [:view :agents (:agent m) :task])}
                                            (System/currentTimeMillis)))
@@ -2273,20 +2275,39 @@
                            "; its tests would run on the system's build of what it changes. Prove it on its own build: bin/prove --out DIR")
                       {:binary (:seon.process/binary-digest rt) :tree tree :baked (vec (:seon.process/differs rt))}))))
 
+(defn prove-candidate!
+  "The merge gate's prove: the candidate's own store branch (candidate, the branch its :gate request names) proved by prove! in mode
+  (default :judge) on names, the deferred process tests, its process items, seed and build run on checkout at tree (the gate's
+  checkout, seon.fx/run-on-checkout). The branch's live agent answers the plan, or one spawned onto it: no tree branch, no catch-up of
+  files that came from the store. An agent spawned for it ends once the run answers, however it ends, so the branch is free for the
+  task's next attach (an agent left live on the branch refuses every seon_attach of
+  its task). The run's answer, or its typed error. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  {:malli/schema [:=> [:cat :seon.system/sys [:map [:candidate :keyword] [:checkout :string] [:tree :string]]] :map]}
+  [sys {:keys [candidate checkout tree names mode]}]
+  (let [b (pdb/on-main (pdb/conn-main (:conn sys)) candidate)
+        live (some (fn [[aid a]] (when (and (= b (:branch a)) (not (task/gone-statuses (:status a)))) aid)) (:agents (state sys)))
+        ag (or live (spawn! sys {:branch b}))]
+    (try @(prove! sys {:branch b} (set (map symbol names)) (or mode :judge) {:checkout checkout :tree tree})
+         (finally (when-not live (kill! sys ag))))))
+
 (defn prove-tree!
   "Prove the files of checkout (a worktree of this root's repository) at tree, its tree id (seon.fx/tree-id, what bin/build records):
   their branch (tree-branch), made once from main with the checkout's catch-up written on it (catch-up :fact? false, as the writer's
   one :branch-for-tree op), its live agent or one forked onto it, and prove! of names in mode (default :judge). The run's answer,
   or a typed error: no tree on main to diff from, the catch-up's read failing, or a file it left out (:seon.system/catch-up-skipped,
   each named: a judgement of part of the files would be wrong). Once no run of it is in flight here, its agent ends and the branch
-  is dropped (tree-leave!); a run that comes meanwhile waits for the drop and makes the branch again.
+  is dropped (tree-leave!); a run that comes meanwhile waits for the drop and makes the branch again. With :candidate (the merge
+  gate's, through the :tests effect's :prove-tree), that store branch is proved instead (prove-candidate!).
   See docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :seon.system/sys [:map [:checkout :string] [:tree :string]]] :map]}
-  [sys {:keys [checkout tree names mode]}]
+  [sys {:keys [checkout tree names mode candidate] :as on}]
   (let [b (tree-branch tree)
-        refusal (tree-refusal (program/binary-program) tree)
-        c (when-not refusal (catch-up @(:conn sys) checkout {:fact? false}))]
+        refusal (when-not candidate (tree-refusal (program/binary-program) tree))
+        c (when-not (or candidate refusal) (catch-up @(:conn sys) checkout {:fact? false}))]
     (cond
+      ;; the merge gate's (its request names the candidate's store branch): that branch is proved on the checkout, with no tree
+      ;; branch and no catch-up (prove-candidate!). Here, not in the :prove-tree binding, so a running root takes it in place
+      candidate (prove-candidate! sys on)
       refusal refusal
       (nil? c) (refused 'seon.system/prove-tree! "main holds no tree of its checkout to diff a session's files from" {:checkout checkout})
       (contract/error? c) c

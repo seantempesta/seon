@@ -4,7 +4,7 @@
   store (its agent caches its verdicts by digest: seon.results-test).
   Run: bin/test seon.prove-test"
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d]
-            [seon.test-store :as ts] [clojure.java.shell :as sh] [seon.agent-test :as at] [clojure.edn] [seon.prove :as prove] [seon.fx :as fx] [seon.step :as step] [seon.agent] [seon.cost] [seon.proofs :as proofs] [seon.program] [seon.config]))
+            [seon.test-store :as ts] [clojure.java.shell :as sh] [seon.agent-test :as at] [clojure.edn] [seon.prove :as prove] [seon.fx :as fx] [seon.step :as step] [seon.agent] [seon.cost] [seon.proofs :as proofs] [seon.program] [seon.config] [seon.reconcile]))
 
 ;; the service's state as a test starts it: the max-workers of the config in force (seon.fx/limits), which deals the queue in
 ;; shares; nothing here reads the machine's load (docs/cost.md#what-is-measured: no assertion the load can turn red)
@@ -43,6 +43,36 @@
               [st o] (feed st [(answer-of m r)])]
           (recur st (into all o) (inc (.indexOf all m))))
         [st all]))))
+
+;; docs/merging.md#the-test-service: a judge's named ask on main while main's own run holds the tests branch waits for that runner,
+;; never a second spawn the branch refuses (data, 2026-11-16, result/bbd0ab17: every pilot judged during a main run read its reds
+;; :unknown from :seon.system/refused). Estimate: a few messages through the step fn, ~20k ticks each = ~0.3M.
+(defn- named-ask [rid t] [:req {:rid rid :branch :main :t t :digest (str "d" t) :names #{'a.b-test/t} :mode :judge}])
+
+(deftest ^{:seon.test/estimate {:ticks 500000}} two-asks-held-on-the-tests-branch-are-both-answered
+  (let [[st o] (feed (proc0) [(req 1 :main 5) (named-ask 2 5) (named-ask 3 6)])
+        _ (is (= 1 (count (asks o :spawn))) "one runner on the tests branch; the two asks wait for it, never a refused spawn")
+        [st all] (run-through st o test-run-answer)]
+    (is (= [1 2 3] (waiters-answered all)) "each asker answered, in turn")
+    (is (every? #(= 1 (count %)) (vals (group-by :tag (asks all :spawn)))) "one spawn at a time")
+    (is (empty? (:held-main st)) "nothing left held")))
+
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-named-ask-during-mains-run-is-answered-with-its-verdicts
+  (let [[st o] (feed (proc0) [(req 1 :main 5) (named-ask 2 5)])
+        _ (is (= 1 (count (asks o :spawn))) "while main's runner is in flight the ask asks no second runner, which the branch would refuse")
+        [_ all] (run-through st o test-run-answer)
+        r (:r (first (filter #(and (= :prove-answer (:op %)) (= 2 (:rid %))) all)))]
+    (is (not (seon.contract/error? r)) (str "answered, never refused: " (pr-str r)))
+    (is (= {'a.b-test/t :pass} (proofs/results r)) "with its test's verdict")))
+
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-dying-main-run-answers-its-waiters-and-the-held-ask-runs
+  (let [[st o] (feed (proc0) [(req 1 :main 5) (named-ask 2 5)])
+        died (seon.contract/error :seon.system/refused 'seon.system/spawn! "the fork server could not fork it" {})
+        [st o2] (feed st [(answer-of (first (asks o :spawn)) died)])]
+    (is (= [1] (waiters-answered o2)) "the dying run answers its own waiter")
+    (is (seon.contract/error? (:r (first (filter #(= :prove-answer (:op %)) o2)))) "with its typed error")
+    (is (= 1 (count (asks o2 :spawn))) "and the held ask spawns its own runner")
+    (is (empty? (:held-main st)))))
 
 ;; Estimate: one state-view of a small state map: ~20k ticks; 200,000
 (deftest ^{:seon.test/estimate {:ticks 200000}} the-state-view-says-how-far-mains-proving-is-behind
@@ -152,12 +182,14 @@
         (is (empty? (asks o3 :spawn)) "the same inputs (program and binary) are not asked again: same inputs, same answer")
         (is (= 1 (count (asks o4 :spawn))) "a newer program is new inputs: main is asked again (a new binary is a new process, whose boot asks it)")))))
 
-(deftest ^{:seon.test/estimate {:ticks 100000}} a-death-naming-another-binary-is-not-asked-again-on-the-same-program
+(deftest ^{:seon.test/estimate {:ticks 8500000}} a-death-naming-another-binary-is-not-asked-again-on-the-same-program
   ;; root's review of adf8de2a25: a failed main run's :binary is what its spawn's death names (target/seon on disk, read by
   ;; seon.fx/runtime-for), which differs from the proc's own :binary (the running binary, fixed for the process) once target/seon is
   ;; rebuilt under a running root. Same program, same process: the same inputs, so main is not asked again at each notice (it
   ;; would spawn and die on every one). Red before: main-inputs-moved? compared the death's binary with the proc's, so every notice
-  ;; at the same program asked main again. Estimate: 3 notices and 1 answer through the step fn, ~20k ticks each = ~80k (measured 46k for its sibling in a shard)
+  ;; at the same program asked main again. Estimate: 3 notices and 1 answer through the step fn, ~20k ticks each = ~80k, plus, when it is
+  ;; its child's first test to start the proc, the init's one read of the binary's build record (seon.program/binary-program: 643 KB
+  ;; decoded, 7.9M ticks measured at root, result/bb8b9fd8; root pays it once at boot) = ~8M. Was 80k: the estimate missed that read (measured 7.96M alone, 46k for its sibling after it)
   (let [value seon.config/value
         died (seon.contract/error :seon.process/env-mismatch 'seon.fx/runtime-for
                                   "target/seon's identity 0b1d1e5 is not tree e6275967's 76dc758d: build it"
@@ -631,7 +663,28 @@
     (is (not (seon.contract/error? r)) (str "the run answers its verdicts, not the one test's error: " (pr-str r)))
     (is (= 1 (:pass r)) "the test that passed counts")
     (is (= [:seon.prove/no-verdict] (keep #(when (= "#'a.b-test/u" (:var %)) (:seon.error/type %)) (:reports r)))
-        "and the one ended at its wall bound is its own no-verdict")))
+        "and the one ended at its wall bound is its own no-verdict")
+    (is (not-any? #{'a.b-test/u} (:red r)) (str "a no-verdict is no red: " (pr-str (:red r))))
+    (is (= ['a.b-test/u] (keys (:no-verdict r))) "it is named as no verdict, with why")))
+
+;; docs/merging.md#the-test-service: a batch's own error (its child could not be forked, it died before a test began) is the platform
+;; failing: each of its items has no verdict, and the error holds, typed, for its asker; never a red per item. Red before: run-answer
+;; named every errored item in :red, and the gate (seon.fx/gate-answer) read each red as :fail: data's pilot, 2026-11-15 23:0x, met
+;; the merge gate's answer of 280 :fail from one batch's error (root). Estimate: one run-answer and one gate-answer of 2 items, ~50k.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-batchs-error-is-no-verdict-and-never-a-red
+  (let [died {:seon.error/type :seon.test/fork-refused :seon.error/message "the test child could not be forked"}
+        r (#'prove/run-answer {:selected ['a.b-test/t 'a.b-test/u] :digests {'a.b-test/t "d1" 'a.b-test/u "d2"}}
+                              {'a.b-test/t died 'a.b-test/u died})
+        g (fx/gate-answer r ['a.b-test/t 'a.b-test/u])]
+    (is (= [] (:red r)) (str "no item ran, so none is red: " (pr-str (:red r))))
+    (is (= #{'a.b-test/t 'a.b-test/u} (set (keys (:no-verdict r)))) "each is no verdict")
+    (is (= :seon.test/fork-refused (get-in r [:no-verdict 'a.b-test/t :seon.error/type])) "naming the batch's own error")
+    (is (= {} (:results g)) (str "the gate reads no :fail from it, so its branch keeps them deferred: " (pr-str g)))
+    (is (= :seon.test/fork-refused (get-in g [:no-verdict 'a.b-test/u :seon.error/type])) "and the gate's answer carries why")
+    ;; every reader of a run's tests reads them as no verdict (root's review of f4ca2f3a4c): the agent's record (seon.proofs/results) and
+    ;; the done rule's ask of main (seon.reconcile/main-answer), where a red would make the change's red main's
+    (is (= {} (proofs/results r)) "no result for a test that never ran")
+    (is (= {:red #{} :unknown #{'a.b-test/u}} (#'seon.reconcile/main-answer #{'a.b-test/u} r)) "main answered nothing of it: unknown, never main's red")))
 
 ;; docs/merging.md#the-test-service: each asker is told an item's verdict as it lands, before it is answered, so a session's
 ;; bin/prove prints each test as it ends; an item with no verdict is told as :no-verdict, never left out

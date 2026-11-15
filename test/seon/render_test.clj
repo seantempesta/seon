@@ -1350,7 +1350,8 @@
         ;; session names request/root, through which it reaches the person it works for)
         ;; 2026-11-15: chat-ask 6 -> 13 with no render changed: root's boot now writes the binary's plan over a stale one
         ;; (seon.system/root-agent-boot-tx), so this world's root holds the real plan, long enough to draw folded, where it held "p"
-        pinned '{seon.render.ui/agent {:class 23 :wire 4} seon.render.ui/agent-parts {:class 3} seon.render.ui/agent-state {:class 3 :wire 3} seon.render.ui/agents-list {:class 1} seon.render.ui/chat-ask {:class 13} seon.render.ui/chat-end {:class 1} seon.render.ui/cite {:class 2} seon.render.ui/conversation-list {:class 3} seon.render.ui/conversation-turn {:class 5} seon.render.ui/eval-output {:class 75 :qualified 36} seon.render.ui/evaluation {:class 21 :qualified 9} seon.render.ui/message {:class 2} seon.render.ui/model-call-view {:class 2} seon.render.ui/page-rules {:class 3} seon.render.ui/problems-tile {:class 1} seon.render.ui/process-tile {:class 4} seon.render.ui/root {:class 1} seon.render.ui/root-evals {:class 3} seon.render.ui/root-head {:class 2} seon.render.ui/root-side {:class 6} seon.render.ui/rules-list {:class 3} seon.render.ui/status {:class 2} seon.render.ui/system-message {:class 6 :wire 3} seon.render.ui/task-view {:class 10} seon.render.ui/turn {:class 2}}]
+        ;; chat-ask 13 -> 5: its fold and toggle are its rules by place, no class; the 5 left are markdown's own root class
+        pinned '{seon.render.ui/agent {:class 23 :wire 4} seon.render.ui/agent-parts {:class 3} seon.render.ui/agent-state {:class 3 :wire 3} seon.render.ui/agents-list {:class 1} seon.render.ui/chat-ask {:class 5} seon.render.ui/chat-end {:class 1} seon.render.ui/cite {:class 2} seon.render.ui/conversation-list {:class 3} seon.render.ui/conversation-turn {:class 5} seon.render.ui/eval-output {:class 75 :qualified 36} seon.render.ui/evaluation {:class 21 :qualified 9} seon.render.ui/message {:class 2} seon.render.ui/model-call-view {:class 2} seon.render.ui/page-rules {:class 3} seon.render.ui/problems-tile {:class 1} seon.render.ui/process-tile {:class 4} seon.render.ui/root {:class 1} seon.render.ui/root-evals {:class 3} seon.render.ui/root-head {:class 2} seon.render.ui/root-side {:class 6} seon.render.ui/rules-list {:class 3} seon.render.ui/status {:class 2} seon.render.ui/system-message {:class 6 :wire 3} seon.render.ui/task-view {:class 10} seon.render.ui/turn {:class 2}}]
 
     (is (= pinned seen) (str "a count moved: write the new one here when it went down, never when it went up\n"
                              (pr-str (into (sorted-map) seen))))))
@@ -3929,7 +3930,9 @@
       (is (= :seon.render/component-defect (:seon.error/type broken)) (str "the model reads the error as data: " (pr-str placed)))
       (is (str/includes? (:seon.error/message broken) "seon.ref/scan invalid-output") "what threw")
       (is (= [{:in [:seon.ref/blocks 3]}] (get-in broken [:seon.render/threw :problems])) "and the thrown error's own data")
-      (is (= "drawn" (last fine)) "the other part draws"))))
+      (is (= "drawn" (last fine)) "the other part draws")
+      ;; the part the model reads names no index: a thrown search drew a walk's whole index, 500k chars, into root's request [M]
+      (is (not (str/includes? (pr-str broken-part) ":seon.render/index")) "the error's call carries no index"))))
 
 (defn- plain-thrower
   "A plain call (its contract asks no input: the walk keeps it as written, the writer calls it) that throws."
@@ -5270,3 +5273,26 @@
     (is (str/includes? h "[clojure.string :as str]") "the status shows the :require")
     (is (str/includes? h "use-fixtures :each") "and the fixtures")
     (is (< ticks 1e6) (str "test-shape on a four-form namespace: estimate 100k ticks, measured " ticks))))
+
+;; See docs/render.md#a-page-is-a-kept-walk
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-walks-reads-are-the-one-index
+  ;; task seon.ratom/web-reads-on-the-core, slice 2: a walk keeps who read what of the store in seon.db's one index (reads-add,
+  ;; reads-drop, readers), never a copy of its own: no second set of the components that read (:db-keys), and the one index's readers
+  ;; of a move's datoms are components the walk holds
+  (let [[kw db] (seon.render-cost-test/step-of 4)
+        p (:p kw)
+        moved (:tx-data (d/with db [{:seon.agent/key "b1/a1" :seon.agent/turn 99}]))
+        rs (seon.db/readers (:readers p) moved)]
+    (is (not (contains? p :db-keys)) "no second set of the store's readers")
+    (is (seq rs) "the move reaches a reader")
+    (is (every? #(contains? (:cache p) %) rs) "and each is a component the walk holds")))
+
+;; See docs/server.md#ops
+(deftest ^{:seon.test/estimate {:ticks 2000000}} roots-debug-page-shows-each-running-server-op
+  ;; task seon.server/connections-park-on-fibers-and-ops-run-bounded, item 4: root's process tile lists each running server op and
+  ;; who asked it (the :server-op owner's running set, told to the api's view), so one held for long is seen and stopped
+  (let [hc (seon.render.ui/process-tile {:seon.ctx/ctx {:process {:writer nil :fork-server nil :health {} :events []
+                                                                   :server-ops [{:client "session-x" :id 7 :since-ns 1}]}}})
+        text (pr-str hc)]
+    (is (clojure.string/includes? text "session-x") "its client")
+    (is (clojure.string/includes? text "request 7") "and its MCP request id")))

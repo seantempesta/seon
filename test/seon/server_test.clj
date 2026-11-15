@@ -127,6 +127,8 @@
         s1 (open!)
         _ (line! s1 (pr-str {:op :eval :agent "root" :client tag :code (started "e1")}))
         _ (ask {:op :eval :agent "root" :code "@e1"})
+        ;; item 4: the :server-op owner told the api's view its running set (seon.fx/running-told)
+        running (ask {:op :eval :agent "root" :code "(mapv :client (get-in (c/state sys) [:server-ops :server-op]))"})
         stop1 (ask {:op :interrupt :client tag})
         a1 (clojure.edn/read-string (read! s1))
         ;; MCP: the same wait, as tools/call id 7, stopped by notifications/cancelled naming request 7
@@ -139,6 +141,7 @@
         a2 (clojure.data.json/read-str (read! s2))
         after (ask {:op :eval :agent "root" :code "(+ 1 2)"})]
     (.close s1) (.close s2)
+    (is (some #{tag} (ts/value-of (:response running))) (str "root's view lists the running op's client: " (pr-str running)))
     (is (= {:stopped 1 :dropped 0} stop1) "the stop finds the client's running op")
     (is (re-find #"(?i)interrupt" (pr-str a1)) (str "the stopped eval is answered, interrupted: " (pr-str a1)))
     (is (= 7 (get a2 "id")) "the cancelled MCP request is answered, by its id")
@@ -411,6 +414,21 @@
                                         " (with-redefs [seon.config/value (fn ([k] (if (= k :seon.config.root/inbox-wait-ms) 50 (v k))) ([k c] (v k c)))]"
                                         " (select-keys (#'seon.server/inbox-answer sys {:agent " (pr-str (name agent)) "}) [:seon.error/type :waited-ms])))")}]))]
     (is (= {:seon.error/type :seon.server/no-message :waited-ms 50} (:value r)) (pr-str r))))
+
+;; Estimate: one server round trip (~0.5M); in root two waits, one message write and its delivery (~0.2M), the second wait's
+;; bound: ~1M; 2,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} a-second-wait-a-delivery-woke-with-nothing-waits-on
+  ;; root, 2026-11-15 23:20 [M]: two waits on one agent at once; the message woke both, one answered it and the other answered
+  ;; {:messages []}, so a session's standing wait ended with nothing. A wait the delivery woke but left nothing for waits on,
+  ;; to its bound, and ends typed. Red before: one answer was [] (the dial at 300 ms, as an-inbox-with-nothing-new-ends-at-its-bound-typed)
+  (let [[r] (at/in-agent (fn [{:keys [agent]}]
+                           [{:op :eval :agent "root"
+                             :code (str "(let [v seon.config/value k " (pr-str (name agent)) "]"
+                                        " (with-redefs [seon.config/value (fn ([k] (if (= k :seon.config.root/inbox-wait-ms) 300 (v k))) ([k c] (v k c)))]"
+                                        " (let [a (future (#'seon.server/inbox-answer sys {:agent k})) b (future (#'seon.server/inbox-answer sys {:agent k}))]"
+                                        " @(seon.system/message! sys (keyword k) \"both wake\")"
+                                        " (set (map (fn [r] (or (:seon.error/type r) (mapv :body (:messages r)))) [@a @b])))))")}]))]
+    (is (= #{["both wake"] :seon.server/no-message} (:value r)) (pr-str r))))
 
 ;; Estimate: three server round trips (~0.5M each) and one delivery on the agent (~0.1M): ~1.6M; 3,000,000
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} an-inbox-answers-a-message-once

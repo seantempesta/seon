@@ -24,3 +24,16 @@
   (.interrupt (Thread/currentThread))
   (is (thrown? ThreadDeath (intr/run 1000000 (fn [] :ran))) "the interrupt is answered, not swallowed")
   (is (= :ran (intr/run 1000000 (fn [] :ran))) "and consumed: the next run runs"))
+
+;; See docs/server.md#ops
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-stop-of-an-ended-run-leaves-no-entry
+  ;; root's reviewer on 3bfa064d5c: seon.intr's stopped is emptied by the runs it names. A stop of a live run records its token; the run
+  ;; ends (stopped) and its finally removes that entry and clears its thread's flag; a stop of a run already ended records nothing
+  (let [tok (jolt.host/make-interrupt)
+        stopped @#'seon.intr/stopped
+        me (Thread/currentThread)]
+    (is (thrown? ThreadDeath (intr/run nil nil tok (fn [] (intr/stop! tok) (loop [i 0] (when (< i 100000000) (recur (inc i))))))) "the live run is stopped")
+    (is (not (contains? @stopped me)) "its entry is gone with it")
+    (is (not (Thread/interrupted)) "and its thread's flag is cleared")
+    (is (false? (intr/stop! tok)) "a stop of the ended run finds nothing live")
+    (is (not (contains? @stopped me)) "and records nothing")))
