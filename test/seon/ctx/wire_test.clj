@@ -540,21 +540,21 @@
 
 ;; See docs/render.md#a-turn-stores-what-it-sent
 (deftest ^{:seon.test/estimate {:ticks 3000000}} an-assembly-resolves-to-the-parts-its-turn-sent
-  ;; a turn stores what changed since the call before (a cut, then an append), whole at a checkpoint: resolved through its prev, it is
+  ;; a turn stores what changed since the call before (a cut, then an append), whole at a checkpoint; each letter a message: resolved through its prev, it is
   ;; the request's parts at the first turn, after an append, after a refine that cut earlier parts, and at a checkpoint (data, 2026-11-15)
   (ts/test-branch!
     (fn [_ conn]
       (let [part (fn [x] [[:message x] [{:role "user" :content x}] 1])
             id #(seon.lib/call-id "a1" %)
-            turn! (fn [n prev xs] (let [ps (mapv part xs)] (d/transact conn (wire/sent-tx @conn (id n) prev n ps)) ps))
+            turn! (fn [n prev xs] (let [ps (mapv (comp part str) xs)] (d/transact conn (wire/sent-tx @conn (id n) prev n ps)) ps))
             digests (fn [ps] (mapv (fn [[ref ms t]] [ref t (mapv #(seon.lib/digest (seon.edn/encode (seon.edn/canonical %))) ms)]) ps))
             back #(wire/assembly-parts @conn (id %))
             asm #(d/entity @conn [:seon.model-call/id (id %)])
-            p1 (turn! 1 nil ["A" "B" "C"])
-            p2 (turn! 2 (id 1) ["A" "B" "C" "D"])
-            p3 (turn! 3 (id 2) ["A" "C" "D" "E"])
+            p1 (turn! 1 nil "ABC")
+            p2 (turn! 2 (id 1) "ABCD")
+            p3 (turn! 3 (id 2) "ACDE")
             cp (seon.config/value :seon.config.ctx/assembly-checkpoint-turns)
-            p4 (turn! cp (id 3) ["A" "C" "D" "E" "F"])]
+            p4 (turn! cp (id 3) "ACDEF")]
         (is (= (digests p1) (back 1)) "the first turn: whole")
         (is (= [3 1] [(:keep (:seon.model-call/assembly (asm 2))) (count (:add (:seon.model-call/assembly (asm 2))))]) "an append keeps what was sent and adds one")
         (is (= (digests p2) (back 2)) "and resolves to its request's parts")
