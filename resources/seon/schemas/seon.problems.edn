@@ -2,7 +2,8 @@
 ;; producer builds through seon.contract/error (the one error map), the recorded error (one
 ;; entity per signature on main, R4's seon.error), the problem members of a run's end,
 ;; and the shape of the one read, seon.problems/report.
-{;; ---- variants of the one error map (each [:and :seon.error/base ...]) ----
+{
+ :seon.problems/owner [:symbol {:description "On a problem's error, the namespace of the operation that raised it: the area to tell (seon.prove/finish). See docs/health.md."}];; ---- variants of the one error map (each [:and :seon.error/base ...]) ----
  ;; an agent's test results not recorded as facts on its branch: its schema lacks them, or the branch refused the write (seon.agent/record-results!); the run answers it under :unrecorded
  :seon.agent/unrecorded [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/unrecorded]]]]
  :seon.agent/gate-unread [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/gate-unread]]]]
@@ -43,6 +44,8 @@
  :seon.system/catch-up-skipped [:and {:description "A session's files the system could not all read, so none is proved (seon.system/prove-tree!): each skipped path with why. See docs/merging.md#a-session-proves-through-root."} :seon.error/base [:map [:seon.error/type [:= :seon.system/catch-up-skipped]] [:skipped [:vector :map]]]]
  ;; a wait on main (seon.system/await-db) whose pred was false when the reconciler went quiet at
  ;; t: nothing in flight will make it true (an outside commit still may)
+ :seon.server/no-message [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/no-message]] [:agent :string] [:waited-ms :int]]]
+ :seon.await/shared-root [:and :seon.error/base [:map [:seon.error/type [:= :seon.await/shared-root]] [:seon.error/fix :string]]]
  :seon.system/quiet-before-true [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/quiet-before-true]] [:t :int] [:waits-on :string]]]
  :seon.system/wait-threw [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/wait-threw]] [:t :int]]]
  ;; a request to an agent after it ended (root stopped it, or it died): not gone, it was
@@ -173,11 +176,11 @@
  :seon.test/bytes-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/bytes-spent]] [:bytes :int] [:budget :int]
                                                 [:test {:optional true} :string]]]
  :seon.fx/io-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/io-error]]]]
- :seon.process/binary-digest [:maybe {:description "target/seon's identity as bin/build recorded it (target/seon.digest), or nil when none was recorded."} :string]
- :seon.process/branch-digest [:string {:description "A branch tree's binary identity (bin/binary-digest at that tree)."}]
+ :seon.process/binary-digest [:maybe {:description "The running binary's identity as bin/build recorded it with the binary (target/seon.program's :digest, held since the process's boot), or nil when none was recorded."} :string]
+ :seon.process/branch-digest [:string {:description "A branch tree's binary identity (seon.fx/binary-digest at that tree)."}]
  :seon.process/tree [:string {:description "A git tree id, as bin/tree and the import name it."}]
  :seon.process/differs [:vector {:description "What differs between the binary's tree and a branch's that only a build changes: the build inputs and pins, as paths (seon.fx/runtime-for)."} :string]
- :seon.process/env-mismatch [:and {:description "A process's binary is not its branch's: target/seon's identity (bin/binary-digest) differs from the branch tree's; its caller builds once (seon.fx/runtime-for)."} :seon.error/base [:map [:seon.error/type [:= :seon.process/env-mismatch]] [:seon.process/binary-digest [:maybe :string]] [:seon.process/branch-digest :string] [:seon.process/tree :string] [:seon.process/differs {:optional true} :seon.process/differs]]]
+ :seon.process/env-mismatch [:and {:description "A process's binary is not its branch's: the running binary's identity (seon.fx/binary-digest) differs from the branch tree's; its caller builds once (seon.fx/runtime-for)."} :seon.error/base [:map [:seon.error/type [:= :seon.process/env-mismatch]] [:seon.process/binary-digest [:maybe :string]] [:seon.process/branch-digest :string] [:seon.process/tree :string] [:seon.process/differs {:optional true} :seon.process/differs]]]
  :seon.fx/tree-unmoved [:and {:description "A commit moved git's main but its checked-out tree could not follow: the commit stands, the tree is brought in by hand."}
                         :seon.error/base [:map [:seon.error/type [:= :seon.fx/tree-unmoved]] [:sha :string]]]
  :seon.fx/ref-moved [:and {:description "A commit asked to move a branch only from the commit it expected found the branch elsewhere: nothing written; the caller reads what moved it and asks again."}
@@ -313,7 +316,7 @@
                              :seon.problems/caused #{:retyped-attribute :unnamed-site :native-in-defonce :stale-section :uncited-var :long-form :unfocused-docstring :leadless-section :orphan-page :waived-proof :uncited-task :stale-plan :unestimated :undeclared-test :unschemed-key :refused-value :hand-written-list :stateful-outside-flow}
                              ;; shown, never a reason to refuse done (root's ruling, 2026-10-23: every var edit stales the sections that cite it;
                              ;; and the plans that cite it, an agent's own task's among them)
-                             :seon.problems/attention #{:stale-section :uncited-var :long-form :unfocused-docstring :stale-plan :hand-written-list :stateful-outside-flow}
+                             :seon.problems/attention #{:stale-section :uncited-var :long-form :unfocused-docstring :stale-plan :hand-written-list}
                              :seon.problems/areas [[:docs #{:stale-pin :stale-section :orphan-page :leadless-section :uncited-var :unfocused-docstring}] [:tests #{:red :cost :waived-proof :unestimated :undeclared-test}]
                                                     [:laws #{:unnamed-site :native-in-defonce :long-form :unschemed-key :refused-value :hand-written-list :retyped-attribute :stateful-outside-flow}] [:merges #{:merge :task-conflict :unrun :unsynced}] [:tasks #{:failed :uncited-task :stale-plan}]
                                                     [:agents #{:stalled :dead :error :waste}] [:errors #{:platform :eval :agent :effect}] [:health #{:problem-unlinked :stale-binary}]]

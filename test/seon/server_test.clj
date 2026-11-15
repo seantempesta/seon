@@ -267,6 +267,61 @@
     (is (some #{4} (map :value (:responses named))) "and so does one that names the agent's task")
     (is (true? (:value open)) "the refused done left the task open")))
 
+;; Estimate: in this process, three server round trips (~0.5M each): ~1.5M; 2,000,000. In root: connection-agent's two :avet seeks of
+;; running and parked tasks (~50k ticks)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} a-message-from-a-connection-is-from-its-agent
+  ;; task seon.server/a-message-reaches-the-session-that-drives-its-agent, part 4: a session's message is from the agent its connection
+  ;; holds (seon.server/connection-agent), never the signed-in person. Red before: every message from MCP was :from "user" (flow's
+  ;; probe ba18c9e9bd81a184)
+  (let [k (volatile! nil)
+        [sent from] (at/in-agent (fn [{:keys [agent]}]
+                                   (vreset! k (name agent))
+                                   [{:op :message :agent "root" :body "from the session holding it" :client "c1"}
+                                    {:op :eval :agent "root"
+                                     :code "(let [db @(:conn sys) e (ffirst (datahike.api/q '[:find ?m :where [?m :seon.message/body \"from the session holding it\"]] db))] (seon.task/sender-name (:seon.message/from (datahike.api/entity db e))))"}])
+                                 {:client "c1"})]
+    (is (true? (:ok sent)) (pr-str sent))
+    (is (= @k (:value from)) (str "from the agent the connection holds: " (pr-str from)))))
+
+(defn- end-session-form
+  "Root's eval ending task id's agents, live or parked: a test's session agent is its own, never left on the shard's root."
+  [id]
+  {:op :eval :agent "root"
+   :code (str "(let [db @(:conn sys)] (doseq [r (concat (seon.task/running db) (seon.task/running db :parked)) :when (= " (pr-str id) " (:task r))] (seon.system/kill! sys (:agent r))))")})
+
+;; Estimate: in this process, four server round trips (~0.5M each, as a-message-reaches-the-agent's): ~2M; 3,000,000. In root: one
+;; request-tx of one task (~0.1M) and one spawn (its fork, root's own work)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} a-session-agent-is-made-for-its-area-once
+  ;; task seon.server/a-message-reaches-the-session-that-drives-its-agent, attach-at-start: a session's first seon_attach of
+  ;; session/<area> template=user makes its own agent's task from the :user template (as root's request/root is made), and a second
+  ;; attach is the same agent on the same one task. Red before: attach of a task that did not exist was refused "no task"
+  (let [id (volatile! nil)
+        [one two made] (at/in-agent (fn [{:keys [ns]}]
+                                      (let [i (vreset! id (str "session/" ns))]
+                                        [{:op :attach :task i :template "user" :client "s-once"}
+                                         {:op :attach :task i :template "user" :client "s-once"}
+                                         {:op :eval :agent "root"
+                                          :code (str "(let [db @(:conn sys)] [(:seon.task/kind (seon.task/task db " (pr-str i) "))"
+                                                     " (count (datahike.api/q '[:find ?e :in $ ?id :where [?e :seon.task/id ?id]] db " (pr-str i) "))])")}
+                                         (end-session-form i)])))]
+    (is (some? (:agent one)) (str "the first attach makes the task and its agent: " (pr-str one)))
+    (is (= (:agent one) (:agent two)) (str "the second is the same agent: " (pr-str two)))
+    (is (= [:user 1] (:value made)) (str "one task, of the :user template's kind: " (pr-str made)))))
+
+;; Estimate: four server round trips (~0.5M each): ~2M; 3,000,000. In root: connection-agent's two scans (~90k [M result/a00e44fe])
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} a-connections-agent-is-its-sessions-own
+  ;; part 3: a session holds its own agent (session/<area>, kind :user) and the task it works; its connection's agent, the :from of
+  ;; what it sends and the started-by of what it attaches, is its own, never the task's. Red before: connection-agent took the first
+  ;; agent the client held
+  (let [[sess who] (at/in-agent (fn [{:keys [ns]}]
+                                  (let [i (str "session/" ns)]
+                                    [{:op :attach :task i :template "user" :client "s-pref"}
+                                     {:op :eval :agent "root" :code "(seon.server/connection-agent sys {:client \"s-pref\"})"}
+                                     (end-session-form i)]))
+                                {:client "s-pref"})]
+    (is (some? (:agent sess)) (pr-str sess))
+    (is (= (name (:agent sess)) (:value who)) (str "the session's own agent, not the task's: " (pr-str who)))))
+
 (deftest a-message-reaches-the-agent
   ;; (parity row 73): the owner's message, sent as
   ;; the page's message bar sends it (seon.system/message!, here through the server's :message
@@ -290,7 +345,7 @@
 ;; new one, ~10.5k ticks a message [M result/b45faee3]
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} a-message-to-an-attached-agent-is-in-the-next-reply
   ;; task seon.server/a-message-reaches-the-session-that-drives-its-agent (docs/users.md#messages): a session driving an agent through
-  ;; MCP hears a message to it in its next reply, as a model hears one in its next request: the messages its turn took, each once. Red
+  ;; MCP hears a message to it in its next reply, as a model hears one in its next request, once. Red
   ;; before: the reply carried its evals' responses alone, and main's merge had already put the message on the branch, so it read as
   ;; delivered while no one had read it (flow's probe, 2026-11-15: agent ba18c9e9bd81a184)
   (let [[_ sent heard again] (at/in-agent (fn [{:keys [agent task]}]
@@ -300,9 +355,11 @@
                                              {:op :eval :agent agent :message-md "" :evals [{:intent "add again" :code "(+ 2 2)"}]}]))]
     (is (true? (:ok sent)) (pr-str sent))
     (is (= [3] (mapv :value (:responses heard))) "the evals answer as before")
-    (is (= ["use demo/g"] (mapv :body (:messages heard))) (str "the reply after the message carries it: " (pr-str (dissoc heard :responses))))
-    (is (= (seon.config/value :seon.config.root/user-name) (:from (first (:messages heard)))) "with who sent it, by name")
-    (is (empty? (:messages again)) (str "and the next reply does not carry it again: " (pr-str (:messages again))))))
+    ;; the reply adds what the model's next request adds (seon.turn/outside-reply!, one request! for both kinds of agent), where a message
+    ;; to the agent is placed as its model reads it
+    (is (clojure.string/includes? (str (:request heard)) "use demo/g") (str "the reply after the message carries it: " (pr-str (dissoc heard :responses))))
+    (is (clojure.string/includes? (str (:request heard)) (seon.config/value :seon.config.root/user-name)) "with who sent it, by name")
+    (is (not (clojure.string/includes? (str (:request again)) "use demo/g")) (str "and the next reply does not carry it again: " (pr-str (:request again))))))
 
 ;; Estimate: in this process, two server round trips (~0.5M each, as a-message-reaches-the-agent's): ~1M; 2,000,000. In root: one
 ;; message write, and the api's wake-inbox over that commit's ops (~1k ticks)
@@ -314,13 +371,72 @@
   (let [k (volatile! nil)
         [before after] (at/in-agent (fn [{:keys [agent]}]
                                       (vreset! k (name agent))
-                                      [{:op :eval :agent "root" :code (str "(def inbox-p (seon.system/await-message sys " (pr-str (name agent)) ")) (realized? inbox-p)")}
+                                      [{:op :eval :agent "root" :code (str "(def inbox-p (:p (seon.system/await-message sys " (pr-str (name agent)) "))) (realized? inbox-p)")}
                                        {:op :eval :agent "root"
                                         :code (str "(do @(seon.system/message! sys " (pr-str (keyword (name agent))) " \"wake up\")"
                                                    " (seon.system/await-db sys #(seq (datahike.api/q '[:find ?m :where [?m :seon.message/body \"wake up\"]] %)))"
                                                    " [(realized? inbox-p) (some? (:max-tx @inbox-p))])")}]))]
     (is (false? (last (:value before))) (str "nothing answers it before a message: " (pr-str before)))
     (is (= [true true] (:value after)) (str "answered with main's db at the commit that wrote the message: " (pr-str after)))))
+
+;; Estimate: in this process, three server round trips (~0.5M each): ~1.5M; 2,000,000. In root: the inbox's seek of the agent's message
+;; links and their lookups on its branch (~10.5k ticks a message [M])
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} an-inbox-answers-at-once-with-what-the-branch-has-not-taken
+  ;; part 2: seon_inbox answers the messages main holds that the agent's branch has not taken, at once, and writes nothing (the agent's
+  ;; next reply delivers them, part 1, so its branch has one writer). Red before: no inbox op (a session polled seon_context)
+  (let [[_ inbox] (at/in-agent (fn [{:keys [agent]}]
+                                 [{:op :message :agent agent :body "for the session's inbox"}
+                                  {:op :inbox :agent (name agent)}]))]
+    (is (= ["for the session's inbox"] (mapv :body (:messages inbox))) (pr-str inbox))))
+
+;; Estimate: in this process, one server round trip (~0.5M); in root, one future, a message write and the wait's seek a commit: ~1M; 2,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} an-inbox-that-waits-is-answered-by-the-message-written
+  ;; part 2: with nothing new, seon_inbox waits on seon.system/await-message (no clock of ours: a message is our own event) until a
+  ;; commit writes one, then answers it. Red before: no inbox
+  (let [[r] (at/in-agent (fn [{:keys [agent]}]
+                           [{:op :eval :agent "root"
+                             :code (str "(let [f (future (#'seon.server/inbox-answer sys {:agent " (pr-str (name agent)) "}))]"
+                                        " @(seon.system/message! sys " (pr-str (keyword (name agent))) " \"while it waits\")"
+                                        " (mapv :body (:messages @f)))")}]))]
+    (is (= ["while it waits"] (:value r)) (pr-str r))))
+
+;; Estimate: one server round trip (~0.5M); in root, one put-after! of 50 ms and the typed answer (~10k): ~0.6M; 2,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} an-inbox-with-nothing-new-ends-at-its-bound-typed
+  ;; part 2: past :seon.config.root/inbox-wait-ms with no message, seon_inbox answers the typed :seon.server/no-message, the bound's own
+  ;; answer to the wait (no sentinel), and drops its wait on main. The dial is turned at the read inbox-answer makes (seon.config/value
+  ;; reads held, config.clj): 50 ms for this key, every other key as held
+  (let [[r] (at/in-agent (fn [{:keys [agent]}]
+                           [{:op :eval :agent "root"
+                             :code (str "(let [v seon.config/value]"
+                                        " (with-redefs [seon.config/value (fn ([k] (if (= k :seon.config.root/inbox-wait-ms) 50 (v k))) ([k c] (v k c)))]"
+                                        " (select-keys (#'seon.server/inbox-answer sys {:agent " (pr-str (name agent)) "}) [:seon.error/type :waited-ms])))")}]))]
+    (is (= {:seon.error/type :seon.server/no-message :waited-ms 50} (:value r)) (pr-str r))))
+
+;; Estimate: three server round trips (~0.5M each) and one delivery on the agent (~0.1M): ~1.6M; 3,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} an-inbox-answers-a-message-once
+  ;; root's end-to-end test on main 6635b0cac2 [M result/bda749de]: a second inbox call returned the messages the first had answered,
+  ;; so a session's standing wait would wake at once forever. The inbox delivers what it answers (the agent's one delivery,
+  ;; seon.agent/deliver!: delivery is the fact, docs/users.md#messages), so the next call answers only what came after. Red before: the
+  ;; second call answered the same message
+  (let [[_ first-r again] (at/in-agent (fn [{:keys [agent]}]
+                                         [{:op :message :agent agent :body "answered once"}
+                                          {:op :inbox :agent (name agent)}
+                                          {:op :eval :agent "root"
+                                           :code (str "(let [v seon.config/value]"
+                                                      " (with-redefs [seon.config/value (fn ([k] (if (= k :seon.config.root/inbox-wait-ms) 50 (v k))) ([k c] (v k c)))]"
+                                                      " (let [r (#'seon.server/inbox-answer sys {:agent " (pr-str (name agent)) "})]"
+                                                      " (or (:seon.error/type r) (mapv :body (:messages r))))))")}]))]
+    (is (= ["answered once"] (mapv :body (:messages first-r))) (pr-str first-r))
+    (is (= :seon.server/no-message (:value again)) (str "asked again, nothing new: never the same message twice: " (pr-str again)))))
+
+(deftest ^{:seon.test/estimate {:ticks 300000}} an-inbox-line-runs-on-its-connection-and-holds-no-worker
+  ;; part 2: seon_inbox waits, so it runs on the connection's fiber (which parks), never one of the 16 :server-op worker threads
+  ;; (:seon.config.root/server-op-workers): eight waiting sessions would hold half of them. Both protocols. Red before: no inline op
+  ;; read once by line-parts, which also names a stop (seon_interrupt) inline
+  (let [inline? #(:inline? (#'seon.server/line-parts %))]
+    (is (inline? "{:op :inbox :agent \"a1\"}") "EDN")
+    (is (inline? "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"seon_inbox\",\"arguments\":{\"agent\":\"a1\"}}}") "MCP")
+    (is (not (inline? "{:op :eval :agent \"root\" :code \"(inbox)\"}")) "an eval naming inbox is no inbox")))
 
 (deftest the-context-op-answers-what-a-model-is-sent
   ;; dogfood 2026-10-25: an outside agent read the task's data and turn sections only, not the system
@@ -450,15 +566,16 @@
   ;; is, runs its git on a fiber. A pool's thread count is no proof here (an idle one this process holds takes the copies).
   ;; Estimate: two git calls on an empty repository (a spawn and an exit event each) and one thread: ~1M ticks
   (let [dir (str (seon.config/checkout) "/target/tmp/done-shells-" (random-uuid))
-        sh clojure.java.shell/sh
-        on-fiber (atom [])]
+        ;; counted where the system counts: seon.lib/sh, through which every shell of Seon's runs on a fiber (its docstring), is a
+        ;; contracted function, so seon.profile holds its exact calls; no library var (clojure.java.shell/sh) is redefined to watch it
+        shells (fn [] (some #(when (= 'seon.lib/sh (:var %)) (:calls %)) (seon.profile/touched)))]
     (try
       (seon.lib/sh "git" "init" "-q" dir)
-      (with-redefs [clojure.java.shell/sh (fn [& args] (swap! on-fiber conj (jolt.fibers/in-fiber?)) (apply sh args))]
-        (let [files (atom nil)]
-          (doto (Thread. ^Runnable (fn [] (reset! files (seon.fx/uncommitted dir)))) (.start) (.join))
-          (is (= [] @files) "the read answers from the thread")
-          (is (= [true] @on-fiber) "and its one shell ran on a fiber, never on the thread's futures")))
+      (let [files (atom nil)]
+        (seon.profile/begin!)
+        (doto (Thread. ^Runnable (fn [] (reset! files (seon.fx/uncommitted dir)))) (.start) (.join))
+        (is (= [] @files) "the read answers from the thread")
+        (is (= 1 (shells)) "and its one shell ran through seon.lib/sh, on a fiber, never on the thread's futures"))
       (finally (seon.lib/remove-tree! dir)))))
 
 (deftest done-answers-the-judges-reasons

@@ -3,7 +3,7 @@
 # root with --port: a check step's own, seon.check/agent-checks),
 # printing the tool's text (seon_<OP>; exit 1 on an error from the relay or the server). VALUE - reads
 # stdin (code=- <<'EOF'), true/false and [...] are JSON; eval's intent= and code= on an agent are a reply of that one eval (seon.server's
-# :eval op makes it). Its client is this checkout, so the agent one call
+# :eval op makes it). Its client is SEON_MCP_CLIENT when set (set per session, e.g. its area name, so two sessions in one tree are two clients), else this checkout, so the agent one call
 # attaches answers the next: what a helper in a worktree uses, since the seon MCP tools of a Claude session
 # are the relay of the checkout the session started in, not the helper's (docs/server.md#working-a-task-from-a-worktree).
 # bin/mcp [PORT]   the MCP server (stdio JSON-RPC) for outside agents: a relay of each line to the
@@ -33,7 +33,8 @@ if [[ ${1:-} == call ]]; then
       if ($v eq "-") { local $/; $v = decode_utf8(scalar <STDIN>) }
       elsif ($k ne "code" && ($v =~ /\A(true|false)\z/ || $v =~ /\A\[/)) { $v = JSON::PP->new->allow_nonref->decode($v) }
       $a{$k} = $v }
-    $ENV{SEON_MCP_CLIENT} = "checkout-$root";
+    # the client the session names (SEON_MCP_CLIENT=<area>: its messages are from its own agent), else this checkout
+    $ENV{SEON_MCP_CLIENT} //= "checkout-$root";
     binmode STDOUT, ":utf8"; binmode STDERR, ":utf8";
     my $req = encode_json({jsonrpc => "2.0", id => 1, method => "tools/call", params => {name => "seon_$op", arguments => \%a}});
     open my $out, "-|", "printf \x27%s\\n\x27 \Q$req\E | \Q$mcp\E \Q$port\E" or die "bin/mcp call: $!\n";

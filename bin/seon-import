@@ -12,5 +12,5 @@ root=$(git -C ${f:h} rev-parse --show-toplevel 2>/dev/null) || exit 0
 # the standing root: the main checkout's (a worktree's git dir names it)
 main=${$(git -C $root rev-parse --path-format=absolute --git-common-dir):h}
 port=$(<$main/runs/root.port 2>/dev/null) || { print -u2 "seon-import: no standing root ($main/runs/root.port): ${f#$root/} not imported"; exit 0 }
-print -u2 -r -- "seon-import ${f#$root/}: $($root/bin/mcp call --port $port import path=$f 2>&1)"
+print -u2 -r -- "seon-import ${f#$root/}: $(SEON_MCP_CLIENT=checkout-$root $root/bin/mcp call --port $port import path=$f 2>&1)"
 exit 0

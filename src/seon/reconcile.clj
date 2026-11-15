@@ -64,8 +64,9 @@
   the merge itself, and once it merged main in its own diff can be empty (swarm's merge steps). A refine (named-site? false) is
   refused :no-change-site until the task it refines names a function its plan did not (seon.task/names-new-site?)."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
-  [{:keys [proofs results main-green allowed-red main-red uncontracted unmerged caused kind plan plan-before deferred behind changed? named-site?]}]
+  [{:keys [proofs results main-green allowed-red main-red main-unknown uncontracted unmerged caused kind plan plan-before deferred behind changed? named-site?]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))
+        main-unknown (set main-unknown)
         design? (= :design kind)]
     (vec (concat
            ;; judged before it has merged main: its proofs ran on a program main has moved from, so the
@@ -83,7 +84,8 @@
            (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t))] {:reason :regression :symbol t})
            (for [t (sort-by str (keys results))
                  :when (and (red? t) (not (proofs t)) (not (main-green t)) (not (allowed-red t)) (not (contains? main-red t)))]
-             {:reason :stray-red :symbol t})
+             ;; main's verdict of it asked and not answered (a process test main's runs never store): held, never the branch's
+             {:reason (if (main-unknown t) :main-unknown :stray-red) :symbol t})
            (for [s (sort-by str uncontracted)] {:reason :contract-gap :symbol s})
            (for [k (sort unmerged)] {:reason :unmerged :key k})
            (for [k (sort caused)] {:reason :open-problem :key k})))))
@@ -456,7 +458,7 @@
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id :map]
                   [:map [:outcome :seon.task/outcome] [:reasons [:vector :seon.reconcile/not-done]]
                    [:hold {:optional true} :string] [:verdict {:optional true} [:vector :seon.reconcile/not-done]]]]}
-  [idx id {:keys [end died results main-red uncontracted unmerged caused behind plan plan-before basis deferred behinds told changed? named-site?]}]
+  [idx id {:keys [end died results main-red main-unknown uncontracted unmerged caused behind plan plan-before basis deferred behinds told changed? named-site?]}]
   (let [t (get-in idx [:tasks id]) kind (:seon.task/kind t) merge? (merges-in? idx id) step? (merge-step-in? idx id) oc (:outcome end) execution (:seon.task/execution t)
         outside (outside? (:seon.agent/env (task-agent idx id)))]
     (cond
@@ -465,6 +467,7 @@
       :else
       (let [rs (done-explain (cond-> (cond-> (assoc (done-input idx id results uncontracted unmerged basis plan-before (set deferred))
                                               :caused (set caused) :main-red (set main-red))
+                                (seq main-unknown) (assoc :main-unknown (set main-unknown))
                                 (and plan (= :design kind)) (assoc :plan plan)
                                 (some? changed?) (assoc :changed? changed?)
                                 (some? named-site?) (assoc :named-site? named-site?))
@@ -642,14 +645,15 @@
 (defn source-moved-tx
   "Main's source fact moved to the commit r (the :git effect's answer) made on git's main, when it was one made from the commit main
   was imported from (seon.fx/git-commit :expect) and main's fact still names that commit: main holds the commit's files now, so a
-  catch-up reads from it. Its :tree is the tree's id when the tree followed. None for any other answer. See docs/source.md#commit-the-merges-branch."
-  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
-  [db r]
+  catch-up reads from it. Its :tree is the tree's id when the tree followed, and :t the t of main whose files it wrote (the merge gate's
+  base knows how far it lags main). None for any other answer. See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat :seon.host/db :map :int] [:vector :any]]}
+  [db r t]
   (let [held (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))]
     ;; a compare-and-swap in the store as in git: only while main's fact still names the commit the write was made from, so a
     ;; catch-up written in between is never written over
     (if-let [{:keys [sha tree]} (when (and (:commit held) (= (:commit held) (get-in r [:value :expected]))) (:value r))]
-      [{:seon.system/id :root :seon.system/source (cond-> (assoc held :commit sha) tree (assoc :tree tree))}]
+      [{:seon.system/id :root :seon.system/source (cond-> (assoc held :commit sha :t t) tree (assoc :tree tree))}]
       [])))
 
 (defn commit-tx
@@ -791,6 +795,33 @@
   new request id, which then names step of task id's flight. Answers [st output]."
   {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :seon.reconcile/step :map] [:tuple :seon.reconcile/state :map]]}
   [st id step req] (step/ask st [:reconciler :answers] [id step] req))
+
+(defn- ask-main
+  "Ask the test service for main's verdict of tests by name, as main's head holds them, for task id's flight; the answer names
+  step: {:op :prove :branch :main :mode :judge :names tests} (:judge plans only what it names, and an
+  item main's own run has queued gains this asker as a waiter, so none runs twice). The answer is waited on, never what the
+  cache happens to hold. See docs/tasks.md#the-done-rule."
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :seon.reconcile/step [:set :qualified-symbol]] [:tuple :seon.reconcile/state :map]]}
+  [st id step tests]
+  (let [db (:db st)]
+    (request st id step {:op :prove :branch :main :t (:max-tx db) :digest (program/run-digest db) :names tests :mode :judge})))
+
+(defn- main-answer
+  "Main's answer r (ask-main's) for the tests asked: :red, those main holds red (main's, whatever the change); :unknown, those it
+  answered nothing of (a process test, whose verdict main's runs never store; or an answer that is an error), which hold the task
+  and are never the branch's. A test main holds green is in neither: its red is the branch's. See docs/tasks.md#the-done-rule."
+  {:malli/schema [:=> [:cat [:set :qualified-symbol] :any] [:map [:red [:set :qualified-symbol]] [:unknown [:set :qualified-symbol]]]]}
+  [asked r]
+  (let [m (if (or (nil? r) (contract/error? r)) {} (proofs/results r))]
+    {:red (into #{} (filter #(#{:fail :error} (get m %))) asked)
+     :unknown (into #{} (remove #(contains? m %)) asked)}))
+
+(defn- reds-to-ask
+  "The red tests of results ({test status}) main's verdict is asked of: every one that is not main-red already, the reader's
+  (seon.proofs/verdicts-at, whose :live verdicts only it reads): main's answer, never a cache, decides whose each is."
+  {:malli/schema [:=> [:cat [:maybe :map] [:maybe [:or [:set :any] [:sequential :any]]]] [:set :qualified-symbol]]}
+  [results main-red]
+  (let [mr (set main-red)] (into #{} (keep (fn [[t s]] (when (and (#{:fail :error} s) (not (mr t))) t))) results)))
 
 (def ^:private ends-told
   "The outcomes an agent that launched a task hears of, each in words: where its work has stopped, for now or for good."
@@ -968,7 +999,7 @@
   a member both changed among the task's conflicts for root; and a failure the agent marked (my.task/fail!) carried with the task held.
   Answers {:tx :outcome :kept?}: kept? when the agent's process is to stay."
   {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db] [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]]] [:map [:tx [:vector :any]] [:outcome :seon.task/outcome]]]}
-  [st {:keys [act run-problems worked-error deferred deferred-digests main-red]} results {:keys [db base base-t] :as diff}]
+  [st {:keys [act run-problems worked-error deferred deferred-digests main-red main-unknown]} results {:keys [db base base-t] :as diff}]
   (let [main (:db st) idx (:idx st)
         id (:task act)
         t (get-in idx [:tasks id])
@@ -993,7 +1024,7 @@
         marked? (and failure end (= k (:agent failure)) (= (:turn failure) (:ended-turn end)))
         kind (:seon.task/kind t)
         unmerged (mapv sedn/encode (:unmerged diff))
-        j (judgment idx id {:end end :results results :main-red main-red :uncontracted (set (:uncontracted diff)) :unmerged unmerged :caused (set (:caused diff))
+        j (judgment idx id {:end end :results results :main-red main-red :main-unknown main-unknown :uncontracted (set (:uncontracted diff)) :unmerged unmerged :caused (set (:caused diff))
                             :behind (when (pos? (:theirs diff 0)) (:theirs diff)) :basis (or base-t (:max-tx main)) :deferred (set deferred)
                             :plan (when (= :design kind) (some-> (task/task db id) :seon.task/accumulated :plan))
                             :plan-before (when (= :design kind) (some-> (task/task base id) :seon.task/accumulated :plan))
@@ -1041,7 +1072,9 @@
                ;; (docs/tasks.md#a-refine-curates-its-own-task): none while the agent goes on or waits (parked, told a verdict, behind main),
                ;; none for a refine or a merge step, none twice (seon.task/refine-tx), and none for a run that took no turn: it left
                ;; nothing to read (data's run of 2026-11-12 died before turn 1; its refine could only cap)
-               (into (when (and (not (#{:parked :told :behind} outcome)) (pos? (:ended-turn end 0))) (task/refine-tx main id)))
+               (into (when (and (not (#{:parked :told :behind} outcome)) (pos? (:ended-turn end 0))
+                                (not (and (seq (:reasons j)) (every? #(= :main-unknown (:reason %)) (:reasons j)))))
+                       (task/refine-tx main id)))
                ;; marked failed (my.task/fail!): the failure on main and the task held for root (a compare-and-swap from :running),
                ;; so the judge closes it (no retry); one root already cancelled or held keeps root's
                (into (when marked?
@@ -1072,8 +1105,8 @@
   passing, the merge is ready; else the task is held for root with the tests not green and why they could not run. mains, the
   tests red on main at the task's base (seon.proofs/main-red), are recorded with the rest and decide nothing. A failed
   :tests effect is recorded here, with the results, in one transaction."
-  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :map [:vector :map] [:maybe :map] [:set :qualified-symbol]] [:vector :any]]}
-  [st id rs unread err mains]
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :map [:vector :map] [:maybe :map] [:set :qualified-symbol] [:set :qualified-symbol]] [:vector :any]]}
+  [st id rs unread err mains unknown]
   (let [main (:db st)
         red (for [[tt s] (sort-by (comp str key) rs) :when (and (not= :pass s) (not (mains tt)))] [tt s])
         why (concat (some-> err :seon.error/message vector) (for [u unread] (str (:ns u) ": " (:reason u))))
@@ -1086,12 +1119,31 @@
                (hold-tx main id (task/move-tx id :gate :closed want)
                         (str (when (seq red)
                                (str "its deferred tests, run on a checkout at its merge, are not green: "
-                                    (str/join ", " (for [[tt s] red] (str tt " " (name s))))))
+                                    (str/join ", " (for [[tt s] red] (str tt " " (name s) (when (unknown tt) " (main's verdict unknown)"))))))
                              ;; why they could not run, when the gate itself failed: the effect's error, or a changed
                              ;; namespace with no file on the branch (each test then reads :error)
                              (when (seq why) (str "; the gate could not run them: " (str/join "; " why))))
                         {:red (mapv first red) :conflicts (:seon.task/conflicts (get-in st [:idx :tasks id])) :unmerged (:seon.task/unmerged (get-in st [:idx :tasks id]))}))]
     (if err (err/asked-tx main err :seon.task/deferred-results move) move)))
+(defn- gated-step
+  "The gate's decision on its run's answer r (seon.fx/run-tests'), main's reds left out of it (r's :main-red, and on-main: the
+  tests main's own answer held red when r named reds nobody knew, `ask-main`): the task written done, and each main red told
+  once as the system's problem. Answers [st outputs]. See docs/tasks.md#the-done-rule."
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :map :any [:map [:red [:set :qualified-symbol]] [:unknown [:set :qualified-symbol]]]] [:tuple :seon.reconcile/state [:vector :map]]]}
+  [st id act r on-main]
+  (let [unread (:unread r)
+        ok? (not (or (contract/error? r) (seq unread)))
+        ;; a test the run answered nothing of is :none, never left out: a gate that judged 78 of its 242 tests
+        ;; read as if it had judged them all (the standing store, 2026-11-11), and with main's reds left out of the
+        ;; decision a missing one would have merged untested
+        rs (if ok? (merge (zipmap (:tests act) (repeat :none)) (get-in r [:value :results])) (zipmap (:tests act) (repeat :error)))
+        mains (if ok? (into (set (get-in r [:value :main-red])) (:red on-main)) #{})
+        [st o] (write st id :done (gated st id rs (vec unread) (when (contract/error? r) r) mains (:unknown on-main)))]
+    [st (into [o] (for [t (sort-by str mains)]
+                    {:op :problem :class :platform
+                     :error (contract/error :seon.prove/full-run-red #'seon.reconcile/gated
+                                            (str t " is red on main without this change (at the gate of " id ")") {:tests [t]})}))]))
+
 
 (defn- advance
   "Task id's flight takes answer r of its step. Answers [st outputs]."
@@ -1184,14 +1236,22 @@
                                 id :tested {:op :judge :id agent}))))
       :tested (if (contract/error? r)
                 (errored st r)
-                (one (request (-> st (assoc-in [:flights id :results] (proofs/results r))
-                                  (assoc-in [:flights id :main-red] (:main-red r))
-                                  (assoc-in [:flights id :deferred] (:deferred r))
-                                  (assoc-in [:flights id :deferred-digests] (:deferred-digests r))
-                                  (assoc-in [:flights id :run-problems] {:failures (proofs/failures r) :costs (proofs/costs r)}))
-                              ;; the branch read once: its head, its merge base, and what it changed
-                              ;; since (three-way's :ours, measured for the octopus merge)
-                              id :diffed {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}})))
+                (let [st (-> st (assoc-in [:flights id :results] (proofs/results r))
+                             (assoc-in [:flights id :main-red] (:main-red r))
+                             (assoc-in [:flights id :deferred] (:deferred r))
+                             (assoc-in [:flights id :deferred-digests] (:deferred-digests r))
+                             (assoc-in [:flights id :run-problems] {:failures (proofs/failures r) :costs (proofs/costs r)}))]
+                  ;; every red not main's already is asked of main by name, and the done rule waits on that answer
+                  (if-let [ask (not-empty (reds-to-ask (proofs/results r) (:main-red r)))]
+                    (one (ask-main (assoc-in st [:flights id :asked] ask) id :main-asked ask))
+                    ;; the branch read once: its head, its merge base, and what it changed
+                    ;; since (three-way's :ours, measured for the octopus merge)
+                    (one (request st id :diffed {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}})))))
+      ;; main's verdict of the reds asked: each main holds red is main's, each it answered nothing of unknown (docs/tasks.md#the-done-rule)
+      :main-asked (one (request (let [{:keys [red unknown]} (main-answer (get-in f [:asked]) r)]
+                                  (-> st (update-in [:flights id :main-red] #(into (set %) red))
+                                      (assoc-in [:flights id :main-unknown] unknown)))
+                                id :diffed {:op :write :req {:op :branch-diff :branch (get-in act [:env :branch])}}))
       ;; root stops the agent because its work ended (its view says :ended, not :killed), unless
       ;; its session parked: then the process stays, idle, for the next message's wake
       ;; (docs/turn.md#parked: parking is work! returning)
@@ -1247,18 +1307,10 @@
       ;; error), or one over a tree missing a changed namespace (:unread), vouches for none: each :error, and no test ran
       ;; a test red on main at the task's base digest (the effect's :main-red, seon.proofs/main-red) is main's, not the
       ;; task's: it is left out of the gate's decision and told as the system's problem, one per test (docs/tasks.md#the-done-rule)
-      :gated (let [unread (:unread r)
-                   ok? (not (or (contract/error? r) (seq unread)))
-                   ;; a test the run answered nothing of is :none, never left out: a gate that judged 78 of its 242 tests
-                   ;; read as if it had judged them all (the standing store, 2026-11-11), and with main's reds left out of the
-                   ;; decision a missing one would have merged untested
-                   rs (if ok? (merge (zipmap (:tests act) (repeat :none)) (get-in r [:value :results])) (zipmap (:tests act) (repeat :error)))
-                   mains (if ok? (set (get-in r [:value :main-red])) #{})
-                   [st o] (write st id :done (gated st id rs (vec unread) (when (contract/error? r) r) mains))]
-               [st (into [o] (for [t (sort-by str mains)]
-                               {:op :problem :class :platform
-                                :error (contract/error :seon.prove/full-run-red #'seon.reconcile/gated
-                                                       (str t " is red on main without this change (at the gate of " id ")") {:tests [t]})}))])
+      :gated (if-let [ask (when-not (or (contract/error? r) (seq (:unread r))) (not-empty (reds-to-ask (get-in r [:value :results]) (get-in r [:value :main-red]))))]
+               (one (ask-main (-> st (assoc-in [:flights id :gate-answer] r) (assoc-in [:flights id :asked] ask)) id :gate-main-asked ask))
+               (gated-step st id act r (main-answer #{} nil)))
+      :gate-main-asked (gated-step st id act (get-in f [:gate-answer]) (main-answer (get-in f [:asked]) r))
       :write-back (one (request st id :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)
                        files (doc/files (:db r) paths)]
@@ -1271,7 +1323,7 @@
                      ;; (:expect, one compare-and-swap; a landing that moved it since answers :seon.fx/ref-moved, nothing written);
                      ;; a main imported from no commit writes the merges branch, as before
                      ;; the branch main was imported from (its source fact's :branch, git's main for the standing root), from its :commit
-                     (one (request (assoc-in st [:flights id :writeback :written] (vec (keys files))) id :committed
+                     (one (request (update-in st [:flights id :writeback] assoc :written (vec (keys files)) :t (:max-tx (:db r))) id :committed
                                    {:op :fx :kind :git :req (merge {:dir (:root (:source st)) :files files :modes (source/modes (:db r) (keys files))
                                                                     :message (source/commit-message members)}
                                                                    (write-back-target (:seon.system/source (d/pull (:db r) [:seon.system/source] [:seon.system/id :root]))
@@ -1280,7 +1332,7 @@
       ;; (seon.program/load-changes!), so nothing is built (BUILD plan P4)
       ;; and main's source fact moves to the commit, in the same write: main was imported from it now (catch-up reads from there)
       :committed (if-let [tx (commit-tx (:db st) r (:members (:writeback f)) (:files (:writeback f)) (:written (:writeback f)))]
-                   (let [[st o] (write st id :done (into tx (source-moved-tx (:db st) r)))]
+                   (let [[st o] (write st id :done (into tx (source-moved-tx (:db st) r (:t (:writeback f)))))]
                      ;; git's main moved but its checked-out tree could not follow: a platform problem someone reads, not only the answer
                      [st (cond-> [o]
                            (get-in r [:value :tree-unmoved])

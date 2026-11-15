@@ -33,6 +33,9 @@
  ;; account read at boot (seon.system/person), owner's ruling via the managing session, 2026-11-10: a default in the config file is
  ;; config, not a fake default in code.
  :seon.config.root/user-name "user"
+ ;; Provenance: flow, 2026-11-15 (root's ask): four tests stopped at their 300 s bound waiting on a shared root's quiet; only a
+ ;; shard's shared root sets it (seon.test-store/start-shared-root!), every other root is a root of its own
+ :seon.config.root/shared false
  :seon.config.root/max-agents 1024
  ;; Unit: bytes. How much of a dead agent's stderr its death records: the last bytes of its
  ;; file. Provenance: the value seon.system held as a literal (shrink). At the bound: earlier
@@ -401,15 +404,18 @@
  ;; bound: none; a value that is no EDN map stops every Jolt process at start, naming it.
  :seon.config.build/jolt-compiler-options "{:image-fn-forms false}"
  ;; What only a build can change: the paths bin/build compiles or bakes into target/seon, besides every
- ;; pin (a gitlink, read from the tree). The binary's identity is the digest of these at a commit
- ;; (bin/binary-digest, the one implementation; target/seon.digest beside the binary); a process whose
+ ;; pin (a gitlink .gitmodules names, read from the tree). The binary's identity is the digest of these at a
+ ;; tree (seon.fx/binary-digest, recorded with the binary in target/seon.program); a process whose
  ;; branch's digest differs is built for, once (seon.fx/runtime-for). The program (src/'s forms) is not
  ;; here: a process loads it from its branch as a diff (docs/source.md#the-binary-records-its-program). Nor are the
- ;; config and schemas (a process holds its branch's: seon.program/hold-config!, seon.agent/schema-moved) or
- ;; system.edn (root reads it live, apply!): only the config keys a schema marks :seon.config/at-load or
- ;; :seon.config/place, whose values a rebuild alone changes, enter the digest, by their stated line.
- ;; Read by bin/binary-digest from this line, so it stays one line of text. A path or prefix ending in /.
- :seon.config.build/inputs ["deps.edn" "bin/build" ".gitmodules" "native/" "resources/public/"]
+ ;; config and schemas (a process holds its branch's: seon.program/hold-config!, seon.agent/schema-moved): only the config
+ ;; keys a schema marks :seon.config/build (the compiler reads it), :seon.config/at-load or :seon.config/place (only a new
+ ;; process acts on them) enter the digest, read as data. resources/seon/system.edn is: a
+ ;; boot reads the binary's copy (seon.graph/read-decl's built-text), and nothing applies a changed one in place yet
+ ;; (seon.system/apply!, uncalled), so a changed graph restarts on a build. INTERIM (root 2026-11-15): system.edn leaves this
+ ;; list when G swaps changed procs through Flow's update! with no restart (task
+ ;; seon.system/a-landing-restarts-root-only-for-a-binary-change). A path or prefix ending in /.
+ :seon.config.build/inputs ["deps.edn" "bin/build" ".gitmodules" "native/" "resources/public/" "resources/seon/system.edn"]
  ;; Unit: megabytes: the byte budget of Jolt's compiled-code cache (target/cache/aot of the main tree, shared
  ;; by every checkout), least recently used first (docs/source.md#shared-build-caches). bin/env exports it
  ;; as JOLT_CACHE_MB, which Jolt's loader reads when a process that published an artifact prunes. 32768
@@ -1242,6 +1248,9 @@
  ;; :done waiting on its judge) holds its worker, never a carrier or another connection. Provenance: the sessions working at once
  ;; (seven tonight), doubled; an op past them waits its turn at the :server-op owner.
  :seon.config.root/server-op-workers 16
+ ;; Unit: ms. A seon_inbox call's wait for a message, then :seon.server/no-message and the session asks again. Provenance: root's
+ ;; ruling 2026-11-15 (600000, an outside client's bound; its sender is often a person or another session).
+ :seon.config.root/inbox-wait-ms 600000
  ;; Unit: pid. The process this root ends with (seon.lib/end-with!, armed once its boot has forked the fork server):
  ;; a test's root names its test process (seon.test-store/start-root! sets SEON_END_WITH), so however that process
  ;; ends, -9 included, its roots and their agents end too (2026-11-08: 12 process groups outlived a stopped prove). 0: none.

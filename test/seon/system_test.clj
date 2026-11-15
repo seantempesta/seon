@@ -86,20 +86,29 @@
         r (ts/value-of (:response (ts/ask root {:op :eval :agent "root"
                                                 :code "(let [ag (seon.system/spawn! sys {}) s (seon.system/stall-state sys)] (seon.system/kill! sys ag) s)"})))]
     (is (map? (:root r)) (pr-str r))
-    (is (every? #{:seon.system/stall-armed :seon.system/busy :seon.system/lost :pending :awaits} (keys (:root r))) "root's stall check and its open asks, nothing else of its state")
-    (is (map? (get-in r [:root :pending])) "every ask the api holds unanswered, by rid")
+    (if (:site (:root r))
+      (is (:stepping (:site (:root r))) (str "the api mid-step, named by what it steps: " (pr-str (:root r))))
+      (do (is (map? (get-in r [:root :pending])) "every ask the api holds unanswered, by rid")
+          ;; red before (batch 32's problems overrun): the api's ping answered only :agents :closing :pending, so :root was {} on every
+          ;; root and a hang's evidence never showed whether the stall check was armed or which agents it held busy
+          (is (boolean? (:seon.system/stall-armed (:root r))) "the armed flag, read whatever its value")
+          (is (set? (:seon.system/busy (:root r))) "the agents with an eval in flight, empty or not")))
     (is (and (seq (:fx r)) (every? #(every? (fn [k] (int? (get % k))) [:busy :in-flight :queued]) (vals (:fx r)))) "each effect owner's load")
     (is (= #{:busy :in-flight :queued :done} (set (keys (get-in r [:fx :fx/server-op])))) "the server ops' owner among them: a parked connection's op is running, queued or answered")
-    ;; red before (batch 32's problems overrun): the api's ping answered only :agents :closing :pending, so :root was {} on every
-    ;; root and a hang's evidence never showed whether the stall check was armed or which agents it held busy
-    (is (boolean? (:seon.system/stall-armed (:root r))) "the armed flag, read whatever its value")
-    (is (set? (:seon.system/busy (:root r))) "the agents with an eval in flight, empty or not")
     (is (map? (:agents r)) "each agent proc's, by pid")
-    (is (and (seq (:agents r)) (every? #(and (contains? % :stall-seen) (contains? % :last-frame-ms) (contains? % :holding) (= 0 (:held %))) (vals (:agents r)))) "with what its stall check reads, and the clone handshake it holds with what waits behind it (none here)")
-    (is (map? (get-in r [:reconciler :flight-steps])) "the reconciler's flights by task and the step each waits at")
-    (is (and (boolean? (get-in r [:reconciler :quiet])) (vector? (get-in r [:reconciler :waits])) (vector? (get-in r [:reconciler :live])))
-        "whether it is quiet, the waits on main it holds and its live tasks by id (the leak a hang's capture must name): what a parked await-db waits on")
-    (is (some #{:api} (:answered r)) "and the procs that answered, root's api among them")))
+    (is (or (seq (:agents r)) (seq (:unanswered r))) "the spawned agent's proc, answered or named mid-step")
+    (is (every? #(and (contains? % :stall-seen) (contains? % :last-frame-ms) (contains? % :holding) (= 0 (:held %))) (vals (:agents r))) "with what its stall check reads, and the clone handshake it holds with what waits behind it (none here)")
+    ;; the spawn wakes the reconciler, so the ping may find it mid-step: then its evidence is its ::flow/site (what it steps, since
+    ;; when), never a state read as nil. Red before (land 2026-11-15 16:26): stall-state read a stepping proc's absent state as {}
+    (is (empty? (filter (set (:answered r)) (keys (:unanswered r)))) "a proc that did not answer is never listed as answered")
+    (is (every? map? (vals (:unanswered r))) "a proc that did not answer is named by its site")
+    (let [rc (:reconciler r)]
+      (if (:site rc)
+        (is (:stepping (:site rc)) (str "the reconciler mid-step, named by what it steps: " (pr-str rc)))
+        (do (is (map? (:flight-steps rc)) "the reconciler's flights by task and the step each waits at")
+            (is (and (boolean? (:quiet rc)) (vector? (:waits rc)) (vector? (:live rc)))
+                "whether it is quiet, the waits on main it holds and its live tasks by id (the leak a hang's capture must name): what a parked await-db waits on"))))
+    (is (or (some #{:api} (:answered r)) (contains? (:unanswered r) :api)) "and the procs that answered, root's api among them, or named mid-step")))
 
 (deftest a-kill-is-answered-once-the-agents-end-is-recorded
   ;; docs/processes.md#the-agent-process: kill! answers the agent's view entry when its end is recorded, so a wait on it ends;
@@ -521,7 +530,8 @@
     (is (str/includes? (str seed) "SEED OK") (str seed))
     (is (true? (:listening? two)) (str "root resumed the store and listens: " two))
     ;; never refused for the program: the spawn reaches the agent's one start, where only the binary's identity is asked
-    ;; (seon.fx/runtime-for: this scratch tree names no build inputs, so another binary than target/seon)
+    ;; (seon.fx/runtime-for reads the tree in the source root's repository, the scratch one: it names no build inputs, so
+    ;; another binary than target/seon)
     (is (= :seon.process/env-mismatch spawned) (str "the agent's start asks its binary, nothing before it: " (pr-str (first (:also two)))))
     (is (not (str/includes? (str message) "git tree")) "no refusal names the trees")
     (doseq [act ["bin/system start --reindex" "bin/system next"]]
@@ -664,8 +674,12 @@
         (is (some #{'seon.system/held-inputs} (:reaches (at-root "(seon.system/stale-binary @(:conn sys))")))
             "what the binary lacks is a form root runs: the case restart-for once restarted for")
         (let [kept (at-root (str "(my.root/landed! sys " (pr-str tree) ")"))]
-          ;; and, the binary lacking a form root runs, asks bin/update to build it for the next boot, with no restart
-          (is (= {:kept boot :tree tree :build true} kept) (str "landed! keeps the system running, its binary built for the next boot: " (pr-str kept))))
+          ;; and builds nothing, though the binary lacks a form root runs (owner 2026-11-15: build only when a restart is about to boot,
+          ;; or a build input moved): the running root holds the form, and a boot catches main's program up in place
+          (is (= {:kept boot :tree tree} kept) (str "landed! keeps the system running and asks for no build: " (pr-str kept)))
+          ;; and the update's outcome is a fact on main, the one place a restart's reason is kept (root 2026-11-15)
+          (is (= [tree :kept] ((juxt :tree :outcome) (at-root "(:seon.system/last-update (datahike.api/pull @(:conn sys) [:seon.system/last-update] [:seon.system/id :root]))")))
+              "the update's outcome is main's fact"))
         (is (= [tree boot] ((juxt :tree :boot) (at-root "(:seon.system/source (datahike.api/pull @(:conn sys) [:seon.system/source] [:seon.system/id :root]))")))
             "main's source fact is at the landed tree, under the same boot")
         (is (= root-pid (at-root "(seon.lib/c-getpid)")) "root is the same process")
