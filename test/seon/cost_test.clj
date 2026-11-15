@@ -10,7 +10,7 @@
 
 (def ^:private linear
   {:of 'seon.cost-test/one-pass :input 'seon.cost-test/ints :n "integers" :work "one pass" :growth :linear
-   :per-n {:ns 100.0 :bytes 50.0 :calls 1.0} :fixed {:calls 1.0} :sizes [100 300 1000 10000]})
+   :per-n {:ns 100.0 :bytes 50.0 :ticks 10.0} :fixed {:ticks 1.0} :sizes [100 300 1000 10000]})
 
 (defn- rows
   "Rows of estimate e at its sizes, measured as (m n) per dimension."
@@ -49,37 +49,37 @@
   (is (< 0.99 (cost/exponent [[10 0] [100 100] [1000 1000]]) 1.01) "a zero measure is left out"))
 
 (deftest expected-is-fixed-plus-per-unit-times-work
-  (is (= {:ns 100000.0 :bytes 50000.0 :calls 1001.0} (cost/expected linear cost/units 1000)))
+  (is (= {:ns 100000.0 :bytes 50000.0 :ticks 10001.0} (cost/expected linear cost/units 1000)))
   (testing ":ops are priced by the unit table; :per-n wins over them"
     (let [u {:a/op {:ns 10.0 :bytes 4.0 :what "a"}}
-          e (assoc linear :ops {:a/op 2.0} :per-n {:calls 1.0})]
-      (is (= {:ns 20.0 :bytes 8.0 :calls 1.0} (cost/per-unit e u)))
-      (is (= {:ns 200.0 :bytes 80.0 :calls 11.0} (cost/expected e u 10))))))
+          e (assoc linear :ops {:a/op 2.0} :per-n {:ticks 1.0})]
+      (is (= {:ns 20.0 :bytes 8.0 :ticks 1.0} (cost/per-unit e u)))
+      (is (= {:ns 200.0 :bytes 80.0 :ticks 11.0} (cost/expected e u 10))))))
 
 (deftest within-the-estimate-is-green
-  (let [v (cost/judge linear (rows linear (fn [n] {:ns (* 60.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})))]
+  (let [v (cost/judge linear (rows linear (fn [n] {:ns (* 60.0 n) :bytes (* 50.0 n) :ticks (+ 1.0 (* 10.0 n))})))]
     (is (:ok? v))
     (is (= [] (:over v) (:steeper v) (:under v) (:unmeasured v)))))
 
 (deftest a-size-over-its-slack-is-red
-  (let [v (cost/judge linear (rows linear (fn [n] {:ns (* 60.0 n) :bytes (* 50.0 n) :calls (+ 2.0 n)})))]
+  (let [v (cost/judge linear (rows linear (fn [n] {:ns (* 60.0 n) :bytes (* 50.0 n) :ticks (* 40.0 n)})))]
     (is (not (:ok? v)))
-    (is (= [:calls] (distinct (map :dim (:over v)))) "calls are exact: one more than stated is over")
+    (is (= [:ticks] (distinct (map :dim (:over v)))) "ticks are exact: four times the work stated is over")
     (is (empty? (:steeper v))))
   (testing "wall time over its 3x slack is recorded and shown, never red: it moves with the machine's load"
-    (let [v (cost/judge linear (rows linear (fn [n] {:ns (* 310.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})))]
+    (let [v (cost/judge linear (rows linear (fn [n] {:ns (* 310.0 n) :bytes (* 50.0 n) :ticks (+ 1.0 (* 10.0 n))})))]
       (is (:ok? v))
       (is (= [:ns] (distinct (map :dim (:over v)))) "the time over is in the verdict")
-      (is (re-find #"TIME OVER \(measured, not red\): ns" (cost/explain linear (rows linear (fn [n] {:ns (* 310.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})) v))))))
+      (is (re-find #"TIME OVER \(measured, not red\): ns" (cost/explain linear (rows linear (fn [n] {:ns (* 310.0 n) :bytes (* 50.0 n) :ticks (+ 1.0 (* 10.0 n))})) v))))))
 
-(deftest more-work-with-the-same-bytes-and-calls-is-red-on-ticks
-  ;; an extra loop that allocates nothing: bytes and calls cannot see it, CPU time can only
+(deftest more-work-with-the-same-bytes-is-red-on-ticks
+  ;; an extra loop that allocates nothing: bytes cannot see it, CPU time can only
   ;; guess at it under load; ticks count it (pure-tests 2026-10-23: 2.56x ticks, 1.0x bytes)
-  (let [e (assoc linear :per-n {:ticks 100.0 :bytes 50.0 :calls 1.0})
-        v (cost/judge e (rows e (fn [n] {:ticks (* 400.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})))]
+  (let [e (assoc linear :per-n {:ticks 100.0 :bytes 50.0})
+        v (cost/judge e (rows e (fn [n] {:ticks (* 400.0 n) :bytes (* 50.0 n)})))]
     (is (not (:ok? v)))
     (is (= [:ticks] (distinct (map :dim (:over v)))))
-    (is (re-find #"OVER: ticks" (cost/explain e (rows e (fn [n] {:ticks (* 400.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})) v)))))
+    (is (re-find #"OVER: ticks" (cost/explain e (rows e (fn [n] {:ticks (* 400.0 n) :bytes (* 50.0 n)})) v)))))
 
 (deftest a-second-pass-is-steeper-even-inside-the-slack
   ;; quadratic bytes that stay under the linear estimate at every size: only the growth sees them
@@ -190,17 +190,31 @@
     (is (not (:ok? v)))
     (is (:uncounted v))
     (is (re-find #"NO COUNTED DIMENSION" (cost/explain e (rows e (fn [n] {:ns (* 60.0 n) :bytes (* 50.0 n)})) v))))
-  (is (:ok? (cost/judge linear (rows linear (fn [n] {:ns (* 60.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)}))))
-      "with bytes and calls stated and measured, it judges"))
+  (is (:ok? (cost/judge linear (rows linear (fn [n] {:ns (* 60.0 n) :bytes (* 50.0 n) :ticks (+ 1.0 (* 10.0 n))}))))
+      "with ticks and bytes stated and measured, it judges"))
+
+;; owner, 2026-11-15: "calls are no cost dimension, drop it" (the count takes every thread's calls, so it is not a
+;; test's own work). Red before: an estimate stating only :calls was judged (and green), and a measure answered :calls.
+(deftest calls-are-no-cost-dimension
+  (let [e (assoc linear :per-n {:calls 1.0} :fixed {:calls 1.0})
+        m (fn [n] {:ns (* 60.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})
+        v (cost/judge e (rows e m))]
+    (is (not (:ok? v)) "an estimate stating only calls states no counted dimension")
+    (is (:uncounted v))
+    (is (re-find #"NO COUNTED DIMENSION" (cost/explain e (rows e m) v))))
+  (is (= #{:ticks :bytes} cost/exact) "what a verdict is decided on")
+  (is (= [:ticks :ns :bytes] cost/dimensions))
+  (is (not (contains? cost/slack :calls)))
+  (is (not (contains? (cost/measure (fn [] nil) []) :calls)) "a measure counts ticks, time and bytes"))
 
 (deftest a-loose-estimate-is-a-finding-not-red
-  (let [v (cost/judge linear (rows linear (fn [n] {:ns (* 10.0 n) :bytes (* 50.0 n) :calls (+ 1.0 n)})))]
+  (let [v (cost/judge linear (rows linear (fn [n] {:ns (* 10.0 n) :bytes (* 50.0 n) :ticks (+ 1.0 (* 10.0 n))})))]
     (is (:ok? v))
     (is (= [{:dim :ns :n 10000 :ratio 0.1}] (mapv #(update % :ratio (fn [r] (/ (Math/round (* r 100)) 100.0))) (:under v))))))
 
 (deftest a-stated-dimension-never-measured-is-named
   (let [v (cost/judge linear (rows linear (fn [n] {:ns (* 60.0 n) :bytes (* 50.0 n)})))]
-    (is (= [:calls] (:unmeasured v)))))
+    (is (= [:ticks] (:unmeasured v)))))
 
 ;; ---- proofs end to end ----------------------------------------------------------------
 
@@ -227,14 +241,12 @@
 (def ^:private estimate
   {:of 'seon.cost-test/one-pass :input 'seon.cost-test/ints :n "integers in the input"
    :work "one pass: per integer one seen call (one persistent assoc)" :growth :linear
-   :ops {:seq/reduce 1.0 :fn/armed-call 1.0 :map/assoc 1.0} :per-n {:calls 1.0} :fixed {:calls 1.0}
+   :ops {:seq/reduce 1.0 :fn/armed-call 1.0 :map/assoc 1.0}
    :sizes [100 300 1000 10000]})
 
 (deftest a-one-pass-function-meets-its-estimate
   (let [{:keys [rows verdict]} (cost/run estimate)]
     (is (= (cost/sizes (:sizes estimate) (seon.config/value :seon.config.proofs/cost-max-n)) (mapv :n rows)))
-    (when seon.contract/on?
-      (is (= (mapv #(double (inc %)) (mapv :n rows)) (mapv #(get-in % [:measured :calls]) rows)) "calls are exact: n + 1"))
     (is (:ok? verdict) (cost/explain estimate rows verdict))))
 
 (deftest a-scan-inside-the-loop-is-red-and-says-why
@@ -243,7 +255,7 @@
         text (cost/explain e rows verdict)]
     (is (not (:ok? verdict)))
     (is (< (count rows) 3) "it stops at the first size over its estimate")
-    (is (re-find #"OVER: (bytes|calls)" text) "red on an exact dimension (time is shown, never red)")
+    (is (re-find #"OVER: (bytes|ticks)" text) "red on an exact dimension (time is shown, never red)")
     (is (re-find #"one pass" text) "the explanation restates the work the data needs")))
 
 ;; ---- a bound in the contract, checked on the contract's own generator -----------------------
@@ -253,13 +265,13 @@
   call's own bytes (an empty vector measured 272 B) and an assoc's an element (the unit table's
   :map/assoc, 825 B)."
   {:malli/schema [:=> [:cat [:vector :int]] :map]
-   :seon.cost/bound (fn [xs] {:calls (inc (count xs)) :bytes (+ 400.0 (* 825.0 (count xs))) :out {:keys (count xs)}})}
+   :seon.cost/bound (fn [xs] {:bytes (+ 400.0 (* 825.0 (count xs))) :out {:keys (count xs)}})}
   [xs] (reduce seen {} xs))
 
 (defn rescanning-bounded
   "rescanning, under one-pass's bound: a pass per element."
   {:malli/schema [:=> [:cat [:vector :int]] :map]
-   :seon.cost/bound (fn [xs] {:calls (inc (count xs)) :bytes (+ 400.0 (* 825.0 (count xs))) :out {:keys (count xs)}})}
+   :seon.cost/bound (fn [xs] {:bytes (+ 400.0 (* 825.0 (count xs))) :out {:keys (count xs)}})}
   [xs] (rescanning xs))
 
 (def ^:private generated
@@ -271,9 +283,7 @@
   ;; same arguments the function is measured on; no hand-picked sizes
   (let [{:keys [rows verdict]} (cost/run generated)]
     (is (= 30 (count rows)) "every generated case measured")
-    (is (every? #(= (get-in % [:expected :calls]) (inc (count (first (:args %))))) rows) "each row's estimate is the bound on that row's arguments")
-    (when seon.contract/on?
-      (is (every? #(== (get-in % [:measured :calls]) (get-in % [:expected :calls])) rows) "calls are exact: the bound's count"))
+    (is (every? #(= (get-in % [:expected :bytes]) (+ 400.0 (* 825.0 (count (first (:args %)))))) rows) "each row's estimate is the bound on that row's arguments")
     (is (:ok? verdict) (cost/explain generated rows verdict))))
 
 (deftest a-cost-reports-line-reads-back-whole
@@ -453,7 +463,7 @@
 (deftest an-open-overrun-is-accepted-until-it-regresses
   ;; 200 bytes per integer against a 50 byte estimate: 4x, over the 1.25x slack (2e6 bytes at n=10000).
   ;; The waiver names a task a task file declares and the largest size it was taken at (:n)
-  (let [m (fn [n] {:ns (* 60.0 n) :bytes (* 200.0 n) :calls (+ 1.0 n)})
+  (let [m (fn [n] {:ns (* 60.0 n) :bytes (* 200.0 n) :ticks (+ 1.0 (* 10.0 n))})
         task "seon.cost/demo-overrun"
         n (peek (:sizes linear))]
     (testing "within the ratchet (1.5x) of what was measured when its task was filed: green, still reported"
@@ -472,7 +482,7 @@
 (deftest a-broken-waiver-is-red
   ;; a waiver within the ratchet is red when its task is in no task file, when it states no size it was
   ;; taken at, or when that size is not the proof's largest: each says which in its failure line
-  (let [m (fn [n] {:ns (* 60.0 n) :bytes (* 200.0 n) :calls (+ 1.0 n)})
+  (let [m (fn [n] {:ns (* 60.0 n) :bytes (* 200.0 n) :ticks (+ 1.0 (* 10.0 n))})
         task "seon.cost/demo-overrun"
         n (peek (:sizes linear))
         broken (fn [overrun] (let [e (assoc linear :overrun overrun) v (with-demo-task #(cost/judge e (rows e m)))] [v (cost/explain e (rows e m) v)]))]
