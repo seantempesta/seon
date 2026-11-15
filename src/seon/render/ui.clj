@@ -731,9 +731,9 @@
 
 (defn problems
   "Main's problems (the declared html render of :seon.problems/report): each class with rows,
-  its count, and its rows a line each (`problem-row`), open ones first, rendered only when the
-  tab opened the class (its id in :open, the /open toggle's; a report shown with no :open shows
-  every class's rows). It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
+  its count, and its rows a line each (`problem-row`), open ones first, rendered whole when the
+  tab opened the class (its id in :open, the /open toggle's); a report shown with no :open (root's system tiles, one walk for every
+  tab) shows each class's first :seon.config.render/recent-errors rows and how many more, with the form that reads them all. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.problems/report] :any]}
   [opts {:keys [classes open]}]
   (let [cs (for [[c {:keys [n rows]}] (sort-by (comp str key) classes) :when (seq rows)] [c n rows])]
@@ -743,7 +743,14 @@
        (for [[c n rows] cs :let [id (str "pc-" (name c)) shown? (or (nil? open) (contains? open id))]]
          [:details (cond-> (toggle id) (and open shown?) (assoc :open true))
           [:summary {:class "cursor-pointer" :title (kname c)} (str (class-words c) ": " n)]
-          (when shown? (for [r (sort-by #(if (false? (:open? %)) 1 0) rows)] (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.problems/row} (assoc r :class c))))]))]))
+          (when shown?
+            (let [sorted (sort-by #(if (false? (:open? %)) 1 0) rows)
+                  ;; a report no tab opened (a tile every tab shares) draws a few rows a class, never the whole history: the page
+                  ;; held 1.4 MB of the problems tile's rows, 2026-11-15; the rest is one call away
+                  k (if open (count rows) (config/value :seon.config.render/recent-errors))]
+              (list (for [r (take k sorted)] (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.problems/row} (assoc r :class c)))
+                    (when (< k (count rows))
+                      [:p {:class "seon-note"} (str "+" (- (count rows) k) " more: (get-in (my.root/problems) [:classes " c " :rows])")]))))]))]))
 
 (defn problems-model
   "The problems report as the model is sent it (the declared model render of :seon.problems/report):

@@ -3187,6 +3187,21 @@
     (is (< (str/index-of html "ticks measured") (str/index-of html "bytes measured")) "in the verdict's order")))
 
 ;; See docs/render.md#the-page
+;; Estimate: two prints of a report of one class of 100 short rows (~20 nodes a row, ~2k ticks a node): ~8M ticks; 20M.
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-shared-problems-report-shows-a-few-rows-a-class
+  ;; root's home page held 1.4 MB in its problems tile: every row of every class, ~11,400 lines [M, 2026-11-15]. A report no tab opened
+  ;; (root's tile, one walk for every tab) shows each class's first :seon.config.render/recent-errors rows and how many more; a tab
+  ;; that opened the class sees them all
+  (let [rows (vec (for [i (range 100)] {:producer nil :owner-ns nil :evidence {} :proofs [] :answered-by [] :at-ms i :message (str "row " i) :count 1}))
+        report {:t 1 :classes {:hand-written-list {:n 100 :rows rows}}}
+        k (seon.config/value :seon.config.render/recent-errors)
+        shared (h/html (ui/problems {:seon.render/index (seon.db/index)} report))
+        opened (h/html (ui/problems {:seon.render/index (seon.db/index)} (assoc report :open #{"pc-hand-written-list"})))]
+    (is (= k (count (re-seq #"row \d+" shared))) (str "a few rows: " (count (re-seq #"row \d+" shared))))
+    (is (str/includes? shared (str "+" (- 100 k) " more")) "and how many more, with the form that reads them")
+    (is (= 100 (count (re-seq #"row \d+" opened))) "a tab that opened the class sees them all")))
+
+;; See docs/render.md#the-page
 ;; Estimate: three prints of one step; the opened ones highlight 100 KB of code (~50 ticks a char): ~10M ticks; 30M.
 (deftest ^{:seon.test/estimate {:ticks 30000000}} a-closed-step-is-its-one-line
   ;; root's home page was 10.7 MB, 9.2 of it in seven closed steps whose whole code (a landed file's text) and output were drawn inside
