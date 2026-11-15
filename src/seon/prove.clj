@@ -687,9 +687,9 @@
    :open (vec (sort-by str (vals (:pending st))))
    ;; main's proving, the gauge the sweep reads: the program-t its last run asked, the newer one wanted (moves made meanwhile, coalesced
    ;; into one next run), and whether a main run is in flight
-   :main {:asked (:main-asked st) :wanted (some-> (:main-want st) :program-t) :in-flight (boolean (main-run? st))
-          ;; a main run that failed, and the inputs it failed on: asked again only when they move (main-inputs-moved?)
-          :failed (:main-failed st)}})
+   :main (cond-> {:asked (:main-asked st) :wanted (some-> (:main-want st) :program-t) :in-flight (boolean (main-run? st))}
+           ;; a main run that failed, and the inputs it failed on: asked again only when they move (main-inputs-moved?)
+           (:main-failed st) (assoc :failed (:main-failed st)))})
 
 (defn prove-proc
   "The test service (see the namespace doc). In :req (requests the api forwards, {:rid :branch :t :digest :agent :names
