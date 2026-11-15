@@ -928,7 +928,10 @@
       ;; one diff a move of main: the index, every kept walk and the views it touched read the same datoms
       (let [moved (when held (ctx/moved held db nil))]
         (cond-> (user-walks (root-walk (main-info st db moved) db held moved) db (when held {:from held :moved moved}))
-          (seq moved) (update :dirty (fnil into #{}) (touched st moved)))))))
+          (seq moved) (update :dirty (fnil into #{}) (touched st moved))
+          ;; a landing kept in place loaded the new program, then wrote root's source fact (my.root/landed!): every held view drew with
+          ;; the old renders and may read nothing that moved, so each walks again (a component whose render fn changed runs, render!)
+          (some #(= :seon.system/source (:a %)) moved) (update :dirty (fnil into #{}) (keys (:views st))))))))
 
 (defn- error-page
   "A view's page that is its error e, by the error's render, in the root every page has (#app): a page sent
