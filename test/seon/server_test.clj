@@ -439,14 +439,39 @@
                               {:op :eval :agent "root" :code (str "(#'seon.server/inbox-deliver sys " (pr-str (name agent)) ")")}]))]
     (is (= ["placed by the delivery"] (when (vector? (:value r)) (mapv :body (:value r)))) (str "the delivered messages, as a vector: " (pr-str r)))))
 
+;; Estimate: five server round trips (~0.5M each): ~2.5M; 4,000,000. In root: one :db/add of the holder
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000}} a-sessions-own-area-client-takes-over-its-hold
+  ;; root's ruling 2026-11-15 evening: a session agent attached before bin/mcp call kept a session's SEON_MCP_CLIENT held its hold under
+  ;; checkout-<path> for its life (session/context's, repaired by hand with transact-main!, result/dc7c8582). A re-attach of a LIVE
+  ;; session/<area> by the client named <area> takes over the hold (the same session under its own name); any other named client still
+  ;; gets :shared, so no session takes another's agent. Red before: the live branch answered :shared and never moved the hold
+  (let [[one two who three who-after] (at/in-agent (fn [{:keys [ns]}]
+                                                     (let [i (str "session/" ns) area (str ns)]
+                                                       [{:op :attach :task i :template "user" :client "checkout-old"}
+                                                        {:op :attach :task i :template "user" :client area}
+                                                        {:op :eval :agent "root" :code (str "(seon.server/connection-agent sys {:client " (pr-str area) "})")}
+                                                        {:op :attach :task i :template "user" :client "another-session"}
+                                                        {:op :eval :agent "root" :code (str "(seon.server/connection-agent sys {:client " (pr-str area) "})")}
+                                                        (end-session-form i)])))]
+    (is (some? (:agent one)) (pr-str one))
+    (is (= (:agent one) (:agent two)) "the same agent")
+    (is (= (name (:agent one)) (:value who)) (str "its own area client now holds it: " (pr-str who)))
+    (is (:shared three) (str "another named client only shares it: " (pr-str three)))
+    (is (= (name (:agent one)) (:value who-after)) "and the hold stays with the area's own client")))
+
 (deftest ^{:seon.test/estimate {:ticks 300000}} an-inbox-line-runs-on-its-connection-and-holds-no-worker
   ;; part 2: seon_inbox waits, so it runs on the connection's fiber (which parks), never one of the 16 :server-op worker threads
   ;; (:seon.config.root/server-op-workers): eight waiting sessions would hold half of them. Both protocols. Red before: no inline op
-  ;; read once by line-parts, which also names a stop (seon_interrupt) inline
+  ;; read once by line-parts; the table decides (an op's :inline), never a name in code (root's reviewer on 6635b0cac2)
   (let [inline? #(:inline? (#'seon.server/line-parts %))]
     (is (inline? "{:op :inbox :agent \"a1\"}") "EDN")
     (is (inline? "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"seon_inbox\",\"arguments\":{\"agent\":\"a1\"}}}") "MCP")
-    (is (not (inline? "{:op :eval :agent \"root\" :code \"(inbox)\"}")) "an eval naming inbox is no inbox")))
+    (is (not (inline? "{:op :eval :agent \"root\" :code \"(inbox)\"}")) "an eval naming inbox is no inbox")
+    (is (seq (filter (comp :inline val) seon.server/ops)) "some op declares :inline")
+    (doseq [[op v] seon.server/ops :when (:inline v)]
+      (is (inline? (str "{:op " op "}")) (str op " declared :inline runs on its connection (EDN)"))
+      (is (inline? (str "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"seon_" (name op) "\"}}")) (str op " (MCP)")))
+    (is (not (inline? "{:op :agents}")) "an op that does not declare :inline runs on a worker")))
 
 (deftest the-context-op-answers-what-a-model-is-sent
   ;; dogfood 2026-10-25: an outside agent read the task's data and turn sections only, not the system

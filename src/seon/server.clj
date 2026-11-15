@@ -191,7 +191,12 @@
       made made
       (not t) (refused (str "no task " id))
       ;; its agent is live: it is the one to work it (a second spawn on its branch is refused)
-      live {:agent (:agent live) :task id :shared true}
+      live (do
+             ;; the session's own area client takes over its live agent's hold (root's ruling 2026-11-15: a hold taken before bin/mcp call kept a
+             ;; session's SEON_MCP_CLIENT stayed under checkout-<path>); any other client only shares it, so no session takes another's agent
+             (when (and client (= id (str "session/" client)) (not= client (get-in live [:env :holder])))
+               @(c/transact-main! sys [[:db/add [:seon.agent/key (:key live)] :seon.agent/holder client]]))
+             {:agent (:agent live) :task id :shared true})
       :else
       (let [restart (when fresh? (task/restart-tx db id))
             env (cond-> (assoc (r/desired-env t) :model "outside")
@@ -282,7 +287,8 @@
 (def ops
   "The server's ops, the one table, keyed by a request's :op (an EDN request is a
   keyword-keyed map, {:op :agents}; a line opening `{\"` is MCP's, respond): each op's
-  description and its arguments (JSON Schema properties; :required, the ones it needs); its
+  description and its arguments (JSON Schema properties; :required, the ones it needs; :inline, an op that runs on its connection's fiber,
+  never a :server-op worker: a wait on our own system's event, or a stop: inline-ops); its
   answer is op-answer's method of its key. MCP lists each as the tool seon_<op> (mcp-reply)."
   (array-map
    :agents {:doc "Live agents (id, branch, status, task); the tasks running or with an agent, newest first (execution, done, blocked-by, its agent and outcome, problem); every other task counted by execution, and the form that lists them all."
@@ -300,7 +306,8 @@
                  :input {:type "string" :description "root only: what the forms read as *in* (stdin), empty when none is sent"}
                  :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}}
           :required ["agent"]}
-   :interrupt {:doc "Stop every op you asked that still runs or waits (your seon_eval at root included, which has no work bound): a queued one is answered stopped, a running one interrupted and answered :seon.server/interrupted. Answered at once, never behind the ops it stops. An MCP client's notifications/cancelled stops the one request it names the same way."
+   :interrupt {:inline true
+               :doc "Stop every op you asked that still runs or waits (your seon_eval at root included, which has no work bound): a queued one is answered stopped, a running one interrupted and answered :seon.server/interrupted. Answered at once, never behind the ops it stops. An MCP client's notifications/cancelled stops the one request it names the same way."
                :args {}}
    :import {:doc "Import a file you wrote onto the Seon agent your checkout holds (my.branch/import!): what bin/seon-import, the edit hook, asks. path: the file's absolute path, inside the checkout your client names (bin/mcp call's checkout-<path>)."
             :args {:path {:type "string" :description "the file's absolute path"}} :required ["path"]}
@@ -327,7 +334,8 @@
                   :tree {:type "string" :description "the checkout's tree id (seon.fx/tree-id, as bin/build records it): its branch's key"}
                   :mode {:type "string" :description "judge (default for a checkout), turn, or main (every key with no green at its digest, against no base: a whole tree)"}
                   :stream {:type "boolean" :description "EDN only: each test's verdict as a line as it ends, then the answer"}}}
-   :inbox {:doc "Wait for a message to an agent (its key, or its task: a session's agent is the one attached to its task session/<area>): answers at once with the messages main holds that its branch has not taken, else when one is written, else the typed :seon.server/no-message at :seon.config.root/inbox-wait-ms (ask again). It delivers what it answers (the agent's one delivery), so the next call answers only what came after. Run it in the background: its answer is your notification."
+   :inbox {:inline true
+           :doc "Wait for a message to an agent (its key, or its task: a session's agent is the one attached to its task session/<area>): answers at once with the messages main holds that its branch has not taken, else when one is written, else the typed :seon.server/no-message at :seon.config.root/inbox-wait-ms (ask again). It delivers what it answers (the agent's one delivery), so the next call answers only what came after. Run it in the background: its answer is your notification."
            :args {:agent {:type "string" :description "an agent id"} :task {:type "string" :description "ns/name: its agent, instead of agent"}}}
    :done {:doc "Hand the task the agent works back to root: the agent writes its end (its proofs run, seon.turn/hand-back!), then root judges it, and merges it when the done rule has no reason. Answers the verdict when main holds it, as one line and a handle (seon.server/verdict-line): the task's outcome (done, merged, or closed with its task held) and reason, each red test with its first failure, and how main differs from the branch; the handle is the form that reads it whole at root. A defect of the reconciler that stops the judge, as that defect. It waits as long as the judge does (the run's proofs, a gate, a merge), so a caller's read timeout must allow minutes."
           :args {:agent {:type "string"} :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}} :required ["agent"]}))
@@ -632,9 +640,10 @@
     (refused (str ag " works no task"))))
 
 (def ^:private inline-ops
-  "The ops a connection answers on its own fiber, never through a :server-op worker (serve-connection!): a stop must not wait
-  behind the ops it stops, and a wait on our own system's event (seon_inbox) parks the fiber, holding none of the workers."
-  #{:interrupt :inbox})
+  "The ops a connection answers on its own fiber, never through a :server-op worker (serve-connection!): those that declare :inline
+  in ops (a wait on our own system's event, seon_inbox, parks the fiber; a stop, seon_interrupt, never waits behind the ops it
+  stops). Read from the one table, never named in code."
+  (into #{} (keep (fn [[op v]] (when (:inline v) op))) ops))
 
 (def ^:private held-ops
   "The ops that act on an agent's work, which its holder's client (or a request naming its task) may ask."
