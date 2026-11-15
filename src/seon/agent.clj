@@ -2236,10 +2236,13 @@
   its record holds them and its own cite! and uncite! change them, and a merge of main never brings one back."
   {:malli/schema [:=> [:cat :seon.task/id] :any]}
   [task]
+  ;; :seon.agent/task is root's alone, on main (one writer per attribute, docs/users.md): the agent reads it as it hears main, so
+  ;; begun is this process's own state, never a write of root's fact on the branch (two writers disagreed at a whole task's stage move)
   (let [k (:key @state) e (d/entity (db) [:seon.agent/key k])]
-    (when-not (= task (:seon.task/id (:seon.agent/task e)))
-      (let [made? (nil? (:seon.agent/task e))]
+    (when-not (= task (:begun @state))
+      (let [made? (or (nil? e) (empty? (task/cites-of (db) (:db/id e))))]
         (begin-run-tx! task)
+        (swap! state assoc :begun task)
         (when made? (transact! (task/agent-cites-tx (db) [:seon.agent/key k] k)))))))
 
 (defn begin-run-tx
@@ -2249,10 +2252,10 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :string] :seon.db/tx-data]}
   [db task k]
   [{:seon.task/id task :seon.task/execution :running}
-   ;; the agent's task, which its record pulls (the agent is the unit, docs/ctx.md#the-pattern)
-   ;; what it reads as its system message: the system prompt's page, its top section and all below (seon.ctx.wire/agent-system-text)
+   ;; what it reads as its system message: the system prompt's page, its top section and all below (seon.ctx.wire/agent-system-text);
+   ;; its task is root's (:seon.agent/task, written on main by seon.task/start-tx), never written here
    (let [sys (ref/page-top db doc/system-page)]
-     (cond-> {:db/id k :seon.agent/key k :seon.agent/task {:seon.task/id task}} sys (assoc :seon.agent/system [sys])))])
+     (cond-> {:db/id k :seon.agent/key k} sys (assoc :seon.agent/system [sys])))])
 
 (defn- begin-run-tx!
   "Task written on this agent's branch (begin-run!'s write): the task as main declares it when the
