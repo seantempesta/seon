@@ -270,7 +270,7 @@
 
 (defn changed-since
   "The files of the tree at root as it is on disk that differ from tree (a tree id seon.fx/tree-id made): git's diff of tree
-  against the files, submodules left out (a pin is a build input, which seon.system/binary-current judges), and each untracked
+  against the files, submodules left out (a pin is a build input, which seon.fx/runtime-for judges), and each untracked
   file git does not ignore whose content tree does not hold at its path, less :seon.config.source/tree-excludes' top-level paths. Each with its text (nil when gone), the mode
   of each the allow-list names, and, when any differs, the tree id now and HEAD's commit. About 40 ms on this checkout when
   nothing differs, where tree-id is ~0.4 s (git checking each submodule's files). Answers {:value {path text} :modes {path mode}
@@ -420,7 +420,7 @@
   git's or the reader's words."
   {:malli/schema [:=> [:cat :string :string] [:set :string]]}
   [root tree]
-  (let [lines (fn [args] (str/split-lines (git! {} root args nil)))
+  (let [lines (fn [args] (remove str/blank? (str/split-lines (git! {} root args nil))))
         ;; every EDN form a text holds, its tags kept as data (aero's #profile, #env): git show of several blobs is their texts end to end
         forms (fn [text] (let [r (java.io.PushbackReader. (java.io.StringReader. text)) end (Object.)]
                            (loop [acc []] (let [f (edn/read {:default tagged-literal :eof end} r)] (if (identical? end f) acc (recur (conj acc f)))))))
@@ -464,19 +464,23 @@
           (do (write-file {:req {:path (.getPath f) :text d}}) {:digest d}))))))
 
 (defn- build-differs
-  "What differs between the identity of the binary's tree (target/seon.tree) and tree's, named: each identity line the two do not
-  share, by its path (a build input or a pin) or its config key; the same lines binary-digest digests, so a mismatch always names
-  its cause. Every build input when the binary recorded no tree, or a tree's lines can't be read. Asked only on a mismatch."
-  {:malli/schema [:=> [:cat :string [:maybe :string] :string] [:vector :string]]}
-  [root built-tree tree]
-  (let [inputs (vec (cfg/value :seon.config.build/inputs))]
-    (if-not built-tree
-      inputs
-      (try
-        (let [a (identity-lines root built-tree) b (identity-lines root tree)
-              named (fn [l] (if (str/starts-with? l "[") (first (str/split (subs l 1) #"\s" 2)) (second (str/split l #"\t" 2))))]
-          (vec (distinct (map named (sort (concat (remove b a) (remove a b)))))))
-        (catch Throwable _ inputs)))))
+  "What differs between the identity of the binary's tree (in the checkout at root's repository) and tree's (in repo's), named: each identity line the two do not share, by its path
+  (a build input or a pin) or its config key; the same lines binary-digest digests, so a mismatch always names its cause. Every
+  build input when the binary recorded no tree. The :seon.fx/io-error of a tree whose lines can't be read; an interrupt passes.
+  Asked only on a mismatch."
+  {:malli/schema [:=> [:cat :string :string [:maybe :string] :string] [:or [:vector :string] :seon.error/base]]}
+  [root repo built-tree tree]
+  (if-not built-tree
+    (vec (cfg/value :seon.config.build/inputs))
+    (try
+      ;; each tree read where it was made: the binary's in this checkout's repository, the branch's in the source root's
+      (let [a (identity-lines root built-tree) b (identity-lines repo tree)
+            named (fn [l] (if (str/starts-with? l "[") (first (str/split (subs l 1) #"\s" 2)) (second (str/split l #"\t" 2))))]
+        (vec (distinct (map named (sort (concat (remove b a) (remove a b)))))))
+      (catch Throwable e
+        (if (intr/interrupt? e)
+          (throw e)
+          (error #'build-differs :seon.fx/io-error (str "what differs between trees " built-tree " and " tree ": " (step/error-msg e)) {:path root}))))))
 
 (defn runtime-for
   "The binary a process on tree's branch runs: {:binary its path :digest d} when the running binary's identity (its build record's
@@ -486,29 +490,33 @@
   check of which runtime a branch needs, made at every start (root's boot, an agent's, a test child's fork) and by the restart
   predicate; the program (src/'s forms) is not in it: a process loads its branch's forms as a diff. With {:scope :all}, for a
   process whose store holds no Seon program and so runs the binary's baked one, the src tree must be the binary's too, and the
-  answer adds :program, tree's src id. tree's digest is kept by tree id (tree-digest); a later ask costs one file read. See
+  answer adds :program, tree's src id. :record is the binary's build record to judge (default this process's,
+  seon.program/binary-program). tree's digest is kept by tree id (tree-digest); a later ask costs one file read. See
   docs/source.md#the-binary-records-its-program."
   {:malli/schema [:function [:=> [:cat :string] [:or [:map [:binary :string] [:digest :string]] :seon.error/base]]
-                  [:=> [:cat :string [:map [:scope {:optional true} [:enum :root :all]]]]
+                  [:=> [:cat :string [:map [:scope {:optional true} [:enum :root :all]] [:record {:optional true} [:maybe :map]]]]
                    [:or [:map [:binary :string] [:digest :string] [:program {:optional true} :string]] :seon.error/base]]]}
   ([tree] (runtime-for tree {}))
-  ([tree {:keys [scope] :or {scope :root}}]
+  ([tree {:keys [scope record] :or {scope :root record (program/binary-program)}}]
    (let [root (cfg/checkout)
          ;; a key a config may lack (seon.config's may-be-absent): absent, the checkout is the repository
          repo (or (get cfg/config :seon.config.source/root) root)
          read (fn [p] (let [f (java.io.File. (str root p))] (when (.isFile f) (str/trim (slurp f)))))
          ;; the RUNNING binary's identity, held since its boot (seon.program/binary-program): never target/seon's file, which a
          ;; later build replaces while this process still runs the old one (bin/update asked after its build, 2026-11-15)
-         built (:digest (program/binary-program))
+         built (:digest record)
          built-tree (read "/target/seon.tree")
          w (tree-digest root repo tree)
          src (fn [t] (when t (let [r (git-run {} repo ["rev-parse" "--verify" "--quiet" (str t ":src")] nil)]
                                (when (zero? (:exit r)) (str/trim (:out r))))))
          mismatch (fn [want why]
-                    (error #'runtime-for :seon.process/env-mismatch
-                           (str "target/seon's identity " (or built "(none recorded)") " is not tree " tree "'s " want ": " why)
-                           {:seon.process/binary-digest built :seon.process/branch-digest want :seon.process/tree tree
-                            :seon.process/differs (build-differs repo built-tree tree)}))]
+                    (let [differs (build-differs root repo built-tree tree)]
+                      (if (contract/error? differs)
+                        differs
+                        (error #'runtime-for :seon.process/env-mismatch
+                               (str "target/seon's identity " (or built "(none recorded)") " is not tree " tree "'s " want ": " why)
+                               {:seon.process/binary-digest built :seon.process/branch-digest want :seon.process/tree tree
+                                :seon.process/differs differs}))))]
      (cond (contract/error? w) w
            (not= built (:digest w)) (mismatch (:digest w) "build it")
            (= :all scope) (let [p (src tree)]
@@ -1288,9 +1296,10 @@
 
 (defn gate-answer
   "The system's answer a to the gate's run of tests (seon.system/prove-tree!'s, the run-tests-forked shape: :reports, :red,
-  :digests) as run-on-checkout answers it: {:results {test :pass|:fail} :failures {test [failure ...]} :digests}. A test
-  the run never reached (it is answered at its first red) is in none, so its branch keeps it deferred and asks again: never a
-  red it did not show. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  :digests) as run-on-checkout answers it: {:results {test :pass|:fail} :failures {test [failure ...]} :digests :no-verdict}. A test
+  the run never reached (it is answered at its first red), or one with no verdict (:no-verdict, its batch's error: the platform
+  failing), is in none, so its branch keeps it deferred and asks again: never a red it did not show. See
+  docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :map [:sequential :qualified-symbol]] :map]}
   [a tests]
   (let [red (set (:red a))
@@ -1299,7 +1308,8 @@
         results (into {} (for [t tests :let [s (cond (red t) :fail (passed t) :pass)] :when s] [t s]))]
     {:results results
      :failures (into {} (for [[t s] results :when (= :fail s) :let [fs (get fails t)] :when (seq fs)] [t (vec fs)]))
-     :digests (select-keys (:digests a) (keys results))}))
+     :digests (select-keys (:digests a) (keys results))
+     :no-verdict (select-keys (:no-verdict a) tests)}))
 
 (defn- kept-files
   "The files of a program store d a copy of it carries: its data, and the reach graphs and reads indexes kept for its trees
@@ -1356,7 +1366,7 @@
               _ (when (and (empty? files) (.isFile (java.io.File. (str slot "/seon"))))
                   (doseq [n kept-build] (lib/sh "cp" "-c" (str slot "/" n) (str dir "/target/" n))))
               ;; the binary root runs, with its build record, over the clone bin/worktree --at took of the main tree's: what a gate's
-              ;; runner judges current for the candidate's tree (seon.system/binary-current) is the binary that is running
+              ;; runner judges current for the candidate's tree (seon.fx/runtime-for) is the binary that is running
               _ (when-not all?
                   (doseq [n ["seon" "seon.stamp" "seon.tree" "seon.program"]
                           :let [f (java.io.File. (str (cfg/checkout) "/target/" n))] :when (.isFile f)]
@@ -1376,7 +1386,7 @@
                       (doseq [n (kept-files d)]
                         (lib/sh "cp" "-c" (str (.getPath d) "/" n) (str to "/" n))))))
               ;; a gate's run builds only through its runner, when the binary is not current for the candidate's tree
-              ;; (bin/test's plan: seon.system/binary-current, rule (a)); the full run builds main's tree here, into its kept slot
+              ;; (bin/test's plan: seon.fx/runtime-for); the full run builds main's tree here, into its kept slot
               b (if (or all? built?) (apply lib/sh (concat clean ["nice" "-n" "15" "bin/build" "seon"] [:dir dir])) {:exit 0})
               _ (when (and all? (empty? files) (zero? (:exit b)))
                   (.mkdirs (java.io.File. ^String slot))
@@ -1394,7 +1404,13 @@
                   a
                   (let [v (gate-answer a tests)]
                     (vreset! green? (= (set tests) (set (keep (fn [[t s]] (when (= :pass s) t)) (:results v)))))
-                    {:value (assoc v :ms (profile/ms-since t0) :log log)})))
+                    (if (and (empty? (:results v)) (seq (:no-verdict v)))
+                      ;; no test has a verdict: the gate's answer is the platform's error, typed and held, never a red each
+                      (let [[t e] (first (:no-verdict v))]
+                        (contract/error :seon.prove/no-verdict #'seon.fx/run-on-checkout
+                                        (str "the gate's run answered no verdict for any of its " (count tests) " tests: " (:seon.error/type e) ": " (:seon.error/message e))
+                                        {:test t :no-verdict (:no-verdict v)}))
+                      {:value (assoc v :ms (profile/ms-since t0) :log log)}))))
             ;; the full run's shards cache their verdicts in this checkout's verdict cache, named to them,
             ;; so the verdicts read below are the ones its run wrote
             (let [out (str dir "/target/prove/run")

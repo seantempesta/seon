@@ -65,7 +65,7 @@
   (let [ended? (= :seon.system/ended (:seon.error/type r))
         keep? (fn [[[b] v]] (not (and (= b (:branch run)) (or ended? (not= (:digest v) (:digest run))))))
         st (update st :done #(into {} (filter keep?) %))]
-    (if (or (contract/error? r) (some :exit (:reports r)) (seq (:red r)))
+    (if (or (contract/error? r) (some :exit (:reports r)) (seq (:red r)) (seq (:no-verdict r)))
       st
       (assoc-in st [:done (slot run)] {:key (:key r) :digest (:digest run)
                                        :r (-> r (dissoc :measured :verdicts) (assoc :ran 0)
@@ -399,15 +399,19 @@
                     (into (batch-errors results)))
         ;; the reused reports' types, and each item's own counts (its answer keeps one pass report a test, its counts every assertion)
         counts (merge-with + (frequencies (map :type (:reused-reports base)))
-                           (apply merge-with + {} (for [[_ r] results] (if (contract/error? r) {:error 1} (select-keys (:answer r) [:pass :fail :error])))))]
+                           (apply merge-with + {} (for [[_ r] results :when (not (contract/error? r))] (select-keys (:answer r) [:pass :fail :error]))))]
     (cond-> {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :reports reports
+             ;; an item answered an error has no verdict (its batch's error, a wall-time end): the platform failing, held typed for
+             ;; its asker, never a red (docs/principles.md#6-nothing-changed-nothing-runs-a-change-costs-what-it-touched)
+             ;; a plain map: an answer crosses the wire, which encodes no sorted collection of a comparator of its own
+             :no-verdict (into {} (for [[t r] results :when (contract/error? r)] [t (select-keys r [:seon.error/type :seon.error/message])]))
              :digests (into (or (:digests base) {}) (for [[_ r] results :when (map? (:answer r)) [t d] (:digests (:answer r))] [t d]))
              :fns (into {} (for [[_ r] results :when (map? (:answer r)) [t f] (:fns (:answer r))] [t f]))
              :measured (into {} (for [[_ r] results :when (map? (:answer r)) [t m] (:measured (:answer r))] [t m]))
              :selected (vec (:selected base)) :deferred (vec (:deferred base)) :at-judge (:at-judge base 0)
              :reused (count (filter :reused (:reused-reports base))) :ran (count results)
              :red (vec (sort-by str (distinct (concat (keys (proofs/failures {:reports (vec (:reused-reports base))}))
-                                                      (keep (fn [[t r]] (when (or (contract/error? r) (not (proofs/green? r))) t)) results)))))}
+                                                      (keep (fn [[t r]] (when (and (not (contract/error? r)) (not (proofs/green? r))) t)) results)))))}
       (seq (:why base)) (assoc :why (:why base))
       ;; each deferred test's digest at the base, as the agent's plan gave it: what the merge check reads main's verdict at
       (seq (:deferred-digests base)) (assoc :deferred-digests (:deferred-digests base))
@@ -447,7 +451,7 @@
         err? (contract/error? r)
         ended? (#{:seon.system/ended :seon.prove/superseded} (:seon.error/type r))
         ;; a run's items name their own reds (run-answer: a step's among them); any other answer, by its failing reports
-        r (if err? r (assoc r :key k :red (vec (sort-by str (distinct (concat (:red r) (keys (proofs/failures r))))))))
+        r (if err? r (assoc r :key k :red (vec (sort-by str (distinct (concat (:red r) (remove (set (keys (:no-verdict r))) (keys (proofs/failures r)))))))))
         ;; asked again, it ran nothing for that asker: each verdict reads as reused at its digest, with no measure to add
         st (remember (-> st (update :runs dissoc k) (assoc :last (:branch run))) run r)
         [st kill] (runner-done st run)
