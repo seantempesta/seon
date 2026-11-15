@@ -5296,3 +5296,16 @@
         text (pr-str hc)]
     (is (clojure.string/includes? text "session-x") "its client")
     (is (clojure.string/includes? text "request 7") "and its MCP request id")))
+
+;; See docs/render.md#reactive-renders
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-render-redefined-on-main-redraws-the-components-it-drew
+  ;; task seon.render.proc/a-render-a-land-redefines-redraws-what-it-drew: a landing redefined seon.render.ui/chat-ask in root's
+  ;; process, and root's page kept serving its old output, since a warm walk checked only its root call's render. Each render a walk
+  ;; drew is checked against its var (its :drawn-fns), so a component whose render a landing redefined draws again with nothing moved
+  (let [[kw db] (seon.render-cost-test/step-of 3)
+        p (:p kw)
+        g @#'seon.render.ui/conversation-turn
+        ran (with-redefs [seon.render.ui/conversation-turn (fn [& args] (apply g args))]
+              (:ran (seon.render/walk p {:db db :tree (:tree p) :root (:root p) :index (:index p) :outputs #{:seon.render/hiccup}
+                                         :changes seon.ctx/changes :moved []})))]
+    (is (some #(= 'seon.render.ui/conversation-turn (first %)) (keys ran)) (str "the redefined render's components draw again: " (pr-str (keys ran))))))
