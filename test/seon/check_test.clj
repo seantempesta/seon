@@ -324,49 +324,51 @@
 ;; image that holds the head's. Analysis evaluates each file's ns form in the live namespace, so a base whose ns form aliases a
 ;; namespace this image has loaded under another target (across the rename of seon.system to seon.graph, seon.server's `c` names
 ;; one in each tree) is a retargeted alias, which Jolt refuses. This image has loaded seon.check-test, `contract` naming
-;; seon.contract; a clone of this checkout's HEAD gets a base commit where that alias names seon.error, and a head restoring it
-;; Estimate, from its parts (the import is the shard's, test-runner/kept-program, warmed before the first test, never this budget's):
-;; ~10 store connects at ~0.15M (1.5M), store config and ids (0.8M), the kept store's key and digest (0.6M), two tree ids (0.5M),
-;; ~24 git shells (0.2M), three queries of one namespace's forms on two program dbs and a base read from its store (~5M) = ~9000000.
-(deftest ^{:seon.test/estimate {:ticks 9000000}} the-health-step-reads-a-base-whose-alias-the-head-retargets
-  (let [co (str (seon.config/checkout))
-        dir (str co "/target/tmp/health-rename-" (random-uuid))
+;; seon.contract; a base commit where that alias names seon.error must reach this image only as facts its own process kept.
+;; The process (make-base-tree!, a worktree and a runner, 41 s of the test this one replaced) is stood in for by the facts it
+;; writes: a branch of the base's tree in the base store holding the retargeted ns form, as the base's own runner would keep it.
+;; Estimate: one two-file git repo (3 shells, 0.2M each = 0.6M), bin/tree twice (0.4M), one store open and branch (1.5M) and a
+;; two-fact transaction (0.3M), two reads of a branch (0.3M each = 0.6M), two queries (0.1M) = ~3500000.
+(deftest ^{:seon.test/estimate {:ticks 3500000}} the-health-step-reads-a-base-whose-alias-the-head-retargets
+  (let [dir (str (seon.config/checkout) "/target/tmp/health-rename-" (random-uuid))
         repo (str dir "/repo")
-        store (ts/kept-program-store)
-        file "test/seon/check_test.clj"
+        stem (str dir "/base-store")
+        retargeted-src "(ns seon.check-test (:require [seon.error :as contract]))"
         sh! (fn [& args] (let [r (apply clojure.java.shell/sh args)] (is (zero? (:exit r)) (pr-str args r)) (str/trim (:out r))))
-        commit! (fn [msg] (sh! "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-a" "-m" msg)
-                  (sh! "git" "-C" repo "rev-parse" "HEAD"))
-;; the ns form's alias only: this test's own body holds the retargeted text as a string, which another form's
-        ;; source would match
+        ;; the ns form's alias only
         retargeted? (fn [db] (boolean (some #(str/includes? % "[seon.error :as contract]")
-                                            (d/q '[:find [?s ...] :in $ ?n :where [?ns :ns/name ?n] [?ns :ns/form ?f] [?f :form/src ?s]] db 'seon.check-test))))]
+                                            (d/q '[:find [?s ...] :in $ ?n :where [?ns :ns/name ?n] [?ns :ns/form ?f] [?f :form/src ?s]] db 'seon.check-test))))
+        made (atom [])
+        ;; what the base's own process leaves at path: its tree's branch holding the retargeted ns form, never analyzed here
+        keep-base! (fn [root base tree _store _stem path _at]
+                     (swap! made conj base)
+                     (let [o (pdb/open! :lmdb path 0 :db) b (test-runner/tree-branch tree)]
+                       (d/branch! (:conn o) :db b)
+                       (let [c (pdb/connect (assoc (:cfg o) :branch b))]
+                         (try (d/transact c {:tx-data [{:db/id -1 :ns/name 'seon.check-test :ns/file "test/seon/check_test.clj" :ns/form -2}
+                                                       {:db/id -2 :form/id "retargeted-ns" :form/ns -1 :form/order 0 :form/src retargeted-src}]})
+                              (finally (d/release c))))
+                       (d/release (:conn o)))
+                     nil)]
     (try
-      (sh! "git" "clone" "-q" "--shared" co repo)
-      ;; this process holds the checkout's tree from the kept store (test-runner/kept-program, a program fixture the shard makes
-      ;; before its first test, so an import of a tree the store lacks is never this test's: one took its 1B budget in data's
-      ;; land, 945M of it seon.source/text-tx), and the clone of a clean checkout is that tree, so the head below is read, not
-      ;; imported. The test reads that store itself, never a copy: a copy keeps the store's id, and one branch under two paths is
-      ;; refused by Datahike (\"Configuration does not match existing connections\", batches 58 and 60)
-      @test-runner/kept-program
-      (let [text (slurp (str repo "/" file))
-            _ (is (str/includes? text "[seon.contract :as contract]"))
-            _ (spit (str repo "/" file) (str/replace text "[seon.contract :as contract]" "[seon.error :as contract]"))
-            base (commit! "base")]
-        (spit (str repo "/" file) text)
-        (commit! "head")
-        (let [head (test-runner/program-db repo store)
-              based (test-runner/base-program repo base store (str dir "/base-store") (str dir "/base"))]
-          (is (not (contract/error? based)) (pr-str based))
-          (is (not (retargeted? head)) "the head's alias is this image's")
-          (is (retargeted? based) "the base holds its own")
-          (is (= 'seon.contract (some-> (get (ns-aliases 'seon.check-test) 'contract) ns-name))
-              "and this image's namespace keeps its own alias: the base's ns form never ran here")
-          (is (not (.exists (java.io.File. (str dir "/base")))) "the base's checkout is removed once its runner ran")
-          (is (retargeted? (test-runner/base-program repo base store (str dir "/base-store") (str dir "/base2")))
-              "a base the base store keeps is read again")
-          (is (not (.exists (java.io.File. (str dir "/base2")))) "with no checkout made")))
-      (finally (test-runner/remove-checkout! (str dir "/base")) (seon.lib/remove-tree! dir)))))
+      (.mkdirs (java.io.File. (str repo "/test/seon")))
+      (sh! "git" "-C" repo "init" "-q")
+      (spit (str repo "/test/seon/check_test.clj") retargeted-src)
+      (sh! "git" "-C" repo "add" "-A")
+      (sh! "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "base")
+      (let [base (sh! "git" "-C" repo "rev-parse" "HEAD")
+            empty-store (str dir "/kept")
+            read-base #(with-redefs [test-runner/make-base-tree! keep-base!]
+                         (test-runner/base-program repo base empty-store stem %))
+            based (read-base (str dir "/base"))]
+        (is (not (contract/error? based)) (pr-str based))
+        (is (= [base] @made) "the base's program was made once, by the base's own process")
+        (is (retargeted? based) "the base holds its own alias")
+        (is (= 'seon.contract (some-> (get (ns-aliases 'seon.check-test) 'contract) ns-name))
+            "and this image's namespace keeps its own alias: the base's ns form never ran here")
+        (is (retargeted? (read-base (str dir "/base2"))) "a base the base store keeps is read again")
+        (is (= [base] @made) "with no second process"))
+      (finally (seon.lib/remove-tree! dir)))))
 
 ;; docs/references.md#task-references: a task's citation of nothing is refused at its write (owner, 2026-11-09); the health step loads
 ;; the tree's tasks through that one checked write, so a task citing a key no program holds is health's typed refusal, never a lookup
