@@ -644,7 +644,7 @@
         (let [[st rid] (pend st p op id)
               msg (case op
                     :eval (cond-> {:op :eval :forms (:forms m)} (:ticks m) (assoc :ticks (:ticks m)) (:origin m) (assoc :origin (:origin m)))
-                    :tests (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m)) (:names m) (assoc :names (:names m)) (:mode m) (assoc :mode (:mode m)) (:plan? m) (assoc :plan? true) (:process? m) (assoc :process? true) (:items m) (assoc :items (:items m))
+                    :tests (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m)) (:names m) (assoc :names (:names m)) (:mode m) (assoc :mode (:mode m)) (:plan? m) (assoc :plan? true :key (:key m) :digest (:digest m)) (:process? m) (assoc :process? true) (:items m) (assoc :items (:items m))
                                             ;; a session's or a landing's checkout: its granted items' test children read its files and its process store
                                             (:checkout m) (assoc :checkout (:checkout m))
                                             ;; the batch's tag: its test child and what that starts carry it, so the :process owner reads
@@ -939,7 +939,7 @@
       ;; an effect owner's failed outcome (seon.fx/owner-proc)
       :problem (problem st (err/occurrence (:error m) (:class m) {:agent (:agent m) :task (get-in st [:view :agents (:agent m) :task])}
                                            (System/currentTimeMillis)))
-      ;; an agent's proc observed it stalled (seon.agent-proc :stall?): a fact on the agent, what it
+      ;; an agent stalled, said by the agent (seon.agent/quiescent!) or seen by its proc (:stall?, for an eval pinned in C): a fact on the agent, what it
       ;; waits on with it, an open problem while it holds (seon.problems/stalled-agents); its next
       ;; frame (:spoke) or its end retracts it
       :stalled (let [s (cond-> {:quiet-ms (:quiet-ms (:error m))} (get-in m [:error :last-op]) (assoc :last-op (get-in m [:error :last-op])))]
@@ -2108,7 +2108,8 @@
   "Hand an outside agent's task to the reconciler for judgement, as a turn loop's end
   is: proofs in a fork, the branch read, the agent retired. work {:task :env
   :agent}. nil."
-  {:malli/schema [:=> [:cat :seon.system/sys :map] :nil]}
+  {:seon.flow/edge "an outside caller's put into the graph (the server's op): its wait is the :judge in-port's back-pressure, the point"
+   :malli/schema [:=> [:cat :seon.system/sys :map] :nil]}
   [sys work] (a/>!! (:judge sys) (assoc work :op :judge)) nil)
 
 (defn await-db
@@ -2427,7 +2428,7 @@
 
 (defn stop!
   "Stop root by letting the flow drain: the api closes (later calls answer \"root
-  stopped\"); every agent is sent :stop, never interrupted: its run ends between turns and it exits after the requests before
+  stopped\"); every agent is sent :stop, never interrupted: its run ends at once (seon.repl/agent-step) and it exits after the requests before
   it (seon.agent-proc/stop!); the writer's in-port closes, it commits and flushes what it
   took; the fork server is killed and reaped; then flow/stop (every proc exited) and the
   reader. Every wait ends on its answer, none on a clock. Nothing accepted is lost.
