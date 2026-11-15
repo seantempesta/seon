@@ -413,15 +413,10 @@
     (when (zero? (:exit r)) (:out r))))
 
 (defn binary-digest
-  "The binary identity of git tree tree in the repository at root: the digest (seon.lib/digest) of what only a build can change
-  there, one line each: the git ls-tree lines of the paths and prefixes tree's :seon.config.build/inputs names, every pin (a
-  gitlink; seon.fx/tree-id keeps only those .gitmodules names), and the value tree's default.edn states for each config key a
-  schema of tree's marks :seon.config/build (read by the compiler at a build), :seon.config/at-load or :seon.config/place
-  (read once at load or before any db, so only a new process acts on a change), each read as EDN data wherever its entry sits
-  in its file. A key read at load or a place leaves it once a landing reloads its readers in place and restarts for a place
-  (seon.config/waiting): task seon.program/a-process-runs-its-branchs-program.
-  What bin/build records with the binary (seon.system/built-program's :digest) and seon.fx/runtime-for compares. The program
-  (src/'s forms) is not in it: a process loads its branch's forms as a diff. Four git calls. See
+  "The binary identity of git tree tree in the repository at root: the digest of what only a new binary or process acts on: tree's
+  build inputs (:seon.config.build/inputs), its pins, and the value default.edn states for each config key a schema marks
+  :seon.config/build, :seon.config/at-load or :seon.config/place, read as EDN data. What seon.system/built-program records with
+  the binary and seon.fx/runtime-for compares; the program (src/'s forms) is not in it. Four git calls. See
   docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat :string :string] [:or :seon.lib/digest :seon.error/base]]}
   [root tree]
@@ -507,6 +502,22 @@
                               (mismatch (:digest w) "its program (src) is not the binary's: build it")))
            :else {:binary (str root "/target/seon") :digest (:digest w)}))))
 
+(defn- drop-unnamed-gitlinks!
+  "Drop from the index env names every gitlink the checkout at root's .gitmodules does not name: a pin is a gitlink .gitmodules
+  names, and a nested repository it does not (a clone left in the checkout) is no part of the tree, so it moves no tree and no
+  binary identity (bin/tree, the same rule; 15:53's core.async-flow, 2026-11-15). See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat [:map-of :string :string] :string] :any]}
+  [env root]
+  (let [mods (set (when (.isFile (java.io.File. (str root "/.gitmodules")))
+                    (for [l (str/split-lines (str (git-try root ["config" "-f" (str root "/.gitmodules") "--get-regexp" "^submodule\\..*\\.path$"])))
+                          :when (not (str/blank? l))]
+                      (second (str/split l #" " 2)))))
+        extra (for [l (str/split-lines (git! env root ["ls-files" "-s"] nil))
+                    :let [[m _ _ p] (str/split l #"\s+" 4)]
+                    :when (and (= "160000" m) (not (mods p)))]
+                (str ":(top)" p))]
+    (when (seq extra) (git! env root (into ["rm" "--cached" "-f" "-q" "--"] extra) nil))))
+
 (defn tree-id
   "git's id of the tree at root as it is on disk: HEAD's tree (none before a first commit) with every
   changed and untracked unignored file added, in an index of its own (the repository's untouched), less
@@ -534,17 +545,7 @@
                head? (git! env root ["read-tree" "HEAD"] nil)))
        (git! env root ["add" "-A"] nil)
        (when (seq excludes) (git! env root (into ["rm" "-r" "--cached" "-q" "--ignore-unmatch" "--"] top) nil))
-       ;; a pin is a gitlink .gitmodules names: a nested repository it does not name (a clone left in the checkout) is no part
-       ;; of the tree, so it moves no tree and no binary identity (bin/tree, the same rule; 15:53's core.async-flow, 2026-11-15)
-       (let [mods (set (when (.isFile (java.io.File. (str root "/.gitmodules")))
-                         (for [l (str/split-lines (str (git-try root ["config" "-f" (str root "/.gitmodules") "--get-regexp" "^submodule\\..*\\.path$"])))
-                               :when (not (str/blank? l))]
-                           (second (str/split l #" " 2)))))
-             extra (for [l (str/split-lines (git! env root ["ls-files" "-s"] nil))
-                         :let [[m _ _ p] (str/split l #"\s+" 4)]
-                         :when (and (= "160000" m) (not (mods p)))]
-                     (str ":(top)" p))]
-         (when (seq extra) (git! env root (into ["rm" "--cached" "-f" "-q" "--"] extra) nil)))
+       (drop-unnamed-gitlinks! env root)
        (git! env root ["write-tree"] nil)
        (finally (.delete idx))))))
 
