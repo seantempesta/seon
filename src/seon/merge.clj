@@ -790,8 +790,12 @@
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.merge/entry-value]]}
   [db]
   (let [es (entries db)
-        prog (program-of db (mapv :key es) #{})]
-    (filterv #(and (not (:resolved? %)) (same? (:key %) (:ours %) (get prog (:key %)))) es)))
+        ;; a datum's branch content is read where it is, one seek; program-of holds no datums (they were never shown: a datum
+        ;; conflict refused the merge while the agent saw nothing to settle, tests' pilot branch 2026-11-15)
+        datum (fn [[_ e a v :as k]] (if (= 4 (count k)) (some? (first (d/datoms db :eavt e a v))) (:v (first (d/datoms db :eavt e a)))))
+        prog (program-of db (into [] (comp (map :key) (remove #(= :datum (first %)))) es) #{})
+        now (fn [k] (if (= :datum (first k)) (datum k) (get prog k)))]
+    (filterv #(and (not (:resolved? %)) (same? (:key %) (:ours %) (now (:key %)))) es)))
 
 (defn content-tx
   "The facts that make the entity of stated key k on db hold content c (a side of an unmerged entry, as stated-content reads it): each
