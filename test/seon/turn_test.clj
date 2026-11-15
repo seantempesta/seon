@@ -108,7 +108,7 @@
                                      #'agent/send! (fn [m] (when (and (= :reply (:op m)) (= 7 (:id m))) (deliver replied m)) true)
                                      #'lib/c-exit (fn [code] (deliver exited code) nil)}
                       (fn []
-                        (let [g (flow/create-flow {:procs {:repl {:proc (flow/process #'repl/agent-step)}} :stop-timeout-ms 1000})]
+                        (let [g (flow/create-flow {:procs {:repl {:proc (flow/process #'repl/agent-step)}}})]
                           (flow/start g) (flow/resume g)
                           ;; the graph is stopped inside the redefinitions whatever ends the test: a :stop it still holds must
                           ;; never reach the real lib/c-exit, which would end this test process (it ended a shard at exit 0 once)
