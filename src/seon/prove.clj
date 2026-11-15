@@ -275,6 +275,18 @@
                                                  :proofs (into #{} (filter #(contains? proofs (first %))) (keys items))}) items)]
       (grant st))))))
 
+(defn- verdicts-write
+  "st and the output asking the api to write tx (a batch's :seon.proof tx-data) on the results branch
+  (:seon.config.proofs/results-branch), the tx held under k until its answer: nothing when tx is empty. See
+  docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :map :string [:maybe [:vector :map]]] [:tuple :map [:vector :map]]]}
+  [st k tx]
+  (if (seq tx)
+    (let [[st m] (step/ask (assoc-in st [:verdict-writes k] tx) [:prove :answers] [:verdicts k]
+                           {:op :write :req {:op :tx :branch (cfg/value :seon.config.proofs/results-branch) :tx-data tx}})]
+      [st [m]])
+    [st []]))
+
 (defn batch-ended
   "Batch bid's answer r (the agent's :tests answer: its :reports by test var, its :failures; or the error its run answered,
   a died child among them): each of its items ended with its own result, one the answer does not name with the typed
@@ -307,8 +319,12 @@
         results (map (juxt identity result) (sort-by str batch))
         [st outs] (reduce (fn [[st outs] [k r]] (let [[st o] (item-ended st k r)] [st (into outs o)])) [st []] results)
         no-verdicts (for [[_ r] results :when (= :seon.prove/no-verdict (:seon.error/type r))] {:op :problem :class :platform :error r})
+        ;; the batch's verdicts (:seon.proof tx-data its agent made, seon.proofs/verdict-tx) written to the results branch by this
+        ;; proc, one write a batch: asked of the api, answered on :answers as :verdicts (never a wait in this step)
+        [st vw] (verdicts-write st (str bid) (when (map? r) (:verdict-tx r)))
         [st more] (grant st)]
-    [st (-> outs (into no-verdicts) (into more))]))
+    [st (-> outs (into no-verdicts) (into vw) (into more))]))
+
 
 ;; ---- the daily full run: a run of its own ------------------------------------------------
 
@@ -565,6 +581,17 @@
   [st [step key] r]
   (case step
     :killed [st []]
+    ;; a batch's verdicts written (verdicts-write): done; the results branch missing, the writer makes it from main
+    ;; (:clone-branch) and the same write is asked again; any other refusal, a :platform problem (the verdicts run again)
+    :verdicts (let [tx (get-in st [:verdict-writes key]) st (update st :verdict-writes dissoc key)
+                    rb (cfg/value :seon.config.proofs/results-branch)]
+                (cond (not (contract/error? r)) [st []]
+                      ;; the writer's refusal of a :tx on a branch the store lacks [M]: "Database does not exist."
+                      (and tx (= :seon.writer/refused (:seon.error/type r)) (str/includes? (str (:seon.error/message r)) "does not exist"))
+                      (let [[st m] (step/ask st [:prove :answers] [:results-branch key] {:op :write :req {:op :clone-branch :from :db :branch rb}})]
+                        [(assoc-in st [:verdict-writes key] tx) [m]])
+                      :else [st [{:op :problem :class :platform :error r}]]))
+    :results-branch (let [[st o] (verdicts-write st key (get-in st [:verdict-writes key]))] [st o])
     :full (if (= key (:key (:full st))) (full-answered st step r) [(update st :stale (fnil inc 0)) []])
     :batch (let [[st outs] (batch-ended st (parse-long key) r)] (settle st outs))
     (let [run (get-in st [:runs key])]
