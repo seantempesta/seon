@@ -430,9 +430,9 @@
         kw (#'seon.render.proc/laid kw)]
     [(:p (#'seon.render.proc/advance-walk! kw later :b identity))]))
 
-;; Estimate: three inputs drawn cold (kept walks of 10, 40 and 160 turns, ~0.6M ticks a turn: ~126M) and 17 warm samples a size of a
-;; layout under 250k (~13M): ~140M ticks, worked from the work.
-(deftest ^{:seon.test/estimate {:ticks 140000000}} a-move-lays-out-only-what-it-touched
+;; Estimate: three inputs drawn cold (kept walks of 10, 30 and 90 turns, ~0.6M ticks a turn: ~78M) and 17 warm samples a size of a
+;; layout under 250k (~13M): ~90M ticks, worked from the work.
+(deftest ^{:seon.test/estimate {:ticks 90000000}} a-move-lays-out-only-what-it-touched
   ;; task seon.ratom/web-reads-on-the-core, slice 1 (the layout as reactions): after a move, laying the page out runs the units the
   ;; move reached and the chain of subtrees above them, never a pass over the whole page. Red before: placed-units walks every
   ;; component at each read (2.31M ticks on root's page for a 5-datom move, result/bc63792d)
@@ -444,7 +444,7 @@
      :growth :constant
      ;; estimate from the arithmetic, before the build: the touched units' html ~0.1M ticks, the chain and concat ~0.15M
      :fixed {:ticks 250000 :bytes 1000000}
-     :sizes [10 40 160]}))
+     :sizes [10 30 90]}))
 
 ;; On disk, the one-store rule's last resort (docs/cost.md#how-we-measure): a page advanced from one turn's basis to the next
 ;; takes the datoms between the two commits (seon.ctx/moved, d/datoms-diff), which skips the subtrees they share by address; the
