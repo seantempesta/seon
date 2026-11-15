@@ -1017,6 +1017,23 @@
                    kw0 [3 4 3 1 5 0 4 4 2])]
     (is (empty? (:defects (:p kw))) "no component drew an error")))
 
+;; See docs/render.md#reactive-renders. Estimate: paged-dbs' two dbs (~1M), the kept walk built once (~0.3M), one advance by one datom
+;; (the diff, the patch, the components that read it: ~0.2M) = ~1.5M ticks, ~10 MB, ~0.1 s: 2,000,000.
+(deftest ^{:seon.test/estimate {:ticks 2000000 :bytes 10000000}} a-commit-of-one-attribute-reruns-only-what-shows-it
+  ;; owner via root, 2026-11-14 21:41: a commit that moves one attribute reruns exactly the components that show it. The layout
+  ;; (seon.render.ui/agent-parts) asked which keys the agent holds by iterating it, which every value replaced reached: an agent's
+  ;; status moved reran it to the same output. It reads the key set alone (seon.ratom/key-set), so only a key added or gone does
+  (let [[_ branch _] (paged-dbs)
+        kw (step-walk branch)
+        a3 (seon.db/eid branch :seon.agent/key "a3")
+        was (:seon.agent/status (d/entity branch a3))
+        db (d/db-with branch [[:db/add a3 :seon.agent/status (if (= :busy was) :idle :busy)]])
+        ran (:ran (:p (#'p/advance-walk! kw db :task-demo-f identity)))
+        renders (set (map (comp first key) ran))]
+    (is (seq ran) "a component showing the status ran")
+    (is (not (contains? renders 'seon.render.ui/agent-parts)) (str "the layout is not among them: " (pr-str ran)))
+    (is (not-any? #{:same} (vals ran)) (str "no component ran to draw what it drew before: " (pr-str ran)))))
+
 ;; See docs/render.md#the-debug-page-is-the-wire-request
 ;; Estimate: paged-dbs' two dbs (~1M), the branch's kept walk built once (~0.3M), and two requests read at the head, one cold (~0.5M)
 ;; and one from the kept walk's answers (~0.05M): ~1.9M; 2,000,000 ticks, worked from the work.
@@ -3141,6 +3158,33 @@
     (let [head (pr-str (ui/root-head {:seon.render/index (seon.db/index) :seon.ctx/ctx (or c {}) :seon.db/db db}))]
       (is (str/includes? head "1 task parked") "the head says so, in the state's plain word, with what it counts")
       (is (str/includes? head "1 task running") "a finished task is not running, whatever its execution still says"))))
+
+;; See docs/cost.md#what-is-measured
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-cost-report-shows-every-dimension-its-estimate-states
+  ;; seon.render.ui/cost-report's columns are seon.cost/dimensions its rows' estimates state; a hand list of them lacked :ticks, the
+  ;; owner's measure, so a proof held in ticks showed no ticks
+  (let [html (h/html (ui/cost-report {:seon.render/index (seon.db/index)}
+                                     {:rows [{:n 2 :measured {:ticks 900.0 :bytes 1000.0} :expected {:ticks 800.0 :bytes 2000.0}}]
+                                      :verdict {:ok? true :over [] :steeper [] :under [] :unmeasured []}}))]
+    (is (str/includes? html "ticks measured / estimate") html)
+    (is (str/includes? html "bytes measured / estimate"))
+    (is (< (str/index-of html "ticks measured") (str/index-of html "bytes measured")) "in the verdict's order")))
+
+;; See docs/render.md#how-the-work-stands
+(deftest ^{:seon.test/estimate {:ticks 2000000}} an-agents-standing-is-its-enums-words
+  ;; owner, 2026-11-14: a list that restates data is derived. How a value of :seon.agent/status, :seon.agent/outcome and
+  ;; :seon.task/outcome reads is that enum's :seon.status/title and :seon.status/tone, so a schema that says it otherwise is read
+  (binding [malli.registry/*registry* (malli.registry/composite-registry
+                                        (malli.core/default-schemas)
+                                        {:seon.agent/status [:enum {:seon.status/title {:idle "resting"} :seon.status/tone {:idle :ask}} :idle]})]
+    (let [s (ui/standing {:seon.agent/status :idle} nil)]
+      (is (= "resting" (:text s)) "its words are the schema's")
+      (is (= :ask (:tone s)) "and so is its tone")))
+  ;; every enum that states tones (each schema form whose properties hold :seon.status/tone) gives one to each value it titles
+  (let [toned (filter #(:seon.status/tone (seon.contract/properties %)) (keys seon.contract/forms))]
+    (is (<= 3 (count toned)) (str "the work's enums state their tones: " (vec toned)))
+    (is (every? (fn [k] (let [{:seon.status/keys [title tone]} (seon.contract/properties k)] (every? #(get tone %) (keys title)))) toned)
+        "every value with words has a tone")))
 
 (deftest how-an-agents-work-stands-is-said-from-its-data
   ;; owner, 2026-11-05: an agent whose task hit its turn cap read "waiting" and "idle", though a capped task is not woken
