@@ -287,7 +287,7 @@
   "Each step of the one path to a provider, and who may reference it."
   '{seon.ctx.wire/request #{seon.ctx.wire/render}
     seon.model/wire-messages #{seon.model/request-body}
-    seon.model/request-body #{seon.model/openai-compat seon.ctx.wire/wire-turn}})
+    seon.model/request-body #{seon.model/openai-compat seon.ctx.wire/wire-of}})
 
 (defn- rows-with
   "The rows of the forms of db in namespaces nss whose source holds one of texts, each with :read, what its source reads as."
@@ -325,8 +325,8 @@
         asks (for [r (rows-with db nss [":messages"])
                    :when (some #(and (map? %) (contains? % :messages) (or (contains? % :turn) (contains? % :model))) (tree-seq coll? seq (:read r)))
                    v (named-by r)
-                   :when (not (or (some #{'seon.ctx.wire/render 'seon.ctx.wire/request} (:refs r))
-                                  (#{'seon.model/request-body 'seon.ctx.wire/request 'my.root/first-moves!} v)))] v)]
+                   :when (not (or (some #{'seon.ctx.wire/render 'seon.ctx.wire/request 'seon.turn/request!} (:refs r))
+                                  (#{'seon.model/request-body 'seon.ctx.wire/request 'seon.ctx.wire/wire-of 'my.root/first-moves!} v)))] v)]
     (set (concat by-ref role asks))))
 
 (defn- action-sites
@@ -584,9 +584,12 @@
   (let [[main branch] (paged-dbs)
         st (-> (proc-state main branch) (assoc :watch #{}) (root-state main))
         main2 (d/db-with (:main-db st) [{:seon.task/id "zz/one" :seon.task/ns 'zz :seon.task/name "one" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work}])
-        n (atom 0) diff d/datoms-diff
-        st2 (with-redefs [d/datoms-diff (fn [& args] (swap! n inc) (apply diff args))] (#'p/advance-main st main2))]
-    (is (= 1 @n) (str "one diff a move of main, " @n " made"))
+        ;; the diff is seon.ctx/moved (a contracted function: seon.profile counts its calls, exactly, where every walk reads main's move);
+        ;; no library var is redefined to count it
+        _ (seon.profile/begin!)
+        st2 (#'p/advance-main st main2)
+        n (some #(when (= 'seon.ctx/moved (:var %)) (:calls %)) (seon.profile/touched))]
+    (is (= 1 n) (str "one diff a move of main, " n " made"))
     (is (identical? main2 (get-in st2 [:root-walk :db])) "root's walk is at the new main")))
 
 (deftest the-problems-tile-counts-what-still-holds
@@ -741,10 +744,10 @@
         ;; 2026-11-12: root's session names its task (request/root, as any request's agent does), so its page draws it as an agent's does:
         ;; the task, its cite, how it stands, its turn and the chat's ask
         root0 #{"chat-ask" "cite-request_2Froot_20docs_2Fagent_2Emd_23working-for-a-person" "status" "task-view-request_2Froot" "turn"
-                "agent-state" "app" "c-rows" "c-side" "p-agent-head" "p-caption" "p-head"
+                "agent-state" "app" "c-rows" "p-agent-head" "p-caption" "p-head"
                 "p-input" "p-rules" "p-task" "p-tiles" "page-rules" "stage-as" "stage-front" "system-message"}
         ;; 2026-11-15, the owner's ruling (docs/decisions.md, The page is a friendly chat): root's chat is the person's, so the sessions list
-        ;; (agent-a3, agent-user, u-agent-a3, u-root-side) and the system's view (root-head, process-tile, problems-tile, root-evals with its eval root-1) left it for root's debug page
+        ;; (agent-a3, agent-user, u-agent-a3, u-root-side) and the system's view (root-head, process-tile, problems-tile, root-evals with its eval root-1) left it for root's debug page, and the frame's empty agents column (c-side) with them
         ;; what the frame's page-chrome drew by hand is now the layout's: its root (the page), its columns and the frame's slot for it
         ;; and the top bar's region for which system it is (seon.render.ui/system-source; this fixture's root holds no source, so it is empty)
         added #(remove (fn [id] (or (#{"p-page" "p-agents" "p-chat" "p-context" "p-system"} id) (str/starts-with? id "agent-") (str/starts-with? id "stage-"))) (clojure.set/difference % %2))]
@@ -1322,7 +1325,9 @@
         ;; measured 2026-11-11, the walk's own class on each component's root (its render's name) among them: it goes when data-render replaces it.
         ;; 2026-11-12: more drawn, no render's own count up: a3's page (every branch read keeps its walk now) and root's own task (root's
         ;; session names request/root, through which it reaches the person it works for)
-        pinned '{seon.render.ui/agent {:class 23 :wire 4} seon.render.ui/agent-parts {:class 3} seon.render.ui/agent-state {:class 3 :wire 3} seon.render.ui/agents-list {:class 1} seon.render.ui/chat-ask {:class 6} seon.render.ui/chat-end {:class 1} seon.render.ui/cite {:class 2} seon.render.ui/conversation-list {:class 3} seon.render.ui/conversation-turn {:class 5} seon.render.ui/eval-output {:class 75 :qualified 36} seon.render.ui/evaluation {:class 21 :qualified 9} seon.render.ui/message {:class 2} seon.render.ui/model-call-view {:class 2} seon.render.ui/page-rules {:class 3} seon.render.ui/problems-tile {:class 1} seon.render.ui/process-tile {:class 4} seon.render.ui/root {:class 1} seon.render.ui/root-evals {:class 3} seon.render.ui/root-head {:class 2} seon.render.ui/root-side {:class 6} seon.render.ui/rules-list {:class 3} seon.render.ui/status {:class 2} seon.render.ui/system-message {:class 6 :wire 3} seon.render.ui/task-view {:class 10} seon.render.ui/turn {:class 2}}]
+        ;; 2026-11-15: chat-ask 6 -> 13 with no render changed: root's boot now writes the binary's plan over a stale one
+        ;; (seon.system/root-agent-boot-tx), so this world's root holds the real plan, long enough to draw folded, where it held "p"
+        pinned '{seon.render.ui/agent {:class 23 :wire 4} seon.render.ui/agent-parts {:class 3} seon.render.ui/agent-state {:class 3 :wire 3} seon.render.ui/agents-list {:class 1} seon.render.ui/chat-ask {:class 13} seon.render.ui/chat-end {:class 1} seon.render.ui/cite {:class 2} seon.render.ui/conversation-list {:class 3} seon.render.ui/conversation-turn {:class 5} seon.render.ui/eval-output {:class 75 :qualified 36} seon.render.ui/evaluation {:class 21 :qualified 9} seon.render.ui/message {:class 2} seon.render.ui/model-call-view {:class 2} seon.render.ui/page-rules {:class 3} seon.render.ui/problems-tile {:class 1} seon.render.ui/process-tile {:class 4} seon.render.ui/root {:class 1} seon.render.ui/root-evals {:class 3} seon.render.ui/root-head {:class 2} seon.render.ui/root-side {:class 6} seon.render.ui/rules-list {:class 3} seon.render.ui/status {:class 2} seon.render.ui/system-message {:class 6 :wire 3} seon.render.ui/task-view {:class 10} seon.render.ui/turn {:class 2}}]
 
     (is (= pinned seen) (str "a count moved: write the new one here when it went down, never when it went up\n"
                              (pr-str (into (sorted-map) seen))))))
@@ -1685,7 +1690,9 @@
     (is (not (str/includes? (bar root) "on jolt")) "no build name")
     (is (not (str/includes? (bar root) "p-system")) "no checkout line")
     (is (not-any? #(= "#p-system" (:container %)) (:seon.render/units root)) "and no unit for it")
-    (is (str/includes? (h/html (:seon.render/hiccup dbg)) "p-system") "the debug view has the checkout line's place")))
+    (is (str/includes? (h/html (:seon.render/hiccup dbg)) "p-system") "the debug view has the checkout line's place")
+    (is (not (str/includes? (h/html (:seon.render/hiccup home)) "id=\"p-agents\"")) "no agents column on the person's page (it drew an empty one)")
+    (is (str/includes? (h/html (:seon.render/hiccup (#'p/page-value st [:chat :a3]))) "id=\"p-agents\"") "an agent's page keeps it")))
 
 ;; See docs/render.md#the-page
 (deftest ^{:seon.test/estimate {:ticks 2000000}} roots-chat-has-the-persons-message-box
@@ -3049,6 +3056,13 @@
     (let [db2 (d/db-with db (seon.system/root-agent-boot-tx db))
           same (fn [d] [(dissoc (d/pull d '[*] [:seon.agent/key "root"]) :db/id) (dissoc (d/pull d '[*] [:seon.task/id "request/root"]) :db/id)])]
       (is (= (same db) (same db2)) "a boot after changes nothing of it"))
+    ;; a main made by an older binary holds that binary's plan text, which root's session read until a boot wrote it again (round 3:
+    ;; main's plan named my.user/sessions, gone from the code)
+    (let [stale (d/db-with db [{:seon.task/id "request/root" :seon.task/plan "An older text."}])
+          db3 (d/db-with stale (seon.system/root-agent-boot-tx stale))]
+      (is (= (:seon.task/plan (d/entity db [:seon.task/id "request/root"])) (:seon.task/plan (d/entity db3 [:seon.task/id "request/root"])))
+          "a boot writes the binary's plan over a stale one")
+      (is (str/includes? (:seon.task/plan (d/entity db3 [:seon.task/id "request/root"])) "plainly") "which tells it to talk plainly"))
     (let [fresh (d/db-with (my.test/world) (into (seon.task/boot-tx "b1" "sean") (seon.system/root-agent-boot-tx (my.test/world))))]
       (is (some? (d/entity fresh [:seon.agent/key "root"])) "a root no one has messaged has its session from its boot")
       (is (= :parked (:seon.task/outcome (d/entity fresh [:seon.task/id "request/root"]))) "parked until a message"))))

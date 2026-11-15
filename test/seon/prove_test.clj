@@ -44,6 +44,13 @@
           (recur st (into all o) (inc (.indexOf all m))))
         [st all]))))
 
+;; Estimate: one state-view of a small state map: ~20k ticks; 200,000
+(deftest ^{:seon.test/estimate {:ticks 200000}} the-state-view-says-how-far-mains-proving-is-behind
+  ;; root's (c), 2026-11-15: main's proving never backlogs (moves during a run coalesce into one next run), and the sweep reads how
+  ;; far behind it is from the view root keeps (:prove-state), never a fact written per move. Red before: the view had no :main
+  (let [v (#'prove/state-view {:runs {} :items {} :pending {} :main-asked 5 :main-want {:t 12 :commit "c" :program-t 9}})]
+    (is (= {:asked 5 :wanted 9 :in-flight false} (:main v)) (pr-str v))))
+
 (deftest ^{:seon.test/estimate {:ticks 500000}} a-running-key-is-joined-and-every-waiter-is-answered-once
   (let [[st outs] (feed (proc0) [(req 1 :main 5) (req 2 :main 5) (req 3 :main 5)])]
     (is (= 1 (count (asks outs :spawn))) "three askers of one key: one run")
@@ -115,6 +122,36 @@
         (is (= 1 (count (asks o1 :spawn))) "the first move starts main's run")
         (is (empty? (asks o2 :spawn)) "two more moves while it runs start nothing and supersede nothing")
         (is (= 2 (count spawns)) (str "the run ends, then exactly one more runs: " (count spawns)))))))
+
+;; Estimate: two notices folded and one spawn answered, map ops: ~0.5M ticks; 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-main-run-whose-agent-dies-is-asked-again-and-said
+  ;; task seon.prove/a-main-run-whose-agent-dies-is-asked-again-or-said: main's run at a program move spawns its prove agent, which
+  ;; dies at its start on another runtime (agent f3eb9fa024d0930d, 2026-11-15 16:34:36: its spawn answered
+  ;; :seon.process/env-mismatch). Its failure is a :platform problem naming the program it could not prove and its owner, and main is
+  ;; asked again once a notice brings other inputs (a rebuilt binary), never again on the same ones (root). Red before: the want was
+  ;; spent when asked, so nothing asked again until the program moved, and no problem named main unproved
+  (let [value seon.config/value
+        died (seon.contract/error :seon.process/env-mismatch 'seon.fx/runtime-for
+                                  "target/seon's identity c7311e6b is not tree e6275967's 76dc758d: build it"
+                                  {:seon.process/differs [] :seon.process/binary-digest "c7311e6b" :seon.process/branch-digest "76dc758d" :seon.process/tree "e6275967"})
+        binary (atom "c7311e6b")]
+    (with-redefs [seon.config/value (fn [k] (if (= k :seon.config.proofs/prove-main-on-commit) true (value k)))
+                  seon.db/at-commit (fn [_ c] c)
+                  seon.program/run-digest (fn [c] (str "dg-" (name c)))
+                  seon.prove/binary-identity (fn [] @binary)]
+      (let [note (fn [t pt] [:main {:t t :ops [] :commit (keyword (str "c" pt)) :program-t pt}])
+            [st o1] (feed (proc0) [(note 6 6)])
+            spawn (first (asks o1 :spawn))
+            [st o2] (feed st [(answer-of spawn died)])
+            [st o3] (feed st [(note 7 6)])
+            _ (reset! binary "76dc758d")
+            [_ o4] (feed st [(note 8 6)])]
+        (is (some? spawn) "the program move asks main's run")
+        (is (some #(and (= :problem (:op %)) (= :platform (:class %)) (= :seon.process/env-mismatch (get-in % [:error :seon.error/type]))
+                        (= 'seon.fx (get-in % [:error :seon.problems/owner])) (= 6 (get-in % [:error :seon.prove/main-unproved]))) o2)
+            (str "its agent's death is a :platform problem naming its owner and the program left unproved: " (pr-str o2)))
+        (is (empty? (asks o3 :spawn)) "the same inputs (program and binary) are not asked again: same inputs, same answer")
+        (is (= 1 (count (asks o4 :spawn))) "a rebuilt binary is new inputs: main is asked again")))))
 
 (deftest ^{:seon.test/estimate {:ticks 500000}} an-answer-whose-child-died-is-never-remembered
   ;; THE PLAN 0.7 (root, 2026-10-27): a judge's run whose test child died answered every later ask

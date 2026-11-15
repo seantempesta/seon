@@ -56,7 +56,7 @@ A public function, macro or def of Seon's own source whose docstring cites no `d
 
 ## A key with no schema
 
-Every key Seon names is one schema entry: each of Seon's own qualified keywords (a `seon` or `my` namespace) that a source form names (`:form/keywords`) and no entry defines (`:schema/key`) is an `:unschemed-key` (```seon.problems/unschemed-keys```), one row a key naming the vars that use it. A reverse ref and an enum's value are not keys. A branch that names a new key without its entry, or removes the entry of a key still named, is caused the row; it closes when the entry is written, with its `:description`.
+Every key Seon names is one schema entry: each of Seon's own qualified keywords (a `seon` or `my` namespace) that a source form names (`:form/keywords`) and no entry defines (`:schema/key`) is an `:unschemed-key` (```seon.problems/unschemed-keys```), one row a key naming the vars that use it and the form that clears it, `(my.schema/register! k ...)`, which the status shows beside the problem as it shows a red proof's (`seon.problems-test/a-caused-row-carries-the-form-that-clears-it`). A reverse ref and an enum's value are not keys. A branch that names a new key without its entry, or removes the entry of a key still named, is caused the row; it closes when the entry is written, with its `:description`.
 
 ## A retyped attribute
 
@@ -77,6 +77,8 @@ Every hand-made list is shown with its owning namespace for judgement, case by c
 ## State or a wait outside Flow
 
 After boot every stateful process is a Flow proc ([flow](flow.md#the-five-rules)), so health names each var of `src/` that holds process-global state (a def or defonce of an atom, volatile, promise or `java.util.concurrent` value), mutates such a var, waits on a channel outside go (`<!!`, `>!!`, `alts!!`) or starts a thread, with what it does, for its owner to move into a proc's state and ports (```seon.problems/stateful-outside-flow```). A var that must stay outside says why on its own def, `:seon.flow/edge` with its reason (an edge reader for a blocking read, Chez's interrupt stack, an OS signal's hook), so the exemption travels with the code and goes with it. It reads the program's own index: one seek a var, so health's run over the moved vars costs what moved.
+
+It is a ratchet, not upkeep (the owner's ruling, 2026-11-15: once running, nothing inside Seon crashes or hangs): a branch that adds a row fails, unless its var names its edge; the rows main already holds stay listed until each is moved (`seon.problems-test/a-branch-that-adds-state-outside-flow-fails-unless-it-names-its-edge`). The list, ranked worst first with each one's owner, is task `seon.problems/nothing-inside-seon-crashes-or-hangs`.
 
 ## An unfocused docstring
 

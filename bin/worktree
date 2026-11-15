@@ -1,4 +1,5 @@
 #!/bin/zsh
+# DEVIATES: a checkout per session, outside the one system; retired, not ported, when sessions work on their agents' branches (seon.system/a-sessions-files-are-a-transaction-on-its-agents-branch).
 # bin/worktree NAME [BASE]    a worktree of the main tree on branch jolt/NAME (a new one from BASE, default
 #                             main; an existing BRANCH as it is, said on stderr with its last commit; an existing worktree is refused, naming it), at <root>/.worktrees/NAME (gitignored: a
 #                             worktree is inside the root it belongs to)
@@ -99,7 +100,8 @@ setup() {
     # and delete while this copies (a directory deleted under cp failed the copy: seon.source-test's
     # bin/worktree --at went red in full proves, never alone)
     for e in "$FROM"/target/*.stamp(N); do
-      # and NAME.program, the program the binary was built from (seon.system/binary-current reads it: without it a gate's binary is unknown, and builds)
+      # and NAME.program, the program the binary was built from (seon.system/binary-current reads it: without it a gate's binary is unknown, and builds),
+      # whose :digest is its identity (seon.fx/runtime-for compares it at every start)
       for p in $e ${e%.stamp} ${e%.stamp}.build ${e%.stamp}.tree ${e%.stamp}.program; do
         if [[ -e $p ]]; then cp -cR "$p" "$WT/target/"; fi
       done

@@ -1,5 +1,6 @@
 #!/bin/zsh
 # bin/full-run [HEAD]   one line: how many landings HEAD (default main) is past the last full run that ended, as bin/test --all
+# DEVIATES (owner, 2026-11-15: every bin/ script is thin over an op): reads the full run's record from a file beside the verdict cache, not the store; not ported: seon.prove/the-daily-full-run-is-a-service-run asks what job is left once the runtime's mechanisms do theirs (owner: never port the outside logic as it is).
 #                       recorded it beside the verdict cache (full-run.edn in :seon.config.proofs/results-dir), and what it found:
 #                       "full run: N landings ago, :green|:red, at <commit>", or "full run: none recorded". What bin/land prints
 #                       before LANDED and bin/system status after its own line (docs/merging.md#the-full-run-is-the-net). A count of

@@ -1171,6 +1171,13 @@
         (swap! held-entities into (remove unheld) new)
         (update-vals outs #(filterv unheld %))))))
 
+(defn running-form
+  "What this process runs for var v: the id of the form it loaded for v since boot, else the program digest of its binary's build
+  (binary-program's :program), else \"unbuilt\". A result v computes and keeps on disk is keyed by it, so a change of v's code
+  misses by construction. See docs/data-modeling.md#derived-data-is-a-cache-never-relied-on."
+  {:malli/schema [:=> [:cat :qualified-symbol] :string]}
+  [v] (or (get @loaded v) (:program (binary-program)) "unbuilt"))
+
 (defn note-loaded!
   "Record that this process now runs form id for each var of vars (an agent's REPL definition, as it records it). nil."
   {:malli/schema [:=> [:cat [:sequential :qualified-symbol] :string] :nil]}
@@ -1369,7 +1376,15 @@
                                      ;; the branch removed is still in main's file; required whole, it brought main's forms back over the
                                      ;; branch's (a test child naming a var its branch deleted, 2026-11-12)
                                      (str/blank? (str/replace (reduce (fn [t f] (str/replace-first t (:src f) "")) text (live n))
-                                                              #"(?m);.*$" "")))))))]
+                                                              #"(?m);.*$" "")))))))
+        wholes (filterv whole? (distinct (map :ns (load-order forms))))]
+    ;; require reads a namespace's file from this process's source roots: the source dirs of the tree main was imported from are
+    ;; put on them, whichever process runs this (a bin/test child holds the checkout's; a prove agent in the image held none, so a
+    ;; file found here was "not on the source roots" there: seon.program/a-test-namespace-loads-whole-in-whatever-process-runs-it)
+    (when (and root (seq wholes))
+      (let [have (set (jolt.host/source-roots))
+            want (remove have (map #(str root "/" %) (cfg/value :seon.config.source/dirs)))]
+        (when (seq want) (jolt.host/set-source-roots! (into (vec (jolt.host/source-roots)) want)))))
     (binding [mr/*registry* (schema-registry (schema-changes db))]
       (reduce (fn [[ok errs] n]
                 (if-let [e (try (require n) nil (catch Throwable e e))]
@@ -1380,7 +1395,7 @@
                                                 :let [r (contract/arm! v)]
                                                 :when (contract/error? r)]
                                             {:ns n :message (:seon.error/message r)}))]))
-              [#{} []] (filterv whole? (distinct (map :ns (load-order forms))))))))
+              [#{} []] wholes))))
 
 (defn defined-keys
   "The var and method keys of every definition a form of db points to: what bin/build records as binary-program's :defs, so

@@ -43,6 +43,7 @@ The failure points whose edge catches, each with the variant it declares and who
 | The store refuses the agent's run-ahead commit (a value hasch or the codec cannot encode) | `seon.agent/commit!` (`Throwable` around `dw/commit-pending!`; `seon.agent/refused!` drops the writes with `abandon-pending!`) | `:seon.agent/commit-refused` (the dropped transactions) | answered under `:unrecorded` beside the next eval and as a message from seon; the agent's loop never ends on it ([storage](storage.md#a-commit-the-store-refuses)) |
 | The filesystem refuses a write-back | `seon.fx/write-file` | `:seon.fx/io-error` | the asker's `my.fx/call` answer |
 | Seon's source cannot be read when indexed | `seon.fx/read-source` | `:seon.fx/io-error` | the index writes nothing; a boot reads no source |
+| A tree's build inputs or config cannot be read for its binary identity | `seon.fx/binary-digest` | `:seon.fx/io-error` | `seon.fx/runtime-for` answers it, so a start or a landing's restart check names it |
 | A text-index image on disk is corrupt (SQLite refuses it at deserialize or its first read) | `seon.doc/build-index` | `:seon.sqlite/refused` | the index is built again from the db and its image written over; a truncated image is never loaded (`seon.sqlite/fts-load` answers nil) |
 | A dependency's source cannot be read (a root gone, a jar unreadable) | `seon.fx/library-source` | `:seon.fx/io-error` | the vectors proc records it on main (seon.error/asked-tx, :seon.library/inputs), writes no file, and reads again when the inputs move |
 | git cannot say what a checkout changed since main's last index | `seon.fx/changed-since` | `:seon.fx/io-error` (`:path`) | `seon.system/catch-up` writes nothing; the boot resumes main as it is |
@@ -97,6 +98,7 @@ An eval's record is plain data: a value in it that is not (a library's record in
 | an effect worker performing a request | `seon.fx/worker-proc` | `:seon.fx/defect` as the outcome: the asker is always answered |
 | an effect worker folding a streamed reply | `seon.fx/stream-step` | `:seon.fx/defect`, the rest of the stream read and dropped |
 | one outside connection's request (line EDN or MCP's JSON-RPC) | `seon.server/respond` | `:seon.server/defect` (for MCP a JSON-RPC error, `-32700` for a line opening `{"` that is not JSON); every other connection goes on |
+| which way one request line runs, before `respond` reads it (a line naming `inbox`) | `seon.server/inline-op?` | `false`: a line that does not read runs on a `:server-op` worker, where `respond` answers its `:seon.server/defect`; nothing is lost |
 | every root proc | Flow's error channel, piped to the api's `:back` | `:root-errors` in the api's view, written once per signature on main with repeats counted (`seon.error/flush-tx`; `my.root/problems` reads both) |
 
 ## Failure points met without a catch (the edge answers data)

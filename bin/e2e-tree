@@ -1,5 +1,6 @@
 #!/bin/zsh
 # bin/e2e-tree — the end-to-end check that the system proves a session's tree as the tree is (docs/merging.md#a-session-proves-through-root):
+# DEVIATES (owner, 2026-11-15: every bin/ script is thin over an op): starts a system of its own to prove a tree, outside the standing one; not ported: seon.proofs/a-test-forks-from-the-standing-system-and-a-binary-test-reruns-only-for-its-binary asks what job is left once the runtime's mechanisms do theirs (owner: never port the outside logic as it is).
 # that a --root verdict is the changed code's, never main's. Run in a clean checkout; it starts a system of its own on a fresh
 # store (SEON_RUNS=target/e2e-tree) on the CLEAN tree first, then, in order:
 #   src     an existing definition changed so an in-process test goes red (seon.fx/gate-answer counts a red test a pass):
