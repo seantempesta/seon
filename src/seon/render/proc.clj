@@ -705,7 +705,7 @@
                       ;; its REPL and its messages while its process runs; its held task's release. Root's session is talked to as any
                       ;; agent (a message wakes it, and it starts the work); only a user's page, no agent to talk to, asks for a task
                       :input (if (:seon.user/name e) {:schema :seon.render/root-input :value {}} {:schema :seon.render/agent-input
-                              :value {:id (keyword (:seon.agent/key e)) :address (keyword (:seon.agent/key e)) :live? (live? st id) :focus? chat?
+                              :value {:id (keyword (:seon.agent/key e)) :address (keyword (:seon.agent/key e)) :live? (live? st id) :focus? chat? :person? person?
                               ;; what its process can answer: a form running is interrupted (busy)
                               :busy? (= :busy (:seon.agent/status e)) :talks? (some? (or (:seon.agent/task e) (first (:seon.task/_agent e))))
                                       :held (d/q '[:find ?id . :in $ ?a :where [?a :seon.agent/task ?t] [?t :seon.task/execution :held] [?t :seon.task/id ?id]] db eid)}})}

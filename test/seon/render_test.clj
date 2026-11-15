@@ -674,7 +674,7 @@
         (is (some #(= "root-head" (:id %)) (:seon.render/units dbg)) "and the sentence of how the tasks stand"))
       (is (= [:seon.render/agent-input :root] [(:schema (input root)) (:id (:input (input root)))]) "a message to root's session, which starts the work"))
     (testing "an agent's focus: its REPL and messages at the top, live while root's view holds it in this boot"
-      (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil :focus? true :busy? true :talks? true :address :a3}] [(:schema (input agent)) (:input (input agent))]))
+      (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil :focus? true :busy? true :talks? true :address :a3 :person? false}] [(:schema (input agent)) (:input (input agent))]))
       (let [ctx-page (#'p/page-value st :a3)]
         (is (false? (:focus? (:input (input ctx-page)))) "@ctx's input takes no focus: a focused field at the page's end scrolls the page to its bottom")))
     (testing "a location naming no entity is that error, never an empty page; a branch that could not be read is shown as its error"
@@ -1651,6 +1651,25 @@
     (is (and (str/includes? cut "line-0") (not (str/includes? cut "line-2999"))) "output over the value budget is cut")
     (is (< (count cut) 6000) (str "cut by the value's budget: " (count cut) " chars"))
     (is (str/includes? cut "(subs (:seon.print/code (:out result/e23))") "and the cut says how to read the rest")))
+
+;; See docs/render.md#the-page
+(deftest ^{:seon.test/estimate {:ticks 2000000}} roots-chat-has-the-persons-message-box
+  ;; docs/decisions.md, The page is a friendly chat (2026-11-15): the person's box is like the good chat tools: it grows with its text, has a
+  ;; clear Send button, and Enter sends; an agent's page (an expert's) keeps its REPL input with its prompt and interrupt
+  (let [[main branch eid] (paged-dbs)
+        main (signed-in main [eid])
+        st (root-state (proc-state main branch) main)
+        html-of (fn [page] (:html (some #(when (= "p-input" (:id %)) %) (:seon.render/units page))))
+        input-of (fn [page] (some #(when (= "p-input" (:id %)) %) (:seon.render/units page)))
+        root (#'p/page-value st :root)
+        agent (#'p/page-value st [:chat :a3])
+        rendered (fn [page] (let [u (input-of page)] (h/html (r/hiccup {:schema (:schema u) :unit "p-input" :seon.render/index (seon.db/index)} (:input u)))))]
+    (is (str/includes? (rendered root) ">Send</button>") "root's chat: a Send button")
+    (is (str/includes? (rendered root) "placeholder=\"Message Seon\"") "and the person's words")
+    (is (not (str/includes? (rendered root) "root=&gt;")) "no REPL prompt")
+    (is (str/includes? (rendered root) "evt.key===") "Enter sends")
+    (is (str/includes? (rendered agent) "a3=&gt;") "an agent's page keeps its REPL prompt")
+    (is (not (str/includes? (rendered agent) ">Send</button>")) "and no person's box")))
 
 (deftest the-repl-input-takes-focus-only-on-the-chat
   ;; owner, 2026-11-05: @ctx opened scrolled to its very bottom. The REPL's textarea is the page's last element and was
