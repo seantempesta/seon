@@ -505,7 +505,7 @@
 (defn- drop-unnamed-gitlinks!
   "Drop from the index env names every gitlink the checkout at root's .gitmodules does not name: a pin is a gitlink .gitmodules
   names, and a nested repository it does not (a clone left in the checkout) is no part of the tree, so it moves no tree and no
-  binary identity (bin/tree, the same rule; 15:53's core.async-flow, 2026-11-15). See docs/source.md#the-binary-records-its-program."
+  binary identity (bin/tree, the same rule). See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat [:map-of :string :string] :string] :any]}
   [env root]
   (let [mods (set (when (.isFile (java.io.File. (str root "/.gitmodules")))
