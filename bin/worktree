@@ -1,4 +1,5 @@
 #!/bin/zsh
+# DEVIATES: a checkout per session, outside the one system; retired, not ported, when sessions work on their agents' branches (seon.system/a-sessions-files-are-a-transaction-on-its-agents-branch).
 # bin/worktree NAME [BASE]    a worktree of the main tree on branch jolt/NAME (a new one from BASE, default
 #                             main; an existing BRANCH as it is, said on stderr with its last commit; an existing worktree is refused, naming it), at <root>/.worktrees/NAME (gitignored: a
 #                             worktree is inside the root it belongs to)
