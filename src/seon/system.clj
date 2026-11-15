@@ -2454,6 +2454,10 @@
   {:malli/schema [:function [:=> [:cat :seon.system/sys] :map] [:=> [:cat :seon.system/sys :keyword] :map]]}
   ([sys] (stop! sys :stop!))
   ([sys cause]
+  ;; its fibers as the stop begins, on root's stderr (its log): a proc mid-step holds the stop until the step ends (Flow takes a stop
+  ;; between steps), and a fiber running then prints its frames at its next safe point, inside the stop's own bound, so an overrun's
+  ;; evidence names the step that held it (docs/machine.md#reading-a-hang); ~91k ticks, 14 KB [M root result/b52f87ea]
+  (binding [*out* *err*] (println "ROOT STOPPING: its fibers as the stop begins\n" (jolt.host/fiber-dump)) (flush))
   (let [fact @(transact-main! sys [{:seon.system/id :root :seon.system/stopped {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)}}]
                               {:flush? true})
         t0 (profile/now-ns)

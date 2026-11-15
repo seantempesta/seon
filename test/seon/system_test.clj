@@ -336,6 +336,22 @@
     ;; what the stop calls, named here so this test's digest takes it (a root's own code is the full run's otherwise)
     (is (= [:enum :group-ended :eof] (last (:malli/schema (meta #'seon.fork-server/release!)))) "release! answers how the server ended")))
 
+;; Estimate: a test root's start and stop (~as a-root-stops-in-a-second, a process test), one fiber dump; ~5M ticks of its own
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-stop-writes-the-roots-fibers-before-it-waits
+  ;; docs/machine.md#reading-a-hang: a root's stop waits for each proc's running step (Flow takes a stop between steps), and two stops
+  ;; overran past their bound with no record of the step that held them (runs/stop-overran-87484, -77485: the dump came at the kill,
+  ;; before the running fibers reached a safe point). The stop writes its fibers first, so a running fiber's frames land in its bound
+  (let [checkout (seon.config/checkout)
+        main (str "root-test-stop-dump-" (random-uuid))
+        runs (str checkout "/target/runs/" main "-runs")
+        root (ts/start-root! {:store (ts/process-store checkout) :main main :runs runs})
+        {:keys [log]} (ts/stop-root! root)
+        dump (clojure.string/index-of log "ROOT STOPPING: its fibers as the stop begins")
+        stopped (clojure.string/index-of log "ROOT STOPPED ")]
+    (is (some? dump) (str "the stop wrote root's fibers: " log))
+    (is (and dump stopped (< dump stopped)) "before it waited for anything (its ROOT STOPPED line comes after)")
+    (is (some? (clojure.string/index-of log "jolt fiber dump") ) "the dump is Jolt's own (every fiber, running ones at their next safe point)")))
+
 (deftest a-test-roots-task-files-are-its-own
   ;; the second boot above read 810 tasks (2026-10-25): its root started seconds after a merge
   ;; rewrote the checkout's task files, and a load read them. A test root's task dir is its own
