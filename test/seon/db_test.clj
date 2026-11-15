@@ -2080,13 +2080,15 @@
     (finally (run! seon.lib/remove-tree! @stores-made) (reset! stores-made []))))
 
 (defn- mark-reads
-  "The konserve reads one fresh mark of db's :eavt makes and the keys it marks: [reads marked]."
+  "The konserve reads one fresh mark of db's :eavt makes and the keys it marks: [reads marked], the reads as konserve reports them
+  (konserve.metrics: each value read is one :io event, :read-immutable or :read-edn), never a redefinition of the reader, which a
+  compiled caller in the binary does not call through."
   {:malli/schema [:=> [:cat :seon.host/db] [:tuple :int [:set :any]]]}
   [db]
-  (let [n (atom 0) g k/get gi k/get-immutable]
-    (with-redefs [k/get (fn [& args] (swap! n inc) (apply g args))
-                  k/get-immutable (fn [& args] (swap! n inc) (apply gi args))]
-      (let [marked (psi/mark (:eavt db))] [@n marked]))))
+  (let [n (atom 0)]
+    (km/add-sink! ::mark-reads (fn [e] (when (and (= :io (:level e)) (#{:read-immutable :read-edn} (:op e))) (swap! n inc))))
+    (try (let [marked (psi/mark (:eavt db))] [@n marked])
+         (finally (km/remove-sink! ::mark-reads)))))
 
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-collections-mark-reads-each-node-once
   ;; docs/storage.md#collection: a collection's mark (datahike.gc, under seon.db/retain! at every root boot) walks each
@@ -2160,3 +2162,22 @@
     (is (not (contains? (d/reads-index reads) [:ea t :seon.task/plan])) "the set answered at the return is what was read by then")
     (let [[_ outer] (d/with-reads #(:seon.task/id e))]
       (is (contains? (d/reads-index outer) [:ea t :seon.task/id]) "read under another recorder, it records there"))))
+
+;; docs/storage.md#lmdb-durability: a process reading beside the writer (a candidate binary testing itself on the live store,
+;; task seon.system/the-store-half-of-an-update-that-loses-nothing) opens the store MDB_RDONLY. konserve opened its main dbi in a
+;; write transaction, which a read-only env refuses (MDB_IS_READONLY), so a read-only connect failed before it read anything.
+;; Estimate: a store of 20 commits ~3M ticks, a read-only connect and one query ~1M: 5,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-read-only-connect-reads-the-store
+  (let [path (str (seon.config/checkout) "/target/db-test-ro-" (random-uuid))
+        {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)]
+    (swap! stores-made conj path)
+    (try
+      (d/transact conn {:tx-data (vec (for [i (range 20)] {:note/text (str "ro" i) :note/agent :t}))})
+      (pdb/sync! cfg)
+      (d/release conn)
+      (let [ro (assoc-in cfg [:store :lmdb :flags] (bit-or 0x20000 0x10000 0x8000))
+            r (try (let [c (d/connect ro)]
+                     (try (d/q '[:find (count ?e) . :where [?e :note/text]] @c) (finally (d/release c))))
+                   (catch Exception e (ex-message e)))]
+        (is (= 20 r) (str "a read-only connect reads the store: " r)))
+      (finally (run! seon.lib/remove-tree! @stores-made) (reset! stores-made [])))))
