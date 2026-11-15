@@ -8,14 +8,15 @@ Each named session owns one area and knows all of it:
 
 | Session | Area |
 |---|---|
-| Context | what an agent reads |
-| Web | what a person sees, and the servers and demos (the standing system on 7888 and 7777) |
-| Optimization | the running system's cost and correctness in Seon's code: the turn, boot, fork and store |
-| Tests | the test system: selection, digests, the verdict cache, the runners and slow tests |
-| Deep fixes | the dependencies: Jolt, Chez, Datahike and konserve |
-| Data model | every change to schemas and pull patterns; Web and Context are its consumers |
+| context | what an agent reads: its context, the turn and its request, the rounds and the `seon-driver` agents |
+| web | what a person sees, the server's ops and the MCP relay, and the standing system on 7888 and 7777 |
+| runtime | the running system's cost and correctness: effects, forks, loading, the update owner and admission, and the reactive core (`seon.ratom`) |
+| tests | the test system: selection, digests, verdicts in the store, `:prove` and its clients |
+| deps | the libraries and native code: Jolt, Chez, Datahike and konserve, their pins, and the binary's identity |
+| data | schemas, pull patterns and keys, and the one merge |
+| flow | Jolt's Flow and Seon's use of it: procs, their start, drain and stop, and the list of state and waits outside Flow |
 
-- A fix that adds, moves or reads an attribute, ref or pattern clause goes to Data model first, with the pull form wanted.
+- A fix that adds, moves or reads an attribute, ref or pattern clause goes to data first, with the pull form wanted.
 - A session reads the code a helper changes, takes the measurements that decide a design itself, and never answers for code it has not read.
 - Taking over an area starts with a list of what exists: each piece with its file and line, and whether to keep, extend or delete it.
 - A session lands its own change and tells root the sha. What a session takes is on the schedule, so nothing is done twice.
