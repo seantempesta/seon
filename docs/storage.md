@@ -205,7 +205,7 @@ A value that is plain data is stored as data: its attribute is ``:db.type/data``
 
 ## Collection
 
-Root collects the store only as its only writer, at quiescence, with no agent live. The reconciler asks once per quiet spell (```seon.reconcile/quiet```, which records `:seon.system/quiescent`), root refuses while an agent is live (`seon.system/api-proc`, `:collect`), and the writer runs ```seon.db/collect!```:
+Root collects the store only as its only writer, at quiescence, with no agent live: a sweep spares the objects a commit wrote before its head moved only by a safe point kept in the sweeping process (Datahike's `gc-guard`), so an agent's writer, another process, would lose a commit in flight to a sweep beside it. The reconciler asks once per quiet spell (```seon.reconcile/quiet```, which records `:seon.system/quiescent`), root refuses while an agent is live (`seon.system/api-proc`, `:collect`), and the writer runs ```seon.db/collect!```:
 - With `:seon.config.store/sole-writer?` false (the `:scripted` profile of test shards and check steps, whose roots share a store) it sweeps and records nothing.
 - When a branch named in main's `:seon.system/collected` record is gone, it runs `datahike.api/gc-storage`, sweeping every key no branch reaches; when branches were only added it records them and sweeps nothing. A new main only records what it sees, so a check boot on a store of many branches does not sweep at its first quiescence.
 - The record (`{:swept :ms :branches :gone}`) is committed through the writer's batch.
