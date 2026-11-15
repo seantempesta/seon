@@ -378,9 +378,10 @@
                                [t (into #{} (mapcat #(program/tests-reaching g %))
                                         (d/q '[:find [?n ...] :in $ ?t :where [?v :var/meta ?t] [?v :var/name ?n]] db t))]))
      :rd (delay (reads-index-of root store tree g in))
-     ;; whether the binary target/seon is (its build record, target/seon.program) runs this tree's program as a build of it would:
-     ;; nil, or what differs that it bakes (seon.system/binary-current, the one rule; docs/source.md#the-binary-records-its-program)
-     :binary-current (seon.system/binary-current db (seon.program/binary-program) tree {:graph g :scope :all})
+     ;; whether the binary target/seon is (its build record, target/seon.program) is this tree's, its program included (a test that
+     ;; starts a process runs the binary's baked program): nil, or why not, by the one binary identity (seon.fx/runtime-for
+     ;; {:scope :all}; docs/source.md#the-binary-records-its-program)
+     :binary-current (let [r (fx/runtime-for tree {:scope :all})] (when (contract/error? r) (:seon.error/message r)))
      :no-test (vec (sort-by str (concat (remove (set (map (comp symbol namespace key) all)) nss)
                                         (remove all vars))))
      :digests (update-vals idx :digest)
@@ -644,7 +645,7 @@
 
 (defn build-text
   "out/build's text, what bin/test builds target/seon for: when a selected key reaches the binary (bin-keys) and the binary is
-  not current for the tree (binary-current's answer, seon.system/binary-current), that answer; else empty, and nothing is
+  not current for the tree (binary-current's answer, seon.fx/runtime-for), that answer; else empty, and nothing is
   built. docs/source.md#the-binary-records-its-program."
   [bin-keys binary-current]
   (if (and (seq bin-keys) binary-current) (str (pr-str binary-current) "\n") ""))
@@ -720,14 +721,14 @@
         step-bin (filterv proofs/step-needs-binary? run-steps)
         bin-keys (into (vec (filter binary run-tests)) step-bin)
         _ (write! (str out "/binary") (str (str/join " " bin-keys) (when (seq bin-keys) "\n")))
-        ;; out/build: what bin/test builds target/seon for, empty when the binary is current for this tree (seon.system/binary-current):
+        ;; out/build: what bin/test builds target/seon for, empty when the binary is current for this tree (seon.fx/runtime-for):
         ;; a change that reaches nothing root runs from its binary builds nothing (rule (a), docs/source.md#the-binary-records-its-program)
         _ (write! (str out "/build") (build-text bin-keys binary-current))
         ;; this tree's inputs beside the binary (target/seon.inputs, keyed by their :tree): what a root booting on this tree with a
         ;; binary current for it by reach hands its agents (seon.system/booted-source), read as a file: root runs no git
         _ (write! (str (config/checkout) "/target/seon.inputs") (sedn/encode inputs))
         _ (when (and (seq bin-keys) (not binary-current))
-            (println "prove: target/seon is current for this tree by reach (seon.system/binary-current): no build"))
+            (println "prove: target/seon is current for this tree (seon.fx/runtime-for): no build"))
         ;; the stall bound bin/test names a quiet test by (:seon.config.agent/stall-ms), and the end bound of a test with no
         ;; record (the step-end factor times it): "<stall ms> <end ms>"
         _ (write! (str out "/stall-ms") (str (config/value :seon.config.agent/stall-ms) " "
@@ -781,7 +782,7 @@
 (defn- store-steps!
   "bin/prove's last part: each step of out/steps.edn that bin/check named green in out/green
   (check-<step>, space separated) cached green at its digest (seon.fx/write-verdicts!),
-  unless the step ran on a binary (seon.proofs/step-needs-binary?) not current for the plan's tree (seon.system/binary-current,
+  unless the step ran on a binary (seon.proofs/step-needs-binary?) not current for the plan's tree (seon.fx/runtime-for,
   the rule the plan's build asked: an edit between the plan and the build). A red one is not
   stored, so it runs again. Answers the exit status: 1 when a step ran red or was not stored.
   See docs/source.md#the-binary-records-its-program."
@@ -794,7 +795,7 @@
         ;; a step that runs a seon.check mode ran on target/seon: kept only if that binary is current for the plan's tree, the
         ;; one rule the build asked (an empty out/build: current; the plan kept its answer beside the builds, so this reads it);
         ;; laws and the lmdb steps ran no mode, so no binary is theirs to judge
-        current? (delay (nil? (seon.system/binary-current (program) (seon.program/binary-program) tree {:scope :all})))
+        current? (delay (not (contract/error? (fx/runtime-for tree {:scope :all}))))
         keep? (fn [k] (and (green k) (or (not (proofs/step-needs-binary? k)) @current?)))
         ;; each step's wall ms as bin/check measured it (out/step-ms, "<step> <ms>" a line; a kill/reopen pair's two phases
         ;; summed under their step), kept on its verdict: its bound's measure (out/step-bounds) and the deal's
@@ -802,7 +803,7 @@
                   (reduce (fn [m [nm ms]] (update m (str/replace nm #"-(write|read)$" "") (fnil + 0) (parse-long ms))) {}
                           (when (.isFile f) (keep #(next (re-matches #"(\S+) (\d+)" %)) (str/split-lines (slurp f))))))
         unstored (do (when (and (some #(and (green %) (proofs/step-needs-binary? %)) (keys digests)) (not @current?))
-                       (println "prove: the binary is not current for the plan's tree (seon.system/binary-current): no step that ran on it stored"))
+                       (println "prove: the binary is not current for the plan's tree (seon.fx/runtime-for): no step that ran on it stored"))
                      (record-run! {:id (str "bin/prove steps " tree " " (random-uuid)) :tree tree}
                                   (into {} (for [[k dg] digests :when (keep? k)] [k (cond-> {:step k :digest dg :pass 1 :fail 0 :error 0} (step-ms k) (assoc :ms (step-ms k)))])) {}))]
     (doseq [u unstored] (println "UNRECORDED" (:key u) (:message u)))

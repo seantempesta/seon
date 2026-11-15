@@ -282,9 +282,9 @@
       (finally (seon.lib/remove-tree! path)))))
 
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-stale-binary-is-refused
-  ;; bin/check runs no binary built from another tree: run from a checkout of its own (this one's
-  ;; bin/, a git repository of its own) whose target/seon.tree names another tree, a mode is
-  ;; refused, naming both trees, before the binary runs (main's binary in a worktree whose config
+  ;; bin/check runs no binary that is not this tree's (seon.fx/runtime-for, asked of the binary): run from a checkout of
+  ;; its own (this one's bin/, a git repository of its own) with no build record of its own, a mode is refused, naming the
+  ;; tree and why, before the binary runs a step (main's binary in a worktree whose config
   ;; differs died reading that config, unseen)
   (let [dir (seon.config/checkout)
         tmp (str dir "/target/runs/check-test-stale-" (random-uuid))]
@@ -294,7 +294,7 @@
       (let [run (ts/binary-sh "env" "SEON_WEB_PORT=0" (str tmp "/bin/check") "config" :dir tmp)
             out (str (:out run) (:err run))]
         (is (not= 0 (:exit run)))
-        (is (str/includes? out "target/seon was built from tree not-this-tree; this checkout is tree ") out)
+        (is (str/includes? out "target/seon is not current for this checkout (tree ") out)
         (is (= "CONFIG FAILED (stale binary)" (last (str/split-lines out))) out))
       (finally (seon.lib/remove-tree! tmp)))))
 
