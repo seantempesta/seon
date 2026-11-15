@@ -79,5 +79,6 @@
  {:seon.task/name "deps-scripts-keep-only-a-job-the-runtime-cannot-do"
   :seon.task/plan "Owner: deps. Owner's ruling (decisions.md 2db6386065, 2026-11-15): a bin/ script is thin over an op, or its header says where it deviates with a task; its outside logic is never ported as it is: the task asks what job is left once the runtime's mechanisms exist, then builds that or deletes the script. Three of deps' scripts deviate (their headers' DEVIATES lines name this task): (1) bin/jolt-gates runs Jolt's own gates (test/forks/jolt-gates.txt, Jolt's Makefile in a clone) in parallel with its own bound and verdict file: the job left is proving a pin, which the test service does by reach (seon_prove); once a Jolt gate is a test key the service runs, the script goes. (2) bin/deps-probe starts a checkout's system when none is up and puts test/ on root's source roots before sending a file to bin/mcp call eval: once a session works at its own agent (seon_attach, seon_eval), a probe is an eval there; the script goes. (3) bin/cache-smoke checks with shell logic that bin/env names the same shared cache directories from two checkouts: the job left is that the cache paths are one config value every process reads; once bin/env's exports are seon.config keys, a test reads them and the script goes. Each closes when its script is deleted with its callers moved."
   :seon.task/kind :work
-  :seon.task/proofs #{}}
+  :seon.task/proofs #{}
+  :seon.task/estimate #:seon.config{value {:n 1, :order :constant, :ticks 1000, :bytes 200}}}
 ]

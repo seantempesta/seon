@@ -428,8 +428,8 @@
   (try
     (let [lines (fn [args] (str/split-lines (git! {} root args nil)))
           ;; every EDN form a text holds, its tags kept as data (aero's #profile, #env): git show of several blobs is their texts end to end
-          forms (fn [text] (let [r (java.io.PushbackReader. (java.io.StringReader. text))]
-                             (loop [acc []] (let [f (edn/read {:default tagged-literal :eof ::eof} r)] (if (= ::eof f) acc (recur (conj acc f)))))))
+          forms (fn [text] (let [r (java.io.PushbackReader. (java.io.StringReader. text)) end (Object.)]
+                             (loop [acc []] (let [f (edn/read {:default tagged-literal :eof end} r)] (if (identical? end f) acc (recur (conj acc f)))))))
           cfg (first (forms (git! {} root ["show" (str tree ":resources/seon/config/default.edn")] nil)))
           schemas (filter #(re-find #"/seon\.config[^/]*\.edn$" %) (lines ["ls-tree" "--name-only" tree "resources/seon/schemas/"]))
           marked (for [m (forms (git! {} root (into ["show"] (map #(str tree ":" %)) schemas) nil)) [k f] m
@@ -439,7 +439,7 @@
       (lib/digest (str/join "\n" (into (sorted-set)
                                        (concat (lines (into ["ls-tree" "-r" tree "--"] (:seon.config.build/inputs cfg)))
                                                (filter #(str/starts-with? % "160000 ") (lines ["ls-tree" "-r" tree]))
-                                               (for [k marked :when (contains? cfg k)] (pr-str [k (get cfg k)])))))))
+                                               (for [k marked :when (contains? cfg k)] (sedn/encode [k (get cfg k)])))))))
     (catch Throwable e (error #'binary-digest :seon.fx/io-error (str "the binary identity of tree " tree ": " (step/error-msg e)) {:path root}))))
 
 (defn- tree-digest

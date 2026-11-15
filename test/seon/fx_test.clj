@@ -994,7 +994,7 @@
       (git "write-tree")
       (finally (.delete idx)))))
 
-(deftest ^{:seon.test/estimate {:ticks 40000000}} only-what-a-new-process-reads-moves-the-binary-digest
+(deftest ^{:seon.test/estimate {:ticks 40000000} :seon.test/execs ["git"]} only-what-a-new-process-reads-moves-the-binary-digest
   ;; 2026-11-15: bin/binary-digest found :seon.config/at-load and :seon.config/place keys by a line regex, which missed a schema
   ;; file's first entry (9 of 57 keys: a web port change moved no identity) and never held jolt-compiler-options, which the
   ;; compiler reads. The identity now holds the keys a schema marks :seon.config/build, at-load or place, read as data
@@ -1026,7 +1026,7 @@
               (fx/binary-digest root (tree-with root base (first-entry "b"))))
         "a build key whose entry is its file's first moves the digest with its value")))
 
-(deftest ^{:seon.test/estimate {:ticks 20000000}} an-untracked-nested-repo-moves-no-tree
+(deftest ^{:seon.test/estimate {:ticks 20000000} :seon.test/execs ["git" "bin/tree" "rm"]} an-untracked-nested-repo-moves-no-tree
   ;; 2026-11-15 15:53: an untracked clone in the main checkout (reference-code/core.async-flow) entered bin/tree's tree as a gitlink,
   ;; and every reader of a gitlink took it for a pin: the build's identity moved (25fd5003 against c7311e6b) and spawns were refused.
   ;; A pin is a gitlink .gitmodules names. Estimate: a tree id's few git calls, ~1M ticks each
@@ -1045,7 +1045,7 @@
         (is (= before (bin-tree)) "and bin/tree names the same tree"))
       (finally (sh "/" "rm" "-rf" dir)))))
 
-(deftest ^{:seon.test/estimate {:ticks 20000000}} runtime-for-answers-for-the-running-binary
+(deftest ^{:seon.test/estimate {:ticks 20000000} :seon.test/execs ["git"]} runtime-for-answers-for-the-running-binary
   ;; 2026-11-15: root (pid 58108) ran digest c7311e6b while target/seon.digest said 76dc758d, a later build's, and runtime-for
   ;; answered current off the file [M root result/aff6b6de, cf6571ca]. It compares the running binary's identity, its build
   ;; record's :digest held since boot (seon.program/binary-program). Estimate: a tree's digest once, then a file read
