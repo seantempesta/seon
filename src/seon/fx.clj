@@ -1772,7 +1772,8 @@
   [st o]
   (let [[st lim] (if (:limits st) [st (:limits st)] (limits-held st))]
     (loop [st (assoc st :lim lim :read? false :fresh #{})]
-      (if-let [[qk m] (first (:queue st))]
+      ;; a restart owed (:hold, hold-for) admits nothing: the queue waits for the restarted root, and no tick is armed for it
+      (if-let [[qk m] (when-not (:hold st) (first (:queue st)))]
         (let [now (quot (profile/now-ns) 1000000)
               st (read-machine st lim m)
               d (admit st m now)]
@@ -1822,6 +1823,16 @@
     (:cost r) (assoc :cost (:cost r))))
 
 
+(defn- hold-told
+  "st with a restart's asker (:hold, its :dest) answered once nothing is in flight (no worker busy, no run asked of the api): the
+  turn boundary of every agent whose call this owner holds, so a restart there loses no turn. Answers st, :told once told."
+  {:malli/schema [:=> [:cat :map :seon.host/volatile] :map]}
+  [st o]
+  (if (and (:hold st) (not (get-in st [:hold :told])) (zero? (:busy st)) (empty? (:pending st)))
+    (do (reply! o (get-in st [:hold :dest]) {:value :idle :queued (count (:queue st))})
+        (assoc-in st [:hold :told] true))
+    st))
+
 (defn owner-proc
   "The owner of one effect kind. In :in (the agent procs' requests {:req :dest :prio
   :budget :budget-key :agent}, addressed by id; :seon.config.fx/buf), :ask (root's own asks, the api's: the same requests,
@@ -1857,9 +1868,13 @@
      (if (nil? m)
        [st nil]
        (case in
-         (:in :ask) (let [n (inc (:seq st))]
-               [(bound (dispatch (-> st (assoc :seq n) (assoc-in [:queue [(- (:prio m 0)) n]] (assoc m :in-ns (profile/now-ns)))) o)) @o])
-         :done (let [st (bound (dispatch (reduce #(outcome %1 o %2) (update st :busy dec) (or (:batch m) [m])) o))]
+         (:in :ask) (if (:seon.fx/hold m)
+                      ;; a restart owed (seon.system/restart-when-idle): no new call is admitted, and its asker is answered at the
+                      ;; turn boundary, when nothing is in flight (task seon.system/a-landing-restarts-root-only-for-a-binary-change)
+                      [(hold-told (assoc st :hold {:dest (:dest m)}) o) @o]
+                      (let [n (inc (:seq st))]
+                        [(bound (dispatch (-> st (assoc :seq n) (assoc-in [:queue [(- (:prio m 0)) n]] (assoc m :in-ns (profile/now-ns)))) o)) @o]))
+         :done (let [st (hold-told (bound (dispatch (reduce #(outcome %1 o %2) (update st :busy dec) (or (:batch m) [m])) o)) o)]
                  ;; the kind's one worker holds a host object that ends when the work does (:close): the queue
                  ;; empty and nothing in flight is that event, told to the worker as the next item, unless an
                  ;; answered request said more of its own were coming (:more in its :req: main's backlog, whose next
@@ -1871,7 +1886,7 @@
          ;; the api's one answer to a request asked of it (step/ask); a second, or a late :ended, finds nothing (step/answered)
          :answers (let [[st m0] (step/answered st (:tag m))]
                     (if m0
-                      [(bound (dispatch (outcome st o (done-of m0 (:r m) (:taken-ns m0) (profile/now-ns))) o)) @o]
+                      [(hold-told (bound (dispatch (outcome st o (done-of m0 (:r m) (:taken-ns m0) (profile/now-ns))) o)) o) @o]
                       [st @o])))))))
 
 (defn- put-lines!

@@ -59,3 +59,24 @@
           _ (is (= [1] (ran o)) "the refilled bucket's tick sends it again")
           [_ o] (fx/owner-proc st :done {:dest dest :request r :est 10 :cost 10 :outcome {:value 1}})]
       (is (= [{:value 1}] (answers o)) "the asker gets the call that went through"))))
+
+;; Estimate: six plain owner steps, no process; ~0.5M ticks
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-restart-waits-for-every-turn-in-flight
+  ;; task seon.system/a-landing-restarts-root-only-for-a-binary-change (G): a restart owed waits for the turn BOUNDARY, never for
+  ;; idle: an agent is :busy for its whole run (seon.repl/serve-request), so waiting for idle while its next turn is held never
+  ;; ends. The :model owner holds every new call once a restart is owed and answers the restart's asker when its calls in flight
+  ;; reach 0: a two-turn run's first call answers, then the restart, and its second call is never admitted before it
+  (let [hold {:seon.fx/hold :restart :dest {:op :restart-when-idle :k :r}}
+        held? (fn [o] (some #(= (:dest hold) (:dest %)) (:out o)))
+        [st o] (fx/owner-proc (owner 8 nil) :in (req 1 0))
+        _ (is (= [1] (ran o)) "turn 1's model call is in flight")
+        [st o] (fx/owner-proc st :ask hold)
+        _ (is (not (held? o)) "a call in flight: the restart is not answered yet")
+        [st o] (fx/owner-proc st :in (req 2 0))
+        _ (is (empty? (ran o)) "a new call while a restart is owed is held, a worker free")
+        [st o] (fx/owner-proc st :done {:dest {:agent :a1 :op :fx-reply :k 1} :outcome {:value 1}})]
+    (is (held? o) "the last call in flight answered: the restart is answered")
+    (is (empty? (ran o)) "the second turn's call still waits: it runs on the restarted root")
+    (is (= [{:k 2}] (map :req (vals (:queue st)))) "kept in the owner's queue")
+    (let [[_ o] (fx/owner-proc (owner 8 nil) :ask hold)]
+      (is (held? o) "nothing in flight: a restart is answered at once"))))
