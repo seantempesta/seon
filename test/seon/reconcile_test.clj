@@ -2557,3 +2557,18 @@
         a (#'seon.task/indexed-agent db e)]
     (is (= 10 (:seon.agent/started-ms a)) (pr-str a))
     (is (= 20 (:seon.agent/ended-ms a)) "the end the index's live rule reads")))
+
+;; Estimate: one db of two tasks (~1M) and one answer-judged step (~10k); ~1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-done-is-answered-while-another-agent-runs
+  ;; docs/plan.md, THE PLAN item 1 (":done waits on the judge's own end"; its done-proof): seon_done's wait on the judge
+  ;; (seon.server's :done, c/judge!) is answered by the reconciler when its own task has no flight and is settled
+  ;; (seon.reconcile/answer-judged), never when the whole root is quiet: another task's agent still working holds nothing.
+  ;; Red under the mutation that brings back the old rule (answer only when no flight at all)
+  (let [db (db-of [(decl "a") (decl "b")] :extra (concat (work "a" :merged) (work "b" :running)))
+        p (promise)
+        st (-> (st-of db :flights {"demo/b" {:act {:op :spawn :task "demo/b"} :agent :a-b :step :worked}})
+               (assoc :judged {"demo/a" [p]}))
+        st (#'r/answer-judged st)]
+    (is (realized? p) "the judge's wait for demo/a is answered while demo/b's agent still runs")
+    (is (= {:task "demo/a" :outcome :merged} (deref p 0 nil)) "with demo/a's own outcome")
+    (is (contains? (:flights st) "demo/b") "and demo/b's flight goes on untouched")))

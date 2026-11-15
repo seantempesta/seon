@@ -408,11 +408,14 @@
  ;; (bin/binary-digest, the one implementation; target/seon.digest beside the binary); a process whose
  ;; branch's digest differs is built for, once (seon.fx/runtime-for). The program (src/'s forms) is not
  ;; here: a process loads it from its branch as a diff (docs/source.md#the-binary-records-its-program). Nor are the
- ;; config and schemas (a process holds its branch's: seon.program/hold-config!, seon.agent/schema-moved) or
- ;; system.edn (root reads it live, apply!): only the config keys a schema marks :seon.config/at-load or
- ;; :seon.config/place, whose values a rebuild alone changes, enter the digest, by their stated line.
+ ;; config and schemas (a process holds its branch's: seon.program/hold-config!, seon.agent/schema-moved): only the
+ ;; config keys a schema marks :seon.config/at-load or :seon.config/place, whose values a rebuild alone changes, enter
+ ;; the digest, by their stated line. resources/seon/system.edn is: a boot reads the binary's copy (seon.graph/read-decl's
+ ;; built-text), and nothing applies a changed one in place yet (seon.system/apply!, uncalled), so a changed graph restarts
+ ;; on a build. INTERIM (root 2026-11-15): system.edn leaves this list when G swaps changed procs through Flow's update! with no
+ ;; restart (task seon.system/a-landing-restarts-root-only-for-a-binary-change).
  ;; Read by bin/binary-digest from this line, so it stays one line of text. A path or prefix ending in /.
- :seon.config.build/inputs ["deps.edn" "bin/build" ".gitmodules" "native/" "resources/public/"]
+ :seon.config.build/inputs ["deps.edn" "bin/build" ".gitmodules" "native/" "resources/public/" "resources/seon/system.edn"]
  ;; Unit: megabytes: the byte budget of Jolt's compiled-code cache (target/cache/aot of the main tree, shared
  ;; by every checkout), least recently used first (docs/source.md#shared-build-caches). bin/env exports it
  ;; as JOLT_CACHE_MB, which Jolt's loader reads when a process that published an artifact prunes. 32768
