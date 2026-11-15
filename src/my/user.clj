@@ -1,9 +1,9 @@
 (ns my.user
   "The agent's functions on the person it works for (Seon's my.user): the sessions working for them, and move their view. See docs/users.md#whats-on-screen.
     (my.user/agents)       every agent on main as this agent last heard it: [{:key :status :task :outcome}], by key
-    (my.user/focus! \"k\")     move the person's view to session k's page"
+    (my.user/focus! \"k\" \"Open the test results\")   offer the person a button to the page of agent or task k"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.ctx :as ctx] [seon.ratom :as ratom]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.db]))
 
 (defn- started
   "The agents join value as a context holds it (a map of agents, or one agent, or none), as a sequence of them. See docs/users.md#roots-agent."
@@ -39,7 +39,11 @@
     (cond-> listed (pos? n) (conj {:more n :depth :seon.config.render/agent-tree-depth}))))
 
 (defn focus!
-  "Move the signed-in person's view to the page of the agent with key k (their :seon.user/focus, which home opens): root's answer, or its refusal when no one is signed in or no agent has that key. See docs/users.md#whats-on-screen."
-  {:malli/schema [:=> [:cat :string] :any]}
-  [k]
-  (agent/focus! k))
+  "Offer the person a place: the page of the agent with key k, or of task k, as a button labelled label (plain words for them), which
+  draws itself in their chat by its schema's render (:seon.user/offer). It writes nothing: the person's tap sets their web state there and
+  opens it (seon.system/focus!). Without a label, the button says to open it. See docs/users.md#whats-on-screen."
+  {:malli/schema [:function [:=> [:cat :string] :seon.user/offer] [:=> [:cat :string :string] :seon.user/offer]]}
+  ([k] (focus! k "Open it"))
+  ([k label]
+   (with-meta {:seon.user/place (if (seon.db/eid (agent/db) :seon.agent/key k) [:seon.agent/key k] [:seon.task/id k]) :seon.user/label label}
+     {:seon.render/schema :seon.user/offer})))

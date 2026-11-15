@@ -338,13 +338,6 @@
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
     (:result (await-reply k {:op :launch :k k :text text :template template}))))
 
-(defn focus!
-  "Ask root to move the signed-in user's view to the page of the agent with key k: root's answer, or its refusal (no user signed in, no such agent). See docs/users.md#whats-on-screen."
-  {:malli/schema [:=> [:cat :string] :any]}
-  [k]
-  (let [n (:tx-seq (swap! state update :tx-seq inc))]
-    (:result (await-reply n {:op :focus :k n :key k}))))
-
 (defn note-costs!
   "fns (seon.profile/touched of an eval) added to what this agent's process has measured since it started, (:fn-costs @state):
   an observation of this process on this machine, never written to the store; nothing in a process that is no agent's. See docs/sharing.md#a-functions-cost-is-a-fact."
