@@ -28,6 +28,15 @@ The goal is that every session works as a Seon agent does: attached to its agent
 
 Every edit goes through the branch: `edit!` writes onto the agent's branch, and the change reaches main only through the merge's conflict check, the tests its reach selects, and the merge itself. Nobody writes a file directly. So `edit!` must address every kind of entry the system is built from as a branch-held place: definitions (functions, vars, macros, tests), namespaces (created, changed, deleted), schema entries, config keys, task entries, doc sections and pages, test fixtures, scripts, and build inputs (pins, `deps.edn`). Its raw disk write is refused for anything in the program's tree.
 
+### Tonight: rounds may spend $25; a new binary takes over in parallel, so no restart ends live work (evening)
+
+Before going out, the owner set three things:
+- The rounds and drivers may spend up to $25 of the model budget tonight.
+- Nothing is held for his review: root reads every landed diff, and the reviewer runs every two hours.
+- A land that needs a new binary must not end live agents. The plan in `seon.system/an-update-loses-nothing` is finished first: the new binary is built, boots beside the standing system on the same store, runs every test against itself, catches up main's program by evaluating the forms that changed (`seon.program/load-diff!`), and takes the system over only if it passes. A red leaves the standing system running as it was.
+
+Runtime builds this right after the update owner, which it extends. Until it lands, a path land that must restart root goes ahead, and context re-releases its round agents on the new root, told before the land starts.
+
 ### The reactive switch-over: the design gate now, reader landings after the self-merge path (evening)
 
 The reactive switch-over's design gate runs now, beside the self-merge path. All area entries `seon.ratom/<area>-reads-on-the-core` reach main, an independent reviewer judges the core against Reagent and re-frame, and each area measures its reader against its engine as a REPL prototype. The reader landings that delete each hand-built engine go after runtime's update owner and D, and take no landing slot from the path.
