@@ -560,8 +560,8 @@
 
 (defn turn-merged
   "A {:merge} output answered with m (merge-main!'s answer): at a turn's begin the turn goes on (`merged-in`); after a green status a
-  merge that brought nothing ends the run :green, else the next turn judges the combined program; the writer's typed error (it merged
-  nothing: a swept merge base) is the turn's throw, the agent's to read. See docs/flow.md#the-five-rules."
+  merge that brought nothing ends the run :green, else the next turn judges the combined program; an error answer is the turn's throw.
+  See docs/flow.md#the-five-rules."
   {:malli/schema [:=> [:cat :map :map] :seon.turn/step]}
   [st m]
   (let [{:keys [merged status]} (:pending st) st (dissoc st :pending)]

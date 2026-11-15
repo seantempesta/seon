@@ -210,7 +210,9 @@
     (try (d/transact bc arg-map) (finally (d/release bc)))))
 
 (defn merge-main-into
-  "Main merged into branch b on main's program (seon.merge/merge-main): a conflict writes only its unmerged entries; clean, one force-branch! onto b while b is at its head. Answers {:ok :conflicts :commit :t :main}, :main the commit merged, or the typed error of a branch with no merge base (seon.db/branch-base's: its base was swept), merged nothing. See docs/merging.md#a-branch-merges-main-in."
+  "Main merged into branch b on main's program (seon.merge/merge-main): a conflict writes only its unmerged entries; clean, one
+  force-branch! onto b. Answers {:ok :conflicts :commit :t :main}, or the typed error of a swept merge base. See
+  docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :any :map :seon.db/branch] :map]}
   [conn cfg b]
   (let [main-b (pdb/conn-main conn) main @conn head (pdb/head conn b)
