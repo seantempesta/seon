@@ -230,7 +230,7 @@
                       {:kind :unnamed-site :law law :site v :page page}
                       ;; the form that clears it: the law's page (its section when it has one) naming the site, through the branch
                       {:law law :site v :page page
-                       :do (list 'seon.repl/edit! (or section page) "<a line of it>" (str "<that line>\n- `" v "`: why it " (name law) "es here"))}))))))
+                       :do (list 'seon.repl/edit! (or section page) "<a line of it>" (str "<that line>\n- `" v "`: why it is a " (name law) " site here"))}))))))
 
 (def pins
   "Where the wiki states each customized library's pin: the page, and the line that states one
