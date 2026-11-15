@@ -3012,7 +3012,29 @@
             (close! k2) (exit! k2) (close! k1)
             (is (nil? (a/poll! (:answer r))) "a child still running: no answer")
             (exit! k1)
-            (answered r 2))))
+            (answered r 2)))
+        ;; task seon.prove/a-test-that-dies-fails-only-itself: a child that dies before it names a running test, with none ended, is
+        ;; no progress. Red before: the shard was done there, its tests never reported, so the service answered each no verdict
+        (let [die! (fn [k] (let [{:keys [out sent] :as e} (:end k)] (a/close! out) (a/<!! sent) (remote/close! e) (a/<!! seen))
+                            (exit! k))]
+          (testing "a death with no progress runs the rest again in a new child"
+            (let [r (run 5 [['app.fold/t 'app.fold/u]]) [k1] @kids]
+              (die! k1)
+              (is (nil? (a/poll! (:answer r))) "the rest runs again, so no answer yet")
+              (a/<!! forked-c)
+              (let [[_ k2] @kids]
+                (close! k2) (exit! k2)
+                (let [[ans] (done r)]
+                  (is (= 1 (:pass ans)) (str "the new child's run is the shard's: " (pr-str ans)))))))
+          (testing "two deaths with no progress between them answer each remaining test the death, its own :error"
+            (let [r (run 6 [['app.fold/t 'app.fold/u]]) [k1] @kids]
+              (die! k1)
+              (a/<!! forked-c)
+              (let [[_ k2] @kids]
+                (die! k2)
+                (let [[ans] (done r)
+                      lost (into #{} (keep #(when (and (= :error (:type %)) (:exit %)) (:var %))) (:reports ans))]
+                  (is (= #{"#'app.fold/t" "#'app.fold/u"} lost) (str "each test ends with its own result, never unreported: " (pr-str ans)))))))))
       (is (nil? (a/poll! error-chan)) "no proc threw")
       (finally
         (flow/stop g)
