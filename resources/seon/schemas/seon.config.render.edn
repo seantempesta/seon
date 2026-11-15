@@ -1,6 +1,7 @@
 ;; The one value printer (v1: seon.config.render.agent.edn, ported: token-budget, max-depth,
 ;; whole-width, max-name, max-number-digits, sort-bound; seon.config.render/* are new in next).
-{:seon.config.render.agent/token-budget [:int {:seon.config/at-load true :min 1 :seon.config/unit "tokens" :description "A reply value's printed budget."}]
+{:seon.config.render/flush-max [:int {:min 1 :seon.config/unit "reactions" :description "The most reactions an owner proc runs in one step (seon.ratom/flush!, seon.problems/recorded-sync!); the rest are its next message, so its control (ping, stop) interleaves and nothing is dropped (flow's rule 2)."}]
+ :seon.config.render.agent/token-budget [:int {:seon.config/at-load true :min 1 :seon.config/unit "tokens" :description "A reply value's printed budget."}]
  :seon.config.render.agent/max-depth [:int {:min 1 :seon.config/unit "levels" :description "Nested levels a printed value shows."}]
  :seon.config.render.agent/whole-width [:int {:seon.config/at-load true :min 1 :seon.config/unit "chars" :description "A value at most this wide is never cut."}]
  :seon.config.render.agent/max-name [:int {:seon.config/at-load true :min 1 :seon.config/unit "chars" :description "A keyword or symbol is whole up to this length."}]

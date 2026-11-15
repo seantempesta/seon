@@ -1655,6 +1655,18 @@
     (is (< (count cut) 6000) (str "cut by the value's budget: " (count cut) " chars"))
     (is (str/includes? cut "(subs (:seon.print/code (:out result/e23))") "and the cut says how to read the rest")))
 
+;; Estimate: one advance-main on a paged fixture, its root walk (~1.5M) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-landing-kept-in-place-redraws-every-held-view
+  ;; docs/render.md#a-page-is-a-kept-walk: a landing kept in place loads the new program into root, then writes root's source fact
+  ;; (my.root/landed!). A held view drew with the old renders, and nothing it reads moved, so it kept the old page until some read moved
+  ;; [M 2026-11-15: / kept the old top bar after a landing]. The source fact's move walks every held view again
+  (let [[main branch _] (paged-dbs)
+        st (root-state (proc-state main branch) main)
+        st (assoc st :views {:root {:units {}} [:chat :a3] {:units {}}} :dirty #{})
+        main2 (d/db-with (:main-db st) [{:seon.system/id :root :seon.system/source {:root "/x" :tree "t2" :commit "c2" :dirs ["src"]}}])
+        st2 (#'p/advance-main st main2)]
+    (is (= #{:root [:chat :a3]} (clojure.set/intersection #{:root [:chat :a3]} (:dirty st2))) "both held views walk again")))
+
 ;; See docs/render.md#the-page
 (deftest ^{:seon.test/estimate {:ticks 3000000}} roots-chat-has-the-persons-plain-bar
   ;; docs/decisions.md, The page is a friendly chat (2026-11-15): the person's bar is Seon's name and a quiet way to the debug view; the
@@ -1664,7 +1676,10 @@
         st (root-state (proc-state main branch) main)
         bar (fn [page] (h/html (nth (:seon.render/hiccup page) 2)))
         root (#'p/page-value st :root)
+        home (#'p/page-value st [:chat :home])
         dbg (#'p/page-value st [:debug :root])]
+    (is (str/includes? (bar home) ">Seon<") "/ (the person's home) has the person's bar")
+    (is (not (str/includes? (bar home) "on jolt")) "and no build name")
     (is (str/includes? (bar root) ">Seon<") "the person's bar names Seon")
     (is (str/includes? (bar root) "href=\"/root/debug\"") "and a quiet way to the debug view")
     (is (not (str/includes? (bar root) "on jolt")) "no build name")
