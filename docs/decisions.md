@@ -14,6 +14,14 @@ The owner wants the plan's self-merge path finished as soon as possible, so the 
 3. **The first real `seon_done`** is tried as soon as main's run proves green in the system and plan items 1, 2 and 4 are on main, not after the whole safety list. A failure is filed as a task. Until D lands, the three-land rule holds the load.
 4. **Drivers first, right after deps' pin:** the context session runs its `seon-driver` Claude agents (Sonnet, only the `seon_*` tools) on real tasks as soon as deps' pin restarts root, before plan items 8 and 9. First a parity check of a driver's reply against a model agent's request, then two drivers beside the DeepSeek rounds. What a driver can't do through `seon_*` is filed as a task.
 
+### Once running, Seon cannot crash or hang; a wait inside it is a design defect (evening)
+
+The owner's rule: once a process is past boot and running, nothing inside it can crash it or hang it. Everything that can block, fail or crash goes to an edge with one owner (the OS, files, the network, the model, native code, git), and the edge turns it into a value or a typed error. Inside, everything is Flow procs and immutable values, so a block, a lock or an unbounded wait found inside the runtime is a design problem to fix in the design, never to guard or retry. The core areas split it:
+- **flow** reviews, fixes and implements Flow and Seon's use of it, and owns the list of state and waits outside Flow (health's `:stateful-outside-flow`);
+- **runtime** owns reactions (`seon.ratom`, the reactive core), and moves each derive or track onto it;
+- **deps** owns the interfaces to the libraries and native code (Jolt, Chez, Datahike, foreign calls), so a failure there reaches Seon as data at the edge.
+Each area works the others through agreed interfaces, recorded in the task they concern.
+
 ### Sessions' tools are thin over the system, and honest where they are not (evening)
 
 The owner wants Claude sessions' tools integrated with the running system. Every `bin/` script and MCP tool is a thin wrapper over a `seon.server` op, carrying no logic, state or decision of its own. Where one still does its work outside the runtime, its header says so plainly: what it does outside, and the task that moves it inside. Sessions and Seon agents feel the same problems, so pain a session hits with a tool is fixed in the shared mechanism (the op, the proc, the namespace function), so both gain, never in the script alone. Root keeps the list of scripts and how each deviates, and each gap is a task in its owning area.
