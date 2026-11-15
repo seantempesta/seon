@@ -85,6 +85,11 @@
   {:malli/schema [:=> [:cat [:maybe :map]] :any]}
   [it] [(:kind it :test) (boolean (:process? it)) (boolean (:binary? it))])
 
+(def ^:private plain
+  "The class of a test that reaches no process (seon.program/process-path): its batch is its test child alone. See
+  docs/merging.md#the-test-service."
+  [:test false false])
+
 (defn item-value
   "What running queued item it next is worth, bid grants made so far: the askers waiting on it, plus the times it was
   passed over (an age counted in grants since it was queued at grant :at, never a clock, and never written: a grant
@@ -181,7 +186,6 @@
               c (item-class it)
               [st m] (step/ask st [:prove :answers] [:batch (str bid)]
                                (cond-> {:op :fx :kind :process :prio v :seon.fx/class c
-
                                         ;; who waits on it: told when the owner holds it for the machine's load
                                         :seon.prove/askers (into (sorted-set) (mapcat #(get-in st [:items % :waiters])) batch)
                                         :req (if (= :test (:kind it :test))
@@ -194,10 +198,7 @@
                                                {:kind (:kind it) :tree (:tree it) :checkout (:checkout it)
                                                 :name (if (#{:build :seed} (:kind it)) (:kind it) (first k)) :digest (second k)
                                                 :binary? (boolean (:binary? it)) :bound (:bound it) :seon.prove/batch (fx/batch-tag bid)})}
-                                 ;; its declared weight (tests-4's queue design): a test batch is one forked child, three processes when
-                                 ;; it reaches a process (a system test: its root and fork server beside it); a build, seed or step
-                                 ;; declares none and runs alone (seon.fx/weight)
-                                 (= :test (:kind it :test)) (assoc :seon.fx/processes (if (:process? it) 3 1))))]
+                                 (= plain c) (assoc :seon.fx/processes 1)))]
           (recur st (conj outs m) (inc sent)))))))
 
 (defn- item-ended
