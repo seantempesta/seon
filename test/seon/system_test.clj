@@ -110,6 +110,23 @@
     ;; kill answered another map in a shard: Context, 2026-11-12)
     (is (= [{:status :killed} true true #{:status :ended-ms} :seon.system/no-agent] r) (pr-str r))))
 
+;; Estimate: a spawn (a fork, ~65 ms of work, ~2e6 ticks), one eval sent, the agent's quiescence told at once (no timer pending),
+;; one frame, one fact written, the wait answered at that commit, a kill: ~3,000,000 ticks
+(deftest ^{:seon.test/root [] :seon.test/execs ["target/seon"] :seon.test/estimate {:ticks 3000000 :asks 1}} a-deadlocked-agent-says-so-with-no-clock
+  ;; docs/flow.md#the-five-rules, rule 3: an agent whose eval waits on what nothing will ever give it is a stall said by its source
+  ;; (seon.agent/quiescent!, Jolt's quiescence event, every fiber's dump), recorded on its process, while root runs no stall timer.
+  ;; Red before: root found a stall only by its own poll, past :seon.config.agent/stall-ms of quiet (30 s), so the stall it
+  ;; recorded was quiet that long; the agent's own is recorded at once (its quiet is the time to its first frame, far under)
+  (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
+        r (ts/value-of (:response (ts/ask root {:op :eval :agent "root"
+                                                :code (str "(let [ag (seon.system/spawn! sys {})"
+                                                           "      _ (seon.system/submit! sys ag \"(clojure.core.async/<!! (clojure.core.async/chan))\" {:origin :outside})"
+                                                           "      db (seon.system/await-db sys (fn [db] (seq (datahike.api/datoms db :aevt :seon.process/stall))))"
+                                                           "      s (some-> db (datahike.api/datoms :aevt :seon.process/stall) first :v)]"
+                                                           "  @(seon.system/kill! sys ag)"
+                                                           "  [(int? (:quiet-ms s)) (< (:quiet-ms s) (seon.config/value :seon.config.agent/stall-ms))])")})))]
+    (is (= [true true] r) (str "the agent's stall is recorded, said by the agent before root's poll could see it: " (pr-str r)))))
+
 (deftest the-sweeper-pool-is-fixed-before-anything-collects
   ;; task seon.system/the-sweeper-pool-is-fixed-before-anything-collects: six threads allocate through 30
   ;; collections in a fresh binary; Chez starts a sweeper per waiting thread and never stops one, so a

@@ -11,6 +11,47 @@
 
 (def testite 10)
 
+;; each test is one owner of the reactions it makes (seon.ratom/*owner*), as a proc's step is: Reagent's process-wide queue and
+;; running count are an owner's here (docs/flow.md#the-five-rules)
+(clojure.test/use-fixtures :each (fn [t] (binding [rv/*owner* (rv/owner)] (t))))
+
+;; Estimate: two owners, one atom, two reactions, three steps: ~100k ticks
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-reaction-runs-only-in-its-owners-step
+  ;; docs/reactive.md#how-a-commit-reaches-its-readers-today: owner A's reaction dirtied in owner B's step is never run by B's flush!; it reaches A
+  ;; as a message on A's port ({:seon.ratom/dirty r}) and runs in A's step. Red before: one process-wide queue, so B's flush! ran A's
+  ;; reaction (and preempted fibers lost 267,087 of 400,000 enqueues to it: flow-lab e18). Deterministic, no load
+  (let [port (clojure.core.async/chan 4)
+        a (rv/owner port) b (rv/owner)
+        x (rv/atom 0) runs (rv/atom 0)
+        [r w] (binding [rv/*owner* a]
+                (let [r (reaction (swap! runs inc) @x)]
+                  [r (run! @r)]))]
+    (is (= 1 @runs) "A's reaction ran once, made")
+    (binding [rv/*owner* b] (reset! x 1) (flush!))
+    (is (= 1 @runs) "B's step changed what A's reaction reads, and B's flush! ran none of A's")
+    (let [m (clojure.core.async/poll! port)]
+      (is (= r (:seon.ratom/dirty m)) "the dirty reached A as a message on its port")
+      (binding [rv/*owner* a] (rv/take-dirty! m) (flush!)))
+    (is (= 2 @runs) "and ran in A's own step")
+    (binding [rv/*owner* a] (dispose! w))))
+
+;; Estimate: two owners, one atom, one auto-run reaction, three steps: ~100k ticks
+(deftest ^{:seon.test/estimate {:ticks 100000}} an-auto-run-reaction-runs-only-in-its-owners-step
+  ;; docs/reactive.md#how-a-commit-reaches-its-readers-today (runtime-2's review of the owner queue): an auto-run reaction (run!) of owner A whose source changes in owner
+  ;; B's step does not fire in B's step, under B's bindings; it reaches A as a message on A's port and runs in A's step. Red before:
+  ;; it ran at once inside B's reset!
+  (let [port (clojure.core.async/chan 4)
+        a (rv/owner port) b (rv/owner)
+        x (rv/atom 0) seen (rv/atom [])
+        w (binding [rv/*owner* a] (run! (swap! seen conj [@x (some? rv/*owner*) (identical? a rv/*owner*)])))]
+    (binding [rv/*owner* b] (reset! x 1) (flush!))
+    (is (= [[0 true true]] @seen) "B's step changed what A's run! reads, and it did not fire in B's step")
+    (let [m (clojure.core.async/poll! port)]
+      (is (some? m) "it reached A as a message on its port")
+      (binding [rv/*owner* a] (rv/take-dirty! m) (flush!)))
+    (is (= [[0 true true] [1 true true]] @seen) "and fired in A's own step, under A")
+    (binding [rv/*owner* a] (dispose! w))))
+
 (deftest basic-ratom
   (let [runs (running) start (rv/atom 0) sv (reaction @start) comp (reaction @sv (+ 2 @sv)) c2 (reaction (inc @comp))
         count (rv/atom 0) out (rv/atom 0)
