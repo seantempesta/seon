@@ -911,6 +911,15 @@
   [base static reads]
   (into {} (for [[t d] base] [t (if (= d (static t)) (get reads t d) d)])))
 
+(defn- results-db
+  "The results branch's head as a db (:seon.config.proofs/results-branch, the store's verdicts), or nil when this agent's store has
+  none yet: the one read of it, by a plan and by the judge's base reds alike. See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat] [:maybe :seon.host/db]]}
+  []
+  (let [conn (:store-conn @state)
+        rb (when conn (pdb/on-main (pdb/main-branch (:cfg @state)) (cfg/value :seon.config.proofs/results-branch)))]
+    (when (and rb (pdb/branch? conn rb)) (pdb/head conn rb))))
+
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/graph-index) against base's (main at its merge base), the greens stored at
@@ -1004,9 +1013,7 @@
     ;; the verdicts the store holds (the test service writes them to the results branch, seon.prove's verdicts-write): its value held
     ;; once for this plan, one seek a candidate (seon.proofs/verdicts-at), then reuse by what each run read for the rest
     ;; (seon.proofs/reused-by-reads, never a test that reaches a process of its own). No results branch yet: nothing found
-    (let [conn (:store-conn @state)
-          rb (when conn (pdb/on-main (pdb/main-branch (:cfg @state)) (cfg/value :seon.config.proofs/results-branch)))
-          rdb (when (and rb (pdb/branch? conn rb)) (pdb/head conn rb))
+    (let [rdb (results-db)
           stored (if rdb (proofs/stored-verdicts rdb db cd (proofs/reads-reusable idx)) {})
           unread nil
           ;; a green is anyone's. A red is this branch's own (its verdict's basis, seon.proofs/verdicts-at's :writer), so its judge need not run what
@@ -1444,7 +1451,8 @@
         give-up? (and (seq died) (seq rest-todo) (<= 2 stalled))
         lost (when give-up?
                (for [t rest-todo] {:type :error :var (str "#'" t) :exit status
-                                   :message (str "test process died twice with no test ended: " status ", before " t " ran")}))
+                                   ;; the death's own report names what its child threw at start (test-run-answer's :ex): kept, never dropped
+                                   :message (str "test process died twice with no test ended, before " t " ran: " (or (some :message died) status))}))
         st (-> st (update :children dissoc cpid) (update :by-os dissoc os)
                (update :run-dirs (fnil conj []) (fx/run-dir os))
                (assoc-in [:shards shard] (-> sh (update :reports #(-> % (into (:streamed acc)) (into (:reports ans)) (into lost)))
@@ -1840,10 +1848,11 @@
         (as-> r (merge-with + r (select-keys (frequencies (map :type reused-reports)) [:pass :fail :error])))
         (assoc :digests (select-keys digests (concat (keep (comp proofs/test-symbol :var) (:reports res)) (filter reused selected))))
         (as-> r (let [reds (proofs/results r) bd (:base-digests plan)
-                      stored (when (seq bd) (fx/stored-results (into {} (keep (fn [[t s]] (when (and (#{:fail :error} s) (bd t)) [t (bd t)]))) reds)))]
-                  ;; a cache that cannot be read excuses nothing: the red stays the branch's
-                  (let [found (if (or (nil? stored) (contract/error? stored)) {} stored)]
-                    (assoc r :main-red (proofs/main-red reds digests bd found) :unknown-reds (proofs/unknown-reds reds digests bd found)))))
+                      ;; base's verdicts at the red tests' base digests, from the store's results branch (the image's own runs, :live: a
+                      ;; green bin/test cached at one digest is no answer for a red here); none held, the red stays the branch's
+                      rdb (when (seq bd) (results-db))
+                      found (if rdb (proofs/verdicts-at rdb (into {} (keep (fn [[t s]] (when (and (#{:fail :error} s) (bd t)) [t (bd t)]))) reds)) {})]
+                  (assoc r :main-red (proofs/main-red reds digests bd found) :unknown-reds (proofs/unknown-reds reds digests bd found))))
         (assoc :reused (count (filter reused selected)) :ran (count (distinct (keep :var (:reports res))))
                :selected selected :deferred deferred :at-judge (count judge)
                ;; each deferred test's digest as main held it (the plan's base): what the merge gate reads main's own verdict of it by
