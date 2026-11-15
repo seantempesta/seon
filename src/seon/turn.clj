@@ -370,9 +370,8 @@
            (agent/db) (pdb/eid (agent/db) :seon.agent/key k)))
 
 (defn- read!
-  "Agent k's context read at basis, a model call of its own (read-<n>, origin :outside, no turn) made by the one request!, stored as
-  what changed since its read before; the call is the agent's once its request is drawn, never before (a read the walk saw mid-draw
-  would place itself). Answers {:id :messages :parts}. See docs/turn.md#an-outside-agent."
+  "Agent k's context read at basis: a model call of its own (read-<n>, no turn) made by the one request!, recorded as the agent's after
+  its draw. Answers {:id :messages :parts}. See docs/turn.md#an-outside-agent."
   {:malli/schema [:=> [:cat :string :seon.model-call/basis] :map]}
   [k basis]
   (let [p (last-read k)
