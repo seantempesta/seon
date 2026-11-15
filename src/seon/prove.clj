@@ -614,9 +614,12 @@
          [st outs] (case in
                      :req (request st m)
                      :answers (let [[st v] (step/answered st (:tag m))] (if v (answered st v (:r m)) [(update st :stale (fnil inc 0)) []]))
-                     :main (let [st (assoc st :main-t (:t m))]
-                             (if (and (cfg/value :seon.config.proofs/prove-main-on-commit) (program/moves-program? (:ops m)))
-                               (request st {:branch :main :t (:t m) :digest (program/run-digest (pdb/at-commit (:conn st) (:commit m))) :mode :main})
+                     ;; the program moved since the last run asked: the writer's :program-t, which the newest notice carries for every
+                     ;; commit the sliding buffer replaced (seon.writer/program-at), never this notice's own ops
+                     :main (let [st (assoc st :main-t (:t m))
+                                 pt (:program-t m)]
+                             (if (and (cfg/value :seon.config.proofs/prove-main-on-commit) pt (> pt (:main-program-t st 0)))
+                               (request (assoc st :main-program-t pt) {:branch :main :t (:t m) :digest (program/run-digest (pdb/at-commit (:conn st) (:commit m))) :mode :main})
                                [st []])))]
      (let [outs (cond-> (vec outs) (not= (state-view st) (state-view st0)) (conj {:op :prove-state :r (state-view st)}))
            ;; credit (docs/flow.md, request and answer): its asks are answered on :answers, which holds reconciler-buf; with that many
