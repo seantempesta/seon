@@ -1005,22 +1005,6 @@
                             acc))))
           {} cand)))
 
-(defn reds-at
-  "Of digests ({test digest}), the tests whose cached verdict at that digest is red, whoever ran it (a shell's run, a test
-  service's item, the daily full run), each with its first failure: {test failure}; a test with no verdict at its digest is
-  not red. What the judge's done-input and the merge gate read to tell a red that is main's (red at that digest without the
-  task's change) from the task's own. Answers the :seon.fx/io-error a file gives, never a partial answer. dir: the cache's
-  (:seon.config.proofs/results-dir unless given). See docs/merging.md#verdicts-are-a-cache."
-  {:malli/schema [:function [:=> [:cat [:map-of :qualified-symbol :string]] [:or [:map-of :qualified-symbol :map] :seon.error/base]]
-                  [:=> [:cat :string [:map-of :qualified-symbol :string]] [:or [:map-of :qualified-symbol :map] :seon.error/base]]]}
-  ([digests] (reds-at (cfg/value :seon.config.proofs/results-dir) digests))
-  ([dir digests]
-   (let [r (if (seq digests) (stored-results dir digests) {})]
-     (if (contract/error? r)
-       r
-       (into {} (for [[t dg] digests :let [v (get r dg)] :when (and v (not (proofs/green? v)))]
-                  [t (or (first (:failures v)) {:message (str "red at digest " dg ", with no failure kept")})]))))))
-
 (defn- verdict-files
   "Key k's cached verdict files, each [digest status file]."
   {:malli/schema [:=> [:cat :string [:or :qualified-symbol :string]] [:vector [:tuple :string :keyword :any]]]}
@@ -1484,10 +1468,8 @@
 (defn run-tests
   "The :tests effect: tests on a checkout of the merge candidate (run-on-checkout), proved by the system through its :ctx's
   :prove-tree (seon.system/prove-tree!, which root binds), its answer {:value {:results :ms :log :digests :failures :kept}} or
-  its declared error; a named run reuses what this candidate already answered (run-held). With :base (each test's digest as
-  main held it at the task's base, seon.task's :seon.task/deferred), the answer's :main-red names its reds that are main's,
-  not the change's (seon.proofs/main-red: the change does not reach the test, or main's verdict at that digest is red,
-  read by reds-at), which the gate never holds the task on. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  its declared error; a named run reuses what this candidate already answered (run-held). Whose each red is, main's or the
+  change's, is main's own answer, which the reconciler asks (seon.reconcile/ask-main). See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [repo branch all?] :as req} :req {:keys [prove-tree]} :ctx}]
   (let [repo (or repo (when all? (str (cfg/checkout))))
@@ -1501,16 +1483,8 @@
       (contract/error? sha) sha
       (or all? (:built? req)) (run-on-checkout nil sha req)
       :else
-      (let [r (run-held (partial run-on-checkout prove-tree) sha req)
-            {:keys [results digests]} (:value r)
-            base (into {} (filter val) (:base req))
-            ;; main's verdict at each red test's base digest: the one reader (reds-at), an io-error excusing nothing
-            found (when (seq base)
-                    (let [at (reds-at (into {} (for [[t s] results :let [b (get base t)] :when (and b (not= :pass s))] [t b])))]
-                      (when-not (contract/error? at) (into {} (for [[t f] at] [(get base t) {:pass 0 :fail 1 :error 0 :failures [f]}])))))]
-        (if (and (seq base) (map? results))
-          (assoc-in r [:value :main-red] (proofs/main-red results (or digests {}) base (or found {})))
-          r)))))
+      ;; whose each red is, main's or the change's, is main's own answer, asked by the reconciler (seon.reconcile/ask-main)
+      (run-held (partial run-on-checkout prove-tree) sha req))))
 
 ;; ---- a session's items (Flow step 4) -------------------------------------------------
 

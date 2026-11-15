@@ -536,7 +536,7 @@
                  (cond
                    (not= :running (:seon.task/execution t)) {:op :close :task id}
                    (= :gate (:seon.task/outcome t)) (let [base (into {} (remove (fn [[k]] (= (get-in idx [:root :started-by]) (str k)))) (:seon.task/deferred t))]
-                                                      {:op :gate :task id :tests (vec (sort-by str (keys base))) :base base})
+                                                      {:op :gate :task id :tests (vec (sort-by str (keys base)))})
                    :else {:op :ready-to-merge :task id}))
         ;; the octopus merge (bors, GitHub's merge queue): ready merge tasks merge together in
         ;; one commit once no merge task is still working, so every member merged the same
@@ -944,7 +944,7 @@
                                      {:op :write :req {:op :octopus-merge :branches bs :data-attrs :all}})))
       ;; the merge gate (a change reaching process tests): root's one :gate request, the candidate's files read from its
       ;; branch, then its deferred tests run on a checkout of the merges head with them (seon.fx/run-tests)
-      :gate (one (request st id :gated {:op :gate :branch (:branch (:seon.agent/env (task-agent (:idx st) id))) :tests (:tests act) :base (:base act)}))
+      :gate (one (request st id :gated {:op :gate :branch (:branch (:seon.agent/env (task-agent (:idx st) id))) :tests (:tests act)}))
       ;; an action the reconciler cannot start keeps no flight
       (throw (ex-info "no such action" {:op op})))))
 
