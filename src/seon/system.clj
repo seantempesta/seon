@@ -1881,7 +1881,7 @@
         ;; (seon.config/hold-args!, a test child's own mechanism), so the one merge of the layers derives what follows from it (the
         ;; gate checkout) and every config this process writes later keeps it
         _ (when (and source (nil? (:seon.config.source/root (:config (cfg/in-force)))))
-            (cfg/hold-args! (conj (vec (cfg/argv)) "--set" (str ":seon.config.source/root=" (pr-str (:root source)))) nil {}))
+            (cfg/hold-args! (conj (vec (cfg/argv)) "--set" (str ":seon.config.source/root=" (sedn/encode (:root source)))) nil {}))
         {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors program-load digest digest-ms contracts pid fd compacted retained dropped-trees main-inputs]}
         (boot! backend path datoms main source t0)
         recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
