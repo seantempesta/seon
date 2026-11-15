@@ -12,6 +12,7 @@ The owner wants the plan's self-merge path finished as soon as possible, so the 
 1. **Landings:** a landing on the path goes first, always. The path is main proving in the system, `bin/test` and `bin/prove` as thin clients of `:prove` (E), admission and the update owner (D), one `:merge`, the `seon_done` pilot, and `bin/land` deleted (plan items 10, 11, 13, 14, 17, 18 and the Stage 1 safety list). A green feature landing goes only when no path landing is ready, so finished work does not drift from main.
 2. **Areas off the path move onto it:** web, flow and context land what is already green, then each owns a path item. Web makes the MCP relay answer each call on its own. Flow makes proving run as Flow procs admitted by backpressure, and reviews runtime's D. Context does plan items 8 and 9. Web's person view waits behind that.
 3. **The first real `seon_done`** is tried as soon as main's run proves green in the system and plan items 1, 2 and 4 are on main, not after the whole safety list. A failure is filed as a task. Until D lands, the three-land rule holds the load.
+4. **Drivers first, right after deps' pin:** the context session runs its `seon-driver` Claude agents (Sonnet, only the `seon_*` tools) on real tasks as soon as deps' pin restarts root, before plan items 8 and 9. First a parity check of a driver's reply against a model agent's request, then two drivers beside the DeepSeek rounds. What a driver can't do through `seon_*` is filed as a task.
 
 ### Tests always have helpers making them millisecond tests of the goal
 
