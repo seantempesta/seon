@@ -175,10 +175,14 @@
              :let [{:keys [marks site?]} (or (get rules law) (when rule (rule)))]
              :let [;; the page's cited names (or its one section's), read when a candidate site asks (a branch that changed no
                    ;; catching form reads nothing)
-                   named-set (delay (into #{} (comp (map :e) (mapcat #(d/datoms db :eavt % :seon.doc/names)) (map :v))
-                                          (if section
-                                            (d/datoms db :avet :seon.doc/address section)
-                                            (d/index-range db {:attrid :seon.doc/address :start (str page "#") :end (str page "#\uffff")}))))
+                   ;; a law's one section names its sites in it and in the sections under it (:seon.doc/parent): the printer law's list sits
+                   ;; in a subsection, whose names it never read (2026-11-15: 20 named sites read as unnamed on main)
+                   named-set (delay (let [below (fn below [es] (when (seq es)
+                                                                 (concat es (below (mapcat #(d/q '[:find [?c ...] :in $ ?p :where [?c :seon.doc/parent ?p]] db %) es)))))]
+                                      (into #{} (comp (mapcat #(d/datoms db :eavt % :seon.doc/names)) (map :v))
+                                            (if section
+                                              (below (map :e (d/datoms db :avet :seon.doc/address section)))
+                                              (map :e (d/index-range db {:attrid :seon.doc/address :start (str page "#") :end (str page "#\uffff")}))))))
                    site-of (or site? (constantly true))
                    named (fn [v] (@named-set v))
                    ;; the multimethod or protocol a form without a var extends: read only if one asks
