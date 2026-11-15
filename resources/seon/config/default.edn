@@ -13,7 +13,7 @@
 ;; - Overrides come only through #env below, and only where a script or a check sets one, so
 ;;   this file is the one list of what can be set. A value resolving to nil (an unset #env with
 ;;   no fallback) is absent, which only an optional key allows.
-;; - #profile selects by the command line's --profile NAME (default :default); :deepseek runs agents on DeepSeek.
+;; - #profile selects by the command line's --profile NAME (default :default); :default and :deepseek run agents on DeepSeek.
 ;; - Machine-dependent values are derived at load, never shipped: #seon/checkout "p" is p under
 ;;   the checkout this process runs from (SEON_CHECKOUT, else JOLT_PWD).
 ;; - Layers (owner, 2026-10-21: "hand out different edn config files ... or do command line
@@ -835,15 +835,15 @@
  ;; named waits unbounded until its bound is measured (seon.agent/fx!).
  :seon.config.fx/bounds {:model {:seon.bound/ms 240000}}
 
- ;; Who answers agents' turns. With no profile, none: the first turn answers the typed
- ;; :seon.model/no-provider and the run ends on it (root's ruling 2026-10-22: production
- ;; ran the scripted test fixture as if it were a model). --profile deepseek (or
- ;; --set :seon.config.ai/provider=:openai-compat) uses the endpoint below; --profile scripted, the
+ ;; Who answers agents' turns. With no profile, DeepSeek through the endpoint below (owner, 2026-11-15:
+ ;; "just make deepseek the default"; it was none, and a root restarted without --profile deepseek
+ ;; left round 2's agents with :seon.model/no-provider). --set :seon.config.ai/provider=:none turns paid
+ ;; calls off; --profile scripted, the
  ;; scripted provider (a test fixture) bin/check and bin/test run under, no paid call: it needs
  ;; that profile, which states its script (--set :seon.config.ai/provider=:scripted alone leaves none, and boot
  ;; refuses the provider's contract). There is no default model (docs/model.md#no-default-model);
  ;; check the context before any paid call.
- :seon.config.ai/provider #keyword #profile {:default "none" :scripted "scripted" :deepseek "openai-compat"}
+ :seon.config.ai/provider #keyword #profile {:default "openai-compat" :scripted "scripted" :deepseek "openai-compat"}
  ;; The scripted provider's reply function (a test fixture): replies by task.
  :seon.config.ai/script #profile {:scripted seon.fixtures/reply}
  ;; Unit: the provider's own model name. Provenance: v1 owner ruling 2026-09-10, deepseek-flash
