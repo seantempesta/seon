@@ -8,11 +8,11 @@ The owner's rulings on the morning after the first night run on its own.
 
 ### Tests always have helpers making them millisecond tests of the goal
 
-"Tests needs to always have sub agents running (I think sonnet is fine) that are refactoring tests to test for 90% of the goal and make it a ms test and to drop any tests that are low quality and slow." The tests session keeps Sonnet helpers working at all times, in its one worktree, each on test files nobody else edits, slowest first ("Have the agents run those conversions slowest first"); a test is rewritten to prove the most important 90% of its goal in milliseconds, or dropped when it is low quality and slow, its `Deletes:` line naming what now proves its goal (`AGENTS.md` §2, helpers; §3, no functionality removed).
+"Tests always has subagents running (Sonnet is fine) that refactor tests to prove 90% of their goal in milliseconds, and drop tests that are low quality and slow" (from his phone; root's rewrite, his meaning). The tests session keeps Sonnet helpers working at all times, in its one worktree, each on test files nobody else edits, slowest first ("Have the agents run those conversions slowest first"); a test is rewritten to prove the most important 90% of its goal in milliseconds, or dropped when it is low quality and slow, its `Deletes:` line naming what now proves its goal (`AGENTS.md` §2, helpers; §3, no functionality removed).
 
 ### Everyone switches over once a change is verified
 
-"Okay so we are changing agent behavior after it lands? I want everyone to merge fork main and immediately switch over once it's tested and verified." Then: "Merge main not fork." A verified change to shared machinery is the one way from its landing: every session and every running agent merges main at once (an agent loads main's changes in place at its turn boundary), and no transitional second way waits for a later landing. For landing 12 this replaces root's ruling that `bin/test` keep its file cache until E: its next slice moves `bin/test`'s verdicts onto the store and deletes the file cache. Stated in [the plan](plan.md#the-order).
+"I want everyone to merge main and switch over immediately, once it's tested and verified" (written from his phone; root's rewrite, his meaning). A verified change to shared machinery is the one way from its landing: every session and every running agent merges main at once (an agent loads main's changes in place at its turn boundary), and no transitional second way waits for a later landing. For landing 12 this replaces root's ruling that `bin/test` keep its file cache until E: its next slice moves `bin/test`'s verdicts onto the store and deletes the file cache. Stated in [the plan](plan.md#the-order).
 
 ### A land proves a copy of its commit
 
@@ -24,7 +24,7 @@ Asked how to free a session's worktree during a land (1,007 session-minutes lock
 
 ### Verdict reuse lands first
 
-"yeah I'm fucking pissed this isn't done yet. FInd out what is holding up the tests agent from getting this shit merged and prioritize this." Landing 12 (verdicts as entities with their read keys) is the first item of every session after the Jolt pin; its reviews preempt the reviewers' own work. Stated in [the plan](plan.md#the-order).
+"I'm pissed this isn't done yet. Find out what is holding up the tests agent from getting this merged, and prioritize it" (from his phone; root's rewrite, his meaning). Landing 12 (verdicts as entities with their read keys) is the first item of every session after the Jolt pin; its reviews preempt the reviewers' own work. Stated in [the plan](plan.md#the-order).
 
 ### No clock guesses when our own work finishes; the world outside gets declared timeouts
 
