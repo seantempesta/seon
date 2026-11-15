@@ -5270,3 +5270,16 @@
     (is (str/includes? h "[clojure.string :as str]") "the status shows the :require")
     (is (str/includes? h "use-fixtures :each") "and the fixtures")
     (is (< ticks 1e6) (str "test-shape on a four-form namespace: estimate 100k ticks, measured " ticks))))
+
+;; See docs/render.md#a-page-is-a-kept-walk
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-walks-reads-are-the-one-index
+  ;; task seon.ratom/web-reads-on-the-core, slice 2: a walk keeps who read what of the store in seon.db's one index (reads-add,
+  ;; reads-drop, readers), never a copy of its own: no second set of the components that read (:db-keys), and the one index's readers
+  ;; of a move's datoms are components the walk holds
+  (let [[kw db] (seon.render-cost-test/step-of 4)
+        p (:p kw)
+        moved (:tx-data (d/with db [{:seon.agent/key "b1/a1" :seon.agent/turn 99}]))
+        rs (seon.db/readers (:readers p) moved)]
+    (is (not (contains? p :db-keys)) "no second set of the store's readers")
+    (is (seq rs) "the move reaches a reader")
+    (is (every? #(contains? (:cache p) %) rs) "and each is a component the walk holds")))
