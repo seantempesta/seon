@@ -1047,6 +1047,28 @@
       (d/release conn)
       (finally (seon.lib/remove-tree! path (str path ".compact"))))))
 
+;; Estimate: a store opened on disk ~5M + 8 small commits ~3M + one raw sweep ~5M + a merge-base ~1M = 15000000
+(deftest ^{:seon.test/estimate {:ticks 15000000}} a-branch-whose-base-was-swept-is-told-so
+  ;; docs/storage.md#collection (root's session agent died at start, 2026-11-15: its branch's base was swept and branch-base answered nil,
+  ;; which its contract refused): a base the commit graph names but no snapshot holds is the typed :seon.db/no-merge-base
+  (let [path (str (seon.config/checkout) "/target/tmp/nobase-" (random-uuid))
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+        note! (fn [c s] (d/transact c [{:note/text s :note/agent :t}]) (d/commit-id @c))]
+    (try
+      (note! conn "a")
+      (d/branch! conn :db :b)
+      ;; the branch moves on from its base, so its head no longer is it
+      (let [bc (pdb/connect (assoc (:config @conn) :branch :b))] (note! bc "on b") (d/release bc))
+      (doseq [i (range 6)] (note! conn (str "n" i)))
+      (let [cutoff (java.util.Date.)]
+        (note! conn "after")
+        @(d/gc-storage conn cutoff))
+      (let [r (pdb/branch-base conn :db :b)]
+        (is (= :seon.db/no-merge-base (:seon.error/type r)) (pr-str r))
+        (is (= :b (:branch r)) "naming the branch"))
+      (d/release conn)
+      (finally (seon.lib/remove-tree! path (str path ".compact"))))))
+
 ;; the rule a collection keeps beside "no agent live" (docs/storage.md#collection)
 (deftest a-root-that-shares-its-store-never-collects
   ;; seon.db/collect! with sole? false (:seon.config.store/sole-writer?, false where roots share

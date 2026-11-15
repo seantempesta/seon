@@ -1147,10 +1147,15 @@
 (defn branch-base
   "The db at the merge base of branch and main (git's merge-base over Datahike's commit
   graph): the branch point, the branch head root last merged, or the main head last
-  merged into the branch."
-  {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch :seon.db/branch] :seon.host/db]}
+  merged into the branch. A base whose snapshot a sweep took (the commit graph still names it) answers :seon.db/no-merge-base, typed,
+  never nil (docs/storage.md#collection)."
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch :seon.db/branch] [:or :seon.host/db :seon.db/no-merge-base]]}
   [conn main branch]
-  (d/commit-as-db conn (d/merge-base conn branch main)))
+  (let [mb (d/merge-base conn branch main)]
+    (or (when mb (d/commit-as-db conn mb))
+        (contract/error :seon.db/no-merge-base #'branch-base
+                        (str "branch " branch " has no merge base with " main " to read: " (if mb (str "its base " mb " was swept") "none in the commit graph"))
+                        {:branch branch :commit mb}))))
 
 (defn point
   "Where db is, as data: [its commit's id, its max-tx]. What a process keeps of an older db it

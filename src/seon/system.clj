@@ -214,7 +214,8 @@
     (let [;; its hello names what of the program it was forked with did not load: the agent runs, and that is its first fact and its spawn's answer
           swp (when (and (:ready m) (seq (:load-errors m)))
                 (contract/error :seon.agent/started-without-program #'seon.system/set-agent
-                                (str "this agent started without part of its program: " (str/join ", " (distinct (map :ns (:load-errors m)))) " did not load")
+                                (str "this agent started without part of its program: "
+                                     (str/join "; " (distinct (map #(if (:ns %) (str (:ns %) " did not load") (:seon.error/message %)) (:load-errors m)))))
                                 {:errors (vec (:load-errors m))}))
           a' (cond-> (merge a (dissoc m :ready :evals-add))
                (and (:ready m) (= :spawning (:status a))) (assoc :status :idle)
