@@ -557,9 +557,8 @@
       :else (ask st))))
 
 (defn- merged-in
-  "A turn of run state st with main merged in: behind, it asks its branch's program taken in place ({:load}, `turn-loaded`), an output
-  answered on its own fiber (the :repl proc's edge ask), so no step holds the load and the turn waits at its boundary for it: no turn
-  runs old code or half-loaded code; else it asks the task observed ({:observe}). See docs/merging.md#a-branch-merges-main-in."
+  "A turn of run state st with main merged in: behind, it asks its branch's program taken in place ({:load}, answered on a fiber, so no
+  turn runs old code); else the task observed ({:observe}). See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :map] :seon.turn/step]}
   [st]
   (if (:behind @agent/state)
