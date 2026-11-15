@@ -1111,7 +1111,7 @@
                       (:seon.test/report x) (swap! current conj (test-report (:seon.test/report x) (str "#'" (:test x))))
                       ;; a test's end: its result, after its reports, and the live heap it left (a
                       ;; collection, then the heap's bytes: what it holds for the tests after it, docs/cost.md#what-a-test-run-measures)
-                      (:test x) (do (put! {:seon.test/ended (str "#'" (:test x)) :reports @current :fns (:fns x)
+                      (:test x) (do (put! {:seon.test/ended (str "#'" (:test x)) :reports @current :fns (:fns x) :files (:files x)
                                            :ms (:ms x) :ticks (:ticks x) :bytes (:bytes x) :budget (:budget x)
                                            :heap (do (System/gc) (lib/bytes-in-heap))})
                                     (swap! reports into @current)
@@ -1161,7 +1161,7 @@
                                  (cond-> (-> acc (dissoc :running) (update :streamed into (:reports v)) (update :ended conj t))
                                    (seq (:fns v)) (assoc-in [:fns (proofs/test-symbol t)] (:fns v))
                                    (:heap v) (assoc-in [:heap (proofs/test-symbol t)] (:heap v))
-                                   (:ms v) (assoc-in [:measured (proofs/test-symbol t)] (select-keys v [:ms :ticks :bytes :budget]))))
+                                   (:ms v) (assoc-in [:measured (proofs/test-symbol t)] (select-keys v [:ms :ticks :bytes :budget :files]))))
           (contains? v :pass) (assoc acc :answer (dissoc v ::flow/pid))
           (::flow/ex v) (assoc acc :ex (::flow/ex v))
           :else acc)))
@@ -1799,8 +1799,7 @@
                       ;; each green keyed by what it read: the functions it called, itself, its reads besides code (docs/source.md#tests-run-by-reach)
                       ran (if-let [rd (some-> (:reads-rd plan) force)]
                             (into {} (for [[t x] ran] [t (cond-> x (proofs/green? x)
-                                                           (assoc :reads (proofs/reads-key rd {:fns (conj (into #{} (map :var) (get-in r [:fns t])) t)
-                                                                                               :keys (get-in plan [:static-reads t])})))]))
+                                                           (assoc :reads (proofs/reads-key rd (proofs/run-reads (assoc x :fns (get-in r [:fns t])) t (get-in plan [:static-reads t])))))]))
                             ran)
                       w (fx/write-verdicts! {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state) :agent (:id @state) :key (:key @state)} ran failures)]
                   ;; beside the cache, the same run's results as facts on this branch (the record shows them); an item the test service
