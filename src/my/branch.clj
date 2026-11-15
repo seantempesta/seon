@@ -75,49 +75,25 @@
         (when (and sym src)
           (let [cur (ns-name *ns*)] (repl/eval-string (str "(in-ns '" (symbol (namespace sym)) ")\n" src "\n(in-ns '" cur ")"))))))))
 
-(defn- resolve-program!
-  "An older merge's program-key entry k ([:var sym], [:task id]) settled to side, as resolve! did before the one merge."
-  {:malli/schema [:=> [:cat :seon.merge/program-key [:enum :ours :theirs :base]] [:vector :seon.merge/entry-value]]}
-  [k side]
-  (let [entry (first (filter #(= k (:key %)) (pm/entries (agent/db))))]
-    (if (= :var (first k))
-      (let [sym (second k) content (get entry side) nsym (symbol (namespace sym))]
-        (when (and entry (not= :ours side))
-          (if-let [src (:src content)]
-            (let [cur (ns-name *ns*)]
-              (repl/eval-string (str "(in-ns '" nsym ")\n" src "\n(in-ns '" cur ")")))
-            ;; main's side removed it: unmapped here, and its definition retracted as an eval's ns-unmap retracts it (seon.repl/removal-tx)
-            (let [db (agent/db) e (pdb/eid db :var/name sym) f (some-> e (#(d/entity db %)) :var/form :db/id)]
-              (ns-unmap (find-ns nsym) (symbol (name sym)))
-              (when f (agent/transact! (repl/removal-tx db [[sym e f]])))))))
-      (when (and entry (not= :ours side))
-        (agent/transact! (pm/side-tx (agent/db) k (get entry side)))))
-    (agent/transact! (pm/resolve-tx (agent/db) k))
-    (unmerged)))
-
 (defn resolve!
   "Settle the unmerged entries of an entity (git add): a var by its symbol, any entity by its name ([:seon.task/id \"ns/name\"],
-  [:var/name sym]: seon.merge/named, as the merge shows a conflict), or one entry by its key ([:datum e a]); an older merge's program
-  key ([:task \"ns/name\"], [:var sym]) as before. With no side the branch keeps what it holds now; :theirs or :base takes that side
+  [:var/name sym]: seon.merge/named, as the merge shows a conflict), or one entry by its key ([:datum e a]). With no side the branch
+  keeps what it holds now; :theirs or :base takes that side
   (`settle-fact!`: main's value, a missing ref target brought from main, a var's form loaded). Answers the entries still unmerged."
-  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol [:tuple :keyword :any] :seon.merge/program-key]] [:vector :seon.merge/entry-value]]
-                  [:=> [:cat [:or :qualified-symbol [:tuple :keyword :any] :seon.merge/program-key] [:enum :ours :theirs :base]] [:vector :seon.merge/entry-value]]]}
+  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol [:tuple :keyword :any] [:tuple [:= :datum] :int :keyword]]] [:vector :seon.merge/entry-value]]
+                  [:=> [:cat [:or :qualified-symbol [:tuple :keyword :any] [:tuple [:= :datum] :int :keyword]] [:enum :ours :theirs :base]] [:vector :seon.merge/entry-value]]]}
   ([x] (resolve! x :ours))
   ([x side]
    (let [db (agent/db) es (pm/entries db)
-         old? (fn [k] (and (vector? k) (not= :datum (first k)) (some #(= k (:key %)) es)))
          ;; the entity x names: a var's symbol, an identity pair, or the entity of a datum key
          e (cond (symbol? x) (pdb/eid db :var/name x)
                  (and (vector? x) (= :datum (first x))) (second x)
                  (and (vector? x) (= 2 (count x)) (qualified-keyword? (first x))) (pdb/eid db (first x) (second x)))
          datum (vec (filter #(and (= :datum (first (:key %))) (not (:resolved? %)) (if (= :datum (first x)) (= x (:key %)) (= e (second (:key %))))) es))]
-     (cond
-       ;; an older merge's program-key entry: settled as it was written
-       (or (old? x) (and (symbol? x) (old? [:var x]) (empty? datum))) (resolve-program! (if (symbol? x) [:var x] x) side)
-       :else (do (doseq [en datum]
-                   (when (not= :ours side) (settle-fact! en side))
-                   (agent/transact! (pm/resolve-tx (agent/db) (:key en))))
-                 (unmerged))))))
+     (doseq [en datum]
+       (when (not= :ours side) (settle-fact! en side))
+       (agent/transact! (pm/resolve-tx (agent/db) (:key en))))
+     (unmerged))))
 
 (defn changes
   "git diff main...: what this branch's merge will carry to main, the vars it added, changed
