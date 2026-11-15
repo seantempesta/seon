@@ -1,4 +1,5 @@
 #!/bin/zsh
+# DEVIATES: reads ps and lsof across checkouts from the shell; retired with the worktrees (seon.system/a-sessions-files-are-a-transaction-on-its-agents-branch); the one system's own view is seon.lib/a-process-reports-the-most-processes-it-held-at-once.
 # bin/worktrees   what is running and what it costs, across every checkout: each worktree's branch and
 # how far it is from main, its root (bin/system status), the processes under it (count, CPU %,
 # memory, threads), its stores' size; then seon processes no checkout claims (orphans: parent 1,

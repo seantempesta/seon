@@ -1,4 +1,5 @@
 #!/bin/zsh
+# DEVIATES: a root per checkout on ports of its own; retired with the worktrees (seon.system/a-sessions-files-are-a-transaction-on-its-agents-branch).
 # bin/ports [FILE]   this checkout's own ports, "SERVER WEB", as its config resolves them
 # (:seon.config.root/server-port, :seon.config.web/port).
 # bin/ports --write   only (re)write the port keys of an existing config/local.edn, booting

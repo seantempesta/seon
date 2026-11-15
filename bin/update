@@ -1,4 +1,5 @@
 #!/bin/zsh
+# DEVIATES: merges main into the write-back tree, builds and restarts root from the shell, outside the runtime; moves inside as the update owner's :update proc (seon.system/a-landing-restarts-root-only-for-a-binary-change, slice 2: landed-tx and landed! its one path), and this becomes bin/mcp call update.
 # bin/update [ARGS]   bring the standing root up to date with main, from the main tree, in one go:
 # bin/update --merges-only DIR   step 1's merge alone on the write-back tree DIR (no build, no restart): what
 #   seon.source-test/an-update-never-says-ok-on-a-merge-that-did-nothing drives

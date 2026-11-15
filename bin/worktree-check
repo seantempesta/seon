@@ -1,4 +1,5 @@
 #!/bin/zsh
+# DEVIATES: proves the per-checkout workflow from the shell; retired with the worktrees (seon.system/a-sessions-files-are-a-transaction-on-its-agents-branch).
 # bin/worktree-check [NAME [BASE]]   prove the worktree workflow end to end with this checkout's tools: a throwaway
 # worktree (bin/worktree NAME BASE, default worktree-check from main; a worktree session names its own branch), its build, its own root on its own ports, an eval
 # through its server and through its MCP server (./bin/mcp), the standing root (7888) untouched,
