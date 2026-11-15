@@ -1162,11 +1162,6 @@
  ;; holds the worker ~0.4 s, so a query waits behind at most one round. 0 embeds nothing and the
  ;; model never loads: bin/test's and bin/check's roots (SEON_EMBED_TEXTS), which never search.
  :seon.config.vector/texts #long #or [#env SEON_EMBED_TEXTS 64]
- ;; Unit: on/off. Whether main's vectors proc reads the source of what the program depends on when its pins or deps move
- ;; (seon.vector/library-round, docs/vector.md#search). Off under the scripted profile: a test root boots with pins and no
- ;; library read, so its first idle round would read ~1,000 files (11.5 M chars) and a stop waited on it
- ;; (seon.system-test/a-root-stops-in-a-second, 2026-11-15).
- :seon.config.vector/library-source #profile {:default true :scripted false}
  ;; Unit: requests. What one :embed step takes from the queue (seon.fx :batch): queries queued
  ;; behind a round are embedded together.
  :seon.config.vector/batch 16
