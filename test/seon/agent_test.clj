@@ -1359,7 +1359,7 @@
                                   "      m1 (msgs 1) m2 (msgs 2) m3 (:messages (seon.ctx.wire/render db (basis 3)))"
                                   "      redrawn (fn [n] (let [m (datahike.api/pull db '[:seon.model-call/sent-hash :seon.model-call/basis] [:seon.model-call/id (seon.lib/call-id k n)])"
                                   "                              b (:seon.model-call/basis m)]"
-                                  "                          [(:seon.model-call/sent-hash m) (seon.lib/digest (seon.edn/encode (:messages (seon.ctx.wire/render (datahike.api/commit-as-db (:store db) (:commit b)) b))))]))]"
+                                  "                          [(:seon.model-call/sent-hash m) (seon.lib/digest (seon.edn/encode (seon.edn/canonical (:messages (seon.ctx.wire/render (datahike.api/commit-as-db (:store db) (:commit b)) b)))))]))]"
                                   "  {:calls [(calls m1) (calls m2) (calls m3)] :prefix [(= m1 (subvec m2 0 (count m1))) (= m2 (subvec m3 0 (count m2)))]"
                                   "   :by (vec (sort (datahike.api/q '[:find [?c ...] :where [?e :seon.eval/by ?s] [?s :seon.system/id :root] [?e :seon.eval/code ?c]] db)))"
                                   "   :pages [(count (pages m1)) (count (pages m2)) (count (pages m3))]"
@@ -3340,7 +3340,7 @@
                                    "      b (:seon.model-call/basis m)"
                                    "      ms (:messages (seon.ctx.wire/render (datahike.api/commit-as-db (:store db) (:commit b)) b))]"
                                    "  {:sent-hash (:seon.model-call/sent-hash m) :error (:seon.error/type (:seon.model-call/error m))"
-                                   "   :redrawn (seon.lib/digest (seon.edn/encode ms)) :roles (mapv :role ms)"
+                                   "   :redrawn (seon.lib/digest (seon.edn/encode (seon.edn/canonical ms))) :roles (mapv :role ms)"
                                    "   :read (mapv :content ms)})")])
                              {:config {:seon.config.ai/provider :none}})]
     (is (= :error (:outcome (:value end))) (pr-str end))

@@ -803,8 +803,11 @@
  ;; what a turn sent that reads the db at a past point (its page message), stored once by its content and named in order by the
  ;; turn's assembly, so a later request reads it and never draws a past point again (owner, 2026-11-15: "store what we sent ... just
  ;; the components that we assemble"; docs/render.md#a-turn-stores-what-it-sent)
- :seon.model-call/assembly [:vector {:description "The parts the turn sent that read the db at a past point, in order, each by its digest. See docs/render.md#a-turn-stores-what-it-sent."}
-                            [:or [:tuple [:= :part] :seon.part/digest] [:tuple [:= :record] :int]]]
+ :seon.model-call/assembly [:vector {:description "Every part the turn sent, in order: what labels it (seon.ctx.wire/request's part ref), the turn it is of, and its messages' digests, so the request reads back as sent. See docs/render.md#a-turn-stores-what-it-sent."}
+                            [:tuple :seon.ctx.wire/ref [:maybe :int] [:vector :seon.part/digest]]]
+ ;; what labels a part of a request (seon.ctx.wire/part-ref): [:page n], [:eval id], [:message id], [:reply id], [:section addresses],
+ ;; [:session key], [:example key], or an entity's schema and id
+ :seon.ctx.wire/ref [:vector {:min 1 :description "What labels a part of a request: its kind, then what names it. See docs/render.md#a-turn-stores-what-it-sent."} :any]
  :seon.part/digest [:and {:seon.db/identity true :seon.db/content-id true :description "A sent part's identity: the digest of its message's canonical EDN (seon.lib/digest of seon.edn/encode of seon.edn/canonical), so one message is one part however it was built and however many turns send it."} :string]
  :seon.part/message [:and {:description "The message as it was sent, plain data. See docs/render.md#a-turn-stores-what-it-sent."} :seon.model/message]
  :seon.part/fact [:map {:seon.db/attributes true} [:seon.part/digest :seon.part/digest] [:seon.part/message :seon.part/message]]

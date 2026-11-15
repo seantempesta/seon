@@ -854,7 +854,7 @@
                   [:=> [:cat :seon.host/db [:or pos-int? [:= :latest]] [:vector pos-int?] :boolean [:maybe :map]] [:maybe :map]]]}
   ([db at calls raw?] (debug-input db at calls raw? nil))
   ([db at calls raw? walk]
-  (let [pull #(d/pull db [:seon.model-call/basis :seon.model-call/sent-hash :seon.model-call/tokens :seon.model-call/cache-hit-tokens
+  (let [pull #(d/pull db [:seon.model-call/id :seon.model-call/basis :seon.model-call/sent-hash :seon.model-call/tokens :seon.model-call/cache-hit-tokens
                           :seon.model-call/cache-miss-tokens :seon.model-call/error :seon.model-call/ms :seon.model-call/model] %)
         last-e (peek calls)
         lb (some-> last-e pull :seon.model-call/basis)
@@ -877,14 +877,17 @@
             ;; with no request before it, nothing is marked: every message is the first request's
             since (some-> prev-e pull :seon.model-call/basis :turn)
             ;; the turn to come reads the render proc's kept walk of the branch (walk: its value at db), never a cold draw
-            w (wire/wire-turn tdb b since (when to-come? walk))
+            ;; a past turn reads what it sent, stored as its parts, never drawn again (the owner, 2026-11-15: "Debug shouldn't be a new
+            ;; interpretation of what's there"); the turn to come, and a turn from before the store kept them, are drawn
+            sent (when-not to-come? (some->> (:seon.model-call/id m) (wire/sent-request db)))
+            w (if sent (wire/wire-of tdb b since (:messages sent) (:parts sent)) (wire/wire-turn tdb b since (when to-come? walk)))
             sent-hash (:seon.model-call/sent-hash m)]
         {:at at :to-come? to-come? :turn (:turn b) :agent (:agent b) :origin (:origin b) :raw? raw? :swept? (boolean swept?)
          :body (:body w) :sources (:sources w) :new (:new w)
          ;; each wire message's tokens and the request's, by the one sizer (seon.ctx.wire/messages-tokens, the turn's cache check's): it
          ;; reads lengths and writes no JSON
          :sizes (mapv #(wire/messages-tokens (mapv (:messages w) %)) (:groups w)) :tokens (wire/messages-tokens (:messages w))
-         :differs? (boolean (and sent-hash (not= sent-hash (lib/digest (sedn/encode (:messages w))))))
+         :differs? (boolean (and sent-hash (not= sent-hash (lib/digest (sedn/encode (sedn/canonical (:messages w)))))))
          :usage (select-keys m [:seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens :seon.model-call/ms :seon.model-call/model])
          :error (:seon.model-call/error m)})))))
 

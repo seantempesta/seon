@@ -492,7 +492,7 @@
             request (fn [n] (let [b {:commit (d/commit-id @conn) :task "demo/f" :turn n :max-turns 4 :origin :model :agent "a1"}
                                   _ (d/transact conn (ts/turn-tx "a1" n {:seon.model-call/basis b}))
                                   {:keys [messages parts]} (wire/render @conn b)]
-                              (d/transact conn (wire/sent-tx "a1" n parts))
+                              (d/transact conn (wire/sent-tx (seon.lib/call-id "a1" n) parts))
                               (d/transact conn (turn-of b n))
                               [b messages]))
             [_ r1] (request 1)
@@ -509,7 +509,15 @@
         (is (= (subvec r2 0 (count r1)) r1) "and the prefix holds")
         (is (= (wire/stored-page @conn (pdb/eid @conn :seon.agent/key "a1") 2)
                (into [] (comp (filter (fn [[ref]] (= [:page 2] ref))) (mapcat second)) (:parts (wire/render @conn b3))))
-            "turn 2's stored page is what its request sent")))))
+            "turn 2's stored page is what its request sent")
+        ;; debug reads what was sent, never a new interpretation (the owner, 2026-11-15): the request joined from its stored parts is
+        ;; the one sent, and hashes as the turn hashed it (seon.turn/model-request!'s :seon.model-call/sent-hash)
+        (let [back (wire/sent-request @conn (seon.lib/call-id "a1" 2))
+              h #(seon.lib/digest (seon.edn/encode (seon.edn/canonical %)))]
+          (is (= r2 (:messages back)) "turn 2's request read back from its parts is what it sent")
+          (is (= (h r2) (h (:messages back))) "its digest is the sent hash")
+          (is (= 1 (count (filter #(= "system" (:role (:seon.part/message (d/entity @conn (:e %))))) (d/datoms @conn :aevt :seon.part/message))))
+              "the system message, sent by every turn, is one part"))))))
 
 ;; See docs/render.md#a-turn-stores-what-it-sent
 (deftest ^{:seon.test/estimate {:ticks 3000000}} one-message-is-one-part-however-it-was-built
@@ -518,7 +526,7 @@
     (fn [_ conn]
       (let [m1 {:role "assistant" :content "My page changed: status." :tool-calls [{:id "x" :intent "Show." :code "(my.render/diff p q)"}]}
             m2 (array-map :tool-calls [(array-map :code "(my.render/diff p q)" :intent "Show." :id "x")] :content "My page changed: status." :role "assistant")
-            tx (fn [k m] (wire/sent-tx k 1 [[[:page 1] [m] 1]]))]
+            tx (fn [k m] (wire/sent-tx (seon.lib/call-id k 1) [[[:page 1] [m] 1]]))]
         (is (= m1 m2) "the same message")
         (is (not= (seon.edn/encode m1) (seon.edn/encode m2)) "whose plain encodings differ")
         (d/transact conn (ts/turn-tx "a1" 1 {}))
@@ -2107,7 +2115,7 @@
                       _ (d/transact conn [{:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/basis b :seon.model-call/forms 1
                                            :seon.model-call/ms 1}])
                       ms (:messages (wire/render @conn b))]
-                  (d/transact conn [{:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/sent-hash (seon.lib/digest (seon.edn/encode ms))}])
+                  (d/transact conn [{:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/sent-hash (seon.lib/digest (seon.edn/encode (seon.edn/canonical ms)))}])
                   ms))
         r0 (turn! 1 {:seon.model-call/reasoning "why"})
         _ (d/transact conn [{:seon.eval/id "e2" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/code "(f 1)"
