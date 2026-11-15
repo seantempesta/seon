@@ -160,6 +160,22 @@
     (is (= :seon.system/undeliverable (:seon.error/type (ffirst (writes o2)))) "to a live agent: a problem")
     (is (= :seon.system/undeliverable (:seon.error/type (ffirst (writes o3)))) "to a pid nothing knows: a problem")))
 
+;; Estimate: one api step on an :error (as a-drop-to-an-agent-stopped-on-purpose-is-no-problem's, ~0.3M) and the answers read: 1,000,000
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-defect-on-an-agents-frame-ends-the-agent-and-answers-its-spawn
+  ;; task seon.step/every-request-is-answered-at-each-end-of-its-holder (docs/flow.md#the-five-rules, rule 3): an agent's proc threw on its
+  ;; hello (data, 2026-11-15: a refused contract error built from :load-errors), Flow kept its state and dropped the frame, and the spawn
+  ;; waiting on that hello was never answered (887 s, until root stopped). Red before: the :error arm answered only what the step took,
+  ;; and a frame from the agent's socket names no caller
+  (let [p (promise)
+        st (-> (api {:agents {:a1 {:status :spawning}}})
+               (assoc-in [:agents :a1] {:branch :b1}) (assoc-in [:agent-procs :a1] {:proc :launcher})
+               (assoc-in [:seon.system/spawning :a1] p))
+        [_ o] (step st :back {:op :error :pid :a1 :message "boom" :msg {:op :hello :ready true}})]
+    (is (realized? p) "the spawn is answered in the step that met the defect, never left waiting")
+    (is (= :seon.agent/failed (:seon.error/type @p)) (pr-str (when (realized? p) @p)))
+    (is (= "boom" (get-in @p [:cause :seon.error/message])) "with the defect as its cause")
+    (is (some #(= :failed (:op %)) (get o [:a1 :in])) "and the agent is told it failed, so it hangs up and its end answers the rest")))
+
 (deftest ^{:seon.test/estimate {:ticks 1000000}} an-agent-death-is-recorded-with-its-cause
   (let [dir (str (System/getProperty "java.io.tmpdir") "/d2-death-" (random-uuid))
         _ (.mkdirs (java.io.File. (str dir "-agents")))

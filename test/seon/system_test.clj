@@ -20,7 +20,11 @@
       (ts/drop-main! (test-store) main)
       (assoc r :res (edn/read-string (last (str/split-lines (:out r))))))))
 
-(deftest root-threads-are-what-root-declares
+;; Estimate: the test's own process only spawns the binary and reads one EDN line: one fork+exec (~65 ms, ~2e6 ticks) and a parse, ~3,000,000
+;; ticks. The one boot, three forked agents and the stop! it waits on are the child's (~10.7 s boot, docs/cost.md; ~3.5e8 child ticks), a root
+;; that must be live because the threads it counts exist only while it runs: no in-process data names them (seon.check/declared-threads reads Jolt's
+;; thread table). Measured 31-61 s under load 28 (was 185 s).
+(deftest ^{:seon.test/root [] :seon.test/execs ["target/seon"] :seon.test/estimate {:ticks 3000000}} root-threads-are-what-root-declares
   ;; one start!/stop! cycle, in a process of its own (a process boots root once,
   ;; a-second-boot-in-one-process-is-refused): while running (three agents just
   ;; evaluated) and after stop!, every thread is one seon.check/declared-threads
