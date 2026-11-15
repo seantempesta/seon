@@ -279,36 +279,39 @@
 (defn- request!
   "The request of model call id at basis, the one way a turn's context is made, for a model's turn and an outside read alike:
   basis recorded, the request drawn from the kept walk, its hash and its parts stored. Answers {:messages :parts}. See
-  docs/render.md#a-turn-stores-what-it-sent."
-  {:malli/schema [:=> [:cat :string [:maybe :string] :int :seon.model-call/basis :boolean] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]}
-  [id prev n basis store?]
+  docs/render.md#a-turn-stores-what-it-sent. sent, the request before's {:messages :digests}, lets it digest only what it added; it
+  answers this one's as :sent."
+  {:malli/schema [:function [:=> [:cat :string [:maybe :string] :int :seon.model-call/basis :boolean] :map]
+                  [:=> [:cat :string [:maybe :string] :int :seon.model-call/basis :boolean [:maybe :map]] :map]]}
+  ([id prev n basis store?] (request! id prev n basis store? nil))
+  ([id prev n basis store? sent]
   (agent/transact! [{:seon.model-call/id id :seon.model-call/basis basis}])
   (agent/commit!)
   (let [db (agent/db)
         {:keys [messages parts] :as r} (wire/render db basis {:walk (repl/page-walk)})
         ;; each message's digest, taken again only where the kept walk drew a new one: a message identical to the one at its place in the
         ;; request before is that one, so its digest is (an unchanged component answers the same objects), and a turn digests what it added
-        ds (when store? (let [[pm pd] (::sent @agent/state)] (wire/sent-digests pm pd messages)))]
-    (when store? (swap! agent/state assoc ::sent [messages ds]))
+        ds (when store? (wire/sent-digests (:messages sent) (:digests sent) messages))]
     (agent/transact! (cond-> [{:seon.model-call/id id :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}]
                        store? (into (wire/sent-tx db id prev n parts ds))))
     (agent/commit!)
-    r))
+    ;; what this request sent, for the next turn's to digest only what it adds (the run's state carries it: seon.turn/model-request!)
+    (cond-> r store? (assoc :sent {:messages messages :digests ds})))))
 
 (defn- model-request!
   "Turn n's model call made ready, never sent: the agent's turn number moved, its basis recorded and the request drawn from
   its walk. Answers {:id :t1 :request}, the request what root's :model owner is asked. See docs/turn.md#act."
   {:malli/schema [:=> [:cat :map :map [:maybe :string]] [:map [:id :string] [:request :map] [:t1 :int]]]}
-  [{:keys [turn max-turns merge?]} t model-name]
+  [{:keys [turn max-turns merge?] :as st} t model-name]
   (let [;; the turn this is: the agent's number, one past the one in force, which the messages taken now and every record
         ;; this turn writes take
         n (inc (agent/turn-now))
         [id basis] (open-turn! (:seon.task/id t) n max-turns (boolean merge?) model-name)
         ;; the provider as the config stands at the basis (main's as the turn heard it, over the task's own), never one copied at boot
         provider (wire/provider-of (agent/db) basis)
-        {:keys [messages]} (request! id (when (> n 1) (lib/call-id (:key @agent/state) (dec n))) n basis true)]
+        {:keys [messages sent]} (request! id (when (> n 1) (lib/call-id (:key @agent/state) (dec n))) n basis true (::sent st))]
     ;; :call and :agent name this model call and its agent, so the reply is read as it streams (docs/flow.md#effects-one-owner-and-its-workers-per-kind)
-    {:id id :t1 (profile/now-ns)
+    {:id id :t1 (profile/now-ns) :sent sent
      :request {:messages messages :task (:seon.task/id t) :turn turn :provider provider :call id :agent (:key @agent/state)}}))
 
 (defn- act!
@@ -543,7 +546,7 @@
         ;; the model call made ready, from act-st (st, or st after its status's error), and left pending with what its answer
         ;; is acted on with
         ask (fn [act-st] (let [call (model-request! act-st t model-name)]
-                           [(assoc st :pending (assoc call :st act-st :task t :unmerged (:unmerged s))) {:model (:request call)}]))]
+                           [(assoc st :pending (assoc call :st (assoc act-st ::sent (:sent call)) :task t :unmerged (:unmerged s))) {:model (:request call)}]))]
     (cond
       ;; the agent's own fail! is its verdict, on green proofs and at the cap too, as at a hand-back
       ;; (hand-back-end); a wait on the last turn is the budget spent, so the run is :cap, never :waiting
