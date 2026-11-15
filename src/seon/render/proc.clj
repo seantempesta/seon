@@ -30,7 +30,7 @@
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.program :as program] [seon.render.ui :as ui] [seon.print :as print] [seon.print.select :as select] [seon.repl :as repl] [seon.system :as c]
             [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.ctx :as ctx] [seon.db] [datahike.index.interface]
-            [seon.config :as config] [seon.step :as step] [seon.problems :as problems] [seon.error :as err]))
+            [seon.config :as config] [seon.step :as step] [seon.problems :as problems] [seon.error :as err] [seon.ratom :as rv]))
 
 (defn- event-cap "Events the stream keeps (:seon.config.render.list/stream)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/stream))
 
@@ -793,15 +793,24 @@
   (if-let [rw (:root-walk st)]
     (let [db (:main-db st) pt (seon.db/point db) from (:health-at st) prev (:health (:tree (:p rw))) fold (:fold st)]
       ;; the held report stands while both what it was read from and the counts it was put at do
-      (if (and (= pt from) (= fold (:health-fold st)))
+      (if (and (= pt from) (= fold (:health-fold st)) (= (:health-rev st) (:health-rev-at st)))
         st
         (let [base (when (and prev from (not= pt from)) (seon.db/at-commit (:conn st) (first from)))
-              ;; the commit's own value, as the held health was read from it; a db ahead of its commit is read whole
-              h (cond (and prev (= pt from)) prev
-                      (and base (= (:max-tx base) (second from))) (problems/health-moved prev base db (apply concat (d/datoms-diff base db :eavt [])))
+              own (or (:rv-owner st) (rv/owner))
+              ;; the recorded classes are the live report's: its reactions reran only what main's moves touched (health-advanced)
+              live (or (:health-live st) (binding [rv/*owner* own] (problems/recorded-live (rv/store db) (config/value :seon.config.render/flush-max))))
+              recorded (:classes (problems/recorded-report live {}))
+              ;; the commit's own value, as the held health was read from it; the moves since are advance-main's, kept, never diffed again;
+              ;; a db ahead of its commit is read whole
+              h (cond (and prev (= pt from) (= (:health-rev st) (:health-rev-at st))) prev
+                      ;; main unmoved, the live report moved (its rows made or rerun by health-more): its recorded classes, nothing diffed
+                      (and prev (= pt from)) (problems/health-moved prev db db [] recorded)
+                      (and base (= (:max-tx base) (second from))) (problems/health-moved prev base db (:health-pending st []) recorded)
                       :else (problems/health db))
               h (if (seq fold) (problems/with-fold h db fold) h)
-              st (assoc st :health-at pt :health-fold fold)]
+              st (assoc st :health-at pt :health-fold fold :health-live live :rv-owner own :health-pending [] :health-rev-at (:health-rev st))]
+          ;; a live report first made bounded (flush-max rows a step) makes the rest in the proc's next steps
+          (when (:more? live) (a/put! (:events-ch st) {::health-more true}))
           (if (= (:classes h) (:classes prev))
             st
             (-> (assoc st :root-walk (rewalk rw #(assoc % :health h)))
@@ -915,6 +924,33 @@
   (let [ix (:read-index st {})]
     (into #{} (mapcat (fn [d] (mapcat #(if (= :all %) (keys (:views st)) (get ix %)) (d/datom-keys d)))) datoms)))
 
+(declare health-more)
+
+(defn- health-advanced
+  "St with main's move to db (moved, advance-main's one diff) given to health: its live recorded report's store committed and
+  flushed in this proc's step, each reaction a datom touched rerun and the rest left (seon.problems/recorded-live), and the move kept
+  for the derived classes until health is next read (:health-pending). Nothing before health was first read. See
+  docs/reactive.md#how-a-commit-reaches-its-readers-today."
+  {:malli/schema [:=> [:cat :map :seon.host/db [:sequential :any]] :map]}
+  [st db moved]
+  (if-let [live (:health-live st)]
+    (do (binding [rv/*owner* (:rv-owner st)] (rv/commit! (:store live) db moved))
+        (health-more (update st :health-pending (fnil into []) moved)))
+    st))
+
+(defn- health-more
+  "St with at most :seon.config.render/flush-max of health's reactions run and rows made in this step; while any are left, the next
+  step's own message (::health-more on the proc's events chan, never kept as an event), so ping and stop interleave and nothing is
+  dropped (flow's rule 2)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
+  (let [n (config/value :seon.config.render/flush-max)
+        [left live] (binding [rv/*owner* (:rv-owner st)]
+                      (let [left (rv/flush! n)] [left (problems/recorded-sync! (:health-live st) n)]))]
+    (when (or (pos? left) (:more? live)) (a/put! (:events-ch st) {::health-more true}))
+    ;; the live report moved: health! reads its recorded classes again at its next read (:health-rev)
+    (-> st (assoc :health-live live) (update :health-rev (fnil inc 0)))))
+
 (defn- advance-main
   "St with main as db when db is newer than the main it holds (main-info): root's walk advanced
   (root-walk) and the views its datoms touched since (the datoms-diff of the two, O(changed), as a branch's read is matched)
@@ -929,6 +965,7 @@
       (let [moved (when held (ctx/moved held db nil))]
         (cond-> (user-walks (root-walk (main-info st db moved) db held moved) db (when held {:from held :moved moved}))
           (seq moved) (update :dirty (fnil into #{}) (touched st moved))
+          (seq moved) (health-advanced db moved)
           ;; a landing kept in place loaded the new program, then wrote root's source fact (my.root/landed!): every held view drew with
           ;; the old renders and may read nothing that moved, so each walks again (a component whose render fn changed runs, render!)
           (some #(= :seon.system/source (:a %)) moved) (update :dirty (fnil into #{}) (keys (:views st))))))))
@@ -1135,9 +1172,12 @@
   recorded by its id (ask-branches reads its branch again)."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [st ev]
+  (if (::health-more ev)
+    ;; this proc's own next step of health's flush, never an event a stream shows
+    (if (:health-live st) (health-more st) st)
   (cond-> (update st :new-events conj ev)
     ;; an agent's commit moves its branch: a page of it reads the branch again (its turns and evaluations are written there)
-    (and (= :commit (:type ev)) (:agent ev)) (assoc-in [:commits (:agent ev)] (:t ev))))
+    (and (= :commit (:type ev)) (:agent ev)) (assoc-in [:commits (:agent ev)] (:t ev)))))
 
 (defn- take-read
   "St with view showing branch b as its one read holds it (:branch-reads b: its db or why it could
