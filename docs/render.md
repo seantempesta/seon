@@ -205,7 +205,7 @@ The page is laid out by Tailwind's classes in each render's hiccup, responsive a
 
 ### Where things go
 
-A page is a bar over columns: the agents on the left (the frame's), then the page render's own columns, an agent's chat in the middle and its parts and tiles on the right (`seon.render.ui/agent-page`); the right column shows only when it holds a part, and each column scrolls on its own on a wide screen and stacks on a narrow one. `input.css` styles them by name: the frame's classes `seon-page`, `seon-bar`, `seon-columns`, and the layout's ids `#p-agents`, `#c-side`, `#p-chat`, `#c-rows`, `#p-context`, `#p-task`, `#p-tiles`. Each child of `#p-task` and `#p-tiles` is a block headed by what it is; its `:data-render`, on the page's html only, names the render that drew it. Shared styling: `seon-note`, `seon-stack`, `seon-stack-2`, `seon-row`, `muted`, `kicker`, `box`.
+A page is a bar over columns: the agents on the left (the frame's; none on the person's page, whose bar links to them), then the page render's chat, which takes the main space, with the agent's parts and tiles after its conversation in the same column, scrolling with it (`seon.render.ui/agent-page`); the parts show only when they hold one, and the columns stack on a narrow screen. `input.css` styles them by name: the frame's classes `seon-page`, `seon-bar`, `seon-columns`, and the layout's ids `#p-agents`, `#c-side`, `#p-chat`, `#c-rows`, `#p-context`, `#p-task`, `#p-tiles`. Each child of `#p-task` and `#p-tiles` is a block headed by what it is; its `:data-render`, on the page's html only, names the render that drew it. Shared styling: `seon-note`, `seon-stack`, `seon-stack-2`, `seon-row`, `muted`, `kicker`, `box`.
 
 ### Style
 
@@ -370,6 +370,7 @@ Text for the wire, storage, a digest, a file, a URL, a command line or code to e
 - `seon.config/resolved`: the config keys a refused combination names, in its error message.
 - `my.root/first-moves!`: the code it sends an agent to evaluate.
 - `seon.server/verdict-line`: the form in its `:handle`, code to evaluate.
+- `seon.server/op-answer`: `:import`'s eval, code it sends the checkout's agent to evaluate.
 
 An agent's namespace refers `clojure.pprint`'s `pp` and `pprint` (`seon.agent/make-ns!`), as a plain REPL does; what they write is the eval's `:out`. An eval's `*out*` and `*err*` are kept marked verbatim (`seon.print/code`, in `seon.repl/eval-code`), never as string literals. A check's console lines are the printer's whole text (`seon.main/shown`).
 

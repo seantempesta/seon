@@ -200,6 +200,10 @@
  :seon.fx/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/defect]]]]
  :seon.fx/unknown-kind [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/unknown-kind]]]]
  :seon.fx/in-test [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/in-test]]]]
+ ;; a request its asker stopped while it was queued (seon.fx/stop): dropped, never run
+ :seon.fx/stopped [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/stopped]] [:seon.fx/stop :seon.fx/stop]]]
+ ;; a server op its caller stopped (seon_interrupt, or MCP's notifications/cancelled) while it ran: seon.server/respond
+ :seon.server/interrupted [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/interrupted]] [:line :string]]]
  ;; the provider's HTTP 429: transient, the :model owner keeps the request and pauses (its Retry-After when given)
  :seon.model/rate-limited [:and {:seon.model/retryable "the provider may answer next time, after its rate window"} :seon.error/base [:map [:seon.error/type [:= :seon.model/rate-limited]] [:status {:optional true} :int]
                                                   [:body {:optional true} :string] [:retry-after-ms {:optional true} :int]]]
