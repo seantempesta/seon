@@ -4,7 +4,7 @@
   store (its agent caches its verdicts by digest: seon.results-test).
   Run: bin/test seon.prove-test"
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d]
-            [seon.test-store :as ts] [clojure.java.shell :as sh] [seon.agent-test :as at] [clojure.edn] [seon.prove :as prove] [seon.fx :as fx] [seon.step :as step] [seon.agent] [seon.cost] [seon.proofs :as proofs] [seon.program] [seon.config]))
+            [seon.test-store :as ts] [clojure.java.shell :as sh] [seon.agent-test :as at] [clojure.edn] [seon.prove :as prove] [seon.fx :as fx] [seon.step :as step] [seon.agent] [seon.cost] [seon.proofs :as proofs] [seon.program] [seon.config] [seon.reconcile]))
 
 ;; the service's state as a test starts it: the max-workers of the config in force (seon.fx/limits), which deals the queue in
 ;; shares; nothing here reads the machine's load (docs/cost.md#what-is-measured: no assertion the load can turn red)
@@ -152,12 +152,14 @@
         (is (empty? (asks o3 :spawn)) "the same inputs (program and binary) are not asked again: same inputs, same answer")
         (is (= 1 (count (asks o4 :spawn))) "a newer program is new inputs: main is asked again (a new binary is a new process, whose boot asks it)")))))
 
-(deftest ^{:seon.test/estimate {:ticks 100000}} a-death-naming-another-binary-is-not-asked-again-on-the-same-program
+(deftest ^{:seon.test/estimate {:ticks 8500000}} a-death-naming-another-binary-is-not-asked-again-on-the-same-program
   ;; root's review of adf8de2a25: a failed main run's :binary is what its spawn's death names (target/seon on disk, read by
   ;; seon.fx/runtime-for), which differs from the proc's own :binary (the running binary, fixed for the process) once target/seon is
   ;; rebuilt under a running root. Same program, same process: the same inputs, so main is not asked again at each notice (it
   ;; would spawn and die on every one). Red before: main-inputs-moved? compared the death's binary with the proc's, so every notice
-  ;; at the same program asked main again. Estimate: 3 notices and 1 answer through the step fn, ~20k ticks each = ~80k (measured 46k for its sibling in a shard)
+  ;; at the same program asked main again. Estimate: 3 notices and 1 answer through the step fn, ~20k ticks each = ~80k, plus, when it is
+  ;; its child's first test to start the proc, the init's one read of the binary's build record (seon.program/binary-program: 643 KB
+  ;; decoded, 7.9M ticks measured at root, result/bb8b9fd8; root pays it once at boot) = ~8M. Was 80k: the estimate missed that read (measured 7.96M alone, 46k for its sibling after it)
   (let [value seon.config/value
         died (seon.contract/error :seon.process/env-mismatch 'seon.fx/runtime-for
                                   "target/seon's identity 0b1d1e5 is not tree e6275967's 76dc758d: build it"
@@ -648,7 +650,11 @@
     (is (= #{'a.b-test/t 'a.b-test/u} (set (keys (:no-verdict r)))) "each is no verdict")
     (is (= :seon.test/fork-refused (get-in r [:no-verdict 'a.b-test/t :seon.error/type])) "naming the batch's own error")
     (is (= {} (:results g)) (str "the gate reads no :fail from it, so its branch keeps them deferred: " (pr-str g)))
-    (is (= :seon.test/fork-refused (get-in g [:no-verdict 'a.b-test/u :seon.error/type])) "and the gate's answer carries why")))
+    (is (= :seon.test/fork-refused (get-in g [:no-verdict 'a.b-test/u :seon.error/type])) "and the gate's answer carries why")
+    ;; every reader of a run's tests reads them as no verdict (root's review of f4ca2f3a4c): the agent's record (seon.proofs/results) and
+    ;; the done rule's ask of main (seon.reconcile/main-answer), where a red would make the change's red main's
+    (is (= {} (proofs/results r)) "no result for a test that never ran")
+    (is (= {:red #{} :unknown #{'a.b-test/u}} (#'seon.reconcile/main-answer #{'a.b-test/u} r)) "main answered nothing of it: unknown, never main's red")))
 
 ;; docs/merging.md#the-test-service: each asker is told an item's verdict as it lands, before it is answered, so a session's
 ;; bin/prove prints each test as it ends; an item with no verdict is told as :no-verdict, never left out

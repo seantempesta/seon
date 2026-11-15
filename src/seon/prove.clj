@@ -393,7 +393,8 @@
   [base results]
   (let [results (into {} (remove (comp vector? key)) results)
         own (fn [t r] (if (contract/error? r)
-                        [{:type :error :var (str "#'" t) :message (:seon.error/message r) :seon.error/type (:seon.error/type r)}]
+                        ;; :no-verdict: what seon.proofs/results and failures read as no verdict, as a death's :exit
+                        [{:type :error :var (str "#'" t) :message (:seon.error/message r) :seon.error/type (:seon.error/type r) :no-verdict true}]
                         (filterv #(= (str "#'" t) (:var %)) (:reports (:answer r)))))
         reports (-> (vec (:reused-reports base)) (into (mapcat (fn [[t r]] (own t r))) (sort-by (comp str key) results))
                     (into (batch-errors results)))
@@ -451,7 +452,7 @@
         err? (contract/error? r)
         ended? (#{:seon.system/ended :seon.prove/superseded} (:seon.error/type r))
         ;; a run's items name their own reds (run-answer: a step's among them); any other answer, by its failing reports
-        r (if err? r (assoc r :key k :red (vec (sort-by str (distinct (concat (:red r) (remove (set (keys (:no-verdict r))) (keys (proofs/failures r)))))))))
+        r (if err? r (assoc r :key k :red (vec (sort-by str (distinct (concat (:red r) (keys (proofs/failures r))))))))
         ;; asked again, it ran nothing for that asker: each verdict reads as reused at its digest, with no measure to add
         st (remember (-> st (update :runs dissoc k) (assoc :last (:branch run))) run r)
         [st kill] (runner-done st run)
