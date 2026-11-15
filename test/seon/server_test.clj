@@ -353,7 +353,8 @@
 
 (deftest an-outside-agent-plays-the-model
   ;; docs/server.md#working-a-task-from-a-worktree: a read holds the conversation, as JSON the body a provider is sent;
-  ;; a seon_eval by the agent attached is one reply, a turn, as a model's is, and a blank intent is not run, as a model's is not
+  ;; a seon_eval by the agent attached is one reply, a turn, as a model's is, and a blank intent is not run, as a model's is not;
+  ;; plain {intent, code} on an agent is a reply of that one eval, for every caller (the :eval op, where bin/mcp's rewrite was)
   (let [[attach called stopped old turn-of moved-ns ns-after wire text]
         (at/in-agent (fn [{:keys [agent task]}]
                        [{:op :attach :task task}
@@ -376,9 +377,8 @@
     (is (= [2 4] (filterv number? (map :value (:responses called)))) "each eval answers, in order")
     (let [exs (keep #(:seon.error/type (:ex %)) (:responses stopped))]
       (is (= [:seon.turn/invalid-call] exs) "a call with no intent is answered invalid, and what follows it runs (owner, 2026-11-08)"))
-    (is (= :seon.system/refused (:seon.error/type old)) (pr-str old))
-    (is (clojure.string/includes? (:seon.error/message old) "message-md") "the old shape is told the new one, nothing run")
-    (is (= 2 (:value turn-of)) "each reply is a turn: no one growing turn 0")
+    (is (= ["old-shape-ran"] (mapv name (:recorded (first (:responses old))))) (str "plain code on an agent runs as one eval: " (pr-str old)))
+    (is (= 3 (:value turn-of)) "each reply is a turn, the plain one too: no one growing turn 0")
     (is (= ["seon.print"] (filterv string? (map :value (:responses ns-after)))) (str "the namespace a reply moved to is where the next one runs: " (pr-str moved-ns)))
     (is (= ["repl"] (mapv #(get-in % ["function" "name"]) (get body "tools"))) "the body holds the tool a model is given")
     (is (= (clojure.data.json/read-str (clojure.data.json/write-str seon.model/eval-tool)) (first (get body "tools"))) "that very tool")
@@ -387,7 +387,7 @@
     (is (= {"intent" "add one and one" "code" "(+ 1 1)"} args) "the first eval is a call of its own")
     (is (= {"intent" "then two and two" "code" "(+ 2 2)"} (clojure.data.json/read-str (get-in ecall2 ["function" "arguments"]))) "and the second")
     (is (= [true true] [(boolean (re-find #":value 2" (result-of ecall))) (boolean (re-find #":value 4" (result-of ecall2)))]) "each call answered by a tool message of its own")
-    (is (not-any? #(clojure.string/includes? (str (get % "content")) "old-shape-ran") msgs) "the old shape ran nothing")
+    (is (some #(some-> (get-in % ["tool_calls" 0 "function" "arguments"]) (clojure.string/includes? "old-shape-ran")) msgs) "the plain code ran as one eval, its intent its call's")
     (is (clojure.string/includes? (:context text) "(+ 1 1)") "the text read holds the conversation too")))
 
 (deftest roots-repl-names-what-has-no-branch
