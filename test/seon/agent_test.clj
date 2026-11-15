@@ -1567,7 +1567,8 @@
   (let [red {:reasons [{:reason :proof-red}]}
         out (volatile! nil)
         end (work-with (fn [st called!] (called!) st) (constantly red)
-                       (fn [arg] (let [[st o] (seon.turn/step-run (seon.turn/start! arg) nil)]
+                       (fn [arg] (let [go (fn go [[st o]] (if (or (:merge o) (:observe o)) (go (seon.turn/step-run st (@#'seon.turn/effect-answer o))) [st o]))
+                                       [st o] (go (seon.turn/step-run (seon.turn/start! arg) nil))]
                                    (vreset! out (set (keys o)))
                                    (@#'seon.turn/end-of (seon.turn/step-run st {:seon.turn/stop true})))))]
     (is (= #{:model} @out) "the run's model call was out when the stop came")
