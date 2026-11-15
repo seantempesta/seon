@@ -28,4 +28,9 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.repl-test/an-eval-of-a-quoted-uuid-or-inst-is-its-value}
   :seon.task/estimate #:jolt.backend{emit-quoted {:n 1, :order :constant, :ticks 1000, :bytes 1000}}
-  :seon.task/needs #{}}]
+  :seon.task/needs #{}}
+ {:seon.task/name "eval-and-the-loader-compile-every-form-alike"
+  :seon.task/plan "Owner: deps (tests-4 asked, 2026-11-15: the class is Jolt's, so a Jolt gate run once per pin, every caller gains). PRIOR WORK [searched Jolt's Makefile gates for eval/loader/parity]: no gate compares the two paths. Nearest: evalbydigest (Makefile:852: the same forms in a second process load by digest), corpus (runs a corpus through the loader). The class: eval compiles a form that a reader or data reader has already turned into values, while the file loader compiles reader forms, and emit-quoted had value branches only for collections. A quoted #uuid broke every test agent's load 482 times (fixed by gate emitquotedvalues, Jolt 6b77996b); any other place the two paths differ is the same class. Inside Seon, evaluating every stored form cost 1.2B ticks and 13 GB for 5 test files [M, tests-4]: too heavy for a test. Design: a Jolt gate reads each form of the corpus and stdlib files twice, as reader forms (the loader's input) and as values (read-string, eval's input), compiles both, and requires equal results or the same typed error. COST: n = the corpus's forms (~thousands); O(n) compiles, about twice the corpus gate's work; lower bound one compile per form per path. Proof: the gate, red first on a commit before 6b77996b (the #uuid case)."
+  :seon.task/kind :work
+  :seon.task/proofs #{jolt.backend-test/eval-and-the-loader-compile-every-form-alike}
+  :seon.task/estimate #:jolt.backend{emit-quoted {:n 5000, :order :linear, :ticks 50000000, :bytes 500000000}}}]
