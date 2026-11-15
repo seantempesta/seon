@@ -58,6 +58,14 @@ On storing each turn's request: "Yes we can store what we sent and we store what
 
 Round 1's transcript showed agents re-forked into a cold process every turn: each turn merged main whenever main moved, and a merge that brought code ended the run. Asked how an agent should take main's changes, he chose loading in place: at each turn boundary the agent merges main and evaluates main's changed forms into its running process, as root does on a landing, re-forking only when a build input changed. Stated in [the plan](plan.md#the-order).
 
+### A branch merges whole; no list of what merges
+
+"right now we have a hand maintained list of what merges and I want that gone and for us to merge everything and there should be no conflicts with our processes. So all the hacky shit where agents were doing partial merges needs to go away and the agent is either operating in their branch which is always merging to main anyway or it's main. This shouldn't be too hard. The underlying mechnaism is branch based so we can branch off of branches with the same system." A branch's net change since its merge base merges whole into the branch it came from, by one function; a conflict is only a fact both sides changed differently. Run records are written only by root on main; derived values are recomputed after the merge. Stated in [the plan](plan.md#the-order) (landing 6).
+
+### Root reviews after the merge
+
+"I'm happy to have you post review things that are merged as we can easily undo a merge if we find a problem or just fix it." Sessions land themselves (`bin/land --fast`); root reviews each landed merge afterwards, and a problem found is reverted or fixed forward by its owner. Stated in `AGENTS.md` §3 (the fast lane).
+
 ### Root fixes errors anywhere; the plan is A to B
 
 "You can and should fix all errors anywhere in the system. Distribute this work to expert agents as you need too." "We need a plan from where we are now A to where we want to go B. That's your job." The order he approved is in [the plan](plan.md#the-order).

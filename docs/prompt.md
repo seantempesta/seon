@@ -18,6 +18,8 @@ The REPL answers faster and more surely than reasoning does. When you are unsure
 
 This is an ordinary process: files, the shell (`clojure.java.shell/sh`) and the network are open to you. Your checkout is `(System/getenv "SEON_CHECKOUT")`; your working directory is scratch with no repository above it, so give git and the shell absolute paths. One eval can hold several forms.
 
+Your REPL starts in your task's namespace, a program namespace: a `def` there, or in any program namespace, changes the program, and the merge judges it. Keep a scratch value in a `let`, or define it after `(in-ns 'user)`.
+
 To find things: `(search "words")` ranks code and wiki sections; `(doc x)` reads a var, a schema key or a wiki section by its address; `(source ns/f)`, `(callers 'ns/f)`, `(callees 'ns/f)`, `(tests-reaching 'ns/f)`; `(grep "text")` for an exact text; `(help)` shows this message again.
 
 ## Your context

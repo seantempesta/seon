@@ -189,18 +189,21 @@
         "and the text made a comment, told too")
     (is (= [] (search/repaired "(+ 1 2)" (:repairs (reader/forgive "(+ 1 2)")))) "code that reads is not repaired")))
 
-(deftest only-program-tests-judge
-  ;; a deftest in a scratch namespace never merges, so it never judges the branch
-  (binding [*ns* *ns*]
-    (eval '(ns ctx-prog-ns (:require [clojure.test :refer [deftest is]])))
-    (eval '(deftest p-test (is true)))
-    (eval '(ns ctx-scratch-ns (:require [clojure.test :refer [deftest is]])))
-    (eval '(deftest s-test (is false)))
-    ;; scratch as the platform declares the agent's own namespace (seon.agent/make-ns!);
-    ;; Jolt's (ns ^:scratch x) does not carry the metadata yet (reported to root)
-    (alter-meta! (find-ns 'ctx-scratch-ns) assoc :scratch true)
-    (is (agent/judges? 'ctx-prog-ns/p-test))
-    (is (not (agent/judges? 'ctx-scratch-ns/s-test)))))
+(deftest ^{:seon.test/estimate {:ticks 30000000}} only-program-tests-judge
+  ;; a deftest in a scratch namespace never merges, so it never judges the branch: its form never becomes program facts
+  ;; (seon.program-test/user-and-scratch-namespaces-stay-scratch), and judges? reads the facts the reach graph holds, never what
+  ;; this process loaded. Estimate: 4 recorded forms ~1.2M, one reach graph of them ~10M, two lookups
+  (seon.program/ensure-ns! 'ctx-scratch-ns)
+  ;; scratch as the platform declares the agent's own namespace (seon.agent/make-ns!)
+  (alter-meta! (find-ns 'ctx-scratch-ns) assoc :scratch true)
+  (let [db ((requiring-resolve 'seon.program-test/record) (pdb/empty-db false)
+            'ctx-prog-ns "(ns ctx-prog-ns (:require [clojure.test :refer [deftest is]]))"
+            'ctx-prog-ns "(deftest p-test (is true))"
+            'ctx-scratch-ns "(require '[clojure.test :refer [deftest is]])"
+            'ctx-scratch-ns "(deftest s-test (is false))")
+        g (seon.program/reach-graph db nil)]
+    (is (agent/judges? g #{} 'ctx-prog-ns/p-test) "a program namespace's deftest judges")
+    (is (not (agent/judges? g #{} 'ctx-scratch-ns/s-test)) "a scratch namespace's never does")))
 
 (deftest a-failure-reads-as-assert-and-got
   (binding [*ns* *ns*]
