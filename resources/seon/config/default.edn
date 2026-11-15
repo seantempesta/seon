@@ -217,6 +217,11 @@
  ;; it replaced was 729 MB. At the bound: seon.check/mcp-proof fails, so a relay that boots Seon
  ;; again is red.
  :seon.config.machine/relay-mb 32
+ ;; Unit: ticks and bytes. The live cost canary's floors (seon.profile/over!): one counted call past either, callees included,
+ ;; is told on the agent's page. Provenance: root's ruling 2026-11-15 (100M ticks, 1 GB); this week's worst finds were a 20G-tick
+ ;; status read, a 34 GB sweep and 873 MB for one status, each 10x past these.
+ :seon.config.machine/call-floor-ticks 100000000
+ :seon.config.machine/call-floor-bytes 1073741824
  ;; Unit: cores. The machine's core count, derived at load (#seon/cores: Runtime's availableProcessors), never shipped: a
  ;; share of :seon.config.proofs/max-cores is a share of it.
  :seon.config.machine/cores #seon/cores nil

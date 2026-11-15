@@ -2243,6 +2243,15 @@
   (mark! :store-reopened)
   ;; the model's API key is root's alone (its :model owner calls the model; session FX1)
   (lib/c-unsetenv (cfg/value :seon.config.ai/api-key-variable))
+  ;; the live cost canary: a call of this process past the floor is an error this agent folds, beside its eval's own record
+  ;; of what each function cost (docs/cost.md#a-call-past-the-floor)
+  (profile/over! (cfg/value :seon.config.machine/call-floor-ticks) (cfg/value :seon.config.machine/call-floor-bytes)
+                 (fn [sym t b]
+                   (swap! state update :errors err/note
+                          (contract/error :seon.cost/call-over-floor #'seon.agent/init!
+                                          (str sym " took " t " ticks and " b " bytes in one call, past the canary's floor")
+                                          {:fn sym :ticks t :bytes b})
+                          :eval nil (System/currentTimeMillis))))
   (let [nsx (make-ns! id)
         _ (mark! :ns)
         intr-ok (interrupt-self-test)
