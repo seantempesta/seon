@@ -176,11 +176,8 @@
   [^String p] (boolean (or (.endsWith p ".clj") (.endsWith p ".edn") (cfg/file-kind p))))
 
 (defn library-source
-  "{path text} of the library files this process loaded: each loaded namespace's file (its vars' :file, as the loader named it,
-  relative to its root) that db's program holds no namespace of, read through Jolt's loader over root's classpath (deps.edn's
-  :paths and its :deps as jolt.deps resolves them, the roots that exist), else from the binary's embedded resources (Jolt's own).
-  A file neither holds is left out. What an agent's (grep x {:in #{:library}}) reads, imported once a pin set
-  (seon.source/library-tx). See docs/vector.md#search."
+  "{path text} of the library files this process loaded (each non-program namespace's :file), read through Jolt's loader over
+  root's classpath, else the binary's resources. Imported once a pin set (seon.source/library-tx). See docs/vector.md#search."
   {:malli/schema [:=> [:cat :string [:set :symbol]] [:map-of :string :string]]}
   [root program]
   (let [deps (edn/read-string (slurp (str root "/deps.edn")))

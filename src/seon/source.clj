@@ -328,10 +328,8 @@
            (if c {:seon.pin/path p :seon.pin/commit c} [:db/retractEntity [:seon.pin/path p]])))))
 
 (defn library-tx
-  "The facts that make db's library files exactly lib ({path text}, seon.fx/library-source's): a file whose text differs written, one
-  db holds that lib does not retracted, and pins, the pins they were read at, recorded on root's entity (:seon.library/pins), so the
-  next import reads them again only when the pins move. Only what differs: a pin change costs the files it changed. See
-  docs/vector.md#search."
+  "The facts that make db's library files exactly lib ({path text}) read at pins: only the files whose text differs written, the
+  gone ones retracted, pins kept on root's entity so a boot whose pins stand reads none. See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string] [:map-of :string :string]] :seon.db/tx-data]}
   [db lib pins]
   (let [held (into {} (for [{:keys [e v]} (d/datoms db :aevt :seon.library/path)] [v e]))]
