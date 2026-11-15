@@ -92,7 +92,7 @@ Every design that waits, steps or bounds follows these; the Flow specialist revi
 
 - `:io`: a fiber; 50 procs add no thread.
 - `:mixed` (the default when describe names none): an OS thread per proc for its life.
-- `:compute`: a fiber, with each transform run as a future on a cached pool and awaited for `compute-timeout-ms` (5000); past it a `TimeoutException` goes to the error chan and the result is lost, but the step keeps running.
+- `:compute`: a fiber, with each transform run as a future on a cached pool and awaited with no clock; a `compute-timeout-ms` given to `flow/process` bounds it, and past it a `TimeoutException` goes to the error chan and the result is lost while the future keeps running.
 
 ## The proc contract
 
@@ -112,12 +112,12 @@ Where an output goes (`proc-resolver`): a connected out to its consumer (a mult 
 What each function of Jolt's Flow API does, with its defaults.
 
 - `create-flow`: `:stop-timeout-ms` default 10000; in-port buffer default 10.
-- `start`: makes the report chan (sliding 100: old entries dropped, the count in the ping answer's metadata; root reads it, so an output Flow could not deliver or a stop dropped is a problem, ```seon.system-test/an-undeliverable-output-is-a-problem```) and the error chan (a fixed `(chan 100)` that never drops: a proc that reports an error waits while it is full), runs every init, starts every proc paused.
-- `resume`, `pause` and their `-proc` forms put on the proc's control chan (`(chan 10)`) with `>!!` under the graph lock.
-- `ping`: waits up to 1000 ms; a proc inside a step is left out.
+- `start`: makes the report chan (sliding 100: old entries dropped, the count in the ping answer's metadata; root reads it, so an output Flow could not deliver or a stop dropped is a problem, ```seon.system-test/an-undeliverable-output-is-a-problem```) and the error chan (a fixed `(chan 100)` that never drops, written with `put!`, so a reporting proc never waits: past 100 its errors queue as pending puts, unbounded in Jolt, each holding the proc's state, so every flow's owner drains it, as root's and each agent's do), runs every init, starts every proc paused.
+- `resume`, `pause`, `stop` and their `-proc` forms `put!` on each proc's own control chan (`(chan 10)`), never blocking, in order; a ping `offer!`s.
+- `ping`: waits up to its timeout (1000 ms) only for the procs not `:stepping` when it is sent, and answers with each proc's `::flow/site` and `::flow/in-fill`, read without asking it; its metadata names the `::flow/unanswered` pids and `::flow/report-dropped`. `ping-proc` has no such fix: on a proc inside a step it waits its whole timeout and answers nil.
 - `inject`: puts on an `:io` fiber and answers a Future at once; an edge derefs it to feel back-pressure.
 - `update!`: unchanged procs (step Var, describe, args, chan-opts) keep loop, state and queue; changed and removed ones are stopped and awaited.
-- `stop`: awaits every exit within one `:stop-timeout-ms` for the whole stop, then closes everything, answering `true` or `{::flow/running #{pids}}`; a proc parked on a full output finishes its outputs, up to 1000 ms per message, then reports `{::flow/dropped-on-stop out}`.
+- `stop`: awaits every exit within one `:stop-timeout-ms` for the whole stop, then closes everything, answering `true` or `{::flow/running #{pids}}`; a proc parked on a full output finishes its outputs with `put!` (no clock), and one a closed channel refuses is reported `{::flow/dropped-on-stop out}`.
 - casts: a sliding 100 per proc; one not taken in time is dropped.
 
 ## Changing a running graph
@@ -134,10 +134,10 @@ So code reaches a running system by redefinition and procs by `update!`; a resta
 
 The ways a Flow graph can wedge or lose data, each read in the source and confirmed.
 
-1. **A proc stuck inside a step wedges the graph's control.** Its control chan holds 10 and commands are put under the graph lock, so the 11th blocks holding it: `ping`, `pause`, `update!` and `stop` of every proc then wait for that step.
+1. **A proc stuck inside a step answers no command until it returns,** but wedges no other proc: commands are `put!` on its own control chan, a ping `offer!`ed and the proc named unanswered (Jolt 887c1b7f, gate flowstuckcontrol).
 2. **A step that never returns can't be stopped:** `stop` names it after `:stop-timeout-ms`, and it lives on.
-3. **Clocks inside Flow:** `compute-timeout-ms`, `finish-outputs!`'s 1000 ms, `stop-timeout-ms`, ping's 1000 ([clocks](clocks.md)).
-4. **Drops:** the report chan past 100 (sliding, counted in the ping's metadata), casts past 100 (oldest dropped), a mult with no taps, and any lossy-buffer channel (counted by `jolt.host/chan-dropped`); an unconnected out is dropped but reported; the error chan never drops (a reporting proc waits).
+3. **Clocks inside Flow:** `stop-timeout-ms` (one bound for the whole stop), ping's timeout, and `compute-timeout-ms` only when given ([clocks](clocks.md)).
+4. **Drops:** the report chan past 100 (sliding, counted in the ping's metadata), casts past 100 (oldest dropped), a mult with no taps, and any lossy-buffer channel (counted by `jolt.host/chan-dropped`); an unconnected out is dropped but reported; the error chan never drops, and nothing bounds its pending puts (its owner drains it).
 5. **A step that runs long shows as an unanswered ping:** ```clojure.core.async.flow/ping-proc``` with `:timeout-ms 1`, asked twice a few seconds apart, gets no answer from a proc inside one step (seen 2026-11-14: `:render` reading health whole for 80 s a step). A `:mixed` proc is its own OS thread, so its frames are not in the fiber dump.
 
 ## The step-fn contract every proc follows
