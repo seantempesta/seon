@@ -185,7 +185,7 @@ A walk answers each component it ran (`:ran`), `:miss` for a new output and `:sa
 - `(keys m)`, `(seq m)`: a member added, removed or replaced, never a change inside one.
 - `(seon.ratom/key-set m)`: a key added or removed, never a value replaced: what a reader of which keys an entity holds asks (```seon.render/entity-schema``` and ```seon.ctx/placed-messages``` do), so a layout reruns only when what it places moves (`seon.render-test/a-commit-of-one-attribute-reruns-only-what-shows-it`).
 - `(for [[id e] evals] (:seon.eval/code e))`: any member's attribute; `[#'eval-code {} id]` per member runs only the one that changed.
-- `seon.ratom/unwrap`, `seon.ratom/realize`, printing: anything below.
+- `seon.ratom/unwrap`, `seon.ratom/realize`, printing: anything below. So a component realizes each attribute it shows, `(realize (get e k))`, never its entity whole (`seon.render-test/a-record-rerun-only-by-what-it-shows`).
 - A component call whose arguments hold a view is never looked up among forms drawn before (```seon.render/emit```), since hashing a view reads all of it.
 - A walk ends with nothing queued: a component drawn before a later one changed what it read is drawn again in the same walk.
 

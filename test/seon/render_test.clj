@@ -1034,6 +1034,22 @@
     (is (not (contains? renders 'seon.render.ui/agent-parts)) (str "the layout is not among them: " (pr-str ran)))
     (is (not-any? #{:same} (vals ran)) (str "no component ran to draw what it drew before: " (pr-str ran)))))
 
+;; See docs/render.md#reactive-renders
+(deftest ^{:seon.test/estimate {:ticks 3000000 :bytes 15000000}} a-record-rerun-only-by-what-it-shows
+  ;; owner via root, 2026-11-14: a commit reruns exactly the components that show what it moved. An eval's step and a model call's view
+  ;; read their entity whole (one :deep read), so a commit of anything in it, shown or not, reran them to the same output (measured on
+  ;; this walk: an eval's :call-id, a call's :n). Each reads what it shows, attribute by attribute. (A cite's own reads are exact too; the
+  ;; task it reads from the db is recorded whole by seon.ctx/build, [:e task]: context's, so a task's plan still reaches it)
+  (let [[_ branch _] (paged-dbs)
+        kw (step-walk branch)
+        first-of (fn [a] (:e (first (d/datoms branch :aevt a))))
+        ev (first-of :seon.eval/call-id) call (first-of :seon.model-call/n)
+        mine #{'seon.render.ui/evaluation 'seon.render.ui/model-call-view}]
+    (doseq [[e a v] [[ev :seon.eval/call-id "c-moved"] [call :seon.model-call/n 99]]]
+      (let [ran (:ran (:p (#'p/advance-walk! kw (d/db-with branch [[:db/add e a v]]) :task-demo-f identity)))
+            same (for [[k r] ran :when (and (= :same r) (mine (first k)))] (first k))]
+        (is (empty? same) (str a " reran, to the same output: " (vec same)))))))
+
 ;; See docs/render.md#the-debug-page-is-the-wire-request
 ;; Estimate: paged-dbs' two dbs (~1M), the branch's kept walk built once (~0.3M), and two requests read at the head, one cold (~0.5M)
 ;; and one from the kept walk's answers (~0.05M): ~1.9M; 2,000,000 ticks, worked from the work.
