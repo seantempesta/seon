@@ -1315,38 +1315,51 @@
   (`recorded-sync!` keeps them). A commit reruns only the reactions whose reads it moved, so a move that touches no error reruns no
   error row. Answers {:store :answers :errors :tasks :rows {} :by-class {}}; `recorded-report` reads it. See
   docs/reactive.md#how-a-commit-reaches-its-readers-today."
-  {:malli/schema [:=> [:cat :any] :map]}
-  [s]
-  (let [ans (rv/make-reaction #(answers @s) :auto-run true)
-        errs (rv/make-reaction #(es @s :seon.error/signature) :auto-run true)
-        tasks (rv/make-reaction #(task-part @s @ans) :auto-run true)
+  {:malli/schema [:function [:=> [:cat :any] :map] [:=> [:cat :any pos-int?] :map]]}
+  ([s] (recorded-live s Long/MAX_VALUE))
+  ;; n: the most rows its first sync makes (flow's rule 2); :more? on the answer says the next sync makes the rest
+  ([s n]
+  (let [ans (rv/make-reaction #(answers @s) :auto-run :queue)
+        errs (rv/make-reaction #(es @s :seon.error/signature) :auto-run :queue)
+        tasks (rv/make-reaction #(task-part @s @ans) :auto-run :queue)
         set-moved (volatile! true)]
-    @ans @errs @tasks
+    ;; each first run tracked and its throw kept as its state (seon.ratom's catching run), never a deref that would throw here
+    (doseq [r [ans errs tasks]] (rv/-run r true))
     ;; the set is diffed against the rows only when it moved, never on every sync (O(errors) a move otherwise)
     (add-watch errs ::set (fn [_ _ _ _] (vreset! set-moved true)))
-    (recorded-sync! {:store s :answers ans :errors errs :tasks tasks :rows {} :by-class {} :changed (volatile! #{}) :set-moved set-moved})))
+    (recorded-sync! {:store s :answers ans :errors errs :tasks tasks :rows {} :by-class {} :changed (volatile! #{}) :set-moved set-moved} n))))
 
 (defn recorded-sync!
   "live (`recorded-live`) with one row reaction for each error entity its error set now holds: a new one made and read, a gone one
   disposed and its row dropped from :by-class; and every row the last commit reran (its watch put it in :changed) in :by-class,
   each class a sorted map by entity, so a change replaces its rows and nothing else. Called in the owner's step after its flush."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [{:keys [store answers errors rows changed set-moved] :as live}]
-  (let [now (when @set-moved (set @errors))
+  {:malli/schema [:function [:=> [:cat :map] :map] [:=> [:cat :map pos-int?] :map]]}
+  ([live] (recorded-sync! live Long/MAX_VALUE))
+  ;; n: the most new rows this step makes (flow's rule 2, :seon.config.render/flush-max); the rest are made at the next sync, :more? says so
+  ([{:keys [store answers errors rows changed set-moved] :as live} n]
+  (let [now (when @set-moved (set (rv/-get errors :state)))
         gone (when now (remove now (keys rows)))
-        fresh (when now (remove #(contains? rows %) now))
-        row-of (fn [e] (let [r (rv/make-reaction #(error-row @store @answers e) :auto-run true)]
+        all-fresh (when now (remove #(contains? rows %) now))
+        fresh (take n all-fresh)
+        more? (< (count fresh) (count all-fresh))
+        row-of (fn [e] (let [r (rv/make-reaction #(error-row @store @answers e) :auto-run :queue)]
                          (add-watch r ::row (fn [_ _ _ _] (vswap! changed conj e)))
-                         @r r))
+                         (rv/-run r true) r))
         rows (as-> rows rs (reduce (fn [rs e] (rv/dispose! (rs e)) (dissoc rs e)) rs gone) (reduce (fn [rs e] (assoc rs e (row-of e))) rs fresh))
         moved (into (set fresh) @changed)
         drop-e (fn [bc e] (reduce-kv (fn [bc c m] (assoc bc c (dissoc m e))) bc bc))
         ;; each class a sorted map from its first row, so a change is O(log n), never a rebuild of the class
-        by-class (reduce (fn [bc e] (let [bc (drop-e bc e)] (if-let [r (rows e)] (let [row @r] (update bc (:class row) (fnil assoc (sorted-map)) e row)) bc)))
+        ;; a row whose run threw is its error (seon.ratom's caught state): out of the report, kept in :thrown where it can be seen
+        thrown (volatile! (or (:thrown live) {}))
+        by-class (reduce (fn [bc e] (let [bc (drop-e bc e) r (rows e)]
+                                      (vswap! thrown dissoc e)
+                                      (cond (nil? r) bc
+                                            (rv/-get r :caught) (do (vswap! thrown assoc e (ex-message (rv/-get r :caught))) bc)
+                                            :else (let [row (rv/-get r :state)] (update bc (:class row) (fnil assoc (sorted-map)) e row)))))
                          (reduce drop-e (:by-class live) gone) moved)]
     (vreset! changed #{})
-    (vreset! set-moved false)
-    (assoc live :rows rows :by-class by-class)))
+    (vreset! set-moved more?)
+    (assoc live :rows rows :by-class by-class :more? more? :thrown @thrown))))
 
 (defn recorded-report
   "The recorded report of live (`recorded-live`, synced) as `report` answers it on its store's db: the counted classes from the kept
@@ -1354,7 +1367,7 @@
   The fold step reads every row once; the rows themselves are the reactions'."
   {:malli/schema [:=> [:cat :map :seon.error/fold] :seon.problems/report]}
   [{:keys [store tasks by-class]} fold]
-  (let [db @store tp @tasks]
+  (let [db @store tp (or (when-not (rv/-get tasks :caught) (rv/-get tasks :state)) {:ended {} :failed {:n 0 :rows []}})]
     ^{:seon.render/schema :seon.problems/report}
     {:t (:max-tx db)
      :classes (merge (fold-counted (into {} (for [c counted-classes] [c {:rows (vec (vals (get by-class c)))}])) db fold)
@@ -1407,8 +1420,11 @@
   `health` of the head. Equal to `health` of head (seon.problems-test/health-moved-is-health). `health` is
   the same per-class readers over every place, so there is one reader of each class and two selections of
   its candidates, not two implementations."
-  {:malli/schema [:=> [:cat :seon.problems/report :seon.host/db :seon.host/db [:sequential :any]] :seon.problems/report]}
-  [prev base head moved]
+  {:malli/schema [:function [:=> [:cat :seon.problems/report :seon.host/db :seon.host/db [:sequential :any]] :seon.problems/report]
+                  [:=> [:cat :seon.problems/report :seon.host/db :seon.host/db [:sequential :any] [:maybe :map]] :seon.problems/report]]}
+  ([prev base head moved] (health-moved prev base head moved nil))
+  ;; live, the recorded classes a store's reactions keep (`recorded-report`): taken as they are, never read again from the errors
+  ([prev base head moved live]
   (let [ans (answers head)
         {:keys [made closed]} (split-rows base head ans (pm/delta-changes base head #{} moved) moved)
         gone (into #{} (map :signature) closed)
@@ -1417,11 +1433,11 @@
                               (comp (filter #(= c (:class %))) (map #(dissoc % :class))) made))
         touched (touched-tasks head moved)
         ids (into #{} (keep #(:v (first (d/datoms head :eavt % :seon.task/id)))) touched)
-        recorded (:classes (report-with head ans {} touched))
-        recorded (into recorded (for [c ended-classes
+        recorded (or live (:classes (report-with head ans {} touched)))
+        recorded (if live recorded (into recorded (for [c ended-classes
                                       :let [rows (into (into [] (comp (remove #(ids (:judged %))) (map current)) (get-in prev [:classes c :rows])) (get-in recorded [c :rows]))
                                             rows (vec (sort-by #(- (or (:end-ms %) 0)) rows))]]
-                                  [c {:n (count rows) :rows rows}]))]
+                                  [c {:n (count rows) :rows rows}])))]
     (health-with head ans recorded (-> (other-derived head ans (vec touched))
                                        ;; the tasks the move left alone keep prev's rows; the touched ones were judged anew
                                        (update :unsynced #(vec (sort-by :task (into (into [] (comp (remove (fn [r] (ids (:task r)))) (map current))
@@ -1431,7 +1447,7 @@
                                               ;; read from what moved (split-rows), never whole again: whole they cost ~290M a move of main
                                               :uncited-task (carried :uncited-task) :stale-plan (carried :stale-plan)
                                               :waived-proof (carried :waived-proof) :unschemed-key (carried :unschemed-key)
-                                              :stale-section (carried :stale-section) :hand-written-list (carried :hand-written-list))))))
+                                              :stale-section (carried :stale-section) :hand-written-list (carried :hand-written-list)))))))
 
 (defn own
   "The open problems of one agent, by class and shaped as `report` (so the one render draws it, an

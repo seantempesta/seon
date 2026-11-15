@@ -405,16 +405,28 @@
 
 (defn flush!
   "Run every reaction the bound owner queued, and any each of those queues, until none is left (Reagent's): the end of the owner's
-  step, and a non-reactive deref. With no owner bound, nothing is queued, so nothing runs."
-  {:malli/schema [:=> [:cat] :nil]}
-  []
-  (when-let [o *owner*]
-    (loop []
-      (when-let [q @(:queue o)]
-        (vreset! (:queue o) nil)
-        (doseq [r q] (-queued-run r))
-        (recur))))
-  nil)
+  step, and a non-reactive deref. With no owner bound, nothing is queued, so nothing runs. With n, at most n runs in this step and
+  the rest stay queued for the owner's next step (flow's rule 2: a step is bounded, never its work), answering how many remain."
+  {:malli/schema [:function [:=> [:cat] :nil] [:=> [:cat pos-int?] nat-int?]]}
+  ([]
+   (when-let [o *owner*]
+     (loop []
+       (when-let [q @(:queue o)]
+         (vreset! (:queue o) nil)
+         (doseq [r q] (-queued-run r))
+         (recur))))
+   nil)
+  ([n]
+   (if-let [o *owner*]
+     (loop [left n]
+       (let [q @(:queue o)]
+         (if (or (empty? q) (zero? left))
+           (count q)
+           (let [[now later] (split-at left q)]
+             (vreset! (:queue o) (not-empty (vec later)))
+             (doseq [r now] (-queued-run r))
+             (recur (- left (count now)))))))
+     0)))
 
 ;;; --- which reads a tree's change reaches -------------------------------------------------------
 
@@ -501,7 +513,7 @@
   IReaction
   (-get [this k]
     (case k :captured captured :last last-captured :watching watching :dirty? dirty? :state state
-            :auto-run auto-run :key-set key-set :peek (binding [*ratom-context* nil] (.deref this))))
+            :auto-run auto-run :key-set key-set :caught caught :peek (binding [*ratom-context* nil] (.deref this))))
   (-set! [_ k v]
     (case k :captured (set! captured v) :dirty? (set! dirty? v) :f (set! f v) :auto-run (set! auto-run v) :key-set (set! key-set v)))
   (-handle-change [this sender oldval newval]
@@ -511,7 +523,8 @@
       ;; run at once only in its owner's own step (or with no owner): in another owner's step it is dirtied and reaches its owner as
       ;; a message, an auto-run one too, so no reaction runs under another owner's bindings. The dirty? guard above keeps at most one
       ;; message outstanding a reaction, so an owner's port holds at most as many as the reactions it owns
-      (if (and (some? auto-run) (or (nil? owner) (identical? owner *owner*)))
+      ;; :queue (an owner's bounded reader): tracked as an auto-run one, but always queued for its owner's flush!, never run here
+      (if (and (some? auto-run) (not= :queue auto-run) (or (nil? owner) (identical? owner *owner*)))
         ;; through the catching run (Reagent's _try-capture, failure-points.md's edge for a reaction's run): a reader that throws is its
         ;; own error, and the commit that reached it goes on to every other reader (web's BUG 2)
         (if (true? auto-run) (-run this true) (auto-run this))
@@ -528,7 +541,7 @@
   (-queued-run [this]
     (when (and dirty? (some? watching))
       (cond (nil? auto-run) (-run this true)
-            (true? auto-run) (do (set! dirty? false) (-run this true))
+            (or (true? auto-run) (= :queue auto-run)) (do (set! dirty? false) (-run this true))
             :else (do (set! dirty? false) (auto-run this)))))
   (-run [this check]
     (let [oldstate state
@@ -578,7 +591,8 @@
 
 (defn make-reaction
   "A Reaction of f (no arguments), Reagent's: :auto-run, run now and on each change of what it
-  derefs (true: run it; a fn: called with the reaction); :on-set, called (old new) by a reset!
+  derefs (true: run it; a fn: called with the reaction; :queue, Seon's: tracked as true is, but each change queues it for its
+  owner's flush!, so a bounded flush governs its reruns); :on-set, called (old new) by a reset!
   before its watches; :on-dispose, called with its last value when it is disposed."
   {:malli/schema [:=> [:cat [:maybe :seon.host/fn] [:* :any]] :seon.host/deref]}
   [f & {:keys [auto-run on-set on-dispose]}]
