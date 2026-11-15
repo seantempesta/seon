@@ -1373,11 +1373,15 @@
       (= :seon.turn/end (first r)) (let [v (try {:end (end r)} (catch Throwable e {:e e}))]
                                      (reply-run! st (:end v) (:e v))
                                      (dissoc st :run :run-st :rid :resp))
-      :else (let [[run-st out] r port (:run-port st)]
+      :else (let [[run-st out] r port (:run-port st)
+                  ;; this output's number: its answer carries it, and an answer to any other (a call a stop dropped, of a run since
+                  ;; ended) is dropped, never stepped into the run in force (context-4's review)
+                  n (inc (:out-n st 0))]
               ;; the turn's writes are on the branch before its call goes out, as each eval's are before its answer
               (when (:dirty? @agent/state) (agent/commit!))
-              (a/io-thread (a/put! port (effect out)))
-              (assoc st :run-st run-st)))))
+              ;; a fiber (Jolt's io-thread), never an OS thread: the agent stays one thread, so judge! forks its test children
+              (a/io-thread (a/put! port (assoc (effect out) ::out n)))
+              (assoc st :run-st run-st :out-n n)))))
 
 (defn- drain
   "The :repl proc's state st with the requests queued while a run was out served in arrival order, until the queue is empty or one
@@ -1407,8 +1411,8 @@
   ([st _] st)
   ([st in m]
    (cond
-     ;; an answer of the run's last output; one for a run that ended (a stop dropped it) is dropped too
-     (= :run in) [(if (:run st) (drain (drive-run st m)) st) nil]
+     ;; the answer of the run's last output; one to any other output (a call a stop dropped, a run that ended) is dropped
+     (= :run in) [(if (and (:run st) (= (::out m) (:out-n st))) (drain (drive-run st (dissoc m ::out))) st) nil]
      ;; root's stop ends a run at once, then the requests before it and the stop itself are served in order
      (and (:run st) (= :stop (:op m))) [(drain (update (drive-run st {:seon.turn/stop true}) :queue conj m)) nil]
      ;; a request while a run is out waits for it: nothing else touches the branch mid-turn
