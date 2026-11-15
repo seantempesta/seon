@@ -679,6 +679,24 @@
       (is (some #(= [:db/cas [:seon.task/id "demo/a"] :seon.task/outcome :running :closed] %) (get-in (second outs) [:req :req :tx-data]))
           "and its end judged from that one answer"))))
 
+;; Estimate: 1 db-of x 0.5M + 3 advance calls (one run-digest of a small main ~0.3M) ~ 1,500,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1500000}} the-judge-asks-main-of-a-red-nobody-knew-before-it-judges
+  ;; docs/tasks.md#the-done-rule (seon.proofs/a-red-main-holds-is-mains-whatever-the-digest): the judge's run names a red whose
+  ;; verdict at base nobody knows yet (:unknown-reds); the flight asks main's verdict of it by name and waits, and only then
+  ;; reads the branch; a red main answers red is main's. Red before: the flight went to the diff at once, the red the task's
+  (let [db (db-of [(decl "a")] :extra (work "a" :running))
+        x 'demo-test/x
+        flight {:act {:op :spawn :task "demo/a" :env {:branch :demo/a}} :agent :a-a}
+        st (st-of db :flights {"demo/a" (assoc flight :step :tested)})
+        [st' outs] (#'r/advance st "demo/a" :tested {:reports [{:var "#'demo-test/x" :type :fail}] :main-red #{} :unknown-reds {x "d-x"}})]
+    (is (= [{:branch :main :names #{x} :mode :judge}] (mapv #(select-keys (:req %) [:branch :names :mode]) outs)) "one ask of main, by name")
+    (is (= :main-asked (get-in st' [:pending (:tag (first outs)) 1])) "answered at :main-asked, nothing read before it")
+    (let [[st2 outs] (#'r/advance st' "demo/a" :main-asked {:reports [{:var "#'demo-test/x" :type :fail}]})]
+      (is (= [{:op :write :req {:op :branch-diff :branch :demo/a}}] (mapv :req outs)) "then the branch, read once")
+      (is (= #{x} (set (get-in st2 [:flights "demo/a" :main-red]))) "red on main: main's"))
+    (let [[st2 _] (#'r/advance st' "demo/a" :main-asked {:reports [{:var "#'demo-test/x" :type :pass}]})]
+      (is (empty? (get-in st2 [:flights "demo/a" :main-red])) "green on main: the task's own"))))
+
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 transacts or db-withs x 50k ~ 600,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 600000}} a-typed-error-from-work-or-the-judge-holds-the-task-and-is-no-death
   ;; docs/errors.md: an error flows to whoever can fix it. :briefed, :worked and :tested each took any typed error for the
@@ -1971,6 +1989,32 @@
       (let [[_ outs] (#'r/advance st id :gated (answer {boots :fail other :pass} nil))]
         (is (= :closed (:seon.task/outcome (task/task (after outs) id))))
         (is (not-any? #(= :problem (:op %)) outs))))))
+
+;; Estimate: 1 mdb x 1M (as the gate test above) + 3 advance calls x 0.7M (one run-digest of a small main ~0.3M each) ~ 3,500,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3500000}} a-red-nobody-knew-on-main-is-asked-of-main-before-the-gate-decides
+  ;; docs/tasks.md#the-done-rule (seon.proofs/a-red-main-holds-is-mains-whatever-the-digest): a red whose verdict at base nobody
+  ;; knows yet (main's own run had not reached it: the first real seon_done closed on six such) is asked of main by name, and the
+  ;; gate decides on main's answer: red there, main's; green there, the task's own. Red before: the gate decided at once, every
+  ;; such red the task's
+  (let [id "demo/a-merge"
+        boots 'seon.system-test/boots other 'seon.system-test/other
+        db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :gate :members {:seon.task/deferred {boots "d-boots" other "d-other"}})))
+        st (assoc (st-of db) :flights {id {:act {:op :gate :task id :tests [boots other] :base {boots "d-boots" other "d-other"}}}})
+        gate {:value {:results {boots :fail other :pass} :main-red #{} :unknown-reds {boots "d-boots"}}}
+        main (fn [status] {:reports [{:var (str "#'" boots) :type status}]})
+        after (fn [outs] (d/db-with db (some #(get-in % [:req :req :tx-data]) outs)))
+        [st2 outs] (#'r/advance st id :gated gate)
+        ask (some #(when (= :prove (get-in % [:req :op])) (:req %)) outs)]
+    (testing "the red nobody knew is asked of main by name, and nothing is decided before its answer"
+      (is (= {:branch :main :names #{boots} :mode :judge} (select-keys ask [:branch :names :mode])) (pr-str outs))
+      (is (not-any? #(get-in % [:req :req :tx-data]) outs) "no write yet"))
+    (testing "main holds it red: main's, so the task is ready and the system is told"
+      (let [[_ outs] (#'r/advance st2 id :gate-main-asked (main :fail))]
+        (is (= :ready (:seon.task/outcome (task/task (after outs) id))))
+        (is (= [boots] (for [o outs :when (= :problem (:op o))] (first (get-in o [:error :tests])))))))
+    (testing "main holds it green: the task's own red, held"
+      (let [[_ outs] (#'r/advance st2 id :gate-main-asked (main :pass))]
+        (is (= :closed (:seon.task/outcome (task/task (after outs) id))))))))
 
 ;; Estimate: 1 db-of 0.5M + 1 d/with of a retractEntity 50k + the index listed twice (0.6M each) + 1 observe from the last 0.3M ~ 2M ticks
 (clojure.test/deftest ^{:seon.test/estimate {:ticks 2000000}}
