@@ -151,4 +151,10 @@ Proof: an agent whose change stales a section reads, in its status, each section
   :seon.task/kind :work
   :seon.task/proofs #{seon.repl-test/an-edit-of-every-kind-reaches-main-through-the-merge}
   :seon.task/estimate #:seon.repl{edit! {:n 1, :order :constant, :ticks 2000000, :bytes 10000000}}}
-]
+
+ {:seon.task/name "an-agent-moving-entries-moves-their-comments"
+  :seon.task/plan "Root's review of the pilot sync, 2026-11-16 05:1x: the first Seon agent reordered :seon.repl/answer's entries in seon.core.edn and left each ;; comment where it was, so four comments sat over the wrong entries (fixed by hand, 97ac6cf112). The class: what an agent reads of an EDN file it edits does not say that a comment belongs to the entry below it. PRIOR WORK: seon.repl/edit! (the agent's edit of a form), the agent's context for a schema file (seon.ctx), seon.source's file text. Fix at the source of the agent's view: an entry's lead comment is part of the entry as the agent reads and edits it (as a form's :form/lead is for code), so a move carries it. COST: no new pass; the lead is read with the entry."
+  :seon.task/kind :work
+  :seon.task/proofs #{}
+  :seon.task/needs #{}
+  :seon.task/estimate #:seon.ctx{pattern {:n 1, :order :constant, :ticks 100000, :bytes 1000000}}}]
