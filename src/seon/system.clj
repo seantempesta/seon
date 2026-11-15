@@ -2114,7 +2114,9 @@
   ([sys agent-id opts] (request! sys 'clone! agent-id opts)))
 
 (defn submit!
-  "Send forms (a string) to the agent; a promise of the reply vector, one map per form.
+  "Send forms (a string) to the agent; a promise of ONE reply map, whatever the form count: its :value is the form's value, or,
+  with several forms, the vector of their values in order ((+ 1 2) answers 3; (+ 1 2) (+ 3 4) answers [3 7], flow result/c9fe6911),
+  beside the reply's :handle, :ns and :cost (:ex for a form that threw).
   opts {:ticks n}: each form stops after n engine ticks of work (an outside or ui origin
   takes :seon.config.agent/form-ticks by default); {:origin :outside|:ui}: who asked, recorded
   with each evaluation."
