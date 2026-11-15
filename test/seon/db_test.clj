@@ -995,6 +995,34 @@
         (is (:bytes-after (pdb/compact-if-due! path)) "the sweep left its freed pages to compact"))
       (finally (seon.lib/remove-tree! path (str path ".compact"))))))
 
+;; Estimate: a store on disk ~20M + 3 rounds of 6 commits, a retain! sweep and a collect! each (~40M a round) = 150000000
+(deftest ^{:seon.test/estimate {:ticks 150000000}} every-branchs-merge-base-outlives-every-sweep
+  ;; docs/storage.md#collection (2026-11-15, root's store: 43 of 66 branches' merge bases swept, :main/tests' among them though its head
+  ;; never moved): sweep after sweep while main moves, a branch made long ago, one that merged main by a two-parent commit (as
+  ;; seon.writer/merge-main-into makes one) and a gone branch collected, each live branch's merge base reads whole after every sweep
+  (let [path (str (seon.config/checkout) "/target/tmp/bases-" (random-uuid))
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+        note! (fn [c s] (d/transact c [{:note/text s :note/agent :t}]) (d/commit-id @c))
+        base-reads? (fn [b] (some? (d/commit-as-db conn (d/merge-base conn b :db))))]
+    (try
+      (note! conn "a")
+      (d/branch! conn :db :old)
+      (note! conn "b")
+      (d/branch! conn :db :m)
+      (d/branch! conn :db :gone)
+      (let [m (pdb/connect (assoc (:config @conn) :branch :m))] (note! m "on m") (d/release m))
+      (doseq [round (range 3)]
+        (doseq [i (range 6)] (note! conn (str "r" round "-" i)))
+        ;; :m merges main: main's head plus its own, one commit with both parents, forced onto :m while it is at its head
+        (let [head (pdb/head conn :m) merged (:db-after (d/with @conn {:tx-data [{:note/text (str "m merged " round) :note/agent :t}]}))]
+          (d/force-branch! merged :m #{(d/commit-id head) (d/commit-id @conn)} {:expected-current-commit (d/commit-id head)}))
+        (when (= 1 round) (d/delete-branch! conn :gone) (pdb/collect! conn true))
+        (pdb/retain! conn 3)
+        (doseq [b [:old :m]]
+          (is (base-reads? b) (str "round " round ": " b "'s merge base reads after the sweep"))))
+      (d/release conn)
+      (finally (seon.lib/remove-tree! path (str path ".compact"))))))
+
 ;; the rule a collection keeps beside "no agent live" (docs/storage.md#collection)
 (deftest a-root-that-shares-its-store-never-collects
   ;; seon.db/collect! with sole? false (:seon.config.store/sole-writer?, false where roots share
