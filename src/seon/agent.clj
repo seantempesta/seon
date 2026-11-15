@@ -443,6 +443,11 @@
     ;; the branch's own schema changes go with the write: the one transaction path checks it (seon.db/with, the writer's 'transact!)
     (let [schemas (let [{:keys [key registry]} (branch-schemas)] (when (seq key) {:forms key :registry registry}))]
     (when-let [e (program/config-refused (db) tx-data)] (throw (ex-info (:seon.error/message e) e)))
+    ;; this process is its branch's one writer: an attribute only root writes, on main ({:seon.db/root-only true}: what root observes
+    ;; of an agent, the system entity, a recorded error) is never written here, so no merge meets it changed on both sides
+    (when-let [ra (seq (distinct (filter (:root-only-attrs (pdb/index)) (mapcat #(cond (map? %) (keys %) (vector? %) [(nth % 2 nil)]) tx-data))))]
+      (let [e (contract/error :seon.agent/root-only-write #'seon.agent/transact! (str "only root writes " (str/join ", " ra) ", on main") {:attributes (vec ra)})]
+        (throw (ex-info (:seon.error/message e) e))))
     (if (= :test (:mode @state))
       (let [r (pdb/with (db) tx-data schemas) attrs (into #{} (map :a) (:tx-data r))]
         (doc/carry-index! (:db-before r) (:db-after r) (map (juxt :e :a) (:tx-data r)))

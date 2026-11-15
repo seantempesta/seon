@@ -273,7 +273,7 @@
  ;; the task it works (the agent's record pulls it, docs/ctx.md#the-pattern) and the turns it may take: raised to extend the agent
  ;; (the agent is the unit, seon.agent/the-agent-is-the-unit-not-the-run; max-turns is written from its cut 2, until then work!'s
  ;; :max-turns bounds the loop)
- :seon.agent/task [:and {:seon.db/root-only true :seon.db/to [:seon.task/task-fact] :description "The task this agent works. See docs/ctx.md#the-pattern."} :seon.db/ref]
+ :seon.agent/task [:and {:seon.db/to [:seon.task/task-fact] :description "The task this agent works. See docs/ctx.md#the-pattern."} :seon.db/ref]
  ;; the turns it may take, agent-wide: its :seon.agent/turn against it. Set at spawn from the config its task's environment names
  ;; (seon.reconcile/desired-env); raised, and the task released again (my.root/run!), it goes on (docs/turn.md#the-cap)
  ;; at least one turn: the environment it is read into (:seon.task/env) takes a positive count, one definition of it

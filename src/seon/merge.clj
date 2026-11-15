@@ -607,14 +607,13 @@
 (defn- facts
   "The facts from changed since base (`changed-datoms`), each {:e :a :v :tx :side}: :retract for one gone, :add for one added, the
   side taken from which list it is in, never a datom's own flag (a diff's gone datoms are stored datoms, :added true). A
-  transaction's own facts, Datahike's own attributes, the derived attributes (the entity index's :derived-attrs, made again after
-  a merge) and root's own (:root-only-attrs, written by root on main alone) are left out. See docs/merging.md#a-branch-merges-main-in."
+  transaction's own facts, Datahike's own attributes, and the derived attributes (the entity index's :derived-attrs, made again after
+  a merge) are left out; every other fact merges whole. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :map]]}
   [base from]
   (let [[gone added] (changed-datoms base from)
-        ix (pdb/index)
-        ;; derived values are made again after a merge, root's own facts only root writes on main: a merge carries neither
-        skip (into (:derived-attrs ix) (:root-only-attrs ix))
+        ;; derived values are made again after a merge, never carried
+        skip (:derived-attrs (pdb/index))
         txe (into #{} (map :tx) (concat gone added))
         fact? (fn [{:keys [e a]}] (and (not (txe e)) (keyword? a) (not= "db" (namespace a)) (not (skip a))))
         as (fn [side] (fn [dt] {:e (:e dt) :a (:a dt) :v (:v dt) :tx (:tx dt) :side side}))

@@ -683,9 +683,9 @@
         head (as w :main/b (var-tx "f" "(inc x)"))
         b0 (d/db-with w [[:db/add [:seon.agent/key "root"] :seon.agent/status :idle]])
         main (d/db-with b0 [[:db/add [:seon.agent/key "root"] :seon.agent/status :stopped]])
-        {:keys [db conflicts]} (merged-of b0 head main)
+        {:keys [db conflicts]} (merged-of w head main)
         merged db]
-    (is (nil? conflicts) (str "a fact the branch holds from before its base is no change of its: " (pr-str conflicts)))
+    (is (nil? conflicts) (str "read from the true base, w, the branch never changed root's fact: no change of its: " (pr-str conflicts)))
     (is (= :stopped (:seon.agent/status (d/entity merged [:seon.agent/key "root"]))) "main's fact, never the shared old value")
     (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch keeps its own change")))
 

@@ -56,7 +56,7 @@ Each is its own schema, linked to the others by refs ("refs out" point away; "re
 
 ### Who writes what, and where
 
-One writer per attribute ([sharing](sharing.md#where-a-fact-lives)). On main, by root's writer: what root observes of an agent (`:seon.agent/status`, `boot`, `branch`, `task`, `model`, `max-turns`, `holder`), process entities, the system entity, messages as sent, and `:seon.agent/parent`. On the agent's own branch, by its process: its turn, namespace, the commits it heard (`:seon.agent/main-commit`, `main-program`, `base-commit`), its evals, results, model calls, cites, searches and delivered messages. Content-id entities (results, cites, messages) are the same on every branch. An agent reads its main half at `:seon.agent/main-commit`.
+One writer per attribute ([sharing](sharing.md#where-a-fact-lives)). On main, by root's writer: what root observes of an agent (`:seon.agent/status`, `boot`, `branch`, `model`, `max-turns`, `holder`; `task` too, which the agent's process also writes, the same value, as it begins a task on its branch: ```seon.agent/begin-run!```), process entities, the system entity, messages as sent, and `:seon.agent/parent`. On the agent's own branch, by its process: its turn, namespace, the commits it heard (`:seon.agent/main-commit`, `main-program`, `base-commit`), its evals, results, model calls, cites, searches and delivered messages. Content-id entities (results, cites, messages) are the same on every branch. An agent reads its main half at `:seon.agent/main-commit`.
 
 ### Who started whom
 
