@@ -18,6 +18,10 @@ The owner's rulings on the morning after the first night run on its own.
 
 Told that ticks count Scheme work only (no foreign calls, GC copying, parked time or interrupts-off time: chez `s/cpnanopass.ss:2966`, `s/event.ss:47`) and that the 161M/300M swing is unexplained, he chose deps' order: dumps that need no event check; CPU time and bytes per fiber per dispatch; steps scoped by the existing nesting measure `ticks-of`, with no new marker; a counter of foreign lookups; then one experiment that settles the swing before ticks can fail a test. Plan in `deps-ticks-soundness-2026-11-15` (deps' task).
 
+### Messaging is flow's: a wake that never blocks, the person included
+
+He ruled that the inbox and the rest of messaging belong to flow, not web: it must be done right from Flow's side, waking an agent without blocking, and it must work for the user, who is also an agent driving a session through the page's input box (2026-11-15). One path serves a Claude session's inbox, a Seon agent's wake and a person's message; flow asks web and runtime for what it needs, and web draws what the path delivers.
+
 ### Claude agents are driven through Seon's own turns
 
 He asked that Claude agents be driven through the Seon MCP turns, with context launching Sonnet agents on real tasks to learn what works and what confuses, using tools as close as possible to a Seon agent's (2026-11-15). A driver is a project agent type allowed only the `seon_*` tools (attach, context, eval, done, message), reading `seon_context` as its whole view and acting only through `seon_eval`; its runs sit beside model runs of the same tasks, and their difference is the finding. A driver gets each turn's changes exactly as a model agent does (what moved, in each `seon_eval` reply, from the one turn assembly), reading `seon_context` once at attach; where the outside path differs, it is fixed. Context runs it.
