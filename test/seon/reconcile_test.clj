@@ -2478,7 +2478,7 @@
            _ (d/branch! conn (:branch cfg) b)
            bc (pdb/connect (assoc cfg :branch b))]
        (try
-         (d/transact bc {:tx-data (task/create-tx @bc [{:seon.task/ns 'demo :seon.task/name "mm-own" :seon.task/plan "The branch's own." :seon.task/proofs #{}}]) :tx-meta (pdb/tx-meta b)})
+         (d/transact bc {:tx-data [{:seon.agent/key "mm-own" :seon.agent/status :busy}] :tx-meta (pdb/tx-meta b)})
          (d/transact conn {:tx-data [{:seon.agent/key "mm-main" :seon.agent/status :idle}] :tx-meta (pdb/tx-meta (:branch cfg))})
          ;; a task both hold, whose plan the branch changes to cite a var: the cites are derived from its text, never merged, so
          ;; the merge makes them again where it lands
@@ -2504,7 +2504,7 @@
          (let [r (ask {:op :merge-main :branch b})
                merged (pdb/head conn b)]
            (is (:ok r) (pr-str r))
-           (is (= "The branch's own." (:seon.task/plan (d/entity merged [:seon.task/id "demo/mm-own"]))) "the branch's own fact (what root observes of an agent is root's, never a branch's: {:seon.db/root-only true})")
+           (is (= :busy (:seon.agent/status (d/entity merged [:seon.agent/key "mm-own"]))) "the branch's own fact")
            (is (= :idle (:seon.agent/status (d/entity merged [:seon.agent/key "mm-main"]))) "and main's"))
          (finally (d/release bc)))))))
 

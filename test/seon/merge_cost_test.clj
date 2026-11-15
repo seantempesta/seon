@@ -252,12 +252,12 @@
 ;; bear read on three dbs, ~6.5 contracted calls a read (key-content, eid, definition-key, form-row, form-of, live?, def-content, same?),
 ;; 59; derived? once per distinct attribute of the diff, 7, with its properties and index reads, 21; a tx-branch per datom the branch
 ;; added and main's last writer's, 7; entity-keys 6, data-attr? 5, program-of 3, and own-datoms, touched-by, content-attr, three-way,
-;; attribute-declarations, changes and the merge decision itself (seon.merge/decide), 7; the branch's unmerged entries read once (entries, with entry-eids, and
+;; attribute-declarations, changes and merge-main itself, 7; the branch's unmerged entries read once (entries, with entry-eids, and
 ;; entry-eids again for the settling retraction), 3: 117 calls, ~2 MB. (A first estimate of 15 missed the content reads, ~8
 ;; calls each, and derived? was asked per datom, 13 times; now per attribute.) Nothing of main's n forms is read: constant in n
 (deftest ^{:seon.test/estimate {:ticks 60000000}} merge-main-costs-the-branchs-change-not-mains-moves
   (cost/proof
-      {:of 'seon.merge/decide :input 'seon.merge-cost-test/moved-main-of
+      {:of 'seon.merge/merge-main :input 'seon.merge-cost-test/moved-main-of
        :n "forms main defined since the branch's base"
        :work (str "the datoms the branch wrote since base (one diff of base and head), the keys they bear, and main's content at "
                   "those keys only: main's own moves are never read, so the same work however far main moved")
