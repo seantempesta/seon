@@ -42,6 +42,14 @@
 ;; root's interrupt that found no eval running: between two forms of a request, the next
 ;; bounded eval starts stopped; idle, it is cleared by the next request (seon.repl/eval-code).
 (defonce ^{:private true :seon.flow/edge "an interrupt delivered while none is armed, read by Chez's interrupt handler: physics, not a proc's state"} pending (atom false))
+
+(defn interrupt?
+  "Is e what ends a step or an eval, never an error of the code it cut: root's interrupt (ThreadDeath) or a Jolt budget's end
+  (ex-data :jolt/interrupted, thrown at run-interruptible's frame). A catching edge rethrows it, so the step's bound holds (seon.ratom's
+  catching run, task seon.ratom/the-core-is-correct-before-a-reader-moves)."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [e] (or (instance? ThreadDeath e) (boolean (:jolt/interrupted (ex-data e)))))
+
 (defn clear-pending! {:malli/schema [:=> [:cat] :boolean]}
   [] (reset! pending false))
 

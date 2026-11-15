@@ -97,11 +97,27 @@
     (is (= {:busy 0 :in-flight 0 :queued 0 :done 3} (get-in r [:fx :fx/process])) "an effects owner's load")))
 
 (deftest a-hangs-evidence-holds-roots-stall-state
+  ;; task seon.system/a-hangs-evidence-test-reads-only-its-own-agent: the root is shared with every test of the run, so other tests'
+  ;; agents and asks are in it, and a proc mid-step on their work past the ping's bound answers nothing (stall-state's contract: it
+  ;; is missing from :answered, never read as nil). So the test holds the shape of each part whose proc answered, and the whole of
+  ;; its OWN agent, idle and so answering; never what other tests left (red at 16:47 and 19:08 on the reconciler, mid-step)
   (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
         ;; with an agent of its own running, so an agent proc's state is read, then ended
-        r (ts/value-of (:response (ts/ask root {:op :eval :agent "root"
-                                                :code "(let [ag (seon.system/spawn! sys {}) s (seon.system/stall-state sys)] (seon.system/kill! sys ag) s)"})))]
+        {:keys [ag s]} (ts/value-of (:response (ts/ask root {:op :eval :agent "root"
+                                                             :code "(let [ag (seon.system/spawn! sys {}) s (seon.system/stall-state sys)] (seon.system/kill! sys ag) {:ag ag :s s})"})))
+        r s
+        answered (set (:answered r))
+        mine (get-in r [:agents ag])]
     (is (map? (:root r)) (pr-str r))
+    ;; its own agent, idle: it answered, and its state is whole
+    (is (or (contains? answered ag) (contains? (:unanswered r) ag)) "its own agent's proc, answered or named mid-step")
+    (when (contains? answered ag)
+      (is (and (map? mine) (contains? mine :stall-seen) (contains? mine :last-frame-ms) (contains? mine :holding) (= 0 (:held mine)))
+          (str "with its stall fields and nothing held behind a handshake: " (pr-str mine))))
+    ;; every other part is the shared root's (other tests' agents and asks are in it): its shape, never its contents; a proc
+    ;; mid-step is named by its ::flow/site, never read as nil (red before, 2026-11-15 16:26: a stepping proc's state read as {})
+    (is (empty? (filter answered (keys (:unanswered r)))) "a proc that did not answer is never listed as answered")
+    (is (every? map? (vals (:unanswered r))) "a proc that did not answer is named by its site")
     (if (:site (:root r))
       (is (:stepping (:site (:root r))) (str "the api mid-step, named by what it steps: " (pr-str (:root r))))
       (do (is (map? (get-in r [:root :pending])) "every ask the api holds unanswered, by rid")
@@ -109,22 +125,14 @@
           ;; root and a hang's evidence never showed whether the stall check was armed or which agents it held busy
           (is (boolean? (:seon.system/stall-armed (:root r))) "the armed flag, read whatever its value")
           (is (set? (:seon.system/busy (:root r))) "the agents with an eval in flight, empty or not")))
-    (is (and (seq (:fx r)) (every? #(every? (fn [k] (int? (get % k))) [:busy :in-flight :queued]) (vals (:fx r)))) "each effect owner's load")
-    (is (= #{:busy :in-flight :queued :done} (set (keys (get-in r [:fx :fx/server-op])))) "the server ops' owner among them: a parked connection's op is running, queued or answered")
-    (is (map? (:agents r)) "each agent proc's, by pid")
-    (is (or (seq (:agents r)) (seq (:unanswered r))) "the spawned agent's proc, answered or named mid-step")
-    (is (every? #(and (contains? % :stall-seen) (contains? % :last-frame-ms) (contains? % :holding) (= 0 (:held %))) (vals (:agents r))) "with what its stall check reads, and the clone handshake it holds with what waits behind it (none here)")
-    ;; the spawn wakes the reconciler, so the ping may find it mid-step: then its evidence is its ::flow/site (what it steps, since
-    ;; when), never a state read as nil. Red before (land 2026-11-15 16:26): stall-state read a stepping proc's absent state as {}
-    (is (empty? (filter (set (:answered r)) (keys (:unanswered r)))) "a proc that did not answer is never listed as answered")
-    (is (every? map? (vals (:unanswered r))) "a proc that did not answer is named by its site")
+    (is (every? (fn [[_ m]] (or (:site m) (every? #(int? (get m %)) [:busy :in-flight :queued]))) (:fx r)) "each effect owner gives its load, or its site")
     (let [rc (:reconciler r)]
       (if (:site rc)
         (is (:stepping (:site rc)) (str "the reconciler mid-step, named by what it steps: " (pr-str rc)))
         (do (is (map? (:flight-steps rc)) "the reconciler's flights by task and the step each waits at")
             (is (and (boolean? (:quiet rc)) (vector? (:waits rc)) (vector? (:live rc)))
                 "whether it is quiet, the waits on main it holds and its live tasks by id (the leak a hang's capture must name): what a parked await-db waits on"))))
-    (is (or (some #{:api} (:answered r)) (contains? (:unanswered r) :api)) "and the procs that answered, root's api among them, or named mid-step")))
+    (is (or (contains? answered :api) (contains? (:unanswered r) :api)) "and root's api answered, or is named mid-step")))
 
 (deftest a-kill-is-answered-once-the-agents-end-is-recorded
   ;; docs/processes.md#the-agent-process: kill! answers the agent's view entry when its end is recorded, so a wait on it ends;
