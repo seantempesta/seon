@@ -490,18 +490,23 @@
             delivered (fn [held] (let [d (inbox-deliver sys k)] (if (vector? d) d held)))]
         (if (seq now)
           {:agent k :messages (delivered now)}
+          ;; the bound's end answers the wait in flight itself, typed: the first of a message's commit and the bound wins. The bound is the
+          ;; call's, not a wait's: a commit that wakes this wait but leaves it nothing (another wait on the agent took the message, root's
+          ;; 2026-11-15 23:20) waits on, from that commit, for what the bound has left, never an empty answer
           (let [ms (cfg/value :seon.config.root/inbox-wait-ms)
-                {:keys [p] wk :k} (c/await-message sys k (:max-tx db))
-                ;; the bound's end answers p itself, typed: the first of the message's commit and the bound wins
-                due (a/chan 1) h (step/put-after! due ms true)
-                _ (a/go (when (a/<! due)
-                          (deliver p (contract/error :seon.server/no-message #'seon.server/inbox-answer
-                                                     (str "no message to " k " in " ms " ms: ask again") {:agent k :waited-ms ms}))))
-                r @p]
-            (step/cancel! h) (a/close! due)
-            (cond (= :seon.server/no-message (:seon.error/type r)) (do (c/drop-wait! sys wk) r)
-                  (contract/error? r) r
-                  :else {:agent k :messages (delivered (inbox-messages sys @(:conn sys) k))})))))))
+                end (+ (System/currentTimeMillis) ms)]
+            (loop [t0 (:max-tx db)]
+              (let [{:keys [p] wk :k} (c/await-message sys k t0)
+                    due (a/chan 1) h (step/put-after! due (max 0 (- end (System/currentTimeMillis))) true)
+                    _ (a/go (when (a/<! due)
+                              (deliver p (contract/error :seon.server/no-message #'seon.server/inbox-answer
+                                                         (str "no message to " k " in " ms " ms: ask again") {:agent k :waited-ms ms}))))
+                    r @p]
+                (step/cancel! h) (a/close! due)
+                (cond (= :seon.server/no-message (:seon.error/type r)) (do (c/drop-wait! sys wk) r)
+                      (contract/error? r) r
+                      :else (let [db2 @(:conn sys) msgs (delivered (inbox-messages sys db2 k))]
+                              (if (seq msgs) {:agent k :messages msgs} (recur (:max-tx db2)))))))))))))
 
 (defmethod op-answer :inbox [sys _ req] (inbox-answer sys req))
 
