@@ -2014,9 +2014,7 @@
                                                            :deferred-digests (into {} (for [t (:deferred sel)] [t (get (:base-digests (:plan sel)) t)])))
                                pp (merge (select-keys pp [:process :steps :mg :build :missing]))))}])
            (let [proofs (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
-                 ;; the default bound only while ticks decide a verdict (:seon.config.proofs/ticks-decide, off by the owner's ruling until a
-                 ;; test's count is its own work: task seon.proofs/a-tests-ticks-are-its-own-work); a bound asked for is kept
-                 r (run-tests-forked (or (:ticks m) (when (cfg/value :seon.config.proofs/ticks-decide) (cfg/value :seon.config.agent/test-ticks)))
+                 r (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
                                      proofs
                                      (or (:mode m) :judge)
                                      #(send! {:op :tests-started :id (:id m) :pid %})

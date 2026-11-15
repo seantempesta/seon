@@ -559,9 +559,7 @@
                                                              (vswap! written assoc (:test x) (:digest x))))
                                                          (when-not (proofs/green? x) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))))
                                    (flush))
-                                 ;; the default bound only while ticks decide a verdict (:seon.config.proofs/ticks-decide; task
-                                 ;; seon.proofs/a-tests-ticks-are-its-own-work)
-                                 (when (config/value :seon.config.proofs/ticks-decide) (config/value :seon.config.agent/test-ticks))
+                                 (config/value :seon.config.agent/test-ticks)
                                  ;; a green another run stored since the plan, looked up just before the test would start
                                  ;; (not one the plan says runs whatever the cache holds: a full run's, the reuse audit's)
                                  (fn [t dg] (when-not (contains? rerun t)

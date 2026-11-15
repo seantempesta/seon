@@ -341,7 +341,10 @@
  ;; that config a lot smaller"): the newest greens of 2,139 tests read p50 1.0 M, p99 164 M, p99.5 219 M ticks, the costliest real
  ;; one 252 M (seon.ctx-test's 5.4 G implied-joins test fixed at its cause, 36 M), so 300 M ends a loop in about 3 s and fails
  ;; none; it caps a stated estimate's budget too (ten times the estimate, never past this).
- :seon.config.agent/test-ticks 300000000
+ ;; While :seon.config.proofs/ticks-decide is off (a test's count is not its own work yet), the ceiling is 10G again: a runaway loop
+ ;; still ends (about a minute), and no honest test reaches it (the costliest real one 252M). 300M (from percentiles, not
+ ;; arithmetic) redded 8 honest tests at 7cf0c01b64; restated by arithmetic when seon.proofs/a-tests-ticks-are-its-own-work lands.
+ :seon.config.agent/test-ticks 10000000000
  ;; The silence, ms, after which an agent with a request in flight is observed stalled, once per
  ;; quiet spell (seon.agent-proc's stall check), and a test bin/test runs is named STALLED: a
  ;; recorded fact (:seon.agent/stall, an open :stalled problem), never an end. Provenance: the
@@ -662,8 +665,9 @@
  ;; Unit: on/off. Whether a test's tick count decides its verdict (its budget, ten times its estimate, and the ceiling
  ;; :seon.config.agent/test-ticks; seon.proofs/run-tests!). Off by the owner's ruling, 2026-11-15: "disable the tick counting
  ;; test until we can reliably measure ticks" (main's full run at 7cf0c01b64 was red on 8 tests at the 300M ceiling, and one
- ;; digest read 161M and 300M: a test's count takes other threads' work). Ticks are still recorded on every verdict; bytes and
- ;; the test's own result decide. Turned back on by seon.proofs/a-tests-ticks-are-its-own-work.
+ ;; digest read 161M and 300M: a test's count takes other threads' work). Off, a test's budget is the ceiling alone
+ ;; (:seon.config.agent/test-ticks), never ten times its estimate; ticks are still recorded on every verdict. Turned back on by
+ ;; seon.proofs/a-tests-ticks-are-its-own-work.
  :seon.config.proofs/ticks-decide false
  ;; :seon.config.proofs/max-load 12.0
  ;; Unit: ms. The least work a shard of an incremental run is worth (seon.proofs/worth-shards). Provenance: a shard's start
