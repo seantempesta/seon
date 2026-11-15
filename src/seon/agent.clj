@@ -590,8 +590,9 @@
   main's forms loads here: its program stays the one :program names (program-db) and :behind says so, so the run re-forks at its
   next turn boundary (seon.turn) and its test children load the branch's difference first (load-diff!). Answers {:ok :merged
   :applied :conflicts :t}: :merged the main commit merged, nil when main had not moved; :applied the program keys main changed since
-  the old base (main-changes, the pair main-line already holds). See docs/merging.md#a-branch-merges-main-in."
-  {:malli/schema [:=> [:cat] [:map [:ok :boolean]]]}
+  the old base (main-changes, the pair main-line already holds); or the writer's typed error (a branch whose merge base was
+  swept: seon.db/branch-base's), merged nothing. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat] [:or [:map [:ok :boolean]] :seon.error/base]]}
   []
   (commit!)
   (let [conn (:store-conn @state)
@@ -963,15 +964,20 @@
         ;; the reach graph is always the agent's base's updated to db, whether or not the selection has a base:
         ;; built from nothing it cost 853 MB of a 1 GiB eval budget where an update costs 290 (a plan of main's
         ;; run, mode :main, selects with no base; measured 2026-10-30, 1,169 tests)
-        g (branch-graph db (or base (:base @state)) in)
-        ;; the index class the shell's runner takes (seon.program/with-index-code), from this graph, before base is indexed
-        in (cond-> in (nil? (get-in in [:config :seon.env/index])) (as-> x (program/with-index-code g x)))
+        bdb (or base (:base @state))
         held (:config (cfg/in-force))
-        ;; the base digested under the same derivation as the branch (its schema entries beyond the binary's, the held config), so
-        ;; only what the branch changed moves a test (seon.agent-test/a-branch-that-changes-no-schema-selects-no-test-for-its-schemas)
-        b (when base (base-graph base (branch-inputs in base nil held)))
-        g (branch-graph db (or base (:base @state)) in)
-        in (branch-inputs in db (or base (:base @state)) held)
+        ;; ONE derivation of the base's inputs (its schema entries beyond the binary's, the held config), given to every graph
+        ;; and index from the first, so the base and the branch are digested alike and reach-indexed re-answers only what moved
+        ;; (seon.agent-test/a-branch-that-changes-no-schema-selects-no-test-for-its-schemas): a second value of one input
+        ;; re-answered the ~1,565 tests reading the schemas on every plan
+        derive (fn [x] (if bdb (branch-inputs x bdb nil held) x))
+        g (branch-graph db bdb (derive in))
+        ;; the index class the shell's runner takes (seon.program/with-index-code), from this graph, before base is indexed:
+        ;; it moves only the tests that read :seon.env/index
+        in (cond-> in (nil? (get-in in [:config :seon.env/index])) (as-> x (program/with-index-code g x)))
+        b (when base (base-graph base (derive in)))
+        g (branch-graph db bdb (derive in))
+        in (branch-inputs in db bdb held)
         g (program/reach-indexed g in)
         ;; a stall task's proofs read that task's cause, so they judge only a task that names them
         idx (into {} (filter (fn [[t _]] (judges? g proofs t))) (program/index-of g))
@@ -2111,7 +2117,11 @@
   (vec (for [[[_ n0 b0] [k n1 b1]] (partition 2 1 (cons [:request t-req-ns nil] marks))]
          (cond-> {:phase k :ms (lib/r2 (/ (- n1 n0) 1e6))} (and b0 b1) (assoc :bytes (- b1 b0))))))
 
-(defn hello! {:malli/schema [:=> [:cat :int :map] [:= true]]}
+(defn hello!
+  "Tell root this agent is ready, with what its start found: :load-errors, each the program error of a namespace that did not load
+  (:seon.program/error), and :seon.db/no-merge-base, its branch's lost base (docs/storage.md#collection), never one inside the other."
+  {:malli/schema [:=> [:cat :int [:map [:load-errors {:optional true} [:sequential :seon.program/error]]
+                                       [:seon.db/no-merge-base {:optional true} :seon.db/no-merge-base]]] [:= true]]}
   [t-req-ns extra]
   (send! (merge {:op :hello :pid (lib/c-getpid) :start-ms (profile/ms-since t-req-ns) :mem-mb (mem-mb) :t (:max-tx (db))
                  :phases (spawn-phases t-req-ns (conj (:marks @state []) [:hello (profile/now-ns) (profile/alloc-bytes)]))}
@@ -2306,7 +2316,7 @@
                              r (when tree (fx/runtime-for tree))]
                          (when (contract/error? r) r))
           _ (mark! :runtime-for)
-          load-errors (concat program-errors (when no-base [no-base]) (when (and resumed (not no-base)) (program/load-diff! base @store-conn)))
+          load-errors (concat program-errors (when (and resumed (not no-base)) (program/load-diff! base @store-conn)))
           _ (mark! :base)
           misaligned (when-not resumed (misaligned commit t @store-conn db0))
           _ (mark! :misaligned)]
@@ -2320,7 +2330,7 @@
                    ;; loaded it at its start (program-db reads it)
                    :program {:seon.db/branch branch :seon.db/commit (d/commit-id @store-conn) :seon.db/t (:max-tx @store-conn)}
                    :base base :main db0 :store-conn store-conn :cfg cfg :results {} :n 0
-                   :load-errors (vec load-errors) :misaligned misaligned :env-mismatch env-mismatch :unwatched (sock/signal-at-input! fd)
+                   :load-errors (vec load-errors) :no-merge-base no-base :misaligned misaligned :env-mismatch env-mismatch :unwatched (sock/signal-at-input! fd)
                    :waits {} :inbox [] :tx-seq 0 :mode :agent
                    :ns (start-ns @store-conn task nsx) :interrupt-ok intr-ok :serve serve :inherited-bytes inherited}
                    ;; main's reach graph as the fork server keeps it, for db0: test-plan's base

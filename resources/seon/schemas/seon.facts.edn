@@ -110,6 +110,16 @@
  :seon.db/schema-fact [:map {:seon.db/attributes true} [:schema/key :schema/key] [:schema/form :schema/form]
                         ;; a schema registered at the REPL (my.schema/register!) has no file until a sync writes it to disk
                         [:schema/file {:optional true} :schema/file]]
+ ;; a source file of what the program depends on (seon.fx/library-source): text an agent greps (seon.doc/text-attrs :library), never
+ ;; program: no import retracts it, no write-back writes it, the program digest reads none (docs/vector.md#search)
+ :seon.library/path [:and {:seon.db/identity true :description "A dependency's source file, by its root as the checkout names it and its path in the root (root/rel, a jar's root!/rel)."} :string]
+ :seon.library/text [:string {:description "The file's text as its root holds it."}]
+ :seon.library/root [:and {:seon.db/index true :description "The classpath root the file was read from, as the checkout names it (a jar, a dir, or the binary's embedded archive)."} :string]
+ :seon.library/rel [:and {:seon.db/index true :description "The file's path in its root: what a var's :file names, so a var maps to its file."} :string]
+ :seon.library/roots [:map-of {:description "Each root's identity when its files were read (a pinned dir's pin commit, a jar's or gitlib's versioned path, the binary's digest), on root's entity: a root whose identity moved is read again."} :string :string]
+ :seon.library/inputs [:string {:description "The digest of the pins and deps the library files were read at (seon.vector/library-inputs), on root's entity: the vectors proc reads them again when it moves."}]
+ :seon.doc/library [:boolean {:description "In the text index slot's per-index state: the dependency source's rows were added to that index (seon.doc/with-library)."}]
+ :seon.library/file-fact [:map {:seon.db/attributes true} [:seon.library/path :seon.library/path] [:seon.library/text :seon.library/text] [:seon.library/root :seon.library/root] [:seon.library/rel :seon.library/rel]]
  :seon.db/file-fact [:map {:seon.db/attributes true} [:file/path :file/path] [:file/text :file/text] [:file/mode {:optional true} :file/mode]]
  ;; A file's mode as git records it: executable or not, all a tree holds of it. Written by the import from the file on disk, committed by the write-back
  ;; (seon.source/modes). A script (:script on the allow-list, docs/source.md#a-program-file): its text is the file's, and what follows is derived from it, for reading.
@@ -670,7 +680,8 @@
                           [:seon.system/tasks {:optional true} :seon.system/tasks]
                           [:seon.system/generation {:optional true} :seon.system/generation]
                           [:seon.system/collected {:optional true} :seon.system/collected] [:seon.system/retained {:optional true} :seon.system/retained]
-                          [:seon.system/content-t {:optional true} :seon.system/content-t]]
+                          [:seon.system/content-t {:optional true} :seon.system/content-t]
+                          [:seon.library/roots {:optional true} :seon.library/roots] [:seon.library/inputs {:optional true} :seon.library/inputs]]
  ;; ---- on every transaction Seon makes, in its tx-meta (seon.db/tx-meta) ----
  ;; the runtime that made it, as its compiled units are keyed (jolt.host/runtime-fingerprint:
  ;; Jolt's version, its runtime fingerprint, its trace tag; docs/storage.md#history)

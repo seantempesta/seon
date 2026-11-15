@@ -205,6 +205,22 @@
   (cond-> (select-keys r [:handle :text :forms :ms :ticks :bytes])
     (:ex r) (assoc :ex (select-keys (:ex r) [:seon.error/type :seon.error/message]))))
 
+(defn started-without-program-text
+  "What an agent that starts without part of its program (swp) is told for its task: each error, and whether a failed namespace is
+  its task's (its to fix) or the program's defect (go on). See docs/processes.md#an-agent-that-starts-without-its-program."
+  {:malli/schema [:=> [:cat :map [:maybe :string]] :string]}
+  [swp task]
+  (let [tns (some-> task (str/split #"/") first)
+        mine? (fn [n] (and tns (#{tns (str tns "-test")} (str n))))
+        errs (:errors swp)]
+    (str (:seon.error/message swp) "; each error: "
+         (str/join "; " (map (fn [{:keys [ns message]}] (str ns ": " message)) errs))
+         (if (some (comp mine? :ns) errs)
+           (str ". Your task's namespace " tns " is among them: its forms are not loaded, so fixing that load is part of your task.")
+           (str ". None is your task's namespace" (when tns (str " (" tns ")"))
+                ": this is the program's defect, recorded as a :seon.agent/load-failed problem for its owner. Go on with your task;"
+                " a test in those namespaces reads :unknown.")))))
+
 (defn- set-agent
   "Merge m into agent id's view entry, recording what went wrong in it (`failed`). A stopped
   agent stays stopped: :killed (a kill) or :ended (root stopped it because its run ended)."
@@ -247,8 +263,7 @@
                         (when-not (pdb/eid @(:conn st) :seon.message/id mid)
                           (step/out! o :to-writer {:op :tx :branch :db
                                                 :tx-data (task/message-tx mid {:seon.system/id :root} [(name id)]
-                                                                          (str (:seon.error/message swp) "; each error: "
-                                                                               (str/join "; " (map (fn [{:keys [ns message]}] (str ns ": " message)) (:errors swp))))
+                                                                          (started-without-program-text swp (:task a))
                                                                           (System/currentTimeMillis))})))
                        st))
         ;; and the evals given at its spawn are the first things its REPL queue holds, before any request the answer makes
