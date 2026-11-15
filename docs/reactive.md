@@ -32,7 +32,7 @@ A minimal reader, at root's REPL:
 
 ## How a commit reaches its readers today
 
-`seon.ratom/commit!` sets the store's db and moved datoms and notifies every watch on the store. Each reaction checks its own key set against the datoms (``datahike.reads/reads-touched?``) and, when touched, is dirtied: an auto-run one runs at once, the rest queue for `seon.ratom/flush!`. Nothing in production feeds the store from real commits yet; the render proc keeps its own read index fed by the writer's `:main` notice ([render](render.md#a-page-is-a-kept-walk)).
+`seon.ratom/commit!` sets the store's db and moved datoms and notifies every watch on the store. Each reaction checks its own key set against the datoms (``datahike.reads/reads-touched?``) and, when touched, is dirtied: an auto-run one runs at once, the rest queue for `seon.ratom/flush!`. The queue and the running count are an owner's, not the process's (`seon.ratom/owner`, bound as `seon.ratom/*owner*` around its proc's step): a reaction runs only in its owner's step, and one dirtied in another owner's step reaches its owner as a message on its port (`seon.ratom/take-dirty!`), never a write to another's queue (`seon.ratom-test/a-reaction-runs-only-in-its-owners-step`; [flow](flow.md#the-five-rules)). Nothing in production feeds the store from real commits yet; the render proc keeps its own read index fed by the writer's `:main` notice ([render](render.md#a-page-is-a-kept-walk)).
 
 ## What it costs [M, at root's REPL on main, 434k datoms]
 
@@ -58,7 +58,6 @@ Three rules keep a reader exact and cheap.
 
 Each limit below names the task that lifts it. The design, its cost analysis (n, big-O, ticks, bytes, seconds) and its red-first proofs are in that task's plan:
 - Commit cost linear in readers, the diamond's glitch, a source gained mid-flush: `seon.ratom/a-commit-reaches-only-the-readers-of-what-it-moved`.
-- One process-wide queue, where another owner's flush runs your reactions: `seon.ratom/a-reaction-queue-is-its-owners`.
 - No owner step feeding commits (in root, the fork server and each agent): `seon.ratom/an-owner-step-advances-its-store-and-flushes`.
 - A boxed key costs 135 B: `seon.ratom/a-read-key-is-one-fixnum`.
 - A pull records its entity, not its attribute: deps' Datahike task, named in the plans above.

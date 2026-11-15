@@ -86,6 +86,7 @@ The words the owner has ruled out, each with what to say instead; a name that st
 - **part**: it is a component (owner, 2026-11-06).
 - **fence** for a guard: say guard; a fence is CommonMark's code fence (owner, 2026-11-07).
 - **our own word where git has one**: merge, pull, rebase, cherry-pick, delete a branch, gc ([above](#data-datahikes-and-gits-words)) (owner, 2026-11-07).
+- **shard**: say **item** (one test at its digest, the unit a test run queues), **worker** (the proc that runs one item at a time; for tests, a test child, as an effect type has its workers, [flow](flow.md#effects-one-owner-and-its-workers-per-kind)), or **batch** (items granted to one worker together, `:seon.prove/batch`). A list of tests dealt to a process ahead of time is the shape being replaced (owner, 2026-11-15: "Can we stop using the term shard? Switch to proper flow terms and do things the flow way").
 
 Words that stay: the libraries' (proc, step-fn, transact, branch, merge, schema, registry, contract, flusher, group commit, fork server, lease, generation), and **waste**, the turns and tokens an agent spent past what its work needed (`:seon.agent/waste`).
 

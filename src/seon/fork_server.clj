@@ -379,7 +379,7 @@
 (defn- start-event-reader!
   "The fork server's socket, read by one thread (a blocking read) into the :fork-server
   proc's :ev port. EOF is {:ev :eof :pid}. Ends at EOF."
-  {:malli/schema [:=> [:cat :seon.host/chan :seon.lib/fd :seon.lib/pid] :seon.host/thread]}
+  {:seon.flow/edge "an edge reader for a blocking read: the fork server's event pipe, read by one thread that puts each event on its proc's in-port" :malli/schema [:=> [:cat :seon.host/chan :seon.lib/fd :seon.lib/pid] :seon.host/thread]}
   [ev-ch fd pid]
   (doto (Thread.
           (fn []
