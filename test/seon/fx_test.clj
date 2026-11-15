@@ -1059,6 +1059,8 @@
         (is (= "another-build" (:seon.process/binary-digest r)) "naming the running binary's identity")))
     (with-redefs [seon.program/binary-program (fn [] {:digest d})]
       (is (= d (:digest (fx/runtime-for tree))) "and its own tree's is current"))
+    ;; a tree this repository cannot read is the identity's typed error, never a digest of what could be read
+    (is (= :seon.fx/io-error (:seon.error/type (fx/runtime-for "0123456789abcdef0123456789abcdef01234567"))) "an unreadable tree is told")
     ;; the kept digest is keyed by the code that computed it: a value a changed binary-digest computed is never read back
     (let [kept (fn [code] (java.io.File. (str root "/target/runtime-for/" tree "." (seon.lib/digest code) ".digest")))]
       (.delete ^java.io.File (kept "another-code"))
