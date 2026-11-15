@@ -79,6 +79,23 @@
     (is (= (before 'app.k-test/reads-b) (after 'app.k-test/reads-b)) "a reader of another key doesn't")
     (is (= before (digests (assoc cfg/config :seon.config.root/main "elsewhere"))) "and a place moves nothing")))
 
+;; docs/source.md#tests-run-by-reach: a test that reads the whole program's text (seon.test-store/kept-program-store, the :seon.env/src class)
+;; reads every form a branch changes, though no reach names them, so a branch's form moves the class as its file would. Red before:
+;; branch-inputs moved a class only for :file/text (a script), never a form, and seon.main-test/an-error-names-its-raiser-by-its-var
+;; was reused green on runtime's branch while its seon.ratom error made it red (runtime, 2026-11-16). Estimate: two small worlds' forms
+;; and one datoms diff of the changed form ~1M.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-branchs-form-moves-the-program-texts-class
+  (let [form (fn [src]
+               (fn [db] (program/record-tx db {:id "app.src-test/f" :src src :ns 'app.src-test :ns-form? false
+                                               :defs [{:var 'app.src-test/f :meta #{}}] :keywords #{}
+                                               :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}})))
+        base (mt/with (mt/world) (form "(defn f [] 1)"))
+        branch (mt/with base (form "(defn f [] 2)"))
+        in {:env "e" :tree "t" :config {:seon.env/src "s0" :seon.env/docs "d0"}}]
+    (is (not= "s0" (get-in (#'agent/branch-inputs in branch base cfg/config) [:config :seon.env/src])) "a changed form moves the program text's class")
+    (is (= "d0" (get-in (#'agent/branch-inputs in branch base cfg/config) [:config :seon.env/docs])) "and no other class")
+    (is (= "s0" (get-in (#'agent/branch-inputs in base base cfg/config) [:config :seon.env/src])) "an unchanged branch moves nothing")))
+
 (defn with-agent
   "in-agent's setup and teardown around a body of the test's own: f is called with {:names {:ns :task :agent}
   :ask (a request to the root's server, answered as data) :eval-root (root-REPL code, answered as the server does; root-value reads its value)

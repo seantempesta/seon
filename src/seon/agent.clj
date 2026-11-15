@@ -887,15 +887,20 @@
 
 (defn- branch-inputs
   "Inputs in, a root's boot's, as branch db's tests read them: the schema class moved by the entries db holds beyond the binary's, which a
-  branch can register (program/schema-changes), and, for the files a branch changed since base (:file/text, a script), each one's class and the tree a
+  branch can register (program/schema-changes), the program text's class (:seon.env/src) moved by the forms it changed since base, and, for the files a branch changed since base (:file/text, a script), each one's class and the tree a
   test reading files takes; and held, the config this process's branch states, key by key, when it differs from what the process loaded with, so a branch's edit of a key moves the tests reading that key and no other. A digest no gate's checkout shares only runs more. See docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :seon.program/inputs :seon.host/db [:maybe :seon.host/db] :map] :seon.program/inputs]}
   [in db base held]
   (let [changes (program/schema-changes db)
         moved (when base (mapcat identity (d/datoms-diff base db :aevt [:file/text])))
         files (into (sorted-map) (for [dt moved :let [p (:file/path (d/entity db (:e dt)))] :when p] [p (:file/text (d/entity db (:e dt)))]))
+        ;; the forms a branch changed since base: the program's text, which a reader of all of it (the :seon.env/src class,
+        ;; seon.program/env-class-readers) reads though no reach names them, as a file of src/ moves the class in a checkout
+        forms (when base (into (sorted-set) (for [dt (mapcat identity (d/datoms-diff base db :aevt [:form/src]))]
+                                               [(or (:form/id (d/entity db (:e dt))) (:form/id (d/entity base (:e dt)))) (:v dt) (boolean (:added dt))])))
         mix (fn [old x] (lib/digest (str old (sedn/encode x))))]
     (cond-> in
+      (seq forms) (update-in [:config :seon.env/src] mix (vec forms))
       (not= held cfg/config) (update :config merge (fx/config-input held (cfg/checkout)))
       (seq changes) (update-in [:config :seon.env/schemas] mix (vec (sort-by key changes)))
       (seq files) (update :tree mix (vec files))
