@@ -51,17 +51,15 @@
         "an attribute the schema does not define: the same answer inside the recorder as outside")))
 
 ;; Estimate: a seeded db, 200 pulls of one attribute under one recorder ~1M; one planned join query ~0.2M; 3 d/with ~0.2M = ~1500000
-(deftest ^{:seon.test/estimate {:ticks 1500000}} a-recorder-holds-one-range-a-key-and-the-planner-records
+(deftest ^{:seon.test/estimate {:ticks 1500000}} a-recorder-holds-one-range-a-key
   ;; task datahike.reads/a-lazy-read-records-into-the-read-it-belongs-to (2) and context's T9: the recorder kept one range a
-  ;; read, so 200 reads of one attribute held 200 ranges for one key (565 B each); it holds each range once. And a query the
-  ;; planner runs records what it read: with-reads no longer turns the planner off (on Jolt its cursors read through the
-  ;; index protocol, which records), so a commit to what a planned join read reaches it.
+  ;; read, so 200 reads of one attribute held 200 ranges for one key (565 B each); it holds each range once. And a recorded
+  ;; join records what it read, so a commit to what it read reaches it (the planner's case: a-recorded-join-is-touched-by-each-attribute-it-read).
   (let [[db t1 t2] (seeded)
         one (count (second (d/with-reads #(d/pull db [:seon.task/plan] t1))))
         [_ rs] (d/with-reads #(dotimes [_ 200] (d/pull db [:seon.task/plan] t1)))
         q '[:find ?id :in $ ?e :where [?e :seon.task/needs ?n] [?n :seon.task/id ?id]]
-        ;; the planner on, whatever with-reads binds: what this asks is that the planner's reads are recorded
-        [v qrs] (d/with-reads #(binding [datahike.query/*disable-planner* false] (d/q q db t1)))
+        [v qrs] (d/with-reads #(d/q q db t1))
         idx (d/reads-index qrs)
         tx (fn [tx-data] (:tx-data (d/with db tx-data)))]
     (is (= one (count rs)) (str "200 pulls of one attribute hold what one pull holds (" one "): " (count rs)))
@@ -69,6 +67,23 @@
     (is (d/reads-touched? idx (tx [{:db/id t1 :seon.task/needs [{:seon.task/id "r/t3"}]}])) "a need added to the entity it joined from")
     (is (d/reads-touched? idx (tx [[:db/retract t2 :seon.task/id "r/t2"]])) "the joined entity's id, retracted")
     (is (not (d/reads-touched? idx (tx [{:db/id t2 :seon.task/plan "Other."}]))) "an attribute the join did not read")))
+
+;; Estimate: the test db with one entity added (~0.4M, missed first: measured 0.83M red), one recorded q, two with-txs and the q again, ~0.9M = 900000
+(deftest ^{:seon.test/estimate {:ticks 900000}} a-recorded-join-is-touched-by-each-attribute-it-read
+  ;; deps' audit, 2026-11-15 [M]: with the planner on while recording (Datahike b1ef15b0), an entity-group merge read its
+  ;; card-one attribute by lookupGE on the eavt set, past the index protocol, and recorded nothing for it: this q recorded
+  ;; only [:a :note/text], so a commit to the entity's :note/agent changed the answer and touched no read (a stale
+  ;; reaction or render). Every attribute a recorded q read reaches its reads
+  (let [db (d/db-with (ts/test-db) [{:db/id "n" :note/text "keep" :note/agent :c1}])
+        e (d/q '[:find ?e . :where [?e :note/text "keep"]] db)
+        q '[:find ?a :where [?e :note/text ?t] [(= ?t "keep")] [?e :note/agent ?a]]
+        [v rs] (d/with-reads #(d/q q db))
+        tx (fn [tx-data] (:tx-data (d/with db tx-data)))]
+    (is (= #{[:c1]} v))
+    (is (= #{[:c9]} (d/q q (d/db-with db [[:db/add e :note/agent :c9]]))) "the commit below changes the answer")
+    (is (d/reads-touched? (d/reads-index rs) (tx [[:db/add e :note/agent :c9]]))
+        (str "so it touches the read: " (pr-str (d/reads-index rs))))
+    (is (d/reads-touched? (d/reads-index rs) (tx [{:note/text "keep" :note/agent :c2}])) "and a new entity the scan would find")))
 
 ;; Estimate: a seeded db and two pulls under nested recorders, ~0.2M = 200000
 (deftest ^{:seon.test/estimate {:ticks 200000}} a-nested-with-reads-records-into-the-outer
