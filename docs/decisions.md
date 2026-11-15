@@ -1238,6 +1238,28 @@ He ruled that he is always given links, or a stable way to find links, on a stab
 
 He asked whether the page looks like a friendly chat window his mother could use, and said he wants nothing hidden. Stated in [render](render.md#the-page) and [the debug page](render.md#the-debug-page-is-the-wire-request).
 
+2026-11-15, to web: the site is for end users, and the owner's 75-year-old mother must be able to use it. He mostly reads it in a portrait window. The person's view is kind, plain and non-technical, with good typography and a short, clear focus: messages by default, and what happened under the hood one tap away. The debug and @ctx views stay technical, for an expert. The model still gets everything it needs. Nothing is hidden: the person's view folds the detail, and @ctx and debug show it whole. Task: `seon.render.ui/the-persons-chat-is-kind-plain-and-portrait-first`.
+
+The owner's choices, the same day:
+- `/` is always the person's chat, never the agent a tab last opened.
+- The system's own status (task counts, root causes, problems, root's process, evals sent to root) is on the debug tab only.
+- Under each answer, one fold ("how I did this") opens its steps.
+- The person's view has no list of sessions (it was a menu on portrait, until root works for the person, below).
+- The theme follows the device's light or dark setting.
+- A failure reads as one kind sentence, its reason folded under Details.
+- Root's session answers a person in plain words.
+- Body type is 19-20px.
+- The message box is like the best AI tools': it grows taller with long text, has a clear Send button, and Enter sends.
+- Opening the page shows a fresh greeting with a clear link back to the previous conversation.
+- While Seon works, it shows "Thinking"; expanded, the progress streams in, then the answer streams in. Streaming needs a plan that checks the reactive core and Datastar.
+- Root's session never ends, so what its model reads should be a sliding window kept short by real compaction (refinement keeps editing it down), never a blind cut.
+- Root, and any agent talking with a person, answers the person promptly; the person still drives their agent, and agents can act for them too.
+- The messaging plans include the person.
+
+Root works for the person (the owner, 2026-11-15, through root and to web): an ordinary user never learns that other agents exist; they talk to root at `/`, in one conversation. Root acts for them as a product and project manager: it understands what they want, turns it into work for the agent whose area fits, manages those agents, and answers, either looking it up itself or asking the right agent for the data. Every agent has the same chat and the same messaging; root differs only by its task. So `/` is root's chat in the person's view, with no list of sessions; the agents' pages, the system's status and the checkout line are on the debug view.
+- While work runs, the agents doing it send short progress updates back, and the waiting line shows the newest one live, with every update one tap away. No bare "thinking" with nothing behind it.
+- One user for now: the signed-in user (`user`) is the person; several users come later.
+
 ### Counts are tokens; what an agent writes is Markdown
 
 He ruled that only tokens are reported (estimates are fine), not characters. Agent text is Markdown. Stated in [prompt](prompt.md).
