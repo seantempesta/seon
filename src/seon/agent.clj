@@ -2111,7 +2111,11 @@
   (vec (for [[[_ n0 b0] [k n1 b1]] (partition 2 1 (cons [:request t-req-ns nil] marks))]
          (cond-> {:phase k :ms (lib/r2 (/ (- n1 n0) 1e6))} (and b0 b1) (assoc :bytes (- b1 b0))))))
 
-(defn hello! {:malli/schema [:=> [:cat :int :map] [:= true]]}
+(defn hello!
+  "Tell root this agent is ready, with what its start found: :load-errors, each the program error of a namespace that did not load
+  (:seon.program/error), and :seon.db/no-merge-base, its branch's lost base (docs/storage.md#collection), never one inside the other."
+  {:malli/schema [:=> [:cat :int [:map [:load-errors {:optional true} [:sequential :seon.program/error]]
+                                       [:seon.db/no-merge-base {:optional true} :seon.db/no-merge-base]]] [:= true]]}
   [t-req-ns extra]
   (send! (merge {:op :hello :pid (lib/c-getpid) :start-ms (profile/ms-since t-req-ns) :mem-mb (mem-mb) :t (:max-tx (db))
                  :phases (spawn-phases t-req-ns (conj (:marks @state []) [:hello (profile/now-ns) (profile/alloc-bytes)]))}
@@ -2306,7 +2310,7 @@
                              r (when tree (fx/runtime-for tree))]
                          (when (contract/error? r) r))
           _ (mark! :runtime-for)
-          load-errors (concat program-errors (when no-base [no-base]) (when (and resumed (not no-base)) (program/load-diff! base @store-conn)))
+          load-errors (concat program-errors (when (and resumed (not no-base)) (program/load-diff! base @store-conn)))
           _ (mark! :base)
           misaligned (when-not resumed (misaligned commit t @store-conn db0))
           _ (mark! :misaligned)]
@@ -2320,7 +2324,7 @@
                    ;; loaded it at its start (program-db reads it)
                    :program {:seon.db/branch branch :seon.db/commit (d/commit-id @store-conn) :seon.db/t (:max-tx @store-conn)}
                    :base base :main db0 :store-conn store-conn :cfg cfg :results {} :n 0
-                   :load-errors (vec load-errors) :misaligned misaligned :env-mismatch env-mismatch :unwatched (sock/signal-at-input! fd)
+                   :load-errors (vec load-errors) :no-merge-base no-base :misaligned misaligned :env-mismatch env-mismatch :unwatched (sock/signal-at-input! fd)
                    :waits {} :inbox [] :tx-seq 0 :mode :agent
                    :ns (start-ns @store-conn task nsx) :interrupt-ok intr-ok :serve serve :inherited-bytes inherited}
                    ;; main's reach graph as the fork server keeps it, for db0: test-plan's base
