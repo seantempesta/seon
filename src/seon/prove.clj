@@ -424,21 +424,15 @@
       (let [[st m] (step/ask st [:prove :answers] [:killed (:key run)] {:op :kill :id a})] [st [m]])
       [st []])))
 
-(defn- binary-identity
-  "This root's checkout's binary identity (target/seon.digest, what bin/build wrote), or \"unbuilt\": one small file read, made only
-  once a main run has failed, to see whether its inputs moved. See docs/merging.md#the-test-service."
-  {:malli/schema [:=> [:cat] :string]}
-  []
-  (let [f (java.io.File. (str (cfg/checkout) "/target/seon.digest"))] (if (.isFile f) (str/trim (slurp f)) "unbuilt")))
-
 (defn- main-inputs-moved?
   "Whether a notice at program t pt brings main's run inputs other than the failed run's (:main-failed, {:program-t :binary}):
-  a newer program, or another binary. Same inputs, same answer: a run that failed is never asked again on them. See
-  docs/merging.md#the-test-service."
+  a newer program, or another binary than the one this proc runs on (:binary, the running binary's built identity, held since
+  its boot: a new binary is a new process, whose boot asks main again). Same inputs, same answer: a run that failed is never asked
+  again on them. See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :map :int] :boolean]}
   [st pt]
   (let [{fpt :program-t fb :binary :as failed} (:main-failed st)]
-    (boolean (and failed (or (not= pt fpt) (not= fb (binary-identity)))))))
+    (boolean (and failed (or (not= pt fpt) (not= fb (:binary st)))))))
 
 (defn- finish
   "Run k ended with answer r: every waiter answered once. A run answered green with nothing died is remembered under its
@@ -460,7 +454,7 @@
         ;; a main run that failed keeps main wanted with the inputs it failed on, asked again when a notice brings others
         ;; (main-inputs-moved?); one that answered clears them
         st (cond (and main? err? (not= :seon.prove/superseded (:seon.error/type r)))
-                 (assoc st :main-failed {:program-t (:main-asked st 0) :binary (or (:seon.process/binary-digest r) (binary-identity))})
+                 (assoc st :main-failed {:program-t (:main-asked st 0) :binary (or (:seon.process/binary-digest r) (:binary st))})
                  main? (dissoc st :main-failed)
                  :else st)
         owner (some-> (:seon.error/operation r) namespace symbol)]
@@ -707,6 +701,8 @@
                               ;; main's run as the service decides it: what is wanted, the program t last asked, and a failed run's inputs
                               :main-want (:main-want st) :main-asked (:main-asked st) :main-failed (:main-failed st)})})
   ([args] {:rid 0 :pending {} :runs {} :done {} :items {} :askers {} :batches {} :conn (:conn args)
+           ;; the running binary's built identity (seon.program/binary-program, what seon.fx/runtime-for compares), held for the proc's life
+           :binary (some-> (program/binary-program) :digest)
            })
   ([st _tr] st)
   ([st0 in m]
