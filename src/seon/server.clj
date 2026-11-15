@@ -406,8 +406,10 @@
 
 (defmethod op-answer :import [sys _ req]
   (let [cl (:client req)
-        checkout (some->> cl (re-matches #"checkout-(/.+)") second)
-        path (str (:path req))
+        ;; both canonical, so a path with .. or a link never names a file outside the checkout (root's reviewer)
+        canon #(.getCanonicalPath (java.io.File. ^String %))
+        checkout (some->> cl (re-matches #"checkout-(/.+)") second canon)
+        path (canon (str (:path req)))
         rel (when (and checkout (str/starts-with? path (str checkout "/"))) (subs path (inc (count checkout))))]
     (cond (nil? checkout) (refused (str "seon_import imports onto the agent a checkout holds: its client is checkout-<path> (bin/mcp call), not " (pr-str cl)))
           (nil? rel) (refused (str path " is outside the checkout " checkout ": not imported"))
