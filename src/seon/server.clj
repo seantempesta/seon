@@ -391,9 +391,9 @@
 (defn- inbox-messages
   "The messages main holds to agent key k that its branch has not taken (seon.task/undelivered), as a session reads them: {:id :from
   :body :sent-ms}, :from by name. Reads only. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.system/sys :string] [:vector :map]]}
-  [sys k]
-  (let [db @(:conn sys) br (:seon.agent/branch (d/entity db [:seon.agent/key k]))
+  {:malli/schema [:=> [:cat :seon.system/sys :seon.host/db :string] [:vector :map]]}
+  [sys db k]
+  (let [br (:seon.agent/branch (d/entity db [:seon.agent/key k]))
         bdb (if br (:db @(c/branch-db sys br)) db)]
     (mapv #(update % :from task/sender-name) (task/undelivered db bdb k))))
 
@@ -408,11 +408,12 @@
         k (or (:agent req) (some->> (:task req) (task/agent-key db)))]
     (if-not (and k (pdb/eid db :seon.agent/key k))
       (refused (str "seon_inbox names no agent: " (pr-str (select-keys req [:agent :task]))))
-      (let [now (inbox-messages sys k)]
+      ;; the wait starts at the t this check read: a message committed between the check and the wait still wakes it
+      (let [now (inbox-messages sys db k)]
         (if (seq now)
           {:agent k :messages now}
           (let [ms (cfg/value :seon.config.root/inbox-wait-ms)
-                {:keys [p] wk :k} (c/await-message sys k)
+                {:keys [p] wk :k} (c/await-message sys k (:max-tx db))
                 due (a/chan 1) h (step/put-after! due ms ::due)
                 _ (a/go (when (a/<! due) (deliver p ::due)))
                 r @p]
@@ -421,7 +422,7 @@
                                   (contract/error :seon.server/no-message #'seon.server/inbox-answer
                                                   (str "no message to " k " in " ms " ms: ask again") {:agent k :waited-ms ms}))
                   (contract/error? r) r
-                  :else {:agent k :messages (inbox-messages sys k)})))))))
+                  :else {:agent k :messages (inbox-messages sys @(:conn sys) k)})))))))
 
 (defmethod op-answer :inbox [sys _ req] (inbox-answer sys req))
 
