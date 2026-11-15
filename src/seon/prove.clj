@@ -480,7 +480,7 @@
   "Request m of the api carrying a run's verdicts as data ({:rid :verdicts}: the :seon.proof entities seon.proofs/verdict-tx
   makes): written by this proc's one per-batch write (verdicts-write), the asker answered {:written n} once they are
   (answered :verdicts). Only :seon.proof attributes: this proc is the one writer of the verdict shape, never a generic write
-  of a client's tx (flow, 2026-11-15); each entity is checked against its schema by the write. Answers [st outputs]. See
+  of a client's tx; each entity is checked against its schema by the write. Answers [st outputs]. See
   docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
   [st {:keys [rid verdicts]}]
