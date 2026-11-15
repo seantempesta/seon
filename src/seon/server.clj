@@ -173,17 +173,22 @@
             ;; the start (its outside env, so the reconciler starts no loop; :spawning, so it counts the agent live and spawns none of its own) is
             ;; written on main BEFORE the spawn: the branch is cut holding its agent's task, root's alone (:seon.agent/task, docs/users.md), so the
             ;; agent never copies it (two writers disagreed at a whole task's stage move). A clone's branch is cut from its source's: it starts after
-            _ (when k @(c/transact-main! sys (conj (start (keyword k)) {:seon.agent/key k :seon.agent/status :spawning})))
+            started (when k @(c/transact-main! sys (conj (start (keyword k)) {:seon.agent/key k :seon.agent/status :spawning})))
             r (if clone-of @(c/clone! sys clone-of opts) @(c/call! sys (c/request 'spawn! nil opts nil)))
             ag (:id r)]
         ;; spawn!'s request, its answer a value: a refusal (a branch another agent holds, named with
-        ;; its task) is the attach's answer, never a server defect; the start written for it is answered too: the task refused, its execution as
-        ;; it was, the agent that never ran ended
+        ;; its task) is the attach's answer, never a server defect; the start written for it is undone exactly (each fact its transaction
+        ;; wrote on the task and the agent inverted, one rule for every attribute: the session's key, a restart's branch, the release), then the
+        ;; refusal written and the agent that never ran ended
         (if-not ag
-          (do (when k @(c/transact-main! sys (into (task/refused-tx @(:conn sys) id r)
-                                                   [[:db/add [:seon.task/id id] :seon.task/execution (or (:seon.task/execution t) :held)]
-                                                    [:db/retract [:seon.task/id id] :seon.task/agent [:seon.agent/key k]]
-                                                    {:seon.agent/key k :seon.agent/status :ended :seon.agent/ended-ms (System/currentTimeMillis)}])))
+          (do (when (:t started)
+                (let [db @(:conn sys) h (d/history db)
+                      undo (vec (for [e (remove nil? [(pdb/eid db :seon.task/id id) (pdb/eid db :seon.agent/key k)])
+                                      dt (d/datoms h :eavt e) :when (= (:t started) (:tx dt))]
+                                  [(if (:added dt) :db/retract :db/add) (:e dt) (:a dt) (:v dt)]))]
+                  @(c/transact-main! sys undo)
+                  @(c/transact-main! sys (conj (task/refused-tx @(:conn sys) id r)
+                                               {:seon.agent/key k :seon.agent/status :ended :seon.agent/ended-ms (System/currentTimeMillis)}))))
               r)
           (do (when clone-of @(c/transact-main! sys (start ag)))
               (when replaced (c/kill! sys replaced))

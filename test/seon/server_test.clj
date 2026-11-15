@@ -125,18 +125,22 @@
   ;; is held again with no env and no agent, and the reconciler never sees a release with no agent (it would spawn a
   ;; second agent for it). <ns>/u shares <ns>/t's
   ;; branch, which <ns>/t's attached agent holds
-  (let [[refused seen] (at/in-agent (fn [{:keys [ns]}]
+  (let [pull (fn [u] (str "(dissoc (datahike.api/pull @(:conn sys) '[*] [:seon.task/id " (pr-str u) "]) :seon.task/outcome :seon.task/reason :seon.task/error)"))
+        [before refused seen after] (at/in-agent (fn [{:keys [ns]}]
                                       (let [u (str ns "/u")]
-                                        [{:op :attach :task u}
+                                        [{:op :eval :agent "root" :code (pull u)}
+                                         {:op :attach :task u}
                                          {:op :eval :agent "root"
                                           :code (str "(let [db @(:conn sys) t (seon.task/task db " (pr-str u) ")]"
                                                      " [(:seon.task/execution t) (:seon.task/model t)"
-                                                     " (some? (:seon.task/agent t))])")}]))
+                                                     " (some? (:seon.task/agent t))])")}
+                                         {:op :eval :agent "root" :code (pull u)}]))
                                     {:decls (fn [{:keys [ns]}]
                                               [{:seon.task/name "u" :seon.task/plan "Work too." :seon.task/kind :work
                                                 :seon.task/proofs #{'demo-test/u} :seon.task/branch (keyword (str "task-" ns "-t"))}])})]
     (clojure.test/is (clojure.string/includes? (pr-str refused) "is held by live agent") "the attach is refused: the t task's agent holds the branch")
-    (clojure.test/is (= [:held nil false] (:value seen)) "and the start it wrote is answered: the u task is held again, with no env and no agent")))
+    (clojure.test/is (= [:held nil false] (:value seen)) "and the start it wrote is answered: the u task is held again, with no env and no agent")
+    (clojure.test/is (= (:value before) (:value after)) "its entity exactly as before, apart from the refusal (each fact the start wrote inverted)")))
 
 (deftest an-attached-agent-holds-its-task
   ;; agent view's browser check: an agent attached from outside (seon.server/attach!
