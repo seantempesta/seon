@@ -374,9 +374,12 @@
                                   (if-let [to (d/commit-as-db conn (:to m))]
                                     {:ok true :commit (d/force-branch! to (:branch m) #{(:to m)} {:expected-current-commit (:expected m)}) :from (:expected m)}
                                     (refused (str "no commit " (:to m)) {:to (:to m)}))))
-      :drop-tree-branch (reply st (cond (not (pdb/tree-branch? (:branch m))) (refused (str "not a tree's branch: " (:branch m)) {})
-                                        (exists? (:branch m)) (do (d/delete-branch! conn (:branch m)) {:ok true :dropped true})
-                                        :else {:ok true :dropped false}))
+      ;; a branch dropped, any but main (a tree's once no proof of it runs, seon.system/tree-leave!; one a merge left inconsistent, by root's
+      ;; go): its head goes, its commits stay in history; refused while a live agent holds it; one already gone answers so
+      :drop-branch (reply st (cond (= main (:branch m)) (refused "main is never dropped" {:branch (:branch m)})
+                                   (not (exists? (:branch m))) {:ok true :dropped false}
+                                   :else (or (branch-held conn main (:branch m))
+                                             (do (d/delete-branch! conn (:branch m)) {:ok true :dropped true}))))
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
                         (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st)}))
       :octopus-merge (let [[st r] (octopus-merge st o (vec (:branches m)) (:data-attrs m :all))] (reply st r))
