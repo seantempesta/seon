@@ -1687,6 +1687,17 @@
     (is (some #(str/includes? % ":seon.zz/new-key") (problems/caused base head)) "a branch that names a new key with no entry is caused it")
     (is (not-any? #(str/includes? % ":seon.zz/new-key") (problems/caused base (d/db-with head entry))) "and one that writes the entry too is not")))
 
+;; See docs/health.md#a-key-with-no-schema
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-caused-row-carries-the-form-that-clears-it
+  ;; round 4 (2026-11-15): two of four runs reached their fix and stopped on an open problem their work made true, told in words with no
+  ;; form to clear it; a red proof carries its :do, and so does each caused row the status shows (seon.ctx.status)
+  (let [base (d/db-with (world) [{:db/id "ns" :ns/name 'seon.zz :ns/file "src/seon/zz.clj"}])
+        head (d/db-with base [{:db/id "a" :form/id "f-a" :form/src "(def k :seon.zz/new-key)" :form/ns [:ns/name 'seon.zz] :form/keywords #{:seon.zz/new-key}}])
+        row (first (filter #(str/includes? (:message %) ":seon.zz/new-key") (:rows (problems/caused-split base head))))]
+    (is (some? row) "the branch is caused the unschemed key")
+    (is (= 'my.schema/register! (first (:do row))) (str "its row carries the form that writes the entry: " (pr-str (:do row))))
+    (is (= :seon.zz/new-key (second (:do row))) "naming the key")))
+
 (deftest ^{:seon.test/estimate {:ticks 8000000}} a-branch-that-tightens-an-entry-is-caused-the-stored-values-it-refuses
   ;; docs/health.md#a-stored-value-its-entry-refuses: a value written before its attribute's entry tightened is held to the new entry
   ;; when a branch changes that entry: the store's datoms of that attribute alone, each refused one a row
