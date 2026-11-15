@@ -77,6 +77,14 @@ A cost proof that names its function only as a quoted symbol keeps a stale resul
 
 **A proof leaves the process as it found it:** a test that arms a namespace (`contract/instrument!`) reloads it unarmed after, or every later proof in the shard counts its checks.
 
+## A call past the floor
+
+The live cost canary tells a costly call while an agent works, not after a land (``seon.profile/over!``). Every counted call already measures its own ticks and bytes, callees included ([counting calls](#counting-calls)). One call past `:seon.config.machine/call-floor-ticks` or `:seon.config.machine/call-floor-bytes` (100M ticks, 1 GB) is an error the agent folds, `:seon.cost/call-over-floor`, naming the function and what it took; its eval's own record says what each function under it cost.
+
+- **Once a stack:** only the deepest call past the floor is told, never each frame above it.
+- **What it costs:** two compares a call, inlined, so no ticks: the armed call measured 21.38 ticks and 0.004 B both before and after [M] (`seon.profile-test/a-call-past-the-floor-is-told-once-at-the-deepest-call`).
+- **Where:** each agent arms it at its start (``seon.agent/init!``). A function's own bound (`:seon.cost/bound`) is the next step: a call past the stop factor times its bound, checked only past the floor, since a bound can cost more than a small call (885 ticks against 221 for `seon.ctx/changes` [M]).
+
 ## A bound in the contract
 
 A contract may carry its cost bound beside its schema: `:seon.cost/bound`, a function of the same arguments answering what one call may cost (`{:ticks :bytes}`, either of them) and `:out`, the measure of its answer a caller's bound passes on (```seon.cost/bound```). The bound is the algorithm sketched: each step at its own cost, measured once on a case that isolates it; priced from the unit table instead, ```seon.ctx/changes```' bound was up to 1,000x under.
