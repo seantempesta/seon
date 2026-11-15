@@ -22,6 +22,10 @@ The owner's rule: once a process is past boot and running, nothing inside it can
 - **deps** owns the interfaces to the libraries and native code (Jolt, Chez, Datahike, foreign calls), so a failure there reaches Seon as data at the edge.
 Each area works the others through agreed interfaces, recorded in the task they concern.
 
+### The reactive switch-over: the design gate now, reader landings after the self-merge path (evening)
+
+The reactive switch-over's design gate runs now, beside the self-merge path. All area entries `seon.ratom/<area>-reads-on-the-core` reach main, an independent reviewer judges the core against Reagent and re-frame, and each area measures its reader against its engine as a REPL prototype. The reader landings that delete each hand-built engine go after runtime's update owner and D, and take no landing slot from the path.
+
 ### Iterate on real agents; nothing lands on them unproved (evening)
 
 The owner wants the slots, gaps and hand-ordering gone, with agents working inside a system that adapts and is fast, and that end reached by iterating, never by pushing untried mechanisms onto agents. A change on the path agents use is done only when a real agent has used it: a round of DeepSeek agents or a `seon-driver` works a real task through it, and its turns-to-merged are compared before and after. A change that adds turns or confuses agents is reworked or reverted, not defended. Rounds and drivers run continuously once deps' pin restarts root, and what they lose re-ranks the work (`my.root/run-losses`).
