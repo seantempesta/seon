@@ -548,7 +548,7 @@
       ;; silently and the value left stale); a cycle through another reaction is the generation's (-queued-run)
       ;; (a source reaction pulled by this run and rerun notifies it too: that is the run reading its new value, never a cycle)
       (and (identical? *ratom-context* this) (not (instance? Reaction sender)))
-      (let [e (seon.contract/error :seon.ratom/cycle 'seon.ratom/flush! "a reaction whose run moves what it reads" {:generation (or *gen* 0)})]
+      (let [e (seon.contract/error :seon.ratom/cycle #'seon.ratom/flush! "a reaction whose run moves what it reads" {:generation (or *gen* 0)})]
         (set! caught (ex-info (:seon.error/message e) e)))
       dirty? nil
       :else
@@ -576,7 +576,7 @@
     (when (and dirty? (or (some? watching) (= :queue auto-run)))
       (if (= gen ran-gen)
         ;; dirtied again by its own generation's runs: a cycle, its typed state, never rerun until the flush's bound
-        (let [e (seon.contract/error :seon.ratom/cycle 'seon.ratom/flush! "a reaction run twice in one generation: its run dirties what it reads" {:generation gen})]
+        (let [e (seon.contract/error :seon.ratom/cycle #'seon.ratom/flush! "a reaction run twice in one generation: its run dirties what it reads" {:generation gen})]
           (set! dirty? false) (set! caught (ex-info (:seon.error/message e) e)))
         ;; dirty? is cleared by the run's own capture at its end (deref-capture), and ran-gen set once it completed: a run cut by a
         ;; budget stays dirty, and its retry is no cycle
