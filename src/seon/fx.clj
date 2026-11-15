@@ -1813,6 +1813,17 @@
   [o dest r]
   (step/out! o :out {:dest dest :r r}))
 
+(defn- running-told
+  "The owner's running set ({:client :id :since-ns} of each request in flight its asker may stop, from :stoppable), told to the api's
+  view (seon.system's :server-ops) when it moved, so root's debug page lists each running server op; nil when none
+  moved. See docs/server.md#ops."
+  {:malli/schema [:=> [:cat :map :map :seon.host/volatile] :nil]}
+  [before st o]
+  (when-not (identical? (:stoppable before) (:stoppable st))
+    (step/out! o :out {:op :server-ops :kind (:kind st)
+                       :running (vec (for [[_ r] (:stoppable st)] (assoc (get-in r [:req :seon.fx/stop-key]) :since-ns (:in-ns r))))}))
+  nil)
+
 ;; an agent's failed effect is root's to count (seon.error, class :effect): the agent's facts of it
 ;; are on its branch, which health does not read; root code records its own (seon.error/asked-tx)
 (defn- outcome
@@ -1829,7 +1840,7 @@
                          :agent (get-in r [:dest :agent])}))
     (let [st (cond-> (charge st r)
                (:fkey (:request r)) (update :flight dissoc (:fkey (:request r)))
-               (::qk (:request r)) (update :stoppable dissoc (::qk (:request r)))
+               (::qk (:request r)) (as-> s (let [s' (update s :stoppable dissoc (::qk (:request r)))] (running-told s s' o) s'))
                (and (:seon.fx/class (:request r)) (:seon.fx/peak-processes (:outcome r)))
                (update-in [:peaks (:seon.fx/class (:request r))] (fnil max 0) (:seon.fx/peak-processes (:outcome r))))]
       (if (and limited? (:request r))
@@ -1918,7 +1929,9 @@
                           (wake-later (dissoc st :lim :read? :fresh :reading) m now))
             (= :run d) (let [[st ms] (batch (update st :queue dissoc qk) (assoc m ::qk qk))
                              ms (mapv #(cond-> % (:seon.fx/class %) (assoc :fkey (or (get-in % [:req :seon.prove/batch]) [:seq (:seon.fx/qk %)]))) ms)
-                             [st ms] (stoppable st ms)
+                             [st' ms] (stoppable st ms)
+                             _ (running-told st st' o)
+                             st st'
                              st (reduce (fn [st r] (if-let [k (:fkey r)]
                                                      (-> st (assoc-in [:flight k] {:class (:seon.fx/class r) :declared (:seon.fx/processes r) :tag (get-in r [:req :seon.prove/batch])
                                                                                    :test? (= :test (get-in r [:req :kind]))})

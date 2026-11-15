@@ -74,6 +74,8 @@
         n (c/view-numbers v)]
     (cond-> {:writer (:writer n) :fork-server (:fork-server n) :store (:store n)
      :root-errors-total (:root-errors-total v 0)
+     ;; each running server op (client, MCP id, since), as the :server-op owner told it (seon.fx/running-told)
+     :server-ops (vec (get-in v [:server-ops :server-op]))
      :health (proc-health-of st (:root-errors v []))
      ;; a stop that arrived before main recorded how the work ended says so once main does
      :events (let [evs (:events st []) ids (into #{} (keep :agent) evs)
