@@ -437,6 +437,16 @@
                      (str (group3 m) " / " (group3 x) (when (and m x (pos? x)) (str " (" (fmt2 (/ m x)) "×)")))])])]]
       (render/hiccup (assoc opts :schema :seon.cost/verdict) verdict)]))
 
+(defn offer
+  "A place an agent offers the person (the declared html render of :seon.user/offer, the value my.user/focus! answers): a button in the
+  person's words; tapped, it calls seon.system/focus! (the person's web state, :seon.user/focus, set to its place) and, once that answers,
+  opens the place's page. Nothing is written until the tap. See docs/users.md#whats-on-screen."
+  {:seon.render/style ".offer { display: inline-block; margin: 0.25rem 0; padding: 0.625rem 1.125rem; border-radius: 1rem; font-size: 1.0625rem; font-weight: 600; background: var(--color-base-800); color: var(--color-text-50); border: 1px solid var(--color-base-700); }
+.offer:hover { border-color: var(--color-signal); }"
+   :malli/schema [:=> [:cat :seon.render/opts :seon.user/offer] :any]}
+  [_ {:seon.user/keys [place label]}]
+  [:button {:type "button" :seon/call 'seon.system/focus! :seon/args {:key (second place)} :seon/go (str "/agent/" (second place))} label])
+
 (defn person-input
   "The person's message box on root's chat (docs/decisions.md, The page is a friendly chat): like the good chat tools, a box that grows
   taller with its text (up to 40% of the screen), a clear Send button, Enter sends and Shift+Enter is a new line; what is sent is a
