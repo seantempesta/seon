@@ -2280,8 +2280,8 @@
   (default :judge) on names, the deferred process tests, its process items, seed and build run on checkout at tree (the gate's
   checkout, seon.fx/run-on-checkout). The branch's live agent answers the plan, or one spawned onto it: no tree branch, no catch-up of
   files that came from the store. An agent spawned for it ends once the run answers, however it ends, so the branch is free for the
-  task's next attach (data, 2026-11-16 00:4x: the pilot's gate left o12c0c0c2d70f9bf live on its branch, and every seon_attach of
-  the task was refused). The run's answer, or its typed error. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  task's next attach (an agent left live on the branch refuses every seon_attach of
+  its task). The run's answer, or its typed error. See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :seon.system/sys [:map [:candidate :keyword] [:checkout :string] [:tree :string]]] :map]}
   [sys {:keys [candidate checkout tree names mode]}]
   (let [b (pdb/on-main (pdb/conn-main (:conn sys)) candidate)
