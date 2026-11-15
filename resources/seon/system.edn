@@ -64,6 +64,8 @@
  {:echo {:perform seon.fx/echo :workers 1}
   :file {:perform seon.fx/write-file :workers 1}
   :source {:perform seon.fx/read-source :workers 1}
+  ;; the source of what the program depends on, read when a pin or deps.edn moved, at the lowest :prio (docs/vector.md#search)
+  :library {:perform seon.fx/library-source :workers 1}
   :git {:perform seon.fx/git-commit :workers 1}
   :deps {:perform seon.fx/resolve-deps :workers 1}
   ;; the next generation (my.root/build!): bin/build seon of the last merges commit, niced, ~25-45 s

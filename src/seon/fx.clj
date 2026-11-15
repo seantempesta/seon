@@ -14,7 +14,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str] [jolt.ffi :as ffi] [jolt.deps :as deps]
-            [seon.edn :as sedn] [clojure.edn :as edn] [seon.proofs :as proofs] [seon.reader :as reader]))
+            [seon.edn :as sedn] [clojure.edn :as edn] [clojure.java.io :as io] [seon.proofs :as proofs] [seon.reader :as reader]))
 
 (defn- error
   "An effect's declared failure, as the one error map (its variant registered in
@@ -175,6 +175,38 @@
   {:malli/schema [:=> [:cat :string] :boolean]}
   [^String p] (boolean (or (.endsWith p ".clj") (.endsWith p ".edn") (cfg/file-kind p))))
 
+(defn library-source
+  "The :library effect: the source of every root the program depends on (classpath roots, and the binary's embedded archive) whose
+  identity differs from since, {:value {:roots {root identity} :files {path {:text :root :rel}}}}. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [root pins since]} :req}]
+  (try
+    (let [base (.getCanonicalPath (java.io.File. ^String root))
+          rel-of (fn [p] (if (str/starts-with? p (str base "/")) (subs p (inc (count base))) p))
+          pinned (fn [rr] (some (fn [[pp c]] (when (or (= rr pp) (str/starts-with? rr (str pp "/"))) (str pp "@" c))) pins))
+          src? #(re-find #"\.(clj|cljc|cljs|jolt)$" %)
+          deps (edn/read-string (slurp (str base "/deps.edn")))
+          roots (->> (concat (keep #(when (pinned %) (str base "/" %)) (:paths deps)) (:roots (deps/resolve-deps (:deps deps) base)))
+                     (filter #(.exists (java.io.File. ^String %))) distinct)
+          digest (let [f (java.io.File. (str base "/target/seon.digest"))] (if (.isFile f) (str/trim (slurp f)) "unbuilt"))
+          ids (into {"jolt-embedded-resources.jar" digest} (for [r roots :let [rr (rel-of r)]] [rr (or (pinned rr) rr)]))
+          due (into #{} (remove #(= (ids %) (get since %))) (keys ids))
+          entries (fn [^java.util.zip.ZipFile z rr]
+                    (for [e (enumeration-seq (.entries z)) :when (src? (.getName e))]
+                      [(str rr "!/" (.getName e)) {:text (slurp (.getInputStream z e)) :root rr :rel (.getName e)}]))
+          files (into (sorted-map)
+                      (concat
+                        (for [r roots :let [rr (rel-of r)] :when (due rr) kv (if (.isDirectory (java.io.File. ^String r))
+                                                                             (for [f (file-seq (java.io.File. ^String r)) :when (and (.isFile ^java.io.File f) (src? (.getName ^java.io.File f)))
+                                                                                   :let [rel (subs (.getPath ^java.io.File f) (inc (count r)))]]
+                                                                               [(str rr "/" rel) {:text (slurp f) :root rr :rel rel}])
+                                                                             (entries (java.util.zip.ZipFile. ^String r) rr))]
+                          kv)
+                        (when (due "jolt-embedded-resources.jar")
+                          (entries (.getJarFile ^java.net.JarURLConnection (.openConnection (io/resource "jolt/ir.clj"))) "jolt-embedded-resources.jar"))))]
+      {:value {:roots ids :files files}})
+    (catch Throwable e (error #'seon.fx/library-source :seon.fx/io-error (step/error-msg e) {:path root}))))
+
 (defn read-source
   "The text of every .clj and .edn file under root's dirs (relative paths, e.g.
   src/seon/fx.clj, resources/seon/schemas/seon.facts.edn), sorted by path, the commit root's
@@ -303,7 +335,7 @@
         (or (str/starts-with? p "resources/public/") (str/starts-with? p "web/")) :seon.env/web
         (= p "deps.edn") :seon.env/deps
         ;; the wiki and the task files, each read whole by its own reader (seon.doc/pages, seon.system/task-files): a class, so a
-        ;; wiki edit moves the tests that read the wiki and no other (a 4-line edit to docs/decisions.md ran 117 tests, 2026-11-11).
+        ;; wiki edit moves the tests that read the wiki and no other (a 4-line edit to docs/decisions.md ran 117 tests).
         ;; A .md file at the checkout's root (AGENTS.md, README.md) is the wiki's too, its top page (seon.doc): as the bin class,
         ;; which every process test and step takes, batch 77's AGENTS.md edit reran 463 of 1,785 tests and 36 of 40 steps
         (or (str/starts-with? p "docs/") (and (not (str/includes? p "/")) (str/ends-with? p ".md"))) :seon.env/docs

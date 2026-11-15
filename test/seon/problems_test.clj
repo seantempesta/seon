@@ -1304,20 +1304,10 @@
                :n "open rows in each class"
                :work "one lookup per class with an open row, found at the first row"
                :growth :constant
-               :per-n {:ns 0 :bytes 0 :calls 0}
-               ;; 47: the :stalled class (seon.problems/stalled-agents) is one more class to look up;
-               ;; 49: :flaky (seon.proofs/flaky) one more
-               ;; 52: :long-form one more class to look up
-               ;; 54: :stale-plan one more (its seon.db/eid and derived-row), 2026-11-10
-               ;; 56: :unsynced one more (its seon.db/eid and derived-row), 2026-11-10
-               ;; 58: :unschemed-key one more (its seon.db/eid and derived-row: this input gives every declared class open rows)
-               ;; 60: :refused-value one more, the same two
-               ;; 64: :unestimated and :undeclared-test two more (each its seon.db/eid and derived-row)
-               ;; 66: :unfocused-docstring one more (its seon.db/eid and derived-row)
-               ;; 68: :hand-written-list one more (its seon.db/eid and derived-row), context 2026-11-14
-               ;; 70: :retyped-attribute one more, the same two (data, 2026-11-14)
-               ;; 72: :stateful-outside-flow's reader and its row on the world (flow, 2026-11-14, measured 70 -> 72)
-               :fixed {:ns 3000000 :bytes 4000000 :calls 72}
+               :per-n {:ns 0 :bytes 0}
+               ;; no :calls: a count of contracted calls grew by 2 with every class, a hand-kept number (owner 2026-11-15: calls are no
+               ;; cost dimension); the bytes are the counted check
+               :fixed {:ns 3000000 :bytes 4000000}
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 4000000}} attention-survives-a-store-write

@@ -727,3 +727,15 @@
      (let [db @conn b (:branch cfg)]
        (is (not (seon.contract/error? (#'seon.system/back-point db b :mine "e-mine"))) "its own eval")
        (is (re-find #"is agent theirs's" (str (:seon.error/message (#'seon.system/back-point db b :mine "e-theirs")))) "never another agent's")))))
+
+;; docs/processes.md#an-agent-that-starts-without-its-program: round 2 (2026-11-15): an agent told only "seon.reads-test did not
+;; load" spent its turns on Jolt's bug; the message says whose each error is. Estimate: two string builds, ~20k ticks; 1,000,000
+(deftest ^{:seon.test/estimate {:ticks 1000000 :bytes 1000000}} a-load-error-says-whose-it-is
+  (let [swp {:seon.error/message "this agent started without part of its program: seon.reads-test did not load"
+             :errors [{:ns 'seon.reads-test :message "emit-quoted: unsupported quoted form"}]}
+        other (seon.system/started-without-program-text swp "seon.test-store/a-shard-says-what-each-test-waits-on")
+        own (seon.system/started-without-program-text swp "seon.reads/a-read-is-recorded")]
+    (is (clojure.string/includes? other "seon.reads-test: emit-quoted: unsupported quoted form") "each error, as before")
+    (is (clojure.string/includes? other "Go on with your task") (str "another namespace's load is not the agent's task: " other))
+    (is (not (clojure.string/includes? other "part of your task")) other)
+    (is (clojure.string/includes? own "fixing that load is part of your task") (str "its own task's test namespace is: " own))))
