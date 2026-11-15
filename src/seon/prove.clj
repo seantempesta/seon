@@ -684,7 +684,8 @@
   [st]
   {:runs (into (sorted-map) (for [[k r] (:runs st)] [k {:stage (:stage r) :waiting (count (:waiters r))}]))
    :queued (count (filter #(= :queued (:status %)) (vals (:items st)))) :running (count (filter #(= :running (:status %)) (vals (:items st))))
-   :open (vec (sort-by str (vals (:pending st))))})
+   :open (vec (sort-by str (vals (:pending st))))
+   :main (select-keys st [:main-want :main-asked :main-failed])})
 
 (defn prove-proc
   "The test service (see the namespace doc). In :req (requests the api forwards, {:rid :branch :t :digest :agent :names
@@ -698,7 +699,9 @@
        :outs {:to-api "requests, and the answers to the waiters"}
        :workload :io
        :ping-map-fn (fn [st] {:runs (count (:runs st)) :full (some-> st :full :key) :queued (count (:items st))
-                              :main-t (:main-t st) :stale-answers (:stale st 0)})})
+                              :main-t (:main-t st) :stale-answers (:stale st 0)
+                              ;; main's run as the service decides it: what is wanted, the program t last asked, and a failed run's inputs
+                              :main-want (:main-want st) :main-asked (:main-asked st) :main-failed (:main-failed st)})})
   ([args] {:rid 0 :pending {} :runs {} :done {} :items {} :askers {} :batches {} :conn (:conn args)
            })
   ([st _tr] st)
