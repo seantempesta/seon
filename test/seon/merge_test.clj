@@ -624,6 +624,17 @@
     (is (= :idle (:seon.agent/status (d/entity merged [:seon.agent/key "a1"]))) "main's fact")
     (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch keeps its own change")))
 
+
+(defn- merged-of
+  "What the writer's merge of main into the branch head makes, from base b0 (seon.merge/decide, then the branch's change carried onto main, seon.merge/carry and seon.writer/replay): {:conflicts},
+  {:refused} with the replay's typed refusal, or {:db} the merged value."
+  [b0 head main]
+  (let [r (pm/decide b0 head main)]
+    (if (:conflicts r)
+      r
+      (let [db (seon.writer/replay main head (:txs (pm/carry b0 head main)) {})]
+        (if (contract/error? db) {:refused db} {:db (cond-> db (seq (:settle-ops r)) (-> (d/with (:settle-ops r)) :db-after))})))))
+
 ;; Estimate: the world 0.5M (cached) + 5 small transactions ~1M + one merge-main (a diff of a few datoms, program-of on 2 keys of three
 ;; dbs) ~3M + one db-with ~0.5M = 10000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 10000000}} merge-main-is-main-plus-the-branchs-own-change
@@ -633,15 +644,15 @@
         b0 (as (base) :main [{:seon.agent/key "a1" :seon.agent/status :busy}])
         head (as b0 :main/b (var-tx "f" "(inc x)"))
         main (-> b0 (as :main (var-tx "g" "(dec x)")) (as :main [{:seon.agent/key "a2" :seon.agent/status :idle}]))
-        {:keys [tx conflicts]} (pm/merge-main b0 head main)
-        merged (d/db-with main tx)]
+        {:keys [db conflicts]} (merged-of b0 head main)
+        merged db]
     (is (nil? conflicts) (pr-str conflicts))
     (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch's own change")
     (is (= (fid "g" "(dec x)") (:form/id (:var/form (d/entity merged [:var/name 'app/g])))) "main's, as main holds it")
     (is (= :idle (:seon.agent/status (d/entity merged [:seon.agent/key "a2"]))) "and main's facts")
     (testing "a key both changed, differently, stops it"
       (let [main' (as main :main (var-tx "f" "(* 2 x)"))]
-        (is (seq (:conflicts (pm/merge-main b0 head main'))) "a conflict, and no tx")))))
+        (is (seq (:conflicts (merged-of b0 head main'))) "a conflict, and no tx")))))
 
 
 ;; Estimate: the world 0.5M (cached) + 4 small transactions ~1M + one merge-main of a few datoms ~3M + one db-with ~0.5M = 10000000 ticks
@@ -655,8 +666,8 @@
         b0 (-> w (as :main [[:db/add [:seon.agent/key "a1"] :seon.agent/status :idle]])
                (as :main [[:db/add [:seon.agent/key "a1"] :seon.agent/status :busy]]))
         main (as b0 :main [{:seon.agent/key "a2" :seon.agent/status :idle}])
-        {:keys [tx conflicts]} (pm/merge-main b0 head main)
-        merged (d/db-with main tx)]
+        {:keys [db conflicts]} (merged-of b0 head main)
+        merged db]
     (is (nil? conflicts) (pr-str conflicts))
     (is (= :busy (:seon.agent/status (d/entity merged [:seon.agent/key "a1"]))) "the fact both hold stays")
     (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch keeps its own change")))
@@ -672,11 +683,11 @@
         w (d/db-with (base) [{:seon.agent/key "root" :seon.agent/status :busy}])
         head (as w :main/b (var-tx "f" "(inc x)"))
         b0 (d/db-with w [[:db/add [:seon.agent/key "root"] :seon.agent/status :idle]])
-        main (d/db-with b0 [[:db/add [:seon.agent/key "root"] :seon.agent/status :stopped]])
-        {:keys [tx conflicts]} (pm/merge-main b0 head main)
-        merged (d/db-with main tx)]
-    (is (nil? conflicts) (str "a fact the branch holds from before its base is no change of its: " (pr-str conflicts)))
-    (is (= :stopped (:seon.agent/status (d/entity merged [:seon.agent/key "root"]))) "main's fact, never the shared old value")
+        main (d/db-with b0 [[:db/add [:seon.agent/key "root"] :seon.agent/status :ended]])
+        {:keys [db conflicts]} (merged-of w head main)
+        merged db]
+    (is (nil? conflicts) (str "read from the true base, w, the branch never changed root's fact: no change of its: " (pr-str conflicts)))
+    (is (= :ended (:seon.agent/status (d/entity merged [:seon.agent/key "root"]))) "main's fact, never the shared old value")
     (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch keeps its own change")))
 
 ;; Estimate: the world 0.5M (cached) + 1M a task's create + 3 small transactions ~1M + one merge-main and one delta three-way of a few keys
@@ -695,11 +706,12 @@
         b0 (as w :main (+ t0 2000) [[:db/add [:seon.task/id "demo/x"] :seon.task/plan "Make x, as main learned it later."]])
         main (as b0 :main (+ t0 3000) [{:seon.agent/key "a2" :seon.agent/status :idle}])
         k [:task "demo/x"]]
-    (is (= [k] (mapv :key (:conflicts (pm/merge-main b0 head main)))) "merging main into the branch: a conflict, not the branch's older plan")
-    (is (= [k] (mapv :key (:conflicts (pm/delta-three-way b0 head main :all)))) "and merging the branch to main")
-    (testing "a branch write after main's is the branch's change"
-      (let [head' (as head :main/b (+ t0 4000) [[:db/add [:seon.task/id "demo/x"] :seon.task/plan "Make x, decided."]])]
-        (is (empty? (:conflicts (pm/merge-main b0 head' main))))))))
+    ;; the one merge reads from the true merge base, w, an ancestor of both: both changed the plan since, so a conflict, named by the
+    ;; task; the branch decides it (a-conflict-the-branch-resolved-merges-the-next-time)
+    (is (= [[:datum (:db/id (d/entity w [:seon.task/id "demo/x"])) :seon.task/plan]] (mapv :key (:conflicts (merged-of w head main))))
+        "merging main into the branch: a conflict, not the branch's older plan")
+    (is (= [[:seon.task/id "demo/x"]] (mapv :entity (:conflicts (merged-of w head main)))) "shown by the task's name")
+    (is (= [k] (mapv :key (:conflicts (pm/delta-three-way b0 head main :all)))) "and merging the branch to main")))
 
 ;; Estimate: the world 0.5M (cached) + 4 small transactions ~1M + one merge-main and one merge-tx of a few datoms ~4M = 8000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 8000000}} a-fact-of-an-entity-the-other-side-deleted-is-left-out
@@ -712,8 +724,10 @@
         head (-> b0 (as :main/b [[:db/add e :seon.test/digest "d1"] [:db/add e :seon.test/status :deferred]])
                  (as :main/b (var-tx "f" "(inc x)")))
         main (as b0 :main [[:db/retractEntity e]])
-        {:keys [tx conflicts]} (pm/merge-main b0 head main)
-        merged (d/db-with main tx)]
+        {:keys [conflicts db]} (merged-of b0 head main)
+        merged db]
+    ;; root's ruling (2026-11-15): a conflict is only an [e a] both changed, so none here; main holds no datom of the var, deleted whole,
+    ;; and that is what is replayed: the branch's facts of it go with it, never a nameless entity
     (is (nil? conflicts) (pr-str conflicts))
     (is (empty? (d/datoms merged :eavt e)) "merging main into the branch: no nameless entity")
     (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch keeps its own change")
@@ -732,18 +746,19 @@
         b0 (base)
         head (as b0 :main/b (var-tx "f" "(inc x)"))
         main (as b0 :main (var-tx "f" "(* 2 x)"))
-        {:keys [conflicts]} (pm/merge-main b0 head main)
+        {:keys [conflicts]} (merged-of b0 head main)
         k (:key (first conflicts))
         with-entry (as head :main/b (pm/unmerged-tx head conflicts (:max-tx main)))
         resolved (as with-entry :main/b (pm/resolve-tx with-entry k))
-        r (pm/merge-main b0 resolved main)
-        merged (d/db-with main (:tx r))]
-    (is (= [(vk "f")] (mapv :key conflicts)) "both changed f: a conflict")
+        r (merged-of b0 resolved main)
+        merged (:db r)]
+    (is (= [[:datum (:db/id (d/entity head [:var/name 'app/f])) :var/form]] (mapv :key conflicts)) "both changed f: a conflict, f's form")
+    (is (= [[:var/name 'app/f]] (mapv :entity conflicts)) "shown by the var's name")
     (is (nil? (:conflicts r)) (str "resolved, the next merge is clean: " (pr-str (:conflicts r))))
     (is (= (fid "f" "(inc x)") (:form/id (:var/form (d/entity merged [:var/name 'app/f])))) "the branch's value stands")
     (is (empty? (pm/entries merged)) "and the entry is settled")
     (testing "main moving the key again is a new conflict"
-      (is (seq (:conflicts (pm/merge-main b0 resolved (as main :main (var-tx "f" "(- x)")))))))))
+      (is (seq (:conflicts (merged-of b0 resolved (as main :main (var-tx "f" "(- x)")))))))))
 
 ;; Estimate: a test branch (~0.5M), 20 commits of one note each (~3M), changed-datoms over 20 commits (20 reads at ~20k and
 ;; ~80 datoms: ~0.5M), one datoms-diff for the answer (~0.3M), ~4.5M = 4500000
@@ -768,3 +783,57 @@
         (is (and (seq gone) (not-any? :added gone)) "read from the commits' changes (a retraction), never a diff of the values (a datom of base)")
         ;; 20 commits: 20 changes values read (~20k ticks each) and their ~80 datoms
         (is (< dt 1000000) (str "read from its 20 commits: " dt " ticks"))))))
+
+;; docs/merging.md#a-branch-merges-main-in: a fact both sides changed differently since the base is a conflict the branch's agent can
+;; see and settle. Red before (found on tests' pilot branch at root, 2026-11-15, result/cad55069): the writer's merge-main-into
+;; refused the merge and wrote the conflict's entry, but seon.merge/unmerged (what my.branch/unmerged shows the agent) read the
+;; branch's content through program-of, which holds no datums, and showed nothing: the agent saw nothing to resolve while the merge
+;; stayed refused
+;; Estimate: the test branch ~3M + 4 small transactions ~1M + one merge-main-into ~3M = ~8M; 10000000
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-datum-conflict-is-shown-and-settled
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [b (pdb/on-main (:branch cfg) :dc-branch)
+           _ (d/transact conn {:tx-data [{:seon.agent/key "dc-agent" :seon.agent/model "base-model"}] :tx-meta (pdb/tx-meta (:branch cfg))})
+           _ (d/branch! conn (:branch cfg) b)
+           bc (pdb/connect (assoc cfg :branch b))]
+       (try
+         (d/transact bc {:tx-data [[:db/add [:seon.agent/key "dc-agent"] :seon.agent/model "branch-model"]] :tx-meta (pdb/tx-meta b)})
+         (d/transact conn {:tx-data [[:db/add [:seon.agent/key "dc-agent"] :seon.agent/model "main-model"]] :tx-meta (pdb/tx-meta (:branch cfg))})
+         (let [r (seon.writer/merge-main-into conn cfg b)
+               shown (pm/unmerged (pdb/head conn b))]
+           (is (false? (:ok r)) (str "both changed it differently: a conflict, nothing merged: " (pr-str r)))
+           (is (= 1 (count shown)) (str "and the agent is shown it to settle: " (pr-str shown)))
+           (testing "settled to main's side (my.branch/resolve!'s two writes), the next merge goes through"
+             (let [{k :key theirs :theirs} (first shown) head (pdb/head conn b)]
+               (d/transact bc {:tx-data (into (pm/side-tx head k theirs) (pm/resolve-tx head k)) :tx-meta (pdb/tx-meta b)})
+               (is (empty? (pm/unmerged (pdb/head conn b))) "nothing left to settle")
+               (is (:ok (seon.writer/merge-main-into conn cfg b)) "and main merges in")
+               (is (= "main-model" (:seon.agent/model (d/entity (pdb/head conn b) [:seon.agent/key "dc-agent"]))) "holding main's value"))))
+         (finally (d/release bc)))))))
+
+
+;; docs/merging.md#a-branch-merges-main-in: a merge of main into a branch is built on main's head, so it states its change against the
+;; branch head it replaces (datahike's force-branch! :changes, deps 0fb0383f): what main moved for the branch. seon.merge/change-record
+;; reads it at the keys either side touched; deps' condition: it equals, by net presence at both ends, the fact difference of the two
+;; values. Red before: d/changes(branch-head -> merged) was refused, and the fallback diff (tx-sensitive) showed every branch fact moved,
+;; so a wake re-sent the whole page (seon.agent-test/a-wake-shows-what-moved-not-the-page-again)
+;; Estimate: the world 0.5M (cached) + 5 small transactions ~1M + decide and carry ~2M + two whole reads of a small world ~1M = 5000000
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-merge-states-what-main-moved-for-the-branch
+  (let [as (fn [db branch tx] (:db-after (d/with db {:tx-data (if (fn? tx) (tx db) tx) :tx-meta {:seon.tx/branch branch}})))
+        b0 (as (base) :main [{:seon.agent/key "a1" :seon.agent/model "m0"}])
+        head (as b0 :main/b (var-tx "f" "(inc x)"))
+        main (-> b0 (as :main (var-tx "g" "(dec x)")) (as :main [[:db/add [:seon.agent/key "a1"] :seon.agent/model "m1"]]))
+        {:keys [db]} (merged-of b0 head main)
+        [gone added] (pm/changed-datoms b0 main)
+        c (pm/carry b0 head main)
+        ks (distinct (for [{:keys [ops]} (:txs c) [o e a] ops :when (not= :db/retractEntity o)] [e a]))
+        ds (pm/merge-record head db [gone added] ks (mapcat identity (:remapped c)))
+        ;; the facts of a value by net presence, transactions' own facts left out
+        facts (fn [v] (into #{} (comp (remove #(seq (d/datoms v :eavt (:e %) :db/txInstant))) (map (juxt :e :a :v))) (d/datoms v :eavt)))
+        [h m] [(facts head) (facts db)]
+        net (fn [added?] (into #{} (comp (filter #(= added? (:added %))) (map (juxt :e :a :v))) ds))]
+    (is (= [#{} #{}] (let [x (into #{} (remove h) m) y (net true)] [(into #{} (remove y) x) (into #{} (remove x) y)])) "what it adds is exactly what the merged value holds and the head did not: [missing extra]")
+    (is (= [#{} #{}] (let [x (into #{} (remove m) h) y (net false)] [(into #{} (remove y) x) (into #{} (remove x) y)])) "and what it retracts, what the head held and the merged value does not: [missing extra]")
+    (is (contains? (net true) [(:db/id (d/entity db [:var/name 'app/g])) :var/form (:db/id (:var/form (d/entity db [:var/name 'app/g])))]) "main's new var is a move")
+    (is (not-any? #(= (:db/id (d/entity db [:var/name 'app/f])) (first %)) (net true)) "the branch's own var is no move of its own")))

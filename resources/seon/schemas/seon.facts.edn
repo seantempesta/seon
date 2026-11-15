@@ -271,26 +271,26 @@
  ;; an agent's id in root's process and its procs: the keyword whose name is its key; never stored
  :seon.agent/id [:keyword {:description "The agent's id in root's process and its procs: the keyword whose name is its key; never stored."}]
  :seon.agent/root [:and {:seon.db/to [:seon.system/root-fact] :description "The root that started this agent."} :seon.db/ref]
- :seon.agent/branch [:keyword {:description "The branch this agent works on."}]
+ :seon.agent/branch [:keyword {:seon.db/root-only true :description "The branch this agent works on."}]
  ;; the task it works (the agent's record pulls it, docs/ctx.md#the-pattern) and the turns it may take: raised to extend the agent
  ;; (the agent is the unit, seon.agent/the-agent-is-the-unit-not-the-run; max-turns is written from its cut 2, until then work!'s
  ;; :max-turns bounds the loop)
- :seon.agent/task [:and {:seon.db/to [:seon.task/task-fact] :description "The task this agent works. See docs/ctx.md#the-pattern."} :seon.db/ref]
+ :seon.agent/task [:and {:seon.db/root-only true :seon.db/to [:seon.task/task-fact] :description "The task this agent works. See docs/ctx.md#the-pattern."} :seon.db/ref]
  ;; the turns it may take, agent-wide: its :seon.agent/turn against it. Set at spawn from the config its task's environment names
  ;; (seon.reconcile/desired-env); raised, and the task released again (my.root/run!), it goes on (docs/turn.md#the-cap)
  ;; at least one turn: the environment it is read into (:seon.task/env) takes a positive count, one definition of it
- :seon.agent/max-turns [:and {:description "The turns the agent may take, agent-wide; raised to extend the agent. See docs/turn.md#the-cap."} pos-int?]
+ :seon.agent/max-turns [:and {:seon.db/root-only true :description "The turns the agent may take, agent-wide; raised to extend the agent. See docs/turn.md#the-cap."} pos-int?]
  ;; the agent's turn number (docs/turn.md#the-turn-is-a-number): moved by the model turn that starts (seon.turn/act!) in the
  ;; transaction of its model call's first facts, agent-wide and never restarting across wakes; every record takes the number in force
  :seon.agent/turn [:int {:description "The agent's turn number, agent-wide and never restarting across wakes. See docs/turn.md#the-turn-is-a-number."}]
  :seon.agent/description :seon.db/text
  ;; the model it works for, when its task names none of root's; the client that attached it, when an outside agent's (seon.server/held)
- :seon.agent/model [:string {:description "The model the agent works for, when its task names none of root's."}]
- :seon.agent/holder [:string {:description "The client that attached this agent, when it is an outside agent's."}]
+ :seon.agent/model [:string {:seon.db/root-only true :description "The model the agent works for, when its task names none of root's."}]
+ :seon.agent/holder [:string {:seon.db/root-only true :description "The client that attached this agent, when it is an outside agent's."}]
  ;; root's boot it was started in, and when (ms): the agent is live in a root when the boot is that root's and its task is :running
- :seon.agent/boot [:and {:seon.db/index true :description "The root boot the agent was started in; it is live in a root when the boot is that root's and its task is running."} :string]
- :seon.agent/started-ms [:int {:description "When the agent was started, in ms."}]
- :seon.agent/ended-ms [:int {:description "When the agent ended, in ms."}]
+ :seon.agent/boot [:and {:seon.db/index true :seon.db/root-only true :description "The root boot the agent was started in; it is live in a root when the boot is that root's and its task is running."} :string]
+ :seon.agent/started-ms [:int {:seon.db/root-only true :description "When the agent was started, in ms."}]
+ :seon.agent/ended-ms [:int {:seon.db/root-only true :description "When the agent ended, in ms."}]
  ;; a test run that failed as a whole (its fork refused, a namespace did not load): the error as data (its type, message and
  ;; data keys), written on the agent's branch by its turn (seon.turn/observe) and retracted when a run answers;
  ;; present only while it is so (seon.ctx.status/status)
@@ -318,7 +318,7 @@
  :seon.user/name [:and {:seon.db/identity true} :string]
  ;; who started this agent, a user or an agent: one ref on the child, written with the agent (seon.task/start-tx), so a fork is a
  ;; parent and a child from its first datom; the agents one started are the reverse, :seon.agent/_parent (docs/users.md#what-each-thing-is)
- :seon.agent/parent [:and {:seon.db/to [:seon.db/agent-fact] :description "The agent that started this one, a user or an agent; the agents an agent started are its :seon.agent/_parent. See docs/users.md#what-each-thing-is."} :seon.db/ref]
+ :seon.agent/parent [:and {:seon.db/root-only true :seon.db/to [:seon.db/agent-fact] :description "The agent that started this one, a user or an agent; the agents an agent started are its :seon.agent/_parent. See docs/users.md#what-each-thing-is."} :seon.db/ref]
  ;; the ids of its evals a reader of its page opened (seon.system/opened!), on main; its turn writes each
  ;; on its branch as the eval's :seon.eval/opened (seon.agent/untaken-facts)
  :seon.agent/opened [:set {:description "The ids of its evals that a reader of its page opened, kept on main."} :string]
@@ -591,7 +591,7 @@
  ;; who started it, a user or an agent: its agent, when it starts, names that one its :seon.agent/parent (seon.task/start-tx; docs/users.md#what-each-thing-is)
  :seon.task/started-by [:and {:seon.db/to [:seon.db/agent-fact] :description "Who started the task, a user or an agent. See docs/users.md#what-each-thing-is."} :seon.db/ref]
  :seon.task/reason [:string {:description "Why the task stands as its outcome says: the agent's own words, or root's."}]
- :seon.task/reasons [:vector {:description "What the done rule said was not done when the task was last judged, each reason a map with what it is about (a proof's name, a problem's key, how far behind main). The same reasons twice in a row hold the task; they are retracted when a person continues it. See docs/tasks.md#the-done-rule."}
+ :seon.task/reasons [:vector {:seon.db/root-only true :description "What the done rule said was not done when the task was last judged, each reason a map with what it is about (a proof's name, a problem's key, how far behind main). The same reasons twice in a row hold the task; they are retracted when a person continues it. See docs/tasks.md#the-done-rule."}
                      :seon.reconcile/not-done]
  ;; the merges-branch commit holding the source files a merge rewrote (seon.source, the
  ;; :git effect), or why the commit was refused; recorded by its asker, the reconciler
@@ -680,7 +680,7 @@
                       [:reason {:optional true} :string] [:differs {:optional true} [:vector :string]]]
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean
  :seon.system/previous-end :seon.system/end
- :seon.system/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.system/id :seon.system/boot :seon.system/generation :seon.system/quiescent] :seon.ctx/pattern [* {:seon.system/config [*]} {[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true] [* {[:seon.agent/task :as :task] [:seon.task/id :seon.task/outcome :seon.task/reason]} {[:seon.process/_agent :as :processes] [*]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/hiccup seon.render.ui/root}
+ :seon.system/root-fact [:map {:seon.db/attributes true :seon.db/root-only true :seon.render/keys [:seon.system/id :seon.system/boot :seon.system/generation :seon.system/quiescent] :seon.ctx/pattern [* {:seon.system/config [*]} {[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true] [* {[:seon.agent/task :as :task] [:seon.task/id :seon.task/outcome :seon.task/reason]} {[:seon.process/_agent :as :processes] [*]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/hiccup seon.render.ui/root}
                           [:seon.system/id :seon.system/id]
                           ;; a seeded store's root holds no boot until a root first boots on it (seon.task/entity-value reads it so)
                           [:seon.system/boot {:optional true} :seon.system/boot] [:seon.system/signed-in {:optional true} :seon.system/signed-in]
@@ -712,10 +712,14 @@
  ;; the branch a catch-up merged (seon.agent/merge-main!): what it applied is that branch's, not
  ;; the agent's, though :seon.tx/branch names the branch it was written on
  :seon.tx/merged [:and {:description "The branch that a catch-up merged, when the transaction is a merge."} :seon.db/branch]
+ :seon.tx/source [:int {:description "The transaction this one replays, on the branch it was written on (seon.merge/decide's replay): a merged fact keeps where it was made. See docs/merging.md#a-branch-merges-main-in."}]
+ :seon.tx/at-ms [:int {:description "When the transaction this one replays was written (its :db/txInstant), in ms: a replayed transaction's own instant is the merge's, so as-of by date and by transaction agree (deps, 2026-11-15)."}]
  :seon.tx/meta [:map {:seon.db/attributes true} [:seon.tx/runtime {:optional true} :seon.tx/runtime]
                 [:seon.tx/branch {:optional true} :seon.tx/branch]
                 [:seon.tx/eval {:optional true} :seon.tx/eval]
                 [:seon.tx/merged {:optional true} :seon.tx/merged]
+                [:seon.tx/source {:optional true} :seon.tx/source]
+                [:seon.tx/at-ms {:optional true} :seon.tx/at-ms]
                 [:seon.tx/asker {:optional true} :seon.tx/asker]]
  ;; a message, one entity read by everyone it is to (docs/users.md#messages): written on main by root's writer at the send,
  ;; and on each recipient's branch whole when its next act delivers it (seon.agent/deliver!). from names a sender: an agent's
@@ -762,7 +766,7 @@
  ;; what it waits on (the request root last sent it: its kind and form, a test run's test); retracted when its
  ;; next frame arrives or it ends. An open :stalled problem while it holds (seon.problems/stalled-agents)
  :seon.process/stall [:map [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]
-  :seon.process/process-fact [:map {:seon.db/attributes true}
+  :seon.process/process-fact [:map {:seon.db/attributes true :seon.db/root-only true}
                           [:seon.process/id :seon.process/id] [:seon.process/agent {:optional true} :seon.process/agent]
                           [:seon.process/pid {:optional true} :seon.process/pid]
                           [:seon.process/running {:optional true} :seon.process/running]
