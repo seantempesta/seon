@@ -2278,7 +2278,12 @@
     ;; :base is the branch's merge base with main: a new branch's is the image (main as it
     ;; forked); a resumed one's is older than main, and comparing against main's head would
     ;; read main's later changes as the branch's (branch-changes)
-    (let [base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0)
+    ;; a resumed branch whose base can't be read (seon.db/no-merge-base: swept) loads its program from the image it was forked with
+    ;; instead (main's program as forked, then the branch's difference from it: the branch head's program all the same, a larger
+    ;; diff), and the missing base goes to root as this agent's problem: it starts, never dies of it
+    (let [base-or-err (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0)
+          no-base (when (contract/error? base-or-err) base-or-err)
+          base (if no-base db0 base-or-err)
           ;; a kept branch, resumed: this process (forked holding main's program) runs the
           ;; branch's own changes since its base on top, as merging main would; from main's
           ;; head it would unmap all main gained since (step E run #11: test/'s namespaces)
@@ -2297,7 +2302,7 @@
                              r (when tree (fx/runtime-for tree))]
                          (when (contract/error? r) r))
           _ (mark! :runtime-for)
-          load-errors (concat program-errors (when resumed (program/load-diff! base @store-conn)))
+          load-errors (concat program-errors (when no-base [no-base]) (when resumed (program/load-diff! base @store-conn)))
           _ (mark! :base)
           misaligned (when-not resumed (misaligned commit t @store-conn db0))
           _ (mark! :misaligned)]
