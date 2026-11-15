@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.reconcile :as r] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.program-test] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.agent-proc] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [my.branch] [seon.template :as tpl] [seon.stall-proofs] [seon.doc] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.async.remote :as remote] [jolt.async.remote.flow :as rflow] [jolt.io-poller :as poller]))
+            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.agent-proc] [seon.intr :as intr] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [my.branch] [seon.template :as tpl] [seon.stall-proofs] [seon.doc] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.async.remote :as remote] [jolt.async.remote.flow :as rflow] [jolt.io-poller :as poller]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -300,19 +300,35 @@
     (is (true? stopped) (str "the blocked eval answers interrupted by root: " stopped))
     (is (= 4 next-answer) (pr-str next-answer))))
 
-;; Estimate: own root started and killed (~2M), 5 requests ~150k, about 10 shell calls (pgrep, kill) at ~200k = ~4000000.
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 5}} an-agent-ends-when-its-root-is-gone
-  ;; with its fork server gone first (a pid cleanup), an agent ends on EOF of its own socket to root,
-  ;; whatever it is doing: an idle agent reads it; one evaluating a form with no tick budget is
-  ;; interrupted by it (SIGIO); one blocked in a channel take, whose condition-wait reaches no safe
-  ;; point, is woken by it too. One root for the three (2026-11-08: two tests booted one root each)
-  (let [{:keys [ids agents left out]} (root-ended ["(loop [] (recur))" "(clojure.core.async/<!! (clojure.core.async/chan))"] true)
-        [idle busy blocked] ids]
-    (is (= (set ids) (set (keys agents))) out)
-    (is (not (contains? left (agents idle))) "the idle agent ended")
-    (is (not (contains? left (agents busy))) "the busy agent ended")
-    (is (not (contains? left (agents blocked))) "the blocked agent ended")
-    (is (empty? left) (str "agents still alive: " left "\n" out))))
+;; Estimate: 3 socketpairs, forks and reaps (~3 x 20k ticks: 18 setsockopt/fcntl calls, a line read, a recv peek, close) + 3 handlers installed
+;; (~3 x 5k) = ~100k, 150000 (the child's ticks are its own and not counted here). The root and the fork server this replaced (own root started and killed, 4M) are not the goal: the goal is the
+;; handler an agent installs (agent.clj, root gone: (intr/exit-at-eof! #(sock/peer-gone? ...))) ending its process.
+(deftest ^{:seon.test/estimate {:ticks 150000}} an-agent-ends-when-its-root-is-gone
+  ;; an agent ends on EOF of its own socket to root, whatever it is doing: an idle agent reads it; one evaluating a form with no
+  ;; tick budget is interrupted by it (SIGIO); one blocked in a channel take, whose condition-wait reaches no safe point, is woken
+  ;; by it too. Each is a fork of this process holding one end of a socketpair and the handler an agent installs
+  ;; (seon.intr/exit-at-eof! over seon.sock/peer-gone?); the parent hangs up its end and reaps the child: exit 0 is the handler's.
+  ;; No boot of a root, no fork server (was 60 s warm: a root and two agents started and killed). Not covered here: root's fork
+  ;; server group kill (a-proof-run-ends-with-its-agent and the root-ended tests cover its processes). Red: a handler exiting non-0
+  (let [forks (fn [wait]
+                (let [[root-end agent-end] (sock/socketpair)
+                      pid (lib/fork! {:fd agent-end :refused (fn [n] {:refused n}) :parent identity
+                                      :child (fn []
+                                               (is (nil? (sock/signal-at-input! agent-end)))
+                                               (intr/exit-at-eof! #(sock/peer-gone? agent-end) false)
+                                               (sock/write-line! agent-end "ready")
+                                               (wait agent-end)
+                                               (lib/c-exit 3))})]
+                  (let [rd (sock/line-reader root-end (fn [] (a/<!! (jolt.io-poller/ready-chan root-end :read))))
+                        ready (loop [] (let [l (rd)] (cond (= l :eof) nil (seq l) (first l) :else (recur))))]
+                    (lib/c-close root-end)
+                    {:ready ready :status (lib/wait-status pid)})))
+        idle (forks (fn [fd] (a/<!! (jolt.io-poller/ready-chan fd :read))))
+        busy (forks (fn [_] (intr/run nil (fn [] (loop [] (recur))))))
+        blocked (forks (fn [_] (a/<!! (a/chan))))]
+    (doseq [[what r] [["idle" idle] ["busy" busy] ["blocked" blocked]]]
+      (is (= "ready" (:ready r)) (str "the " what " child began its wait: " (pr-str r)))
+      (is (= {:exit 0} (:status r)) (str "the " what " child ended when its peer closed: " (pr-str r))))))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded); 2 shell calls (mkfifo, rm) at ~200k each = ~2650k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-proof-run-ends-with-its-agent
