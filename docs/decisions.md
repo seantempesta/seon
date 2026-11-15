@@ -2,6 +2,12 @@
 
 The owner's standing rulings, one entry each: his meaning in correct terms (never quoted; asked first when unclear), its date, and where the rule is stated now. The mechanism lives in `AGENTS.md` and the wiki; the reasoning and the history around each ruling are in git. A ruling a later one reverses keeps a one-line pointer to it.
 
+## 2026-11-16 rulings
+
+The owner's ruling at the end of the 2026-11-15 night, when the weekly budget ran out.
+
+- **The next sessions' focus is the test system, fully implemented inside Seon, with no more hacks** (owner, 2026-11-16 morning, after the night's pilot merged once through `seon_done`). Proving and landing go through the system's own `:prove` service and `seon_done` for every session and agent. The fast lane (`bin/land --fast`), `bin/land`, `bin/prove` and the worktree path are deleted once the inside path does their jobs, each Deletes line naming what does the job now. No interim mechanism is added beside them; feature work waits until this holds. Where it stands and its order: [plan](plan.md#where-things-stand-root-2026-11-16-062x).
+
 ## 2026-11-15 rulings
 
 The owner's rulings on the morning after the first night run on its own.
