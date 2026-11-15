@@ -96,8 +96,10 @@
     (is (= #{[:ea t1 :seon.task/plan]} (d/reads-index inner)) (pr-str (d/reads-index inner)))
     (is (= #{[:ea t1 :seon.task/plan] [:ea t2 :seon.task/id]} (d/reads-index outer)) (pr-str (d/reads-index outer)))))
 
-;; Estimate: a seeded db; one q recorded uncached, one warmed, one recorded over the warm cache, ~0.5M = 500000
-(deftest ^{:seon.test/estimate {:ticks 500000}} a-cached-read-records-what-it-read
+;; Estimate: a test branch (~1M) and four recorded q runs with the planner off (~1M each on the seed, measured 0.96M: the
+;; planner's probes do not record, so a recorded q runs without it, task datahike.query/the-planners-probes-record), ~5M
+;; = 5000000 (measured 5.03M; 3.5M first, missing the branch and the recorded warm-up)
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-cached-read-records-what-it-read
   ;; task datahike.reads/a-cached-read-records-what-it-read: recording switched the q result cache off, so every recorded
   ;; read recomputed what an unrecorded one served cached. A recorded q the cache holds is served by it and records what
   ;; its computation read: the same keys as an uncached recorded run. On a live connection's committed value: the result
@@ -108,7 +110,8 @@
             q '[:find ?a :where [?e :db/ident ?a] [?e :db/cardinality :db.cardinality/many]]
             ticks (fn [f] (let [t (jolt.host/ticks)] (f) (- (jolt.host/ticks) t)))
             cold (d/reads-index (second (d/with-reads #(binding [datahike.query/*query-result-cache?* false] (d/q q db)))))
-            _ (d/q q db)
+            ;; warmed by a recorded run: an unrecorded one runs the planner, which is in the cache key
+            _ (d/with-reads #(d/q q db))
             [[v warm] dt] (let [t (jolt.host/ticks) r (d/with-reads #(d/q q db))] [r (- (jolt.host/ticks) t)])
             uncached-dt (ticks #(d/with-reads (fn [] (binding [datahike.query/*query-result-cache?* false] (d/q q db)))))]
         (is (seq v) "the seed holds cardinality-many attributes")
