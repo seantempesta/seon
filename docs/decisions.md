@@ -1170,7 +1170,23 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 "Does that look like a friendly chat window that my mom could use?"; "I don't want anything hidden". Stated in [render](render.md#the-page) and [the debug page](render.md#the-debug-page-is-the-wire-request).
 
-2026-11-15, to web: "This is supposed to be end user facing and I want my mom to able to use this. She's 75."; "I'm mostly viewing it through a portrait viewport"; "the html version is kinder and gentler and non technical user facing. So think beautiful typography, shorter more clear focus, messages by default and you can expand if you want to see what they are doing under the hood. Then the debug and ctx views can be technical and what an expert wants to see."; and that the model still gets the data it needs. Nothing is hidden: the person's view folds what is under the hood, and @ctx and debug show it whole. Task: `seon.render.ui/the-persons-chat-is-kind-plain-and-portrait-first`.
+2026-11-15, to web: the site is for end users, and the owner's 75-year-old mother must be able to use it. He mostly reads it in a portrait window. The person's view is kind, plain and non-technical, with good typography and a short, clear focus: messages by default, and what happened under the hood one tap away. The debug and @ctx views stay technical, for an expert. The model still gets everything it needs. Nothing is hidden: the person's view folds the detail, and @ctx and debug show it whole. Task: `seon.render.ui/the-persons-chat-is-kind-plain-and-portrait-first`.
+
+The owner's choices, the same day:
+- `/` is always the person's chat, never the agent a tab last opened.
+- The system's own status (task counts, root causes, problems, root's process, evals sent to root) is on the debug tab only.
+- Under each answer, one fold ("how I did this") opens its steps.
+- On a portrait screen the sessions list is behind a menu.
+- The theme follows the device's light or dark setting.
+- A failure reads as one kind sentence, its reason folded under Details.
+- Root's session answers a person in plain words.
+- Body type is 19-20px.
+- The message box is like the best AI tools': it grows taller with long text, has a clear Send button, and Enter sends.
+- Opening the page shows a fresh greeting with a clear link back to the previous conversation.
+- While Seon works, it shows "Thinking"; expanded, the progress streams in, then the answer streams in. Streaming needs a plan that checks the reactive core and Datastar.
+- Root's session never ends, so what its model reads should be a sliding window kept short by real compaction (refinement keeps editing it down), never a blind cut.
+- Root, and any agent talking with a person, answers the person promptly; the person still drives their agent, and agents can act for them too.
+- The messaging plans include the person.
 
 ### Counts are tokens; what an agent writes is Markdown
 
