@@ -522,9 +522,8 @@
   (seon.render/page-edits over forms-moved, as `page-edits-between` makes them); nothing moved, or a first page that shows nothing:
   no messages. Placed by the agent's model render before turn n's call, [#'page-diff-msgs opts a p0 p1 n], so the walk keeps each
   pair as a component keyed by its points. A turn whose call stored what it sent is read (`stored-page`). The parts come from the draw of all the turns'
-  bases the placing render shares (`turn-entities`): opts' metadata :seon.ctx.wire/parts, a function answering this pair's two
-  (`pages-from`), metadata so the component's opts compare by what they say, never by that function; without it, the pair's own
-  chain is drawn (`page-parts-through`). See docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
+  bases the placing render shares (`turn-entities`): opts' metadata :seon.ctx.wire/parts (`pages-from`); without it, the pair's
+  own chain is drawn (`page-parts-through`). See docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db] [:seon.render/index :map]] :int [:maybe :map] :map :int] [:vector :seon.model/message]]}
   [{db :seon.db/db ix :seon.render/index :as opts} a p0 p1 n]
   ;; every read here is of a db value at a fixed past point (its two points: a commit, an immutable value, or a past t), which no
