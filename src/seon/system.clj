@@ -1578,7 +1578,7 @@
   "Does changed path p (a build input the binary bakes) load into a running system by the landing's own commit, so it is no
   restart: a config entry (resources/seon/config/: seon.program/hold-config!) or a schema entry (the env-class schemas: its
   dependents re-armed and root's registry held, seon.program/load-changes! and seon.writer's main-commit). The binary is built
-  again for the next boot (my.root/landed!'s :build), never restarted for it. See docs/source.md#a-landing-enters-main-as-data."
+  at the next restart, which builds first, never restarted for it. See docs/source.md#a-landing-enters-main-as-data."
   {:malli/schema [:=> [:cat :string] :boolean]}
   [p]
   (boolean (or (str/starts-with? p "resources/seon/config/") (= :seon.env/schemas (fx/env-class p)))))

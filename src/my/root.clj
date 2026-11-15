@@ -438,7 +438,7 @@
   source fact, tree, the binary's answer for it and the inputs bin/update wrote), main's source fact is written again as a boot
   writes it (seon.system/booted-source: this boot, main's program digest now, the inputs of the files now), so agents key their
   results by the landed files and every agent keeps running. Answers {:kept boot :tree} or {:restart why}, which bin/update
-  restarts on; kept with a binary not current for the landed tree, :build true, which bin/update builds with no restart. See
+  restarts on. A kept landing builds nothing: a boot catches main's program up in place, and a restart builds first. See
   docs/source.md#a-landing-enters-main-as-data."
   {:malli/schema [:=> [:cat :seon.system/sys :string] :map]}
   [sys tree]
@@ -453,7 +453,7 @@
             r @(root/transact-main! sys [{:seon.system/id :root :seon.system/source src}])]
         ;; kept, but the binary is not current for the landed tree (forms, config or schema entries it bakes): bin/update builds
         ;; it now, with no restart, so the next boot is on main's build, never a stale one
-        (if (contract/error? r) r (cond-> {:kept (:boot sys) :tree tree} (seq (:reaches stale)) (assoc :build true)))))))
+        (if (contract/error? r) r {:kept (:boot sys) :tree tree})))))
 
 (defn build!
   "Build the next generation from main's last merges commit, for what cannot load in place

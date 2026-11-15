@@ -78,12 +78,8 @@ if bin/system status >/dev/null 2>&1; then
     kept=$(printf '{:op :eval :agent "root" :code "(my.root/landed! sys \"%s\")"}\n' "$tree" | bin/ask "$port")
     if [[ $kept == *':kept '* ]]; then
       printf '{:op :eval :agent "root" :code "(my.root/file-slow-tests! sys)"}\n' | bin/ask "$port" >/dev/null || print "filing the slow tests' tasks failed: run (my.root/file-slow-tests! sys) at root"
-      # the landing loaded in place, but the binary bakes what it changed (forms root runs, config or schema entries): built now,
-      # with no restart (bin/build installs target/seon by rename, the running root keeps its own), so the next boot is current
-      if [[ $kept == *':build true'* ]]; then
-        nice -n 15 bin/build || fail "the build for the next boot (the system kept running)"
-        print "UPDATE OK: kept running on tree $tree (built for the next boot, no restart: its agents go on)"; exit 0
-      fi
+      # a landing kept in place builds nothing (owner 2026-11-15: build only when needed): a boot catches main's program up in place,
+      # and the restart path below builds first
       print "UPDATE OK: kept running on tree $tree (no build, no restart: its agents go on)"; exit 0
     fi
     # the reason restart-for gave (the {:restart "..."} answer's text), else the whole answer: a refused connection or an error
