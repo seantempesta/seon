@@ -25,5 +25,6 @@
  {:seon.task/name "a-cold-request-makes-no-past-point-read"
   :seon.task/plan "Owner: context. THE PLAN item 16, the slice after the first (jolt/context bbb8ccd741: each turn stores its page messages, :seon.part/digest and :seon.part/message by canonical digest, and its call's :seon.model-call/assembly; seon.ctx.wire/stored-page reads them). Left: (1) a request made again at turn n's basis still draws its own pair once (p0 is the previous basis: a read of a past point), since its assembly is written after its request; a debug redraw or a cold restart can read turn n's assembly too once it exists, so only the request being made draws, at its own head. (2) Once every live agent's turns hold assemblies (a turn before the first slice has none), delete seon.ctx.wire/page-parts-through's past-point chain, pages-from and db-at's as-of fallback; a turn with no assembly and a swept commit answers :seon.ctx/point-swept, never an as-of read. (3) Measure the cold request again on a real agent of 30+ turns after a round (today 11B ticks / 37.6 GB at 30 turns, result/a444fa99; estimate under 50M). Proof: seon.ctx.wire-test/a-cold-request-makes-no-past-point-read."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.ctx.wire-test/a-cold-request-makes-no-past-point-read}}
+  :seon.task/proofs #{seon.ctx.wire-test/a-cold-request-makes-no-past-point-read}
+  :seon.task/estimate #:seon.ctx.wire{render {:n 30, :order :linear, :ticks 50000000, :bytes 100000000}}}
 ]
