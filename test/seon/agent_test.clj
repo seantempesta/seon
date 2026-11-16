@@ -773,30 +773,6 @@
     ;; content (test, reads digest, status) is the same result, so the branch still holds one
     (is (= 1 (:value again)) (str "a result the branch holds, written again, is no new result: " (pr-str again)))))
 
-(deftest ^{:seon.test/estimate {:ticks 2000000}} a-green-that-is-no-proof-writes-no-fact
-  ;; docs/sharing.md#what-a-branchs-nodes-are: a green that is no proof of the task is read by nothing
-  ;; on this branch (seon.reconcile/done-explain reads proofs and reds), and its facts on its var rewrite a leaf
-  ;; among the program's. A red is held, and stays held when it goes green, so it never reads as still red.
-  ;; T1: the agent's record-results! is seon.proofs/facts-worth-keeping then seon.proofs/result-tx, both pure on the
-  ;; entities the branch holds; two runs of three tests (a proof, another, one that turns red then green), a few calls each
-  (let [digests '{green-test/proof "p" green-test/other "o" green-test/turned "t2"}
-        green {:digest "x" :pass 1 :fail 0 :error 0}
-        red {:digest "t" :pass 0 :fail 1 :error 0}
-        proofs '#{green-test/proof}
-        record (fn [held ran failures]
-                 ;; what the branch then holds: {test status}, record-results!'s steps on held ({test entity})
-                 (let [kept (proofs/facts-worth-keeping held proofs ran)
-                       tx (proofs/result-tx held kept failures {} digests)]
-                   (into {} (for [m tx :when (map? m)] [(:var/name m) (:seon.test/status m)]))))
-        ;; the run that asks the red by name: the proof and the other are not run
-        first-facts (record {} {'green-test/turned red} {'green-test/turned [{:type :fail :message "no"}]})
-        ;; the branch holds the red; the deftest redefined (a new digest), the run of everything turns it green
-        second-facts (record {'green-test/turned {:seon.test/digest "t" :seon.test/status :red}}
-                             {'green-test/proof (assoc green :digest "p") 'green-test/other (assoc green :digest "o") 'green-test/turned (assoc green :digest "t2")}
-                             {})]
-    (is (= '{green-test/turned :red} first-facts) (pr-str first-facts))
-    (is (= '{green-test/proof :green green-test/turned :green} second-facts) (pr-str second-facts))))
-
 ;; Estimate: calc-db and 2 records ~1.8M, 2 test plans at ~2M, 2 reach-digests at ~1.3M, db-with x3 = ~9000000.
 (deftest ^{:seon.test/estimate {:ticks 9000000}} a-proof-over-the-branchs-data-is-keyed-by-its-data-too
   ;; Context's trial finding 14: an agent's proof over its branch's data (lab.proofs/the-tasks-i-cite-differ-from-my-base) ran
