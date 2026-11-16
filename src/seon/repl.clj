@@ -931,7 +931,7 @@
       (or (some (fn [root] (when root
                              (let [r (str (.getCanonicalPath (java.io.File. ^String root)) "/")]
                                (when (clojure.string/starts-with? abs r) (subs abs (count r))))))
-                [(cfg/checkout) (get cfg/config :seon.config.source/root)])
+                [(cfg/checkout) (:source-root (cfg/process))])
           at))
     at))
 
