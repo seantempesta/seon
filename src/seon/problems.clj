@@ -1291,10 +1291,11 @@
   ([db fold] (report-with db (answers db) fold nil)))
 
 (defn- health-with
-  "db's health from its recorded problems (`report`'s classes) and `derived`, the derived classes' rows by class."
+  "db's health from its recorded problems (`report`'s classes) and `derived`, the derived classes' rows by class, each class's rows
+  in :signature order, so the held health and the whole read are one value whichever path made the rows. See docs/health.md#cost."
   {:malli/schema [:=> [:cat :seon.host/db :map :map :map] :seon.problems/report]}
   [db ans recorded derived]
-  (let [classes (merge recorded (update-vals derived (fn [rows] {:n (count rows) :rows rows})))
+  (let [classes (merge recorded (update-vals derived (fn [rows] {:n (count rows) :rows (vec (sort-by :signature rows))})))
         unlinked (problem-unlinked db ans classes)]
     (vary-meta (assoc {:t (:max-tx db)} :classes (assoc classes :problem-unlinked {:n (count unlinked) :rows unlinked}))
                assoc :seon.render/schema :seon.problems/report)))

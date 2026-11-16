@@ -477,7 +477,8 @@
   ;; docs/reactive.md#what-it-does-not-do-yet: a commit of d datoms costs d x 5 index lookups, whatever the readers; today each reader
   ;; checks every commit itself ([M root result/bcecbc16]: 53.6k, 538k, 4.41M ticks at 10, 100, 1,000 readers)
   (let [[db es] (notes 1010) readers (subvec es 0 1000) moved (subvec es 1000)
-        tx (fn [_] (vec (for [e moved] [:db/add e :note/text (str "moved" (rand-int 1000000))])))
+        ;; a new value each commit, from the db it commits on (its :max-tx moves with each), never a random draw
+        tx (fn [db] (vec (for [e moved] [:db/add e :note/text (str "moved" (:max-tx db))])))
         [t10 t100 t1000] (for [n [10 100 1000]] (commit-ticks db (subvec readers 0 n) text-reader tx))]
     (is (<= t1000 (* 2 t10)) (str "a commit no reader read costs the same at 10 and 1,000 readers: " [t10 t100 t1000]))))
 
@@ -486,7 +487,7 @@
   ;; the same commit on a store 10x larger costs the same: nothing a commit does reads the store whole
   (let [cost (fn [n] (let [[db es] (notes n)]
                        (commit-ticks db (subvec es 0 100) text-reader
-                                     (fn [_] (vec (for [e (subvec es 100 110)] [:db/add e :note/text (str "moved" (rand-int 1000000))]))))))
+                                     (fn [db] (vec (for [e (subvec es 100 110)] [:db/add e :note/text (str "moved" (:max-tx db))]))))))
         small (cost 110) large (cost 1100)]
     (is (<= large (* 2 small)) (str "10x the store, the same commit: " [small large]))))
 
