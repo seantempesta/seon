@@ -381,10 +381,11 @@
         (is (= ['demo/helper] (:without-a-contract st)))
         (is (= [{:reason :contract-gap :vars ['demo/helper]}] (:refused st)))))))
 
-(deftest a-red-main-was-red-on-too-is-the-agents-and-is-said
-  ;; the owner, 2026-11-07: "I don't care who fixes the problems on main, if an agent needs to fix the problem to get all the tests to pass then that's fine".
-  ;; A test red at the branch's merge base still has to clear, and the status says it's also red on main; only a test the branch
-  ;; wrote or changed is offered the form that makes it a proof
+(deftest a-red-main-was-red-on-too-is-mains-and-is-said
+  ;; THE FOCUS (docs/plan.md, 2026-11-16): "a red the change reaches blocks it, a red main also holds is main's, fixed forward by its
+  ;; owner", as the judge reads it (seon.reconcile/judgment's :main-red). The agent's own status reads the same: a test red at the
+  ;; branch's merge base is said as a fact and holds nothing (session/context's end said 5 stray reds main held while the judge found
+  ;; nothing open, result/a8547af3); only a test the branch wrote or changed is offered the form that makes it a proof
   (ts/test-branch!
     (fn [_ conn]
       (d/transact conn (program-facts '[[demo-test/env-test "(deftest env-test (is (pinned?)))" []]
@@ -399,7 +400,7 @@
             st (status/status db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b))
                                {:index (fn [] (index-of {"demo/f" #{'demo-test/f-test}} {} {}))})
             by (into {} (map (juxt :test identity)) (:refused st))]
-        (is (= #{'demo-test/own-test 'demo-test/kept-test 'demo-test/env-test} (set (keys by))) (str "main's own red is a reason too: " (pr-str (:refused st))))
+        (is (= #{'demo-test/own-test 'demo-test/kept-test} (set (keys by))) (str "main's own red is main's, no reason here: " (pr-str (:refused st))))
         (is (= ['demo-test/env-test] (:also-red-on-main st)) "and said as a fact")
         (is (= '(my.task/update! :seon.task/proofs conj (quote demo-test/own-test)) (:do (by 'demo-test/own-test)))
             "a red test the branch wrote is offered the form that makes it a proof")
