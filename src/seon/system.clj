@@ -1708,7 +1708,8 @@
   (jolt.host/main-carrier-run!
     (fn []
       (let [;; first of all: no process holds the store yet (docs/storage.md#collection)
-            compacted (when (and (= :lmdb backend) (cfg/value :seon.config.store/sole-writer?)) (pdb/compact-if-due! path))
+            ;; under LMDB's alone open: refused while any other process holds the store (seon.db/compact-if-due!)
+            compacted (when (= :lmdb backend) (pdb/compact-if-due! path))
             opened (pdb/open! backend path datoms main)
             ;; before any agent: a tree's branch left by an earlier root's end, its last run cut short, is dropped as that run would have
             dropped-trees (pdb/drop-trees! (:conn opened) main)

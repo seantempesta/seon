@@ -1004,6 +1004,39 @@
         (is (:bytes-after (pdb/compact-if-due! path)) "the sweep left its freed pages to compact"))
       (finally (seon.lib/remove-tree! path (str path ".compact"))))))
 
+;; docs/storage.md#collection, task seon.system/the-store-half-of-an-update-that-loses-nothing: compaction renames a new data file over
+;; the store, so a process still holding the old one (a candidate binary beside root, this process's own connection) would write to an
+;; unlinked file. It happens only under LMDB's alone open (MDB_ALONE: no other holder, kept until done), never by a config flag.
+;; Estimate: a store opened on disk ~5M + 2 alone opens (a lock and a refusal) and one compaction of a small store ~5M = 15000000
+(deftest ^{:seon.test/estimate {:ticks 15000000}} a-store-another-holder-has-open-is-not-compacted
+  (let [path (str (seon.config/checkout) "/target/tmp/alone-" (random-uuid))
+        {:keys [conn]} (pdb/open! :lmdb path 0 :db)
+        data #(.length (java.io.File. (pdb/data-file :lmdb path)))]
+    (try
+      (d/transact conn [{:note/text "held" :note/agent :t}])
+      (pdb/sync! (:config @conn))
+      (spit (str path "/compact-due") "")
+      (let [before (data)]
+        (is (nil? (pdb/compact-if-due! path)) "held by a connection: no compaction now")
+        (is (= before (data)) "the store is as it was"))
+      (d/release conn)
+      (is (:bytes-after (pdb/compact-if-due! path)) "with no holder it compacts")
+      (finally (seon.lib/remove-tree! path (str path ".compact"))))))
+
+;; task seon.system/the-store-half-of-an-update-that-loses-nothing: two binaries on one store (a candidate beside root) with different
+;; :seon.config.store/lmdb-map-bytes: the one that grew the map made the other's next transaction fail (MDB_MAP_RESIZED). A store opens at
+;; the map size it was made with. Estimate: two env opens and an env-info ~1M = 2000000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-store-opens-at-the-map-size-it-was-made-with
+  (let [path (str (seon.config/checkout) "/target/tmp/mapsize-" (random-uuid))
+        made (* 64 1024 1024)]
+    (try
+      (.mkdirs (java.io.File. ^String path))
+      (let [e (lmdb/open-env path {:map-size made})] (lmdb/close-env e))
+      (let [e (lmdb/open-env path {:map-size (* 4 made)})]
+        (is (= made (:map-bytes (lmdb/env-info e))) "the store's own map size, not the opener's")
+        (lmdb/close-env e))
+      (finally (seon.lib/remove-tree! path)))))
+
 ;; docs/storage.md#collection (root down 2026-11-16: boot's sweep grew runs/store to its 64 GiB map, then to 128 GiB in 75 s): under
 ;; MDB_SAFENOSYNC no page freed after the last sync is reused, and at boot no writer syncs, so the store's bound steadies it as the
 ;; sweep frees pages (docs/storage.md#durability-is-continuous-group-commit; retain! synced each batch itself until 2026-11-16).
