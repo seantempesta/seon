@@ -1750,7 +1750,11 @@
             main-inputs (held-inputs)]
         (warm! conn)
         (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
-        (lib/static!)
+        ;; every level of forks (root, the fork server, an agent, a test child) collects one generation less than its parent
+        ;; (Jolt: a forked child never collects what it inherited), so root keeps generations enough for each before its first
+        ;; fork, then collects in full so the fork server inherits everything in root's oldest generation
+        (jolt.host/gc-generations! (cfg/value :seon.config.root/gc-generations))
+        (System/gc)
         (let [db @conn]
           (merge opened (fs/fork-server db store-cfg)
                  {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :dropped-trees dropped-trees

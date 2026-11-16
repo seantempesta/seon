@@ -965,25 +965,6 @@
         [id] (in-agent (fn [n] (vreset! names n) ["(:seon.task/id (my.task/current))"]))]
     (is (= (:task @names) (:value id)) (pr-str id))))
 
-;; Estimate: in-agent's own setup and teardown (2 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3500k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 2}} an-agent-inherits-a-static-heap
-  ;; design agent-loop section 2: an agent forked after main moved inherits the fork server's
-  ;; heap in Chez's static generation, so its collections never copy (un-share) it. Measured
-  ;; 2026-10-25: 163 MB of the fork server's heap sat in generations 3 and 4 at fork, and one
-  ;; full collect in a fresh agent raised its footprint by 98 MB; made static, 106 MB after a
-  ;; work that left today's agent at 333 MB. The bytes in Chez's collected generations are
-  ;; work done (what the fork server held live), not load. Measured as the agent found them at
-  ;; its start (:inherited-bytes, seon.lib/generation-bytes): its own start-up promotes 2 MB more
-  ;; into them, which the fork server's rule (:seon.config.agent/inherited-bytes) does not bound.
-  ;; An agent is forked and used first: the fork server's first fork freezes its heap (nothing is
-  ;; outside static then, so an agent measured alone inherits 0 and any bound passes); the second
-  ;; inherits what the server holds outside static since, which the bound is about.
-  (in-agent ["1"])
-  (let [[r] (in-agent ["(:inherited-bytes @seon.agent/state)"])
-        bound (/ (seon.config/value :seon.config.agent/inherited-bytes) 1048576.0)
-        mb (/ (:value r) 1048576.0)]
-    (is (< mb bound) (str "the agent inherited " mb " MB outside the static generation: " (pr-str r)))))
-
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} an-agents-collect-trip-is-the-configured-one
   ;; docs/machine.md#what-a-process-owns-in-memory: Jolt's adaptive nursery raises any trip
@@ -1007,22 +988,6 @@
                            "(let [r (seon.agent/run-tests-forked 100000000 #{} :main (fn [_] nil) '#{room-test})] (pr-str {:pass (:pass r) :fail (:fail r) :error (:error r)}))"])
         v (some-> (:value r) clojure.edn/read-string)]
     (is (= {:pass 1 :fail 0 :error 0} v) (pr-str r))))
-
-;; Estimate: in-agent's own setup and teardown (10 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 10 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~17500k, 20000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 20000000 :asks 10}} a-fork-servers-static-grows-only-with-the-program
-  ;; docs/machine.md#what-a-process-owns-in-memory: the fork server made its heap static before
-  ;; every fork, so what each fork replaced (main's db, the reach graph, the index) stayed in
-  ;; static for the server's life. Twenty forks with main moving (each a task of its own) but
-  ;; no program change: an agent's static at its start is the server's at that fork
-  ;; and main's live data growing as it does (each task's facts), not every fork: a freeze is a
-  ;; step of more than 64 KB in the server's static (measured: 19 in 20 forks before, 1 to 3 after).
-  ;; It is due when what an agent would inherit passes :seon.config.agent/inherited-bytes, so what the forks may
-  ;; freeze follows from what static grew: one more than that many, whichever point of the cycle the shard's
-  ;; earlier tests left it at (a fixed count sat on the edge: 3 at 2.2 MB of main a fork)
-  (let [statics (vec (for [_ (range 10)] (:value (first (in-agent ["(jolt.scheme/eval-string \"(bytes-allocated 'static)\")"])))))
-        freezes (count (filter #(> % 65536) (map - (rest statics) statics)))
-        due (inc (quot (- (peek statics) (first statics)) (seon.config/value :seon.config.agent/inherited-bytes)))]
-    (is (<= freezes due) (str freezes " freezes in 10 forks, " due " due by what static grew; the server's static at each: " (pr-str statics)))))
 
 (defn- history-tx
   "What n agents leave on main, shaped as production's (an agent started on task, and an eval record

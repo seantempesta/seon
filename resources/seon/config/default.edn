@@ -92,6 +92,11 @@
  ;; Provenance: jolt/root-reserve-cap (Jolt's default 50 kept 1x, 234-450 MB free in an idle
  ;; root). At the bound: 1 returns nearly every free page and keeps the nursery at its floor.
  :seon.config.root/max-heap-free-ratio 10
+ ;; Unit: generations. Chez's maximum generation, set by root at its boot before its first fork (jolt.host/gc-generations!).
+ ;; Each level of forks collects one generation less than its parent (Jolt: a forked child never collects what it inherited,
+ ;; task jolt.host/a-forked-child-never-collects-what-it-inherited): root, the fork server, an agent, a test child and a
+ ;; double-forked clone are five levels, so 8 leaves an agent generations 0-5 and a test child 0-4. Chez allows up to 254.
+ :seon.config.root/gc-generations 8
 
  ;; Where kept runs live (owner, 2026-10-21: runs are kept, "a perfect record frozen in time").
  ;; bin/system exports SEON_RUNS (<this tree>/runs).
@@ -304,12 +309,6 @@
  ;; default scales with the parent heap (E10); a small trip keeps an agent's garbage, and so
  ;; its private pages, small.
  :seon.config.agent/trip-bytes 4194304
- ;; Unit: bytes an agent may inherit outside Chez's static generation. The fork server freezes its
- ;; heap into static at a fork when main's program moved or, after a collection outside static, its
- ;; live non-static bytes pass this; a freeze keeps what is live then for the server's life, so it is not done every fork
- ;; (measured 2026-10-28: 22.6 MB of static over 20 forks when it was). 16 MiB is what
- ;; seon.agent-test/an-agent-inherits-a-static-heap holds an agent to. At the bound: the next fork freezes.
- :seon.config.agent/inherited-bytes 16777216
  ;; Unit: bytes an agent's heap may grow past what it inherited. Past it an allocation throws
  ;; OutOfMemoryError in the form (an :err item), so a runaway agent cannot take the machine.
  :seon.config.agent/heap-extra-bytes 1073741824

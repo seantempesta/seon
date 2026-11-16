@@ -83,7 +83,7 @@
   in its own process, so without these each agent decoded them cold, and more of them as main's commits
   rewrote leaves and its cache evicted the rest; read here, each agent inherits them decoded, and this
   process's reads keep them in its cache. Only what this agent reads is read, so what the server holds
-  grows by that, not by what main writes (its static: seon.fork-server/static-due?). Nothing is written.
+  grows by that, not by what main writes. Nothing is written.
   See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [st {:keys [task key branch]}]
@@ -109,17 +109,6 @@
   (index-at-fork brought it there), which the agent holds as its :main and :base."
   {:malli/schema [:=> [:cat :map] :map]}
   [st] {:db (:db st) :index (get-in st [:index :index])})
-
-(defn static-due?
-  "Whether the fork server freezes its heap into static before this fork: main's program moved
-  since the last freeze (its compiled code is what agents must share), or, after a collection of
-  everything outside static (what forks replaced is freed there, never frozen), what an agent
-  would inherit outside the static generation has passed :seon.config.agent/inherited-bytes. A
-  freeze keeps whatever is live then for the server's life, so it is done only when due. See
-  docs/machine.md#what-a-process-owns-in-memory."
-  {:malli/schema [:=> [:cat :map] :boolean]}
-  [st]
-  (boolean (or (:static-due st) (> (lib/non-static-live!) (cfg/value :seon.config.agent/inherited-bytes)))))
 
 (defn- stood
   "Server state st with its program's standing load errors (:standing, by namespace) brought to a load: the namespaces it
@@ -149,16 +138,16 @@
 
 (defn- preload
   "Server state st with what a first fork would otherwise wait for done now, while no one waits: main's tests loaded, the reach graph and index brought to
-  :db, what every agent's start reads warmed, and the heap made static when due. Answers [st' load errors]. A fork after it costs a fork. See docs/machine.md#an-agents-first-write."
+  :db, what every agent's start reads warmed, and, when main's program moved, the fixtures forced again and the heap collected in full. Answers [st' load errors]. A fork after it costs a fork. See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat :map] [:tuple :map [:maybe [:sequential :any]]]]}
   [st]
   (let [tests-errs (when (:tests-due st) (:errors (program/load-all! (:db st))))
         errs (seq (concat (:load-errors st) tests-errs))
         st (-> st (stood tests-errs #{}) (dissoc :tests-due :preload-t :load-errors) graph-at-fork index-at-fork (warm-start {}))]
-    ;; the test fixtures made here once a program, before the heap is made static, so every agent inherits them made
-    (when (:static-due st) (proofs/warm-fixtures!))
-    (when (static-due? st) (lib/static!))
-    [(dissoc st :static-due) errs]))
+    ;; the test fixtures made here once a program, so every agent inherits them made; then a full collection, which frees what
+    ;; the program move replaced: a forked agent never collects what it inherits (Jolt's collection ceiling), so it is freed here
+    (when (:program-moved st) (proofs/warm-fixtures!) (System/gc))
+    [(dissoc st :program-moved) errs]))
 
 (defn- step-failed
   "The event for a step that threw on message m: the error, naming the op and the message's agent or
@@ -194,7 +183,7 @@
                       (not= (:max-tx db') (:t m)) (update :mismatch inc)
                       ;; the program moved: the reach graph is brought to it at the next fork
                       ;; the program moved: the writer's :program-t changed (seon.writer/program-at, the one computation of it)
-                      (not= (:program-t m) (:program-t st)) (assoc :graph-moved true :static-due true :program-t (:program-t m)))
+                      (not= (:program-t m) (:program-t st)) (assoc :graph-moved true :program-moved true :program-t (:program-t m)))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled; while
                  ;; the tests' load is still due it loads them all at the first fork, as main has them then
                  errs (seq (program/load-changes! db' (:tx-data m) {:tests? (not (:tests-due st))}))
@@ -220,19 +209,14 @@
                  st (graph-at-fork st)
                  tg (profile/now-ns)
                  st (-> st index-at-fork (warm-start m))
-                 ;; the heap made static when it is due (static-due?), so the agent's collections never
-                 ;; trace (and un-share) much of what it inherits (design agent-loop section 2: 163 MB
-                 ;; of this heap sat in generations 3-4 at fork; static, an agent's work left 106 MB
-                 ;; where it left 333). Not every fork: what a fork replaced (main's db, the graph, the
-                 ;; index) stays in static for this server's life (docs/machine.md#what-a-process-owns-in-memory)
                  t1 (profile/now-ns)
                  ;; the ^:seon.test/fixture delays (the worlds, the test store) made here once a program, before the freeze, so
                  ;; every agent forked inherits them made, shared: each agent made them at its first prove (195M ticks, 1.1 GB,
-                 ;; tests2 result/ba7c27c8). A program commit (:static-due) may redefine one, so they are forced again then
-                 _ (when (:static-due st) (proofs/warm-fixtures!))
-                 due? (static-due? st)
-                 _ (when due? (lib/static!))
-                 st (dissoc st :static-due)
+                 ;; tests2 result/ba7c27c8). A program commit (:program-moved) may redefine one, so they are forced again then, and
+                 ;; the heap collected in full, freeing what the move replaced: an agent never collects what it inherits
+                 ;; (docs/machine.md#what-a-process-owns-in-memory)
+                 _ (when (:program-moved st) (proofs/warm-fixtures!) (System/gc))
+                 st (dissoc st :program-moved)
                  static-ms (profile/ms-since t1)
                  ;; the spawn's phases here, on the one clock (seon.agent/spawn-phases)
                  marks [[:fork-server-in t0 nil] [:reach-graph tg nil] [:index t1 nil] [:static (profile/now-ns) nil]]]
@@ -254,7 +238,7 @@
      :stats [st {:ev [{:ev :stats :t (:max-tx (:db st)) :datoms (count (d/datoms (:db st) :eavt)) :tests-due (boolean (:tests-due st))
                        :mismatch (:mismatch st) :mem-mb (lib/r2 (lib/real-mb)) :os-threads (lib/nthreads)
                        :active-threads (lib/active-threads)}]}]
-     :static (let [t0 (profile/now-ns)] (lib/static!) [st {:ev [{:ev :static :ms (profile/ms-since t0)}]}])
+     :static (let [t0 (profile/now-ns)] (System/gc) [st {:ev [{:ev :static :ms (profile/ms-since t0)}]}])
      ;; a standby (session F2): a fork of this server, idle on its own named pipes until root
      ;; promotes it, so that no fork after boot ever comes from root (multithreaded).
      ;; The previous standby is killed: one standby at a time.
@@ -285,8 +269,8 @@
    {:db db :cfg cfg :store store :mismatch 0 :conn conn :exits exits :status-buf (ffi/alloc 4) :children #{} :tests-due (boolean tests-due)
     ;; the errors of the boot server's load of main's tests at its start (main), sent with the first :preload or fork
     :load-errors load-errors
-    ;; the first fork freezes the heap: nothing is static yet (seon.fork-server/static-due?)
-    :static-due true
+    ;; the first fork forces the fixtures and collects in full, as a program move does
+    :program-moved true
     :graph (or graph (program/reach-indexed (program/reach-graph db (fx/declared-refs graph/built-text))
                                             (second (agent/test-inputs db))))
     ;; listed here when the server boots; a standby inherits its server's
