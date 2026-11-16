@@ -771,6 +771,10 @@
   []
   (let [v (test-symbol (str (first t/*testing-vars*)))] (seed v (get *digests* v))))
 
+;; when the running test started (seon.profile/now-ns), bound by test-vars around each test: what a test's own bounded waits
+;; count back from, so an edge's bound is the time left before its wall, never a whole wall again (seon.test-store/ask)
+(def ^:dynamic *test-started-ns* nil)
+
 (defn- test-vars
   "clojure.test's test-vars for vars of namespace n (Jolt's: its :once fixtures around them, each
   var in its :each fixtures), each test with a budget of its own: ticks engine ticks of work (nil:
@@ -793,7 +797,7 @@
         ;; test's count is its own work, task seon.proofs/a-tests-ticks-are-its-own-work), only the ceiling, which no honest test reaches
         budget (fn [v] (when ticks (if-let [e (and (cfg/value :seon.config.proofs/ticks-decide) (:ticks (:seon.test/estimate (meta v))))] (min ticks (* 10 e)) ticks)))
         one (fn [v]
-              (try (jolt.host/run-interruptible (jolt.host/make-interrupt) #(t/test-var v) (budget v))
+              (try (binding [*test-started-ns* (profile/now-ns)] (jolt.host/run-interruptible (jolt.host/make-interrupt) #(t/test-var v) (budget v)))
                    ;; root's interrupt (a ThreadDeath, seon.intr) stops the run that holds this test: it passes
                    (catch ThreadDeath e (throw e))
                    ;; a throw that ends the test from outside its body (its budget; a test child's deadlock end, which can land in
