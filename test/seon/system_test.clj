@@ -274,6 +274,25 @@
     (is (= ":hand-over" cause) (str "the stop's cause: " (subs (str log) (max 0 (- (count (str log)) 3000)))))
     (is (some? ended) "and its process ends by itself: the candidate never waits on it")))
 
+;; Estimate: two binary spawns (~0.6M ticks each, as the test above), one hand-over ask the successor makes and two stops: ~2M of this
+;; process's own; 5,000,000
+(deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/root [] :seon.test/execs ["target/seon"]} a-successor-takes-over-the-running-root
+  ;; task seon.system/a-successor-takes-over-the-running-root: a successor started beside a running root with --take-over its port loads,
+  ;; asks it to hand over, and serves on the port it released, on the same store and main; the old root ends by itself, its stop's
+  ;; cause :hand-over. Red under a successor started without it (bin/system next before: a stop, then a start on a port of its own)
+  (let [main (str "root-test-take-over-" (random-uuid))
+        tmp (System/getProperty "java.io.tmpdir")
+        store (ts/process-store)
+        ;; this checkout as their source tree (ts/default-root-args, as boot-candidate! gives its root): each boot catches main up with it, so
+        ;; neither runs the process store's older program over its binary
+        old (ts/start-root! {:store store :main main :runs (str tmp "/" main "-old") :args (ts/default-root-args)})
+        new (ts/start-root! {:store store :main main :runs (str tmp "/" main "-new") :args (into (ts/default-root-args) ["--take-over" (str (:port old))])})
+        old-log (str (:log (ts/stop-root! old)))
+        {new-log :log} (ts/stop-root! new)]
+    (is (and (:port old) (= (:port old) (:port new))) (str "the successor serves the port the old root released: " (subs (str new-log) (max 0 (- (count (str new-log)) 2000)))))
+    ;; no wait on the old root's exit: under the red stand-in it never comes; its log says why it stopped, which is the claim
+    (is (= ":hand-over" (second (re-find #"ROOT STOPPED \{:cause (:[a-z-]+)" old-log))) (str "the old root stopped for it: " (subs old-log (max 0 (- (count old-log) 2000)))))))
+
 ;; Estimate: the world (built once a process, ~3M when this test builds it first) + main's ~200 config entries through db-with ~1M + one
 ;; hold-config! (of-entries' aero read of every entry ~3.6M) ~4M + stale-binary (seon.fx/runtime-for: its tree's digest, refused
 ;; for a tree git cannot read ~0.1M) + main's program digest ~1M + 2 booted-source writes and 2 health derivations on the world ~2M = 11,000,000 ticks
