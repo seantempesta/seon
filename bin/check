@@ -160,8 +160,6 @@ step() {
   local name=$1 filter=$2; shift 2
   local log=$OUT/$name.log expect=${EXPECT:-0}
   [[ $name == seed ]] || want ${${name%-write}%-read} || return 0
-  # a unit past its bound (bounded, below) runs no more of its steps: bounded reports it, STEP-OVERRAN
-  [[ -n ${UNIT:-} && -e $OUT/$UNIT.overran ]] && return 0
   # its wall and CPU seconds kept beside its log (NAME.time: zsh's time, which keeps the exit
   # status); fd 7 (the starter fifo) and fd 3 (the run's token pool) stay bin/check's own
   { time (SEON_MAIN=check-$name "$@" > "$log" 2>&1 7>&- 3>&-) } 2> "$OUT/$name.time" 7>&- 3>&- & local sp=$!
@@ -172,7 +170,6 @@ step() {
   # (an unhandled exception, a FAILED or ERROR verdict), else its first line; never its last, which for a throw is a trace
   # frame (the rename's health red was read from its trace lines and misdiagnosed for 1.5 h, 2026-11-11)
   local msg=
-  [[ -n ${UNIT:-} && -e $OUT/$UNIT.overran ]] && return 0
   if (( st != expect )); then
     msg=$(grep -m1 -E 'Unhandled exception|Exception|FAILED|FAIL |ERROR|[Ee]rror:' "$log" 2>/dev/null)
     [[ -n $msg ]] || msg=$(head -1 "$log" 2>/dev/null)
@@ -185,42 +182,11 @@ step() {
   return 0
 }
 
-# bounded NAME CMD...: CMD (a unit, every step and phase it runs) under NAME's bound (bin/prove's plan, SEL/step-bounds: the
-# step-end factor times its median measured ms; a step never measured takes the largest median, seon.proofs/step-bounds). Past
-# it, its evidence is captured (bin/evidence, with its root's stall state from the port its root wrote beside its store), what
-# it runs is ended, and it FAILED, STEP-OVERRAN: a step past its bound is a bug, recorded as an error and fixed (the owner,
-# 2026-11-12: "A test killed for running too long is a bug and it should be recorded as an error and fixed"; the owner's
-# fourth clock exception, 2026-11-10: docs/clocks.md#time-decides-the-owners-exceptions). The bound is the unit's, not one
-# step()'s: a phase a unit runs outside step() (orphan's held --drain, resume's first root) had none, and two of them
-# waited 75 min in a landing's prove, 2026-11-12.
+# bounded NAME CMD...: CMD, a unit (every step and phase it runs), run under NAME (UNIT): no clock bounds it; a step that
+# does not end is a bug found at its cause (the owner: no clocks).
 bounded() {
-  local name=$1 bound= W=; shift
-  [[ -n $SEL && -s $SEL/step-bounds ]] && bound=$(awk -v k="$name" '$1 == k { print $2 }' "$SEL/step-bounds")
-  rm -f "$OUT/$name.overran"
-  # timed whole (NAME.unit-time, zsh's time): an overran unit's wall and CPU seconds are kept, as a finished step's are
-  { time ( UNIT=$name; "$@" ) } 2> "$OUT/$name.unit-time" & local up=$!
-  if [[ -n $bound ]]; then
-    ( trap 'kill $S 2>/dev/null; exit 0' TERM; sleep $(( bound / 1000.0 )) 7>&- 3>&- & S=$!; wait $S || exit 0
-      "$ROOT/bin/evidence" "$OUT/$name-overran" $up "$(cat "${SEON_STORE:-/nonexistent}/root.port" 2>/dev/null)" > /dev/null 2>&1
-      print -r -- "$bound" > "$OUT/$name.overran"
-      # the CPU seconds of every process under the unit, read before they are ended: a killed child is never reaped, so
-      # the unit's own `time` never counts it (an overran unit showed CPU 0.0 s while its root booted, 2026-11-12)
-      ps -axo pid=,ppid=,time= | awk -v r=$up '{ p[$1] = $2; t[$1] = $3 } END { for (x in p) { y = p[x]; while (y != "") { if (y == r) { n = split(t[x], a, ":"); s += (n == 3 ? a[1] * 3600 + a[2] * 60 + a[3] : a[1] * 60 + a[2]); break } y = p[y] } } printf "%.1f", s }' > "$OUT/$name.cpu"
-      "$ROOT/bin/end-tree" $up ) 7>&- 3>&- & W=$!
-  fi
-  wait $up
-  [[ -n $W ]] && { kill $W 2>/dev/null; wait $W 2>/dev/null }
-  if [[ -e $OUT/$name.overran ]]; then
-    # its store is kept, as any failed step's; its processes' CPU seconds at its end beside its wall bound and the load say whether it
-    # was working or waiting on the machine; its time is kept for its verdict, as a green step's is
-    local cpu=$(<"$OUT/$name.cpu" 2>/dev/null)
-    local r=$(sed -n 's/^real \([0-9.]*\).*/\1/p' "$OUT/$name.unit-time" | head -1)
-    [[ -n $SEL && -n $r ]] && printf "%s %.0f\n" "$name" $(( r * 1000 )) >> "$SEL/step-ms"
-    local msg="STEP-OVERRAN, ran past its bound of $(<$OUT/$name.overran) ms (:seon.config.check/step-end-factor times its median; CPU ${cpu:-?} s, load $(sysctl -n vm.loadavg | awk '{print $3}')); evidence in $OUT/$name-overran"
-    echo "FAILED $name: $msg"
-    failed "$name: $msg"
-  fi
-  return 0
+  local name=$1; shift
+  ( UNIT=$name; "$@" )
 }
 
 if (( NEEDS )); then
@@ -379,14 +345,8 @@ unit() {
 }
 mkfifo "$OUT/pool"; exec 3<>"$OUT/pool"; rm "$OUT/pool"
 for i in $(seq 1 $JOBS); do print -u 3 x; done
-# what the run's steps are doing at the owner's checkpoint, once ("10m is my main wtf is going on checkpoint", 2026-11-06), while they live: a limit's stop
-# signals the whole group, so nothing can be read of a stuck step after it. An observation of time, never an end (docs/clocks.md)
-# the timer ends its own sleep when the run ends it: killing the subshell alone left its sleep orphaned under init in the
-# checkout for up to ten minutes, which kept bin/land from removing the worktree (2026-11-08)
-( trap 'kill $S 2>/dev/null; exit 0' TERM; sleep ${SEON_CHECK_EVIDENCE_AFTER_S:-600} & S=$!; wait $S && "$ROOT/bin/evidence" "$OUT/at-checkpoint" $$ ) & W=$!
 P=(); for u in $UNITS; do read -u 3 tok; { unit $u; print -u 3 x } & P+=($!); done
 wait $P
-kill $W 2>/dev/null; wait $W 2>/dev/null
 exec 3>&-
 
 # what the green steps made is deleted; a failed step's branches stay until its next run
