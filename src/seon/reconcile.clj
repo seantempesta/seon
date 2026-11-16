@@ -489,7 +489,7 @@
       :else
       (let [rs (done-explain (rule-input (done-input idx id results uncontracted unmerged basis plan-before (set deferred))
                                          ;; behind main is no reason (plan item 10): a green task is ready, and the writer's one :merge merges main
-                                         ;; into its branch in its own step, re-proving when main's program moved since the proof (:reprove)
+                                         ;; into its branch in its own step, re-proving R itself when main's program moved since the proof
                                          {:caused caused :main-red main-red :main-unknown main-unknown :plan plan :kind kind
                                           :changed? changed? :named-site? named-site?
                                           ;; an outside agent's end is its hand-back (seon_done): a session's change judged as work is
@@ -949,7 +949,7 @@
                                  (into (task/move-tx id from :killed {:seon.task/reason (name (:reason act))}) (ended-ms-tx db id now)))]
               [st [o1 o2]])
       ;; a ready task's branch into main through the writer's one :merge (plan item 10): main merged into the branch and main taking
-      ;; it in one writer step, so it is never behind; :reprove when main's program moved since its proof
+      ;; it in one writer step, so it is never behind; when main's program moved since its proof the writer proves R before it merges
       :merge (let [b (:branch (:seon.agent/env (task-agent (:idx st) id)))
                    ;; the t of main the task's proof read: its :ready outcome's transaction, written by the judge reading main then
                    te (:db/id (d/entity (:db st) [:seon.task/id id]))
@@ -1088,7 +1088,7 @@
                ;; (docs/tasks.md#a-refine-curates-its-own-task): none while the agent goes on or waits (parked, told a verdict, proving again),
                ;; none for a refine or a merge step, none twice (seon.task/refine-tx), and none for a run that took no turn: it left
                ;; nothing to read (data's run of 2026-11-12 died before turn 1; its refine could only cap)
-               (into (when (and (not (#{:parked :told :reprove} outcome)) (pos? (:ended-turn end 0))
+               (into (when (and (not (#{:parked :told} outcome)) (pos? (:ended-turn end 0))
                                 (not (and (seq (:reasons j)) (every? #(= :main-unknown (:reason %)) (:reasons j)))))
                        (task/refine-tx main id)))
                ;; marked failed (my.task/fail!): the failure on main and the task held for root (a compare-and-swap from :running),
@@ -1286,8 +1286,8 @@
                         :else (let [[st o1] (request st id :ignored {:op :kill :id agent :ended true})
                                     [st o2] (write st id :done tx)]
                                 [st [o1 o2]]))))
-      ;; the writer's :merge answer, as one write: merged at its t; :reprove (its task proves again on its branch, which holds main now);
-      ;; or refused, an error answer (the writer's step threw) included: a failed end like any other (held for root), never left :ready
+      ;; the writer's :merge answer, as one write: merged at its t (main's program moved since the proof: the writer proved R itself
+      ;; first, seon.writer/reprove!); or refused, an error answer (the writer's step threw) included: a failed end like any other (held for root), never left :ready
       ;; for its seon_done to wait on. A merged task's namespaces that are Seon's own source are written back: main's files after the
       ;; merge, committed on the merges branch (:git), the sha recorded on the task (the self-improvement loop: the next generation builds it)
       :merged (let [task id
@@ -1305,10 +1305,6 @@
                                                              ;; its files wait for the hand that syncs them (my.root/write-back!): named here until a commit holds them
                                                              (and (:source st) (seq (:files r)) (not (cfg/value :seon.config.source/write-back-on-merge)))
                                                              (assoc :seon.task/error (contract/error :seon.git/commit-failed #'seon.reconcile/commit-tx "not on disk yet: (my.root/write-back! sys) syncs it" {:seon.git/files (vec (:files r))}))))
-                                     ;; main's program moved since its proof: its branch holds main now (the :merge took it), so it proves
-                                     ;; again there, never counted or held (plan item 10)
-                                     (and (not (contract/error? r)) (:reprove r))
-                                     (task/move-tx task :ready :reprove {:seon.task/reason "main's program moved since its proof: its branch now holds main; prove again"})
                                      :else (hold-tx (:db st) task (task/move-tx task :ready :closed {:seon.task/reason problem :seon.task/error r})
                                                     problem {:conflicts (:seon.task/conflicts t) :unmerged (:seon.task/unmerged t)}))
                                    ;; the live agents of the tasks a merged one unblocks are told, in this write, which wakes each
