@@ -1428,7 +1428,7 @@
                                                             :let [fs (some->> (get-in plan [:digests t]) found :failures not-empty vec)]
                                                             :when fs]
                                                         [t fs]))}
-                            (not @green?) (assoc :kept kept))}))))))
+                            (not @green?) (assoc :kept kept))})))))
         ;; the worktree's removal is recorded in the run's log: a failed one names what it left; a run not all green keeps the
         ;; whole of target/prove (its shard logs) beside its log
         (finally (let [run (java.io.File. (str dir "/target/prove"))
