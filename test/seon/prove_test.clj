@@ -454,6 +454,22 @@
     (is (= :seon.prove/no-verdict (:seon.error/type r)) (str "no verdict, never a red: " (pr-str r)))
     (is (some #(and (= :problem (:op %)) (= :platform (:class %))) o2) "and a :platform problem, loud")))
 
+;; root's ruling, 2026-11-17: a root that refused a test's attach (:seon.process/env-mismatch, its binary not its branch's tree) is the
+;; platform's error, never the test's result: no verdict and a :platform problem, as a wall-bound end is, so it is never cached as a
+;; red that a candidate's fix would leave standing (89 in-agent reds reused at their digests). The variant's schema says so
+;; (:seon.error/no-verdict, seon.proofs/no-verdict-error?). Red first: a red. Estimate: one item asked and ended: 200,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-refused-attach-is-no-verdict-never-a-red
+  (let [[st o1] (prove/ask-items (items-st 1) 7 :batch {['app.x-test/t "d1"] {:agent :a1 :ms 5}})
+        b (first (batches o1))
+        [st v] (step/answered st (:tag b))
+        refused {:pass 0 :fail 0 :error 1
+                 :reports [{:type :error :var "#'app.x-test/t" :seon.error/type :seon.process/env-mismatch :message "Uncaught exception, not in assertion."
+                            :actual "in-agent: the attach made no agent: target/seon's identity a is not tree b's"}]}
+        [st o2] (prove/batch-ended st (parse-long (second v)) refused)
+        r (get-in (answers o2) [7 :results 'app.x-test/t])]
+    (is (= :seon.prove/no-verdict (:seon.error/type r)) (str "no verdict, never a red: " (pr-str r)))
+    (is (some #(and (= :problem (:op %)) (= :platform (:class %))) o2) "and a :platform problem")))
+
 ;; docs/merging.md#the-test-service: one test with no verdict voids only its own. A run's answer was the first item error
 ;; (seon.prove/settle): one test ending at its wall bound (seon.procs-test/the-render-proc-asks-for-root-s-view-once-per-round-trip)
 ;; made the first backlog task's whole run an error, the agent held it as :seon.agent/test-error, and every proof read unknown, so
