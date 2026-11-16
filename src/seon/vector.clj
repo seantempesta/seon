@@ -583,9 +583,10 @@
         todo (concat fresh later)
         due (take (:texts st) todo)
         left (into (mapv first (drop (:texts st) todo)) (drop room owed))
-        ;; the searches holding a vector but no hits for their query (seon.ctx.search/hits-owed): read once, at the first round (a store
-        ;; written before hits were, or restored), then owed round by round; seon.ctx.search requires this namespace, so it is resolved here
-        hits-owed (if clean (:hits-owed st) ((requiring-resolve 'seon.ctx.search/hits-owed) db))
+        ;; the searches holding a vector but no hits for their query (seon.ctx.search/hits-owed): read once, the first round this state
+        ;; holds none (a start, after a failure, or a proc whose state was made before this code arrived in place), then owed round by
+        ;; round; seon.ctx.search requires this namespace, so it is resolved here
+        hits-owed (if (and clean (contains? st :hits-owed)) (:hits-owed st) ((requiring-resolve 'seon.ctx.search/hits-owed) db))
         ;; scanned at this commit: what is still due is owed, so the next round starts from here, not from a full scan
         st (assoc st :seen (:commit m) :clean (select-keys m [:t :commit]) :owed left :hits-owed (vec hits-owed))]
     (cond
