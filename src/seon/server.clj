@@ -658,11 +658,14 @@
   (if-let [{:keys [task env]} (work-of sys ag)]
     ;; a session's land: its checkout's changed files onto its agent's branch first, one it cannot read refusing the land, since a
     ;; judgement of part of the files would be wrong; then the end, as a turn loop's end is written, so the judge reads it. Which files
-    ;; changed is root's to read (seon.system/catch-up of the checkout against the tree the agent's branch last indexed: main's code,
-    ;; whatever program the agent's process runs); the agent imports them by name (my.branch/import!, the edit hook's own call)
+    ;; changed is root's to read: seon.system/catch-up of the checkout against its merge base with main (seon.fx/base-commit),
+    ;; so a checkout behind main names only what its own branch changed, never main's newer files as its own (read against the
+    ;; branch's held tree, a checkout 36 commits behind named 42 files where its branch changed 16 [M result/aad1e86e], and the
+    ;; import would have written main's older versions onto the branch); the agent imports them by name (my.branch/import!)
     (let [co (:checkout req)
+          base-tree (when co (some->> (fx/base-commit co) (fx/tree-of co)))
           diff (when co (let [b @(c/branch-db sys (:branch env))]
-                          (if (contract/error? b) b (c/catch-up (:db b) co {:fact? false}))))
+                          (if (contract/error? b) b (c/catch-up (:db b) co (cond-> {:fact? false} base-tree (assoc :tree base-tree))))))
           paths (when (map? diff) (into (vec (:paths diff)) (map :path) (:skipped diff)))
           imported (cond (nil? co) nil
                          (contract/error? diff) diff
