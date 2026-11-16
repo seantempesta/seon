@@ -1448,7 +1448,15 @@
                                   [p (:v (first (d/datoms db :eavt e :seon.task/id)))]))
               task? #(and (str/ends-with? % ".edn") (str/starts-with? % (str tasks-dir "/")))
               task-texts (into {} (for [[p t] (:value r) :when (task? p)] [(subs p (inc (count tasks-dir))) (or t "[]")]))
-              refused (when (seq task-texts) (let [x (task/load-tx db (tasks-of task-texts))] (when (contract/error? x) (:seon.error/message x))))
+              ;; a task file that does not read is left out alone, named with its error, and the rest are loaded: one bad file once
+              ;; refused every changed task file, so main's tree fact never moved (a bad entry never stops a catch-up, decisions)
+              unreadable-task (into {} (for [[n t] task-texts
+                                             :let [x (task/file-declarations (symbol (subs n 0 (- (count n) 4))) t)]
+                                             :when (contract/error? x)]
+                                         [(str tasks-dir "/" n) (:seon.error/message x)]))
+              readable (into {} (remove #(unreadable-task (str tasks-dir "/" (key %)))) task-texts)
+              ;; what load-tx refuses across the readable files (a need on a task none declares) is the set's, so it leaves them all out
+              refused (when (seq readable) (let [x (task/load-tx db (tasks-of readable))] (when (contract/error? x) (:seon.error/message x))))
               ;; the schema entries the changed schema files state, so the config file is checked against the branch's own schema
           schema-changes (into {} (for [[p t] (:value r) :when (and t (str/starts-with? p "resources/seon/schemas/") (str/ends-with? p ".edn"))
                                         :let [m (sedn/decode t)] :when (map? m)] m))
@@ -1458,6 +1466,7 @@
                                  :let [why (cond (and (unsynced p) (not= t (get (doc/files db [p]) p)))
                                                  (str "merged task " (unsynced p) " changed it and main holds it unsynced: (my.root/sync! sys [\"" (unsynced p) "\"]), then start again")
                                                  (and t (fx/unreadable p t schema-changes)) (fx/unreadable p t schema-changes)
+                                                 (unreadable-task p) (str "the task file does not read: " (unreadable-task p))
                                                  (and refused (task? p)) (str "the task files are refused: " refused))]
                                  :when why]
                              {:path p :reason why}))
