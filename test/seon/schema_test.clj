@@ -33,11 +33,11 @@
   request stops at its first error, so each line is one), and the branch's db after."
   [db code]
   (let [old @agent/state]
-    (binding [seon.agent/*start* (merge seon.agent/*start* {:mode :test})] (reset! agent/state {:n 0 :ns (the-ns 'user) :db db})
+    (reset! agent/state {:n 0 :ns (the-ns 'user) :mode :test :db db})
     (try [(mapv #(let [r (repl/eval-string % {})] (if (:ex r) (pr-str (:ex r)) (pr-str (:value r))))
                 (clojure.string/split-lines code))
           (:db @agent/state)]
-         (finally (reset! agent/state old))))))
+         (finally (reset! agent/state old)))))
 
 (def ^:private paused-status
   "[:and {:seon.db/index true} [:enum :running :parked :told :cap :done :ready :gate :merged :reprove :dead :lost :killed :refused :closed :paused]]")

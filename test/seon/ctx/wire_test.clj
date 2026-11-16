@@ -1800,13 +1800,13 @@
   (let [old @agent/state
         db0 (t/with (t/world) [{:seon.agent/key "a1"}])
         db3 (t/with db0 [{:seon.agent/key "a1" :seon.agent/turn 3}])]
-    (binding [agent/*start* (merge agent/*start* {:key "a1"})] (try (reset! agent/state {:db db0})
+    (try (reset! agent/state {:key "a1" :db db0})
          (is (= 0 (agent/turn-now)) "before its first turn")
-         (reset! agent/state {:db db3})
+         (reset! agent/state {:key "a1" :db db3})
          (is (= 3 (agent/turn-now)))
          (is (= [["a1"] false] ((juxt (comp #(mapv second %) :seon.message/to) #(contains? % :seon.message/call)) (first (agent/entries-tx [{:id "m" :from (seon.task/sender "owner") :body "x" :sent-ms 1000}]))))
              "a message delivered to the agent carries its agent, and no turn: the turn that reads it is derived from when it was delivered")
-         (finally (reset! agent/state old))))))
+         (finally (reset! agent/state old)))))
 
 (deftest failures-that-got-the-same-value-are-one-entry
   ;; 2026-10-29, the md-scan bench: nine assertions that each threw one NullPointerException were

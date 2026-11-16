@@ -648,12 +648,12 @@
   {:malli/schema [:=> [:cat :seon.host/db :map] :nil]}
   [db acct]
   ;; an agent's state holds its branch's schema slot (seon.agent/branch-schemas: a fork carries main's), the one copy of its entity index
-  (binding [seon.agent/*start* (merge seon.agent/*start* {:mode :test})] (reset! seon.agent/state {:db db :schema-registry {:key {} :registry {} :index (seon.db/index)}})
+  (reset! seon.agent/state {:db db :mode :test :schema-registry {:key {} :registry {} :index (seon.db/index)}})
   (let [tx (program/record-tx db acct)]
     (program/meaning-changes db tx)
     (seon.agent/transact! tx))
   (seon.doc/carry-index! (:db @seon.agent/state) db (map (juxt :e :a) (get-in @seon.agent/state [:tx :tx-data])))
-  nil))
+  nil)
 
 ;; Estimate: sizes 30+100+300 = 430 forms: branch-of 43M + the text index read ~20k a form = 9M; 3 definitions at ~0.34M each, a few samples: ~60M ticks.
 (deftest ^{:seon.test/estimate {:ticks 60000000}} a-definition-costs-the-form-never-the-program

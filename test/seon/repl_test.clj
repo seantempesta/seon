@@ -216,8 +216,8 @@
         abs (str (cfg/checkout) "/" p)
         main (my.test/with (my.test/world) (seon.source/file-tx p "#!/bin/zsh\necho 1\n"))
         old @agent/state]
-    (binding [agent/*start* (merge agent/*start* {:mode :test})] (try
-      (reset! agent/state {:db main :n 0 :ns (create-ns 'seon.repl-test.scratch)})
+    (try
+      (reset! agent/state {:mode :test :db main :n 0 :ns (create-ns 'seon.repl-test.scratch)})
       (let [named (repl/edit! p "echo 1" "echo 2")
             by-path (repl/edit! abs "echo 2" "echo 3")
             bad (refusal #(repl/edit! p "echo 3" "if then"))
@@ -228,7 +228,7 @@
         (is (= "#!/bin/zsh\necho 3\n" (:file/text (d/entity branch [:file/path p]))) "the branch holds the last edit that read")
         (is (= "#!/bin/zsh\necho 1\n" (:file/text (d/entity main [:file/path p]))) "main holds what it held")
         (is (not (.exists (java.io.File. ^String abs))) "nothing reached the disk"))
-      (finally (reset! agent/state old))))))
+      (finally (reset! agent/state old)))))
 
 (deftest a-doc-is-edited-as-a-definition-is
   ;; docs as code (task seon.doc/any-markdown-file-is-docs-it-writes-back): edit! of a doc's address replaces exact
@@ -468,7 +468,7 @@
         [_ ab ba ab2 _ _ turned _ _ m7 _ s2]
         (at/in-agent ["(ns x.swap) (defn f [] 1)" (ed "f" "[] 1" "[] 2") (ed "f" "[] 2" "[] 1") (ed "f" "[] 1" "[] 2")
                       "(ns x.swap) (defn g [] 1)"
-                      "(seon.agent/transact! [{:seon.agent/key (:key seon.agent/*start*) :seon.agent/turn 1 :seon.agent/max-turns 9}])"
+                      "(seon.agent/transact! [{:seon.agent/key (:key @seon.agent/state) :seon.agent/turn 1 :seon.agent/max-turns 9}])"
                       (ed "g" "[] 1" "[] 2")
                       ;; the agent's own data keeps its keys: a timing of its own that changed is a different answer
                       "(def t (atom 4))" "{:ms (swap! t inc)}" "{:ms (swap! t inc)}"
@@ -863,9 +863,9 @@
   ;; in this process by repl/eval-string as the agent's REPL does; 4 evals, a grep each; the one cost is the text index built once over the seed (~70 M ticks measured, ~2,000 datoms)
   (let [db (my.test/with (ts/test-db) (my.test/code 'seon.task "(ns seon.task)\n(defn accumulate [x] x)\n(defn tasks [] 1)"))
         old @agent/state
-        ev (fn [code] (binding [agent/*start* (merge agent/*start* {:mode :test})] (try (reset! agent/state {:db db :n 0 :ns (create-ns 'seon.repl-test.scratch)})
+        ev (fn [code] (try (reset! agent/state {:mode :test :db db :n 0 :ns (create-ns 'seon.repl-test.scratch)})
                            (repl/eval-string code {})
-                           (finally (reset! agent/state old)))))
+                           (finally (reset! agent/state old))))
         [kinds piped regex quoted] (map ev ["(try (my.agent/grep \"accumulate\" {:kinds #{:var}}) (catch Exception e (:seon.error/message (ex-data e))))"
                                             "(my.agent/grep \"defn (accumulate|tasks)\" {:ns \"seon.task\"})"
                                             "(count (my.agent/grep #\"defn (accumulate|tasks)\" {:ns \"seon.task\"}))"
@@ -1301,10 +1301,10 @@
             "(:seon.error/type (my.db/at {:t (inc (:max-tx (my.db/at)))}))"
             "(:seon.error/type (my.db/at {:branch :no-such-branch}))"
             "(:seon.error/type (my.db/at {:commit (random-uuid)}))"
-            "(let [b (:branch seon.agent/*start*)] (= (:seon.error/type (my.db/at {:branch b})) nil))"
+            "(let [b (:branch @seon.agent/state)] (= (:seon.error/type (my.db/at {:branch b})) nil))"
             ;; a branch as a task names it (its root's main left off) reads the same branch as the store's name for it
-            "(let [b (:branch seon.agent/*start*) m (seon.db/main-branch (:cfg seon.agent/*start*)) bare (if (= (name m) (namespace b)) (keyword (name b)) b)] [(not= b bare) (= (:max-tx (my.db/at {:branch b})) (:max-tx (my.db/at {:branch bare})))])"
-            "(let [b (:branch seon.agent/*start*) c (datahike.api/commit-id (my.db/at {:branch b}))] (= (:max-tx (my.db/at {:commit c})) (:max-tx (my.db/at {:branch b}))))"
+            "(let [b (:branch @seon.agent/state) m (seon.db/main-branch (:cfg @seon.agent/state)) bare (if (= (name m) (namespace b)) (keyword (name b)) b)] [(not= b bare) (= (:max-tx (my.db/at {:branch b})) (:max-tx (my.db/at {:branch bare})))])"
+            "(let [b (:branch @seon.agent/state) c (datahike.api/commit-id (my.db/at {:branch b}))] (= (:max-tx (my.db/at {:commit c})) (:max-tx (my.db/at {:branch b}))))"
             "(try (my.db/at {:commit (random-uuid) :t 1}) :no (catch Exception e :refused))"]))]
     (is (= 2 (count (filter :added? (:value rows)))) (str "the var's two definitions: " (pr-str rows)))
     (is (every? string? (map (comp :form/src :v) (filter :added? (:value rows)))) "each pulled to the text it had")
@@ -1433,7 +1433,7 @@
                                            nil)"
                                       "[id before]"
                                       "(do (seon.repl/again id \"(swap! tick + 10)\") (seon.agent/commit!) [(eid-of id) (code-of id)])"
-                                      "(do (seon.agent/transact! [{:seon.eval/id \"e1\" :seon.eval/agent [:seon.agent/key (:key seon.agent/*start*)] :seon.eval/by {:seon.agent/key \"agent\"} :seon.eval/code \"(+ 5 5)\" :seon.eval/response {:value 10}}])
+                                      "(do (seon.agent/transact! [{:seon.eval/id \"e1\" :seon.eval/agent [:seon.agent/key (:key @seon.agent/state)] :seon.eval/by {:seon.agent/key \"agent\"} :seon.eval/code \"(+ 5 5)\" :seon.eval/response {:value 10}}])
                                            (def was (eid-of \"e1\"))
                                            (seon.repl/again \"e1\" \"(+ 5 6)\")
                                            (seon.agent/commit!)
