@@ -796,7 +796,7 @@
         ;; three greens, each its own transaction: the newest written (on w1) last, though its basis :t is the lowest
         rdb (-> w0 (pdb/db-with (tx w0 3)) (pdb/db-with (tx w0 2)) (pdb/db-with (tx w1 1)))
         plan (seon.lib/digest "the plan's digest")]
-    (is (every? #(and (seq (:seon.proof/read-keys %)) (not (contains? % :seon.proof/reads))) (tx w0 3))
+    (is (every? #(and (seq (:seon.proof/read-keys %)) (not (contains? % :seon.proof/reads))) (filter :seon.proof/id (tx w0 3)))
         "a result carries its read keys as datoms, and no reads value")
     (let [txs (mapcat (fn [[w n]] (tx w n)) [[w0 3] [w0 2] [w1 1]])
           k (first (sort (:seon.proof/read-keys (first (tx w1 1)))))]
@@ -819,8 +819,8 @@
                                         {t (merge {:digest (seon.lib/digest (str "run " n))} r)} {t [{:var 'pt.sp/add}]} {}))
         rdb (-> w (pdb/db-with (tx 1 {:pass 1 :fail 0 :error 0 :ms 40 :ticks 9000}))
                   (pdb/db-with (tx 2 {:pass 0 :fail 1 :error 0 :ms 900 :failures [{:type :fail}]})))]
-    (is (= {:seon.bound/ms 40 :seon.bound/ticks 9000} (:seon.bound/spent (first (tx 1 {:pass 1 :fail 0 :error 0 :ms 40 :ticks 9000}))))
-        "a result carries what its run spent")
+    (is (= {:seon.bound/ms 40 :seon.bound/ticks 9000} (:seon.proof.run/spent (second (tx 1 {:pass 1 :fail 0 :error 0 :ms 40 :ticks 9000}))))
+        "a result's run carries what it spent")
     (is (= {t [40]} (proofs/spent-ms rdb [t 'pt.sp-test/never])) "a green's spend is read back; a red's and a test never run are not")))
 
 ;; docs/cost.md#what-a-test-run-measures: what each function cost a test is on its result, so my.agent/cost reads the store
@@ -975,11 +975,13 @@
   (let [basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
         ts (mapv #(symbol "pt.cold-test" (str "t" %)) (range 4))
         reads-at (fn [n]
-                   (let [ent (fn [i t] (let [rd (seon.lib/digest (str "reads " i))]
-                                         {:seon.proof/id (proofs/verdict-id t rd :pass) :seon.proof/test t :seon.proof/reach-digest (seon.lib/digest (str "reach " i))
-                                          :seon.proof/status :pass :seon.proof/route :live :seon.proof/ran-on #{:db} :seon.proof/reads-digest rd
-                                          :seon.proof/read-keys (into #{} (map (fn [j] (pr-str [:ea (+ 1000 (* i 10000) j) :form/code]))) (range n))}))
-                         db (pdb/db-with (mt/world) (vec (map-indexed ent ts)))
+                   ;; each result and its run at its reach digest, as seon.proofs/verdict-tx writes them
+                   (let [ent (fn [i t] (let [rd (seon.lib/digest (str "reads " i)) id (proofs/verdict-id t rd :pass)]
+                                         [{:db/id id :seon.proof/id id :seon.proof/test t
+                                           :seon.proof/status :pass :seon.proof/route :live :seon.proof/ran-on #{:db} :seon.proof/reads-digest rd
+                                           :seon.proof/read-keys (into #{} (map (fn [j] (pr-str [:ea (+ 1000 (* i 10000) j) :form/code]))) (range n))}
+                                          {:seon.proof.run/id (seon.lib/digest (str id " run")) :seon.proof.run/of id :seon.proof.run/reach-digest (seon.lib/digest (str "reach " i))}]))
+                         db (pdb/db-with (mt/world) (vec (apply concat (map-indexed ent ts))))
                          cand (into {} (for [i [1 3]] [(ts i) (seon.lib/digest (str "reach " i))]))
                          seen (atom [])
                          real d/datoms
@@ -1110,3 +1112,22 @@
     (is (= 1 (count results)) "of one result")
     (is (= #{:b :main} (into #{} (map :v) (d/datoms merged :aevt :seon.proof/ran-on (:e (first results))))) "which ran on both")
     (is (= {d {:digest d :pass 1 :fail 0 :error 0}} (proofs/verdicts-at merged {t d})) "and is found at its digest")))
+
+;; root, 2026-11-17 (flow's find, result/dce6ac09): a committed change to code a test reached was answered by the test's earlier green,
+;; reused by reads (seon.proofs/reused-by-reads), so the test never ran. A run's read of a function was its form entity's code
+;; ([:ea form :form/code]), and a form's id is its text's content: a change is a new form entity the var is pointed at, and the old one,
+;; left where another branch or a merge holds it, keeps its code, so no recorded read moved. The read is the var's form too ([:ea var
+;; :var/form]), which moves whenever the var is pointed at another. Red under the form-only keys. Estimate: a world with one form (~3M), a
+;; second (~1M), read-keys and three digests (<0.5M): 5,000,000
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-green-is-never-reused-across-a-code-change-it-read
+  (let [w0 (mt/with (mt/world) (mt/code 'pt.cc "(ns pt.cc)\n(defn add [x y] (+ x y))\n"))
+        t 'pt.cc-test/adds
+        ks (proofs/read-keys w0 (program/reach-graph w0 nil) t [{:var 'pt.cc/add}] #{})
+        old (:db/id (:var/form (d/entity w0 [:var/name 'pt.cc/add])))
+        ;; the var pointed at its new form; the old form's facts as they were (another branch, or a merge, still holds it)
+        w1 (mt/with w0 (mt/code 'pt.cc "(ns pt.cc)\n(defn add [x y] (- x y))\n"))
+        w1 (pdb/db-with w1 (vec (for [dt (d/datoms w0 :eavt old)] [:db/add old (:a dt) (:v dt)])))]
+    (is (not= old (:db/id (:var/form (d/entity w1 [:var/name 'pt.cc/add])))) "the var is on its new form")
+    (is (some? (:form/code (d/entity w1 old))) "and the old form keeps its code")
+    (is (not= (pdb/reads-digest w0 ks nil) (pdb/reads-digest w1 ks nil))
+        "what the run read moved: a green of the old code is no answer for the new")))
