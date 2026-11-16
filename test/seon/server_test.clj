@@ -149,14 +149,16 @@
     (is (clojure.string/includes? (get-in bad ["error" "message"]) "keyword-keyed map"))
     (is (contract/error? (clojure.edn/read-string (respond nil "{:op :nope}"))) "a keyword-keyed line is EDN in, EDN out")))
 
-(deftest an-attached-agent-holds-its-task-running-in-its-record
+(deftest ^{:seon.test/estimate {:ticks 5000000}} an-attached-agent-holds-its-task-running-in-its-record
   ;; agent view's browser check: an agent attached from outside (seon.server/attach! spawns it before it writes the start on main, so its branch is
   ;; cut without the task, and before main writes the task's release) held no task in @ctx, and read it :held, until a turn or a context read began
   ;; its work. Forked for a task, the agent records it on its branch as it starts (seon.agent/begin-run!): its task in its record, no runs, and
   ;; (my.task/current) and its record read the task running, as main does (task seon.task/an-agent-reads-its-task-as-main-holds-it)
+  ;; in this process (my.test/eval-in): the agent of a fresh task on the world, whose start (init!) is begin-run!, run as the first form
   (let [names (volatile! nil)
-        [held current running] (at/in-agent (fn [n] (vreset! names n)
-                                              ["(let [t @seon.ctx/ctx] [(contains? t :runs) (get-in t [:seon.agent/task :seon.task/id])])"
+        [_ held current running] (my.test/eval-in (fn [n] (vreset! names n)
+                                              [(fn [_] (seon.agent/begin-run! {:key (:agent n) :role :test} (:task n)))
+                                               "(let [t @seon.ctx/ctx] [(contains? t :runs) (get-in t [:seon.agent/task :seon.task/id])])"
                                                "(:seon.task/execution (my.task/current agent))"
                                                "(:seon.task/execution (:seon.agent/task @seon.ctx/ctx))"]))]
     (is (= [false (:task @names)] (:value held)) "its task, in its record, and no runs")
@@ -404,7 +406,7 @@
                                " {:kept (own? (select-keys k [:commit :t])) :first (own? (zipmap [:commit :t] (:point (:first k))))})")])]
     (is (= {:kept true :first true} (:value r)) (str "each kept point names its commit's own t: " (pr-str r)))))
 
-(deftest a-later-read-draws-no-page-cold
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-later-read-draws-no-page-cold
   ;; the owner, 2026-10-27: a later turn's request build measured 94M ticks, 317 MB on Seon's own tasks, 25,000
   ;; contracted calls, two pages drawn a read (the one before's again, to diff against). Each read after
   ;; the first draws the one page it tells and costs what the read before did: ticks and bytes are the
@@ -412,7 +414,7 @@
   ;; so no walk is drawn cold, and it equals a cold walk (seon.render/walk :once) on the db it is drawn to. Its cost claim (a read costs what the one
   ;; before did) is no test: a ratio of two readings in a root whose main other tests move (docs/testing.md#testing-in-the-world, a cost proof is seon.cost/proof)
   (let [[reads]
-        (at/in-agent (fn [{:keys []}]
+        (my.test/eval-in (fn [{:keys []}]
                        [(str "(let [t (seon.agent/task-of agent)"
                              " m (fn [] (let [v (seon.profile/measure! #(count (seon.turn/context-block agent t true)))]"
                              "           {:ticks (:ticks v) :bytes (:bytes v)"
