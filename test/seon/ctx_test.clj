@@ -2055,3 +2055,21 @@
     (is (string? a) "the test's agent")
     (is (= a k) "the record is the start value's agent")
     (is held? "its entity, held on the db")))
+
+;; Estimate: a test branch (~1M), three small commits (~0.3M), the read: d/changes of two commits (~0.1M); 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000 :bytes 20000000}} a-move-across-commits-reads-the-commits-never-a-whole-diff
+  ;; task seon.ctx/a-merge-of-main-patches-ctx-by-what-the-merge-moved (flow's find): after a merge of main the agent's held db is its
+  ;; run-ahead value (made by d/with, uncommitted) and the new one the merged head, so seon.ctx/moved diffed the two values whole
+  ;; (seon.merge/changed-datoms falls back to datoms-diff for an uncommitted value): 551M ticks and 2.4 GB a merge, at every judge's
+  ;; merge. What moved is the commits between them (d/changes) and the held value's own uncommitted writes, O(what moved). Red before:
+  ;; the whole diff ran
+  (ts/test-branch!
+   (fn [_ conn]
+     (d/transact conn [{:db/id "f" :form/id "mv/1" :form/ns {:ns/name (quote app.mv)} :form/order 0 :form/src "(defn a [])"}])
+     (let [a (:db-after (d/with @conn [{:db/id "g" :form/id "mv/2" :form/ns {:ns/name (quote app.mv)} :form/order 1 :form/src "(defn b [])"}]))
+           _ (d/transact conn [{:db/id "g" :form/id "mv/2" :form/ns {:ns/name (quote app.mv)} :form/order 1 :form/src "(defn b [])"}])
+           _ (d/transact conn [{:db/id "h" :form/id "mv/3" :form/ns {:ns/name (quote app.mv)} :form/order 2 :form/src "(defn c [])"}])
+           b @conn
+           ids (fn [ds] (set (keep (fn [d] (when (= :form/id (:a d)) (:v d))) ds)))
+           ds (with-redefs [datahike.api/datoms-diff (fn [& _] (throw (ex-info "a whole diff" {})))] (ctx/moved a b nil))]
+       (is (= #{"mv/2" "mv/3"} (ids ds)) "the held value's own write and the commit after it, read from the commits")))))
