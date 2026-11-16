@@ -2054,7 +2054,16 @@
   docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat [:set :symbol] :boolean] :map]}
   [names reach?]
-  (let [r (prove! :judge names)]
+  ;; the judge's own run proves the branch with main merged in, the candidate the merge makes main (the owner: prove the
+  ;; merged branch once): merged first, so its results are the candidate's and the merge reruns only what main moves after.
+  ;; A conflict is the answer: nothing is proved on a branch that cannot become main; a merged form that does not load reds its tests
+  (let [m (when reach? (merge-main!))
+        r (cond (contract/error? m) m
+                (seq (:conflicts m)) (contract/error :seon.merge/unmerged #'judge!
+                                                     (str "main does not merge into this branch: " (count (:conflicts m)) " unmerged entr"
+                                                          (if (= 1 (count (:conflicts m))) "y" "ies") "; (my.branch/unmerged) lists them, (my.branch/resolve! ...) settles each")
+                                                     {:unmerged (vec (:conflicts m))})
+                :else (prove! :judge names))]
     (if (or (contract/error? r) (empty? (:deferred r)) (seq (proofs/failures r)))
       r
       (let [_ (commit!)
