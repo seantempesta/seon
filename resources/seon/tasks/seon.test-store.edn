@@ -34,4 +34,8 @@
   :seon.task/proofs #{seon.test-store-test/an-ask-to-a-silent-root-ends-typed-with-its-state}
   :seon.task/estimate #:seon.test-store{ask {:n 1, :order :constant, :ticks 200000, :bytes 100000}}
   :seon.task/needs #{}}
+ {:seon.task/name "a-test-leaves-nothing-on-the-standing-stores-main"
+  :seon.task/plan "Measured 2026-11-14 (root, a query on the standing store's main): 107 tasks with no file are test debris on main itself, e.g. seon.agent-test/fast-a-call-is-text-and-its-forms and r3.inc-test/fast-incremental-equals-full. A test writes on a branch or store of its own and never on the standing store's main, so main holds only what we keep and the owner's rule that kept data reaches disk can be checked. Find the writers (the fast- prefix and r3.inc-test), route them to their own branch, and retract the 107 from main after listing them for the owner. Owner: tests."
+  :seon.task/kind :whole
+  :seon.task/proofs #{seon.test-store-test/a-test-run-adds-no-task-to-the-standing-main}}
 ]

@@ -47,4 +47,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.check-test/the-health-bases-own-process-writes-its-program-into-the-base-store}
   :seon.task/estimate #:test-runner{make-base-tree! {:n 1, :order :constant, :ticks 5000000, :bytes 10000000}}
-  :seon.task/needs #{}}]
+  :seon.task/needs #{}}
+ {:seon.task/name "the-health-step-test-builds-its-world-outside-its-budget"
+  :seon.task/plan "[M] seon.check-test/the-health-step-reads-a-base-whose-alias-the-head-retargets clones the checkout's HEAD and imports HEAD's tree into the kept program store inside its own budget. When the plan's tree differs from HEAD (an uncommitted edit during a land check), that is a full import, ~1.0B ticks, and the test is red at its budget: web's land --check, 2026-11-14 12:15 (target/land/20261114T121502-jolt-web.log). It is green alone in 21.7 s. The verdict reads the checkout's state. Fix: the world is a fixture (^:seon.test/fixture) built once and outside the budget, or the test imports the plan's own tree, never HEAD. Owner: tests. Filed by web for root.\n\nAgreed 2026-11-14 (tests-2, web): the series' first fixture case. The clone and the head's program-db (the ~1B-tick import) become a warm shard fixture made once before timing, as seon.proofs/warm-fixtures! does for the shared root, so the test's budget holds only the base build it asserts on. Until it lands the test stays as is: no waiver, no raised estimate. Owner: tests."
+  :seon.task/kind :whole}]
