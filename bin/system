@@ -160,7 +160,10 @@ kill_root() {
 case ${1:-start} in
   status)
     NET=$("$ROOT/bin/full-run")
-    if running; then read T R < "$PIDS"; print "root $R up: server $(cat "$PORTF" 2>/dev/null || print $PORT), dashboard http://127.0.0.1:$WEB/"; print "$NET"
+    # up is read from readiness: root.port is written at ROOT LISTENING (launch) and removed at the next start; alive without it,
+    # the root is starting and no port is named (seon.system/status-says-up-only-once-the-root-listens)
+    if running && [[ -f $PORTF ]]; then read T R < "$PIDS"; print "root $R up: server $(<"$PORTF"), dashboard http://127.0.0.1:$WEB/"; print "$NET"
+    elif running; then read T R < "$PIDS"; print "root $R starting: not listening yet"; print "$NET"; exit 2
     else print "no root running for $ROOT (ports $PORT $WEB)"; print "$NET"; exit 1; fi ;;
   stop)
     running || { print "no root running"; exit 0 }

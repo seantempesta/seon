@@ -750,3 +750,23 @@
       (write! "other")
       (is (zero? (:exit (laws))) "each name once: green")
       (finally (seon.lib/remove-tree! dir)))))
+
+;; seon.system/status-says-up-only-once-the-root-listens: bin/system status says up only once root.port is written (ROOT LISTENING);
+;; a root alive without it is starting, with no port named. Estimate: two runs of bin/system status (its zsh, bin/ports and
+;; bin/full-run: ~0.2 s of processes, ~1M ticks of ours to start and read them)
+(deftest ^{:seon.test/execs ["bin/system"] :seon.test/estimate {:ticks 2000000}} status-says-up-only-once-the-root-listens
+  (let [runs (str (seon.config/checkout) "/target/status-test-" (seon.lib/c-getpid))
+        status #(seon.lib/sh "env" (str "SEON_RUNS=" runs) (str (seon.config/checkout) "/bin/system") "status" :dir (seon.config/checkout))]
+    (.mkdirs (java.io.File. runs))
+    ;; a live process stands for the root: this test's own
+    (spit (str runs "/root.pids") (str "0 " (seon.lib/c-getpid) "\n"))
+    (try
+      (let [r (status)]
+        (is (str/includes? (:out r) "starting: not listening yet") (pr-str r))
+        (is (not (str/includes? (:out r) " up:")) "alive but not listening is never up")
+        (is (= 2 (:exit r))))
+      (spit (str runs "/root.port") "41234\n")
+      (let [r (status)]
+        (is (str/includes? (:out r) "up: server 41234") (pr-str r))
+        (is (zero? (:exit r))))
+      (finally (seon.lib/sh "rm" "-rf" runs)))))
