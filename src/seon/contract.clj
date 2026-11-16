@@ -211,11 +211,12 @@
     (let [s @@st]
       (when (:db s) (or (:schema-registry s) (@bs))))))
 
-(def ^:private branch-vars
-  "The agent's state and branch-schemas vars, found by name once they are bound (seon.agent loads after this namespace)."
-  (let [found (volatile! nil)]
-    #(or @found (let [st (find-var 'seon.agent/state) bs (find-var 'seon.agent/branch-schemas)]
-                  (when (and st bs (bound? st) (bound? bs)) (vreset! found [st bs]))))))
+(clojure.core/defn- branch-vars
+  "The agent's state and branch-schemas vars, or nil until both are bound: found by name, since seon.agent loads after this namespace."
+  {:malli/schema [:=> [:cat] [:maybe [:tuple :any :any]]]}
+  []
+  (let [st (find-var 'seon.agent/state) bs (find-var 'seon.agent/branch-schemas)]
+    (when (and st bs (bound? st) (bound? bs)) [st bs])))
 
 (clojure.core/defn held-branch
   "The schema slot of the branch this agent process holds (seon.agent/branch-schemas: its changes, registry, entity index and Datahike
