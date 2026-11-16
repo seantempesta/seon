@@ -1213,6 +1213,21 @@
        (d/transact conn [{:seon.agent/key "k1" :seon.agent/started-ms 9}])
        (is (= {:agent :k1 :task "demo/s"} (my.root/held-agent sys "c1")) "spawned again after that end: c1 holds it")))))
 
+;; Estimate: three small transactions on a test branch and one held-agents read, ~0.3M
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-killed-agent-is-held-by-no-one
+  ;; tests, 2026-11-16: after attach fresh=true, every eval of client tests answered :seon.system/ended for its old agent n281eb679a9b6642.
+  ;; Root's view records a process's end on its process entity (:seon.process/ended-ms, seon.task/agent-tx); a kill outside the reconciler
+  ;; (root's kill!, an OOM, the gate's spawn ended) writes no :seon.agent/ended-ms, and seon.task/agent-ended?, the one ended rule, read
+  ;; only that. So a killed agent read live: held-agent picked it, and so did every reader of the rule. Red before: :k1
+  (ts/test-branch!
+   (fn [_ conn]
+     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'session :seon.task/name "w" :seon.task/plan "Work w." :seon.task/proofs #{'demo-test/w}}]))
+     (d/transact conn (ts/work-tx "session/w" :running {:agent :k1 :holder "w" :start-ms 1000}))
+     (d/transact conn [{:seon.process/id "k1/42" :seon.process/agent [:seon.agent/key "k1"] :seon.process/pid 42 :seon.process/ended-ms 2000}
+                       {:seon.agent/key "k1" :seon.agent/status :killed}])
+     (let [sys {:graph nil :ext (a/chan) :conn conn}]
+       (is (nil? (my.root/held-agent sys "w")) "its process ended after its start: held by no one")))))
+
 ;; Estimate: three small transactions on a test branch and two reads (held-agents, agent-key), ~0.5M
 (deftest ^{:seon.test/estimate {:ticks 1500000}} a-sessions-message-is-from-its-session-whoever-holds-its-agent
   ;; root, 2026-11-16: 15 of 27 messages to root arrived :from "user", as the owner, though sessions sent them. The sender was the agent
