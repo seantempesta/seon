@@ -565,7 +565,7 @@
   (apply record (empty-db) (concat calc-srcs ['app.pt-calc-test "(deftest neg-test (is (= -1 (app.pt-calc/neg 1))))"])))
 
 (defn- scratch-dir [label]
-  (let [d (str (System/getProperty "java.io.tmpdir") "/seon-reach-" label "-" (random-uuid))]
+  (let [d (str (str/replace (System/getProperty "java.io.tmpdir") #"/+$" "") "/seon-reach-" label "-" (random-uuid))]
     (.mkdirs (java.io.File. d))
     d))
 
@@ -835,61 +835,66 @@
     (sh/sh "git" "-C" d "add" ".")
     d))
 
-;; Estimate: 2 checkouts (git) 0.3M; calc-db 2.4M; 8 fx/inputs x 0.1M = 0.8M; 2 reach-digests 0.6M; running 3 tests 1.5M; verdicts and 2 plans 0.6M. Estimated 6,000,000 ticks, worked from the work, never from a run.
-(deftest ^{:seon.test/estimate {:ticks 6000000}} a-result-recorded-in-one-checkout-is-reused-in-another
+;; A checkout's inputs are a function of git's `ls-tree -r` of its tree (seon.fx/inputs reads nothing else of a clean checkout:
+;; no submodule is checked out here), so the claims about which file moves which input are made on that listing, never on a
+;; repository that git must init, add and tree-id (about 20 git children a call).
+(defn- ls-tree
+  "git ls-tree -r's lines for files ({path text}; {:gitlink sha} for a submodule): mode, type, content id, path."
+  [files]
+  (str/join "\n" (for [[p t] (sort files)]
+                   (if (map? t) (str "160000 commit " (:gitlink t) "\t" p) (str "100644 blob " (seon.lib/digest t) "\t" p)))))
+
+(defn- fake-inputs
+  "fx/inputs of the checkout at root whose tree is files ({path text}, a submodule {:gitlink sha}), c the config in force and
+  checkout the main tree's path: git's listing of the files stands in for the repository."
+  ([root files] (fake-inputs root files cfg/config (cfg/checkout)))
+  ([root files c checkout]
+   (with-redefs [fx/git! (let [real @#'fx/git!]
+                           (fn [env dir args in] (if (= ["ls-tree" "-r"] (take 2 args)) (ls-tree files) (real env dir args in))))]
+     (fx/inputs root c checkout (seon.lib/digest (ls-tree files))))))
+
+;; Estimate: calc-db 2.4M; 8 fx/inputs of a 5-line listing x 0.05M = 0.4M; 2 reach-digests 0.6M; running 3 tests 1.5M; verdicts and 2 plans 0.6M. Estimated 5,500,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 5500000}} a-result-recorded-in-one-checkout-is-reused-in-another
   (with-dir (fn [conn]
   (let [files {"deps.edn" "{}" "resources/seon/schemas/x.edn" "{:x :int}" "src/app/a.clj" "(ns app.a)" "docs/a.md" "# a"}
-        a (checkout! "a" files)
-        b (checkout! "b" files)
         db (calc-db)
-        in-a (fx/inputs a)
+        in-a (fake-inputs "/a" files)
         da (select-keys (ts/reach-digests db in-a) calc-tests)
-        in-b (fx/inputs b)]
-    ;; b's inputs once for each state of its files: each call is its tree-id's git children
+        in-b (fake-inputs "/b" files)
+        b-with (fn [& kvs] (fake-inputs "/b" (apply assoc files kvs)))]
     (is (= in-a in-b) "the same content at another path: the same inputs")
     (record-ran! conn (proofs/run-tests! (:run (run-plan da conn)) da (fn [_])))
     (is (= [] (:run (run-plan (select-keys (ts/reach-digests db in-b) calc-tests) conn)))
         "checkout b reuses every result checkout a recorded")
-    (spit (str b "/docs/a.md") "# a, edited")
-    (let [in-b (fx/inputs b)]
+    (let [in-b (b-with "docs/a.md" "# a, edited")]
       (is (= (:env in-a) (:env in-b)) "text is no input of a test that reads no files")
       (is (= (:code in-a) (:code in-b)) "nor of a check step"))
     ;; the shipped config is no input of every test (root, 2026-10-27: a batch's greens were reused
     ;; by none, because :env moved in 8 of 12 batches): its values are :config's, taken by the keys
     ;; a test reads
-    (.mkdirs (java.io.File. (str b "/resources/seon/config")))
-    (spit (str b "/resources/seon/config/default.edn") "{:a 1}")
-    (let [in-b (fx/inputs b)]
+    (let [in-b (b-with "resources/seon/config/default.edn" "{:a 1}")]
       (is (= (:env in-a) (:env in-b)) "the shipped config file is no input of every test")
       (is (not= (:code in-a) (:code in-b)) "though it is of a check step, which runs with all of it"))
-    (spit (str b "/resources/seon/schemas/x.edn") "{:x :string}")
-    (let [in-b (fx/inputs b)]
+    (let [in-b (b-with "resources/seon/schemas/x.edn" "{:x :string}")]
       (is (= (:env in-a) (:env in-b)) "a schema resource is no input of every test: its entries are program facts, taken by the tests whose reach names them")
       (is (not= (get-in in-a [:config :seon.env/schemas]) (get-in in-b [:config :seon.env/schemas]))
           "and a class of its own, for a reach that walks a db's whole schema (seon.reconcile/index)"))
-    (spit (str b "/src/app/a.clj") "(ns app.a \"edited\")")
-    (let [in-b (fx/inputs b)]
+    (let [in-b (b-with "src/app/a.clj" "(ns app.a \"edited\")")]
       (is (= (:env in-a) (:env in-b)) "a src file is no input of every test: its forms are program facts")
       (is (not= (get-in in-a [:config :seon.env/src]) (get-in in-b [:config :seon.env/src]))
           "and a class of its own, for a reach that reads the whole program's text (a docstring)"))
-    (spit (str b "/deps.edn") "{:paths []}")
-    (is (= (:env in-a) (:env (fx/inputs b))) "deps.edn is a class of its own too")
+    (is (= (:env in-a) (:env (b-with "deps.edn" "{:paths []}"))) "deps.edn is a class of its own too")
     ;; a hotfix landing of .gitignore and one task file reused 14 of 1,891 keys: .gitignore was in :env
-    (spit (str b "/.gitignore") "target/")
-    (let [in-b (fx/inputs b)]
+    (let [in-b (b-with ".gitignore" "target/")]
       (is (= (:env in-a) (:env in-b)) "a file at the checkout's root (git's, the tools') is no input of every test")
       (is (not= (get-in in-a [:config :seon.env/bin]) (get-in in-b [:config :seon.env/bin]))
           "it is the bin class, which a test running git or a script takes"))
     ;; batch 77 changed AGENTS.md and four wiki pages and reran 463 of 1,785 tests and 36 of 40 steps: AGENTS.md, at the
     ;; checkout's root, was the bin class, which every process test and step takes. It is the wiki's top page (seon.doc)
-    (let [before (fx/inputs b)
-          _ (spit (str b "/AGENTS.md") "# edited")
-          in-b (fx/inputs b)]
-      (is (= (get-in before [:config :seon.env/bin]) (get-in in-b [:config :seon.env/bin])) "a .md file at the checkout's root is no script's input")
-      (is (not= (get-in before [:config :seon.env/docs]) (get-in in-b [:config :seon.env/docs])) "it is the wiki's, the docs class"))
-    (.mkdirs (java.io.File. (str b "/native")))
-    (spit (str b "/native/x.c") "int x;")
-    (is (not= (:env in-a) (:env (fx/inputs b))) "native/, the pins and the fixtures are every test's")))))
+    (let [in-b (b-with "AGENTS.md" "# edited")]
+      (is (= (get-in in-a [:config :seon.env/bin]) (get-in in-b [:config :seon.env/bin])) "a .md file at the checkout's root is no script's input")
+      (is (not= (get-in in-a [:config :seon.env/docs]) (get-in in-b [:config :seon.env/docs])) "it is the wiki's, the docs class"))
+    (is (not= (:env in-a) (:env (b-with "native/x.c" "int x;"))) "native/, the pins and the fixtures are every test's")))))
 
 ;; Estimate: 14 record-tx x 40k = 0.6M (the world is cached); 1 graph 0.2M; 13 graph-indexes x 0.05M = 0.65M; checks small. Estimated 2,000,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-test-takes-only-the-file-classes-its-reach-reads
@@ -1095,103 +1100,88 @@
       (is (= ((dg g1) 'app.pt-op-test/a-test) ((dg g2) 'app.pt-op-test/a-test)) "the one sending only :pt-a does not")
       (finally (remove-method seon.server/op-answer :pt-a) (remove-method seon.server/op-answer :pt-b)))))
 
-;; Estimate: 5 sampled files (first, 4 named) x ~520 lines x 40k ticks a line imported (3.4G over src+test's 86k lines) = 100M; sampled-repo listing of 229 files 1M, fx/inputs 3M, graph 1M, 5 graph-indexes 2.5M. Estimated 100,000,000 ticks, worked from the work, never from a run.
-(deftest ^{:seon.test/estimate {:ticks 100000000}} a-test-takes-the-pins-of-the-libraries-its-reach-runs-on
+;; Estimate: the checkout's .gitmodules (15 paths) as a listing 0.1M; 5 forms recorded as facts 5 x 40k; 1 graph 0.1M; 6 graph-indexes of 5 tests 0.3M. Estimated 1,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-test-takes-the-pins-of-the-libraries-its-reach-runs-on
   ;; root, 2026-10-27: a pin bump moved every digest in 3 of the last 12 batches (datahike 3, konserve
   ;; 2, jolt 2). A pin named by :seon.config.source/pin-namespaces is a :seon.pin/NAME entry of
   ;; :config, taken by a test whose reach references a namespace its library provides (or runs on),
-  ;; a test that reads files or runs a process too; the runtime core's pins are no test's (ruling D)
-  (let [here (seon.config/checkout)
-        in (fx/inputs here)
-        sample (sampled-repo "pins" 1000 ;; the first file of the tree and the four named: seon.db and its test reach lmdb and zstd, datahike.query-test datahike, reader-test nothing
-                                 ["test/datahike/query_test.clj" "test/seon/reader_test.clj" "src/seon/db.clj" "test/seon/db_test.clj"])
-        g (program/reach-graph (runner/program-db sample (ts/program-store)) (:data-refs in))
+  ;; a test that reads files or runs a process too; the runtime core's pins are no test's (ruling D).
+  ;; On a test namespace of five facts (a test reaching datahike, one lmdb, one zstd, one datahike through a helper, a pure one)
+  ;; and the checkout's own submodules as the listing git gives them, never on a sample of the program
+  (let [paths (map second (re-seq #"path = (\S+)" (slurp (str (cfg/checkout) "/.gitmodules"))))
+        in (fake-inputs "/p" (into {"deps.edn" "{}"} (for [p paths] [p {:gitlink (str "pin-of-" p)}])))
+        runtime (cfg/value :seon.config.source/runtime-pins)
+        fact (fn [nm kind refs]
+               (fn [db] (program/record-tx db {:id (str "app.pt-pn-test/" nm) :src (str "(defn " nm ")") :ns 'app.pt-pn-test :ns-form? false
+                                               :defs [{:var (symbol "app.pt-pn-test" nm) :meta (case kind :test #{:test} #{:arglists})}]
+                                               :declares #{} :methods [] :impls [] :refs refs :requires #{} :banned #{} :inline-defs #{}})))
+        db (mt/with (empty-db)
+             (fact "datahike-test" :test '#{datahike.api/q})
+             (fact "lmdb-test" :test '#{konserve.jolt.lmdb/open-env})
+             (fact "zstd-test" :test '#{konserve.jolt.zstd/compress})
+             (fact "helper" :fn '#{datahike.api/transact})
+             (fact "by-helper-test" :test '#{app.pt-pn-test/helper})
+             (fact "pure-test" :test '#{}))
+        g (program/reach-graph db nil)
         a (update-vals (program/graph-index g in nil) :digest)
         all-tests (set (keys a))
-        ;; each class once: the checks below ask the same sets several times, a graph-index of the whole program each
-        moved (memoize (fn [c] (let [b (update-vals (program/graph-index g (assoc-in in [:config c] "other") nil) :digest)]
-                                 (set (for [[t d] a :when (not= d (b t))] t)))))]
-    (is (every? #(contains? (:config in) %) [:seon.pin/datahike :seon.pin/konserve :seon.pin/malli :seon.pin/crypto]) "the pins the config names are classes of the inputs")
-    (is ((moved :seon.pin/datahike) 'datahike.query-test/a-nested-call-in-a-predicate-is-refused) "a test that calls datahike takes its pin")
-    ;; the runtime's pins (Jolt, Chez) are no class: every test's :env takes them (a-runtime-pin-moves-every-digest)
-    (is (every? #(contains? (:config in) %) [:seon.pin/lmdb :seon.pin/zstd :seon.pin/llama.cpp :seon.pin/awesome-jolt]) "every other submodule is a class")
-    (is (not-any? #(contains? (:config in) %) [:seon.pin/jolt :seon.pin/chez]) "the runtime's pins are in :env, no class")
-    (is (= #{} (moved :seon.pin/crypto)) "a library no reached namespace names is no test's (src calls no jolt.crypto)")
-    (doseq [c [:seon.pin/datahike :seon.pin/lmdb :seon.pin/zstd]]
-      (is (< 0 (count (moved c)) (count all-tests)) (str (count (moved c)) " of " (count all-tests) " tests take " c ": some, not every test"))
-      (is (not ((moved c) 'seon.reader-test/text-without-a-fence-is-a-comment)) (str "a pure test takes no " c)))
-    (is (< (count (moved :seon.pin/lmdb)) (* 0.5 (count all-tests))) "an lmdb bump moves under half the tests")
-    (is (< (count (moved :seon.pin/crypto)) (count (moved :seon.pin/datahike))) "fewer tests run on the crypto library than on datahike")))
+        moved (fn [c] (let [b (update-vals (program/graph-index g (assoc-in in [:config c] "other") nil) :digest)]
+                        (set (for [[t d] a :when (not= d (b t))] t))))]
+    (is (= 5 (count all-tests)) "the five tests")
+    (is (every? #(contains? (:config in) (cfg/pin-class %)) (remove (set runtime) paths)) "every submodule but the runtime's is a class of the inputs")
+    (is (not-any? #(contains? (:config in) (cfg/pin-class %)) runtime) "the runtime's pins are in :env, no class")
+    (is (= '#{app.pt-pn-test/datahike-test app.pt-pn-test/by-helper-test} (moved :seon.pin/datahike)) "a test that calls datahike takes its pin, and so does one that reaches it through a helper")
+    (is (= '#{app.pt-pn-test/lmdb-test} (moved :seon.pin/lmdb)) "an lmdb bump moves the test running on it alone")
+    (is (= '#{app.pt-pn-test/zstd-test} (moved :seon.pin/zstd)))
+    (is (= #{} (moved :seon.pin/crypto)) "a library no reached namespace names is no test's")
+    (is (every? #(not (contains? (moved %) 'app.pt-pn-test/pure-test)) [:seon.pin/datahike :seon.pin/lmdb :seon.pin/zstd :seon.pin/konserve]) "a pure test takes no pin")))
 
-;; Estimate: checkout .15M + 3 git shells .15M + 3 fx/inputs (tree-id, one pin) x 0.1M = 0.3M. Estimated 700,000 ticks, worked from the work, never from a run.
+;; Estimate: 1 shell making the submodule's repository 0.05M; 3 fx/inputs of a 2-entry listing x 0.05M, each one pin: git status, and for the edited state a tree-id (git children, the subject). Estimated 700,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 700000}} an-uncommitted-edit-in-a-submodule-is-an-input
   ;; pure-tests 2026-10-23: tree-id stages a submodule at its HEAD, while bin/build copies and
   ;; the test runtime loads its files as they are: a dependency edit not yet committed left
   ;; every digest as it was, so a green proven on the old files was reused on the new. A submodule
-  ;; is a class (seon.config/pin-class), taken by the tests whose reach runs on it
-  (let [p (checkout! "with-sub" {"deps.edn" "{}"})
+  ;; is a class (seon.config/pin-class), taken by the tests whose reach runs on it. The parent is
+  ;; the listing git would give (fake-inputs); the submodule is a repository, the git status of
+  ;; its files being what is judged
+  (let [p (scratch-dir "with-sub")
         s (str p "/reference-code/lib")
-        core (str s "/core.clj")]
-    (.mkdirs (java.io.File. s))
+        core (str s "/core.clj")
+        _ (.mkdirs (java.io.File. s))
+        _ (spit core "(ns lib.core)")
+        _ (sh/sh "zsh" "-c" "git -C \"$1\" init -q && git -C \"$1\" add . && git -C \"$1\" -c user.name=t -c user.email=t@t commit -q -m lib" "zsh" s)
+        lib #(get-in (fake-inputs p {"deps.edn" "{}" "reference-code/lib" {:gitlink "abc"}}) [:config :seon.pin/lib])
+        before (lib)]
+    (is (string? before) "the submodule is a class of the inputs")
+    (spit core "(ns lib.core) (def edited 1)")
+    (is (not= before (lib)) "an edit in the submodule's files moves its class")
     (spit core "(ns lib.core)")
-    (doseq [args [["init" "-q"] ["add" "."] ["-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "lib"]]]
-      (apply sh/sh "git" "-C" s args))
-    (sh/sh "git" "-C" p "add" "reference-code/lib")
-    (let [lib #(get-in (fx/inputs p) [:config :seon.pin/lib])
-          before (lib)]
-      (is (string? before) "the submodule is a class of the inputs")
-      (spit core "(ns lib.core) (def edited 1)")
-      (is (not= before (lib)) "an edit in the submodule's files moves its class")
-      (spit core "(ns lib.core)")
-      (is (= before (lib)) "its files back as committed: the same input as before"))))
+    (is (= before (lib)) "its files back as committed: the same input as before")))
 
-;; Estimate: 3 sampled files (first, reader_test, reader) of ~200 lines each x 40k a line = 25M; 2 checkouts' 4 shells 0.8M; 5 fx/inputs x 0.1M; sampled-repo listing 1M; graph + 6 graph-indexes 1M. Estimated 30,000,000 ticks, worked from the work, never from a run.
-(deftest ^{:seon.test/estimate {:ticks 30000000}} a-runtime-pin-moves-every-digest
+;; Estimate: 4 listings of 4 entries x 0.05M = 0.2M; 1 import of 2 small files ~1M + 1 graph 0.2M + 4 graph-indexes of 2 tests 0.2M. Estimated 2,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-runtime-pin-moves-every-digest
   ;; 2026-10-29: seon.cost-test/the-unit-table-is-current stayed green across a Jolt pin that moved
   ;; its numbers, since the runtime core took no pin (root's ruling D, 2026-10-27). The gitlinks of
   ;; :seon.config.source/runtime-pins (Jolt, Chez) are in every test's and every contract key's :env;
   ;; a bump re-runs everything once. docs/source.md#tests-run-by-reach
-  (let [p (checkout! "runtime-pins" {"deps.edn" "{}" "docs/a.md" "# a"})
-        ;; a commit in submodule name and its gitlink staged in p: one shell, not four git children (each spawn of this
-        ;; process costs tens of ms, and the test's wall time was its children's)
-        commit! (fn [name init?]
-                  (let [s (str p "/reference-code/" name)]
-                    (sh/sh "zsh" "-c" (str (when init? "git -C \"$1\" init -q && ")
-                                           "git -C \"$1\" add . && git -C \"$1\" -c user.name=t -c user.email=t@t commit -q -m c"
-                                           " && git -C \"$2\" add \"reference-code/$3\"")
-                           "zsh" s p name)))
-        n (volatile! 0)
-        bump (fn [name]
-               ;; a new text per bump, so each is a commit of its own (a count, never a random: test-inputs)
-               (spit (str p "/reference-code/" name "/core.clj") (str "(ns " name ") " (vswap! n inc)))
-               (commit! name false))
+  (let [tree (fn [jolt chez] {"deps.edn" "{}" "docs/a.md" "# a" "reference-code/jolt" {:gitlink jolt} "reference-code/chez" {:gitlink chez}})
         c (assoc cfg/config :seon.config.source/runtime-pins #{"reference-code/jolt" "reference-code/chez"})
-        env #(:env (fx/inputs p c (cfg/checkout)))]
-    (doseq [n ["jolt" "chez"]]
-      (.mkdirs (java.io.File. (str p "/reference-code/" n)))
-      (spit (str p "/reference-code/" n "/core.clj") (str "(ns " n ")"))
-      (commit! n true))
-    ;; one fx/inputs a state of the files
-    (let [in0 (fx/inputs p c (cfg/checkout)) before (:env in0)]
-      (is (not-any? #(contains? (:config in0) %) [:seon.pin/jolt :seon.pin/chez]) "no class of their own: they are :env")
-      (bump "jolt")
-      (let [after-jolt (env)]
-        (is (not= before after-jolt) "a Jolt bump moves :env, which every test's digest takes")
-        (bump "chez")
-        (let [e (env)]
-          (is (not= after-jolt e) "and a Chez bump")
-          (spit (str p "/docs/a.md") "# c")
-          (is (= e (env)) "an unrelated file (text) moves no :env"))))
+        env #(:env (fake-inputs "/p" % c (cfg/checkout)))
+        in0 (fake-inputs "/p" (tree "j1" "c1") c (cfg/checkout))
+        before (:env in0)]
+    (is (not-any? #(contains? (:config in0) %) [:seon.pin/jolt :seon.pin/chez]) "no class of their own: they are :env")
+    (is (not= before (env (tree "j2" "c1"))) "a Jolt bump moves :env, which every test's digest takes")
+    (is (not= (env (tree "j2" "c1")) (env (tree "j2" "c2"))) "and a Chez bump")
+    (is (= before (env (assoc (tree "j1" "c1") "docs/a.md" "# c"))) "an unrelated file (text) moves no :env")
     (testing "the digest of every test and every contract key takes :env"
-      (let [here (seon.config/checkout)
-            in (assoc no-files-inputs :data-refs (data-refs here))
-            sample (sampled-repo "runtime-pins" 1000 ["test/seon/reader_test.clj" "src/seon/reader.clj"])
-            g (program/reach-graph (runner/program-db sample (ts/program-store)) (:data-refs in))
-            roots {"k" ['seon.reader/read-text]}
-            at (fn [env] [(update-vals (program/graph-index g (assoc in :env env) nil) :digest)
-                          (update-vals (program/graph-index g (assoc in :env env) roots) :digest)])
+      (let [srcs {"src/app/pt_rp.clj" "(ns app.pt-rp)\n(defn f [x] x)\n"
+                  "test/app/pt_rp_test.clj" "(ns app.pt-rp-test (:require [clojure.test :refer [deftest is]] [app.pt-rp]))\n(deftest calls (is (= 1 (app.pt-rp/f 1))))\n(deftest pure (is (= 1 1)))\n"}
+            g (program/reach-graph (let [db (empty-db)] (d/db-with db (source/import-tx db srcs))) nil)
+            roots {"k" ['app.pt-rp/f]}
+            at (fn [env] [(update-vals (program/graph-index g (assoc no-files-inputs :env env) nil) :digest)
+                          (update-vals (program/graph-index g (assoc no-files-inputs :env env) roots) :digest)])
             [t1 k1] (at "jolt-1") [t2 k2] (at "jolt-2") [t3 _] (at "jolt-1")]
-        (is (seq t1))
+        (is (= 2 (count t1)))
         (is (every? #(not= (t1 %) (t2 %)) (keys t1)) "every test's digest moves with the runtime pin")
         (is (= t1 t3) "and returns with it")
         (is (not= (k1 "k") (k2 "k")) "a contract key's digest too")))))
@@ -1288,49 +1278,48 @@
     (is (= (before 'app.pt-sc-test/plain-test) (after 'app.pt-sc-test/plain-test) (after-base 'app.pt-sc-test/plain-test))
         "a test not reaching h kept its digest")))
 
-;; Estimate: 2 tiny trees (9 files) written and git-added 2M; 4 imports of 8 files x 1M = 32M less the one read from the kept branch (-8M); 2 stores of their own x S 10M = 20M; 4 reach-digests 1.2M; verdict write and plan 1M. Estimated 50,000,000 ticks, worked from the work, never from a run.
-(deftest ^{:seon.test/estimate {:ticks 50000000}} the-same-tree-gives-the-same-digests-in-any-checkout-and-any-run
+;; Estimate: 3 imports of 8 tiny files x 1M = 3M less the shared analysis; 1 read-source of a directory of 9 files 0.3M; 3 reach-digests of 9 tests 1M; verdict write and plan 1M. Estimated 8,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 8000000}} the-same-tree-gives-the-same-digests-in-any-checkout-and-any-run
   ;; a quoted name counted as a ref only when its var existed yet (then by namespace, now by name: seon.program/quoted-names), so
   ;; the digests followed what the process had analyzed before: 43 of 387 equal on a second
-  ;; import of the same tree. The same commit, imported twice and from a copy at another path,
-  ;; gives the same digest for every test: a second run reruns nothing, two worktrees share.
+  ;; import of the same tree. The same files, imported twice and after the process forgot their namespaces,
+  ;; give the same digest for every test: a second run reruns nothing, two worktrees share.
   ;; And root's import of it (seon.source/import-tx of :seon.config.source/dirs, as
   ;; a seed reads them, seon.system/import-tree!) gives bin/test's digests: bin/test imported src and test
   ;; only, root the schemas too, so 882 of 922 differed and the judge reused 0 of 917 greens
   ;; bin/prove stored (task an-outside-branch-hands-back-through-the-store, experiment 2)
-  ;; A small tree of eight files in two repositories (tiny-tree): a function calling another file's, and names quoted
+  ;; A small tree of eight files: a function calling another file's, and names quoted
   ;; before the var they name is imported (src/app/ta.clj quotes app.tz/g and app.tb/late, which files after it
-  ;; define), and tests calling and naming them. The whole tree's run of the same property cost 6.7 G ticks, an
-  ;; eighth of it 1.5 G, and each import of a store of its own about 100 M ticks beside the sample's.
+  ;; define), and tests calling and naming them. The tree's text is the files', so what a checkout's git objects or
+  ;; its directory hold is the same text: the tree is a map of path to text, imported from the map and from a plain directory
+  ;; (read-source), never from a repository and a store of its own for each import (program-db, a-kept-tree-is-read-whatever-its-stores-size)
   (let [here (seon.config/checkout)
         dirs (cfg/value :seon.config.source/dirs)
-        tiny-tree (fn [label]
-                    (checkout! label
-                               (into {"deps.edn" "{}"
-                                      "src/app/ta.clj" "(ns app.ta (:require [app.tz :as z]))\n(defn f [x] (z/g x))\n(def names '[app.tz/g app.tb/late])\n"
-                                      "src/app/tz.clj" "(ns app.tz)\n(defn g [x] (inc x))\n"
-                                      "src/app/tb.clj" "(ns app.tb)\n(defn late [x] x)\n"}
-                                     (for [i (range 4)]
-                                       [(str "test/app/t" i "_test.clj")
-                                        (str "(ns app.t" i "-test (:require [clojure.test :refer [deftest is]] [app.ta :as ta]))\n"
-                                             "(deftest calls-test (is (= 2 (ta/f 1))))\n"
-                                             "(deftest names-test (is (= '[app.tb/late] ['app.tb/late])))\n")]))))
-        copy (tiny-tree "copy") copy2 (tiny-tree "copy2")
+        tree (into {"deps.edn" "{}"
+                    "src/app/ta.clj" "(ns app.ta (:require [app.tz :as z]))\n(defn f [x] (z/g x))\n(def names '[app.tz/g app.tb/late])\n"
+                    "src/app/tz.clj" "(ns app.tz)\n(defn g [x] (inc x))\n"
+                    "src/app/tb.clj" "(ns app.tb)\n(defn late [x] x)\n"}
+                   (for [i (range 4)]
+                     [(str "test/app/t" i "_test.clj")
+                      (str "(ns app.t" i "-test (:require [clojure.test :refer [deftest is]] [app.ta :as ta]))\n"
+                           "(deftest calls-test (is (= 2 (ta/f 1))))\n"
+                           "(deftest names-test (is (= '[app.tb/late] ['app.tb/late])))\n")]))
+        src-files (into {} (filter #(re-find #"^(src|test)/" (key %))) tree)
+        imported (fn [files] (let [db (empty-db)] (d/db-with db (source/import-tx db files))))
         in (assoc no-files-inputs :data-refs (data-refs here))
-        a (ts/reach-digests (runner/program-db copy (ts/program-store)) in)
-        b (ts/reach-digests (runner/program-db copy (ts/program-store)) in)
-        ;; another checkout, in a store of its own: imported again, not read from a's branch
-        c (ts/reach-digests (runner/program-db copy2 (scratch-dir "store2")) in)
-        ;; root imports into its own store, which holds no example program (the test store's seed
-        ;; does: names a test quotes would reach it)
-        {:keys [conn]} (pdb/open! :lmdb (scratch-dir "root-import") 0 :db)
-        r (try (d/transact conn {:tx-data (source/import-tx @conn (:value (fx/read-source {:req {:root copy :dirs dirs}})))})
-               (ts/reach-digests @conn in)
-               (finally (d/release conn true)))]
+        a (ts/reach-digests (imported src-files) in)
+        ;; the process no longer holds what the first import analyzed
+        _ (run! remove-ns '[app.ta app.tz app.tb])
+        c (ts/reach-digests (imported src-files) in)
+        ;; root imports a directory: its dirs' files, the schemas among them
+        dir (scratch-dir "root-import")
+        _ (doseq [[p t] (assoc tree "resources/seon/schemas/app.edn" "{:app/x :int}")]
+            (.mkdirs (.getParentFile (java.io.File. (str dir "/" p)))) (spit (str dir "/" p) t))
+        r (ts/reach-digests (imported (:value (fx/read-source {:req {:root dir :dirs dirs}}))) in)]
     (is (< 5 (count a)) "a sample of the suite, not an empty tree")
-    (is (= a b) "the same tree imported twice in one process: every digest equal")
-    (is (= a c) "the same tree in another checkout: every digest equal, so its results are shared")
-    (is (= a (select-keys r (keys a))) "root's import of the tree: bin/test's digest for every test")
+    (is (= a (ts/reach-digests (imported src-files) in)) "the same tree imported twice in one process: every digest equal")
+    (is (= a c) "and when the process holds none of what the first import analyzed")
+    (is (= a (select-keys r (keys a))) "root's import of the directory: bin/test's digest for every test")
     (with-dir
      (fn [rconn]
        (record-ran! rconn (into {} (for [[t dg] r :when (a t)] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
@@ -1420,16 +1409,14 @@
     (is (contains? (get (fx/declared-refs (slurp (str (seon.config/checkout) "/resources/seon/system.edn"))) 'seon.graph/read-decl) 'seon.writer/writer-proc)
         "the shipped declaration's procs are the reader's data refs")))
 
-;; Estimate: checkout .15M + tree-id .05M + 13 config-input calls x 20k = 0.3M. Estimated 500,000 ticks, worked from the work, never from a run.
+;; Estimate: 13 config-input calls x 20k = 0.3M + 13 listings of one file 0.1M. Estimated 500,000 ticks, worked from the work, never from a run.
 (deftest ^{:seon.test/estimate {:ticks 500000}} the-config-in-force-is-an-input
   ;; config/local.edn is gitignored and #env values are no files: a result proven under one
   ;; checkout's config was reused in another's
-  ;; the claims are of the config, never of the files: a checkout of one file, its tree-id once (the checkout's own
+  ;; the claims are of the config, never of the files: a checkout of one file, as git lists it (the checkout's own
   ;; tree-id and its 15 submodules' pins were 23 git children a call, 11 calls)
   (let [here (seon.config/checkout)
-        root (checkout! "config-in-force" {"deps.edn" "{}"})
-        tree (fx/tree-id root)
-        inputs (fn [cfg checkout] (fx/inputs root cfg checkout tree))
+        inputs (fn [cfg checkout] (fake-inputs "/config-in-force" {"deps.edn" "{}"} cfg checkout))
         cfg {:seon.config.ai/model "a" :seon.config.root/runs-dir (str here "/runs") :seon.config.web/port 8451
              :seon.config.native/probe-lib (str here "/target/lib/libprobe.dylib")}
         config #(:config (inputs % here))]
