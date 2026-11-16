@@ -1145,18 +1145,20 @@
 
 ;; Estimate: four judgments over a small main (~1M each): ~4M; 6,000,000
 (deftest ^{:seon.test/estimate {:ticks 6000000}} a-merge-task-is-ready-with-its-process-tests-named
-  ;; the one prove (task seon.step's queue, item 2): the judge (seon.agent/judge! with reach? true) proves what a merge task's change reaches;
-  ;; the process tests among them are named, not run, until the one-build runner (docs/plan.md NOW), so they never hold the task: it is
-  ;; ready, naming them. Red before: a merge task whose process tests had no verdict was held (:closed) naming them
+  ;; the one prove (task seon.step's queue, item 2): the judge (seon.agent/judge! with reach? true) proves what a merge task's change
+  ;; reaches, its process tests on the candidate (F2), so a process test it left unrun holds the task as :unrun, named, never green
+  ;; (root, 2026-11-16: a seon_done merged with two reached process tests never run); the root's own test is still left out, since a
+  ;; test cannot judge the root it started. The name is the pre-F2 rule's, kept so main's definition is replaced in place
   (let [boots 'seon.system-test/boots
         other 'seon.system-test/other
         self {:seon.system/id :root :seon.system/started-by "seon.system-test/boots"}
         judged (fn [root deferred] (judgment-of (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :running) (when root (ts/root-tx root))))
                                                 "a-merge" {:end {:outcome :green} :results {(t "a") :pass} :deferred deferred}))]
     (is (= {:outcome :ready :reasons []} (judged nil [])) "nothing deferred: ready to merge, with no second stage")
-    (is (= {:outcome :ready :reasons [] :deferred [boots]} (judged nil [boots])) "a process test with no verdict is named, and the task is ready")
+    (is (= [{:reason :unrun :symbol boots}] (:reasons (judged nil [boots]))) "a process test left unrun holds the task, named")
+    (is (not= :ready (:outcome (judged nil [boots]))) "and the task is not ready")
     (is (= {:outcome :ready :reasons []} (judged self [boots])) "the root's own test is left out: a test cannot judge the root it started")
-    (is (= {:outcome :ready :reasons [] :deferred [other]} (judged self [boots other])) "beside the root's own, the other is named")))
+    (is (= [{:reason :unrun :symbol other}] (:reasons (judged self [boots other]))) "beside the root's own, the other holds it")))
 
 ;; Estimate: 4 db builds (test-db fork 0.1M + the root-tx transact 50k = 0.15M each, 0.6M) + 7 task/proof? and unjudged calls of ~10k each ~ 0.7M ~ 700,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 700000}} what-no-gate-runs-is-said-and-what-a-task-owes-is-its-proofs
@@ -1174,13 +1176,17 @@
 
 ;; Estimate: pure data in, pure data out, a few 10k ticks ~ 50,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 50000}} a-deferred-proof-is-neither-red-nor-unknown
-  ;; owner's ruling (2026-10-23): a process test never runs in an agent's turn or root's judge,
-  ;; a proof among them; the done rule reads it as deferred to root's gate, and still refuses a
-  ;; proof that is neither green nor deferred
+  ;; since F2 (root, 2026-11-16) the judge runs process tests on the candidate, so one it left unrun (deferred) is a run that did not
+  ;; happen: a proof among them is :proof-unknown, never green, and any other test the change reaches is :unrun, named. Red before: a
+  ;; seon_done merged a task whose two proofs were process tests no candidate ran (0b6ca94636). The name is the 2026-10-23 rule's,
+  ;; kept so main's definition is replaced in place
   (let [in {:proofs #{'app/p 'app/q} :results {'app/p :pass} :main-green #{} :allowed-red #{} :uncontracted #{}}]
     (is (= [{:reason :proof-unknown :symbol 'app/q}] (r/done-explain in)))
-    (is (= [] (r/done-explain (assoc in :deferred #{'app/q}))))
-    (is (= [{:reason :proof-red :symbol 'app/p}] (r/done-explain (assoc in :results {'app/p :fail} :deferred #{'app/q}))))))
+    (is (= [{:reason :proof-unknown :symbol 'app/q}] (r/done-explain (assoc in :deferred #{'app/q}))) "a proof left unrun is unknown")
+    (is (= [{:reason :unrun :symbol 'app/r}] (r/done-explain (assoc in :proofs #{'app/p} :deferred #{'app/r}))) "a reached test left unrun is named")
+    (is (= [] (r/done-explain (assoc in :proofs #{'app/p} :results {'app/p :pass 'app/r :pass} :deferred #{'app/r}))) "one that ran is no longer unrun")
+    (is (= [{:reason :proof-red :symbol 'app/p} {:reason :proof-unknown :symbol 'app/q}]
+           (r/done-explain (assoc in :results {'app/p :fail} :deferred #{'app/q}))))))
 
 ;; Estimate: 2 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 3,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 3000000}} merges-run-one-at-a-time
