@@ -1258,15 +1258,16 @@
 
 (defn details
   "What each test of cand ({test digest}, a tree's) spent in each contracted function, as its cached
-  verdict at that digest measured it: {test {var [calls ticks self-ticks bytes self-bytes]}}."
-  {:malli/schema [:function [:=> [:cat [:map-of :qualified-symbol :string]] [:map-of :qualified-symbol [:map-of :qualified-symbol [:tuple :int :int :int :int :int]]]]
-                  [:=> [:cat :string [:map-of :qualified-symbol :string]] [:map-of :qualified-symbol [:map-of :qualified-symbol [:tuple :int :int :int :int :int]]]]]}
+  verdict at that digest measured it: {test {var {:calls :ticks :self-ticks :bytes :self-bytes}}}, the shape the store keeps (seon.proofs/fn-costs)."
+  {:malli/schema [:function [:=> [:cat [:map-of :qualified-symbol :string]] [:map-of :qualified-symbol [:map-of :qualified-symbol [:map [:calls :int] [:ticks :int] [:self-ticks :int] [:bytes :int] [:self-bytes :int]]]]]
+                  [:=> [:cat :string [:map-of :qualified-symbol :string]] [:map-of :qualified-symbol [:map-of :qualified-symbol [:map [:calls :int] [:ticks :int] [:self-ticks :int] [:bytes :int] [:self-bytes :int]]]]]]}
   ([cand] (details (cfg/value :seon.config.proofs/results-dir) cand))
   ([dir cand]
   (into {} (for [[t dg] cand
                  :let [v (some #(let [v (read-verdict (verdict-path dir t dg %))] (when (and (map? v) (not (contract/error? v))) v)) [:pass :red])]
                  :when (seq (:fns v))]
-             [t (:fns v)]))))
+             [t (into {} (for [[f [calls ticks self-ticks bytes self-bytes]] (:fns v)]
+                           [f {:calls calls :ticks ticks :self-ticks self-ticks :bytes bytes :self-bytes self-bytes}]))]))))
 
 (defn test-results
   "Each of tests' status from its result at its digest: plan is what prove's plan wrote in the
