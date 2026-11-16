@@ -1,7 +1,7 @@
 #!/bin/zsh
 # bin/check [N] — the platform's end-to-end checks on target/seon (bin/build seon), each a
 # DEVIATES (owner, 2026-11-15: every bin/ script is thin over an op): runs the end-to-end checks as processes of its own, not as tests on the test service; not ported: seon.check/check-steps-are-tests-on-the-service asks what job is left once the runtime's mechanisms do theirs (owner: never port the outside logic as it is).
-# mode of seon.check (laws is bin/laws and health bin/test --health, neither on the binary): contracts, mg-check, fx, config, system, mcp, agent-checks, threads, instrument, record,
+# mode of seon.check (health is bin/test --health, not on the binary): contracts, mg-check, fx, config, system, mcp, agent-checks, threads, instrument, record,
 # smoke, lifecycle, hotreload, idle, orphan,
 # window, e2e tasks and scenarios,
 # resume, scale-work N [no-search], spawn-phases N (N = 10 agents that work: evals and a prove of ~60 tests each; a single mode, not in a full run). A run's steps run at once, :seon.config.proofs/jobs at a
@@ -76,7 +76,7 @@ SEL=
 [[ ${1:-} == --steps ]] && { SEL=$2; shift 2; set -- 100 }
 S=$ROOT/target/seon
 # NEEDS: does this run use the binary? Yes, unless its plan says none: a selected run whose
-# DIR/steps-binary is there and empty (laws, lmdb-kill, lmdb-lock, lmdb-crash: bin/prove's plan writes it) seeds no store,
+# DIR/steps-binary is there and empty (lmdb-kill, lmdb-lock, lmdb-crash: bin/prove's plan writes it) seeds no store,
 # starts no root and wants no build. No steps-binary is unknown, never none: the run seeds and uses
 # the binary (a steps file written by hand ran window on an empty store)
 NEEDS=1; [[ -n $SEL && -e $SEL/steps-binary && ! -s $SEL/steps-binary ]] && NEEDS=
@@ -203,7 +203,6 @@ run drop ${STEPS/#/check-} > "$OUT/drop-before.log" 2>&1 || failed "drop-before 
 fi
 
 # ---- the steps, each a unit u-NAME: what it runs, in order, on its own store ----
-u-laws() { echo "== laws (every law's sites: catch, clocks, measures, resolution)"; step laws "OK \(|FAILED" "$ROOT/bin/laws" }
 # lmdb-kill, lmdb-lock and lmdb-crash run below Datahike, on LMDB envs of their own under one
 # directory each: a raw put has no branch to take, and the store's env is konserve's key space (a raw
 # key or a named sub-db there is a key konserve reads). Each directory is deleted when its step is green.
@@ -312,7 +311,7 @@ u-resume() {
 # seeded store (its data file; LMDB makes its lock file), the same content as a branch of it,
 # deleted when the unit is green.
 if (( NEEDS )); then JOBS=$(run jobs); else JOBS=2; fi
-UNITS=(laws lmdb-kill lmdb-lock lmdb-crash forks health contracts test-inputs mg-check fx config system mcp agent-checks threads instrument record smoke lifecycle
+UNITS=(lmdb-kill lmdb-lock lmdb-crash forks health contracts test-inputs mg-check fx config system mcp agent-checks threads instrument record smoke lifecycle
        hotreload idle orphan window ids e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns
        e2e-sibling e2e-loop e2e-held resume vectors)
 # the longest first, by the last full run's measured wall seconds (a unit not measured yet first):

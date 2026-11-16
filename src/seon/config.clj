@@ -23,15 +23,16 @@
   loads with moves only at a rebuild and no file on disk can stop it starting. A process then holds
   the config of its own branch's db (`hold!`, docs/config.md#a-process-holds-its-branchs-config):
   every read takes that map, and a fork inherits it. A value resolving to nil (an unset `#env`) is
-  absent; the result must satisfy `:seon.config/config` as a config is read (`required`: an invalid value or a missing key a
-  config may not lack refuses with `:seon.config/refused`; an unknown key is carried, read by nothing). Root
+  absent; each required key's schema :default fills it (malli's default-value-transformer), then the result must satisfy
+  `:seon.config/config` (an invalid value, or a required key with no default and no value, refuses with `:seon.config/refused`;
+  an unknown key is carried, read by nothing). Root
   writes the resolved config as facts on main (`seon.task/config-tx`: an entity of its own, named by its content, which root's entity refs), platform records a
   merge never carries, where agents, the dashboard and the context read it.
 
   A foundational namespace, below seon.contract (which reads the instrument config key here): its
   functions carry contracts in their metadata and are armed at boot."
   (:refer-clojure :exclude [resolve])
-  (:require [seon.edn :as sedn] [aero.core :as aero] [malli.core :as m] [malli.registry :as mr] [malli.util :as mu] [clojure.edn :as edn]
+  (:require [seon.edn :as sedn] [aero.core :as aero] [malli.core :as m] [malli.registry :as mr] [malli.util :as mu] [malli.transform :as mt] [clojure.edn :as edn]
             [clojure.java.io :as io] [clojure.string :as str] [datahike.api :as d] [datahike.db.utils :as dbu]))
 
 ;; ---- where: the checkout (the loader's bootstrap environment read) ----------
@@ -101,24 +102,26 @@
 (def ^:private registry
   (mr/composite-registry (m/default-schemas) (mr/simple-registry schema-forms)))
 
-(def ^:private may-be-absent
-  "The config keys a config may lack, read from the code: each one's readers take nil as none (an unbounded share or load, no
-  temperature, no script outside :scripted, no source root or gate checkout), and the resolver answers nil for it (resolve-in).
-  Every other declared key is required: it has its schema's :default or a value the file or a layer gives, so a missing one is a
-  defect refused as a config is read (`required`), never at its first read. Each key's own schema carries this once the config map
-  is dissolved (seon.db/one-definition-of-each-entity, step 2). See docs/config.md#a-process-holds-its-branchs-config."
-  #{:seon.config.ai/script :seon.config.ai/temperature :seon.config.source/root :seon.config.source/gate-checkout
-    :seon.config.proofs/max-cores :seon.config.proofs/max-load})
+(def ^:private with-defaults
+  "Malli's default-value transformer (malli.transform/default-value-transformer): a decode of a config map, held to config-schema
+  (`as-read`: every top-level key required unless its own schema says optional, whatever the branch's entity map says), adds each
+  required key it lacks from its :default. Optional keys are never filled, so a model's or provider's entry that leaves a key unset
+  still falls through to the next level (resolve-in). See docs/config.md#the-file."
+  (mt/default-value-transformer))
 
-(defn- required
-  "The compiled config map s as a config is read: every key but those it `may-be-absent` required (a missing one refuses it, at
-  boot). Open at its top, as every entity schema is (owner: no closed map): a key no schema declares is carried and
-  read by nothing. The schema itself keeps its keys optional, since a task holds single keys as its overrides. See
-  docs/config.md#a-process-holds-its-branchs-config."
+(defn- optional?
+  "Whether config key k's own schema in map s says it may be absent (:seon.config/optional: its readers take nil as none)."
+  {:malli/schema [:=> [:cat :any :qualified-keyword] :boolean]}
+  [s k] (boolean (some (fn [[ek _ child]] (and (= ek k) (:seon.config/optional (m/properties (m/deref child))))) (m/children s))))
+
+(defn- as-read
+  "The config entity map s as a process reads a config: every key required but those whose own schema says
+  :seon.config/optional (malli.util/required-keys), open at its top. The entity schema itself keeps every key optional, as
+  every entity schema does (an entity holds the keys it holds). See docs/config.md#the-file."
   {:malli/schema [:=> [:cat :any] :any]}
-  [s] (mu/required-keys s (remove may-be-absent (map first (m/entries s)))))
+  [s] (mu/required-keys s (remove (partial optional? s) (map first (m/entries s)))))
 
-(def config-schema "The compiled `:seon.config/config`, its required keys required (`required`)." (required (m/deref (m/schema :seon.config/config {:registry registry}))))
+(def config-schema "The compiled `:seon.config/config` as a config is read (`as-read`)." (as-read (m/deref (m/schema :seon.config/config {:registry registry}))))
 
 (declare held)
 
@@ -157,7 +160,7 @@
   agent's own settings (a :seon.task/config map), then the model's entry (default
   :seon.config.ai/model), then that model's provider's, then c's own key. Answers {:value
   :source}, :source one of [:task], [:model id], [:provider id], [:config layer], or [:absent] with value nil for a key
-  the config may lack (may-be-absent), which its readers take as none. Any other key set nowhere is a defect of the caller:
+  whose own schema says :seon.config/optional, which its readers take as none. Any other key set nowhere is a defect of the caller:
   the error names it."
   {:malli/schema [:=> [:cat :map :map :qualified-keyword :seon.config/context] :seon.config/resolved]}
   [c srcs k {:keys [task model]}]
@@ -171,7 +174,7 @@
       (contains? pe k) {:value (get pe k) :source [:provider p]}
       (contains? c k) {:value (get c k) :source [:config (get srcs k "resources/seon/config/default.edn")]}
       ;; a key the config may lack reads nil, which its readers take as none (my.root's no-source-root errors)
-      (may-be-absent k) {:value nil :source [:absent]}
+      (optional? (:schema @held) k) {:value nil :source [:absent]}
       :else (refuse! #'seon.config/resolve-in (str k " is set nowhere: not by the task, the model " m ", its provider "
                                                p " or the config (declared keys: seon.config/keys-declared)")))))
 
@@ -196,14 +199,15 @@
           :value (str (sedn/encode pair) ": " (:description (m/properties reasoning-pair)) " " (sedn/encode (mapv #(select-keys % [:path :value]) (:errors e))))})))
 
 (defn resolved
-  "Raw (what aero read) as the config: nil values dropped (absent), then validated against
+  "Raw (what aero read) as the config: nil values dropped (absent), each required key it lacks filled from its schema's :default
+  (with-defaults), then validated against
   :seon.config/config, and each model's thinking with its reasoning replay against
   :seon.config.ai/reasoning-pair (invalid-pairs). schema is the compiled config map it is held
   to (default this process's branch's). Answers the map, or throws the error."
   {:malli/schema [:function [:=> [:cat :map] :map] [:=> [:cat :map :any] :map]]}
   ([raw] (resolved raw (:schema @held)))
   ([raw schema]
-   (let [m (into {} (remove (comp nil? val)) raw)]
+   (let [m (m/decode schema (into {} (remove (comp nil? val)) raw) with-defaults)]
      (if-not (m/validate schema m)
        (let [r (invalid m schema)] (throw (ex-info (:seon.error/message r) r)))
        (let [ps (invalid-pairs m)]
@@ -275,37 +279,26 @@
   [p prof dir]
   (into {} (remove (comp nil? val)) (aero/read-config p {:profile prof ::checkout dir})))
 
-(defn defaults
-  "{k value} of each key whose entry in config map schema states :default in its properties (the owner: config
-  defaults live in the schema): the bottom layer of every config (layered), so a key no layer states resolves to its schema's
-  default. Derived from the schema in force, a branch's own when it changed an entry. See docs/config.md#layers."
-  {:malli/schema [:=> [:cat :any] [:map-of :qualified-keyword :any]]}
-  [schema]
-  (into {} (for [[k _ child] (m/children schema)
-                 :let [p (m/properties (m/deref child))]
-                 ;; a nil default states nothing (a key absent unless a layer or derivation gives it), so it names no source
-                 :when (some? (:default p))]
-             [k (:default p)])))
-
 (defn layered
-  "The config of the layers [[source map] ...] (later wins, key by key) over the schema's defaults (`defaults`, source
-  \"schema\"), validated once against schema (default this process's branch's): {:config :sources}, :sources naming the layer
+  "The config of the layers [[source map] ...] (later wins, key by key), resolved once against schema (`resolved`: a key no
+  layer states takes its schema's :default, source \"schema\") (default this process's branch's): {:config :sources}, :sources naming the layer
   each key came from. An absent :seon.config.source/gate-checkout is :seon.config.source/root as it resolves, from the root's
   layer. See docs/config.md#layers."
   {:malli/schema [:function [:=> [:cat [:sequential [:tuple :string :map]]] [:map [:config :map] [:sources :seon.config/sources]]]
                   [:=> [:cat [:sequential [:tuple :string :map]] :any] [:map [:config :map] [:sources :seon.config/sources]]]]}
   ([layers] (layered layers (:schema @held)))
   ([layers schema]
-   (let [ds (defaults schema)
-         m (reduce (fn [m [_ l]] (merge m l)) ds layers)
-         srcs (into (zipmap (keys ds) (repeat "schema")) (for [[src l] layers [k v] l :when (some? v)] [k src]))
+   (let [m (reduce (fn [m [_ l]] (merge m l)) {} layers)
+         srcs (into {} (for [[src l] layers [k v] l :when (some? v)] [k src]))
          ;; the gate's checkout, absent, is the source root as it resolves (its schema's default), derived here, in the one merge
          ;; of the layers, so every config a process holds or writes has it (a key derived at boot alone was lost when a moved
          ;; entry wrote main's config again, 2026-11-15)
          gate? (and (nil? (:seon.config.source/gate-checkout m)) (some? (:seon.config.source/root m)))
          c (resolved (cond-> m gate? (assoc :seon.config.source/gate-checkout (:seon.config.source/root m))) schema)]
      {:config c
-      :sources (cond-> srcs gate? (assoc :seon.config.source/gate-checkout (srcs :seon.config.source/root)))})))
+      ;; a key no layer stated came from its schema's :default
+      :sources (cond-> (into srcs (for [k (keys c) :when (not (contains? srcs k))] [k "schema"]))
+                 gate? (assoc :seon.config.source/gate-checkout (srcs :seon.config.source/root)))})))
 
 (def shipped-file "The shipped config, relative to the checkout." "resources/seon/config/default.edn")
 
@@ -384,7 +377,7 @@
   [changes]
   (if (empty? changes)
     config-schema
-    (required (m/deref (m/schema :seon.config/config {:registry (mr/composite-registry (m/default-schemas) (mr/simple-registry (merge schema-forms changes)))})))))
+    (as-read (m/deref (m/schema :seon.config/config {:registry (mr/composite-registry (m/default-schemas) (mr/simple-registry (merge schema-forms changes)))})))))
 
 (defn- entries-text
   "The file's text of entries {k form}: a map, one entry a line, each form as stated. See docs/config.md#a-process-holds-its-branchs-config."
@@ -404,7 +397,10 @@
   [entries changes]
   (let [forms (merge schema-forms changes)
         text (entries-text entries)
-        built (second (first built-layers))
+        ;; what this process loaded: its binary's schema defaults under its shipped file, as it loaded them (`loaded`), so a place
+        ;; whose value is a schema :default has it on every branch, whatever that branch's own schema entries say (a branch made
+        ;; before the defaults moved into the schema holds entries with no :default: its agents lost cwd, dirs and main, 2026-11-16)
+        built (m/decode config-schema (second (first built-layers)) with-defaults)
         place? #(of-key forms % :seon.config/place)
         prof (get config :seon.config.root/profile)
         schema (schema-of changes)]
@@ -415,7 +411,7 @@
             r (layered (assoc-in built-layers [0 1] base) schema)]
         ;; what waits compares the values in force on both sides, each over its schema's defaults: a key the file no longer states
         ;; resolves to its default, so a branch that changes an at-load key's :default waits for a rebuild as a changed entry does
-        (let [stated (merge (defaults schema) stated) built (merge (defaults config-schema) built)]
+        (let [stated (m/decode schema stated with-defaults)]
           (assoc r :schema schema :text text
                  :waiting (into {} (for [k (distinct (concat (keys stated) (keys built)))
                                          :when (and (or (place? k) (of-key forms k :seon.config/at-load))
@@ -439,7 +435,7 @@
   (the planners' :test-system-config), so that digest is one whichever process plans it: an agent of the standing system, under
   its own profile and local.edn, gave 103 of 180 process digests apart from the shell's (task
   seon.prove/one-digest-whichever-runner-plans-it). See docs/source.md#tests-run-by-reach."
-  (merge (defaults config-schema) (read-layer (str (checkout) "/" shipped-file) :scripted (checkout))))
+  (m/decode config-schema (read-layer (str (checkout) "/" shipped-file) :scripted (checkout)) with-defaults))
 
 (defn hold!
   "Make this process's config what es and changes state (of-entries), when they differ from what it holds. Its :schema follows changes even when the entries are refused, so a branch can name a key before it states it; what it reads stays as it was. Answers nil, or the refusal. es nil (nothing stated) holds nothing. See docs/config.md#a-process-holds-its-branchs-config."

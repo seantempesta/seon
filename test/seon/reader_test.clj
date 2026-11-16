@@ -74,10 +74,12 @@
   (doseq [t texts]
     (is (= t (unforgive (reader/forgive t))) (pr-str t))))
 
-(deftest the-laws-hold-over-generated-replies
+;; 40 trials, not 300: the fixed `texts` above carry the known counterexamples; each trial is
+;; a read of <= 40 pieces (~26k ticks measured at 300 trials = 7.9M), so 40 trials ~ 1.1M ticks
+(deftest ^{:seon.test/estimate {:ticks 1100000}} the-laws-hold-over-generated-replies
   (let [piece (gen/elements ["(" ")" "[" "]" "{" "}" "\"" "\\" ";" "\n" " " "  " "a" "x/y" "1" "#" "'" ":k" "I'll "
                              "```" "```clojure\n" "```text\n" "\n```\n" "#{" "#(" "`" "~" "@" "^" ","])
-        r (tc/quick-check 300 (prop/for-all [ps (gen/vector piece 0 40)] (laws-hold? (apply str ps))) :seed (proofs/test-seed))]
+        r (tc/quick-check 40 (prop/for-all [ps (gen/vector piece 0 40)] (laws-hold? (apply str ps))) :seed (proofs/test-seed))]
     (is (:pass? r) (pr-str (select-keys r [:seed]) (get-in r [:shrunk :smallest])))))
 
 ;; A line that starts with a backtick is read once, to ask whether it is one literal
