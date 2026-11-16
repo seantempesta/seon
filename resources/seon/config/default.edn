@@ -95,8 +95,9 @@
  ;; Unit: generations. Chez's maximum generation, set by root at its boot before its first fork (jolt.host/gc-generations!).
  ;; Each level of forks collects one generation less than its parent (Jolt: a forked child never collects what it inherited,
  ;; task jolt.host/a-forked-child-never-collects-what-it-inherited): root, the fork server, an agent, a test child and a
- ;; double-forked clone are five levels, so 8 leaves an agent generations 0-5 and a test child 0-4. Chez allows up to 254.
- :seon.config.root/gc-generations 8
+ ;; double-forked clone are five levels: 6, the most our Chez supports (measured 2026-11-16: 8 is refused, "exceeds maximum
+ ;; supported value 6"), leaves the fork server 0-5, an agent 0-4, a test child 0-3 and a clone 0-2.
+ :seon.config.root/gc-generations 6
 
  ;; Where kept runs live (owner, 2026-10-21: runs are kept, "a perfect record frozen in time").
  ;; bin/system exports SEON_RUNS (<this tree>/runs).
