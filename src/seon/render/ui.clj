@@ -794,7 +794,7 @@
 (defn problems-model
   "The problems report as the model is sent it (the declared model render of :seon.problems/report):
   each class with its count and its rows newest first, a row its count, type, its message's first line
-  and, for a recorded error, the form that reads it whole ((my.agent/problem signature): its example and
+  and, for a recorded error, the form that reads it whole ((my.agent/problem agent signature): its example and
   evidence), never the rows printed whole. So many errors are a few lines that say how many there are
   and where to read each. See docs/render.md#a-component-answers-hiccup."
   {:malli/schema [:=> [:cat :map :seon.problems/report] :map]}
@@ -809,7 +809,7 @@
                                        (:type r) (assoc :type (:type r))
                                        line (assoc :message line)
                                        (false? (:open? r)) (assoc :open? false)
-                                       (:signature r) (assoc :read (list 'my.agent/problem (:signature r))))))}]))})
+                                       (:signature r) (assoc :read (list 'my.agent/problem 'agent (:signature r))))))}]))})
 
 (defn proofs
   "An agent's proofs as its newest turn measured them (the declared html render of
@@ -1299,7 +1299,7 @@
            (let [arg (cond (and (vector? entity) (= :var/name (first entity))) (second entity)
                            (vector? entity) entity
                            :else key)]
-             [:p "Keep yours: " [:code (str "(my.branch/resolve! '" arg ")")] ". Take main's: " [:code (str "(my.branch/resolve! '" arg " :theirs)")] "."])])])
+             [:p "Keep yours: " [:code (str "(my.branch/resolve! agent '" arg ")")] ". Take main's: " [:code (str "(my.branch/resolve! agent '" arg " :theirs)")] "."])])])
      (when (seq (:conflicts merge)) [:p {:key :conflicts} (str (count (:conflicts merge)) " things conflict with main; they are listed above.")])
      (when main-moved [:p {:key :main-moved} main-moved])
      ;; a fact beside its box, which stays open: the agent's to clear whoever caused it (the owner, 2026-11-07)

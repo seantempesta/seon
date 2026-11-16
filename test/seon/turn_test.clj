@@ -28,10 +28,10 @@
   ;; attribute, the agent's write refusing it), and the branch holds it once it merges main
   (let [[_ _ written ctxr bases] (at/in-agent (fn [{:keys [agent]}]
                                    [{:op :eval :agent "root" :code (str "@(c/transact-main! sys [{:seon.agent/key " (pr-str (name agent)) " :seon.agent/max-turns 7}])")}
-                                    "(seon.agent/merge-main!)"
-                                    "(seon.agent/transact! [{:db/id \"other\" :seon.agent/key \"other-outside\"} {:seon.model-call/id \"other-outside-1\" :seon.model-call/n 1 :seon.model-call/origin :outside :seon.model-call/agent \"other\" :seon.model-call/basis {:commit (datahike.api/commit-id (seon.agent/db)) :task (:task @seon.agent/state) :turn 1 :max-turns 3 :origin :outside :agent \"other-outside\"}}])"
+                                    "(seon.agent/merge-main! agent)"
+                                    "(seon.agent/transact! agent [{:db/id \"other\" :seon.agent/key \"other-outside\"} {:seon.model-call/id \"other-outside-1\" :seon.model-call/n 1 :seon.model-call/origin :outside :seon.model-call/agent \"other\" :seon.model-call/basis {:commit (datahike.api/commit-id (seon.agent/db)) :task (seon.agent/task-of agent) :turn 1 :max-turns 3 :origin :outside :agent \"other-outside\"}}])"
                                     {:op :context :agent agent}
-                                    "(let [[_ m] (last (sort (datahike.api/q '[:find ?n ?m :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/n ?n]] (seon.agent/db) (:key @seon.agent/state))))] [(:max-turns (:seon.model-call/basis (datahike.api/pull (seon.agent/db) [:seon.model-call/basis] m)))])"]))]
+                                    "(let [[_ m] (last (sort (datahike.api/q '[:find ?n ?m :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/n ?n]] (seon.agent/db) (:key agent))))] [(:max-turns (:seon.model-call/basis (datahike.api/pull (seon.agent/db) [:seon.model-call/basis] m)))])"]))]
     (is (nil? (:ex written)) (str "the setup's write: " (pr-str (:ex written))))
     (is (= [7] (:value bases)) (str "the read's basis names the run's max-turns: " (pr-str bases) (pr-str ctxr)))))
 (deftest ^{:seon.test/estimate {:ticks 200000}} a-hand-back-says-a-failed-run-before-its-unknown-proofs
@@ -79,7 +79,7 @@
         red {:reasons [{:reason :proof-red :symbol 'app.calc-test/total-sums}]}
         request {:messages [{:role "user" :content "page"}] :task "app.calc/total-is-exact" :call "k/2"}
         fx (atom 0)
-        st {:task "app.calc/total-is-exact" :max-turns 3}]
+        st {:ag {:key "k" :role :test} :task "app.calc/total-is-exact" :max-turns 3}]
     (try
       (with-redefs [seon.agent/db (constantly nil)
                     seon.agent/turn-now (constantly 1)
@@ -104,7 +104,7 @@
   ;; the one thing a fork has no store for is the commit of the message turn-error! writes (seon.agent/commit!), stood in; the write is the fork's db
   (let [[r] (t/eval-in [(fn [_]
                           (with-redefs [agent/commit! (constantly nil)]
-                            (let [st {:task "app.calc/total-is-exact" :turn 0 :max-turns 3 :pending {:merged :green :status {}}}
+                            (let [st {:ag {:key "test-agent" :role :test} :task "app.calc/total-is-exact" :turn 0 :max-turns 3 :pending {:merged :green :status {}}}
                                   err (seon.contract/error :seon.db/no-merge-base 'seon.db/branch-base "no merge base: swept" {:branch :swept :commit nil})
                                   [k st'] (turn/turn-merged st err)]
                               {:k k :outcome (when (= :seon.turn/end k) (nth (turn/turn-merged st err) 2)) :thrown (:thrown st')})))]
@@ -134,16 +134,16 @@
   "A run of the world's task (seon.agent-test's work-with: its turns' effects stood in) driven by the real :repl proc (seon.repl/agent-step)
   in a graph, its status by status, with the effect var held (agent/fx!, the model call, or agent/judge!, the proofs) parked until the
   test is done: what (probe g) answers while the wait is out, then root's :stop, the run's reply (its end) and whether the process exited."
-  ([status held probe] (held-run status held probe (fn [arg] (str "(seon.turn/work! " (pr-str arg) ")"))))
+  ([status held probe] (held-run status held probe (fn [arg] (str "(seon.turn/work! agent " (pr-str arg) ")"))))
   ([status held probe form]
   (@#'at/work-with (fn [st called!] (called!) st) status
-                (fn [arg]
+                (fn [ag arg]
                   (let [out (promise) release (promise) replied (promise) exited (promise)]
                     (with-redefs-fn {held (fn [& _] (deliver out true) @release {:value {}})
                                      #'agent/send! (fn [m] (when (and (= :reply (:op m)) (= 7 (:id m))) (deliver replied m)) true)
                                      #'lib/c-exit (fn [code] (deliver exited code) nil)}
                       (fn []
-                        (let [g (flow/create-flow {:procs {:repl {:proc (flow/process #'repl/agent-step)}}})]
+                        (let [g (flow/create-flow {:procs {:repl {:proc (flow/process #'repl/agent-step) :args {:ag ag}}}})]
                           (flow/start g) (flow/resume g)
                           ;; the graph is stopped inside the redefinitions whatever ends the test: a :stop it still holds must
                           ;; never reach the real lib/c-exit, which would end this test process (it ended a shard at exit 0 once)
@@ -192,7 +192,7 @@
   ;; task seon.turn/no-turn-step-waits-for-main-or-its-observation (docs/flow.md#flow-inside-an-agent): main's merge into the branch is an
   ;; output ({:merge}) answered as a message, so while root's writer merges, the :repl proc is parked and answers a ping. Red before:
   ;; hand-back-step and turn-begin called my.branch/merge-main! inside the step
-  (let [r (held-run (constantly {:reasons []}) #'my.branch/merge-main! ping-of (fn [arg] (str "(seon.turn/hand-back! " (pr-str (:task arg)) ")")))]
+  (let [r (held-run (constantly {:reasons []}) #'my.branch/merge-main! ping-of (fn [arg] (str "(seon.turn/hand-back! agent " (pr-str (:task arg)) ")")))]
     (is (not (contains? (get-in r [:seen :site]) :stepping)) (str "parked while main merges: " (pr-str (:seen r))))
     (is (= "app.calc/total-is-exact" (get-in r [:seen :run :task])) (str "the ping is answered with the hand-back: " (pr-str (:seen r))))
     (is (= :waiting (get-in r [:end :outcome])) (str "the stop ended it at once: " (pr-str (:end r))))))
@@ -213,17 +213,18 @@
   ;; cold (a page diff each turn, each over a collected commit's as-of view). With no walk held the status is read directly; a held walk
   ;; still gives its kept status, so a warm turn computes it once (docs/turn.md#act)
   (let [old @seon.agent/state
+        ag {:key "k" :role :test}
         drawn (volatile! 0) direct (volatile! 0)]
     (try
       (with-redefs [seon.agent/db (constantly nil)
-                    seon.repl/page-walk (fn [] (vswap! drawn inc) {:held true})
+                    seon.repl/page-walk (fn [_] (vswap! drawn inc) {:held true})
                     seon.render/kept-of (fn [_ _] {:reasons [] :from :walk})
                     seon.ctx.status/status (fn [_ _ _] (vswap! direct inc) {:reasons [] :from :direct})]
         (reset! seon.agent/state (dissoc old :walk))
-        (let [s (@#'turn/status-now)] (is (= :direct (:from s)) (str "no walk held: the status is read directly: " (pr-str s))))
+        (let [s (@#'turn/status-now ag)] (is (= :direct (:from s)) (str "no walk held: the status is read directly: " (pr-str s))))
         (is (zero? @drawn) "and the page is not drawn")
         (swap! seon.agent/state assoc :walk {:held true})
-        (is (= :walk (:from (@#'turn/status-now))) "a held walk: its kept status")
+        (is (= :walk (:from (@#'turn/status-now ag))) "a held walk: its kept status")
         (is (= 1 @drawn) "advanced once, as a warm turn does"))
       (finally (reset! seon.agent/state old)))))
 
@@ -233,7 +234,7 @@
   ;; outside agent's hand-back (seon.turn/hand-back!, seon_done's path) is a run on the same protocol, so while its observation is out the
   ;; :repl proc is parked, answers a ping with it, and root's :stop ends it at once. Red before: hand-back! awaited agent/judge! inside the
   ;; :repl step; it proves nothing now (its judge does), so it waits on its merge and its observation, each an output
-  (let [r (held-run (constantly {:reasons []}) #'turn/observe ping-of (fn [arg] (str "(seon.turn/hand-back! " (pr-str (:task arg)) ")")))]
+  (let [r (held-run (constantly {:reasons []}) #'turn/observe ping-of (fn [arg] (str "(seon.turn/hand-back! agent " (pr-str (:task arg)) ")")))]
     (is (not (contains? (get-in r [:seen :site]) :stepping)) (str "parked while its observation is out: " (pr-str (:seen r))))
     (is (= "app.calc/total-is-exact" (get-in r [:seen :run :task])) (str "the ping is answered with the hand-back: " (pr-str (:seen r))))
     (is (= :waiting (get-in r [:end :outcome])) (str "the stop ended it at once: " (pr-str (:end r))))))
@@ -249,7 +250,7 @@
         got (atom nil)]
     (try
       (reset! seon.agent/state (assoc old :key "k-err"))
-      (with-redefs [seon.agent/db (constantly db) seon.agent/transact! (fn [tx] (reset! got tx) {})]
-        (@#'seon.turn/test-error! err))
+      (with-redefs [seon.agent/db (constantly db) seon.agent/transact! (fn [_ tx] (reset! got tx) {})]
+        (@#'seon.turn/test-error! {:key "k-err" :role :test} err))
       (is (= ['app.x-test/u] (get-in (first @got) [:seon.agent/test-error :reported])) (pr-str @got))
       (finally (reset! seon.agent/state old)))))
