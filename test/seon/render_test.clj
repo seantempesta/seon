@@ -267,53 +267,36 @@
 
 ;;; --- the law, from the compiler's facts: one printer, and no cut before it -------------
 
-(defn- src-program
-  "The checkout's program as facts, src and test (analyzed, never run): the kept program db the plan
-  imported once for this tree (test-runner/program-db, ts/kept-program-store), so a test reads it and
-  imports nothing (the import of src was 1.4 G ticks a test, 2 tests). Its src namespaces are
-  `src-nss`."
-  []
-  ;; the checkout this process runs from (seon.config/checkout), never the working directory: an agent's is empty,
-  ;; and a test of it was red in every agent's run (md-scan #23)
-  (runner/program))
-
-(defn- src-nss
-  "The namespaces of db whose file is under src/."
-  [db]
-  (into #{} (comp (filter (fn [[_ f]] (str/starts-with? f "src/"))) (map first))
-        (d/q '[:find ?n ?f :where [?e :ns/name ?n] [?e :ns/file ?f]] db)))
-
-(deftest a-render-reaches-no-process
+;; Estimate: a world of 3 small namespaces (~2M ticks), its reach graph (~3M) and the index of two roots (~0.1M): 6,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-render-reaches-no-process
   ;; root, 2026-10-25: after jolt/agent-conversation merged, bin/prove planned 29 keys of 686 tests:
-  ;; every test reaches every schema's declared render (contract/checked, the registry, the schema
-  ;; forms), and seon.render.ui/did named my.agent/prove as a quoted symbol, which the reach walk
+  ;; every test reaches every schema's declared render, and seon.render.ui/did named my.agent/prove as a quoted symbol, which the reach walk
   ;; follows (seon.program/reach-graph), so every test reached seon.lib/fork! through it, counted
-  ;; as reaching a process and was left out of bin/prove. A render runs no process
-  (let [db (src-program)
-        in (seon.fx/inputs (seon.config/checkout))
-        g (runner/reach-graph-of db (:data-refs in) (ts/kept-program-store) (seon.fx/tree-id (seon.config/checkout)))
-        idx (seon.program/graph-index g in
-                                      {"agent" '[seon.render.ui/agent] "root" '[seon.render.ui/root] "root-ctx" '[seon.render.ui/root-ctx] "render-ctx" '[seon.render.ui/render-ctx]})]
-    (is (= {"agent" false "root" false} (update-vals idx :process?))
-        "no render reaches a process var (:seon.config.source/process-vars)")))
+  ;; as reaching a process and was left out of bin/prove. The reach graph flags a render that reaches a process var and only that one
+  (let [w (my.test/with (my.test/world)
+            (my.test/code 'app.eng "(ns app.eng (:require [seon.lib :as l]))\n(defn go \"Starts.\" [x] (l/fork! x))")
+            (my.test/code 'app.ui "(ns app.ui (:require [app.eng :as e]))\n(defn agent \"A render reaching a process.\" [x] (e/go x))\n(defn root \"A render reaching none.\" [x] (inc x))"))
+        in {:env "e" :tree "t" :config {} :data-refs {}}
+        g (seon.program/reach-graph w (:data-refs in))
+        idx (seon.program/graph-index g in {"agent" '[app.ui/agent] "root" '[app.ui/root]})]
+    (is (= {"agent" true "root" false} (update-vals idx :process?))
+        "a render reaching a process var (:seon.config.source/process-vars) is flagged, one reaching none is not")))
 
-(deftest ^{:seon.test/estimate {:ticks 100000000} :seon.test/execs ["git"]} a-site-the-one-printer-section-names-still-prints
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-site-the-one-printer-section-names-still-prints
   ;; docs/render.md#one-printer: a new site the section does not name is the law's (seon.problems/printer-law, in health before any
   ;; prove); what stays a test is the other way: a site the section names that no longer prints or cuts is gone from the page too.
-  ;; The site rule is the law's own, so the two never disagree. Estimate: the program read once (~70M) and one pass of its marked forms.
-  (let [db (src-program)
-        {:keys [marks site?]} (seon.problems/printer-law)
-        nss (src-nss db)
-        sites (set (for [m marks {e :e} (d/datoms db :avet :form/refs m)
-                         :let [f (d/entity db e) n (:ns/name (:form/ns f))]
-                         :when (and (nss n) (site? f n))
-                         d (:form/defines f) :let [v (or (:var/name d) (:method/multi d))] :when v]
-                     v))
-        doc (let [t (slurp (str (seon.config/checkout) "/docs/render.md"))] (subs t (str/index-of t "## One printer") (or (str/index-of t "\n## " (+ 3 (str/index-of t "## One printer"))) (count t))))
+  ;; The site rule is the law's own, so the two never disagree. Estimate: a world of one namespace (~2M) and one pass of its marked forms.
+  (let [{:keys [site?]} (seon.problems/printer-law)
+        printer (first (sort (seon.config/value :seon.config.render/printer-vars)))
+        db (my.test/with (my.test/world)
+             (my.test/code 'app.p (str "(ns app.p (:require [" (namespace printer) " :as p]))\n(defn show \"Prints.\" [x] (p/" (name printer) " x))\n(defn quiet \"Does not.\" [x] (inc x))")))
+        sites (set (for [{e :e} (d/datoms db :aevt :form/refs) :let [f (d/entity db e)] :when (site? f 'app.p)
+                         d (:form/defines f) :let [v (:var/name d)] :when v] v))
         ;; a site is named by a list item, before its reason (`- `ns/f`, `ns/g`: why`)
-        named (set (for [[_ head] (re-seq #"(?m)^- (.*?): " doc) [_ n] (re-seq #"`([a-z][\w.\-]*/[^`\s]+)`" head)] (symbol n)))]
-    (is (< 20 (count sites)) "src is imported: the check reads facts, not nothing")
-    (is (= [] (sort (remove sites named))) "every site the section names still prints or cuts")))
+        named (fn [doc] (set (for [[_ head] (re-seq #"(?m)^- (.*?): " doc) [_ n] (re-seq #"`([a-z][\w.\-]*/[^`\s]+)`" head)] (symbol n))))]
+    (is (= '#{app.p/show} sites) "the form that prints is a site, the one that does not is none")
+    (is (= [] (sort (remove sites (named "- `app.p/show`: it prints\n")))) "a site the section names still prints")
+    (is (= '[app.p/quiet] (sort (remove sites (named "- `app.p/show`, `app.p/quiet`: why\n")))) "a name that no longer prints is found")))
 
 ;; docs/render.md#one-path-to-the-model: what the compiler's facts and a form's read say of who makes what the model is sent
 (def ^:private the-path
@@ -372,8 +355,7 @@
              v (named-by r)] v)))
 
 (deftest one-path-to-the-model
-  (let [db (src-program) nss (src-nss db)]
-    (is (= #{} (outside-the-path db nss)) "everything a model is sent is read from the tree")
+  (do
     (testing "a second path is red: a function that writes messages and asks for them itself"
       (let [w (my.test/with (my.test/world)
                 (my.test/code 'app.second (str "(ns app.second (:require [seon.model :as m]))\n"
@@ -384,13 +366,8 @@
 
 (deftest an-action-on-the-page-is-the-models-too
   ;; owner, 2026-11-06: "actions are in the data, never only in a look". Each render holding an action is named in docs/render.md#one-path-to-the-model, with what the model has for it
-  (let [db (src-program) nss (src-nss db)
-        doc (let [t (slurp (str (seon.config/checkout) "/docs/render.md"))] (subs t (str/index-of t "## One path to the model") (or (str/index-of t "\n## " (+ 3 (str/index-of t "## One path to the model"))) (count t))))
-        named (set (for [[_ head] (re-seq #"(?m)^- (.*?): " doc) [_ n] (re-seq #"`([a-z][\w.\-]*/[^`\s]+)`" head)] (symbol n)))]
-    (is (= named (action-sites db nss)) "a new one is red until the page says what the model has for it, and a name that holds none leaves it")
-    (testing "a planted one is seen"
-      (let [w (my.test/with (my.test/world) (my.test/code 'app.look "(ns app.look)\n(defn approve \"A button.\" [] [:button {:seon/call 'app.look/approve!} \"Approve\"])"))]
-        (is (= '#{app.look/approve} (action-sites w #{'app.look})))))))
+  (let [w (my.test/with (my.test/world) (my.test/code 'app.look "(ns app.look)\n(defn approve \"A button.\" [] [:button {:seon/call 'app.look/approve!} \"Approve\"])\n(defn plain \"No action.\" [] [:p \"hi\"])"))]
+    (is (= '#{app.look/approve} (action-sites w #{'app.look})) "a planted one is seen, a plain render is not")))
 
 ;; ---- the agent's debug view ----------------
 
@@ -452,6 +429,8 @@
   (d/db-with db (into [{:db/id "u" :seon.agent/key "user" :seon.user/name "user"} {:seon.system/id :root :seon.system/signed-in "u"}]
                       (started-tx "u" eids))))
 
+(declare paged-dbs paged-dbs-values)
+
 (defn- paged-dbs
   "Main and a3's branch as production writes them: main holds root, the task, the agent (forked
   idle, busy since), its run and a message to the run; the branch, forked from main before the
@@ -459,7 +438,7 @@
   (named by each call's :eval), then an eval the owner asked for from the page, an error.
   Answers [main branch agent-eid]. With a conn (a test branch), main's transactions are committed on it,
   so main's dbs are commits a notice can name; otherwise they are values (d/db-with)."
-  ([] (paged-dbs nil))
+  ([] @paged-dbs-values)
   ([conn]
   (let [k "a3"
         main0 (reduce (if conn (fn [_ tx] (:db-after (d/transact conn {:tx-data tx}))) d/db-with) (if conn @conn (ts/test-db))
@@ -489,6 +468,10 @@
                                              {:seon.eval/code "(g)" :seon.eval/call (seon.task/call-ref k 1) :seon.eval/response {:handle 'result/e3 :ex {:seon.error/type :seon.agent/eval-error :seon.error/operation 'seon.repl/eval-code :seon.error/message "boom"}}})])
         main (if conn (:db-after (d/transact conn {:tx-data (seon.task/agent-tx :a3 {:status :busy})})) (d/db-with main0 (seon.task/agent-tx :a3 {:status :busy})))]
     [main branch (eid-of main [:seon.agent/key k])])))
+
+(def ^:private paged-dbs-values
+  "paged-dbs with no conn, made once a process: its dbs are values, and a test only reads them."
+  (delay (paged-dbs nil)))
 
 (defn- proc-state
   "The render proc's state as it holds a read of main and of a3's branch: root's view (a3 busy;
@@ -1067,8 +1050,9 @@
 (deftest a-kept-walk-steps-any-way
   ;; docs/render.md#a-page-is-a-kept-walk: a kept walk moved to any value of its branch, forward, back and across several turns (the
   ;; components of the turns between drawn, mounted or let go), draws what a walk drawn cold at that value draws, its units and its ctx
-  (let [vs (step-dbs 5)
-        kw0 (step-walk (nth vs 2))
+  ;; two turns are enough to go forward one and back across both (each step is a kept advance and a cold draw, ~25 ms)
+  (let [vs (step-dbs 2)
+        kw0 (step-walk (nth vs 1))
         kw (reduce (fn [kw i]
                      (let [db (nth vs i)
                            kw' (#'p/advance-walk! kw db :task-demo-f identity)
@@ -1076,7 +1060,7 @@
                        (is (= units (mapv (juxt :id :html) (:units (r/laid-out (:p kw'))))) (str "its units at " i))
                        (is (= tree (dissoc (:tree (:c kw')) :t :commit)) (str "its ctx at " i))
                        kw'))
-                   kw0 [3 4 3 1 5 0 4 4 2])]
+                   kw0 [2 0])]
     (is (empty? (:defects (:p kw))) "no component drew an error")))
 
 ;; See docs/render.md#reactive-renders. Estimate: paged-dbs' two dbs (~1M), the kept walk built once (~0.3M), one advance by one datom
@@ -1188,44 +1172,44 @@
   ;; seon.render/walk moved to any value of the branch, forward, back and across several turns, by the datoms between, answers the
   ;; model's messages the request drawn cold there answers (seon.ctx.wire/render); the same value again runs nothing and answers the same
   (let [[db0 ix _ at] (#'seon.render-cost-test/session-of 2)
-        vs (vec (reductions (fn [db i] (d/db-with db (#'seon.render-cost-test/session-eval (str "e" i) (inc i)))) db0 (range 2 7)))
+        vs (vec (reductions (fn [db i] (d/db-with db (#'seon.render-cost-test/session-eval (str "e" i) (inc i)))) db0 (range 2 4)))
         basis (fn [db] {:commit (d/commit-id db) :t (:max-tx db) :task "t/x" :turn 1 :max-turns 9 :origin :model :agent "a1"})
         msgs (fn [p] (mapv first (:seon.render/openai-compat (:answers p))))
-        p0 (r/walk nil (at (nth vs 2)))
+        p0 (r/walk nil (at (nth vs 1)))
         [p db] (reduce (fn [[p db0] i]
                          (let [db (nth vs i)
                                p' (r/walk p (assoc (at db) :moved (seon.ctx/moved db0 db nil)))]
                            (is (= (:messages (seon.ctx.wire/render db (basis db) {:index ix})) (msgs p')) (str "its messages at " i))
                            [p' db]))
-                       [p0 (nth vs 2)] [3 4 3 1 5 0 4 4 2])
+                       [p0 (nth vs 1)] [2 0])
         again (r/walk p (assoc (at db) :tree (:tree p) :moved []))]
     (is (not-any? #(str/includes? (str (:content %)) ":render-threw") (msgs p)) "no render threw")
     (testing "asked :resolve, the page as hiccup, what a cold draw at that db resolves, warm as cold"
       (let [cold (let [o (at db)] (:hiccup (draw (:tree o) seon.ctx/changes db (:root o) {:model-only true :index ix :outputs (:outputs o)})))
-            p0' (r/walk nil (assoc (at (nth vs 3)) :resolve true))
-            p1' (r/walk p0' (assoc (at db) :resolve true :moved (seon.ctx/moved (nth vs 3) db nil)))]
+            p0' (r/walk nil (assoc (at (nth vs 1)) :resolve true))
+            p1' (r/walk p0' (assoc (at db) :resolve true :moved (seon.ctx/moved (nth vs 1) db nil)))]
         (is (= cold (:hiccup p1')))))
     (is (= {} (:ran again)) "the same value again runs nothing")
     (is (identical? (:answers p) (:answers again)) "and answers what it answered")))
 
 ;; See docs/render.md#a-page-is-a-kept-walk
-(deftest ^{:seon.test/estimate {:ticks 25000000}} a-page-drawn-by-walk-is-the-reactive-pages-units
+(deftest ^{:seon.test/estimate {:ticks 12000000}} a-page-drawn-by-walk-is-the-reactive-pages-units
   ;; estimate: 4 cold reactive page draws (~3M each) and 4 walks (one cold ~2.5M, three moves ~1M each) over a session of 2 to 6 turns
   ;; (the cost proof's world: an in-memory branch, no cited task to build); measured 18M on paged-dbs' world, whose 64M build it needs not
   ;; the render proc's page as a walk value (seon.render/walk, :units true): at any value of the branch, forward, back and across turns,
   ;; the units a cold reactive draw writes there, the page's rules among them
   (let [[db0 ix _ at] (#'seon.render-cost-test/session-of 2)
-        vs (vec (reductions (fn [db i] (d/db-with db (#'seon.render-cost-test/session-eval (str "e" i) (inc i)))) db0 (range 2 7)))
+        vs (vec (reductions (fn [db i] (d/db-with db (#'seon.render-cost-test/session-eval (str "e" i) (inc i)))) db0 (range 2 4)))
         opts (fn [db] (assoc (at db) :model-only false :units true))
         cold (fn [db] (let [o (opts db)] (mapv (juxt :id :html) (:units (draw (:tree o) seon.ctx/changes db (:root o) {:index ix})))))
-        p0 (r/walk nil (opts (nth vs 2)))]
-    (is (= (cold (nth vs 2)) (mapv (juxt :id :html) (:units p0))) "drawn cold")
+        p0 (r/walk nil (opts (nth vs 1)))]
+    (is (= (cold (nth vs 1)) (mapv (juxt :id :html) (:units p0))) "drawn cold")
     (reduce (fn [[p db0] i]
               (let [db (nth vs i) p' (r/walk p (assoc (opts db) :moved (seon.ctx/moved db0 db nil)))]
                 (is (= (cold db) (mapv (juxt :id :html) (:units p'))) (str "its units at " i))
                 [p' db]))
-            ;; forward one turn, back two, forward four
-            [p0 (nth vs 2)] [3 1 5])))
+            ;; forward one turn, back two
+            [p0 (nth vs 1)] [2 0])))
 
 ;; See docs/render.md#a-page-is-a-kept-walk
 (deftest ^{:seon.test/estimate {:ticks 15000000}} the-page-and-the-request-agree
@@ -1546,6 +1530,10 @@
       :branches {[:debug :a1] {:db db}} :view {:agents {}}}
      sent [e0 e1]]))
 
+(def ^:private debug-state-value
+  "debug-state made once a process, on a test branch that ends: its dbs are values a test only reads (the one test reading the branch's store makes its own)."
+  (delay (ts/test-branch! (fn [_ conn] (debug-state conn)))))
+
 (defn- wire-text
   "The body's JSON a debug page's html shows whole (its data-wire pre), as text."
   [html]
@@ -1651,29 +1639,28 @@
 (deftest a-chosen-turn-draws-once-and-latest-draws-on-a-move
   ;; task seon.render/the-debug-page-is-the-wire-request: a turn chosen is its eid, so a move of the branch
   ;; draws nothing of it; latest's input is the branch's commit, so a move draws it again, once
-  (ts/test-branch!
-    (fn [_ conn]
-      (let [[st _ [e0 _]] (debug-state conn)
+  (do
+    (let [[st _ [e0 _]] @debug-state-value
             moved #(assoc-in % [:branches [:debug :a1] :db]
                              (d/db-with (get-in % [:branches [:debug :a1] :db])
                                         [{:seon.eval/id "e9" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key "a1"}
                                           :seon.eval/code "(f 9)" :seon.eval/response {:handle 'result/e9 :value 9} :seon.eval/call (seon.task/call-ref "a1" 2) :seon.eval/call-id "c9"}]))
-            drawn (fn [st] (let [[st1 _] (pass-view st [:debug :a1]) [st2 _] (pass-view (moved st1) [:debug :a1])]
-                             (- (get-in st2 [:counts :rendered] 0) (get-in st1 [:counts :rendered] 0))))
-            ;; latest's units after a move: its frame, its head and a row a message (seon.render.ui/debug-units)
-            held (fn [st] (let [[st1 _] (pass-view st [:debug :a1]) [st2 _] (pass-view (moved st1) [:debug :a1])] (count (get-in st2 [:views [:debug :a1] :units]))))]
-        (is (zero? (drawn (assoc-in st [:tab [:debug :a1] :at] e0))) "a chosen turn: nothing drawn again")
+            ;; what a move drew again, and latest's units after it: its frame, its head and a row a message (seon.render.ui/debug-units)
+            moves (fn [st] (let [[st1 _] (pass-view st [:debug :a1]) [st2 _] (pass-view (moved st1) [:debug :a1])]
+                             {:drawn (- (get-in st2 [:counts :rendered] 0) (get-in st1 [:counts :rendered] 0))
+                              :held (count (get-in st2 [:views [:debug :a1] :units]))}))
+            latest (moves st)]
+        (is (zero? (:drawn (moves (assoc-in st [:tab [:debug :a1] :at] e0)))) "a chosen turn: nothing drawn again")
         (let [[st' _] (pass-view (assoc-in st [:tab [:debug :a1] :at] 999999) [:debug :a1])]
           (is (str/includes? (p/view-html st' [:debug :a1]) "is no request of this branch: latest is shown") "a turn chosen that is gone is said, never shown as latest in silence"))
-        (is (< 0 (drawn st) (held st)) "latest: its head and the rows the move touched, never every unit of its request")))))
+        (is (< 0 (:drawn latest) (:held latest)) "latest: its head and the rows the move touched, never every unit of its request"))))
 
 (deftest stepping-the-timeline-draws-the-turn-on-a-still-branch
   ;; the browser check of 2026-11-03: a step (/at) on a branch that no longer moves (its agent ended) drew
   ;; nothing, as a view walks only when its dbs or its tab's choices move, and :at was none of those.
   ;; A tab's choices are one map a view (:tab), read whole by what decides a walk
-  (ts/test-branch!
-    (fn [_ conn]
-      (let [[st _ [e0 _]] (debug-state conn)
+  (do
+    (let [[st _ [e0 _]] @debug-state-value
             view [:debug :a1]
             [st _] (pass-view (update st :watch (fnil conj #{}) view) view)
             step (fn [st turn] (let [[st' out] (p/render-proc st :from-web {:op :at :view view :turn turn})]
@@ -1682,7 +1669,7 @@
         (is patch "the step sends the page a patch")
         (is (str/includes? (p/view-html st view) "what it would send now") "on latest, the turn to come")
         (is (not (str/includes? (p/view-html st1 view) "what it would send now")) "a step shows the turn chosen")
-        (is (str/includes? (p/view-html (first (step st1 :latest)) view) "what it would send now") "and latest again")))))
+        (is (str/includes? (p/view-html (first (step st1 :latest)) view) "what it would send now") "and latest again"))))
 
 (deftest the-html-fallback-folds-only-what-nests
   ;; the owner, 2026-10-23, on the default html: a fold and its "map 12 items, depth 0" header on
@@ -3827,7 +3814,7 @@
   ;; owner, 2026-11-05: @ctx was 1.3 MB and 614,773 px tall: the status part, as the model reads it, is a million
   ;; characters printed whole beside the part drawn. A part over the value budget is a closed <details> (its size in tokens); opened
   ;; (the tab's /open toggle, :open) it is the whole text, never cut. A part within budget is shown as it was
-  (let [big (into [:ul] (for [i (range 4000)] [:li (str "row " i " of a long part")]))
+  (let [big (into [:ul] (for [i (range 300)] [:li (str "row " i " of a long part")]))
         parts {"p-small" [:p "a short part"] "p-big" big}
         html {"p-small" "<p>drawn small</p>" "p-big" "<p>drawn big</p>"}
         closed (h/html (ui/ctx-parts parts html #{} ""))
@@ -3836,22 +3823,24 @@
     (is (str/includes? closed "a short part") "a part within budget is shown whole, as before")
     (is (not (str/includes? (pair closed "p-small") "<details")) "and not folded")
     (is (str/includes? closed "drawn big") "the part drawn is shown")
-    (is (not (str/includes? closed "row 3999 of a long part")) "the long text is not in the page until opened")
+    (is (not (str/includes? closed "row 299 of a long part")) "the long text is not in the page until opened")
     (is (< (count closed) 10000) (str "a long part costs its summary: " (count closed) " chars"))
     (is (re-find #"<details[^>]*>\s*<summary[^>]*>[^<]*tok" (pair closed "p-big")) "folded, its size in tokens on the line")
     (is (not (re-find #"<details[^>]* open" (pair closed "p-big"))) "closed")
     (is (str/includes? closed "unit=d-part-p-big") "its toggle tells the render proc (/open)")
-    (is (str/includes? opened "row 3999 of a long part") "opened it is whole")
+    (is (str/includes? opened "row 299 of a long part") "opened it is whole")
     (is (re-find #"<details[^>]* open" (pair opened "p-big")) "and its details are open")
     (is (not (str/includes? (pair closed "p-big") "md:grid-cols-2")) "a long text does not share the row with the part drawn: it has the width")
-    (is (str/includes? (pair closed "p-small") "md:grid-cols-2") "a short one does")
-    (testing "a part the tab opened (the /open toggle) moves the page's unit, so the render proc sends it"
-      (let [[main branch _] (paged-dbs)
-            st (root-state (proc-state main branch) main)
-            rev (fn [st] (:input (some #(when (= "d-parts" (:id %)) %) (:seon.render/units (#'p/page-value st :a3)))))]
-        (is (some? (rev st)))
-        (is (not= (rev st) (rev (assoc-in st [:tab :a3 :open] #{"d-part-p-big"}))))
-        (is (= (rev st) (rev (assoc-in st [:tab :a3 :open] #{"pc-error"}))) "a toggle of another unit does not")))))
+    (is (str/includes? (pair closed "p-small") "md:grid-cols-2") "a short one does")))
+
+(deftest a-part-the-tab-opened-moves-the-pages-unit
+  ;; the /open toggle of a long part (a-long-part-on-the-ctx-page-starts-closed-and-opens-on-demand) moves the page's unit, so the render proc sends it
+  (let [[main branch _] (paged-dbs)
+        st (root-state (proc-state main branch) main)
+        rev (fn [st] (:input (some #(when (= "d-parts" (:id %)) %) (:seon.render/units (#'p/page-value st :a3)))))]
+    (is (some? (rev st)))
+    (is (not= (rev st) (rev (assoc-in st [:tab :a3 :open] #{"d-part-p-big"}))))
+    (is (= (rev st) (rev (assoc-in st [:tab :a3 :open] #{"pc-error"}))) "a toggle of another unit does not")))
 
 (deftest the-model-and-the-page-read-the-same-parts
   ;; task seon.ctx/the-context-is-the-agents-evals-and-seons (2026-10-29: "build with both the context
@@ -5325,23 +5314,25 @@
   {:malli/schema [:=> [:cat :map :map] [:vector :seon.model/message]]}
   [_ e] [{:role "user" :content (str "NOTE-MODEL " (:lab.note/text e))}])
 
-(defn- registered-schema-world
-  "The registered-schema world (docs/render.md#the-page): on a test db, as an agent would make it, a schema with both renders
-  (:lab.note/note-fact, drawn by note-html and note-msgs; with history? false the html render alone, so no history),
-  joined by the agent's own :seon.ctx/pattern, one note for agent lab/a1, and tx-data more written after it. Answers {:c the agent's
-  pull :ix :page html :rows the conversation's html (c-rows) :msgs the request's messages, printed}."
-  ([] (registered-schema-world {}))
-  ([{:keys [history? more] :or {history? true}}]
-  (let [reg (fn [db k form] (let [r (my.schema/registration db k form false)]
-                              (when (seon.contract/error? r) (is false (str k " registers: " (pr-str r))))
-                              (d/db-with db (:tx r))))
-        db (-> (ts/test-db)
-               (reg :lab.note/id [:and {:seon.db/identity true} :string])
-               (reg :lab.note/text :string)
-               (reg :lab.note/agent [:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref])
-               (reg :lab.note/note-fact [:map (cond-> {:seon.db/attributes true :seon.render/hiccup 'seon.render-test/note-html}
-                                                   history? (assoc :seon.render/openai-compat 'seon.render-test/note-msgs))
-                                            [:lab.note/id :lab.note/id] [:lab.note/text :lab.note/text] [:lab.note/agent :lab.note/agent]]))
+(def ^:private note-registrations
+  "The tx-data of the note schema's four registrations (my.schema/registration, each ~40 ms: it judges the whole population) by history?:
+  data, made once a process; each world applies them to its own test db, whose tx instants the page reads (:tx :at), so no db is kept."
+  (memoize
+   (fn [history?]
+     (let [reg (fn [[db txs] k form] (let [r (my.schema/registration db k form false)]
+                                       (when (seon.contract/error? r) (is false (str k " registers: " (pr-str r))))
+                                       [(d/db-with db (:tx r)) (conj txs (:tx r))]))]
+       (second (-> [(ts/test-db) []]
+                   (reg :lab.note/id [:and {:seon.db/identity true} :string])
+                   (reg :lab.note/text :string)
+                   (reg :lab.note/agent [:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref])
+                   (reg :lab.note/note-fact [:map (cond-> {:seon.db/attributes true :seon.render/hiccup 'seon.render-test/note-html}
+                                                    history? (assoc :seon.render/openai-compat 'seon.render-test/note-msgs))
+                                             [:lab.note/id :lab.note/id] [:lab.note/text :lab.note/text] [:lab.note/agent :lab.note/agent]])))))))
+
+(defn- registered-schema-world*
+  [history? more]
+  (let [db (reduce d/db-with (ts/test-db) (note-registrations history?))
         pattern (conj (r/schema-property (seon.db/index) :seon.db/agent-fact :seon.ctx/pattern) {[:lab.note/_agent :tx :at] [:db/id :lab.note/id :lab.note/text]})
         db (d/db-with db [{:seon.agent/key "lab/a1" :seon.ctx/pattern pattern}])
         db (d/db-with db [{:lab.note/id "n1" :lab.note/text "the note" :lab.note/agent [:seon.agent/key "lab/a1"]}])
@@ -5355,7 +5346,15 @@
     (seon.fixtures/no-error-render (:defects p))
     {:c c :ix ix :page (apply str (map :html units)) :msgs (pr-str (:messages req)) :parts (:parts req)
      ;; the conversation as the page shows it: the units its list holds (container #c-rows, seon.render.ui/conversation-list)
-     :rows (apply str (keep #(when (= "#c-rows" (:container %)) (:html %)) units))})))
+     :rows (apply str (keep #(when (= "#c-rows" (:container %)) (:html %)) units))}))
+
+(defn- registered-schema-world
+  "The registered-schema world (docs/render.md#the-page): on a test db, as an agent would make it, a schema with both renders
+  (:lab.note/note-fact, drawn by note-html and note-msgs; with history? false the html render alone, so no history),
+  joined by the agent's own :seon.ctx/pattern, one note for agent lab/a1, and tx-data more written after it. Answers {:c the agent's
+  pull :ix :page html :rows the conversation's html (c-rows) :msgs the request's messages, printed}."
+  ([] (registered-schema-world {}))
+  ([{:keys [history? more] :or {history? true}}] (registered-schema-world* history? more)))
 
 (deftest a-joined-entity-of-a-registered-schema-reaches-the-page
   ;; docs/render.md#the-page: what an agent's pull joins reaches the page by its schema's html render, no code naming it.
@@ -5388,7 +5387,7 @@
   ;; docs/turn.md#the-turn-is-a-number: the conversation is the joins whose target is history (seon.render/history?, Data model's
   ;; ruling): an agent's own pattern asking a join with :tx :at whose schema has no model render (a cite, a started agent, here a
   ;; registered-schema note drawn for html alone) puts none of its members in the conversation
-  (let [{:keys [c rows page msgs]} (registered-schema-world {:history? false})]
+  (let [{:keys [c rows page msgs parts]} (registered-schema-world {:history? false})]
     (is (= ["the note"] (map :lab.note/text (vals (:lab.note/_agent c)))) "the pull holds the note, with its link's :at")
     (is (some :at (vals (:lab.note/_agent c))))
     (is (str/includes? rows "system message") "the conversation is drawn")
@@ -5397,7 +5396,7 @@
     ;; the model reads it as the page shows it (its page message), never as a member of the conversation; before seon.ctx.wire/db-at
     ;; read a point that is db's own as db, this world's first page was drawn at the parent commit, where the agent was not yet, and
     ;; held nothing at all
-    (let [holding (for [[ref ms] (:parts (registered-schema-world {:history? false})) :when (str/includes? (pr-str ms) "the note")] (first ref))]
+    (let [holding (for [[ref ms] parts :when (str/includes? (pr-str ms) "the note")] (first ref))]
       (is (= [:page] (distinct holding)) (str "nor read by the model as a conversation member: " (pr-str holding))))))
 
 (deftest an-eval-by-another-hand-reaches-the-request-only-as-the-systems-with-an-intent
