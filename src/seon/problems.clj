@@ -674,10 +674,8 @@
 ;; var once for every proc (memoized). A proc reaches most of the program: 1,917 vars at ~57k ticks each, 110M ticks for every proc on
 ;; main [M result/ad977787], against ~1M estimated (the estimate missed the reach). A branch's run checks only the procs it moved
 (defn undrained-procs
-  "An :undrained-proc row for each step-fn of src/ among names (nil: every one on db) that holds work outside its channels (its code
-  reaches seon.step/pend, ask, ask-edge, put-after! or arm!, read through :form/refs) and does not end it at ::flow/drain: its
-  transition names no ::flow/drain. A drain ends what a proc holds as its stop does (step/end-all, timers cancelled), then the proc
-  finishes its queue. See docs/health.md#a-proc-that-does-not-drain."
+  "An :undrained-proc row for each step-fn of src/ among names (nil: all) whose code reaches a pend, an ask or a timer (read through
+  :form/refs) and whose transition names no ::flow/drain. See docs/health.md#a-proc-that-does-not-drain."
   {:malli/schema [:=> [:cat :seon.host/db :map [:maybe [:set :symbol]]] [:vector :seon.problems/row]]}
   [db ans names]
   (let [step-fn? #(= ":seon.step/step-fn" (:var/contract %))
