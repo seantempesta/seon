@@ -5,7 +5,7 @@
   is keyed like a test by what its functions reach, and the run is shards whose greens are
   stored."
   (:require [seon.lib] [seon.agent] [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d] [clojure.java.shell]
-            [seon.test-store :as ts] [my.test :as mt] [seon.db :as pdb] [seon.merge] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
+            [seon.test-store :as ts] [my.test :as mt] [seon.db :as pdb] [seon.merge] [seon.program :as program] [seon.proofs :as proofs] [seon.writer] [seon.cost :as cost]
             [seon.program-test :refer [record]] [seon.source :as source] [seon.fx :as fx] [seon.config] [seon.contract :as contract] [seon.profile :as profile] [test-runner :as runner]))
 
 (defn- calc-srcs
@@ -366,8 +366,13 @@
 ;; 2026-11-12: measured over ten times the estimate stops the work), never past the cap; a test that states none runs under the
 ;; cap, and no history is read. Red before: the budget was max(4e9 floor, 10 x the median of its greens), whatever it stated
 ;; Estimate: the cap is 500,000 ticks here: estimated-spins stops at its 100k budget, estimated-over-the-cap at the 500k cap, within does 5k
-;; iterations (~50k), the rest are trivial; evaluating four forms (<0.1M): ~0.8M, 1,500,000 ticks.
-(deftest ^{:seon.test/estimate {:ticks 1500000}} a-tests-budget-is-ten-times-its-stated-estimate
+;; iterations (~50k), the rest are trivial; evaluating four forms (<0.1M) and a fork (~1M): ~1.7M, 2,500,000 ticks.
+;; A stop is judged by the engine's own count, the stop report's :ticks (:jolt/ticks-spent): the run's measured :ticks holds work not the
+;; test's, a test child's signal handler run at a safe point (seon.profile/aside), which read 401,722 through the test service against
+;; 117,323 in-agent (task seon.proofs/a-tests-budget-stop-is-judged-by-its-own-ticks). The budget's config, :seon.config.proofs/ticks-decide,
+;; is held by a child of the test's own (my.test/in-child, seon.config/install!), never a redefinition of seon.config/value, which every
+;; test in this process reads. Red first: the measured :ticks under the test service.
+(deftest ^{:seon.test/estimate {:ticks 2500000}} a-tests-budget-is-ten-times-its-stated-estimate
   (loaded {'app.pv-own-budget-test
            (str "(ns app.pv-own-budget-test (:require [clojure.test :refer [deftest is]]))\n"
                 "(deftest ^{:seon.test/estimate {:ticks 10000}} estimated-spins (loop [] (recur)))\n"
@@ -375,12 +380,21 @@
                 "(deftest ^{:seon.test/estimate {:ticks 999999999999}} estimated-over-the-cap (loop [] (recur)))\n"
                 "(deftest stated-none (is true))\n")}
   (fn [] (let [ts '[app.pv-own-budget-test/estimated-spins app.pv-own-budget-test/within app.pv-own-budget-test/estimated-over-the-cap app.pv-own-budget-test/stated-none]
-        ;; the estimate's budget proved with it on (:seon.config.proofs/ticks-decide, off by the owner's ruling until a test's count is its own)
-        ran (with-redefs [seon.config/value (let [v seon.config/value] (fn [k & more] (if (= k :seon.config.proofs/ticks-decide) true (apply v k more))))]
-              (proofs/run-tests! ts {} (fn [_]) 500000))]
+               {:keys [ran spent decide]}
+               (mt/in-child (fn []
+                              ;; the estimate's budget proved with it on (off by the owner's ruling until a test's count is its own), held by this child alone
+                              (seon.config/install! (seon.config/held-for ["--profile" "scripted" "--set" ":seon.config.proofs/ticks-decide=true"] nil {}))
+                              (let [spent (atom {})
+                                    ran (proofs/run-tests! ts {} (fn [x] (let [m (:seon.test/report x)]
+                                                                           (when (= :seon.test/ticks-spent (:seon.error/type m)) (swap! spent assoc (:test x) (:ticks m)))))
+                                                           500000)]
+                                {:ran (update-vals ran #(select-keys % [:budget :error :pass :fail])) :spent @spent
+                                 :decide (seon.config/value :seon.config.proofs/ticks-decide)})))]
+    (is (true? decide) "the child held the budget's config")
+    (is (not (seon.config/value :seon.config.proofs/ticks-decide)) "and this process holds what it held")
     (is (= 100000 (:budget (ran 'app.pv-own-budget-test/estimated-spins))) "ten times its estimate")
     (is (= 1 (:error (ran 'app.pv-own-budget-test/estimated-spins))) "past it: red, named")
-    (is (< (:ticks (ran 'app.pv-own-budget-test/estimated-spins)) 400000) "after about its budget's work, not the cap's")
+    (is (< (spent 'app.pv-own-budget-test/estimated-spins 0) 200000) "stopped after about its budget's own work (the engine's count), not the cap's")
     (is (proofs/green? (ran 'app.pv-own-budget-test/within)) "a test inside ten times its estimate is green")
     (is (= 200000 (:budget (ran 'app.pv-own-budget-test/within))))
     (is (= 500000 (:budget (ran 'app.pv-own-budget-test/estimated-over-the-cap))) "and never past the cap")
@@ -729,6 +743,32 @@
         db (pdb/db-with w0 (into live seeded))]
     (is (= :fail (cond (pos? (:fail (get (proofs/verdicts-at db {t d1}) d1) 0)) :fail :else :none)) "the image's own red is found")
     (is (= {} (proofs/verdicts-at db {t d2})) "a green another runner made (:seeded) answers nothing for the image")))
+
+;; tests2, 2026-11-17: the results branch, cloned from main once (seon.prove's :clone-branch), kept the schema it was cut with, so
+;; once main added the run's attributes (:seon.proof.run/*) the writer's every verdict write there was refused ("Bad entity attribute
+;; :seon.proof.run/reach-digest ... not defined in current schema", result/db584e86) and no verdict was stored after 20:46Z. A branch the
+;; writer writes takes the declarations its process holds first (seon.db/install-missing!, as an agent's resume does). Here the process
+;; holds one declaration more than the test's branch, in a child of the test's own (my.test/in-child), so no other test sees it. Red first:
+;; the write with no install. Estimate: a child (~1M), a reach graph of the seed (~2M), a verdict-tx and its write (~1M), one
+;; missing-declarations over the held schema (~0.5M): 5,000,000
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-branch-the-writer-writes-holds-the-declarations-its-process-holds
+  (is (= {:held true :written true}
+         (mt/in-child
+          (fn []
+            (ts/test-branch!
+             (fn [cfg conn]
+               ;; held once the branch is cut (test-branch! installs what the process holds then)
+               (let [real (pdb/held-schema)
+                     extra {:db/ident :seon.proof.run/zz-probe :db/valueType :db.type/string :db/cardinality :db.cardinality/one}]
+                 (with-redefs [pdb/held-schema (fn [& _] (conj (vec real) extra))]
+                   (let [w @conn t 'pt.vr-test/adds
+                         tx (proofs/verdict-tx w (program/reach-graph w nil) {:seon.db/branch (:branch cfg) :seon.db/commit (d/commit-id w) :seon.db/t (:max-tx w)}
+                                               {t {:digest (seon.lib/digest "a run") :pass 0 :fail 1 :error 0 :failures [{:type :fail :message "m"}]}} {t []} {})
+                         r (#'seon.writer/branch-tx! cfg (:branch cfg) {:tx-data tx})
+                         c (pdb/connect cfg)]
+                     (try {:held (contains? (:schema @c) :seon.proof.run/zz-probe) :written (some? (:db-after r))}
+                          (finally (d/release c)))))))))))
+      "the branch holds the declaration its process holds and it lacked, and the write is made"))
 
 ;; docs/storage.md#what-a-read-scanned: a plan finds a verdict at its digest, and a green at another digest while what its run read
 ;; still holds what it did (reuse by the one read record); a change to what it read ends the reuse.
