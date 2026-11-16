@@ -1022,3 +1022,13 @@
                                   ['a.x-test/three "d3"] {:status :queued :waiters #{1}}})
         ping ((:ping-map-fn (prove/prove-proc)) st)]
     (is (= [2 1] [(:queued ping) (:running ping)]) (pr-str (select-keys ping [:queued :running])))))
+
+;; docs/merging.md#the-test-service: process tests share a child and the test root its first one boots (~20 s a root, ~0.5 s a test
+;; after), so one agent's queued process items go out as one batch, never a share each: a share each booted a root a test, 15 at
+;; once at ~450 MB, and a session's seon_done overran 300 s in the gate's first wave (web's end-to-end land, 2026-11-16). In-process
+;; items keep their shares. Red first: process items were dealt like any (ten over the budget, a share each). Estimate: two grants
+;; over ten items, the proc's start (~8M binary-program read once): 10,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 10000000}} process-items-of-one-agent-share-one-batch
+  (let [[_ outs] (prove/ask-items (proc0) 1 :batch (into {} (for [i (range 10)] [[(symbol "app.p-test" (str "t" i)) (str "d" i)] {:agent :a1 :ms 5 :process? true}])))]
+    (is (= 1 (count (batches outs))) (str "ten process items, one batch: " (count (batches outs))))
+    (is (= 10 (count (mapcat #(get-in % [:req :names]) (batches outs)))) "every item asked")))
