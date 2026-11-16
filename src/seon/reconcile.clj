@@ -496,21 +496,18 @@
                                           :hand-back? (boolean outside)}))
             ended (str "ended" (some->> oc name (str " ")) (some->> (:reason end) (str " (") (#(str % ")"))) ": " (explain-text rs))]
         (parked-if-person kind (cond
-          ;; the process tests the branch's change reaches run before its merge, on a checkout (:gate, seon.fx/run-tests),
-          ;; nobody asking (owner's ruling, 2026-10-27: process tests the change reaches run automatically at the judge)
+          ;; the judge's one prove (seon.agent/judge! with reach? true) ran the process tests its change reaches through the gate; what it
+          ;; leaves deferred had no verdict there (or no checkout to run on): a merge task ready, or held naming them, never run again
           (and (empty? rs) merge?)
           (let [self (get-in idx [:root :started-by])
                 ;; a test cannot be its own gate (:seon.system/started-by): left out, with no result recorded
                 deferred (vec (sort-by str (remove #(= self (str %)) deferred)))]
-            (cond (and (empty? deferred) (nil? (get-in idx [:root :gate-checkout]))) {:outcome :ready :reasons rs}
-                  ;; no process test reached: :gate analyzes the candidate's files and runs nothing (docs/merging.md#a-merge-runs-what-the-change-reaches)
-                  (empty? deferred) {:outcome :gate :reasons rs :deferred []}
-                  ;; with no checkout to run them on (a root with no source), the merge is held with that reason, never merged with them unrun
-                  (nil? (get-in idx [:root :gate-checkout]))
-                  {:outcome :closed :reasons rs :deferred deferred
-                   :hold (str "its change reaches process tests (" (str/join ", " deferred)
-                              ") and this root has no checkout to run them on (:seon.config.source/gate-checkout, or a source root)")}
-                  :else {:outcome :gate :reasons rs :deferred deferred}))
+            (if (empty? deferred)
+              {:outcome :ready :reasons rs}
+              {:outcome :closed :reasons rs :deferred deferred
+               :hold (str "its change reaches process tests with no verdict from the judge's gate (" (str/join ", " deferred)
+                          (when (nil? (get-in idx [:root :gate-checkout])) "; this root has no checkout to run them on: :seon.config.source/gate-checkout, or a source root")
+                          "): a test with no verdict never merges")}))
           (empty? rs) {:outcome :done :reasons rs}
           ;; it parked (waiting, out of turns): never a hold, the session waits for its next message (docs/turn.md#parked)
           ;; out of turns with its work not done: an end, failed in the number of turns, held (its release runs it again from its
@@ -529,7 +526,7 @@
 
 (defn actions
   "The actions for index idx, in the order root executes them (the full view's rule): reap,
-  kill, close, gate, then each ready task's merge, then start ready tasks up to max-running,
+  kill, close, then each ready task's merge, then start ready tasks up to max-running,
   merges up to max-merging. Reads the index's sets and the stored answer of each judged task
   (`judgment` decided it once, at its end): its cost is the tasks to reap, kill and judge plus the starts."
   {:malli/schema [:=> [:cat :seon.reconcile/index] :seon.reconcile/actions]}
@@ -542,15 +539,11 @@
                      :let [t (get-in idx [:tasks id])]]
                  (cond
                    (not= :running (:seon.task/execution t)) {:op :close :task id}
-                   (= :gate (:seon.task/outcome t)) (let [base (into {} (remove (fn [[k]] (= (get-in idx [:root :started-by]) (str k)))) (:seon.task/deferred t))]
-                                                      {:op :gate :task id :tests (vec (sort-by str (keys base)))})
                    :else {:op :ready-to-merge :task id}))
         ;; ready tasks merge once no merge task is still working
         ready (filter #(= :ready-to-merge (:op %)) judged)
         live-merge? (some (:live idx) (:merging idx))
-        ;; one gate at a time, while no merge is in flight (it runs on the merges branch's head)
-        gates (when-not live-merge? (take 1 (filter #(= :gate (:op %)) judged)))
-        judged (remove #(#{:ready-to-merge :gate} (:op %)) judged)
+        judged (remove #(= :ready-to-merge (:op %)) judged)
         ;; each ready task merges alone through the writer's one :merge (plan item 10): the writer runs one at a time, so each
         ;; merges the main the one before it left, never behind
         merges (when (and (seq ready) (not live-merge?))
@@ -587,7 +580,7 @@
                    {:op :spawn :task id :env env}))]
     ;; a task has one flight, so one action a pass: the first in root's order; what follows it waits for the pass its write moves main to
     (first (reduce (fn [[acc seen] act] (if (contains? seen (:task act)) [acc seen] [(conj acc act) (conj seen (:task act))]))
-                   [[] #{}] (concat reaps kills judged gates merges spawns)))))
+                   [[] #{}] (concat reaps kills judged merges spawns)))))
 
 ;; ---- held for root, and the root causes at quiescence -----------------------------------
 
@@ -955,9 +948,6 @@
                    te (:db/id (d/entity (:db st) [:seon.task/id id]))
                    proved-t (or (some-> (first (d/datoms (:db st) :eavt te :seon.task/outcome)) :tx) 0)]
                (one (request st id :merged {:op :write :req {:op :merge :branch b :proved-t proved-t}})))
-      ;; the merge gate (a change reaching process tests): root's one :gate request, the candidate's files read from its
-      ;; branch, then its deferred tests run on a checkout of the merges head with them (seon.fx/run-tests)
-      :gate (one (request st id :gated {:op :gate :branch (:branch (:seon.agent/env (task-agent (:idx st) id))) :tests (:tests act)}))
       ;; an action the reconciler cannot start keeps no flight
       (throw (ex-info "no such action" {:op op})))))
 
@@ -1115,52 +1105,6 @@
     (cond-> (into move (ended-ms-tx main id now))
       (and (:hold j) (pos? (:ended-turn end 0))) (into (task/refine-tx main id)))))
 
-(defn- gated
-  "Task id's gate answered: rs, each deferred test's status (the gate's run of them, or :error for each when it
-  could not run: unread, or err the effect's error), written on the task with the decision `judgment` leaves to it: all
-  passing, the merge is ready; else the task is held for root with the tests not green and why they could not run. mains, the
-  tests red on main at the task's base (seon.proofs/main-red), are recorded with the rest and decide nothing. A failed
-  :tests effect is recorded here, with the results, in one transaction."
-  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :map [:vector :map] [:maybe :map] [:set :qualified-symbol] [:set :qualified-symbol]] [:vector :any]]}
-  [st id rs unread err mains unknown]
-  (let [main (:db st)
-        red (for [[tt s] (sort-by (comp str key) rs) :when (and (not= :pass s) (not (mains tt)))] [tt s])
-        why (concat (some-> err :seon.error/message vector) (for [u unread] (str (:ns u) ": " (:reason u))))
-        want (cond-> {:seon.task/deferred-results rs}
-               (seq unread) (assoc :seon.task/gate-unread unread)
-               err (assoc :seon.task/error err))
-        ;; an answer that isn't results is no pass, though it names no test to be red: real run 10's replay, a refused candidate with no process test merged
-        move (if (and (empty? red) (not err) (empty? unread))
-               (task/move-tx id :gate :ready want)
-               (hold-tx main id (task/move-tx id :gate :closed want)
-                        (str (when (seq red)
-                               (str "its deferred tests, run on a checkout at its merge, are not green: "
-                                    (str/join ", " (for [[tt s] red] (str tt " " (name s) (when (unknown tt) " (main's verdict unknown)"))))))
-                             ;; why they could not run, when the gate itself failed: the effect's error, or a changed
-                             ;; namespace with no file on the branch (each test then reads :error)
-                             (when (seq why) (str "; the gate could not run them: " (str/join "; " why))))
-                        {:red (mapv first red) :conflicts (:seon.task/conflicts (get-in st [:idx :tasks id])) :unmerged (:seon.task/unmerged (get-in st [:idx :tasks id]))}))]
-    (if err (err/asked-tx main err :seon.task/deferred-results move) move)))
-(defn- gated-step
-  "The gate's decision on its run's answer r (seon.fx/run-tests'), main's reds left out of it (r's :main-red, and on-main: the
-  tests main's own answer held red when r named reds nobody knew, `ask-main`): the task written done, and each main red told
-  once as the system's problem. Answers [st outputs]. See docs/tasks.md#the-done-rule."
-  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :map :any [:map [:red [:set :qualified-symbol]] [:unknown [:set :qualified-symbol]]]] [:tuple :seon.reconcile/state [:vector :map]]]}
-  [st id act r on-main]
-  (let [unread (:unread r)
-        ok? (not (or (contract/error? r) (seq unread)))
-        ;; a test the run answered nothing of is :none, never left out: a gate that judged 78 of its 242 tests
-        ;; read as if it had judged them all (the standing store, 2026-11-11), and with main's reds left out of the
-        ;; decision a missing one would have merged untested
-        rs (if ok? (merge (zipmap (:tests act) (repeat :none)) (get-in r [:value :results])) (zipmap (:tests act) (repeat :error)))
-        mains (if ok? (into (set (get-in r [:value :main-red])) (:red on-main)) #{})
-        [st o] (write st id :done (gated st id rs (vec unread) (when (contract/error? r) r) mains (:unknown on-main)))]
-    [st (into [o] (for [t (sort-by str mains)]
-                    {:op :problem :class :platform
-                     :error (contract/error :seon.prove/full-run-red #'seon.reconcile/gated
-                                            (str t " is red on main without this change (at the gate of " id ")") {:tests [t]})}))]))
-
-
 (declare advance)
 
 (defn- advance-step
@@ -1310,16 +1254,6 @@
                                    ;; the live agents of the tasks a merged one unblocks are told, in this write, which wakes each
                                    ;; (seon.task/landed-tx; plan Stage 1.8)
                                    (when merged? (task/landed-tx (:db st) [task] (System/currentTimeMillis))))))))
-      ;; each deferred test's status on the task. The candidate is the writer's: the files the merge would write
-      ;; (seon.writer's :merge-candidate), forms', tests' and schema resources' alike (a :seon.ref/block change left out would
-      ;; meet its new seon.ref/scan in the checkout, and the seed would throw on scan's contract). A refused candidate (an
-      ;; error), or one over a tree missing a changed namespace (:unread), vouches for none: each :error, and no test ran
-      ;; a test red on main at the task's base digest (the effect's :main-red, seon.proofs/main-red) is main's, not the
-      ;; task's: it is left out of the gate's decision and told as the system's problem, one per test (docs/tasks.md#the-done-rule)
-      :gated (if-let [ask (when-not (or (contract/error? r) (seq (:unread r))) (not-empty (reds-to-ask (get-in r [:value :results]) (get-in r [:value :main-red]))))]
-               (one (ask-main (-> st (assoc-in [:flights id :gate-answer] r) (assoc-in [:flights id :asked] ask)) id :gate-main-asked ask))
-               (gated-step st id act r (main-answer #{} nil)))
-      :gate-main-asked (gated-step st id act (get-in f [:gate-answer]) (main-answer (get-in f [:asked]) r))
       :write-back (one (request st id :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)
                        files (doc/files (:db r) paths)]
@@ -1501,17 +1435,15 @@
     [st (into outs more)]))
 
 (defn settled?
-  "Whether task id's work is judged on db, so a wait on its judge (seon_done) answers: its outcome left :running and :ready, or
-  it is at :gate with no process test deferred (its merge, minutes at most). The one rule a judge's waiter reads. See
+  "Whether task id's work is judged on db, so a wait on its judge (seon_done) answers: its outcome left :running and :ready. The
+  one rule a judge's waiter reads. See
   docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] :boolean]}
   [db id]
-  (let [{o :seon.task/outcome ts :seon.task/deferred} (d/pull db [:seon.task/outcome :seon.task/deferred] [:seon.task/id id])]
-    (not (or (contains? #{:running :ready} o) (and (= :gate o) (empty? ts))))))
+  (not (contains? #{:running :ready} (:seon.task/outcome (d/pull db [:seon.task/outcome] [:seon.task/id id])))))
 
 (defn- answer-judged
-  "st with each wait on a task's judge (:judged, {task [promise]}) answered once the task has no flight, or is at :gate with tests
-  deferred (the flight then is the gate's run, and the waiter is told :next): {:task :outcome} when it is settled?, the typed :seon.reconcile/judge-left-running when its flight ended and left it :running (nothing of root's will
+  "st with each wait on a task's judge (:judged, {task [promise]}) answered once the task has no flight: {:task :outcome} when it is settled?, the typed :seon.reconcile/judge-left-running when its flight ended and left it :running (nothing of root's will
   move it); a task at :ready waits on, its merge to come as commits, until root is quiet with it unmerged
   (:seon.reconcile/judge-left-ready): no merge flying and no live merge task. Asked after every step, so the producer's own end answers
   its waiter, never a quiet of the whole root. O(waits)."
@@ -1520,17 +1452,13 @@
   (if (or (empty? (:judged st)) (nil? (:db st)))
     st
     (reduce-kv (fn [st id ps]
-                 ;; a task at :gate with tests deferred is judged (settled?) while its flight, the gate's run of those tests, goes on:
-                 ;; its waiter answers now, never at the gate's end (web's land, 2026-11-16: a done waited out a 13-minute gate)
-                 (if (and (get-in st [:flights id])
-                          (not (let [{o :seon.task/outcome ts :seon.task/deferred} (d/pull (:db st) [:seon.task/outcome :seon.task/deferred] [:seon.task/id id])]
-                                 (and (= :gate o) (seq ts)))))
+                 (if (get-in st [:flights id])
                    st
                    (let [o (:seon.task/outcome (d/pull (:db st) [:seon.task/outcome] [:seon.task/id id]))
                          r (cond (settled? (:db st) id) {:task id :outcome o}
                                  (= :running o) (contract/error :seon.reconcile/judge-left-running #'seon.reconcile/answer-judged
                                                                 (str id "'s judge ended and left it :running: nothing root runs will move it") {:task id})
-                                 ;; :ready (or :gate with nothing deferred) waits for its merge, until nothing will merge it: this step's pass
+                                 ;; :ready waits for its merge, until nothing will merge it: this step's pass
                                  ;; ran first and starts a ready task's merge whenever no merge is in flight, so with no merge flying and no
                                  ;; live merge task, none is coming for it (scoped to merging, never to every agent's work: flow's review)
                                  (and (not-any? #(= :merge (get-in % [:act :op])) (vals (:flights st)))

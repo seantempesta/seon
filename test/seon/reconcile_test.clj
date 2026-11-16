@@ -879,9 +879,6 @@
         boots 'seon.system-test/boots]
     (testing ":ready is the writer's :merge"
       (is (= [merge] (actions-for (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :ready)))))))
-    (testing ":gate is the gate, with the tests its judging deferred"
-      (is (= [{:op :gate :task "demo/a-merge" :tests [boots]}]
-             (actions-for (mdb [(decl "a")] :extra (concat (work "a" :done) (ts/root-tx gate) (work "a-merge" :gate :members {:seon.task/deferred {boots "d-boots"}})))))))
     (testing "a judged task no longer running is closed, never merged"
       (is (= [{:op :close :task "demo/a-merge"}]
              (actions-for (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :ready) (task/execution-tx ["demo/a-merge"] :cancelled)))))))
@@ -1161,61 +1158,28 @@
            (actions-for (db-req (concat (work "a" :done) (work "a-merge" :ready)))))
         "and the merge task's green end is the merge")))
 
-;; Estimate: 3 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 3 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 1 judgings x 0.7M (the index and the judge-tx); 1 transacts or db-withs x 50k ~ 6,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 6000000}} a-merge-with-deferred-tests-is-gated-with-nobody-asking
-  ;; the owner's ruling (2026-10-27: process tests the change reaches run automatically at the
-  ;; judge; it replaces 2026-10-23's "never automatically" for merges): the process tests a
-  ;; branch's change reaches run before its merge, on a worktree of the root's declared gate
-  ;; checkout, with no one asking for it, and gate it like proofs: unrun, the
-  ;; member is gated first (alone); all passing, it merges; a red, or a run that could not run
-  ;; them (:error), is refused as a red proof is, never hidden. With no checkout to run them on
-  ;; (a root with no source), it is held, saying so: never merged with them unrun
+;; Estimate: six judgments over a small main (~1M each): ~6M; 8,000,000
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-merge-task-is-ready-or-holds-the-tests-the-judges-gate-left-unrun
+  ;; the one prove (task seon.step's queue, item 2): the judge (seon.agent/judge! with reach? true) runs the process tests a merge task's
+  ;; change reaches through its gate; what it leaves deferred had no verdict there, so the task is held naming them, never run again by a
+  ;; later stage, and a task with none deferred is ready. Red before: a clean merge task went to :gate (the reconciler's second run)
   (let [gate {:seon.system/id :root :seon.config.source/gate-checkout "/the/merges/tree"}
         boots 'seon.system-test/boots
         other 'seon.system-test/other
         self (assoc gate :seon.system/started-by "seon.system-test/boots")
-        ;; the merge task working, the work before it done; judged on a green end with the tests its change reaches deferred
         judged (fn [root deferred] (judgment-of (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :running) (when root (ts/root-tx root))))
-                                                "a-merge" {:end {:outcome :green} :results {(t "a") :pass} :deferred deferred}))
-        ;; ... and gated: its outcome :gate, the gate's answer in
-        gated (fn [root rs unread err]
-                (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :gate :members {:seon.task/deferred {boots "d-boots"}}) (when root (ts/root-tx root))))]
-                  (d/db-with db (#'r/gated (st-of db) "demo/a-merge" rs unread err #{} #{}))))
-        merges [{:op :merge :task "demo/a-merge"}]]
-    (is (= {:outcome :gate :reasons [] :deferred [boots]} (judged gate [boots])) "unrun: gated first")
-    (is (= {:outcome :gate :reasons [] :deferred []} (judged gate [])) "none deferred: its tree is still analyzed, with no checkout (docs/merging.md#a-merge-runs-what-the-change-reaches)")
-    (is (= :ready (:outcome (judged nil []))) "a root with no source has no candidate to analyze")
-    (testing "all passing, it is ready and merges"
-      (let [db (gated gate {boots :pass} [] nil)]
-        (is (= :ready (:seon.task/outcome (task/task db "demo/a-merge"))))
-        (is (= {boots :pass} (:seon.task/deferred-results (task/task db "demo/a-merge"))))
-        (is (= merges (actions-for db)))))
-    (testing "a gate that answers an error with no test named is no pass: its candidate didn't analyze"
-      (let [db (gated gate {} [] {:seon.error/type :seon.writer/refused :seon.error/operation 'seon.writer/refused :seon.error/message "the merged tree doesn't analyze: x"})]
-        (is (= :closed (:seon.task/outcome (task/task db "demo/a-merge"))))
-        (is (clojure.string/includes? (str (:seon.error/message (:seon.task/error (task/task db "demo/a-merge")))) "doesn't analyze"))))
-    (testing "a red, or a run that could not run them (:error), is refused as a red proof is"
-      (doseq [s [:fail :error]]
-        (let [db (gated gate {boots s} [] nil)
-              tk (task/task db "demo/a-merge")]
-          (is (= [:closed :held] ((juxt :seon.task/outcome :seon.task/execution) tk)) "held for root")
-          (is (str/includes? (get-in tk [:seon.task/failure :reason]) (str boots " " (name s))))
-          (is (= [] (actions-for db)) "and nothing merges"))))
-    (testing "a gate that could not run them says why: the effect's error and the namespaces it could not put over the checkout"
-      (let [err (contract/error :seon.fx/io-error 'seon.fx/run-tests "bin/worktree --at exited 1: no such branch" {})
-            tk (task/task (gated gate {boots :error} [{:ns 'seon.generation :reason "no :ns/file on the branch"}] err) "demo/a-merge")]
-        (is (str/includes? (get-in tk [:seon.task/failure :reason])
-                           "the gate could not run them: bin/worktree --at exited 1: no such branch; seon.generation: no :ns/file on the branch")
-            (get-in tk [:seon.task/failure :reason]))))
-    (testing "the test whose process started this root is left out: a test cannot be its own gate (:seon.system/started-by)"
-      (is (= {:outcome :gate :reasons [] :deferred []} (judged self [boots])) "the only deferred test is the root's own: no test runs, and the tree is still analyzed")
-      (is (= {:outcome :gate :reasons [] :deferred [other]} (judged self [boots other])) "another test beside it is still gated, itself not named")
-      (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (ts/root-tx self) (work "a-merge" :gate :members {:seon.task/deferred {boots "d-boots" other nil}})))]
-        (is (= [{:op :gate :task "demo/a-merge" :tests [other]}] (actions-for db)))))
-    (testing "no checkout to run them on (a root with no source): held, never merged with them unrun"
-      (let [j (judged nil [boots])]
-        (is (= :closed (:outcome j)))
-        (is (str/includes? (:hold j) "no checkout to run them on"))))))
+                                                "a-merge" {:end {:outcome :green} :results {(t "a") :pass} :deferred deferred}))]
+    (is (= {:outcome :ready :reasons []} (judged gate [])) "nothing deferred: ready to merge, with no second stage")
+    (is (= {:outcome :ready :reasons []} (judged nil [])) "nor with no checkout")
+    (is (= {:outcome :ready :reasons []} (judged self [boots])) "the root's own test is left out: a test cannot be its own gate")
+    (let [j (judged gate [boots])]
+      (is (= [:closed [boots]] ((juxt :outcome :deferred) j)) "a test the judge's gate gave no verdict holds the task")
+      (is (str/includes? (:hold j) (str boots)) (:hold j)))
+    (let [j (judged self [boots other])]
+      (is (= [:closed [other]] ((juxt :outcome :deferred) j)) "beside the root's own, the other is named"))
+    (let [j (judged nil [boots])]
+      (is (= :closed (:outcome j)))
+      (is (str/includes? (:hold j) "no checkout") (str "no checkout to run them on says so: " (:hold j))))))
 
 ;; Estimate: 4 db builds (test-db fork 0.1M + the root-tx transact 50k = 0.15M each, 0.6M) + 7 task/proof? and unjudged calls of ~10k each ~ 0.7M ~ 700,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 700000}} what-no-gate-runs-is-said-and-what-a-task-owes-is-its-proofs
@@ -1956,89 +1920,6 @@
       (let [main (d/db-with base [[:db/add [:seon.task/id "demo/b"] :seon.task/proofs 'demo-test/mains-test]])]
         (is (empty? (:conflicts (pm/decide base branch main))) "no conflict: each proof is its own fact")))))
 
-;; Estimate: pure data in, pure data out, a few 10k ticks ~ 50,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 50000}} a-refused-merge-candidate-is-the-gates-error
-  ;; the Sonnet review of gate-schema (2026-10-30): the gate took the candidate's :text with no check, so a
-  ;; writer that refused the candidate sent the gate no files, and it would have tested main as it is
-  (let [id "demo/a-merge"
-        refused (contract/error :seon.system/refused #'seon.reconcile-test/a-refused-merge-candidate-is-the-gates-error "no branch demo/x")
-        st {:db (ts/test-db) :boot "b1" :rid 0 :pending {} :flights {id {:act {:op :gate :task id :tests ['seon.system-test/boots]}}}}
-        [_ outs] (#'r/advance st id :gated refused)
-        reqs (map :req outs)]
-    (is (not-any? #(= :tests (:kind %)) reqs) "no tests run on a checkout with no candidate")
-    (let [tx (some #(get-in % [:req :tx-data]) reqs)]
-      (is (some #(= {'seon.system-test/boots :error} (:seon.task/deferred-results %)) tx)
-          (str "each deferred test :error: " (pr-str tx)))
-      (is (some #(= refused (:seon.task/error %)) tx) "with why it was refused as the task's error"))))
-
-;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 2 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 2 transacts or db-withs x 50k ~ 3,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 3000000}} a-test-red-on-main-at-its-base-decides-nothing-at-the-gate
-  ;; docs/tasks.md#the-done-rule: a deferred test red on main at the task's base digest (the :tests effect's :main-red,
-  ;; seon.proofs/main-red) is main's: recorded with the rest, left out of the gate's decision, and told once as the system's
-  ;; problem (:seon.prove/full-run-red); a red of the task's own still holds it
-  (let [id "demo/a-merge"
-        boots 'seon.system-test/boots other 'seon.system-test/other
-        db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :gate :members {:seon.task/deferred {boots "d-boots" other "d-other"}})))
-        st (assoc (st-of db) :flights {id {:act {:op :gate :task id :tests [boots other]}}})
-        answer (fn [rs mains] {:value {:results rs :main-red mains}})
-        after (fn [outs] (d/db-with db (some #(get-in % [:req :req :tx-data]) outs)))]
-    (testing "its only red is main's: the task is ready, its results kept whole, and the system told"
-      (let [[_ outs] (#'r/advance st id :gated (answer {boots :fail other :pass} #{boots}))
-            tk (task/task (after outs) id)]
-        (is (= :ready (:seon.task/outcome tk)))
-        (is (= {boots :fail other :pass} (:seon.task/deferred-results tk)))
-        (is (= [[:platform :seon.prove/full-run-red [boots]]]
-               (for [o outs :when (= :problem (:op o))] [(:class o) (get-in o [:error :seon.error/type]) (get-in o [:error :tests])])))))
-    (testing "a red of its own beside main's: asked of main, green there, held, naming only its own"
-      (let [[st2 _] (#'r/advance st id :gated (answer {boots :fail other :fail} #{boots}))
-            [_ outs] (#'r/advance st2 id :gate-main-asked {:reports [{:var (str "#'" other) :type :pass}]})
-            tk (task/task (after outs) id)]
-        (is (= [:closed :held] ((juxt :seon.task/outcome :seon.task/execution) tk)))
-        (is (str/includes? (get-in tk [:seon.task/failure :reason]) (str other " fail")))
-        (is (not (str/includes? (get-in tk [:seon.task/failure :reason]) (str boots))))))
-    (testing "a test the run answered nothing of is recorded :none and holds the task, though the only red is main's"
-      (let [[_ outs] (#'r/advance st id :gated (answer {boots :fail} #{boots}))
-            tk (task/task (after outs) id)]
-        (is (= {boots :fail other :none} (:seon.task/deferred-results tk)))
-        (is (= :closed (:seon.task/outcome tk)))
-        (is (str/includes? (get-in tk [:seon.task/failure :reason]) (str other " none")))))
-    (testing "no :main-red and main green: the red is the task's, and no problem is told"
-      (let [[st2 _] (#'r/advance st id :gated (answer {boots :fail other :pass} nil))
-            [_ outs] (#'r/advance st2 id :gate-main-asked {:reports [{:var (str "#'" boots) :type :pass}]})]
-        (is (= :closed (:seon.task/outcome (task/task (after outs) id))))
-        (is (not-any? #(= :problem (:op %)) outs))))))
-
-;; Estimate: 1 mdb x 1M (as the gate test above) + 3 advance calls x 0.7M (one run-digest of a small main ~0.3M each) ~ 3,500,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 3500000}} a-red-nobody-knew-on-main-is-asked-of-main-before-the-gate-decides
-  ;; docs/tasks.md#the-done-rule (seon.proofs/a-red-main-holds-is-mains-whatever-the-digest): a red whose verdict at base nobody
-  ;; knows yet (main's own run had not reached it: the first real seon_done closed on six such) is asked of main by name, and the
-  ;; gate decides on main's answer: red there, main's; green there, the task's own. Red before: the gate decided at once, every
-  ;; such red the task's
-  (let [id "demo/a-merge"
-        boots 'seon.system-test/boots other 'seon.system-test/other
-        db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :gate :members {:seon.task/deferred {boots "d-boots" other "d-other"}})))
-        st (assoc (st-of db) :flights {id {:act {:op :gate :task id :tests [boots other]}}})
-        gate {:value {:results {boots :fail other :pass} :main-red #{}}}
-        main (fn [status] {:reports [{:var (str "#'" boots) :type status}]})
-        after (fn [outs] (d/db-with db (some #(get-in % [:req :req :tx-data]) outs)))
-        [st2 outs] (#'r/advance st id :gated gate)
-        ask (some #(when (= :prove (get-in % [:req :op])) (:req %)) outs)]
-    (testing "the red nobody knew is asked of main by name, and nothing is decided before its answer"
-      (is (= {:branch :main :names #{boots} :mode :judge} (select-keys ask [:branch :names :mode])) (pr-str outs))
-      (is (not-any? #(get-in % [:req :req :tx-data]) outs) "no write yet"))
-    (testing "main holds it red: main's, so the task is ready and the system is told"
-      (let [[_ outs] (#'r/advance st2 id :gate-main-asked (main :fail))]
-        (is (= :ready (:seon.task/outcome (task/task (after outs) id))))
-        (is (= [boots] (for [o outs :when (= :problem (:op o))] (first (get-in o [:error :tests])))))))
-    (testing "main holds it green: the task's own red, held"
-      (let [[_ outs] (#'r/advance st2 id :gate-main-asked (main :pass))]
-        (is (= :closed (:seon.task/outcome (task/task (after outs) id))))))
-    (testing "main answered nothing of it (a process test): held, its reason saying main's verdict is unknown"
-      (let [[_ outs] (#'r/advance st2 id :gate-main-asked {:reports []})
-            tk (task/task (after outs) id)]
-        (is (= :closed (:seon.task/outcome tk)))
-        (is (str/includes? (get-in tk [:seon.task/failure :reason]) "main's verdict unknown") (pr-str (:seon.task/failure tk)))))))
-
 ;; Estimate: 1 db-of 0.5M + 1 d/with of a retractEntity 50k + the index listed twice (0.6M each) + 1 observe from the last 0.3M ~ 2M ticks
 (clojure.test/deftest ^{:seon.test/estimate {:ticks 2000000}}
  an-observed-retraction-leaves-no-residue
@@ -2580,20 +2461,6 @@
         (is (= :unanswered (deref p 0 :unanswered)) "a merge in flight: wait, whatever else is live")
         (#'seon.reconcile/answer-judged (assoc s :flights {}))
         (is (= :seon.reconcile/judge-left-ready (:seon.error/type (deref p 0 :unanswered))) "no merge flying or coming, other agents live: answered")))))
-
-;; docs/server.md#ops: a seon_done at a :gate with process tests deferred answers with :next (settled?), its gate running on. web's
-;; land through seon_done (2026-11-16, result/ab5418b0): the task at :gate with its tests deferred and its agent ended, the done still
-;; waiting, since answer-judged skipped any task with a flight, and at the gate the flight is the gate's run of every reached test
-;; (13 min on root's pilot; the 300 s overrun of a-sessions-done-with-its-checkout-merges-its-change-into-main). Red before: held.
-;; Estimate: one answer-judged step over a db of one task, ~0.1M
-(deftest ^{:seon.test/estimate {:ticks 500000}} a-done-at-a-gate-with-tests-is-answered-while-the-gate-runs
-  (let [db (d/db-with (seon.db/empty-db false) [{:seon.task/id "demo/a" :seon.task/outcome :gate :seon.task/deferred {'demo-test/p "d1"}}])
-        p (promise)
-        st {:db db :boot "b" :pending {} :rid 0 :waits [] :behind [] :judged {"demo/a" [p]}
-            :flights {"demo/a" {:act {:op :gate :task "demo/a" :tests ['demo-test/p]}}}}
-        st (#'seon.reconcile/answer-judged st)]
-    (is (= {:task "demo/a" :outcome :gate} (deref p 0 :unanswered)) "answered at the gate, its tests still running")
-    (is (contains? (:flights st) "demo/a") "and the gate's flight goes on")))
 
 ;; docs/errors.md#nothing-crashes-and-nothing-hangs: a merge whose request the writer answered with an error (a step that threw,
 ;; answered at its :dest) moved its task off :ready: (:results r) was nil, so its seon_done waited for its merge for good, and the

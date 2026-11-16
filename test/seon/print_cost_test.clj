@@ -1,10 +1,10 @@
 (ns seon.print-cost-test
-  "The one value printer's cost proofs: printing follows the value's shown size, one pass.
-
-  Two proofs over one input. The first states the printer's own work, unarmed (its namespaces
-  as defined): what a print must allocate and how long it takes. The second is the same print
-  armed, as root runs it (seon.print is armed at boot): it adds exactly the contracted calls
-  the printer makes per entry, which is what arming multiplies."
+  "The one value printer's cost proofs: printing follows the value's shown size, one pass, at sizes
+  of at most 30 (the growth is read off three small sizes, never a huge value). Every proof is the
+  print armed, as root runs it (seon.print is armed at boot, and each test shard arms it before its
+  tests): arming adds the contracted calls the printer makes per entry to its own work, priced in bytes.
+  No proof reloads the printer: a reload to measure it unarmed cost 600 ms a proof and made each a
+  process test, for a state nothing runs in."
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is]] [seon.contract :as contract :refer [defn defn-]]
             [seon.cost :as cost] [seon.print] [seon.print.select :as select] [clojure.string :as str]))
@@ -54,30 +54,19 @@
   work below 65 entries: the sizes start above it."
   (round (priced {:map/assoc! 60})))
 
-(defn- as-defined!
-  "The printer's namespaces loaded again from their source, unarmed: this runner's own, since in a built binary an agent's
-  test child runs, a reload changes nothing. Named in :seon.config.source/process-vars so these proofs run on bin/test's
-  runner, at the merge gate, and never in an agent's fork (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)."
+(defn- armed
+  "Costs `own` plus the `calls` contracted calls a print makes, each at `per-call` bytes and the armed-call row's ticks."
+  {:malli/schema [:=> [:cat [:map-of :keyword number?] pos-int? number?] [:map-of :keyword int?]]}
+  [own calls per-call]
+  (round (assoc own :bytes (+ (:bytes own) (* calls per-call))
+                :ticks (+ (:ticks own) (* calls (:ticks (cost/units :fn/armed-call)))))))
+
+(defn- armed!
+  "The printer's contracted vars armed, as at boot (arming an armed var changes nothing)."
   []
-  (require 'seon.print.emit 'seon.print.select 'seon.print :reload))
+  (contract/instrument! '[seon.print seon.print.select seon.print.emit]))
 
 (deftest printing-a-map-is-one-pass-over-its-entries
-  ;; the printer's own work: its namespaces as defined, whatever an earlier test armed (and
-  ;; armed again after, as that test left them)
-  (let [armed? (contract/armed? #'seon.print/print-value)]
-    (as-defined!)
-    (try
-      (cost/proof
-        {:of 'seon.print/print-value :input 'seon.print-cost-test/entries
-         :n "entries of a flat map, all shown (~13 characters each), unarmed"
-         :work work
-         :growth :linear
-         :ops per-entry
-         :fixed fixed
-         :sizes [100 300 1000 10000]})
-      (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))
-
-(deftest armed-printing-adds-only-its-contracted-calls
   ;; as root runs it: every contracted printer function armed. Bytes are the own work's plus what each
   ;; contracted call's checks allocate (the calls price the bytes; they are no bound of their own: the owner, 2026-11-15). An armed call takes no try (task
   ;; seon.contract/an-armed-call-costs-its-checks: :fn/armed-call's one-int row is ~0 B), but the
@@ -87,18 +76,18 @@
   ;; unarmed above. The printer is left as this test found it: an armed seon.print stayed armed for
   ;; every test after it in the process, and a debug page's pass printed through it with 189 more
   ;; contracted calls (the debug page's pass of its rows, measured 2026-10-23: 420 alone, 609 after this test)
-  (let [armed? (contract/armed? #'seon.print/print-value)
-        armed (fn [own calls per-call] (round (assoc own :bytes (+ (:bytes own) (* calls per-call)))))]
-    (contract/instrument! '[seon.print seon.print.select seon.print.emit])
-    (try
-      (cost/proof
+  (do
+    (armed!)
+    (cost/proof
         {:of 'seon.print/print-value :input 'seon.print-cost-test/entries
          :n "entries of a flat map, all shown, armed as at boot"
          :work (str work ". Armed, per entry exactly nine contracted calls: classify and scalar for the key "
                     "and the value (4), child, entry and member-indent (3), and leaf-op for the key and the "
                     "value (2)")
          :growth :linear
-         :per-n (dissoc (armed (priced per-entry) 9 62) :ns)
+         ;; a map of at most :sort-bound (64) keys is shown sorted, which every size here is under: the sort adds per entry
+         ;; (measured at 10, 20 and 30 entries: the work above falls short by 2.0k ticks and 1.25k B an entry)
+         :per-n (merge-with + (dissoc (armed (priced per-entry) 9 62) :ns) {:ticks 2000 :bytes 1250})
          ;; the functions a print calls once or twice whatever its size (show, select, allot, the
          ;; root's node and sizing, tree, emit-both, node-ops, layout and their helpers): 79 calls
          ;; (71 until an entry of two leaves was charged its flat width, 2026-10-25: the least form,
@@ -107,13 +96,13 @@
          ;; one call more; 80 with seon.print.select/lifted-namespace, the one decision of a map's
          ;; #:ns{ lift, made once per map over its keys with no call per key)
          :fixed (dissoc (armed fixed 86 170) :ns)
-         :sizes [100 300 1000 10000]})
-      (finally (when-not armed? (as-defined!))))))
+         :sizes [10 20 30]})))
 
 (def ^:private shown-budget
   "The budget the cut inputs print under, stated here so a proof's input does not move with the
-  reply's config key (6,144 tokens, the reply's until 2026-10-25)."
-  6144)
+  reply's config key: 64 tokens, which shows the first three lines of a text and cuts the rest, so
+  thirty lines are enough to see what grows with the text."
+  64)
 
 (defn text
   "The input of size n: a text of n lines (~50 characters each, a log an evaluation printed),
@@ -127,27 +116,22 @@
   ;; (seon.print.select/line-breaks): what grows with the text is that one pass, never a scan of
   ;; the rest at every sizing. What the budget shows is fixed: its characters escaped once into
   ;; the literal, and read by the sizing passes (fill-end and escaped-width, about three).
-  (let [armed? (contract/armed? #'seon.print/print-value)
-        shown (select/estimate-chars shown-budget)]
-    (as-defined!)
-    (try
-      (cost/proof
+  (let [shown (select/estimate-chars shown-budget)]
+    (armed!)
+    (cost/proof
         {:of 'seon.print/print-value :input 'seon.print-cost-test/text
-         :n "lines of a text cut under 6,144 tokens, unarmed"
+         :n "lines of a text cut under 64 tokens, armed as at boot"
          :work (str "per line, one indexOf to its line break (~50 characters read) and one conj! of the break's offset; "
                     "fixed, the ~" shown " characters shown: each escaped once into the string literal and looked up by "
                     "about three sizing passes (char-escape-string)")
          :growth :linear
          :ops {:vec/conj! 1 :seq/reduce 50}
-         :fixed (round (priced {:str/escape shown :map/get (* 3 shown)}))
-         :sizes [250 500 1000 10000 100000]})
-      (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))
+         :fixed (dissoc (armed (priced {:str/escape shown :map/get (* 3 shown)}) 86 170) :ns)
+         :sizes [10 20 30]})))
 
 (def ^:private rows-budget
-  "The budget the rows print under: 1,024 tokens, which shows the first dozen or so rows whole (a
-  reply's 6,144 shows 73, each of the same walks six times as dear, and the growth with the rows is
-  as visible)."
-  1024)
+  "The budget the rows print under: 256 tokens, which shows the first few rows whole and cuts the rest."
+  256)
 
 (defn rows
   "The input of size n: n problem rows (7 keys each, as my.root/problems' :stale-section rows),
@@ -160,26 +144,24 @@
 
 (deftest printing-rows-costs-what-it-shows
   ;; a printed value costs what it shows, not what it hides: the budget fixes the rows shown whole
-  ;; (73 of 7 keys under a reply's 6,144, then one cut), and no row past the cut is read (seon.print.select/fill-rows).
+  ;; (a few of 7 keys under rows-budget, then one cut), and no row past the cut is read (seon.print.select/fill-rows).
   ;; Measured 2026-10-25, unarmed: 13.2 MB and 3.39M ticks at 100, 1,000 and 10,000 rows; main's
   ;; breadth path on the same input cost 16.0 MB and 4.28M ticks at 100 rows, growing with them,
   ;; for 493 cuts and no row shown. The fixed part is the selection trying each level whole
   ;; (the root map, its :rows entry, the vector, each row: about four walks of what shows).
-  (let [armed? (contract/armed? #'seon.print/print-value)]
-    (as-defined!)
-    (try
-      (cost/proof
+  (do
+    (armed!)
+    (cost/proof
         {:of 'seon.print/print-value :input 'seon.print-cost-test/rows
-         :n "problem rows under 1,024 tokens, unarmed"
+         :n "problem rows under 256 tokens, armed as at boot"
          :work (str "nothing per row past what the budget could show (alike? reads member kinds only when no row fits whole): the rows the budget shows whole are fixed by it, about four whole walks of "
                     "them (one a level: the root, its :rows entry, the vector, each row), and the first row "
                     "that does not fit is sized until its charge passes the room; no row past the cut is read")
          :growth :constant
-         ;; 2026-10-31 (shrink-tests-4): under rows-budget (1,024) the same walks cost 0.70M ticks, 2.1 ms and 2.48 MB at
-         ;; 100, 300 and 1,000 rows, flat (6,144 read the 3.4M / 7.8 ms / 13.2 MB above)
-         :fixed {:ticks 7.1e5 :ns 2.1e6 :bytes 2.5e6}
-         :sizes [100 300 1000 10000]})
-      (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))
+         ;; the walks cost what they show, so a quarter of the 1,024 budget's 0.71M ticks and 2.5 MB (2026-10-31, flat from
+         ;; 100 to 1,000 rows): 1.8e5 ticks and 6.3e5 bytes, flat from 10 to 30 rows
+         :fixed {:ticks 1.8e5 :ns 5.0e5 :bytes 6.3e5}
+         :sizes [10 20 30]})))
 
 (defn code
   "The input of size n: n lines of a test's source (~50 characters each) as code
@@ -195,13 +177,11 @@
   ;; for each time the selection makes the map's child (three);
   ;; what shows is fixed by the budget, each shown character sized about three times (fill-end,
   ;; code-width) and copied once as written (emit/code-text)
-  (let [armed? (contract/armed? #'seon.print/print-value)
-        shown (select/estimate-chars shown-budget)]
-    (as-defined!)
-    (try
-      (cost/proof
+  (let [shown (select/estimate-chars shown-budget)]
+    (armed!)
+    (cost/proof
         {:of 'seon.print/print-value :input 'seon.print-cost-test/code
-         :n "lines of code cut under 6,144 tokens, unarmed"
+         :n "lines of code cut under 64 tokens, armed as at boot"
          :work (str "per line, three times (the map's child is made three times, whole, at its least and filled, "
                     "and each finds its line breaks: seon.print.select/node-of), one indexOf to its line break (~50 "
                     "characters read) and one conj! of the break's offset; "
@@ -210,9 +190,11 @@
                     "a-cut-text-reads-its-lines-once, prices the same characters at 13.5 MB)")
          :growth :linear
          :ops {:vec/conj! 3 :seq/reduce 150}
-         :fixed {:ticks 2.5e5 :ns 5.0e5 :bytes 4.5e5}
-         :sizes [250 500 1000 10000 100000]})
-      (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))
+         ;; the shown characters are ~1% of the budget the 2026-10-25 figure was measured under, so ~5 KB of it; the rest is the
+         ;; print's fixed part, armed (about 86 contracted calls at 170 B and 14 ticks each, 15 KB, and the root map, its :source
+         ;; child made three times and their sizings), which measured 90 KB and 30k ticks at 10 lines
+         :fixed {:ticks 3.0e4 :bytes 9.0e4}
+         :sizes [10 20 30]})))
 
 ;; See docs/render.md#a-render-is-a-value-printed-once
 (deftest a-nested-maps-key-namespace-costs-nothing-more
