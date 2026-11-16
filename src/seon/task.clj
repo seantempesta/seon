@@ -1006,7 +1006,12 @@
         out (loop [out dangling]
               (let [more (into out (for [[id ns] decls :when (not (out id)) :let [b (some #(when (out %) %) ns)] :when b] [id (str "needs " b ", left out")]))]
                 (if (= (count more) (count out)) out (recur more))))
-        cyc (when-let [c (cycle-in (apply dissoc decls (keys out)))] {c (str "needs form a cycle through " c)})]
+        cyc (when-let [c (cycle-in (apply dissoc decls (keys out)))]
+              ;; every entry on the cycle: what c reaches that reaches c back
+              (let [g (apply dissoc decls (keys out))
+                    reach (fn [from] (loop [seen #{} todo [from]] (if-let [x (first todo)] (recur (conj seen x) (into (vec (rest todo)) (remove seen (get g x)))) seen)))
+                    on (filter #(contains? (reach %) c) (reach c))]
+                (into {} (for [x on] [x (str "needs form a cycle through " c)]))))]
     (if cyc (merge out cyc (left-out db (into {} (for [[n ds] files] [n (if (sequential? ds) (remove #(contains? cyc (task-id (:seon.task/ns %) (:seon.task/name %))) ds) ds)])))) out)))
 
 (defn load-tx

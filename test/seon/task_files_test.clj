@@ -73,19 +73,20 @@
     (testing "declaring it again revives it as held"
       (is (= :held (:seon.task/execution (task/task (load-text db file-a) "demo/index")))))))
 
-(defn- refused-type
-  "The error type of loading text as demo's file onto db, or nil."
-  [db text] (:seon.error/type (task/load-tx db {'demo (task/file-declarations 'demo text)})))
-
-(deftest needs-that-form-a-cycle-or-name-nothing-are-refused
-  (let [db (load-text (empty-db) file-a)]
-    (is (= :seon.task/refused
-           (refused-type db "[{:seon.task/name \"parse\" :seon.task/plan \"p\" :seon.task/needs #{\"demo/index\"}}
-                            {:seon.task/name \"index\" :seon.task/plan \"i\" :seon.task/needs #{\"demo/parse\"}}]"))
-        "a cycle through a changed entry and a stored one")
-    (is (= :seon.task/refused
-           (refused-type db "[{:seon.task/name \"x\" :seon.task/plan \"p\" :seon.task/needs #{\"demo/nope\"}}]"))
-        "a need that names no task")))
+(deftest needs-that-form-a-cycle-or-name-nothing-leave-out-only-their-entries
+  ;; docs/tasks.md#task-files: a cycle or a need on no task leaves out its own entries, named (seon.task/left-out), and the rest load;
+  ;; it once refused the whole load (9 of 688 tasks after a reseed)
+  (let [db (load-text (empty-db) file-a)
+        files (fn [text] {'demo (task/file-declarations 'demo text)})
+        cyc "[{:seon.task/name \"parse\" :seon.task/plan \"p\" :seon.task/needs #{\"demo/index\"}}
+              {:seon.task/name \"index\" :seon.task/plan \"i\" :seon.task/needs #{\"demo/parse\"}}
+              {:seon.task/name \"free\" :seon.task/plan \"f\"}]"
+        nope "[{:seon.task/name \"x\" :seon.task/plan \"p\" :seon.task/needs #{\"demo/nope\"}} {:seon.task/name \"y\" :seon.task/plan \"q\"}]"]
+    (is (= #{"demo/parse" "demo/index"} (set (keys (task/left-out db (files cyc))))) "a cycle leaves out the entries on it")
+    (is (vector? (task/load-tx db (files cyc))) "and the load answers the rest, no refusal")
+    (is (= ["demo/x"] (keys (task/left-out db (files nope)))) "a need that names no task leaves out its entry")
+    (is (contains? (set (d/q '[:find [?id ...] :where [_ :seon.task/id ?id]] (d/db-with db (task/load-tx db (files nope))))) "demo/y")
+        "and its file's other entry loads")))
 
 (deftest a-file-task-merges-itself
   ;; a task loaded from a
