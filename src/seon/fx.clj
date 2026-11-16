@@ -592,6 +592,13 @@
           (not (str/blank? (git! {} root ["status" "--porcelain" "--ignore-submodules=all"] nil))) (git! {} root ["rev-parse" "HEAD"] nil)
           :else (git-try root ["rev-parse" "--verify" "--quiet" "HEAD^1"]))))
 
+(defn behind
+  "How many commits git's main (:seon.config.source/main) holds that the checkout at root's HEAD does not: what a session merges
+  before a plan, never what its own change reached. 0 for main itself; nil when either has no commit. See docs/merging.md#a-branch-lands-with-binland."
+  {:malli/schema [:=> [:cat :string] [:maybe nat-int?]]}
+  [root]
+  (some-> (git-try root ["rev-list" "--count" (str "HEAD.." (cfg/value :seon.config.source/main))]) str/trim parse-long))
+
 (defn tree-of
   "The id of commit rev's tree in the repository at root."
   {:malli/schema [:=> [:cat :string :string] :string]}
@@ -1258,15 +1265,16 @@
 
 (defn details
   "What each test of cand ({test digest}, a tree's) spent in each contracted function, as its cached
-  verdict at that digest measured it: {test {var [calls ticks self-ticks bytes self-bytes]}}."
-  {:malli/schema [:function [:=> [:cat [:map-of :qualified-symbol :string]] [:map-of :qualified-symbol [:map-of :qualified-symbol [:tuple :int :int :int :int :int]]]]
-                  [:=> [:cat :string [:map-of :qualified-symbol :string]] [:map-of :qualified-symbol [:map-of :qualified-symbol [:tuple :int :int :int :int :int]]]]]}
+  verdict at that digest measured it: {test {var {:calls :ticks :self-ticks :bytes :self-bytes}}}, the shape the store keeps (seon.proofs/fn-costs)."
+  {:malli/schema [:function [:=> [:cat [:map-of :qualified-symbol :string]] [:map-of :qualified-symbol [:map-of :qualified-symbol [:map [:calls :int] [:ticks :int] [:self-ticks :int] [:bytes :int] [:self-bytes :int]]]]]
+                  [:=> [:cat :string [:map-of :qualified-symbol :string]] [:map-of :qualified-symbol [:map-of :qualified-symbol [:map [:calls :int] [:ticks :int] [:self-ticks :int] [:bytes :int] [:self-bytes :int]]]]]]}
   ([cand] (details (cfg/value :seon.config.proofs/results-dir) cand))
   ([dir cand]
   (into {} (for [[t dg] cand
                  :let [v (some #(let [v (read-verdict (verdict-path dir t dg %))] (when (and (map? v) (not (contract/error? v))) v)) [:pass :red])]
                  :when (seq (:fns v))]
-             [t (:fns v)]))))
+             [t (into {} (for [[f [calls ticks self-ticks bytes self-bytes]] (:fns v)]
+                           [f {:calls calls :ticks ticks :self-ticks self-ticks :bytes bytes :self-bytes self-bytes}]))]))))
 
 (defn test-results
   "Each of tests' status from its result at its digest: plan is what prove's plan wrote in the
