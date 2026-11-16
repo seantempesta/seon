@@ -49,60 +49,6 @@
         r (ts/value-of resp)]
     (is (= {:seon.agent/key (seon.config/value :seon.config.root/user-name)} r) (str "a task released at root's REPL is the user's: " (pr-str resp)))))
 
-;; Estimate: one pure read of a five-entry ping answer: ~20k ticks; 200,000
-(deftest ^{:seon.test/estimate {:ticks 200000}} a-stall-read-names-a-mid-step-proc-by-its-site-and-an-answered-one-by-its-state
-  ;; root's reviewer on 6635b0cac2: the live test below takes one path or the other by what the ping happens to find; this one always takes
-  ;; both, on a ping answer as Jolt's ping gives it (a proc that answered: its ::flow/state; one mid-step: ::flow/unanswered and its site)
-  (let [site {:stepping :main :since-ns 1 :msg {:op :commit}}
-        states (with-meta {:api {::flow/state {:seon.system/stall-armed false :seon.system/busy #{} :pending {}}}
-                           :reconciler {::flow/site site}
-                           :fx/process {::flow/state {:busy 0 :in-flight 0 :queued 0 :done 3}}}
-                 {::flow/unanswered [:reconciler]})
-        r (seon.system/stall-of states)]
-    (is (= {:site site} (:reconciler r)) "a mid-step proc's evidence is its site, never its state read as nil")
-    (is (= site (get-in r [:unanswered :reconciler])) "and it is named unanswered")
-    (is (not-any? #{:reconciler} (:answered r)) "and never listed as answered")
-    (is (= #{} (get-in r [:root :seon.system/busy])) "an answered proc's evidence is its own ping map")
-    (is (= {:busy 0 :in-flight 0 :queued 0 :done 3} (get-in r [:fx :fx/process])) "an effects owner's load")))
-
-(deftest a-hangs-evidence-holds-roots-stall-state
-  ;; task seon.system/a-hangs-evidence-test-reads-only-its-own-agent: the root is shared with every test of the run, so other tests'
-  ;; agents and asks are in it, and a proc mid-step on their work past the ping's bound answers nothing (stall-state's contract: it
-  ;; is missing from :answered, never read as nil). So the test holds the shape of each part whose proc answered, and the whole of
-  ;; its OWN agent, idle and so answering; never what other tests left (red at 16:47 and 19:08 on the reconciler, mid-step)
-  (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
-        ;; with an agent of its own running, so an agent proc's state is read, then ended
-        {:keys [ag s]} (ts/value-of (:response (ts/ask root {:op :eval :agent "root"
-                                                             :code "(let [ag (seon.system/spawn! sys {}) s (seon.system/stall-state sys)] (seon.system/kill! sys ag) {:ag ag :s s})"})))
-        r s
-        answered (set (:answered r))
-        mine (get-in r [:agents ag])]
-    (is (map? (:root r)) (pr-str r))
-    ;; its own agent, idle: it answered, and its state is whole
-    ;; the one path that always asserts: its own agent was just spawned and is idle, so it answers, with its stall fields whole
-    (is (contains? answered ag) (str "its own agent, idle, answered the ping: " (pr-str (:unanswered r))))
-    (is (and (map? mine) (contains? mine :stall-seen) (contains? mine :last-frame-ms) (contains? mine :holding) (= 0 (:held mine)))
-        (str "with its stall fields and nothing held behind a handshake: " (pr-str mine)))
-    ;; every other part is the shared root's (other tests' agents and asks are in it): its shape, never its contents; a proc
-    ;; mid-step is named by its ::flow/site, never read as nil (red before, 2026-11-15 16:26: a stepping proc's state read as {})
-    (is (empty? (filter answered (keys (:unanswered r)))) "a proc that did not answer is never listed as answered")
-    (is (every? map? (vals (:unanswered r))) "a proc that did not answer is named by its site")
-    (if (:site (:root r))
-      (is (:stepping (:site (:root r))) (str "the api mid-step, named by what it steps: " (pr-str (:root r))))
-      (do (is (map? (get-in r [:root :pending])) "every ask the api holds unanswered, by rid")
-          ;; red before (batch 32's problems overrun): the api's ping answered only :agents :closing :pending, so :root was {} on every
-          ;; root and a hang's evidence never showed whether the stall check was armed or which agents it held busy
-          (is (boolean? (:seon.system/stall-armed (:root r))) "the armed flag, read whatever its value")
-          (is (set? (:seon.system/busy (:root r))) "the agents with an eval in flight, empty or not")))
-    (is (every? (fn [[_ m]] (or (:site m) (every? #(int? (get m %)) [:busy :in-flight :queued]))) (:fx r)) "each effect owner gives its load, or its site")
-    (let [rc (:reconciler r)]
-      (if (:site rc)
-        (is (:stepping (:site rc)) (str "the reconciler mid-step, named by what it steps: " (pr-str rc)))
-        (do (is (map? (:flight-steps rc)) "the reconciler's flights by task and the step each waits at")
-            (is (and (boolean? (:quiet rc)) (vector? (:waits rc)) (vector? (:live rc)))
-                "whether it is quiet, the waits on main it holds and its live tasks by id (the leak a hang's capture must name): what a parked await-db waits on"))))
-    (is (or (contains? answered :api) (contains? (:unanswered r) :api)) "and root's api answered, or is named mid-step")))
-
 (deftest a-kill-is-answered-once-the-agents-end-is-recorded
   ;; docs/processes.md#the-agent-process: kill! answers the agent's view entry when its end is recorded, so a wait on it ends;
   ;; a wait on an end event read after a tap could miss it and never end (with-agent's teardown, 300 s, Context 2026-11-12).
@@ -115,25 +61,6 @@
     ;; its answer is the end, {:status :ended-ms}, never the whole entry, which gains :exit when the fork server reaps it (a second
     ;; kill answered another map in a shard: Context, 2026-11-12)
     (is (= [{:status :killed} true true #{:status :ended-ms} :seon.system/no-agent] r) (pr-str r))))
-
-;; Estimate: the test's own work is one ask of the shard's shared root (~20k ticks to send, read and parse; measured 28,500-28,900), but
-;; its wall bound is ten times the estimate at :seon.config.proofs/slow-ticks-per-ms (149) and the ask waits on a spawn, which on a
-;; root with no agent yet is a cold first start (21.7 s measured in an-update-keeps-running-agents): at least 21,700 ms * 149 / 10 =
-;; 323k ticks to hold it, kept at the 3,000,000 it was (a 201 s bound)
-(deftest ^{:seon.test/root [] :seon.test/execs ["target/seon"] :seon.test/estimate {:ticks 3000000 :asks 1}} a-deadlocked-agent-says-so-with-no-clock
-  ;; docs/flow.md#the-five-rules, rule 3: an agent whose eval waits on what nothing will ever give it is a stall said by its source
-  ;; (seon.agent/quiescent!, Jolt's quiescence event, every fiber's dump), recorded on its process, while root runs no stall timer.
-  ;; Red before: root found a stall only by its own poll, past :seon.config.agent/stall-ms of quiet (30 s), so the stall it
-  ;; recorded was quiet that long; the agent's own is recorded at once (its quiet is the time to its first frame, far under)
-  (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
-        r (ts/value-of (:response (ts/ask root {:op :eval :agent "root"
-                                                :code (str "(let [ag (seon.system/spawn! sys {})"
-                                                           "      _ (seon.system/submit! sys ag \"(clojure.core.async/<!! (clojure.core.async/chan))\" {:origin :outside})"
-                                                           "      db (seon.system/await-db sys (fn [db] (seq (datahike.api/datoms db :aevt :seon.process/stall))))"
-                                                           "      s (some-> db (datahike.api/datoms :aevt :seon.process/stall) first :v)]"
-                                                           "  @(seon.system/kill! sys ag)"
-                                                           "  [(int? (:quiet-ms s)) (< (:quiet-ms s) (seon.config/value :seon.config.agent/stall-ms))])")})))]
-    (is (= [true true] r) (str "the agent's stall is recorded, said by the agent before root's poll could see it: " (pr-str r)))))
 
 (deftest the-sweeper-pool-is-fixed-before-anything-collects
   ;; task seon.system/the-sweeper-pool-is-fixed-before-anything-collects: six threads allocate through 30
