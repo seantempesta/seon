@@ -3,14 +3,35 @@
 {:seon.config.web/port [:int {:seon.config/place true :min -1 :max 65535 :seon.config/unit "TCP port" :description "The dashboard's port on 127.0.0.1. 0: no web; -1: a free port the kernel assigns, which the web proc's ping names (a check's or test's root: no fixed port)."}]
  :seon.config.root/end-with [:int {:seon.config/place true :min 0 :seon.config/unit "pid" :description "The process this root ends with (seon.lib/end-with!): a test's root names its test process, so its roots and agents never outlive it. 0: none."}]
  :seon.config.root/server-port [:int {:seon.config/place true :min -1 :max 65535 :seon.config/unit "TCP port" :description "Root's server on 127.0.0.1 (bin/mcp, outside agents). -1: a free port the kernel assigns; 0: none; >0: that port. The port bound is named on ROOT LISTENING (runs/root.port); nothing reads -1 as a port."}]
- :seon.config.root/server-connections [:int {:min 1 :seon.config/unit "connections" :description "Root's server connections open at once, each a fiber parked on its socket; one past it waits in the accept until one closes (seon.server/serve!)."}]
- :seon.config.root/server-op-workers [:int {:min 1 :seon.config/unit "workers" :description "The :server-op effect's workers: server ops answered at once, each on a :mixed worker so an op that blocks never holds a carrier or another connection (seon.server/perform-op)."}]
+ ;; Unit: connections. Root's server connections open at once, each a fiber (~6 KB); one past it waits in the accept until one
+ ;; closes. Provenance: the sessions' relays (bin/mcp, a connection a call) and the test roots' askers, a few dozen at most; bounded,
+ ;; where a connection was an OS thread each with no bound (2026-11-14).
+ :seon.config.root/server-connections [:int {:default 256 :min 1 :seon.config/unit "connections" :description "Root's server connections open at once, each a fiber parked on its socket; one past it waits in the accept until one closes (seon.server/serve!)."}]
+ ;; Unit: workers. Server ops answered at once, each on a :mixed worker (an OS thread): an op that blocks (a root eval, a
+ ;; :done waiting on its judge) holds its worker, never a carrier or another connection. Provenance: the sessions working at once
+ ;; (seven tonight), doubled; an op past them waits its turn at the :server-op owner.
+ :seon.config.root/server-op-workers [:int {:default 16 :min 1 :seon.config/unit "workers" :description "The :server-op effect's workers: server ops answered at once, each on a :mixed worker so an op that blocks never holds a carrier or another connection (seon.server/perform-op)."}]
  :seon.config.web/public-dir [:string {:seon.config/at-load true :min 1 :seon.config/unit "path" :description "Where datastar.js is read."}]
- :seon.config.web/streams-buf [:int {:seon.config/at-load true :min 1 :seon.config/unit "messages" :description "In-flight text messages the web proc's :streams in-port holds while it is busy; a sliding buffer, the oldest dropped past it (shown as … in that stream)."}]
- :seon.config.web/feed-encoding [:enum {:seon.config/unit "encoding" :description "How each tab's feed is compressed: :auto deflate when the browser takes it, :deflate, or :none (plain, to read a stream when debugging)."} :auto :deflate :none]
- :seon.config.web/feed-deflate-level [:int {:min 1 :max 9 :seon.config/unit "zlib level" :description "The feed's deflate level: higher is fewer bytes and more work per update."}]
+ ;; Unit: messages of in-flight text (docs/render.md#in-flight-output-streams) the web proc's
+ ;; :streams in-port holds while it is busy. A sliding buffer: past the bound the oldest is
+ ;; dropped, never the producer made to wait, and the drop shows in the tab as … in that
+ ;; stream until its committed value replaces it. 64: the model reader's own in-port's size.
+ :seon.config.web/streams-buf [:int {:default 64 :seon.config/at-load true :min 1 :seon.config/unit "messages" :description "In-flight text messages the web proc's :streams in-port holds while it is busy; a sliding buffer, the oldest dropped past it (shown as … in that stream)."}]
+ ;; Unit: encoding. How each tab's feed (the SSE stream of patches and in-flight text,
+ ;; docs/render.md#in-flight-output-streams) is compressed: :auto deflates it when the browser's
+ ;; Accept-Encoding takes deflate (every current browser does), :deflate always, :none sends it
+ ;; plain, to read a stream as it is when debugging (owner, 2026-11-08: "a config option if we
+ ;; need to ever debug the streams").
+ :seon.config.web/feed-encoding [:enum {:default :auto :seon.config/unit "encoding" :description "How each tab's feed is compressed: :auto deflate when the browser takes it, :deflate, or :none (plain, to read a stream when debugging)."} :auto :deflate :none]
+ ;; Unit: zlib level, 1-9. The feed's deflate level: each update's work grows with it and the
+ ;; bytes shrink; 6 is zlib's default.
+ :seon.config.web/feed-deflate-level [:int {:default 6 :min 1 :max 9 :seon.config/unit "zlib level" :description "The feed's deflate level: higher is fewer bytes and more work per update."}]
  :seon.config.web/stylesheet [:string {:seon.config/at-load true :min 1 :seon.config/unit "path" :description "The page's stylesheet, bin/build's css step's output (read per request)."}]
  :seon.config.contract/instrument [:enum {:seon.config/at-load true :seon.config/unit "mode" :description "Contracts and their recording: on, contracts (wrappers, no recording), off."} :on :contracts :off]
  :seon.config.contract/private-checked? [:boolean {:seon.config/at-load true :seon.config/unit "boolean" :description "Is a private function's contract (defn-) checked on each call? True in test processes (--profile scripted; an agent's test child sets it at its fork), false in root and its agents otherwise: docs/checks.md#contracts-armed-at-definition."}]
  :seon.config.native/probe-lib [:string {:min 1 :seon.config/unit "path" :description "native/probe.c's library (bin/build native)."}]
- :seon.config.native/sqlite-lib [:string {:min 1 :seon.config/unit "path" :description "The libsqlite3 seon.sqlite binds on first use, built with FTS5 (docs/vector.md#search). Missing or without FTS5: the first text index throws :seon.sqlite/unloaded or :seon.sqlite/refused, so no search by text runs."}]}
+ ;; The SQLite seon.sqlite binds for the text index's FTS5 table (docs/vector.md#search): macOS's own, which
+ ;; the system holds in its shared cache (the path has no file, dlopen finds it) and builds with FTS5 and
+ ;; Porter's tokenizer. Unit: path. Missing, or without FTS5: the first text index throws
+ ;; :seon.sqlite/unloaded or :seon.sqlite/refused. Provenance: the task seon.doc/the-text-index-is-fts5.
+ :seon.config.native/sqlite-lib [:string {:default "/usr/lib/libsqlite3.dylib" :min 1 :seon.config/unit "path" :description "The libsqlite3 seon.sqlite binds on first use, built with FTS5 (docs/vector.md#search). Missing or without FTS5: the first text index throws :seon.sqlite/unloaded or :seon.sqlite/refused, so no search by text runs."}]}

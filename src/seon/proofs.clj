@@ -287,7 +287,7 @@
 
 (defn own-cost
   "What the tests of ran (test -> its result) did themselves, summed: {:n :ticks :bytes}, each result's own top-level :ticks
-  and :bytes, never its called functions' (:fns, cumulative). The work beside a run's seconds (docs/merging.md#a-tests-tick-budget)."
+  and :bytes, never its called functions' (:fns, cumulative); an empty run is all zeros. The work beside a run's seconds (docs/merging.md#a-tests-tick-budget)."
   {:malli/schema [:=> [:cat [:map-of :symbol [:map [:ticks {:optional true} [:maybe :int]] [:bytes {:optional true} [:maybe :int]]]]]
                   [:map [:n :int] [:ticks :int] [:bytes :int]]]}
   [ran]

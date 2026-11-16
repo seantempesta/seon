@@ -111,7 +111,7 @@ The words for tasks and their prerequisites, and the namespace that owns each.
 | **reconciler** | the pure function of main's db to actions, and the proc that carries them out | `seon.reconcile/actions` |
 | **flight** | one action carried out as a chain of requests in the reconciler proc | `seon.reconcile/advance` |
 | **turn loop** | inside an agent: observe, then end or act | `seon.turn/work!` |
-| **three-way** | git's merge of program maps keyed by var, form and schema entry ([storage](storage.md#merges-read-what-changed)) | `seon.merge/three-way` |
+| **three-way** | git's merge of program maps keyed by var, form and schema entry ([storage](storage.md#merges-read-what-changed)) | ``seon.merge/three-way`` |
 | **unmerged entry** | a conflict kept on the branch until re-defn or `resolve!` | `seon.merge/unmerged` |
 | **failure point** | a place the outside world can fail us, met by one named edge ([failure points](failure-points.md)) | |
 | **problem** | an open fact that something needs fixing ([errors](errors.md#problems)) | `seon.problems/report` |
