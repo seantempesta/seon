@@ -683,7 +683,7 @@
     (try
       (git "init" "-q" "-b" "main") (spit (str dir "/a.edn") "{:a 1}\n") (spit (str dir "/b.txt") "b\n") (git "add" "-A") (git "commit" "-q" "-m" "base")
       (let [base (git "rev-parse" "HEAD")
-            out (fn [files] (fx/write-out {:req {:dir dir :branch "seon/candidate/x" :base base :files files :modes {} :links {"reference-code/lib" pin} :message "m"}}))
+            out (fn [files] (fx/write-out {:req {:dir dir :ref "refs/seon/candidate/x" :base base :files files :modes {} :links {"reference-code/lib" pin} :message "m"}}))
             r (out {"a.edn" "{:a 2}\n"})
             sha (get-in r [:value :sha])]
         (is (= "{:a 2}" (git "show" (str sha ":a.edn"))) (pr-str r))
@@ -692,9 +692,12 @@
         (is (= base (git "rev-parse" (str sha "^"))) "on the base main was imported from")
         (is (= base (git "rev-parse" "HEAD")) "no tree moved")
         (let [r2 (out {"b.txt" "c\n"}) sha2 (get-in r2 [:value :sha])]
-          (is (= sha2 (git "rev-parse" "refs/heads/seon/candidate/x")) "written out again, the ref moves to it")
+          (is (= sha2 (git "rev-parse" "refs/seon/candidate/x")) "written out again, the ref moves to it")
           (is (= base (git "rev-parse" (str sha2 "^"))) "from the base again, never on the last write-out")
-          (is (= "{:a 1}" (git "show" (str sha2 ":a.edn"))) "so it holds the branch's files now alone")))
+          (is (= "{:a 1}" (git "show" (str sha2 ":a.edn"))) "so it holds the branch's files now alone")
+          (is (= "" (git "branch" "--list" "*candidate*")) "never a branch")
+          (is (= {:dropped "refs/seon/candidate/x"} (:value (fx/drop-write-out {:req {:dir dir :ref "refs/seon/candidate/x"}}))))
+          (is (= "" (git "for-each-ref" "refs/seon/")) "dropped with its candidate")))
       (finally (seon.lib/remove-tree! dir)))))
 
 ;; docs/merging.md#verdicts-are-a-cache: a config value naming a file enters a test's digest as the file's name, never where the

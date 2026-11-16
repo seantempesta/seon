@@ -428,7 +428,7 @@
         req (seon.writer/write-out-req main head :main/x "/co" "base0")]
     (is (= {"bin/zz-out" "#!/bin/sh\necho b\n"} (:files req)) "the branch's file, as the branch holds it")
     (is (= {"reference-code/b" "ccc"} (:links req)) "the pin it moved, and no other")
-    (is (= ["/co" "seon/candidate/x" "base0"] ((juxt :dir :branch :base) req)))))
+    (is (= ["/co" "refs/seon/candidate/x" "base0"] ((juxt :dir :ref :base) req)))))
 
 ;; docs/references.md#an-entity-cites: a cite is a stated fact (an agent's start cites, my.agent/cite! and uncite!), identified by its
 ;; content (:seon.cite/id), so it rides the merge; a moved task's cites are made again from its text by the writer as before. Red while

@@ -776,21 +776,31 @@
 
 (defn write-out
   "A branch's files written out as a commit to build from (seon.writer/write-out-req's request): files ({path text}, with modes) and links
-  (pins, {path commit}) on base (the commit main's files were imported from), in one fast-commit, the ref refs/heads/<branch> moved to
-  it from whatever it held (a branch written out again starts from base again: its files are the branch's now, never a history of
+  (pins, {path commit}) on base (the commit main's files were imported from), in one fast-commit, ref (refs/seon/candidate/<branch>,
+  never a branch: git branch lists the sessions' alone) moved to it from whatever it held (a branch written out again starts from base again: its files are the branch's now, never a history of
   write-outs). No tree's files are touched; seon.fx/build of the commit makes the tree a candidate builds and boots from. Answers
   {:value {:sha :files n :links n}} or :seon.fx/io-error. See task seon.writer/a-branchs-files-are-written-out-to-a-tree."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [dir branch base files modes links message]} :req}]
+  [{{:keys [dir ref base files modes links message]} :req}]
   (try
-    (let [ref (str "refs/heads/" branch)
-          who (cfg/value :seon.config.source/committer-name) mail (cfg/value :seon.config.source/committer-email)
+    (let [who (cfg/value :seon.config.source/committer-name) mail (cfg/value :seon.config.source/committer-email)
           old (or (git-try dir ["rev-parse" "--verify" "--quiet" ref]) "0000000000000000000000000000000000000000")
           sha (fast-commit dir {"GIT_COMMITTER_NAME" who "GIT_COMMITTER_EMAIL" mail} ref old base files modes message links)]
       (if sha
         {:value {:sha sha :files (count files) :links (count links)}}
         (error #'seon.fx/write-out :seon.fx/io-error (str ref " moved while it was written out: nothing written") {:path dir})))
     (catch Throwable e (if (intr/interrupt? e) (throw e) (error #'seon.fx/write-out :seon.fx/io-error (step/error-msg e) {:path dir})))))
+
+(defn drop-write-out
+  "A branch's write-out deleted when its candidate is stopped: ref (seon.writer/write-out-req's :ref) removed from the repository at
+  dir, so no candidate commit outlives its candidate. Answers {:value {:dropped ref}}, the same when it is gone already, or
+  :seon.fx/io-error. See task seon.writer/a-branchs-files-are-written-out-to-a-tree."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [dir ref]} :req}]
+  (let [r (git-run {} dir ["update-ref" "-d" ref] nil)]
+    (if (or (zero? (:exit r)) (nil? (git-try dir ["rev-parse" "--verify" "--quiet" ref])))
+      {:value {:dropped ref}}
+      (error #'seon.fx/drop-write-out :seon.fx/io-error (str "deleting " ref ": " (str/trim (str (:err r)))) {:path dir}))))
 
 (defn- tree-refusal
   "Why the worktree wt can't take a commit of paths, or nil: a change staged there that its HEAD does not hold, or a file to

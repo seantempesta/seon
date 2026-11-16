@@ -91,14 +91,14 @@
 (defn write-out-req
   "The :git write-out request (seon.fx/write-out) for branch b, read on main and head (b's committed head): the files b's change touches,
   drawn as head holds them (changed-files of its delta-changes against main, seon.doc/files, with their modes), and its pins that differ
-  from main's as links, on base (main's :seon.system/source :commit), at dir, named seon/candidate/<b>. O(what b changed): the text
+  from main's as links, on base (main's :seon.system/source :commit), at dir, on refs/seon/candidate/<b> (never a branch; seon.fx/drop-write-out deletes it with its candidate). O(what b changed): the text
   of its changed files and its pins. See task seon.writer/a-branchs-files-are-written-out-to-a-tree."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.db/branch :string :string] :map]}
   [main head b dir base]
   (let [ours (pm/delta-changes main head :all)
         paths (source/changed-files head ours)
         mains (source/pins-of main)]
-    {:dir dir :branch (str "seon/candidate/" (name b)) :base base
+    {:dir dir :ref (str "refs/seon/candidate/" (name b)) :base base
      :files (doc/files head paths) :modes (source/modes head paths)
      :links (into (sorted-map) (remove (fn [[p c]] (= c (mains p)))) (source/pins-of head))
      :message (str "Seon candidate: " (name b) "\n")}))
