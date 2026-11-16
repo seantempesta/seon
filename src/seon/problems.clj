@@ -142,22 +142,22 @@
 (def laws
   "The laws health reads over the program's forms, as data: the fact that marks a candidate (a form text law reads :form/src, so a
   move reads only the forms whose text moved, `split-rows`), the site rule, the page (and its sections: :section and those under it,
-  or :anchor, every section whose address starts page#anchor) that must name each site's function, and the namespaces the law
-  leaves out. A law with no page sanctions no site: each is a row (:says). :tests? reads test namespaces too; :pre, a pattern a form's raw text must hold first (a law of text reads no form that cannot be a site). A form defining no var is named by its form id or by its namespace. Dates: a date in prose, never a string that is
+  or :anchor, every section whose address starts page#anchor) that must name each site's function; a site is in the program's own namespaces
+  (seon.program/program-nss: the check drivers seon.check and seon.e2e are test/'s, so none of theirs), test's too for :tests?. A law with no page sanctions no site: each is a row (:says). :tests? reads test namespaces too; :pre, a pattern a form's raw text must hold first (a law of text reads no form that cannot be a site). A form defining no var is named by its form id or by its namespace. Dates: a date in prose, never a string that is
   only a date (a value: a protocol's version). A name defined twice in a namespace is the import's to record: the store keeps one form
   a var (seon.program/a-file-defining-one-var-twice-is-a-fact-of-its-import). See docs/health.md#a-laws-unnamed-site."
-  [{:law :catch :fact :form/catches :page "docs/failure-points.md" :except #{"seon.check" "seon.e2e"}}
+  [{:law :catch :fact :form/catches :page "docs/failure-points.md"}
    ;; the one printer (docs/render.md#one-printer): a form whose refs hold a printer, a cut in a display namespace or a budgeted
    ;; cut outside one; the law's marks and display namespaces are config dials (printer-law), named by that one section
-   {:law :printer :fact :form/refs :page "docs/render.md" :section "docs/render.md#one-printer" :except #{} :rule printer-law}
-   {:law :clocks :fact :form/src :pre #"[Ss]leep|[Tt]imeout|deadline|-MS" :page "docs/clocks.md" :anchor "time-decides" :except #{"seon.check" "seon.e2e"} :tests? true
+   {:law :printer :fact :form/refs :page "docs/render.md" :section "docs/render.md#one-printer" :rule printer-law}
+   {:law :clocks :fact :form/src :pre #"[Ss]leep|[Tt]imeout|deadline|-MS" :page "docs/clocks.md" :anchor "time-decides" :tests? true
     :rule (text-law #"(?m)[Ss]leep|[Tt]imeout([^s]|$)|deadline|[A-Z]-MS")}
-   {:law :measures :fact :form/src :pre #"currentTimeMillis|nanoTime|now-ns|now-ms" :page "docs/clocks.md" :except #{"seon.check" "seon.e2e"} :rule (text-law #"currentTimeMillis|nanoTime|now-ns|now-ms")}
-   {:law :resolution :fact :form/src :pre #"resolve|intern|alter-var-root|with-redefs" :page "docs/resolution.md" :except #{"seon.check" "seon.e2e"}
+   {:law :measures :fact :form/src :pre #"currentTimeMillis|nanoTime|now-ns|now-ms" :page "docs/clocks.md" :rule (text-law #"currentTimeMillis|nanoTime|now-ns|now-ms")}
+   {:law :resolution :fact :form/src :pre #"resolve|intern|alter-var-root|with-redefs" :page "docs/resolution.md"
     :rule (text-law #"[(](requiring-resolve|ns-resolve|resolve '|intern|alter-var-root|with-redefs)[\s)]")}
-   {:law :transactions :fact :form/src :pre #"/(with|db-with|transact|apply!|connect)" :page "docs/storage.md" :anchor "the-write-checks-every-entity-it-touches" :except #{"seon.check" "seon.e2e"}
+   {:law :transactions :fact :form/src :pre #"/(with|db-with|transact|apply!|connect)" :page "docs/storage.md" :anchor "the-write-checks-every-entity-it-touches"
     :rule (text-law #"[(](d|datahike[.]api|datahike[.]core|dc|dw|datahike[.]writer|datahike[.]writing|w)/(with|db-with|transact!?|transact-batch!|apply!|connect)[\s)]")}
-   {:law :dates :fact :form/src :pre #"20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]" :except #{} :says "holds a date in a string: say what is true now; the day is git's"
+   {:law :dates :fact :form/src :pre #"20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]" :says "holds a date in a string: say what is true now; the day is git's"
     :rule (fn [] {:site? (fn [f _] (boolean (some #(and (re-find #"(^|[^0-9])20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]([^0-9]|$)" %)
                                                          (not (re-matches #"\s*20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]\s*" %)))
                                                     (string-text (:form/src f)))))})}])
@@ -198,7 +198,7 @@
   ([db ans only rules]
   ;; the law is the program's own source's: its namespaces, read once, when a site asks
   (let [program (delay (program/program-nss db))]
-  (vec (for [{:keys [law fact page section anchor except rule tests? says pre]} laws
+  (vec (for [{:keys [law fact page section anchor rule tests? says pre]} laws
              :let [{:keys [marks site?]} (or (get rules law) (when rule (rule)))]
              :let [;; the page's cited names (or its one section's), read when a candidate site asks (a branch that changed no
                    ;; catching form reads nothing)
@@ -236,7 +236,7 @@
              v sites
              ;; the law is Seon's own source's (src, and test for a law that says :tests?): a namespace with no file, and a
              ;; test helper's under test/, are not failure points of the system
-             :when (and (not (except (str nsym))) (not (named v)) (not (and (= v (:form/id f)) (named nsym)))
+             :when (and (not (named v)) (not (and (= v (:form/id f)) (named nsym)))
                         (or tests? (contains? @program nsym)) (site-of f nsym))
              :let [s (str "unnamed-site " (name law) " " v)]]
          (derived-row ans s nsym (if page (str v " has a " (name law) " site that " page " does not name") (str v " " says))
