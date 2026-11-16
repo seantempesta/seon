@@ -439,7 +439,10 @@
                          :seon.model-call/reply (or message "")}])
       (agent/commit!))
     ;; what the model's next request adds past what the session saw last: a read by the one request!, after the evals
-    (let [delta (when turn? (context-block task true false) (wire/sent-delta (agent/db) seen (lib/call-id k (str "read-" (last-read k)))))]
+    ;; what this reply sent and is answered here (its text and its evals, under :responses) is the session's already: not sent again
+    (let [own (when turn? (into #{[:reply id]} (map (fn [e] [:eval e]))
+                                (d/q '[:find [?eid ...] :in $ ?cid :where [?c :seon.model-call/id ?cid] [?e :seon.eval/call ?c] [?e :seon.eval/id ?eid]] (agent/db) id)))
+          delta (when turn? (context-block task true false) (wire/sent-delta (agent/db) seen (lib/call-id k (str "read-" (last-read k))) own))]
       (print (sedn/encode (cond-> {:responses (mapv agent/on-the-wire (map :response rs))}
                             turn? (assoc :request (wire/messages-text delta))))))
     nil))

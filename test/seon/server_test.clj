@@ -375,16 +375,23 @@
   ;; called seon_context had no read, so its first reply was the whole request; and a seon_context read stored no parts, so the reply
   ;; after it was the whole request again: runtime's reply of 93,941 characters, 2026-11-16 [result/dba934d6]. Every read stores what it
   ;; showed, so the reply after a seon_context is what moved since it. Red before: it carried the system prompt whole. A session that has
-  ;; read nothing is answered its run's request (seon.ctx/a-runs-request-holds-its-own-run makes that the run's own)
-  (let [[_ first-reply ctx second-reply] (at/in-agent (fn [{:keys [agent task]}]
+  ;; read nothing is answered its run's request (seon.ctx/a-runs-request-holds-its-own-run makes that the run's own).
+  ;; Estimate unchanged: one more round trip (~0.5M)
+  (let [[_ first-reply ctx second-reply third-reply] (at/in-agent (fn [{:keys [agent task]}]
                                                          [{:op :attach :task task}
                                                           {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 2)"}]}
                                                           {:op :context :agent agent}
-                                                          {:op :eval :agent agent :message-md "" :evals [{:intent "add again" :code "(+ 2 2)"}]}]))
+                                                          {:op :eval :agent agent :message-md "" :evals [{:intent "add again" :code "(+ 2 2)"}]}
+                                                          {:op :eval :agent agent :message-md "third" :evals [{:intent "add a third" :code "(+ 30 4)"}]}]))
         prompt "# You are a Seon agent"]
     (is (= [3] (mapv :value (:responses first-reply))) (pr-str first-reply))
     (is (clojure.string/includes? (str ctx) prompt) "seon_context shows it whole")
-    (is (not (clojure.string/includes? (str (:request second-reply)) prompt)) "and the reply after it: what moved since it")))
+    (is (not (clojure.string/includes? (str (:request second-reply)) prompt)) "and the reply after it: what moved since it")
+    ;; a seon-driver's replies each echoed its own evals and results under the request (2026-11-16, agent mf89a160307a724d
+    ;; [result/b8996cc0]): what a reply sent and answers under :responses is the session's already
+    (is (= [34] (mapv :value (:responses third-reply))) (pr-str third-reply))
+    (is (not (clojure.string/includes? (str (:request third-reply)) "(+ 30 4)")) (str "a reply does not send its own eval back: " (pr-str (:request third-reply))))
+    (is (not (clojure.string/includes? (str (:request third-reply)) "(+ 2 2)")) "nor the reply's before it")))
 
 ;; Estimate: in this process, two server round trips (~0.5M each, as a-message-reaches-the-agent's): ~1M; 2,000,000. In root: one
 ;; message write, and the api's wake-inbox over that commit's ops (~1k ticks)
