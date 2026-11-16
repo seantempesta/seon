@@ -9,6 +9,9 @@
  :seon.agent/gate-unread [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/gate-unread]]]]
  ;; a commit the agent's branch refused (a value the store cannot hash): its run-ahead writes dropped, the eval ids among them named (seon.agent/commit!); an eval answers it under :unrecorded
  :seon.agent/no-branch [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/no-branch]]]]
+ ;; what an agent's :call may ask the writer process (seon.agent/call!): reads of its live state, acts, effects, a wait on main, and a
+ ;; write, always on the caller's own branch (agent-proc puts it there): main changes only by a merge (decisions, 2026-11-16)
+ :seon.agent/call-op [:enum {:description "An op an agent's :call may carry to the writer process (seon.agent/call!). See docs/processes.md#the-socket-and-the-agent-proc."} :state :health :errors :spawn :kill :clone :ask :message :focus :fx :prove :gate :await :write]
  :seon.agent/commit-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/commit-refused]] [:transactions :int] [:evals [:vector :string]]]]
  :seon.agent/eval-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/eval-error]]
                                                 [:class :string] [:data {:optional true} :map] [:phase {:optional true} :keyword]
