@@ -1018,8 +1018,12 @@
         plan (seon.lib/digest "the plan's digest")]
     (is (every? #(and (seq (:seon.proof/read-keys %)) (not (contains? % :seon.proof/reads))) (tx w0 3))
         "a result carries its read keys as datoms, and no reads value")
-    (let [k (first (sort (:seon.proof/read-keys (first (tx w1 1)))))]
-      (is (= 3 (count (d/datoms rdb :avet :seon.proof/read-keys k))) "a key finds every result that read it, by one AVET seek"))
+    (let [txs (mapcat (fn [[w n]] (tx w n)) [[w0 3] [w0 2] [w1 1]])
+          k (first (sort (:seon.proof/read-keys (first (tx w1 1)))))]
+      ;; a result is one entity by its content (verdict-id): two runs reading the same content to the same status are one
+      (is (= (count (into #{} (comp (filter #(contains? (:seon.proof/read-keys %) k)) (map :seon.proof/id)) txs))
+             (count (d/datoms rdb :avet :seon.proof/read-keys k)))
+          "a key finds every result that read it, by one AVET seek"))
     (is (= #{plan} (set (keys (proofs/stored-verdicts rdb w1 {t plan} [t])))) "the newest written green, whose reads hold on w1, is reused")
     (is (= {} (proofs/stored-verdicts rdb w0 {t plan} [t])) "and only it: older greens' reads hold on w0, the newest's do not")))
 
@@ -1176,10 +1180,13 @@
     (cost/proof
       {:of 'seon.proofs/verdicts-at :input 'seon.proofs-test/cold-results-of
        :n "read keys each result holds"
-       :work "4 candidates, each a seek of its test's results and three :aevt reads of small attributes, every node read cold"
-       :growth :constant
-       ;; a cold node read ~24 KB and ~5k ticks (docs/cost.md); 4 candidates x 4 reads x ~5 nodes on a path's cold misses
-       :fixed {:ticks 150000 :bytes 600000}
+       :work (str "4 candidates, each a seek of its test's results and four :aevt reads of small attributes, every node read cold: "
+                  "the path's depth, log of the store's datoms (32 n key datoms), never a result's keys decoded")
+       :growth :log
+       ;; a cold node read ~24 KB and ~5k ticks (docs/cost.md); 4 candidates x 5 reads on a path of cold misses, one level more as
+       ;; the store grows (the first estimate, constant, missed the depth: 10 -> 100 keys added one level, 1,000 none, result/ab69a994)
+       :fixed {:ticks 100000 :bytes 400000}
+       :per-n {:ticks 25000 :bytes 150000}
        :sizes cold-sizes})
     (finally (doseq [n cold-sizes :let [path (cold-path n)] :when (pdb/store? path)]
                (d/release (pdb/connect (assoc (pdb/store-cfg :lmdb path) :store-cache-bytes 4096)) true)
