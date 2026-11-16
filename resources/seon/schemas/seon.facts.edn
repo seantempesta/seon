@@ -78,6 +78,7 @@
  :seon.test/failures [:and {:seon.db/no-history? true} [:vector :seon.problems/assertion]]
  :seon.test/ticks [:and {:seon.db/no-history? true} :int]
  :seon.test/bytes [:and {:seon.db/no-history? true} :int]
+ :seon.test/candidate [:map {:description "The one booted candidate a test child runs its process tests on: seon.test-store/boot-candidate!'s :port, :store and :main (and its :branch), a fact of the child's world written in memory at its start by the run that forked it, never stored. seon.test-store/candidate-of reads it; shared-root! answers it for the default root arguments and boots no root. See docs/testing.md#test-types."} [:port :int] [:store :string] [:main :string] [:branch {:optional true} :keyword]]
  :method/key [:and {:seon.db/identity true :seon.db/content-id true} :string]
  :method/multi :qualified-symbol
  :method/dispatch :string
@@ -697,6 +698,8 @@
                           [:seon.system/last-update {:optional true} :seon.system/last-update]
                           [:seon.system/previous-end {:optional true} :seon.system/previous-end]
                           [:seon.system/quiescent {:optional true} :seon.system/quiescent]
+                          ;; a test child's world only, written in memory at its start: the candidate its process tests run on
+                          [:seon.test/candidate {:optional true} :seon.test/candidate]
                           [:seon.system/source {:optional true} :seon.system/source]
                           [:seon.system/tasks {:optional true} :seon.system/tasks]
                           [:seon.system/generation {:optional true} :seon.system/generation]

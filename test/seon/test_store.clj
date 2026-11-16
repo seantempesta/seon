@@ -690,8 +690,17 @@
 
 (declare default-root-args)
 
+(defn candidate-of
+  "The candidate db's world holds (its :seon.test/candidate fact: what a test child's run writes in memory at its start), or nil
+  when it holds none or db is nil. One AEVT seek. See task seon.prove/tests-fork-from-the-branchs-warm-agent."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] [:maybe :map]]}
+  [db]
+  (when (and db (contains? (:schema db) :seon.test/candidate))
+    (:v (first (d/datoms db :aevt :seon.test/candidate)))))
+
 (defn shared-root!
-  "The root this test process shares among its tests for root arguments args: started at the
+  "The root this test process shares among its tests for root arguments args: for the default arguments, the candidate its
+  world holds (candidate-of), when it holds one; else started at the
   first call for them (start-shared-root!), then the same one: a root boots once per shard, not
   once per test (the boot was most of an in-agent test; an attach on a running root costs
   milliseconds). A test sharing it works on branches of its main and deletes them when it ends
@@ -702,11 +711,13 @@
   ;; no arguments is the shard's shared root (docs/testing.md#test-types): default-root-args, the one shard-fixture warms, never a
   ;; second root booted inside the first asking test's budget (an-idle-connection-holds-no-os-thread: 1.2M ticks or 10.3M, by
   ;; whether another test had booted the [] root first)
-  (let [args (if (empty? args) (default-root-args) args)
-        k [(seon.config/checkout) (vec args)]
-        ;; a start that is not run unless it is the one put: two callers at once share one root
-        d (delay (start-shared-root! (first k) (second k)))]
-    @(or (.putIfAbsent ^java.util.concurrent.ConcurrentHashMap shared-roots k d) d)))
+  (let [args (if (empty? args) (default-root-args) args)]
+    ;; a test child whose world holds the candidate runs on it: one boot for every process test of a change, none here
+    (or (when (= (vec args) (default-root-args)) (candidate-of (:db @seon.agent/state)))
+        (let [k [(seon.config/checkout) (vec args)]
+              ;; a start that is not run unless it is the one put: two callers at once share one root
+              d (delay (start-shared-root! (first k) (second k)))]
+          @(or (.putIfAbsent ^java.util.concurrent.ConcurrentHashMap shared-roots k d) d)))))
 
 (defn default-root-args
   "The root arguments an in-agent test's shared root takes when it names no dirs or settings: this checkout as its source root."

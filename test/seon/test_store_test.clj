@@ -253,3 +253,14 @@
         (is (not= (:writer-pid a) (:system-pid a)))
         (is (= (:writer-pid a) (ppid (:system-pid a))) "the system process is the writer's fork"))
       (finally (ts/stop-candidate! c)))))
+
+;; task seon.prove/tests-fork-from-the-branchs-warm-agent: a process test runs on the one booted candidate its child's world holds
+;; (:seon.test/candidate, written in memory at the child's start), never on a root of its own: candidate-of reads it, and
+;; shared-root! answers it for the default arguments. Red first: a candidate-of that reads nothing (no candidate, a root booted).
+;; Estimate: two d/db-with on the seed and three seeks: 2,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-process-test-shares-the-candidate-its-world-holds
+  (let [c {:port 4242 :store "/tmp/candidate/store" :main "candidate-x" :branch :candidate-x}
+        w (d/db-with (ts/test-db) [{:seon.system/id :root :seon.test/candidate c}])]
+    (is (= c (ts/candidate-of w)) "the candidate the child's world holds")
+    (is (nil? (ts/candidate-of (ts/test-db))) "a world with none: nil, and shared-root! boots as before")
+    (is (nil? (ts/candidate-of nil)) "no world (a process with no agent): nil")))
