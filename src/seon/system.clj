@@ -2244,20 +2244,26 @@
 (defn prove-candidate!
   "The merge gate's prove: the candidate's own store branch (candidate, the branch its :gate request names) proved by prove! in mode
   (default :judge) on names, the deferred process tests, its process items, seed and build run on checkout at tree (the gate's
-  checkout, seon.fx/run-on-checkout). The candidate is proved at its head commit, on a branch of its own made there (gate-<commit>-<id>)
-  with an agent of its own: never on the task's branch, so no attach of the task is refused while the gate runs (root's pilot:
-  the gate's agent on session/root's branch refused every attach for 13 minutes) and the task's own agent is never
-  written by the gate. Once the run answers, however it ends, that agent ends and its branch is dropped (the writer's :drop-branch, as
-  a tree's is). The run's answer, or its typed error. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  checkout, seon.fx/run-on-checkout). The task's own agent, when it is live on that branch, proves them: it holds the candidate's
+  program (the judge merged main first) and its plan, so the gate starts nothing and plans nothing again (the owner's one prove;
+  task seon.system/the-judged-agent-serves-its-own-gate, agreed with tests2). With none live, the candidate is proved at its head
+  commit on a branch of its own made there (gate-<commit>-<id>) by an agent of its own, never on the task's branch, which ends and
+  whose branch is dropped once the run answers. The run's answer, or its typed error. See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :seon.system/sys [:map [:candidate :keyword] [:checkout :string] [:tree :string]]] :map]}
   [sys {:keys [candidate checkout tree names mode]}]
   (let [main (pdb/conn-main (:conn sys))
-        c (d/commit-id (pdb/head (:conn sys) (pdb/on-main main candidate)))
-        g (keyword (str "gate-" c "-" (lib/unique-id)))
-        ag (spawn! sys {:branch g :commit c})]
-    (try @(prove! sys {:branch (pdb/on-main main g)} (set (map symbol names)) (or mode :judge) {:checkout checkout :tree tree})
-         (finally (kill! sys ag)
-                  @(write! sys {:op :drop-branch :branch g})))))
+        b (pdb/on-main main candidate)
+        on {:checkout checkout :tree tree}
+        names (set (map symbol names))
+        live (some (fn [[aid a]] (when (and (= b (:branch a)) (not (task/gone-statuses (:status a)))) aid)) (:agents (state sys)))]
+    (if live
+      @(prove! sys {:branch b} names (or mode :judge) on)
+      (let [c (d/commit-id (pdb/head (:conn sys) b))
+            g (keyword (str "gate-" c "-" (lib/unique-id)))
+            ag (spawn! sys {:branch g :commit c})]
+        (try @(prove! sys {:branch (pdb/on-main main g)} names (or mode :judge) on)
+             (finally (kill! sys ag)
+                      @(write! sys {:op :drop-branch :branch g})))))))
 
 (defn prove-tree!
   "Prove the files of checkout (a worktree of this root's repository) at tree, its tree id (seon.fx/tree-id, what bin/build records):
