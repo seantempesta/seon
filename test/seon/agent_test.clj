@@ -86,7 +86,9 @@
   :ask (a request to the root's server, answered as data) :eval-root (root-REPL code, answered as the server does; root-value reads its value)
   :root}, once the agent is ready, and its answer is with-agent's. A test whose steps wait on its own process
   (a fifo, a pid) uses this instead of a root of its own; opts are in-agent's (and :group, a name for a root of its own among
-  the tests that name it: :pristine, for tests that need a main nothing merged into, :merge, for tests whose agent merges)."
+  the tests that name it: :pristine, for tests that need a main nothing merged into, :merge, for tests whose agent merges).
+  At a merge's judge it runs on the candidate's one root, so the test service runs these tests apart from the platform tests,
+  :seon.config.proofs/shared-root-batches batches at a time (docs/merging.md#the-test-service)."
   {:malli/schema [:=> [:cat :map :seon.host/fn] :any]}
   [{:keys [dirs proofs sets config decls client group] :or {proofs '#{demo-test/t}}} f]
   (let [checkout (seon.config/checkout)
