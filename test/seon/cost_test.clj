@@ -263,8 +263,10 @@
   [xs] (reduce seen {} xs))
 
 (defn rescanning-bounded
-  "rescanning, under one-pass's bound: a pass per element."
-  {:malli/schema [:=> [:cat [:vector :int]] :map]
+  "rescanning, under one-pass's bound: a pass per element. Its contract generates 100 to 200 integers, where a pass per element
+  (~n^2/2 steps, ~10^4 at 150) is past the bound's ~825 B an element; at the generator's default sizes (0 to ~30) the scan
+  allocated too little to tell from one pass once a measure counted the call's own work alone (seon.cost/measure)."
+  {:malli/schema [:=> [:cat [:vector {:min 100 :max 200} :int]] :map]
    :seon.cost/bound (fn [xs] {:bytes (+ 400.0 (* 825.0 (count xs))) :out {:keys (count xs)}})}
   [xs] (rescanning xs))
 

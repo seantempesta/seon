@@ -138,7 +138,8 @@
 ;; seon.db's task proof); its cost is the whole wiki's load
 (deftest every-section-of-the-wiki-has-a-lead
   (let [db0 (empty-db)
-        db (d/db-with db0 (doc/load-dir-tx db0 (config/checkout) "docs"))]
+        ;; the wiki as the branch holds it (my.test/stored-files reads the store), never the checkout's files: a branch's edit is read
+        db (d/db-with db0 (doc/load-tx db0 "docs" (mt/stored-files "docs/" ".md")))]
     (is (< 300 (count (d/datoms db :aevt :seon.doc/address))) "the real wiki is read")
     (is (= [] (mapv :section (get-in (problems/health db) [:classes :leadless-section :rows]))) "no section lacks a lead")))
 

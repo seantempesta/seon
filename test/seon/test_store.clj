@@ -277,6 +277,28 @@
     (try (f (assoc @store :branch b) conn)
          (finally (d/release conn) (pdb/delete-main! seed b) (d/release seed)))))
 
+(defn with-verdicts
+  "f's value, (f as verdict!) on a fresh test main with a results branch: (as db) reads db (a test-db value) as an agent branch's, and
+  (verdict! t status failures) writes test t's verdict on the results branch as run on that branch, newest last, as a run records
+  it. See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat fn?] :any]}
+  [f]
+  (test-branch!
+   (fn [cfg conn]
+     (let [main (:branch cfg)
+           ab (pdb/on-main main :agent)
+           rb (pdb/on-main main (config/value :seon.config.proofs/results-branch))
+           _ (d/branch! conn main rb)
+           rc (d/connect (assoc cfg :branch rb))]
+       (try (f #(assoc-in % [:config :branch] ab)
+               (fn [t status failures]
+                 (d/transact rc [(cond-> {:seon.proof/id (seon.lib/digest (str t " " (count (d/datoms @rc :aevt :seon.proof/test))))
+                                          :seon.proof/test t :seon.proof/status status :seon.proof/route :live :seon.proof/ran-on #{ab}
+                                          :seon.proof/reads-digest (seon.lib/digest (str t " reads"))}
+                                   (seq failures) (assoc :seon.proof/failures (vec failures)))])
+                 nil))
+            (finally (d/release rc) (d/delete-branch! conn rb)))))))
+
 (defn root-tx
   "Root's entity as a test states it: m's root attributes on root's entity and its seon.config.* keys as the config in force, an entity of its own
   (seon.task/config-tx), as root's boot writes them. See docs/config.md#facts-on-main."
@@ -668,9 +690,17 @@
 
 (declare default-root-args)
 
+(defn candidate-of
+  "The candidate db's world holds (its :seon.test/candidate fact: what a test child's run writes in memory at its start), or nil
+  when it holds none or db is nil. One AEVT seek. See task seon.prove/tests-fork-from-the-branchs-warm-agent."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] [:maybe :map]]}
+  [db]
+  (when (and db (contains? (:schema db) :seon.test/candidate))
+    (:v (first (d/datoms db :aevt :seon.test/candidate)))))
+
 (defn shared-root!
-  "The root this test process shares among its tests for root arguments args: the candidate its world records for the default
-  arguments (:seon.test/candidate, a batch's on a candidate), else started at the
+  "The root this test process shares among its tests for root arguments args: for the default arguments, the candidate its
+  world holds (candidate-of), when it holds one; else started at the
   first call for them (start-shared-root!), then the same one: a root boots once per shard, not
   once per test (the boot was most of an in-agent test; an attach on a running root costs
   milliseconds). A test sharing it works on branches of its main and deletes them when it ends
@@ -681,15 +711,13 @@
   ;; no arguments is the shard's shared root (docs/testing.md#test-types): default-root-args, the one shard-fixture warms, never a
   ;; second root booted inside the first asking test's budget (an-idle-connection-holds-no-os-thread: 1.2M ticks or 10.3M, by
   ;; whether another test had booted the [] root first)
-  ;; a test child of a batch on a candidate: its world records the one booted candidate (:seon.test/candidate, written as the child
-  ;; starts: seon.agent's test-child-runs!), and the default root is that one, never a root of its own
-  (if-let [c (when (empty? args) (some->> (:db @seon.agent/state) (d/q '[:find ?c . :where [_ :seon.test/candidate ?c]])))]
-    c
-  (let [args (if (empty? args) (default-root-args) args)
-        k [(seon.config/checkout) (vec args)]
-        ;; a start that is not run unless it is the one put: two callers at once share one root
-        d (delay (start-shared-root! (first k) (second k)))]
-    @(or (.putIfAbsent ^java.util.concurrent.ConcurrentHashMap shared-roots k d) d))))
+  (let [args (if (empty? args) (default-root-args) args)]
+    ;; a test child whose world holds the candidate runs on it: one boot for every process test of a change, none here
+    (or (when (= (vec args) (default-root-args)) (candidate-of (:db @seon.agent/state)))
+        (let [k [(seon.config/checkout) (vec args)]
+              ;; a start that is not run unless it is the one put: two callers at once share one root
+              d (delay (start-shared-root! (first k) (second k)))]
+          @(or (.putIfAbsent ^java.util.concurrent.ConcurrentHashMap shared-roots k d) d)))))
 
 (defn default-root-args
   "The root arguments an in-agent test's shared root takes when it names no dirs or settings: this checkout as its source root."

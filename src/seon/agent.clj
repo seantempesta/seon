@@ -1446,7 +1446,9 @@
         ;; seon.prove/tests-fork-from-the-branchs-warm-agent)
         (when-let [c (:seon.test/candidate plan)]
           (lib/c-setpgid 0 0)
-          (transact! (assoc ag :role :test) [{:seon.agent/key (:key ag) :seon.test/candidate c}]))
+          ;; the root entity's (:seon.test/candidate, a root fact): written on the child's own world value through the checked write,
+          ;; never the branch's writer, which refuses a root fact
+          (swap! state update :db #(:db-after (pdb/with % [{:seon.system/id :root :seon.test/candidate c}] nil))))
         ;; its first act on its own env: the branch's environment, whatever the agent it was forked from held (its reads of
         ;; db go through its own env, so after own-store!)
         (hold-env! (db) {:args ["--profile" "scripted"] :checkout (:checkout plan)

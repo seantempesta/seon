@@ -195,8 +195,8 @@
                                                        ;; process tests run on the tree's one booted candidate, on a branch of this batch's own
                                                        (when-let [cd (get-in st [:candidates (or (:checkout it) (:branch it))])]
                                                          (and (:process? it) (contains? (:needs it) [[:candidate (:tree cd)] (:tree cd)])))
-                                                       (assoc :seon.test/candidate {:port (get-in st [:candidates (or (:checkout it) (:branch it)) :candidate :port])
-                                                                                    :branch (keyword (str "candidate-batch-" bid))}))}
+                                                       (assoc :seon.test/candidate (assoc (select-keys (get-in st [:candidates (or (:checkout it) (:branch it)) :candidate]) [:port :store :main])
+                                                                                          :branch (keyword (str "candidate-batch-" bid)))))}
                                                ;; a build, a seed or a check step: run on the run's checkout
                                                {:kind (:kind it) :tree (:tree it) :checkout (:checkout it) :branch (:branch it)
                                                 :name (if (#{:build :seed} (:kind it)) (:kind it) (first k)) :digest (second k)
