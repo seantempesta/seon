@@ -222,7 +222,7 @@
 
 (deftest a-missing-required-key-refuses-and-nil-is-absent
   ;; a key the config may not lack, resolving nil (an unset #env), refuses the config as it is read: at boot, naming it,
-  ;; never at its first read mid-run (seon.config's required; the schema's keys stay optional for a task's single overrides)
+  ;; never at its first read mid-run (seon.config's as-read; the entity schema's keys stay optional, as every entity schema's do)
   (let [r (refused #(config/resolved (assoc config/config :seon.config.root/main nil)))]
     (is (= [{:key :seon.config.root/main :problem :missing-key :value "nil"}] (:seon.config/problems r)) "a required key with no default"))
   (is (= (:default (second (get config/schema-forms :seon.config.store/branching-factor)))
@@ -235,7 +235,7 @@
   (is (= 0.5 (:seon.config.ai/temperature (config/resolved (assoc config/config :seon.config.ai/temperature 0.5))))))
 
 (deftest a-key-set-nowhere-reads-nil-only-when-it-may-be-absent
-  ;; a key the schema marks {:optional true} reads nil, which its readers take as none; any other key set nowhere
+  ;; a key whose own schema says :seon.config/optional reads nil, which its readers take as none; any other key set nowhere
   ;; is the caller's defect, refused naming it
   (is (nil? (config/value :seon.config.ai/temperature)))
   (is (= [:absent] (:source (config/resolve :seon.config.ai/temperature {:model "deepseek-flash"}))) "not by the model, its provider or the config")

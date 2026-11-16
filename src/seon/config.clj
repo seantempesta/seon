@@ -108,7 +108,19 @@
   one does, still has its default count), the one way a schema's default reaches a config (resolved). See docs/config.md#the-file."
   (mt/default-value-transformer {::mt/add-optional-keys true}))
 
-(def config-schema "The compiled `:seon.config/config`: required keys as the schema declares them, open at its top." (m/deref (m/schema :seon.config/config {:registry registry})))
+(defn- optional?
+  "Whether config key k's own schema in map s says it may be absent (:seon.config/optional: its readers take nil as none)."
+  {:malli/schema [:=> [:cat :any :qualified-keyword] :boolean]}
+  [s k] (boolean (some (fn [[ek _ child]] (and (= ek k) (:seon.config/optional (m/properties (m/deref child))))) (m/children s))))
+
+(defn- as-read
+  "The config entity map s as a process reads a config: every key required but those whose own schema says
+  :seon.config/optional (malli.util/required-keys), open at its top. The entity schema itself keeps every key optional, as
+  every entity schema does (an entity holds the keys it holds). See docs/config.md#the-file."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [s] (mu/required-keys s (remove (partial optional? s) (map first (m/entries s)))))
+
+(def config-schema "The compiled `:seon.config/config` as a config is read (`as-read`)." (as-read (m/deref (m/schema :seon.config/config {:registry registry}))))
 
 (declare held)
 
@@ -147,7 +159,7 @@
   agent's own settings (a :seon.task/config map), then the model's entry (default
   :seon.config.ai/model), then that model's provider's, then c's own key. Answers {:value
   :source}, :source one of [:task], [:model id], [:provider id], [:config layer], or [:absent] with value nil for a key
-  the schema marks {:optional true}, which its readers take as none. Any other key set nowhere is a defect of the caller:
+  whose own schema says :seon.config/optional, which its readers take as none. Any other key set nowhere is a defect of the caller:
   the error names it."
   {:malli/schema [:=> [:cat :map :map :qualified-keyword :seon.config/context] :seon.config/resolved]}
   [c srcs k {:keys [task model]}]
@@ -161,7 +173,7 @@
       (contains? pe k) {:value (get pe k) :source [:provider p]}
       (contains? c k) {:value (get c k) :source [:config (get srcs k "resources/seon/config/default.edn")]}
       ;; a key the config may lack reads nil, which its readers take as none (my.root's no-source-root errors)
-      (some (fn [[ek p]] (and (= ek k) (:optional p))) (m/children (:schema @held))) {:value nil :source [:absent]}
+      (optional? (:schema @held) k) {:value nil :source [:absent]}
       :else (refuse! #'seon.config/resolve-in (str k " is set nowhere: not by the task, the model " m ", its provider "
                                                p " or the config (declared keys: seon.config/keys-declared)")))))
 
@@ -364,7 +376,7 @@
   [changes]
   (if (empty? changes)
     config-schema
-    (m/deref (m/schema :seon.config/config {:registry (mr/composite-registry (m/default-schemas) (mr/simple-registry (merge schema-forms changes)))}))))
+    (as-read (m/deref (m/schema :seon.config/config {:registry (mr/composite-registry (m/default-schemas) (mr/simple-registry (merge schema-forms changes)))})))))
 
 (defn- entries-text
   "The file's text of entries {k form}: a map, one entry a line, each form as stated. See docs/config.md#a-process-holds-its-branchs-config."

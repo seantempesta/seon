@@ -13,7 +13,7 @@
  ;; root with a source gates a merge on the process tests its change reaches, nobody asking. With
  ;; neither (a test root given no source), such a merge is held, its reason naming the tests and
  ;; that no checkout runs them: never merged with them silently unrun.
- :seon.config.source/gate-checkout [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "The checkout a merge's deferred process tests run on (a worktree of it at the merges head, seon.fx/run-tests): the standing root's merges tree. Absent: a merge reaching process tests merges with them unrun, an open problem until they run (root's git merge runs them, bin/prove)."}]
+ :seon.config.source/gate-checkout [:string {:seon.config/optional true :seon.config/place true :min 1 :seon.config/unit "path" :description "The checkout a merge's deferred process tests run on (a worktree of it at the merges head, seon.fx/run-tests): the standing root's merges tree. Absent: a merge reaching process tests merges with them unrun, an open problem until they run (root's git merge runs them, bin/prove)."}]
  ;; Unit: boolean. Whether a boot of a root with a source tree (:seon.config.source/root) catches main up with the files that changed
  ;; since main last indexed it (seon.system/catch-up, docs/source.md#a-boot-catches-up-with-its-checkout): about 40 ms when nothing
  ;; changed, the changed files' forms when some did. Provenance: the owner, 2026-11-10 ("if very little has changed it doesn't take
@@ -23,7 +23,7 @@
  ;; Unit: boolean. Whether a merge writes its files and commits :seon.config.source/branch by itself. False: main is the source of truth, and
  ;; my.root/write-back! (seon_write_back) syncs main's changed files and commits, called by hand (owner, 2026-11-07). At the bound: n/a.
  :seon.config.source/write-back-on-merge [:boolean {:default true :seon.config/unit "boolean" :description "Whether a merge writes its files and commits the merges branch by itself; false: my.root/write-back! does, by hand."}]
- :seon.config.source/root [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "The repository whose dirs main imports at boot (when main holds none of them) and whose merges branch receives the write-back; absent: no source is imported or written."}]
+ :seon.config.source/root [:string {:seon.config/optional true :seon.config/place true :min 1 :seon.config/unit "path" :description "The repository whose dirs main imports at boot (when main holds none of them) and whose merges branch receives the write-back; absent: no source is imported or written."}]
  ;; Unit: path, relative to the source root. Where the tree keeps its task files: a fact of the tree's layout, what a reader of a
  ;; tree's task files at a commit takes (bin/check's health step, test-runner/tasks-dir), never a process's place. A root's own
  ;; task dir is :seon.config.root/tasks-dir (the same path under the checkout by default; a check run's root takes its run's own).
