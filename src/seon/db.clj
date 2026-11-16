@@ -14,6 +14,20 @@
   seon.schema.datahike; session D1): one source of truth with the contracts."
   (sd/declarations contract/registry))
 
+(defn schema-of
+  "The Datahike schema of a branch whose schema changes beyond the binary's are changes, its registry reg (seon.program/schema-registry):
+  the binary's (`schema`) when it changes none, else derived from reg. What a branch's process holds (seon.agent/branch-schemas' slot),
+  derived once a schema entry moves, never per read. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:malli/schema [:=> [:cat :map :any] [:vector :map]]}
+  [changes reg] (if (empty? changes) schema (sd/declarations reg)))
+
+(defn held-schema
+  "The Datahike schema this process holds: its agent's branch's (seon.contract/held-branch's :schema), else the binary's (`schema`).
+  What a world (`empty-db`) and a store's install (`install-missing!`) read, so a branch that adds an attribute writes it in its own
+  tests with no rebuild. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:malli/schema [:=> [:cat] [:vector :map]]}
+  [] (or (:schema (contract/held-branch)) schema))
+
 (def layout
   "How a store lays out its records, fixed when it is made: its index nodes addressed by their content (:crypto-hash?, so
   branches holding the same datoms name one node: docs/sharing.md#what-a-branchs-nodes-are) and its history kept or not
@@ -785,6 +799,8 @@
   {:malli/schema [:=> [:cat :seon.host/conn] [:set :keyword]]}
   [conn]
   (let [have (:schema @conn)
+        ;; the process's schema: its branch's when an agent holds one (held-schema)
+        schema (held-schema)
         differ (into {} (for [{k :db/ident t :db/valueType} schema
                               :let [stored (get-in have [k :db/valueType])]
                               :when (and stored (not= stored t))]
@@ -889,7 +905,7 @@
   "An empty db value with Seon's schema (`schema`), in memory, keeping history when history?: a test's world
   (my.test/world) and a tree indexed with no store (seon.system/built-program). See docs/testing.md#testing-in-the-world."
   {:malli/schema [:=> [:cat :boolean] :seon.host/db]}
-  [history?] (datahike.core/empty-db (into {} (map (juxt :db/ident #(dissoc % :db/ident))) schema)
+  [history?] (datahike.core/empty-db (into {} (map (juxt :db/ident #(dissoc % :db/ident))) (held-schema))
                                      {:keep-history? history? :schema-flexibility :write}))
 
 (defn delete-main!

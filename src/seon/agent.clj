@@ -388,9 +388,10 @@
   seon.db/index-of), and :index-builds, how many times this agent built one. See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
-  (let [k (program/schema-changes (:db st))]
+  (let [k (program/schema-changes (:db st)) reg (program/schema-registry k)]
     (-> st
-        (assoc :schema-registry {:key k :registry (program/schema-registry k) :index (pdb/index-of {:forms k})})
+        ;; the branch's Datahike schema with them, derived once here: what its worlds and stores install (seon.db/held-schema)
+        (assoc :schema-registry {:key k :registry reg :index (pdb/index-of {:forms k}) :schema (pdb/schema-of k reg)})
         (update :index-builds (fnil inc 0)))))
 
 (defn schema-moved
