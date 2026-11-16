@@ -1528,6 +1528,53 @@
     (is (= 1 (count (d/datoms main :avet :seon.proof/test 'app.r-test/shared))) "once")
     (is (= :fail (:seon.proof/status (d/entity main [:seon.proof/id (seon.proofs/verdict-id 'app.r-test/a-only rd :fail)]))) "and a's other result")))))
 
+;; docs/merging.md#a-branch-merges-main-in, plan item 10 (2): main's program moving after a branch's proof re-proves only R, the tests
+;; whose recorded reads (:seon.proof/read-keys of the branch's own results) main moved since the branch's base: none read it, so the
+;; branch merges in the same writer step. Red first: any program move answered :reprove. Estimate: as
+;; a-merge-after-mains-program-moved-reproves-and-never-lands-unproved (~6M) + one results-moved over main's few moved datoms (~0.1M):
+;; 7,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 7000000}} a-merge-reproves-only-the-tests-whose-reads-main-moved
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        b (pdb/on-main (:branch cfg) :m3)
+        _ (d/branch! conn (:branch cfg) b)
+        bc (pdb/connect (assoc cfg :branch b))
+        [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f2] [?v :var/form ?f] [?f :form/ns ?n]] @bc)
+        [g nsg] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f1] [?v :var/form ?f] [?f :form/ns ?n]] @conn)
+        rd (seon.lib/digest "what it read")
+        ;; the branch's change and its proof's results: one read f2's form, one read f1's form (main moves f1)
+        result (fn [t reads] {:seon.proof/id (seon.proofs/verdict-id t rd :pass) :seon.proof/test t :seon.proof/reach-digest (seon.lib/digest (str t))
+                              :seon.proof/status :pass :seon.proof/route :live :seon.proof/ran-on #{b} :seon.proof/reads-digest rd
+                              :seon.proof/read-keys (into #{} (map pr-str) reads)})
+        _ (d/transact bc {:tx-data [{:db/id "f2'" :form/id "app.m0/f2-m3" :form/ns nsx :form/order 100 :form/defines [v]
+                                     :form/src "(defn f2 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 500))"}
+                                    [:db/add v :var/form "f2'"]
+                                    (result 'app.m0-test/f2-only [[:ea v :var/form]])]
+                          :tx-meta (pdb/tx-meta b)})
+        _ (d/release bc)
+        proved-t (:max-tx @conn)
+        move-f1 (fn [st id] (step #'writer/writer-proc st :in {:op :tx :branch :db :flush? true :dest {:rid 0}
+                                                                :tx-data [{:db/id "f1'" :form/id id :form/ns nsg :form/order 101 :form/defines [g]
+                                                                           :form/src (str "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (- x " (count id) "))")}
+                                                                          [:db/add g :var/form "f1'"]]}))
+        [st _] (move-f1 st "app.m0/f1-main-m3")
+        [st outs] (step #'writer/writer-proc st :in {:op :merge :branch b :proved-t proved-t :dest {:rid 1}})
+        r (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))]
+    (is (:merged? r) (str "main moved f1, which no proof of the branch read: it merges in the step: " (pr-str r)))
+    (testing "a branch whose proof read what main moved re-proves that test alone"
+      (let [b2 (pdb/on-main (:branch cfg) :m4)
+            _ (d/branch! conn (:branch cfg) b2)
+            bc2 (pdb/connect (assoc cfg :branch b2))
+            _ (d/transact bc2 {:tx-data [(assoc (result 'app.m0-test/reads-f1 [[:ea g :var/form]]) :seon.proof/ran-on #{b2})
+                                         {:note/text "the branch's own change" :note/agent :m4}]
+                               :tx-meta (pdb/tx-meta b2)})
+            _ (d/release bc2)
+            proved-t2 (:max-tx @conn)
+            [st _] (move-f1 st "app.m0/f1-main-m4")
+            [_ outs] (step #'writer/writer-proc st :in {:op :merge :branch b2 :proved-t proved-t2 :dest {:rid 2}})
+            r2 (:r (first (filter #(= {:rid 2} (:dest %)) (:to-api outs))))]
+        (is (= {:reprove true :tests #{'app.m0-test/reads-f1}} (select-keys r2 [:reprove :tests])) (pr-str r2))))))))
+
 ;; docs/merging.md#a-branch-merges-main-in: main's program moving after the branch's proof is never merged unproved and never "behind":
 ;; the one :merge step merges main into the branch and answers :reprove, main unmoved, so the judge proves the branch again on what it
 ;; now holds. Red before: the octopus merge answered :seon.merge/behind, the task was told to merge main, up to max-behind.

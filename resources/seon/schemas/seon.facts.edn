@@ -229,7 +229,7 @@
  :seon.proof/read-keys [:set {:seon.db/index true :description "The read keys the run's reads recorded (datahike.reads/range-key, each its pr-str): what a moved datom is sought by."} :string]
  :seon.proof/unreusable [:and {:description "The effects the run used whose answers its inputs don't decide: such a result is recorded, never reused."} :seon.reads/unreusable]
  :seon.proof/basis [:and {:description "The db a result's run read: its branch, commit and t. No longer written: a result is one fact for every run of it, and a run's branch is one of its :seon.proof/ran-on; this entry stays as installed (docs/health.md#a-retyped-attribute) for the results stored before."} :seon.db/reference]
- :seon.proof/ran-on [:set {:description "The branches a run of the result ran on, one value a branch. A result is identified by its content (seon.proofs/verdict-id), so two branches' runs of one result are values of one entity, and a merge unions them, never a conflict (docs/merging.md#verdicts-are-a-cache)."} :seon.db/branch]
+ :seon.proof/ran-on [:set {:seon.db/index true :description "The branches a run of the result ran on, one value a branch. A result is identified by its content (seon.proofs/verdict-id), so two branches' runs of one result are values of one entity, and a merge unions them, never a conflict (docs/merging.md#verdicts-are-a-cache)."} :seon.db/branch]
  :seon.proof/agent [:and {:seon.db/to [:seon.db/agent-fact] :description "The agent whose process ran it."} :seon.db/ref]
  :seon.proof/program [:and {:description "The digest of the program the running binary was built from (seon.program/binary-program)."} :seon.lib/digest]
  :seon.proof/profile [:keyword {:description "The config profile the run resolved under."}]

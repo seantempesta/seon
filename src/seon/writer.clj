@@ -264,17 +264,35 @@
                                  {:expected-current-commit (d/commit-id head) :changes {:base (d/commit-id head) :datoms ds}})]
         {:ok true :commit cid :keys (count ks) :t (:max-tx merged) :main (d/commit-id main)}))))
 
+(defn- reprove-tests
+  "R, the tests a branch b must prove again before it merges: those whose results on head (b with main merged in) are its own (their
+  :seon.proof/ran-on names b) and read a key main changed since proved-on, the main b's proof read (its merge base before the merge);
+  :unknown when b holds no result of its own, so its proof's reads are unknown and it proves again whole (never merged unproved).
+  Main's change is read from its commits (seon.merge/changed-datoms), each datom's keys sought among the results' read keys
+  (seon.db/results-moved): O(what main moved). See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :keyword :any] [:or [:= :unknown] [:set :qualified-symbol]]]}
+  [main head b proved-on]
+  (let [own (into #{} (map :e) (d/datoms head :avet :seon.proof/ran-on b))]
+    (if (or (empty? own) (contract/error? proved-on) (nil? proved-on))
+      :unknown
+      (let [[gone added] (pm/changed-datoms proved-on main)]
+        (into #{} (comp (filter own) (keep #(:v (first (d/datoms head :eavt % :seon.proof/test)))))
+              (pdb/results-moved head (concat gone added)))))))
+
 (defn- merge-into-main
   "Branch b merged into main in ONE writer step (plan item 10): main merged into b first (merge-main-into: the candidate, built on
   main's head; a conflict or a refused fact answers its entries and nothing moves), b's candidate refused as merge-refused and
   dangling-refused judge it, else main takes the candidate's change in one commit with b's head a parent (d/merge-db), so b's merge
   base is its head. Main can't move inside the step, so a merge is never behind. proved-t is main's t the branch's proof ran on: when
-  main's program moved since (:program-t, program-at), b still takes main and the answer is {:reprove true}, nothing of main moved, so
+  main's program moved since (:program-t, program-at) and a test whose reads main moved since b's base proved it (R, reprove-tests:
+  :unknown when b holds no result of its own), b still takes main and the answer is {:reprove true :tests R}, nothing of main moved, so
   the judge proves b again, reusing every result whose reads did not move: each pass costs what moved, with no count. Answers
-  [st {:merged? :tx ...}], {:merged? false :reprove true}, or a refusal. See docs/merging.md#a-branch-merges-main-in."
+  [st {:merged? :tx ...}], {:merged? false :reprove true :tests R}, or a refusal; R empty merges in the step. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/branch :int] [:tuple :seon.writer/state :map]]}
   [st o b proved-t]
   (let [conn (:conn st)
+        ;; the main the branch's proof read: its merge base before this merge takes main in
+        proved-on (when (pdb/branch? conn b) (pdb/branch-base conn (pdb/conn-main conn) b))
         r (if (pdb/branch? conn b) (merge-main-into conn (:cfg st) b) (refused (str "no branch " b) {}))]
     (if (or (contract/error? r) (not (:ok r)))
       [st (if (contract/error? r) r {:merged? false :conflicts (:conflicts r)})]
@@ -283,14 +301,18 @@
             ;; (seon.merge/delta-three-way until slice 2's checks read the candidate's facts)
             tw (pm/delta-three-way main head main :all)
             why-not (or (merge-refused main head tw) (dangling-refused main head))
+            ;; R, only when main's program moved since the proof (a data move re-proves nothing, as before)
+            rt (when (> (:program-t st 0) proved-t) (reprove-tests main head b proved-on))
             [gone added] (pm/changed-datoms main head)
             txe (into #{} (map :tx) (concat gone added))
             ops (-> [] (into (for [dt gone :when (not (txe (:e dt)))] [:db/retract (:e dt) (:a dt) (:v dt)]))
                     (into (for [dt added :when (not (txe (:e dt)))] [:db/add (:e dt) (:a dt) (:v dt)])))]
         (cond
           why-not [st why-not]
-          ;; main's program moved since the proof: b holds main now; its proof runs again on it
-          (> (:program-t st 0) proved-t) [st {:merged? false :reprove true :tx (:max-tx main)}]
+          ;; main's program moved since the proof: b holds main now; the tests whose reads main moved prove again on it (R), and
+          ;; with none the branch merges in this step
+          (or (= :unknown rt) (seq rt))
+          [st {:merged? false :reprove true :tests rt :tx (:max-tx main)}]
           (empty? ops) [st {:merged? true :tx (:max-tx main) :datoms 0}]
           :else
           (let [rep (d/merge-db conn #{(d/commit-id head)} (into ops (mark-tx main)) (pdb/tx-meta (pdb/conn-main conn)))
