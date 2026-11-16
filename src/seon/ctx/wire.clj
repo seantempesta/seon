@@ -59,7 +59,7 @@
   (let [{:keys [t branch]} (:seon.eval/basis e)
         ;; the agent of the eval's record, else (an eval not yet recorded, whose text is made first) the one this process is
         a (or (d/q '[:find ?a . :in $ ?id :where [?e :seon.eval/id ?id] [?e :seon.eval/agent ?a]] db (:seon.eval/id e))
-              (pdb/eid db :seon.agent/key (:key @agent/state)))]
+              (pdb/eid db :seon.agent/key (:key agent/*start*)))]
     (with-meta (assoc (:tree (binding [datahike.index.interface/*reads* nil] (ctx/build ix (d/as-of db t) a branch))) :t t)
       {:seon.render/schema (:seon.eval/schema e)})))
 

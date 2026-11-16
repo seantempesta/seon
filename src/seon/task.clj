@@ -676,7 +676,7 @@
   my.task/update! writes them: a set member (:seon.task/proofs) its values added and retracted, a
   single member its new value. A value its member's schema does not admit (proofs that are no
   set of qualified symbols, a plan that is no string) is the update's contract error, writing nothing."
-  {:malli/schema [:=> [:cat :seon.task/keyed [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause :seon.task/found-nothing] :seon.host/fn [:sequential :any]]
+  {:malli/schema [:=> [:cat :seon.task/keyed [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/found-nothing] :seon.host/fn [:sequential :any]]
                   [:or :seon.db/tx-data :seon.task/invalid-member]]}
   [t member f args]
   (let [id [:seon.task/id (:seon.task/id t)]
@@ -1088,7 +1088,7 @@
   {:malli/schema [:=> [:cat :seon.task/declaration] :seon.task/declaration]}
   [d]
   (into {} (remove (fn [[_ v]] (and (coll? v) (empty? v))))
-        (cond-> (dissoc d :seon.task/branch :seon.task/after :seon.task/cause :seon.task/causes)
+        (cond-> (dissoc d :seon.task/branch :seon.task/after :seon.task/causes)
           (:seon.task/proofs d) (update :seon.task/proofs set)
           (:seon.task/needs d) (update :seon.task/needs set))))
 
@@ -1104,12 +1104,12 @@
               (seq c) (assoc :seon.task/config c)))))
 
 (defn derived?
-  "Whether task entity e is made by the system from data it derives again, so no file states it: it has a cause (a stall's
-  :seon.task/cause, a :seon.task/causes tag) or is a refine (`refine?`). Seeks only. See
+  "Whether task entity e is made by the system from data it derives again, so no file states it: it has a cause (a
+  :seon.task/causes tag) or is a refine (`refine?`). Seeks only. See
   docs/source.md#a-merged-task-reaches-mains-files."
   {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
   [db e]
-  (boolean (or (seq (d/datoms db :eavt e :seon.task/cause)) (seq (d/datoms db :eavt e :seon.task/causes))
+  (boolean (or (seq (d/datoms db :eavt e :seon.task/causes))
                ;; a refine (`refine?`'s rule) by seeks alone: one of its cites targets `refine-section`, never a pull of each cite
                (when-let [sec (pdb/eid db :seon.doc/address refine-section)]
                  (some #(= sec (:v (first (d/datoms db :eavt (:e %) :seon.cite/target)))) (d/datoms db :avet :seon.cite/of e))))))
