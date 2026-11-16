@@ -412,7 +412,7 @@
                  ;; the remainder: answers, report-with, health-with (and problem-unlinked inside it, over the derived rows as health hands them), and the folds
                  :fixed (let [derived (#'problems/other-derived db ans (mapv :e (d/datoms db :aevt :seon.task/id)))]
                           #(let [a (problems/answers db)]
-                             (#'problems/health-with db a (:classes (#'problems/report-with db a {} nil)) derived)))}
+                             (#'problems/health-with db a (:classes (#'problems/report-with db a {})) derived)))}
         measured (update-vals classes calls-of)
         ;; 74 -> 86 -> 88 -> 89 on 2026-11-10 (uncited-tasks every ready task, stale-binary, waived-proof), one total; per class since. Each bound is the contracted calls measured on this world.
         bounds {:stale-pin 2           ; the pins of the branch scheme

@@ -282,12 +282,13 @@
     (if (or (contract/error? r) (not (:ok r)))
       [st (if (contract/error? r) r {:merged? false :conflicts (:conflicts r)})]
       (let [main @conn head (pdb/head conn b)
-            ;; the candidate's program change against main, as merge-refused's checks and the write-back read it
-            tw {:ours (pm/delta-changes main head :all)}
+            ;; the candidate's change against main, read once from its commit (changed-datoms): the ops main takes, and the program
+            ;; view merge-refused's checks and the write-back read (delta-changes over those datoms, never a second diff)
+            [gone added] (pm/changed-datoms main head)
+            tw {:ours (pm/delta-changes main head :all (pm/content-datoms main head :all (into gone added)))}
             why-not (or (merge-refused main head tw) (dangling-refused main head))
             ;; R, only when main's program moved since the proof (a data move re-proves nothing, as before)
             rt (when (> (:program-t st 0) proved-t) (reprove-tests main head b proved-on))
-            [gone added] (pm/changed-datoms main head)
             txe (into #{} (map :tx) (concat gone added))
             ops (-> [] (into (for [dt gone :when (not (txe (:e dt)))] [:db/retract (:e dt) (:a dt) (:v dt)]))
                     (into (for [dt added :when (not (txe (:e dt)))] [:db/add (:e dt) (:a dt) (:v dt)])))]
