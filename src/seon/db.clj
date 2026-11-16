@@ -576,7 +576,7 @@
   "The one transaction on a database value (Datahike's `d/with`) through both checks (`checked`): every speculation, an
   agent's test fork and a test's world write through it, as the writer's transact does. Answers the report; schemas
   are a branch's own ({:forms :registry}) or nil. A Datahike transaction call at a site docs/storage.md does not
-  name is red (bin/laws transactions). See docs/storage.md#the-write-checks-every-entity-it-touches."
+  name is red (health's :transactions law, seon.problems/laws). See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.db/tx-data] :seon.db/tx-report] [:=> [:cat :seon.host/db :seon.db/tx-data [:maybe :seon.db/branch-schemas]] :seon.db/tx-report]
                   [:=> [:cat :seon.host/db :seon.db/tx-data [:maybe :seon.db/branch-schemas] [:maybe :map]] :seon.db/tx-report]
                   [:=> [:cat :seon.host/db :seon.db/tx-data [:maybe :seon.db/branch-schemas] [:maybe :map] :boolean] :seon.db/tx-report]]}
@@ -601,7 +601,7 @@
   "tx-data on db as a hypothetical (Datahike's `d/with`), unchecked: nothing of it is stored, so it is not data entering
   the system; the write that may follow (the same transaction through a connection's `'transact!`) is checked there, once
   (validation at transaction time, never the same data checked again). A state the system shows or
-  relies on is written, never only speculated. Each caller is named in docs/storage.md (bin/laws transactions). Answers the report."
+  relies on is written, never only speculated. Each caller is named in docs/storage.md (health's :transactions law, seon.problems/laws). Answers the report."
   {:malli/schema [:=> [:cat :seon.host/db :seon.db/tx-data] :seon.db/tx-report]}
   [db tx-data] (d/with db tx-data))
 
@@ -715,8 +715,8 @@
 
 (defn connect
   "A connection to the store and branch of cfg (Datahike's `d/connect`), its writer's transact the one path's
-  (`transact-checked`), so every write through it is checked. The one way a connection is opened (bin/laws
-  transactions): the hook is added here, never stored in cfg, which is plain data that travels (a fork's message, a
+  (`transact-checked`), so every write through it is checked. The one way a connection is opened (health's
+  :transactions law): the hook is added here, never stored in cfg, which is plain data that travels (a fork's message, a
   stored config): a Var in it could not be encoded, and the fork it rode never came.
   See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :map] :any]}
@@ -912,6 +912,12 @@
   (cond (= :db b) main
         (or (= :db main) (= main b) (= (name main) (namespace b))) b
         :else (keyword (name main) (if (namespace b) (str (namespace b) "." (name b)) (name b)))))
+
+(defn main-of
+  "The main of branch b as `on-main` names it: the namespace of a qualified b (:smoke-x/agent-1 is :smoke-x's), :db for an unqualified
+  one. Not defined for a main other than :db asked of itself (its name is unqualified): read it of a branch under main."
+  {:malli/schema [:=> [:cat :seon.db/branch] :seon.db/branch]}
+  [b] (if-let [n (namespace b)] (keyword n) :db))
 
 (defn of-main
   "The branches of the store held under main, by the names its root gives them (on-main undone),

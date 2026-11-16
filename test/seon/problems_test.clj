@@ -744,6 +744,30 @@
       (let [page (str "# Failure points\n\n| failure | edge |\n|---|---|\n| x | `" v "` |\n")]
         (is (= [] (unnamed (d/db-with db1 (seon.doc/load-tx db1 "docs" {"docs/failure-points.md" page})))))))))
 
+;; Estimate: the world (~2M), five health reads of a small program (~0.5M each), a caused split of one moved form (~0.3M): ~5M; 8,000,000.
+(deftest ^{:seon.test/estimate {:ticks 8000000}} bin-laws-text-rules-are-health-classes-read-over-the-forms
+  ;; root's order, the owner: "What is laws doing and why isn't this an online system?": bin/laws' text laws (clocks, measures,
+  ;; resolution, transactions, dates) are entries of seon.problems/laws, read form by form from :form/src in health, and a move
+  ;; reads only the forms whose text moved (split-rows). Red before: no such law; bin/laws grepped the whole tree cold
+  (let [db0 (world)
+        v 'app.calc/inc2
+        fe (:db/id (:var/form (d/entity db0 [:var/name v])))
+        ns-e (:db/id (:var/ns (d/entity db0 (:e (first (d/datoms db0 :avet :var/name v))))))
+        src (fn [db text] (d/db-with db [[:db/add ns-e :ns/file "src/app/m.clj"] [:db/add fe :form/src text]]))
+        unnamed (fn [db law] (into [] (comp (filter (comp #{law} :law)) (map (juxt :law :site))) (get-in (problems/health db) [:classes :unnamed-site :rows])))
+        clock (src db0 "(defn inc2 [x] (System/currentTimeMillis) (+ x 2))")]
+    (is (= [[:measures v]] (unnamed clock :measures)) "a clock read its page does not name")
+    (is (= [] (unnamed (src db0 "(defn inc2 \"Reads no nanoTime.\" [x] (+ x 2)) ; now-ns") :measures)) "a mark in a string or comment is none")
+    (testing "the clocks page names it: no problem"
+      (is (= [] (unnamed (d/db-with clock (seon.doc/load-tx clock "docs" {"docs/clocks.md" (str "# Clocks\n\nRead as data.\n\n- `" v "`: a measure\n")})) :measures))))
+    (is (= [[:dates v]] (unnamed (src db0 "(defn inc2 \"Fixed 2026-11-16 by web.\" [x] (+ x 2))") :dates)) "a date in prose")
+    (is (= [] (unnamed (src db0 "(def inc2 [\"2025-06-18\"])") :dates)) "a string that is only a date is a value")
+    (testing "a move reads the form it moved: the site is the branch's, one row"
+      (let [base (src db0 "(defn inc2 [x] (+ x 2))")]
+        (let [made (problems/caused base (src base "(defn inc2 [x] (seon.profile/now-ns) (+ x 2))"))]
+          (is (= 1 (count made)) (pr-str made))
+          (is (str/includes? (first made) (str v)) (pr-str made)))))))
+
 ;; docs/render.md#one-printer as a law (root: the test stopped three landings, each found late): a src form referencing a printer
 ;; beside seon.print, a cut in a display namespace or a budgeted cut outside one is a site its section must name, read over the
 ;; compiler's :form/refs in health, so a land sees it before any prove. Red before: no law; the test read every form at prove time.
@@ -853,8 +877,11 @@
                :growth :linear
                ;; fixed calls 5 -> 9 (39 measured at n=10, 35 before): the world's test namespace app.calc-test has two
                ;; forms carrying a catch (a deftest's `is`), each read and dropped as no program namespace's: 2 calls each
-               :per-n {:ns 76000 :bytes 74500}
-               :fixed {:ns 50000 :bytes 50000} ; 22: the one-printer law's rule beside catch, its four dials read once (tests, 9 -> 22 by 39 -> 52 at 10)
+               ;; + the five text laws' raw prefilter (seon.problems/laws :pre): each form's :form/src read and matched once a law, ~12 KB
+               ;; and ~1.5k ticks a form (result/d27e061e: 20 forms 0.65 MB, 110 forms 1.74 MB), so +12k a site and the world's 10 other
+               ;; forms plus the datom walk (~0.4 MB) fixed
+               :per-n {:ns 88000 :bytes 86500}
+               :fixed {:ns 500000 :bytes 570000} ; 22: the one-printer law's rule beside catch, its four dials read once (tests, 9 -> 22 by 39 -> 52 at 10)
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 15000000}} stale-pins-follow-the-pin-page

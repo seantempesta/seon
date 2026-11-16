@@ -16,23 +16,29 @@
         ops [[:db/add 1 :seon.agent/key "boot-1/a1"] [:db/add 1 :seon.agent/boot "boot-1"]]]
     [(cond-> {:db db :graph (program/reach-graph db nil)} (program/moves-program? ops) (assoc :graph-moved true))]))
 
-;; Estimate: spawned-of 10: branch-of 10 forms x 100k = 1M, its reach-graph 41k a form = 0.4M, two moves-program? checks: ~2M ticks.
-(deftest ^{:seon.test/estimate {:ticks 2000000}} a-spawns-commit-leaves-the-graph-and-a-program-commit-moves-it
-  (let [[st] (spawned-of 10)]
+;; Estimate: spawned-of 4: branch-of 4 forms x 100k = 0.4M, its reach-graph 41k a form = 0.17M, two moves-program? checks: ~1M ticks.
+(defn held-of
+  "graph-at-fork's argument at n: a server state holding a graph of n entries and no moved program."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
+  [n]
+  [{:db nil :graph {:live (zipmap (range n) (range n))}}])
+
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-spawns-commit-leaves-the-graph-and-a-program-commit-moves-it
+  (let [[st] (spawned-of 4)]
     (is (not (:graph-moved st)) "an agent's facts move no program")
     (is (identical? (:graph st) (:graph (fs/graph-at-fork st))) "so the fork hands on the graph it holds"))
   (is (program/moves-program? [[:db/add 7 :form/id "app.pc/f0-x"]]) "a form's facts move it")
   (is (program/moves-program? [[:db/retract 7 :var/form 9]]) "and so does a definition's pointer"))
 
-;; Estimate: spawned-of 10 = 1.5M; record-tx and d/with ~0.3M; reach-graph twice (fresh, and graph-at-fork's update) ~1M: ~4M ticks.
-(deftest ^{:seon.test/estimate {:ticks 4000000}} a-program-commit-moves-the-graph-to-the-new-program
+;; Estimate: spawned-of 4 = 0.6M; record-tx and d/with ~0.3M; reach-graph twice (fresh, and graph-at-fork's update) ~0.4M: ~1.5M ticks.
+(deftest ^{:seon.test/estimate {:ticks 1500000}} a-program-commit-moves-the-graph-to-the-new-program
   ;; the graph a fork (or a standby: the self-review's finding, a standby forked before the next
   ;; fork kept the passed graph) hands on is the new program's, and the flag is cleared
-  (let [[st] (spawned-of 10)
+  (let [[st] (spawned-of 4)
         db (:db st)
-        acct {:id "app.pc/f5-(dec x)" :src "(defn f5 [x] (dec x))" :ns 'app.pc :ns-form? false
-              :defs [{:var 'app.pc/f5 :meta #{:arglists}}] :declares #{} :methods [] :impls []
-              :refs #{'app.pc/f4} :requires #{} :banned #{} :inline-defs #{}}
+        acct {:id "app.pc/f2-(dec x)" :src "(defn f2 [x] (dec x))" :ns 'app.pc :ns-form? false
+              :defs [{:var 'app.pc/f2 :meta #{:arglists}}] :declares #{} :methods [] :impls []
+              :refs #{'app.pc/f1} :requires #{} :banned #{} :inline-defs #{}}
         {db2 :db-after txd :tx-data} (d/with db (program/record-tx db acct))
         ops (for [dt txd] [(if (:added dt) :db/add :db/retract) (:e dt) (:a dt) (:v dt)])
         st2 (cond-> (assoc st :db db2) (program/moves-program? ops) (assoc :graph-moved true))
@@ -42,13 +48,14 @@
     (is (= (select-keys fresh [:live :schemas]) (select-keys (:graph moved) [:live :schemas])) "the graph is the new program's")
     (is (not (:graph-moved moved)) "and the flag is cleared")))
 
-;; Estimate: sizes 10+30+100 = 140 forms: branch-of 14M + reach-graph 41k a form = 6M; 3 key lookups: ~20M ticks. A 10x spread
-;; shows :constant (1000 forms cost 90% of the test for no more of the claim: cut 2026-11-13, it was over the 1e8 cap)
-(deftest ^{:seon.test/estimate {:ticks 20000000}} a-fork-on-an-unmoved-program-costs-nothing-of-the-program
+;; Estimate: held-of builds a graph map of n entries: 10+100+1000 = ~1.1k conj, ~0.1M ticks; 3 key lookups: ~0.2M ticks.
+;; The claim is that an unmoved program is a key lookup whatever the graph's size; graph-at-fork reads no db then, so the
+;; graph is synthetic (a real reach-graph per size cost 388 ms and proved nothing more: the real graph is test 1's).
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-fork-on-an-unmoved-program-costs-nothing-of-the-program
   (cost/proof
-    {:of 'seon.fork-server/graph-at-fork :input 'seon.fork-server-cost-test/spawned-of
-     :n "forms in main's program"
+    {:of 'seon.fork-server/graph-at-fork :input 'seon.fork-server-cost-test/held-of
+     :n "entries in the graph the server holds"
      :work "a key lookup: no commit since moved the program, so the graph is the one held (reach-update, which reads every live form, is not called)"
      :growth :constant
      :fixed {:bytes 2000}
-     :sizes [10 30 100]}))
+     :sizes [10 100 1000]}))

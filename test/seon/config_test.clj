@@ -111,26 +111,48 @@
   seon.config/per-run-keys-ride-the-command-line turns each into a --set and empties this set."
   #{"SEON_AI_MODEL" "SEON_INSTRUMENT"})
 
+;; the shipped file's entries by key, read once for the tests that build a config over them (source/config-tx is ~25M ticks of the file's analysis)
+(def ^:private shipped-entries
+  (delay (into {} (for [{k :config/key f :config/form} (source/config-tx config/shipped-file config/built-text) :when k] [k f]))))
+
 ;; docs/config.md#layers: `#env` appears only where a script sets one
 (deftest entries-are-a-config-over-this-processs-layers
   ;; docs/config.md#a-process-holds-its-branchs-config: what a branch's entries state is what a process reads: tags read as aero reads them, a place stays where the process loaded, and a key needs its schema
-  (let [es (into {} (for [{k :config/key f :config/form} (source/config-tx config/shipped-file config/built-text) :when k] [k f]))
+  (let [es @shipped-entries
         k :seon.config.root/view-window
         over (fn [m] (config/of-entries (merge es m) {}))]
-    (is (= (config/value :seon.config.root/max-agents) (get-in (over {}) [:config :seon.config.root/max-agents])))
-    (is (= 21 (get-in (over {k "21"}) [:config k])) "an entry's value is read")
-    (is (= (get-in (over {:seon.config.root/max-agents "4"}) [:config :seon.config.root/writer-buf]) 4) "a tag in an entry resolves, here #ref over the entry it names")
-    (let [p (over {:seon.config.root/main "\"elsewhere\""})]
+    ;; one of-entries over every entry these assertions state (each call reads and resolves the whole file: ~10M ticks), a key per behaviour
+    (let [p (over {k "21" :seon.config.root/max-agents "4" :seon.config.root/main "\"elsewhere\""
+                   :seon.config.agent/sock-buf-bytes "1234567" :seon.config.nope/key "1"})
+          k2 :seon.config.root/server-port]
+      (is (= (config/value k2) (get-in p [:config k2])) "an entry nothing states keeps the value this process reads")
+      (is (= 21 (get-in p [:config k])) "an entry's value is read")
+      (is (= 4 (get-in p [:config :seon.config.root/writer-buf])) "a tag in an entry resolves, here #ref over the entry it names")
       (is (= (:seon.config.root/main config/config) (get-in p [:config :seon.config.root/main])) "a place stays where this process loaded")
-      (is (= "elsewhere" (get-in p [:waiting :seon.config.root/main :stated])) "and says so"))
-    (is (= 1234567 (get-in (over {:seon.config.agent/sock-buf-bytes "1234567"}) [:waiting :seon.config.agent/sock-buf-bytes :stated])) "a key read at load says it waits for a rebuild")
-    (is (= 1 (get-in (over {:seon.config.nope/key "1"}) [:config :seon.config.nope/key])) "a key no schema declares is carried, never refused")
+      (is (= "elsewhere" (get-in p [:waiting :seon.config.root/main :stated])) "and says so")
+      (is (= 1234567 (get-in p [:waiting :seon.config.agent/sock-buf-bytes :stated])) "a key read at load says it waits for a rebuild")
+      (is (= 1 (get-in p [:config :seon.config.nope/key])) "a key no schema declares is carried, never refused"))
     (is (= 1 (get-in (config/of-entries (assoc es :seon.config.nope/key "1")
                                         {:seon.config/config (conj (get config/schema-forms :seon.config/config) [:seon.config.nope/key :int])})
                      [:config :seon.config.nope/key]))
         "a key this branch's schema allows reads")
     (is (= (config/in-force) (do (mt/with (mt/world) [{:config/key k :config/form "21" :config/file config/shipped-file}]) (config/in-force)))
         "a db around, a test's world, changes nothing a key reads")))
+
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-branchs-old-config-schema-keeps-the-places-this-process-loaded
+  ;; docs/config.md#a-process-holds-its-branchs-config: a branch made before the defaults moved into the schema holds its config
+  ;; schema entries with no :default; its agents read cwd, dirs and main as missing, and seon.config did not load (tests2,
+  ;; 2026-11-16, result/dfba7f77). A place is the value this process loaded, its binary's default included, whatever the
+  ;; branch's schema says. Red before: of-entries took a place from the binary's file alone.
+  ;; Estimate: one of-entries over ~220 entries (aero read ~5M, two config-map compiles ~10M): ~20M
+  (let [es @shipped-entries
+        places [:seon.config.agent/cwd :seon.config.source/dirs :seon.config.source/main]
+        old-form (fn [k] (let [[t p & more] (get config/schema-forms k)] (into [t (dissoc p :default)] more)))
+        changes (into {} (for [k places] [k (old-form k)]))
+        r (config/of-entries es changes)]
+    (is (nil? (:seon.error/type r)) (str "an old branch's config is held: " (:seon.error/message r)))
+    (doseq [k places]
+      (is (= (get config/config k) (get-in r [:config k])) (str k " is the value this process loaded")))))
 
 (deftest no-env-tag-names-a-variable-nothing-sets
   (let [root (config/checkout)
@@ -207,9 +229,12 @@
 
 (deftest a-missing-required-key-refuses-and-nil-is-absent
   ;; a key the config may not lack, resolving nil (an unset #env), refuses the config as it is read: at boot, naming it,
-  ;; never at its first read mid-run (seon.config's required; the schema's keys stay optional for a task's single overrides)
-  (let [r (refused #(config/resolved (assoc config/config :seon.config.store/branching-factor nil)))]
-    (is (= [{:key :seon.config.store/branching-factor :problem :missing-key :value "nil"}] (:seon.config/problems r))))
+  ;; never at its first read mid-run (seon.config's as-read; the entity schema's keys stay optional, as every entity schema's do)
+  (let [r (refused #(config/resolved (assoc config/config :seon.config.root/main nil)))]
+    (is (= [{:key :seon.config.root/main :problem :missing-key :value "nil"}] (:seon.config/problems r)) "a required key with no default"))
+  (is (= (:default (second (get config/schema-forms :seon.config.store/branching-factor)))
+         (:seon.config.store/branching-factor (config/resolved (assoc config/config :seon.config.store/branching-factor nil))))
+      "a required key with a default resolving nil takes its default: the default counts")
   ;; a key the config may lack reads nil through the resolver, never a throw (my.root's no-source-root errors are reached)
   (is (= {:value nil :source [:absent]} (config/resolve-in {} {} :seon.config.proofs/max-load {})))
   ;; a key resolving nil is absent, not a stored nil
@@ -217,7 +242,7 @@
   (is (= 0.5 (:seon.config.ai/temperature (config/resolved (assoc config/config :seon.config.ai/temperature 0.5))))))
 
 (deftest a-key-set-nowhere-reads-nil-only-when-it-may-be-absent
-  ;; a key the config may lack (seon.config's may-be-absent) reads nil, which its readers take as none; any other key set nowhere
+  ;; a key whose own schema says :seon.config/optional reads nil, which its readers take as none; any other key set nowhere
   ;; is the caller's defect, refused naming it
   (is (nil? (config/value :seon.config.ai/temperature)))
   (is (= [:absent] (:source (config/resolve :seon.config.ai/temperature {:model "deepseek-flash"}))) "not by the model, its provider or the config")
@@ -319,8 +344,8 @@
   ;; the analyzer's references of each src form (:form/refs: a host call is Class/member) as the program holds them, so
   ;; no file is analyzed again here (that was the test's work, every src form): the forms naming System/getenv
   (let [db (runner/program)
-        getenv? #(and (= "getenv" (name %)) (#{"System" "java.lang.System"} (namespace %)))
-        calling (into #{} (keep #(when (getenv? (:v %)) (:e %))) (d/datoms db :aevt :form/refs))
+        ;; :form/refs is indexed: seek the two spellings of the host call (avet, O(log n) each), never scan every ref of every form
+        calling (into #{} (mapcat (fn [s] (map :e (d/datoms db :avet :form/refs s)))) '[System/getenv java.lang.System/getenv])
         refs (for [[nsn src] (d/q '[:find ?nsn ?src :in $ [?f ...] :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn]
                                     [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]] db (vec calling))]
                [nsn (take 2 (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))])]
@@ -536,7 +561,7 @@
 ;; and one resolve of the shipped file ~15M ~ 40,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-config-file-is-checked-against-its-branchs-schema-with-the-changes-over-it
   (let [held @#'seon.config/held h @held
-        ;; a key the file states (a key with a schema :default is never missing: seon.config/defaults supplies it)
+        ;; a key the file states (a key with a schema :default is never missing: malli fills it)
         k :seon.config.root/main
         ;; the config map as this process's branch states it (the binary's forms, the branch's held changes over them), and its file
         form (get (merge config/schema-forms (:changes h)) :seon.config/config)
@@ -564,7 +589,7 @@
         es (into {} (for [{ek :config/key f :config/form} (source/config-tx config/shipped-file text0) :when ek] [ek f]))
         form (get config/schema-forms :seon.config/config)
         ;; the binary's: its shipped text and its compiled schema both state k
-        binary-schema (#'seon.config/required (malli.core/deref (malli.core/schema :seon.config/config
+        binary-schema (identity (malli.core/deref (malli.core/schema :seon.config/config
                         {:registry (malli.registry/composite-registry (malli.core/default-schemas)
                                     (malli.registry/simple-registry (assoc config/schema-forms :seon.config/config (conj form [k {:optional true} :int]))))})))
         ;; the branch's: its schema entries differ from the binary's, and none declares k
@@ -601,15 +626,18 @@
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-key-no-layer-states-resolves-to-its-schemas-default
   ;; the owner, 2026-11-16: config defaults live in the schema; task seon.config/config-is-schema-defaults-and-datoms. A key
   ;; whose schema entry states :default and that no layer states resolves to that default, its source "schema"; a layer that
-  ;; states it wins; a key with no default and no layer stays absent. Red before: layered merged the layers alone
-  (let [schema (m/schema [:map [:t.cfg/size {:optional true} [:int {:default 5}]]
-                               [:t.cfg/name {:optional true} [:string {:default "seon"}]]
+  ;; states it wins; an optional key with no default and no layer stays absent; a required one with neither refuses. Malli's own
+  ;; default-value-transformer fills them (seon.config/resolved). Red before: layered merged the layers alone
+  (let [schema (m/schema [:map [:t.cfg/size [:int {:default 5}]]
+                               [:t.cfg/name [:string {:default "seon"}]]
                                [:t.cfg/bare {:optional true} :int]])
         {:keys [config sources]} (config/layered [["a layer" {:t.cfg/name "mine"}]] schema)]
     (is (= 5 (:t.cfg/size config)) "the schema's default where no layer states it")
     (is (= "schema" (get sources :t.cfg/size)) "named as the schema's")
     (is (= "mine" (:t.cfg/name config)) "a layer that states a key wins over its default")
     (is (= "a layer" (get sources :t.cfg/name)))
-    (is (not (contains? config :t.cfg/bare)) "no default and no layer: absent")
-    (is (= {:t.cfg/size 5 :t.cfg/name "seon"} (config/defaults schema)) "defaults reads each entry's :default")))
+    (is (not (contains? config :t.cfg/bare)) "optional, no default and no layer: absent")
+    (is (= [{:key :t.cfg/need :problem :missing-key :value "nil"}]
+           (:seon.config/problems (refused #(config/layered [] (m/schema [:map [:t.cfg/need :int]])))))
+        "required, no default and no layer: refused, named")))
 
