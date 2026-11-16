@@ -1058,6 +1058,17 @@
     (is (= {t {'pt.fc/add {:calls 2 :ticks 900 :self-ticks 700 :bytes 64 :self-bytes 32}}} costs) "a called function's row is kept; one read but never called is not; a test never run has none")
     (is (= {'pt.fc/add {:calls 2 :ticks 450 :self-ticks 350 :bytes 32 :self-bytes 16}} (proofs/per-call costs)) "and per-call reads it as it read the files")))
 
+;; docs/cost.md#the-test-systems-lower-bound: the ranking that keeps the 3 s row live: the fast set (in-process, under the bound) summed,
+;; each slow and process namespace counted for its owner, a test with no record counted apart. Red first: no ranking existed.
+;; Estimate: a fold over five rows: 50,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 50000}} a-ranking-splits-the-fast-set-from-each-owners-slow-tests
+  (let [r (proofs/ranking '{a.x-test/f {:ms 6} a.x-test/g {:ms 40} a.x-test/s {:ms 300} b.y-test/p {:ms 900 :process? true} b.y-test/u {}} 50)]
+    (is (= {:count 2 :ms 46} (:fast r)) "under the bound: the fast set, summed")
+    (is (= {"a.x-test" {:count 1 :ms 300}} (:slow r)) "at or over it: slow, by namespace")
+    (is (= {"b.y-test" {:count 1 :ms 900}} (:process r)) "a process test is its own class, whatever its ms")
+    (is (= 1 (:unmeasured r)))
+    (is (= '[[a.x-test/s 300]] (:slowest r)))))
+
 ;; E checklist step 0 (root's order): a read key names what was read at datom level, a function by its form's code, so a derived
 ;; attribute of the form moving (:form/keywords moved in 40 of 40 sampled reuse misses, result/be937ff1) leaves the result's
 ;; reads-digest where it was, and the form's code moving still moves it. Red first: read-keys named the whole form ([:e form]).

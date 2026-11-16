@@ -57,7 +57,7 @@
  ;; (seon.fx/slow-tests, docs/merging.md#a-slow-test-runs-last); naming it or the full run still runs it.
  ;; Provenance: owner, 2026-11-06. Over the verdict cache that day, 5 s left out 70 of 1,466 tests and
  ;; kept about 96 s of work on 4 shards; 2 s left out 123 for 55 s, 15 s left out 31 for 189 s.
- :seon.config.proofs/slow-test-ms [:int {:default 5000 :min 1 :seon.config/unit "ms" :description "A test measured at this or over is left out of bin/prove and a merge until it is fast; naming it or the full run still runs it (docs/merging.md#a-slow-test-runs-last)."}]
+ :seon.config.proofs/slow-test-ms [:int {:default 50 :min 1 :seon.config/unit "ms" :description "A test measured at this or over is left out of a merge's proof, and named, until it is fast; a proof or a named test still runs (docs/merging.md#a-slow-test-runs-last). 50 ms (owner, 2026-11-16: the fast set is what runs, ~3 s whole): 1,264 of 2,239 tests are under it, 14.5 s summed (seon.proofs/ranking)."}]
  ;; Unit: frames. How many frames of where a test's error was thrown its report keeps (seon.proofs/error-at).
  ;; Provenance: tests, 2026-11-12: the posix_spawn ENOENT's caller was three frames in; 8 is ~0.5 KB a red.
  :seon.config.proofs/error-frames [:int {:default 8 :min 1 :seon.config/unit "frames" :description "How many frames of where a test's error was thrown its report keeps (seon.proofs/error-at)."}]
