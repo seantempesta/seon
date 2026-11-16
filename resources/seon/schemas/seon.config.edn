@@ -18,7 +18,6 @@
   [:seon.config.root/shared {:optional true} :seon.config.root/shared]
   [:seon.config.root/max-agents {:optional true} :seon.config.root/max-agents]
   [:seon.config.root/death-stderr-bytes {:optional true} :seon.config.root/death-stderr-bytes]
-  [:seon.config.root/flow-stop-ms {:optional true} :seon.config.root/flow-stop-ms]
   [:seon.config.root/stop-ms {:optional true} :seon.config.root/stop-ms]
   [:seon.config.root/view-window {:optional true} :seon.config.root/view-window]
   [:seon.config.root/api-writes {:optional true} :seon.config.root/api-writes]
