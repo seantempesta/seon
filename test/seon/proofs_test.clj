@@ -592,10 +592,9 @@
   ;; the agent's change. Red before: such a test composed program-db of the checkout's tree, so in an agent's prove, where
   ;; no plan had kept the tree, it imported the whole program inside its own budget (3.87 G ticks of 4.0 G, the stray reds
   ;; of 2026-11-10) and judged root's checkout, never the branch
-  (let [w (my.test/world) before @seon.agent/state]
-    (try (reset! seon.agent/state {:db w})
-         (is (identical? w (test-runner/program)) "the branch's db, as held: no import, and the branch's own program")
-         (finally (reset! seon.agent/state before)))))
+  (let [w (my.test/world)]
+    (with-redefs [seon.agent/state (atom {:db w})]
+      (is (identical? w (test-runner/program)) "the branch's db, as held: no import, and the branch's own program"))))
 
 (deftest ^{:seon.test/estimate {:ticks 50000}} a-red-at-bases-digest-or-red-at-base-is-mains
   ;; docs/tasks.md#the-done-rule: of the reds of a run, those the branch's change did not make
@@ -937,11 +936,11 @@
 ;; test that read a schema entry is selected when a branch edits that entry, whether or not its digest moved, and run, never reused
 ;; at that digest; a test that did not read it is neither. Red first: selection had no readers half (neither test selected).
 ;; Estimate: the world and 3 namespaces' facts (~4M), the reach graph of main the test reads its form from (~3M), the test plan's
-;; base and branch graphs and digests (~8M: two graphs), two namespaces loaded (~1M), the branch's content diff (one descent per
+;; base and branch graphs and digests (~8M: two graphs), the branch's content diff (one descent per
 ;; content attribute, ~0.2M), ~5 AVET seeks a moved datom and a newest green a test hit (~20k), three
-;; reads-digests of one key (<0.1M): ~16M, 20,000,000 ticks (the first estimate, 10M, left out the test's own graph and the
-;; plan's second graph).
-(deftest ^{:seon.test/estimate {:ticks 20000000}} a-schema-entry-edit-reruns-its-readers-only
+;; reads-digests of one key (<0.1M): ~10M, 12,000,000 ticks (the first estimate, 10M, left out the test's own graph and the
+;; plan's second graph; the agent's own base, 48M, is left out by a state with none).
+(deftest ^{:seon.test/estimate {:ticks 12000000}} a-schema-entry-edit-reruns-its-readers-only
   (let [calc "(ns pt.sr)\n(defn add [x y] (+ x y))\n(defn neg [x] (- x))\n"
         reader-src "(ns pt.sr-test (:require [clojure.test :refer [deftest is]] [pt.sr :as c]))\n(deftest reads-the-entry (is (= 3 (c/add 1 2))))\n"
         other-src "(ns pt.sr-other-test (:require [clojure.test :refer [deftest is]] [pt.sr :as c]))\n(deftest reads-another (is (= -1 (c/neg 1))))\n"
@@ -959,14 +958,13 @@
         rdb (pdb/db-with main [(green reader [[:ea entry :schema/form]]) (green other [[:ea neg-form :form/code]])])
         branch (d/db-with main [{:schema/key :pt.sr/thing :schema/form "[:map [:pt.sr/x :string]]"}])]
     (is (and entry neg-form) "the entry and the other test's function are entities of main")
-    (try (doseq [t [reader-src other-src]] (binding [*ns* (create-ns 'user)] (load-string t)))
-         (with-redefs [seon.agent/state (atom {}) seon.agent/results-db (fn [_] rdb)]
+    (do (with-redefs [seon.agent/state (atom {}) seon.agent/results-db (fn [_] rdb)]
            (let [plan (seon.agent/test-plan branch main #{})]
              (is (= #{reader} (:read-moved plan)) "the edit's datoms reach the result that read the entry, and only it")
              (is (contains? (set (:selected plan)) reader) "the reader is selected, though its reach digest did not move")
              (is (contains? (set (:run plan)) reader) "and run: what it read moved, so no verdict of it is reused")
              (is (not (contains? (set (:selected plan)) other)) "the test that did not read the entry is not selected")))
-         (finally (run! remove-ns '[pt.sr pt.sr-test pt.sr-other-test])))))
+         )))
 
 ;; THE FOCUS step (1): one public read of a test's result, seon.agent/results-at, for any process: a test's stored result on the
 ;; results branch at the digest the plan gives it, and nothing for a test with none. Red first: no such read existed (a stand-in
@@ -1025,12 +1023,13 @@
 ;; it, result/b624f125): a judge's plan looks up stored results only for what it selects (the tests its change reached, and the proofs).
 ;; Red first: it looked up every test's (2,301 at an agent: 4.2B of the plan's 5.2B ticks, 19 GB allocated, result/de6441cd), so an
 ;; unselected test's stored green came back in :reused.
-;; Estimate: three test plans of a ~14-form world (~5M ticks each) and one result written (~0.5M): 20M ticks
-(deftest ^{:seon.test/estimate {:ticks 20000000}} a-judges-plan-looks-up-only-what-it-selects
+;; Estimate: three test plans of a ~14-form world on a state with no base (~3M ticks each, the graph built from nothing; an agent's own base
+;; would be updated to the world, ~48M) and one result written (~0.5M): ~10M, 15,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 15000000}} a-judges-plan-looks-up-only-what-it-selects
   (let [src "(ns pt.lk)\n(defn a [x] (inc x))\n(defn b [x] (dec x))\n"
         tests "(ns pt.lk-test (:require [clojure.test :refer [deftest is]] [pt.lk :as k]))\n(deftest uses-a (is (= 2 (k/a 1))))\n(deftest uses-b (is (= 0 (k/b 1))))\n"
         w (mt/with (mt/world) (mt/code 'pt.lk src) (mt/code 'pt.lk-test tests))]
-    (try (binding [*ns* (create-ns 'user)] (load-string src) (load-string tests))
+    (try (with-redefs [seon.agent/state (atom {})]
          (let [p0 (seon.agent/test-plan w nil #{'pt.lk-test/uses-b})
                basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
                ;; main holds a green of uses-b at its digest
@@ -1041,7 +1040,7 @@
            (is (= '[pt.lk-test/uses-a] (:selected plan)) "the change reaches uses-a alone")
            (is (= #{} (set (remove (set (:selected plan)) (keys (:reused plan))))) "and no result is looked up for a test it did not select")
            (is (contains? (:reused (seon.agent/test-plan branch main #{'pt.lk-test/uses-b})) 'pt.lk-test/uses-b)
-               "a test asked for by name is looked up, as results-at asks"))
+               "a test asked for by name is looked up, as results-at asks")))
          (finally (run! remove-ns '[pt.lk pt.lk-test])))))
 
 ;; THE FOCUS (E) step 1 (data's condition): a result's identity is its whole content (test, reads digest, status), so two branches'
