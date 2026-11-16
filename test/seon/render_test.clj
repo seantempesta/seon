@@ -4143,7 +4143,7 @@
         db (ts/test-db)
         ;; the section as the one parse reads it (seon.doc/page-sections), stored alone: its page's links reach pages this db does not hold
         sec (some #(when (= "docs/agent.md#working-a-task" (:seon.doc/address %)) %)
-                  (seon.doc/page-sections "docs/agent.md" (slurp (str (seon.config/checkout) "/docs/agent.md"))))
+                  (seon.doc/page-sections "docs/agent.md" (my.test/stored-text "docs/agent.md")))
         db (d/db-with db [(select-keys sec [:seon.doc/address :seon.doc/heading :seon.doc/level :seon.doc/position :seon.doc/lead :seon.doc/text])])
         db (d/db-with db (seon.task/create-tx db (seon.template/request {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true. How: ```docs/agent.md#working-a-task```."})))
         db (d/db-with db [{:db/id k :seon.agent/key k :seon.agent/task [:seon.task/id "demo/w"]}])

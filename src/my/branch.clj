@@ -47,7 +47,9 @@
                  ;; refused as :seon.agent/program-differs (a session's edit, then seon_prove, 2026-11-16)
                  errors (when (seq (:tx r)) (agent/transact! ag (:tx r)) (agent/commit! ag) (program/load-diff! db (agent/db)))]
              (cond-> {:imported (vec (remove out todo)) :unchanged unchanged :skipped skipped}
-               (seq errors) (assoc :load-errors errors)))))))))
+               (seq errors) (assoc :load-errors errors)
+               ;; a task entry whose need dangles (a task this branch or another deleted), left out alone and named at once
+               (seq (:left-out r)) (assoc :left-out (:left-out r))))))))))
 
 (defn merge-main!
   "git merge main: the branch becomes main plus its own change since the merge base (seon.agent/merge-main!); a key both

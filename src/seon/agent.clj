@@ -490,8 +490,10 @@
 ;; ---- effects (seon.fx, worktree session FX1): root's owner procs, through the agent's proc ---
 
 (defn deliver!
-  "Bring what main holds for this agent onto its branch, committed: its messages (undelivered) and the facts of
-  its own entities (untaken-facts). The one delivery, a turn's (seon.turn/deliver!) and its code's (messages). A message
+  "Bring what main holds for this agent onto its branch: its messages (undelivered) and the facts of
+  its own entities (untaken-facts), applied ahead and committed by the commit that follows (a turn's basis, seon.turn/basis!; an eval's
+  own, seon.turn/evaluated!), never one of its own: a commit costs its index paths whatever it holds (docs/storage.md#an-agents-reads-and-writes).
+  The one delivery, a turn's (seon.turn/deliver!) and its code's (messages). A message
   on the branch is delivered; the turn that read it is derived from its transaction (seon.ctx/placed-messages). Answers the
   messages delivered. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.agent/start] [:vector :map]]}
@@ -499,7 +501,6 @@
   (let [es (undelivered ag)
         tx (into (untaken-facts ag) (entries-tx ag es))]
     (when (seq tx) (transact! ag tx))
-    (commit! ag)
     es))
 
 (defn messages

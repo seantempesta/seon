@@ -40,8 +40,6 @@
  ;; 2026-10-23 (303 sections, 139 citing code), once per store. Off (bin/test and bin/check set
  ;; SEON_WIKI_BASELINE=false: every test root has a store of its own): such a section is recorded as of today.
  :seon.config.root/wiki-baseline #boolean #or [#env SEON_WIKI_BASELINE true]
- ;; Root's system declaration (owner, 2026-10-20: the definition lives in a file).
- :seon.config.root/system-path #seon/checkout "resources/seon/system.edn"
  ;; The task files (resources/seon/tasks/<owning-ns>.edn, docs/tasks.md#task-files). bin/check sets SEON_TASKS
  ;; to its run's own (none), so every root a check step starts, and every process it starts, indexes no task file of
  ;; the checkout's: they cite the checkout's program, which a check's example program does not hold.
@@ -106,11 +104,6 @@
  ;; seon.system/root-repairs-a-failed-merge-from-its-repl, gap 1; audit cut 11, 2026-10-27: it was
  ;; an env var bin/env set, outside the config).
  :seon.config.source/branch #seon/own-branch "jolt/seon-merges"
- ;; Unit: path. Where each generation is built (seon.fx/build, docs/source.md#the-next-generation):
- ;; <dir>/<commit>, a worktree of the merges commit (bin/worktree --at) with its own target/,
- ;; whose target/seon bin/system next starts. Kept with the run (a generation is a record of what
- ;; ran); one worktree and one ~200 MB binary per merges commit built.
- :seon.config.source/generations-dir #join [#or [#env SEON_RUNS #seon/checkout "runs"] "/generations"]
  ;; Unit: path. Where every checkout's test and check verdicts are kept, one small file per (key,
  ;; digest, status) (seon.fx/write-verdicts!, docs/merging.md#verdicts-are-a-cache): a verdict is derived
  ;; data, a function of the code its test reaches, so it is an evictable cache outside the store (owner,
@@ -194,19 +187,12 @@
  ;; tree's target/cache; bin/env alone names it, so its pin is written once). Measured on Seon's 1,393 forms (M5 Max, Metal, load ~10):
  ;; 12 ms one text, 37k tokens/s batched (175 texts/s), 0.86 GB RSS; the BF16 file no faster (34k).
  :seon.config.vector/model #env SEON_EMBED_MODEL
- :seon.config.vector/lib #seon/checkout "target/lib/libseon-embed.dylib"
  ;; Unit: texts. One request of main's backlog (seon.vector/vectors-proc): at 175 texts/s a round
  ;; holds the worker ~0.4 s, so a query waits behind at most one round. 0 embeds nothing and the
  ;; model never loads: bin/test's and bin/check's roots (SEON_EMBED_TEXTS), which never search.
  :seon.config.vector/texts #long #or [#env SEON_EMBED_TEXTS 64]
  ;; ==== the web, instrumentation, the native probe ==============================================
 
- ;; datastar.js, read once.
- :seon.config.web/public-dir #seon/checkout "resources/public"
- ;; The page's stylesheet, bin/build's css step's output (Tailwind over
- ;; resources/public/css/input.css, docs/render.md#tailwind); read per request, so a build's
- ;; new stylesheet shows on reload. Missing (no build yet): the page is served unstyled.
- :seon.config.web/stylesheet #seon/checkout "target/css/app.css"
  ;; Contracts and their recording (session G1): :on, :contracts (wrappers, no recording
  ;; transaction: the two measured apart), :off (no wrapper, no recording: the same binary
  ;; measured with instrumentation off; test/r3's benches).
@@ -221,8 +207,5 @@
  ;; (docs/checks.md#contracts-armed-at-definition).
  :seon.config.contract/private-checked? #profile {:default false :scripted true}
 
- ;; native/probe.c's library (bin/build native): Mach memory probes and qfork. T5 points it at
- ;; next's build from a snapshot that has none.
- :seon.config.native/probe-lib #seon/checkout "target/lib/libprobe.dylib"
 
 }

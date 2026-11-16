@@ -148,6 +148,27 @@
             (repl/eval-string ag code {}))
           (finally (reset! agent/state old) (when ag (ctx/watch! prev))))))))
 
+(defn stored-text
+  "The text of the file at path (relative to the tree) as the branch this process runs on holds it (seon.doc/files on seon.agent/db:
+  a namespace's file, a schema resource, a wiki page, a bin/ script), nil when it holds none: what a test reads in place of the
+  checkout's disk, so its read is datoms, which a change to the file selects it by. Example: (my.test/stored-text \"docs/agent.md\")
+  See docs/testing.md#testing-in-the-world."
+  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  [path] (get (doc/files (agent/db) [path]) path))
+
+(defn stored-files
+  "{path text} of the files the branch holds under dir (a prefix, e.g. \"src/\") whose path ends in suffix: its namespaces' files, its
+  wiki pages and its scripts (:file/path), read from the store as stored-text reads one. Example: (my.test/stored-files \"docs/\" \".md\")
+  See docs/testing.md#testing-in-the-world."
+  {:malli/schema [:=> [:cat :string :string] [:map-of :string :string]]}
+  [dir suffix]
+  (let [db (agent/db)
+        paths (into #{} (filter #(and (.startsWith ^String % dir) (.endsWith ^String % suffix)))
+                    (concat (d/q '[:find [?f ...] :where [_ :ns/file ?f]] db)
+                            (d/q '[:find [?p ...] :where [_ :file/path ?p]] db)
+                            (map #(first (clojure.string/split % #"#")) (d/q '[:find [?a ...] :where [_ :seon.doc/address ?a]] db))))]
+    (into (sorted-map) (keep (fn [[p t]] (when t [p t]))) (doc/files db (vec paths)))))
+
 (defn cost
   "The work (thunk) does: {:ticks :bytes :ms :value}, the engine ticks and bytes the test thread
   spent (seon.profile/measure!), what every test is judged by (its ceiling is

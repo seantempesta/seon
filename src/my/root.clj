@@ -474,8 +474,7 @@
              (cond-> [[:seon.config.root/store-path (:store-path sys)]
                       [:seon.config.root/main (name (pdb/conn-main (:conn sys)))]
                       [:seon.config.source/dirs (config/value :seon.config.source/dirs)]
-                      [:seon.config.source/branch (config/value :seon.config.source/branch)]
-                      [:seon.config.source/generations-dir (config/value :seon.config.source/generations-dir)]]
+                      [:seon.config.source/branch (config/value :seon.config.source/branch)]]
                source-root (conj [:seon.config.source/root source-root])))
        (into ["--profile" (name (config/value :seon.config.root/profile))])
        (into (when-let [t (:started-by (task/root @(:conn sys)))] ["--started-by" t])))))

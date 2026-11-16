@@ -161,13 +161,10 @@
       (is (= (get config/config k) (get-in r [:config k])) (str k " is the value this process loaded")))))
 
 (deftest no-env-tag-names-a-variable-nothing-sets
-  (let [root (config/checkout)
-        names (env-tags (config/shipped-text))
-        sources (concat (filter #(.isFile %) (file-seq (java.io.File. (str root "/bin"))))
-                        (filter #(.isFile %) (file-seq (java.io.File. (str root "/src"))))
-                        (filter #(and (.isFile %) (not (str/ends-with? (.getName %) "config_test.clj"))) (file-seq (java.io.File. (str root "/test"))))
-                        [(java.io.File. (str root "/config/local.edn"))])
-        text (apply str (for [f sources :when (.isFile f)] (slurp f)))
+  ;; the branch's own files, read from the store (my.test/stored-files), never the checkout's disk
+  (let [names (env-tags (config/shipped-text))
+        text (apply str (vals (merge (my.test/stored-files "bin/" "") (my.test/stored-files "src/" "")
+                                     (into {} (remove #(str/ends-with? (key %) "config_test.clj")) (my.test/stored-files "test/" "")))))
         set-somewhere? (fn [n] (boolean (some #(str/includes? text %) [(str n "=") (str "export " n)])))]
     (is (seq names) "the reader finds the file's #env tags")
     (is (= [] (vec (remove set-somewhere? (remove env-awaiting-their-task names))))
@@ -206,8 +203,7 @@
 ;; docs/merging.md#a-result-is-a-function-of-its-digest: 231 of 1,469 digests differed between a root and a
 ;; checkout on one tree, all by :seon.config.vector/texts, 64 in a root and 0 under bin/test
 (deftest what-bin-test-sets-for-itself-moves-no-digest
-  (let [checkout (config/checkout)
-        set-by-test (set (map second (re-seq #"(?m)^export (SEON_\w+)=\$\{\1:-" (slurp (str checkout "/bin/test")))))
+  (let [set-by-test (set (map second (re-seq #"(?m)^export (SEON_\w+)=\$\{\1:-" (my.test/stored-text "bin/test"))))
         read-by (into {} (for [[_ k v] (re-seq #"(?m)^ *:(seon\.config[\w./-]+) [^\n]*#env (SEON_\w+)" (config/shipped-text))] [v (keyword k)]))
         keys-set (keep read-by set-by-test)]
     (is (= #{:seon.config.root/wiki-baseline :seon.config.vector/texts} (set keys-set)))
@@ -221,7 +217,6 @@
     (let [f (get (edn/read-string {:default tagged-literal} (config/shipped-text)) :seon.config.root/tasks-dir)]
       (is (= 'or (:tag f)))
       (is (= (tagged-literal 'seon/checkout "resources/seon/tasks") (last (:form f)))))
-    (is (= (str (config/checkout) "/resources/seon/system.edn") (:seon.config.root/system-path c)))
     ;; the writer's buffer is the live agents' bound, by #ref
     (is (= (:seon.config.root/max-agents c) (:seon.config.root/writer-buf c)))))
 
@@ -236,8 +231,8 @@
 (deftest a-missing-required-key-refuses-and-nil-is-absent
   ;; a key the config may not lack, resolving nil (an unset #env), refuses the config as it is read: at boot, naming it,
   ;; never at its first read mid-run (seon.config's as-read; the entity schema's keys stay optional, as every entity schema's do)
-  (let [r (refused #(config/resolved (assoc config/config :seon.config.native/probe-lib nil)))]
-    (is (= [{:key :seon.config.native/probe-lib :problem :missing-key :value "nil"}] (:seon.config/problems r)) "a required key with no default"))
+  (let [r (refused #(config/resolved (assoc config/config :seon.config.contract/instrument nil)))]
+    (is (= [{:key :seon.config.contract/instrument :problem :missing-key :value "nil"}] (:seon.config/problems r)) "a required key with no default"))
   (is (= (:default (second (get config/schema-forms :seon.config.store/branching-factor)))
          (:seon.config.store/branching-factor (config/resolved (assoc config/config :seon.config.store/branching-factor nil))))
       "a required key with a default resolving nil takes its default: the default counts")
@@ -343,6 +338,20 @@
       (is (= vs (:seon.config.source/process-vars (config/from-db @conn))))
       (is (set? (:seon.config.source/process-vars (config/from-db @conn))))
       (is (= c (config/from-db @conn)) "and the whole config is its db copy")))))
+
+;; docs/config.md#facts-on-main: a config key the store has not declared (spec'd, but not in the :seon.config/config map, or its
+;; declaration not yet in the store) is left out of main's config entity and named, and the boot fact writes the rest: root's
+;; boot fact was refused whole on one such key and the standing root could not boot (root, 2026-11-16, deps' 932d20d62d). Red
+;; under a storable that keeps every key: the write is refused, "not defined in current schema". Estimate: one test branch
+;; (as the test above) and one transaction of ~220 attributes: ~20M ticks.
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-config-key-the-store-has-not-declared-never-stops-the-boot-fact
+  (ts/test-branch! (fn [_ conn]
+    (let [k :seon.config.zz/declared-nowhere
+          {:keys [stored left-out]} (config/storable @conn (assoc config/config k 1))]
+      (is (= [k] left-out) "left out and named")
+      (d/transact conn {:tx-data (into (task/boot-tx "boot-1" "sean") (seon.task/config-tx stored {}))})
+      (is (= (:seon.config.agent/max-running config/config) (:seon.config.agent/max-running (config/from-db @conn)))
+          "and the boot fact holds the rest")))))
 
 ;; ---- no environment read outside the loader -------------------------------------------------
 
@@ -574,7 +583,7 @@
   (let [held @#'seon.config/held h @held
         ;; a key the file states and requires (a key with a schema :default is never missing: malli fills it; a process's own facts,
         ;; seon.config/process, are stated by no file)
-        k :seon.config.native/probe-lib
+        k :seon.config.contract/instrument
         ;; the config map as this process's branch states it (the binary's forms, the branch's held changes over them), and its file
         form (get (merge config/schema-forms (:changes h)) :seon.config/config)
         ;; the branch's: its config map no longer declares k, and its file no longer states it

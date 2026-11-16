@@ -762,7 +762,7 @@
   ;; turn does, which makes the my.* functions act on its task), runs the help page's forms and then every
   ;; kind's forms in order; the ending functions come last
   (let [;; what an agent is sent: the instructions and the help page's sections they cite whole (```docs/agent.md#a```)
-        page (slurp (str (cfg/checkout) "/" wire/help-page))
+        page (my.test/stored-text wire/help-page)
         section (fn [anchor] (some (fn [[_ h body]] (when (= anchor (-> h str/lower-case (str/replace #"[^a-z0-9 -]" "") (str/replace " " "-"))) body))
                                    (re-seq #"(?m)^## (.+)\n([\s\S]*?)(?=^## |\z)" page)))
         sent (fn [text] (apply str text (for [[_ a] (re-seq #"```docs/agent\.md#([a-z0-9-]+)```" text)] (str "\n" (section a)))))
@@ -923,7 +923,7 @@
   ;; the help page is read from the wiki's sections main holds (root's boot loads them), at
   ;; the commit a turn read, through seon.doc's one reader: the help page alone, as my.test/page loads one
   (let [db0 (ts/test-db)
-        db (my.test/with db0 (my.test/page-alone wire/help-page (slurp (str (cfg/checkout) "/" wire/help-page))))
+        db (my.test/with db0 (my.test/page-alone wire/help-page (my.test/stored-text wire/help-page)))
         toc (doc/page db wire/help-page)]
     (is (= ["docs/agent.md#the-agent" 1] ((juxt :seon.ref/address :seon.ref/level) (first toc))) "the page's sections, the first its title")
     (is (every? :seon.ref/lead toc) "each section leads with a sentence that stands alone")
