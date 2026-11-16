@@ -75,23 +75,14 @@
             (assoc :index {:commit (d/commit-id (:db st)) :index (r/index idx (d/commit-as-db (:store st) from) (:db st))}))))
 
 (defn warm-start
-  "Server state st with the index nodes the start of the agent m forks reads read into this process's
-  node cache: its first write (seon.agent/begin-run-tx on its own task and key, then the cites
-  every agent is made with) applied with d/with to :db and dropped, and its record built on it
-  (seon.ctx/build: its task and the sections it cites); and, once per move of main (:warm-t), main's
-  schema registry (seon.program/schema-changes), which each agent forked holds as its branch's until it writes a schema entry (:schema-registry). An agent's reads stay
-  in its own process, so without these each agent decoded them cold, and more of them as main's commits
-  rewrote leaves and its cache evicted the rest; read here, each agent inherits them decoded, and this
-  process's reads keep them in its cache. Only what this agent reads is read, so what the server holds
-  grows by that, not by what main writes (its static: seon.fork-server/static-due?). Nothing is written.
-  See docs/machine.md#an-agents-first-write."
+  "Server state st with, once per move of main (:warm-t), main's search text index (seon.doc/text-index) and main's
+  schema registry (seon.program/schema-changes), which each agent forked holds as its branch's until it writes a schema
+  entry (:schema-registry): built once here, inherited by every agent. Nothing per fork: a per-fork build of the agent's
+  record, made only to warm this process's node cache and dropped, is gone (the owner, 2026-11-16: no baggage). Nothing is
+  written. See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat :map :map] :map]}
-  [st {:keys [task key branch]}]
+  [st _]
   (let [db (:db st) t (:max-tx db)]
-    (when (and task key (d/entity db [:seon.task/id task]))
-      (let [db1 (:db-after (pdb/speculate db (agent/begin-run-tx db task key)))
-            db2 (:db-after (pdb/speculate db1 (task/agent-cites-tx db1 [:seon.agent/key key] key)))]
-        (ctx/build (or (:index (:schema-registry st)) (program/index-of-db db2)) db2 (pdb/eid db2 :seon.agent/key key) branch)))
     (if (= t (:warm-t st))
       st
       ;; main's search text index (seon.doc/text-index), built here once and carried by each commit
@@ -148,17 +139,17 @@
   (into #{} (keep (fn [[op _ a v]] (when (and (= op :db/add) (= a :form/ns)) (:ns/name (d/entity db v))))) ops))
 
 (defn- preload
-  "Server state st with what a first fork would otherwise wait for done now, while no one waits: main's tests loaded, the reach graph and index brought to
-  :db, what every agent's start reads warmed, and the heap made static when due. Answers [st' load errors]. A fork after it costs a fork. See docs/machine.md#an-agents-first-write."
+  "Server state st with what a first fork would otherwise wait for done now, while no one waits: the reach graph and index brought to
+  :db, main's registry and text index made, the test fixtures made when main's program moved, and the heap made static when due. Main's
+  program, tests included, is loaded only by the :tx arm (load-diff!), never here. Answers [st' load errors]. A fork after it costs a fork. See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat :map] [:tuple :map [:maybe [:sequential :any]]]]}
   [st]
-  (let [tests-errs (when (:tests-due st) (:errors (program/load-all! (:db st))))
-        errs (seq (concat (:load-errors st) tests-errs))
-        st (-> st (stood tests-errs #{}) (dissoc :tests-due :preload-t :load-errors) graph-at-fork index-at-fork (warm-start {}))]
+  (let [errs (seq (:load-errors st))
+        st (-> st (dissoc :tests-due :preload-t :load-errors) graph-at-fork index-at-fork (warm-start {}))]
     ;; the test fixtures made here once a program, before the heap is made static, so every agent inherits them made
-    (when (:static-due st) (proofs/warm-fixtures!))
+    (when (or (:static-due st) (:fixtures-due st)) (proofs/warm-fixtures!))
     (when (static-due? st) (lib/static!))
-    [(dissoc st :static-due) errs]))
+    [(dissoc st :static-due :fixtures-due) errs]))
 
 (defn- step-failed
   "The event for a step that threw on message m: the error, naming the op and the message's agent or
@@ -189,15 +180,19 @@
                  ;; then builds it)
                  _ (when (contains? (set (get-in db' [:meta :datahike/parents])) (d/commit-id (:db st)))
                      (doc/carry-index! (:db st) db' (map (fn [op] [(nth op 1) (nth op 2)]) (:tx-data m))))
+                 ;; the program moved: the writer's :program-t changed (seon.writer/program-at, the one computation of it)
+                 moved? (not= (:program-t m) (:program-t st))
+                 ;; the one load path: this process runs the commit's program where it held its own db's, by the diff of the
+                 ;; two (seon.program/load-diff!: what was removed unmapped, what is new loaded with what it reaches, tests
+                 ;; included, and the commit's config held), so agents forked from now on inherit it compiled. Never from
+                 ;; :tx-data: a notice missed is covered by the next diff, and from an empty db the first is the whole
+                 ;; program. A commit that moves no program loads nothing (its diff measured 0 ms, result/c1786805)
+                 errs (when moved? (seq (program/load-diff! (:db st) db')))
                  st (cond-> (assoc st :db db')
                       ;; a commit not the one the writer said
                       (not= (:max-tx db') (:t m)) (update :mismatch inc)
-                      ;; the program moved: the reach graph is brought to it at the next fork
-                      ;; the program moved: the writer's :program-t changed (seon.writer/program-at, the one computation of it)
-                      (not= (:program-t m) (:program-t st)) (assoc :graph-moved true :static-due true :program-t (:program-t m)))
-                 ;; main's program changed: load it here, so agents forked from now on inherit it compiled; while
-                 ;; the tests' load is still due it loads them all at the first fork, as main has them then
-                 errs (seq (program/load-changes! db' (:tx-data m) {:tests? (not (:tests-due st))}))
+                      ;; the reach graph is brought to it at the next fork, and the fixtures made again
+                      moved? (assoc :graph-moved true :static-due true :fixtures-due true :program-t (:program-t m)))
                  st (stood st errs (asserted-nss db' (:tx-data m)))
                  ;; the commit a :preload was waiting to see
                  [st load-errs] (if (and (:preload-t st) (>= (:max-tx db') (:preload-t st))) (preload st) [st nil])
@@ -211,12 +206,10 @@
                  [st {:ev [{:ev :fork-failed :agent (:agent m) :reason "the fork server is draining: the agent forks at the next root"}]}])
            (let [fd (sock/take-fd! (:conn st)) _ (vreset! open fd) ; the request's socket, closed if this step throws before fork!
                  t0 (profile/now-ns)
-                 ;; main's tests, loaded once, before the first fork, so every agent and test child forked from here
-                 ;; inherits them compiled, as read-only pages (docs/source.md#a-process-holds-the-tests-only-when-it-runs-them);
-                 ;; their errors go to root as a tx's load errors do
-                 tests-errs (when (:tests-due st) (:errors (program/load-all! (:db st))))
-                 load-errs (seq (concat (:load-errors st) tests-errs))
-                 st (-> st (stood tests-errs #{}) (dissoc :tests-due :load-errors))
+                 ;; main's program, tests included, is this process's already (the :tx arm's load-diff!), so every agent and test
+                 ;; child forked from here inherits it compiled (docs/source.md#a-process-holds-the-tests-only-when-it-runs-them)
+                 load-errs (seq (:load-errors st))
+                 st (dissoc st :tests-due :load-errors)
                  st (graph-at-fork st)
                  tg (profile/now-ns)
                  st (-> st index-at-fork (warm-start m))
@@ -229,10 +222,10 @@
                  ;; the ^:seon.test/fixture delays (the worlds, the test store) made here once a program, before the freeze, so
                  ;; every agent forked inherits them made, shared: each agent made them at its first prove (195M ticks, 1.1 GB,
                  ;; tests2 result/ba7c27c8). A program commit (:static-due) may redefine one, so they are forced again then
-                 _ (when (:static-due st) (proofs/warm-fixtures!))
+                 _ (when (or (:static-due st) (:fixtures-due st)) (proofs/warm-fixtures!))
                  due? (static-due? st)
                  _ (when due? (lib/static!))
-                 st (dissoc st :static-due)
+                 st (dissoc st :static-due :fixtures-due)
                  static-ms (profile/ms-since t1)
                  ;; the spawn's phases here, on the one clock (seon.agent/spawn-phases)
                  marks [[:fork-server-in t0 nil] [:reach-graph tg nil] [:index t1 nil] [:static (profile/now-ns) nil]]]
