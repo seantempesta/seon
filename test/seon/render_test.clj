@@ -119,6 +119,7 @@
     (is (= [:cron :api :writer] (mapv :pid rows)) "one row a proc, one not running first")
     (is (= {:back {:count 3 :capacity 64 :parked-puts 1}} (:fill (second rows))) "only an in-port holding something")
     (is (= 42 (get-in (nth rows 2) [:site :since-ns])) "a stepping site keeps its :since-ns: no clock read")
+    (is (not (contains? (nth rows 2) :stepping-ms)) "no clock read: no age")
     (snap st1)
     (is (= 1 @pings) "the same view still watched on the next pass: no second ping")
     (is (nil? (:procs (p/process-value (snap (assoc st1 :watch #{}))))) "no system view watched: no rows")

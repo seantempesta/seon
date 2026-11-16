@@ -91,6 +91,8 @@
           (and opened (some-> (:graph-p st) realized?)) (assoc st :procs (proc-rows (flow/ping @(:graph-p st))) :procs-for watched)
           :else (assoc st :procs-for watched))))
 
+(declare system-views)
+
 (defn process-value
   "Root's process as one value (:seon.render/process), from the render proc's state: the writer's,
   the fork server's and the store's numbers as root's own `state` shows them (seon.system/view-numbers),
