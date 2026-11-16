@@ -707,6 +707,7 @@
 (defn- corpus
   "The text of the checkout's files under dir ending in ext, sorted by path and joined: real
   text (docs/*.md) or real code (src/**/*.clj) for turn text that compresses as a turn's does."
+  {:malli/schema [:=> [:cat :string :string] :string]}
   [dir ext]
   ;; as the branch holds them (my.test/stored-files), never the checkout's disk
   (apply str (vals (my.test/stored-files (str dir "/") ext))))

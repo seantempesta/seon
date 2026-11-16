@@ -9,7 +9,8 @@
             [seon.db :as pdb] [seon.task :as task] [seon.reconcile :as r] [seon.template :as tpl] [seon.fixtures :as fx] [clojure.string :as str] [seon.config] [seon.contract]))
 
 (defn- working-a-task
-  "The help page's section on how a task is worked, as the checkout holds it: what :work and :whole instructions cite whole."
+  "The help page's section on how a task is worked, as the branch holds it: what :work and :whole instructions cite whole."
+  {:malli/schema [:=> [:cat] :string]}
   []
   (let [t (my.test/stored-text "docs/agent.md")
         a (str/index-of t "## Working a task")]
