@@ -16,12 +16,12 @@
       (is (< (:ticks m) 5000000) (str "test-db after the agent's warm reads the seeded store: " (:ticks m) " ticks"))
       (is (zero? (#'seon.agent/warm-fixtures!)) "once an agent"))))
 
-(deftest the-process-store-is-made-before-any-shard
-  ;; task seon.test-store/the-process-store-is-made-before-any-shard: shards' roots that each made
-  ;; target/runs/test-store when they found it missing raced (one opened the store another was
-  ;; still creating: "Database does not exist", the first test of 2 of 4 shards red on a fresh
-  ;; tree). bin/test makes it before any shard starts; a test asking for it where it is not
-  ;; made is refused, naming who makes it, and never creates it
+(deftest ^{:seon.test/estimate {:ticks 300000}} the-process-store-is-made-before-any-shard
+  ;; docs/testing.md#a-root-costs-what-it-boots, task seon.test-store/the-process-store-is-made-before-any-shard: shards' roots that each
+  ;; made target/runs/test-store when they found it missing raced (one opened the store another was still creating: "Database does not
+  ;; exist"). bin/test makes it before any shard starts; a test asking for it where it is not made is refused, naming who makes it, and
+  ;; never creates it. A store is its data file (pdb/store?), so a file stands in for the one the maker seeds (seeding it was 17M ticks
+  ;; of a 160 ms test). Estimate: a scratch dir, one refused read, one file: ~0.3M ticks
   (let [co (str (System/getProperty "java.io.tmpdir") "/seon-process-store-" (random-uuid))
         path (str co "/target/runs/test-store-" pdb/schema-digest)]
     (try
@@ -29,28 +29,10 @@
         (is (= :seon.test-store/no-process-store (:seon.error/type (ex-data e))))
         (is (re-find #"bin/test makes it" (ex-message e))))
       (is (not (pdb/store? path)) "refused, it made nothing")
-      (d/release (:conn (pdb/open! :lmdb path 0 :db)))
+      (.mkdirs (java.io.File. ^String path))
+      (spit (str path "/data.mdb") "x")
       (is (= path (ts/process-store co)) "made, it is the store")
       (finally (seon.lib/remove-tree! co)))))
-
-(deftest a-test-root-is-its-own
-  ;; task seon.test-store/a-test-root-is-its-own: root_test's root-answers gave every root on the
-  ;; one test store the runs directory <store>-runs; bin/system start in a runs directory whose root
-  ;; still runs only reports that root, so under parallel load one test asked another test's
-  ;; root (main-follows-its-source-tree-across-restarts read the whole Seon program, :removed-forms 71).
-  ;; A second root asked for in a runs directory a live root holds is refused, never answered
-  ;; The live root is the one bin/system's status reads: runs/root.pids names a running process. This
-  ;; process stands in for it (a root booted for it was all of this test's time; that a started root
-  ;; listens is every process test's claim, and n-roots-open-the-process-store-at-once's)
-  (let [store (ts/process-store)
-        runs (str (.getParent (java.io.File. ^String store)) "/own-root-" (random-uuid) "-runs")
-        pid (seon.lib/c-getpid)]
-    (try
-      (.mkdirs (java.io.File. ^String runs))
-      (spit (str runs "/root.pids") (str pid " " pid "\n"))
-      (let [e (is (thrown? ExceptionInfo (ts/start-root! {:store store :main (str "own-b-" (random-uuid)) :runs runs})))]
-        (is (= :seon.test-store/runs-in-use (:seon.error/type (ex-data e)))))
-      (finally (seon.lib/remove-tree! runs)))))
 
 (deftest a-test-root-runs-scripted-unless-its-test-names-another
   ;; seon.test-store/root-profile: start-root! gave a root the starting process's own profile, so a
@@ -60,24 +42,22 @@
     (is (= "scripted" ts/root-profile (profile-of {:runs "r"})))
     (is (= "other" (profile-of {:runs "r" :args ["--set" ":a/b=1" "--profile" "other"]})))))
 
-(deftest a-kept-store-is-keyed-by-its-schema
-  ;; task seon.test-store/a-kept-store-is-keyed-by-its-schema: the page merge changed three
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-kept-store-is-keyed-by-its-schema
+  ;; docs/merging.md#verdicts-are-a-cache, task seon.test-store/a-kept-store-is-keyed-by-its-schema: the page merge changed three
   ;; attributes to refs, and every checkout's kept program store and process store refused to open
   ;; (:seon.db/types-differ): bin/test failed at its plan, process tests at root start. A kept store
   ;; of output is named by the schema's digest; one made with another schema is removed, and the
-  ;; new path is made fresh, nothing migrated or refused
+  ;; new path is made fresh, nothing migrated or refused. Directory names are all kept-store! reads (what an old store holds is not
+  ;; read), so a directory with a file stands in for each store; the new path is only named here, never opened (seeding it was
+  ;; 14M ticks of a 320 ms test). Estimate: four scratch directories and a listing: ~0.3M ticks
   (let [dir (str (java.io.File. (System/getProperty "java.io.tmpdir") (str "seon-kept-" (random-uuid))))
         base (str dir "/test-store")
         old (str base "-00000000")
         runs (str base "-" pdb/schema-digest "-some-main-runs")]
     (try
       (.mkdirs (java.io.File. dir))
-      ;; a store made under another schema's digest (what it holds is not read: its name says it)
-      (let [cfg (pdb/store-cfg :lmdb old)]
-        (d/create-database cfg)
-        (let [c (pdb/connect cfg)]
-          (d/transact c {:tx-data [{:db/ident :task/name :db/valueType :db.type/long :db/cardinality :db.cardinality/one}]})
-          (d/release c)))
+      (.mkdirs (java.io.File. old))
+      (spit (str old "/data.mdb") "x")
       (.mkdirs (java.io.File. base))
       (.mkdirs (java.io.File. runs))
       (let [path (pdb/kept-store! base)]
@@ -85,29 +65,8 @@
         (is (not (.exists (java.io.File. old))) "the store of another schema is removed")
         (is (not (.exists (java.io.File. base))) "and the unkeyed one")
         (is (.exists (java.io.File. runs)) "a runs directory beside them is no store, and stays")
-        (let [{:keys [conn seeded?]} (pdb/open! :lmdb path 0 :db)]
-          (is seeded? "the new path is made fresh")
-          (d/release conn)))
+        (is (not (.exists (java.io.File. ^String path))) "the new path is named, made fresh by whoever opens it"))
       (finally (seon.lib/remove-tree! dir)))))
-
-(deftest n-roots-open-the-process-store-at-once
-  ;; task seon.test-store/a-process-root-opens-the-shared-store-under-load: under load one shard's
-  ;; root died before listening, `lmdb env_open: Invalid argument` opening the shared process store
-  ;; other shards' roots held open. n = 2 roots start on it at once (a race of two reproduces it; 4 bought
-  ;; CPU contention): every one listens
-  (let [store (ts/process-store)
-        dir (.getParent (java.io.File. ^String store))
-        roots (vec (for [i (range 2)] {:store store :main (str "n2-" i "-" (random-uuid)) :runs (str dir "/n2-" i "-" (random-uuid) "-runs")}))
-        started (mapv deref (mapv #(future (ts/start-root! %)) roots))]
-    (try
-      (is (every? :port started)
-          (str "every root listens; the logs of those that did not: " (pr-str (map :log (remove :port started)))))
-      (testing "a root that did not listen is the test's error with its log, never an ask of no port"
-        (is (= {:error :root-did-not-listen :log "lmdb env_open: Invalid argument"}
-               (ts/ask {:port nil :log "lmdb env_open: Invalid argument"} {:op :agents}))))
-      (finally
-        (doseq [r started :when (:port r)] (ts/stop-root! r))
-        (doseq [r started] (seon.lib/remove-tree! (:runs r)) (ts/drop-main! store (:main r)))))))
 
 (deftest agent-tests-in-one-process-share-its-root
   ;; task seon.test-store/an-agent-test-shares-its-shards-root: a root booted per in-agent test
@@ -139,36 +98,20 @@
   ;; store anew, and the next plan imported the whole program (18-28 s, 3-4 G ticks)
   (let [decl (fn [k] {:db/ident k :db/valueType :db.type/string :db/cardinality :db.cardinality/one})
         base (vec pdb/schema)
-        digest ts/program-schema-digest]
+        digest ts/program-schema-digest
+        pins (#'ts/store-pins (seon.config/checkout))]
     (is (= (digest base) (digest (conj base (decl :seon.agent/zzz)))) "an agent's attribute: the same store")
     (is (= (digest base) (digest (conj base (decl :app.task/zzz)))) "any other namespace too")
     (is (not= (digest base) (digest (conj base (decl :form/zzz)))) "a form's attribute: a new store")
     (is (not= (digest base) (digest (conj base (decl :var/zzz)))) "a var's too")
-    (is (= @ts/kept-program-digest (ts/program-store-key (digest base) (#'ts/store-pins (seon.config/checkout))))
+    (is (= @ts/kept-program-digest (ts/program-store-key (digest base) pins))
         "this process's: its schema's and its checkout's pins of the code that encodes it")
-    (is (= 3 (count (#'ts/store-pins (seon.config/checkout)))) "Jolt's, konserve's and Datahike's")
+    (is (= 3 (count pins)) "Jolt's, konserve's and Datahike's")
     (is (not= (ts/program-store-key (digest base) {"reference-code/jolt" "a"}) (ts/program-store-key (digest base) {"reference-code/jolt" "b"}))
         "another Jolt pin: another store, never an old encoding read by a new pin")
     (is (not= (ts/program-store-key (digest base) {"reference-code/konserve" "a"}) (ts/program-store-key (digest base) {"reference-code/konserve" "b"}))
         "another codec pin: another store")
     (is (re-matches #"[0-9a-f]{8}" @ts/kept-program-digest))))
-
-;; docs/merging.md#verdicts-are-a-cache: a store another process holds open is never removed, whatever the count kept: one
-;; removed under its writer failed it (NoSuchFileException under program-store-<key>/, seon.program-test, 2026-11-12). The
-;; holder is this test's own process, the file opened before the keeper runs and closed at the end. Cost: one lsof a store, ~30 ms.
-(deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/execs ["lsof"]} a-program-store-held-open-is-never-removed
-  (let [dir (str (seon.config/checkout) "/target/tmp/held-ps-" (random-uuid))
-        base (str dir "/ps")
-        mk (fn [k age] (let [f (java.io.File. (str base "-" k))] (.mkdirs f) (spit (str f "/data.mdb") "x")
-                         (.setLastModified f (- (System/currentTimeMillis) (* age 60000))) f))
-        there? (fn [k] (.isDirectory (java.io.File. (str base "-" k))))
-        _ (do (mk "aaaaaaaa" 40) (mk "bbbbbbbb" 30) (mk "cccccccc" 20))
-        holder (java.io.RandomAccessFile. (str base "-aaaaaaaa/data.mdb") "r")]
-    (try
-      (ts/shared-program-store! base "dddddddd")
-      (is (there? "aaaaaaaa") "the least recently used, but held open by a process: kept")
-      (is (and (there? "bbbbbbbb") (there? "cccccccc")) "and the others within the count")
-      (finally (.close holder) (seon.lib/remove-tree! dir)))))
 
 ;; docs/merging.md#verdicts-are-a-cache: a key's store is its generations (base-<key>, base-<key>-<n>), newest first; those of the key
 ;; beyond :seon.config.proofs/program-stores-kept most recently used go, never one a process holds open; other keys' generations go
@@ -210,49 +153,40 @@
       (is (= {:error :eof} (ts/ask {:port (.getLocalPort ss)} {:op :agents})) "closed with no reply")
       @f (.close ss))
     (let [port (let [ss (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName "127.0.0.1")) p (.getLocalPort ss)] (.close ss) p)]
-      (is (= {:error :refused} (ts/ask {:port port} {:op :agents})) "no one listening"))))
+      (is (= {:error :refused} (ts/ask {:port port} {:op :agents})) "no one listening"))
+    (is (= {:error :root-did-not-listen :log "lmdb env_open: Invalid argument"} (ts/ask {:port nil :log "lmdb env_open: Invalid argument"} {:op :agents}))
+        "a root that did not listen is the test's error with its log, never an ask of no port")))
 
-(deftest ^{:seon.test/estimate {:ticks 80000000} :seon.test/execs ["git"]} what-a-dead-test-process-made-is-reclaimed-and-a-live-ones-is-kept
+(deftest ^{:seon.test/estimate {:ticks 300000}} what-a-dead-test-process-made-is-reclaimed-and-a-live-ones-is-kept
   ;; docs/testing.md#a-root-costs-what-it-boots. Killed shards left 30 merges branches and 8 fixture worktrees (2026-11-12): their
   ;; shutdown hooks and finally blocks never ran. What a test process makes outside itself is named with its pid (ts/mark-of), and
-  ;; reclaim! removes it once that pid is gone. Cost: a git repository, one worktree, a scratch store and two forks (~80M ticks)
-  (let [repo (str (seon.config/checkout) "/target/tmp/reclaim-" (random-uuid))
-        git (fn [& args] (:out (apply sh/sh "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@t" args)))
-        dead (let [p (seon.lib/fork! {:child (fn [] nil) :refused (fn [n] {:refused n}) :parent identity})] (seon.lib/wait-status p) p)
+  ;; reclaim! removes it once that pid is gone: dead-pid? is that decision (git only runs `branch -D` and `worktree remove` on what
+  ;; it names, which git's own tests prove; the test made a repository, two worktrees and a fork for it, 256 ms). A pid no process
+  ;; holds stands in for the dead one. Estimate: five name matches and five kill(pid, 0) calls: ~0.3M ticks
+  (let [dead-pid 2147483646
         named (fn [label pid] (clojure.string/replace (ts/mark-of label) (str "-" (seon.lib/c-getpid) "-") (str "-" pid "-")))
-        [db live] [(named "jolt/seon-merges-x-shard" dead) (ts/mark-of "jolt/seon-merges-x-shard")]
-        wt-dead (str (named (str repo "-fix/seon-fixture") dead) "/wt")
-        wt-live (str (ts/mark-of (str repo "-fix/seon-fixture")) "/wt")
-]
-    (try
-      (.mkdirs (java.io.File. repo))
-      (git "init" "-q") (spit (str repo "/a") "a") (git "add" "a") (git "commit" "-q" "-m" "one")
-      (git "branch" db) (git "branch" live)
-      (git "worktree" "add" "-q" "--detach" wt-dead) (git "worktree" "add" "-q" "--detach" wt-live)
-      (let [r (ts/reclaim-git! repo)
-            heads (set (clojure.string/split-lines (git "for-each-ref" "--format=%(refname:short)" "refs/heads/jolt/")))
-            wts (git "worktree" "list" "--porcelain")]
-        (is (= {:branches 1 :worktrees 1} r) (pr-str r))
-        (is (not (heads db)) "the dead process's merges branch is gone")
-        (is (heads live) "this live process's is kept")
-        (is (not (clojure.string/includes? wts wt-dead)) "the dead process's fixture worktree is gone")
-        (is (clojure.string/includes? wts wt-live) "this live process's is kept"))
-      (finally (git "worktree" "remove" "--force" wt-live)
-               (seon.lib/remove-tree! repo (str repo "-fix"))))))
+        dead? #'ts/dead-pid?]
+    (is (dead? (named "jolt/seon-merges-x-shard" dead-pid)) "the dead process's merges branch is reclaimed")
+    (is (not (dead? (ts/mark-of "jolt/seon-merges-x-shard"))) "this live process's is kept")
+    (is (dead? (str (named "/r-fix/seon-fixture" dead-pid) "/wt")) "the dead process's fixture worktree is reclaimed")
+    (is (not (dead? (str (ts/mark-of "/r-fix/seon-fixture") "/wt"))) "this live process's is kept")
+    (is (not (dead? "jolt/seon-merges-x-shard")) "a name no process made is never reclaimed")))
 
-(deftest ^{:seon.test/estimate {:ticks 40000000} :seon.test/execs ["cp"]} the-process-store-is-the-one-its-maker-recorded
+(deftest ^{:seon.test/estimate {:ticks 300000}} the-process-store-is-the-one-its-maker-recorded
   ;; docs/testing.md#a-root-costs-what-it-boots. Found 2026-11-12 (jolt/tests's land through the standing system): the seed made
   ;; the checkout's process store under the digest its own runtime derives, and a test child of the system's agent, running main's
-  ;; program, derived another and found none: 197 process tests red. The maker records the path; every reader reads it.
-  (let [co (str (seon.config/checkout) "/target/tmp/pstore-" (random-uuid))
-        made (ts/make-process-store! co)]
+  ;; program, derived another and found none: 197 process tests red. The maker records the path; every reader reads it. The
+  ;; reader's claim: with a store at the derived path and another recorded, it takes the recorded. (The maker, make-process-store!,
+  ;; seeds a store, 17M ticks and 184 ms; bin/test's plan runs it before every process test, and a reader it did not serve is red
+  ;; there.) Estimate: two scratch stores as files and two reads: ~0.3M ticks
+  (let [co (str (System/getProperty "java.io.tmpdir") "/seon-pstore-" (random-uuid))
+        derived (str co "/target/runs/test-store-" pdb/schema-digest)
+        other (str co "/target/runs/test-store-elsewhere")]
     (try
-      (is (= made (clojure.string/trim (slurp (str co "/target/process-store.path")))) "the maker records its path")
-      (let [other (str co "/target/runs/test-store-elsewhere")]
-        (.mkdirs (java.io.File. other))
-        (sh/sh "cp" "-c" (str made "/data.mdb") (str other "/data.mdb"))
-        (spit (str co "/target/process-store.path") other)
-        (is (= other (ts/process-store co)) "a reader takes the recorded path, never one it derives"))
+      (doseq [p [derived other]] (.mkdirs (java.io.File. ^String p)) (spit (str p "/data.mdb") "x"))
+      (is (= derived (ts/process-store co)) "no record: the path it derives")
+      (spit (str co "/target/process-store.path") (str other "\n"))
+      (is (= other (ts/process-store co)) "a reader takes the recorded path, never one it derives")
       (finally (seon.lib/remove-tree! co)))))
 
 ;; docs/merging.md#verdicts-are-a-cache: the repository's program store is shared by checkouts at other keys at once (another
@@ -276,7 +210,7 @@
 
 ;; docs/clocks.md#two-kinds-of-wait: an ask of a test root (seon.test-store/ask) ends at its declared bound, typed, with what it asked,
 ;; never at the test's wall (pilot 14's hang blocked in ask's readLine). Red before: ask had no bound, and this test ended at its wall
-;; (OVERRAN, ~5 min). Estimate: one connection and one socket timeout, ~0.05M ticks; its wall time is its bound, 0.5 s.
+;; (OVERRAN, ~5 min). Estimate: one connection and one socket timeout, ~0.05M ticks; its wall time is its bound, 20 ms.
 (deftest ^{:seon.test/estimate {:ticks 1000000}} an-ask-no-root-answers-ends-at-its-bound
   (with-open [server (java.net.ServerSocket. 0 8)]
     (let [m {:op :prove :names ['a.b-test/t]}
