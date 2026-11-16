@@ -979,9 +979,12 @@
             base-c (d/merge-base conn :c :db)
             _ (doseq [i (range 5)] (note! conn (str "m" i)))
             main-before (notes-of @conn) hist-before (hist @conn) tail (d/commit-id @conn)
-            r (pdb/retain! conn 3)]
+            r (pdb/retain! conn 3)
+            _ (is (= tail (d/commit-id @conn)) "retain! writes nothing on main: its caller writes the record through root's writer")
+            ;; as root's reconciler does on the :collect effect's answer
+            _ (d/transact conn (pdb/retained-tx r))]
         (is (pos? (:swept r)) (pr-str r))
-        (is (= (:generation r) (:generation (:seon.system/retained (d/pull @conn [:seon.system/retained] [:seon.system/id :root])))) "and it is written on main")
+        (is (= (:generation r) (:generation (:seon.system/retained (d/pull @conn [:seon.system/retained] [:seon.system/id :root])))) "and its record, written, is on main")
         (is (= :db (:seon.tx/branch (d/entity @conn (:max-tx @conn)))) "by a transaction that names its branch, as every write does (an unnamed one read as a branch's own in a merge, lb76 2026-11-15)")
         (is (nil? (pdb/retain! conn 3)) "with nothing new landed, none is due")
         (is (= (conj (vec main-before)) (notes-of @conn)) "main's head reads the same")
@@ -1103,7 +1106,7 @@
                   (pdb/retain! conn 3))]
           (is (= :seon.db/retain-refused (:seon.error/type r)) (pr-str r))
           (is (some? (d/commit-as-db conn base)) "the branch's base is kept: nothing was swept")
-          (is (= [:b] (mapv :branch (:refused (:seon.system/retained (d/pull @conn [:seon.system/retained] [:seon.system/id :root]))))) "the record names it")))
+          (is (= [:b] (mapv :branch (:refused (:retained r)))) "the record it answers names it")))
       (d/release conn)
       (finally (seon.lib/remove-tree! path (str path ".compact"))))))
 

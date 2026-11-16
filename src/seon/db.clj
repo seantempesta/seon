@@ -1123,9 +1123,11 @@
   counted by the commit graph's generation, never a clock. Kept whole, whatever their age: each branch's head, its merge base with main, and each commit an agent's facts
   name (an attribute whose schema reaches :seon.db/commit: the entity index's :commit-attrs, an agent's bases and a turn's basis among them),
   which is what a merge and a page read by id. Every datom, a branch's history and as-of reads stay: only reading
-  another old commit by its id goes. Root calls it at boot, before any other process exists, so nothing live holds a swept commit, and as its sole writer. Answers
-  {:swept :ms :generation}, written on main, or nil when none is due; when a branch's merge base is unknown (d/merge-base refused
-  for a reason other than several bases), nothing is swept: the record names the branches and :seon.db/retain-refused answers. See docs/storage.md#collection."
+  another old commit by its id goes. Root runs it as its :collect effect at quiescence (seon.reconcile's quiet, no agent live), off
+  its writer and never at boot; what a writer commits meanwhile is newer than the cutoff, so it is kept. Answers the record
+  {:swept :ms :generation}, which it writes nowhere (its caller writes retained-tx through root's writer), or nil when none is due;
+  when a branch's merge base is unknown (d/merge-base refused for a reason other than several bases), nothing is swept and
+  :seon.db/retain-refused answers, the record naming the branches under :retained. See docs/storage.md#collection."
   {:malli/schema [:=> [:cat :seon.host/conn pos-int?] [:maybe :map]]}
   [conn keep]
   (let [store (:store @conn)
@@ -1159,18 +1161,22 @@
             named (into #{} (for [b bs :let [h (d/branch-as-db store b)] a commit-attrs d (d/datoms h :aevt a)
                                   x (tree-seq coll? seq (:v d)) :when (uuid? x)]
                               x))
-            ;; unsynced, as the writer is not running yet: the store's own bound (:seon.config.store/lmdb-sync-pages) steadies it
-            ;; as the sweep frees pages, so they are reused (docs/storage.md#durability-is-continuous-group-commit)
+            ;; the store's own bound (:seon.config.store/lmdb-sync-pages) steadies the sweep's deletes as it frees pages, so they are reused (docs/storage.md#durability-is-continuous-group-commit)
             swept (when (empty? refused) @(d/gc-storage conn cutoff {:datahike.gc/keep-commits (into #{} (remove nil?) (concat bases named))}))
-            ;; refused: nothing swept, the record keeps the last sweep's generation (the next boot asks again) and names the branches
+            ;; refused: nothing swept, the record keeps the last sweep's generation (the next quiescence asks again) and names the branches
             r (cond-> {:swept (count swept) :ms (profile/ms-since t0) :generation (if (seq refused) last-g generation)}
                 (seq refused) (assoc :refused refused))]
         (when (seq swept) (compact-due! conn))
-        (d/transact conn [{:seon.system/id :root :seon.system/retained r}])
         (if (seq refused)
           (contract/error :seon.db/retain-refused #'seon.db/retain! (str "no sweep: the merge base of " (count refused) " branch(es) is unknown, "
-                                                                         (str/join ", " (map :branch refused))) {:refused refused})
+                                                                         (str/join ", " (map :branch refused))) {:refused refused :retained r})
           r)))))
+
+(defn retained-tx
+  "The write of retain!'s record r on main (:seon.system/retained), which its next collection reads as the generation it swept
+  at; through root's writer, the one writer of main. See docs/storage.md#collection."
+  {:malli/schema [:=> [:cat :map] :seon.db/tx-data]}
+  [r] [{:seon.system/id :root :seon.system/retained r}])
 
 (defn after-fork!
   "Make this forked process (an agent, a clone) open the store itself: an LMDB env and the

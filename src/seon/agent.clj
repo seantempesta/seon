@@ -964,9 +964,10 @@
   [db]
   ;; opened from db's own store, so any process planning a db reads it (root's plan read none when it held no agent's :store-conn);
   ;; main is this process's (an agent's :cfg) or, in one that holds none (root), the planned db's own branch
-  (let [main (pdb/main-branch (or (:cfg @state) (:config db)))
+  (let [main (if-let [cfg (:cfg @state)] (pdb/main-branch cfg) (get-in db [:config :branch] :db))
         rb (pdb/on-main main (cfg/value :seon.config.proofs/results-branch))]
-    (when (pdb/branch? db rb) (d/branch-as-db (:store db) rb))))
+    ;; a db with no store (a test's world) holds no results branch
+    (when (and (:store db) (pdb/branch? db rb)) (d/branch-as-db (:store db) rb))))
 
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
