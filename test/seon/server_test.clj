@@ -469,6 +469,24 @@
     (is (= :killed (:value ended)) (pr-str ended))
     (is (= [["to an ended agent"] :seon.server/no-message] (:value r)) (pr-str r))))
 
+;; Estimate: one server round trip (~0.5M); in root two message writes, three reads (~10k each) and one bound's end: ~0.8M; 2,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} an-inbox-stream-writes-each-message-as-it-comes
+  ;; the owner, 2026-11-16: messages pushed to a session through its own background watch (Claude's Monitor tool runs bin/mcp call inbox
+  ;; ... stream=true). The stream writes each message as one line through the connection's *emit* as it comes, reads on from its :t,
+  ;; and ends at a wait with none, typed, with the since to stream from again. Red before: :stream was ignored and nothing was a line
+  (let [[r] (at/in-agent (fn [{:keys [agent]}]
+                           [{:op :eval :agent "root"
+                             :code (str "(let [k " (pr-str (name agent)) " v seon.config/value lines (clojure.core.async/chan 8)]"
+                                        " (with-redefs [seon.config/value (fn ([x] (if (= x :seon.config.root/inbox-wait-ms) 300 (v x))) ([x c] (v x c)))]"
+                                        " (let [f (future (binding [seon.server/*emit* #(clojure.core.async/>!! lines %)] (seon.server/op-answer sys nil {:op :inbox :agent k :stream true})))]"
+                                        " @(seon.system/message! sys (keyword k) \"first\")"
+                                        " (let [one (:body (clojure.core.async/<!! lines))]"
+                                        " @(seon.system/message! sys (keyword k) \"second\")"
+                                        " (let [two (:body (clojure.core.async/<!! lines)) end @f]"
+                                        " [one two (:seon.error/type end) (int? (:t end))])))))")}]))]
+    (is (= ["first" "second" :seon.server/no-message true] (:value r))
+        (str "each message a line as it came; then the bound's typed end with :t: " (pr-str r)))))
+
 ;; Estimate: one server round trip (~0.5M); in root two waits, one message write, two api state reads and two Flow pings of the graph
 ;; (~0.5M each): ~2.5M; 3,000,000
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} an-inbox-wait-is-one-wait-the-api-holds
