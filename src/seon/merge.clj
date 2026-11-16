@@ -157,18 +157,16 @@
     []))
 
 (defn task-conflicts
-  "The members of tasks both sides changed differently, from a three-way's conflicts on [:task id] keys, as
-  :seon.task/task-conflicts holds them: {:task :attr :base :ours :theirs}, ours the branch's and theirs main's. mine names
-  the side the branch is (:ours or :theirs in the three-way that found them). See docs/tasks.md#a-task-holds-how-its-work-ended."
-  {:malli/schema [:=> [:cat [:sequential :map] [:enum :ours :theirs]] :seon.task/task-conflicts]}
-  [conflicts mine]
-  (let [attr (into {} (map (fn [[a k]] [k a])) (get-in stated-keys [:task :stated]))
-        main-side (if (= :ours mine) :theirs :ours)]
-    (vec (for [{[kind id] :key :as c} conflicts :when (= :task kind)
-               k (sort (distinct (mapcat (comp keys #(get c %)) [:base :ours :theirs])))
-               :let [b (get-in c [:base k]) o (get-in c [mine k]) t (get-in c [main-side k])]
-               :when (and (not= o t) (not= o b) (not= t b))]
-           {:task id :attr (attr k) :base b :ours o :theirs t}))))
+  "The members of tasks a branch and main both changed differently, from the branch's unmerged entries (the one merge's, `entries`):
+  each [:datum e a] entry at a task entity of db that holds both sides (an entry the replay's write check refused names :why, no
+  conflict of two sides), as :seon.task/task-conflicts holds them, {:task :attr :base :ours :theirs}, ours the branch's and theirs
+  main's. See docs/tasks.md#a-task-holds-how-its-work-ended."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] :seon.task/task-conflicts]}
+  [db entries]
+  (vec (for [{[kind e a] :key :keys [base ours theirs why] :as c} entries
+             :when (and (= :datum kind) (nil? why) (contains? c :ours) (contains? c :theirs))
+             :let [id (:v (first (d/datoms db :eavt e :seon.task/id)))] :when id]
+         {:task id :attr a :base base :ours ours :theirs theirs})))
 
 (defn three-way
   "git's three-way merge of program maps: :ours and :theirs (each side's changes since
