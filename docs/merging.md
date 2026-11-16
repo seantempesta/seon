@@ -57,7 +57,7 @@ A branch that grows `src` or adds a mechanism is also reviewed against the laws:
 
 A merge's verification is one command, `bin/prove --merge`: every test and `bin/check` step with no green at its digest, process tests and slow tests included (the plan's `:merge` mode, ```seon.proofs/plan-of```), `contracts` and `smoke` among the steps. It ends on `MERGE OK` or `MERGE FAILED` from its exit status alone and prints the line for the merge commit: sha, the plan's counts, the reds, the `src` delta against the first parent, and the keys left out against main's last merge line. No lock: nothing waits on main's verification, and load is kept down by never running the same work twice. How many heavy runs go at once is the machine's cores and memory ([machine](machine.md#builds-and-checks)).
 
-`bin/update ARGS` hands its arguments to the restarted root (`bin/update --profile deepseek`, [config](config.md#layers)). A root mid-restart refuses connections, so a run that meets it prints `TEST FAILED` for the connection: run again once root is up.
+`bin/update ARGS` hands its arguments to the restarted root (`bin/update --profile deepseek`, [config](config.md#layers)). A root mid-restart refuses connections, so a run that meets it prints `TEST FAILED` for the connection: no verdict, caused by the restart, which goes once an update loses nothing in flight (runtime's update owner).
 
 ## A merge runs what the change reaches
 
