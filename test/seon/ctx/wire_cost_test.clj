@@ -193,9 +193,11 @@
 ;; See docs/render.md#how-the-work-stands
 (deftest ^{:seon.test/estimate {:ticks 2000000}} an-unwritten-proofs-shape-costs-its-namespace-once
   ;; each var of the namespace read once, each test's source scanned once for the heads it calls: linear, no regex per test and helper.
-  ;; Estimate: 100 KB + 42 KB a helper and test (measured 2026-11-10: it was quadratic before)
+  ;; Estimate: 400 KB + 42 KB a helper and test (measured 2026-11-10: it was quadratic before). The fixed part was 100 KB; it is the
+  ;; namespace's :require slice and the fixtures query over the seeded world (~2,000 datoms), measured 353 KB at n=1 and linear at
+  ;; ~22 KB a pair after it (result/c0bbe584, 2026-11-16)
   (let [small (ticks-bytes #'seon.ctx.status/test-shape test-ns-of 4) large (ticks-bytes #'seon.ctx.status/test-shape test-ns-of 24)]
-    (clojure.test/is (< (:bytes large) (+ 100000 (* 42000 24))))
+    (clojure.test/is (< (:bytes large) (+ 400000 (* 42000 24))))
     (clojure.test/is (< (- (:bytes large) (:bytes small)) (* 42000 20)) "twenty more vars cost twenty vars")))
 
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-turns-page-message-does-no-cold-draw
