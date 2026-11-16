@@ -4,14 +4,6 @@
 ;; provenance and what happens at its bound in the comment above it; a value read from the process (#env, a path
 ;; under the checkout, a #profile choice) is resources/seon/config/default.edn's (docs/config.md#layers).
 {
- ;; Unit: hh:mm UTC. The cron proc's daily full run of main (bin/test --all, which runs every test,
- ;; process tests included, green or not): the net under the narrow digests (a test takes only what
- ;; its reach names, owner 2026-10-27), so what a reach cannot show is found within a day. "" is
- ;; never. Off here because every root with this config would run it, a worktree's too, at once and
- ;; on one machine: the standing root of the main tree sets it (config/local.edn or
- ;; --set :seon.config.proofs/full-run-at="03:00"). A malformed time refuses the config. Provenance:
- ;; root's task (2026-10-27): nothing ran the full run, the narrow digests' only net.
- :seon.config.proofs/full-run-at [:or {:default "" :seon.config/at-load true :seon.config/unit "hh:mm UTC" :description "The time of day (UTC) at which the cron proc (seon.cron) asks the test service for the full run of main (bin/test --all in a worktree of main, green or not: the net under the narrow digests, docs/merging.md), its shards caching their verdicts by digest as any run does. \"\": never. A root started after the time waits for the next day's; a malformed time is refused when the config loads."} [:= ""] [:re "(?:[01][0-9]|2[0-3]):[0-5][0-9]"]]
  :seon.config.proofs/results-dir [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "Where every checkout's test and check verdicts are kept, one file per (key, digest, status): the main tree's target/results under bin/env."}]
  ;; Unit: bytes. The whole verdict cache's capacity (the files under results-dir). A write that takes it
  ;; past the bound removes the least recently used verdicts (oldest file mtime; a read touches it),
@@ -161,11 +153,6 @@
  ;; Unit: ms. The bound of an ask of a test root made outside any test (a REPL): every wait ends. Worked from the work: the longest
  ;; ask a test makes is a prove of a process test, a root boot ~20 s and a run ~60 s; ten times that.
  :seon.config.proofs/ask-ms [:int {:default 600000 :min 1 :seon.config/unit "ms" :description "The bound of an ask of a test root made outside any test (seon.test-store/ask from a REPL), so every wait ends."}]
- ;; Unit: ms. The merge gate's declared bound, its request's (seon.agent/ask-gate): past it the judge's wait ends with the typed
- ;; :seon.bound/reached and no verdict, whatever the gate does. Worked from its work: a build ~45 s, a seed ~60 s, and its process
- ;; tests, a test root's boot ~20 s then ~0.5 s a test, 253 in a large gate ~150 s: ~250 s; ten times that (AGENTS 3, the one factor).
- ;; At the bound: the judge answers :seon.bound/reached (no verdict), a :platform problem.
- :seon.config.proofs/gate-ms [:int {:default 2500000 :min 1 :seon.config/unit "ms" :description "The merge gate's declared bound (seon.agent/ask-gate): past it the judge's wait ends with :seon.bound/reached, whatever the gate does."}]
  ;; Unit: engine ticks a ms. The slowest rate green tests ran at, waiting included: the 5th percentile of ticks/ms over every stored
  ;; green (88,534 greens, 2026-11-13: p5 149, median 116,069). A test child ends a test that never returns at ten times its estimate
  ;; at this rate (seon.agent/wall-bound-ms): a wall bound derived from the test's own declared work, never a typed-in time.

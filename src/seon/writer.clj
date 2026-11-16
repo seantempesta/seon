@@ -4,7 +4,7 @@
   proto.control's writer (session F2; writer design A, the session design papers in git history)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
-            [seon.program :as program] [seon.merge :as pm] [seon.problems :as problems] [seon.source :as source] [seon.doc :as doc] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg] [seon.task :as task]
+            [seon.program :as program] [seon.merge :as pm] [seon.problems :as problems] [seon.source :as source] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg] [seon.task :as task]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
 (defn- main-commit
@@ -83,8 +83,8 @@
 (defn- written
   "What a merge of changes ours writes back, read on db (main with them merged): :files, the source
   files (namespaces' and schema resources') they touch, and :unfiled, the changed forms of
-  namespaces with no file, which no write-back can write. A merge's write-back and the
-  merge gate's candidate are both this (docs/merging.md#a-merge-runs-what-the-change-reaches)."
+  namespaces with no file, which no write-back can write: a merge's write-back
+  (docs/merging.md#a-merge-runs-what-the-change-reaches)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/changes] [:map [:files [:vector :string]] [:unfiled :map]]]}
   [db ours] {:files (source/changed-files db ours) :unfiled (source/unfiled-forms db ours)})
 
@@ -93,14 +93,6 @@
   describe the refused answer."
   {:malli/schema [:=> [:cat :string :map] :seon.writer/refused]}
   [why members] (contract/error :seon.writer/refused #'seon.writer/refused why members))
-
-(defn- unanalyzable
-  "The refusal when a merge candidate's Clojure files, text ({path text}), don't analyze on db, the merged value, or nil: the import's own analysis, in this process, at the cost of the files that changed. See docs/merging.md#a-merge-runs-what-the-change-reaches."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]]] [:maybe :seon.writer/refused]]}
-  [db text]
-  ;; docs/failure-points.md: a form of the candidate that can't be analyzed is this answer, and the merge doesn't happen
-  (try (source/refresh-tx db (into {} (filter #(clojure.string/ends-with? (key %) ".clj")) text)) nil
-       (catch Throwable e (refused (str "the merged tree doesn't analyze: " (ex-message e)) {}))))
 
 (defn- merge-refused
   "Why branch head (r: {:ours its program change against main, seon.merge/delta-changes}) cannot merge into main now (session M1), or
@@ -194,7 +186,7 @@
   against main's at the same keys), and when clean its change carried onto main's head (seon.merge/carry, replayed through the write
   check, `replay`), its decided entries settled and its moved tasks' cites made again. {:conflicts [entry]} (a conflict, or a fact the
   replay's check refused), or {:db merged :keys ks :cite-keys :whole :settle-ops}; what merge-main-into writes, and what every reader of
-  a merge takes (the gate's candidate, the judge's diff), so a merge is computed one way. O(what the branch changed). See
+  a merge takes (the judge's diff), so a merge is computed one way. O(what the branch changed). See
   docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :map] :map]}
   [main base head meta]
@@ -505,23 +497,6 @@
       :merge-main (reply st (if-not (exists? (:branch m))
                               (refused (str "no branch " (:branch m)) {})
                               (merge-main-into conn (:cfg st) (:branch m))))
-      ;; the merge gate's candidate: branch b merged over main as the merge would merge it, applied to
-      ;; a value and never committed, and the files that merge would write, with their text as it holds them
-      ;; (written, source/files): what the gate tests is what the merge writes, schema resources included
-      ;; the merge gate's candidate: the one merge's (candidate), main merged into the branch as a value, never committed, and the files
-      ;; that merge would write with their text as it holds them
-      :merge-candidate (reply st (if (exists? (:branch m))
-                                   (let [b (:branch m) head (pdb/head conn b) base (pdb/branch-base conn main b)
-                                         cand (when-not (contract/error? base) (candidate @conn base head (pdb/tx-meta b)))]
-                                     (cond (contract/error? base) base
-                                           (:conflicts cand) (refused (str "the branch and main changed " (count (:conflicts cand)) " key(s) differently: settle them first")
-                                                                      {:conflicts (:conflicts cand)})
-                                           :else (let [db (:db cand)
-                                                       w (written db (pm/delta-changes @conn db :all))
-                                                       text (doc/files db (:files w))]
-                                                   (or (dangling-refused @conn db) (unanalyzable db text)
-                                                       (assoc w :ok true :text text)))))
-                                   (refused (str "no branch " (:branch m)) {})))
       ;; a branch read for the dashboard and the done rule: its own change and the one merge's decision against main
       :branch-diff (reply st (if (exists? (:branch m))
                                (let [b (:branch m) head (pdb/head conn b) base (pdb/branch-base conn main b)

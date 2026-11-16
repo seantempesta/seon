@@ -35,8 +35,8 @@
   what the branch changed, an agent's turn; :main: main's run, every test with no result at its
   digest, the plan taking no base). No checkout: two checkouts of one tree asking at once share a run, whose process items
   and steps run on the first asker's checkout; a checkout removed while that run reads it answers its waiters :tree-moved."
-  {:malli/schema [:=> [:cat :keyword :string [:maybe [:set :symbol]] [:enum :turn :judge :main :full]] :string]}
-  [branch dg names mode] (str (name branch) "@" dg (when (seq names) (str ":" (str/join "," (sort names)))) (when (= :turn mode) "!turn") (when (= :full mode) "!full")))
+  {:malli/schema [:=> [:cat :keyword :string [:maybe [:set :symbol]] [:enum :turn :judge :main]] :string]}
+  [branch dg names mode] (str (name branch) "@" dg (when (seq names) (str ":" (str/join "," (sort names)))) (when (= :turn mode) "!turn")))
 
 ;; ---- answers ---------------------------------------------------------------------------
 
@@ -48,7 +48,7 @@
 (defn- slot
   "The identity of what a request asks for apart from its digest: the branch, the namespaces named and the mode, under
   which a run answered green is remembered (:done), so asking again at the same key is answered from it."
-  {:malli/schema [:=> [:cat :map] [:tuple :keyword [:maybe [:set :symbol]] [:enum :turn :judge :main :full]]]}
+  {:malli/schema [:=> [:cat :map] [:tuple :keyword [:maybe [:set :symbol]] [:enum :turn :judge :main]]]}
   [{:keys [branch names mode]}] [branch names mode])
 
 (defn- remember
@@ -323,45 +323,6 @@
         [st more] (grant st)]
     [st (-> outs (into no-verdicts) (into vw) (into more))]))
 
-
-;; ---- the daily full run: a run of its own ------------------------------------------------
-
-(defn- full-request
-  "The daily full run (the cron proc's request, :full mode): bin/test --all in a worktree of git's
-  main, an OS child (the :tests effect), as a run of its own, so it never holds the run slot an
-  agent's turn waits on (a full run takes most of an hour, and can stall: measured, its
-  first one stalled in a process test). The same day's request again joins it or is answered by
-  it; another day's while one runs is a :platform problem naming the one that has not ended.
-  Answers [st outputs]."
-  {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
-  [st req]
-  (let [cur (:full st)]
-    (cond
-      (and cur (= (:key cur) (:key req))) [st []]
-      cur [st [{:op :problem :class :platform
-                :error (contract/error :seon.prove/full-run-running #'seon.prove/full-request
-                                       (str "the full run " (:key req) " was asked while " (:key cur) " has not ended") {:running (:key cur)})}]]
-      (= (:key req) (:full-done st)) [st []]
-      :else (let [[st m] (step/ask st [:prove :answers] [:full (:key req)] {:op :fx :kind :tests :req {:all? true}})]
-              [(assoc st :full req) [m]]))))
-
-(defn- full-answered
-  "The full run's chain: the effect's answer (its shards cached their verdicts), its slot free. A failed effect is a
-  :platform problem, and so is a red: this run is what catches what a digest can't see (docs/merging.md#verdicts-are-a-cache), so
-  a red it finds is told, naming each test."
-  {:malli/schema [:=> [:cat :map :keyword :any] [:tuple :map [:vector :map]]]}
-  [st step r]
-  (let [run (:full st)]
-    (cond
-      (contract/error? r) [(dissoc st :full) [{:op :problem :class :platform :error r}]]
-      :else (let [reds (vec (sort-by str (keep (fn [[t st]] (when-not (= :pass st) t)) (get-in r [:value :results]))))]
-              [(-> st (dissoc :full) (assoc :full-done (:key run)))
-               (if (empty? reds)
-                 []
-                 [{:op :problem :class :platform
-                   :error (contract/error :seon.prove/full-run-red #'seon.prove/full-answered
-                                          (str "the full run " (:key run) " found " (count reds) " red on main: " (str/join " " reds)) {:tests reds})}])]))))
-
 ;; ---- runs: a request planned by its agent, its items on the one queue --------------------------------
 ;; A run (one key: branch, digest, names, mode) is planned by the agent holding its branch (its :tests with :plan?: what
 ;; it would run, at their digests; what it reuses and defers), main's by a prove agent forked for it. Its items join the
@@ -532,8 +493,6 @@
         req (-> m (select-keys [:branch :digest :agent :proofs :checkout :tree]) (assoc :key key :t t :names names :mode mode))
         done (get-in st [:done (slot req)])]
     (cond
-      ;; the daily full run, a run of its own
-      (= :full mode) (full-request st req)
       ;; a run of this key in flight: joined
       (get-in st [:runs key]) [(update-in st [:runs key :waiters] into rids) []]
       ;; asked again after its run, nothing it reads changed
@@ -651,7 +610,6 @@
                         [(cond-> (assoc-in st [:verdict-writes key] tx) asker (assoc-in [:verdict-askers key] asker)) [m]])
                       :else [st (cond-> [{:op :problem :class :platform :error r}] asker (reply [asker] r))]))
     :results-branch (let [[st o] (verdicts-write st key (get-in st [:verdict-writes key]))] [st o])
-    :full (if (= key (:key (:full st))) (full-answered st step r) [(update st :stale (fnil inc 0)) []])
     ;; a batch's end can be a runner's last item, its run finished before it: the runner ends then (runner-done), and the held
     ;; asks re-enter once the branch is free, never left waiting on a runner no finish will sweep
     :batch (let [[st outs] (batch-ended st (parse-long key) r) [st o] (settle st outs) [st k] (runner-done st) [st h] (re-enter-held st)]
@@ -694,7 +652,7 @@
        :outs {:to-api "requests, and the answers to the waiters"}
        :workload :io
        ;; the queue's counts and each run's stage are state-view's, the one reading of them: a slow run shows its items running
-       :ping-map-fn (fn [st] {:runs (count (:runs st)) :full (some-> st :full :key)
+       :ping-map-fn (fn [st] {:runs (count (:runs st))
                               :queued (count (filter #(= :queued (:status %)) (vals (:items st))))
                               :running (count (filter #(= :running (:status %)) (vals (:items st))))
                               :run-stages (:runs (state-view st))

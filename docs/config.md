@@ -77,6 +77,5 @@ Every limit, bound or default is a config key. A number left in src is one of th
 - `seon.cost/min-points`: three, the fewest sizes a cost proof measures, since two points always make a line.
 - `seon.program/form-ids`: `(drop 3 form)` drops a `defn`'s head, name and docstring.
 - `seon.program/place-gap`: the space between a file's forms in the sort key.
-- `seon.cron/day-ms`: a day in milliseconds.
 - `seon.server/verdict-line`: the ten reds `seon_done`'s line names; it counts the rest.
 - `seon.fx/runner-end`: the six lines of runner output an error names beside its log path.
