@@ -329,6 +329,17 @@
     (is (some? (:agent sess)) (pr-str sess))
     (is (= (name (:agent sess)) (:value who)) (str "the session's own agent, not the task's: " (pr-str who)))))
 
+;; Estimate: three server round trips (~0.5M each) and one seek of the task's agent key: ~1.5M; 3,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} a-message-to-a-task-reaches-its-agent
+  ;; docs/server.md#ops: seon_message names its recipient by agent or by task (session/<area> for a session), as seon_inbox does
+  ;; (seon.task/agent-key), so a session messages another without first reading its agent id from seon_agents. Red before: the op
+  ;; required agent
+  (let [[sent taken] (at/in-agent (fn [{:keys [task]}]
+                                    [{:op :message :task task :body "by its task"}
+                                     "(my.agent/messages)"]))]
+    (is (true? (:ok sent)) (pr-str sent))
+    (is (re-find #":body \"by its task\"" (str (:text taken))) (pr-str taken))))
+
 (deftest a-message-reaches-the-agent
   ;; (parity row 73): the owner's message, sent as
   ;; the page's message bar sends it (seon.system/message!, here through the server's :message
@@ -1073,6 +1084,21 @@
                (#'seon.server/prove-streamed sys :tree-x (fn [] (throw (ex-info "the run broke" {})))))]
        (is (= :seon.server/defect (:seon.error/type r)) (pr-str r))
        (is (re-find #"the run broke" (str (:seon.error/message r))))))))
+
+;; Estimate: four transactions on a test branch and two :aevt walks of three holder datoms: ~1M; 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-client-holds-its-agent-spawned-again
+  ;; docs/server.md#ops: an agent key spawned again keeps its last :seon.agent/ended-ms, which is no end of the new process
+  ;; (seon.task/agent-ended?, the reconciler's one rule). Red before: held-agent dropped any agent with an ended-ms, so a session
+  ;; agent re-attached after a restart was held by no one, and its done and eval had no agent
+  (ts/test-branch!
+   (fn [_ conn]
+     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "s" :seon.task/plan "Make s true." :seon.task/proofs #{'demo-test/s}}]))
+     (d/transact conn (ts/work-tx "demo/s" :running {:agent :k1 :holder "c1"}))
+     (d/transact conn [{:seon.agent/key "k1" :seon.agent/started-ms 1 :seon.agent/ended-ms 5}])
+     (let [sys {:graph nil :ext (a/chan) :conn conn}]
+       (is (nil? (my.root/held-agent sys "c1")) "ended after it started: held by no one")
+       (d/transact conn [{:seon.agent/key "k1" :seon.agent/started-ms 9}])
+       (is (= {:agent :k1 :task "demo/s"} (my.root/held-agent sys "c1")) "spawned again after that end: c1 holds it")))))
 
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-checkout-names-the-agent-it-holds
   ;; docs/server.md#working-a-task-from-a-worktree: a session's edit hook (bin/seon-import) imports onto the agent its checkout

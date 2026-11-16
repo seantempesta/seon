@@ -315,7 +315,8 @@
              :args {:agent {:type "string"} :task {:type "string" :description "ns/name, instead of an agent"}
                     :wire {:type "boolean" :description "answer the request body as JSON, not the text"}}}
    :message {:doc "Send an agent a message (the owner's words): a message on main to the agent (whether or not its process lives), which its next turn delivers onto its branch and reads, and which wakes a session that waits, with its allowance of turns more. The page's message bar sends the same request (seon.system/message!)."
-             :args {:agent {:type "string"} :body {:type "string" :description "what to tell the agent"}} :required ["agent" "body"]}
+             :args {:agent {:type "string" :description "an agent id"} :task {:type "string" :description "ns/name: its agent, instead of agent (session/<area> for a session)"}
+                    :body {:type "string" :description "what to tell the agent"}} :required ["body"]}
    :write_back {:doc "Sync main's changed files to disk and commit them on the merges branch: every merged task whose files no commit holds. Answers the tasks, the paths and the commit, or what it couldn't."
                 :args {}}
    :create {:doc "Declare a task, held: nothing starts and nothing is paid. Answers its id, which seon_attach works. Its proofs may be named later."
@@ -430,15 +431,13 @@
       (refused (if ag (str ag " works no task: attach one first") (str "no task " (:task req) ", and no agent named"))))))
 
 (defn connection-agent
-  "The key of the agent req's client holds (attach!'s :holder, running or parked), or nil, then the signed-in person. Read per
-  request, never kept. See docs/users.md#messages."
+  "The key of the agent req's client is (my.root/held-agents, the one read of a client's agents): its session's own, of kind :user,
+  else the one it last attached; nil with no client or none held, then the signed-in person. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.system/sys :map] [:maybe :string]]}
   [sys req]
   (when-let [c (:client req)]
-    (let [db @(:conn sys)
-          held (filter #(= c (:holder (:env %))) (concat (task/running db) (task/running db :parked)))]
-      ;; the session's own agent first: the one whose task is of kind :user (its template's property, docs/users.md#messages)
-      (:key (or (first (filter #(= :user (:seon.task/kind (task/task db (:task %)))) held)) (first held))))))
+    (let [held (root/held-agents sys c)]
+      (some-> (or (first (filter #(= :user (:kind %)) held)) (first held)) :agent name))))
 
 ;; Estimate: one :avet seek of the agent's message links and one id lookup each on its branch (~10.5k ticks a message [M]); a wait
 ;; parks the connection's fiber (no worker, no thread) on await-message, one :avet seek a commit while held
@@ -504,8 +503,11 @@
 (defmethod op-answer :inbox [sys _ req] (inbox-answer sys req))
 
 (defmethod op-answer :message [sys ag req]
-  ;; from the agent the connection works through (connection-agent), else the signed-in person
-  @(c/message! sys ag (:body req) (some->> (connection-agent sys req) (hash-map :from))))
+  ;; to the agent named, or the agent of the task named (a session's session/<area>, as seon_inbox takes it); from the agent the
+  ;; connection works through (connection-agent), else the signed-in person
+  (if-let [to (or ag (some->> (:task req) (task/agent-key @(:conn sys)) keyword))]
+    @(c/message! sys to (:body req) (some->> (connection-agent sys req) (hash-map :from)))
+    (refused (str "seon_message names no agent: give agent (an agent id) or task (its task, session/<area> for a session); asked task " (:task req)))))
 
 (defmethod op-answer :write_back [sys _ _] (root/write-back! sys))
 
