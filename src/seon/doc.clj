@@ -632,7 +632,8 @@
   {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe :map]]}
   [db at]
   (let [[_ ix counted _ [cid t]] @indexes
-        before (when (and ix cid) (d/commit-as-db db cid))]
+        ;; db's own store reads the commit: a value with none (a test's world, made from a stored db) carries nothing
+        before (when (and ix cid (:store db)) (d/commit-as-db db cid))]
     (when (and before (= t (:max-tx before)))
       (let [attrs (if (::library @counted) index-attrs (remove #{:seon.library/text} index-attrs))
             written (into [] (mapcat (fn [a] (let [[only-before only-db] (d/datoms-diff before db :aevt [a])]

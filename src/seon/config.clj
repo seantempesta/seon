@@ -103,9 +103,10 @@
   (mr/composite-registry (m/default-schemas) (mr/simple-registry schema-forms)))
 
 (def ^:private with-defaults
-  "Malli's default-value transformer (malli.transform/default-value-transformer): a decode of a config map adds each required key
-  it lacks from its entry's :default, the one way a schema's default reaches a config (resolved). See docs/config.md#the-file."
-  (mt/default-value-transformer))
+  "Malli's default-value transformer (malli.transform/default-value-transformer): a decode of a config map adds each key it lacks
+  from its entry's :default, required or optional (::mt/add-optional-keys: a schema that marks a key optional, as a branch's older
+  one does, still has its default count), the one way a schema's default reaches a config (resolved). See docs/config.md#the-file."
+  (mt/default-value-transformer {::mt/add-optional-keys true}))
 
 (def config-schema "The compiled `:seon.config/config`: required keys as the schema declares them, open at its top." (m/deref (m/schema :seon.config/config {:registry registry})))
 
