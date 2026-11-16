@@ -19,4 +19,9 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.lib-test/a-child-that-never-exits-answers-its-bound-as-data seon.fx-test/a-native-fault-in-a-worker-is-told-to-its-owner}
   :seon.task/needs #{"jolt.io-poller/a-fiber-waits-for-a-childs-exit"}
+  :seon.task/estimate #:seon.lib{wait-status {:n 1, :order :constant, :ticks 2000, :bytes 500}}}
+ {:seon.task/name "a-forked-childs-exit-status-is-the-one-it-exited-with"
+  :seon.task/plan "Found by tests2, 2026-11-17, in batch 2's seon_done of session/tests2: seon.lib-test/a-forked-child-runs-none-of-its-parents-shutdown-hooks red at reach digest 5797caebd2bc9da2 (failure: (= {:exit 3} st) got {:exit 0}, 25 ms, 128k ticks) and green at 344596172b9d8105 (29 ms) in the same judge, both route :live, on branch :main/task-session-tests2-r536894600 (read with seon.proofs/ran-on at root). The child runs (System/exit 3) and seon.lib/wait-status answered {:exit 0}: the status lost or another child's reaped. Not reached by the change's cause (an eval-in move); a flaky result is a defect at its cause (AGENTS section 3). Read both ends: seon.lib/fork! with :parent lib/wait-status, and Jolt's System/exit in a forked child (does it run exit hooks or flush that exit 0 first, or does wait-status reap a pid another fiber waits on). Proof: the test green every run, its child's status the one it exited with."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.lib-test/a-forked-child-runs-none-of-its-parents-shutdown-hooks}
   :seon.task/estimate #:seon.lib{wait-status {:n 1, :order :constant, :ticks 2000, :bytes 500}}}]
