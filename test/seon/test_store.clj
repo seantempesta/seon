@@ -399,13 +399,15 @@
   environment it starts with, over the caller's, so nothing inherited redirects it; its server port -1, a port the kernel
   assigns, which bin/system next carries to the next generation."
   {:malli/schema [:=> [:cat :map :string [:sequential :string]] :map]}
-  [{:keys [store main runs env]} command args]
+  [{:keys [store main runs env checkout]} command args]
   (apply binary-sh (concat ["env" (str "SEON_RUNS=" runs) (str "SEON_STORE=" store) (str "SEON_MAIN=" main)
                             "SEON_SERVER_PORT=-1" "SEON_WEB_PORT=0"
                             ;; the root ends with this test process, however it ends (:seon.config.root/end-with)
                             (str "SEON_END_WITH=" (seon.lib/c-getpid))]
                            (for [[k v] env] (str k "=" v))
-                           ["bin/system" command] args)))
+                           ["bin/system" command] args
+                           ;; a root of another tree's build (checkout: a branch candidate's): that tree's bin/system and binary
+                           (when checkout [:dir checkout]))))
 
 (defn drop-main!
   "Delete main and every branch under it from the store at store (seon.db/delete-main!), with its
@@ -469,7 +471,8 @@
   outside a test, it names none, and every deferred test is gated. Its profile is root-profile unless
   args name another (start-args)."
   {:malli/schema [:=> [:cat [:map [:store :string] [:main :string] [:runs :string]
-                             [:env {:optional true} [:map-of :string :string]] [:args {:optional true} [:sequential :string]]]]
+                             [:env {:optional true} [:map-of :string :string]] [:args {:optional true} [:sequential :string]]
+                             [:checkout {:optional true} :string]]]
                   :map]}
   [{:keys [runs] :as root}]
   (.mkdirs (java.io.File. ^String runs))
@@ -767,11 +770,13 @@
             _ (try (let [running (d/q '[:find [?t ...] :where [?t :seon.task/execution :running]] @bconn)]
                      (when (seq running) (d/transact bconn {:tx-data (mapv (fn [t] [:db/add t :seon.task/execution :held]) running)})))
                    (finally (pdb/sync! cfg) (d/release bconn)))
-            root (start-root! {:store store :main cmain :runs (str dir "/runs")
-                               :args (if from
-                                       []
-                                       ["--set" (str ":seon.config.source/root=" (pr-str checkout))
-                                        "--set" ":seon.config.root/catch-up-on-boot=true"])})]
+            root (start-root! (cond-> {:store store :main cmain :runs (str dir "/runs")
+                                       :args (if from
+                                               []
+                                               ["--set" (str ":seon.config.source/root=" (pr-str checkout))
+                                                "--set" ":seon.config.root/catch-up-on-boot=true"])}
+                                ;; a branch's: checkout's own binary (the standing one's, or its write-out's build, seon.fx/run-item)
+                                from (assoc :checkout checkout)))]
         (assoc (with-pids root) :dir dir :booted true))))))
 
 (defn on-candidate
