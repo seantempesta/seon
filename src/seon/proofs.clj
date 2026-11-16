@@ -325,11 +325,11 @@
   "Each function's cost per call over the tests of details ({test {var row}}, seon.fx/details): {var {:calls n :ticks
   :self-ticks :bytes :self-bytes}}, the measures summed over the tests and divided by the calls. A
   recursive function's inclusive ticks and bytes count its inner calls again; its self ones do not."
-  {:malli/schema [:=> [:cat [:map-of {:gen/max 4} :qualified-symbol [:map-of {:gen/max 4} :qualified-symbol [:tuple :int :int :int :int :int]]]] [:map-of :qualified-symbol :map]]}
+  {:malli/schema [:=> [:cat [:map-of {:gen/max 4} :qualified-symbol [:map-of {:gen/max 4} :qualified-symbol [:map [:calls :int] [:ticks :int] [:self-ticks :int] [:bytes :int] [:self-bytes :int]]]]] [:map-of :qualified-symbol :map]]}
   [detail]
-  (let [sums (reduce (fn [m [v row]] (update m v #(if % (mapv + % row) row))) {} (mapcat val detail))]
-    (into {} (for [[v [calls ticks self-ticks bytes self-bytes]] sums :when (pos? calls)]
-               [v {:calls calls :ticks (quot ticks calls) :self-ticks (quot self-ticks calls) :bytes (quot bytes calls) :self-bytes (quot self-bytes calls)}]))))
+  (let [sums (reduce (fn [m [v row]] (update m v #(if % (merge-with + % row) row))) {} (mapcat val detail))]
+    (into {} (for [[v {:keys [calls] :as row}] sums :when (pos? calls)]
+               [v (into {:calls calls} (for [k [:ticks :self-ticks :bytes :self-bytes]] [k (quot (get row k) calls)]))]))))
 
 (defn answer-ran
   "What an agent's test run answer ({:reports :digests :fns}, seon.agent/run-tests-forked's) ran:
@@ -461,15 +461,14 @@
 ;; ---- what the results answer ------------------------------------------------------------
 
 (defn exercising
-  "The tests of details ({test {var [calls ticks self-ticks bytes self-bytes]}}, the per-function rows
+  "The tests of details ({test {var {:calls :ticks :self-ticks :bytes :self-bytes}}}, the per-function rows
   of a tree's verdicts: seon.fx/details) that called contracted function v, and how much ({:test :calls
   :ticks :self-ticks :bytes :self-bytes}), most ticks first."
-  {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:map-of :qualified-symbol [:vector :int]]] :qualified-symbol] [:vector :map]]}
+  {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:map-of :qualified-symbol :map]] :qualified-symbol] [:vector :map]]}
   [details v]
   (vec (sort-by (juxt (comp - :ticks) (comp str :test))
-                (for [[t fs] details :let [row (fs v)] :when row
-                      :let [[calls ticks self-ticks bytes self-bytes] row]]
-                  {:test t :calls calls :ticks ticks :self-ticks self-ticks :bytes bytes :self-bytes self-bytes}))))
+                (for [[t fs] details :let [row (fs v)] :when row]
+                  (assoc row :test t)))))
 
 (defn left-out
   "The keys of ks a run leaves out: those in process (tests and bin/check steps that reach a
@@ -652,10 +651,27 @@
                   :seon.proof/route :live :seon.proof/ran-on #{(:seon.db/branch basis)}
                   :seon.proof/reads-digest rd :seon.proof/read-keys ks}
            (and (not (green? r)) (seq (:failures r))) (assoc :seon.proof/failures (vec (:failures r)))
+           ;; what each contracted function the run called cost it ({var {:calls :ticks :self-ticks :bytes :self-bytes}}): read by fn-costs
+           (seq (keep #(when (pos? (:calls % 0)) %) (get fns test-var)))
+           (assoc :seon.proof/fn-costs (into {} (for [{:keys [var calls] :as row} (get fns test-var) :when (pos? (or calls 0))]
+                                                  [var (select-keys row [:calls :ticks :self-ticks :bytes :self-bytes])])))
            ;; what the run spent, the newest run's: what orders the next run's work (spent-ms), never part of the verdict
            (nat-int? (:ms r)) (assoc :seon.bound/spent (cond-> {:seon.bound/ms (:ms r)}
                                                         (nat-int? (:ticks r)) (assoc :seon.bound/ticks (:ticks r))
                                                         (nat-int? (:bytes r)) (assoc :seon.bound/bytes (:bytes r))))))))
+
+(defn fn-costs
+  "{test {var {:calls :ticks :self-ticks :bytes :self-bytes}}} of cand ({test digest}): what each contracted function cost the test's
+  result db holds at that digest (:seon.proof/fn-costs, verdict-tx's), the input of per-call and exercising; a test with none is
+  left out. One AVET seek a test. See docs/cost.md#what-a-test-run-measures."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :any [:maybe :string]]] [:map-of :qualified-symbol [:map-of :qualified-symbol [:map [:calls :int] [:ticks :int] [:self-ticks :int] [:bytes :int] [:self-bytes :int]]]]]}
+  [db cand]
+  (let [at (fn [e a] (:v (first (d/datoms db :aevt a e))))]
+    (into {} (for [[t dg] cand :when (and (qualified-symbol? t) dg)
+                   :let [c (some #(when (= dg (at (:e %) :seon.proof/reach-digest)) (at (:e %) :seon.proof/fn-costs))
+                                 (sort-by #(- (:tx %)) (d/datoms db :avet :seon.proof/test t)))]
+                   :when (seq c)]
+               [t c]))))
 
 (defn spent-ms
   "{test [ms ...]} of tests, ascending: the wall ms its newest green results in db spent (:seon.bound/spent, verdict-tx's); a test
