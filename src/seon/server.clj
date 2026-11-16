@@ -162,10 +162,10 @@
 
 (defn- attach!
   "Start an outside agent on task id: its env's model is \"outside\" (the task keeps its own), so the
-  reconciler starts no turn loop for it and does not kill it. The agent is spawned first;
-  only once it exists are its env, the release and its start written, in one transaction,
-  so a refused spawn writes nothing and the reconciler never sees a release with no agent
-  (it would spawn a second agent for it). The session's agent continues (its key) unless fresh?:
+  reconciler starts no turn loop for it and does not kill it. Its env, the release and its start are written
+  on main in one transaction BEFORE the spawn, with the agent's key made here and the agent :spawning, so its branch is cut holding
+  its task (root's alone) and the reconciler, which counts a :spawning agent live, spawns no second one; a refused spawn answers that
+  start (the task refused, its execution as it was, the agent ended). A clone's start follows its spawn (its branch is cut from its source's). The session's agent continues (its key) unless fresh?:
   a reset, the task's branch a new one cut from main and its conversation empty (the agent on the
   old branch is killed here once the task is the new one's: the reconciler compares the task's own agent, so it never
   saw the old one; that branch and its records stay). A task
@@ -204,23 +204,36 @@
             env (cond-> (assoc (r/desired-env t) :model "outside")
                   restart (assoc :branch (:branch restart))
                   client (assoc :holder client))
-            ;; the session's agent continues (docs/turn.md#parked)
-            k (when-not (or fresh? clone-of) (task/agent-key db id))
+            ;; the session's agent continues (docs/turn.md#parked); a new one's key is made here, so its start is main's before its branch is cut
+            k (when-not clone-of (or (when-not fresh? (task/agent-key db id)) (lib/unique-id)))
             opts (cond-> {:branch (:branch env) :task id} k (assoc :key k))
+            replaced (when fresh? (:agent (first (live-run sys db id))))
+            ;; read after the restart's retractions: its outcome swap starts from none
+            start (fn [ag] (vec (concat (task/execution-tx [id] :running) (:tx restart)
+                                        (task/start-tx (cond-> db restart (-> (pdb/with (:tx restart)) :db-after)) id (:boot sys) ag env (System/currentTimeMillis)))))
+            ;; the start (its outside env, so the reconciler starts no loop; :spawning, so it counts the agent live and spawns none of its own) is
+            ;; written on main BEFORE the spawn: the branch is cut holding its agent's task, root's alone (:seon.agent/task, docs/users.md), so the
+            ;; agent never copies it (two writers disagreed at a whole task's stage move). A clone's branch is cut from its source's: it starts after
+            started (when k @(c/transact-main! sys (conj (start (keyword k)) {:seon.agent/key k :seon.agent/status :spawning})))
             r (if clone-of @(c/clone! sys clone-of opts) @(c/call! sys (c/request 'spawn! nil opts nil)))
             ag (:id r)]
         ;; spawn!'s request, its answer a value: a refusal (a branch another agent holds, named with
-        ;; its task) is the attach's answer, never a server defect
+        ;; its task) is the attach's answer, never a server defect; the start written for it is undone exactly (each fact its transaction
+        ;; wrote on the task and the agent inverted, one rule for every attribute: the session's key, a restart's branch, the release), then the
+        ;; refusal written and the agent that never ran ended
         (if-not ag
-          r
-          (let [replaced (when fresh? (:agent (first (live-run sys db id))))]
-            @(c/transact-main! sys (vec (concat (task/execution-tx [id] :running)
-                                                (:tx restart)
-                                                ;; read after the restart's retractions: its outcome swap starts from none
-                                                (task/start-tx (cond-> db restart (-> (pdb/with (:tx restart)) :db-after)) id (:boot sys) ag env
-                                                               (System/currentTimeMillis)))))
-            (when replaced (c/kill! sys replaced))
-            {:agent ag :task id})))))))
+          (do (when (:t started)
+                (let [db @(:conn sys) h (d/history db)
+                      undo (vec (for [e (remove nil? [(pdb/eid db :seon.task/id id) (pdb/eid db :seon.agent/key k)])
+                                      dt (d/datoms h :eavt e) :when (= (:t started) (:tx dt))]
+                                  [(if (:added dt) :db/retract :db/add) (:e dt) (:a dt) (:v dt)]))]
+                  ;; one transaction: the refusal read on the task as the undo leaves it
+                  @(c/transact-main! sys (into undo (conj (task/refused-tx (:db-after (pdb/with db undo)) id r)
+                                                          {:seon.agent/key k :seon.agent/status :ended :seon.agent/ended-ms (System/currentTimeMillis)})))))
+              r)
+          (do (when clone-of @(c/transact-main! sys (start ag)))
+              (when replaced (c/kill! sys replaced))
+              {:agent ag :task id})))))))
 
 (defn- fork!
   "A fork of live agent from: a sibling of its task, <name>-fork-<n> (its plan, proofs and kind, on
