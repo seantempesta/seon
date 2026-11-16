@@ -1,14 +1,15 @@
 ;; The config (session CONFIG, owner 2026-10-21: "the only things that should stay are documented
 ;; config schemas that we are porting from seon if they are relevant"). Each key's schema, in seon.config.<area>.edn,
 ;; states its default (:default) with its unit, provenance and what happens at its bound (owner, 2026-11-16: config
-;; defaults live in the schema; seon.config/defaults); resources/seon/config/default.edn states only what a schema
+;; defaults live in the schema; malli's default-value-transformer applies them); resources/seon/config/default.edn states only what a schema
 ;; can't (values read from the process, #profile choices, #ref and #join paths). Each keeps v1's shape (~/src/seon resources/seon/schemas/
 ;; seon.config.*.edn): a schema with a :description and its :seon.config/unit.
 ;;
-;; :seon.config/config is the whole resolved config: open, as every entity schema is, and every key optional, since a task holds single keys as its overrides; a write is held to the
-;; keys it holds. The loader keeps it open (owner, 2026-11-16: no closed map), so an unknown key is carried, read by nothing, and
-;; requires every key but those seon.config's may-be-absent names; that each has a value is
-;; seon.config-test/the-shipped-file-validates-under-every-profile's,
+;; :seon.config/config is the config's entity schema: open (owner, 2026-11-16: no closed map) and every key optional, as every
+;; entity schema is, since an entity holds the keys it holds (a task's single overrides). A config as a process reads it is held
+;; to more (seon.config/config-schema): every key required but those whose own schema says :seon.config/optional true (a key its
+;; readers take as absent), each required key's :default filling it first (malli's default-value-transformer); that each has a
+;; value is seon.config-test/the-shipped-file-validates-under-every-profile's,
 ;; and its entries declare the attributes root writes on the config entity on main (seon.task/config-tx).
 {:seon.config/config
  [:map {:seon.db/attributes true

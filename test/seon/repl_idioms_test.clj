@@ -6,16 +6,16 @@
             [my.test :as t] [datahike.api :as d] [clojure.string :as str]))
 
 (defn vars-db
-  "The input of size n: the world with n more vars (app.big/f0 ...), as the one argument vector."
+  "The input of size n: the world with n more var entities (app.big/f0 ..., the name alone: the index is what is read), as the one argument vector."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db]]}
-  [n] [(t/with (t/world) (t/code 'app.big (apply str "(ns app.big)\n" (for [i (range n)] (str "(defn f" i " [] " i ")\n")))))])
+  [n] [(t/with (t/world) (vec (for [i (range n)] {:var/name (symbol "app.big" (str "f" i))})))])
 
 (defn first-names
   "The first five var names off the :var/name index: docs/agent.md#small-answers's head."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :symbol]]}
   [db] (->> (d/datoms db :aevt :var/name) (take 5) (mapv :v)))
 
-(deftest the-idioms-answer-their-questions
+(deftest ^{:seon.test/estimate {:ticks 6000000}} the-idioms-answer-their-questions
   ;; docs/agent.md#small-answers: each idiom answers the question it is shown for
   (let [[db] (vars-db 30)
         q '[:find ?n :where [_ :var/name ?n]]]
@@ -32,7 +32,7 @@
     (is (= [:a :b] (->> (update-vals {:a "xxxxxx" :b "x" :c 1} (comp count pr-str)) (sort-by val >) (take 2) (map key)))
         "a map's keys by the size of their values")))
 
-(deftest the-first-few-by-index-cost-the-few-not-the-index
+(deftest ^{:seon.test/estimate {:ticks 30000000}} the-first-few-by-index-cost-the-few-not-the-index
   ;; docs/agent.md#small-answers: five datoms read lazily off the index cost the same whatever the db
   ;; holds; a datoms that read eagerly, or an idiom that walked the index, grows with it
   (cost/proof
