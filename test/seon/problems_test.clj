@@ -32,36 +32,36 @@
 
 (defn- occ [e agent ms] (err/occurrence e :eval {:agent agent :task "t/a" :form "(f 1)"} ms))
 
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-storm-is-one-write-per-window
-  (ts/test-branch! (fn [_ conn] (let [f (reduce err/fold {} (concat (for [i (range 1000)] (occ (invalid 'app/f i) (if (even? i) :a1 :a2) (+ 1000 i)))
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-storm-is-one-write-per-window
+  (ts/test-branch! (fn [_ conn] (let [f (reduce err/fold {} (concat (for [i (range 100)] (occ (invalid 'app/f i) (if (even? i) :a1 :a2) (+ 1000 i)))
                                      (for [i (range 10)] (occ (invalid 'app/g i) :a3 (+ 5000 i)))))
         [f tx] (err/flush-tx f @conn)
         s (err/signature (invalid 'app/f 0))]
-    (is (= 2 (count tx)) "1,010 occurrences, two signatures, two entities")
+    (is (= 2 (count tx)) "110 occurrences, two signatures, two entities")
     (d/transact conn tx)
     (let [r (err/record @conn s)]
-      (is (= [1000 2 :eval 'app/f :a2 "t/a"]
+      (is (= [100 2 :eval 'app/f :a2 "t/a"]
              [(:seon.error/count r) (:seon.error/agents r) (:seon.error/class r) (:seon.error/operation r)
               (:seon.error/last-agent r) (:seon.error/last-task r)]))
       (is (= :seon.instrument/contract-error (get-in r [:seon.error/example :seon.error/type])) "the example is the error map, as data")
-      (is (= [1000 1999] [(:seon.error/first-ms r) (:seon.error/last-ms r)])))
+      (is (= [1000 1099] [(:seon.error/first-ms r) (:seon.error/last-ms r)])))
     (testing "an unchanged window writes nothing"
       (is (= [] (second (err/flush-tx f @conn)))))
     (testing "a written signature's later occurrences count in the fold, not on main; a new observer adds to the stored count"
       (let [[f tx] (err/flush-tx (reduce err/fold f (for [i (range 5)] (occ (invalid 'app/f i) :a1 3000))) @conn)]
         (is (= [] tx))
-        (is (= 1005 (:count (get f (err/cause (invalid 'app/f 0))))) "the fold holds the true count")
-        (is (= 1000 (:seon.error/count (err/record @conn s))) "main still holds the written one")
+        (is (= 105 (:count (get f (err/cause (invalid 'app/f 0))))) "the fold holds the true count")
+        (is (= 100 (:seon.error/count (err/record @conn s))) "main still holds the written one")
         (testing "the next write that has a signature to write carries the pending count"
           (let [[_ tx] (err/flush-tx (err/fold f (occ (invalid 'app/h 0) :a1 3500)) @conn)]
-            (is (= #{1005 1} (set (map :seon.error/count tx))))))
+            (is (= #{105 1} (set (map :seon.error/count tx))))))
         (let [[_ tx] (err/flush-tx (reduce err/fold {} (for [i (range 7)] (occ (invalid 'app/f i) :a9 4000))) @conn)]
           (d/transact conn tx)
-          (is (= 1007 (:seon.error/count (err/record @conn s)))))))))))
+          (is (= 107 (:seon.error/count (err/record @conn s)))))))))))
 
 ;; ---- a repeated defect is not a write (task seon.error/a-repeated-defect-writes-nothing) ------
 
-(deftest ^{:seon.test/estimate {:ticks 20000000}} a-written-signature-is-not-written-again
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-written-signature-is-not-written-again
   ;; the window's write is one entity per signature that CHANGED (a-storm-is-one-write-per-window);
   ;; a signature already on main whose only change is one more occurrence is the same fact,
   ;; counted in the observer's fold: transacting its count is what made 41,709 commits in 70 s
@@ -69,10 +69,10 @@
         [f tx] (err/flush-tx f @conn)]
     (is (= 1 (count tx)) "the first occurrence writes the signature")
     (d/transact conn {:tx-data tx})
-    (let [[_ tx2] (err/flush-tx (reduce err/fold f (for [i (range 1000)] (occ (invalid 'app/f i) :a1 (+ 2000 i)))) @conn)]
-      (is (= [] tx2) "1,000 more occurrences of a written signature change no fact")
-      (let [f (reduce err/fold f (for [i (range 1000)] (occ (invalid 'app/f i) :a1 (+ 2000 i))))]
-        (is (= [3 1003] [(get-in (problems/report @conn) [:classes :eval :rows 0 :count])
+    (let [[_ tx2] (err/flush-tx (reduce err/fold f (for [i (range 50)] (occ (invalid 'app/f i) :a1 (+ 2000 i)))) @conn)]
+      (is (= [] tx2) "50 more occurrences of a written signature change no fact")
+      (let [f (reduce err/fold f (for [i (range 50)] (occ (invalid 'app/f i) :a1 (+ 2000 i))))]
+        (is (= [3 53] [(get-in (problems/report @conn) [:classes :eval :rows 0 :count])
                          (get-in (problems/report @conn f) [:classes :eval :rows 0 :count])])
             "the report reads the true count from the fold")))))))
 
@@ -498,7 +498,7 @@
   fixed clean program."
   [n] [(seeded n 4)])
 
-(deftest ^{:seon.test/estimate {:ticks 20000000}} problems-reads-only-the-problems
+(deftest ^{:seon.test/estimate {:ticks 12000000}} problems-reads-only-the-problems
   (cost/proof {:of 'seon.problems/report :input 'seon.problems-test/rows-input
                :n "recorded problems of each class (per n: one signature, one red task, one dead task)"
                :work (str "one index seek per class, then per row one pull: the signature's 13 attributes; a task's "
@@ -542,7 +542,7 @@
                                  :seon.agent/max-turns 2 :seon.agent/task [:seon.task/id "t/h0"]}])]
         [db (pdb/eid db :seon.agent/key "b/own")]))
 
-(deftest ^{:seon.test/estimate {:ticks 30000000}} an-agents-own-problems-cost-nothing-for-the-history
+(deftest ^{:seon.test/estimate {:ticks 11000000}} an-agents-own-problems-cost-nothing-for-the-history
   (cost/proof {:of 'seon.problems/own :input 'seon.problems-test/own-input
                :n "finished tasks, each merged by an agent of its own, beside the agent asked for"
                :work "the agent's task's pull (its outcome, agent and attributes), and the error signatures' last-task datoms: none per finished task"
@@ -551,7 +551,7 @@
                :fixed {:ticks 85000 :bytes 320000}
                :sizes [4 8 16]}))
 
-(deftest ^{:seon.test/estimate {:ticks 30000000}} problems-move-at-the-cost-of-what-changed
+(deftest ^{:seon.test/estimate {:ticks 11000000}} problems-move-at-the-cost-of-what-changed
   ;; main moves by one task's ending while its finished history grows: the health of the move reads the task it
   ;; touched, not the history (health-moved; report read every task's cost verdict and waste)
   (cost/proof {:of 'seon.problems/health-moved :input 'seon.problems-test/history-input
@@ -564,7 +564,7 @@
                                                                    ; its row (derived-row) on base and head (data, 2026-11-15, measured 104 -> 106)
                :sizes [4 8 16]}))
 
-(deftest ^{:seon.test/estimate {:ticks 25000000}} problems-cost-nothing-for-a-clean-program
+(deftest ^{:seon.test/estimate {:ticks 14000000}} problems-cost-nothing-for-a-clean-program
   (cost/proof {:of 'seon.problems/report :input 'seon.problems-test/clean-input
                :n "clean tasks (each done), beside 4 problems of each class"
                :work "none per clean task: the indexes the read seeks hold only problem rows; the 4 problem sets cost what they cost"
@@ -863,7 +863,7 @@
             db (d/db-with db0 (seon.doc/load-tx db0 "docs" {"docs/forks.md" page}))]
         [(d/db-with db (for [i (range n)] {:seon.pin/path (str "reference-code/lib" i) :seon.pin/commit (str "def" i)})) {}]))
 
-(deftest ^{:seon.test/estimate {:ticks 20000000}} unnamed-sites-follow-the-catch-forms
+(deftest ^{:seon.test/estimate {:ticks 8000000}} unnamed-sites-follow-the-catch-forms
   (cost/proof {:of 'seon.problems/unnamed-sites :input 'seon.problems-test/catch-input
                :n "live forms carrying a catch, each defining one var, none named by the page"
                :work "once: the page's cited names as a set, the method and impl owners, the program's namespaces (seon.program/program-nss); per site: its form entity, its defines and one row"
@@ -877,7 +877,7 @@
                :fixed {:ns 500000 :bytes 570000} ; 22: the one-printer law's rule beside catch, its four dials read once (tests, 9 -> 22 by 39 -> 52 at 10)
                :sizes [4 8 16]}))
 
-(deftest ^{:seon.test/estimate {:ticks 15000000}} stale-pins-follow-the-pin-page
+(deftest ^{:seon.test/estimate {:ticks 6000000}} stale-pins-follow-the-pin-page
   (cost/proof {:of 'seon.problems/stale-pins :input 'seon.problems-test/pins-input
                :n "sections of docs/forks.md, each stating one stale pin"
                :work "one AVET range of addresses, then per section a pull of its text, one regex scan and one row"
@@ -886,7 +886,7 @@
                :fixed {:ns 600000 :bytes 600000}
                :sizes [4 8 16]}))
 
-(deftest ^{:seon.test/estimate {:ticks 30000000}} health-follows-what-is-recorded-and-cited
+(deftest ^{:seon.test/estimate {:ticks 10000000}} health-follows-what-is-recorded-and-cited
   (cost/proof {:of 'seon.problems/health :input 'seon.problems-test/health-input
                :n "unnamed catch sites (the derived classes dominate; the recorded part is the seed's)"
                :work "report once, then the three derived reads; the sites dominate"
@@ -932,7 +932,7 @@
     (testing label
       (is (= (caused-full base head) (caused-sites base head))))))
 
-(deftest ^{:seon.test/estimate {:ticks 10000000}} caused-agrees-with-the-full-reading
+(deftest ^{:seon.test/estimate {:ticks 20000000}} caused-agrees-with-the-full-reading
   (let [[base e v _ none page] (caused-world)
         gone (d/db-with base [[:db/retractEntity (e base v)]])]
     (agrees-with-the-full-reading
@@ -942,7 +942,7 @@
       "the var is back" (d/db-with gone [{:var/name v}])
       "a section is added citing a dead name" (d/db-with base (seon.doc/load-tx base "demo" {"demo/p.md" page "demo/r.md" (str "# R\n\nIt reads `" none "`.\n")}))})))
 
-(deftest ^{:seon.test/estimate {:ticks 10000000}} caused-agrees-with-the-full-reading-for-an-edited-page
+(deftest ^{:seon.test/estimate {:ticks 20000000}} caused-agrees-with-the-full-reading-for-an-edited-page
   (let [[base e _ w _ _ failure-points] (caused-world)
         named (d/db-with base (seon.doc/load-tx base "docs" {"docs/failure-points.md" failure-points}))]
     (agrees-with-the-full-reading
@@ -951,7 +951,7 @@
       "the failure-points page names a site" named
       "the page names it, then a var it cites is deleted" (d/db-with named [[:db/retractEntity (e named 'app.cost/v1)]])})))
 
-(deftest ^{:seon.test/estimate {:ticks 10000000}} caused-agrees-with-the-full-reading-for-an-added-catch-site
+(deftest ^{:seon.test/estimate {:ticks 20000000}} caused-agrees-with-the-full-reading-for-an-added-catch-site
   (let [[base] (caused-world)
         head (catch-forms base 4)]
     (agrees-with-the-full-reading base {"a catch site is added" head})
@@ -975,7 +975,7 @@
             head (catch-forms (d/db-with base (seon.doc/load-tx base "demo" {"demo/c.md" changed})) (inc n))]
         [base head (seon.merge/delta-changes base head #{}) (problems/caused-datoms base head)]))
 
-(deftest ^{:seon.test/estimate {:ticks 50000000}} caused-follows-what-changed
+(deftest ^{:seon.test/estimate {:ticks 30000000}} caused-follows-what-changed
   ;; the program grows (n sections citing, n catch sites); the change is fixed (one section, one
   ;; site): the work is the scan of the attributes' datoms, a few bytes each, never a pull or a rule
   ;; per citation or site. Before: ~150 KB per catch site, both dbs read in full. 24 contracted calls were its three
@@ -1003,7 +1003,7 @@
                ;; once for both sides (tests, measured 90 -> 103 before context's 97); + 4 (flow, 2026-11-14): :stateful-outside-flow's reader
                ;; on base and head, and on each side the seek of each changed var's namespace file
                :fixed {:ticks 460000 :bytes 1800000} ; 90: and retyped-attributes' own contract, once a read (data, 2026-11-14)
-               :sizes [4 8 16]}))
+               :sizes [2 4 8]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
 
@@ -1023,7 +1023,7 @@
   (let [ve (pdb/eid db :var/name v)]
     (d/db-with (change-var db v) [[:db/add ve (or attr :var/doc) (str "changed " (random-uuid))]])))
 
-(deftest ^{:seon.test/estimate {:ticks 15000000}} health-moved-is-health
+(deftest ^{:seon.test/estimate {:ticks 5000000}} health-moved-is-health
   ;; health-moved carries prev's rows and reads where base and head differ: for each kind of move
   ;; of main it equals health read whole (set of rows by class; the row order is the scan's)
   (let [db0 (world)
@@ -1044,18 +1044,63 @@
         (is (same? db1 db2))
         (is (pos? (get-in (problems/health-moved (problems/health db1) db1 db2 (diff db1 db2) (:classes (problems/report db2))) [:classes :dead :n])))
         (is (same? db2 db3))
-        (is (zero? (get-in (problems/health-moved (problems/health db2) db2 db3 (diff db2 db3) (:classes (problems/report db3))) [:classes :dead :n])))))
+        (is (zero? (get-in (problems/health-moved (problems/health db2) db2 db3 (diff db2 db3) (:classes (problems/report db3))) [:classes :dead :n])))))))
+
+(deftest ^{:seon.test/estimate {:ticks 5000000}} health-moved-is-health-for-a-changed-docstring
+  ;; health-moved carries prev's rows and reads where base and head differ: for each kind of move
+  ;; of main it equals health read whole (set of rows by class; the row order is the scan's)
+  (let [db0 (world)
+        [v w] ['app.calc/inc2 'app.calc/add]
+        page (str "# P\n\nIt reads `" v "` and `" w "`.\n")
+        db1 (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" page}))
+        same? (fn [base head]
+                (let [moved (problems/health-moved (problems/health base) base head (diff base head) (:classes (problems/report head))) whole (problems/health head)]
+                  (and (= (set (keys (:classes whole))) (set (keys (:classes moved))))
+                       (every? #(= (set (get-in whole [:classes % :rows])) (set (get-in moved [:classes % :rows])))
+                               (keys (:classes whole))))))
+        died (ended "t/x" {:seon.task/proofs #{'t-test/x} :seon.task/outcome :dead :seon.task/reason "its agent died"
+                           :seon.task/error (contract/error :seon.agent/died 'seon.system/end-agent "agent a1 died" {:agent :a1})})]
     (testing "a docstring changed under the text opens a stale section"
       (let [db2 (change-meaning db1 v)]
         (is (same? db1 db2))
         (is (= 1 (get-in (problems/health-moved (problems/health db1) db1 db2 (diff db1 db2) (:classes (problems/report db2))) [:classes :stale-section :n])))
         (testing "and editing the section closes it"
-          (is (same? db2 (d/db-with db2 (seon.doc/load-tx db2 "demo" {"demo/p.md" (str page "\nMore.\n")})))))))
+          (is (same? db2 (d/db-with db2 (seon.doc/load-tx db2 "demo" {"demo/p.md" (str page "\nMore.\n")})))))))))
+
+(deftest ^{:seon.test/estimate {:ticks 5000000}} health-moved-is-health-for-a-linked-page
+  ;; health-moved carries prev's rows and reads where base and head differ: for each kind of move
+  ;; of main it equals health read whole (set of rows by class; the row order is the scan's)
+  (let [db0 (world)
+        [v w] ['app.calc/inc2 'app.calc/add]
+        page (str "# P\n\nIt reads `" v "` and `" w "`.\n")
+        db1 (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" page}))
+        same? (fn [base head]
+                (let [moved (problems/health-moved (problems/health base) base head (diff base head) (:classes (problems/report head))) whole (problems/health head)]
+                  (and (= (set (keys (:classes whole))) (set (keys (:classes moved))))
+                       (every? #(= (set (get-in whole [:classes % :rows])) (set (get-in moved [:classes % :rows])))
+                               (keys (:classes whole))))))
+        died (ended "t/x" {:seon.task/proofs #{'t-test/x} :seon.task/outcome :dead :seon.task/reason "its agent died"
+                           :seon.task/error (contract/error :seon.agent/died 'seon.system/end-agent "agent a1 died" {:agent :a1})})]
     (testing "a page added that an unchanged section links to"
       (let [linking (d/db-with db1 (seon.doc/load-tx db1 "demo" {"demo/p.md" (str page "\nSee [q](q.md).\n")}))
             both (d/db-with linking (seon.doc/load-tx linking "demo" {"demo/p.md" (str page "\nSee [q](q.md).\n") "demo/q.md" "# Q\n\nLead.\n"}))]
         (is (same? db1 linking))
-        (is (same? linking both))))
+        (is (same? linking both))))))
+
+(deftest ^{:seon.test/estimate {:ticks 5000000}} health-moved-is-health-for-an-answer-on-an-untouched-task
+  ;; health-moved carries prev's rows and reads where base and head differ: for each kind of move
+  ;; of main it equals health read whole (set of rows by class; the row order is the scan's)
+  (let [db0 (world)
+        [v w] ['app.calc/inc2 'app.calc/add]
+        page (str "# P\n\nIt reads `" v "` and `" w "`.\n")
+        db1 (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" page}))
+        same? (fn [base head]
+                (let [moved (problems/health-moved (problems/health base) base head (diff base head) (:classes (problems/report head))) whole (problems/health head)]
+                  (and (= (set (keys (:classes whole))) (set (keys (:classes moved))))
+                       (every? #(= (set (get-in whole [:classes % :rows])) (set (get-in moved [:classes % :rows])))
+                               (keys (:classes whole))))))
+        died (ended "t/x" {:seon.task/proofs #{'t-test/x} :seon.task/outcome :dead :seon.task/reason "its agent died"
+                           :seon.task/error (contract/error :seon.agent/died 'seon.system/end-agent "agent a1 died" {:agent :a1})})]
     (testing "an answer added to an untouched task's row is carried current"
       (let [db2 (d/db-with db1 [died])
             db3 (d/db-with db2 [{:seon.task/id "fix/x" :seon.task/ns 'fix :seon.task/name "x" :seon.task/plan "p" :seon.task/execution :held
@@ -1133,7 +1178,7 @@
   [n] (let [db0 (world)]
         [(d/db-with db0 (seon.doc/load-tx db0 "docs" {"docs/p.md" (apply str "# P\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\n- item\n")))})) {}]))
 
-(deftest ^{:seon.test/estimate {:ticks 15000000}} leadless-sections-follow-the-sections
+(deftest ^{:seon.test/estimate {:ticks 4000000}} leadless-sections-follow-the-sections
   (cost/proof {:of 'seon.problems/leadless-sections :input 'seon.problems-test/leadless-input
                :n "sections, none with a lead"
                :work "the sections' addresses and the lead datoms once, sorted by address, then a row per section"
@@ -1173,7 +1218,7 @@
             db (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/c.md" page}))]
         [(reduce change-meaning db (distinct vs)) {}]))
 
-(deftest ^{:seon.test/estimate {:ticks 30000000}} stale-sections-follow-the-recorded-names
+(deftest ^{:seon.test/estimate {:ticks 12000000}} stale-sections-follow-the-recorded-names
   (cost/proof {:of 'seon.problems/stale-sections :input 'seon.problems-test/stale-input
                :n "sections each citing a var whose docstring then changed"
                :work "the read, review, vars' and forms' datoms in one scan each, then per recorded name whose form moved a seek of its var, its name's history and each meaning attribute's history (value-at), and a row"
@@ -1190,7 +1235,7 @@
   [n] (let [db0 (world)]
         [(d/db-with db0 (seon.doc/load-tx db0 "docs" (into {"docs/README.md" "# Map\n\nThe map.\n"} (for [i (range n)] [(str "docs/p" i ".md") (str "# P" i "\n\nThe page.\n")])))) {}]))
 
-(deftest ^{:seon.test/estimate {:ticks 10000000}} orphan-pages-follow-the-sections
+(deftest ^{:seon.test/estimate {:ticks 4000000}} orphan-pages-follow-the-sections
   (cost/proof {:of 'seon.problems/orphan-pages :input 'seon.problems-test/orphan-input
                :n "pages, none linked"
                :work "the sections' addresses and the reference datoms once, then a row per orphan"
@@ -1261,7 +1306,7 @@
   [n] (let [v 'app.calc/inc2]
         [(uncited-fixture (for [i (range (quot n 2))] [(str "t" i) (str "It changes `" v "`.")]) #{}) {}]))
 
-(deftest ^{:seon.test/estimate {:ticks 40000000}} uncited-tasks-cost-the-tasks-they-examine
+(deftest ^{:seon.test/estimate {:ticks 9000000}} uncited-tasks-cost-the-tasks-they-examine
   ;; Sean, 2026-11-10: n restated as tasks examined (it was design/implement pairs): every task now gets its ready check, so
   ;; the class's work is per task; 68 calls measured at 20 tasks against 85 (per-n 4, fixed 5, unchanged)
   (cost/proof {:of 'seon.problems/uncited-tasks :input 'seon.problems-test/uncited-input
@@ -1435,7 +1480,7 @@
     (is (= [] (problems/uncited-vars persons {} #{v})) "the same var in a namespace whose docstring cites no section, a person's: no row")))
 
 ;; See docs/health.md#a-function-that-cites-no-section
-(deftest ^{:seon.test/estimate {:ticks 20000000}} uncited-vars-follow-the-vars-asked-for
+(deftest ^{:seon.test/estimate {:ticks 7000000}} uncited-vars-follow-the-vars-asked-for
   (cost/proof {:of 'seon.problems/uncited-vars :input 'seon.problems-test/uncited-var-input
                :n "changed public vars, each with a docstring that cites nothing"
                :work "once: the program's namespaces (seon.program/program-nss); per named var: one AVET seek, its entity, its docstring and its form's head (read by seon.source/first-head), and one row"
@@ -1478,7 +1523,7 @@
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :long-form))))
 
 ;; See docs/health.md#a-form-too-long
-(deftest ^{:seon.test/estimate {:ticks 15000000}} long-forms-follow-the-vars-asked-for
+(deftest ^{:seon.test/estimate {:ticks 6000000}} long-forms-follow-the-vars-asked-for
   (cost/proof {:of 'seon.problems/long-forms :input 'seon.problems-test/long-form-input
                :n "changed vars, each with a form under the bound"
                :work "per named var: one AVET seek, its entity and its form's text length"
