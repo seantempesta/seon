@@ -172,9 +172,11 @@
  :seon.test/unreadable-line [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/unreadable-line]]]]
  ;; a test that never returned within its wall bound (seon.agent/wall-bound-ms): ended after its evidence, Jolt's dump of every fiber
  :seon.test-store/no-answer [:and {:description "A test root asked (seon.test-store/ask) answered nothing within the ask's bound (a test's wall less :seon.config.proofs/ask-margin-ms, else :seon.config.proofs/ask-ms): what was asked."} :seon.error/base [:map [:seon.error/type [:= :seon.test-store/no-answer]] [:asked :any]]]
- :seon.test/wall-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/wall-spent]] [:test :string] [:bound-ms pos-int?] [:dump :string]]]
+ :seon.test/wall-spent [:and {:seon.error/no-verdict true} :seon.error/base [:map [:seon.error/type [:= :seon.test/wall-spent]] [:test :string] [:bound-ms pos-int?] [:dump :string]]]
  ;; the OS refused the thread that ends a process with its starter (seon.lib/end-with!)
  :seon.lib/starter-unwatched [:and :seon.error/base [:map [:seon.error/type [:= :seon.lib/starter-unwatched]] [:pid [:maybe :int]]]]
+ ;; a message made from its schema that does not hold it (seon.contract/message)
+ :seon.contract/invalid-message [:and :seon.error/base [:map [:seon.error/type [:= :seon.contract/invalid-message]] [:schema :qualified-keyword]]]
  ;; a waitpid that reaped nothing: no status was read (seon.lib/wait-status)
  :seon.lib/no-child [:and :seon.error/base [:map [:seon.error/type [:= :seon.lib/no-child]] [:pid :int] [:answered :int]]]
  :seon.test/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int]
@@ -190,7 +192,7 @@
  :seon.process/branch-digest [:string {:description "A branch tree's binary identity (seon.fx/binary-digest at that tree)."}]
  :seon.process/tree [:string {:description "A git tree id, as bin/tree and the import name it."}]
  :seon.process/differs [:vector {:description "What differs between the binary's tree and a branch's that only a build changes: the build inputs and pins, as paths (seon.fx/runtime-for)."} :string]
- :seon.process/env-mismatch [:and {:description "A process's binary is not its branch's: the running binary's identity (seon.fx/binary-digest) differs from the branch tree's; its caller builds once (seon.fx/runtime-for)."} :seon.error/base [:map [:seon.error/type [:= :seon.process/env-mismatch]] [:seon.process/binary-digest [:maybe :string]] [:seon.process/branch-digest :string] [:seon.process/tree :string] [:seon.process/differs {:optional true} :seon.process/differs]]]
+ :seon.process/env-mismatch [:and {:seon.error/no-verdict true :description "A process's binary is not its branch's: the running binary's identity (seon.fx/binary-digest) differs from the branch tree's; its caller builds once (seon.fx/runtime-for)."} :seon.error/base [:map [:seon.error/type [:= :seon.process/env-mismatch]] [:seon.process/binary-digest [:maybe :string]] [:seon.process/branch-digest :string] [:seon.process/tree :string] [:seon.process/differs {:optional true} :seon.process/differs]]]
  :seon.fx/tree-unmoved [:and {:description "A commit moved git's main but its checked-out tree could not follow: the commit stands, the tree is brought in by hand."}
                         :seon.error/base [:map [:seon.error/type [:= :seon.fx/tree-unmoved]] [:sha :string]]]
  :seon.fx/ref-moved [:and {:description "A commit asked to move a branch only from the commit it expected found the branch elsewhere: nothing written; the caller reads what moved it and asks again."}

@@ -737,6 +737,22 @@
       (let [page (str "# Failure points\n\n| failure | edge |\n|---|---|\n| x | `" v "` |\n")]
         (is (= [] (unnamed (d/db-with db1 (seon.doc/load-tx db1 "docs" {"docs/failure-points.md" page})))))))))
 
+;; root, 2026-11-17: four hand lists of keys on message paths dropped a key each (the api's :process?, the candidate, an item's
+;; :write-out, the effect's request); a send whose line takes a select-keys is a :message-lists site its page must name, and one
+;; made from its schema (seon.contract/message) is none. Red first: no such law. Estimate: the world (~2M) and two health reads
+;; (~0.5M each): 4,000,000.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-send-of-a-hand-list-of-keys-is-a-message-lists-site
+  (let [db0 (world)
+        v 'app.calc/inc2
+        fe (:db/id (:var/form (d/entity db0 [:var/name v])))
+        ns-e (:db/id (:var/ns (d/entity db0 (:e (first (d/datoms db0 :avet :var/name v))))))
+        src (fn [db text] (d/db-with db [[:db/add ns-e :ns/file "src/app/m.clj"] [:db/add fe :form/src text]]))
+        unnamed (fn [db law] (into [] (comp (filter (comp #{law} :law)) (map (juxt :law :site))) (get-in (problems/health db) [:classes :unnamed-site :rows])))]
+    (is (= [[:message-lists v]] (unnamed (src db0 "(defn inc2 [o m] (step/out! o :to-api (select-keys m [:a :b])))") :message-lists))
+        "a send of a hand list of keys")
+    (is (= [] (unnamed (src db0 "(defn inc2 [o m] (step/out! o :to-api (contract/message :app/m m)))") :message-lists))
+        "a message made from its schema is none")))
+
 ;; Estimate: the world (~2M), five health reads of a small program (~0.5M each), a caused split of one moved form (~0.3M): ~5M; 8,000,000.
 (deftest ^{:seon.test/estimate {:ticks 8000000}} bin-laws-text-rules-are-health-classes-read-over-the-forms
   ;; root's order, the owner: "What is laws doing and why isn't this an online system?": bin/laws' text laws (clocks, measures,

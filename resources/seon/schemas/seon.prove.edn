@@ -4,7 +4,22 @@
  ;; a run could not read the verdicts at its digests (test-runner/read-results): why, never zero greens
  :seon.proofs/unread [:and :seon.error/base [:map [:seon.error/type [:= :seon.proofs/unread]] [:why :any]]]
  ;; the request a session or an agent's turn makes of the service, and its answer
- :seon.prove/request [:map [:branch :keyword] [:t :int] [:agent {:optional true} [:maybe :keyword]] [:proofs {:optional true} [:set :qualified-symbol]]]
+ ;; made by seon.contract/message wherever it is sent (the api's :prove, the proc's intake): the one list of what crosses
+ :seon.prove/request [:map {:description "A request of the test service: a run of a branch (its point, digest, asker and what it names), or a batch's verdicts to write (:verdicts). See docs/merging.md#the-test-service."}
+                      [:branch {:optional true} [:maybe :keyword]] [:t {:optional true} [:maybe :int]] [:digest {:optional true} [:maybe :string]]
+                      [:agent {:optional true} [:maybe :keyword]] [:proofs {:optional true} [:maybe [:set :symbol]]]
+                      [:names {:optional true} [:maybe [:set :symbol]]] [:mode {:optional true} [:maybe :keyword]]
+                      [:checkout {:optional true} [:maybe :string]] [:tree {:optional true} [:maybe :string]]
+                      [:verdicts {:optional true} :any] [:process? {:optional true} [:maybe :boolean]]]
+ ;; what the prove proc holds of a booted candidate, to grant its batches and stop it (seon.fx/run-item's answer)
+ :seon.prove/held-candidate [:map {:description "A booted candidate as the test service holds it: :seon.test/candidate's :port, :store and :main, the pids and directories its stop needs, and a branch's write-out to drop with it. See docs/merging.md#the-test-service."}
+                             [:port :int] [:store :string] [:main :string] [:writer-pid {:optional true} [:maybe :int]] [:system-pid {:optional true} [:maybe :int]]
+                             [:dir {:optional true} :string] [:runs {:optional true} :string] [:write-out {:optional true} [:map [:dir :string] [:ref :string]]]]
+ ;; a tree or candidate item as the :process effect is asked to run it (seon.prove/grant)
+ :seon.prove/item-request [:map {:description "A build, seed, check step or candidate item as the :process effect owner runs it (seon.fx/run-item). See docs/merging.md#the-test-service."}
+                           [:kind :keyword] [:tree {:optional true} [:maybe :string]] [:checkout {:optional true} [:maybe :string]] [:name :any] [:digest :any]
+                           [:binary? :boolean] [:bound {:optional true} :any] [:seon.prove/batch :seon.prove/batch]
+                           [:branch {:optional true} :keyword] [:write-out {:optional true} :map]]
  ;; a batch's tag: what every process it starts carries as SEON_PROVE_BATCH (seon.fx/batch-tag)
  :seon.prove/batch [:string {:description "The test service's tag of a batch it granted, its process's pid and the batch's number: every process the batch starts carries it as SEON_PROVE_BATCH, so seon.fx/held-processes counts what each request in flight holds. See docs/merging.md#the-test-service."}]
  :seon.prove/askers [:set {:description "On a :process request of the test service, the askers waiting on its items: told when the owner holds it for the machine's load (seon.fx/held-told). See docs/merging.md#the-test-service."} :any]

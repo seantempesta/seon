@@ -771,7 +771,18 @@
             _ (try (d/branch! conn (or from (keyword smain)) (keyword cmain)) (finally (d/release conn)))
             bconn (pdb/connect (assoc cfg :branch (keyword cmain)))
             _ (try (let [running (d/q '[:find [?t ...] :where [?t :seon.task/execution :running]] @bconn)]
-                     (when (seq running) (d/transact bconn {:tx-data (mapv (fn [t] [:db/add t :seon.task/execution :held]) running)})))
+                     (when (seq running) (d/transact bconn {:tx-data (mapv (fn [t] [:db/add t :seon.task/execution :held]) running)}))
+                     ;; a branch's own build (checkout another than this process's): its main was brought to the tree that build is of, so
+                     ;; its source fact names that tree, the one every start's runtime check reads (seon.system's :seon.system/source :tree),
+                     ;; never the tree the clone inherited, which its binary is not (every attach refused, :seon.process/env-mismatch)
+                     (when (and from (not= checkout (seon.config/checkout)))
+                       ;; the tree as the build recorded it (target/seon.tree, what runtime-for reads of the binary), never HEAD's: bin/build
+                       ;; records the tree it built, its pins checked out, which is not the written-out commit's own tree
+                       (let [held (:seon.system/source (d/pull @bconn [:seon.system/source] [:seon.system/id :root]))
+                             built (clojure.string/trim (slurp (str checkout "/target/seon.tree")))
+                             commit (clojure.string/trim (:out (sh/sh "git" "-C" checkout "rev-parse" "HEAD")))]
+                         (d/transact bconn {:tx-data [{:seon.system/id :root
+                                                       :seon.system/source (assoc held :tree built :commit commit :root checkout)}]}))))
                    (finally (pdb/sync! cfg) (d/release bconn)))
             root (start-root! (cond-> {:store store :main cmain :runs (str dir "/runs")
                                        :args (if from
