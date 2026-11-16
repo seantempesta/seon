@@ -1836,11 +1836,14 @@
                2 {:src "(defn v2 ([st tr] st))" :contract step :refs #{(v 4)}}
                3 {:src "(defn v3 ([st tr] st))" :contract step :refs #{'seon.step/pend} :keywords #{:clojure.core.async.flow/drain}}
                4 {:src "(defn v4 [o] (seon.step/put-after! o 1 {}))" :refs #{'seon.step/put-after!}}
-               5 {:src "(defn v5 ([st tr] st))" :contract step :refs #{}}}
-        head (var-forms (world) 5 (fn [i] (specs (int i))))
+               5 {:src "(defn v5 ([st tr] st))" :contract step :refs #{}}
+               ;; an asker: its answerer ends what it asked (rule 3); one whose describe says why its work ends by itself
+               6 {:src "(defn v6 ([st tr] st))" :contract step :refs #{'seon.step/ask}}
+               7 {:src "(defn v7 ([] {:seon.flow/drain \"its timer ends with its queue\"}) ([st tr] st))" :contract step :refs #{'seon.step/put-after!} :keywords #{:seon.flow/drain}}}
+        head (var-forms (world) 7 (fn [i] (specs (int i))))
         rows (filterv #(= nsym (namespace (:site %))) (mapv :evidence (problems/undrained-procs head {} nil)))]
     (is (= [{:site (v 1) :law :undrained-proc :named? false} {:site (v 2) :law :undrained-proc :named? false}] rows)
-        "a proc holding a pend, or a timer through its helper, that names no drain; not one that drains, nor one that holds nothing")
+        "a proc holding a pend, or a timer through its helper, that names no drain; not one that drains, one that holds nothing, an asker, nor one that says why its work ends by itself")
     (is (= [{:site (v 2) :law :undrained-proc :named? false}] (mapv :evidence (problems/undrained-procs head {} #{(v 2) (v 3)})))
         "the moved procs alone")))
 
