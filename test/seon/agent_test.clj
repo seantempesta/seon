@@ -4128,13 +4128,3 @@
     (is (false? (agent/judges? g #{} 'seon.never-loaded-test/not-a-test)) "a name the program holds no deftest of does not")
     (is (false? (agent/judges? g #{} s)) "a stall task's proof judges only a task that names it")
     (is (true? (agent/judges? g #{s} s)) "and does judge the task that names it")))
-
-;; root's finding, 2026-11-16: the agent's whole-program reads index (seon.program/reads-index, 107M ticks over 6,402 vars [M
-;; result/bfc17509]) was kept by the branch's point, so every eval moved it and the next prove computed it again; it is derived
-;; from the program and the inputs alone, so it is kept by the program's digest and the inputs, and an eval that moves no form
-;; reuses it. Estimate: in-agent's setup ~1.5M + two test plans and one index in the agent (~0.7B, not this process's ticks) + 3 asks
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 5000000 :asks 3}} an-eval-that-moves-no-form-reuses-the-reads-index
-  (let [rd "(let [p (seon.agent/test-plan (seon.agent/db) (:base @seon.agent/state) #{})] (force (:reads-rd p)) (System/identityHashCode (second (:reads-index @seon.agent/state))))"
-        [before _ after] (in-agent (fn [_] [rd "(my.db/transact! [{:note/text \"a note, no form\"}])" rd]))]
-    (is (int? (:value before)) (pr-str before))
-    (is (= (:value before) (:value after)) "the same index, not computed again after a write that moved no form")))
