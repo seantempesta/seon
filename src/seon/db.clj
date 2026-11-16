@@ -409,15 +409,30 @@
                                                (datahike.datom/datom e :schema/form nil datahike.constants/txmax)))))
   nil)
 
+(def ^:private held-schemas
+  "The schema changes of the branch this process holds ({:forms :registry}, seon.agent/branch-schemas' :key and :registry), or nil
+  where it holds none (root, the fork server) or its branch changed no schema entry: what a write given no schemas is held to, so
+  a test's world written in an agent's test child is checked against the branch under test, never the binary's (a branch that
+  made a key optional was refused at its own test's write, 2026-11-16). seon.agent loads after this namespace: its vars are
+  found by name, once, as seon.contract/branch-registry finds them. See docs/storage.md#the-write-checks-every-entity-it-touches."
+  (let [found (volatile! nil)
+        vars #(or @found (let [st (find-var 'seon.agent/state) bs (find-var 'seon.agent/branch-schemas)]
+                          (when (and st bs (bound? st) (bound? bs)) (vreset! found [st bs]))))]
+    (fn []
+      (when-let [[st bs] (vars)]
+        (when (:db @@st)
+          (let [{:keys [key registry]} (@bs)] (when (seq key) {:forms key :registry registry})))))))
+
 (defn- checked
   "Transaction tx-data applied to db by apply-fn (Datahike's, given the tx-data: its report), held to both checks: each
-  datom's value (`invalid-datom`, with schemas {:forms :registry}, a branch's own) before, a lookup ref to nothing
+  datom's value (`invalid-datom`, with schemas {:forms :registry}, a branch's own; none given: the process's, held-schemas) before, a lookup ref to nothing
   (:seon.db/no-target), each entity it touched (`invalid-entity`, by the branch's `write-index`) after; an entity retracted whole takes the entities that require a ref to it with it.
   A refusal throws its typed error, and the value is as it was. See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :any :any [:maybe :map] ifn?] :map]}
   [db tx-data schemas apply-fn]
   (when-let [e (supplied-instant tx-data nil)] (refuse! e))
-  (let [ix (write-index schemas)
+  (let [schemas (or schemas (held-schemas))
+        ix (write-index schemas)
         ;; ends-with: tx-data with each entity retracted whole followed by the entities that require a ref to it (a vector's
         ;; identity, :seon.vector/of; a cite's :seon.cite/target; a form's :form/ns): such an entity has no meaning without its
         ;; target, and the entity check would refuse it left without a key its schema requires, so it ends with it, as Datahike
@@ -1401,11 +1416,14 @@
                [id (lib/digest-parts (concat [open] (interpose sep (map piece (sort ks))) [close]))]))))
 
 (defn results-moved
-  "The results (:seon.proof/proof-fact entities) on db a move's datoms reach: those whose recorded reads (:seon.proof/reads, one
-  value a result) hold one of a datom's keys: seon.db/readers over the index reads-add makes of them, so one matcher decides
-  for renders and results alike; a schema datom reaches every result. One read of each result's reads value: O(results), the stored results being what the results branch's collection keeps
-  (seon.db/the-store-holds-what-collection-keeps). See docs/storage.md#what-a-read-scanned."
+  "The results (:seon.proof/proof-fact entities) on db a move's datoms reach: those holding one of a datom's keys
+  (datahike.reads/datom-keys, each printed) as a :seon.proof/read-keys datom, one AVET seek a key; a schema datom reaches every
+  result. Cost: ~5 seeks a datom and the results found, never the stored results' reads. See docs/storage.md#what-a-read-scanned."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/datom]] [:set :seon.db/eid]]}
   [db datoms]
-  ;; the one matcher of moved datoms to readers (readers, over reads-add's index of each result's keys), never a second copy
-  (readers (reduce (fn [idx dt] (reads-add idx (:e dt) (:seon.reads/keys (:v dt)))) {} (d/datoms db :aevt :seon.proof/reads)) datoms))
+  (reduce (fn [acc dt]
+            (let [ks (datahike.reads/datom-keys dt)]
+              (if (some #{:all} ks)
+                (reduced (into #{} (map :e) (d/datoms db :aevt :seon.proof/test)))
+                (into acc (comp (mapcat #(d/datoms db :avet :seon.proof/read-keys (pr-str %))) (map :e)) ks))))
+          #{} datoms))

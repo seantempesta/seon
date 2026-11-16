@@ -601,16 +601,16 @@
       (is (= [] (:answered-by e)))
       (is (some? s)))
     (testing "a merge: its conflicts, unmerged keys and the writer's refused answer, as evidence"
-      (let [behind (contract/error :seon.merge/behind 'seon.writer/merge-refused "main changed 2 key(s)" {:behind 2})
+      (let [refused (contract/error :seon.merge/unmerged 'seon.writer/merge-refused "the branch has 1 unmerged entr(ies)" {:unmerged [[:var 'app/g]]})
             db2 (:db-after (d/with db [(ended "t/m" {:seon.task/kind :merge :seon.task/agent {:seon.agent/key "b/a2" :seon.agent/ended-ms 9}
-                                                     :seon.task/outcome :behind :seon.task/unmerged #{"[:var app/g]"}
+                                                     :seon.task/outcome :closed :seon.task/unmerged #{"[:var app/g]"}
                                                      :seon.task/conflicts [{:key [:var 'app/f]}]
-                                                     :seon.task/error behind})]))
+                                                     :seon.task/error refused})]))
             [m] (get-in (problems/report db2) [:classes :merge :rows])]
-        (is (= ["t/m" :behind 1 ["[:var app/g]"] 'seon.writer/merge-refused]
+        (is (= ["t/m" :closed 1 ["[:var app/g]"] 'seon.writer/merge-refused]
                [(:task m) (:status m) (:conflicts m) (:unmerged m) (:producer m)]))
         (is (= [{:key [:var 'app/f]}] (get-in m [:evidence :conflicts])))
-        (is (= :seon.merge/behind (get-in m [:error :seon.error/type])))))
+        (is (= :seon.merge/unmerged (get-in m [:error :seon.error/type])))))
     (testing "a task whose evidence names a problem answers it: mining files no duplicate"
       (ts/test-branch! (fn [_ c] (let [_ (d/transact c (vec (d/datoms db :eavt)))
             db2 db

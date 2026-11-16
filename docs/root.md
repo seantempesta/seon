@@ -31,7 +31,7 @@ In order: the store is opened and main resumed, reading no file and no git (`seo
 
 The reconciler starts an agent for each ready task and judges the agent's end from measured facts only; what it decides is stored on the task ([reconcile](reconcile.md#a-task-holds-how-its-work-ended)).
 
-```seon.reconcile/actions``` derives what root does next from the index (`seon.reconcile/index`, `seon.reconcile/observe`), in order: reap, kill, close, gate, an octopus merge of ready merge tasks, then starts (a spawn, or a wake of a parked agent) up to `:seon.config.agent/max-running` (merges up to `:seon.config.merge/max-running`). A pass costs what changed plus what is in flight, never the number of tasks.
+```seon.reconcile/actions``` derives what root does next from the index (`seon.reconcile/index`, `seon.reconcile/observe`), in order: reap, kill, close, gate, a `:merge` of each ready task (each alone, while no merge task works), then starts (a spawn, or a wake of a parked agent) up to `:seon.config.agent/max-running` (merges up to `:seon.config.merge/max-running`). A pass costs what changed plus what is in flight, never the number of tasks.
 
 A ready task merges alone through the writer's one `:merge`, which merges main into its branch in the same step, so it is never behind; when main's program moved since its proof the answer is `:reprove`, the task stands `:behind` and proves again on its branch, which now holds main, never counted or held (plan item 10, `seon.reconcile-test/a-ready-task-merges-alone-and-a-reprove-proves-again-never-held`). An end its turn loop never wrote is a dead agent ([turn](turn.md#the-end)).
 

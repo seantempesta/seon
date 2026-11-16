@@ -454,14 +454,15 @@
   "Why text can't be the shipped config on this process's branch, as a boot reads it with no profile, or nil: its message names each key. What a write of the file checks first (seon.fx/unreadable). See docs/source.md#a-program-file."
   {:malli/schema [:function [:=> [:cat :string] [:maybe :string]] [:=> [:cat :string [:maybe [:map-of :qualified-keyword :any]]] [:maybe :string]]]}
   ([text] (text-refusal text nil))
-  ;; changes: schema entries the same change states ({k form}, a branch's schema files read with it), so a config key and its
-  ;; schema changed together are checked against each other, never against this process's schema alone
+  ;; changes: schema entries the same change states ({k form}, a branch's schema files read with it), over the entries this process's
+  ;; branch already holds beyond the binary's (held's :changes), so a config key and its schema changed together are checked against
+  ;; each other and the branch, never against the binary's schema with the change's alone (a key the branch deleted stays deleted)
   ([text changes]
   ;; docs/failure-points.md: text that aero can't read, or a map that doesn't validate, is this answer
   (try
     (layered [[shipped-file (read-layer (java.io.StringReader. text) :default (checkout))]
               ["no --profile" {:seon.config.root/profile :default}]]
-             (if (seq changes) (schema-of changes) (:schema @held)))
+             (if (seq changes) (schema-of (merge (:changes @held) changes)) (:schema @held)))
     nil
     (catch Throwable e (ex-message e)))))
 

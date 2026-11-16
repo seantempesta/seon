@@ -19,7 +19,7 @@
   drains and flushes last, the fork server is reaped, then flow/stop.
 
   Agents transact facts on their own branch; root reacts: the writer applies them, and
-  only a merge task's octopus merge (the reconciler's, seon.writer) advances main."
+  only a ready task's merge (the reconciler's, through seon.writer's one :merge) advances main."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.ctx.wire :as wire] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
@@ -748,7 +748,7 @@
                (step/out! o :to-writer (assoc (dissoc req :agent) :dest dest))
                (update st :writes (fnil conj #{}) rid)))
       ;; the merge gate's run, whoever asks (the reconciler's :gate, an agent's seon.agent/judge!): branch's candidate
-      ;; (the writer's: the files the octopus merge would write), then the :tests effect over them on the gate checkout
+      ;; (the writer's: the files the merge would write), then the :tests effect over them on the gate checkout
       :gate (let [checkout (:gate-checkout (task/root @(:conn st)))]
               (if-not (and checkout (:branch (:source st)))
                 (reply! st o p (contract/error :seon.system/no-gate-checkout #'seon.system/ext-op "this root has no checkout to run process tests on (:seon.config.source/gate-checkout, or a source root)"))
@@ -2026,7 +2026,7 @@
   merge-main! message! release! opened! focus!) on agent id with args, as the api request it is: one table for these fns
   and the dashboard's calls (seon.web). a: the agent's entry in root's view, which
   merge-main! reads; an op the agent cannot take answers its error. A branch reaches main
-  only through a merge task (seon.reconcile's octopus merge)."
+  only through a ready task's merge (seon.reconcile, seon.writer's :merge)."
   {:malli/schema [:=> [:cat :symbol [:maybe :seon.agent/id] [:maybe :map] [:maybe :map]] :map]}
   [op id args a]
   (let [live? (boolean (and a (not (task/gone-statuses (:status a)))))

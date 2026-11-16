@@ -43,7 +43,7 @@
   "A result of test t that read keys ks, at db's basis, as tests' T-1 writes one."
   [db t ks status]
   {:seon.proof/id (seon.lib/digest (str t ks)) :seon.proof/test t :seon.proof/reads-digest (pdb/reads-digest db (set (map pr-str ks)) nil)
-   :seon.proof/reads {:seon.reads/branch :db :seon.reads/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.reads/keys (set ks)}
+   :seon.proof/read-keys (into #{} (map pr-str) ks)
    :seon.proof/status status :seon.proof/route :live
    :seon.proof/basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t (:max-tx db)}})
 
@@ -55,7 +55,7 @@
         db (pdb/db-with db0 [(proof db0 'app-test/one #{k-ea} :pass) (proof db0 'app-test/two #{k-a} :pass)])
         id-of #(:seon.proof/test (d/entity db %))
         moved (fn [& ds] (set (map id-of (pdb/results-moved db (map #(apply dd/datom %) ds)))))]
-    (is (= #{'app-test/one} (moved [e :note/text "x" 9])) "an entity's attribute it read: its result, by its reads value")
+    (is (= #{'app-test/one} (moved [e :note/text "x" 9])) "an entity's attribute it read: its result, by its read-key datom")
     (is (= #{'app-test/two} (moved [77 :seon.task/plan "p" 9])) "an attribute it read whole")
     (is (= #{} (moved [77 :seon.task/kind :work 9])) "an attribute no result read")
     (let [r (try (pdb/with db [{:seon.proof/id (seon.lib/digest (str 'app-test/one #{k-ea})) :seon.proof/status :fail}]) (catch clojure.lang.ExceptionInfo x (ex-data x)))]

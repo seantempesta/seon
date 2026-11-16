@@ -2265,7 +2265,7 @@
         ;; the done rule's reasons as the task holds them (:seon.task/reasons, data), each in its schema's words with what it is about as code;
         ;; a string only where no data stands behind it (a restart, a process gone): docs/render.md#how-the-work-stands
         said (some->> (seq (:seon.task/reasons t))
-                      (map (fn [r] (str (reason-title (:reason r)) (some->> (or (:symbol r) (:key r) (:behind r)) (str " `") (#(str % "`"))))))
+                      (map (fn [r] (str (reason-title (:reason r)) (some->> (or (:symbol r) (:key r)) (str " `") (#(str % "`"))))))
                       (str/join "; "))
         reason (when-not waiting? (some #(when-not (str/blank? %) %) [said (:seon.task/reason t) (:reason (:seon.task/failure t)) (when end (:seon.agent/reason a))]))]
     (cond-> {:state (keyword (case from :seon.task/outcome "task" :seon.agent/outcome "end" "status") (name (or k :none)))
