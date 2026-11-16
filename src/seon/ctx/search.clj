@@ -10,7 +10,21 @@
             [seon.config :as cfg]
             [seon.vector :as vector]
             [seon.program :as program]
-            [seon.ctx :as ctx]))
+            [seon.print :as print]))
+
+(defn callees
+  "The program functions proof p calls directly (one level: its recorded form's :form/refs,
+  the compiler's resolved references), each by its name, and for a helper of p's own namespace
+  its source too (what the proof means, which an agent reads first); a var is program when db holds it (a branch's callee this process never loaded
+  included). A callee's doc and contract are its source's or `doc`'s to show: a docstring
+  each was a large share of the first request. See docs/agent.md#what-you-read."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :map]]}
+  [db p]
+  (vec (for [q (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] db p)) p))
+             :let [v (d/entity db [:var/name q])]
+             :when (and v (not (contains? (set (:var/meta v)) :test)))]
+         (cond-> {:var q}
+           (= (namespace p) (namespace q)) (merge (some->> (doc/source-of db q) print/code (hash-map :source)))))))
 
 (defn- near
   "Where position at of text is: its line's number and its column (1-based), and the
@@ -334,7 +348,7 @@
         refs (if (by :refs)
                (into [] (comp (filter in-ns?) (filter (comp kinds first)) (distinct))
                      (concat (for [s seeds :when (symbol? s) c (doc/callers db s) :let [kd (kind-of db c)] :when (kinds kd)] [kd c])
-                             (for [s seeds :when (symbol? s) c (map :var (ctx/callees db s)) :let [kd (kind-of db c)] :when (kinds kd)] [kd c])
+                             (for [s seeds :when (symbol? s) c (map :var (callees db s)) :let [kd (kind-of db c)] :when (kinds kd)] [kd c])
                              (for [s seeds :when (symbol? s) e (d/q '[:find [?e ...] :in $ ?n :where [?e :seon.doc/names ?n]] db s) :when (kinds :section)]
                                [:section (:seon.doc/address (d/entity db e))])
                              ;; a schema key: the functions whose code or contract name it
