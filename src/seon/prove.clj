@@ -221,8 +221,10 @@
                                                (cond-> {:kind (:kind it) :tree (:tree it) :checkout (:checkout it)
                                                         :name (if (#{:build :seed} (:kind it)) (:kind it) (first k)) :digest (second k)
                                                         :binary? (boolean (:binary? it)) :bound (:bound it) :seon.prove/batch (fx/batch-tag bid)}
-                                                 ;; an agent branch's candidate names its branch (it has no checkout)
-                                                 (:branch it) (assoc :branch (:branch it))))}
+                                                 ;; an agent branch's candidate names its branch (it has no checkout), and, when its change moved a
+                                                 ;; build input, the write-out its build is made from (seon.fx/run-item)
+                                                 (:branch it) (assoc :branch (:branch it))
+                                                 (:write-out it) (assoc :write-out (:write-out it))))}
                                  (= plain c) (assoc :seon.fx/processes 1)))]
           (recur st (conj outs m) (inc sent)))))))
 
@@ -322,7 +324,9 @@
     (let [st (reduce (fn [st [k m]]
                        (if (get-in st [:items k])
                          (update-in st [:items k :waiters] conj rid)
-                         (assoc-in st [:items k] (assoc (select-keys m [:agent :ms :mode :kind :needs :tree :checkout :branch :binary? :bound :process? :shared?]) :status :queued :waiters #{rid} :at (:bid st 0)))))
+                         ;; the item whole as its plan made it (a list of its keys dropped :write-out, as such lists dropped :process? and
+                         ;; the candidate before it), with its queue state
+                         (assoc-in st [:items k] (assoc m :status :queued :waiters #{rid} :at (:bid st 0)))))
                      (assoc-in st [:askers rid] {:left (set (keys items)) :prio prio :results {}
                                                  ;; the items that are its proofs: past a red it still waits for these (item-ended)
                                                  :proofs (into #{} (filter #(contains? proofs (first %))) (keys items))}) items)]
