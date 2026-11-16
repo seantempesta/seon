@@ -8,25 +8,19 @@
             [seon.test-store :as ts] [my.test :as mt] [seon.db :as pdb] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
             [seon.program-test :refer [record]] [seon.source :as source] [seon.fx :as fx] [seon.config] [seon.contract :as contract] [seon.profile :as profile] [test-runner :as runner]))
 
-(defn- calc-srcs
-  "{ns text} of the calc program and its two test namespaces; edits ({:add :neg :twice} a form's text) replace that form."
-  ([] (calc-srcs {}))
-  ([{:keys [add neg twice] :or {add "(defn add [a b] (+ a b))" neg "(defn neg [a] (- a))" twice "(defmacro twice [x] `(* 2 ~x))"}}]
-   (array-map
-    'app.pv-calc (str "(ns app.pv-calc)\n" add "\n" neg "\n" twice "\n(defn half {:malli/schema [:=> [:cat :app.pv-calc/n] :int]} [x] (quot x 2))\n")
-    'app.pv-calc-test "(ns app.pv-calc-test (:require [clojure.test :refer [deftest is]] [app.pv-calc :as c]))\n(deftest add-test (is (= 3 (c/add 1 2))))\n(deftest twice-test (is (= 4 (c/twice 2))))\n"
-    'app.pv-neg-test "(ns app.pv-neg-test (:require [clojure.test :refer [deftest is]] [app.pv-calc :as c]))\n(deftest neg-test (is (= -1 (c/neg 1))))\n(deftest half-test (is (= 2 (c/half 4))))\n")))
-
-(defn- prog
-  "The world with the calc program (calc-srcs) as program facts: a value, nothing evaluated."
-  ([] (prog {}))
-  ([edits] (apply mt/with (mt/world) (map (fn [[n t]] (mt/code n t)) (calc-srcs edits)))))
-
-(defn- loaded
-  "(f) with each text of srcs ({ns text}) evaluated in this process, in order, their namespaces removed after."
-  [srcs f]
-  (try (binding [*ns* (create-ns 'user)] (run! load-string (vals srcs)) (f))
-       (finally (run! remove-ns (keys srcs)))))
+(defn- prog []
+  (record (ts/test-db)
+          'user "(ns app.pv-calc)"
+          'app.pv-calc "(defn add [a b] (+ a b))"
+          'app.pv-calc "(defn neg [a] (- a))"
+          'app.pv-calc "(defmacro twice [x] `(* 2 ~x))"
+          'app.pv-calc "(defn half {:malli/schema [:=> [:cat :app.pv-calc/n] :int]} [x] (quot x 2))"
+          'user "(ns app.pv-calc-test (:require [clojure.test :refer [deftest is]] [app.pv-calc :as c]))"
+          'app.pv-calc-test "(deftest add-test (is (= 3 (c/add 1 2))))"
+          'app.pv-calc-test "(deftest twice-test (is (= 4 (c/twice 2))))"
+          'user "(ns app.pv-neg-test (:require [clojure.test :refer [deftest is]] [app.pv-calc :as c]))"
+          'app.pv-neg-test "(deftest neg-test (is (= -1 (c/neg 1))))"
+          'app.pv-neg-test "(deftest half-test (is (= 2 (c/half 4))))"))
 
 (def ^:private ts '#{app.pv-calc-test/add-test app.pv-calc-test/twice-test app.pv-neg-test/neg-test app.pv-neg-test/half-test})
 
@@ -35,9 +29,9 @@
 (defn- digests [db env] (select-keys (ts/reach-digests db {:env env :tree "t" :config {}}) ts))
 
 (defn- with-dir
-  "f called with a fresh verdict cache directory under the system's temp dir (never the checkout), removed after."
+  "f called with a fresh verdict cache directory under this checkout's target/tmp, removed after."
   [f]
-  (let [dir (str (System/getProperty "java.io.tmpdir") "/seon-verdicts-" (random-uuid))]
+  (let [dir (str (seon.config/checkout) "/target/tmp/verdicts-" (random-uuid))]
     (try (f dir) (finally (seon.lib/remove-tree! dir)))))
 
 (defn- stored
@@ -50,18 +44,15 @@
   ([dir ran failures] (fx/write-verdicts! dir {:id "proofs-test"} ran failures)))
 
 (defn- prove!
-  "What bin/test does for the candidate db, with the run itself stood in for by a green per test (run-tests! has its own tests
-  below): plan against base digests, 'run' the rest, cache them at dir."
+  "What bin/test does for the candidate db: plan against base digests, run the rest, cache them at dir."
   [base db env dir]
   (let [cand (digests db env)
         p (proofs/plan base cand (stored dir cand) #{})
-        ran (into {} (for [t (:run p)] [t {:test t :digest (cand t) :pass 1 :fail 0 :error 0 :ticks 1 :ms 1}]))]
+        ran (proofs/run-tests! (:run p) cand (fn [_]))]
     (store! dir ran)
     (assoc p :cand cand :ran ran)))
 
-;; docs/merging.md#verdicts-are-a-cache. Estimate: the calc program on the world (3 namespaces, ~8 forms at ~0.2M = ~2M) built once, and its
-;; digest walk (~0.5M) twice, 2 cache writes and 4 reads of small files (~0.1M): ~4M, 6,000,000 ticks.
-(deftest ^{:seon.test/estimate {:ticks 6000000}} an-unchanged-tree-runs-nothing-and-reuses-everything
+(deftest ^{:seon.test/estimate {:ticks 10000000}} an-unchanged-tree-runs-nothing-and-reuses-everything
   (with-dir (fn [dir]
   (let [db (schema (prog) :app.pv-calc/n "int?")
         first-run (prove! nil db "e" dir)
@@ -73,12 +64,11 @@
     (is (= (:cand first-run) (:cand second-run)) "the digests are the tree's, not the run's")
     (is (= {} (stored dir {})) "a branch holding no test reads no greens (an agent died on (vals {}), nil)")))))
 
-;; Estimate: two programs built (~2M each) and walked (~0.5M each), three plans and cache reads (<0.3M): ~6M, 8,000,000 ticks.
-(deftest ^{:seon.test/estimate {:ticks 8000000}} a-one-defn-change-runs-only-what-reaches-it
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-one-defn-change-runs-only-what-reaches-it
   (with-dir (fn [dir]
   (let [db (schema (prog) :app.pv-calc/n "int?")
         base (:cand (prove! nil db "e" dir))
-        db' (schema (prog {:neg "(defn neg [a] (- 0 a))"}) :app.pv-calc/n "int?")
+        db' (record db 'app.pv-calc "(defn neg [a] (- 0 a))")
         r (prove! base db' "e" dir)]
     (is (= '[app.pv-neg-test/neg-test] (:run r)) "neg changed: only the test reaching it runs")
     (is (= '[app.pv-neg-test/neg-test] (:selected r)) "and only it is selected against the base")
@@ -88,27 +78,25 @@
         (is (= '[app.pv-calc-test/add-test app.pv-neg-test/neg-test] (:selected p)))
         (is (= [] (:run p)) "both are green at their digests now")))))))
 
-;; Estimate: three programs built (~2M each) and walked (~0.5M each), the plans (<0.3M): ~8M, 10,000,000 ticks.
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-macro-schema-or-config-change-widens-the-selection
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-macro-schema-or-config-change-widens-the-selection
   (with-dir (fn [dir]
   (let [db (schema (prog) :app.pv-calc/n "int?")
         base (:cand (prove! nil db "e" dir))
         run-of (fn [db env] (:run (proofs/plan base (digests db env) (stored dir (digests db env)) #{})))]
-    (is (= '[app.pv-calc-test/twice-test] (run-of (schema (prog {:twice "(defmacro twice [x] `(+ ~x ~x))"}) :app.pv-calc/n "int?") "e"))
+    (is (= '[app.pv-calc-test/twice-test] (run-of (record db 'app.pv-calc "(defmacro twice [x] `(+ ~x ~x))") "e"))
         "a macro's body changed: the test expanding it runs, not the others in its namespace")
     (is (= '[app.pv-neg-test/half-test] (run-of (schema db :app.pv-calc/n "pos-int?") "e"))
         "a schema entry changed: the test reaching the contract naming it runs")
     (is (= (sort-by str ts) (run-of db "e2"))
         "deps or a pin changed (:env, the inputs with no program facts): every test runs")))))
 
-;; Estimate: two calc programs built (~2M each) and walked for step digests (~0.5M each), seven step-digest sets over strings (<0.1M each): ~6M, 8,000,000 ticks.
-(deftest ^{:seon.test/estimate {:ticks 8000000}} a-check-step-is-keyed-by-what-its-function-reaches
-  (let [check (mt/code 'app.pv-check "(ns app.pv-check (:require [app.pv-calc :as c]))\n(defn smoke [] (c/add 1 2))\n(defn idle [] (c/neg 1))\n")
-        db (mt/with (prog) check)
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-check-step-is-keyed-by-what-its-function-reaches
+  (let [db (record (prog) 'user "(ns app.pv-check (:require [app.pv-calc :as c]))"
+                   'app.pv-check "(defn smoke [] (c/add 1 2))" 'app.pv-check "(defn idle [] (c/neg 1))")
         roots {"smoke" '[app.pv-check/smoke] "idle" '[app.pv-check/idle]}
         dg (fn [db] (ts/reach-digests db {:env "e" :tree "t" :config {}} roots))
         before (dg db)
-        after (dg (mt/with (prog {:add "(defn add [a b] (+ b a))"}) check))]
+        after (dg (record db 'app.pv-calc "(defn add [a b] (+ b a))"))]
     (is (= #{"smoke" "idle"} (set (keys before))) "each step its own digest")
     (is (not= (before "smoke") (after "smoke")) "add changed: the step whose function calls it moves")
     (is (= (before "idle") (after "idle")) "the step not reaching add keeps its digest, so its green is reused")
@@ -136,29 +124,25 @@
       (is (= {} (ts/reach-digests db {:env "e" :tree "t" :config {}} {"gone" '[app.pv-check/renamed]})))
       (is (= ["smoke"] (:missing (proofs/step-digests (fn [roots] (dissoc (zipmap (keys roots) (map str (keys roots))) "smoke")) {:env "e" :tree "t" :config {} :base "b"})))))))
 
-;; Estimate: two template programs built (~6 forms at ~0.2M = ~1.5M each), their reach graphs (~1M each), five digest sets over three contracts
-;; (~0.2M each), the deal over three strings (<0.1M): ~7M, 10,000,000 ticks.
-(deftest ^{:seon.test/estimate {:ticks 10000000}} each-pure-contract-is-a-key-of-the-generative-check
+(deftest ^{:seon.test/estimate {:ticks 20000000}} each-pure-contract-is-a-key-of-the-generative-check
   ;; owner, 2026-10-29: the contract check is per function, keyed by digest like a test. A pure
   ;; contracted function's key is its reach (its form, what it calls, the schemas its contract
   ;; names); a change re-checks only the contracts it reaches (docs/checks.md#the-generative-check-is-per-function)
   ;; the namespaces are the real ones (mg-roots' purity is by namespace); the functions are new
-  (let [tmpl (fn [a-body]
-               (-> (mt/with (mt/world)
-                            (mt/code 'seon.template (str "(ns seon.template)\n(defn mgk-a {:malli/schema [:=> [:cat :int] :int]} [x] " a-body ")\n"
-                                                         "(defn mgk-b {:malli/schema [:=> [:cat :int] :int]} [x] (inc (mgk-a x)))\n"
-                                                         "(defn mgk-c {:malli/schema [:=> [:cat :seon.cost/row] :int]} [x] (dec x))\n"
-                                                         "(defn mgk-d [x] (inc x))\n"
-                                                         "(defn mgk-step {:malli/schema :seon.step/step-fn} [& args] args)\n"))
-                            (mt/code 'seon.sock "(ns seon.sock)\n(defn kill {:malli/schema [:=> [:cat :int] :int]} [pid] pid)\n"))
-                   (schema :seon.step/step-fn "map?") (schema :seon.cost/row "map?")))
-        db (tmpl "(inc x)")
-        a-changed (tmpl "(+ 1 x)")
+  (let [db (-> (record (ts/test-db) 'user "(ns seon.template)"
+                       'seon.template "(defn mgk-a {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"
+                       'seon.template "(defn mgk-b {:malli/schema [:=> [:cat :int] :int]} [x] (inc (mgk-a x)))"
+                       'seon.template "(defn mgk-c {:malli/schema [:=> [:cat :seon.cost/row] :int]} [x] (dec x))"
+                       'seon.template "(defn mgk-d [x] (inc x))"
+                       'seon.template "(defn mgk-step {:malli/schema :seon.step/step-fn} [& args] args)"
+                       'user "(ns seon.sock)"
+                       'seon.sock "(defn kill {:malli/schema [:=> [:cat :int] :int]} [pid] pid)")
+               (schema :seon.step/step-fn "map?") (schema :seon.cost/row "map?"))
         inputs {:env "e" :tree "t" :config {}}
         keys-of (fn [db] (proofs/mg-roots (program/reach-graph db nil)))
         dg (fn [db] (ts/reach-digests db inputs (keys-of db)))
         before (dg db)
-        after-a (dg a-changed)
+        after-a (dg (record db 'seon.template "(defn mgk-a {:malli/schema [:=> [:cat :int] :int]} [x] (+ 1 x))"))
         after-n (dg (schema db :seon.cost/row "some?"))]
     (is (= #{"mg/seon.template/mgk-a" "mg/seon.template/mgk-b" "mg/seon.template/mgk-c"} (set (keys (keys-of db))))
         "a pure contracted function is a key; an uncontracted one, a proc's step-fn and a host namespace's function are not")
@@ -183,7 +167,7 @@
       (let [g #(program/reach-graph % nil)
             rd #(proofs/mg-registry-digest (g %) "e")]
         (is (not= (rd db) (rd (schema db :seon.cost/row "some?"))) "a schema entry changed")
-        (is (= (rd db) (rd a-changed)) "a function changed")))
+        (is (= (rd db) (rd (record db 'seon.template "(defn mgk-a {:malli/schema [:=> [:cat :int] :int]} [x] (+ 1 x))"))) "a function changed")))
     (testing "contracts are dealt among the shards that run, by their measured ms; with no test shard, one"
       (let [mg {"mg/a" "1" "mg/b" "2" "mg/c" "3"}]
         (is (= [[[] mg]] (runner/deal-mg [] mg {} {})) "no test shard: one process for all")
