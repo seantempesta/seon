@@ -96,7 +96,7 @@
                 " loads every form of main's program over the binary (bin/build records them)"))
         ;; the port, then how long bin/system stop waits for this process's exit after its TERM (:seon.config.root/stop-ms):
         ;; the script reads the one resolver's value from this line, never the config files itself
-        (out! "ROOT LISTENING " bound " " (seon.config/value :seon.config.root/stop-ms)))
+        (out! "ROOT LISTENING " bound " " (seon.system/stop-bound-ms)))
       (loop [] (when (read-line) (recur)))
       (end! :stdin-eof))
     (lib/c-exit 0)))

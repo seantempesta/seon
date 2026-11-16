@@ -1589,7 +1589,7 @@
         g (flow/create-flow {:procs (update-vals agent-steps (fn [step] (cond-> {:proc (flow/process step)} (not= step #'transport-step) (assoc :chan-opts in))))
                              :conns [[[:transport :repl] [:repl :in]] [[:transport :tests] [:tests :in]]]
                              ;; what update! waits for a removed test-run proc's exit, the bound root's graph declares too
-                             :stop-timeout-ms (cfg/value :seon.config.root/flow-stop-ms)})
+                             :stop-timeout-ms (cfg/value :seon.config.root/stop-ms)})
         {:keys [error-chan]} (flow/start g)]
     ;; a deadlock is an event, never a timer of root's: the agent says it (docs/flow.md#the-five-rules, rule 3)
     (jolt.host/on-quiescent! #'agent/quiescent!)
