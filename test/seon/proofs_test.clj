@@ -924,12 +924,12 @@
         add-form (:e (first (d/datoms w0 :avet :form/id (first (get-in g [:defs 'pt.vs/add])))))]
     (is (= {d1 {:digest d1 :pass 1 :fail 0 :error 0}} (proofs/verdicts-at db {t d1})) "found at its reach digest by one seek")
     (is (= {} (proofs/verdicts-at db {t d2})) "and not at another digest")
-    (is (contains? (:seon.reads/keys (:seon.proof/reads (d/entity db [:seon.proof/id (proofs/verdict-id t d1)]))) [:ea add-form :form/code])
+    (is (contains? (:seon.reads/keys (:seon.proof/reads (d/entity db (:e (first (d/datoms db :avet :seon.proof/test t)))))) [:ea add-form :form/code])
         "what it read holds the called function's form")
     (let [redefined (d/with db ((mt/code 'pt.vs "(ns pt.vs)\n(defn add [x y] (+ y x))\n") db))
           moved (pdb/results-moved db (:tx-data redefined))
-          ks (into #{} (map pr-str) (:seon.reads/keys (:seon.proof/reads (d/entity db [:seon.proof/id (proofs/verdict-id t d1)]))))]
-      (is (= #{(:db/id (d/entity db [:seon.proof/id (proofs/verdict-id t d1)]))} moved)
+          ks (into #{} (map pr-str) (:seon.reads/keys (:seon.proof/reads (d/entity db (:e (first (d/datoms db :avet :seon.proof/test t)))))))]
+      (is (= #{(:db/id (d/entity db (:e (first (d/datoms db :avet :seon.proof/test t)))))} moved)
           "redefining the function it called moves its verdict, found by what it read")
       (is (not= (pdb/reads-digest db ks nil) (pdb/reads-digest (:db-after redefined) ks nil))
           "and what it read no longer holds what it did"))))
@@ -1018,7 +1018,7 @@
     (is (not-any? #(contains? % :seon.proof/read-keys) (tx w0 3))
         "a verdict carries no datom a read key")
     (is (= [] (vec (d/datoms rdb :aevt :seon.proof/read-keys))) "so the results branch holds none")
-    (is (seq (:seon.reads/keys (:seon.proof/reads (d/entity rdb [:seon.proof/id (proofs/verdict-id t (seon.lib/digest "run 1"))])))) "its keys are one value")
+    (is (seq (:seon.reads/keys (:seon.proof/reads (d/entity rdb (:e (first (filter #(= (seon.lib/digest "run 1") (:v (first (d/datoms rdb :eavt (:e %) :seon.proof/reach-digest)))) (d/datoms rdb :avet :seon.proof/test t)))))))) "its keys are one value")
     (is (= #{plan} (set (keys (proofs/stored-verdicts rdb w1 {t plan} [t])))) "the newest written green, whose reads hold on w1, is reused")
     (is (= {} (proofs/stored-verdicts rdb w0 {t plan} [t])) "and only it: older greens' reads hold on w0, the newest's do not")))
 
@@ -1097,7 +1097,7 @@
         entry (pdb/eid main :schema/key :pt.sr/thing)
         neg-form (:e (first (d/datoms main :avet :form/id (first (get-in (program/reach-graph main nil) [:defs 'pt.sr/neg])))))
         ;; a green each, on the results branch, whose recorded reads are the keys given, digested on main as its run's were
-        green (fn [t ks] {:seon.proof/id (proofs/verdict-id t (seon.lib/digest (str t))) :seon.proof/test t
+        green (fn [t ks] {:seon.proof/id (proofs/verdict-id t (seon.lib/digest (str t)) :pass) :seon.proof/test t
                           :seon.proof/reach-digest (seon.lib/digest (str t)) :seon.proof/status :pass :seon.proof/route :live
                           :seon.proof/basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
                           :seon.proof/reads-digest (pdb/reads-digest main (into #{} (map pr-str) ks) nil)
@@ -1143,3 +1143,19 @@
         v (intern 'pt.sk-test (with-meta 'reads-an-entry {:test (fn [] (count (d/datoms w :eavt e :schema/form)))}) nil)
         r (get (proofs/run-tests! ['pt.sk-test/reads-an-entry] {'pt.sk-test/reads-an-entry "d"} (fn [_])) 'pt.sk-test/reads-an-entry)]
     (is (contains? (:schema-reads r) [:ea e :schema/form]) (pr-str (select-keys r [:schema-reads :pass :error])))))
+
+;; THE FOCUS (E) step 1 (data's condition): a result's identity is its whole content (test, reads digest, status), so two branches'
+;; results never conflict at a merge: a different status at one reach digest is another entity (flaky is a query), and the lookup at
+;; a reach digest answers the newest. Red first: the identity was (test, reach digest) with a write-once status, so the second
+;; status was refused. Estimate: one small world (~4M), two verdict-txs and writes (~1M): 6,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} two-statuses-at-one-reach-digest-are-two-results
+  (let [w0 (mt/with (mt/world) (mt/code 'pt.fl "(ns pt.fl)\n(defn add [x y] (+ x y))\n"))
+        g (program/reach-graph w0 nil) t 'pt.fl-test/adds d (seon.lib/digest "one digest")
+        basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
+        green (proofs/verdict-tx w0 g basis {t {:digest d :pass 1 :fail 0 :error 0}} {t [{:var 'pt.fl/add}]} {})
+        red (proofs/verdict-tx w0 g basis {t {:digest d :pass 0 :fail 1 :error 0 :failures [{:type :fail :message "flaked"}]}} {t [{:var 'pt.fl/add}]} {})
+        db (pdb/db-with (pdb/db-with w0 green) red)]
+    (is (= 2 (count (d/datoms db :avet :seon.proof/test t))) "both results are kept, neither refused")
+    (is (= #{:pass :fail} (set (for [dt (d/datoms db :avet :seon.proof/test t)] (:v (first (d/datoms db :eavt (:e dt) :seon.proof/status)))))))
+    (is (= 1 (:fail (get (proofs/verdicts-at db {t d}) d))) "the lookup at the reach digest answers the newest written")))
+
