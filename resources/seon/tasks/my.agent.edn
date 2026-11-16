@@ -19,4 +19,9 @@
   :seon.task/kind :work
   :seon.task/proofs #{my.agent-test/merge-main-is-in-the-agents-api}
   :seon.task/estimate #:seon.agent{merge-main! {:n 1, :order :constant, :ticks 10000, :bytes 100000}}}
-]
+ {:seon.task/name "tests-reaching-takes-what-a-change-moved"
+  :seon.task/plan "Owner: runtime builds, tests reviews (the selection is tests'). Found by runtime's audit, 2026-11-16 (the owner: use and improve what Seon has, never a mechanism beside it). A session finding the tests its land must run evaluates AGENTS.md section 3's two forms at root's REPL (seon.agent/test-inputs, branch-graph, seon.program/tests-reaching over a hand list of vars; reach-indexed's :answers filtered by :takes for a changed key; a third clause for any schema file), then writes the names to a file by hand: runtime did it four times today, 1.3-1.7 s and 270-370M ticks each [M result/bb9bf4c6, ad836e15], plus files of names edited in the shell. The agent already has the one call: my.agent/tests-reaching (agent.clj:190, one var) and my.agent/callers (agent.clj:170, a var or a key: config, schema, attribute) answered a loader's callers, a config key's readers and a var's 73 tests in one eval, 399 ms and 86M ticks [M result/c0a6f704]. HYBRID: my.agent/tests-reaching takes a collection of vars and keys (each key by its readers, as callers resolves it; a schema entry by the tests that take :seon.env/schemas until tests' schema reach lands) and answers one sorted set, the names a land or (my.agent/prove) runs. Deletes AGENTS.md section 3's two root forms and the by-hand names files; a session asks its own agent. Proof, red first: my.agent-test/tests-reaching-takes-what-a-change-moved (a var and a config key given together answer the union of what each alone answers; red today: a collection is refused by the contract)."
+  :seon.task/kind :work
+  :seon.task/proofs #{my.agent-test/tests-reaching-takes-what-a-change-moved}
+  :seon.task/estimate #:my.agent{tests-reaching {:n 20, :order :linear, :ticks 60000000, :bytes 100000000}}
+  :seon.task/needs #{}}]

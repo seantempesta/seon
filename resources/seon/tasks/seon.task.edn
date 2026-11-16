@@ -57,4 +57,10 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.task-test/a-boot-after-a-crash-repairs-no-agent-state}
   :seon.task/estimate #:seon.task{this-boots {:n 1, :order :constant, :ticks 5000, :bytes 2000}}
+  :seon.task/needs #{}}
+ {:seon.task/name "a-task-is-held-to-its-rule-where-it-is-written"
+  :seon.task/plan "Owner: data (the task's schema), runtime found it. Rails, never guards (owner, 2026-11-16): validity is checked where data flows. Found by runtime's audit, 2026-11-16 [read]: four runtime tasks lived only on main with no proof or estimate; main's write took them, root's sync wrote them to their file (2e0d232c4d, my.root/sync-req) and health refused them as file tasks, so the write was reverted by hand (84c7b309f5). Two checks of one rule: the store's write admits what health's unestimated/undeclared class later refuses. HYBRID: the rule health applies to an open :work task (a proof named, an estimate for each hot var its plan changes: seon.problems/unestimated) is the task entity's schema, checked by the one write path, so a task that could not reach its file is refused at its write, typed, naming what it lacks; health keeps reading the same predicate for what is already stored. Deletes the by-hand revert path. Proof, red first: seon.task-test/a-task-health-would-refuse-is-refused-at-its-write."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.task-test/a-task-health-would-refuse-is-refused-at-its-write}
+  :seon.task/estimate #:seon.task{member-tx {:n 1, :order :constant, :ticks 50000, :bytes 50000}}
   :seon.task/needs #{}}]

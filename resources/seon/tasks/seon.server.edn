@@ -98,4 +98,10 @@ PROOF (red first, once the waiter is found): seon.server-test/an-eval-at-root-wh
   :seon.task/kind :work
   :seon.task/proofs #{seon.server-test/a-call-in-flight-across-a-takeover-gets-its-answer}
   :seon.task/needs #{"seon.system/an-update-loses-nothing"}
-  :seon.task/estimate #:seon.server{serve! {:n 1, :order :constant, :ticks 10000, :bytes 10000}}}]
+  :seon.task/estimate #:seon.server{serve! {:n 1, :order :constant, :ticks 10000, :bytes 10000}}}
+ {:seon.task/name "a-message-to-a-sessions-task-reaches-its-agent"
+  :seon.task/plan "Owner: web (the server's ops). Found by runtime's audit, 2026-11-16: seon_message and the relay's message op require :agent (server.clj:317-319, :required [\"agent\" \"body\"]), though every session is known by its task, session/<area>, and the op already takes :task; runtime had to find each session's agent id with a hand query at root (result/cd8b4a3a) before it could write to tests, data, flow, deps and root. HYBRID: :agent is optional when :task names a task with one agent (seon.task's :seon.task/agent), resolved inside the op, so a Seon agent and a session message an area by its task. COST: one entity read a message. Proof, red first: seon.server-test/a-message-to-a-sessions-task-reaches-its-agent (a message with :task alone lands on that task's agent; red today: refused \"agent is required\")."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.server-test/a-message-to-a-sessions-task-reaches-its-agent}
+  :seon.task/estimate #:seon.system{message! {:n 1, :order :constant, :ticks 50000, :bytes 50000}}
+  :seon.task/needs #{}}]
