@@ -2672,7 +2672,7 @@
 ;; (2026-11-16) was parked on 28 reasons none of which its two-line change caused: a session imports a worktree that merged a newer
 ;; main, so main's changes reach the branch as its own and the done rule read them against the old merge base; and every :user task
 ;; was refused :open, so no session could merge. Red before: main's uncontracted var counted as the branch's, and :open and
-;; :no-proofs refused the hand-back. Estimate: three small world dbs (~3M), one delta-three-way (~1M), the measures (~0.5M): 6,000,000
+;; :no-proofs refused the hand-back. Estimate: three small world dbs (~3M), one delta-changes (~1M), the measures (~0.5M): 6,000,000
 (deftest ^{:seon.test/estimate {:ticks 6000000 :bytes 60000000}} a-hand-back-is-judged-by-what-its-change-adds
   (let [rec (fn [nm] (fn [db] (seon.program/record-tx db {:id (str "app/" nm) :src (str "(defn " nm " [x] x)") :ns 'app :ns-form? false
                                                            :defs [{:var (symbol "app" nm) :meta #{:arglists}}]
@@ -2680,8 +2680,7 @@
         base (my.test/world {:history? true})
         main (my.test/with base (rec "mains-own"))
         head (my.test/with base (rec "mains-own") (rec "the-branchs-own"))
-        r (seon.merge/delta-three-way base head main #{})
-        m (seon.writer/against-main base head main r)]
+        m (seon.writer/against-main base head main (seon.merge/delta-changes base head #{}) #{})]
     (is (= ['app/the-branchs-own] (:uncontracted m)) (str "only the branch's own uncontracted var: " (pr-str m)))
     (is (not-any? #{"app/mains-own"} (map str (:uncontracted m))) "main's own change, carried by the branch, is main's"))
   (let [reasons (fn [input] (set (map :reason (r/done-explain input))))

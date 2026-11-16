@@ -675,7 +675,7 @@
   transaction that wrote its net value, and a retraction (a value base held and from does not) under the one that wrote its key's new
   value, else the last that wrote its entity, else the last of all: a value changed twice nets to a retraction stamped with the first
   change and an addition stamped with the last, and replayed apart the retraction leaves the entity without a value its schema
-  requires, which the write check refuses (context's and web's seon_done, 2026-11-16). O(facts)."
+  requires, which the write check refuses (context's and web's seon_done). O(facts)."
   {:malli/schema [:=> [:cat [:sequential :map] ifn?] [:vector [:map [:source :int] [:ops :seon.db/tx-data]]]]}
   [fs op]
   (let [adds (filter #(= :add (:side %)) fs)

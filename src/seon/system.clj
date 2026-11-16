@@ -2167,13 +2167,17 @@
   opts {:k :ms :due} make the api hold a bound for key :k across waits under it (`drop-wait!` ends it). See docs/users.md#messages."
   {:malli/schema [:function [:=> [:cat :seon.system/sys :string] [:map [:p :seon.host/promise] [:k :keyword]]]
                   [:=> [:cat :seon.system/sys :string :int] [:map [:p :seon.host/promise] [:k :keyword]]]
-                  [:=> [:cat :seon.system/sys :string :int [:map [:k :keyword] [:ms :int] [:due :map]]] [:map [:p :seon.host/promise] [:k :keyword]]]]}
+                  [:=> [:cat :seon.system/sys :string :int [:map [:k :keyword] [:ms :int] [:due :map] [:seen {:optional true} [:set :int]]]] [:map [:p :seon.host/promise] [:k :keyword]]]]}
   ([sys k] (await-message sys k (:max-tx @(:conn sys))))
   ;; t0: the t the caller last read (its check that nothing was new), so a message committed between that read and this wait wakes it
   ([sys k t0] (await-message sys k t0 {:k (keyword "seon.system" (str "await-" (lib/unique-id)))}))
   ([sys k t0 {wk :k :as opts}]
   (let [;; a message linked to k after t0: one seek of k's :seon.message/to links a commit, O(its messages), while the wait is held
-        new? (fn [db] (when-let [e (pdb/eid db :seon.agent/key k)] (some #(> (:tx %) t0) (d/datoms db :avet :seon.message/to e))))]
+        ;; with :seen (the message entities its reader has read), a link not among them, whatever its tx (a merge carries a link with its
+        ;; older tx); else one after t0
+        seen (:seen opts)
+        new? (fn [db] (when-let [e (pdb/eid db :seon.agent/key k)]
+                        (some #(if seen (not (seen (:e %))) (> (:tx %) t0)) (d/datoms db :avet :seon.message/to e))))]
     {:p (step/ask-edge (:ext sys) (merge {:op :await :k wk :pred new? :to (pdb/eid @(:conn sys) :seon.agent/key k)} (select-keys opts [:ms :due]))
                        (gone nil "root stopped"))
      :k wk})))
@@ -2323,8 +2327,8 @@
   "The merge gate's prove: the candidate's own store branch (candidate, the branch its :gate request names) proved by prove! in mode
   (default :judge) on names, the deferred process tests, its process items, seed and build run on checkout at tree (the gate's
   checkout, seon.fx/run-on-checkout). The candidate is proved at its head commit, on a branch of its own made there (gate-<commit>-<id>)
-  with an agent of its own: never on the task's branch, so no attach of the task is refused while the gate runs (root's pilot,
-  2026-11-16: the gate's agent on session/root's branch refused every attach for 13 minutes) and the task's own agent is never
+  with an agent of its own: never on the task's branch, so no attach of the task is refused while the gate runs (root's pilot:
+  the gate's agent on session/root's branch refused every attach for 13 minutes) and the task's own agent is never
   written by the gate. Once the run answers, however it ends, that agent ends and its branch is dropped (the writer's :drop-branch, as
   a tree's is). The run's answer, or its typed error. See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :seon.system/sys [:map [:candidate :keyword] [:checkout :string] [:tree :string]]] :map]}

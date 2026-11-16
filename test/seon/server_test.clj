@@ -10,6 +10,26 @@
   (is (= (set (keys seon.server/ops)) (disj (set (keys (methods seon.server/op-answer))) :default)))
   (is (contains? (methods seon.server/op-answer) :default) "an unknown op has its answer: refused"))
 
+;; Estimate: one memory store made, one server socket, two request lines read and answered: ~1M ticks; 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-request-to-a-stopping-root-answers-restarting
+  ;; the switch-over's L2 step 1 (task seon.system/an-update-loses-nothing: close the edges): once root's end has begun (its cause
+  ;; delivered: a hand-over, a stop), every new request line, EDN or MCP's JSON-RPC, is answered :seon.system/restarting, so its
+  ;; caller re-asks the next root on the same port. Red before: the request ran on the stopping root
+  (let [cfg (pdb/made-cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :writer pdb/writer-cfg})
+        _ (d/create-database cfg)
+        conn (pdb/connect cfg)
+        ss (seon.server/serve! {:graph nil :ext (doto (a/chan) a/close!) :conn conn :ending (deliver (promise) :hand-over)} 0)
+        ask (fn [line] (with-open [s (java.net.Socket. "127.0.0.1" (int (.getLocalPort ^java.net.ServerSocket ss)))]
+                         (let [w (.getOutputStream s) r (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s) "UTF-8"))]
+                           (.write w (.getBytes (str line "\n") "UTF-8")) (.flush w)
+                           (.readLine r))))]
+    (try
+      (let [e (clojure.edn/read-string {:default tagged-literal} (ask "{:op :interrupt :client \"c\"}"))]
+        (is (= :seon.system/restarting (:seon.error/type e)) (pr-str e)))
+      (let [j (clojure.data.json/read-str (ask "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"seon_interrupt\",\"arguments\":{}}}"))]
+        (is (clojure.string/includes? (str (get-in j ["error" "message"])) "restarting") (pr-str j)))
+      (finally (.close ^java.net.ServerSocket ss) (d/release conn)))))
+
 (deftest seon-agents-answers-what-is-live
   ;; seon_agents answered every task on main (580 on the standing root, most :held or
   ;; :cancelled with no agent), so an outside agent never saw what runs
@@ -527,44 +547,26 @@
     (is (= [(seon.lib/call-id (:key (:value sent)) "read-1")] (:ids (:value sent))) "the read's model call is its agent and read number digested")
     (is (empty? (:turns (:value sent))) "a read moves no turn number: no agent holds one")))
 
-(deftest an-outside-agent-plays-the-model
-  ;; docs/server.md#working-a-task-from-a-worktree: a read holds the conversation, as JSON the body a provider is sent;
-  ;; a seon_eval by the agent attached is one reply, a turn, as a model's is, and a blank intent is not run, as a model's is not;
-  ;; plain {intent, code} on an agent is a reply of that one eval, for every caller (the :eval op, where bin/mcp's rewrite was)
-  (let [[attach called stopped old turn-of moved-ns ns-after wire text]
+;; Estimate: one agent's setup and teardown (~1.5M) and six asks of ~0.25M each, its replies' evals through the REPL path (~0.3M each): ~3.5M; 4,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 6}} each-outside-reply-is-a-turn-and-its-evals-answer-in-order
+  ;; docs/server.md#working-a-task-from-a-worktree: a seon_eval by the agent attached is one reply, a turn, as a model's is: each of its evals answers, in
+  ;; order, a call with no intent is answered invalid and what follows it runs (owner, 2026-11-08), and plain {intent, code} on an agent is a reply of
+  ;; that one eval, for every caller (the :eval op, where bin/mcp's rewrite was). The tool body a read sends is seon.ctx.wire-test's and model-test's;
+  ;; the blank intent's error is agent-test's (call-problem); the REPL's namespace staying where a form moved it is an-outside-agents-repl-answers-plainly's
+  (let [[attach called stopped old turn-of]
         (at/in-agent (fn [{:keys [agent task]}]
                        [{:op :attach :task task}
                         {:op :eval :agent agent :message-md "Adding, then adding again." :evals [{:intent "add one and one" :code "(+ 1 1)"} {:intent "then two and two" :code "(+ 2 2)"}]}
-                        {:op :eval :agent agent :message-md "" :evals [{:intent " " :code "(def not-run-form 1)"} {:intent "after it" :code "(def not-run-either 1)"}]}
+                        {:op :eval :agent agent :message-md "" :evals [{:intent " " :code "(def not-run-form 1)"} {:intent "after it" :code "(def ran-after-it 1)"}]}
                         {:op :eval :agent agent :intent "the old shape" :code "(def old-shape-ran 1)"}
-                        "(seon.agent/turn-now)"
-                        {:op :eval :agent agent :message-md "" :evals [{:intent "move" :code "(in-ns 'seon.print)"}]}
-                        {:op :eval :agent agent :message-md "" :evals [{:intent "where" :code "(str *ns*)"}]}
-                        {:op :context :agent agent :wire true}
-                        {:op :context :agent agent}]))
-        body (clojure.data.json/read-str (:context wire))
-        msgs (get body "messages")
-        call (first (filter #(some-> (get-in % ["tool_calls" 0 "function" "arguments"]) (clojure.string/includes? "(+ 1 1)")) msgs))
-        [ecall ecall2] (get call "tool_calls")
-        args (clojure.data.json/read-str (get-in ecall ["function" "arguments"]))
-        result-of (fn [c] (get (first (filter #(and (= "tool" (get % "role")) (= (get c "id") (get % "tool_call_id"))) msgs)) "content"))]
+                        "(seon.agent/turn-now)"]))]
     (is (clojure.string/includes? (:next attach) "seon_context") "an attach names the next step")
     (is (clojure.string/includes? (:next attach) "message-md") "and the shape of a reply")
     (is (= [2 4] (filterv number? (map :value (:responses called)))) "each eval answers, in order")
-    (let [exs (keep #(:seon.error/type (:ex %)) (:responses stopped))]
-      (is (= [:seon.turn/invalid-call] exs) "a call with no intent is answered invalid, and what follows it runs (owner, 2026-11-08)"))
+    (is (= [:seon.turn/invalid-call] (keep #(:seon.error/type (:ex %)) (:responses stopped))) "a call with no intent is answered invalid")
+    (is (= ["ran-after-it"] (mapv name (mapcat :recorded (:responses stopped)))) (str "and what follows it runs: " (pr-str stopped)))
     (is (= ["old-shape-ran"] (mapv name (:recorded (first (:responses old))))) (str "plain code on an agent runs as one eval: " (pr-str old)))
-    (is (= 3 (:value turn-of)) "each reply is a turn, the plain one too: no one growing turn 0")
-    (is (= ["seon.print"] (filterv string? (map :value (:responses ns-after)))) (str "the namespace a reply moved to is where the next one runs: " (pr-str moved-ns)))
-    (is (= ["repl"] (mapv #(get-in % ["function" "name"]) (get body "tools"))) "the body holds the tool a model is given")
-    (is (= (clojure.data.json/read-str (clojure.data.json/write-str seon.model/eval-tool)) (first (get body "tools"))) "that very tool")
-    (is (= "system" (get (first msgs) "role")))
-    (is (= "Adding, then adding again." (get call "content")) "the message is the reply's text, as a model's")
-    (is (= {"intent" "add one and one" "code" "(+ 1 1)"} args) "the first eval is a call of its own")
-    (is (= {"intent" "then two and two" "code" "(+ 2 2)"} (clojure.data.json/read-str (get-in ecall2 ["function" "arguments"]))) "and the second")
-    (is (= [true true] [(boolean (re-find #":value 2" (result-of ecall))) (boolean (re-find #":value 4" (result-of ecall2)))]) "each call answered by a tool message of its own")
-    (is (some #(some-> (get-in % ["tool_calls" 0 "function" "arguments"]) (clojure.string/includes? "old-shape-ran")) msgs) "the plain code ran as one eval, its intent its call's")
-    (is (clojure.string/includes? (:context text) "(+ 1 1)") "the text read holds the conversation too")))
+    (is (= 3 (:value turn-of)) "each reply is a turn, the plain one too: no one growing turn 0")))
 
 (deftest roots-repl-names-what-has-no-branch
   ;; my.agent/* and my.db/* at root answered seon.agent/db's invalid-output, "Fix seon.agent/db (the producer)", and
@@ -734,23 +736,26 @@
       (is (some #{'app.ptest/p-test} (:deferred r)) "the service's answer names the deferred one too"))
     (is (nil? (:value status-p)) "an in-process test is none")))
 
-;; Estimate: one agent's setup and teardown (~1.5M) and six asks of ~0.25M each, its prove run by the service and its done judged by the reconciler: ~3.5M; 4,000,000
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 6}} a-named-prove-counts-for-status-and-the-judge-and-done-answers-its-reasons
+;; Estimate: one agent's setup and teardown (~1.5M) and seven asks of ~0.25M each, its prove run by the service and its done judged by the reconciler: ~3.8M; 4,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 7}} a-named-prove-counts-for-status-and-the-judge-and-done-answers-its-reasons
   ;; - a named prove counts for my.task/status and the judge and answers one line (the blind agent, 2026-10-27: 171 green left both proofs
   ;;   :proof-unknown, and a bare prove answered 25k chars); how that line and the eval's value are drawn is seon.render-test's
   ;; - done answers the judge's reasons once main holds them (dogfood 2026-10-25: seon_done answered {:judging ...}): the harness's task names
   ;;   demo-test/t, which no test defines, so the done rule refuses and the line says why
-  (let [[_ _ _ proved-ok status done]
+  (let [[_ _ _ proved-ok status drawn done]
         (at/in-agent (fn [{:keys [agent]}]
                        ["(ns app.okt (:require [clojure.test :refer [deftest is]])) (deftest ok-test (is (= 2 (+ 1 1))))"
                         "(my.task/update! :seon.task/proofs conj 'app.okt/ok-test)"
                         "(+ 2 2)"
                         "(my.agent/prove #{'app.okt/ok-test})"
                         "(let [s (my.task/status)] [(some #(when (= 'app.okt/ok-test (:test %)) (:status %)) (:proofs s)) (filterv #(= 'app.okt/ok-test (:symbol %)) (:refused s (:reasons s)))])"
+                        ;; the prove's eval as recorded names the render schema its value is drawn by (seon.render.ui/proved is render-test's)
+                        "(second (datahike.api/q '[:find [?e ?k] :in $ ?c :where [?e :seon.eval/code ?c] [?e :seon.eval/response _] [?e :seon.eval/schema ?k]] (seon.agent/db) \"(my.agent/prove #{'app.okt/ok-test})\"))"
                         {:op :done :agent agent}]))]
     (is (clojure.string/includes? (:text proved-ok) "green: ") (:text proved-ok))
     (is (< (count (:text proved-ok)) 300) (str "the answer is its handle and one line: " (count (:text proved-ok)) " chars"))
     (is (= [:pass []] (:value status)) (str "my.task/status: the proof's status, and no reason about it: " (pr-str status)))
+    (is (= :seon.test/proved (:value drawn)) (str "the live prove's eval record names the render schema its value is drawn by: " (pr-str drawn)))
     (is (not (clojure.string/includes? (pr-str done) "proof-unknown app.okt/ok-test")) (str "and the judge counts it: " (pr-str done)))
     (is (clojure.string/includes? (:line done) ":outcome :closed") (pr-str done))
     (is (clojure.string/includes? (:line done) "proof-unknown demo-test/t") "the done rule's reasons, as the judge wrote them on the held task")
@@ -935,6 +940,34 @@
        (is (nil? (my.root/held-agent sys "c1")) "ended after it started: held by no one")
        (d/transact conn [{:seon.agent/key "k1" :seon.agent/started-ms 9}])
        (is (= {:agent :k1 :task "demo/s"} (my.root/held-agent sys "c1")) "spawned again after that end: c1 holds it")))))
+
+;; Estimate: an in-memory store, one branch, five small transactions and two seeks of k1's links, ~1M
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-inbox-reads-a-message-a-merge-carried-onto-main
+  ;; deps' reproduction (result/d1027635 at deps' agent), 2026-11-16: a merge up carries a branch's facts onto main with their own, older
+  ;; transactions, so a message linked on a branch before main moved arrives on main below a since its reader already read, and a read of
+  ;; "links after since by tx" misses it. An inbox reads what is new against main's commit at since: the recipient's links now minus those
+  ;; that commit holds, whatever a link's tx. Latent today (messages are written on main only); live once a reply travels by merge. Red
+  ;; before: the tx filter answered none
+  (let [cfg {:store {:backend :memory :id (random-uuid)} :keep-history? true
+             :initial-tx [{:db/ident :seon.agent/key :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+                          {:db/ident :seon.message/id :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+                          {:db/ident :seon.message/body :db/valueType :db.type/string :db/cardinality :db.cardinality/one}
+                          {:db/ident :seon.message/to :db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/index true}]}
+        _ (d/create-database cfg)
+        m (d/connect cfg)
+        _ (d/transact m [{:seon.agent/key "k1"}])
+        _ (d/branch! m :db :b)
+        b (d/connect (assoc cfg :branch :b))
+        tb (:max-tx (:db-after (d/transact b [{:seon.message/id "m0" :seon.message/body "by a merge" :seon.message/to [[:seon.agent/key "k1"]]}])))
+        _ (d/transact m [{:seon.message/id "m1" :seon.message/body "on main" :seon.message/to [[:seon.agent/key "k1"]]}])
+        read-db @m
+        since (:max-tx read-db)
+        _ (d/transact m (vec (filter #(= tb (:tx %)) (d/datoms @b :eavt))))]
+    (is (some #(and (= :seon.message/to (:a %)) (< (:tx %) since)) (d/datoms @m :eavt)) "the carried link keeps its older tx, below since")
+    (is (= ["by a merge"] (mapv :body (#'seon.server/inbox-messages @m "k1" read-db))) "read against the commit at since, it is new")
+    (is (= [] (#'seon.server/inbox-messages read-db "k1" read-db)) "nothing new against itself")
+    (is (= ["by a merge" "on main"] (sort (mapv :body (#'seon.server/inbox-messages @m "k1" nil)))) "with nothing read, every message")
+    (d/release m) (d/release b)))
 
 ;; Estimate: one index of an empty test branch and a map over two agents, ~0.5M
 (deftest ^{:seon.test/estimate {:ticks 1500000}} the-agents-answer-names-each-agents-pid
