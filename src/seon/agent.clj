@@ -1505,7 +1505,7 @@
                (do (doseq [v fx/root-variables] (lib/c-unsetenv v))
                    (assoc plan ::test-held (cfg/test-held! point ["--profile" "scripted"] #(cfg/entries (db)) #(program/schema-changes (db)))
                                ::test-point point)))
-        forked (rflow/fork! (:graph st) cpid #(test-child-runs! (:ag st) % plan ticks todo)
+        forked (rflow/fork! @(:graph st) cpid #(test-child-runs! (:ag st) % plan ticks todo)
                             {:in :seon.link/down :out :seon.link/up :pump :fiber :codec (child-codec cpid)
                              :fork-wait-ms (cfg/value :seon.config.agent/fork-wait-ms)
                              :conns [[[cpid :seon.link/up] [(:pid st) :seon.link/up]]]})]
@@ -1572,7 +1572,7 @@
                (assoc-in [:shards shard] (-> sh (update :reports #(-> % (into (:streamed acc)) (into (:reports ans)) (into lost)))
                                              (update :fns merge (:fns acc)) (update :heap merge (:heap acc)) (update :measured merge (:measured acc))
                                              (assoc :todo rest-todo :pid os :exit status :no-progress stalled))))]
-    (flow/update! (:graph st) (fn [cfg] (-> cfg (update :procs dissoc cpid) (update :conns #(filterv (fn [[[p]]] (not= cpid p)) %)))))
+    (flow/update! @(:graph st) (fn [cfg] (-> cfg (update :procs dissoc cpid) (update :conns #(filterv (fn [[[p]]] (not= cpid p)) %)))))
     (swap! state #(cond-> % (= os (:test-child %)) (dissoc :test-child)))
     (if (and (seq rest-todo) (seq died) (not give-up?) (not (:draining st)))
       (fork-test-child st shard rest-todo)
@@ -1585,7 +1585,7 @@
   [st e]
   (let [cpids (set (keys (:children st)))]
     (doseq [[_ c] (:children st)] (lib/kill! (:os c) (jolt.host/signal-number "KILL")))
-    (flow/update! (:graph st) (fn [cfg] (-> cfg (update :procs #(apply dissoc % cpids)) (update :conns #(filterv (fn [[[p]]] (not (cpids p))) %)))))
+    (flow/update! @(:graph st) (fn [cfg] (-> cfg (update :procs #(apply dissoc % cpids)) (update :conns #(filterv (fn [[[p]]] (not (cpids p))) %)))))
     (swap! state dissoc :test-child)
     (run-answered (-> st (update :run-dirs (fnil into []) (map (comp fx/run-dir :os) (vals (:children st))))
                       (assoc :threw e :children {} :by-os {})))))
@@ -1662,7 +1662,7 @@
         pid (keyword "seon.test" (str "run-" (:test-runs (swap! state update :test-runs (fnil inc 0)))))
         answer (a/promise-chan)]
     (flow/update! g (fn [cfg] (assoc-in cfg [:procs pid] {:proc (flow/process #'test-run-step)
-                                                          :args {:ag ag :graph g :answer answer :plan plan :ticks ticks
+                                                          :args {:ag ag :graph (:graph ag) :answer answer :plan plan :ticks ticks
                                                                  :shards (vec shards) :forked forked :say say}})))
     (let [[res dirs] (a/<!! answer)]
       (flow/update! g (fn [cfg] (update cfg :procs dissoc pid)))

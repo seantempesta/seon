@@ -2611,7 +2611,7 @@
               (let [answer (a/promise-chan) pid (keyword "seon.test" (str "fold-" n))]
                 (reset! kids [])
                 (flow/update! g #(assoc-in % [:procs pid] {:proc (flow/process fold)
-                                                           :args {:graph g :ag {:key "test/a1" :role :test} :answer answer :plan {} :ticks 0 :budgets nil :shards shards :forked forked :say (fn [_])}}))
+                                                           :args {:graph (doto (promise) (deliver g)) :ag {:key "test/a1" :role :test} :answer answer :plan {} :ticks 0 :budgets nil :shards shards :forked forked :say (fn [_])}}))
                 ;; the fold forks in its resume, on its own thread: the run is the test's once every shard's child is told
                 (dotimes [_ (count shards)] (a/<!! forked-c))
                 {:pid pid :answer answer}))
