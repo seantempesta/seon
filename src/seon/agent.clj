@@ -1084,9 +1084,14 @@
                   ;; any is (a result stored there was made with this code)
                   (into #{} (filter #(and (cd %) (= (cd %) (get bd %)))) (read-moved rdb (branch-moved base db)))
                   #{})
+          ;; what is looked up: with a base, only what the plan can select (seon.proofs/plan: the tests whose digest moved or is new,
+          ;; the proofs asked, the readers of what moved; the removed run from main's text), never every test: every test's lookup was
+          ;; 4.2B of a judge's 5.2B ticks and ran root's agent out of its 2.5 GB heap (result/de6441cd). With none, every test is one
+          wanted (if bd (into (set (keys removed)) (concat (filter cd proofs) moved (remove #(= (get bd %) (cd %)) (keys cd)))) (set (keys cd)))
           ;; the branch's own results first, then the results branch's for the rest (own-results-first)
           stored (let [reusable (proofs/reads-reusable idx)]
-                   (own-results-first (fn [src c m] (proofs/stored-verdicts src db c reusable m)) db rdb (apply dissoc cd moved) (select-keys cd moved)))
+                   (own-results-first (fn [src c m] (proofs/stored-verdicts src db c reusable m)) db rdb
+                                      (select-keys (apply dissoc cd moved) wanted) (select-keys cd moved)))
           unread nil
           ;; a green is anyone's. A red is this branch's own (its verdict's basis, seon.proofs/verdicts-at's :writer), so its judge need not run what
           ;; its turn just recorded, never another's: a digest does not see the machine, so another's red, under load, would be told to this agent as its work

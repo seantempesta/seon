@@ -1173,6 +1173,29 @@
      :fixed {:ticks 8000}
      :sizes [4 12 36 100]}))
 
+;; seon.agent/a-tests-result-is-read-in-one-seek-at-its-digest, the plan's memory (root's seon_done ran out of its agent's 2.5 GB building
+;; it, result/b624f125): a judge's plan looks up stored results only for what it selects (the tests its change reached, and the proofs).
+;; Red first: it looked up every test's (2,301 at an agent: 4.2B of the plan's 5.2B ticks, 19 GB allocated, result/de6441cd), so an
+;; unselected test's stored green came back in :reused.
+;; Estimate: three test plans of a ~14-form world (~5M ticks each) and one result written (~0.5M): 20M ticks
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-judges-plan-looks-up-only-what-it-selects
+  (let [src "(ns pt.lk)\n(defn a [x] (inc x))\n(defn b [x] (dec x))\n"
+        tests "(ns pt.lk-test (:require [clojure.test :refer [deftest is]] [pt.lk :as k]))\n(deftest uses-a (is (= 2 (k/a 1))))\n(deftest uses-b (is (= 0 (k/b 1))))\n"
+        w (mt/with (mt/world) (mt/code 'pt.lk src) (mt/code 'pt.lk-test tests))]
+    (try (binding [*ns* (create-ns 'user)] (load-string src) (load-string tests))
+         (let [p0 (seon.agent/test-plan w nil #{'pt.lk-test/uses-b})
+               basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
+               ;; main holds a green of uses-b at its digest
+               main (pdb/db-with w (proofs/verdict-tx w (:graph p0) basis {'pt.lk-test/uses-b {:digest (get (:digests p0) 'pt.lk-test/uses-b) :pass 1 :fail 0 :error 0}}
+                                                      {'pt.lk-test/uses-b [{:var 'pt.lk/b}]} {}))
+               branch (mt/with main (mt/code 'pt.lk "(ns pt.lk)\n(defn a [x] (+ x 1))\n(defn b [x] (dec x))\n"))
+               plan (seon.agent/test-plan branch main #{})]
+           (is (= '[pt.lk-test/uses-a] (:selected plan)) "the change reaches uses-a alone")
+           (is (= #{} (set (remove (set (:selected plan)) (keys (:reused plan))))) "and no result is looked up for a test it did not select")
+           (is (contains? (:reused (seon.agent/test-plan branch main #{'pt.lk-test/uses-b})) 'pt.lk-test/uses-b)
+               "a test asked for by name is looked up, as results-at asks"))
+         (finally (run! remove-ns '[pt.lk pt.lk-test])))))
+
 ;; THE FOCUS (E) step 1 (data's condition): a result's identity is its whole content (test, reads digest, status), so two branches'
 ;; results never conflict at a merge: a different status at one reach digest is another entity (flaky is a query), and the lookup at
 ;; a reach digest answers the newest. Red first: the identity was (test, reach digest) with a write-once status, so the second
