@@ -485,3 +485,19 @@
       (is (empty? killed) "and nothing ended")
       (is (empty? written) "no gate branch to drop")
       (is (= task-b (:branch r)) "proved on the task's own branch"))))))
+
+;; docs/decisions.md, a bad entry never stops a boot: the seed and a boot's catch-up write their entries leaving out each one the
+;; write check refuses for a cite to nothing, named with its error. Red before: one task citing a name that did not exist refused
+;; the whole seed (seon.db/no-target), so every fresh store and every bin/test failed (2026-11-16, step 3's 33 stale cites).
+;; Estimate: 1 test branch ~1M + load-tx of a 2-task file ~0.5M + 2 writes of ~2 entities (the refused one, then the rest) ~1M ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-bad-entry-is-left-out-and-named-never-refusing-the-rest
+  (ts/test-branch!
+   (fn [_ conn]
+     ;; a task file as the seed reads it (tasks-of, seon.task/load-tx): one task cites a var of a program namespace that has none
+     (let [text (str "[{:seon.task/name \"good\" :seon.task/plan \"Make it.\" :seon.task/proofs #{}}\n"
+                     " {:seon.task/name \"bad\" :seon.task/plan \"Fix `app.m0/missing` first.\" :seon.task/proofs #{}}]\n")
+           tx (seon.task/load-tx @conn (root/tasks-of {"demo.edn" text}))
+           {:keys [db skipped]} (#'root/transact-leaving-out! conn tx)]
+       (is (some? (d/entity db [:seon.task/id "demo/good"])) "the good entry is written")
+       (is (nil? (d/entity db [:seon.task/id "demo/bad"])) "the bad one is left out")
+       (is (= [["demo/bad" :seon.db/no-target]] (mapv (juxt :by :seon.error/type) skipped)) (str "and named with its error: " (pr-str skipped)))))))
