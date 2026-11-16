@@ -722,13 +722,18 @@
         store (clone-process-store! (str dir "/store"))
         root (start-root! {:store store :main main :runs (str dir "/runs")
                            :args ["--set" (str ":seon.config.source/root=" (pr-str checkout))]})]
-    (.addShutdownHook (Runtime/getRuntime)
-                      (Thread. ^Runnable (fn [] (let [s (stop-root! root)] (when-not (:exit s) (binding [*out* *err*] (println "candidate" main "not stopped:" (pr-str s)))))
-                                               (seon.lib/remove-tree! dir))))
+    ;; the process that booted it stops it: a test child forked after the boot inherits the hook and the booted value, and its
+    ;; exit must not end the candidate its siblings still run on
+    (let [owner (seon.lib/c-getpid)]
+      (.addShutdownHook (Runtime/getRuntime)
+                        (Thread. ^Runnable (fn [] (when (= owner (seon.lib/c-getpid))
+                                                    (let [s (stop-root! root)] (when-not (:exit s) (binding [*out* *err*] (println "candidate" main "not stopped:" (pr-str s)))))
+                                                    (seon.lib/remove-tree! dir))))))
     (assoc (with-pids root) :booted true)))
 
 (def ^:private booted-candidate
-  "This process's one booted candidate (candidate): realized by its first platform test, then the same root."
+  "The one booted candidate (candidate): realized once, by the runner before it forks its test children, which inherit it, so a
+  candidate change boots once whatever the number of test processes."
   (delay (boot-candidate! (seon.config/checkout))))
 
 ;; Estimate: the first call is boot-candidate!'s (one boot, ~10.7 s of wall today against a 2 s target); every later call one deref
