@@ -1113,10 +1113,10 @@
      :seon.repl/said (cond
              (= 1 (count holders))
              (str ": its place is its ns form, and the text is in " (first holders)
-                  ", so edit it there, with the same old and new: (seon.repl/edit! '" (first holders) " old new)")
+                  ", so edit it there, with the same old and new: (seon.repl/edit! agent '" (first holders) " old new)")
              (seq holders)
              (str ": its place is its ns form, and the text is in " (count holders) " definitions, " (clojure.string/join ", " holders)
-                  ": edit the one you mean, with the same old and new, (seon.repl/edit! 'its-name old new)")
+                  ": edit the one you mean, with the same old and new, (seon.repl/edit! agent 'its-name old new)")
              :else
              (str ": its place is its ns form, and no definition of " nsym " holds it either. A new definition has no place in a file"
                   " to insert it: evaluate it in its namespace, (in-ns '" nsym ") then (defn- f ...), and it is recorded as program"))}))
