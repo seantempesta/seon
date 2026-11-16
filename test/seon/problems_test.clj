@@ -876,8 +876,11 @@
                :growth :linear
                ;; fixed calls 5 -> 9 (39 measured at n=10, 35 before): the world's test namespace app.calc-test has two
                ;; forms carrying a catch (a deftest's `is`), each read and dropped as no program namespace's: 2 calls each
-               :per-n {:ns 76000 :bytes 74500}
-               :fixed {:ns 50000 :bytes 50000} ; 22: the one-printer law's rule beside catch, its four dials read once (tests, 9 -> 22 by 39 -> 52 at 10)
+               ;; + the five text laws' raw prefilter (seon.problems/laws :pre): each form's :form/src read and matched once a law, ~12 KB
+               ;; and ~1.5k ticks a form (result/d27e061e: 20 forms 0.65 MB, 110 forms 1.74 MB), so +12k a site and the world's 10 other
+               ;; forms plus the datom walk (~0.4 MB) fixed
+               :per-n {:ns 88000 :bytes 86500}
+               :fixed {:ns 500000 :bytes 570000} ; 22: the one-printer law's rule beside catch, its four dials read once (tests, 9 -> 22 by 39 -> 52 at 10)
                :sizes [10 30 100]}))
 
 (deftest ^{:seon.test/estimate {:ticks 15000000}} stale-pins-follow-the-pin-page
