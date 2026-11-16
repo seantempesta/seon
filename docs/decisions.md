@@ -45,6 +45,8 @@ The owner's ruling at the end of the 2026-11-15 night, when the weekly budget ra
 - **Until the inside path is whole, sessions follow one REPL function, never the shell tools** (owner, 2026-11-16): the stop gap is a Seon function every session calls (what the branch moved, what it reaches, its health, whether the binary changes, readiness to merge, its prove), whose body changes in the same land as each capability, so the instruction never does.
 - **Old test results do not matter; the store may be erased whenever the new test system needs it** (owner, 2026-11-16, to tests2). A result written before its read keys were datoms counts as none (```seon.proofs/verdicts-at```), so its test reruns once; no migration is written.
 - **After boot, tests read no disk** (owner, 2026-11-16). Only boot reads files; afterwards outside data enters only through effects (a session's file-edit hook is one, and temporary). Sessions work as Seon agents through the MCP tools now, and fix what makes that painful, since Seon agents must be able to.
+- **Good fixes are released, never held** (owner, 2026-11-16 evening): finished, proved work merges at once; no hold, freeze or batching keeps a good fix off main. The agent-process freeze is lifted: a fix inside `seon.agent` merges like any other, its author telling flow when it touches what flow's rebuild moves. Where: [plan](plan.md#where-things-stand).
+- **A whole or wide test run needs a reason** (owner, 2026-11-16 evening): a session runs every test only when the reached in-process tests at a fresh agent cannot answer its question, and says why to root first; a session that runs one without that reason is replaced by one that works this way. Where: [plan](plan.md#where-things-stand).
 
 ## 2026-11-15 rulings
 

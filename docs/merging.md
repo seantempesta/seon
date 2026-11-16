@@ -212,7 +212,7 @@ A green is reused when its digest matches, so whatever its run read outside the 
 
 ## A slow test runs last
 
-A test measured at `:seon.config.proofs/slow-test-ms` or over (```seon.fx/slow-tests```: the fastest of its newest greens and its green at its digest) is left out of an agent's run, and `bin/prove` runs the slow tests with no green at their digest last, once everything else is green (the plan's `out/slow`), so a fast red answers first. A slow test is a bug, seen as its own red: past its tick budget or its wall bound. Run one by name (`bin/test NS/TEST`); once fast, its green is under the bound.
+A merge's proof is the fast set: a test measured at `:seon.config.proofs/slow-test-ms` (50 ms) or over (```seon.fx/slow-tests```: the fastest of its newest greens and its green at its digest) is left out of an agent's run, and `bin/prove` runs the slow tests with no green at their digest last, once everything else is green (the plan's `out/slow`), so a fast red answers first. A slow test is a bug, seen as its own red: past its tick budget or its wall bound. Run one by name (`bin/test NS/TEST`); once fast, its green is under the bound.
 
 ## A test's tick budget
 
