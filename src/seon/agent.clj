@@ -233,6 +233,11 @@
   [mid from body sent-ms]
   (task/message-tx mid from [(:key @state)] body sent-ms))
 
+(defn entries-tx
+  "The transaction that writes entries (undelivered) on this branch: the entity root wrote on main, with this agent's ref only (own-message-tx)."
+  {:malli/schema [:=> [:cat [:sequential :map]] :seon.db/tx-data]}
+  [entries] (into [] (mapcat (fn [{:keys [id from body sent-ms]}] (own-message-tx id from body sent-ms))) entries))
+
 (defn taken!
   "The first n entries of the inbox (effect outcomes, which no model turn reads) leave it at a turn's take (seon.turn/take!). nil."
   {:malli/schema [:=> [:cat nat-int?] :nil]}
@@ -453,14 +458,14 @@
 ;; ---- effects (seon.fx, worktree session FX1): root's owner procs, through the agent's proc ---
 
 (defn deliver!
-  "Bring what main holds for this agent onto its branch, committed: its messages (seon.task/delivery-tx: each with its
-  :seon.agent/delivered ref, the delivery) and the facts of its own entities (untaken-facts). The one delivery while its process
-  lives, a turn's (seon.turn/deliver!), its code's (messages) and a session's inbox (seon.server/inbox-answer); the turn that read a
-  message is derived from its transaction (seon.ctx/placed-messages). Answers the messages delivered. See docs/users.md#messages."
+  "Bring what main holds for this agent onto its branch, committed: its messages (undelivered) and the facts of
+  its own entities (untaken-facts). The one delivery, a turn's (seon.turn/deliver!) and its code's (messages). A message
+  on the branch is delivered; the turn that read it is derived from its transaction (seon.ctx/placed-messages). Answers the
+  messages delivered. See docs/users.md#messages."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
-  (let [{es :messages dtx :tx} (task/delivery-tx (heard-main) (db) (:key @state))
-        tx (into (untaken-facts) dtx)]
+  (let [es (undelivered)
+        tx (into (untaken-facts) (entries-tx es))]
     (when (seq tx) (transact! tx))
     (commit!)
     es))

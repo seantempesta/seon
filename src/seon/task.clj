@@ -548,51 +548,22 @@
                (landed-messages db ids))))
 
 (defn undelivered
-  "The messages main holds to the agent with key k that branch-db, its branch, records no delivery of: each {:id :from :body :sent-ms},
-  :from its sender as a ref's value (`sender`), in main's order (by transaction, then id). The agent's ref on main is the fact (a seek of
-  :seon.message/to on its entity, never a scan of the messages); its delivery is the agent's own :seon.agent/delivered ref to it on the
-  branch, written only by the one delivery (`delivery-tx`), so a message a merge of main brings down, or one held at the fork, is still
-  undelivered (docs/users.md#messages). A message the agent removed (its ref retracted) stays delivered. Cutover: a message the
-  branch held from before :seon.agent/delivered was installed there (its id's transaction is older than the attribute's) was
-  delivered by being held, as it was then. O(m) seeks on main and O(m) lookups on the branch, m the messages to the agent. See
-  docs/users.md#messages."
+  "The messages main holds to the agent with key k that branch-db, its branch, does not hold: each {:id :from :body :sent-ms}, :from its sender as a ref's value (`sender`), in main's
+  order (by transaction, then id). The agent's ref on main is the fact (a seek of :seon.message/to on its entity, never a scan of the
+  messages), and the message entity on the branch (one lookup of its id) is its delivery (docs/users.md#messages), written there by seon.agent/deliver! or brought down
+  by a merge or sync of main: a message the agent removed (its ref retracted, the entity kept) stays delivered, and one already on main when the branch forked is
+  delivered at the fork. The one reading of it: the agent's next act (seon.agent/undelivered) and root's check that a
+  parked agent is owed one. O(m) seeks on main and O(m) id lookups on the branch, m the messages to the agent. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :string] [:vector :seon.task/message]]}
   [main branch-db k]
   (if-let [me (pdb/eid main :seon.agent/key k)]
-    (let [ae (pdb/eid branch-db :seon.agent/key k)
-          ;; the transaction that installed the attribute on this branch: nil while it lacks it, so all it holds was delivered then
-          since (:tx (first (d/datoms branch-db :avet :db/ident :seon.agent/delivered)))
-          delivered? (fn [mid]
-                       (when-let [be (pdb/eid branch-db :seon.message/id mid)]
-                         (or (nil? since)
-                             (< (:tx (first (d/datoms branch-db :eavt be :seon.message/id))) since)
-                             (and ae (seq (d/datoms branch-db :eavt ae :seon.agent/delivered be))))))]
-      (->> (d/datoms main :avet :seon.message/to me)
-           (map (fn [dt] [(:tx dt) (d/entity main (:e dt))]))
-           (remove (fn [[_ m]] (delivered? (:seon.message/id m))))
-           (sort-by (fn [[tx m]] [tx (:seon.message/id m)]))
-           ;; its sender as a ref's value (`sender`): an agent's key, else the system's
-           (mapv (fn [[_ m]] {:id (:seon.message/id m) :from (sender (:seon.agent/key (:seon.message/from m))) :body (:seon.message/body m) :sent-ms (:seon.message/sent-ms m)}))))
+    (->> (d/datoms main :avet :seon.message/to me)
+         (map (fn [dt] [(:tx dt) (d/entity main (:e dt))]))
+         (remove (fn [[_ m]] (pdb/eid branch-db :seon.message/id (:seon.message/id m))))
+         (sort-by (fn [[tx m]] [tx (:seon.message/id m)]))
+         ;; its sender as a ref's value (`sender`): an agent's key, else the system's
+         (mapv (fn [[_ m]] {:id (:seon.message/id m) :from (sender (:seon.agent/key (:seon.message/from m))) :body (:seon.message/body m) :sent-ms (:seon.message/sent-ms m)})))
     []))
-
-(defn delivery-tx
-  "The one delivery of agent k's messages onto branch-db, its branch, from main: {:messages (undelivered) :tx}, tx writing each message
-  entity with k's ref only (message-tx; one a merge or the fork brought is the same entity, an upsert by id; k by its identity) and k's
-  :seon.agent/delivered ref to it. Transacted by the branch's one writer: its live process (seon.agent/deliver!), else root's writer
-  (seon.writer's :deliver). O(m) as undelivered. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :string] [:map [:messages [:vector :seon.task/message]] [:tx :seon.db/tx-data]]]}
-  [main branch-db k]
-  (let [es (undelivered main branch-db k)]
-    {:messages es
-     ;; the recipient by its identity, an upsert as `sender` is: a branch that never merged main since its fork lacks its own agent
-     :tx (if (empty? es)
-           []
-           (into [{:db/id "recipient" :seon.agent/key k}]
-                 (mapcat (fn [{:keys [id from body sent-ms]}]
-                           (let [tid (str "delivered-" id)]
-                             [(assoc (first (message-tx id from [k] body sent-ms)) :db/id tid :seon.message/to ["recipient"])
-                              [:db/add "recipient" :seon.agent/delivered tid]])))
-                 es))}))
 
 (def held-attrs
   "The attributes a hold writes on a task, what failed and its evidence (seon.reconcile/hold-tx builds its write from them, as
