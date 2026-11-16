@@ -325,6 +325,39 @@
                                                   (written (:db-after rep) (:ours (:r %)))))
                          (:members judged))}]))))
 
+(defn- merge-into-main
+  "Branch b merged into main in ONE writer step (plan item 10): main merged into b first (merge-main-into: the candidate, built on
+  main's head; a conflict or a refused fact answers its entries and nothing moves), b's candidate refused as merge-refused and
+  dangling-refused judge it, else main takes the candidate's change in one commit with b's head a parent (d/merge-db), so b's merge
+  base is its head. Main can't move inside the step, so a merge is never behind. Answers [st {:merged? :tx ...}] or a refusal. See
+  docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/branch] [:tuple :seon.writer/state :map]]}
+  [st o b]
+  (let [conn (:conn st)
+        r (if (pdb/branch? conn b) (merge-main-into conn (:cfg st) b) (refused (str "no branch " b) {}))]
+    (if (or (contract/error? r) (not (:ok r)))
+      [st (if (contract/error? r) r {:merged? false :conflicts (:conflicts r)})]
+      (let [main @conn head (pdb/head conn b)
+            ;; the candidate's program change against main, as the octopus merge's checks read it
+            ;; (seon.merge/delta-three-way until slice 2's checks read the candidate's facts)
+            tw (pm/delta-three-way main head main :all)
+            why-not (or (merge-refused main head (assoc tw :conflicts [] :theirs {})) (dangling-refused main head false))
+            [gone added] (pm/changed-datoms main head)
+            txe (into #{} (map :tx) (concat gone added))
+            ops (-> [] (into (for [dt gone :when (not (txe (:e dt)))] [:db/retract (:e dt) (:a dt) (:v dt)]))
+                    (into (for [dt added :when (not (txe (:e dt)))] [:db/add (:e dt) (:a dt) (:v dt)])))]
+        (cond
+          why-not [st why-not]
+          (empty? ops) [st {:merged? true :tx (:max-tx main) :datoms 0}]
+          :else
+          (let [rep (d/merge-db conn #{(d/commit-id head)} (into ops (mark-tx main)) (pdb/tx-meta (pdb/conn-main conn)))
+                t (:max-tx (:db-after rep))
+                tx-ops (pdb/report->tx rep)
+                st (program-at st t tx-ops)
+                _ (stored! st o tx-ops)]
+            [(main-commit st o (:max-tx (:db-before rep)) t tx-ops (:db-after rep))
+             (merge {:merged? true :tx t :datoms (count tx-ops)} (written (:db-after rep) (:ours tw)))]))))))
+
 (defn- answer
   "The answer r for dest, as data on :to-api."
   {:malli/schema [:=> [:cat :seon.host/volatile [:maybe :map] :any] :nil]}
@@ -471,6 +504,7 @@
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
                         (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st)}))
       :octopus-merge (let [[st r] (octopus-merge st o (vec (:branches m)) (:data-attrs m :all))] (reply st r))
+      :merge (let [[st r] (merge-into-main st o (:branch m))] (reply st r))
       ;; main merged into branch b on main's program (merge-main-into); its agent waits meanwhile
       :merge-main (reply st (if-not (exists? (:branch m))
                               (refused (str "no branch " (:branch m)) {})
