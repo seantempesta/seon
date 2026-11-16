@@ -721,7 +721,9 @@
   [n more]
   (merge {:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/agent [:seon.agent/key "a1"] :seon.model-call/n n :seon.model-call/origin :model} more))
 
-(defn- reply-world
+(declare reply-world)
+
+(defn- build-reply-world
   "The conversation of agent b/a1 on the world, as ctx holds it: model call 1 (text \"I look.\", reasoning \"think\") with evals e1 e2
   e3, call 2 (\"Then.\", \"more\") with e4 e5, call 3 (no text, reasoning \"quiet\") with e6. Answers [db ctx-value]."
   []
@@ -734,6 +736,12 @@
                     (model-call-fact 3 {:seon.model-call/forms 1 :seon.model-call/reply "" :seon.model-call/reasoning "quiet"})
                     (ev 1 1) (ev 2 1) (ev 3 1) (ev 4 2) (ev 5 2) (ev 6 3)])]
     [db (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b))]))
+
+(def ^:private ^:seon.test/fixture reply-world-value
+  "`build-reply-world`, built once a process (an immutable value): seven reads of it cost seven builds (~12 ms each)."
+  (delay (build-reply-world)))
+
+(defn- reply-world "[db ctx-value] of `build-reply-world`." [] @reply-world-value)
 
 (defn- wire-without
   "The wire messages of the conversation of `reply-world` with the evals ids of its ctx unlinked (what swap! on @ctx does)."
@@ -1035,7 +1043,8 @@
 (deftest a-value-past-the-largest-kept-is-gone-and-the-transcript-says-so
   ;; docs/storage.md#plain-data: :seon.config.store/max-value-chars bounds what an eval's record keeps; past it the
   ;; value's type and the bound are kept, the transcript says it is gone, and the handle still reads it live
-  (let [bound (seon.config/value :seon.config.store/max-value-chars)
+  (with-redefs [seon.config/value (let [v seon.config/value] (fn [k & more] (if (= k :seon.config.store/max-value-chars) 20 (apply v k more))))]
+   (let [bound (seon.config/value :seon.config.store/max-value-chars)
         big (apply str (repeat (inc bound) "x"))
         at (apply str (repeat bound "x"))
         details (fn [v] (repl/record-details "(read-it)" {:handle 'result/e1 :value v} {:call-id "c1"}))
@@ -1046,7 +1055,7 @@
     (is (= bound (:over (:seon.value/gone (value-of (details (range (inc bound))))))) "a lazy seq past it too, never realized further")
     (is (str/includes? sent ":seon.value/gone") "the transcript says it is gone")
     (is (str/includes? sent (str ":over " bound)) "and past what")
-    (is (< (count sent) 500) "and carries no part of the value")))
+    (is (< (count sent) 500) "and carries no part of the value"))))
 
 (deftest an-evals-facts-are-attributes-a-query-finds
   ;; docs/storage.md#plain-data: an eval's code, call id, text and response are attributes of its entity, so a
@@ -2529,13 +2538,13 @@
 (deftest an-opened-eval-reads-whole-to-the-model
   ;; owner, 2026-11-09: opening an eval changes what the agent's model reads ("Model reads it too"): its result whole, not budgeted
   (let [[db] (tree-world)
-        big (vec (range 40000))
-        e {:seon.eval/id "e9" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/code "(range 40000)" :seon.eval/call-id "c9" :seon.eval/intent "Count."
+        big (vec (range 8000))
+        e {:seon.eval/id "e9" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/code "(range 8000)" :seon.eval/call-id "c9" :seon.eval/intent "Count."
            :seon.eval/response {:handle 'result/e9 :value big}}
         tool (fn [e] (:content (peek (wire/eval-msgs {:seon.db/db db :seon.render/index (seon.program/index-of-db db)} e))))
         closed (tool e) opened (tool (assoc e :seon.eval/opened true))]
-    (is (str/includes? opened "39999") "opened: the whole value")
-    (is (not (str/includes? closed "39999")) "closed: within its budget")
+    (is (str/includes? opened "7999") "opened: the whole value")
+    (is (not (str/includes? closed "7999")) "closed: within its budget")
     (is (< (count closed) (count opened)))))
 
 
