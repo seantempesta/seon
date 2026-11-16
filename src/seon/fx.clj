@@ -592,6 +592,23 @@
           (not (str/blank? (git! {} root ["status" "--porcelain" "--ignore-submodules=all"] nil))) (git! {} root ["rev-parse" "HEAD"] nil)
           :else (git-try root ["rev-parse" "--verify" "--quiet" "HEAD^1"]))))
 
+(defn landing-message
+  "A session's landing message, read from its checkout at root: {:message :head}, the messages of its own commits (merges of main left
+  out) from after since (the head the last landing read, when it is an ancestor of HEAD) or else from the checkout's merge base with
+  main, to HEAD, and HEAD; nil with no base or no own commit since; :seon.fx/io-error when git cannot read them. A session's commits
+  never reach git's main themselves (seon_done merges its files), so its merge base stays behind them: since is what keeps a landing
+  from carrying the ones before it. Three or four git processes. See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat :string [:maybe :string]] [:or [:maybe [:map [:message :string] [:head :string]]] :seon.error/base]]}
+  [root since]
+  (try
+    (let [head (git! {} root ["rev-parse" "HEAD"] nil)
+          from (or (when (and since (zero? (:exit (git-run {} root ["merge-base" "--is-ancestor" since head] nil)))) since)
+                   (base-commit root))]
+      (when (and from (not= from head))
+        (let [m (str/trim (git! {} root ["log" "--no-merges" "--format=%B" (str from ".." head)] nil))]
+          (when-not (str/blank? m) {:message m :head head}))))
+    (catch Throwable e (error #'seon.fx/landing-message :seon.fx/io-error (step/error-msg e) {:path root}))))
+
 (defn behind
   "How many commits git's main (:seon.config.source/main) holds that the checkout at root's HEAD does not: what a session merges
   before a plan, never what its own change reached. 0 for main itself; nil when either has no commit. See docs/merging.md#a-branch-lands-with-binland."
@@ -865,7 +882,7 @@
   tree's own refuses the commit; moved by plumbing, its HEAD left its index behind. With :expect (a sha), the commit is made on
   that commit and the ref moves only from it, one compare-and-swap (expected-commit!: :seon.fx/ref-moved when it moved). See docs/source.md#commit-the-merges-branch.
   With :allow-empty? and no files it commits the branch's own tree again (an empty commit: a review,
-  seon.doc/review-message). Each file is first read as its reader reads it (unreadable), and one that doesn't refuses the commit. :modes ({path git mode}) gives a file's mode, 100644 otherwise. Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing
+  seon.doc/review-message). The files are committed as given, never read again: main's drawn text was read form by form when written. :modes ({path git mode}) gives a file's mode, 100644 otherwise. Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing
   to write), or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [dir branch files message allow-empty? modes base expect merge]} :req}]
@@ -881,8 +898,9 @@
   (if (and (empty? files) (not allow-empty?))
     {:value {:sha nil :files 0}}
     (try
-      (if-let [bad (seq (for [[p t] (sort files) :let [why (unreadable p t)] :when why] (str p ": " why)))]
-       (error #'seon.fx/git-commit :seon.fx/io-error (str "refused, nothing committed: " (str/join "; " bad)) {:path dir})
+      ;; the files are main's own drawn text, each form read when it was written: not read again here (a draw bug is the write-back's
+      ;; byte-for-byte proofs' to catch, and a catch-up leaves out a file it cannot read, naming it)
+      (do
        (let [ref (str "refs/heads/" branch)
             who (cfg/value :seon.config.source/committer-name) mail (cfg/value :seon.config.source/committer-email)
             id-env {"GIT_AUTHOR_NAME" who "GIT_AUTHOR_EMAIL" mail "GIT_COMMITTER_NAME" who "GIT_COMMITTER_EMAIL" mail}]

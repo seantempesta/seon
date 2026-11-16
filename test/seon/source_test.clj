@@ -498,6 +498,16 @@
     (is (= (program/program-digest seeded-b) (program/program-digest main-b))
         "the program main holds is the one a seed of B holds: one program digest")))
 
+;; docs/source.md#commit-the-merges-branch: the merges commit carries each merged task's landing message under its task line
+;; Estimate: a test db with one task ~0.5M, one message ~10k = 600000
+(deftest ^{:seon.test/estimate {:ticks 600000}} a-merge-commit-carries-the-landings-message
+  (let [db (d/db-with (ts/test-db) [{:seon.task/id "s/t" :seon.task/ns 's :seon.task/name "t" :seon.task/plan "P." :seon.task/execution :running
+                                     :seon.task/kind :work :seon.task/branch :task-s-t :seon.task/landing {:message "A fix\n\nDeletes: x, onto y" :head "abc"}}])
+        msg (source/commit-message db [{:task "s/t"} {:task "s/none"}])]
+    (is (clojure.string/starts-with? msg "Seon merge: s/t, s/none\n") msg)
+    (is (clojure.string/includes? msg "task s/t\n\nA fix\n\nDeletes: x, onto y\n") "the landing's message under its task")
+    (is (clojure.string/includes? msg "task s/none") "a task with none: its line alone")))
+
 (def ^:private pt-text
   "(ns app.pt-src\n  \"A fixture file.\")\n\n;; adds\n(defn add [a b] (+ a b))\n\n(defn twice\n  [x]\n  (add x x))\n\n(def limit 3)\n")
 
@@ -689,7 +699,7 @@
         main-sha (git tree "rev-parse" "main")
         [main2 ours] (merged (main-with-file) 'app.pt-src "(defn twice [x] (* 2 x))")
         files (source/files main2 (source/changed-files main2 ours))
-        msg (source/commit-message [{:task "app.pt/twice"}])
+        msg (source/commit-message main2 [{:task "app.pt/twice"}])
         r (fx/git-commit {:req {:dir tree :branch "jolt/seon-merges" :files files :message msg}})]
     (is (re-matches #"[0-9a-f]{40}" (str (get-in r [:value :sha]))) (pr-str r))
     (is (= (get-in r [:value :sha]) (git tree "rev-parse" "jolt/seon-merges")) "the merges branch, made at HEAD, holds the commit")

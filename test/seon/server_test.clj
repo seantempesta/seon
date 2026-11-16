@@ -771,8 +771,11 @@
      (d/transact conn [{:seon.task/id "session/w" :seon.task/outcome :gate :seon.task/deferred {'demo-test/p "d1"}}])
      (let [sys {:graph nil :ext (a/chan) :conn conn}
            done (fn [skipped load-errors]
-                  (let [asked (atom [])
+                  (let [asked (atom []) written (atom [])
                         r (with-redefs [seon.server/work-of (fn [_ _] {:task "session/w" :env {:branch :b} :key "k1"})
+                                        ;; the checkout's own commits since its last landing (docs/source.md#commit-the-merges-branch)
+                                        seon.fx/landing-message (fn [_ _] {:message "A fix\n\nDeletes: x, onto y" :head "h1"})
+                                        seon.system/transact-main! (fn [_ tx] (swap! written into tx) (doto (promise) (deliver {:t 1})))
                                         seon.system/branch-db (fn [_ _] (doto (promise) (deliver {:ok true :db @conn})))
                                         seon.system/catch-up (fn [_ _ _] {:paths ["src/app/x.clj" "test/app/x_test.clj"] :skipped skipped})
                                         seon.system/submit! (fn [_ _ code _]
@@ -785,9 +788,11 @@
                                         seon.system/judge! (fn [_ _] {:task "session/w" :outcome :gate})
                                         seon.fx/uncommitted (fn [_] [])]
                             (seon.server/op-answer sys :k1 {:op :done :checkout "/co" :client "w"}))]
-                    {:r r :asked @asked}))]
-       (let [{:keys [r asked]} (done [] nil)]
+                    {:r r :asked @asked :written @written}))]
+       (let [{:keys [r asked written]} (done [] nil)]
          (is (= '[my.branch/import! seon.turn/hand-back!] (mapv first asked)) (str "import, then hand back, nothing between: " (pr-str asked)))
+         (is (= [{:seon.task/id "session/w" :seon.task/landing {:message "A fix\n\nDeletes: x, onto y" :head "h1"}}] written)
+             "the landing's own message is the task's, which the merge's git commit carries (seon.source/commit-message)")
          (is (= ["src/app/x.clj" "test/app/x_test.clj"] (last (first asked))) "the import is asked for exactly the changed files")
          (is (re-find #":outcome :gate" (str (:line r))) (pr-str r))
          (is (re-find #"merge gate runs 1 process test" (str (:next r))) "a :gate answers with :next"))

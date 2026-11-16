@@ -334,8 +334,8 @@
 
 ;; docs/source.md#a-program-file. KEPT with its two interpreters: zsh -n and perl -c are the subject. Estimate: 2 spawns (~100k ticks
 ;; each) + 4 EDN/clj reads + 2 config validations of the shipped file (~4M ticks each) = ~10M ticks.
-(deftest ^{:seon.test/estimate {:ticks 15000000} :seon.test/execs ["zsh" "perl"]} a-file-is-read-as-its-reader-reads-it-before-a-commit
-  ;; docs/source.md#a-program-file: measured 2026-11-07, one agent's spit of a schemaless key stopped a new process loading its config; what doesn't read is refused and nothing is committed
+(deftest ^{:seon.test/estimate {:ticks 15000000} :seon.test/execs ["zsh" "perl"]} a-file-is-read-as-its-reader-reads-it
+  ;; docs/source.md#a-program-file: measured 2026-11-07, one agent's spit of a schemaless key stopped a new process loading its config; what doesn't read is named where it is read in (an import), never written back again by a commit
   (is (nil? (fx/unreadable "bin/x" "#!/bin/zsh\necho 1\n")))
   (is (some? (fx/unreadable "bin/x" "#!/bin/zsh\nif then\n")) "zsh -n")
   (is (some? (fx/unreadable "bin/x" "#!/usr/bin/perl\nprint (;\n")) "perl -c")
@@ -346,12 +346,7 @@
   (is (some? (fx/unreadable "resources/seon/schemas/x.edn" "{:a ")))
   (let [shipped (seon.config/shipped-text)]
     (is (nil? (fx/unreadable seon.config/shipped-file shipped)) "the shipped file reads")
-    (is (re-find #"seon.config.root/view-window" (str (fx/unreadable seon.config/shipped-file (clojure.string/replace-first shipped "{" "{:seon.config.root/view-window 0\n")))) "an invalid value is refused, naming its key"))
-  ;; a commit refuses before it asks git anything, so it needs no repository: the refused one touches no ref (nothing to read back)
-  (let [r (fx/git-commit {:req {:dir "/nonexistent-repo" :branch "b" :files {"bin/x" "#!/bin/sh\nif then\n"} :message "m"}})]
-    (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r))
-    (is (clojure.string/includes? (:seon.error/message r) "bin/x") (pr-str r))
-    (is (clojure.string/includes? (:seon.error/message r) "nothing committed") (pr-str r))))
+    (is (re-find #"seon.config.root/view-window" (str (fx/unreadable seon.config/shipped-file (clojure.string/replace-first shipped "{" "{:seon.config.root/view-window 0\n")))) "an invalid value is refused, naming its key")))
 
 ;; docs/source.md#indexing-a-tree: an import brings what the tree changed, so a merge the tree never held stays on main.
 ;; Estimate: git is the subject (tree-id and diff). One init, 2 commits, 3 tree-ids and 3 reads of ~5 git calls each (tree-id 4, diff 1)
@@ -655,6 +650,27 @@
         (git "branch" "-q" "side" "HEAD^")
         (let [r (commit {:branch "side" :expect (git "rev-parse" "HEAD") :files {"d.txt" "d\n"}})]
           (is (= :seon.fx/ref-moved (:seon.error/type r)) (pr-str r))))
+      (finally (seon.lib/remove-tree! dir)))))
+
+;; docs/source.md#commit-the-merges-branch: a seon_done's git commit carries the landing's own message, so a branch commit's Deletes: reaches
+;; main: its own commits since the last landing it read, its merges of main left out. Estimate: git is the subject, ~15 spawns at ~100k
+;; ticks = 1.5M ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["git"]} a-landing-message-is-the-branchs-own-commits-since-its-last-landing
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-fx-landing-" (random-uuid))) (.mkdirs)))
+        git (fn [& args] (clojure.string/trim (str (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@localhost" args)))))
+        commit (fn [f m] (spit (str dir "/" f) m) (git "add" "-A") (git "commit" "-q" "-m" m))]
+    (try
+      (git "init" "-q" "-b" "main") (commit "a" "base")
+      (git "checkout" "-q" "-b" "jolt/s") (commit "b" "A fix\n\nDeletes: x, onto y")
+      (git "checkout" "-q" "main") (commit "c" "main moved") (git "checkout" "-q" "jolt/s") (git "merge" "-q" "--no-edit" "main")
+      (let [l (fx/landing-message dir nil)]
+        (is (clojure.string/includes? (:message l) "Deletes: x, onto y") (pr-str l))
+        (is (not (clojure.string/includes? (:message l) "Merge")) "a merge of main is no part of it")
+        (is (not (clojure.string/includes? (:message l) "main moved")) "nor main's own commits")
+        (is (= (git "rev-parse" "HEAD") (:head l)))
+        (is (nil? (fx/landing-message dir (:head l))) "landed: nothing new since")
+        (commit "d" "Next fix")
+        (is (= "Next fix" (:message (fx/landing-message dir (:head l)))) "the next landing carries only its own"))
       (finally (seon.lib/remove-tree! dir)))))
 
 ;; docs/merging.md#verdicts-are-a-cache: a config value naming a file enters a test's digest as the file's name, never where the
