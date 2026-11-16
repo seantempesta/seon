@@ -30,13 +30,14 @@ What each session works on now, kept by root and rewritten in place at every che
 
 | Session | Item | Started | Estimate | Actual / ratio |
 |---|---|---|---|---|
-| tests | `ts/ask` bounded by the time left before the test's wall: the hung `a-sessions-checkout-is-proved-on-its-trees-branch` (its brief's item 3); then the checklist's step 1 | 07:10 | 45 min | |
-| runtime | admission by weight (plan item 11, D): red-first proof of `class-weight` | 07:10 | 90 min | |
-| flow | the inbox: delivery as one fact, so a message survives a restart and is answered once | 07:15 | 45 min | |
-| data | its held merge slice (`seon.merge`, `seon.writer`, `my.branch`), proving then landing | 07:15 | 60 min | |
-| deps | the ~2 GB a boot writes before the writer's first sync: a clone root with a transaction sampler | 07:15 | 120 min | |
-| context | land its task commits; then plan item 8, the done rule stored as the task's reasons | 07:15 | land 15 min; item 8 120 min | |
-| web | land its task text; then the MCP relay and ops answering across a restart | 07:15 | land 15 min; relay 90 min | |
+| tests | `ts/ask` bounded by the time left before the test's wall (the pilot-15 hang); its 2 task commits; then checklist step 4 (`bin/test` as a client of `:prove`, reusing `seon.main/prove-client`) | 07:10 | 45 min | in the land queue at 07:41 |
+| runtime | admission by weight (plan item 11, D), slice 1 committed (1893e8defd); `bin/system status` up only once root listens; next the switch-over build | 07:10 | 90 min | proving at 07:41 |
+| flow | the inbox: delivery as one fact (`:seon.agent/delivered`); next the switch-over's `::flow/drain` contract | 07:15 | 45 min | 5 of 6 proofs green at 07:41 |
+| data | its held merge slice; a run of its reach | 07:15 | 60 min | told at 07:41 to debug one red forward, not rerun 204 |
+| deps | the ~2 GB a boot writes before the writer's first sync (measuring churn per commit on a clone); next `::flow/drain` in Jolt | 07:15 | 120 min | measuring at 07:41 |
+| context | land its task commits; then plan item 8, the done rule stored as the task's reasons | 07:15 | land 15 min; item 8 120 min | land started 07:33 |
+| web | land its task text | 07:15 | 15 min | 14 min (721c71bb33), 0.9 |
+| web | `seon.server/an-op-acts-on-its-callers-own-agent` (deletes `:seon.server/held`); then its part of the switch-over (S4: `:seon.system/restarting` with `:next-port`) | 07:42 | 60 min; S4 120 min | |
 
 ## The managing session
 
