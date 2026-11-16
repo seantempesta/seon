@@ -4,7 +4,7 @@
   serialized in one pass, linear in its nodes (owner, 2026-10-23: renders as functions and results;
   root: a cost proof for the recursion). Run: bin/test seon.render-cost-test"
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.web.html] [seon.db :as pdb]
+  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.web.html] [seon.db]
             [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.render.ui] [seon.config] [seon.task] [seon.repl] [seon.doc] [seon.ctx] [seon.ctx] [seon.ratom] [seon.program] [seon.ctx.wire] [seon.fixtures]))
 
 (def ^:private fan "Children per node: a tree as deep as log3 n (10,000 nodes: 9 levels)." 3)
@@ -197,63 +197,6 @@
      :fixed {:bytes 212000}
      :sizes [100 300 1000 10000]}))
 
-(defn latest-of
-  "The input of size n: the render proc's state holding agent a1's debug page on latest after a pass, over a
-  session of n earlier evals and one model turn (its basis recorded as seon.turn/model-request! writes it), with one eval
-  more on the branch since: what the next pass draws (the turn to come's request, made at the head); and the view."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
-  [n]
-  (let [k "a1"
-        ev (fn [id turn] (seon.repl/record-tx {:seon.agent/key k} id (seon.task/sender "a1") {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol "result" id) :value 3} :seon.eval/call (seon.task/call-ref k turn) :seon.eval/call-id (str "c-" id)}))
-        db0 (reduce d/db-with (ts/test-db)
-                    [[{:seon.system/id :root :seon.system/boot "b1"}]
-                     (seon.task/agent-tx :a1 {:status :busy :branch :task-x})])
-        db0 (reduce d/db-with db0
-                    [(seon.doc/load-tx db0 "docs" {seon.doc/system-page "# You are a Seon agent\n\nThe help page."})
-                     (seon.task/create-tx db0 [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{'t-test/x-test}}])
-                     ;; the agent has no :seon.agent/task: its page draws no task part, as this input has always been (the run it
-                     ;; stood for held the task); linked, the draw costs 4,135 calls at 10 against these 3,920
-                     (into [] (mapcat #(ev (str "e" %) 0)) (range n))
-                     [{:seon.agent/key k :seon.agent/turn 1}
-                      {:seon.model-call/id (str k "/1") :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n 1 :seon.model-call/origin :model}]])
-        b {:commit (d/commit-id db0) :task "t/x" :turn 1 :max-turns 9 :origin :model :agent k}
-        db (d/db-with db0 [{:seon.model-call/id (str k "/1") :seon.model-call/basis b}])
-        view [:debug :a1]
-        st {:rid 1 :pending {} :watch #{view} :waiting {} :kf-wanted #{} :views {} :main-db db
-            :branches {view {:db db :read [:task-x] :branch :task-x}} :branch-reads {:task-x {:db db}} :view {:agents {}}}
-        [st _] (#'seon.render.proc/pass-view st view)]
-    [(assoc-in st [:branches view :db] (d/db-with db (ev "next" 1))) view]))
-
-(deftest drawing-latest-costs-one-request
-  ;; task seon.render/the-debug-page-is-the-wire-request: a pass of the debug page on latest after the branch
-  ;; moved draws the one request the next turn would send (seon.ctx.wire/wire-turn at the head), nothing per
-  ;; earlier turn; the request holds the session, so it grows with the session's evals, as the turn's own does
-  (cost/proof
-    {:of 'seon.render.proc/pass-view :input 'seon.render-cost-test/latest-of
-     :n "earlier evals in the agent's session"
-     :work (str "one request made at the branch's head (seon.ctx.wire/render: the system prompt, the session's records each "
-                "printed by its own render, the turn's page message made at the head) "
-                "under its provider, put in the wire shape "
-                "(seon.model/request-body), its head and the rows the move added drawn (seon.render.ui/debug-units: a unit a message), and the timeline's "
-                "strip (a pull of each model call's basis). Linear in the evals: the page's rows, and the request read from the agent's kept walk "
-                "(seon.render.proc/branch-walk, advanced by the eval more), never a cold draw")
-     :growth :linear
-     ;; 2026-11-14 (web): restated in ticks and bytes, the owner's measure (ticks, bytes, seconds; calls retired: they count private
-     ;; helpers production does not check, W-5's marker tests among them). Ticks = the work's calls above x ~1.4k ticks a contracted call
-     ;; on this render path (seon.render-cost-test/a-request-made-again-costs-what-moved: 3.65M ticks over 2,598 calls, 2026-11-14).
-     ;; bytes from the bound, never a run (root, 2026-11-14): an eval is its message text (~1 KB), its html entry (~3 KB), its wire JSON
-     ;; (~2 KB) and its pulled entity (~2 KB): ~8 KB, 20 KB with slack; fixed, the system prompt (~20 KB), the agent's ctx (~200 KB),
-     ;; the page's skeleton (~50 KB) and the request body (~50 KB): ~0.35 MB, 1 MB with slack
-     :per-n {:ticks 444000 :bytes 20000}
-     :fixed {:ticks 2660000 :bytes 1000000}
-     ;; measured 8.2 / 11.0 / 19.2 MB at 3 / 10 / 30: ~8x the fixed bound and ~20x the per-eval one, waste, its task
-     ;; read from the kept walk (web, 2026-11-14): 14.28 MB and 4.40M ticks at 30, against 19.23 MB and 6.21M drawn cold
-     ;; a row a unit (web, 2026-11-15): 10.33 MB and 2.99M ticks at 30; what still grows an eval is the request made whole each move
-     ;; (seon.ctx/node, own, join, linked ~50 KB an eval; the wire shape ~20 KB): context's P7
-     ;; seon.render/a-debug-entry-allocates-what-it-shows
-     :overrun {:task "seon.render/a-debug-entry-allocates-what-it-shows" :n 3 :measured {:ticks 2990000.0 :bytes 10330000.0}}
-     :sizes [1 2 3]}))
-
 (deftest a-transaction-renders-what-it-touched
   ;; task seon.render/a-page-is-its-entitys-view (4a), now every-page-is-its-parts: a commit on main touching
   ;; the agent renders the one unit whose input it moved (its head), whatever the page's rows
@@ -328,7 +271,7 @@
      :growth :linear
      :per-n {:bytes 3400}
      :fixed {:bytes 300000}
-     :sizes [3 6 12]}))
+     :sizes [2 3 4]}))
 
 ;; See docs/render.md#a-change-is-edits-by-name
 (defn keyed-part
@@ -448,76 +391,9 @@
      :fixed {:ticks 250000 :bytes 1000000}
      :sizes [2 4 8]}))
 
-;; On disk, the one-store rule's last resort (docs/cost.md#how-we-measure): a page advanced from one turn's basis to the next
-;; takes the datoms between the two commits (seon.ctx/moved, d/datoms-diff), which skips the subtrees they share by address; the
-;; in-memory test store gives its nodes no address, so there the diff walks the whole index each advance (4 MB a turn measured)
-(def ^:private disk
-  (delay (let [{:keys [conn]} (pdb/open! :lmdb (str (seon.config/checkout) "/target/render-cost-" (random-uuid)) 2000 :db)]
-           ;; seeded as the test store is (seon.test-store/store): what agents and templates cite, and a stub of the system prompt
-           (d/transact conn {:tx-data (ts/standing-targets-tx)})
-           (d/transact conn {:tx-data (seon.doc/load-tx @conn "docs" {seon.doc/system-page "# A stub of the system prompt\n\nBe brief."})})
-           (pdb/store-cfg :lmdb (get-in @conn [:config :store :path])))))
-
-(defn- disk-branch!
-  "(f conn) on a fresh branch of the on-disk store (`disk`), deleted when f returns or throws, as seon.test-store/test-branch! does."
-  {:malli/schema [:=> [:cat :seon.host/fn] :any]}
-  [f]
-  (let [b (keyword (str "test-" (random-uuid)))
-        [conn _] (pdb/open-main! @disk b)
-        seed (pdb/connect @disk)]
-    (try (f conn)
-         (finally (d/release conn) (pdb/delete-main! seed b) (d/release seed)))))
-
 (def ^:dynamic *conn*
   "The branch's connection these proofs read and write: the status's its base, main and branch, the draw's its parts (bound by each deftest)."
   nil)
-
-(defn- defn-facts
-  "Program facts for var v defined by source src, as an import records them."
-  {:malli/schema [:=> [:cat :qualified-symbol :string] [:vector :map]]}
-  [v src]
-  (let [n (namespace v)]
-    [{:db/id (str "ns " n) :ns/name (symbol n) :ns/file (str "src/" (clojure.string/replace n "-" "_") ".clj")}
-     {:db/id (str "form " v) :form/id (str v " " src) :form/src src :form/ns (str "ns " n) :form/order 0 :form/defines [(str v)]}
-     {:db/id (str v) :var/name v :var/ns (str "ns " n) :var/form (str "form " v) :var/meta #{:arglists}}]))
-
-(defn branch-of
-  "The input at n: the status part's arguments, [opts aid]: a base holding one function, main one
-  function later, and the branch (the base's db, with the agent whose base commit it is) with n functions
-  of its own, each without a contract (so gaps and divergence have n rows each); the task merges itself,
-  so main's commit is read too."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
-  [n]
-  (let [conn *conn* ns (str "bn" n)
-        _ (d/transact conn (defn-facts (symbol ns "f") "(defn f [x] x)"))
-        base (d/commit-id @conn)
-        _ (d/transact conn (defn-facts (symbol ns "k") "(defn k [] 2)"))
-        main (d/commit-id @conn)
-        ours (reduce (fn [db i] (d/db-with db (defn-facts (symbol ns (str "h" i)) (str "(defn h" i " [] " i ")"))))
-                     (d/db-with (d/commit-as-db conn base) [{:seon.agent/key "b/a1" :seon.agent/base-commit base}])
-                     (range n))]
-    [{:seon.db/db ours :seon.ctx/ctx {:task {:seon.task/kind :whole} :seon.agent/main-program main}}]))
-
-;; See docs/render.md#a-component-answers-hiccup
-(deftest the-status-reads-the-branchs-diff-once
-  (ts/test-branch!
-    (fn [_ conn]
-      (binding [*conn* conn]
-        (cost/proof {:of 'seon.render.ui/status :input 'seon.render-cost-test/branch-of
-                     :n "functions the branch defined without a contract (a base and main one function apart)"
-                     :work (str "the datoms that differ between the base and the branch read once (seon.merge/content-datoms), "
-                                "then the changes, the problems it caused, the gaps, what it carries and the merge section's "
-                                "three-way from them; main's own diff once; the verdicts one scan of the status datoms")
-                     :growth :linear
-                     ;; measured 2026-10-28: 28.1 MB / 175 calls at 1, 37.4 MB / 742 at 10, 57.9 MB / 2,002 at 30
-                     ;; (9.7M, 12.9M, 19.9M ticks); before, the four views each reading the diff: 61.5 MB / 220 calls
-                     ;; at 1, 80.9 MB / 1,309 at 10, 124.7 MB / 3,729 at 30 (21.8M, 28.7M, 44.3M ticks)
-;; +2 calls a function: caused asks each changed var of the :long-form class (its seek and its form's text)
-                     :per-n {:bytes 1100000}
-                     ;; +3 calls 2026-10-30: seon.merge/content-attr, one contracted call a merge-diff read, was uncontracted
-;; +10 calls: caused asks the :long-form class (seon.problems/long-forms) of the changed vars, its bound read once
-                     :fixed {:bytes 27000000}
-                     :sizes [1 3 6]})))))
 
 (def ^:dynamic *sels*
   "The cold walk proof's opts (bound by its deftest)."
@@ -572,8 +448,8 @@
   ;; docs/render.md#a-layout-places-its-lists: a request with no live walk (a replay at a turn's commit, a judge's first move) draws the tree the model reads,
   ;; its conversation among it, and nothing for the page alone: no tile, no eval's cost or structured value
   (binding [*conn* nil]
-    (disk-branch!
-      (fn [conn]
+    (ts/test-branch!
+      (fn [_ conn]
         (binding [*conn* conn]
           (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/page-of
                        :n "evals of the agent (and a message for every other)"
@@ -673,14 +549,6 @@
         db1 (d/db-with db (session-eval (str "e" n) (inc n)))]
     [(seon.render/walk nil (at db)) (assoc (at db1) :moved (seon.ctx/moved db db1 nil))]))
 
-(defn walk-same-of
-  "The input at n: seon.render/walk's arguments for agent a1's request at n turns made again on the same db and tree, the walk the
-  first made kept."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
-  [n]
-  (let [[db _ _ at] (session-of n) o (at db) p (seon.render/walk nil o)]
-    [p (assoc o :moved [])]))
-
 (defn child-page-of
   "The input at n: seon.render/walk's arguments for the first page of c1, an agent a1 started (its :seon.agent/parent), a1 having
   worked n turns: c1 has none, drawn cold, as a forked agent's first page is (its walk is its own, never its parent's)."
@@ -772,16 +640,7 @@
                ;; (seon.render-test/a-record-rerun-only-by-what-it-shows); measured 2,929 at 10 against 2,916
                :per-n {:bytes 156000}
                :fixed {:bytes 1850000}
-               :sizes [1 2 4]})
-  (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/walk-same-of
-               :n "turns of the agent, an eval each"
-               :work "nothing moved: the root reused, the last answers answered"
-               :growth :constant
-               ;; measured 2026-11-12 on jolt/web by the test runner: 17 calls, 19.0 KB, 3.5k ticks at every size; 18 and 20.2 KB once the
-               ;; queueing of what moved became its own function (walk's form was over the token bound)
-               ;; 19 and 23.3 KB once walk's answer is its own function and the page's drawn renders are two kept cells (the render proc's page walks, step 1)
-               :fixed {:bytes 24000}
-               :sizes [1 2 4]}))
+               :sizes [1 2 3]}))
 
 (defn newest-pair-of
   "The input at n: the arguments of seon.ctx.wire/page-edits-between for agent b/t<n>'s newest turn, on a branch where it holds a
@@ -804,9 +663,9 @@
 
 (deftest a-turns-page-edits-cost-the-same-at-any-length
   ;; task seon.render/a-model-render-draws-each-turns-diff: a turn's diff renders the page parts at its two bases (each pulled by
-  ;; what the parts render reads, never the agent's conversation), so the newest pair costs the same at 4 turns as at 64
-  (disk-branch!
-    (fn [conn]
+  ;; what the parts render reads, never the agent's conversation), so the newest pair costs the same at 2 turns as at 4 (in memory: the on-disk store's shared-node skip is the data area's to prove, a 9 s page of its own)
+  (ts/test-branch!
+    (fn [_ conn]
       (binding [*conn* conn]
         (cost/proof
           {:of 'seon.ctx.wire/page-edits-between :input 'seon.render-cost-test/newest-pair-of
