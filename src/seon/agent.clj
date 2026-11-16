@@ -294,7 +294,7 @@
   []
   (let [p (program-db) db (db)
         errs (when (and p (not= (d/commit-id p) (d/commit-id db))) (program/load-diff! p db))]
-    (swap! state assoc :behind false
+    (swap! state assoc
            :program {:seon.db/branch (:branch @state) :seon.db/commit (d/commit-id db) :seon.db/t (:max-tx db)})
     (vec errs)))
 
@@ -593,10 +593,10 @@
   seon.merge/decide, then seon.writer/replay), never this branch's code. The branch becomes main's head plus its own transactions since the base, replayed, one commit
   only while the branch is still at the head this process committed; a key both changed stops it, and each conflict is an unmerged
   entry on the branch. This process writes nothing of its branch while it waits; the wait ends by the writer's answer, or, if
-  its step throws, the typed error root answers the request's :dest with (seon.system/answer-taken), or root's end; then its connection follows the branch's moved head (datahike.connector/follow-head!). None of
-  main's forms loads here: its program stays the one :program names (program-db) and :behind says so, so the run re-forks at its
-  next turn boundary (seon.turn) and its test children load the branch's difference first (load-diff!). Answers {:ok :merged
-  :applied :conflicts :t}: :merged the main commit merged, nil when main had not moved; :applied the program keys main changed since
+  its step throws, the typed error root answers the request's :dest with (seon.system/answer-taken), or root's end; then its connection follows the branch's moved head (datahike.connector/follow-head!). When main's
+  program moved, this process takes the branch's program in place at once (take-branch-program!, load-diff!), so it runs its
+  branch's program whenever its branch moves, and no judge, test child or turn meets it behind. Answers {:ok :merged
+  :applied :conflicts :t :load-errors}, :load-errors the forms that did not load (the turn tells them to the agent): :merged the main commit merged, nil when main had not moved; :applied the program keys main changed since
   the old base (main-changes, the pair main-line already holds); or the writer's typed error (a branch whose merge base was
   swept: seon.db/branch-base's), merged nothing. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat] [:or [:map [:ok :boolean]] :seon.error/base]]}
@@ -622,8 +622,6 @@
               (swap! state #(cond-> (assoc % :db @conn)
                               ;; the merge base is now the main just merged
                               merged? (assoc :base main :merged-t (:t r))
-                              ;; behind only when main's program moved: a main moved by records alone leaves its code as it is
-                              (and merged? (seq applied)) (assoc :behind true)
                               ;; main's schema moves are in the merged branch too: the registry slot built again
                               merged? with-slot))
               (when merged?
@@ -633,8 +631,11 @@
                 (d/transact conn [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id main)}])
                 (swap! state assoc :db @conn))
               (send! {:op :committed :t (:max-tx @conn) :txs 1})
-              {:ok merged? :merged (when merged? (d/commit-id main)) :applied (if merged? applied []) :conflicts (vec (:conflicts r))
-               :t (if merged? (:t r) (:max-tx @conn))})))))))
+              ;; the branch's program taken in place now, only when main's program moved (a main moved by records alone leaves the
+              ;; code as it is): the process runs its branch's program from this moment (load-diff!, O(what main changed))
+              (let [errs (if (and merged? (seq applied)) (take-branch-program!) [])]
+                {:ok merged? :merged (when merged? (d/commit-id main)) :applied (if merged? applied []) :conflicts (vec (:conflicts r))
+                 :t (if merged? (:t r) (:max-tx @conn)) :load-errors errs}))))))))
 
 ;; ---- evaluation -----------------------------------------------------------------
 
@@ -1422,11 +1423,6 @@
         ;; its first act on its own env: the branch's environment, whatever the agent it was forked from held (its reads of
         ;; db go through its own env, so after own-store!)
         (hold-env! (db) {:args ["--profile" "scripted"] :checkout (:checkout plan)})
-        ;; an agent behind its branch (a merge of main loads nothing into it: merge-main!) forks children holding its own program:
-        ;; each brings it to the branch first, the forms that differ only (seon.program/load-diff!), so a verdict judges the branch
-        ;; only behind (a merge of main loaded nothing into it): the forms its own evals defined are loaded in it already, and a
-        ;; second eval of them here would repeat their effects (a def that holds 300 MB: a-test-childs-ceiling-is-its-own)
-        (when (:behind @state) (when-let [p (program-db)] (program/load-diff! p (db))))
         ;; and as a test process: a private function's contract is checked on each call here, whatever its agent's
         ;; setting (the owner, 2026-11-10: "Private helpers: tests only"; docs/checks.md#contracts-armed-at-definition)
         (contract/check-private! true)
