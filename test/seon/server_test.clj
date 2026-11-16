@@ -428,7 +428,7 @@
   ;; message is our own event) until a commit links one, then answers it
   (let [[r] (at/in-agent (fn [{:keys [agent]}]
                            [{:op :eval :agent "root"
-                             :code (str "(let [f (future (#'seon.server/inbox-answer sys {:agent " (pr-str (name agent)) "}))]"
+                             :code (str "(let [t (str (:max-tx @(:conn sys))) f (future (#'seon.server/inbox-answer sys {:agent " (pr-str (name agent)) " :since t}))]"
                                         " @(seon.system/message! sys " (pr-str (keyword (name agent))) " \"while it waits\")"
                                         " (mapv :body (:messages @f)))")}]))]
     (is (= ["while it waits"] (:value r)) (pr-str r))))
@@ -443,10 +443,12 @@
 ;; Estimate: one server round trip (~0.5M); in root two waits and one message write (~0.2M): ~1M; 2,000,000
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} two-waits-on-one-agent-both-read-its-message
   ;; root, 2026-11-15 23:20 [M]: two waits on one agent split one message, one answered empty. A read marks nothing, so both answer it.
-  ;; Red before: the first wait's delivery took it from the second
+  ;; Red before: the first wait's delivery took it from the second. Both read from a t taken before the message: a read with no since starts when its future runs,
+  ;; which may be after the message, and then waits out its bound (context, 2026-11-16: red 4 times in 6, 131 s each)
   (let [[r] (at/in-agent (fn [{:keys [agent]}]
                            [{:op :eval :agent "root"
-                             :code (str "(let [k " (pr-str (name agent)) " a (future (#'seon.server/inbox-answer sys {:agent k})) b (future (#'seon.server/inbox-answer sys {:agent k}))]"
+                             :code (str "(let [k " (pr-str (name agent)) " t (str (:max-tx @(:conn sys)))"
+                                        " a (future (#'seon.server/inbox-answer sys {:agent k :since t})) b (future (#'seon.server/inbox-answer sys {:agent k :since t}))]"
                                         " @(seon.system/message! sys (keyword k) \"both wake\")"
                                         " [(mapv :body (:messages @a)) (mapv :body (:messages @b))])")}]))]
     (is (= [["both wake"] ["both wake"]] (:value r)) (pr-str r))))
@@ -491,7 +493,7 @@
                            [{:op :eval :agent "root"
                              :code (str "(let [k " (pr-str (name agent)) " v seon.config/value lines (clojure.core.async/chan 8)]"
                                         " (with-redefs [seon.config/value (fn ([x] (if (= x :seon.config.root/inbox-wait-ms) 300 (v x))) ([x c] (v x c)))]"
-                                        " (let [f (future (binding [seon.server/*emit* #(clojure.core.async/>!! lines %)] (seon.server/op-answer sys nil {:op :inbox :agent k :stream true})))]"
+                                        " (let [t (str (:max-tx @(:conn sys))) f (future (binding [seon.server/*emit* #(clojure.core.async/>!! lines %)] (seon.server/op-answer sys nil {:op :inbox :agent k :stream true :since t})))]"
                                         " @(seon.system/message! sys (keyword k) \"first\")"
                                         " (let [one (:body (clojure.core.async/<!! lines))]"
                                         " @(seon.system/message! sys (keyword k) \"second\")"
@@ -522,6 +524,22 @@
                                         " [(some? held) woke (some? kept) due ((set (:awaits (aw))) wk)])")}]))]
     (is (= [true true true :seon.server/no-message nil] (:value r))
         (str "held with its bound; answered by the message; kept for the next wait; that wait ends at the bound; then gone: " (pr-str r)))))
+
+;; Estimate: four server round trips (~0.5M each) and one main write: ~2.5M; 4,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000}} a-session-takes-back-its-parked-agent
+  ;; docs/server.md#ops: a session's agent parked with its process alive (a turn boundary, a restart's resume) is still the task's live
+  ;; agent: an attach answers it and takes its hold, never a second spawn on its branch. Red before: live-run read only :running tasks,
+  ;; so the attach spawned and was refused "branch ... is held by live agent" (context's session, after root's restart, 2026-11-16)
+  (let [[one _ again who] (at/in-agent (fn [{:keys [ns]}]
+                                         (let [i (str "session/" ns)]
+                                           [{:op :attach :task i :template "user" :client "s-park"}
+                                            {:op :eval :agent "root" :code (str "@(seon.system/transact-main! sys [{:seon.task/id " (pr-str i) " :seon.task/outcome :parked}])")}
+                                            {:op :attach :task i :template "user" :client "s-park-again"}
+                                            {:op :eval :agent "root" :code "(:agent (my.root/held-agent sys \"s-park-again\"))"}
+                                            (end-session-form i)])))]
+    (is (some? (:agent one)) (pr-str one))
+    (is (and (not (contract/error? again)) (:shared again) (= (:agent one) (:agent again))) (str "the parked agent is answered, not a second spawn: " (pr-str again)))
+    (is (= (:agent one) (:value who)) "and the attaching client holds it")))
 
 ;; Estimate: five server round trips (~0.5M each): ~2.5M; 4,000,000. In root: one :db/add of the holder
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000}} a-sessions-own-area-client-takes-over-its-hold

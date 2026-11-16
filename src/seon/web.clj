@@ -520,7 +520,7 @@
            (assoc st :listening true :server server :port (:port server))))
        (assoc st :listening false))))
   ([st tr]
-   (if (= tr ::flow/stop)
+   (if (#{::flow/stop ::flow/drain} tr)
      (do (doseq [{:keys [ch]} (vals (:tabs st))] (a/close! ch))
          (doseq [[p] (vals (:pending st))] (deliver p nil))
          (when-let [s (:server st)] (adapter/stop-server s {:drain-timeout-ms 0}))
