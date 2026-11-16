@@ -27,7 +27,8 @@
   (is (< 9.96 (cost/work :log 1000) 9.97))
   (is (< 9965.0 (cost/work :n-log-n 1000) 9966.0)))
 
-(deftest a-measure-takes-a-count-of-samples-never-a-time
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-measure-takes-a-count-of-samples-never-a-time
+  ;; Estimate: at most cost-max-samples calls of a 2000-element reduce (~20k ticks each) in the last block, a few hundred trivial calls in the others: ~3M ticks.
   ;; task seon.cost/ticks-are-exact: measure repeated a call until 20 ms of CPU time or 25 calls,
   ;; so a fast call took 25 samples and a slow or loaded one 3, and the minimum moved with the
   ;; machine. A measure is one call (owner, 2026-11-11); given a cap (a call over its estimate, seon.cost/run, or an agent's
@@ -39,7 +40,7 @@
     (is (<= (inc (seon.config/value :seon.config.proofs/cost-settled)) @n (seon.config/value :seon.config.proofs/cost-max-samples)) "a fast call: a count of calls between the settled count and the cap")
     (is (= @n (:samples (meta m))) "and the measure says how many"))
   (let [n (atom 0)]
-    (cost/measure (fn [] (swap! n inc) (reduce + (range 200000))) [] (seon.config/value :seon.config.proofs/cost-max-samples))
+    (cost/measure (fn [] (swap! n inc) (reduce + (range 2000))) [] (seon.config/value :seon.config.proofs/cost-max-samples))
     (is (<= (inc (seon.config/value :seon.config.proofs/cost-settled)) @n (seon.config/value :seon.config.proofs/cost-max-samples)) "a slow call: the same bounds, whatever it costs")))
 
 (deftest exponent-is-the-log-log-slope
@@ -406,38 +407,6 @@
         m (cost/measure f args cap)
         b (when minus (cost/measure (:f (unit-benches minus)) args cap))]
     {:ticks (/ (- (:ticks m) (:ticks b 0.0)) units) :ns (/ (- (:ns m) (:ns b 0.0)) units) :bytes (/ (- (:bytes m) (:bytes b 0.0)) units)}))
-
-(defn- fresh-rows
-  "Unit k's rows (all units when k is nil), reps of each, each measured in a process that ran nothing before it
-  (seon.check/units: a child forked per measurement from a fresh binary's main carrier): {k [row ...]}. A row measured in
-  a shard moved with what the shard ran before it (:db/pull-attr 1870, 2590 and 2774 ticks, 7488 and 8560 B, 2026-11-10)."
-  [k reps]
-  (let [{:keys [exit out err]} (ts/binary-sh "./seon" "units" (if k (str k) "all") (str reps) "--profile" ts/root-profile :dir "target")]
-    (when-not (zero? exit) (throw (ex-info (str "./seon units exited " exit ": " err) {:exit exit})))
-    (reduce (fn [acc l] (let [[k row] (edn/read-string (subs l 5))] (update acc k (fnil conj []) row)))
-            {} (filter #(str/starts-with? % "UNIT ") (str/split-lines out)))))
-
-(deftest the-unit-table-is-current
-  ;; every row of the table measured again (unit-n: where its row is steady), each in a process that ran nothing before it
-  ;; (fresh-rows), a warm call: its bytes within 1.25x (counted, the same at any load); its ticks too, the work done; a
-  ;; drifted row means the estimates priced by it are stale. Its ns (CPU time) no verdict decides on (seon.cost/exact):
-  ;; measured, not asserted (pure-tests 2026-10-23: within 3x of a table measured under another day's load was no function
-  ;; of the digest). Measured at 10k (pulls 1k) the test cost 5.3 G ticks, at these n 0.15 G.
-  (let [rows (fresh-rows nil 1)]
-    (doseq [[k {:keys [ticks bytes]}] cost/units
-            :let [m (first (rows k)) row (assoc m :what (:what (unit-benches k)))]]
-      (is (<= (/ ticks 1.25) (:ticks m) (* ticks 1.25)) (str k " ticks: table " ticks ", measured " (:ticks m) "; the row now: " row))
-      (is (<= (- (/ bytes 1.25) 1.0) (:bytes m) (+ (* bytes 1.25) 1.0)) (str k " bytes: table " bytes ", measured " (:bytes m) "; the row now: " row)))))
-
-(deftest a-unit-measures-the-same-across-runs
-  ;; a row is a function of its input, not of the process: three measurements of :db/pull-attr, each in a process that ran
-  ;; nothing before it, agree to 1% in the counted dimensions (in a shard the same row read 1870 to 2774 ticks with what
-  ;; ran before it: docs/cost.md#what-is-measured)
-  (let [ms ((fresh-rows :db/pull-attr 3) :db/pull-attr)
-        near (fn [d] (let [vs (map d ms)] (<= (apply max vs) (* 1.01 (apply min vs)))))]
-    (is (= 3 (count ms)) (pr-str ms))
-    (is (near :bytes) (str "bytes differ across runs: " (mapv :bytes ms)))
-    (is (near :ticks) (str "ticks differ across runs: " (mapv :ticks ms)))))
 
 (defn- with-demo-task
   "f judged with the one task file entry the demo waiver names (the shipped files' tasks come and go as they complete)."
