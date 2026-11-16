@@ -102,9 +102,12 @@
     (spit (java.io.File. dir "demo.edn") "[{:seon.task/name \"parse\" :seon.task/plan \"Parse the rows.\" :seon.task/proofs #{demo-test/parse-test}}]")
     (is (= :cancelled (:seon.task/execution (task/task (load! db) "demo/index"))) "a removed task cancels")))
 
-(deftest ^{:seon.test/estimate {:ticks 20000000}} the-shipped-task-files-are-whole-tasks-that-merge-themselves
+(deftest ^{:seon.test/estimate {:ticks 12000000}} the-shipped-task-files-are-whole-tasks-that-merge-themselves
   ;; every shipped declaration is one :whole task, none a merge task (found by the full run when a
-  ;; task file changes: the file is no input of the digest)
+  ;; task file changes: the file is no input of the digest). The claim is about every file, so it reads them all through
+  ;; seon.system/task-files (which derives the kind, never written in a file): the floor is the read of 1.7 MB of EDN, 7.5 M
+  ;; ticks measured, plus the contract check and the derivation of ~680 declarations, 10.3 M ticks measured in all.
+  ;; Estimate 12 M: the floor and a margin; not under 50 ms, as it reads the whole of the shipped data.
   (let [ds (mapcat val (filter (comp vector? val) (shipped-task-files)))]
     (is (seq ds))
     (is (every? #(= :whole (:seon.task/kind %)) ds))
@@ -156,23 +159,29 @@
         (is (str/includes? (nth (refused bad) 2) "not a non-empty vector of transactions")))
       (finally (seon.lib/remove-tree! runs)))))
 
-(deftest ^{:seon.test/root [] :seon.test/asks 1 :seon.test/estimate {:ticks 20000000}} loading-an-example-twice-changes-nothing
+(deftest ^{:seon.test/estimate {:ticks 1000000}} loading-an-example-twice-changes-nothing
   ;; my.root/load-example!: an example session's file (seon.ctx.session/session-tx's transactions, written with pr-str)
-  ;; is transacted once; a second load of it writes nothing (main's t does not move)
-  ;; (T2, on the process's shared root, with keys of its own: a root's boot was most of this test's time)
+  ;; is transacted once; a second load of it writes nothing (main's db does not move). In-process on a branch of the test
+  ;; store, no root: the writer (seon.system/transact-main!) is stood in for by a d/transact on the sys's conn, so what is
+  ;; proved is load-example!'s own decision of what main already holds. Estimate: 2 small EDN reads, a branch, 2 transacts
+  ;; of ~3 datoms and 6 eid seeks, ~1 M ticks (0.69 M measured). See docs/tasks.md#a-task-names-examples.
   (let [{:keys [runs file key]} (example-files)]
     (try
-      (let [[twice]
-            (map :value
-                 (at/in-agent [{:op :eval :agent "root"
-                                :code (str "(let [f " (pr-str file) " a (my.root/load-example! sys f)
-                              t1 (:max-tx @(:conn sys))
-                              b (my.root/load-example! sys f)]
-                          {:first (:batches a) :second (select-keys b [:ok :changed :batches]) :moved (not= t1 (:max-tx @(:conn sys)))
-                           :evals (count (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/id " (pr-str (str key "/s1")) "]] @(:conn sys)))
-                           :agents (count (datahike.api/q '[:find [?e ...] :where [?e :seon.agent/key " (pr-str key) "]] @(:conn sys)))})")}]))]
-        (is (= {:first 2 :second {:ok true :changed 0 :batches 0} :moved false :evals 1 :agents 1} twice)
-            "the first load writes its two transactions; the second writes nothing"))
+      (ts/test-branch!
+       (fn [_ conn]
+         (let [sys {:graph {} :ext (clojure.core.async/chan) :conn conn}
+               writes (atom 0)
+               before (:max-tx @conn)]
+           (with-redefs [seon.system/transact-main! (fn [sys tx] (swap! writes inc) (doto (promise) (deliver (assoc (d/transact (:conn sys) tx) :ok true))))]
+             (let [a (my.root/load-example! sys file)
+                   t1 (:max-tx @conn)
+                   b (my.root/load-example! sys file)]
+               (is (= {:first 2 :second {:ok true :changed 0 :batches 0} :moved false :writes 2 :evals 1 :agents 1}
+                      {:first (:batches a) :second (select-keys b [:ok :changed :batches]) :moved (not= t1 (:max-tx @conn)) :writes @writes
+                       :evals (count (d/q '[:find [?e ...] :in $ ?id :where [?e :seon.eval/id ?id]] @conn (str key "/s1")))
+                       :agents (count (d/q '[:find [?e ...] :in $ ?k :where [?e :seon.agent/key ?k]] @conn key))})
+                   "the first load writes its two transactions; the second writes nothing")
+               (is (not= before t1) "and the first did move main"))))))
       (finally (seon.lib/remove-tree! runs)))))
 
 ;; See docs/tasks.md#a-request-is-one-transaction
