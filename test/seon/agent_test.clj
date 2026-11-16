@@ -635,15 +635,16 @@
     (is (not (.exists (java.io.File. (str "/tmp/seon-agents/tests/" (second (:value run)))))) "and its directory is removed")))
 
 (defn- store-verdict
-  "Agent code writing test t's verdict at the digest digest-code evaluates to, as a run on branch (branch-code) would have
-  written it: result ({:pass :fail :error}, with :failures for a red), through the prove proc's :verdicts request, the one
-  writer of the results branch (seon.prove/verdicts-request). See docs/merging.md#verdicts-are-a-cache."
+  "Agent code holding test t's verdict at the digest digest-code evaluates to on the agent's own branch, as a run on branch (branch-code)
+  records it and a merge carries it there: result ({:pass :fail :error}, with :failures for a red), its :seon.proof entity
+  (seon.proofs/verdict-tx), written and committed on the branch. Results live on the branch (seon.agent/own-results-first reads the
+  branch's own first); the results branch goes. See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :qualified-symbol :string :map :string] :string]}
   [t digest-code result branch-code]
   (str "(let [db (seon.agent/db) [c tt] (seon.db/point db) d " digest-code
        " vt (seon.proofs/verdict-tx db (:graph (seon.agent/test-plan db nil #{'" t "})) {:seon.db/branch " branch-code " :seon.db/commit c :seon.db/t tt}"
-       " {'" t " (assoc '" (pr-str result) " :digest d)} {} {})"
-       " k (:tx-seq (swap! seon.agent/state update :tx-seq inc))]"
-       " (:result (seon.agent/await-reply k {:op :prove :k k :verdicts vt})))"))
+       " {'" t " (assoc '" (pr-str result) " :digest d)} {} {})]"
+       " (seon.agent/transact! agent vt) (seon.agent/commit! agent) :held)"))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 7 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3250k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 7}} a-red-at-its-digest-is-reused-with-its-failures
