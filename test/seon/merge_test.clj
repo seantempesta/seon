@@ -419,6 +419,24 @@
         (is (= {facts-path (str/replace text status-line " :seon.task/reason [:string {:min 1}]")}
                (source/files main2 (source/changed-files main2 ch))))))))
 
+;; docs/merging.md#verdicts-are-a-cache: results ride the merge as facts identified by their content, so a branch's and main's results
+;; for one test are two facts, never a conflict. runtime's seon_done was held on 164 [:datum e :seon.test/digest] conflicts: each
+;; branch's own record of its runs on the test's var entity, one value a side. Red before :seon.test/* were derived (never merged).
+;; Estimate: a test db, a var and two results a side ~1M, one candidate of a few facts ~0.5M = 2000000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-branch-and-main-each-with-a-result-for-one-test-merge-clean
+  (let [t 'app.r-test/t
+        [r1 r2] [(seon.lib/digest "reads one") (seon.lib/digest "reads two")]
+        result (fn [rd status on] {:seon.proof/id (proofs/verdict-id t rd status) :seon.proof/test t :seon.proof/reads-digest rd
+                                   :seon.proof/status status :seon.proof/route :live :seon.proof/ran-on on})
+        base (:db-after (pdb/with (empty-db) [{:var/name t}]))
+        branch (:db-after (pdb/with base [{:var/name t :seon.test/digest "on-b" :seon.test/status :green} (result r1 :pass #{:b})]))
+        main (:db-after (pdb/with base [{:var/name t :seon.test/digest "on-main" :seon.test/status :red} (result r2 :fail #{:db})]))
+        r (seon.writer/candidate main base branch {})]
+    (is (nil? (:conflicts r)) (str "two results are two facts: " (pr-str (mapv :key (:conflicts r)))))
+    (is (= #{[r1 :pass] [r2 :fail]} (set (d/q '[:find ?rd ?s :in $ ?t :where [?p :seon.proof/test ?t] [?p :seon.proof/reads-digest ?rd] [?p :seon.proof/status ?s]] (:db r) t)))
+        "both results are on the merged value")
+    (is (= "on-main" (:seon.test/digest (d/entity (:db r) [:var/name t]))) "and each side's own record of its runs stays its own")))
+
 ;; docs/merging.md#a-branch-merges-main-in: an entity the branch made and then changed is replayed whole in the transaction that made
 ;; it. tests2's seon_done, 2026-11-16: a task created on the branch, its plan edited after, netted to its plan stamped with the edit; its
 ;; creation replayed without the plan its schema requires was refused whole, so every key that transaction wrote (another task's plan
