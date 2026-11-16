@@ -35,8 +35,11 @@
   what the branch changed, an agent's turn; :main: main's run, every test with no result at its
   digest, the plan taking no base). No checkout: two checkouts of one tree asking at once share a run, whose process items
   and steps run on the first asker's checkout; a checkout removed while that run reads it answers its waiters :tree-moved."
-  {:malli/schema [:=> [:cat :keyword :string [:maybe [:set :symbol]] [:enum :turn :judge :main]] :string]}
-  [branch dg names mode] (str (name branch) "@" dg (when (seq names) (str ":" (str/join "," (sort names)))) (when (= :turn mode) "!turn")))
+  {:malli/schema [:function [:=> [:cat :keyword :string [:maybe [:set :symbol]] [:enum :turn :judge :main]] :string]
+                  [:=> [:cat :keyword :string [:maybe [:set :symbol]] [:enum :turn :judge :main] :boolean] :string]]}
+  ([branch dg names mode] (run-key branch dg names mode false))
+  ;; process?: the judge of a merge, whose process tests run on the candidate: another run than an eval's prove of the same digest
+  ([branch dg names mode process?] (str (name branch) "@" dg (when (seq names) (str ":" (str/join "," (sort names)))) (when (= :turn mode) "!turn") (when process? "!process"))))
 
 ;; ---- answers ---------------------------------------------------------------------------
 
@@ -139,8 +142,9 @@
                              (= agent (:agent o)) (= mode (:mode o)) (= checkout (:checkout o)) (some (:waiters it) (:waiters o))
                              (not-any? (:items st) (:needs o))))
           queued (count (filter fits? (vals (:items st))))
-          ;; process items share one child, so its first test's root boot (~20 s) is paid once, never once a test
-          share (if (:process? it) queued (long (Math/ceil (/ queued (double free)))))]
+          ;; process items too go to the free workers in shares: they share the tree's one booted candidate (:candidates), so no
+          ;; child boots a root of its own (they once shared one child for that root, 166 tests in one sequence, 732 s)
+          share (long (Math/ceil (/ queued (double free))))]
       (loop [b #{k} [[k2 o] & more :as left] (seq (:items st))]
         (cond (empty? left) b
               (or (= k k2) (not (fits? o))) (recur b more)
@@ -482,10 +486,12 @@
   Answers [st outputs]."
   {:malli/schema [:=> [:cat :map :string] [:tuple :map [:vector :map]]]}
   [st k]
-  (let [{:keys [agent mode names checkout digest]} (get-in st [:runs k])
+  (let [{:keys [agent mode names checkout digest process?]} (get-in st [:runs k])
         ;; its key and digest: the agent holds this plan under its key, beside another run's (seon.agent/hold-plan)
         [st m] (step/ask st [:prove :answers] [:plan k] (cond-> {:op :tests :id agent :mode mode :plan? true :key k :digest digest} names (assoc :names names)
-                                                          (not= :turn mode) (assoc :process? true)))]
+                                                          ;; process tests are items of a session's checkout run and of a merge's judge (process?): an
+                                                          ;; eval's prove names them unrun (the owner's one prove of a change)
+                                                          (and (not= :turn mode) (or checkout process?)) (assoc :process? true)))]
     [(assoc-in st [:runs k :stage] :plan) [m]]))
 
 (defn- verdicts-request
@@ -516,8 +522,8 @@
         t (or (:t m) (some-> (:conn st) deref :max-tx))
         names (not-empty (:names m))
         mode (or (:mode m) :judge)
-        key (run-key branch (:digest m) names mode)
-        req (-> m (select-keys [:branch :digest :agent :proofs :checkout :tree]) (assoc :key key :t t :names names :mode mode))
+        key (run-key branch (:digest m) names mode (boolean (:process? m)))
+        req (-> m (select-keys [:branch :digest :agent :proofs :checkout :tree :process?]) (assoc :key key :t t :names names :mode mode))
         done (get-in st [:done (slot req)])]
     (cond
       ;; a run of this key in flight: joined

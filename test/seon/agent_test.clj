@@ -2498,8 +2498,9 @@
 ;; "if another agent has already run the same exact test we remove those" (owner, 2026-11-07)
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 14 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~5000k, 5000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 5000000 :asks 11}} a-process-test-green-at-its-digest-asks-no-gate
-  ;; docs/merging.md#verdicts-are-a-cache. Another's green at this digest answers; another's red does not (the test stays deferred, named and not
-  ;; run until the one-build runner, docs/plan.md NOW), and a schema the branch registers moves the
+  ;; docs/merging.md#verdicts-are-a-cache. Another's green at this digest answers; another's red does not: an eval's prove (my.agent/prove)
+  ;; names a process test and never runs it (the owner's one prove of a change: process tests run on a candidate only at the judge of a
+  ;; merge, seon.agent/judge! with reach? true), so it stays deferred; and a schema the branch registers moves the
   ;; digest, since a process test takes the schema class and an agent's inputs are its root's boot's (seon.agent/test-plan)
   (let [t 'seon.repl-test/a-process-proof-already-green
         ;; an edge each (seon.program/reach-step): what this judges runs across prove!'s message, which no reference shows, so a fix to it moved no digest here

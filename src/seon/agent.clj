@@ -1141,10 +1141,14 @@
   turn's observation, the default) or :judge (root's judge at the run's end: its :judge request);
   names, those tests and the tests of those namespaces only (none: all it selects)."
   {:malli/schema [:function [:=> [:cat :seon.agent/start] :map] [:=> [:cat :seon.agent/start [:enum :turn :judge]] :map]
-                  [:=> [:cat :seon.agent/start [:enum :turn :judge] [:set :symbol]] :map]]}
+                  [:=> [:cat :seon.agent/start [:enum :turn :judge] [:set :symbol]] :map]
+                  [:=> [:cat :seon.agent/start [:enum :turn :judge] [:set :symbol] :boolean] :map]]}
   ([ag] (prove! ag :turn))
   ([ag mode] (prove! ag mode #{}))
-  ([ag mode names]
+  ([ag mode names] (prove! ag mode names false))
+  ;; process?: the judge of a merge's one prove (judge! with reach? true): its process tests run on the candidate (seon.prove's
+  ;; :candidate); an eval's prove names them unrun, so a turn stays cheap and a test already on a candidate boots no nested one
+  ([ag mode names process?]
   (commit! ag)
   ;; the turn's one diff, read here at the committed db, so the test child forked for this run
   ;; inherits it and the turn's other readers find it held (branch-changes)
@@ -1158,7 +1162,7 @@
       (let [;; its proofs, the task's and those asked for by name: the service answers past a red until each has its verdict
             ;; (seon.prove/item-ended; Sean, 2026-11-11: "have them fix that"), which an ask that named none never got
             proofs (into (or (some->> (task-of ag) (task/task (db)) :seon.task/accumulated :proofs) #{}) (filter qualified-symbol?) names)
-            r (:result (await-reply k (cond-> {:op :prove :k k :t (:max-tx (db)) :digest d :mode mode}
+            r (:result (await-reply k (cond-> {:op :prove :k k :t (:max-tx (db)) :digest d :mode mode :process? process?}
                                         (seq names) (assoc :names names)
                                         (seq proofs) (assoc :proofs proofs))))]
         (vreset! answered true)
@@ -2001,7 +2005,7 @@
                                                      (str "main does not merge into this branch: " (count (:conflicts m)) " unmerged entr"
                                                           (if (= 1 (count (:conflicts m))) "y" "ies") "; (my.branch/unmerged) lists them, (my.branch/resolve! ...) settles each")
                                                      {:unmerged (vec (:conflicts m))})
-                :else (prove! ag :judge names))]
+                :else (prove! ag :judge names reach?))]
     (if (or (contract/error? r) (empty? (:deferred r)))
       r
       (let [dbv (db)
