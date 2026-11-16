@@ -47,6 +47,15 @@
   (is (= 1 (:max-workers (fx/limits {:max-cores 0.1 :cores 4}))) "at least one")
   (is (= 12.0 (:max-load (fx/limits {:max-load 12.0 :cores 4})))))
 
+;; docs/config.md#the-test-services-three-limits: the process rail's memory ceiling over a booted root's is a count beside the others
+;; (task seon.fx/the-process-rail-holds-a-memory-ceiling); red first under limits with no such key: 18 (result/a2b3eec6)
+(deftest ^{:seon.test/estimate {:ticks 500000}} the-process-rails-count-is-its-memory-ceiling-over-a-roots
+  (let [gib (* 1024 1024 1024) root (long (* 2.5 gib))]
+    (is (= 3 (:max-workers (fx/limits {:cores 18 :process-rail-bytes (* 8 gib) :root-bytes root}))) "8 GiB over 2.5 GiB: three roots fit")
+    (is (= 2 (:max-workers (fx/limits {:cores 18 :max-workers 2 :process-rail-bytes (* 8 gib) :root-bytes root}))) "the least count holds")
+    (is (= 1 (:max-workers (fx/limits {:cores 18 :process-rail-bytes gib :root-bytes root}))) "under one root: at least one")
+    (is (= 18 (:max-workers (fx/limits {:cores 18 :root-bytes root}))) "no rail ceiling set: no memory bound")))
+
 (defn- flight [& fs] (into {} (map-indexed (fn [i f] [i (merge {:tag (str "t" i)} f)])) fs))
 
 ;; a pure fn of the dials and the owner's state: why a request waits, or nil

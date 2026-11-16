@@ -124,6 +124,10 @@
  ;; machine: its cores (#seon/cores; a forked test child is 16-35 MB of its own and about a core while it runs). At the
  ;; bound: an item waits in the queue for a running one to end.
  :seon.config.proofs/max-workers #seon/cores nil
+ ;; Unit: bytes. One item that boots a root at its peak: a booted root and its fork server, ~2.5 GiB (measured 2026-11-17,
+ ;; phys_footprint 1,813-1,949 MB and 556-680 MB). The process rail's ceiling (:seon.config.proofs/process-rail-bytes, set per
+ ;; machine in config/local.edn, never shipped) over it is a count beside max-workers: the least holds.
+ :seon.config.proofs/root-bytes 2684354560
  ;; Unit: path. The plan's store of kept program dbs (test-runner/program-db): one LMDB store
  ;; per checkout, a branch per git tree id holding that tree's program as facts. A tree never
  ;; seen is branched from the kept tree with the fewest changed files and brought current by

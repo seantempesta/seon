@@ -1640,14 +1640,18 @@
   [st {:keys [budget budget-key]}] (boolean (and budget (>= (get-in st [:spent budget-key] 0) budget))))
 
 (defn limits
-  "The admission dials from the config's optional keys, any combination: :max-workers (the least count set, else the cores),
-  :max-load, and :budget, the cores and two: the size of the owner's :answers port. See docs/config.md#the-test-services-three-limits."
+  "The admission dials from the config's optional keys, any combination: :max-workers (the least count set, else the cores): a count,
+  a share of the cores, and the process rail's memory ceiling over a booted root's (:process-rail-bytes / :root-bytes, rounded down,
+  at least 1: the rail holds no more items than that many roots fit, the most an item that boots a root costs); :max-load; and
+  :budget, the cores and two: the size of the owner's :answers port. See docs/config.md#the-test-services-three-limits."
   {:malli/schema [:=> [:cat [:map [:cores pos-int?] [:max-workers {:optional true} [:maybe pos-int?]]
-                             [:max-cores {:optional true} [:maybe number?]] [:max-load {:optional true} [:maybe number?]]]]
+                             [:max-cores {:optional true} [:maybe number?]] [:max-load {:optional true} [:maybe number?]]
+                             [:process-rail-bytes {:optional true} [:maybe pos-int?]] [:root-bytes {:optional true} [:maybe pos-int?]]]]
                   [:map [:max-workers pos-int?] [:budget pos-int?] [:max-load [:maybe number?]]]]}
-  [{:keys [cores max-workers max-cores max-load]}]
+  [{:keys [cores max-workers max-cores max-load process-rail-bytes root-bytes]}]
   (let [by-cores (when max-cores (max 1 (long (Math/floor (* max-cores cores)))))
-        counts (filterv some? [max-workers by-cores])]
+        by-memory (when (and process-rail-bytes root-bytes) (max 1 (quot process-rail-bytes root-bytes)))
+        counts (filterv some? [max-workers by-cores by-memory])]
     {:max-workers (if (seq counts) (reduce min counts) cores) :budget (+ cores 2) :max-load max-load}))
 
 (defn config-limits
@@ -1657,7 +1661,8 @@
   []
   (let [c (:config (cfg/in-force))]
     (limits {:cores (:cores (cfg/process)) :max-cores (:seon.config.proofs/max-cores c)
-             :max-workers (:seon.config.proofs/max-workers c) :max-load (:seon.config.proofs/max-load c)})))
+             :max-workers (:seon.config.proofs/max-workers c) :max-load (:seon.config.proofs/max-load c)
+             :process-rail-bytes (:seon.config.proofs/process-rail-bytes c) :root-bytes (:seon.config.proofs/root-bytes c)})))
 
 (defn limits-held
   "[st limits]: config-limits of the config this process holds, kept in the reader's own state st (under ::limits-of, with the
