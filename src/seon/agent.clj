@@ -39,6 +39,20 @@
 ;; def's :args, whose init keeps it in its state, and a function that needs what this process is takes it as its first argument. No
 ;; var, binding or atom holds it, so a namespace reload cannot touch it. See docs/processes.md#the-agent-process.
 
+(defn as-args
+  "Agent value ag as a proc's :args take it: data only, its store connection left out (the proc opens its own: `opened`), since a datafy
+  of the graph walks every proc's :args as data and a hash of what carries it would walk the store. See
+  docs/flow.md#the-step-fn-contract-every-proc-follows."
+  {:malli/schema [:=> [:cat :seon.agent/start] :seon.agent/start]}
+  [ag] (dissoc ag :conn))
+
+(defn opened
+  "Agent value ag with its store connection, opened by the proc that keeps it in its state (seon.db/connect of its branch, which answers
+  the branch's one connection, so the branch keeps one writer); as it is when it names no store (a test's agent). See
+  docs/processes.md#the-agent-process."
+  {:malli/schema [:=> [:cat :seon.agent/start] :seon.agent/start]}
+  [ag] (cond-> ag (and (:cfg ag) (:branch ag) (not (:conn ag))) (assoc :conn (pdb/connect (assoc (:cfg ag) :branch (:branch ag))))))
+
 (defn main-branch
   "This process's main: the branch its root works on, a fact of the process (seon.config/process's :main). See docs/processes.md#the-agent-process."
   {:malli/schema [:=> [:cat] :keyword]}
@@ -1618,6 +1632,7 @@
   ([args]
    (let [ends (a/chan (cfg/value :seon.config.proofs/jobs))]
      (-> (select-keys args [:ag :graph :answer :plan :ticks :forked :say])
+         (update :ag #(some-> % opened))
          (assoc :pid (::flow/pid args) :ends ends ::flow/in-ports {:seon.process/end ends} :children {} :by-os {}
                 :shards (mapv (fn [todo] {:todo todo :reports [] :fns {} :heap {} :measured {}}) (:shards args))))))
   ([st transition]
@@ -1662,7 +1677,7 @@
         pid (keyword "seon.test" (str "run-" (:test-runs (swap! state update :test-runs (fnil inc 0)))))
         answer (a/promise-chan)]
     (flow/update! g (fn [cfg] (assoc-in cfg [:procs pid] {:proc (flow/process #'test-run-step)
-                                                          :args {:ag ag :graph (:graph ag) :answer answer :plan plan :ticks ticks
+                                                          :args {:ag (as-args ag) :graph (:graph ag) :answer answer :plan plan :ticks ticks
                                                                  :shards (vec shards) :forked forked :say say}})))
     (let [[res dirs] (a/<!! answer)]
       (flow/update! g (fn [cfg] (update cfg :procs dissoc pid)))
@@ -2253,7 +2268,7 @@
                       (stderr-to-file! (stderr-path (pdb/agents-dir (:cfg r)) (:agent m)))
                       (let [store-conn (own-store! (:cfg r) (:branch m))
                             ;; the clone's own agent value: its key, its connection on its branch
-                            clone (assoc ag :key (name (:agent m)) :role :agent :conn store-conn :cfg (:cfg r))]
+                            clone (assoc ag :key (name (:agent m)) :role :agent :conn store-conn :cfg (:cfg r) :branch (:branch m))]
                         ;; the task it was cloned for (a fork's sibling task, seon.server's), else its parent's
                         (reset! link {:fd fd :conn (sock/conn fd)})
                         (swap! state assoc :tx-seq 0 :fx-pending {} :waits {} :db @store-conn)
@@ -2261,7 +2276,7 @@
                         (swap! state #(assoc % :ns (start-ns (:db %) task (:ns %))))
                         (let [unwatched (sock/signal-at-input! fd)]
                           (hello! t0 (cond-> {:cloned-from parent} unwatched (assoc :unwatched unwatched))))
-                        ((:serve ag) clone))))})))))
+                        ((requiring-resolve (:serve ag)) clone))))})))))
 
 (defn misaligned
   "Where a new agent's branch or forked image is not at the commit :spawn branched it from
@@ -2436,7 +2451,7 @@
      ;; agent with no task (a fresh one on a kept branch) takes none
      ;; the agent value: what this process is given and the store does not hold (its key, its role, its connection, the store's
      ;; config, the loop a clone runs); its branch and task are its entity's, read there
-     (let [ag {:key session :role :agent :conn store-conn :cfg cfg :serve serve}]
+     (let [ag {:key session :role :agent :conn store-conn :cfg cfg :branch branch :serve 'seon.repl/serve!}]
        (when-let [tx (when (and resumed task) (not-empty (task/onto-tx db0 @store-conn task)))]
          (transact! ag tx))
        ;; forked for a task: it is this session's on the branch from the start. A label that names no task of main's (a check's

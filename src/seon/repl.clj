@@ -1444,7 +1444,7 @@
   {:malli/schema :seon.step/step-fn}
   ([] {:ins {:in "the requests that run at the REPL or write the branch"} :outs {} :workload :io
        :ping-map-fn (fn [st] {:evals (:n @agent/state) :run (some-> (:run-st st) (select-keys [:task :turn])) :queued (count (:queue st))})})
-  ([args] (let [port (a/chan 4)] {:ag (:ag args) :run-port port :rid 0 :pending {} :queue clojure.lang.PersistentQueue/EMPTY ::flow/in-ports {:run port}}))
+  ([args] (let [port (a/chan 4)] {:ag (agent/opened (:ag args)) :run-port port :rid 0 :pending {} :queue clojure.lang.PersistentQueue/EMPTY ::flow/in-ports {:run port}}))
   ;; drain: a run ends at once, as root's :stop ends it (its turn re-opens from its basis at the next root), and the requests queued
   ;; behind it are served (docs/health.md#a-proc-that-does-not-drain)
   ([st tr] (if (and (= tr ::flow/drain) (:run st)) (drain (drive-run st {:seon.turn/stop true})) st))
@@ -1530,7 +1530,7 @@
   ([] {:ins {:in "root's :tests requests"} :outs {} :workload :io :ping-map-fn (fn [_] {})
        ;; docs/health.md#a-proc-that-does-not-drain
        :seon.flow/drain "its waits on root are seon.agent/await-reply's, which the :transport proc answers typed at a drain; its item runs end by their own bounds"})
-  ([args] {:ag (:ag args)})
+  ([args] {:ag (agent/opened (:ag args))})
   ([st _] st)
   ([st _ m]
    (if (:items m)
@@ -1565,7 +1565,7 @@
   {:malli/schema :seon.step/step-fn}
   ([] {:ins {} :outs {:repl "requests that run at the REPL or write the branch" :tests "root's test runs"} :workload :io
        :ping-map-fn (fn [_] {:waits (count (:waits @agent/state))})})
-  ([args] {:ag (:ag args) ::flow/in-ports {:from (agent/intake)}})
+  ([args] {:ag (agent/opened (:ag args)) ::flow/in-ports {:from (agent/intake)}})
   ;; drain: every wait on root (seon.agent/await-reply's :waits) answered typed, root being about to go; the answer ends each
   ;; wait's bound (await-reply's finally) (docs/health.md#a-proc-that-does-not-drain)
   ([st tr]
@@ -1628,7 +1628,7 @@
   (let [in {:in {:buf-or-n (cfg/value :seon.config.agent/inbox-size)}}
         gp (promise)
         ag (assoc ag :graph gp)
-        g (flow/create-flow {:procs (update-vals agent-steps (fn [step] (cond-> {:proc (flow/process step) :args {:ag ag}} (not= step #'transport-step) (assoc :chan-opts in))))
+        g (flow/create-flow {:procs (update-vals agent-steps (fn [step] (cond-> {:proc (flow/process step) :args {:ag (agent/as-args ag)}} (not= step #'transport-step) (assoc :chan-opts in))))
                              :conns [[[:transport :repl] [:repl :in]] [[:transport :tests] [:tests :in]]]
                              ;; what update! waits for a removed test-run proc's exit, the bound root's graph declares too
                              :stop-timeout-ms (cfg/value :seon.config.root/stop-ms)})
