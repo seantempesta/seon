@@ -746,7 +746,8 @@
 (defn hand-back-step
   "A hand-back's one driver step on step-run's message protocol, run state st ({:task}) and msg: nil begins and asks main merged in
   ({:merge}); {::merged m} asks the task observed ({:observe}); {::observed o} reads the status and, when clear, asks the judge
-  ({:prove judge-request}: the tests its change reaches, as a turn asks them); {::verdict v} reads the status again with the verdict
+  ({:prove} with reach? false: its proofs and in-process tests, as (my.agent/prove) asks; the process tests its change reaches are
+  root's judge's :gate); {::verdict v} reads the status again with the verdict
   written (test-error!); each end is hand-back-end-step's. Every wait is an output, so the agent answers ping and stop throughout.
   {::threw e} is an output's throw, the hand-back's own; {::stop true} ends it :waiting. See docs/flow.md#flow-inside-an-agent."
   {:malli/schema [:=> [:cat :map [:maybe :map]] :seon.turn/step]}
@@ -761,7 +762,10 @@
     (contains? msg ::merged) [st {:observe (:task st)}]
     ;; a clear status: the tests its change reaches run now, as the judge judges them, before it is done (the owner's ruling: a turn
     ;; runs the proofs, the reach runs once they are green)
-    (contains? msg ::observed) (let [s (status-now)] (if (clear? s) [st {:prove judge-request}] (hand-back-end-step st s)))
+    ;; a hand-back asks as (my.agent/prove) does, reach? false: the process tests its change only reaches are root's judge's :gate
+    ;; (seon.reconcile's judgment, nobody waiting), which seon_done answers as :gate with :next; run here as well they were run twice,
+    ;; the second inside the done op, each booting its own test root (tests' measure of the 300 s overrun, 2026-11-16)
+    (contains? msg ::observed) (let [s (status-now)] (if (clear? s) [st {:prove (assoc judge-request :reach? false)}] (hand-back-end-step st s)))
     ;; the stop is read before begin!, which starts the turn state anew when it has none yet
     :else (let [stop (get-in @agent/state [:turn :stop])]
             (begin! (:task st))

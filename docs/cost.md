@@ -16,6 +16,21 @@ The constants a lower bound is worked from (AGENTS.md §3a), measured on 2026-11
 - A process's first read of its binary's build record (```seon.program/binary-program```, 643 KB of EDN decoded once, about 12 ticks a byte) costs 7.9M ticks and 24 MB (measured 2026-11-16, result/bb8b9fd8): the first test in a child to start the prove proc pays it, so a test's estimate counts it when it can be first.
 - A cold test plan's reuse by reads over main's 2,258 tests costs 5.2B ticks and 25 GB (2026-11-16): 4.3B of it finding each test's newest green and reading its ~410 read-key datoms, against a bound of one seek and one value a candidate (```seon.proofs/reused-by-reads```; the read keys as one value a verdict is the fix).
 
+## The test system's lower bound
+
+Every plan, test and merge message on the test path is held to these bounds; a number past 10x of its row stops the work and its cause is found first (`AGENTS.md` §3a). Worked from measurements on the standing store, 2026-11-16 (tests2, result/a38054f7, result/ca9ba5f4; deps; root result/da6a0d63).
+
+| Step | Lower bound | Measured 2026-11-16 |
+|---|---|---|
+| The judge's plan, s tests selected, d datoms changed | lookups s x ~40k ticks cold (s=400: ~16M, ~0.1 s); readers of the change d x ~15k ticks; the program graph's update O(d) | 2.7B ticks, 12.8 GB, 32 s; after (A) 1.37B, 6.5 GB; agents die at their 2.5 GB heap |
+| Running the tests that must rerun | ~65 ms a fork per worker, ~21 ms a test, divided by `:seon.config.proofs/max-workers`: s=400 ~0.5 s, all ~2,350 ~3 s | ~2.3 s a test (276 s for 120 in a `bin/test` shard), ~100x |
+| The merge, one writer step | d datoms plus ~10 a result: s=400 ~4,000 datoms, ~20M ticks, ~0.1 s | not reached while the plan fails |
+| Re-proving what main moved meanwhile | the same plan over main's d: under 1 s | as the plan |
+| A catch-up of d changed files into a store | O(d files): one read and index of each changed file, ~11M ticks for a 43 KB namespace | 9 files: 410M ticks, 1.36 GB (root, 2026-11-16) |
+| A fresh agent's live heap | what its branch's program and one db value need | 1.91 GB of a 2.8 GB ceiling, 1.64 GB inherited from the fork server |
+
+So a typical change goes through `seon_done` in 2-3 s, a schema-wide change (~1,600 tests) in 3-5 s, and the whole suite with nothing reused in ~3 s of test work. A build-input change adds one build and one boot of the candidate binary (10.7 s today, target 2 s).
+
 ## What is measured
 
 A proof measures the function under test on the thread that calls it, and nothing else in the process:
