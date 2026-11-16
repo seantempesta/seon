@@ -427,9 +427,10 @@
 (deftest a-started-agent-names-the-agent-it-is-forked-from-its-parent
   ;; docs/users.md#who-started-whom: an agent names the agent it is forked from, :seon.agent/parent, in the write that makes it: the agent
   ;; that started its task (a launch, a refine), or root's agent when a person did (a person forks nothing); who asked stays the task's
-  (let [db (d/db-with (ts/test-db) (into [{:seon.system/id :root :seon.system/boot "b1"} {:seon.agent/key "sean" :seon.user/name "sean"}
+  (let [base (ts/test-db)
+        db (d/db-with base (into [{:seon.system/id :root :seon.system/boot "b1"} {:seon.agent/key "sean" :seon.user/name "sean"}
                                           {:seon.agent/key "root"} {:seon.agent/key "lead"}]
-                                         (task/create-tx (ts/test-db) [{:seon.task/ns 'demo :seon.task/name "a" :seon.task/plan "A." :seon.task/kind :work}])))
+                                         (task/create-tx base [{:seon.task/ns 'demo :seon.task/name "a" :seon.task/plan "A." :seon.task/kind :work}])))
         db (d/db-with db [{:seon.task/id "demo/a" :seon.task/started-by [:seon.agent/key "sean"]}])
         env {:branch :task-demo-a :model nil :max-turns 40}
         started (d/db-with db (task/start-tx db "demo/a" "b1" :a1 env 1000))

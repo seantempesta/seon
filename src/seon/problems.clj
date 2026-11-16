@@ -105,6 +105,19 @@
   (assoc fields :signature s :open? true :message message :producer nil :owner-ns owner :proofs [] :evidence evidence
          :answered-by (get-in ans [:signature s] []) :at-ms nil))
 
+(defn defined-twice
+  "Each namespace whose file defines a var more than once, as a :defined-twice row: the import keeps one form a var (the later
+  supersedes the earlier), so the name's first definition is dead text no reader sees; the import records the names
+  (:ns/defined-twice, seon.source/text-tx). Cost: one :aevt range of the attribute, its namespaces only. See
+  docs/health.md#a-name-defined-twice-in-a-file."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (vec (for [dt (d/datoms db :aevt :ns/defined-twice)
+             :let [nsym (:v (first (d/datoms db :eavt (:e dt) :ns/name))) vs (:v dt)]]
+         (derived-row ans (str "defined-twice " nsym) nsym
+                      (str nsym "'s file defines " (str/join ", " vs) " more than once: the later definition is the one that runs; delete the other")
+                      {:kind :defined-twice :ns nsym :vars vs} {:ns nsym :vars vs}))))
+
 (defn printer-law
   "The one-printer law's site rule and marks, from the :seon.config.render dials read once: {:marks (every printer, cut and
   budgeted var), :site? (fn [form ns]): a printer beside seon.print anywhere, a cut in a display namespace, a budgeted cut
@@ -143,21 +156,21 @@
   "The laws health reads over the program's forms, as data: the fact that marks a candidate (a form text law reads :form/src, so a
   move reads only the forms whose text moved, `split-rows`), the site rule, the page (and its sections: :section and those under it,
   or :anchor, every section whose address starts page#anchor) that must name each site's function; a site is in the program's own namespaces
-  (seon.program/program-nss: the check drivers seon.check and seon.e2e are test/'s, so none of theirs), test's too for :tests?. A law with no page sanctions no site: each is a row (:says). :tests? reads test namespaces too; :pre, a pattern a form's raw text must hold first (a law of text reads no form that cannot be a site). A form defining no var is named by its form id or by its namespace. Dates: a date in prose, never a string that is
+  (seon.program/program-nss: the check drivers seon.check and seon.e2e are test/'s, so none of theirs), test's too for :tests?. A law with no page sanctions no site: each is a row (:says). :tests? reads test namespaces too; :pre, substrings one of which a form's raw text must hold first (a law of text reads no form that cannot be a site). A form defining no var is named by its form id or by its namespace. Dates: a date in prose, never a string that is
   only a date (a value: a protocol's version). A name defined twice in a namespace is the import's to record: the store keeps one form
   a var (seon.program/a-file-defining-one-var-twice-is-a-fact-of-its-import). See docs/health.md#a-laws-unnamed-site."
   [{:law :catch :fact :form/catches :page "docs/failure-points.md"}
    ;; the one printer (docs/render.md#one-printer): a form whose refs hold a printer, a cut in a display namespace or a budgeted
    ;; cut outside one; the law's marks and display namespaces are config dials (printer-law), named by that one section
    {:law :printer :fact :form/refs :page "docs/render.md" :section "docs/render.md#one-printer" :rule printer-law}
-   {:law :clocks :fact :form/src :pre #"[Ss]leep|[Tt]imeout|deadline|-MS" :page "docs/clocks.md" :anchor "time-decides" :tests? true
+   {:law :clocks :fact :form/src :pre ["leep" "imeout" "deadline" "-MS"] :page "docs/clocks.md" :anchor "time-decides" :tests? true
     :rule (text-law #"(?m)[Ss]leep|[Tt]imeout([^s]|$)|deadline|[A-Z]-MS")}
-   {:law :measures :fact :form/src :pre #"currentTimeMillis|nanoTime|now-ns|now-ms" :page "docs/clocks.md" :rule (text-law #"currentTimeMillis|nanoTime|now-ns|now-ms")}
-   {:law :resolution :fact :form/src :pre #"resolve|intern|alter-var-root|with-redefs" :page "docs/resolution.md"
+   {:law :measures :fact :form/src :pre ["currentTimeMillis" "nanoTime" "now-ns" "now-ms"] :page "docs/clocks.md" :rule (text-law #"currentTimeMillis|nanoTime|now-ns|now-ms")}
+   {:law :resolution :fact :form/src :pre ["resolve" "intern" "alter-var-root" "with-redefs"] :page "docs/resolution.md"
     :rule (text-law #"[(](requiring-resolve|ns-resolve|resolve '|intern|alter-var-root|with-redefs)[\s)]")}
-   {:law :transactions :fact :form/src :pre #"/(with|db-with|transact|apply!|connect)" :page "docs/storage.md" :anchor "the-write-checks-every-entity-it-touches"
+   {:law :transactions :fact :form/src :pre ["/with" "/db-with" "/transact" "/apply!" "/connect"] :page "docs/storage.md" :anchor "the-write-checks-every-entity-it-touches"
     :rule (text-law #"[(](d|datahike[.]api|datahike[.]core|dc|dw|datahike[.]writer|datahike[.]writing|w)/(with|db-with|transact!?|transact-batch!|apply!|connect)[\s)]")}
-   {:law :dates :fact :form/src :pre #"20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]" :says "holds a date in a string: say what is true now; the day is git's"
+   {:law :dates :fact :form/src :pre ["20"] :says "holds a date in a string: say what is true now; the day is git's"
     :rule (fn [] {:site? (fn [f _] (boolean (some #(and (re-find #"(^|[^0-9])20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]([^0-9]|$)" %)
                                                          (not (re-matches #"\s*20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]\s*" %)))
                                                     (string-text (:form/src f)))))})}])
@@ -197,7 +210,11 @@
   ([db ans only] (unnamed-sites db ans only nil))
   ([db ans only rules]
   ;; the law is the program's own source's: its namespaces, read once, when a site asks
-  (let [program (delay (program/program-nss db))]
+  (let [program (delay (program/program-nss db))
+        ;; the laws of text read the forms' text in ONE :aevt walk, each datom tested for each law's :pre substrings: {law [form entity]}
+        text-cands (delay (let [ls (filter #(and (:pre %) (= :form/src (:fact %))) laws)]
+                            (reduce (fn [acc d] (reduce (fn [acc {:keys [law pre]}] (if (some #(str/includes? (:v d) %) pre) (update acc law (fnil conj []) (:e d)) acc)) acc ls))
+                                    {} (d/datoms db :aevt :form/src))))]
   (vec (for [{:keys [law fact page section anchor rule tests? says pre]} laws
              :let [{:keys [marks site?]} (or (get rules law) (when rule (rule)))]
              :let [;; the page's cited names (or its one section's), read when a candidate site asks (a branch that changed no
@@ -215,13 +232,16 @@
                    ;; the multimethod or protocol a form without a var extends: read only if one asks
                    owners (delay (merge (into {} (map (fn [{:keys [e v]}] [v (:method/multi (d/entity db e))])) (d/datoms db :aevt :method/form))
                                         (into {} (map (fn [{:keys [e v]}] [v (:impl/protocol (d/entity db e))])) (d/datoms db :aevt :impl/form))))]
-             :let [this (get only law)]
-             fe (distinct (cond (and only (not= :all this)) (filter (fn [e] (seq (d/datoms db :eavt e fact))) this)
+             :let [this (get only law)
+                   ;; a law of text reads a form only when its raw text holds one of the law's substrings (str/includes?, never a regex over every
+                   ;; form: Jolt's re-find allocates ~230 bytes a character, 1.67 GB over main's 7.1M, web result/a8a9f582): no entity, no live read for the rest; the
+                   ;; fact's own datom holds the text, so a whole read matches the :aevt walk's values and seeks nothing
+                   held? (fn [d] (or (nil? pre) (some #(str/includes? (:v d) %) pre)))]
+             fe (distinct (cond (and only (not= :all this)) (filter (fn [e] (some held? (d/datoms db :eavt e fact))) this)
                                 ;; a law of marks seeks each mark in the fact's index, never every form's refs
                                 marks (mapcat (fn [m] (map :e (d/datoms db :avet fact m))) marks)
-                                :else (map :e (d/datoms db :aevt fact))))
-             ;; a law of text reads a form only when its raw text holds the law's pattern: no entity, no live read for the rest
-             :when (or (nil? pre) (some->> (first (d/datoms db :eavt fe :form/src)) :v (re-find pre)))
+                                (and pre (= :form/src fact)) (get @text-cands law)
+                                :else (keep #(when (held? %) (:e %)) (d/datoms db :aevt fact))))
              :when (program/live? db fe)
              :let [f (d/entity db fe)]
              ;; a test is no failure point: a deftest's var holds :test (its definition's metadata), in test/ or in a
@@ -1016,6 +1036,7 @@
                          (when linkage? (map #(assoc % :class :orphan-page) (orphan-pages db ans)))
                          (map #(assoc % :class :waived-proof) (waived-proofs db ans form-cands))
                          (map #(assoc % :class :native-in-defonce) (native-in-defonce db ans form-cands))
+                         (map #(assoc % :class :defined-twice) (defined-twice db ans))
                          (map #(assoc % :class :unschemed-key) (unschemed-keys db ans key-cands))
                          (map #(assoc % :class :refused-value) (refused-values db ans moved-attrs))
                          (map #(assoc % :class :uncited-task) (uncited-tasks db ans tr))
@@ -1483,7 +1504,7 @@
                                      :stale-pin (stale-pins db ans) :orphan-page (orphan-pages db ans) :leadless-section (leadless-sections db ans)
                                      :uncited-task (uncited-tasks db ans tr) :stale-plan (stale-plans db ans tr)
                                      :waived-proof (waived-proofs db ans) :unschemed-key (unschemed-keys db ans)
-                                     :unnamed-site (unnamed-sites db ans) :native-in-defonce (native-in-defonce db ans) :stale-section (stale-sections db ans)
+                                     :unnamed-site (unnamed-sites db ans) :native-in-defonce (native-in-defonce db ans) :defined-twice (defined-twice db ans) :stale-section (stale-sections db ans)
                                      :hand-written-list (hand-written-lists db ans nil))))))
 
 (defn- touched-tasks
@@ -1545,7 +1566,7 @@
                                        ;; the pins are read again only when a gitlink or the page stating them moved
                                        (assoc :stale-pin (cond (pins-moved? base head moved) (stale-pins head ans) (empty? ev) (held :stale-pin) :else (mapv current (held :stale-pin)))
                                               :orphan-page (carried :orphan-page) :leadless-section (carried :leadless-section))
-                                       (assoc :unnamed-site (carried :unnamed-site) :native-in-defonce (carried :native-in-defonce)
+                                       (assoc :unnamed-site (carried :unnamed-site) :native-in-defonce (carried :native-in-defonce) :defined-twice (defined-twice head ans)
                                               ;; read from what moved (split-rows), never whole again: whole they cost ~290M a move of main
                                               :uncited-task (carried :uncited-task) :stale-plan (carried :stale-plan)
                                               :waived-proof (carried :waived-proof) :unschemed-key (carried :unschemed-key)

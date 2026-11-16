@@ -56,6 +56,7 @@
  :ns/file [:string {:seon.db/index true :description "The path of the namespace's file, relative to the source tree's root: where it was imported from, or where a REPL-recorded namespace's file belongs."}]
  ;; the text after its file's last form
  :ns/tail [:string {:description "The text after the last form of the namespace's file."}]
+ :ns/defined-twice [:vector {:description "The vars the namespace's file defines more than once, sorted, as its last import read them: the import keeps one form a var (the later supersedes the earlier), so this fact is what shows it (seon.source/text-tx; a :defined-twice row, docs/health.md#a-name-defined-twice-in-a-file)."} :qualified-symbol]
  :var/name [:and {:seon.db/identity true :seon.db/content-id true :description "The var's qualified name."} :symbol]
  :var/ns [:and {:seon.db/to [:seon.db/ns-fact] :description "The namespace that the var belongs to."} :seon.db/ref]
  :var/form [:and {:seon.db/to [:seon.db/form-fact] :description "The form that last made this var."} :seon.db/ref]
@@ -137,7 +138,8 @@
                       [:form/inline-defs {:optional true} :form/inline-defs] [:form/source {:optional true} :form/source]
                       [:form/catches {:optional true} :form/catches]]
  :seon.db/ns-fact [:map {:seon.db/attributes true} [:ns/name :ns/name] [:ns/doc {:optional true} :ns/doc]
-                    [:ns/form {:optional true} :ns/form] [:ns/file {:optional true} :ns/file] [:ns/tail {:optional true} :ns/tail]]
+                    [:ns/form {:optional true} :ns/form] [:ns/file {:optional true} :ns/file] [:ns/tail {:optional true} :ns/tail]
+                   [:ns/defined-twice {:optional true} :ns/defined-twice]]
  :seon.db/var-fact [:map {:seon.db/attributes true :seon.ctx/pattern [:var/name :var/ns :var/doc :var/meta :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes {:var/form [:form/id :form/src :form/defines :form/refs :form/quoted :form/keywords]}]}
                      [:var/name :var/name] [:var/ns {:optional true} :var/ns] [:var/form {:optional true} :var/form]
                      [:var/doc {:optional true} :var/doc]
