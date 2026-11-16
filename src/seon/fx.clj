@@ -1622,9 +1622,7 @@
             ;; and the steps' one seeded store is the checkout's own, never a store this process was handed
             store (str checkout "/target/check-store")
             sh (fn [& argv] (let [r (apply lib/sh (concat child-env-scrub [(str "SEON_RESULTS_DIR=" (cfg/value :seon.config.proofs/results-dir))
-                                                                           (str "SEON_STORE=" store)
-                                                                           ;; the :process owner reads what each request in flight holds by it (held-processes)
-                                                                           (str "SEON_PROVE_BATCH=" (:seon.prove/batch req))]
+                                                                           (str "SEON_STORE=" store)]
                                                           ["nice" "-n" "15"] argv [:dir checkout]))]
                               (spit log (str "$ " (str/join " " argv) " (exit " (:exit r) ")\n" (:out r) (:err r)) :append true)
                               r))
@@ -1694,23 +1692,26 @@
 
 (defn limits
   "The admission dials from the config's optional keys, any combination: :max-workers (the least count set, else the cores),
-  :max-load, and :budget, the processes in flight, derived (the cores and two). See docs/config.md#the-test-services-three-limits."
+  :max-load, :memory-mb (the MB the requests in flight may hold, :seon.config.proofs/prove-mb), and :budget, the processes in
+  flight, derived (the cores and two). See docs/config.md#the-test-services-three-limits."
   {:malli/schema [:=> [:cat [:map [:cores pos-int?] [:max-workers {:optional true} [:maybe pos-int?]]
-                             [:max-cores {:optional true} [:maybe number?]] [:max-load {:optional true} [:maybe number?]]]]
-                  [:map [:max-workers pos-int?] [:budget pos-int?] [:max-load [:maybe number?]]]]}
-  [{:keys [cores max-workers max-cores max-load]}]
+                             [:max-cores {:optional true} [:maybe number?]] [:max-load {:optional true} [:maybe number?]]
+                             [:memory-mb {:optional true} [:maybe pos-int?]]]]
+                  [:map [:max-workers pos-int?] [:budget pos-int?] [:max-load [:maybe number?]] [:memory-mb {:optional true} [:maybe pos-int?]]]]}
+  [{:keys [cores max-workers max-cores max-load memory-mb]}]
   (let [by-cores (when max-cores (max 1 (long (Math/floor (* max-cores cores)))))
         counts (filterv some? [max-workers by-cores])]
-    {:max-workers (if (seq counts) (reduce min counts) cores) :budget (+ cores 2) :max-load max-load}))
+    {:max-workers (if (seq counts) (reduce min counts) cores) :budget (+ cores 2) :max-load max-load :memory-mb memory-mb}))
 
 (defn config-limits
   "limits of the config this process holds: what limits-held derives once a config change, so a dial the owner turns (when he
   games, say) admits by it at the next admission. See docs/config.md#the-test-services-three-limits."
-  {:malli/schema [:=> [:cat] [:map [:max-workers pos-int?] [:budget pos-int?] [:max-load [:maybe number?]]]]}
+  {:malli/schema [:=> [:cat] [:map [:max-workers pos-int?] [:budget pos-int?] [:max-load [:maybe number?]] [:memory-mb {:optional true} [:maybe pos-int?]]]]}
   []
   (let [c (:config (cfg/in-force))]
     (limits {:cores (cfg/value :seon.config.machine/cores) :max-cores (:seon.config.proofs/max-cores c)
-             :max-workers (:seon.config.proofs/max-workers c) :max-load (:seon.config.proofs/max-load c)})))
+             :max-workers (:seon.config.proofs/max-workers c) :max-load (:seon.config.proofs/max-load c)
+             :memory-mb (:seon.config.proofs/prove-mb c)})))
 
 (defn limits-held
   "[st limits]: config-limits of the config this process holds, kept in the reader's own state st (under ::limits-of, with the
@@ -1718,7 +1719,7 @@
   only when a transaction touches an entry): a dial the owner turns reaches the next admission or grant, and every other one costs
   one identical? compare, never a resolver read (~1k ticks a call, measured 953). The :process owner's dispatch and seon.prove's grant read it.
   See docs/config.md#the-test-services-three-limits."
-  {:malli/schema [:=> [:cat :map] [:tuple :map [:map [:max-workers pos-int?] [:budget pos-int?] [:max-load [:maybe number?]]]]]}
+  {:malli/schema [:=> [:cat :map] [:tuple :map [:map [:max-workers pos-int?] [:budget pos-int?] [:max-load [:maybe number?]] [:memory-mb {:optional true} [:maybe pos-int?]]]]]}
   [st]
   (let [c (:config (cfg/in-force)) h (::limits-of st)]
     (if (and h (identical? c (:config h)))
@@ -1726,65 +1727,48 @@
       (let [l (config-limits)] [(assoc st ::limits-of {:config c :limits l}) l]))))
 
 (defn batch-tag
-  "The value of SEON_PROVE_BATCH in every process batch bid of the test service starts: the service's process and the batch, so a
-  reading of the machine's processes (held-processes) names the request each belongs to, a root a process test detaches among
-  them. See docs/merging.md#the-test-service."
+  "The tag of batch bid of the test service: the service's process and the batch, the key its request is in flight under at the
+  :process owner. See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :int] :string]}
   [bid] (str (lib/c-getpid) "-" bid))
 
-(defn held-processes
-  "The processes on the machine by their SEON_PROVE_BATCH tag ({tag n}), one ps read (~70 ms); nil when ps answers none, and then
-  nothing more is admitted while one runs. See docs/merging.md#the-test-service."
-  {:malli/schema [:=> [:cat] [:maybe [:map-of :string nat-int?]]]}
-  []
-  ;; awk keeps each process's tag, so only the tags cross (the whole listing is ~0.9 MB); pipefail answers ps's failure
-  (let [r (lib/sh "zsh" "-c" (str "setopt pipefail; ps -axwwE -o command | awk 'match($0, /SEON_PROVE_BATCH=[^ ]+/) "
-                                  "{ print substr($0, RSTART + 17, RLENGTH - 17) }'"))]
-    (when (zero? (:exit r)) (frequencies (str/split-lines (:out r))))))
+(defn class-weight
+  "What a request of :seon.fx/class c ([kind process? binary?], seon.prove's item-class) holds at its peak, its config entry
+  ({:seon.fx/processes n :seon.fx/mb m}, :seon.config.proofs/weights): a :test kind by its type (a plain batch, a system test's,
+  a binary test's), any other kind by its name; a kind with no entry one process and no memory. Declared, never read off the
+  machine (seon.fx/admission-counts-memory). See docs/config.md#the-test-services-three-limits."
+  {:malli/schema [:=> [:cat [:tuple :keyword :boolean :boolean]] [:map [:seon.fx/processes pos-int?] [:seon.fx/mb nat-int?]]]}
+  [[kind process? binary?]]
+  (let [k (if (= :test kind) (cond binary? :binary-test process? :system-test :else :test) kind)
+        {:keys [processes mb]} (get (cfg/value :seon.config.proofs/weights) k)]
+    {:seon.fx/processes (or processes 1) :seon.fx/mb (or mb 0)}))
 
 (defn- weight
-  "The processes request m holds at its peak under bound b: its class's measured peak, else what it declares (:seon.fx/processes),
-  else b, so an unmeasured class runs alone; none without a class. See docs/config.md#the-test-services-three-limits."
-  {:malli/schema [:=> [:cat pos-int? :map :map] nat-int?]}
-  [b st m]
-  (if-let [c (:seon.fx/class m)] (or (get-in st [:peaks c]) (:seon.fx/processes m) b) 0))
-
-(defn- holds
-  "The processes request f in flight holds under bound b: the more of its class's weight now and what this pass's reading counts by
-  its tag (a test batch's fork counted too). See docs/config.md#the-test-services-three-limits."
-  {:malli/schema [:=> [:cat pos-int? :map :map] nat-int?]}
-  [b st f]
-  (let [w (weight b st {:seon.fx/class (:class f) :seon.fx/processes (:declared f)})]
-    (if-let [held (:reading st)] (max w (+ (get held (:tag f) 0) (if (:test? f) 1 0))) w)))
+  "The processes request m declares (:seon.fx/processes), else bound b, so a request of a class that declares none runs alone;
+  none without a class. See docs/config.md#the-test-services-three-limits."
+  {:malli/schema [:=> [:cat pos-int? :map] nat-int?]}
+  [b m]
+  (if (:seon.fx/class m) (or (:seon.fx/processes m) b) 0))
 
 (defn hold-reason
-  "Why request m waits under limits lim beside st's :flight, :load and :reading: :workers, :load or :processes; nil when admitted.
-  A request of no class is never held, and nothing in flight admits one. See docs/config.md#the-test-services-three-limits."
-  {:malli/schema [:=> [:cat :map :map :map] [:maybe [:enum :workers :load :processes]]]}
-  [{:keys [budget max-workers max-load]} st m]
+  "Why request m waits under limits lim beside st's :flight (each {:declared processes :mb}) and :load: :workers, :load,
+  :processes or :memory; nil when admitted. A request of no class is never held, and nothing in flight admits one. One sum
+  over what is in flight, at most max-workers entries. See docs/config.md#the-test-services-three-limits."
+  {:malli/schema [:=> [:cat :map :map :map] [:maybe [:enum :workers :load :processes :memory]]]}
+  [{:keys [budget max-workers max-load memory-mb]} st m]
   (let [flight (vals (:flight st))]
     (cond
       (or (nil? (:seon.fx/class m)) (empty? flight)) nil
       (>= (count flight) max-workers) :workers
       (and max-load (:load st) (>= (:load st) max-load)) :load
-      (> (+ (transduce (map #(holds budget st %)) + flight) (weight budget st m)) budget) :processes)))
+      (> (+ (transduce (map #(or (:declared %) budget)) + flight) (weight budget m)) budget) :processes
+      (and memory-mb (> (+ (transduce (map #(:mb % 0)) + flight) (:seon.fx/mb m 0)) memory-mb)) :memory)))
 
 (defn admits?
   "Whether request m is admitted under limits lim beside what st has in flight (hold-reason is nil). See
   docs/config.md#the-test-services-three-limits."
   {:malli/schema [:=> [:cat :map :map :map] :boolean]}
   [lim st m] (nil? (hold-reason lim st m)))
-
-(defn- measured
-  "st with each request in flight but not fresh (admitted this pass: its processes have not started) read in held: where it holds
-  more than its class's peak so far, that is the peak; a class its requests declare (a plain test's one fork) is never read."
-  {:malli/schema [:=> [:cat :map [:maybe :map] [:set :any]] :map]}
-  [st held fresh]
-  (reduce-kv (fn [st k f]
-               (let [h (when held (+ (get held (:tag f) 0) (if (:test? f) 1 0)))]
-                 (cond-> st (and h (not (fresh k)) (not (:declared f)) (> h (get-in st [:peaks (:class f)] 0)))
-                   (assoc-in [:peaks (:class f)] h))))
-             st (:flight st)))
 
 (defn- admit
   "What the owner does with a queued request at now-ms: :run, :wait (no free worker, or its
@@ -1851,9 +1835,7 @@
                          :agent (get-in r [:dest :agent])}))
     (let [st (cond-> (charge st r)
                (:fkey (:request r)) (update :flight dissoc (:fkey (:request r)))
-               (::qk (:request r)) (as-> s (let [s' (update s :stoppable dissoc (::qk (:request r)))] (running-told s s' o) s'))
-               (and (:seon.fx/class (:request r)) (:seon.fx/peak-processes (:outcome r)))
-               (update-in [:peaks (:seon.fx/class (:request r))] (fnil max 0) (:seon.fx/peak-processes (:outcome r))))]
+               (::qk (:request r)) (as-> s (let [s' (update s :stoppable dissoc (::qk (:request r)))] (running-told s s' o) s')))]
       (if (and limited? (:request r))
         (let [q (:request r)
               qk (or (::qk q) [(- (:prio q 0)) (inc (:seq st))])]
@@ -1884,17 +1866,13 @@
     [(update st :queue #(apply dissoc % (map key more))) (into [m] (map val) more)]))
 
 (defn- read-machine
-  "st with the load (only with max-load set) and the processes by tag (only while an undeclared class is in flight) read once a
-  pass, when m has a class and something is in flight; readings become peaks. See docs/clocks.md#the-machines-load-admits-work."
+  "st with the load read once a pass, only with max-load set, when m has a class and something is in flight. See
+  docs/clocks.md#the-machines-load-admits-work."
   {:malli/schema [:=> [:cat :map :map :map] :map]}
   [st lim m]
-  (if (or (:read? st) (nil? (:seon.fx/class m)) (empty? (:flight st)))
+  (if (or (:read? st) (nil? (:seon.fx/class m)) (empty? (:flight st)) (nil? (:max-load lim)))
     st
-    (let [ld (when (:max-load lim) ((:load-fn st)))
-          held (when (some (complement :declared) (vals (:flight st))) ((:held-fn st)))]
-      (cond-> (assoc st :read? true :reading held)
-        ld (assoc :load ld)
-        held (measured held (:fresh st #{}))))))
+    (assoc st :read? true :load ((:load-fn st)))))
 
 (defn- held-told
   "st and o with the askers of the queued requests told once that they wait on the machine's load ({:op :prove-held :key :held
@@ -1930,23 +1908,21 @@
   {:malli/schema [:=> [:cat :map :seon.host/volatile] :map]}
   [st o]
   (let [[st lim] (if (:limits st) [st (:limits st)] (limits-held st))]
-    (loop [st (assoc st :lim lim :read? false :fresh #{})]
+    (loop [st (assoc st :lim lim :read? false)]
       (if-let [[qk m] (first (:queue st))]
         (let [now (quot (profile/now-ns) 1000000)
               st (read-machine st lim m)
               d (admit st m now)]
           (cond
             (= :wait d) (let [st (if (= :load (hold-reason lim st m)) (held-told st o lim) st)]
-                          (wake-later (dissoc st :lim :read? :fresh :reading) m now))
+                          (wake-later (dissoc st :lim :read?) m now))
             (= :run d) (let [[st ms] (batch (update st :queue dissoc qk) (assoc m ::qk qk))
                              ms (mapv #(cond-> % (:seon.fx/class %) (assoc :fkey (or (get-in % [:req :seon.prove/batch]) [:seq (:seon.fx/qk %)]))) ms)
                              [st' ms] (stoppable st ms)
                              _ (running-told st st' o)
                              st st'
                              st (reduce (fn [st r] (if-let [k (:fkey r)]
-                                                     (-> st (assoc-in [:flight k] {:class (:seon.fx/class r) :declared (:seon.fx/processes r) :tag (get-in r [:req :seon.prove/batch])
-                                                                                   :test? (= :test (get-in r [:req :kind]))})
-                                                         (update :fresh conj k))
+                                                     (assoc-in st [:flight k] {:class (:seon.fx/class r) :declared (:seon.fx/processes r) :mb (:seon.fx/mb r 0)})
                                                      st))
                                         st ms)
                              st (cond-> st (and (:holding st) (some :fkey ms)) (resumed-told o))
@@ -1963,7 +1939,7 @@
                                   (:bucket st) (update :bucket #(update (refill % now) :tokens - (transduce (map (fn [r] (or (:est r) 0))) + ms))))))))
             :else (do (reply! o (:dest m) d)
                       (recur (update st :queue dissoc qk)))))
-        (dissoc st :lim :read? :fresh :reading)))))
+        (dissoc st :lim :read?)))))
 
 (defn- stop
   "The owner at a stop {:req {:seon.fx/stop k}} on :ask: each request whose :seon.fx/stop-key holds k is stopped (queued:
@@ -2014,14 +1990,14 @@
                 :close? "the kind has a :close: when the queue is empty and nothing is in flight, its worker is told {:idle true}"
                 :tick "its clock's channel (external in-port, with :rate): a :tick when the bucket refilled"
                 :limits "its admission dials (limits' map; nil: config-limits, read at each admission)"
-                :load-fn "reads the machine's load (lib/load-average)" :held-fn "reads the processes by tag (held-processes)"}
+                :load-fn "reads the machine's load (lib/load-average)"}
        :ins {:in "requests, addressed [:fx/<kind> :in] by any proc" :ask "root's own requests, never held back by the bound" :done "its workers' outcomes"
               :answers "the api's answers to the requests it asked (:seon.fx/ask), one each"} :outs {}
        ;; admission and routing only: never blocks, never computes long
        :workload :io
-       :ping-map-fn (fn [st] (-> (select-keys st [:kind :workers :busy :peaks :load :done]) (assoc :in-flight (count (:flight st))) (assoc :queued (count (:queue st)) :spent (:spent st))))})
-  ([args] (assoc (select-keys args [:kind :workers :batch :close? :limits]) :busy 0 :flight {} :stoppable {} :peaks {} :done 0 :rid 0 :pending {}
-                 :load-fn (or (:load-fn args) lib/load-average) :held-fn (or (:held-fn args) held-processes) :seq 0 :queue (sorted-map) :spent {}
+       :ping-map-fn (fn [st] (-> (select-keys st [:kind :workers :busy :load :done]) (assoc :in-flight (count (:flight st))) (assoc :queued (count (:queue st)) :spent (:spent st))))})
+  ([args] (assoc (select-keys args [:kind :workers :batch :close? :limits]) :busy 0 :flight {} :stoppable {} :done 0 :rid 0 :pending {}
+                 :load-fn (or (:load-fn args) lib/load-average) :seq 0 :queue (sorted-map) :spent {}
                  :bucket (when-let [r (:rate args)]
                            {:tokens (double r) :cap (double r) :per-ms (/ r 1000.0) :rate-ms (/ r 1000.0) :at (quot (profile/now-ns) 1000000)})
                  :tick (:tick args)

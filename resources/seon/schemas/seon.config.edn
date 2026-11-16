@@ -113,6 +113,8 @@
   [:seon.config.proofs/ticks-decide {:optional true} :seon.config.proofs/ticks-decide]
   [:seon.config.proofs/results-branch {:optional true} :seon.config.proofs/results-branch]
   [:seon.config.proofs/max-load {:optional true} :seon.config.proofs/max-load]
+  [:seon.config.proofs/weights {:optional true} :seon.config.proofs/weights]
+  [:seon.config.proofs/prove-mb {:optional true} :seon.config.proofs/prove-mb]
   [:seon.config.proofs/child-min-ms {:optional true} :seon.config.proofs/child-min-ms]
   [:seon.config.proofs/unmeasured-ms {:optional true} :seon.config.proofs/unmeasured-ms]
   [:seon.config.proofs/unmeasured-process-ms {:optional true} :seon.config.proofs/unmeasured-process-ms]

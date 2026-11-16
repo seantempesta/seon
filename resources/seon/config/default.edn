@@ -678,6 +678,20 @@
  ;; Unit: a share of :seon.config.machine/cores in (0,1] (rounded down, at least 1); a count of items is max-workers. Unset:
  ;; no core bound. At the bound: as max-workers; the least of the two set holds.
  ;; :seon.config.proofs/max-cores 0.5
+ ;; Unit: processes and MB at a request's peak, by class (seon.fx/class-weight; docs/config.md#the-test-services-three-limits).
+ ;; Declared, so admission reads nothing off the machine (owner's choice (b), seon.fx/admission-counts-memory). Provenance:
+ ;; :test, one forked child, 16-35 MB of its own [M 2026-10-29, above]; :system-test and :step, a shard's process tree at its
+ ;; peak, 9 processes and 2,046 MB over seon.system-test's 12 process tests [M 2026-11-10, shard-mb], one batch's root of
+ ;; them about 4 processes (the child, the root, its fork server, an agent); :binary-test a binary and its root; :build make
+ ;; -j4 (bin/build) and the compiler; :seed one booted seon. The last four are hypotheses until a request reports its peak.
+ ;; At the bound: a measured peak above its class's entry is the entry to raise, never a reading that admits.
+ :seon.config.proofs/weights {:test {:processes 1 :mb 64} :system-test {:processes 4 :mb 2048} :binary-test {:processes 4 :mb 2048}
+                              :build {:processes 4 :mb 2048} :seed {:processes 2 :mb 1024} :step {:processes 4 :mb 2048}}
+ ;; Unit: MB. What the :process owner's requests in flight may hold together, by their classes' weights. Provenance: half
+ ;; of Seon's 16 GB target machine (:seon.config.machine/memory-mb is Seon's own quarter; the OS and the user keep the
+ ;; rest): sixteen plain test batches (64 MB) and three root-holding batches at once. Raise it per machine
+ ;; (config/local.edn). At the bound: a request waits for one in flight to end; nothing in flight admits one.
+ :seon.config.proofs/prove-mb 8192
  ;; Unit: the machine's 1-minute load average. Unset: the load admits everything. Set, an item is granted only while the
  ;; load (read in a step the service already takes: an ask arrived, an item ended; never polled) is under it, except that
  ;; with nothing running one item is always granted, so the queue never stalls with nothing to wake it. Admission only,
