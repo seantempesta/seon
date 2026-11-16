@@ -7,6 +7,9 @@
  ;; is a login; a person sets their own in config/local.edn ({:seon.config.root/user-name "sean"}). Provenance: replaced the OS
  ;; account read at boot (seon.system/person), owner's ruling via the managing session, 2026-11-10: a default in the config file is
  ;; config, not a fake default in code.
+ ;; The tasks whose agents hear each new :platform problem (seon.system/platform-told-tx). Provenance: root's ruling 2026-11-17, after the
+ ;; results branch refused every verdict write for hours with nobody told: a defect of the system reaches root's inbox, not only a row.
+ :seon.config.root/platform-told [:set {:default #{"session/root"} :seon.config/unit "task ids" :description "The tasks whose agents are told, once a signature, each new :platform problem root records: the managing session's own task by default."} :string]
  :seon.config.root/user-name [:string {:default "user" :min 1 :seon.config/unit "name" :description "The one person's name, the user entity a fresh store's boot makes and signs in (:seon.user/name, :seon.system/signed-in), until there is a login."}]
  ;; Unit: ms. A seon_inbox call's wait for a message, then :seon.server/no-message and the session asks again. Provenance: root's
  ;; ruling 2026-11-15 (600000, an outside client's bound; its sender is often a person or another session).
