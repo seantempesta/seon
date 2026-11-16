@@ -72,9 +72,7 @@
   facts (`status-now`): nothing here is held for it. {:test-run :task}."
   {:malli/schema [:=> [:cat :seon.task/id] :map]}
   [id]
-  (let [;; the branch's own texts embedded first, so the plan's vector is the plan's now
-        _ (agent/embed-written!)
-        test-run (agent/prove!)]
+  (let [test-run (agent/prove!)]
     (test-error! test-run)
     {:test-run test-run :task (task/task (agent/db) id)}))
 
