@@ -426,6 +426,26 @@
     (is (= 1 (count (:value (sqlite/using ix2 #(sqlite/fts-match % "\"qqzz\"" #{}))))) "found by its word")
     (is (= [(:hash (:db-after r2)) (:max-tx (:db-after r2))] (first @@#'seon.doc/indexes)) "keyed to the db it was carried to")))
 
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-search-on-a-branch-that-moved-carries-the-index-it-holds
+  ;; docs/vector.md#search: a forked agent's first search found the index its fork point holds keyed to main's db, its branch
+  ;; 502 transactions on, and built its own from every text: 3,566 ms, +133 MB private (runtime, 2026-11-16, pid 26635). The
+  ;; slot keeps the point it is at (seon.db/point, a reference), so a reader on a later commit carries it by the texts that
+  ;; differ (datahike.api/datoms-diff), never a build. Red before: acquire! built when the slot was another db's.
+  ;; Estimate: a test branch ~0.5M, one build of the seed's texts (~2,000 datoms) ~40M, two commits ~0.4M, one diff of the
+  ;; text attributes over two commits and one row replaced ~1M: ~42M; 60,000,000
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [ix0 (doc/text-index @conn)
+            _ (d/transact conn [{:seon.doc/address "fts.md#a" :seon.doc/heading "A" :seon.doc/text "The numbat sleeps."}])
+            _ (d/transact conn [{:seon.doc/address "fts.md#b" :seon.doc/heading "B" :seon.doc/text "No animal here."}])
+            builds (atom 0)
+            ix1 (with-redefs-fn {#'seon.doc/build-index (fn [_] (swap! builds inc) (throw (ex-info "built" {})))}
+                  #(doc/text-index @conn))]
+        (is (zero? @builds) "the moved branch's search built nothing")
+        (is (identical? ix0 ix1) "it took the index the slot held, carried")
+        (is (= 1 (count (:value (sqlite/using ix1 #(sqlite/fts-match % "\"numbat\"" #{}))))) "the text written since is found")
+        (is (= [(:hash @conn) (:max-tx @conn)] (first @@#'seon.doc/indexes)) "and the slot is keyed to the branch's head")))))
+
 (deftest a-move-counts-again-only-the-texts-it-wrote
   ;; docs/vector.md#search: a text's term counts are kept beside its row of the text index (seon.doc/text-terms), counted the
   ;; first time they are read; a move carried into the index (seon.doc/carry-index!) drops the counts of the texts it wrote alone,
