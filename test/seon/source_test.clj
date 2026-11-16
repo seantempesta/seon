@@ -1334,6 +1334,24 @@
     (is (= 3 (:app.shape/size (d/entity (d/db-with (d/db-with db tx) [{:db/id 900 :app.shape/size 3}]) 900)))
         "and the landed main can store it at once")))
 
+;; docs/source.md#a-boot-catches-up-with-its-checkout: a task file that does not read is left out alone, named with its error, and the
+;; other changed task files are imported (a bad entry never stops a catch-up): one unreadable seon.prove.edn once refused every changed
+;; task file, so main's tree fact never moved. Red first: both files were left out, "the task files are refused".
+;; Estimate: a test db ~1M, two small files read and one task's load-tx ~1M: 3,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-task-file-that-does-not-read-leaves-out-only-itself
+  (let [dir (scratch-dir "taskread")
+        tasks-dir (seon.config/value :seon.config.source/tasks-dir)
+        good (str tasks-dir "/app.good.edn") bad (str tasks-dir "/app.bad.edn")]
+    (try
+      (.mkdirs (java.io.File. (str dir "/" tasks-dir)))
+      (spit (str dir "/" good) "[{:seon.task/name \"a-good-task\" :seon.task/plan \"Plan.\" :seon.task/kind :work :seon.task/proofs #{}}]\n")
+      (spit (str dir "/" bad) "[{:seon.task/name \"a-bad-task\" :seon.task/plan \"one \"two\" three\" :seon.task/kind :work}]\n")
+      (let [r (seon.system/catch-up (ts/test-db) dir {:fact? false :paths [good bad]})]
+        (is (= [good] (:paths r)) (pr-str (dissoc r :tx)))
+        (is (= [bad] (mapv :path (:skipped r))) "only the unreadable file is left out")
+        (is (clojure.string/starts-with? (str (:reason (first (:skipped r)))) "the task file does not read") "named with its error"))
+      (finally (seon.lib/remove-tree! dir)))))
+
 (deftest ^{:seon.test/estimate {:ticks 3000000}} named-paths-catch-up-on-a-db-that-holds-no-tree
   ;; data's review of my.branch/import!: catch-up answered nil on a db that holds no :seon.system/source tree even when its
   ;; :paths named the files, and import! read that nil as every path unchanged, a wrong answer with no error. Named paths need no
