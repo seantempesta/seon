@@ -235,6 +235,43 @@
             [_ o3] (vector/vectors-proc st :main (assoc (note written) :t 14))]
         (is (= ["title: none | text: (defn h [] 1)"] (get-in (first (:to-api o3)) [:req :req :texts]))))))))
 
+(deftest ^{:seon.test/estimate {:ticks 30000000 :bytes 120000000}} a-search-embedded-mid-backfill-gets-its-hits-once-nothing-is-due
+  ;; docs/vector.md#search: a search's hits are searched once, so at a commit holding every text's vector: in a backfill (a clean
+  ;; store's ~10k texts, 665 searches) a search embedded while texts are owed writes its vector alone and its hits wait until nothing is
+  ;; due; searched mid-backfill they ranked a part-embedded corpus and cost a whole search inside the round (59M ticks each, 2026-11-16).
+  ;; Estimate: the caught-up seed (~5M), three rounds of one text (~3M), one search over the test store (~3M): ~11M; 30000000 ticks
+  (ts/test-branch! (fn [_ conn]
+    (let [[st db1 _] (caught-up conn)
+          db2 (with! conn db1 [{:seon.search/id "t/x/request" :seon.search/query "messages sent while it ran are lost"}])
+          db3 (with! conn db2 [{:db/id "g" :form/id "x/2" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn h [])"}])
+          s (:db/id (d/entity db3 [:seon.search/id "t/x/request"]))
+          g (:e (first (d/datoms db3 :avet :form/id "x/2")))
+          ;; one notice, its :embed answered and its write answered: [st db' the write's tx-data], or nil when nothing was asked
+          step (fn [st db t]
+                 (let [[st o] (vector/vectors-proc st :main (assoc (note db) :t t))
+                       w (first (:to-api o))]
+                   (when w
+                     (if (= :embed (get-in w [:req :kind]))
+                       (let [n (count (get-in w [:req :req :texts]))
+                             [st o2] (vector/vectors-proc st :answers {:tag (:tag w) :r {:value {:model "m" :vectors (vectors 1 n 1 768) :tokens (vec (repeat n 5))}}})
+                             w2 (first (:to-api o2))
+                             tx (get-in w2 [:req :req :tx-data])
+                             [st _] (vector/vectors-proc st :answers {:tag (:tag w2) :r {:ok true :t (inc t)}})]
+                         [st (with! conn db tx) tx])
+                       (let [tx (get-in w [:req :req :tx-data])
+                             [st _] (vector/vectors-proc st :answers {:tag (:tag w) :r {:ok true :t (inc t)}})]
+                         [st (with! conn db tx) tx])))))
+          runs (loop [st (assoc st :texts 1) db db3 t 12 out []]
+                 (if-let [[st db tx] (when (< t 30) (step st db t))] (recur st db (+ t 2) (conj out [db tx])) out))
+          hits-of (fn [tx] (some #(when (and (= s (:db/id %)) (:seon.search/hits %)) %) tx))
+          vec-of (fn [tx] (some #(= s (:seon.vector/of %)) tx))
+          [_ vtx] (first (filter (comp vec-of second) runs))
+          [hdb htx] (first (filter (comp hits-of second) runs))]
+      (is (some? vtx) "the search's vector is written")
+      (is (nil? (hits-of vtx)) "while a text is owed, its vector alone: no hits searched over a part-embedded corpus")
+      (is (some? htx) "its hits are written once nothing is due")
+      (is (seq (vector/vector-of hdb g)) "at a commit where the text owed then holds its vector")))))
+
 (deftest a-more-round-followed-by-nothing-due-releases-the-helper
   ;; a request saying :more keeps the :embed kind's helper up; where the proc stops asking, an empty request without :more
   ;; is the event that lets it close (docs/vector.md#the-model)

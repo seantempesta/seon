@@ -354,8 +354,11 @@
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]
                      [:at-ms [:maybe :int]]]
- :seon.problems/report [:map {:seon.render/hiccup seon.render.ui/problems :seon.render/model seon.render.ui/problems-model} [:t :int]
-                        [:classes [:map-of :seon.problems/class [:map [:n nat-int?] [:rows [:vector :seon.problems/row]]]]]]
+ ;; health's report as every reader takes it: its shape, checked once where it is made (seon.problems' health-with marks it,
+ ;; seon.contract/checked-once), so health-moved's prev and answer are admitted by their mark, never walked again
+ :seon.problems/report [:seon.contract/once {:seon.render/hiccup seon.render.ui/problems :seon.render/model seon.render.ui/problems-model} :seon.problems/report-shape]
+ :seon.problems/report-shape [:map [:t :int]
+                              [:classes [:map-of :seon.problems/class [:map [:n nat-int?] [:rows [:vector :seon.problems/row]]]]]]
  ;; keys-schemas sweep
  :seon.git/files [:vector {:description "On a git commit's error, the files the commit was to hold, sorted."} :string]
  ;; keys-schemas sweep: the properties of :seon.problems/class
