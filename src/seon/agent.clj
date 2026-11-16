@@ -2213,9 +2213,10 @@
   (case (:op m)
     ;; the proofs of the task root names (:task), as this branch holds them
     ;; root hears the test child's pid once it is forked (its agent proc's :tests-started event)
-    ;; root's judge at a run's end: the test service proves this branch (prove! :judge), so the
-    ;; run is recorded on main and joins any other asker's of its key; answered as :tests is
-    :judge [{:op :tests :id (:id m) :result (prove! :judge) :mem-mb (mem-mb)}]
+    ;; root's judge at a run's end (seon_done's path and the turn loop's alike): judge! with reach? true, the one prove of the
+    ;; candidate: main merged in first (a conflict is its answer), the run recorded on main, and the process tests the change
+    ;; reaches run through the gate once the rest is green, so no later stage runs them again; answered as :tests is
+    :judge [{:op :tests :id (:id m) :result (judge! #{} true) :mem-mb (mem-mb)}]
     ;; served by the :tests proc on its own fiber (seon.repl/tests-step), which waits on the children while
     ;; the :repl proc runs what it runs; the answer is the run as the done rule reads it, bounded by its
     ;; reds (seon.proofs/answer): the whole run is cached by digest before it, so nothing is lost, and
