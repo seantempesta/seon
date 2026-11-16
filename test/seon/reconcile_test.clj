@@ -1944,38 +1944,30 @@
     (is (= 1 (count (stage outs5))) "a later commit than the write's takes it as well"))))
 )
 
-;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 5 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 2 judgings x 0.7M (the index and the judge-tx); 6 transacts or db-withs x 50k ~ 6,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 6000000}} a-proof-a-branch-registers-reaches-main-at-the-agents-end
-  ;; owner, 2026-10-25 (Dogfood rulings): a design registers the red proofs it writes
-  ;; (my.task/update! :seon.task/proofs conj 't); the judge carries them onto main like the plan,
-  ;; so the done rule sees them at design and the implement step inherits them
+;; Estimate: 1 db-of x 0.5M + 3 judgings x 0.7M + one decide over a few facts ~0.2M ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-proof-a-branch-registers-reaches-main-at-the-agents-end
+  ;; owner, 2026-10-25 (Dogfood rulings): a design registers the red proofs it writes (my.task/update! :seon.task/proofs conj 't), and
+  ;; the implement step inherits them; owner, 2026-11-16 (via root): one merge carries everything, so they reach main with the branch's
+  ;; :merge, and the judge reads them from the branch it judges (seon.reconcile/branch-acc). Red first: with the early copy gone the
+  ;; judge read the design's proofs from main and found none (:no-proofs)
   (let [base (db-of [(decl "a" :proofs #{}) (decl "b" :proofs #{'demo-test/kept-test 'demo-test/dropped-test})] :extra (work "a" :running))
         branch (d/db-with base [[:db/add [:seon.task/id "demo/a"] :seon.task/proofs 'demo-test/a-design-wrote-test]
                                 [:db/retract [:seon.task/id "demo/b"] :seon.task/proofs 'demo-test/dropped-test]])
-        judged (:db (judge! base "a" nil :branch branch))]
-    (is (= #{'demo-test/a-design-wrote-test} (set (:seon.task/proofs (task/task judged "demo/a")))) "an added proof reaches main")
-    (is (= #{'demo-test/kept-test} (set (:seon.task/proofs (task/task judged "demo/b")))) "a dropped one leaves it")
-    (is (= #{'demo-test/a-design-wrote-test} (get-in (r/index judged) [:acc "demo/a"])) "the done rule's input holds it")
-    (testing "the implement step that needs the design inherits it, observed as the reconciler does (live finding F3)"
+        reasons (fn [db] (set (map (juxt :reason :symbol) (:seon.task/reasons (task/task db "demo/a")))))
+        judged (:db (judge! base "a" {:outcome :green} :branch branch))]
+    (is (contains? (reasons judged) [:proof-unknown 'demo-test/a-design-wrote-test]) (str "the done rule judges the proof the branch registered: " (reasons judged)))
+    (is (empty? (:seon.task/proofs (task/task judged "demo/a"))) "and main holds it only once the branch merges")
+    (is (= #{'demo-test/kept-test 'demo-test/dropped-test} (set (:seon.task/proofs (task/task judged "demo/b")))) "a dropped one too")
+    (testing "the implement step that needs the design inherits it, on the same branch (live finding F3)"
       (let [base (d/db-with base (task/create-tx base [(decl "c" :needs ["a"] :proofs #{})]))
             branch (d/db-with base [[:db/add [:seon.task/id "demo/a"] :seon.task/proofs 'demo-test/a-design-wrote-test]])
-            judge (fn [main nm] (:db (judge! main nm nil :branch branch :diff {:base base})))
-            judged (judge (d/db-with base (into (work "a" :running) (task/execution-tx ["demo/c"] :running))) "a")
-            idx0 (r/index base)]
-        (is (= #{'demo-test/a-design-wrote-test} (get-in (r/index judged) [:acc "demo/c"])) "listed")
-        (is (= #{'demo-test/a-design-wrote-test} (get-in (r/index idx0 base judged) [:acc "demo/c"])) "observed from the index before")
-        (let [judged2 (judge (d/db-with judged (work "c" :running)) "c")]
-          (is (= #{'demo-test/a-design-wrote-test} (:seon.task/proofs (task/task judged2 "demo/a")))
-              "the implement's judge, on the same branch from the same base, keeps the design's proof on main")
-          (is (= #{'demo-test/a-design-wrote-test} (get-in (r/index judged2) [:acc "demo/c"]))))))
-    (testing "a proof set main changed too, differently, is a conflict for root"
-      (let [main (d/db-with base [[:db/add [:seon.task/id "demo/b"] :seon.task/proofs 'demo-test/mains-test]])
-            {:keys [apply conflicts]} (pm/delta-three-way base main branch #{})
-            c (first (filter #(= [:task "demo/b"] (:key %)) conflicts))]
-        (is (not-any? #{[:task "demo/b"]} apply) "never applied")
-        (is (= [#{'demo-test/kept-test 'demo-test/dropped-test} #{'demo-test/kept-test 'demo-test/dropped-test 'demo-test/mains-test} #{'demo-test/kept-test}]
-               [(:proofs (:base c)) (:proofs (:ours c)) (:proofs (:theirs c))])
-            "a conflict, each side's proofs")))))
+            judged (:db (judge! (d/db-with base (into (work "c" :running) (task/execution-tx ["demo/c"] :running))) "c" {:outcome :green}
+                                :branch branch :diff {:base base}))]
+        (is (contains? (set (map (juxt :reason :symbol) (:seon.task/reasons (task/task judged "demo/c")))) [:proof-unknown 'demo-test/a-design-wrote-test])
+            "the implement's done rule holds the design's proof")))
+    (testing "a proof set main changed too merges per proof in the one merge: the branch's drop and main's addition both hold"
+      (let [main (d/db-with base [[:db/add [:seon.task/id "demo/b"] :seon.task/proofs 'demo-test/mains-test]])]
+        (is (empty? (:conflicts (pm/decide base branch main))) "no conflict: each proof is its own fact")))))
 
 ;; Estimate: pure data in, pure data out, a few 10k ticks ~ 50,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 50000}} a-refused-merge-candidate-is-the-gates-error

@@ -981,6 +981,21 @@
              "Its plan: " plan "\n\nIts proofs: " (str/join " " (sort (map str proofs)))
              "\n\nIts whole task as data (what it cites, its write set): (my.task/data)")))))
 
+(defn- branch-acc
+  "Task id's accumulated proofs as db, the branch being judged, holds them: its own and every task's it needs, transitively, as the
+  index's :acc derives them (derive-needs) but read from the branch, where a design's registered proofs live until its one :merge
+  (owner, 2026-10-25: the implement step inherits them; 2026-11-16: one merge carries everything). O(the needs chain). See
+  docs/tasks.md#the-done-rule."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:set :qualified-symbol]]}
+  [db id]
+  (loop [todo [id] seen #{} acc #{}]
+    (if-let [x (first todo)]
+      (if (seen x)
+        (recur (rest todo) seen acc)
+        (let [e (d/entity db [:seon.task/id x])]
+          (recur (into (rest todo) (keep :seon.task/id (:seon.task/needs e))) (conj seen x) (into acc (:seon.task/proofs e)))))
+      acc)))
+
 (defn- judge-tx
   "Task id's end judged on MEASURED facts and written on main, once: the end its agent wrote on the branch (pull-end),
   root's own proof results, the branch's merge entries, and diff, the writer's one read of the
@@ -997,6 +1012,8 @@
         t (get-in idx [:tasks id])
         {k :key branch :branch} (agent-of main id)
         end (when k (pull-end db k))
+        ;; the done rule's proofs as the branch holds its chain (a design's registered proofs reach main only with its :merge)
+        idx (assoc-in idx [:acc id] (branch-acc db id))
         ;; the task content its branch changed (a design's plan, the proofs it registered) reaches main with the branch's one :merge, never
         ;; at its judging beside it (owner, 2026-11-16: one merge carries everything); a task member both sides changed is an entry of
         ;; that merge, shown on the task (task-conflicts)
