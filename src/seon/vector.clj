@@ -634,8 +634,12 @@
                                             [st [w]])
                                           (release (assoc st :running false))))
                                       (let [{:keys [model vectors]} (:value r)
+                                            ;; a search's hits are searched once, here, with its query's vector, at the commit this round read:
+                                            ;; every agent forked after reads them from main (seon.ctx.search/embedded-tx; seon.ctx.search requires
+                                            ;; this namespace, so it is resolved at the call)
+                                            tx ((requiring-resolve 'seon.ctx.search/embedded-tx) (pdb/at-commit (:conn st) (:commit asked)) es ts vectors model)
                                             [st w] (step/ask st [:vectors :answers] [:written (count es)]
-                                                             {:op :write :req {:op :tx :branch :db :tx-data (tx-data es ts vectors model)}})]
+                                                             {:op :write :req {:op :tx :branch :db :tx-data tx}})]
                                         [st [w]])))
                         :written (let [st (cond-> (assoc st :running false)
                                             (not (contract/error? r)) (-> (update :embedded + es) (assoc :written-t (:t r)))

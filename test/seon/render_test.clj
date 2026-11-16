@@ -4252,8 +4252,8 @@
             search-part (fn [parts] (some #(when (and (vector? %) (= 'seon.render.ui/searched (first %))) %) (tree-seq coll? seq (vals parts))))
             s (:db/id (d/entity @conn [:seon.search/id "demo/find/request"]))
             unembedded (search-part (draw))
-            ;; its query's vector, as main's vectors proc writes it (seon.vector/tx-data)
-            _ (d/transact conn (seon.vector/tx-data [s] ["query"] [(vec (repeat 768 0.036))] "m"))
+            ;; its query's vector and hits, as main's vectors proc writes them (seon.ctx.search/embedded-tx)
+            _ (d/transact conn (seon.ctx.search/embedded-tx @conn [s] ["query"] [(vec (repeat 768 0.036))] "m"))
             before (search-part (draw))]
         (is (nil? unembedded) "a query with no vector yet draws nothing: words alone are no search the page shows")
         (is (some? before) "the request's search is a part of the page once its query has a vector")
@@ -4263,7 +4263,39 @@
         (is (not (str/includes? (pr-str before) "more:")) "no line of the hits left out, whose count would move each turn")
         (do
           (d/transact conn [{:db/id s :seon.search/query "a tile of the dashboard"}])
-          (is (str/includes? (pr-str (search-part (draw))) "app.srch/render-tile") "a new query: the part draws its hits"))))))
+          (is (not (str/includes? (pr-str (search-part (draw))) "app.srch/untaken-entries")) "a new query draws no hits of the old one")
+          (d/transact conn (seon.ctx.search/embedded-tx @conn [s] ["query 2"] [(vec (repeat 768 0.036))] "m"))
+          (is (str/includes? (pr-str (search-part (draw))) "app.srch/render-tile") "its new vector writes its hits: the part draws them"))))))
+
+(deftest ^{:seon.test/estimate {:ticks 20000000 :bytes 60000000}} a-searchs-hits-are-drawn-from-its-fact-and-searched-once
+  ;; docs/vector.md#search, task seon.ctx.search/the-pages-search-names-only-the-hits-it-shows: a search's hits are a value of immutable
+  ;; inputs (its query, its vector, the commit), searched once where its vector is written (seon.ctx.search/embedded-tx) and drawn from
+  ;; that fact. Before, every agent's first page searched a past commit cold: 201M ticks and 1.08 GB a call, +269 MB a fresh agent (runtime,
+  ;; 2026-11-16), ~17x the same search warm (11.9M ticks, result/a1655f9d). Estimate: a test branch with a small program (~5M), one
+  ;; search at the write (~3M on this store), two draws of a page (~6M): ~14M; 20000000 ticks, 60 MB
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn ((my.test/code 'app.srch (str "(ns app.srch)\n"
+                                                     "(defn untaken-entries\n  \"The messages addressed to this session that it has not taken.\"\n  [db] db)\n")) @conn))
+      (d/transact conn (seon.template/request-tx @conn [{:seon.task/ns 'demo :seon.task/name "find" :seon.task/kind :whole
+                                                          :seon.task/plan "Messages addressed to the session go untaken."}]))
+      (d/transact conn [{:seon.agent/key "b/find" :seon.agent/task [:seon.task/id "demo/find"]}])
+      (let [s (:db/id (d/entity @conn [:seon.search/id "demo/find/request"]))
+            calls (atom 0)
+            real seon.ctx.search/search
+            counted (fn [& args] (swap! calls inc) (apply real args))
+            written (with-redefs [seon.ctx.search/search counted]
+                      (d/transact conn (seon.ctx.search/embedded-tx @conn [s] ["query"] [(vec (repeat 768 0.036))] "m"))
+                      @calls)
+            a (:db/id (d/entity @conn [:seon.agent/key "b/find"]))
+            draw #(seon.fixtures/drawn-parts @conn (seon.ctx/build (seon.db/index) @conn a (:seon.agent/branch (d/entity @conn a))))
+            part (fn [parts] (some #(when (and (vector? %) (= 'seon.render.ui/searched (first %))) %) (tree-seq coll? seq (vals parts))))
+            drawn (with-redefs [seon.ctx.search/search counted] (reset! calls 0) (let [p (part (draw))] [p @calls]))]
+        (is (= 1 written) "the write searches once, with the vector it writes")
+        (is (= {:query "Messages addressed to the session go untaken."} (select-keys (:seon.search/hits (d/entity @conn s)) [:query]))
+            "the hits are kept with the query they were searched for")
+        (is (str/includes? (pr-str (first drawn)) "app.srch/untaken-entries") (str "the page draws them: " (pr-str (first drawn))))
+        (is (zero? (second drawn)) "drawing the page searches nothing")))))
 
 (deftest a-definition-matching-the-request-moves-no-search-hit
   ;; docs/vector.md#search: the demo.math/half request (2026-11-11) was sent
@@ -4278,7 +4310,7 @@
       (d/transact conn (seon.template/request-tx @conn [{:seon.task/ns 'demo :seon.task/name "find" :seon.task/kind :whole
                                                           :seon.task/plan "Messages addressed to the session go untaken."}]))
       (let [s (:db/id (d/entity @conn [:seon.search/id "demo/find/request"]))
-            _ (d/transact conn (seon.vector/tx-data [s] ["query"] [(vec (repeat 768 0.036))] "m"))
+            _ (d/transact conn (seon.ctx.search/embedded-tx @conn [s] ["query"] [(vec (repeat 768 0.036))] "m"))
             base (d/commit-id @conn)
             _ (d/transact conn [{:seon.agent/key "b/find" :seon.agent/task [:seon.task/id "demo/find"] :seon.agent/base-commit base}])
             a (:db/id (d/entity @conn [:seon.agent/key "b/find"]))

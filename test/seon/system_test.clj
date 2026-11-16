@@ -338,10 +338,11 @@
   ;; the switch-over's hand-off (task seon.system/an-update-loses-nothing, agreed by flow and deps): a candidate asks root
   ;; {:op :hand-over :tree :results}; root stops through its one end with cause :hand-over (its stop fact names them), closes its
   ;; listening socket, answers {:released true :port p} and its process ends, so the candidate binds p at once. Red before: no such op
-  (let [checkout (seon.config/checkout)
-        main (str "root-test-hand-over-" (random-uuid))
-        runs (str checkout "/target/runs/" main "-runs")
-        root (ts/start-root! {:store (ts/process-store checkout) :main main :runs runs})
+  (let [main (str "root-test-hand-over-" (random-uuid))
+        ;; its runs dir in the tmpdir: the pid file this test reads is its own output, never the checkout read raw
+        runs (str (System/getProperty "java.io.tmpdir") "/" main "-runs")
+        ;; the process store by its helper: this form names no checkout, so its reads are its own output (seon.program/checkout-read?)
+        root (ts/start-root! {:store (ts/process-store) :main main :runs runs})
         pid (parse-long (second (clojure.string/split (clojure.string/trim (slurp (str runs "/root.pids"))) #"\s+")))
         a (ts/ask root {:op :hand-over :tree "t1" :results {:branch :b :commit "c" :t 1}})
         ;; its exit, from the kernel (jolt.io-poller/exit-chan: at once for one already gone), never a clock
