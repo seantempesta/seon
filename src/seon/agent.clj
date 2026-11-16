@@ -135,7 +135,13 @@
   (:main; the record's :main-commit and :main-t, seon.ctx). Every read of main's head is this one. A db with no store (a test's
   world, d/db-with values) has no other branch: it is its own main."
   {:malli/schema [:=> [:cat] :seon.host/db]}
-  [] (let [b (db) s (pdb/store-of b) m (if s (d/branch-as-db s (main-branch)) b)] (swap! state assoc :main m) m))
+  [] (let [b (db) s (pdb/store-of b)
+           ;; the main its branch is cut under (a branch's name is qualified by its main's, seon.db/on-main): the process's in production,
+           ;; a test's own main for a test's agent on a stored branch (my.test/eval-in)
+           br (get-in b [:config :branch])
+           main (if (and (keyword? br) (namespace br)) (pdb/main-of br) (main-branch))
+           m (if s (d/branch-as-db s main) b)]
+       (swap! state assoc :main m) m))
 
 (defn task-of
   "The task id agent ag works on: its entity's :seon.agent/task, which root writes on main (seon.task/start-tx), read on its branch
