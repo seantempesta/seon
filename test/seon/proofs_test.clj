@@ -760,7 +760,9 @@
         basis (fn [n] {:seon.db/branch :db :seon.db/commit (parse-uuid (str "00000000-0000-0000-0000-00000000000" n)) :seon.db/t n})
         older (proofs/verdict-tx w0 (program/reach-graph w0 nil) (basis 1) {t {:digest d1 :pass 1 :fail 0 :error 0}} {t [{:var 'pt.vr/add}]} {})
         newer (proofs/verdict-tx w1 (program/reach-graph w1 nil) (basis 2) {t {:digest d2 :pass 1 :fail 0 :error 0}} {t [{:var 'pt.vr/add}]} {})
-        rdb (pdb/db-with w0 (into older newer))]
+        ;; two runs, two transactions, as the results branch's one writer writes them (a run writes one result a test): in one
+        ;; transaction the order fell to the results' entity ids, content digests, which a change of read keys reordered (result/b53bf2be)
+        rdb (pdb/db-with (pdb/db-with w0 older) newer)]
     (is (= {} (proofs/stored-verdicts rdb w0 {t d3} [t]))
         "the newest green's reads no longer hold on db: no reuse, though an older green's still do")
     (is (= #{d3} (set (keys (proofs/stored-verdicts rdb w1 {t d3} [t])))) "and the newest's, holding, is reused")
