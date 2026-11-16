@@ -739,13 +739,14 @@
 
 (defn ran-on
   "test-var's verdicts on rdb (the results branch) that ran on branch b, oldest written first, each {:status :failures :tx}: one AVET
-  seek of :seon.proof/test against one of :seon.proof/ran-on b, each attribute read through :aevt (never a result's :eavt leaf, `verdicts-at`).
+  seek of :seon.proof/test, then each verdict's :seon.proof/ran-on b seeked, each attribute read through :aevt (never a result's :eavt leaf, `verdicts-at`).
   What a page draws of a proof (seon.render.ui/agent-state, proof-story). See docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol :seon.db/branch] [:vector [:map [:status :keyword] [:failures :any] [:tx :int]]]]}
   [rdb test-var b]
   (let [at (fn [e a] (:v (first (d/datoms rdb :aevt a e))))
-        on (into #{} (map :e) (d/datoms rdb :avet :seon.proof/ran-on b))]
-    (into [] (comp (filter #(on (:e %))) (map (fn [{:keys [e tx]}] {:status (at e :seon.proof/status) :failures (or (at e :seon.proof/failures) []) :tx tx})))
+        ;; each verdict's own :ran-on value b, one :aevt seek a verdict, never every result the branch ran
+        on? (fn [e] (seq (d/datoms rdb :aevt :seon.proof/ran-on e b)))]
+    (into [] (comp (filter #(on? (:e %))) (map (fn [{:keys [e tx]}] {:status (at e :seon.proof/status) :failures (or (at e :seon.proof/failures) []) :tx tx})))
           (sort-by (juxt :tx :e) (d/datoms rdb :avet :seon.proof/test test-var)))))
 
 (defn newest-green
