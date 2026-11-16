@@ -1,6 +1,6 @@
 (ns seon.ctx.status-test
   "seon.ctx.status's done-rule input, the judge's own (docs/tasks.md#the-done-rule). Run: bin/test seon.ctx.status-test"
-  (:require [clojure.test :refer [deftest is]] [seon.reconcile :as r]))
+  (:require [clojure.test :refer [deftest is]] [seon.reconcile :as r] [seon.ctx.status :as status] [my.test]))
 
 (deftest ^{:seon.test/estimate {:ticks 200000}} the-status-reads-the-judges-done-input
   ;; the status built the done rule's input by hand when no test outside the proofs was red, beside the judge's
@@ -46,3 +46,14 @@
     (is (= '(do (my.schema/register! :a/b [:int]) (my.schema/register! :a/c [:int])) (:do several)) "several, one do of their forms")
     (is (not (contains? none :do)) "a problem with no form says none")
     (is (not (contains? red :do)) "only an open problem's")))
+
+;; docs/render.md#how-the-work-stands: a proof to write is shown one test of its namespace to copy. A seon-driver copied the shortest,
+;; which had no estimate, and its prove then asked for one: a turn lost (2026-11-16). The example is the shortest that states its
+;; estimate, as a new test must. Red before: the shortest, unestimated. Estimate: a world (~2M) and one test-shape read (~0.2M): 3,000,000
+(deftest ^{:seon.test/estimate {:ticks 3000000 :bytes 30000000}} a-proof-to-write-is-shown-a-test-that-states-its-estimate
+  (let [db (my.test/with (my.test/world)
+                         (my.test/code 'app.shape-test (str "(ns app.shape-test (:require [clojure.test :refer [deftest is]]))\n"
+                                                            "(deftest short (is true))\n"
+                                                            "(deftest ^{:seon.test/estimate {:ticks 100000}} with-estimate (is (= 1 1)))\n")))
+        shape (status/test-shape db 'app.shape-test/new-proof)]
+    (is (clojure.string/includes? (str (:example shape)) ":seon.test/estimate") (str "the example states its estimate: " (pr-str (:example shape))))))

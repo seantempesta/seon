@@ -1280,6 +1280,12 @@
   (into {} (for [t tests :let [r (some-> (get-in plan [:digests t]) found)]]
              [t (cond (nil? r) :error (proofs/green? r) :pass :else :fail)])))
 
+(defn checkout-branch
+  "The branch the checkout at dir is on (jolt/<area> for a session's worktree), or nil on a detached HEAD: what names the session
+  whose agent a worktree's edits are imported onto (my.root/branch-agent). See docs/server.md#working-a-task-from-a-worktree."
+  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  [dir] (git-try dir ["symbolic-ref" "--short" "HEAD"]))
+
 (defn branch-head
   "The commit branch names in the repository at repo, or the commit HEAD names when the branch is not
   there yet: the rule git-commit starts a new branch by (it starts at dir's HEAD), so a merge gated
