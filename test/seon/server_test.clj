@@ -311,11 +311,16 @@
                                          {:op :attach :task i :template "user" :client "s-once"}
                                          {:op :eval :agent "root"
                                           :code (str "(let [db @(:conn sys)] [(:seon.task/kind (seon.task/task db " (pr-str i) "))"
-                                                     " (count (datahike.api/q '[:find ?e :in $ ?id :where [?e :seon.task/id ?id]] db " (pr-str i) "))])")}
+                                                     " (count (datahike.api/q '[:find ?e :in $ ?id :where [?e :seon.task/id ?id]] db " (pr-str i) "))"
+                                                     " (:seon.task/model (datahike.api/entity db [:seon.task/id " (pr-str i) "]))])")}
                                          (end-session-form i)])))]
     (is (some? (:agent one)) (str "the first attach makes the task and its agent: " (pr-str one)))
     (is (= (:agent one) (:agent two)) (str "the second is the same agent: " (pr-str two)))
-    (is (= [:user 1] (:value made)) (str "one task, of the :user template's kind: " (pr-str made)))))
+    (is (= [:user 1] (take 2 (:value made))) (str "one task, of the :user template's kind: " (pr-str made)))
+    ;; its own model is "outside": the reconciler never starts it on a model, after a wake, a kill or a restart alike (seon.reconcile/actions).
+    ;; Red before: a session task named no model, so its killed agent's next start ran root's default model as the session (data's,
+    ;; twice, 2026-11-16)
+    (is (= "outside" (nth (:value made) 2)) (str "the session's task is driven from outside: " (pr-str made)))))
 
 ;; Estimate: four server round trips (~0.5M each): ~2M; 3,000,000. In root: connection-agent's two scans (~90k [M result/a00e44fe])
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} a-connections-agent-is-its-sessions-own
@@ -380,6 +385,31 @@
     (is (clojure.string/includes? (str (:request heard)) "use demo/g") (str "the reply after the message carries it: " (pr-str (dissoc heard :responses))))
     (is (clojure.string/includes? (str (:request heard)) (seon.config/value :seon.config.root/user-name)) "with who sent it, by name")
     (is (not (clojure.string/includes? (str (:request again)) "use demo/g")) (str "and the next reply does not carry it again: " (pr-str (:request again))))))
+
+;; Estimate: in this process, four server round trips and the answers' reads (~0.5M ticks each): ~2M; 3,000,000. At the agent: the
+;; attach's read and the context read each draw the request once and store its parts (~50-100M, the agent's own work, not this process's)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} a-reply-carries-what-moved-since-the-sessions-read
+  ;; docs/users.md#messages: a reply answers what the model's next request adds past what the session was shown. A session that never
+  ;; called seon_context had no read, so its first reply was the whole request; and a seon_context read stored no parts, so the reply
+  ;; after it was the whole request again: runtime's reply of 93,941 characters, 2026-11-16 [result/dba934d6]. Every read stores what it
+  ;; showed, so the reply after a seon_context is what moved since it. Red before: it carried the system prompt whole. A session that has
+  ;; read nothing is answered its whole request (seon.ctx/a-runs-request-holds-its-own-run would make it its run's).
+  ;; Estimate unchanged: one more round trip (~0.5M)
+  (let [[_ first-reply ctx second-reply third-reply] (at/in-agent (fn [{:keys [agent task]}]
+                                                         [{:op :attach :task task}
+                                                          {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 2)"}]}
+                                                          {:op :context :agent agent}
+                                                          {:op :eval :agent agent :message-md "" :evals [{:intent "add again" :code "(+ 2 2)"}]}
+                                                          {:op :eval :agent agent :message-md "third" :evals [{:intent "add a third" :code "(+ 30 4)"}]}]))
+        prompt "# You are a Seon agent"]
+    (is (= [3] (mapv :value (:responses first-reply))) (pr-str first-reply))
+    (is (clojure.string/includes? (str ctx) prompt) "seon_context shows it whole")
+    (is (not (clojure.string/includes? (str (:request second-reply)) prompt)) "and the reply after it: what moved since it")
+    ;; a seon-driver's replies each echoed its own evals and results under the request (2026-11-16, agent mf89a160307a724d
+    ;; [result/b8996cc0]): what a reply sent and answers under :responses is the session's already
+    (is (= [34] (mapv :value (:responses third-reply))) (pr-str third-reply))
+    (is (not (clojure.string/includes? (str (:request third-reply)) "(+ 30 4)")) (str "a reply does not send its own eval back: " (pr-str (:request third-reply))))
+    (is (not (clojure.string/includes? (str (:request third-reply)) "(+ 2 2)")) "nor the reply's before it")))
 
 ;; Estimate: in this process, two server round trips (~0.5M each, as a-message-reaches-the-agent's): ~1M; 2,000,000. In root: one
 ;; message write, and the api's wake-inbox over that commit's ops (~1k ticks)
@@ -520,6 +550,22 @@
                                         " [(some? held) woke (some? kept) due ((set (:awaits (aw))) wk)])")}]))]
     (is (= [true true true :seon.server/no-message nil] (:value r))
         (str "held with its bound; answered by the message; kept for the next wait; that wait ends at the bound; then gone: " (pr-str r)))))
+
+;; Estimate: four server round trips (~0.5M each) and one main write: ~2.5M; 4,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000}} a-session-takes-back-its-parked-agent
+  ;; docs/server.md#ops: a session's agent parked with its process alive (a turn boundary, a restart's resume) is still the task's live
+  ;; agent: an attach answers it and takes its hold, never a second spawn on its branch. Red before: live-run read only :running tasks,
+  ;; so the attach spawned and was refused "branch ... is held by live agent" (context's session, after root's restart, 2026-11-16)
+  (let [[one _ again who] (at/in-agent (fn [{:keys [ns]}]
+                                         (let [i (str "session/" ns)]
+                                           [{:op :attach :task i :template "user" :client "s-park"}
+                                            {:op :eval :agent "root" :code (str "@(seon.system/transact-main! sys [{:seon.task/id " (pr-str i) " :seon.task/outcome :parked}])")}
+                                            {:op :attach :task i :template "user" :client "s-park-again"}
+                                            {:op :eval :agent "root" :code "(:agent (my.root/held-agent sys \"s-park-again\"))"}
+                                            (end-session-form i)])))]
+    (is (some? (:agent one)) (pr-str one))
+    (is (and (not (contract/error? again)) (:shared again) (= (:agent one) (:agent again))) (str "the parked agent is answered, not a second spawn: " (pr-str again)))
+    (is (= (:agent one) (:value who)) "and the attaching client holds it")))
 
 ;; Estimate: five server round trips (~0.5M each): ~2.5M; 4,000,000. In root: one :db/add of the holder
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000}} a-sessions-own-area-client-takes-over-its-hold
@@ -1130,16 +1176,20 @@
        (is (= {:agent :k1 :task "demo/s"} (my.root/held-agent sys "c1")) "spawned again after that end: c1 holds it")))))
 
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-checkout-names-the-agent-it-holds
-  ;; docs/server.md#working-a-task-from-a-worktree: a session's edit hook (bin/seon-import) imports onto the agent its checkout
-  ;; attached (seon.server/attach!'s :holder): the live one and its task; an ended one, or another client's, is none
+  ;; docs/server.md#working-a-task-from-a-worktree: a session's edit hook (bin/seon-import) imports onto its session's agent. A
+  ;; worktree's branch is jolt/<area> and its session works session/<area> (AGENTS.md section 2), so the checkout's branch names the
+  ;; agent: the live one working session/<area>, whoever attached it (the session attaches as its area, the hook writes as its checkout:
+  ;; one session, two clients, and root measured that nothing imported, 2026-11-16). An ended agent, or a branch of no session, is none
   (ts/test-branch!
    (fn [_ conn]
-     (let [decl (fn [nm] {:seon.task/ns 'demo :seon.task/name nm :seon.task/plan (str "Make " nm " true.") :seon.task/proofs #{(symbol "demo-test" nm)}})]
-       (d/transact conn (task/create-tx @conn [(decl "old") (decl "a") (decl "b")]))
-       (d/transact conn (ts/work-tx "demo/old" :running {:agent :k0 :holder "checkout-/w"}))
+     (let [decl (fn [nm] {:seon.task/ns 'session :seon.task/name nm :seon.task/plan (str "Work " nm ".") :seon.task/proofs #{(symbol "demo-test" nm)}})]
+       (d/transact conn (task/create-tx @conn [(decl "w") (decl "v")]))
+       (d/transact conn (ts/work-tx "session/w" :running {:agent :k0 :holder "w"}))
        (d/transact conn [{:seon.agent/key "k0" :seon.agent/ended-ms 1}])
-       (d/transact conn (ts/work-tx "demo/a" :running {:agent :k1 :holder "checkout-/w"}))
-       (d/transact conn (ts/work-tx "demo/b" :running {:agent :k2 :holder "mcp-1-2"}))
+       (d/transact conn (ts/work-tx "session/w" :running {:agent :k1 :holder "w"}))
+       (d/transact conn (ts/work-tx "session/v" :running {:agent :k2 :holder "mcp-1-2"}))
        (let [sys {:graph nil :ext (a/chan) :conn conn}]
-         (is (= {:agent :k1 :task "demo/a"} (my.root/held-agent sys "checkout-/w")) "the checkout's live agent, its task")
-         (is (nil? (my.root/held-agent sys "checkout-/elsewhere")) "a checkout that attached none holds none"))))))
+         (is (= {:agent :k1 :task "session/w"} (select-keys (my.root/branch-agent sys "jolt/w") [:agent :task])) "the session's live agent, attached by its area")
+         (is (= :k2 (:agent (my.root/branch-agent sys "jolt/v"))) "whoever attached it")
+         (is (nil? (my.root/branch-agent sys "jolt/nobody")) "a branch whose session attached none holds none")
+         (is (nil? (my.root/branch-agent sys "main")) "a branch of no session holds none"))))))

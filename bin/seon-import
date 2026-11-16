@@ -2,7 +2,7 @@
 # bin/seon-import: Claude Code's PostToolUse hook on Edit and Write (registered in .claude/settings.json): the file a
 # session just wrote is imported onto its Seon agent's branch, so a session works as a Seon agent does (AGENTS.md §0).
 # A thin wrapper over the standing root's import op (seon_import: seon.server's op-answer :import, my.branch/import! on the
-# agent this checkout's client holds, my.root/held-agent). Reads the hook's JSON on stdin (tool_input.file_path); a file
+# session's agent: the checkout's branch jolt/<area> names session/<area>, my.root/branch-agent). Reads the hook's JSON on stdin (tool_input.file_path); a file
 # outside a checkout or no standing root imports nothing and says why on stderr; the hook never blocks the edit (exit 0).
 # See docs/server.md#working-a-task-from-a-worktree.
 emulate -L zsh; setopt pipefail

@@ -29,6 +29,8 @@
   {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
   [env] (= "outside" (:model env)))
 
+(def ^:private waiting-outcomes "The outcomes a task stands at while its agent waits for a message: parked or told (a cap is an end). See docs/users.md#messages." #{:parked :told})
+
 (defn desired-env
   "The environment task t's agent must work in; with prior, an agent's environment it goes on from,
   an outside agent's stays outside (seon.server's attach: the model and its :holder are the
@@ -567,11 +569,14 @@
                                        (recur more n m taken acc)))
                        :else (recur more (inc n) m taken (conj acc id))))
         spawns (for [id starts :let [t (get-in idx [:tasks id]) p (idle idx id) prior (task-agent idx id)
-                                     ;; work a root restart lost was ended by nobody: a model's goes on
-                                     lost? (= :lost (:seon.task/outcome t))
-                                     env (desired-env t (when lost? (:seon.agent/env prior)))]
-                     ;; nothing drives an outside agent until someone attaches, and that attach starts it (seon.server's attach!): a process here would only race it
-                     :when (not (and lost? (outside? env)))]
+                                     ;; an agent that goes on (lost at a restart, or waiting and woken) goes on in its own environment: an outside
+                                     ;; agent's model and holder are kept; after an end (killed, refused) the task's next agent is its own
+                                     goes-on? (or (= :lost (:seon.task/outcome t)) (waiting-outcomes (:seon.task/outcome t)))
+                                     env (desired-env t (when goes-on? (:seon.agent/env prior)))]
+                     ;; nothing drives an outside agent but its session (lost at a restart, or parked and sent a message, which its session
+                     ;; reads by seon_inbox with no process): its attach starts it (seon.server's attach!), and a process here would only race
+                     ;; it, on an environment that is not its own
+                     :when (not (outside? env))]
                  ;; its process is idle (parked in this boot, on its branch): its next work is a wake on it, no fork
                  (if (and p (not (get-in idx [:kill id])))
                    {:op :wake :task id :env env :agent (some-> (:seon.agent/key p) keyword)}
@@ -1426,7 +1431,6 @@
   {:malli/schema [:=> [:cat :map :map] :boolean]}
   [st m] (let [{:keys [ok t]} (:r m)] (boolean (or (nil? (:t st)) (and ok (int? t) (< (:t st) t))))))
 
-(def ^:private waiting-outcomes "The outcomes a task stands at while its agent waits for a message: parked or told (a cap is an end). See docs/users.md#messages." #{:parked :told})
 
 (defn- tasks-of-key
   "The ids of the tasks the agent with key k is on, on db."

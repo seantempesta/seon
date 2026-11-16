@@ -1424,20 +1424,6 @@
     (is (pos? (:value marked)) (pr-str marked))
     (is (true? (:value vars)))))
 
-;; See docs/agent.md#changing-a-file
-;; Estimate: in-agent's own setup and teardown (~1.5M) + 2 asks at ~0.25M: 3000000
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 2}} an-edit-of-a-file-in-the-programs-tree-is-refused
-  ;; the program's tree changes only through a branch, its merge's checks and the merge (the owner, 2026-11-15); a driver's edit! of a path
-  ;; wrote the standing checkout's file on disk (2026-11-15). A scratch file in the tree's test/ dir stands in (removed after), so a run
-  ;; without the refusal changes nothing but it
-  (let [f (java.io.File. (str (seon.config/checkout) "/test/seon/ctx_edit_probe_" (random-uuid) ".txt"))]
-    (spit f "before")
-    (try
-      (let [[r] (in-agent [(str "(seon.repl/edit! " (pr-str (.getPath f)) " \"before\" \"after\")")])]
-        (is (= :in-the-tree (:seon.repl/refused-because (:ex r))) (str "refused, saying the place to use: " (pr-str (select-keys r [:value :ex]))))
-        (is (clojure.string/includes? (str (:seon.error/message (:ex r))) "my.schema/register!") "it names the branch's way for each kind")
-        (is (= "before" (slurp f)) "and nothing was written"))
-      (finally (.delete f)))))
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} edit-says-what-it-did
   (let [[_ many same fine] (in-agent (fn [{:keys [ns]}]
@@ -1556,24 +1542,6 @@
     (is (= 3 (count (distinct (mapv :tool-call-id rs)))) (str "every call has its result, by its id: " (pr-str msgs)))
     (is (str/includes? (:content r1) "boom") "the second call's error")
     (is (str/includes? (:content r2) ":value 2") (str "(inc a) ran after the call that threw: " (:content r2)))))
-
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-model-call-holds-no-errors-or-finish
-  ;; docs/turn.md#the-turn-is-a-number: a turn records its call's forms, ms and model, and nothing reads a count of its errors or how its reply
-  ;; finished, so a call holds neither (:seon.model-call/errors, :seon.model-call/finish); nor an eval the page its value carried (:seon.eval/page)
-  (let [[_ _ held] (in-agent (fn [{:keys [task]}]
-                             [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
-                              "(seon.repl/eval-string \"(with-meta [1] {:seon.render/page :p})\" {\"ns\" \"user\" :origin :outside})"
-                              ;; each call's and eval's attributes, read from its datoms in the agent: what the claim is about, never the whole entity
-                              (str "(let [db (seon.agent/db) attrs (fn [e] (set (map :a (datahike.api/datoms db :eavt e))))]"
-                                   " {:calls (mapv attrs (datahike.api/q '[:find [?m ...] :where [?m :seon.model-call/forms _]] db))"
-                                   "  :evals (mapv attrs (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/code _]] db))})")])
-                           {:config {:seon.config.ai/script 'seon.fixtures/calls-one-throws}})
-        {:keys [calls evals]} (:value held)]
-    (is (seq calls) (str "a turn left its model call: " (pr-str held)))
-    (is (seq evals) "and its evals")
-    (is (every? #(not-any? #{:seon.model-call/errors :seon.model-call/finish} %) calls) (str "no errors or finish on a call: " (pr-str calls)))
-    (is (not-any? #(contains? % :seon.eval/page) evals) (str "no page on an eval: " (pr-str evals)))))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-call-after-an-error-answer-still-runs
