@@ -496,7 +496,7 @@
   [c db]
   (let [doc-load (requiring-resolve 'seon.doc/load-tx)
         page (requiring-resolve 'seon.doc/system-page)
-        db (if (@(requiring-resolve 'seon.doc/page-text) db @page) db (datahike.api/db-with db (doc-load db "docs" {@page "# A stub of the system prompt\n\nBe brief."})))
+        db (if (@(requiring-resolve 'seon.doc/markdown) db @page) db (datahike.api/db-with db (doc-load db "docs" {@page "# A stub of the system prompt\n\nBe brief."})))
         p (seon.render/walk nil {:db db :tree c :root #'seon.render.ui/agent :index (seon.program/index-of-db db) :changes @(requiring-resolve 'seon.ctx/changes)
                                  :model-only true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
     (no-error-render (:defects p))
