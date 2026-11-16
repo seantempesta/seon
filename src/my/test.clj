@@ -133,9 +133,11 @@
               (with (or db (:db old) (world)) (task (symbol (:ns names)) "t" "Work.")
                     [{:seon.agent/key (:agent names) :seon.agent/task [:seon.task/id (:task names)]}])
               db)]
-     (binding [agent/*start* (cond-> (or agent/*start* {})
+     ;; the test's own start value, as the state it replaced held: none for a scratch session, a test agent's with a world, and
+     ;; its forms' own agent on the caller's config and branch
+     (binding [agent/*start* (cond-> {}
                                db (assoc :mode :test :key "test-agent")
-                               forms? (assoc :key (:agent names) :id (keyword (:agent names))))]
+                               forms? (merge (select-keys agent/*start* [:cfg :branch]) {:key (:agent names) :id (keyword (:agent names))}))]
      (try (reset! agent/state (cond-> {:n 0 :ns (create-ns nsym)}
                                 db (assoc :db db :seon.repl/as-agent true)
                                 forms? (merge (select-keys old [:program :index :schema-registry]))))
