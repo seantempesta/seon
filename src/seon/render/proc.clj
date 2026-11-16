@@ -1368,7 +1368,7 @@
       :new-events [] :events [] :views {} :branches {}
       ::flow/in-ports {:events events :health-wake wake}}))
   ([st tr]
-   (when (= tr ::flow/stop)
+   (when (#{::flow/stop ::flow/drain} tr)
      (a/untap (:mult st) (:events-ch st)))
    st)
   ([st in m]

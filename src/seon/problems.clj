@@ -628,6 +628,11 @@
                          (str v " holds a hand-made list " ms ": judge it a dial (spec'd config with its reason), a patch over a missing mechanism (fix the root) or held data restated (derive it)")
                          {:kind :hand-written-list :var v :members m} {:var v :members m})))))
 
+(def ^:private holding-refs
+  "What a proc's code refers to that holds work outside its channels, a pend, an ask or a timer: the reads health's :undrained-proc
+  takes (docs/health.md#a-proc-that-does-not-drain)."
+  '#{seon.step/pend seon.step/ask seon.step/ask-edge seon.step/put-after! seon.step/arm!})
+
 (def ^:private stateful-refs
   "What a form refers to that holds state or waits outside a Flow proc, by kind: the reads health's :stateful-outside-flow
   takes (docs/health.md#state-or-a-wait-outside-flow)."
@@ -664,6 +669,39 @@
                                                          :blocks "waits on a channel outside go" :threads "starts a thread"} kinds))
                              " outside a Flow proc: move it into a proc's state and ports, or name why it must stay (:seon.flow/edge)")
                         {:kind :stateful-outside-flow :var v :what kinds} {:var v :what kinds})))))
+
+;; Estimate, corrected by measure: one :aevt read of :var/contract (the step-fns), then one seek a var reached through :form/refs, each
+;; var once for every proc (memoized). A proc reaches most of the program: 1,917 vars at ~57k ticks each, 110M ticks for every proc on
+;; main [M result/ad977787], against ~1M estimated (the estimate missed the reach). A branch's run checks only the procs it moved
+(defn undrained-procs
+  "An :undrained-proc row for each step-fn of src/ among names (nil: all) whose code reaches a pend, an ask or a timer (read through
+  :form/refs) and whose transition names no ::flow/drain. See docs/health.md#a-proc-that-does-not-drain."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:maybe [:set :symbol]]] [:vector :seon.problems/row]]}
+  [db ans names]
+  (let [step-fn? #(= ":seon.step/step-fn" (:var/contract %))
+        src? (fn [ve] (some-> ve :var/ns :ns/file (str/starts-with? "src/")))
+        procs (if names
+                (keep #(some->> (pdb/eid db :var/name %) (d/entity db)) names)
+                (map #(d/entity db (:e %)) (d/datoms db :aevt :var/contract)))
+        ;; does var v reach a holding ref through the refs of src vars? each var decided once (memo), a var on the path counted no
+        holds (volatile! {})
+        reaches? (fn reaches? [v]
+                   (if (contains? @holds v)
+                     (get @holds v)
+                     (do (vswap! holds assoc v false)
+                         (let [ve (some->> (pdb/eid db :var/name v) (d/entity db))
+                               refs (when (and ve (src? ve)) (:form/refs (:var/form ve)))
+                               r (boolean (or (some holding-refs refs) (some #(and (qualified-symbol? %) (not (holding-refs %)) (reaches? %)) refs)))]
+                           (vswap! holds assoc v r)
+                           r))))]
+    (vec (for [ve (sort-by (comp str :var/name) procs)
+               :when (and (step-fn? ve) (src? ve) (not (contains? (:var/meta ve) :seon.flow/edge)))
+               :let [v (:var/name ve)]
+               :when (and (reaches? v) (not (contains? (set (:form/keywords (:var/form ve))) :clojure.core.async.flow/drain)))
+               :let [s (str "undrained-proc " v)]]
+           (derived-row ans s (some-> (namespace v) symbol)
+                        (str v " holds work outside its channels (a pend, an ask or a timer) and does not end it at ::flow/drain: end it there as at ::flow/stop (seon.step/end-all, timers cancelled)")
+                        {:site v :law :undrained-proc :named? false} {:var v})))))
 
 (defn unfocused-docstrings
   "An :unfocused-docstring row for each named Seon var whose docstring is over :seon.config.shrink/docstring-words words or
@@ -944,6 +982,7 @@
                          (map #(assoc % :class :long-form) (long-forms db ans moved-vars))
                          (map #(assoc % :class :hand-written-list) (hand-written-lists db ans moved-vars))
                          (map #(assoc % :class :stateful-outside-flow) (stateful-outside-flow db ans moved-vars))
+                         (map #(assoc % :class :undrained-proc) (undrained-procs db ans moved-vars))
                          (map #(assoc % :class :unfocused-docstring) (unfocused-docstrings db ans moved-vars))
                          (map #(assoc % :class :unestimated) (unestimated db ans moved-vars (moved-tasks db)))
                          (map #(assoc % :class :undeclared-test) (undeclared-tests db ans moved-vars))
