@@ -1296,14 +1296,17 @@
     (is (= reasons
            (r/done-explain {:proofs #{(t "a")} :results {(t "a") :pass} :main-green #{} :allowed-red #{} :uncontracted #{} :caused #{msg}})))))
 
-;; a-reprove-merge-gets-a-new-agent deleted: no merge answers :reprove (the writer proves R itself, seon.writer/reprove!), so no task
-;; stands :reprove for an action to start again
+;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-reprove-merge-gets-a-new-agent
+  (testing "root's merge found main's program moved since the proof: the merge task starts again, the same session; no catch-up"
+    (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :reprove)))]
+      (is (= [(mspawn "a-merge")] (actions-for db))))))
 
 ;; Estimate: 1 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 1 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions); 4 transacts or db-withs x 50k ~ 2,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-ready-task-merges-alone-and-a-reprove-proves-again-never-held
   ;; plan item 10: a ready task merges alone through the writer's one :merge, with the t of main its proof read (its :ready outcome's
-  ;; transaction); main's program moving since is the writer's to prove (R, seon.writer/reprove!), never an answer the task is told.
-  ;; Red before: one octopus act for every ready task, and a :seon.merge/behind answer held the task past
+  ;; transaction); a :reprove answer (main's program moved since) tells it to prove again on its branch, which holds main now, and is
+  ;; never counted or held. Red before: one octopus act for every ready task, and a :seon.merge/behind answer held the task past
   ;; :seon.config.merge/max-behind; then (C2) an act named :octopus-merge with members, and the outcome :behind for a reprove
   (let [db (mdb [(decl "add")] :extra (concat (work "add" :done) (work "add-merge" :running)))
         db (d/db-with db [{:seon.task/id "demo/add-merge" :seon.task/outcome :ready}])
@@ -1316,7 +1319,9 @@
                          (task/task (d/db-with db tx) "demo/add-merge")))]
     (is (= :merge (:op req)) (str "the writer's one :merge, a task alone: " (pr-str req)))
     (is (= ready-t (:proved-t req)) "with the t its proof read")
-    (is (= :merged (:seon.task/outcome (answer {:merged? true :tx 9 :datoms 1}))) "merged at its t")
+    (let [tk (answer {:merged? false :reprove true :tx 9})]
+      (is (= :running (:seon.task/execution tk)) "a reprove runs again, never held")
+      (is (= :reprove (:seon.task/outcome tk)) "told to prove again on its branch"))
     (is (= {:op :merge :task "demo/add-merge"} act) "one act a task, with no octopus members")))
 
 ;; Estimate: 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 1 judgings x 0.7M (the index and the judge-tx) ~ 1,000,000 ticks

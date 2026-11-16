@@ -296,9 +296,8 @@
   dangling-refused judge it, else main takes the candidate's change in one commit with b's head a parent (d/merge-db), so b's merge
   base is its head. Main can't move inside the step, so a merge is never behind. proved-t is main's t the branch's proof ran on: when
   main's program moved since (:program-t, program-at) and a test whose reads main moved since b's base proved it (R, reprove-tests:
-  :unknown when b holds no result of its own), b still takes main and the answer is {:reprove true :tests R}, nothing of main moved,
-  which the writer asks of the test service itself (reprove!) and finishes in the step that takes its answer (r-answered), never
-  answering its caller :reprove: each pass costs what moved, with no count. Answers
+  :unknown when b holds no result of its own), b still takes main and the answer is {:reprove true :tests R}, nothing of main moved, so
+  the judge proves b again, reusing every result whose reads did not move: each pass costs what moved, with no count. Answers
   [st {:merged? :tx ...}], {:merged? false :reprove true :tests R}, or a refusal; R empty merges in the step. See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/branch :int] [:tuple :seon.writer/state :map]]}
   [st o b proved-t]
@@ -329,8 +328,7 @@
           (let [rep (d/merge-db conn #{(d/commit-id head)} (into ops (mark-tx main)) (pdb/tx-meta (pdb/conn-main conn)))
                 t (:max-tx (:db-after rep))
                 tx-ops (pdb/report->tx rep)
-                ;; one commit of main's, as a batch's: the flush that follows covers it (told-flusher)
-                st (update (program-at st t tx-ops) :commits inc)
+                st (program-at st t tx-ops)
                 _ (stored! st o tx-ops)]
             [(main-commit st o (:max-tx (:db-before rep)) t tx-ops (:db-after rep))
              (merge {:merged? true :tx t :datoms (count tx-ops)} (written (:db-after rep) (:ours tw)))]))))))
@@ -339,54 +337,6 @@
   "The answer r for dest, as data on :to-api."
   {:malli/schema [:=> [:cat :seon.host/volatile [:maybe :map] :any] :nil]}
   [o dest r] (when dest (step/out! o :to-api {:dest dest :r r})))
-
-(defn- told-flusher
-  "st with its commits since c0 marked dirty and, while dirty and durable with no notice out, the flusher told what is committed
-  ({:op :dirty :commits n}, once until it answers): what every step that commits does, so each commit is covered by a flush."
-  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :int] :seon.writer/state]}
-  [st o c0]
-  (let [st (cond-> st (> (:commits st) c0) (assoc :dirty true))]
-    (if (and (:durable? st) (:dirty st) (not (:notified st)))
-      (do (step/out! o :to-flusher {:op :dirty :commits (:commits st) :since (profile/now-ns)})
-          (assoc st :notified true))
-      st)))
-
-(defn- reprove!
-  "st with branch b's R (merge-into-main's {:reprove true :tests R :tx main-t}) asked of the test service through the api, as
-  every asker asks (seon.step/ask: {:op :prove :branch :t :digest :names :mode :judge}, answered on the writer's :answers): R
-  by name, :unknown the judge's whole plan (:names nil), at b's head, which holds main now. dest waits for the merge, never for
-  :reprove. See docs/merging.md#a-branch-merges-main-in."
-  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile [:maybe :map] :seon.db/branch :map] :seon.writer/state]}
-  [st o dest b r]
-  (let [head (pdb/head (:conn st) b)
-        [st req] (step/ask st [:writer :answers] {:dest dest :branch b :proved-t (:tx r)}
-                           {:op :prove :branch b :t (:max-tx head) :digest (program/run-digest head) :mode :judge
-                            :names (when (set? (:tests r)) (vec (sort (:tests r))))})]
-    (step/out! o :to-api req)
-    st))
-
-(defn- r-answered
-  "st after the test service answered a merge's R (reprove!, m {:tag rid :r}): green (no :red, no :no-verdict) merges b in this
-  step (merge-into-main, proved at the main R was read against, so main moved again meanwhile asks only R' of what moved since);
-  a red or a no verdict (the platform's error) answers the merge's caller a refusal naming them. See docs/merging.md#a-branch-merges-main-in."
-  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :map] :seon.writer/state]}
-  [st o {:keys [tag r]}]
-  (let [[st v] (step/answered st tag)]
-    (if-not v
-      st
-      (let [{:keys [dest branch proved-t]} v]
-        (if (and (map? r) (not (contract/error? r)) (empty? (:red r)) (empty? (:no-verdict r)))
-          (let [c0 (:commits st)
-                [st r2] (merge-into-main st o branch proved-t)]
-            (if (:reprove r2)
-              (reprove! st o dest branch r2)
-              (do (answer o dest r2) (told-flusher st o c0))))
-          (do (answer o dest (if (contract/error? r)
-                               r
-                               (refused (str "R did not prove green on the merged branch: " (count (:red r)) " red, "
-                                             (count (:no-verdict r)) " with no verdict")
-                                        {:red (vec (:red r)) :no-verdict (:no-verdict r)})))
-              st))))))
 
 (defn- commit-batch
   "Group commit of root's writes to main: every queued transaction applied in arrival order (datahike.writer/apply!), main's
@@ -528,10 +478,7 @@
                                              (do (d/delete-branch! conn (:branch m)) {:ok true :dropped true}))))
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
                         (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st)}))
-      ;; R non-empty is proved by the test service and the merge finishes in the step that takes its answer (r-answered): the
-      ;; caller is answered the merge, never :reprove
-      :merge (let [[st r] (merge-into-main st o (:branch m) (:proved-t m))]
-               (if (:reprove r) (reprove! st o dest (:branch m) r) (reply st r)))
+      :merge (let [[st r] (merge-into-main st o (:branch m) (:proved-t m))] (reply st r))
       ;; main merged into branch b on main's program (merge-main-into); its agent waits meanwhile
       :merge-main (reply st (if-not (exists? (:branch m))
                               (refused (str "no branch " (:branch m)) {})
@@ -632,8 +579,6 @@
   ([] {:params {:conn "main's connection" :cfg "the store config" :to-writer "its in-port channel"}
        ;; :to-writer is bound, not a conn: the writer drains it whole for one group commit (drain), which a Flow channel never allows
        :in-params #{:to-writer}
-       ;; the api's answers to the writer's own requests (a merge's R, proved by the test service: reprove!), {:tag rid :r}
-       :ins {:answers "the api's answers to the writer's requests"}
        :outs {:to-fork-server "commits and forks, FIFO" :to-api "answers {:dest :r}" :main "main's commits"
               :to-flusher "the store became dirty"}
        ;; its own thread: a transaction is CPU and store work the fiber scheduler cannot see
@@ -645,19 +590,15 @@
    (d/transact (:conn args) {:tx-data (mark-tx @(:conn args)) :tx-meta (pdb/tx-meta (pdb/conn-main (:conn args)))})
    ;; :program-t seeded at main's t: a root booted onto main proves it once (seon.prove's :main), never waits for the next program move
    ;; :program-db, the db this process's program was loaded from (boot loaded main's): each later load is the diff from it (main-commit)
-   (assoc args :tx-count 0 :commits 0 :batches 0 :rid 0 :pending {} :program-t (:max-tx @(:conn args)) :program-db @(:conn args)
+   (assoc args :tx-count 0 :commits 0 :batches 0 :program-t (:max-tx @(:conn args)) :program-db @(:conn args)
           ::flow/in-ports {:in (:to-writer args)} ::flow/out-ports {:events (:events args)}))
   ([st tr]
    st)
-  ([st in m]
-   (cond
-     ;; the test service's answer to a merge's R (reprove!): merged on green, refused on a red or no verdict
-     (= :answers in) (let [o (volatile! {}) st (r-answered st o m)] [st @o])
-     (nil? m)
+  ([st _ m]
+   (if (nil? m)
      ;; the in-port closed: what was taken is committed; flush it, then done flows on
      (do (when (and (:durable? st) (:dirty st)) (pdb/sync! (:cfg st)))
          [(assoc st :dirty false) {:to-api [{:op :drained :tx-count (:tx-count st)}]}])
-     :else
      (let [ms (drain (:to-writer st) m)
            o (volatile! {})
            c0 (:commits st)
@@ -667,8 +608,7 @@
            reqs (remove #(= :flushed (:op %)) ms)
            st (commit-batch (reduce #(writer-one %1 o %2) st reqs) o)
            commits (- (:commits st) c0)
-           ;; root's commits, an agent's (:agent-commit) or a merge's: dirty before :flush? reads it
-           st (cond-> st (pos? commits) (assoc :dirty true))
+           st (cond-> st (pos? commits) (assoc :dirty true))  ; root's commits, or an agent's (:agent-commit)
            f0 (:flushes st 0)
            ;; now for a write an outside effect follows (:flush?), inline before its answer
            flush-now? (and (:durable? st) (:dirty st) (some :flush? reqs))
@@ -678,7 +618,10 @@
                 covered (assoc :notified false)
                 (and covered (:dirty st) (= covered (:commits st))) (-> (assoc :dirty false) (update :flushes (fnil inc 0))))
            ;; still dirty and no notice out: the flusher is told what is committed so far
-           st (told-flusher st o (:commits st))
+           st (if (and (:durable? st) (:dirty st) (not (:notified st)))
+                (do (step/out! o :to-flusher {:op :dirty :commits (:commits st) :since (profile/now-ns)})
+                    (assoc st :notified true))
+                st)
            n-tx (count (filter #(= :tx (:op %)) reqs))
            st (-> st (update :tx-count + n-tx) (update :batches inc))]
        ;; what changed, to root's view: a batch, or a flush (its count is shown, never pinged)
