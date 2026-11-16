@@ -145,7 +145,7 @@
                                     [tot (fold-left (lambda (acc r) (+ acc (cadr r) (caddr r))) 0 rows)])
                                (with-output-to-string
                                  (lambda ()
-                                   (printf \"  TOTAL ~a KB\\n\" (quotient tot 1024))
+                                   (printf \"  TOTAL ~a KB; after the collection: bytes-allocated ~a KB, current-memory-bytes ~a KB, maximum-memory-bytes ~a KB; heap-reserve-ratio ~a collect-maximum-generation ~a release-minimum-generation ~a in-place-minimum-generation ~a\\n\" (quotient tot 1024) (quotient (bytes-allocated) 1024) (quotient (current-memory-bytes) 1024) (quotient (maximum-memory-bytes) 1024) (heap-reserve-ratio) (collect-maximum-generation) (release-minimum-generation) (in-place-minimum-generation))
                                    (for-each (lambda (r) (printf \"  ~a static ~a KB dynamic ~a KB\\n\" (car r) (quotient (cadr r) 1024) (quotient (caddr r) 1024)))
                                              (list-head sorted (min 25 (length sorted))))))))")))
           (flush)))
