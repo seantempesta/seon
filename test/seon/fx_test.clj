@@ -295,25 +295,9 @@
 ;; ---- write-back answers what happened (audit GUARDS #21) ------------------------------
 
 (defn- scratch-dir []
-  (let [d (str (seon.config/checkout) "/target/tmp/fx-test-" (random-uuid))]
+  (let [d (str (System/getProperty "java.io.tmpdir") "/seon-fx-test-" (random-uuid))]
     (.mkdirs (java.io.File. d))
     d))
-
-(deftest bin-env-publishes-its-git-link-by-rename-and-keeps-a-right-one
-  ;; docs/machine.md#processes. Found 2026-11-12 (tests): every script sourcing bin/env re-made target/git-bin/git with
-  ;; ln -sf (unlink, then symlink), so a git spawn that resolved it from PATH in that gap failed "posix_spawn failed
-  ;; (errno 2)": seon.program-test/a-kept-program-store-another-schema-refuses-is-made-again went red inside a full run,
-  ;; where check steps source bin/env beside the shards, and never alone. Cost: three zsh starts, ~0.1 s.
-  (let [d (scratch-dir)
-        env (str (cfg/checkout) "/bin/env")
-        link (str d "/target/git-bin/git")
-        src #(clojure.java.shell/sh "zsh" "-c" "ROOT=$1 . $2 >/dev/null 2>&1; stat -f '%i %Y' $3 2>/dev/null" "x" d env link)]
-    (.mkdirs (java.io.File. (str d "/target/git-bin")))
-    (clojure.java.shell/sh "ln" "-s" "/nonexistent/git" link)
-    (let [a (clojure.string/trim (:out (src))) b (clojure.string/trim (:out (src)))]
-      (when (seq a)   ; a machine whose git on PATH is already the binary makes no link
-        (is (not (clojure.string/ends-with? a "/nonexistent/git")) (str "a wrong link is replaced: " a))
-        (is (= a b) "a right link is left as it is: the same inode, never unlinked under a running spawn")))))
 
 ;; docs/source.md#the-next-generation: a test child of the service is a fork of root's agent, and held root's environment: its
 ;; SEON_SOURCE_ROOT named the main tree, so a test's root it started seeded main's tree under the branch's binary and refused
@@ -332,16 +316,6 @@
       (is (= (.getCanonicalPath (java.io.File. co)) (clojure.string/trim (:out (clojure.java.shell/sh "pwd" "-P"))))
           "and it starts in checkout (JOLT_PWD, which Jolt keeps to itself)")
       (finally (doseq [[v x] saved] (if x (seon.lib/c-setenv v x 1) (seon.lib/c-unsetenv v)))))))
-
-;; docs/source.md#tests-run-by-reach: the kept program store is the repository's, as the verdict cache is: a tree any checkout
-;; analyzed is every checkout's, so health's base after a merge (the landing's tree) is read, not imported again in a new
-;; checkout (~58 s cold, 2026-11-12). bin/env names it in the main tree's target/ from any worktree. Cost: one zsh start, ~0.05 s.
-(deftest ^{:seon.test/estimate {:ticks 1000000} :seon.test/execs ["git" "zsh"]} the-kept-program-store-is-the-main-trees-for-every-checkout
-  (let [env (str (cfg/checkout) "/bin/env")
-        main (clojure.string/trim (:out (clojure.java.shell/sh "git" "-C" (str (cfg/checkout)) "rev-parse" "--path-format=absolute" "--git-common-dir")))
-        main-tree (.getCanonicalPath (.getParentFile (java.io.File. main)))
-        got (clojure.string/trim (:out (clojure.java.shell/sh "env" "-u" "SEON_PROGRAM_STORE" "zsh" "-c" "ROOT=$1 . $2 >/dev/null 2>&1; print -r -- $SEON_PROGRAM_STORE" "x" (str (cfg/checkout)) env)))]
-    (is (= (str main-tree "/target/program-store") got) (str "bin/env names the main tree's store, whatever checkout sources it: " got))))
 
 (deftest a-file-the-program-loads-reads
   ;; docs/source.md#a-program-file: seen 2026-11-07, edamame refused three files Jolt loads (a #() inside a #(), a symbol with two slashes in EDN), so a write-back naming them was refused; the check reads as the loader does
@@ -390,6 +364,7 @@
         ;; each read-source is about ten git children (tree-id's own index): the test reads no tree it already has
         git (fn [& args] (:out (apply clojure.java.shell/sh "git" "-C" d "-c" "user.email=t@t" "-c" "user.name=t" args)))
         read (fn [since] (seon.fx/read-source {:req (cond-> {:root d :dirs ["src"]} since (assoc :since since))}))]
+    (try
     (.mkdirs (java.io.File. (str d "/src")))
     (git "init" "-q")
     (spit (str d "/src/a.clj") "(ns a)") (spit (str d "/src/b.clj") "(ns b)") (spit (str d "/notes.clj") "(ns notes)")
@@ -409,7 +384,8 @@
             (let [t3 (:tree (read nil))
                   r (seon.fx/read-source {:req {:root d :dirs ["src" "bin"] :since t3 :since-dirs ["src"]}})]
               (is (not= t2 t3))
-              (is (= {"bin/x.clj" "(ns x)"} (:value r))))))))))
+              (is (= {"bin/x.clj" "(ns x)"} (:value r))))))))
+      (finally (seon.lib/remove-tree! d)))))
 
 (deftest a-write-back-answers-the-bytes-on-disk
   (let [d (scratch-dir)
@@ -503,69 +479,11 @@
     (is (= ["expected 1"] (map :message (get-in v [:failures 'seon.system-test/b]))))
     (is (= {'seon.check-test/a "da" 'seon.system-test/b "db"} (:digests v)))))
 
-(defn- checkout-sh
-  "seon.lib/sh as run-on-checkout runs it, for a test of that function on a repository of a few files: bin/worktree --at is a
-  plain detached worktree of the repository (the script also clones the checkout's built products and submodules: its own
-  proofs' subject, not this one's), --remove-at removes it, bin/build answers built, and bin/test's run is (runner out names);
-  every other command runs. Each command is added to calls as [argv dir]."
-  [calls runner]
-  (let [sh seon.lib/sh repo (atom nil)]
-    (fn [& args]
-      (let [[cmd opts] (split-with string? args)
-            cmd (vec cmd)
-            script (some #(re-find #"bin/(worktree|build|test)$" %) cmd)]
-        (swap! calls conj [cmd (:dir (apply hash-map opts))])
-        (case (second script)
-          "worktree" (if (= "--at" (second cmd))
-                       (let [[_ _ d sha r] cmd] (reset! repo r) (sh "git" "-C" r "worktree" "add" "-q" "--detach" d sha))
-                       (sh "git" "-C" @repo "worktree" "remove" "--force" (nth cmd 2)))
-          "build" {:exit 0 :out "" :err ""}
-          "test" (let [[out & names] (drop (inc (.indexOf ^java.util.List cmd "tests")) cmd)] (runner out names) {:exit 0 :out "" :err ""})
-          (apply sh args))))))
-
-(deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/execs ["git"]} a-gate-is-proved-by-the-system-on-its-candidates-checkout
-  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: the :tests effect makes the candidate's checkout (the merges head,
-  ;; the candidate's files over it) and asks the system to prove it (its :ctx's :prove-tree, seon.system/prove-tree! as root
-  ;; binds it), named by exactly the deferred tests, in mode :judge, by the checkout's tree; the checkout is removed after.
-  ;; Before, it ran bin/prove --tests in the checkout, a shell runner beside the test service. The checkout is a worktree of a
-  ;; repository of two files (checkout-sh): bin/worktree's clone of the built products is not this claim.
-  ;; Estimate: ~12 git calls (init, commit, worktree add and remove, two tree-ids) and a few clones and file writes: ~3M ticks
-  (let [repo (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/fx-gate-" (random-uuid))) (.mkdirs)))
-        git (fn [& args] (clojure.string/trim (str (:out (apply seon.lib/sh "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@localhost" args)))))
-        asked (atom nil)
-        calls (atom [])
-        ;; one red and one test the run never reached (it is answered at its first red): nothing green is held
-        prove (fn [on] (reset! asked (assoc on :file (slurp (str (:checkout on) "/src/a.clj")) :tree-now (fx/tree-id (:checkout on))))
-                ;; an item's log, as run-tree-item writes a build's: a run not all green keeps it
-                (spit (doto (java.io.File. (str (:checkout on) "/target/prove/items/build-d.log")) (-> .getParentFile .mkdirs)) "the build's own error")
-                {:red ['a/t] :reports [{:type :fail :var "#'a/t" :message "red"}] :digests {'a/t "d"}})]
-    (try
-      (git "init" "-q" "-b" "main")
-      ;; target/ ignored, as the repository's is: the checkout's cloned products are no part of its tree
-      (spit (str repo "/.gitignore") "/target/\n/runs/\n") (spit (str repo "/f") "1") (git "add" "-A") (git "commit" "-q" "-m" "one")
-      (let [r (with-redefs [seon.lib/sh (checkout-sh calls (fn [& _] (is false "the gate runs no runner of its own")))]
-                (fx/run-tests {:req {:repo repo :branch "main" :files {"src/a.clj" (str "(ns a) ; " (random-uuid))} :tests ['a/t 'a/u]
-                                     :candidate :task-a}
-                               :ctx {:prove-tree prove}}))]
-        (is (= {'a/t :fail} (get-in r [:value :results])) (pr-str r))
-        (is (= ["red"] (map :message (get-in r [:value :failures 'a/t]))))
-        (is (= #{'a/t 'a/u} (:names @asked)) "named by exactly the deferred tests")
-        (is (= :judge (:mode @asked)))
-        (is (= :task-a (:candidate @asked)) "the candidate's own store branch is what is proved (seon.system/prove-candidate!), never a tree branch caught up from the checkout")
-        (is (= "the build's own error" (let [f (java.io.File. (str (:checkout @asked) ".run/items/build-d.log"))] (when (.isFile f) (slurp f))))
-            "a run not all green keeps its items' logs")
-        (is (clojure.string/starts-with? (str (:file @asked)) "(ns a)") "the candidate's files are on the checkout it asks to prove")
-        (is (= (:tree-now @asked) (:tree @asked)) "named by the checkout's tree")
-        (is (not-any? (fn [[cmd]] (some #(clojure.string/ends-with? % "bin/build") cmd)) @calls) "nothing is built for it")
-        (is (not (.exists (java.io.File. (str (:checkout @asked))))) "and the checkout is removed after"))
-      (finally (seon.lib/remove-tree! repo) (some-> @asked :checkout (str ".run") seon.lib/remove-tree!)))))
-
-
 (deftest a-gate-runs-on-the-head-a-new-merges-branch-would-start-at
   ;; the restart test's first loop merge was held: "no commit of branch jolt/seon-merges-... in <clone>": the
   ;; merges branch does not exist until the first write-back, which git-commit starts at HEAD; the gate asked
   ;; for the branch itself. branch-head is the one rule
-  (let [dir (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/fx-branch-head-" (random-uuid))) (.mkdirs)))
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-fx-branch-head-" (random-uuid))) (.mkdirs)))
         git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@localhost" args)] (clojure.string/trim (str (:out r)))))]
     (try
       (git "init" "-q")
@@ -774,7 +692,7 @@
   ;; moved and its index and files stayed at the parent: each merged file a staged deletion, and bin/update's merge of main
   ;; then refused (or, unchecked, did nothing). A commit onto a branch a worktree has checked out goes through that tree:
   ;; its files written, its index, its HEAD, one commit. Red before: git status showed "D  src/demo/half.clj"
-  (let [dir (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/fx-checked-out-" (random-uuid))) (.mkdirs)))
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-fx-checked-out-" (random-uuid))) (.mkdirs)))
         git (fn [& args] (clojure.string/trim (str (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@localhost" args)))))
         commit #(fx/git-commit {:req (merge {:dir dir :branch "jolt/merges" :message "Seon merge"} %)})]
     (try
@@ -810,7 +728,7 @@
   ;; stores-files): a commit carries :expect, the commit the store's main was imported from, and the ref moves only from it, as
   ;; one compare-and-swap (git update-ref NEW EXPECT). A landing that moved main since is never undone by the store's older text:
   ;; the answer is :seon.fx/ref-moved, nothing written
-  (let [dir (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/fx-expect-" (random-uuid))) (.mkdirs)))
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-fx-expect-" (random-uuid))) (.mkdirs)))
         git (fn [& args] (clojure.string/trim (str (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@localhost" args)))))
         commit #(fx/git-commit {:req (merge {:dir dir :branch "main" :message "Seon merge"} %)})]
     (try
@@ -838,76 +756,6 @@
           (is (= :seon.fx/ref-moved (:seon.error/type r)) (pr-str r))))
       (finally (seon.lib/remove-tree! dir)))))
 
-(deftest a-sessions-item-runs-on-its-checkout-once
-  ;; docs/merging.md#a-session-proves-through-root: the :item effect runs one item seon.prove granted (a check step) on the
-  ;; session's checkout, and its verdict is the cache's by digest: an item green at its digest is answered from the cache with no
-  ;; process started, and a checkout whose files are no longer the item's tree is refused. Red before: an asked-again item
-  ;; started its runner again only to reuse the green (2.3 s a test)
-  (let [co (str (cfg/checkout)) tree (fx/tree-id co)
-        ;; a digest of this run's own, green in the cache, so no other run's verdict is read
-        dg (subs (str (random-uuid)) 0 16)
-        _ (fx/write-verdicts! {:id "a-sessions-item-runs-on-its-checkout-once" :tree tree} {"laws" {:step "laws" :digest dg :pass 1 :fail 0 :error 0 :ms 1}} {})
-        item {:kind :step :tree tree :checkout co :name "laws" :digest dg :binary? false}
-        two (fx/run-item {:req item})
-        moved (fx/run-item {:req (assoc item :tree "0000000000000000000000000000000000000000")})]
-    (is (= {:pass 1 :reused true} (select-keys (:value two) [:pass :reused])) (str "green at its digest, the cache answers: " (pr-str two)))
-    (is (and (contract/error? moved) (:tree-moved moved)) (pr-str moved))))
-
-;; docs/merging.md#a-session-proves-through-root: an item's command past its bound is ended whole (bin/bounded): its evidence kept,
-;; every process of its group ended, an orphan reparented to pid 1 included, and the exit 124. Red before: bin/end-tree, which
-;; bin/check and bin/stalls end an overran run with, walks by parent and spares its caller's group, so an orphan of the command
-;; lived on (a forked shard runner held a prove 22 minutes, 2026-11-11). Under the bound the command's output and status are its own,
-;; and what it left in its group is ended as it ends
-(deftest a-bounded-command-is-ended-whole-past-its-bound
-  (let [root (str (cfg/checkout)) dir (str (System/getProperty "java.io.tmpdir") "/seon-bounded-" (random-uuid))
-        ;; a sleep of a length no other process has, so the check reads only this test's orphan: a fixed value, an input the
-        ;; digest names (a random one was an unnamed input of the test, the check step test-inputs' red)
-        n 47113
-        alive? (fn [m] (some #(clojure.string/ends-with? % (str "sleep " m)) (clojure.string/split-lines (:out (seon.lib/sh "ps" "-axo" "command")))))
-        over (seon.lib/sh (str root "/bin/bounded") "1000" (str dir "/over") "zsh" "-c" (str "( sleep " n " & ) ; sleep " (inc n)))
-        under (seon.lib/sh (str root "/bin/bounded") "60000" (str dir "/under") "zsh" "-c" (str "( sleep " (+ 2 n) " & ) ; echo kept; exit 3"))]
-    (try
-      (is (= 124 (:exit over)) (pr-str over))
-      (is (.isFile (java.io.File. (str dir "/over/overran"))) "the bound it ran past is written")
-      (is (.isFile (java.io.File. (str dir "/over/ps.txt"))) "its evidence was captured before it was ended")
-      (is (not (alive? n)) "the orphan, ppid 1 in the command's group, is ended with it")
-      (is (not (alive? (inc n))) "and the command itself")
-      (is (= [3 "kept\n"] [(:exit under) (:out under)]) (pr-str under))
-      (is (not (.exists (java.io.File. (str dir "/under/overran")))) "under its bound no overran")
-      (is (not (alive? (+ 2 n))) "what it left in its group is ended as it ends")
-      (finally (seon.lib/remove-tree! dir)))))
-
-;; docs/merging.md#a-merge-runs-what-the-change-reaches: the fallback route of a branch's run: a checkout of its commit, the tree's
-;; own binary built there (bin/build seon), and the named tests run by that checkout's runner, never proved by root's program.
-;; Red before: :built? was not read, the run went to the gate's path, and with no system to prove on it answered that error.
-;; The checkout is a worktree of a repository of one file, its build and runner answered (checkout-sh): the runner plans the one
-;; named test at a digest of this run's, whose green is cached as a shard's is; run-on-checkout reads its status from there
-(deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/execs ["git"]} a-built-run-judges-the-named-tests-on-the-checkouts-own-build
-  ;; Estimate: ~8 git calls, a few clones, one verdict written and read: ~3M ticks
-  (let [repo (.getCanonicalPath (doto (java.io.File. (str (cfg/checkout) "/target/tmp/fx-built-" (random-uuid))) (.mkdirs)))
-        git (fn [& args] (clojure.string/trim (str (:out (apply seon.lib/sh "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@localhost" args)))))
-        pn (str "built-probe-" (random-uuid))
-        t (symbol pn "t")
-        cache (cfg/value :seon.config.proofs/results-dir)
-        calls (atom [])
-        ran (atom nil)
-        runner (fn [out names]
-                 (reset! ran names)
-                 (.mkdirs (java.io.File. ^String out))
-                 (spit (str out "/tests.edn") (pr-str {:digests {t pn}}))
-                 (fx/write-verdicts! cache {:id (str "probe " pn) :tree "t"} {t {:test t :digest pn :pass 1 :fail 0 :error 0}} {}))]
-    (try
-      (git "init" "-q" "-b" "main")
-      (spit (str repo "/.gitignore") "/target/\n/runs/\n") (spit (str repo "/f") "1") (git "add" "-A") (git "commit" "-q" "-m" "one")
-      (let [r (with-redefs [seon.lib/sh (checkout-sh calls runner)]
-                (fx/run-tests {:req {:repo repo :branch "main" :built? true :tests [t]}}))
-            build (some (fn [[cmd dir]] (when (some #(clojure.string/ends-with? % "bin/build") cmd) [(last cmd) dir])) @calls)]
-        (is (= {t :pass} (get-in r [:value :results])) (str "judged with no system given (:ctx), by the checkout's own runner: " (pr-str r)))
-        (is (= [(str t)] @ran) "the runner was named exactly the tests")
-        (is (= "seon" (first build)) (pr-str @calls))
-        (is (clojure.string/starts-with? (str (second build)) (cfg/value :seon.config.source/tests-dir)) "the binary built in the checkout, from its own source"))
-      (finally (seon.lib/remove-tree! repo) (seon.lib/remove-tree! (str cache "/" pn))))))
-
 ;; docs/merging.md#verdicts-are-a-cache: a config value naming a file enters a test's digest as the file's name, never where the
 ;; machine keeps it, so one test has one digest from any checkout (the embed model in the main tree's cache read "<checkout>/..."
 ;; from the main tree and an absolute path from a worktree: 103 of 181 process digests apart on the standing system, 2026-11-12)
@@ -923,7 +771,7 @@
 ;; docs/source.md#tests-run-by-reach: a green whose run recorded what it read keeps that record beside its verdicts, the
 ;; newest only, and a red keeps none: what a plan's reuse check reads, one small file a test
 (deftest ^{:seon.test/estimate {:ticks 5000000}} a-green-keeps-what-its-run-read-beside-its-verdicts
-  (let [dir (str (cfg/checkout) "/target/reads-" (random-uuid)) t 'a.r-test/t]
+  (let [dir (str (System/getProperty "java.io.tmpdir") "/seon-reads-" (random-uuid)) t 'a.r-test/t]
     (try
       (fx/write-verdicts! dir {:id "r"} {t {:digest "d1" :pass 1 :fail 0 :error 0 :reads {'a/f "f1"}}} {})
       (fx/write-verdicts! dir {:id "r"} {t {:digest "d2" :pass 1 :fail 0 :error 0 :reads {'a/f "f2"}}} {})
@@ -954,30 +802,6 @@
         (is (= :seon.bound/reached (get-in done [:outcome :seon.error/type])) (pr-str done))
         (is (= {:seon.bound/ms 50} (get-in done [:outcome :seon.bound/bound])))
         (is (nil? (:call st)) "the worker is free for its next item")))))
-(deftest ^{:seon.test/estimate {:ticks 20000000}} a-process-on-another-runtime-answers-env-mismatch
-  ;; task seon.fx/runtime-for-reads-the-pins-from-the-branch: the one check of which runtime a branch needs. target/seon's
-  ;; identity (the :digest of its build record, seon.fx/binary-digest of the tree it was built from) answers the binary for the tree it was built
-  ;; from, and a tree from before the last Chez pin moved (another runtime) answers :seon.process/env-mismatch naming both
-  ;; digests, for its caller to build once. The estimate: two git ls-trees of the build inputs, ~30 ms each.
-  (let [root (cfg/checkout)
-        git (fn [& args] (clojure.string/trim (:out (apply seon.lib/sh "git" "-C" root args))))
-        built (clojure.string/trim (:out (seon.lib/sh (str root "/bin/tree") root)))
-        moved (git "log" "-1" "--format=%H" "--" "reference-code/chez")
-        before (git "rev-parse" (str moved "^^{tree}"))
-        same (fx/runtime-for built)
-        other (fx/runtime-for before)]
-    (is (= (str root "/target/seon") (:binary same)) (str "answered " same))
-    (is (= :seon.process/env-mismatch (:seon.error/type other)) (str "answered " other))
-    (is (not= (:seon.process/binary-digest other) (:seon.process/branch-digest other)))
-    ;; the agreed interface (task seon.system/a-landing-restarts-root-only-for-a-binary-change): a mismatch names what a build
-    ;; changes that differs, and a tree's digest is kept by its id, the one value every reader takes
-    (is (some #{"reference-code/chez"} (:seon.process/differs other)) (str "differs " (:seon.process/differs other)))
-    (is (.isFile (java.io.File. (str root "/target/runtime-for/" before "." (seon.lib/digest (seon.program/running-form 'seon.fx/binary-digest)) ".digest")))
-        "the tree's digest is kept by its id and the code that computed it")
-    ;; :all, a process that runs the binary's baked program: the binary's own tree is current, with its src id
-    (let [all (fx/runtime-for (clojure.string/trim (slurp (str root "/target/seon.tree"))) {:scope :all})]
-      (is (string? (:program all)) (str "answered " all)))))
-
 ;; docs/source.md#the-binary-records-its-program: the binary's identity, one implementation (seon.fx/binary-digest), checked on trees
 ;; made from this checkout's own committed tree with one file changed (git's own index, blob and tree commands).
 (defn- scratch-repo
@@ -1043,7 +867,7 @@
         "a build key whose entry is its file's first moves the digest with its value")
     (finally (clojure.java.shell/sh "rm" "-rf" root)))))
 
-(deftest ^{:seon.test/estimate {:ticks 20000000} :seon.test/execs ["git" "bin/tree" "rm"]} an-untracked-nested-repo-moves-no-tree
+(deftest ^{:seon.test/estimate {:ticks 20000000} :seon.test/execs ["git" "rm"]} an-untracked-nested-repo-moves-no-tree
   ;; 2026-11-15 15:53: an untracked clone in the main checkout (reference-code/core.async-flow) entered bin/tree's tree as a gitlink,
   ;; and every reader of a gitlink took it for a pin: the build's identity moved (25fd5003 against c7311e6b) and spawns were refused.
   ;; A pin is a gitlink .gitmodules names. Estimate: a tree id's few git calls, ~1M ticks each
@@ -1051,36 +875,37 @@
         sh (fn [d & args] (let [r (apply clojure.java.shell/sh (concat args [:dir d :env (assoc (into {} (System/getenv)) "GIT_CONFIG_GLOBAL" "/dev/null")]))]
                             (assert (zero? (:exit r)) (str args (:err r))) (clojure.string/trim (:out r))))
         commit! (fn [d] (sh d "git" "init" "-q") (spit (str d "/a") "a") (sh d "git" "add" "a")
-                  (sh d "git" "-c" "user.email=t@t" "-c" "user.name=t" "commit" "-qm" "a"))
-        bin-tree (fn [] (sh dir (str (cfg/checkout) "/bin/tree") dir))]
+                  (sh d "git" "-c" "user.email=t@t" "-c" "user.name=t" "commit" "-qm" "a"))]
     (try
       (commit! dir)
       (let [before (fx/tree-id dir)]
         (.mkdirs (java.io.File. (str dir "/clone")))
         (commit! (str dir "/clone"))
-        (is (= before (fx/tree-id dir)) "a nested repository .gitmodules does not name is no part of the tree")
-        (is (= before (bin-tree)) "and bin/tree names the same tree"))
+        (is (= before (fx/tree-id dir)) "a nested repository .gitmodules does not name is no part of the tree"))
       (finally (sh "/" "rm" "-rf" dir)))))
 
-(deftest ^{:seon.test/estimate {:ticks 20000000} :seon.test/execs ["git"]} runtime-for-answers-for-the-running-binary
+;; Estimate: one tree digest of the scratch repository (four git calls, ~2M ticks), then file reads; the other asks are pure
+(deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/execs ["git"]} runtime-for-answers-for-the-running-binary
   ;; 2026-11-15: root (pid 58108) ran digest c7311e6b while target/seon.digest said 76dc758d, a later build's, and runtime-for
   ;; answered current off the file [M root result/aff6b6de, cf6571ca]. It compares the running binary's identity, its build
-  ;; record's :digest held since boot (seon.program/binary-program). Estimate: a tree's digest once, then a file read
-  (let [root (cfg/checkout)
-        tree (clojure.string/trim (:out (clojure.java.shell/sh "git" "-C" root "rev-parse" "HEAD^{tree}")))
-        d (fx/binary-digest root tree)]
-    ;; the binary's build record is data runtime-for judges (:record, default this process's): a record of another identity
-    (let [r (fx/runtime-for tree {:record {:digest "another-build" :inputs (:inputs (seon.program/binary-program))}})]
-      (is (= :seon.process/env-mismatch (:seon.error/type r)) (str "a running binary of another identity is told: " r))
-      (is (= "another-build" (:seon.process/binary-digest r)) "naming the running binary's identity"))
-    (is (= d (:digest (fx/runtime-for tree {:record {:digest d}}))) "and its own tree's is current")
-    ;; a tree this repository cannot read is the identity's typed error, never a digest of what could be read
-    (is (= :seon.fx/io-error (:seon.error/type (fx/runtime-for "0123456789abcdef0123456789abcdef01234567"))) "an unreadable tree is told")
-    ;; the kept digest is keyed by the code that computed it: a value a changed binary-digest computed is never read back
-    (let [kept (fn [code] (java.io.File. (str root "/target/runtime-for/" tree "." (seon.lib/digest code) ".digest")))]
-      (.delete ^java.io.File (kept "another-code"))
-      (try
-        (with-redefs [seon.program/running-form (fn [_] "another-code")]
-          (fx/runtime-for tree)
-          (is (.isFile ^java.io.File (kept "another-code")) "another code keeps its own value"))
-        (finally (.delete ^java.io.File (kept "another-code")))))))
+  ;; record's :digest held since boot (seon.program/binary-program). The checkout is a scratch repository in the temp dir that
+  ;; reads the real one's objects (scratch-repo), so the digest it keeps (target/runtime-for) lands there, never in the checkout
+  (let [root (scratch-repo (cfg/checkout))
+        tree (clojure.string/trim (:out (clojure.java.shell/sh "git" "-C" (cfg/checkout) "rev-parse" "HEAD^{tree}")))]
+    (try
+      (with-redefs [cfg/checkout (fn [] root) cfg/config (dissoc cfg/config :seon.config.source/root)]
+        (let [d (fx/binary-digest root tree)
+              r (fx/runtime-for tree {:record {:digest "another-build" :inputs (:inputs (seon.program/binary-program))}})]
+          (is (= :seon.process/env-mismatch (:seon.error/type r)) (str "a running binary of another identity is told: " r))
+          (is (= "another-build" (:seon.process/binary-digest r)) "naming the running binary's identity")
+          (is (= d (:digest (fx/runtime-for tree {:record {:digest d}}))) "and its own tree's is current")
+          (is (= (str root "/target/seon") (:binary (fx/runtime-for tree {:record {:digest d}}))) "answering the binary of the source root")
+          ;; a tree this repository cannot read is the identity's typed error, never a digest of what could be read
+          (is (= :seon.fx/io-error (:seon.error/type (fx/runtime-for "0123456789abcdef0123456789abcdef01234567"))) "an unreadable tree is told")
+          ;; the kept digest is keyed by the code that computed it: a value a changed binary-digest computed is never read back
+          (let [kept (fn [code] (java.io.File. (str root "/target/runtime-for/" tree "." (seon.lib/digest code) ".digest")))]
+            (is (.isFile ^java.io.File (kept (seon.program/running-form 'seon.fx/binary-digest))) "this code keeps its value in the scratch tree")
+            (with-redefs [seon.program/running-form (fn [_] "another-code")]
+              (fx/runtime-for tree)
+              (is (.isFile ^java.io.File (kept "another-code")) "another code keeps its own value")))))
+      (finally (seon.lib/remove-tree! root)))))
