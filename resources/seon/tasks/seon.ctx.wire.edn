@@ -37,4 +37,9 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.ctx.wire-test/a-turn-digests-only-the-messages-it-added}
   :seon.task/estimate #:seon.ctx.wire{sent-tx {:n 150, :order :constant, :ticks 100000, :bytes 1000000}}}
+ {:seon.task/name "a-stored-turns-page-keeps-what-a-later-fix-removed"
+  :seon.task/plan "Context's (filed by web, evidence measured 2026-11-16 by seon_context on root's session): root's request is 746k chars after web's fix landed (main ba730d71f2, a thrown component's error no longer prints a walk's index), because root's FIRST turn's page is replayed as it was sent (the stored parts of context's landing 5) and that stored page holds the 500k-char index printed by a thrown seon.render.ui/searched (sqlite ranked: out of memory). New draws are clean; the stored one stays until the conversation moves past it. Decide: a fold or refine that drops the first page from what the model is sent, or a fresh conversation for root's session; and whether a stored part found to hold a defect's dump is ever re-drawn. Also yours: the sqlite ranked query's out of memory in seon.render.ui/searched."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.ctx.wire-test/a-past-turn-reads-back-as-it-was-sent}
+  :seon.task/estimate #:seon.ctx.wire{request {:n 1, :order :linear, :ticks 100000, :bytes 1000000}}}
 ]

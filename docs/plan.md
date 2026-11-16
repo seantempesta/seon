@@ -48,17 +48,40 @@ measures the agents, not the plumbing.
 A process often runs on state its branch doesn't name (stale code, pins, schema registry, config, caches), so verdicts are
 wrong or flaky, landings fail on what the change didn't touch, and the merge a task needs runs on that stale state. Around
 it, the work itself lives outside Seon: blockers, deletions, the landing queue, the turns ledger and the owner's rulings are
-files in root's notes and messages between sessions, which no agent reads and nothing checks. Since 2026-11-12 the
-sessions have landed 82 times through `bin/land` and git, and no task through Seon's merge, the one path every agent's
-task must take. The priority (owner,
+files in root's notes and messages between sessions, which no agent reads and nothing checks. Sessions land through `bin/land` and git; one agent task has merged through Seon's merge (`seon_done`, pilot run 15,
+2026-11-16), the one path every agent's task must take. The priority (owner,
 2026-11-14) is one view: fix the broken processes that slow us down, and move Claude sessions off files and git onto the
 system, working, proving and merging as Seon agents do. Everything else in this plan stays, in order behind it.
+
+## Where things stand
+
+What a fresh root reads first: what works now, what to do next, and the lessons that cost time.
+
+- **The self-merge path works end to end once.** Pilot run 15 took `seon.db/an-eval-responses-parts-are-its-schemas-keys` through `seon_done` (judge, gate, merge) into main in the store. Seon wrote it back to git (85cc745c06 on jolt/merges), root reviewed the sync, and it landed as 7875387c3e.
+- **Restarts and the store.** Lands keep root running again (09e83a2d59). Boot's sweep syncs, so freed pages are reused (1a7c7d8526). Each boot still grows the store ~2 GB from writes made before the writer's first sync (`seon.system/a-write-before-the-writer-syncs-its-own-steps`). The 64 GiB store copy `runs/store-pre-compact-20261116.mdb` is kept until the owner says otherwise.
+- **Redraw.** A render a land redefines now redraws every kept walk (2409c17de3).
+- **THE FOCUS of the next sessions (owner, 2026-11-16, [decisions](decisions.md#2026-11-16-rulings)): the test system fully implemented inside Seon, with no more hacks.** Done means every bullet below holds and the fast lane is gone:
+  - The ordered checklist, with each step's red-first proof, is the plan of `seon.proofs/a-test-forks-from-the-standing-system-and-a-binary-test-reruns-only-for-its-binary`.
+  - Every session and agent proves and lands through the system: `seon_prove` and `seon_done` on the `:prove` service. Tests run as thin clients of `:prove`, forked from the standing system (tests' item E).
+  - One land queue as data replaces the by-hand land count and the race it allows.
+  - Read-keys are one value a verdict (`seon.proofs/a-verdict-is-an-entity-that-names-its-environment`).
+  - Process tests have main verdicts.
+  - A pilot judges against a pinned main.
+  - Every test that ends at its bound has its wait found at its cause.
+  - Then `bin/land --fast`, `bin/land`, `bin/prove`, `bin/test`'s session use and the worktree land path are DELETED (plan item 18), each with what now does its job named in its Deletes line.
+  - What this needs from others comes first, because the loop depends on it: messaging that survives a restart (the `seon.server/*` inbox tasks: no process, merged-down messages, an ended agent, duplicates) and bin/land's ticks print fixed while it still exists.
+- **After the focus:** the page walk's remaining work on the reactive core (`seon.ratom/web-reads-on-the-core`, whose STATUS says what is left); runtime's slice 2b `:update` proc; the store's ~2 GB a boot.
+- **How root found things (lessons):**
+  - Inboxes lapse at every restart: re-attach, and wake idle sessions directly.
+  - Name one owner the moment a cause is found.
+  - A land that restarts root needs `runtime-for` checked first.
+  - Before ordering any fix, ask which standard mechanism already does the job.
+  - Memory and notes files are per-login: state lives in tasks, schemas and this wiki.
 
 ## The order of work now
 
 Agreed 2026-11-14 by every area and the owner ([decisions](decisions.md#2026-11-14-rulings)). Each session works its items
-in this order, on its one branch, and lands when green (`AGENTS.md` §3). Every item names its
-expected finish to root; root holds it to 2x and 3x. Correct and simple first; cost later (owner: "Right now we dedupe and
+in this order, on its one branch, and lands when green (`AGENTS.md` §3). Correct and simple first; cost later (owner: "Right now we dedupe and
 upgrade everyone").
 
 ### The root concept: one reaction over the store
@@ -120,7 +143,7 @@ sync), shown on the dashboard: drift is a problem, not a merge-time surprise.
 
 ### The order
 
-The overhaul halves the code (owner, 2026-11-15: "I want our codebase cut in half when we are done overhauling everything so de-duplication of ideas is essential"): `src` goes from 43,312 lines to about 21,600, each landing's `Deletes:` line counting toward it, and no functionality removed.
+The overhaul halves the code (owner, 2026-11-15: "I want our codebase cut in half when we are done overhauling everything so de-duplication of ideas is essential"): `src` goes from 43,312 lines to about 21,600 (45,804 on 2026-11-16, so the overhaul has not shrunk it yet), each landing's `Deletes:` line counting toward it, and no functionality removed.
 
 The owner adopted this order on 2026-11-15: eighteen landings over six primitives that already exist in the code, each finished and made the one way to do its job. The primitives:
 1. what a commit changed: Datahike keeps each commit's tx-data (`d/changes`), and the writer's notice delivers it live;
@@ -130,7 +153,7 @@ The owner adopted this order on 2026-11-15: eighteen landings over six primitive
 5. one queue and one admission (`seon.prove`, the `:process` owner);
 6. one loader and one identity (`seon.program/diff-plan`, `load-diff!`, content digests).
 
-A session takes its first unblocked landing; areas run side by side; rounds of real agents run continuously and re-rank what follows by the turns they lose (`my.root/run-losses`). The first real `seon_done` is tried once 1, 2 and 4 are on main, and again after 6, 7 and 10. Every piece first finds the code that does its job and wires it; a complicated design steps back to a pillar, data model first (`AGENTS.md` §4).
+A session takes its first unblocked landing; areas run side by side; rounds of real agents run continuously and re-rank what follows by the turns they lose (`my.root/run-losses`). The first real `seon_done` merged on 2026-11-16 (pilot run 15); it is tried again after 6, 7 and 10. Every piece first finds the code that does its job and wires it; a complicated design steps back to a pillar, data model first (`AGENTS.md` §4).
 
 1. **`:done` waits on the judge's own end** (runtime). Deletes `merge-ms` and the wait on root-wide quiet. Done: `seon_done` ends while another agent runs.
 2. **The status read apart from the page walk; a run with a RED line or no result line fails** (context, tests). Done: a cold status read makes no as-of read, and a run printing RED fails.
@@ -154,13 +177,13 @@ A session takes its first unblocked landing; areas run side by side; rounds of r
 
 Designed so far, the order removes about 13,500 of the ~21,700 lines; the rest needs design, starting with `seon.agent`, `seon.repl` and `seon.turn` together, then `seon.render.ui`, the `*-tx` builders, `seon.fx` and `seon.program`.
 
-## Stage 0: one happy path (now)
+## Stage 0: one happy path
 
 **Goal:** one real backlog task merged by an agent. **Done when:** a task drawn from the backlog is on main, with its turns
 recorded.
 1. Landed 579d62547d: a test child holds the config its checkout's shard loads, and every runner digest moved (tests).
 2. One schema registry per process, and a schema entry main deleted merges as its deletion; the memory gauge's proof reads
-   its block alone, completing `seon.lib/the-memory-gauges-proof-measures-the-block-alone` (runtime, one landing). The
+   its block alone (runtime, one landing). The
    cause behind both, a process running state its branch doesn't name, is `seon.program/a-process-runs-its-branchs-program`
    (Stage 2.1).
 3. A reasoning overrun is the model call's typed error, not the end of the run: the effect answers it as data, the system
@@ -197,8 +220,9 @@ booted ~74 test roots at once and took the owner's machine to load 70; a prove w
 - the MCP relay answers each call on its own (web);
 - one session's edit, proved and merged through the system end to end, keeps the machine's load within its cores
   (`seon.server/a-sessions-file-edit-merges-through-done`, with its cost proof).
-Until then no session calls `seon_done`, `seon_prove` or `(my.agent/prove)` on the standing system, and the path's own
-tasks land through a worktree and `bin/land`.
+Until then sessions land through their worktree and `bin/land --fast` (`AGENTS.md` §3); `seon_done` has merged one agent
+task (pilot run 15, 2026-11-16), and moving every session onto it is step 7 of the checklist in
+`seon.proofs/a-test-forks-from-the-standing-system-and-a-binary-test-reruns-only-for-its-binary`.
 
 **Goal:** a Claude session changes Seon the way a Seon agent does: its change enters the one system as a valid branch, is
 proved there by what it reaches, and merges into main through Seon's own merge, with git following the store. Everything a

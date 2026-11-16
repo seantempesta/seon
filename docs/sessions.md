@@ -14,7 +14,9 @@ Each named session owns one area and knows all of it:
 | tests | the test system: selection, digests, verdicts in the store, `:prove` and its clients |
 | deps | the libraries and native code: Jolt, Chez, Datahike and konserve, their pins, and the binary's identity |
 | data | schemas, pull patterns and keys, and the one merge |
-| flow | Jolt's Flow and Seon's use of it: procs, their start, drain and stop, and the list of state and waits outside Flow |
+| flow | Jolt's Flow and Seon's use of it: procs, their start, drain and stop, and the list of state and waits outside Flow (`seon.problems/nothing-inside-seon-crashes-or-hangs`); the merge gate inside the system (`seon.fx/proving-runs-as-flow`); the switch-over design (`seon.system/an-update-loses-nothing`); messaging (`seon_inbox`, `seon_message`, attach of `session/<area>`); and the review of every design that waits |
+
+Each works on branch `jolt/<session>` in `.worktrees/<session>`, except two older paths: runtime's worktree is `.worktrees/optimization` and tests' is `.worktrees/tests-reads`. Root works in `.worktrees/root`. `.worktrees/merges` (branch `jolt/merges`) is no session's: it is the write-back's tree, where Seon commits main's changed files (`docs/source.md#commit-the-merges-branch`).
 
 - A fix that adds, moves or reads an attribute, ref or pattern clause goes to data first, with the pull form wanted.
 - A session reads the code a helper changes, takes the measurements that decide a design itself, and never answers for code it has not read.
@@ -70,7 +72,7 @@ A Claude session does what a Seon agent does, through the same calls; each line 
 | Change a file it edited on disk | its import, as a transaction on the agent's branch | not built (`seon.system/a-sessions-files-are-a-transaction-on-its-agents-branch`) |
 | Run its tests | `(my.agent/prove)`, by what the change reaches | built; its process tests wait on the gate (`seon.reconcile/the-gate-proves-the-candidate-branch`) |
 | Merge main in | `(my.branch/merge-main!)` | built; costs 8.2B ticks a merge (`seon.agent/a-merge-of-main-applies-every-change-main-made`) |
-| Land | `seon_done`: the judge, the check, Seon's merge into main | built, unused since 2026-11-12 |
+| Land | `seon_done`: the judge, the check, Seon's merge into main | built; merged one agent task (pilot run 15, 2026-11-16); sessions move onto it at the checklist's step 7 |
 | Git follows | the write-back of main's changed files | commits to a side branch (`seon.source/a-merge-moves-gits-main-to-the-stores-files`) |
 | Learn that what it waits on merged | a message to its agent from the merge | built (```seon.task/landed-messages```) |
 
