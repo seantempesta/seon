@@ -277,7 +277,7 @@
             ks (vec (distinct (for [{:keys [ops]} (:txs c) [o e a] ops :when (not= :db/retractEntity o)] [e a])))
             ;; a merged task's cites are derived from its text: made again here, never carried (seon.task/merged-cites-tx)
             settled (pdb/with replayed (:settle-ops r) nil meta true)
-            cites (task/merged-cites-tx (:db-after settled) (mapv (fn [[e a]] [:datum e a]) ks))
+            cites (task/merged-cites-tx main (:db-after settled) (mapv (fn [[e a]] [:datum e a]) ks))
             cited (when (seq cites) (pdb/with (:db-after settled) cites nil meta true))
             merged (if cited (:db-after cited) (:db-after settled))
             ;; the keys the cites wrote, read from their datoms (cites-tx gives entity maps), the transaction's own facts left out
