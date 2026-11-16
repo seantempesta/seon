@@ -425,10 +425,23 @@
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-branchs-write-out-is-its-own-files-and-pins
   (let [main (let [db (empty-db)] (d/db-with db (into (source/import-tx db {"bin/zz-out" "#!/bin/sh\necho a\n"}) [{:seon.pin/path "reference-code/a" :seon.pin/commit "aaa"} {:seon.pin/path "reference-code/b" :seon.pin/commit "bbb"}])))
         head (d/db-with main (into (source/import-tx main {"bin/zz-out" "#!/bin/sh\necho b\n"}) [{:seon.pin/path "reference-code/b" :seon.pin/commit "ccc"}]))
-        req (seon.writer/write-out-req main head :main/x "/co" "base0")]
+        req (seon.writer/write-out-req main head :main/x "/co" "base0" (pm/delta-changes main head #{} (pm/content-datoms main head #{})))]
     (is (= {"bin/zz-out" "#!/bin/sh\necho b\n"} (:files req)) "the branch's file, as the branch holds it")
     (is (= {"reference-code/b" "ccc"} (:links req)) "the pin it moved, and no other")
     (is (= ["/co" "refs/seon/candidate/x" "base0"] ((juxt :dir :ref :base) req)))))
+
+;; flow, 2026-11-17: drawn against main's head, a write-out read everything main moved since the branch was cut (8.9B ticks / 33.8 GB /
+;; 36.7 s for a branch of 13 changed files, inside the prove proc's step, which held a switch-over's stop 3 s past its bound) and wrote
+;; main's own moves back at the branch's older text (22 files drawn, 9 of them main's). Drawn from the branch's own change since its
+;; base (the diff its agent holds) it is that change alone. Red first: a stand-in drawing main's. Estimate: an empty db, three imports
+;; ~1.5M, one delta-changes and one draw ~0.5M: 2,000,000.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-write-out-is-the-branchs-own-change-never-mains-moves
+  (let [base (let [db (empty-db)] (d/db-with db (source/import-tx db {"bin/zz-a" "#!/bin/sh\necho a\n" "bin/zz-m" "#!/bin/sh\necho m\n"})))
+        main (d/db-with base (source/import-tx base {"bin/zz-m" "#!/bin/sh\necho main moved it\n"}))
+        head (d/db-with base (source/import-tx base {"bin/zz-a" "#!/bin/sh\necho branch\n"}))
+        ours (pm/delta-changes base head #{} (pm/content-datoms base head #{}))
+        req (seon.writer/write-out-req main head :main/x "/co" "base0" ours)]
+    (is (= {"bin/zz-a" "#!/bin/sh\necho branch\n"} (:files req)) "the branch's own file, and not main's, which the branch never touched")))
 
 ;; docs/references.md#an-entity-cites: a cite is a stated fact (an agent's start cites, my.agent/cite! and uncite!), identified by its
 ;; content (:seon.cite/id), so it rides the merge; a moved task's cites are made again from its text by the writer as before. Red while

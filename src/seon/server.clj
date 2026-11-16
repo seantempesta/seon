@@ -711,7 +711,9 @@
                             j (c/judge! sys {:task task :env env :agent ag})
                             db @(:conn sys)]
                         (cond (contract/error? j) (assoc j :task task)
-                              (:stopped j) (refused (str "root stopped while judging " task))
+                              ;; its hand-back is a fact (:seon.task/hand-back): the next root's first pass judges it again (seon.reconcile's :rejudge)
+                              (:stopped j) (refused (str "root stopped while judging " task ": its hand-back is recorded, so the next root judges it again;"
+                                                         " its verdict reaches the task's outcome, your page and your inbox"))
                               ;; a reconciler step threw while judging: its flight never ends, the defect is the answer
                               (:defect j) {:task task :defect (select-keys (:defect j) [:seon.error/type :seon.error/message])}
                               ;; a defect and a judge that left the task :running are the judge's own answers (j), never re-read here

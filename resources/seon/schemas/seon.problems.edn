@@ -175,6 +175,9 @@
  :seon.test/wall-spent [:and {:seon.error/no-verdict true} :seon.error/base [:map [:seon.error/type [:= :seon.test/wall-spent]] [:test :string] [:bound-ms pos-int?] [:dump :string]]]
  ;; the OS refused the thread that ends a process with its starter (seon.lib/end-with!)
  :seon.lib/starter-unwatched [:and :seon.error/base [:map [:seon.error/type [:= :seon.lib/starter-unwatched]] [:pid [:maybe :int]]]]
+ ;; a switch-over to a build that is not main's binary (seon.fx/switch-over): main's head, which the reconciler builds and switches to
+ :seon.fx/not-mains-binary [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/not-mains-binary]] [:checkout :string] [:have :string]
+                                                   [:want :string] [:head [:maybe :string]] [:repo :string]]]
  ;; a message made from its schema that does not hold it (seon.contract/message)
  :seon.contract/invalid-message [:and :seon.error/base [:map [:seon.error/type [:= :seon.contract/invalid-message]] [:schema :qualified-keyword]]]
  ;; a waitpid that reaped nothing: no status was read (seon.lib/wait-status)
