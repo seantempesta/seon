@@ -1361,24 +1361,30 @@
        (mapv (fn [[_ label x]] [label x]))))
 
 (defn own-problems
-  "The open problems of the agent (a component over its branch db, seon.problems/own: its newest run's,
-  its task's failure and the errors raised in its task), each class with its count and each of its rows a line, as `problems-model`
-  makes them: its count, type, first line and the form that reads it whole; then its newest failures with their causes (`recent-errors`,
-  each by `error-box`). Nothing when there are neither. See docs/render.md#components."
+  "The open problems of the agent's task (a component over its branch db, seon.problems/own: its newest run's, its task's failure and
+  the errors raised in its task), each class with its count and each of its rows a line, as `problems-model` makes them: its count,
+  type, first line and the form that reads it whole. Nothing when there are none. It reads the db alone, never the agent's evals and
+  calls, so a new eval reruns `recent-failures` and not this (its read is ~1.5 MB at a session agent). See docs/render.md#components."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
-  (let [r (problems/own db (:db/id c))
-        errs (recent-errors c (config/value :seon.config.render/recent-errors))]
-    (when (or (seq (:classes r)) (seq errs))
-      (-> [:section [:h2 "Your open problems"]]
-          (into (for [[c {:keys [n rows]}] (:classes (problems-model {} r))]
-                  [:div {:key c} [:h3 (str (kname c) " " n)]
-                   (into [:ul]
-                         (for [{:keys [count type message read open?]} rows]
-                           [:li (str count " x") (when type [:code (str type)]) (when message (str " " message)) (when (false? open?) " (closed)") (when read [:code (print/text read)])]))]))
-          (into (when (seq errs)
-                  [[:div {:key "recent"} [:h3 "Recent errors"]
-                    (for [[label x] errs] [:div {:key label} [:p label] (error-box {} x)])]]))))))
+  (let [r (problems/own db (:db/id c))]
+    (when (seq (:classes r))
+      (into [:section [:h2 "Your open problems"]]
+            (for [[c {:keys [n rows]}] (:classes (problems-model {} r))]
+              [:div {:key c} [:h3 (str (kname c) " " n)]
+               (into [:ul]
+                     (for [{:keys [count type message read open?]} rows]
+                       [:li (str count " x") (when type [:code (str type)]) (when message (str " " message)) (when (false? open?) " (closed)") (when read [:code (print/text read)])]))])))))
+
+(defn recent-failures
+  "The agent's newest failures with their causes (`recent-errors`, each by `error-box`), at most :seon.config.render/recent-errors:
+  a component of its own beside `own-problems`, since it reads each eval's and each call's error path, which every new eval moves.
+  Nothing when there are none. See docs/render.md#components."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}]
+  (when-let [errs (seq (recent-errors c (config/value :seon.config.render/recent-errors)))]
+    [:section [:h3 "Recent errors"]
+     (for [[label x] errs] [:div {:key label} [:p label] (error-box {} x)])]))
 
 (defn ctx-key
   "A key the agent added to its ctx (a component over ctx), named by that key, which is its schema:
@@ -2146,6 +2152,7 @@
    ;; then the agent's own state, from its own attributes
    (when (:seon.agent/task c) [#'status {:at [:seon.agent/task :proved]}])
    (when (:seon.agent/task c) [#'own-problems {:at [:seon.agent/task]}])
+   (when (:seon.agent/task c) [#'recent-failures {:at [:db/id]}])
    (when (seq (added-keys ix c)) [#'ctx-keys {:at [:db/id]}])
    [#'turn {:at [:seon.agent/ns]}]
    [#'agent-state {:at [:seon.agent/status] :wire/for "page"}]])

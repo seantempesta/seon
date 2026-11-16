@@ -324,19 +324,6 @@
     (is (nil? (:value after)) (str "and it wrote no end, so root reads none: " (pr-str after)))))
 
 ;; See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent
-;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/estimate {:ticks 12000000}} a-stall-tasks-proofs-judge-only-a-task-that-names-them
-  ;; seon.stall-proofs read their task's cause, so on any other task they were stray reds (the control of 2026-11-05). On a world that gains a
-  ;; namespace named seon.stall-proofs with a test (a changed test is selected unless it is a stall proof the task does not name); two plans ~4M each
-  (let [p 'seon.stall-proofs/the-stall-ended
-        main (mt/world)
-        branch (mt/with main (mt/code 'seon.stall-proofs "(ns seon.stall-proofs (:require [clojure.test :refer [deftest is]]))\n(deftest the-stall-ended (is true))\n"))
-        plan (fn [proofs] (fn [_] (contains? (set (:selected (agent/test-plan branch main proofs))) p)))
-        [named not-named] (mt/eval-in [(plan #{p}) (plan #{})] 'seon.agent-test.scratch {:db main})]
-    (is (true? (:value named)) (str "a stall task's proof is selected: " (pr-str named)))
-    (is (false? (:value not-named)) (str "and no other task's: " (pr-str not-named)))))
-
-;; See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent
 ;; Estimate: evals on a world (built once a process, ~3.2M) at ~0.3M each; measured a few M
 (deftest ^{:seon.test/estimate {:ticks 25000000}} an-eval-that-empties-the-agents-state-leaves-it-working
   ;; a test run at an agent's REPL ended by resetting the state it had taken for its own (seon.ctx-test's end-agent!):
@@ -2060,37 +2047,6 @@
          (is (= [] (agent/deliver!)) "the delivery a turn makes (seon.turn/deliver!): no messages here, the facts written")
          (is (true? (:seon.eval/opened (member :seon.eval/_agent :seon.eval/id "e1"))) "the opened eval")
          (is (= [] (agent/untaken-facts)) "delivered: nothing more to copy")
-         (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
-
-;; Estimate: test-branch! ~1M, 3 transacts and a connect ~1M, 2 runs of 5 stall proofs at ~1.5M, an update! and commit ~0.5M = ~5000000.
-(deftest ^{:seon.test/estimate {:ticks 5000000}} a-stall-task-closes-when-its-conditions-hold
-  ;; owner, 2026-10-26: root's stall task (seon.template/stall) is done when its boundary
-  ;; conditions hold, which are its proofs (seon.stall-proofs): red while the agent is stalled and
-  ;; no cause is recorded; green once main retracts the stall and the worker records the cause
-  ;; with its evidence and decides it is no bug, through my.task/update!
-  (ts/test-branch!
-   (fn [cfg conn]
-     (let [k "a1"
-           stall (tpl/stall :a1 "demo/t" {:quiet-ms 4000 :pid 77})
-           _ (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "t" :seon.task/plan "Work." :seon.task/proofs #{}} stall]))
-           _ (d/transact conn (ts/work-tx "demo/t" :running {:agent :a1 :branch :task-demo-t}))
-           _ (d/transact conn [{:seon.agent/key k} {:seon.process/id (str k "/77") :seon.process/agent [:seon.agent/key k] :seon.process/stall {:quiet-ms 4000}}])
-           ab (pdb/on-main (:branch cfg) :stall-task)
-           _ (d/branch! conn (:branch cfg) ab)
-           store-conn (pdb/connect (assoc cfg :branch ab))
-           [a b] (sock/socketpair)
-           old @agent/state old-link @agent/link
-           proofs (fn [] (let [reps (atom [])]
-                           (binding [clojure.test/report (fn [m] (swap! reps conj (:type m)))]
-                             (doseq [v (sort tpl/stall-proofs)] ((:test (meta (resolve v))))))
-                           (frequencies @reps)))]
-       (try
-         (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :task "root/stall-a1-demo-t" :db @store-conn})
-         (is (pos? (:fail (proofs) 0)) "red: the agent is stalled, no cause is recorded")
-         (d/transact conn [[:db.fn/retractAttribute [:seon.process/id (str k "/77")] :seon.process/stall]])
-         (my.task/update! :seon.task/cause merge {:what "a test child parked on a pipe nobody wrote" :evidence {:sample "..." :lsof "..."} :bug? false})
-         (agent/commit!)
-         (is (= {:pass 5} (proofs)) "green: the stall ended, the cause recorded with its evidence, and it is no bug")
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 ;; Estimate: test-branch! and connect ~1.5M, 5 eval-string calls at ~1M, 2 transact! and 4 commit! at ~0.2M = ~8000000.
@@ -3820,15 +3776,13 @@
          (is (= (d/commit-id start) (d/commit-id (agent/program-db))) "the program it holds is still the one it started on")
          (finally (reset! agent/state old)))))))
 ;; docs/source.md#tests-run-by-reach: a test judges by the program's facts, never by what the asking process loaded
-;; Estimate: 5 judges? calls, each a set lookup under its contract, well under 100k ticks
+;; Estimate: 2 judges? calls, each a set lookup under its contract, well under 100k ticks
 (deftest ^{:seon.test/estimate {:ticks 100000}} a-test-judges-by-the-programs-facts-not-what-the-process-loaded
-  (let [t 'seon.never-loaded-test/a-test s 'seon.stall-proofs/a-bug-is-filed
-        g {:tests #{t s}}]
+  (let [t 'seon.never-loaded-test/a-test
+        g {:tests #{t}}]
     (is (nil? (find-ns 'seon.never-loaded-test)) "the test's namespace is not loaded here, as at root")
     (is (true? (agent/judges? g #{} t)) "a deftest the program holds judges, though this process never loaded it")
-    (is (false? (agent/judges? g #{} 'seon.never-loaded-test/not-a-test)) "a name the program holds no deftest of does not")
-    (is (false? (agent/judges? g #{} s)) "a stall task's proof judges only a task that names it")
-    (is (true? (agent/judges? g #{s} s)) "and does judge the task that names it")))
+    (is (false? (agent/judges? g #{} 'seon.never-loaded-test/not-a-test)) "a name the program holds no deftest of does not")))
 
 
 ;; docs/merging.md#a-branch-merges-main-in, FOCUS (2): a merge of main that moved main's program takes the branch's program in place at

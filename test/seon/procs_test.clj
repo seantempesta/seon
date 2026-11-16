@@ -226,21 +226,6 @@
               (is (empty? (statuses outs)) "a read beside it changes nothing")))))
       (finally (remote/close! end) (sock/close! a')))))
 
-;; Estimate: 4 step-fn calls x 10k (pure state in, state out) ~ 40,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 40000}} an-agent-that-reads-nothing-is-seen-as-a-stall
-  ;; docs/processes.md#a-stalled-agent: root's frames to an agent never block its proc. An agent that stopped reading its
-  ;; socket (an eval held in a blocking open(2)) left the proc's blocking put parked in its step, so it never took root's
-  ;; :stall? and no stall was recorded (batch 16's problems step, 8.5 min). Here nothing ever takes from the end's :out:
-  ;; each step returns, the frames wait in order, and the stall check answers. No load, no clock: red before, the first
-  ;; step never returned (shown once under a bound outside this test).
-  (let [out (a/chan)
-        st (#'ap/agent-proc {:id :a1 :end {:out out :in (a/chan)} :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
-        [st _] (step #'ap/agent-proc st :in {:op :req :rid 5 :kind :eval :msg {:op :eval :forms "(open-a-fifo)"}})
-        [st _] (step #'ap/agent-proc st :in {:op :req :rid 6 :kind :eval :msg {:op :eval :forms "(+ 1 2)"}})
-        [_ outs] (step #'ap/agent-proc (assoc st :last-frame-ms 0) :in {:op :stall? :now-ms 10000 :stall-ms 1000})]
-    (is (= [:stalled] (map :op (:to-api outs))) "the proc takes :stall? and answers the stall")
-    (is (= [5 6] [(:id (a/poll! out)) (:id (a/poll! out))]) "and its frames wait for the agent, in order")))
-
 ;; Estimate: a few pure step calls ~ 50,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 50000}} a-reply-the-wire-cannot-encode-answers-its-asker-and-the-end-serves-on
   ;; task jolt.async/a-value-a-remote-end-cannot-encode-answers-its-asker: root's end sent an agent
@@ -714,7 +699,7 @@
 (deftest ^{:seon.test/estimate {:ticks 100000}} an-end-closed-on-a-live-pid-ends-the-agent-and-answers-its-waiter
   ;; an agent whose end closed can never answer root again: root ends it at once (the kill its :kill
   ;; makes), and its exit, which comes, answers the requests it held through ::dying. No bound is
-  ;; reached and no stall timer is armed. The pid is a real child (sleep 20), alive unless killed.
+  ;; reached. The pid is a real child (sleep 20), alive unless killed.
   (let [proc (.start (ProcessBuilder. ^java.util.List ["sleep" "20"]))
         pid (.pid proc)
         p (promise)
@@ -733,31 +718,8 @@
         (when (realized? p)
           (is (= [:seon.agent/died :a1] ((juxt :seon.error/type :agent) @p)) (pr-str @p))
           (is (re-find #"ended by root" (:seon.error/message @p))))
-        (is (empty? (:seon.system/dying st')) "nothing is parked")
-        (is (false? @(:seon.system/stall-timer st')) "and no stall timer was armed"))
+        (is (empty? (:seon.system/dying st')) "nothing is parked"))
       (finally (.destroyForcibly proc)))))
-
-;; Estimate: 5 step-fn calls x 10k (pure state in, state out) ~ 50,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 50000}} a-step-that-throws-after-a-stall-check-leaves-the-check-armed
-  ;; docs/clocks.md: root's stall check is a timer to itself (seon.step/timer). A step that took :stall-check and then
-  ;; threw is undone by Flow (its state from before the step is kept); the timer's armed flag is a host object, so the
-  ;; next step with an eval in flight arms it again. Red before: the flag was in the state (::stall-due), kept true by
-  ;; the undo, and no check was armed for the life of root. No clock: each arm's put is recorded as it is asked for
-  ;; (seon.step/put-after! redefined), never waited on.
-  (let [puts (atom [])
-        st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
-                             :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
-        st (assoc st :stall-ms 2 :seon.system/busy #{:a1})]
-    (with-redefs [step/put-after! (fn [_ _ m] (swap! puts conj m) nil)]
-      (let [[st _] (#'root/api-proc st :ext {:op :noop})]
-        (is (= [{:op :stall-check}] @puts) "an eval in flight arms the check")
-        (let [[st _] (#'root/api-proc st :ext {:op :noop})]
-          (is (= 1 (count @puts)) "armed once: a second step arms nothing more")
-          ;; the step that takes it throws after the take: Flow keeps the state from before it
-          (is (thrown? Throwable (with-redefs [root/record-agents (fn [& _] (throw (ex-info "after the take" {})))]
-                                   (#'root/api-proc st :back {:op :stall-check}))))
-          (#'root/api-proc st :ext {:op :noop})
-          (is (= [{:op :stall-check} {:op :stall-check}] @puts) "the next step arms it again"))))))
 
 ;; Estimate: 4 step-fn calls x 10k (pure state in, state out) ~ 40,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 40000}} root-records-what-it-observes-of-its-agents
@@ -766,8 +728,7 @@
   ;; (the main t the agent reports) writes nothing
   (let [st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                              :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
-        ;; no stall check (:stall-ms 0): the busy agent's check is not this test's
-        st (assoc st :stall-ms 0 :view {:agents {:a3 {:status :idle :pid 77 :branch :task-demo-f}}})
+        st (assoc st :view {:agents {:a3 {:status :idle :pid 77 :branch :task-demo-f}}})
         [st outs] (step #'root/api-proc st :back {:op :status :agent :a3 :set {:status :busy :running {:form "(f 2)" :since-ms 5}}})
         w (first (:to-writer outs))]
     (is (= {:op :tx :branch :db :dest {:agent-facts [:a3]}} (dissoc w :tx-data)))
@@ -786,7 +747,7 @@
   ;; threw. Red while the entry held the response whole (its :value, :out and an error's :data grew with them)
   (let [st0 (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                               :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
-        st0 (assoc st0 :stall-ms 0 :view {:agents {:a3 {:status :idle :pid 77 :branch :task-demo-f :evals []}}})
+        st0 (assoc st0 :view {:agents {:a3 {:status :idle :pid 77 :branch :task-demo-f :evals []}}})
         held (fn [n]
                (let [big (vec (range n))
                      r1 {:handle 'result/e1 :text "[0 1 2 ...]" :ms 0.1 :value big :out (apply str (repeat n "x"))}
@@ -956,6 +917,24 @@
 
 ;; ---- a proc answers every request it took (laws audit #2) ----------------------
 
+;; Estimate: one socket pair and remote end opened (~0.3M ticks), three agent-proc steps as plain calls (~0.1M each): ~0.6M; 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} an-agents-call-is-answered-and-writes-only-its-own-branch
+  ;; one agent kind (task seon.step/roots-procs-are-the-first-forks-graph, B1): an agent asks the writer process as root's REPL does
+  ;; through sys, with one frame, :call, forwarded as a :request the api answers by its tag, as :launch is. Main changes only by a
+  ;; merge (decisions): a :write names no branch, so the agent's own is the only one it can mean (the root agent's is main). Red before:
+  ;; no :call frame
+  (let [[r _] (sock/socketpair)
+        end (remote/open r {:codec {:encode codec/encode :decode codec/decode}})
+        st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
+        [_ outs] (step #'ap/agent-proc st :from {:op :call :k 7 :req {:op :state}})
+        [_ outs2] (step #'ap/agent-proc st :from {:op :call :k 8 :req {:op :write :req {:op :tx :tx-data [{:note/text "x"}]}}})]
+    (is (= [{:op :request :req {:op :state} :route [:a1 :in] :tag 7}] (filterv #(= :request (:op %)) (:to-api outs))) (pr-str outs))
+    (is (= :agent-1 (get-in (first (filterv #(= :request (:op %)) (:to-api outs2))) [:req :req :branch]))
+        (str "a write names no branch and is this agent's own: " (pr-str outs2)))
+    (is (not (seon.contract/valid? :seon.agent/call-req {:op :write :req {:op :tx :branch :db :tx-data []}}))
+        "a write naming a branch fails its schema: never rewritten")
+    (is (seon.contract/valid? :seon.agent/call-req {:op :write :req {:op :tx :tx-data []}}))))
+
 (defn- api-state []
   (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                     :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))}))
@@ -965,8 +944,8 @@
 ;; Estimate: three api steps as plain calls (~0.1M each) and api-state (~0.2M): ~0.5M ticks; 2,000,000
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-stops-fact-is-written-inside-its-drain
   ;; the switch-over's L2 (task seon.system/an-update-loses-nothing): the stop fact rides the api's :shutdown and goes to the writer then,
-  ;; flushed, before its in-port closes, so the stop has one wait, its drain, under one bound, and a writer stuck on it is named by that
-  ;; bound's ping (drained-within), never a wait of its own. Red before: stop! wrote the fact first and waited on it unbounded (pid
+  ;; flushed, before its in-port closes, so the stop has one wait, its drain, never a wait of its own on the writer before it.
+  ;; Red before: stop! wrote the fact first and waited on it unbounded (pid
   ;; 52331: :fact 30,569 ms on 3.7k ticks, the 6 s bound gone, its drain left 1 ms)
   (let [p (promise)
         fact {:boot "b1" :cause :hand-over :at-ms 1 :tree "t1"}

@@ -9,6 +9,12 @@
  :seon.agent/gate-unread [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/gate-unread]]]]
  ;; a commit the agent's branch refused (a value the store cannot hash): its run-ahead writes dropped, the eval ids among them named (seon.agent/commit!); an eval answers it under :unrecorded
  :seon.agent/no-branch [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/no-branch]]]]
+ ;; what an agent's :call may ask the writer process (seon.agent/call!): reads of its live state, acts, effects, a wait on main, and a
+ ;; write, which names no branch: the only branch it can mean is the caller's own (agent-proc names it); the root agent is main's
+ ;; agent, so its writes are main's (decisions, 2026-11-16)
+ :seon.agent/call-op [:enum {:description "An op an agent's :call may carry to the writer process (seon.agent/call!). See docs/processes.md#the-socket-and-the-agent-proc."} :state :health :errors :spawn :kill :clone :ask :message :focus :fx :prove :gate :await :write]
+ ;; an agent's :call request: its op, and for a :write the writer's request, which names no :branch (a request naming one fails here)
+ :seon.agent/call-req [:map {:description "An agent's :call request (seon.agent/call!): its op, and a :write's writer request, which names no branch: the caller's own is the only one it can mean. See docs/processes.md#the-socket-and-the-agent-proc."} [:op :seon.agent/call-op] [:req {:optional true} [:map [:branch {:optional true} :nil]]]]
  :seon.agent/commit-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/commit-refused]] [:transactions :int] [:evals [:vector :string]]]]
  :seon.agent/eval-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/eval-error]]
                                                 [:class :string] [:data {:optional true} :map] [:phase {:optional true} :keyword]
@@ -173,7 +179,7 @@
  ;; ends :error with the value's head, and the agent goes on (seon.agent/child-codec)
  :seon.test/unreadable-line [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/unreadable-line]]]]
  ;; a test that never returned within its wall bound (seon.agent/wall-bound-ms): ended after its evidence, Jolt's dump of every fiber
- :seon.test-store/no-answer [:and {:description "A test root asked (seon.test-store/ask) answered nothing within the ask's bound (a test's wall less :seon.config.proofs/ask-margin-ms, else :seon.config.proofs/ask-ms): what was asked, and the root's state then (seon.system/stall-state), or this same error when the root answered that neither."} :seon.error/base [:map [:seon.error/type [:= :seon.test-store/no-answer]] [:asked :any] [:root-state :any]]]
+ :seon.test-store/no-answer [:and {:description "A test root asked (seon.test-store/ask) answered nothing within the ask's bound (a test's wall less :seon.config.proofs/ask-margin-ms, else :seon.config.proofs/ask-ms): what was asked."} :seon.error/base [:map [:seon.error/type [:= :seon.test-store/no-answer]] [:asked :any]]]
  :seon.test/wall-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/wall-spent]] [:test :string] [:bound-ms pos-int?] [:dump :string]]]
  ;; the OS refused the thread that ends a process with its starter (seon.lib/end-with!)
  :seon.lib/starter-unwatched [:and :seon.error/base [:map [:seon.error/type [:= :seon.lib/starter-unwatched]] [:pid [:maybe :int]]]]
@@ -332,7 +338,7 @@
                                                     [:agents #{:stalled :dead :error :waste}] [:errors #{:platform :eval :agent :effect}] [:health #{:problem-unlinked :stale-binary}]]
                              ;; each class's section of the wiki: what it is and how it is fixed. A class with open rows whose
                              ;; section is no stored section is itself a problem (:problem-unlinked)
-                             :seon.problems/docs {:stalled "docs/processes.md#a-stalled-agent" :platform "docs/errors.md#problems" :eval "docs/errors.md#problems" :agent "docs/errors.md#problems"
+                             :seon.problems/docs {:platform "docs/errors.md#problems" :eval "docs/errors.md#problems" :agent "docs/errors.md#problems"
                                                   :effect "docs/errors.md#problems" :error "docs/errors.md#problems" :waste "docs/errors.md#problems"
                                                   :red "docs/tasks.md#the-done-rule" :cost "docs/tasks.md#the-done-rule"
                                                   :merge "docs/merging.md#conflicts-and-pins" :task-conflict "docs/merging.md#conflicts-and-pins"

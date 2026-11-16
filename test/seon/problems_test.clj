@@ -227,133 +227,6 @@
              (written (step (api view) :back {:op :status :agent :a2
                                               :set {:error (contract/error :seon.agent/failed 'seon.system/spawn! "fork server went down before the fork" {:agent :a2})}})))))))
 
-(deftest ^{:seon.test/estimate {:ticks 1000000}} a-stall-is-observed-by-the-agent-proc
-  (let [end {:in (a/chan 4) :out (a/chan 16)}
-        st (#'ap/agent-proc {:id :a1 :end end :branch :b1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4) :fx-kinds #{:fx/model}})
-        [st _] (#'ap/agent-proc st :in {:op :req :rid 1 :kind :eval :msg {:op :eval :forms "(Thread/sleep 99999)"}})
-        st (assoc st :last-frame-ms 1000)]
-    (testing "an eval in flight, no frame for longer than the stall bound, no effect outstanding: stalled, once"
-      (let [[st outs] (#'ap/agent-proc st :in {:op :stall? :now-ms 5000 :stall-ms 2000})
-            s (first (filter #(= :stalled (:op %)) (:to-api outs)))]
-        (is (= :seon.agent/stalled (get-in s [:error :seon.error/type])))
-        (is (= 4000 (get-in s [:error :quiet-ms])))
-        (is (contract/valid? :seon.agent/stalled (:error s)))
-        (is (empty? (:to-api (second (#'ap/agent-proc st :in {:op :stall? :now-ms 6000 :stall-ms 2000})))) "reported once per quiet spell")))
-    (testing "an effect outstanding is waiting on its owner, not stalled"
-      (let [[st _] (#'ap/agent-proc st :from {:op :fx :k 1 :kind :model})
-            st (assoc st :last-frame-ms 1000)]
-        (is (empty? (:to-api (second (#'ap/agent-proc st :in {:op :stall? :now-ms 9000 :stall-ms 2000})))))))
-    (testing "a test of its run that started is what a stall names; its first frame after the stall ends it"
-      (let [[st _] (#'ap/agent-proc st :from {:op :testing :test "#'app.t/hangs"})
-            st (assoc st :last-frame-ms 1000)
-            [st outs] (#'ap/agent-proc st :in {:op :stall? :now-ms 5000 :stall-ms 2000})
-            [_ outs2] (#'ap/agent-proc st :from {:op :testing :test "#'app.t/next"})]
-        (is (= {:kind :tests :form "#'app.t/hangs"} (get-in (first (:to-api outs)) [:error :last-op])) "the stall names the test")
-        (is (some #(= {:op :spoke :agent :a1} %) (:to-api outs2)) "its next frame: it spoke")))))
-
-;; docs/flow.md#the-five-rules, rule 3: a stall is said by its source (seon.agent/quiescent!), never polled by root. Estimate: a few pure
-;; step calls ~ 1,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 1000000}} a-stall-the-agent-says-is-recorded-by-its-proc
-  (let [end {:in (a/chan 4) :out (a/chan 16)}
-        st (#'ap/agent-proc {:id :a1 :end end :branch :b1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4) :fx-kinds #{:fx/model}})
-        [st _] (#'ap/agent-proc st :in {:op :req :rid 1 :kind :eval :msg {:op :eval :forms "(deref (promise))"}})
-        st (assoc st :last-frame-ms (- (System/currentTimeMillis) 4000))]
-    (testing "the agent's :stalled frame: its stall and how long it has been quiet, once; the stall is no frame of progress"
-      (let [before (:last-frame-ms st)
-            [st outs] (#'ap/agent-proc st :from {:op :stalled})
-            s (first (filter #(= :stalled (:op %)) (:to-api outs)))]
-        (is (= :seon.agent/stalled (get-in s [:error :seon.error/type])))
-        (is (<= 4000 (get-in s [:error :quiet-ms])) "quiet since the frame before it")
-        (is (= before (:last-frame-ms st)) "the evidence never reads the stall as the agent speaking")
-        (is (contract/valid? :seon.agent/stalled (:error s)))
-        (is (empty? (:to-api (second (#'ap/agent-proc st :from {:op :stalled})))) "said once per quiet spell")))
-    (testing "a test of its run that started is what a stall names; its first frame after the stall ends it"
-      (let [[st _] (#'ap/agent-proc st :from {:op :testing :test "#'app.t/hangs"})
-            [st outs] (#'ap/agent-proc st :from {:op :stalled})
-            [_ outs2] (#'ap/agent-proc st :from {:op :testing :test "#'app.t/next"})]
-        (is (= {:kind :tests :form "#'app.t/hangs"} (get-in (first (:to-api outs)) [:error :last-op])) "the stall names the test")
-        (is (some #(= {:op :spoke :agent :a1} %) (:to-api outs2)) "its next frame: it spoke")))))
-
-(deftest ^{:seon.test/estimate {:ticks 1000000}} a-stall-is-a-fact-on-the-agent-until-it-speaks-or-ends
-  ;; root, 2026-10-26 (the owner: "the hangs are super bad especially if you don't notice an agent
-  ;; has been stuck"): a stall root observes is a fact on the agent, with what it waits on, so
-  ;; my.root/problems, root's page and every ctx holding the agent show it, until the agent's next
-  ;; frame or its end retracts it
-  (let [view {:agents {:a1 {:status :busy :pid 77 :task "t/x"}}}
-        waits {:kind :tests :form "#'app.t/hangs"}
-        stalled {:op :stalled :agent :a1
-                 :error (contract/error :seon.agent/stalled 'seon.agent-proc/agent-in "agent a1 sent nothing for 4000 ms with a request in flight"
-                                        {:agent :a1 :quiet-ms 4000 :last-op waits})}
-        facts (fn [o] (into [] cat (writes o)))
-        retracts? (fn [o] (some #(and (vector? %) (= :seon.process/stall (last %))) (facts o)))
-        [st o1] (step (api view) :back stalled)]
-    (is (some #(= {:quiet-ms 4000 :last-op waits} (:seon.process/stall %)) (facts o1)) "recorded on the agent, with what it waits on")
-    (is (retracts? (second (step st :back {:op :spoke :agent :a1}))) "retracted when it speaks")
-    (is (retracts? (second (step st :back {:op :status :agent :a1 :set {:status :dead}}))) "and when it ends")))
-
-(deftest ^{:seon.test/estimate {:ticks 5000000}} a-stall-in-a-live-task-makes-one-task-for-root
-  ;; owner, 2026-10-26: no push; a stall "becomes a task for root to deal with, from a template":
-  ;; the first write of a stall in a live task writes one task (seon.template/stall), its cause
-  ;; pre-filled with the stall, its proofs the boundary conditions; a later stall of the same task
-  ;; writes none (one per agent and task), and an agent working no task gets none
-  (let [db (world)
-        view {:agents {:a1 {:status :busy :pid 77 :task "demo/t"} :a2 {:status :busy :pid 78}}}
-        stalled (fn [ag] {:op :stalled :agent ag
-                          :error (contract/error :seon.agent/stalled 'seon.agent-proc/agent-in (str "agent " (name ag) " sent nothing for 4000 ms with a request in flight")
-                                                 {:agent ag :quiet-ms 4000 :last-op {:kind :tests :form "#'app.t/hangs"}})})
-        tasks (fn [o] (filter :seon.task/id (into [] cat (writes o))))
-        [_ o1] (step (assoc (api view) :conn (atom db)) :back (stalled :a1))
-        [t] (tasks o1)]
-    (is (= ["root/stall-a1-demo-t"] (mapv :seon.task/id (tasks o1))) "one task, named for the agent and its task")
-    (is (= {:agent :a1 :task "demo/t" :quiet-ms 4000 :pid 77 :last-op {:kind :tests :form "#'app.t/hangs"}} (dissoc (get-in t [:seon.task/cause :stall]) :api))
-        "its cause pre-filled with the stall")
-    (is (= {:open [] :prove nil} (get-in t [:seon.task/cause :stall :api]))
-        "and what the api held then: no ask open, no report from the test service yet")
-    (is (= [:held "outside" seon.template/stall-proofs] [(:seon.task/execution t) (:seon.task/model t) (set (:seon.task/proofs t))])
-        "held, for an outside worker, its proofs the boundary conditions")
-    (is (empty? (tasks (second (step (assoc (api view) :conn (atom (d/db-with db (vec (tasks o1))))) :back (stalled :a1)))))
-        "a later stall of the same task writes none")
-    (is (empty? (tasks (second (step (assoc (api view) :conn (atom db)) :back (stalled :a2))))) "an agent working no task: none")))
-
-(deftest ^{:seon.test/estimate {:ticks 5000000}} a-stall-tasks-evidence-is-captured-while-it-is-stuck
-  ;; the evening audit (a6's hang left no evidence: the root restarted and the process went with
-  ;; it): the stall task's first write asks for the stuck process's evidence (the :evidence effect,
-  ;; seon.fx/stall-evidence), and its answer's files are written into the task's cause on main
-  (let [db (world)
-        view {:agents {:a1 {:status :busy :pid 77 :task "demo/t"}}}
-        st (assoc (api view) :conn (atom db) :system {:procs {:fx/evidence {}}})
-        stalled {:op :stalled :agent :a1
-                 :error (contract/error :seon.agent/stalled 'seon.agent-proc/agent-in "agent a1 sent nothing for 4000 ms with a request in flight"
-                                        {:agent :a1 :quiet-ms 4000})}
-        [st o1] (step st :back stalled)
-        [ask] (get o1 [:fx/evidence :ask])
-        db (d/db-with db (vec (filter :seon.task/id (into [] cat (writes o1)))))
-        files {:sample "/x/sample.txt" :lsof "/x/lsof.txt"}
-        [_ o2] (step (assoc st :conn (atom db)) :back {:dest (:dest ask) :r {:value {:dir "/x" :files files}}})
-        [[_ _ attr cause]] (filter #(and (vector? %) (= :seon.task/cause (nth % 2 nil))) (into [] cat (writes o2)))]
-    (is (= 77 (get-in ask [:req :pid])) "asked for the stuck process")
-    (is (str/ends-with? (get-in ask [:req :dir]) "/stalls/stall-a1-demo-t") "its files under the runs directory's stalls/, by the task")
-    (is (= :seon.task/cause attr))
-    (is (= files (:evidence cause)) "the evidence's files on the task's cause")
-    (is (= :a1 (get-in cause [:stall :agent])) "beside the stall it was captured for")))
-
-(deftest ^{:seon.test/estimate {:ticks 3000000}} a-stalled-agent-is-an-open-problem-while-the-fact-holds
-  (let [db (d/db-with (world) [{:seon.agent/key "a1"}
-                                    {:seon.process/id "a1/77" :seon.process/agent [:seon.agent/key "a1"] :seon.process/pid 77 :seon.process/forked-ms 10.0
-                                     :seon.process/stall {:quiet-ms 4000 :last-op {:kind :tests :form "#'app.t/hangs"}}}
-                                    {:seon.agent/key "a2"}])
-        rows (get-in (problems/health db) [:classes :stalled :rows])]
-    (is (= [[:a1 77 "#'app.t/hangs"]] (mapv (juxt :agent (comp :pid :evidence) (comp :form :waits-on :evidence)) rows)) "one row, the stalled agent's")
-    (is (re-find #"a1 sent nothing for 4000 ms.*tests #'app.t/hangs" (:message (first rows))) "saying what it waits on")
-    (is (empty? (get-in (problems/health (d/db-with db [[:db.fn/retractAttribute [:seon.process/id "a1/77"] :seon.process/stall]])) [:classes :stalled :rows]))
-        "closed once the fact is retracted")
-    (is (empty? (get-in (problems/health (d/db-with db (seon.task/earlier-agents-tx db))) [:classes :stalled :rows]))
-        "and by a new boot: an earlier boot's stall ended with its process")
-    ;; a stall left on an earlier process of the agent is no row: only its current process's counts
-    (is (empty? (get-in (problems/health (d/db-with db [{:seon.process/id "a1/78" :seon.process/agent [:seon.agent/key "a1"] :seon.process/pid 78 :seon.process/forked-ms 20.0}]))
-                        [:classes :stalled :rows]))
-        "a respawned agent's old process's stall is no row")))
-
 (defn- gone-ended? [r] (= :seon.system/ended (:seon.error/type r)))
 
 (deftest ^{:seon.test/estimate {:ticks 1000000}} a-late-live-status-leaves-a-gone-agent-gone
@@ -528,7 +401,7 @@
         [h m] (measured-health db)
         rows (get-in h [:classes :problem-unlinked :rows])
         ans (problems/answers db)
-        classes {:stalled #(problems/stalled-agents db ans) :stale-pin #(problems/stale-pins db ans)
+        classes {:stale-pin #(problems/stale-pins db ans)
                  :stale-binary #(problems/stale-binary db ans) :orphan-page #(problems/orphan-pages db ans)
                  :leadless-section #(problems/leadless-sections db ans) :uncited-task #(problems/uncited-tasks db ans)
                  :unnamed-site #(problems/unnamed-sites db ans) :stale-section #(problems/stale-sections db ans)
@@ -542,8 +415,7 @@
                              (#'problems/health-with db a (:classes (#'problems/report-with db a {} nil)) derived)))}
         measured (update-vals classes calls-of)
         ;; 74 -> 86 -> 88 -> 89 on 2026-11-10 (uncited-tasks every ready task, stale-binary, waived-proof), one total; per class since. Each bound is the contracted calls measured on this world.
-        bounds {:stalled 1             ; the processes holding a stall fact, one range
-                :stale-pin 2           ; the pins of the branch scheme
+        bounds {:stale-pin 2           ; the pins of the branch scheme
                 :stale-binary 2        ; root's source fact: one seon.db/eid and one pull
                 :orphan-page 1         ; the sections' references, one scan
                 :leadless-section 1    ; the stored sections' first blocks
