@@ -19,14 +19,17 @@
     (is (= {:model-calls 1} (turn/agent-usage (t/with (t/world) (call-of "b1/a3" 1 nil)) "b1/a3"))
         "no call reported: its tokens unknown, never 0")))
 
-;; Estimate: in-agent's setup and teardown ~1.5M + 3 asks at ~0.25M (one write, one context read, one scoped query of a few seeks) = ~2.3M:
-;; 2500000 ticks, ~20 MB; measured 0.75M ticks, 7.3 MB
-(deftest ^{:seon.test/estimate {:ticks 2500000 :bytes 20000000}} an-outside-context-names-only-the-branchs-own-gaps
+;; Estimate: in-agent's setup and teardown ~1.5M + 5 asks at ~0.25M (root's write on main, a merge of main, one write, one context read, one scoped query of a few seeks) = ~2.8M:
+;; 3000000 ticks, ~20 MB
+(deftest ^{:seon.test/estimate {:ticks 3000000 :bytes 20000000}} an-outside-context-names-only-the-branchs-own-gaps
   ;; docs/turn.md#the-cap: an outside agent's read of its context is the turn the loop would take, at the run's own max-turns: here 7, apart from the config's, which the read once passed as 1
   ;; another agent's outside read in the same db (as one a test before it on a shared root leaves) is not this agent's: the read is scoped to its own,
-  ;; and its newest (the attach takes a read of its own before max-turns is set)
-  (let [[written ctxr bases] (at/in-agent (fn [{:keys [agent]}]
-                                   ["(seon.agent/transact! [{:seon.agent/key (:key @seon.agent/state) :seon.agent/max-turns 7} {:db/id \"other\" :seon.agent/key \"other-outside\"} {:seon.model-call/id \"other-outside-1\" :seon.model-call/n 1 :seon.model-call/origin :outside :seon.model-call/agent \"other\" :seon.model-call/basis {:commit (datahike.api/commit-id (seon.agent/db)) :task (:task @seon.agent/state) :turn 1 :max-turns 3 :origin :outside :agent \"other-outside\"}}])"
+  ;; and its newest (the attach takes a read of its own before max-turns is set). :seon.agent/max-turns is root's, written on main (docs/users.md: one writer per
+  ;; attribute, the agent's write refusing it), and the branch holds it once it merges main
+  (let [[_ _ written ctxr bases] (at/in-agent (fn [{:keys [agent]}]
+                                   [{:op :eval :agent "root" :code (str "@(c/transact-main! sys [{:seon.agent/key " (pr-str (name agent)) " :seon.agent/max-turns 7}])")}
+                                    "(seon.agent/merge-main!)"
+                                    "(seon.agent/transact! [{:db/id \"other\" :seon.agent/key \"other-outside\"} {:seon.model-call/id \"other-outside-1\" :seon.model-call/n 1 :seon.model-call/origin :outside :seon.model-call/agent \"other\" :seon.model-call/basis {:commit (datahike.api/commit-id (seon.agent/db)) :task (:task @seon.agent/state) :turn 1 :max-turns 3 :origin :outside :agent \"other-outside\"}}])"
                                     {:op :context :agent agent}
                                     "(let [[_ m] (last (sort (datahike.api/q '[:find ?n ?m :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/n ?n]] (seon.agent/db) (:key @seon.agent/state))))] [(:max-turns (:seon.model-call/basis (datahike.api/pull (seon.agent/db) [:seon.model-call/basis] m)))])"]))]
     (is (nil? (:ex written)) (str "the setup's write: " (pr-str (:ex written))))
