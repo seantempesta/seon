@@ -22,15 +22,11 @@
   digest (seon.fx/write-verdicts!) before it answers, so every run after finds them
   (seon.fx/stored-results) and runs none of them again; the asker's agent writes the run's facts on its own branch once
   it is answered (seon.agent/record-answer!), and nothing else is written to the store.
-  `:main` is the writer's commit notice (a sliding buffer of one: a notice is replaced by the next,
-  a reader catches up from main's head): it keeps the latest main t for a request that names
-  none, and with :seon.config.proofs/prove-main-on-commit a notice whose :program-t passed the last run asked is a
-  request to prove main at it, with no waiter: main is proved at each program move, whoever asks. Whether a commit moves
-  the program is decided once, in the writer (seon.writer/program-at, the one call of seon.program/moves-program?), and
-  carried on every notice; moves made during a run coalesce into the next (`main-wanted`)."
+  A request that names no t is of main's head, read from the store's connection when it arrives; main is proved when someone
+  asks, never by a commit (on a clean store a run per program move started 223 tests at boot, 2026-11-16)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.proofs :as proofs] [seon.program :as program] [seon.config :as cfg] [seon.fx :as fx]
-            [clojure.core.async.flow :as flow] [clojure.string :as str] [seon.db :as pdb]))
+            [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
 (defn run-key
   "The key of the run of branch whose program has digest dg (seon.program/run-digest of its
@@ -448,23 +444,11 @@
   [st]
   (boolean (or (seq (:runners st)) (some #(and (nil? (:agent %)) (= :spawn (:stage %))) (vals (:runs st))))))
 
-(defn- main-inputs-moved?
-  "Whether a notice at program t pt brings main's run inputs other than the failed run's (:main-failed, {:program-t :binary}):
-  a newer program. The binary is fixed for this process (a new binary is a new process, whose boot asks main again), so the
-  :binary the failure keeps (what its death named) is evidence, never an input compared: compared with this proc's :binary, a
-  target/seon rebuilt under a running root asked main again at every notice. Same inputs, same answer: a run that failed is never
-  asked again on them. See docs/merging.md#the-test-service."
-  {:malli/schema [:=> [:cat :map :int] :boolean]}
-  [st pt]
-  (let [{fpt :program-t :as failed} (:main-failed st)]
-    (boolean (and failed (not= pt fpt)))))
-
 (defn- finish
   "Run k ended with answer r: every waiter answered once. A run answered green with nothing died is remembered under its
   slot (a key asked again gets that answer, nothing runs); an error, a death or a red is not, so asking again runs it
-  again. An error is a :platform problem too, but :seon.system/ended (the agent it asked ended: a cancel, its run's end), except a
-  main run's: main left unproved is always said, the program t it could not prove and the owner of its error's operation named
-  on it; and a failed main run keeps the inputs it failed on (:main-failed), so main is asked again only when they move. Answers [st outputs]."
+  again. An error is a :platform problem too, but :seon.system/ended (the agent it asked ended: a cancel, its run's end), the owner
+  of its error's operation named on it. Answers [st outputs]."
   {:malli/schema [:=> [:cat :map :string :any] [:tuple :map [:vector :map]]]}
   [st k r]
   (let [{:keys [waiters] :as run} (get-in st [:runs k])
@@ -475,18 +459,11 @@
         ;; asked again, it ran nothing for that asker: each verdict reads as reused at its digest, with no measure to add
         st (remember (-> st (update :runs dissoc k) (assoc :last (:branch run))) run r)
         [st kill] (runner-done st)
-        main? (and (= :main (:mode run)) (= :main (:branch run)))
-        ;; a main run that failed keeps main wanted with the inputs it failed on, asked again when a notice brings others
-        ;; (main-inputs-moved?); one that answered clears them
-        st (cond (and main? err? (not= :seon.prove/superseded (:seon.error/type r)))
-                 (assoc st :main-failed {:program-t (:main-asked st 0) :binary (or (:seon.process/binary-digest r) (:binary st))})
-                 main? (dissoc st :main-failed)
-                 :else st)
         owner (some-> (:seon.error/operation r) namespace symbol)]
     [st (cond-> (into (reply [] waiters r) kill)
-          (and err? (or (not ended?) main?))
+          (and err? (not ended?))
           (conj {:op :problem :class :platform
-                 :error (cond-> r main? (assoc :seon.prove/main-unproved (:main-asked st 0)) owner (assoc :seon.problems/owner owner))}))]))
+                 :error (cond-> r owner (assoc :seon.problems/owner owner))}))]))
 
 (defn- settle
   "Outputs of the queue (ask-items, batch-ended) carried out: an :asker-answered of run k finishes it with its answer
@@ -547,7 +524,8 @@
   (if (contains? m :verdicts)
     (verdicts-request st m)
   (let [rids (if rid #{rid} #{})
-        t (or (:t m) (:main-t st))
+        ;; a request naming no t is of main's head now, one read of the connection the proc holds
+        t (or (:t m) (some-> (:conn st) deref :max-tx))
         names (not-empty (:names m))
         mode (or (:mode m) :judge)
         key (run-key branch (:digest m) names mode)
@@ -696,24 +674,6 @@
                          (settle st (into outs apart)))
         :else [(update st :stale (fnil inc 0)) []]))))
 
-(defn- main-run?
-  "Whether a run of main by the service's own notice (:branch :main, mode :main) is in flight in st. See docs/merging.md#the-test-service."
-  {:malli/schema [:=> [:cat :map] :boolean]}
-  [st] (boolean (some (fn [[_ r]] (and (= :main (:branch r)) (= :main (:mode r)))) (:runs st))))
-
-(defn- main-wanted
-  "st and outs with main's wanted run (:main-want, the newest notice whose :program-t passed the last asked) asked once no main run is
-  in flight: never superseding one, so every main run ends, and the program moves between coalesce into the next. Its digest is
-  computed only here, once a run (1.6-2.5M ticks [M, tests-4]). A run that ends in error is asked again at the next program move, never
-  in a loop: its failure is a :platform problem (finish). Answers [st outs]. See docs/merging.md#the-test-service."
-  {:malli/schema [:=> [:cat :map [:vector :map]] [:tuple :map [:vector :map]]]}
-  [st outs]
-  (if-let [w (and (not (main-run? st)) (:main-want st))]
-    (let [[st o] (request (-> st (dissoc :main-want) (assoc :main-asked (:program-t w)))
-                          {:branch :main :t (:t w) :digest (program/run-digest (pdb/at-commit (:conn st) (:commit w))) :mode :main})]
-      [st (into (vec outs) o)])
-    [st outs]))
-
 (defn- state-view
   "What the service holds, as data: the runs in flight (each key's stage and waiters), the queue (items queued and running),
   and the api's asks it has open. A hang in the chain is read from it (seon.system's stall task records it)."
@@ -721,21 +681,16 @@
   [st]
   {:runs (into (sorted-map) (for [[k r] (:runs st)] [k {:stage (:stage r) :waiting (count (:waiters r))}]))
    :queued (count (filter #(= :queued (:status %)) (vals (:items st)))) :running (count (filter #(= :running (:status %)) (vals (:items st))))
-   :open (vec (sort-by str (vals (:pending st))))
-   ;; main's proving, the gauge the sweep reads: the program-t its last run asked, the newer one wanted (moves made meanwhile, coalesced
-   ;; into one next run), and whether a main run is in flight
-   :main (cond-> {:asked (:main-asked st) :wanted (some-> (:main-want st) :program-t) :in-flight (boolean (main-run? st))}
-           ;; a main run that failed, and the inputs it failed on: asked again only when they move (main-inputs-moved?)
-           (:main-failed st) (assoc :failed (:main-failed st)))})
+   :open (vec (sort-by str (vals (:pending st))))})
 
 (defn prove-proc
   "The test service (see the namespace doc). In :req (requests the api forwards, {:rid :branch :t :digest :agent :names
-  :mode}), :answers (the api's answers to this proc's requests) and :main (the writer's commit notice); out :to-api (its
+  :mode}) and :answers (the api's answers to this proc's requests); out :to-api (its
   requests; {:op :prove-answer :rid :r} for each waiter, one message each; {:op :problem} for a failed run). Its workers,
   the items running at once on the machine, are admitted by root's :process effect owner (seon.fx/admits?). Buffers (system.edn): :req and
-  :answers are lossless and bounded (a full one parks the sender: the api); :main is a sliding buffer of one."
+  :answers are lossless and bounded (a full one parks the sender: the api)."
   {:malli/schema :seon.step/step-fn}
-  ([] {:params {:conn "the store main's commit notices are read from (seon.db/at-commit)"} :ins {:req "requests to prove a branch at a tx" :answers "the api's answers" :main "main's commit notice, a sliding buffer of one"}
+  ([] {:params {:conn "main's connection: the head a request naming no t is of"} :ins {:req "requests to prove a branch at a tx" :answers "the api's answers"}
        :outs {:to-api "requests, and the answers to the waiters"}
        :workload :io
        ;; the queue's counts and each run's stage are state-view's, the one reading of them: a slow run shows its items running
@@ -743,9 +698,7 @@
                               :queued (count (filter #(= :queued (:status %)) (vals (:items st))))
                               :running (count (filter #(= :running (:status %)) (vals (:items st))))
                               :run-stages (:runs (state-view st))
-                              :main-t (:main-t st) :stale-answers (:stale st 0)
-                              ;; main's run as the service decides it: what is wanted, the program t last asked, and a failed run's inputs
-                              :main-want (:main-want st) :main-asked (:main-asked st) :main-failed (:main-failed st)
+                              :stale-answers (:stale st 0)
                               ;; what the tests branch is held by and what waits on it
                               :runs-in-flight (vec (sort (keys (:runs st)))) :runners (:runners st) :held-main (count (:held-main st))})})
   ([args] {:rid 0 :pending {} :runs {} :done {} :items {} :askers {} :batches {} :conn (:conn args)
@@ -757,17 +710,7 @@
    (let [st st0
          [st outs] (case in
                      :req (request st m)
-                     :answers (let [[st v] (step/answered st (:tag m))] (if v (answered st v (:r m)) [(update st :stale (fnil inc 0)) []]))
-                     ;; the program moved past the last main run asked: the writer's :program-t, which the newest notice carries for every
-                     ;; commit the sliding buffer replaced (seon.writer/program-at), never this notice's own ops. It is wanted, and asked
-                     ;; below once no main run is in flight (main-wanted)
-                     :main (let [st (assoc st :main-t (:t m))
-                                 pt (:program-t m)]
-                             [(cond-> st (and (cfg/value :seon.config.proofs/prove-main-on-commit) pt
-                                              (or (> pt (:main-asked st 0)) (main-inputs-moved? st pt)))
-                                (assoc :main-want (select-keys m [:t :commit :program-t])))
-                              []]))
-         [st outs] (main-wanted st outs)]
+                     :answers (let [[st v] (step/answered st (:tag m))] (if v (answered st v (:r m)) [(update st :stale (fnil inc 0)) []])))]
      (let [outs (vec outs)
            ;; credit (docs/flow.md, request and answer): its asks are answered on :answers, which holds reconciler-buf; with that many
            ;; open it reads only :answers, so the api never parks putting an answer while this parks putting an ask

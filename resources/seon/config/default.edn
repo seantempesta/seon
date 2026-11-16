@@ -728,7 +728,6 @@
  ;; and a death now costs only its test (seon.agent/run-tests-forked reruns the rest in a new child).
  ;; Off (owner, 2026-11-16: "I don't want to run the old shit show"): main is not proved by itself on each commit; a branch's results ride its merge. The path is deleted by tests2. Only the standing system proved main: a scripted root (every test root and check root) never did, or each would fork its
  ;; own prove agents in the background of the test it serves.
- :seon.config.proofs/prove-main-on-commit false
  ;; How many times its own last recorded run (ms) a test bin/test runs may be quiet before it is named
  ;; STALLED (bin/stalls): a test with no record, or a bound under :seon.config.agent/stall-ms, takes
  ;; that key. Provenance: at a flat 30 s, 21 healthy process tests were named STALLED in one run (each
