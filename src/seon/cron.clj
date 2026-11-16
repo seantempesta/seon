@@ -66,7 +66,8 @@
    (let [now (epoch-ms) due (next-fire-ms now (or at ""))]
      (when due (step/put-after! tick (- due now) {}))
      (cond-> {:at at :tick tick :fired 0 ::flow/in-ports {:tick tick}} due (assoc :due due))))
-  ([st _] st)
+  ;; drain: no next fire; the tick armed already finds no :due and arms none (docs/health.md#a-proc-that-does-not-drain)
+  ([st tr] (cond-> st (= tr ::flow/drain) (assoc :due nil)))
   ([st in m]
    (if (or (nil? m) (not= :tick in) (nil? (:due st)))
      [st nil]
