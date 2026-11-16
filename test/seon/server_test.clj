@@ -389,9 +389,9 @@
               " (let [r (#'seon.server/inbox-answer sys (cond-> {:agent " (pr-str k) "} " (pr-str since) " (assoc :since " (pr-str since) ")))]"
               " (or (:seon.error/type r) (mapv :body (:messages r))))))")})
 
-;; Estimate: an empty test branch ~0.3M [M], four small transacts (a task, a work-tx, two messages) ~0.1M each, two inbox-messages reads ~20k: ~0.8M;
+;; Estimate: an empty test branch ~0.3M [M], four small transacts (a task, a work-tx, two messages) ~0.1M each, two undelivered reads ~20k: ~0.8M;
 ;; 1,500,000. Measured warm 0.87M ticks (the first call in a fresh process reads 9M: code not yet loaded, which the warm fork has paid).
-;; No root: inbox-messages is the read inbox-answer answers at once from (it waits only when this is empty), so a wrong read fails here, never hangs.
+;; No root: seon.task/undelivered is the read inbox-answer answers at once from (against main at since) (it waits only when this is empty), so a wrong read fails here, never hangs.
 (deftest ^{:seon.test/estimate {:ticks 1500000}} an-inbox-answers-at-once-with-what-came-after-since
   ;; docs/users.md#messages: seon_inbox reads the messages linked to the agent after since (0: all), oldest first, each with :t, the next since.
   ;; Red before: it answered what the branch had not taken, and took it
@@ -400,12 +400,13 @@
      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'session :seon.task/name "w" :seon.task/plan "Work w." :seon.task/proofs #{'demo-test/w}}]))
      (d/transact conn (ts/work-tx "session/w" :running {:agent :k1}))
      (d/transact conn (task/message-tx "m1" {:seon.agent/key "user"} ["k1"] "first" 4))
-     (d/transact conn (task/message-tx "m2" {:seon.agent/key "user"} ["k1"] "second" 5))
-     (let [all (#'seon.server/inbox-messages @conn "k1" 0)
-           after (#'seon.server/inbox-messages @conn "k1" (:t (first all)))]
+     (let [read-db @conn]
+       (d/transact conn (task/message-tx "m2" {:seon.agent/key "user"} ["k1"] "second" 5))
+       (let [all (task/undelivered @conn nil "k1")
+             after (task/undelivered @conn read-db "k1")]
        (is (= ["first" "second"] (mapv :body all)) (pr-str all))
        (is (every? #(int? (:t %)) all) "each with :t, the next since")
-       (is (= ["second"] (mapv :body after)) "after a since: only what came later")))))
+       (is (= ["second"] (mapv :body after)) "after a since: only what came later"))))))
 
 ;; Estimate: one server round trip (~0.5M); in root, one put-after! of 50 ms and the typed answer (~10k): ~0.6M; 2,000,000
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000}} an-inbox-with-nothing-new-ends-at-its-bound-typed
@@ -480,26 +481,6 @@
     (is (some? (:agent one)) (pr-str one))
     (is (= [:user 1 "outside"] (:value made)) (str "one task of the :user template's kind, driven from outside: " (pr-str made)))
     (is (and (not (contract/error? again)) (:shared again) (= (:agent one) (:agent again))) (str "the parked agent is answered, not a second spawn: " (pr-str again)))))
-
-;; Estimate: five server round trips (~0.5M each): ~2.5M; 4,000,000. In root: two seeks (the session task, its agent key)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000}} a-sessions-agent-is-its-areas-whoever-attached-it
-  ;; docs/server.md#ops (root, 2026-11-16: an act is addressed by its session's task or by the agent named, never by who attached
-  ;; last): the client named <area> is session/<area>'s agent whichever client attached it, before or after; another client's
-  ;; attach shares the live agent and moves nothing. Red before: the last attach's client held it (:seon.agent/holder), so
-  ;; another-session's attach took it from the area's client
-  (let [[one two who three who-after] (at/in-agent (fn [{:keys [ns]}]
-                                                     (let [i (str "session/" ns) area (str ns)]
-                                                       [{:op :attach :task i :template "user" :client "checkout-old"}
-                                                        {:op :attach :task i :template "user" :client area}
-                                                        {:op :eval :agent "root" :code (str "(seon.server/connection-agent sys {:client " (pr-str area) "})")}
-                                                        {:op :attach :task i :template "user" :client "another-session"}
-                                                        {:op :eval :agent "root" :code (str "(seon.server/connection-agent sys {:client " (pr-str area) "})")}
-                                                        (end-session-form i)])))]
-    (is (some? (:agent one)) (pr-str one))
-    (is (= (:agent one) (:agent two)) "the same agent")
-    (is (= (name (:agent one)) (:value who)) (str "its area client's agent: " (pr-str who)))
-    (is (:shared three) (str "another named client shares it: " (pr-str three)))
-    (is (= (name (:agent one)) (:value who-after)) (str "and the area client's agent is still its session's: " (pr-str who-after)))))
 
 (deftest ^{:seon.test/estimate {:ticks 300000}} an-inbox-line-runs-on-its-connection-and-holds-no-worker
   ;; part 2: seon_inbox waits, so it runs on the connection's fiber (which parks), never one of the 16 :server-op worker threads
@@ -705,7 +686,7 @@
         [ctx proved after live]
         (at/in-agent (fn [{:keys [agent]}]
                        [{:op :context :agent agent}
-                        {:op :prove :agent agent :names ["seon.union-test/a-message-and-its-reply-on-two-branches-are-one-query"]}
+                        {:op :prove :agent agent :names ["seon.db-test/a-question-across-branches-is-one-query"]}
                         "(+ 1 2)"
                         (alive agent)]))]
     (is (string? (:context ctx)) (pr-str ctx))
@@ -955,28 +936,29 @@
 (deftest ^{:seon.test/estimate {:ticks 3000000}} an-inbox-reads-a-message-a-merge-carried-onto-main
   ;; deps' reproduction (result/d1027635 at deps' agent), 2026-11-16: a merge up carries a branch's facts onto main with their own, older
   ;; transactions, so a message linked on a branch before main moved arrives on main below a since its reader already read, and a read of
-  ;; "links after since by tx" misses it. An inbox reads what is new against main's commit at since: the recipient's links now minus those
-  ;; that commit holds, whatever a link's tx. Latent today (messages are written on main only); live once a reply travels by merge. Red
+  ;; "links after since by tx" misses it. An inbox reads what is new against main's commit at since: the messages to the recipient now that
+  ;; that commit does not hold (seon.task/undelivered, as an agent's delivery reads its branch), whatever a link's tx. Latent today (messages are written on main only); live once a reply travels by merge. Red
   ;; before: the tx filter answered none
   (let [cfg {:store {:backend :memory :id (random-uuid)} :keep-history? true
              :initial-tx [{:db/ident :seon.agent/key :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
                           {:db/ident :seon.message/id :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
                           {:db/ident :seon.message/body :db/valueType :db.type/string :db/cardinality :db.cardinality/one}
+                          {:db/ident :seon.message/sent-ms :db/valueType :db.type/long :db/cardinality :db.cardinality/one}
                           {:db/ident :seon.message/to :db/valueType :db.type/ref :db/cardinality :db.cardinality/many :db/index true}]}
         _ (d/create-database cfg)
         m (d/connect cfg)
         _ (d/transact m [{:seon.agent/key "k1"}])
         _ (d/branch! m :db :b)
         b (d/connect (assoc cfg :branch :b))
-        tb (:max-tx (:db-after (d/transact b [{:seon.message/id "m0" :seon.message/body "by a merge" :seon.message/to [[:seon.agent/key "k1"]]}])))
-        _ (d/transact m [{:seon.message/id "m1" :seon.message/body "on main" :seon.message/to [[:seon.agent/key "k1"]]}])
+        tb (:max-tx (:db-after (d/transact b [{:seon.message/id "m0" :seon.message/body "by a merge" :seon.message/sent-ms 1 :seon.message/to [[:seon.agent/key "k1"]]}])))
+        _ (d/transact m [{:seon.message/id "m1" :seon.message/body "on main" :seon.message/sent-ms 2 :seon.message/to [[:seon.agent/key "k1"]]}])
         read-db @m
         since (:max-tx read-db)
         _ (d/transact m (vec (filter #(= tb (:tx %)) (d/datoms @b :eavt))))]
     (is (some #(and (= :seon.message/to (:a %)) (< (:tx %) since)) (d/datoms @m :eavt)) "the carried link keeps its older tx, below since")
-    (is (= ["by a merge"] (mapv :body (#'seon.server/inbox-messages @m "k1" read-db))) "read against the commit at since, it is new")
-    (is (= [] (#'seon.server/inbox-messages read-db "k1" read-db)) "nothing new against itself")
-    (is (= ["by a merge" "on main"] (sort (mapv :body (#'seon.server/inbox-messages @m "k1" nil)))) "with nothing read, every message")
+    (is (= ["by a merge"] (mapv :body (task/undelivered @m read-db "k1"))) "read against the commit at since, it is new")
+    (is (= [] (task/undelivered read-db read-db "k1")) "nothing new against itself")
+    (is (= ["by a merge" "on main"] (sort (mapv :body (task/undelivered @m nil "k1")))) "with nothing read, every message")
     (d/release m) (d/release b)))
 
 ;; Estimate: one index of an empty test branch and a map over two agents, ~0.5M

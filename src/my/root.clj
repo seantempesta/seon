@@ -440,13 +440,21 @@
                            w @(root/transact-main! sys (conj tx {:seon.system/id :root :seon.system/source fact}))]
                        (if (contract/error? w) w fact))))))))
 
-(defn union
-  "Every branch's history as one db (seon.union): (d/q '[:find ... :where ...] (my.root/union
-  sys)) asks what happened across every branch; each datom's transaction names its branch
-  (:seon.tx/branch). Built at the first ask (about 1 s at 50k datoms), then kept current by
-  every commit (about 1 ms each)."
-  {:malli/schema [:=> [:cat :seon.system/sys] :seon.host/db]}
-  [sys] (:db @(root/union sys)))
+(defn history
+  "Branch b's own history (:db names main), a source for a query across branches: (d/q '[:find ... :in $m $b :where [$m ...]
+  [$b ...]] (my.root/history sys :db) (my.root/history sys b)) joins what main and b each wrote. Nothing is kept: each source is its
+  branch's own indexes (seon.db/branch-history). See docs/storage.md#a-question-across-branches."
+  {:malli/schema [:=> [:cat :seon.system/sys :seon.db/branch] :seon.host/db]}
+  [sys b] (let [conn (:conn sys)] (pdb/branch-history conn (pdb/on-main (pdb/conn-main conn) b))))
+
+(defn across
+  "Query q (with inputs after the db) over every branch's history, main's and each branch under it: {branch result}, a query on each
+  branch's own indexes, O(branches x the query), nothing kept. See docs/storage.md#a-question-across-branches."
+  {:malli/schema [:=> [:cat :seon.system/sys :any [:* :any]] [:map-of :seon.db/branch :any]]}
+  [sys q & inputs]
+  (let [conn (:conn sys) main (pdb/conn-main conn)]
+    (into {} (for [b (cons main (map #(pdb/on-main main %) (pdb/of-main main (set (d/branches conn)))))]
+               [b (apply d/q q (pdb/branch-history conn b) inputs)]))))
 
 (defn generation
   "The next generation on main (seon.reconcile/generation): the last merges commit built,

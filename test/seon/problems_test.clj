@@ -412,7 +412,7 @@
                  ;; the remainder: answers, report-with, health-with (and problem-unlinked inside it, over the derived rows as health hands them), and the folds
                  :fixed (let [derived (#'problems/other-derived db ans (mapv :e (d/datoms db :aevt :seon.task/id)))]
                           #(let [a (problems/answers db)]
-                             (#'problems/health-with db a (:classes (#'problems/report-with db a {} nil)) derived)))}
+                             (#'problems/health-with db a (:classes (#'problems/report-with db a {})) derived)))}
         measured (update-vals classes calls-of)
         ;; 74 -> 86 -> 88 -> 89 on 2026-11-10 (uncited-tasks every ready task, stale-binary, waived-proof), one total; per class since. Each bound is the contracted calls measured on this world.
         bounds {:stale-pin 2           ; the pins of the branch scheme
@@ -519,7 +519,8 @@
 (defn history-input
   "The flatness proof's input at k: the health of main with 4 problems of each class beside k finished
   tasks, each merged by an agent of its own as production writes it (judge-tx records its cost verdict and its
-  waste too), then main one task's ending later: [health base head moved]."
+  waste too), then main one task's ending later: [health base head moved live], live the recorded classes."
+  {:malli/schema [:=> [:cat :int] [:tuple :map :any :any [:sequential :any] :map]]}
   [k] (let [base (d/db-with (world)
                             (vec (for [i (range k)]
                                    (ended (str "t/h" i)
@@ -529,7 +530,8 @@
                                            :seon.task/waste {:turns 1}}))))
             head (d/db-with base [{:seon.agent/key "b/h0" :seon.agent/ended-ms 4}
                                   {:seon.task/id "t/h0" :seon.task/merged-t 7}])]
-        [(problems/health base) base head (diff base head)]))
+        ;; the recorded classes as the render proc's store keeps them (seon.problems/recorded-live), read here outside the measure
+        [(problems/health base) base head (diff base head) (:classes (problems/report head))]))
 
 (defn own-input
   "The proof's input at k: a db with k finished tasks beside the agent of one: [db agent-entity]."
@@ -991,7 +993,7 @@
         page (str "# P\n\nIt reads `" v "` and `" w "`.\n")
         db1 (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" page}))
         same? (fn [base head]
-                (let [moved (problems/health-moved (problems/health base) base head (diff base head)) whole (problems/health head)]
+                (let [moved (problems/health-moved (problems/health base) base head (diff base head) (:classes (problems/report head))) whole (problems/health head)]
                   (and (= (set (keys (:classes whole))) (set (keys (:classes moved))))
                        (every? #(= (set (get-in whole [:classes % :rows])) (set (get-in moved [:classes % :rows])))
                                (keys (:classes whole))))))
@@ -1002,13 +1004,13 @@
       (let [db2 (d/db-with db1 [died])
             db3 (d/db-with db2 [{:seon.task/id "t/x" :seon.task/outcome :merged}])]
         (is (same? db1 db2))
-        (is (pos? (get-in (problems/health-moved (problems/health db1) db1 db2 (diff db1 db2)) [:classes :dead :n])))
+        (is (pos? (get-in (problems/health-moved (problems/health db1) db1 db2 (diff db1 db2) (:classes (problems/report db2))) [:classes :dead :n])))
         (is (same? db2 db3))
-        (is (zero? (get-in (problems/health-moved (problems/health db2) db2 db3 (diff db2 db3)) [:classes :dead :n])))))
+        (is (zero? (get-in (problems/health-moved (problems/health db2) db2 db3 (diff db2 db3) (:classes (problems/report db3))) [:classes :dead :n])))))
     (testing "a docstring changed under the text opens a stale section"
       (let [db2 (change-meaning db1 v)]
         (is (same? db1 db2))
-        (is (= 1 (get-in (problems/health-moved (problems/health db1) db1 db2 (diff db1 db2)) [:classes :stale-section :n])))
+        (is (= 1 (get-in (problems/health-moved (problems/health db1) db1 db2 (diff db1 db2) (:classes (problems/report db2))) [:classes :stale-section :n])))
         (testing "and editing the section closes it"
           (is (same? db2 (d/db-with db2 (seon.doc/load-tx db2 "demo" {"demo/p.md" (str page "\nMore.\n")})))))))
     (testing "a page added that an unchanged section links to"
@@ -1020,7 +1022,7 @@
       (let [db2 (d/db-with db1 [died])
             db3 (d/db-with db2 [{:seon.task/id "fix/x" :seon.task/ns 'fix :seon.task/name "x" :seon.task/plan "p" :seon.task/execution :held
                                  :seon.task/branch :f :seon.task/kind :work :seon.task/evidence {:kind :error :from "t/x"}}])
-            moved (problems/health-moved (problems/health db2) db2 db3 (diff db2 db3))
+            moved (problems/health-moved (problems/health db2) db2 db3 (diff db2 db3) (:classes (problems/report db3)))
             whole (problems/health db3)]
         (is (= (get-in whole [:classes :dead :rows]) (get-in moved [:classes :dead :rows])))))))
 

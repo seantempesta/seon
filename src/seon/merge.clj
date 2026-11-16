@@ -421,12 +421,23 @@
         derived (:derived-attrs (pdb/index))
         fact? (fn [{:keys [e a]}] (and (not (txe e)) (keyword? a) (not= "db" (namespace a)) (not (derived a))))
         as (fn [side] (fn [dt] {:e (:e dt) :a (:a dt) :v (:v dt) :tx (:tx dt) :side side}))
-        held? (fn [db {:keys [e a v]}] (some? (first (d/datoms db :eavt e a v))))]
-    ;; a fact is [e a v]: one both hold, asserted in different transactions (a diff compares whole datoms), is neither side's change
-    ;; (d8a0285ba8's regression on lb76: 712 facts both held were retracted)
-    {:facts (into (into [] (comp (filter fact?) (remove #(held? from %)) (map (as :retract))) gone)
-                  (comp (filter fact?) (remove #(held? base %)) (map (as :add))) added)
-     :declared (into (sorted-set) (comp (filter #(= :db/ident (:a %))) (remove #(held? base %)) (map :v)) added)}))
+        ;; a fact is [e a v], netted from what the change itself holds, never sought again: each assertion counts +1 and each
+        ;; retraction -1, so one retracted and asserted again since base (or both held under different transactions, a diff
+        ;; comparing whole datoms) nets 0, no side's change (d8a0285ba8's regression on lb76: 712 facts both held were retracted).
+        ;; The two seeks a datom it replaces cost 2.7 MB of 6.4 at 840 facts (result/bb148f80)
+        eav (juxt :e :a :v)
+        ;; only an [e a v] the change both retracted and asserted can net away: a change that retracted nothing (a branch adding
+        ;; forms) is its assertions as they are, no key built a datom
+        both (when (seq gone) (let [g (into #{} (map eav) gone)] (into #{} (comp (map eav) (filter g)) added)))
+        net (when (seq both)
+              (as-> (transient {}) n (reduce #(let [k (eav %2)] (if (both k) (assoc! %1 k (dec (get %1 k 0))) %1)) n gone)
+                    (persistent! (reduce #(let [k (eav %2)] (if (both k) (assoc! %1 k (inc (get %1 k 0))) %1)) n added))))
+        moved? (fn [sign] (fn [dt] (let [k (when net (eav dt))] (or (nil? k) (not (contains? net k)) (= sign (net k))))))
+        ;; one fact an [e a v], the last of its datoms (the transaction that wrote the net value, by-tx's): only a netted key repeats
+        one (fn [side] (if net (fn [xs] (vals (into {} (map (juxt eav (as side))) xs))) (fn [xs] (map (as side) xs))))]
+    {:facts (into (vec ((one :retract) (into [] (comp (filter fact?) (filter (moved? -1))) gone)))
+                  ((one :add) (into [] (comp (filter fact?) (filter (moved? 1))) added)))
+     :declared (into (sorted-set) (comp (filter #(= :db/ident (:a %))) (filter (moved? 1)) (map :v)) added)}))
 
 (defn- identity-of
   "Entity e's identity on db, [identity-attribute value] by the entity index's :identity-schemas, or nil when it has none: the one
@@ -458,9 +469,19 @@
   docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] :map]}
   [base from into-db]
-  (let [to-into (memoize (fn [e] (or (when-let [[a v] (identity-of from e)] (pdb/eid into-db a v)) e)))
+  (let [{:keys [declared] :as fx} (facts base from)
+        ;; only an entity made since base can be another id on into-db (one base holds is the same id on both: both descend from
+        ;; it), and all its datoms are the change's: its identity is read from the facts in hand, by the entity index's order of
+        ;; identity attributes (identity-of's), never sought; an entity with none, or one base holds, is its own id. The seeks
+        ;; per identity attribute it replaces were 6.8 MB of mapped's 13.2 at 840 facts (result/bb148f80)
+        rank (into {} (map-indexed (fn [i [a]] [a i])) (:identity-schemas (pdb/index)))
+        ids (reduce (fn [m {:keys [e a v side]}]
+                      (if-let [r (and (= :add side) (rank a))]
+                        (let [[r0] (get m e)] (if (or (nil? r0) (< r r0)) (assoc m e [r a v]) m))
+                        m))
+                    {} (:facts fx))
+        to-into (memoize (fn [e] (or (when-let [[_ a v] (ids e)] (pdb/eid into-db a v)) e)))
         ref? (fn [a] (= :db.type/ref (get-in (:schema from) [a :db/valueType])))
-        {:keys [declared] :as fx} (facts base from)
         fs (mapv (fn [{:keys [e a v] :as f}] (assoc f :e0 e :v0 v :e (to-into e) :v (if (ref? a) (to-into v) v))) (:facts fx))
         many? (fn [a] (= :db.cardinality/many (get-in (:schema from) [a :db/cardinality])))
         k-of (fn [{:keys [e a v]}] (if (many? a) [:datum e a v] [:datum e a]))

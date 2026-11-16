@@ -464,24 +464,6 @@
 
 ;; Estimate: one :avet seek of the agent's message links, a tx filter and an entity read each, O(m) for m messages to it (~10k ticks a
 ;; message [M]); no write. A wait parks the connection's fiber (no worker, no thread) on await-message, its bound held by the api
-(defn- inbox-messages
-  "The messages main db holds to agent key k that seen-db (main's db at the reader's since; nil, none read) did not, oldest first, each
-  {:id :from :body :sent-ms :t}, :from by name and :t the link's transaction. Reads only. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.host/db :string [:maybe :seon.host/db]] [:vector :map]]}
-  [db k seen-db]
-  (if-let [e (pdb/eid db :seon.agent/key k)]
-    ;; a link seen-db does not hold, whatever its tx: a merge carries a link with its older tx (deps' reproduction), so new is a set
-    ;; difference of the two seeks, O(the messages to k), never a filter by tx
-    (let [seen (if seen-db (into #{} (map :e) (some->> (pdb/eid seen-db :seon.agent/key k) (d/datoms seen-db :avet :seon.message/to))) #{})]
-      (->> (d/datoms db :avet :seon.message/to e)
-           (remove #(seen (:e %)))
-           (map (fn [dt] (let [m (d/entity db (:e dt))]
-                           {:id (:seon.message/id m) :from (task/sender-name (:seon.message/from m)) :body (:seon.message/body m)
-                            :sent-ms (:seon.message/sent-ms m) :t (:tx dt)})))
-           (sort-by (juxt :t :id))
-           vec))
-    []))
-
 (defn- inbox-answer
   "seon_inbox: req's agent's messages linked after since, at once or at the first commit that links one, else typed
   :seon.server/no-message at its bound; writes nothing, and :t is the next since. See docs/users.md#messages."
@@ -511,7 +493,7 @@
                                            (d/as-of db since)))
             seen (into #{} (comp (mapcat #(some->> (pdb/eid seen-db :seon.agent/key %) (d/datoms seen-db :avet :seon.message/to))) (map :e)) (when seen-db ks))
             opts (assoc opts :seen seen)
-            answer (fn [db] (when-let [ms (not-empty (vec (sort-by (juxt :t :id) (mapcat #(inbox-messages db % seen-db) ks))))] {:agent k :messages ms :t (:max-tx db)}))]
+            answer (fn [db] (when-let [ms (not-empty (vec (sort-by (juxt :t :id) (mapcat (fn [k] (map #(update % :from task/sender-name) (task/undelivered db seen-db k))) ks))))] {:agent k :messages ms :t (:max-tx db)}))]
         (or (answer db)
             ;; the wait starts at the t this read: a message linked after it wakes it
             (loop [t0 (:max-tx db)]
@@ -658,14 +640,13 @@
   (if-let [{:keys [task env]} (work-of sys ag)]
     ;; a session's land: its checkout's changed files onto its agent's branch first, one it cannot read refusing the land, since a
     ;; judgement of part of the files would be wrong; then the end, as a turn loop's end is written, so the judge reads it. Which files
-    ;; changed is root's to read: seon.system/catch-up of the checkout against its merge base with main (seon.fx/base-commit),
+    ;; changed is root's to read: seon.system/catch-up of a session's files, read against its merge base with main (its default),
     ;; so a checkout behind main names only what its own branch changed, never main's newer files as its own (read against the
     ;; branch's held tree, a checkout 36 commits behind named 42 files where its branch changed 16 [M result/aad1e86e], and the
     ;; import would have written main's older versions onto the branch); the agent imports them by name (my.branch/import!)
     (let [co (:checkout req)
-          base-tree (when co (some->> (fx/base-commit co) (fx/tree-of co)))
           diff (when co (let [b @(c/branch-db sys (:branch env))]
-                          (if (contract/error? b) b (c/catch-up (:db b) co (cond-> {:fact? false} base-tree (assoc :tree base-tree))))))
+                          (if (contract/error? b) b (c/catch-up (:db b) co {:fact? false}))))
           paths (when (map? diff) (into (vec (:paths diff)) (map :path) (:skipped diff)))
           imported (cond (nil? co) nil
                          (contract/error? diff) diff
@@ -695,9 +676,6 @@
                               (:stopped j) (refused (str "root stopped while judging " task))
                               ;; a reconciler step threw while judging: its flight never ends, the defect is the answer
                               (:defect j) {:task task :defect (select-keys (:defect j) [:seon.error/type :seon.error/message])}
-                              ;; :reprove, the one :merge's answer (main's program moved since its proof, its branch now holding main): handed
-                              ;; back again, which proves again on the branch, as a model agent's turn loop does when it is told so
-                              (= :reprove (outcome db)) (op-answer sys ag req)
                               ;; a defect and a judge that left the task :running are the judge's own answers (j), never re-read here
                               :else (let [files (fx/uncommitted (str (cfg/checkout)))]
                                         (cond-> (verdict-line db task (:main r))
@@ -721,16 +699,15 @@
 
 (defn- own-agent
   "The agent req acts on: the agent it names (or root); else, for :done or :eval from a client named <area>, its session's agent
-  (session/<area>'s, seon.task/agent-key), whatever attached it last; else the answer that it names none. An act is addressed by its
+  (`connection-agent`, the one reading of it), whatever attached it last; else the answer that it names none. An act is addressed by its
   session's task or by the agent named, never by who attached last. See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.system/sys :map] :any]}
   [sys req]
   (let [named (some-> (:agent req) (#(if (= "root" %) :root (keyword %))))
-        cl (:client req)
-        session (when cl (str "session/" cl))]
+        cl (:client req)]
     (cond named named
           (not (and cl (own-ops (:op req)))) nil
-          :else (or (some-> (task/agent-key @(:conn sys) session) keyword)
+          :else (or (some-> (connection-agent sys req) keyword)
                     (refused (str "client " cl " has no session agent (session/" cl "): name the agent (agent=), or attach task=session/" cl " template=user"))))))
 
 (defn answer

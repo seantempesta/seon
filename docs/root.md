@@ -33,7 +33,7 @@ The reconciler starts an agent for each ready task and judges the agent's end fr
 
 ```seon.reconcile/actions``` derives what root does next from the index (`seon.reconcile/index`, `seon.reconcile/observe`), in order: reap, kill, close, gate, a `:merge` of each ready task (each alone, while no merge task works), then starts (a spawn, or a wake of a parked agent) up to `:seon.config.agent/max-running` (merges up to `:seon.config.merge/max-running`). A pass costs what changed plus what is in flight, never the number of tasks.
 
-A ready task merges alone through the writer's one `:merge`, which merges main into its branch in the same step, so it is never behind; when main's program moved since its proof the answer is `:reprove`, the task stands `:behind` and proves again on its branch, which now holds main, never counted or held (plan item 10, `seon.reconcile-test/a-ready-task-merges-alone-and-a-reprove-proves-again-never-held`). An end its turn loop never wrote is a dead agent ([turn](turn.md#the-end)).
+A ready task merges alone through the writer's one `:merge`, which merges main into its branch in the same step, so it is never behind; when main's program moved since its proof the writer proves R, the tests whose reads main moved, before it merges, and the task is never told to prove again (plan item 10, `seon.reconcile-test/a-ready-task-merges-alone-and-a-reprove-proves-again-never-held`). An end its turn loop never wrote is a dead agent ([turn](turn.md#the-end)).
 
 The judge asks the agent's REPL for its proofs' results, reads the branch once (the writer's `:branch-diff`), stops the agent unless it parks, and writes the decision with `seon.reconcile/judge-tx`: outcome, reasons, results, contract gaps, unmerged keys, and the task content carried to main. `seon.reconcile/done-explain` decides ([tasks](tasks.md#the-done-rule)); a refused or dead task is held (```seon.reconcile/hold-tx```, [tasks](tasks.md#a-refused-run-is-held-for-root)). An outside agent's `seon_done` enters the same judge ([server](server.md#ops)).
 
@@ -49,7 +49,7 @@ A caller outside root's procs (the server, a test, the dashboard) reaches root t
 
 - agents: ```seon.system/spawn!```, ```seon.system/clone!```, ```seon.system/submit!```, ```seon.system/message!```, ```seon.system/opened!```, ```seon.system/interrupt!```, ```seon.system/kill!```;
 - tasks and branches: ```seon.system/release!```, ```seon.system/run-tests!```, ```seon.system/merge-main!```, ```seon.system/judge!```; a branch reaches main only through a merge task;
-- the store: ```seon.system/transact-main!``` (`{:flush? true}` answers after the durable flush), ```seon.system/effect!```, ```seon.system/store-clean!```, ```seon.system/branch-db```, ```seon.system/branch-diff```, ```seon.system/union``` and ```my.root/union``` (every branch's history as one db, [storage](storage.md));
+- the store: ```seon.system/transact-main!``` (`{:flush? true}` answers after the durable flush), ```seon.system/effect!```, ```seon.system/store-clean!```, ```seon.system/branch-db```, ```seon.system/branch-diff```, and ```my.root/history``` and ```my.root/across``` (a question across branches, one query over their own histories, [storage](storage.md#a-question-across-branches));
 - what it shows: ```seon.system/state```, ```seon.system/view-numbers```, ```seon.system/errors```, ```seon.system/events```, ```seon.system/gone-statuses``` (a dead agent's last `:seon.config.root/death-stderr-bytes` of stderr is kept with its death).
 
 ## Holders and refused spawns

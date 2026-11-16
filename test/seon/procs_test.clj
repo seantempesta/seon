@@ -1287,26 +1287,8 @@
   (let [{:keys [fail error]} (run-tests 'seon.procs-test)]
     (System/exit (if (zero? (+ fail error)) 0 1))))
 
-;; Estimate: 1 test-branch! 1M + building the union at the first :union (the seed's ~2,000 datoms re-added across branches, 5k x 2,000 = 10M) + 2 commits' datoms added and 1 branch + connect + 2 transacts (~1M) ~ 12M, about 1e7 ~ 10,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 10000000}} the-writer-keeps-the-union-current
-  ;; seon.union through the writer: built at the first :union, then every main commit and
-  ;; every agent's commit notice add their datoms, so one query over its answer sees both
-  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
-        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
-        main (:branch cfg)
-        ab (pdb/on-main main :a1)
-        union-of (fn [st] (let [[st outs] (step #'writer/writer-proc st :in {:op :union :dest {:rid 9}})] [st (:r (first (:to-api outs)))]))
-        bodies (fn [db] (set (d/q '[:find ?b ?br :where [?m :seon.message/body ?b ?tx] [?tx :seon.tx/branch ?br]] db)))]
-    (d/branch! conn main ab)
-    (let [[st r] (union-of st)
-          _ (is (true? (:ok r)))
-          [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:seon.message/id "m1" :seon.message/from {:seon.system/id :root} :seon.message/body "from main"}] :dest {:rid 1}})
-          bc (pdb/connect (assoc cfg :branch ab))
-          _ (d/transact bc {:tx-data [{:seon.message/id "r1" :seon.message/from {:seon.agent/key "a1"} :seon.message/body "from a1"}] :tx-meta (pdb/tx-meta ab)})
-          _ (d/release bc)
-          [st _] (step #'writer/writer-proc st :in {:op :agent-commit :branch :a1})
-          [_ r2] (union-of st)]
-      (is (= #{["from main" main] ["from a1" ab]} (bodies (:db r2))) "a main commit and an agent's commit, each under its branch"))))))
+;; the-writer-keeps-the-union-current deleted with seon.union: a question across branches is one query over their own
+;; histories (seon.db-test/a-question-across-branches-is-one-query)
 
 ;; Estimate: 4 step-fn calls x 10k (pure state in, state out) ~ 40,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 40000}} a-fork-server-step-that-throws-answers-with-the-error-and-its-state-is-unchanged
@@ -1580,9 +1562,22 @@
             _ (d/release bc2)
             proved-t2 (:max-tx @conn)
             [st _] (move-f1 st "app.m0/f1-main-m4")
-            [_ outs] (step #'writer/writer-proc st :in {:op :merge :branch b2 :proved-t proved-t2 :dest {:rid 2}})
-            r2 (:r (first (filter #(= {:rid 2} (:dest %)) (:to-api outs))))]
-        (is (= {:reprove true :tests #{'app.m0-test/reads-f1}} (select-keys r2 [:reprove :tests])) (pr-str r2))))))))
+            [st outs] (step #'writer/writer-proc st :in {:op :merge :branch b2 :proved-t proved-t2 :dest {:rid 2}})
+            answered (fn [outs] (:r (first (filter #(= {:rid 2} (:dest %)) (:to-api outs)))))
+            ask (first (filter #(= :request (:op %)) (:to-api outs)))]
+        (is (nil? (answered outs)) "the merge's caller waits for the merge, never told :reprove")
+        (is (= {:op :prove :branch b2 :mode :judge :names ['app.m0-test/reads-f1]} (select-keys (:req ask) [:op :branch :mode :names]))
+            (str "R alone is asked of the test service, through the api: " (pr-str ask)))
+        (is (= [:writer :answers] (:route ask)) "answered on the writer's own in-port")
+        (testing "a red R answers the caller a refusal naming it, and nothing merges"
+          (let [t0 (:max-tx @conn)
+                [_ outs] (step #'writer/writer-proc st :answers {:tag (:tag ask) :r {:red ['app.m0-test/reads-f1] :results {'app.m0-test/reads-f1 :fail}}})]
+            (is (= ['app.m0-test/reads-f1] (:red (answered outs))) (pr-str (answered outs)))
+            (is (= t0 (:max-tx @conn)) "main did not move")))
+        (testing "a green R merges in the step that takes it"
+          (let [[_ outs] (step #'writer/writer-proc st :answers {:tag (:tag ask) :r {:red [] :results {'app.m0-test/reads-f1 :pass}}})]
+            (is (:merged? (answered outs)) (pr-str (answered outs)))
+            (is (some #(= "the branch's own change" (:v %)) (d/datoms @conn :aevt :note/text)) "main holds the branch's change")))))))))
 
 ;; docs/source.md#a-landing-enters-main-as-data, the one load path: the writer process loads main's program by the diff from the db it last
 ;; loaded to each commit that moves the program (seon.program/load-diff!), never from a commit's ops alone, so a change no commit's ops
@@ -1623,8 +1618,11 @@
                                                                :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (- x))"}
                                                               [:db/add g :var/form "f1'"]]})
         main-t (:max-tx @conn)
-        [_ outs] (step #'writer/writer-proc st :in {:op :merge :branch b :proved-t proved-t :dest {:rid 1}})
-        r (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))]
-    (is (:reprove r) (str "main's program moved since the proof: prove again: " (pr-str r)))
+        [st outs] (step #'writer/writer-proc st :in {:op :merge :branch b :proved-t proved-t :dest {:rid 1}})
+        r (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))
+        ask (first (filter #(= :request (:op %)) (:to-api outs)))]
+    (is (nil? r) (str "main's program moved since the proof: the caller waits for the proof, never told :reprove: " (pr-str r)))
+    (is (= {:op :prove :branch b :mode :judge :names nil} (select-keys (:req ask) [:op :branch :mode :names]))
+        "no result of the branch's own: its proof's reads are unknown, so the judge's whole plan is asked")
     (is (= main-t (:max-tx @conn)) "main did not move")
     (is (= "app.m0/f1-main" (:form/id (:var/form (d/entity (pdb/head conn b) [:var/name 'app.m0/f1])))) "the branch holds main's change, ready to prove")))))

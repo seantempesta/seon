@@ -2274,3 +2274,31 @@
     (is (= held (set (keys (dissoc (:seon.eval/result e) :seon.result/hash)))) "its result holds each attribute the result schema declares that it has")
     (is (= r back) "and the response reads back whole")
     (is (= (keys back) (filter (set (keys r)) order)) "its keys in the order :seon.repl/answer declares")))
+
+;; docs/storage.md#a-question-across-branches: what main and a branch each wrote is one query over their own histories (d/q's
+;; several sources), never one copy of every branch's history (seon.union, deleted: 2.5B ticks and 2.26 GB built in the writer's
+;; step, then caught up on every commit). The owner's example: root's message on main, the agent's reply on its branch.
+;; Estimate: 1 test-branch! 1M + a branch and 2 small transacts 0.6M + 2 history reads and one 2-source query of ~6 clauses ~0.5M ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-question-across-branches-is-one-query
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [main (:branch cfg)
+           b (pdb/on-main main :a1)
+           _ (d/branch! conn main b)
+           bc (pdb/connect (assoc cfg :branch b))
+           conversation '[:find ?body ?reply
+                          :in $m $b
+                          :where [$m ?m :seon.message/from ?root] [$m ?root :seon.system/id :root] [$m ?m :seon.message/body ?body]
+                                 [$b ?r :seon.message/from ?f] [$b ?f :seon.agent/key "demo/f#1"] [$b ?r :seon.message/body ?reply]]]
+       (try
+         ;; root writes on main after the branch was cut: the branch never holds it, and main never holds the reply
+         (d/transact conn {:tx-data [{:seon.message/id "m1" :seon.message/from {:seon.system/id :root} :seon.message/body "main moved, merge main"}]
+                           :tx-meta (pdb/tx-meta main)})
+         (d/transact bc {:tx-data [{:seon.message/id "r1" :seon.message/from {:seon.agent/key "demo/f#1"} :seon.message/body "merged; 3 forms changed"}]
+                         :tx-meta (pdb/tx-meta b)})
+         (is (empty? (d/q conversation (pdb/branch-history conn main) (pdb/branch-history conn main))) "main alone holds no reply")
+         (is (empty? (d/q conversation (pdb/branch-history conn b) (pdb/branch-history conn b))) "nor the branch alone root's message")
+         (is (= #{["main moved, merge main" "merged; 3 forms changed"]}
+                (d/q conversation (pdb/branch-history conn main) (pdb/branch-history conn b)))
+             "one query over the two branches' own histories joins them")
+         (finally (d/release bc) (d/delete-branch! conn b)))))))
