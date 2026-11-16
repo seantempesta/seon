@@ -1544,7 +1544,7 @@
                                              (assoc :todo rest-todo :pid os :exit status :no-progress stalled))))]
     (flow/update! (:flow @state) (fn [cfg] (-> cfg (update :procs dissoc cpid) (update :conns #(filterv (fn [[[p]]] (not= cpid p)) %)))))
     (swap! state #(cond-> % (= os (:test-child %)) (dissoc :test-child)))
-    (if (and (seq rest-todo) (seq died) (not give-up?))
+    (if (and (seq rest-todo) (seq died) (not give-up?) (not (:draining st)))
       (fork-test-child st shard rest-todo)
       (assoc-in st [:shards shard :done] true))))
 
@@ -1560,6 +1560,20 @@
     (run-answered (-> st (update :run-dirs (fnil into []) (map (comp fx/run-dir :os) (vals (:children st))))
                       (assoc :threw e :children {} :by-os {})))))
 
+(defn child-stages
+  "Each test child of test run state st ({cpid {:os :shard :stage :test :done}}): :forked until its first test starts, :running (:test
+  the one running, take-value's) until its stream closes, :closed until its exit is reaped, then :ended with its :exit; :done the tests
+  it ended. Derived from the fold's own state at each ping, never stored, so a wait on a run names where each child stands. See
+  docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
+  {:malli/schema [:=> [:cat :map] [:map-of :any :map]]}
+  [st]
+  (into {} (for [[cpid {:keys [acc] :as c}] (:children st)]
+             [cpid (cond-> {:os (:os c) :shard (:shard c) :done (count (:ended acc))
+                            :stage (cond (some? (:status c)) :ended (:closed c) :closed
+                                         (or (:running acc) (seq (:ended acc))) :running :else :forked)}
+                     (:running acc) (assoc :test (:running acc))
+                     (some? (:status c)) (assoc :exit (:status c)))])))
+
 (defn test-run-step
   "One test run's fold, a proc of the agent's own graph (run-tests-forked adds it, and removes it once it has answered):
   at its start it forks a test child per shard (fork-test-child), each a proc of the graph whose values arrive on
@@ -1569,7 +1583,8 @@
   docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
   {:malli/schema :seon.step/step-fn}
   ([] {:ins {:seon.link/up "the values of this run's test children, each tagged with its child's proc id"} :outs {} :workload :io
-       :ping-map-fn (fn [st] {:children (count (:children st))})})
+       ;; each child's stage, so a run that waits says which child stands where (child-stages)
+       :ping-map-fn (fn [st] {:children (child-stages st)})})
   ([args]
    (let [ends (a/chan (cfg/value :seon.config.proofs/jobs))]
      (-> (select-keys args [:answer :plan :ticks :forked :say])
@@ -1581,6 +1596,9 @@
                      st
                      (try (run-answered (reduce-kv (fn [st i sh] (fork-test-child st i (:todo sh))) (assoc st :dealt true) (:shards st)))
                           (catch Throwable e (fold-threw st e))))
+     ;; drain: no child forked from now (no first deal, no refork of a death); those running end by their own bound (arm-wall!)
+     ;; and the stop that follows kills any left (docs/health.md#a-proc-that-does-not-drain)
+     ::flow/drain (assoc st :draining true :dealt true)
      ;; nothing it forked outlives it (a child's exit is still reaped by its watch)
      ::flow/stop (do (doseq [[_ c] (:children st)] (lib/kill! (:os c) (jolt.host/signal-number "KILL")))
                      (a/close! (:ends st))
