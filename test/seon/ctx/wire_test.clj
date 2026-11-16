@@ -381,11 +381,12 @@
         (is (= ['demo/helper] (:without-a-contract st)))
         (is (= [{:reason :contract-gap :vars ['demo/helper]}] (:refused st)))))))
 
-(deftest a-red-main-was-red-on-too-is-mains-and-is-said
+(deftest ^{:seon.test/estimate {:ticks 6000000 :bytes 60000000}} a-red-main-was-red-on-too-is-mains-and-is-said
   ;; THE FOCUS (docs/plan.md, 2026-11-16): "a red the change reaches blocks it, a red main also holds is main's, fixed forward by its
   ;; owner", as the judge reads it (seon.reconcile/judgment's :main-red). The agent's own status reads the same: a test red at the
   ;; branch's merge base is said as a fact and holds nothing (session/context's end said 5 stray reds main held while the judge found
   ;; nothing open, result/a8547af3); only a test the branch wrote or changed is offered the form that makes it a proof
+  ;; Estimate: a test branch with a program (~2M), five small transactions (~0.5M), one record build and status (~2M): ~4.5M; 6000000 ticks, 60 MB
   (ts/test-branch!
     (fn [_ conn]
       (d/transact conn (program-facts '[[demo-test/env-test "(deftest env-test (is (pinned?)))" []]
