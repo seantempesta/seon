@@ -356,11 +356,9 @@
   (pdb/after-fork! cfg)
   (let [conn (sock/conn fd)
         store (pdb/connect (assoc cfg :branch (pdb/main-branch cfg)))
-        ;; db0 at its commit, read through this process's own store; the boot server reads all
-        ;; of it once, so agents forked from here inherit it decoded (root does not hold it:
-        ;; docs/machine.md#what-a-process-owns-in-memory)
+        ;; db0 at its commit, read through this process's own store; nothing of it is read ahead: an agent reads what it
+        ;; needs through the node cache it inherits (docs/machine.md#what-a-process-owns-in-memory)
         db0 (d/commit-as-db store (d/commit-id db0))
-        _ (when boot? (pdb/preload! db0))
         ;; main's tests compiled now, at the boot server's start, while root writes its boot fact and imports
         ;; its source (about 1.3 s of a fresh root's first spawn, measured 2026-11-08): a commit the import
         ;; writes after this loads as changes (:tx), as a merge's does
@@ -449,7 +447,7 @@
   (drop-standby (:standby st)) (drop-standby (:standby-pending st))
   (some-> fd (lib/c-shutdown 1)) ; SHUT_WR; a lost server's socket is closed already
   ;; root's boot server leads its own group (main's setpgid): the group ended at once, so a stop never waits for the server
-  ;; to read its EOF, which a server still warming (preload!, its tests' load: ~35 s) did not do until it was done (every
+  ;; to read its EOF, which a server still warming (its tests' load: ~35 s) did not do until it was done (every
   ;; stop of a root under ~35 s old took 26-32 s). It writes nothing to the store, and at a stop its agents have ended.
   ;; A promoted server leads no group: kill answers false, and it exits on the EOF as before
   (let [ended (if (and pid (lib/kill! (- pid) 9)) :group-ended :eof)]

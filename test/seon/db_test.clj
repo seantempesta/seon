@@ -80,7 +80,7 @@
 (deftest a-reopened-store-issues-past-every-head
   ;; the page is reseeded from the heads when it opens, so a page lost (a crash, a deleted
   ;; file) re-issues no id a committed head holds; a store on disk of its own, removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
     (try
       (let [r (d/transact conn [{:db/id "n" :note/text "before" :note/agent :t}])
@@ -101,7 +101,7 @@
   program) holding n branches besides :db, each made from :db as a root's main is and given a commit
   of its own, opened once since, so its ids page is stamped. Its path is kept in stores-made."
   [n]
-  (let [path (str (seon.config/checkout) "/target/db-test-branched-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-branched-" (random-uuid))
         {:keys [conn cfg]} (pdb/open! :lmdb path 0 :db)]
     (swap! stores-made conj path)
     (doseq [i (range n) :let [b (keyword (str "b" i))]]
@@ -240,7 +240,7 @@
   ;; release; the open after it folds no roster, and its page and its next transaction are past every
   ;; head's ids (found by the scan itself, the oracle). A store on disk of its own, the last resort: the
   ;; page is a file beside data.mdb; removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-killed-" (random-uuid))]
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-killed-" (random-uuid))]
     (try
       (d/release (:conn (pdb/open! :lmdb path 0 :db)))
       (is (= {:signal 9}
@@ -265,7 +265,7 @@
   ;; taken before its last commits (cp: another inode), and one whose ids file was removed (a new file is
   ;; all zero, so a reused inode number is no stamp) each fold the roster at their open, and issue past
   ;; every head. Stores on disk of this test's own, the last resort; removed at the end
-  (let [base (str (seon.config/checkout) "/target/db-test-copied-" (random-uuid))
+  (let [base (str (System/getProperty "java.io.tmpdir") "/seon-db-test-copied-" (random-uuid))
         path (str base "/store")
         sh (fn [& args] (is (zero? (:exit (apply clojure.java.shell/sh args))) (str/join " " args)))]
     (try
@@ -304,7 +304,7 @@
   ;; its stamp's boot identity (word 2, native/ids.c's layout) through a mapping of the file: the open
   ;; folds the roster and stamps it again, and the open after that trusts it. A store on disk of its own,
   ;; the last resort; removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-reboot-" (random-uuid))]
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-reboot-" (random-uuid))]
     (try
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)] (commit-notes! conn :booted 2) (d/release conn))
       (let [[p _] (pdb/c-ids-open (str path "/ids"))
@@ -325,7 +325,7 @@
   ;; know it), and a copy that went further than the page (a clone that committed on: the kept page is
   ;; behind it, and trusting it would issue ids the store holds). Each open folds the roster and issues
   ;; past every head. Stores on disk of this test's own, the last resort; removed at the end
-  (let [base (str (seon.config/checkout) "/target/db-test-replaced-" (random-uuid))
+  (let [base (str (System/getProperty "java.io.tmpdir") "/seon-db-test-replaced-" (random-uuid))
         path (str base "/store")
         clone (str base "/clone")
         sh (fn [& args] (is (zero? (:exit (apply clojure.java.shell/sh args))) (str/join " " args)))]
@@ -351,7 +351,7 @@
 (deftest the-store-reports-its-map-use
   ;; a store on disk of this test's own, the last resort: what is proved is how an LMDB
   ;; store reports its map; removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-" (random-uuid))
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)]
     (try
       (let [{:keys [used-bytes map-bytes]} (pdb/map-use cfg)]
@@ -373,7 +373,7 @@
   ;; two processes at once each make 50 branches of one store (two roots on one store, as
   ;; parallel check steps or a standing root beside a run): every branch is listed. A store on
   ;; disk of this test's own, the last resort: the race is between processes; removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-race-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-race-" (random-uuid))
         _ (d/release (:conn (pdb/open! :lmdb path 0 :db)))
         jolt (str (seon.config/checkout) "/target/jolt/jolt")
         code (fn [tag] (pr-str `(do (require 'seon.db 'datahike.api)
@@ -401,7 +401,7 @@
   ;; between processes): two last used by a process that exits with them open, two by one SIGKILLed, one still
   ;; open in this process; seon.lib/remove-tree! deletes them: the tree is gone, this process holds no env
   ;; under it, and a store made again at a removed path is a new store that opens and writes.
-  (let [base (str (seon.config/checkout) "/target/tmp/deleted-store-test-" (random-uuid))
+  (let [base (str (System/getProperty "java.io.tmpdir") "/seon-deleted-store-test-" (random-uuid))
         dir (str base "/stores")
         paths (mapv #(str dir "/s" %) (range 5))
         jolt (str (seon.config/checkout) "/target/jolt/jolt")
@@ -431,7 +431,7 @@
 (deftest opening-a-kept-store-installs-the-attributes-it-lacks
   ;; a store on disk of this test's own, the last resort: what is proved is what a root's
   ;; open does to a kept store seeded before an attribute existed; removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-" (random-uuid))
         cfg (pdb/store-cfg :lmdb path)
         lacking (:db/ident (last pdb/schema))
         _ (d/create-database cfg)
@@ -458,7 +458,7 @@
   ;; a store seeded before content ids (its identities without :db/contentId): opening it
   ;; gives them their content ids; an entity it holds keeps its id, a new identity takes its
   ;; content id. A store on disk of this test's own, the last resort; removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-" (random-uuid))
         cfg (pdb/store-cfg :lmdb path)
         _ (d/create-database (pdb/made-cfg cfg))
         c0 (pdb/connect cfg)
@@ -482,7 +482,7 @@
   ;; a write applied run-ahead (datahike.writer/apply!, an agent's transact!) and not yet
   ;; committed is committed by the release (the :sync writer's shutdown drains it), never
   ;; dropped. A store on disk of this test's own, the last resort; removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))]
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-" (random-uuid))]
     (try
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
         (is (map? (dw/apply! conn {:tx-data [{:note/text "applied, not committed" :note/agent :t}] :tx-meta (pdb/tx-meta :db)})))
@@ -498,7 +498,7 @@
   ;; Datahike's throwable-promise, which on Jolt is no channel: the fiber threw and the caller
   ;; waited for ever (pure-tests' store-release-all-hang, after a store was removed). A store
   ;; on disk of this test's own, the last resort; removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))]
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-" (random-uuid))]
     (try
       (is (false? (d/database-exists? (pdb/store-cfg :lmdb path))) "no store at the path")
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)] (d/release conn true))
@@ -513,7 +513,7 @@
   ;; (konserve.jolt.lmdb/release-env!), so the new store opens its own files, never the old
   ;; mapping (which still held :db: "Database already exists"). A store on disk of this
   ;; test's own, the last resort; removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))]
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-" (random-uuid))]
     (try
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
         (d/transact conn {:tx-data [{:note/text "the first store's" :note/agent :t}] :tx-meta (pdb/tx-meta :db)})
@@ -532,7 +532,7 @@
   ;; reference that killed the process; it answers :lmdb-env-closed naming the store, and the
   ;; value is read before its last release. A store on disk of this test's own, the last
   ;; resort; removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))]
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-" (random-uuid))]
     (try
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)
             _ (d/transact conn {:tx-data [{:note/text "kept" :note/agent :t}] :tx-meta (pdb/tx-meta :db)})
@@ -554,7 +554,7 @@
   ;; and one create made here finishes. Each path then holds a whole store or none, and
   ;; the next open answers either. (It killed at the moment a data file showed, read by a busy loop of up
   ;; to 10 M directory listings: 0.25-147 G ticks a run, red at its budget.) Stores of this test's own
-  (let [base (str (seon.config/checkout) "/target/db-test-create-" (random-uuid))
+  (let [base (str (System/getProperty "java.io.tmpdir") "/seon-db-test-create-" (random-uuid))
         killed (fn [path ticks]
                  (lib/fork! {:child #(do (try (intr/run ticks (fn [] (pdb/open! :lmdb path 0 :db))) (catch Throwable _ nil))
                                          (lib/kill! (lib/c-getpid) 9))
@@ -577,7 +577,7 @@
   ;; store made before the attribute existed (every store before 2026-10-22) failed to open
   ;; (bin/check seed: "Bad entity attribute :seon.tx/runtime"). A store on disk of this test's
   ;; own, the last resort: what is proved is a root's open of a kept store; removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-runtime-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-runtime-" (random-uuid))
         made (pdb/made-cfg (pdb/store-cfg :lmdb path))]
     (try
       (d/create-database made)
@@ -595,7 +595,7 @@
   ;; next/runs/store-full-20261021, renamed from next/runs/store) was refused at its new path
   ;; with "Store identity mismatch". Now it is named by the id it records. A store on disk of
   ;; this test's own, the last resort: what is proved is a move and a copy; removed at the end
-  (let [base (str (seon.config/checkout) "/target/db-test-move-" (random-uuid))
+  (let [base (str (System/getProperty "java.io.tmpdir") "/seon-db-test-move-" (random-uuid))
         moved (str base "-moved")
         copied (str base "-copied")
         made (do (d/release (:conn (pdb/open! :lmdb base 0 :db))) (get-in (pdb/store-cfg :lmdb base) [:store :id]))
@@ -620,7 +620,7 @@
   ;; attributes before they became plain data, 2026-10-22) is refused at open, naming each such
   ;; attribute: never opened to fail at its first write. A store on disk of this test's own,
   ;; the last resort: what is proved is a root's open of a kept store; removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-types-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-types-" (random-uuid))
         made (pdb/made-cfg (pdb/store-cfg :lmdb path))
         old (mapv #(if (= :seon.model-call/basis (:db/ident %)) (assoc % :db/valueType :db.type/string) %) pdb/schema)]
     (try
@@ -635,7 +635,7 @@
   ;; a stored keyword is renamed by erasing the store, never by a migration (docs/storage.md#a-renamed-attribute): a store holding a retired name (here :schema.file/path, before
   ;; :file/path) would open, gain the new name and hold no text under it, and its next write-back would rewrite each resource from nothing. Refused at open, saying what to do.
   ;; A store on disk of this test's own, the last resort: what is proved is a root's open of a kept store
-  (let [path (str (seon.config/checkout) "/target/db-test-retired-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-retired-" (random-uuid))
         made (pdb/made-cfg (pdb/store-cfg :lmdb path))
         old (conj (vec pdb/schema) {:db/ident :schema.file/path :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity})]
     (try
@@ -716,7 +716,7 @@
   ;; (the standing root's store was made without history). A store on disk of this test's own,
   ;; the last resort: what is proved is a root's open of a kept store; removed at the end
   (doseq [kept? [false true]]
-    (let [path (str (seon.config/checkout) "/target/db-test-history-" (random-uuid))
+    (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-history-" (random-uuid))
           made (assoc (pdb/store-cfg :lmdb path) :keep-history? kept?)]
       (try
         (d/create-database made)
@@ -801,7 +801,7 @@
   ;; read only, as a later connection may reuse the store's storage and its cache); GC's mark
   ;; keeps the value while a branch reaches it and sweeps it once none does. A store on disk of this test's own, the last resort: what is
   ;; proved is the store's bytes and its collection; removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-ool-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-ool-" (random-uuid))
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
         _ (d/release conn)
         reply (slice @text 7 3000)
@@ -836,7 +836,7 @@
   ;; encoding for clojure.lang.Ratio, so a large value holding one threw at its commit, and a small one did not (its
   ;; datom is no key). A store on disk of this test's own, the last resort: the in-memory store has no out-of-line
   ;; values; removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-ratio-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-ratio-" (random-uuid))
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
         v {:value (mapv #(/ % 3) (range 1 3000)) :small (/ 1 3) :kinds [1.5 2N 3M 'a :b "c" \d (java.util.UUID. 0 1) (java.util.Date. 0)]}]
     (try
@@ -871,7 +871,7 @@
   ;; collection, whose result holds no :db-after, failed in commit! ("Parent cannot be nil").
   ;; A store on disk of this test's own, the last resort: the in-memory store has no nodes to
   ;; collect; removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-gc-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-gc-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
     (try
       (d/transact conn [{:note/text "kept" :note/agent :t}])
@@ -888,7 +888,7 @@
   ;; since is recorded as seen, nothing swept; once a branch named in the record is gone, its nodes and its values out of line are swept and
   ;; every live branch reads as before. A store on disk of this test's own, the last resort:
   ;; the in-memory store has no nodes to collect; removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-collect-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-collect-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
         reply (slice @text 11 3000)
         vk (hasch.core/uuid reply)
@@ -921,7 +921,7 @@
 
 ;; docs/storage.md#collection: a sweep frees pages, and only a compaction makes the file smaller
 (deftest a-store-a-sweep-freed-is-compacted-at-its-next-boot
-  (let [path (str (seon.config/checkout) "/target/tmp/compact-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-compact-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
         head #(vec (map (juxt :e :a :v :tx) (d/datoms (pdb/head % :db) :eavt)))
         size #(.length (java.io.File. (str path "/data.mdb")))]
@@ -954,7 +954,7 @@
 
 ;; docs/storage.md#collection: old snapshots go when enough commits have landed, and nothing a merge or a page reads goes with them
 (deftest a-store-keeps-what-is-read-and-sweeps-old-snapshots
-  (let [path (str (seon.config/checkout) "/target/tmp/retain-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-retain-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
         note! (fn [c s] (d/transact c [{:note/text s :note/agent :t}]) (d/commit-id @c))
         notes-of (fn [db] (sort (map :v (d/datoms db :aevt :note/text))))
@@ -1009,7 +1009,7 @@
 ;; unlinked file. It happens only under LMDB's alone open (MDB_ALONE: no other holder, kept until done), never by a config flag.
 ;; Estimate: a store opened on disk ~5M + 2 alone opens (a lock and a refusal) and one compaction of a small store ~5M = 15000000
 (deftest ^{:seon.test/estimate {:ticks 15000000}} a-store-another-holder-has-open-is-not-compacted
-  (let [path (str (seon.config/checkout) "/target/tmp/alone-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-alone-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
         data #(.length (java.io.File. (pdb/data-file :lmdb path)))]
     (try
@@ -1027,7 +1027,7 @@
 ;; :seon.config.store/lmdb-map-bytes: the one that grew the map made the other's next transaction fail (MDB_MAP_RESIZED). A store opens at
 ;; the map size it was made with. Estimate: two env opens and an env-info ~1M = 2000000
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-store-opens-at-the-map-size-it-was-made-with
-  (let [path (str (seon.config/checkout) "/target/tmp/mapsize-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-mapsize-" (random-uuid))
         made (* 64 1024 1024)]
     (try
       (.mkdirs (java.io.File. ^String path))
@@ -1044,7 +1044,7 @@
 ;; and a few env syncs, ~10M = 45000000; measured 61M (the 6,000 keys' write cost more than counted: within 2x). The sweep grew the file
 ;; 10,616,832 B (648 pages) unsynced, 3,162,112 B (193) synced; its 7 syncs cost 59 ms (93 -> 152 ms)
 (deftest ^{:seon.test/estimate {:ticks 45000000}} a-sweep-at-boot-reuses-the-pages-it-frees
-  (let [path (str (seon.config/checkout) "/target/tmp/sweep-reuse-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-sweep-reuse-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
         size #(.length (java.io.File. (str path "/data.mdb")))
         n 6000 pad (apply str (repeat 2000 "x"))]
@@ -1073,7 +1073,7 @@
 ;; stated 110M, a batch counted at 1M with no arithmetic); measured 53M (419M while the 2,000-char pad was built for every key, 10,000
 ;; times); the file grew 143 pages at the bound 128
 (deftest ^{:seon.test/estimate {:ticks 45000000}} a-write-outside-the-writer-grows-the-file-by-at-most-its-bound
-  (let [path (str (seon.config/checkout) "/target/tmp/unsynced-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-unsynced-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
         bound (cfg/value :seon.config.store/lmdb-sync-pages)
         pages #(:used-pages (pdb/map-use (:config @conn)))
@@ -1097,7 +1097,7 @@
   ;; docs/storage.md#collection (2026-11-15, root's store: 43 of 66 branches' merge bases swept, :main/tests' among them though its head
   ;; never moved): sweep after sweep while main moves, a branch made long ago, one that merged main by a two-parent commit (as
   ;; seon.writer/merge-main-into makes one) and a gone branch collected, each live branch's merge base reads whole after every sweep
-  (let [path (str (seon.config/checkout) "/target/tmp/bases-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-bases-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
         note! (fn [c s] (d/transact c [{:note/text s :note/agent :t}]) (d/commit-id @c))
         base-reads? (fn [b] (some? (d/commit-as-db conn (d/merge-base conn b :db))))]
@@ -1126,7 +1126,7 @@
   ;; docs/storage.md#collection (root's store, 2026-11-15: 43 of 66 branches' merge bases swept): retain! read every refusal of
   ;; d/merge-base as "no base" and swept the base; a refusal other than several bases is the base unknown, so nothing is swept, the
   ;; record names the branch and the answer is the typed :seon.db/retain-refused
-  (let [path (str (seon.config/checkout) "/target/tmp/refused-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-refused-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
         note! (fn [c s] (d/transact c [{:note/text s :note/agent :t}]) (d/commit-id @c))]
     (try
@@ -1147,7 +1147,7 @@
 (deftest ^{:seon.test/estimate {:ticks 15000000}} a-branch-whose-base-was-swept-is-told-so
   ;; docs/storage.md#collection (root's session agent died at start, 2026-11-15: its branch's base was swept and branch-base answered nil,
   ;; which its contract refused): a base the commit graph names but no snapshot holds is the typed :seon.db/no-merge-base
-  (let [path (str (seon.config/checkout) "/target/tmp/nobase-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-nobase-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
         note! (fn [c s] (d/transact c [{:note/text s :note/agent :t}]) (d/commit-id @c))]
     (try
@@ -1172,7 +1172,7 @@
   ;; another process's commit could be reusing a value the sweep would delete (Datahike's
   ;; collection sees only its own process's commits). A store on disk of this test's own, the
   ;; last resort: the in-memory store has no nodes to collect; removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-shared-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-shared-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
         reply (slice @text 11 3000)
         vk (hasch.core/uuid reply)]
@@ -1197,7 +1197,7 @@
   ;; per turn, wrote ~15x the one commit, because every commit rewrites the whole tail leaf
   ;; of :eavt and :aevt (up to 64 contexts) holding the values inline. A store on disk of
   ;; this test's own, the last resort: the in-memory store writes no nodes; removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-commit-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-commit-" (random-uuid))
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
         n 20]
     (try
@@ -1293,7 +1293,7 @@
   ;; the size now, 91 M ticks against 584 M at 3,000) 1.55x at 2 and 3.08x at 10. A store on disk of this test's own, the last resort:
   ;; the in-memory store writes no nodes to count
   (let [nodes (fn [content?]
-                (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
+                (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-" (random-uuid))
                       cfg (pdb/made-cfg (pdb/store-cfg :lmdb path))
                       _ (d/create-database cfg)
                       conn (pdb/connect (dissoc cfg :keep-history?))
@@ -1558,7 +1558,7 @@
   ;; ByteArrayOutputStreams (its serializer, then its compressor: each stream's buffer doubling, then copied
   ;; out), six copies or more; konserve.impl.defaults/direct-bytes makes the same bytes once a link. A store
   ;; of this test's own (the write path is the subject), removed at the end
-  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))]
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-" (random-uuid))]
     (try
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)
             _ (d/transact conn {:tx-data (vec (for [i (range 200)] {:note/text (str "note " i) :note/agent :t})) :tx-meta (pdb/tx-meta :db)})
@@ -1587,7 +1587,7 @@
   ;; store's path (bin/check, batch 3). Either backend: no old spelling is handed over, the serializer is ours,
   ;; and the compressor the config names is the store's (the :file backend's config map once replaced it).
   (doseq [backend [:lmdb :file]]
-    (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
+    (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-" (random-uuid))
           ;; what konserve's normalize-store-config warns of is these spellings in the config it is handed (konserve.impl.defaults, its
           ;; old top-level and :config keys): the config is data this namespace makes, so it is read, never a redef of konserve's warning
           ;; (a library function the compiled code may not call through its var, which let a count of it pass at nothing)
@@ -1609,7 +1609,7 @@
   ;; store's config once dropped its compressor (store-cfg's :file branch replaced :config), so file stores made
   ;; before hold uncompressed values: such a store, opened by the config that compresses, reads the old values,
   ;; writes compressed ones beside them, and reads both after another open.
-  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-" (random-uuid))
         cfg-of pdb/store-cfg
         notes (fn [conn] (set (map :v (d/datoms @conn :aevt :note/text))))
         write! (fn [conn from] (d/transact conn {:tx-data (vec (for [i (range from (+ from 50))] {:note/text (str "note " i) :note/agent :t})) :tx-meta (pdb/tx-meta :db)}))
@@ -1636,7 +1636,7 @@
 (deftest plain-is-what-the-store-keeps
   ;; docs/storage.md#plain-data: what seon.contract/plain? passes the store keeps and gives back equal, through its
   ;; serializer: a store on disk of its own, reopened, since a db-with serializes nothing
-  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-" (random-uuid))
         samples [nil true 1 10N 1.5 1/2 1.5M \a "s" :k 'n/s (random-uuid) (java.util.Date. 0)
                  {:a [1 #{2} (list 3)]} {[1] {"k" 2}} [] #{} ()]]
     (try
@@ -1884,7 +1884,7 @@
   ;; key on main moved a B-tree split and turned it red, 9 of 87 against the tenth (batch 20, 2026-11-10); measured on
   ;; that tree: 5 of 108 own at 1000, 4 of 158 at 2000, the bound five nodes clear, for about 1 s more than 550. At 1000 one more
   ;; config key moved a split again (web's :seon.config.render/recent-errors, 2026-11-14: 12 of 118 against the tenth), so 2000
-  (let [path (str (seon.config/checkout) "/target/db-test-nodes-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-nodes-" (random-uuid))
         {cfg :cfg main :conn} (pdb/open! :lmdb path 2000 :db)]
       (let [b (keyword (str "test-" (random-uuid)))
             _ (d/branch! main :db b)
@@ -2012,39 +2012,6 @@
     (is (nil? (pdb/invalid-datom db tx (own :string))) "and the same name, now a string, accepts it")
     (is (= :seon.db/invalid-datom (:seon.error/type (pdb/invalid-datom db tx (own :int)))) "and is refused again when it is an int again")))
 
-(defn preloaded
-  "preload!'s argument: the world with n plain datoms added."
-  [n]
-  (let [[db tx] (plain-datoms n)] [(d/db-with db tx)]))
-
-(deftest preload-counts-each-index-leaf-by-leaf
-  ;; docs/machine.md#roots-heap: the fork server reads every node of main's indexes once so its agents inherit them
-  ;; decoded. The read is each index's own reduce (a leaf's datoms stepped over, nothing made), and it answers what the
-  ;; three indexes hold. Counting (d/datoms db index) made a lazy cell a datom: 1.2 s of a root's first fork
-  (let [[db tx] (plain-datoms 300)
-        db (d/db-with db tx)]
-    (is (= (+ (count (d/datoms db :aevt)) (count (d/datoms db :avet)) (count (d/datoms db :eavt))) (pdb/preload! db))
-        "the datoms of the three indexes"))
-  (cost/proof
-    {:of 'seon.db/preload! :input 'seon.db-test/preloaded
-     :n "datoms added to the world, each in two or three indexes"
-     :work "per datom per index: one step of the sorted set's reduce"
-     :growth :linear
-     ;; measured 2026-11-10 (seon.cost/measure, the world + n datoms, nodes in memory): 7,579 ticks and 4.5 KB at 100,
-     ;; 23,683 and 14.0 KB at 1,000: 18 ticks and 10 B a datom added. Counting (d/datoms db index) three times on the same
-     ;; dbs: 65,399 ticks and 387 KB at 100, 205,556 ticks and 1.23 MB at 1,000 (78 ticks and 470 B a datom in an index)
-     ;; On Seon's own program db, read from its store in a fresh process (609,913 datoms in the three indexes, measured the
-     ;; same day, one run each): 504 M ticks and 1,836 ms counting d/datoms, 462 M ticks and 1,774 ms by this reduce: 8 percent.
-     ;; The rest is not the walk: it is decoding the leaves, about 750 ticks a datom, paid again on a second pass in that
-     ;; process (495 M ticks), so its node cache did not hold them. This proof bounds the walk; the decode is another row
-     :per-n {:ticks 22 :bytes 13}
-     :fixed {:ticks 7000 :bytes 4500}
-     :sizes [100 300 1000]}))
-
-;; docs/storage.md#the-write-checks-every-entity-it-touches (the owner, 2026-11-11: "We should never record two transaction
-;; times that are the same"; Point's ruling, option A): the store stamps a transaction's time, after its branch's last, so the
-;; one write path refuses a supplied :db/txInstant, in tx-data (a speculation through seon.db/with) or in tx-meta (a
-;; connection's transact). Red before: both were written, the second back-dated before the branch's last
 (deftest a-transaction-never-supplies-its-own-time
   (let [past (java.util.Date. 0)
         refused (fn [f] (try (f) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))]
@@ -2148,7 +2115,7 @@
   of n * 100 distinct longs, so its stored value grows with n and its metadata does not. Its path is kept in stores-made."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :any [:map [:sync? :boolean]]]]}
   [n]
-  (let [path (str (seon.config/checkout) "/target/db-test-keys-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-keys-" (random-uuid))
         s (klmdb/connect-lmdb-store path :opts {:sync? true}
                                     :config {:encoding {:serializer :FaslSerializer :compressor {:type :zstd}}})]
     (swap! stores-made conj path)
@@ -2196,7 +2163,7 @@
   ;; 64) and three values past :seon.config.store/value-out-of-line-bytes, each its own key; the mark finds the three and
   ;; reads each node once. The estimate: the transaction of 1,003 entities ~25M ticks (first written as 300M, ten times what
   ;; a datom of a new entity costs here; measured 30.3M for the whole test), the mark ~116 keys at ~30k ticks: 40M.
-  (let [path (str (seon.config/checkout) "/target/db-test-mark-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-mark-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
     (swap! stores-made conj path)
     (try
@@ -2264,7 +2231,7 @@
 ;; write transaction, which a read-only env refuses (MDB_IS_READONLY), so a read-only connect failed before it read anything.
 ;; Estimate: a store of 20 commits ~3M ticks, a read-only connect and one query ~1M: 5,000,000 ticks.
 (deftest ^{:seon.test/estimate {:ticks 5000000}} a-read-only-connect-reads-the-store
-  (let [path (str (seon.config/checkout) "/target/db-test-ro-" (random-uuid))
+  (let [path (str (System/getProperty "java.io.tmpdir") "/seon-db-test-ro-" (random-uuid))
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)]
     (swap! stores-made conj path)
     (try

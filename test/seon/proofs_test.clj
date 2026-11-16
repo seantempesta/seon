@@ -1104,7 +1104,7 @@
         ;; a green each, on the results branch, whose recorded reads are the keys given, digested on main as its run's were
         green (fn [t ks] {:seon.proof/id (proofs/verdict-id t (seon.lib/digest (str t)) :pass) :seon.proof/test t
                           :seon.proof/reach-digest (seon.lib/digest (str t)) :seon.proof/status :pass :seon.proof/route :live
-                          :seon.proof/basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
+                          :seon.proof/ran-on #{:db}
                           :seon.proof/reads-digest (pdb/reads-digest main (into #{} (map pr-str) ks) nil)
                           :seon.proof/read-keys (into #{} (map pr-str) ks)})
         rdb (pdb/db-with main [(green reader [[:ea entry :schema/form]]) (green other [[:ea neg-form :form/code]])])
@@ -1167,7 +1167,7 @@
         ts (mapv #(symbol "pt.cold-test" (str "t" %)) (range 32))
         ent (fn [i t] (let [rd (seon.lib/digest (str "reads " i))]
                         {:seon.proof/id (proofs/verdict-id t rd :pass) :seon.proof/test t :seon.proof/reach-digest (seon.lib/digest (str "reach " i))
-                         :seon.proof/status :pass :seon.proof/route :live :seon.proof/basis basis :seon.proof/reads-digest rd
+                         :seon.proof/status :pass :seon.proof/route :live :seon.proof/ran-on #{(:seon.db/branch basis)} :seon.proof/reads-digest rd
                          :seon.proof/read-keys (into #{} (map (fn [j] (pr-str [:ea (+ 1000 (* i 10000) j) :form/code]))) (range n))}))]
     (d/transact c {:tx-data (vec (map-indexed ent ts))})
     [@c (into {} (for [i [3 11 19 27]] [(ts i) (seon.lib/digest (str "reach " i))]))]))
@@ -1232,6 +1232,22 @@
     (is (= 1 (:fail (get (proofs/verdicts-at db {t d}) d))) "the lookup at the reach digest answers the newest written")))
 
 
+;; THE FOCUS (E), results ride the one :merge (data, agreed with tests2): a result is one entity for every run of it, and each branch it ran
+;; on is one of its :seon.proof/ran-on, so two branches' runs of one result never conflict at a merge (it unions them) and a red is reused
+;; by every branch that ran it. Red first: :seon.proof/basis held one run, the second branch's replaced the first's, and a merge of the two
+;; was a conflict at [:datum e :seon.proof/basis] (data's measure on a branch pair, 2026-11-16). Estimate: one small world (~4M), two
+;; verdict-txs and writes (~1M): 6,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-result-holds-each-branch-it-ran-on-and-its-red-is-each-runners
+  (let [w0 (mt/with (mt/world) (mt/code 'pt.rb "(ns pt.rb)\n(defn add [x y] (+ x y))\n"))
+        g (program/reach-graph w0 nil) t 'pt.rb-test/adds d (seon.lib/digest "one reach digest")
+        basis (fn [b n] {:seon.db/branch b :seon.db/commit (parse-uuid (str "00000000-0000-0000-0000-00000000000" n)) :seon.db/t n})
+        red (fn [b n] (proofs/verdict-tx w0 g (basis b n) {t {:digest d :pass 0 :fail 1 :error 0 :failures [{:type :fail :message "red"}]}} {t [{:var 'pt.rb/add}]} {}))
+        db (pdb/db-with (pdb/db-with w0 (red :main/a 1)) (red :main/b 2))
+        es (d/datoms db :avet :seon.proof/test t)]
+    (is (= 1 (count es)) "one result: its identity is its content")
+    (is (= #{:main/a :main/b} (into #{} (map :v) (d/datoms db :eavt (:e (first es)) :seon.proof/ran-on))) "each branch it ran on")
+    (is (= #{:main/a :main/b} (get-in (proofs/verdicts-at db {t d}) [d :writer :branches])) "and its red is reused by each branch that ran it")))
+
 ;; docs/merging.md#the-test-service (web's report, result/c529a48e: :pass 894 :fail 2 for 2 named tests, no failing report named, no red):
 ;; a run's counts are its items' own, never their batch's answer, which every item of a batch shares and which holds the other tests
 ;; that ran in its child. Red first: the counts summed each item's (:answer r), so a batch's failures elsewhere were counted once an
@@ -1245,3 +1261,13 @@
         r (#'seon.prove/run-answer {:selected '[a.b-test/one a.b-test/two]} items)]
     (is (= [2 0 0] [(:pass r) (:fail r) (:error r)]) "each item counted once, by its own counts")
     (is (= [] (:red r)) "and nothing red: the batch's other failure is not this run's")))
+
+;; docs/merging.md#a-merge-runs-what-the-change-reaches (web, result/cd4ba881): a session's own task (:user, driven from outside) hands
+;; back through seon_done, which the judge takes as work, so its process tests are the gate's, never left unjudged by its kind; a
+;; person's own :user task is not judged. Red first: unjudged kept every task not :work/:merge/:whole off the gate.
+;; Estimate: two calls on the test db, one root read each (~50k): 300,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-sessions-task-is-judged-by-the-gate-as-work
+  (let [db (ts/test-db) tests ['a.b-test/p]
+        kind-why #(some-> (seon.task/unjudged db % tests) :why (str/includes? "isn't judged by the gate"))]
+    (is (not (kind-why {:seon.task/kind :user :seon.task/model "outside"})) "a session's task is the gate's, as work is")
+    (is (kind-why {:seon.task/kind :user :seon.task/model "claude-sonnet"}) "a person's :user task driven by its own model is not")))

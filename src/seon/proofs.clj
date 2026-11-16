@@ -637,7 +637,8 @@
   "tx-data writing ran ({test result}) as :seon.proof entities: each test's verdict at its reach digest (verdict-id), its
   status written once, what it read as read keys (read-keys), each printed key a :seon.proof/read-keys datom (AVET-indexed: a moved
   datom's readers are one seek, seon.db/results-moved; read through :aevt, they burden no other read), with their content's digest at db (seon.db/reads-digest), and
-  basis, the {:seon.db/branch :seon.db/commit :seon.db/t} it ran at; a red's :failures (the assertions its run reported), so a
+  basis, the {:seon.db/branch :seon.db/commit :seon.db/t} it ran at, its branch one of the result's :seon.proof/ran-on (another branch's run
+  of the same result is another); a red's :failures (the assertions its run reported), so a
   reuse of it judges as it did (verdicts-at). A result with no digest, judged flaky or unreported,
   writes nothing, as the file cache keeps it. fns: {test [called function]}; static: {test static reads}. See
   docs/merging.md#verdicts-are-a-cache."
@@ -648,7 +649,7 @@
              :let [ks (into (read-keys db g test-var (get fns test-var) (get static test-var)) (map pr-str) (:schema-reads r))
                    rd (pdb/reads-digest db ks nil)]]
          (cond-> {:seon.proof/id (verdict-id test-var rd (status-of r)) :seon.proof/test test-var :seon.proof/reach-digest (:digest r) :seon.proof/status (status-of r)
-                  :seon.proof/route :live :seon.proof/basis basis
+                  :seon.proof/route :live :seon.proof/ran-on #{(:seon.db/branch basis)}
                   :seon.proof/reads-digest rd :seon.proof/read-keys ks}
            (and (not (green? r)) (seq (:failures r))) (assoc :seon.proof/failures (vec (:failures r)))))))
 
@@ -675,12 +676,13 @@
                  ;; where the two runners do (a verdict that depends on which process runs it)
                  :when (#{:live :full} route)]
              [d (cond-> {:digest d :pass (if (= :pass st) 1 0) :fail (if (= :fail st) 1 0) :error (if (#{:error :none} st) 1 0)}
-                  (not= :pass st) (assoc :writer {:branch (:seon.db/branch (at e :seon.proof/basis))})
+                  ;; a red is reused only by a branch that ran it: each branch it ran on (one result, a branch a value)
+                  (not= :pass st) (assoc :writer {:branches (into #{} (map :v) (d/datoms db :aevt :seon.proof/ran-on e))})
                   (not= :pass st) (assoc :failures (or (at e :seon.proof/failures) [])))]))))
 
 (defn newest-green
   "The entity of test-var's newest green on rdb (the results branch), or nil: newest written, by the :tx of the one AVET seek of
-  :seon.proof/test (the results branch's one writer orders them), and within one transaction by the basis :t each ran at; its
+  :seon.proof/test (the results branch's one writer orders them), and within one transaction newest entity first; its
   status read from the newest down to the first green. The one result reuse by reads takes (reused-by-reads) and a change's readers
   are (seon.agent/read-moved). See docs/storage.md#what-a-read-scanned."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :seon.db/eid]]}
@@ -688,7 +690,8 @@
   ;; each attribute through :aevt, never a result's :eavt leaf and the reads values it restores (verdicts-at)
   (let [at (fn [e a] (:v (first (d/datoms rdb :aevt a e))))]
     (some #(when (= :pass (at (:e %) :seon.proof/status)) (:e %))
-          (mapcat (fn [grp] (if (next grp) (sort-by #(- (get (at (:e %) :seon.proof/basis) :seon.db/t 0)) grp) grp))
+          ;; within one transaction, newest entity first: a run writes one result a test
+          (mapcat (fn [grp] (if (next grp) (sort-by #(- (:e %)) grp) grp))
                   (partition-by :tx (sort-by #(- (:tx %)) (d/datoms rdb :avet :seon.proof/test test-var)))))))
 
 (defn reused-by-reads

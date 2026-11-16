@@ -14,6 +14,20 @@
   seon.schema.datahike; session D1): one source of truth with the contracts."
   (sd/declarations contract/registry))
 
+(defn schema-of
+  "The Datahike schema of a branch whose schema changes beyond the binary's are changes, its registry reg (seon.program/schema-registry):
+  the binary's (`schema`) when it changes none, else derived from reg. What a branch's process holds (seon.agent/branch-schemas' slot),
+  derived once a schema entry moves, never per read. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:malli/schema [:=> [:cat :map :any] [:vector :map]]}
+  [changes reg] (if (empty? changes) schema (sd/declarations reg)))
+
+(defn held-schema
+  "The Datahike schema this process holds: its agent's branch's (seon.contract/held-branch's :schema), else the binary's (`schema`).
+  What a world (`empty-db`) and a store's install (`install-missing!`) read, so a branch that adds an attribute writes it in its own
+  tests with no rebuild. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:malli/schema [:=> [:cat] [:vector :map]]}
+  [] (or (:schema (contract/held-branch)) schema))
+
 (def layout
   "How a store lays out its records, fixed when it is made: its index nodes addressed by their content (:crypto-hash?, so
   branches holding the same datoms name one node: docs/sharing.md#what-a-branchs-nodes-are) and its history kept or not
@@ -770,6 +784,8 @@
   "Stored names a rename retired, {old new}: a stored keyword is renamed by erasing the store, never by a migration, so a store holding one is refused at open (install-missing!). See docs/storage.md#a-renamed-attribute."
   {:schema.file/path :file/path :schema.file/text :file/text})
 
+(declare missing-declarations)
+
 (defn install-missing!
   "Transact the attributes of `schema` the db under conn lacks, or holds without their
   declared :db/contentId, and answer the idents it added: first
@@ -784,20 +800,33 @@
   new name and hold nothing under it. Nothing missing writes nothing."
   {:malli/schema [:=> [:cat :seon.host/conn] [:set :keyword]]}
   [conn]
-  (let [have (:schema @conn)
+  (let [missing (missing-declarations (:schema @conn))]
+    (let [[tx-attrs others] ((juxt filter remove) #(#{:seon.tx/runtime :seon.tx/branch} (:db/ident %)) missing)]
+      (when (seq tx-attrs) (d/transact conn {:tx-data (vec tx-attrs)}))
+      (when (seq others) (d/transact conn {:tx-data (vec others) :tx-meta (tx-meta (conn-main conn))})))
+    (into #{} (map :db/ident) missing)))
+
+(defn missing-declarations
+  "The declarations of the schema this process holds (held-schema: its branch's, or the binary's) that a db whose Datahike schema is
+  have lacks, or holds without their declared :db/contentId or index: what install-missing! transacts, and what a test's world of a
+  kept store takes (seon.test-store), so a branch's new attribute is written in its tests with no store seeded again. Refuses an
+  attribute held as another value type (:seon.db/types-differ) and a name a rename retired (:seon.db/name-retired). O(attributes)."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [have]
+  (let [schema (held-schema)
         differ (into {} (for [{k :db/ident t :db/valueType} schema
                               :let [stored (get-in have [k :db/valueType])]
                               :when (and stored (not= stored t))]
                           [k {:stored stored :declared t}]))
         _ (when (seq differ)
-            (let [e (contract/error :seon.db/types-differ #'seon.db/install-missing!
+            (let [e (contract/error :seon.db/types-differ #'seon.db/missing-declarations
                                     (str "the store holds " (count differ) " attributes as another value type than the schema declares (each in :seon.db/attributes)")
                                     {:seon.db/attributes differ
                                      :seon.error/fix "An attribute's value type is fixed once installed: open a store made with this schema (a fresh one), or keep running the build that made this store."})]
               (throw (ex-info (:seon.error/message e) e))))
         retired (into {} (filter (comp #(contains? have %) key)) retired-names)
         _ (when (seq retired)
-            (let [e (contract/error :seon.db/name-retired #'seon.db/install-missing!
+            (let [e (contract/error :seon.db/name-retired #'seon.db/missing-declarations
                                     (str "the store holds " (count retired) " attributes under names a rename retired (each in :seon.db/retired): it was made by an older build, and nothing in it was changed")
                                     {:seon.db/retired retired
                                      :seon.error/fix "A stored keyword is renamed by erasing the store, never by a migration: erase this store and start fresh, or keep running the build that made it."})]
@@ -810,10 +839,7 @@
                                    (= (:db/contentId %) (get-in have [(:db/ident %) :db/contentId]))
                                    (or (not (:db/index %)) (get-in have [(:db/ident %) :db/index])))
                              schema))]
-    (let [[tx-attrs others] ((juxt filter remove) #(#{:seon.tx/runtime :seon.tx/branch} (:db/ident %)) missing)]
-      (when (seq tx-attrs) (d/transact conn {:tx-data (vec tx-attrs)}))
-      (when (seq others) (d/transact conn {:tx-data (vec others) :tx-meta (tx-meta (conn-main conn))})))
-    (into #{} (map :db/ident) missing)))
+    missing))
 
 (defn seed!
   "Seed the empty store under conn: the schema (install-missing!), then (seed-tx n)."
@@ -889,7 +915,7 @@
   "An empty db value with Seon's schema (`schema`), in memory, keeping history when history?: a test's world
   (my.test/world) and a tree indexed with no store (seon.system/built-program). See docs/testing.md#testing-in-the-world."
   {:malli/schema [:=> [:cat :boolean] :seon.host/db]}
-  [history?] (datahike.core/empty-db (into {} (map (juxt :db/ident #(dissoc % :db/ident))) schema)
+  [history?] (datahike.core/empty-db (into {} (map (juxt :db/ident #(dissoc % :db/ident))) (held-schema))
                                      {:keep-history? history? :schema-flexibility :write}))
 
 (defn delete-main!
@@ -925,19 +951,6 @@
   (let [bs (filterv tree-branch? (of-main main (d/branches conn)))]
     (doseq [b bs] (d/delete-branch! conn (on-main main b)))
     bs))
-
-(defn preload!
-  "Read every node of db's indexes into this process's node cache, so the children it forks
-  (the fork server's agents) inherit them decoded and read the store less at a spawn. The fork
-  server calls it once, through its own store, after its fork (docs/machine.md#roots-heap).
-  Answers the datoms its three indexes hold, counted leaf by leaf: each index is one reduce over
-  the sorted set's own slice, which restores every node on its way and makes nothing a datom
-  (counting (d/datoms db index) walked each index through Datahike's lazy seq, a cell a datom: a small part of the 1.2 s
-  a root's first fork spends here; the rest is decoding leaves)."
-  {:malli/schema [:=> [:cat :seon.host/db] :int]}
-  [db]
-  (reduce (fn [n index] (reduce (fn [k _] (inc k)) n (pss/slice (get db index) nil nil)))
-          0 [:aevt :avet :eavt]))
 
 (lib/defc c-ids-open "seon_ids_open" [:string] :pointer {:capture-native-error true})
 (lib/defc c-ids-take "seon_ids_take" [:pointer :int] :uint64)
