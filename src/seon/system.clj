@@ -170,12 +170,18 @@
     (-> (reply! st o p r) (update ::spawning dissoc id) (update ::restored dissoc id))
     st))
 
+(declare spawn-agent)
+
 (defn- deliver-rid
-  "Answer the caller waiting on rid; answers st."
+  "Answer the caller waiting on rid; answers st. When rid is the store's sweep (the :collect effect, ::sweep), the spawns held
+  behind it start now, in the order they came (docs/storage.md#collection)."
   {:malli/schema [:=> [:cat :seon.system/api-state :seon.host/volatile :int :any] :seon.system/api-state]}
   [st o rid r]
-  (let [[st' {:keys [p]}] (step/answered st rid)]
-    (if p (-> (reply! st' o p r) (update :writes disj rid)) st)))
+  (let [[st' {:keys [p]}] (step/answered st rid)
+        st (if p (-> (reply! st' o p r) (update :writes disj rid)) st)]
+    (if (= rid (::sweep st))
+      (reduce (fn [st {:keys [p opts]}] (spawn-agent st o p opts)) (dissoc st ::sweep ::held-spawns) (::held-spawns st))
+      st)))
 
 (defn- view! {:malli/schema [:=> [:cat :seon.system/api-state :seon.host/fn [:* :any]] :seon.system/api-state]}
   [st f & args] (apply update st :view f args))
@@ -556,6 +562,10 @@
   (let [opts (cond-> opts (:branch opts) (update :branch #(pdb/on-main (pdb/conn-main (:conn st)) %)))
       holder (branch-holder st opts)]
   (cond
+    ;; the store's sweep is running (the :collect effect, asked at quiescence): an agent's commit could reuse a value out of line
+    ;; the sweep is deleting, which Datahike's collection cannot see from another process (docs/storage.md#collection), so the
+    ;; spawn starts once the sweep answers (deliver-rid), its value or its typed end: ordered after it, never refused
+    (::sweep st) (update st ::held-spawns (fnil conj []) {:p p :opts opts})
     holder (let [{:keys [task]} (get-in st [:view :agents holder])]
              (reply! st o p (refused 'seon.system/spawn! (str "branch " (:branch opts) " is held by live agent " holder
                                                           (when task (str " working " task))
@@ -766,7 +776,8 @@
             (if (contains? (graph/fx-owners (get-in st [:system :procs])) owner)
               (let [[st rid] (pend st p :fx nil)]
                 (step/out! o [owner :ask] (merge {:prio 0} (select-keys m [:prio :seon.fx/class :seon.fx/processes :seon.prove/askers]) {:req (:req m) :dest {:rid rid}}))
-                st)
+                ;; the store's sweep: spawns wait for its answer (spawn-agent, deliver-rid)
+                (cond-> st (= :collect (:kind m)) (assoc ::sweep rid)))
               (reply! st o p (contract/error :seon.fx/unknown-kind #'seon.system/ext-op (str "no effect kind " (:kind m))))))
       :fs (let [[st rid] (pend st p :fs nil)]
             (step/out! o :to-fs (assoc (:req m) :rid rid))
@@ -1698,15 +1709,11 @@
     (fn []
       (let [;; first of all: no process holds the store yet (docs/storage.md#collection)
             compacted (when (and (= :lmdb backend) (cfg/value :seon.config.store/sole-writer?)) (pdb/compact-if-due! path))
-            sole? (and (= :lmdb backend) (cfg/value :seon.config.store/sole-writer?))
             opened (pdb/open! backend path datoms main)
             ;; before any agent: a tree's branch left by an earlier root's end, its last run cut short, is dropped as that run would have
             dropped-trees (pdb/drop-trees! (:conn opened) main)
-            ;; still the only process: old snapshots swept when enough commits have landed
-            ;; what it sweeps is compacted at the NEXT boot, first of all (compact-if-due!, above, before any connection): never here
-            ;; between a release and a reopen of the store, where a connection still referenced had its environment closed and its file
-            ;; renamed under it, and the boot's own transact then dispatched on a released one (Context's two failed starts, 2026-11-11)
-            retained (when sole? (pdb/retain! (:conn opened) (cfg/value :seon.config.store/keep-commits)))
+            ;; old snapshots are swept at quiescence by the :collect effect (seon.fx/collect-store), never here: a boot's sweep held
+            ;; root from listening for 678 s on 2026-11-16 [M result/a7ef0389]; what it frees is compacted at the next boot
             {store-cfg :cfg conn :conn} opened
             ;; each agent's stderr goes to a file here (seon.agent/stderr-path), read at its death
             agents-dir (pdb/agents-dir store-cfg)
@@ -1744,7 +1751,7 @@
         (lib/static!)
         (let [db @conn]
           (merge opened (fs/fork-server db store-cfg)
-                 {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :retained retained :dropped-trees dropped-trees
+                 {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :dropped-trees dropped-trees
                   :seeded seeded :caught-up caught :seed-ms seed-ms :config-errors config-errors :program-load program-load :digest digest :digest-ms digest-ms :contracts contracts :main-inputs main-inputs}))))))
 
 (defn- flow-error
@@ -1851,7 +1858,7 @@
         ;; gate checkout) and every config this process writes later keeps it
         _ (when (and source (nil? (:seon.config.source/root (:config (cfg/in-force)))))
             (cfg/hold-args! (conj (vec (cfg/argv)) "--set" (str ":seon.config.source/root=" (sedn/encode (:root source)))) nil {}))
-        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors program-load digest digest-ms contracts pid fd compacted retained dropped-trees main-inputs]}
+        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors program-load digest digest-ms contracts pid fd compacted dropped-trees main-inputs]}
         (boot! backend path datoms main source t0)
         recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
         ;; root holds main, so its malli default registry is main's (its schema entries beyond the binary's included)
@@ -1885,7 +1892,7 @@
               :fork-server {:agents-forked 0 :pid pid :status :up :restarts 0}
               :store {:backend backend :path path :main main :agents-dir agents-dir :recovered? (boolean recovered?)
                       :recovered-branches recovered :open-ms (lib/r2 open-ms)}
-              :boot {:gc-sweepers sweepers :compacted compacted :retained retained :dropped-trees dropped-trees :seeded seeded :caught-up caught-up :seed-ms (lib/r2 seed-ms)
+              :boot {:gc-sweepers sweepers :compacted compacted :dropped-trees dropped-trees :seeded seeded :caught-up caught-up :seed-ms (lib/r2 seed-ms)
                      :config-errors config-errors :program-load (update program-load :removed count) :digest digest :digest-ms (lib/r2 digest-ms)
                      :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :instrument (if contract/on? :on :off)
                      :stale-binary stale}}
