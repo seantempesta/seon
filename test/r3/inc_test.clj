@@ -60,9 +60,10 @@
     [ok idx' full incr]))
 
 (def ^:private commits
-  "The commits of a random history: the depth the 1e8-tick cap allows at ~0.9M ticks a commit (the oracle's full reconcile and
-  the incremental observe over a 4-task world growing to ~15). A history the pinned seed needed (140) is a scenario of its own."
-  105)
+  "The commits of a random history: 25, under 50 ms at ~0.6M ticks a commit (the oracle's full reconcile and the incremental observe over
+  a 4-task world growing to ~10), where 105 cost 800 ms. Every run draws other histories (the seed moves with the reach digest). A history the
+  pinned seed needed (140) is a scenario of its own."
+  25)
 
 (defn- equals-full
   "A random history from seed, `commits` long, in a world of n work tasks (r3.fx/world, a value in memory): after each, the
@@ -88,11 +89,11 @@
                 (println :inc (pr-str (remove (set full) incr))))
               (recur (inc k) db' idx' (if ok bad (inc bad))))))))))
 
-(deftest ^{:seon.test/estimate {:ticks 100000000}} incremental-equals-full
+(deftest ^{:seon.test/estimate {:ticks 20000000}} incremental-equals-full
   ;; one seed in the automatic run, five in the full one (:seon.config.proofs/seeds). The world is the fewest tasks every step kind
   ;; reaches: 2 work tasks (4 with their merges; kind 7 needs a plain work task and one that is not), in memory (r3.fx/world).
   ;; Estimate: 105 commits (`commits`) x ~0.9M ticks a commit (the oracle's named pull and reconcile ~0.25M, the incremental observe
-  ;; ~0.4M: seon.task/entity-value pulls a changed task's whole schema, ~31k ticks a task, filed; the step's own reads) = ~95M
+  ;; ~0.4M: seon.task/entity-value pulls a changed task's whole schema, ~31k ticks a task, filed; the step's own reads) = ~15M for 25 commits (measured 63M for 105)
   (doseq [seed (let [s (proofs/test-seed)] (map #(+ s %) (range (config/value :seon.config.proofs/seeds))))]
     (equals-full 2 seed)))
 

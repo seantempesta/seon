@@ -218,7 +218,7 @@
            (let [fd (sock/take-fd! (:conn st)) _ (vreset! open fd) ; the request's socket, closed if this step throws before fork!
                  t0 (profile/now-ns)
                  ;; main's program, tests included, is this process's already (the :tx arm's load-diff!), so every agent and test
-                 ;; child forked from here inherits it compiled (docs/source.md#a-process-holds-the-tests-only-when-it-runs-them)
+                 ;; child forked from here inherits it compiled (docs/source.md#the-binary-holds-the-tests-compiled)
                  load-errs (seq (:load-errors st))
                  st (dissoc st :tests-due :load-errors)
                  st (graph-at-fork st)
@@ -364,10 +364,6 @@
         ;; db0 at its commit, read through this process's own store; nothing of it is read ahead: an agent reads what it
         ;; needs through the node cache it inherits (docs/machine.md#what-a-process-owns-in-memory)
         db0 (d/commit-as-db store (d/commit-id db0))
-        ;; main's tests compiled now, at the boot server's start, while root writes its boot fact and imports
-        ;; its source (about 1.3 s of a fresh root's first spawn, measured 2026-11-08): a commit the import
-        ;; writes after this loads as changes (:tx), as a merge's does
-        loaded (when boot? (program/load-all! db0))
         ;; one wait on its two dependencies, root's socket and a child's exit (no timeout): alts! over
         ;; the exits channel and the socket's readiness, which stays pending until the socket is read
         exits (a/chan 64)
@@ -381,11 +377,10 @@
                                (do (vreset! ready nil) (recur))
                                [:cmd {:op :exit :pid v}]))
                            (case m :eof nil [:cmd m])))))]
-    ;; root evaluates no test namespace (program/load-all! {:tests? false}); the boot server does, once, at its start (above), and its socket is read
-    ;; from boot: a stop that came while 2,020 forms were evaluated one by one waited 12-21 s for them
+    ;; it inherits main's program and tests from root: the binary holds test/ compiled, and root's boot load-all! loaded
+    ;; whatever main changed since the build, tests included, so this process loads nothing at its start
     (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :exits exits :graph graph :index index
-                                  :tests-due (and (not boot?) tests-due) :load-errors (seq (:errors loaded))
-                                  :standing (group-by :ns (:errors loaded))}
+                                  :tests-due (and (not boot?) tests-due)}
                    recv! (fn [_ m] (sock/send! fd m)))
     (lib/kill! 0 9)
     (lib/c-exit 0))))
