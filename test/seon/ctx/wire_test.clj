@@ -464,9 +464,9 @@
         (is (not (str/includes? (:content (nth r0 3)) "Make ```demo/f``` triple")) "and never the plan's text: its size")
         (is (= 1 (count (filter #(= "(my.agent/describe @ctx)" (str (get-in % [:tool-calls 0 :code]))) r2))) "shown once, at the first point")
         (is (str/starts-with? (page-code r0) "(my.render/page {:commit #uuid \"") "the page is the call (my.render/page p)")
-        (is (every? #(re-find % (:content (peek r0))) [#":render seon.render.ui/cite" #"Doubles\." #":render seon.render.ui/status"]) "the page whole, each part by the function that drew it: how the work stands too")
+        (is (every? #(re-find % (:content (peek r0))) [#"\[seon.render.ui/cite" #"Doubles\." #"\[seon.render.ui/status"]) "the page whole, each part by the function that drew it: how the work stands too")
         (is (str/starts-with? (page-code r1) "(my.render/diff {:commit #uuid \"") "what moved is a generated eval of its own at the end, after turn 1's own eval")
-        (is (re-find #"\[\"page\" \"p-task\" \"task-view-demo_2Ff\" \"cite-[^\"]*demo_2Ff\" :pre\]" (:content (peek r1)))
+        (is (re-find #"\[\"task-view-demo_2Ff\" \"cite-[^\"]*demo_2Ff\"" (:content (peek r1)))
             "the cited var's edit at its own part, nested in its task's as the pull nests it: the ids name each render and what it shows, and only what moved inside the cite is sent")
         (is (not (str/includes? (:content (peek r1)) "What your task still needs")) "one edit at the part that moved, never the page whole")
         (is (str/includes? (:content (peek r1)) "Triples."))
@@ -1783,16 +1783,24 @@
               "the opening page is drawn again at the new head, the point it shows having moved"))
         (is (contains? (evals w1) "e2") "the placing render read the current db, tracked: the write ran it again, and the request holds the new eval")))))
 
-(deftest the-models-page-holds-no-attribute-of-the-pages-alone
-  ;; docs/render.md#style: what the page's script and a screen reader read (:data-*, :aria-*) is the page's alone, as class and style
-  ;; are; a link's target, a title and an image's text stay, and a component's root keeps its id and the render that drew it as data
-  ;; (:render, its full symbol), never a class (Point's 1602 ruling, 2026-11-11: nothing presentational reaches the model)
-  (is (= [:section {:render 'seon.render.ui/task-view :id "task-view-x"} [:a {:href "/x" :title "t"} "x"] [:button "close"] [:img {:alt "a"}]]
-         (#'wire/presentation-free
-          [:section {:class "task-view big" :id "task-view-x" :render 'seon.render.ui/task-view :data-render "seon.render.ui/task-view"}
-           [:a {:href "/x" :title "t" :aria-current "page" :class "link"} "x"]
-           [:button {:data-seon-form "(f)" (keyword "data-on:click") "@post('/open')"} "close"]
-           [:img {:alt "a" :style "w"}]]))))
+(deftest ^{:seon.test/estimate {:ticks 20000000 :bytes 60000000}} the-models-page-holds-no-attribute-of-the-pages-alone
+  ;; docs/render.md#style: what the page's script and a screen reader read (:data-*, :aria-*) is the page's alone, as class and style are;
+  ;; a component's root is named by its render and its id, never a class (Point's 1602 ruling: nothing presentational reaches the model).
+  ;; Read on the page the model is sent (seon.render/part-form's parts, seon.ctx.wire/page-parts-at): a cite's <details> carried
+  ;; {:data-preserve-attr "open"} into it (context's before/after, an agent's own cites). Estimate: a test branch, a task, one page (~10M);
+  ;; 20000000 ticks, 60 MB
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (slurp (str (seon.config/checkout) "/" doc/system-page))
+                                                  "docs/x.md" "# X\n\n## The x\n\nWhat x is."}))
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g; see [the x](docs/x.md#the-x)." :seon.task/proofs #{'demo-test/g-test}}]))
+      (d/transact conn [{:seon.task/id "demo/g" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
+      (let [db @conn
+            parts (wire/page-parts-at db (pdb/eid db :seon.agent/key "a1") {:commit (d/commit-id db) :t (:max-tx db)})
+            attrs (into #{} (comp (filter map?) (mapcat keys) (filter keyword?)) (tree-seq coll? seq parts))]
+        (is (seq parts) "the page has parts")
+        (is (empty? (filter #(or (#{:class :style} %) (re-find #"^(data|aria)-" (name %))) attrs))
+            (str "no attribute of the page's alone: " (pr-str attrs)))))))
 
 (deftest a-record-takes-the-agents-turn-in-force
   ;; docs/turn.md#the-turn-is-a-number: agent/turn-now is the agent's :seon.agent/turn on its branch (0 before its first turn),
@@ -2226,10 +2234,11 @@
         pattern '[:seon.agent/key :seon.agent/turn {:seon.agent/system [:db/id]}
                   {:seon.eval/_agent [:seon.eval/id :seon.eval/by :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/response]}
                   {:seon.model-call/_agent [:seon.model-call/id :seon.model-call/n :seon.model-call/origin {:seon.eval/_call [:db/id]}]}]
-        ;; turn 1's call names the point its page message is made from (its basis), so the whole agent has a page to be shown
-        task (d/db-with db (into (seon.task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f." :seon.task/proofs #{'demo-test/f-test}}])
-                                 [{:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/f"}}
-                                  {:seon.model-call/id (seon.lib/call-id "a1" 1) :seon.model-call/basis {:commit #uuid "00000000-0000-0000-0000-000000000001" :t (:max-tx db) :task "demo/f" :turn 1 :max-turns 9 :origin :model :agent "a1"}}]))
+        ;; turn 1's call names the point its page message is made from (its basis), after its task is written, so the whole agent has a page
+        ;; to be shown (a page of no parts, only its lists' wrappers, is shown to no one)
+        tasked (d/db-with db (into (seon.task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f." :seon.task/proofs #{'demo-test/f-test}}])
+                                   [{:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/f"}}]))
+        task (d/db-with tasked [{:seon.model-call/id (seon.lib/call-id "a1" 1) :seon.model-call/basis {:commit #uuid "00000000-0000-0000-0000-000000000001" :t (:max-tx tasked) :task "demo/f" :turn 1 :max-turns 9 :origin :model :agent "a1"}}])
         small (d/db-with task [{:db/id a :seon.ctx/pattern pattern :seon.agent/system [section]}])
         full (wire-of-world task)
         sent (wire-of-world small)]
@@ -2574,10 +2583,16 @@
             "and the new task is described where the record holds it, its cites' paths and the forms that act on them (docs/agent.md#looking-at-what-you-pulled)")
         (is (= (subvec (:messages r3) 0 (count (:messages r3))) (subvec (:messages r4) 0 (count (:messages r3)))) "the next request starts with this one, boundary included")))))
 
+(defn lab-part
+  "A part a test render's list places: a list's parts are the components placed in it (seon.render/placed-hiccup), as a page's are.
+  See docs/render.md#an-entity-may-name-its-own-render."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}] [:section [:p (str "LAB-PART at turn " (get c :seon.agent/turn))]])
+
 (defn lab-list
-  "A list a test render places, read by the model as a part. See docs/render.md#an-entity-may-name-its-own-render."
+  "A list a test render places, read by the model as its parts. See docs/render.md#an-entity-may-name-its-own-render."
   {:seon.render/list "p-lab" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}] [:div {:id "p-lab"} [:p (str "LAB-PART at turn " (get c :seon.agent/turn))]])
+  [_] [:div {:id "p-lab"} [#'lab-part {}]])
 
 (defn lab-view
   "An agent's own render for a test: the agent's page and one list of its own after it. See docs/render.md#an-entity-may-name-its-own-render."
@@ -2626,10 +2641,6 @@
 ;; docs/render.md#style: presentation goes from the page the model reads, and a map the page shows as data keeps its entries:
 ;; a map entry [:k {...}] is a vector headed by a keyword with a map second, and was rebuilt as an element, which its map
 ;; could not take back (seon.ctx-test/an-agent-adds-a-datum-and-its-render, red in context's land, 2026-11-12)
-(deftest presentation-leaves-a-maps-entries
-  (is (= [:div [:pre {:task {:plan "p"} :opts {} :n 1}]]
-         (#'wire/presentation-free [:div {:class "x"} [:pre {:class "y" :data-n 1} {:task {:plan "p"} :opts {} :n 1}]]))))
-
 ;; docs/render.md#a-page-is-a-kept-walk: a point is read as the db it names: its own db, its commit when the commit holds its t, else
 ;; the db as of its t. A world written without commits (d/db-with on a store's db, as a speculated or a test world is) names its
 ;; store's commit at every point; read as that commit, each past point was the world before any of it, and its page showed nothing

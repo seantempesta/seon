@@ -1200,7 +1200,7 @@
   (let [cache (:cache p)]
     (vec (for [k (:children (get cache (:out p)))
                :let [{:keys [f opts]} (get cache k) m (when (var? f) (meta f))]
-               :when (and (:seon.render/list m) (not (:seon.render/messages m)) (not= "page" (:wire/for opts)))]
+               :when (and (:seon.render/list m) (not (:seon.render/messages m)) (not= "page" (:wire/for opts)) (not= "page" (:wire/for m)))]
            (str "#" (:seon.render/list m))))))
 
 ;;; --- the model's reading of the tree: one generic conversion to provider-neutral messages ---------
