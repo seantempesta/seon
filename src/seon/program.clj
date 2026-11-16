@@ -740,7 +740,7 @@
   "The namespaces of db read from a file outside :seon.config.source/program-dirs: test/'s (a test,
   a fixture, a driver), which the process that runs tests holds evaluated and root never does
   (load-all!'s :tests?). One with no file (an agent's app, a test store's example program) is
-  none. One read of the namespaces' files. See docs/source.md#a-process-holds-the-tests-only-when-it-runs-them."
+  none. One read of the namespaces' files. See docs/source.md#the-binary-holds-the-tests-compiled."
   {:malli/schema [:=> [:cat :seon.host/db] [:set :symbol]]}
   [db]
   (let [prog (program-nss db)]
@@ -1416,61 +1416,6 @@
             (load-forms! db (filterv (fn [f] (not-any? :var/contract (:form/defines (d/entity db [:form/id (:id f)]))))
                                      (schema-dependents db keys)))))))
 
-(defn- required!
-  "Of form rows forms, the test namespaces whose every live form is its file's as imported
-  (:form/source, the namespace's :ns/file) and that this process holds none of, each loaded whole
-  by require, in load order: through Jolt's AOT cache (JOLT_CACHE_DIR, bin/env) a namespace's
-  compile is paid once, by the first process, and every later one loads it compiled (main's 78
-  test namespaces: 12.2 s evaluated form by form, 0.70 s loaded warm, 16.1 s cold: the commit that
-  made this), its contracted vars armed. A namespace whose require throws is left to load-forms!, which names the
-  form that fails. Answers [the namespaces loaded, the errors]. See docs/source.md#a-process-holds-the-tests-only-when-it-runs-them."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map] [:sequential :map]] [:tuple [:set :symbol] [:vector :seon.program/error]]]}
-  [db forms lf]
-  (let [tnss (test-nss db)
-        ;; lf: db's live forms, which load-all! has read (a second read was 0.6-1.1 s of a fork server's start)
-        live (group-by :ns lf)
-        ;; the tree db's program was imported from, as db states it (root's :seon.system/source fact), which every :ns/file is
-        ;; relative to: never this process's config, which a root given its source as start!'s options (every check mode,
-        ;; boot-twice, a cycle) never holds, so its fork server loaded all 77 test namespaces form by form, 12.2 s of its
-        ;; first fork against 1.06 s whole (measured 2026-11-10)
-        root (some->> (pdb/eid db :seon.system/id :root) (d/pull db [:seon.system/source]) :seon.system/source :root)
-        ;; the file require reads is the one a source dir holds at the namespace's path, and it holds every
-        ;; form main has of it, as main has it: a file edited since its import, or one on no source dir (a
-        ;; fixture under test/build/), is never what require loads
-        file-of (fn [n] (let [f (:ns/file (d/entity db [:ns/name n]))
-                              path (str (str/replace (str/replace (str n) "-" "_") "." "/") ".clj")]
-                          (when (and root f (some #(= f (str % "/" path)) (cfg/value :seon.config.source/dirs)))
-                            (java.io.File. (str root "/" f)))))
-        whole? (fn [n] (when-let [^java.io.File file (and (tnss n) (nil? (find-ns n)) (file-of n))]
-                         (and (.isFile file)
-                              (every? #(:form/source (d/entity db (:e %))) (live n))
-                              (let [text (slurp file)]
-                                (and (every? #(str/includes? text (:src %)) (live n))
-                                     ;; and nothing else: the file's text, each live form taken out, is only space and comments. A form
-                                     ;; the branch removed is still in main's file; required whole, it brought main's forms back over the
-                                     ;; branch's (a test child naming a var its branch deleted, 2026-11-12)
-                                     (str/blank? (str/replace (reduce (fn [t f] (str/replace-first t (:src f) "")) text (live n))
-                                                              #"(?m);.*$" "")))))))
-        wholes (filterv whole? (distinct (map :ns (load-order forms))))]
-    ;; require reads a namespace's file from this process's source roots: the source dirs of the tree main was imported from are
-    ;; put on them, whichever process runs this (a bin/test child holds the checkout's; a prove agent in the image held none, so a
-    ;; file found here was "not on the source roots" there: seon.program/a-test-namespace-loads-whole-in-whatever-process-runs-it)
-    (when (and root (seq wholes))
-      (let [have (set (jolt.host/source-roots))
-            want (remove have (map #(str root "/" %) (cfg/value :seon.config.source/dirs)))]
-        (when (seq want) (jolt.host/set-source-roots! (into (vec (jolt.host/source-roots)) want)))))
-    (binding [mr/*registry* (schema-registry (schema-changes db))]
-      (reduce (fn [[ok errs] n]
-                (if-let [e (try (require n) nil (catch Throwable e e))]
-                  ;; a file that holds main's forms and does not load is a load error, named; its forms then load one by one
-                  [ok (conj errs {:ns n :message (str "require of its file: " (step/error-msg e))})]
-                  [(conj ok n) (into errs (for [v (vals (ns-interns n))
-                                                :when (contract/contract v)
-                                                :let [r (contract/arm! v)]
-                                                :when (contract/error? r)]
-                                            {:ns n :message (:seon.error/message r)}))]))
-              [#{} []] wholes))))
-
 (defn defined-keys
   "The var and method keys of every definition a form of db points to: what bin/build records as binary-program's :defs, so
   load-all! unmaps what another program dropped. One scan of two pointers. See docs/source.md#the-binary-records-its-program."
@@ -1490,32 +1435,26 @@
     (vec (sort-by str (for [[_ a :as k] defs :when (and (nss (symbol (namespace a))) (not (defined? k)))] k)))))
 
 (defn load-all!
-  "Make this process run db's program where its binary holds another: at root's boot ({:tests? false}) unmap each definition
-  the binary holds that db's program dropped (gone-definitions of the binary's :defs), then load every live form it does not hold, with what they
-  reach (load!). With {:tests? false} (root's, at its boot) the test namespaces' forms are left unevaluated: root imports
-  test/ as facts and runs no deftest; and only the forms whose ids the binary lacks are read (live-ids first: unchanged
-  forms are never read or evaluated). The fork server loads the tests for every agent and test child, each namespace read
-  from its file whole where main holds it as the file is (required!), the rest form by form
-  (docs/source.md#a-process-holds-the-tests-only-when-it-runs-them). :forms and :defs, the binary's form ids (held?) and
-  definition keys, are the running binary's record by default (binary-program); a test passes the sets it means.
-  Answers {:loaded n :errors [...]}, with :removed [keys] when it unmapped any. See docs/source.md#a-boot-runs-mains-program."
+  "Make this process run db's program where its binary holds another: unmap each definition the binary holds that db's
+  program dropped (gone-definitions of the binary's :defs), then load every live form whose id the binary lacks (live-ids
+  first: unchanged forms are never read or evaluated), with what they reach (load!). The binary holds the tests compiled
+  as it holds the program (bin/build compiles test/ into its image), so a test form is loaded here only when main changed
+  it since the build, as any form is. Root runs it at its boot and the fork server when main's program moves; every
+  process forked after inherits what it loaded. :forms and :defs, the binary's form ids (held?) and definition keys, are
+  the running binary's record by default (binary-program); a test passes the sets it means. Answers {:loaded n :errors
+  [...]}, with :removed [keys] when it unmapped any. See docs/source.md#a-boot-runs-mains-program."
   {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.program/load-report]
-                  [:=> [:cat :seon.host/db [:map [:tests? {:optional true} :boolean] [:forms {:optional true} [:maybe [:set :string]]]
+                  [:=> [:cat :seon.host/db [:map [:forms {:optional true} [:maybe [:set :string]]]
                                             [:defs {:optional true} [:maybe [:set :seon.merge/program-key]]]]] :seon.program/load-report]]}
   ([db] (load-all! db {}))
-  ([db {:keys [tests?] :or {tests? true} :as opts}]
+  ([db opts]
    (let [built (binary-program)
          binary (if (contains? opts :forms) (:forms opts) (:forms built))
-         ;; root's boot alone unmaps: the fork server and every agent fork from root and hold what it holds
-         removed (if tests? [] (gone-definitions db (if (contains? opts :defs) (:defs opts) (:defs built))))
+         removed (gone-definitions db (if (contains? opts :defs) (:defs opts) (:defs built)))
          _ (run! remove-definition! removed)
-         lf (if tests?
-              (live-forms db)
-              (mapv #(form-row db %) (sort (keep (fn [[id e]] (when-not (contains? binary id) e)) (live-ids db)))))
-         forms (loadable db (filterv #(not (held? db binary %)) lf) tests?)
-         [required errs] (if tests? (required! db forms lf) [#{} []])]
-     (cond-> {:loaded (count forms)
-              :errors (into errs (load! db (filterv #(not (required (:ns %))) forms) (set (keys (schema-changes db))) tests?))}
+         forms (filterv #(not (held? db binary %))
+                        (mapv #(form-row db %) (sort (keep (fn [[id e]] (when-not (contains? binary id) e)) (live-ids db)))))]
+     (cond-> {:loaded (count forms) :errors (load! db forms (set (keys (schema-changes db))) true)}
        (seq removed) (assoc :removed removed)))))
 
 (defn- live-in?
