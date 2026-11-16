@@ -2244,10 +2244,8 @@
     {} kinds))
 
 (defn collect-store
-  "The :collect effect: the store's old commit snapshots swept (seon.db/retain! under its :ctx's :conn, root's) when keep commits
-  have landed since the last sweep; asked by the reconciler at quiescence, never at boot, so its minutes of marking hold no boot
-  and no writer step. Answers {:value record} (nil when none is due), or retain!'s typed refusal, its record under :retained.
-  See docs/storage.md#collection."
+  "The :collect effect: seon.db/retain! of root's store, asked at quiescence, never at boot. Answers {:value record} (nil when
+  none is due or the store is not LMDB), or retain!'s typed refusal with its record under :retained. See docs/storage.md#collection."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [keep]} :req {:keys [conn]} :ctx}]
   ;; an LMDB store only, as the boot's sweep was (a :file store's test root sweeps nothing)

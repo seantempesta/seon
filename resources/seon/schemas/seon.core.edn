@@ -277,6 +277,8 @@
  :seon.system/respawn [:map-of {:description "The agents ended for a respawn, with the caller and the spawn opts that start the next in their place."} :keyword [:map [:p [:or :seon.host/promise :map]] [:opts :map]]]
  :seon.system/restored [:map-of {:description "The agents whose spawn restores a commit, whose answer then says what was not restored."} :keyword [:= true]]
  :seon.system/spawning [:map-of {:description "The callers of each agent's spawn, answered at its hello or the end it met first."} :keyword [:or :seon.host/promise :map]]
+ :seon.system/sweep [:int {:description "In root's api state, the request id of the store's sweep in flight (the :collect effect, seon.fx/collect-store): while it is set, spawns wait behind it (seon.system/spawn-agent) and start at its answer. See docs/storage.md#collection."}]
+ :seon.system/held-spawns [:vector {:description "In root's api state, the spawns asked while the store's sweep runs, in order, each {:p :opts}: started when the sweep answers (seon.system/deliver-rid). See docs/storage.md#collection."} :map]
  :seon.system/stall-armed [:boolean {:description "True when the api's stall-check timer is armed (what the stall task reads)."}]
  :seon.system/stall-timer [:and {:description "The stall check's armed flag: a host volatile the proc's state holds, so a thrown step does not undo it (seon.step/timer)."} :seon.host/volatile]
  :seon.system/taken [:and {:description "A host volatile of the messages the api's step took, kept so a throw can still answer them (seon.step)."} :seon.host/volatile]
