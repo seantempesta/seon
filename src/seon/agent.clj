@@ -899,7 +899,7 @@
   "seon.proofs/reads-index of rdb (the results branch's head), held with the commit it is of and advanced from it by what the branch
   wrote since (a datoms-diff of :seon.proof/reads), never rebuilt per plan; made whole only when none is held (669M ticks at 2,291
   tests, result/c9e79efa). A value with no commit (a test's world) is indexed whole and not held. See docs/storage.md#what-a-read-scanned."
-  {:malli/schema [:=> [:cat :seon.host/db] :map]}
+  {:seon.flow/edge "held in the agent's state (seon.agent/state, principles §5's named atom) beside :branch-changes, as plan caches are, until the prove proc holds the index for the processes it forks (seon.proofs/a-test-forks-..., DESIGN (C))" :malli/schema [:=> [:cat :seon.host/db] :map]}
   [rdb]
   (let [{c :commit held :held} (:results-index @state)
         now (d/commit-id rdb)]
