@@ -1056,6 +1056,17 @@
     (is (= {t {'pt.fc/add {:calls 2 :ticks 900 :self-ticks 700 :bytes 64 :self-bytes 32}}} costs) "a called function's row is kept; one read but never called is not; a test never run has none")
     (is (= {'pt.fc/add {:calls 2 :ticks 450 :self-ticks 350 :bytes 32 :self-bytes 16}} (proofs/per-call costs)) "and per-call reads it as it read the files")))
 
+;; docs/cost.md#the-test-systems-lower-bound: the ranking that keeps the 3 s row live: the fast set (in-process, under the bound) summed,
+;; each slow and process namespace counted for its owner, a test with no record counted apart. Red first: no ranking existed.
+;; Estimate: a fold over five rows: 50,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 50000}} a-ranking-splits-the-fast-set-from-each-owners-slow-tests
+  (let [r (proofs/ranking '{a.x-test/f {:ms 6} a.x-test/g {:ms 40} a.x-test/s {:ms 300} b.y-test/p {:ms 900 :process? true} b.y-test/u {}} 50)]
+    (is (= {:count 2 :ms 46} (:fast r)) "under the bound: the fast set, summed")
+    (is (= {"a.x-test" {:count 1 :ms 300}} (:slow r)) "at or over it: slow, by namespace")
+    (is (= {"b.y-test" {:count 1 :ms 900}} (:process r)) "a process test is its own class, whatever its ms")
+    (is (= 1 (:unmeasured r)))
+    (is (= '[[a.x-test/s 300]] (:slowest r)))))
+
 ;; E checklist step 0 (root's order): a read key names what was read at datom level, a function by its form's code, so a derived
 ;; attribute of the form moving (:form/keywords moved in 40 of 40 sampled reuse misses, result/be937ff1) leaves the result's
 ;; reads-digest where it was, and the form's code moving still moves it. Red first: read-keys named the whole form ([:e form]).
@@ -1173,54 +1184,32 @@
         r (get (proofs/run-tests! ['pt.sk-test/reads-an-entry] {'pt.sk-test/reads-an-entry "d"} (fn [_])) 'pt.sk-test/reads-an-entry)]
     (is (contains? (:schema-reads r) [:ea e :schema/form]) (pr-str (select-keys r [:schema-reads :pass :error])))))
 
-(def ^:private cold-sizes "The read keys a result holds, in the cold read's proof." [10 100 1000])
-
-(defn- cold-path
-  "Where the cold read's proof keeps its store of n keys a result: the system's temp dir, never the checkout (owner, 2026-11-16: no
-  test edits the worktree), a directory of this process's own (on-disk-path's reason)."
-  {:malli/schema [:=> [:cat pos-int?] :string]}
-  [n] (str (System/getProperty "java.io.tmpdir") "/seon-cold-results-" (.pid (java.lang.ProcessHandle/current)) "-" n))
-
-(defn cold-results-of
-  "[db cand] for verdicts-at: 32 results of 32 tests, each holding n read keys (:seon.proof/read-keys datoms), on a store on disk of
-  its own read through a 4 KB node cache, so every node read is a cold decode as the standing store's are; cand asks for 4 of them.
-  The last resort (docs/storage.md): the in-memory test store decodes no node."
-  {:malli/schema [:=> [:cat pos-int?] [:vector :any]]}
-  [n]
-  (let [path (cold-path n)
-        _ (seon.lib/remove-tree! path)
-        {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
-        _ (d/release conn)
-        c (pdb/connect (assoc cfg :store-cache-bytes 4096))
-        basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
-        ts (mapv #(symbol "pt.cold-test" (str "t" %)) (range 32))
-        ent (fn [i t] (let [rd (seon.lib/digest (str "reads " i))]
-                        {:seon.proof/id (proofs/verdict-id t rd :pass) :seon.proof/test t :seon.proof/reach-digest (seon.lib/digest (str "reach " i))
-                         :seon.proof/status :pass :seon.proof/route :live :seon.proof/ran-on #{(:seon.db/branch basis)} :seon.proof/reads-digest rd
-                         :seon.proof/read-keys (into #{} (map (fn [j] (pr-str [:ea (+ 1000 (* i 10000) j) :form/code]))) (range n))}))]
-    (d/transact c {:tx-data (vec (map-indexed ent ts))})
-    [@c (into {} (for [i [3 11 19 27]] [(ts i) (seon.lib/digest (str "reach " i))]))]))
-
-;; seon.agent/a-tests-result-is-read-in-one-seek-at-its-digest: a cold read of a result costs nothing of what it read. Red first
-;; (result/d322f7cb, 4 candidates, keys then one :seon.proof/reads value): verdicts-at read each attribute through :eavt, whose leaf
-;; Datahike restores with every result's reads in it: 1.3 MB at 10 keys, 8.7 MB at 100, 70 MB at 1,000; through :aevt 477 KB at each.
-;; Estimate: 3 stores made and 32 results written (~10M each), 3 sizes measured cold a few times (~0.5M each): 40,000,000 ticks
-(deftest ^{:seon.test/estimate {:ticks 40000000}} a-results-read-costs-nothing-of-its-reads-value
-  (try
-    (cost/proof
-      {:of 'seon.proofs/verdicts-at :input 'seon.proofs-test/cold-results-of
-       :n "read keys each result holds"
-       :work (str "4 candidates, each a seek of its test's results and four :aevt reads of small attributes, every node read cold: "
-                  "the path's depth, log of the store's datoms (32 n key datoms), never a result's keys decoded")
-       :growth :log
-       ;; a cold node read ~24 KB and ~5k ticks (docs/cost.md); 4 candidates x 5 reads on a path of cold misses, one level more as
-       ;; the store grows (the first estimate, constant, missed the depth: 10 -> 100 keys added one level, 1,000 none, result/ab69a994)
-       :fixed {:ticks 100000 :bytes 400000}
-       :per-n {:ticks 25000 :bytes 150000}
-       :sizes cold-sizes})
-    (finally (doseq [n cold-sizes :let [path (cold-path n)] :when (pdb/store? path)]
-               (d/release (pdb/connect (assoc (pdb/store-cfg :lmdb path) :store-cache-bytes 4096)) true)
-               (seon.lib/remove-tree! path)))))
+;; docs/storage.md#what-a-read-scanned, seon.agent/a-tests-result-is-read-in-one-seek-at-its-digest: a read of a result costs nothing of
+;; what it read. The cause of the cold cost (result/d322f7cb: :eavt leaves restore every result's read keys, 1.3 MB at 10 keys, 70 MB at
+;; 1,000; :aevt 477 KB at each) is which index a read goes through, so it is shown by the reads themselves, in process, never by a cold
+;; store on disk: every d/datoms verdicts-at makes is :aevt or :avet, and their number is the same at 10 read keys a result as at 1,000.
+;; Estimate: one world (shared) and 2 x 8 results written (~0.2M each size), 4 candidates read at ~10 seeks (<0.1M): 1,000,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-results-read-costs-nothing-of-its-reads-value
+  (let [basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
+        ts (mapv #(symbol "pt.cold-test" (str "t" %)) (range 8))
+        reads-at (fn [n]
+                   (let [ent (fn [i t] (let [rd (seon.lib/digest (str "reads " i))]
+                                         {:seon.proof/id (proofs/verdict-id t rd :pass) :seon.proof/test t :seon.proof/reach-digest (seon.lib/digest (str "reach " i))
+                                          :seon.proof/status :pass :seon.proof/route :live :seon.proof/ran-on #{:db} :seon.proof/reads-digest rd
+                                          :seon.proof/read-keys (into #{} (map (fn [j] (pr-str [:ea (+ 1000 (* i 10000) j) :form/code]))) (range n))}))
+                         db (pdb/db-with (mt/world) (vec (map-indexed ent ts)))
+                         cand (into {} (for [i [1 3 5 7]] [(ts i) (seon.lib/digest (str "reach " i))]))
+                         seen (atom [])
+                         real d/datoms
+                         found (with-redefs [d/datoms (fn [db' index & more] (swap! seen conj [index (first more)]) (apply real db' index more))]
+                                 (proofs/verdicts-at db cand))]
+                     [found @seen]))
+        [f10 s10] (reads-at 10)
+        [f1000 s1000] (reads-at 1000)]
+    (is (= 4 (count f10) (count f1000)) "each candidate's result found")
+    (is (= #{:aevt :avet} (set (map first s1000))) (str "never an :eavt leaf, whose restore loads every read key: " (pr-str (frequencies (map first s1000)))))
+    (is (= (count s10) (count s1000)) "and the reads made do not grow with the keys a result holds")
+    (is (not-any? #(= :seon.proof/read-keys (second %)) (remove #(= :aevt (first %)) s1000)) "the keys are only ever tested present, through the attribute's own index")))
 
 ;; seon.agent/a-tests-result-is-read-in-one-seek-at-its-digest, the plan's memory (root's seon_done ran out of its agent's 2.5 GB building
 ;; it, result/b624f125): a judge's plan looks up stored results only for what it selects (the tests its change reached, and the proofs).
