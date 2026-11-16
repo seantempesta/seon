@@ -1377,9 +1377,13 @@
     (let [fact {:t (:t st) :root-causes (root-causes (:idx st))}
           [st q] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :tx :branch :db :tx-data [{:seon.system/id :root :seon.system/quiescent fact}]}})
           [st c] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :collect}})
-          [st r] (step/ask st [:reconciler :answers] [::retained nil] {:op :fx :kind :collect :req {:keep (cfg/value :seon.config.store/keep-commits)}})]
+          ;; only where root is the store's sole writer (:seon.config.store/sole-writer?): a root that shares its store (a test's)
+          ;; never sweeps it, as its boot never did
+          [st r] (if (cfg/value :seon.config.store/sole-writer?)
+                   (step/ask st [:reconciler :answers] [::retained nil] {:op :fx :kind :collect :req {:keep (cfg/value :seon.config.store/keep-commits)}})
+                   [st nil])]
       ;; :report, the report's request until its answer: a wait is answered once main holds it
-      [(assoc st :quiet true :quiescent fact :report (:tag q)) [q c r]])))
+      [(assoc st :quiet true :quiescent fact :report (:tag q)) (cond-> [q c] r (conj r))])))
 
 (defn- answer-waits
   "Deliver each held wait on main (seon.system/await-db, through :quiet) whose :after the

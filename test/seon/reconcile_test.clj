@@ -1643,10 +1643,16 @@
       (is (:quiet st)))
     ;; switch-over step 0 (seon.system/an-update-loses-nothing): old snapshots are swept at quiescence by the :collect effect, off the
     ;; writer and never at boot, and its record is written through the writer when it answers
-    (let [sweep (some #(when (= :collect (get-in % [:req :kind])) %) outs)
+    (testing "a root that shares its store (sole-writer? off, as here) asks no sweep, as its boot never swept"
+      (is (not-any? #(= :collect (get-in % [:req :kind])) outs)))
+    (let [value seon.config/value
+          ;; the root as the store's sole writer: that one key read as the standing root's config sets it, every other as it is
+          sole (fn ([k] (if (= k :seon.config.store/sole-writer?) true (value k))) ([k ctx] (if (= k :seon.config.store/sole-writer?) true (value k ctx))))
+          [st outs] (with-redefs [seon.config/value sole] (step (r/reconciler-proc {:boot "boot-1" :conn conn}) db []))
+          sweep (some #(when (= :collect (get-in % [:req :kind])) %) outs)
           rec {:swept 3 :ms 1.0 :generation 42}
           [_ after] (r/reconciler-proc st :answers {:tag (:tag sweep) :r {:value rec}})]
-      (testing "the quiet spell asks the :collect effect for the sweep, with the keep the config states"
+      (testing "the sole writer's quiet spell asks the :collect effect for the sweep, with the keep the config states"
         (is (= {:op :fx :kind :collect :req {:keep (seon.config/value :seon.config.store/keep-commits)}} (:req sweep))))
       (testing "its answer's record is written on main through the writer"
         (is (some #(= (pdb/retained-tx rec) (get-in % [:req :req :tx-data])) (:to-api after)) (pr-str (:to-api after)))))

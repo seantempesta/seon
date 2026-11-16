@@ -2250,7 +2250,10 @@
   See docs/storage.md#collection."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [keep]} :req {:keys [conn]} :ctx}]
-  (let [r (pdb/retain! conn keep)] (if (contract/error? r) r {:value r})))
+  ;; an LMDB store only, as the boot's sweep was (a :file store's test root sweeps nothing)
+  (if (= :lmdb (get-in @conn [:config :store :backend]))
+    (let [r (pdb/retain! conn keep)] (if (contract/error? r) r {:value r}))
+    {:value nil}))
 
 (defn stall-evidence
   "A stalled agent's evidence, captured while it is stuck (seon.system's stall task asks it at the
