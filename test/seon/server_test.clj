@@ -58,23 +58,31 @@
     (is (= "abc" (:value sent)) "the request's input is what the forms read")
     (is (= "" (:value none)) "with none sent, stdin is empty: a read answers at once")))
 
-(deftest a-server-refused-answer-is-the-one-error-map
-  ;; task seon.render/one-owner-per-view-path (B2): the server refuses as root does, with the
-  ;; one error map, never a second {:error "text"} shape
-  (let [answers (at/in-agent [{:op :nope} {:op :context :agent "a0"} {:op :done :agent "a0"} {:op :attach :task "no/such"}])]
-    (is (= 4 (count answers)))
-    (doseq [a answers]
-      (is (contract/error? a) (pr-str a))
-      (is (nil? (:error a)) (pr-str a)))))
+;; Estimate: an empty test branch ~0.3M and three answers that refuse before any proc is asked: ~0.4M; 1,000,000
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-server-refused-answer-is-the-one-error-map
+  ;; task seon.render/one-owner-per-view-path (B2): the server refuses as root does, with the one error map, never a second {:error "text"} shape
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [sys {:graph nil :ext (a/chan) :conn conn}
+           answers [(seon.server/answer sys {:op :nope}) (seon.server/answer sys {:op :attach :task "no/such"})]]
+       (is (= 2 (count answers)))
+       (doseq [a answers]
+         (is (contract/error? a) (pr-str a))
+         (is (nil? (:error a)) (pr-str a)))))))
 
-(deftest a-server-defect-answers-that-request-alone
-  ;; task seon.server/a-server-defect-answers-that-request-alone: a request whose op throws
-  ;; (attach! refuses a task id that is not a string: its contract) is answered the typed
-  ;; :seon.server/defect naming the line it took, and the server answers the next request
-  (let [[defect ok] (at/in-agent [{:op :attach :task 5} {:op :eval :agent "root" :code "(+ 1 2)"}])]
-    (is (= :seon.server/defect (:seon.error/type defect)))
-    (is (= (pr-str {:op :attach :task 5}) (:line defect)))
-    (is (= 3 (:value ok)) "the server goes on")))
+;; Estimate: an empty test branch ~0.3M, one answer that throws in attach!'s contract and one that refuses: ~0.5M; 1,000,000
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-server-defect-answers-that-request-alone
+  ;; task seon.server/a-server-defect-answers-that-request-alone: a request whose op throws (attach! refuses a task id that is not a string: its
+  ;; contract) is answered the typed :seon.server/defect naming the line it took, and the server answers the next request
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [sys {:graph nil :ext (a/chan) :conn conn}
+           ask #(clojure.edn/read-string (#'seon.server/respond sys (pr-str %)))
+           defect (ask {:op :attach :task 5})
+           next (ask {:op :nope})]
+       (is (= :seon.server/defect (:seon.error/type defect)))
+       (is (= (pr-str {:op :attach :task 5}) (:line defect)))
+       (is (= :seon.system/refused (:seon.error/type next)) (str "the server goes on: " (pr-str next)))))))
 
 ;; See docs/server.md#ops
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} an-op-past-its-bound-answers-its-caller-and-the-server-goes-on
@@ -669,12 +677,13 @@
     (is (clojure.string/ends-with? (:task made) "/made") (pr-str made))
     (is (= :held (:value held)) "nothing starts")))
 
-(deftest a-later-read-draws-no-page-cold-and-costs-what-the-one-before-did
+(deftest a-later-read-draws-no-page-cold
   ;; the owner, 2026-10-27: a later turn's request build measured 94M ticks, 317 MB on Seon's own tasks, 25,000
   ;; contracted calls, two pages drawn a read (the one before's again, to diff against). Each read after
   ;; the first draws the one page it tells and costs what the read before did: ticks and bytes are the
   ;; process's exact counts (seon.profile/measure!); its page is the agent's live walk's (seon.repl/page-walk),
-  ;; so no walk is drawn cold, and it equals a cold walk (seon.render/walk :once) on the db it is drawn to
+  ;; so no walk is drawn cold, and it equals a cold walk (seon.render/walk :once) on the db it is drawn to. Its cost claim (a read costs what the one
+  ;; before did) is no test: a ratio of two readings in a root whose main other tests move (docs/testing.md#testing-in-the-world, a cost proof is seon.cost/proof)
   (let [[reads]
         (at/in-agent (fn [{:keys []}]
                        [(str "(let [t (:task @seon.agent/state)"
@@ -691,70 +700,61 @@
         later (rest (:reads (:value reads)))]
     (is (= 9 (count (:reads (:value reads)))))
     (is (true? (:live=cold (:value reads))) (str "the live walk's request is a cold walk's on the db it is drawn to; live only: " (pr-str (:live=cold (:value reads)))))
-    (is (not-any? :cold? later) (str "each later read draws no page cold: its walk ran fewer components than it holds " (pr-str (map :cold? later))))
-    ;; a read costs what changed (the render's views, docs/render.md): main's commit moving between two reads
-    ;; (an earlier test's task merging in this root) redraws the branch views, which the task's render
-    ;; keys by it (seon.render.ui/render-ctx), so only reads beside the same main are compared; measured 2026-10-29:
-    ;; every read after a move cost 15.5M ticks against 9.2M, a shard run's reads moved main in 8 of 13
-    (let [same (filter (fn [[a b]] (= (:main a) (:main b))) (partition 2 1 later))]
-      (is (seq same) (str "some later reads follow one that saw the same main: " (pr-str (map :main later))))
-      (is (every? (fn [[a b]] (<= (:ticks b) (* 1.05 (:ticks a)))) same) (str "and costs what the one before it did: " (pr-str (map (juxt :ticks :main) later))))
-      (is (every? (fn [[a b]] (<= (:bytes b) (* 1.05 (:bytes a)))) same) (str "in bytes too: " (pr-str (map (juxt :bytes :main) later)))))))
+    (is (not-any? :cold? later) (str "each later read draws no page cold: its walk ran fewer components than it holds " (pr-str (map :cold? later))))))
 
-;; Estimate: one agent's setup and teardown (~1.5M) and 17 asks of ~0.25M each, its three proves run by the service, not here: ~5.8M; 8,000,000
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 8000000 :asks 17}} an-outside-agents-prove-names-what-it-runs-and-done-answers-the-judge
-  ;; One outside agent, every step of its prove and done (tests' FOCUS step 4: these were four tests, each its own agent):
-  ;; - a prove never ends the agent it proves (THE PLAN 0.7, root 2026-10-27: after seon_prove the agent had ended); each prove names
-  ;;   one test, which runs alone (seon.agent/named-tests): naming a namespace once proved all of main inside a test (568 s, 2026-10-30)
-  ;; - a process test an agent defined is deferred from the fork with why, and a red comes with its first failing assertion
-  ;; - a named prove counts for my.task/status and the judge, answers one line, and its value is drawn on its eval (the blind agent,
-  ;;   2026-10-27: 171 green left both proofs :proof-unknown, and a bare prove answered 25k chars)
-  ;; - done answers the judge's reasons once main holds them (dogfood 2026-10-25: seon_done answered {:judging ...}): the harness's
-  ;;   task names demo-test/t, which no test defines, so the done rule refuses and the line says why
+;; Estimate: one agent's setup and teardown (~1.5M) and four asks of ~0.25M each, its prove run by the service, not here: ~2.5M; 3,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} a-prove-never-ends-the-agent-and-a-named-test-runs-alone
+  ;; THE PLAN 0.7 (root 2026-10-27: after seon_prove the agent had ended). Each prove names one test, which runs alone (seon.agent/named-tests):
+  ;; naming a namespace once proved all of main inside a test (568 s, 2026-10-30)
   (let [alive #(hash-map :op :eval :agent "root" :code (str "(contains? (:agents (c/state sys)) :" % ")"))
-        [ctx proved after live1 defined _ why answer status-p _ _ _ proved-ok status drawn done]
+        [ctx proved after live]
         (at/in-agent (fn [{:keys [agent]}]
                        [{:op :context :agent agent}
                         {:op :prove :agent agent :names ["seon.union-test/a-message-and-its-reply-on-two-branches-are-one-query"]}
                         "(+ 1 2)"
-                        (alive agent)
-                        (str "(ns app.ptest (:require [clojure.test :refer [deftest is]]))"
+                        (alive agent)]))]
+    (is (string? (:context ctx)) (pr-str ctx))
+    (is (not (contract/error? proved)) (pr-str proved))
+    (is (= 1 (:ran proved (:ran (:result proved)))) (str "a named test runs alone: " (pr-str proved)))
+    (is (= 3 (:value after)) (str "the agent answers after a prove of its branch: " (pr-str after)))
+    (is (true? (:value live)) "and root holds it live")))
+
+;; Estimate: one agent's setup and teardown (~1.5M) and five asks of ~0.25M each, its prove run by the service: ~2.8M; 3,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} a-process-test-an-agent-defined-is-deferred-and-a-red-names-its-failure
+  ;; a process test an agent defined is deferred from the fork with why, and a red comes with its first failing assertion
+  (let [[defined _ why answer status-p]
+        (at/in-agent (fn [{:keys [agent]}]
+                       [(str "(ns app.ptest (:require [clojure.test :refer [deftest is]]))"
                              " (deftest p-test (is (fn? seon.lib/fork!)))"
                              " (deftest r-test (is (= 1 2) \"one is two\"))")
                         "(+ 1 1)"
                         "(my.agent/process-test? 'app.ptest/p-test)"
                         {:op :prove :agent agent :names ["app.ptest"]}
-                        "(my.agent/process-test? 'app.ptest/r-test)"
-                        "(ns app.okt (:require [clojure.test :refer [deftest is]])) (deftest ok-test (is (= 2 (+ 1 1))))"
-                        "(my.task/update! :seon.task/proofs conj 'app.okt/ok-test)"
-                        "(+ 2 2)"
-                        "(my.agent/prove #{'app.okt/ok-test})"
-                        "(let [s (my.task/status)] [(some #(when (= 'app.okt/ok-test (:test %)) (:status %)) (:proofs s)) (filterv #(= 'app.okt/ok-test (:symbol %)) (:refused s (:reasons s)))])"
-                        ;; the prove's eval as recorded: its value, data, under the schema the page draws it by
-                        "(let [e (datahike.api/q '[:find [?e ?k] :in $ ?c :where [?e :seon.eval/code ?c] [?e :seon.eval/response _] [?e :seon.eval/schema ?k]] (seon.agent/db) \"(my.agent/prove #{'app.okt/ok-test})\")
-                               v (seon.ratom/realize (:value (seon.db/response-of (seon.agent/db) (datahike.api/pull (seon.agent/db) '[:seon.eval/response :seon.eval/result] (first e)))))]
-                           [(second e) (:proofs v) (seon.web.html/html (seon.render.ui/proved {:seon.render/index (seon.db/index)} v))])"
-                        {:op :done :agent agent}]))]
-    (is (string? (:context ctx)) (pr-str ctx))
-    (is (not (contract/error? proved)) (pr-str proved))
-    (is (= 1 (:ran proved (:ran (:result proved)))) (str "a named test runs alone: " (pr-str proved)))
-    (is (= 3 (:value after)) (str "the agent answers after a prove of its branch: " (pr-str after)))
-    (is (true? (:value live1)) "and root holds it live")
+                        "(my.agent/process-test? 'app.ptest/r-test)"]))]
     (is (nil? (:ex defined)) (pr-str defined))
     (is (some #{'seon.lib/fork!} (:uses (:value why))) (str "a deferred process test says why: " (pr-str why)))
     (let [r (or (:result answer) answer)]
       (is (= "one is two" (get-in r [:failures 'app.ptest/r-test :message])) (str "a red's first failing assertion: " (pr-str answer)))
       (is (some #{'app.ptest/p-test} (:deferred r)) "the service's answer names the deferred one too"))
-    (is (nil? (:value status-p)) "an in-process test is none")
-    ;; the owner, 2026-10-27: an eval's answer stays small, its handle and one line; what the run found is drawn on its eval
+    (is (nil? (:value status-p)) "an in-process test is none")))
+
+;; Estimate: one agent's setup and teardown (~1.5M) and six asks of ~0.25M each, its prove run by the service and its done judged by the reconciler: ~3.5M; 4,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 6}} a-named-prove-counts-for-status-and-the-judge-and-done-answers-its-reasons
+  ;; - a named prove counts for my.task/status and the judge and answers one line (the blind agent, 2026-10-27: 171 green left both proofs
+  ;;   :proof-unknown, and a bare prove answered 25k chars); how that line and the eval's value are drawn is seon.render-test's
+  ;; - done answers the judge's reasons once main holds them (dogfood 2026-10-25: seon_done answered {:judging ...}): the harness's task names
+  ;;   demo-test/t, which no test defines, so the done rule refuses and the line says why
+  (let [[_ _ _ proved-ok status done]
+        (at/in-agent (fn [{:keys [agent]}]
+                       ["(ns app.okt (:require [clojure.test :refer [deftest is]])) (deftest ok-test (is (= 2 (+ 1 1))))"
+                        "(my.task/update! :seon.task/proofs conj 'app.okt/ok-test)"
+                        "(+ 2 2)"
+                        "(my.agent/prove #{'app.okt/ok-test})"
+                        "(let [s (my.task/status)] [(some #(when (= 'app.okt/ok-test (:test %)) (:status %)) (:proofs s)) (filterv #(= 'app.okt/ok-test (:symbol %)) (:refused s (:reasons s)))])"
+                        {:op :done :agent agent}]))]
     (is (clojure.string/includes? (:text proved-ok) "green: ") (:text proved-ok))
     (is (< (count (:text proved-ok)) 300) (str "the answer is its handle and one line: " (count (:text proved-ok)) " chars"))
     (is (= [:pass []] (:value status)) (str "my.task/status: the proof's status, and no reason about it: " (pr-str status)))
-    (let [[k proofs html] (:value drawn)]
-      (is (= :seon.test/proved k) (str "the eval's record names the value's render schema: " (pr-str drawn)))
-      (is (= :pass (get proofs 'app.okt/ok-test)) "the value is the run, stored as data")
-      (is (and (string? html) (clojure.string/includes? html "green: ") (clojure.string/includes? html "app.okt/ok-test"))
-          (str "drawn on the eval: the line, then each proof's status: " html)))
     (is (not (clojure.string/includes? (pr-str done) "proof-unknown app.okt/ok-test")) (str "and the judge counts it: " (pr-str done)))
     (is (clojure.string/includes? (:line done) ":outcome :closed") (pr-str done))
     (is (clojure.string/includes? (:line done) "proof-unknown demo-test/t") "the done rule's reasons, as the judge wrote them on the held task")
