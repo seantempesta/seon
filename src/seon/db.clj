@@ -1200,9 +1200,26 @@
   {:malli/schema [:=> [:cat :any] :any]}
   [db] (or (:store db) (:store (:origin-db db))))
 
+(defn settled-branches
+  "The branches, as main db's store names them, whose work is settled: every agent on the branch (:seon.agent/branch) is gone
+  (:seon.agent/status's :seon.status/gone) and the task each worked has ended (:seon.task/outcome's :seon.status/ended) or moved
+  to another branch (:seon.task/branch, a fresh attach's restart), so nothing will merge main into it or read its old commits by id
+  again. A branch no agent names (main's own, the results branch) is never settled. One query over main's agents: O(agents).
+  See docs/storage.md#collection."
+  {:malli/schema [:=> [:cat :seon.host/db] [:set :seon.db/branch]]}
+  [db]
+  (let [main (get-in db [:config :branch])
+        gone (:seon.status/gone (contract/properties :seon.agent/status))
+        ended (:seon.status/ended (contract/properties :seon.task/outcome))
+        settled? (fn [b a] (let [e (d/entity db a) t (:seon.agent/task e)]
+                             (and (gone (:seon.agent/status e)) (or (ended (:seon.task/outcome t)) (not= b (:seon.task/branch t))))))]
+    (into #{} (comp (filter (fn [[b as]] (every? #(settled? b (second %)) as))) (map (comp #(on-main main %) key)))
+          (group-by first (d/q '[:find ?b ?a :where [?a :seon.agent/branch ?b]] db)))))
+
 (defn retain!
   "Sweep the commit snapshots of the store under conn older than main's newest keep commits, when that many have landed since the last sweep (main's :seon.system/retained),
-  counted by the commit graph's generation, never a clock. Kept whole, whatever their age: each branch's head, its merge base with main, and each commit an agent's facts
+  counted by the commit graph's generation, never a clock. Kept whole, whatever their age: each branch's head, and for a branch not settled (`settled-branches`: its agents gone
+  and its task ended or moved on, whose head alone is kept) its merge base with main and each commit an agent's facts
   name (an attribute whose schema reaches :seon.db/commit: the entity index's :commit-attrs, an agent's bases and a turn's basis among them),
   which is what a merge and a page read by id. Every datom, a branch's history and as-of reads stay: only reading
   another old commit by its id goes. Root runs it as its :collect effect at quiescence (seon.reconcile's quiet, no agent live), off
@@ -1228,10 +1245,14 @@
                            (if-let [p (when (seq ps) (apply max-key #(:datahike/generation (record %) 0) ps))] (recur p (dec n)) c))))
             cutoff (let [{:keys [datahike/updated-at datahike/created-at]} (:meta (k/get store oldest nil {:sync? true}))] (or updated-at created-at))
             bs (d/branches conn)
+            ;; a settled branch (its agents gone, its task ended or moved on) keeps its head alone: nothing merges main into it or reads its
+            ;; old commits by id again, so neither its merge base nor the commits its facts name are kept for it
+            settled (settled-branches @conn)
+            open (remove settled bs)
             ;; a branch with more than one best ancestor has each kept; its data says which (d/merge-base's refusal); any other refusal
             ;; is the branch's base unknown, and nothing is swept, never a sweep without it (43 of root's 66 bases were swept that way,
             ;; 2026-11-15: every ExceptionInfo was read as no base)
-            answers (for [b (remove #{main} bs)]
+            answers (for [b (remove #{main} open)]
                       (try {:bases [(d/merge-base conn b main)]}
                            (catch clojure.lang.ExceptionInfo e
                              (if-let [ms (:merge-bases (ex-data e))] {:bases ms} {:refused {:branch b :message (ex-message e)}}))))
@@ -1240,7 +1261,7 @@
             ;; every commit a kept reference names (an attribute whose schema reaches :seon.db/commit: the entity index's :commit-attrs,
             ;; derived from the schemas): an agent's bases, a turn's basis, a run's; whatever reads it by id reads it whole
             commit-attrs (:commit-attrs (index))
-            named (into #{} (for [b bs :let [h (d/branch-as-db store b)] a commit-attrs d (d/datoms h :aevt a)
+            named (into #{} (for [b open :let [h (d/branch-as-db store b)] a commit-attrs d (d/datoms h :aevt a)
                                   x (tree-seq coll? seq (:v d)) :when (uuid? x)]
                               x))
             ;; the store's own bound (:seon.config.store/lmdb-sync-pages) steadies the sweep's deletes as it frees pages, so they are reused (docs/storage.md#durability-is-continuous-group-commit)
