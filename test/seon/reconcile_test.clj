@@ -449,7 +449,7 @@
 ;; still calls is seen whichever side the call is on: (1) two branches, one removing f and one calling it, each passing alone: the
 ;; first merges, and the second, main merged into it, must not; (2) one branch removing f that main's unchanged g calls must not merge at all.
 ;; Read from the forms' recorded references (seon.merge/dangling): Jolt compiles x/f with no var as a lookup at each call, so a load would not see it
-;; Estimate: 1 test-branch! 1M + 5 source/refresh-tx of 2-line files (~0.5M each = 2.5M) + 3 branches and connects (0.5M each = 1.5M) + 3 :merge steps (~10M each: main merged into the branch, its candidate judged, main's commit, as seon.procs-test/a-branch-merges-into-a-moved-main-in-one-writer-step measured 12.5M; the octopus step this replaced was ~2M, judging every member against one main) + 1 merge-candidate step ~2M ~ 37M ~ 40,000,000 ticks
+;; Estimate: 1 test-branch! 1M + 5 source/refresh-tx of 2-line files (~0.5M each = 2.5M) + 3 branches and connects (0.5M each = 1.5M) + 3 :merge steps (~10M each: main merged into the branch, its candidate judged, main's commit, as seon.procs-test/a-branch-merges-into-a-moved-main-in-one-writer-step measured 12.5M; the octopus step this replaced was ~2M, judging every member against one main) ~ 35M ~ 40,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 40000000}} a-merge-leaves-no-name-unbound
   (ts/test-branch!
    (fn [cfg conn]
@@ -482,9 +482,7 @@
            (swap! conns conj cc)
            (on cc {x x-without-f})
            (let [w (writer)
-                 gate (ask w {:op :merge-candidate :branch c})
                  rc (ask w {:op :merge :branch c :proved-t (:max-tx @conn)})]
-             (is (= :seon.merge/dangling (:seon.error/type gate)) (pr-str gate))
              (is (= :seon.merge/dangling (:seon.error/type rc)) (pr-str rc))
              (is (= ['app.oct.x/f] (mapv :ref (:dangling rc))) "naming what main's g still calls")))
          (finally (run! d/release @conns)))))))
@@ -863,9 +861,7 @@
 ;; Estimate: 2 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M); 3 mdb x 1M (as db-of with a merge task for each of ~4 tasks); 5 index or actions calls x 0.7M (0.2M + ~100k a task x ~4, then the actions) ~ 8,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 8000000}} actions-read-the-judgment-stored-on-the-task
   ;; the decision is made once, at the agent's end (`judgment`) and written; `actions` reads the outcome stored, never the done rule
-  (let [merge {:op :merge :task "demo/a-merge"}
-        gate {:seon.system/id :root :seon.config.source/gate-checkout "/the/merges/tree"}
-        boots 'seon.system-test/boots]
+  (let [merge {:op :merge :task "demo/a-merge"}]
     (testing ":ready is the writer's :merge"
       (is (= [merge] (actions-for (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :ready)))))))
     (testing "a judged task no longer running is closed, never merged"
@@ -1147,44 +1143,34 @@
            (actions-for (db-req (concat (work "a" :done) (work "a-merge" :ready)))))
         "and the merge task's green end is the merge")))
 
-;; Estimate: six judgments over a small main (~1M each): ~6M; 8,000,000
-(deftest ^{:seon.test/estimate {:ticks 8000000}} a-merge-task-is-ready-or-holds-the-tests-the-judges-gate-left-unrun
-  ;; the one prove (task seon.step's queue, item 2): the judge (seon.agent/judge! with reach? true) runs the process tests a merge task's
-  ;; change reaches through its gate; what it leaves deferred had no verdict there, so the task is held naming them, never run again by a
-  ;; later stage, and a task with none deferred is ready. Red before: a clean merge task went to :gate (the reconciler's second run)
-  (let [gate {:seon.system/id :root :seon.config.source/gate-checkout "/the/merges/tree"}
-        boots 'seon.system-test/boots
+;; Estimate: four judgments over a small main (~1M each): ~4M; 6,000,000
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-merge-task-is-ready-with-its-process-tests-named
+  ;; the one prove (task seon.step's queue, item 2): the judge (seon.agent/judge! with reach? true) proves what a merge task's change reaches;
+  ;; the process tests among them are named, not run, until the one-build runner (docs/plan.md NOW), so they never hold the task: it is
+  ;; ready, naming them. Red before: a merge task whose process tests had no verdict was held (:closed) naming them
+  (let [boots 'seon.system-test/boots
         other 'seon.system-test/other
-        self (assoc gate :seon.system/started-by "seon.system-test/boots")
+        self {:seon.system/id :root :seon.system/started-by "seon.system-test/boots"}
         judged (fn [root deferred] (judgment-of (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :running) (when root (ts/root-tx root))))
                                                 "a-merge" {:end {:outcome :green} :results {(t "a") :pass} :deferred deferred}))]
-    (is (= {:outcome :ready :reasons []} (judged gate [])) "nothing deferred: ready to merge, with no second stage")
-    (is (= {:outcome :ready :reasons []} (judged nil [])) "nor with no checkout")
-    (is (= {:outcome :ready :reasons []} (judged self [boots])) "the root's own test is left out: a test cannot be its own gate")
-    (let [j (judged gate [boots])]
-      (is (= [:closed [boots]] ((juxt :outcome :deferred) j)) "a test the judge's gate gave no verdict holds the task")
-      (is (str/includes? (:hold j) (str boots)) (:hold j)))
-    (let [j (judged self [boots other])]
-      (is (= [:closed [other]] ((juxt :outcome :deferred) j)) "beside the root's own, the other is named"))
-    (let [j (judged nil [boots])]
-      (is (= :closed (:outcome j)))
-      (is (str/includes? (:hold j) "no checkout") (str "no checkout to run them on says so: " (:hold j))))))
+    (is (= {:outcome :ready :reasons []} (judged nil [])) "nothing deferred: ready to merge, with no second stage")
+    (is (= {:outcome :ready :reasons [] :deferred [boots]} (judged nil [boots])) "a process test with no verdict is named, and the task is ready")
+    (is (= {:outcome :ready :reasons []} (judged self [boots])) "the root's own test is left out: a test cannot judge the root it started")
+    (is (= {:outcome :ready :reasons [] :deferred [other]} (judged self [boots other])) "beside the root's own, the other is named")))
 
 ;; Estimate: 4 db builds (test-db fork 0.1M + the root-tx transact 50k = 0.15M each, 0.6M) + 7 task/proof? and unjudged calls of ~10k each ~ 0.7M ~ 700,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 700000}} what-no-gate-runs-is-said-and-what-a-task-owes-is-its-proofs
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: seon.task/proof? is the one reading, a test var against the accumulated proofs (a
-  ;; namespace's name is no proof); seon.task/unjudged says what the gate leaves and why, for the status and the run's end
+  ;; namespace's name is no proof); seon.task/unjudged says which process tests a task is not held to and why, for the status and the run's end
   (let [t 'seon.system-test/boots u 'seon.system-test/other
         tk {:seon.task/kind :work :seon.task/accumulated {:proofs #{t}}}
-        db (fn [root] (d/db-with (ts/test-db) (when root (ts/root-tx (merge {:seon.system/boot "b" :seon.config.agent/max-running 1} root)))))
-        gate {:seon.config.source/gate-checkout "/the/tree"}]
+        db (fn [root] (d/db-with (ts/test-db) (when root (ts/root-tx (merge {:seon.system/boot "b" :seon.config.agent/max-running 1} root)))))]
     (is (task/proof? tk t))
     (is (not (task/proof? tk u)))
     (is (not (task/proof? {:seon.task/accumulated {:proofs #{'seon.system-test}}} t)) "like with like: a test var, never a namespace")
-    (is (nil? (task/unjudged (db gate) tk [t u])) "the gate runs them all")
-    (is (= [t u] (:tests (task/unjudged (db nil) tk [t u]))) "no checkout: all, with why")
-    (is (= [t u] (:tests (task/unjudged (db gate) (assoc tk :seon.task/kind :design) [t u]))) "a design: all")
-    (is (= {:tests [u]} (select-keys (task/unjudged (db (assoc gate :seon.system/started-by (str u))) tk [t u]) [:tests])) "the test that started this root: itself")))
+    (is (nil? (task/unjudged (db {}) tk [t u])) "a work task: none excused")
+    (is (= [t u] (:tests (task/unjudged (db {}) (assoc tk :seon.task/kind :design) [t u]))) "a design: all")
+    (is (= {:tests [u]} (select-keys (task/unjudged (db {:seon.system/started-by (str u)}) tk [t u]) [:tests])) "the test that started this root: itself")))
 
 ;; Estimate: pure data in, pure data out, a few 10k ticks ~ 50,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 50000}} a-deferred-proof-is-neither-red-nor-unknown

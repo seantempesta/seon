@@ -282,23 +282,17 @@
 (defn layered
   "The config of the layers [[source map] ...] (later wins, key by key), resolved once against schema (`resolved`: a key no
   layer states takes its schema's :default, source \"schema\") (default this process's branch's): {:config :sources}, :sources naming the layer
-  each key came from. An absent :seon.config.source/gate-checkout is :seon.config.source/root as it resolves, from the root's
-  layer. See docs/config.md#layers."
+  each key came from. See docs/config.md#layers."
   {:malli/schema [:function [:=> [:cat [:sequential [:tuple :string :map]]] [:map [:config :map] [:sources :seon.config/sources]]]
                   [:=> [:cat [:sequential [:tuple :string :map]] :any] [:map [:config :map] [:sources :seon.config/sources]]]]}
   ([layers] (layered layers (:schema @held)))
   ([layers schema]
    (let [m (reduce (fn [m [_ l]] (merge m l)) {} layers)
          srcs (into {} (for [[src l] layers [k v] l :when (some? v)] [k src]))
-         ;; the gate's checkout, absent, is the source root as it resolves (its schema's default), derived here, in the one merge
-         ;; of the layers, so every config a process holds or writes has it (a key derived at boot alone was lost when a moved
-         ;; entry wrote main's config again, 2026-11-15)
-         gate? (and (nil? (:seon.config.source/gate-checkout m)) (some? (:seon.config.source/root m)))
-         c (resolved (cond-> m gate? (assoc :seon.config.source/gate-checkout (:seon.config.source/root m))) schema)]
+         c (resolved m schema)]
      {:config c
       ;; a key no layer stated came from its schema's :default
-      :sources (cond-> (into srcs (for [k (keys c) :when (not (contains? srcs k))] [k "schema"]))
-                 gate? (assoc :seon.config.source/gate-checkout (srcs :seon.config.source/root)))})))
+      :sources (into srcs (for [k (keys c) :when (not (contains? srcs k))] [k "schema"]))})))
 
 (def shipped-file "The shipped config, relative to the checkout." "resources/seon/config/default.edn")
 

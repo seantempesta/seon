@@ -159,6 +159,42 @@
 ;; seon.server/a-call-is-answered-across-a-restart, switch-over S4), before any op runs, so the relay sends that same line once to the
 ;; candidate and relays its answer: the session never sees the restart. Here stand-in roots: the old answers the restarting error, the
 ;; new the call. Red before: the relay passed the old root's error to the session
+;; estimate: one relay process (~1M ticks of ours to start it and read its pipes), three socket accepts
+(deftest ^{:seon.test/execs ["bin/mcp"] :seon.test/estimate {:ticks 3000000}} a-relay-call-in-flight-across-a-restart-is-answered
+  ;; task seon.server/a-relayed-call-in-flight-across-a-restart-is-answered (flow's report: an eval in flight across a restart, the
+  ;; client gave up at 1800 s): the relay waits exactly as long as a root holds the call's connection, so a root that stops mid-call
+  ;; (its socket closed, no answer) is an error the session reads at once, and so is a candidate that closes after a draining root
+  ;; passed the call on. Fake roots: plain server sockets that read the line and close, so nothing waits on a clock
+  (with-open [dying (java.net.ServerSocket. 0 4 (java.net.InetAddress/getByName "127.0.0.1"))
+              old (java.net.ServerSocket. 0 4 (java.net.InetAddress/getByName "127.0.0.1"))
+              new (java.net.ServerSocket. 0 4 (java.net.InetAddress/getByName "127.0.0.1"))]
+    (let [relay (fn [port] (.start (ProcessBuilder. ^java.util.List [(str (seon.config/checkout) "/bin/mcp") (str port)])))
+          line! (fn [^java.io.OutputStream os s] (.write os (.getBytes (str s "\n") "UTF-8")) (.flush os))
+          read-line! (fn [^java.net.Socket s] (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s)))))
+          call "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"tools/call\"}"]
+      (testing "a root that stops mid-call: the session reads an error naming it, never waits"
+        (let [p (relay (.getLocalPort dying)) out (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream p)))]
+          (try
+            (line! (.getOutputStream p) call)
+            (let [s (.accept dying)] (read-line! s) (.close s))
+            (let [answered (.readLine out)]
+              (is (str/includes? (str answered) "\"id\":7") (str "the call is answered: " answered))
+              (is (str/includes? (str answered) "stopped mid-request") (str "naming the stop: " answered)))
+            (finally (.close (.getOutputStream p)) (.waitFor p)))))
+      (testing "a candidate that closes after a draining root passed the call on: the session reads the restart"
+        (let [p (relay (.getLocalPort old)) out (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream p)))]
+          (try
+            (line! (.getOutputStream p) call)
+            (let [s (.accept old)]
+              (read-line! s)
+              (line! (.getOutputStream s) (str "{\"jsonrpc\":\"2.0\",\"id\":7,\"error\":{\"code\":-32000,\"message\":\"root is restarting\","
+                                               "\"data\":{\"type\":\"seon.system/restarting\",\"next-port\":" (.getLocalPort new) "}}}"))
+              (.close s))
+            (let [c (.accept new)] (read-line! c) (.close c))
+            (let [answered (.readLine out)]
+              (is (str/includes? (str answered) "seon.system/restarting") (str "the restart is the answer: " answered)))
+            (finally (.close (.getOutputStream p)) (.waitFor p))))))))
+
 (deftest ^{:seon.test/execs ["bin/mcp"] :seon.test/estimate {:ticks 3000000}} a-relay-follows-a-draining-root-to-its-candidate
   ;; estimate: one relay process started (~1M ticks of ours to start it and read its pipes) and two socket accepts
   (with-open [old (java.net.ServerSocket. 0 4 (java.net.InetAddress/getByName "127.0.0.1"))
