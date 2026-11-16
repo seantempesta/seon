@@ -34,6 +34,17 @@
   [path text]
   (fn [db] (doc/load-tx db "docs" {path text})))
 
+(defn page-alone
+  "A fixture: the wiki page at path with markdown text as its sections alone (seon.doc/page-sections: address, heading, level,
+  position, lead, text and parent), with none of its citations or links, for a test that reads one page whose links reach pages the
+  world does not hold, which a load (`page`) refuses. Loading the whole wiki to read one page cost a test ~180M ticks.
+  Example: (my.test/page-alone \"docs/agent.md\" text) See docs/testing.md#testing-in-the-world."
+  {:malli/schema [:=> [:cat :string :string] :seon.host/fn]}
+  [path text]
+  (fn [_] (vec (for [sec (doc/page-sections path text)]
+                 (cond-> (select-keys sec [:seon.doc/address :seon.doc/heading :seon.doc/level :seon.doc/position :seon.doc/lead :seon.doc/text])
+                   (:seon.ref/parent sec) (assoc :seon.doc/parent [:seon.doc/address (:seon.ref/parent sec)]))))))
+
 (defn task
   "A fixture: a held task named nsym/tname with its plan and proofs, and the tasks it needs, by id
   (\"ns/name\": a task of the same `with` or one the db holds) (seon.task/create-tx).
