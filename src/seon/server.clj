@@ -329,7 +329,7 @@
                    :from {:type "string" :description "fork: an agent id (a3) whose program, live values and branch the new agent goes on from, on a sibling of its task"}}}
    :prove {:doc "Run the tests a branch's change reaches, once per branch and tx however many ask (a session, an agent's turn): the one test service (seon.prove). Names an agent (its branch at its head), else main. Answers the run: its key, the counts, the red tests; a result already held for a test's digest is not run again."
            :args {:agent {:type "string" :description "an agent id whose branch to prove; omit for main"}
-                  :names {:type "array" :items {:type "string"} :description "test namespaces to run; omit for every test whose digest holds no green"}
+                  :names {:type "array" :items {:type "string"} :description "test namespaces, or qualified test vars (ns/test, run alone: seon.agent/named-tests); omit for every test whose digest holds no green"}
                   :checkout {:type "string" :description "a worktree of this root's repository whose files to prove (with tree), in place of an agent"}
                   :tree {:type "string" :description "the checkout's tree id (seon.fx/tree-id, as bin/build records it): its branch's key"}
                   :mode {:type "string" :description "judge (default for a checkout), turn, or main (every key with no green at its digest, against no base: a whole tree)"}
