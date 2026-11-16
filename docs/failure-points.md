@@ -54,7 +54,6 @@ The failure points whose edge catches, each with the variant it declares and who
 | git cannot read the messages of the commits a landing brought | `seon.fx/messages-since` | `:seon.fx/io-error` (`:path`) | `seon.system/landed-tx` throws it: the landing's write is refused, never written without its completions |
 | a file a session's import names cannot be read | `seon.fx/files-at` | `:seon.fx/io-error` (`:path`) | `my.branch/import!` answers the error and writes nothing on the branch |
 | git cannot name the health step's base or extract its tree | `seon.fx/base-commit`, `seon.fx/checkout-at` (no `try`: they throw git's stderr) | thrown to `seon.check/run-check` | `HEALTH FAILED` with git's words ([health](health.md#checks-are-callers-of-seon)) |
-| A stalled agent's process is gone before its evidence is taken | `seon.fx/stall-evidence` | `:seon.fx/io-error` | root records it as the agent's problem |
 | git refuses the merges commit, or a file does not read as its reader reads it | `seon.fx/git-commit`, `seon.fx/unread-text` | `:seon.fx/io-error` | the reconciler writes `:seon.git/commit-failed` on each merged task (`seon.reconcile/commit-tx`); a later commit clears it; main's merge stands |
 | A merge candidate's file does not analyze | `seon.writer/unanalyzable` | `:seon.writer/refused` | the task is held with why |
 | A merge's deferred process tests cannot run on a checkout | `seon.fx/run-tests` | `:seon.fx/io-error` | every deferred test `:error`: the gate refuses |

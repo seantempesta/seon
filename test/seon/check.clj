@@ -82,14 +82,12 @@
 
 (defn- ping
   "Flow's ping of proc pid: {:status :count :state}, or {:blocked pid :ping-ms ms} when it took
-  no control message within :seon.config.check/ping-ms, with :site, what it was stepping on (its :msg) and since when
-  (:since-ns), as seon.system/stall-state's :unanswered names it: a long step's op, never only a missing ping."
+  no control message within :seon.config.check/ping-ms."
   [sys pid]
   (let [ms (seon.config/value :seon.config.check/ping-ms)]
     (if-let [m (flow/ping-proc (:graph sys) pid :timeout-ms ms)]
       {:status (::flow/status m) :count (::flow/count m) :state (::flow/state m)}
-      (let [site (get-in (seon.system/stall-state sys) [:unanswered pid])]
-        (cond-> {:blocked pid :ping-ms ms} site (assoc :site site))))))
+      {:blocked pid :ping-ms ms})))
 
 (defn- await-agents
   "ids, once each has sent an event whose :type is in types on ev (await-event); an agent
