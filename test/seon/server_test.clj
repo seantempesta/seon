@@ -512,11 +512,12 @@
                         "(deftest ^{:seon.test/estimate {:ticks 100000}} t (is (= 2 (inc 1))))"
                         {:op :eval :agent "root" :code (str "(let [db @(:conn sys)] @(c/transact-main! sys ((my.test/code '" ns ".behind \"(ns " ns ".behind) (defn f \\\"One.\\\" {:malli/schema [:=> [:cat] :int]} [] 1)\") db)))")}
                         {:op :done :agent agent}
-                        {:op :eval :agent "root" :code (str "(some-> (java.io.File. (str (seon.config/value :seon.config.proofs/results-dir) \"/" ns "-test\")) .list vec)")}])
+                        ;; the verdict main holds once the branch merged: its :seon.proof entity (seon.agent/record-results!)
+                        {:op :eval :agent "root" :code (str "(count (datahike.api/datoms @(:conn sys) :avet :seon.proof/test '" ns "-test/t))")}])
                      {:proofs (fn [{:keys [ns]}] #{(symbol (str ns "-test") "t")})})]
     (is (not (clojure.string/includes? (str (:line done)) "behind")) (pr-str done))
     (is (clojure.string/includes? (str (:line done)) ":merged") (pr-str done))
-    (is (= ["t"] (:value cached)) (str "the judge's verdict is cached at the test's digest: " (pr-str cached)))))
+    (is (pos? (:value cached)) (str "the judge's verdict is held at the test's digest, a :seon.proof entity main merged: " (pr-str cached)))))
 
 (deftest the-done-answer-is-a-line-and-a-handle
   ;; one-wait's real run (root, 2026-10-28): seon_done answered 73,856 characters, the whole verdict
