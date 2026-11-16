@@ -4,7 +4,7 @@
   many branches, as in production; owner, 2026-10-21). Test-only, so it lives in test/, not
   in src (session DUP-HELPERS); it seeds and opens through seon.db's own seed! and open-main!."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [clojure.test] [seon.lib] [seon.program :as program] [seon.agent] [seon.config] [seon.fx :as fx] [seon.task :as task] [seon.config :as config] [hasch.core :as hasch]
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [clojure.test] [seon.lib] [seon.program :as program] [seon.agent] [seon.config] [seon.fx :as fx] [seon.task :as task] [seon.config :as config] [seon.proofs] [seon.profile] [hasch.core :as hasch]
             [seon.ref :as ref] [seon.doc :as doc] [seon.template :as template]))
 
 (defn standing-targets-tx
@@ -514,6 +514,18 @@
                (:value m))
              (catch Exception _ nil))))
 
+(defn ask-bound-ms
+  "The bound of an ask made now: in a test, the time left of its wall bound (seon.agent/wall-bound-ms) since it started
+  (seon.proofs/*test-started-ns*: a boot or an earlier ask spent the rest), less :seon.config.proofs/ask-margin-ms, so the ask ends
+  typed with the root's state before the wall ends the test with none; outside a test, :seon.config.proofs/ask-ms. At least 1.
+  See docs/clocks.md#two-kinds-of-wait."
+  {:malli/schema [:=> [:cat] pos-int?]}
+  []
+  (if-let [v (first clojure.test/*testing-vars*)]
+    (max 1 (- (seon.agent/wall-bound-ms (str v)) (seon.config/value :seon.config.proofs/ask-margin-ms)
+              (if-let [t0 seon.proofs/*test-started-ns*] (quot (- (seon.profile/now-ns) t0) 1000000) 0)))
+    (seon.config/value :seon.config.proofs/ask-ms)))
+
 (defn ask
   "One request m to a started root's server: its line on a socket this process opens, one reply line read,
   ending on the reply or when the root closes the connection or dies: the reply as data (tagged literals
@@ -525,10 +537,7 @@
   {:malli/schema [:function [:=> [:cat [:map [:port [:maybe :int]]] :map] :map]
                   [:=> [:cat [:map [:port [:maybe :int]]] :map pos-int?] :map]
                   [:=> [:cat [:map [:port [:maybe :int]]] :map pos-int? :boolean] :map]]}
-  ([root m] (ask root m (if-let [v (first clojure.test/*testing-vars*)]
-                          ;; a test's ask ends before its wall bound, so it ends typed, with the root's state, never at the wall with none
-                          (max 1 (- (seon.agent/wall-bound-ms (str v)) (seon.config/value :seon.config.proofs/ask-margin-ms)))
-                          (seon.config/value :seon.config.proofs/ask-ms))))
+  ([root m] (ask root m (ask-bound-ms)))
   ([root m bound-ms] (ask root m bound-ms false))
   ;; evidence?: this ask is itself the evidence ask, so a silence there is no second evidence ask
   ([{:keys [port log] :as root} m bound-ms evidence?]
