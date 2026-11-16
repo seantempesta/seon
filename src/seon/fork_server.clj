@@ -192,7 +192,9 @@
                  ;; included, and the commit's config held), so agents forked from now on inherit it compiled. Never from
                  ;; :tx-data: a notice missed is covered by the next diff, and from an empty db the first is the whole
                  ;; program. A commit that moves no program loads nothing (its diff measured 0 ms, result/c1786805)
-                 errs (when moved? (seq (program/load-diff! (:db st) db')))
+                 ;; main's schema held first (registry, Datahike schema, entity index; nothing when no schema entry moved), so every
+                 ;; fork inherits it and the contracts the load re-arms compile against it (seon.program/hold-main-schema!)
+                 errs (when moved? (seq (concat (program/hold-main-schema! db') (program/load-diff! (:db st) db'))))
                  ;; one collection once the program moved, never before a fork: what the diff replaced is freed here, once a
                  ;; merge, so every agent forked after inherits no garbage (a collection ~50-100 ms; a fork's bound ~5 ms,
                  ;; docs/cost.md#the-test-systems-lower-bound)
