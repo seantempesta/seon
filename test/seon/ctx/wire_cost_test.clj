@@ -193,12 +193,15 @@
 ;; See docs/render.md#how-the-work-stands
 (deftest ^{:seon.test/estimate {:ticks 2000000}} an-unwritten-proofs-shape-costs-its-namespace-once
   ;; each var of the namespace read once, each test's source scanned once for the heads it calls: linear, no regex per test and helper.
-  ;; Estimate: 400 KB + 42 KB a helper and test (measured 2026-11-10: it was quadratic before). The fixed part was 100 KB; it is the
-  ;; namespace's :require slice and the fixtures query over the seeded world (~2,000 datoms), measured 353 KB at n=1 and linear at
-  ;; ~22 KB a pair after it (result/c0bbe584, 2026-11-16)
+  ;; Estimate, from what it reads: fixed, the namespace's entity and its ns form's :require slice (~2 KB), one AVET seek for its vars
+  ;; and one for its forms (~2 KB each) and the use-fixtures scan of the forms that define nothing (~2 KB): ~10 KB, 50 KB with slack.
+  ;; A helper and a test (two vars): each var's entity with its name and meta read (~4 KB), its form's source (~1 KB), the test's
+  ;; source scanned once for the heads it calls (one re-seq and a set, ~4 KB), and its place in the sort: ~20 KB, 25 KB with slack.
+  ;; Measured 40 KB at 1, 509 KB at 24 (result/a4069406): the 353 KB fixed part measured before was two datalog queries' engine
+  ;; (62 KB and 255 KB on a 256-datom world), now AVET seeks
   (let [small (ticks-bytes #'seon.ctx.status/test-shape test-ns-of 4) large (ticks-bytes #'seon.ctx.status/test-shape test-ns-of 24)]
-    (clojure.test/is (< (:bytes large) (+ 400000 (* 42000 24))))
-    (clojure.test/is (< (- (:bytes large) (:bytes small)) (* 42000 20)) "twenty more vars cost twenty vars")))
+    (clojure.test/is (< (:bytes large) (+ 50000 (* 25000 24))))
+    (clojure.test/is (< (- (:bytes large) (:bytes small)) (* 25000 20)) "twenty more vars cost twenty vars")))
 
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-turns-page-message-does-no-cold-draw
   ;; docs/render.md#a-page-is-a-kept-walk: a turn's page message is made from the parts the placing render's walk keeps
