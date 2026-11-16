@@ -30,14 +30,17 @@ What each session works on now, kept by root and rewritten in place at every che
 
 | Session | Item | Started | Estimate | Actual / ratio |
 |---|---|---|---|---|
-| tests | checklist step 1 (the fast lane's cost line, 13T ticks -> 38M) and its task commits | 07:10 | 45 min | 33 min (07:43), 0.7 |
-| tests | `ts/ask` bounded by time left (the pilot-15 hang); then integrating the new test system's pieces 2-6, with Sonnet helpers | 07:43 | ask 30 min; pieces open | ask in its land at 07:56 |
-| runtime | admission by weight: held by the owner, not built; pieces 2 (warm process per branch), 3 (system_test) and 7 (switch-over build) | 07:10 | piece 2 120 min | replanning at 07:56 |
-| flow | the inbox: delivery as one fact; a restart land, GO given | 07:15 | 45 min | final reach run at 07:56 (past 1.5x) |
-| data | landing 6 slice 1 (merge on real branches); then the test store as the branch | 07:15 | 60 min | laws and health at 07:56 (past 1.5x) |
-| deps | the LMDB sync bound (pin, restarts root); then Jolt's tick attribution | 07:50 | 90 min | building at 07:56 |
-| context | tasks and plan item 8 together: 212 agent-test reds from its fork-server `init!` change, debugging forward; then piece 3 (repl and agent tests) | 07:15 | land 15 min | red at 07:56 (3.7x) |
-| web | `seon.server/an-op-acts-on-its-callers-own-agent`; then pieces 3, 6, 7 | 07:42 | 60 min | proof green-run at 07:56 |
+| tests | the ask bound (time left of the wall) | 07:43 | 30 min | 49 min (ccb70177dc), 1.6 |
+| tests | read keys at datom level ([:ea form :form/id]): the cross-branch reuse miss, measured to `:form/keywords` moving | 08:39 | its estimate owed | |
+| runtime | docs and tasks to the rulings | 08:00 | 20 min | 35 min (5520f4c5ec), 1.8 |
+| runtime | liveness a reaction, one loader, typed child death, no-disk law, the threads red | 08:39 | its estimate owed | |
+| flow | docs and tasks to the rulings | 08:00 | 20 min | 29 min (7ae810088f), 1.5 |
+| flow | `seon_inbox` reads since t, marks nothing; then `stream=true` | 08:39 | one seek a read, O(d) a commit | |
+| data | landing 6 slice 1; why `:form/keywords` is stored; test writes speculative | 08:15 | its estimate owed | |
+| deps | the LMDB sync bound (pin; restart window owed); then Jolt ticks | 07:50 | 90 min | proving at 08:39 |
+| context | docs and tasks | 07:15 | 15 min | 66 min (f185ad1e2e), 4.4 |
+| context | `edit!` places an in-tree path on the branch; the turn-test's scope fix | 08:39 | its estimate owed | |
+| web | the held-guard fix; the render proc's order-dependent red (root-reads-the-health) | 07:42 | 60 min | built at 08:39, 1.6 |
 
 ## The managing session
 
