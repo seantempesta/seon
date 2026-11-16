@@ -923,10 +923,12 @@
   [c0 c1] (let [t0 (tree-of c0)] (into {} (for [[_ p v] (changes c0 c1)] [p [(get-in t0 p) v]]))))
 
 (defn- agent-record
-  "The record of this process's agent (its key's entity on db and its branch, both its start value's, seon.agent/*start*), built
-  with st's registry."
+  "The record of the agent this process is (agent/*start*: its key's entity on db, its branch), built with the schema index
+  agent state st holds. Its key and branch are the start value's, fixed for the process's life, never state's (G2: state
+  holds what changes, docs/processes.md#the-agent-process)."
   {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
-  [db st] (build (or (:index (:schema-registry st)) (program/index-of-db db)) db (some->> (:key agent/*start*) (pdb/eid db :seon.agent/key)) (:branch agent/*start*)))
+  [db st] (let [{:keys [key branch]} agent/*start*]
+            (build (or (:index (:schema-registry st)) (program/index-of-db db)) db (some->> key (pdb/eid db :seon.agent/key)) branch)))
 
 (defonce ^:private moved-since
   ;; the datoms ctx's patches moved the db by since the agent's page walk last took them (take-moved!),
@@ -942,8 +944,8 @@
   [] (let [m @moved-since] (vreset! moved-since []) m))
 
 (defn- on-state
-  "The watch on the agent's state: a first db builds ctx (the agent's key and branch are its start value's, fixed for the process's
-  life: seon.agent/*start*), as does a db moved while
+  "The watch on the agent's state: a record not yet built, or built for another agent or branch than the start value's
+  (agent/*start*, a test world's own when it binds one), builds ctx, as does a db moved while
   the record lacks its agent's entity; a db moved patches it, its datoms kept for the page walk (take-moved!);
   a commit of what was applied (one t, one branch) moves only its :commit. What the agent heard of
   main and its merge base is no part of it: its turn writes them as facts (:seon.agent/main-commit,
@@ -953,19 +955,21 @@
   {:malli/schema [:=> [:cat :any :any :any :any] :any]}
   [_ _ o n]
   (let [a (:db o) b (:db n)
+        {:keys [key branch]} agent/*start*
+        t (:tree @held)
         in install!
         whole! #(do (vreset! moved-since :all) (in (agent-record b n)))]
     (cond
       (nil? b) nil
-      (or (nil? @held) (nil? a)) (whole!)
+      (or (nil? @held) (nil? a) (not= branch (:branch t)) (and (:db/id t) (not= key (:seon.agent/key t)))) (whole!)
       (identical? a b) nil
       ;; the agent's entity reaches its branch after the process starts (a merge of main): until
       ;; it is there the record is its environment alone, and each move looks it up (one seek)
       (nil? (get-in @held [:tree :db/id])) (whole!)
-      (= (:max-tx a) (:max-tx b)) (in (update @held :tree with-environment b (:branch agent/*start*)))
+      (= (:max-tx a) (:max-tx b)) (in (update @held :tree with-environment b branch))
       :else (let [ds (moved a b (:tx n))
                   _ (vswap! moved-since #(if (= :all %) % (into % ds)))
-                  c (patch @held b ds (:branch agent/*start*) (:index (:schema-registry n)))]
+                  c (patch @held b ds branch (:index (:schema-registry n)))]
               (install! c)))))
 
 (add-watch agent/state ::ctx on-state)
