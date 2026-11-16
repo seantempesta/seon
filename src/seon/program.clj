@@ -1292,8 +1292,10 @@
   entry moved from what is held. Answers the config's load errors. See docs/source.md#schemas-at-the-repl."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.program/error]]}
   [db]
-  ;; RED-FIRST STAND-IN: what a process holds today (its config alone); the real body follows
-  (hold-config! db))
+  (let [k (schema-changes db) reg (schema-registry k)]
+    (hold-registry! reg)
+    (pdb/hold-schema! k reg)
+    (hold-config! db)))
 
 (defn schema-declarations
   "The Datahike declarations registry reg derives that db does not hold as declared (a
