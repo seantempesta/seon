@@ -1200,25 +1200,9 @@
   {:malli/schema [:=> [:cat :any] :any]}
   [db] (or (:store db) (:store (:origin-db db))))
 
-(defn settled-branches
-  "The branches, as main db's store names them, whose work is settled: every agent on the branch (:seon.agent/branch) is gone
-  (:seon.agent/status's :seon.status/gone) and the task each worked has ended (:seon.task/outcome's :seon.status/ended) or moved
-  to another branch (:seon.task/branch, a fresh attach's restart), so nothing will merge main into it or read its old commits by id
-  again. A branch no agent names (main's own, the results branch) is never settled. One query over main's agents: O(agents).
-  See docs/storage.md#collection."
-  {:malli/schema [:=> [:cat :seon.host/db] [:set :seon.db/branch]]}
-  [db]
-  (let [main (get-in db [:config :branch])
-        gone (:seon.status/gone (contract/properties :seon.agent/status))
-        ended (:seon.status/ended (contract/properties :seon.task/outcome))
-        settled? (fn [b a] (let [e (d/entity db a) t (:seon.agent/task e)]
-                             (and (gone (:seon.agent/status e)) (or (ended (:seon.task/outcome t)) (not= b (:seon.task/branch t))))))]
-    (into #{} (comp (filter (fn [[b as]] (every? #(settled? b (second %)) as))) (map (comp #(on-main main %) key)))
-          (group-by first (d/q '[:find ?b ?a :where [?a :seon.agent/branch ?b]] db)))))
-
 (defn retain!
   "Sweep the commit snapshots of the store under conn older than main's newest keep commits, when that many have landed since the last sweep (main's :seon.system/retained),
-  counted by the commit graph's generation, never a clock. Kept whole, whatever their age: each branch's head, and for a branch not settled (`settled-branches`: its agents gone
+  counted by the commit graph's generation, never a clock. Kept whole, whatever their age: each branch's head, and for a branch not settled (settled, as seon.task/settled-branches reads it from main: its agents gone
   and its task ended or moved on, whose head alone is kept) its merge base with main and each commit an agent's facts
   name (an attribute whose schema reaches :seon.db/commit: the entity index's :commit-attrs, an agent's bases and a turn's basis among them),
   which is what a merge and a page read by id. Every datom, a branch's history and as-of reads stay: only reading
@@ -1227,8 +1211,8 @@
   {:swept :ms :generation}, which it writes nowhere (its caller writes retained-tx through root's writer), or nil when none is due;
   when a branch's merge base is unknown (d/merge-base refused for a reason other than several bases), nothing is swept and
   :seon.db/retain-refused answers, the record naming the branches under :retained. See docs/storage.md#collection."
-  {:malli/schema [:=> [:cat :seon.host/conn pos-int?] [:maybe :map]]}
-  [conn keep]
+  {:malli/schema [:=> [:cat :seon.host/conn pos-int? [:set :seon.db/branch]] [:maybe :map]]}
+  [conn keep settled]
   (let [store (:store @conn)
         main (get-in @conn [:config :branch])
         record #(d/commit-graph-record store %)
@@ -1247,7 +1231,6 @@
             bs (d/branches conn)
             ;; a settled branch (its agents gone, its task ended or moved on) keeps its head alone: nothing merges main into it or reads its
             ;; old commits by id again, so neither its merge base nor the commits its facts name are kept for it
-            settled (settled-branches @conn)
             open (remove settled bs)
             ;; a branch with more than one best ancestor has each kept; its data says which (d/merge-base's refusal); any other refusal
             ;; is the branch's base unknown, and nothing is swept, never a sweep without it (43 of root's 66 bases were swept that way,
