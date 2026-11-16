@@ -696,3 +696,59 @@
   first test (seon.proofs/warm-fixtures!), so no test pays the root's start inside its own budget; an agent never forces it (a
   test root booted inside an agent). See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
   (delay (shared-root! (default-root-args))))
+
+(defn- with-pids
+  "root (a map with :port) with its writer process's pid and its system process's (the fork server: seon.system/state's
+  :fork-server :pid), read in one root eval, never from a pid file; root as it is when it has no port (start-root!'s :log says why)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [root]
+  (if-not (:port root)
+    root
+    (let [r (ask root {:op :eval :agent "root" :code "[(seon.lib/c-getpid) (get-in (seon.system/state sys) [:fork-server :pid])]"})
+          [w s] (value-of (:response r r))]
+      (assoc root :writer-pid w :system-pid s))))
+
+;; Estimate: the store a clone of the process store's data file (APFS copy-on-write: one cp, no bytes copied), one root's boot
+;; (bin/system start of the built binary: 10.7 s of wall today against a 2 s target, docs/cost.md#the-test-systems-lower-bound), one
+;; root eval answering two pids (~20 ms): once a binary a test process, and only for a build input
+(defn- boot-candidate!
+  "The booted candidate for a tree whose binary the running system is not (candidate): checkout's built binary on a store of its
+  own, an APFS clone of the process store (clone-process-store!, made first when missing: make-process-store!), on a main of its
+  own, so a binary that writes another format never touches the system's store. Stopped, its store and runs removed, when this
+  process ends (a shutdown hook, as shared roots). Answers start-root!'s answer with-pids."
+  {:malli/schema [:=> [:cat :string] :map]}
+  [checkout]
+  (let [main (mark-of "candidate")
+        dir (str checkout "/target/runs/" main)
+        _ (make-process-store! checkout)
+        store (clone-process-store! (str dir "/store"))
+        root (start-root! {:store store :main main :runs (str dir "/runs")
+                           :args ["--set" (str ":seon.config.source/root=" (pr-str checkout))]})]
+    (.addShutdownHook (Runtime/getRuntime)
+                      (Thread. ^Runnable (fn [] (let [s (stop-root! root)] (when-not (:exit s) (binding [*out* *err*] (println "candidate" main "not stopped:" (pr-str s)))))
+                                               (seon.lib/remove-tree! dir))))
+    (assoc (with-pids root) :booted true)))
+
+(defonce ^:private booted-candidates
+  ;; this test process's booted candidates by tree (candidate): data, not a function
+  (java.util.concurrent.ConcurrentHashMap.))
+
+(defn candidate
+  "The system a platform test (boot, restart, the binary, a pin, the fork point) runs on, and a branch of its own there: when the
+  running binary is tree's (seon.fx/runtime-for, the one check every start makes), the system this process belongs to (its root's
+  port, :seon.config.root/runs-dir), with no clone and no boot, the branch's forms being loaded by load-diff! as any agent's are;
+  when a build input differs (a pin, native code, deps.edn), checkout's binary booted once on a clone of the process store
+  (boot-candidate!), the same root for every later call of tree in this process. A test spawns its agent on :branch through ask on
+  :port ({:op :eval :agent \"root\" :code \"(seon.system/spawn! sys {:branch ...})\"}). Answers {:port :writer-pid :system-pid
+  :branch}, :booted true for a boot. Interface agreed by tests2, runtime and deps (task seon.prove/tests-fork-from-the-branchs-warm-agent);
+  its first caller is the ruler, seon.fork-server-test/a-forked-agent-holds-its-memory-rows. tree: default the checkout's as it is
+  on disk (seon.fx/tree-id)."
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :string] :map]]}
+  ([] (candidate (fx/tree-id (seon.config/checkout))))
+  ([tree]
+   (let [checkout (seon.config/checkout)
+         sys (if (seon.contract/error? (fx/runtime-for tree))
+               (let [d (delay (boot-candidate! checkout))]
+                 @(or (.putIfAbsent ^java.util.concurrent.ConcurrentHashMap booted-candidates tree d) d))
+               (with-pids {:port (fx/bound-port (seon.config/value :seon.config.root/runs-dir))}))]
+     (assoc sys :branch (keyword (mark-of "candidate"))))))
