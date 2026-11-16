@@ -2025,7 +2025,9 @@
               :answers "the api's answers to the requests it asked (:seon.fx/ask), one each"} :outs {}
        ;; admission and routing only: never blocks, never computes long
        :workload :io
-       :ping-map-fn (fn [st] (-> (select-keys st [:kind :workers :busy :peaks :load :done]) (assoc :in-flight (count (:flight st))) (assoc :queued (count (:queue st)) :spent (:spent st))))})
+       :ping-map-fn (fn [st] (-> (select-keys st [:kind :workers :busy :peaks :load :done]) (assoc :in-flight (count (:flight st))) (assoc :queued (count (:queue st)) :spent (:spent st))))
+       ;; docs/health.md#a-proc-that-does-not-drain
+       :seon.flow/drain "its queue is finished as when running, each request answered by its worker; its tick re-arms only while a request waits for a worker, budget or bucket, so it ends with the queue"})
   ([args] (assoc (select-keys args [:kind :workers :batch :close? :limits]) :busy 0 :flight {} :stoppable {} :peaks {} :done 0 :rid 0 :pending {}
                  :load-fn (or (:load-fn args) lib/load-average) :held-fn (or (:held-fn args) held-processes) :seq 0 :queue (sorted-map) :spent {}
                  :bucket (when-let [r (:rate args)]
@@ -2166,6 +2168,8 @@
        ;; worker count already bounds the threads
        :workload :mixed
        ;; :open?: it holds its kind's host object (a model's foreign threads run while it does)
+       ;; docs/health.md#a-proc-that-does-not-drain
+       :seon.flow/drain "its call in flight ends by its kind's declared bound (put-after!), which answers it typed, never by a drain"
        :ping-map-fn (fn [st] (-> (select-keys st [:n :closed]) (assoc :open? (some? (:handle st)))
                                    (cond-> (:facts (:handle st)) (assoc :host @(:facts (:handle st))))))})
   ([args] (let [lines (a/chan)]
