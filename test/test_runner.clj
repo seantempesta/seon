@@ -30,7 +30,7 @@
   "The tree the config names (:seon.config.source/root, when a root was given one: a clone an
   agent works on), else the checkout this process runs from."
   []
-  (str (or (get config/config :seon.config.source/root) (config/checkout))))
+  (str (or (:source-root (config/process)) (config/checkout))))
 
 ;; ---- reach -----------------------------------------------------------------------------
 

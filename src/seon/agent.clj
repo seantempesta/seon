@@ -917,15 +917,19 @@
   test reading files takes; and held, the config this process's branch states, key by key, when it differs from what the process loaded with, so a branch's edit of a key moves the tests reading that key and no other. A digest no gate's checkout shares only runs more. See docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :seon.program/inputs :seon.host/db [:maybe :seon.host/db] :map] :seon.program/inputs]}
   [in db base held]
-  (let [changes (program/schema-changes db)
+  (let [;; the attributes the change added, removed or retyped (Datahike's schema), what the whole-schema walkers read; an entry's
+        ;; text (a description) moves only its readers, by the row each reaches (seon.program reach-step)
+        attrs (when (and base (not= (d/schema base) (d/schema db)))
+                (let [a (d/schema base) b (d/schema db)]
+                  (into (sorted-map) (for [k (into (set (keys a)) (keys b)) :when (and (keyword? k) (not= (get a k) (get b k)))] [k (pr-str (get b k))]))))
         moved (when base (mapcat identity (d/datoms-diff base db :aevt [:file/text])))
         files (into (sorted-map) (for [dt moved :let [p (:file/path (d/entity db (:e dt)))] :when p] [p (:file/text (d/entity db (:e dt)))]))
         mix (fn [old x] (lib/digest (str old (sedn/encode x))))]
     (cond-> in
+      (seq attrs) (update-in [:config :seon.env/schemas] mix (vec attrs))
       (not= held cfg/config) (update :config merge (fx/config-input held (cfg/checkout)))
-      (seq changes) (update-in [:config :seon.env/schemas] mix (vec (sort-by key changes)))
       (seq files) (update :tree mix (vec files))
-      (seq files) (update :config (fn [c] (reduce-kv (fn [c p text] (if-let [k (fx/env-class p)] (update c k mix [p text]) c)) c files))))))
+      (seq files) (update :config (fn [c] (reduce-kv (fn [c p text] (if-let [k (let [k (fx/env-class p)] (when (not= :seon.env/schemas k) k))] (update c k mix [p text]) c)) c files))))))
 
 (defn base-at-reads
   "Base's digests (base, {test digest} by reach) as a branch's selection compares them with the branch's: a test whose reach digest
