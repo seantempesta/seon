@@ -1964,11 +1964,11 @@
         entry (cfg/value :seon.config.source/process-entry)
         entry-method? (fn [f] (some (fn [[k m]] (and (= :method k) (entry m))) (:defines f)))
         ns-vars :ns-vars
-;; a test namespace's own vars quoted there are no edge: a test never runs another by its name (clojure.test does), and the
-        ;; proof an agent a test drives defines (seon.repl-test/...) is the test's data: as an edge it made the test reach that
-        ;; proof in the agent's world, moved its digest there and deferred the test as its own process test
+;; a deftest quoted there is no edge: a test never runs another by its name (clojure.test does), and the proof an agent a
+        ;; test drives defines (seon.repl-test/...) is the test's data: as an edge it made the test reach that proof in the agent's
+        ;; world, moved its digest there and deferred the test as its own process test
         named (fn [f] (cond-> (cond (entry-method? f) (into (:refs f) (:quoted f))
-                                    (test-nss (:ns f)) (into (:refs f) (remove #(test-nss (some-> (namespace %) symbol))) (:quoted f))
+                                    (test-nss (:ns f)) (into (:refs f) (remove tests) (:quoted f))
                                     :else (:refs f))
                         (seq (ns-vars f)) (into (map #(vector :ns-vars %)) (ns-vars f))))
         refd (if bulk?
