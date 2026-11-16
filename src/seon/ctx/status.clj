@@ -304,7 +304,8 @@
                        ;; in an agent's process its index, advanced by what differs; else one built cold
                        (= :agent (:mode @agent/state)) (agent/reconcile-index db)
                        :else (r/index db)))
-        ;; a red here that main was red on too, at the branch's merge base: said as a fact, and the agent's to clear all the same (the owner, 2026-11-07)
+        ;; a red here that main was red on too, at the branch's merge base: said as a fact, and main's, fixed forward by its owner (THE FOCUS,
+        ;; docs/plan.md), so the done rule reads it as the judge does (:main-red, seon.reconcile/judgment)
         also-on-main (when (and base (some (fn [[_ st]] (= :fail st)) results))
                        (vec (sort-by str (keep (fn [[t {st :status}]] (when (and (= :fail st) (= :fail (get results t))) t)) (verdicts base (set proofs))))))
         ;; the judge's own producer of the done rule's input; with no claims read no test is main's (none red outside the proofs)
@@ -314,6 +315,11 @@
                                  results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) (set deferred) (constantly false) (constantly false)))
                 (seq (:caused split)) (assoc :caused (set (:caused split)))
                 (some? changed?) (assoc :changed? changed?)
+                ;; a task an outside agent drives (a session's own, :seon.task/model "outside") ends by its hand-back (seon_done), judged
+                ;; by what its change adds: the fact the judge reads (seon.reconcile/judgment's outside?, through desired-env) and
+                ;; seon.task/unjudged reads, so the end and the judge read one done rule
+                (and tid (= "outside" (:seon.task/model (d/entity db [:seon.task/id tid])))) (assoc :hand-back? true)
+                (seq also-on-main) (assoc :main-red (set also-on-main))
                 ;; a refine's one write: the task it refines names a function it did not (one function, root's judging reads it too)
                 (and base tid) (as-> m (let [n (task/names-new-site? base db tid)] (cond-> m (some? n) (assoc :named-site? n)))))
         reasons (r/done-explain input)
