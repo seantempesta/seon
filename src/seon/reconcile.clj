@@ -812,7 +812,7 @@
   and are never the branch's. A test main holds green is in neither: its red is the branch's. Beside them :answered, each asked
   test's status as main gave it (:unknown when none), and :error, the type of an error answer: what the judge writes as it read it
   (:seon.task/main-asked). See docs/tasks.md#the-done-rule."
-  {:malli/schema [:=> [:cat [:set :qualified-symbol] :any] [:map [:red [:set :qualified-symbol]] [:unknown [:set :qualified-symbol]] [:answered [:map-of :qualified-symbol :keyword]] [:error {:optional true} :keyword]]]}
+  {:malli/schema [:=> [:cat [:set :qualified-symbol] [:maybe [:or :seon.error/base [:map [:reports [:sequential :map]]]]]] [:map [:red [:set :qualified-symbol]] [:unknown [:set :qualified-symbol]] [:answered [:map-of :qualified-symbol :keyword]] [:error {:optional true} :keyword]]]}
   [asked r]
   (let [err? (or (nil? r) (contract/error? r))
         m (if err? {} (proofs/results r))]
