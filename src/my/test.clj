@@ -136,15 +136,16 @@
   nothing recorded. code a vector of forms, or a function of the names {:ns :task :agent} answering one: each
   evaluated in order as the agent of a fresh task of its own made on db (default this process's db, else the
   world), a string answering its response with :value, a function of {:db :names} answering {:value v}.
-  The agent's state is put back after. Example:
+  fx: the effect kinds its agent performs in this process, {kind perform} (a turn's {:model 'seon.fx/model}, with the task's config
+  naming the scripted provider); a kind it names none of is :seon.fx/in-test. The agent's state is put back after. Example:
   (my.test/eval-in \"(require '[clojure.set :as s])\" 'app.rq {:db (my.test/with (my.test/world) (my.test/code 'app.rq \"(ns app.rq)\"))})
   See docs/testing.md#testing-in-the-world."
   {:malli/schema [:function [:=> [:cat [:or :string :seon.host/fn [:vector :any]]] [:or :map [:vector :map]]]
                   [:=> [:cat [:or :string :seon.host/fn [:vector :any]] :symbol] [:or :map [:vector :map]]]
-                  [:=> [:cat [:or :string :seon.host/fn [:vector :any]] :symbol [:map [:db {:optional true} :seon.host/db] [:conn {:optional true} :seon.host/conn] [:config {:optional true} :map]]] [:or :map [:vector :map]]]]}
+                  [:=> [:cat [:or :string :seon.host/fn [:vector :any]] :symbol [:map [:db {:optional true} :seon.host/db] [:conn {:optional true} :seon.host/conn] [:config {:optional true} :map] [:fx {:optional true} [:map-of :keyword :qualified-symbol]]]] [:or :map [:vector :map]]]]}
   ([code] (eval-in code 'seon.repl-test.scratch {}))
   ([code nsym] (eval-in code nsym {}))
-  ([code nsym {:keys [db conn config]}]
+  ([code nsym {:keys [db conn config fx]}]
    (let [old @agent/state
          forms? (not (string? code))
          ;; several forms: a task and an agent of their own, so their records and writes are theirs
@@ -171,9 +172,13 @@
          db (if aconn @aconn db)]
      ;; the test's own agent value: none for a scratch session, a test agent's with a world, its forms' own agent with forms; its writes
      ;; on its db value (:role :test), its ctx watched for it, and the agent the watch held put back after
-     (let [ag (cond forms? (cond-> {:key (:agent names) :role :test} aconn (assoc :conn aconn)) db {:key "test-agent" :role :test})
+     ;; its forms' agent performs in this process the effects the test names (opts :fx, {kind perform}: the :perform the system
+     ;; declaration gives that kind, e.g. {:model 'seon.fx/model}, the scripted model through the real code), never through a root; named
+     ;; by the test, never read from the whole declaration, whose every :perform a reader of it reaches (a candidate's boot among them)
+     (let [ag (cond forms? (cond-> {:key (:agent names) :role :test} (seq fx) (assoc :fx fx) aconn (assoc :conn aconn)) db {:key "test-agent" :role :test})
            prev (when ag (ctx/watch! ag))]
-     (try (reset! agent/state (cond-> {:n 0 :ns (create-ns nsym) :inbox []}
+     ;; an agent's state as init! makes it: its effect keys counted from 0, and its schema, by which the printer shows its summary
+     (try (reset! agent/state (cond-> (with-meta {:n 0 :ns (create-ns nsym) :inbox [] :tx-seq 0} {:seon.render/schema :seon.agent/state})
                                 db (assoc :db db :seon.repl/as-agent true)
                                 base (assoc :base base :main base)
                                 forms? (merge (select-keys old [:program :index :schema-registry]))))
