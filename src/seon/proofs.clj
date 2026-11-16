@@ -670,6 +670,56 @@
                   (not= :pass st) (assoc :writer {:branch (:seon.db/branch (:v (first (d/datoms db :eavt e :seon.proof/basis))))})
                   (not= :pass st) (assoc :failures (or (:v (first (d/datoms db :eavt e :seon.proof/failures))) [])))])))
 
+(defn- reads-drop-test
+  "idx without test t under ks, the keys it was added with (none: idx)."
+  {:malli/schema [:=> [:cat :map :any [:maybe :seon.reads/keys]] :map]}
+  [idx t ks] (if (seq ks) (pdb/reads-drop idx t ks) idx))
+
+(defn newest-green
+  "The entity of test-var's newest green on rdb (the results branch), or nil: newest written, by the :tx of the one AVET seek of
+  :seon.proof/test (the results branch's one writer orders them), and within one transaction by the basis :t each ran at; its
+  status read from the newest down to the first green. The one result reuse by reads takes (reused-by-reads) and the readers index
+  holds (reads-index). See docs/storage.md#what-a-read-scanned."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :seon.db/eid]]}
+  [rdb test-var]
+  (let [at (fn [e a] (:v (first (d/datoms rdb :eavt e a))))]
+    (some #(when (= :pass (at (:e %) :seon.proof/status)) (:e %))
+          (mapcat (fn [grp] (if (next grp) (sort-by #(- (get (at (:e %) :seon.proof/basis) :seon.db/t 0)) grp) grp))
+                  (partition-by :tx (sort-by #(- (:tx %)) (d/datoms rdb :avet :seon.proof/test test-var)))))))
+
+(defn- reads-index-of
+  "held ({:index :keys}, reads-index's) with each of tests indexed again under its newest green's read keys on rdb (none: dropped)."
+  {:malli/schema [:=> [:cat :map :seon.host/db [:set :any]] :map]}
+  [{:keys [index keys]} rdb tests]
+  (reduce (fn [{:keys [index keys]} t]
+            (let [index (reads-drop-test index t (get keys t))
+                  ks (when (qualified-symbol? t)
+                       (some-> (newest-green rdb t) (as-> e (:seon.reads/keys (:v (first (d/datoms rdb :eavt e :seon.proof/reads)))))))]
+              (if (seq ks)
+                {:index (pdb/reads-add index t ks) :keys (assoc keys t ks)}
+                {:index index :keys (dissoc keys t)})))
+          {:index index :keys keys} tests))
+
+(defn reads-index
+  "The readers index of rdb (the results branch): each test, its reader, under the read keys of its newest green (newest-green, its
+  :seon.proof/reads value), as seon.db/reads-add makes it; {:index idx :keys {test keys}}, keys what each test was added with so it
+  can be dropped. What seon.db/readers matches a change's datoms against, so the tests a change can have moved are selected
+  whether or not their reach digest moved. Only the newest green: a test whose older result read a moved key and whose newest
+  did not is not selected. That is the choice reuse by reads makes (reused-by-reads takes only the newest green), so the
+  selection and the reuse judge a test by one result; what is left is an older verdict at the test's unmoved reach digest that
+  read the key, found by verdicts-at, where the newest run of the same code read otherwise (its reads not fixed by its code).
+  Every result of every test was 7.3B ticks and 50.7 GB to index
+  (33,331 results, 13M keys) against 669M and 3.7 GB for the newest of 2,291 tests [M root result/cbe1f093, result/c9e79efa].
+  Given held, the value it answered for an earlier value from of the same branch, it is advanced by the tests whose results
+  :seon.proof/reads differs on (one datoms-diff descent, then a reads-drop and a newest-green and reads-add a test moved), never
+  rebuilt: O(tests moved). See docs/storage.md#what-a-read-scanned."
+  {:malli/schema [:function [:=> [:cat :seon.host/db] :map] [:=> [:cat :seon.host/db :map :seon.host/db] :map]]}
+  ([rdb] (reads-index-of {:index {} :keys {}} rdb (into #{} (map :v) (d/datoms rdb :aevt :seon.proof/test))))
+  ([from held rdb]
+   (let [[gone came] (d/datoms-diff from rdb :aevt [:seon.proof/reads])
+         test-of (fn [db e] (:v (first (d/datoms db :eavt e :seon.proof/test))))]
+     (reads-index-of held rdb (into (into #{} (keep #(test-of from (:e %))) gone) (keep #(test-of rdb (:e %))) came)))))
+
 (defn reused-by-reads
   "{digest result} for the tests of cand ({test digest}) found holds no verdict for: each one's newest green on rdb (the results
   branch) whose read keys still hold on db what they held when it ran (seon.db/reads-digests equal to its :seon.proof/reads-digest),
@@ -681,13 +731,9 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:map-of :any :string] [:map-of :string :map]] [:map-of :string :map]]}
   [rdb db cand found]
   (let [at (fn [e a] (:v (first (d/datoms rdb :eavt e a))))
-        ;; a test's verdicts, newest written first: by :tx, and within one transaction by the basis :t each ran at
-        newest-first (fn [ds] (mapcat (fn [grp] (if (next grp) (sort-by #(- (get (at (:e %) :seon.proof/basis) :seon.db/t 0)) grp) grp))
-                                      (partition-by :tx (sort-by #(- (:tx %)) ds))))
-        ;; each candidate's newest green and its read keys (one value)
+        ;; each candidate's newest green (newest-green) and its read keys (one value)
         newest (into {} (for [[test-var d] cand :when (and (qualified-symbol? test-var) (not (contains? found d)))
-                              :let [e (some #(when (= :pass (at (:e %) :seon.proof/status)) (:e %))
-                                            (newest-first (d/datoms rdb :avet :seon.proof/test test-var)))
+                              :let [e (newest-green rdb test-var)
                                     ks (when e (:seon.reads/keys (at e :seon.proof/reads)))]
                               :when (seq ks)]
                           [d [e ks]]))
@@ -700,11 +746,15 @@
 (defn stored-verdicts
   "{digest result} of the verdicts rdb (the results branch) holds for cand ({test digest}) on db, the program planned: each
   candidate's verdict at its digest (verdicts-at), and, for the reusable tests found holds none for, a green whose read keys still
-  hold on db what they held (reused-by-reads). What a test plan reads of the store. See docs/merging.md#verdicts-are-a-cache."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:map-of :any :string] [:or [:set :any] [:sequential :any]]] [:map-of :string :map]]}
-  [rdb db cand reusable]
-  (let [at (verdicts-at rdb cand)]
-    (merge at (reused-by-reads rdb db (select-keys cand reusable) at))))
+  hold on db what they held (reused-by-reads). moved ({test digest}, the tests a change's datoms reached by their recorded reads:
+  seon.agent/read-moved) are never found at their digest, which the change did not move, only by reads that still hold. What a
+  test plan reads of the store. See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db [:map-of :any :string] [:or [:set :any] [:sequential :any]]] [:map-of :string :map]]
+                  [:=> [:cat :seon.host/db :seon.host/db [:map-of :any :string] [:or [:set :any] [:sequential :any]] [:map-of :any :string]] [:map-of :string :map]]]}
+  ([rdb db cand reusable] (stored-verdicts rdb db cand reusable {}))
+  ([rdb db cand reusable moved]
+   (let [at (verdicts-at rdb cand)]
+     (merge at (reused-by-reads rdb db (merge (select-keys cand reusable) (select-keys moved reusable)) at)))))
 
 (defn plan-of
   "What bin/prove and bin/test run on a program: the tests of names (or all) and the bin/check
