@@ -376,7 +376,7 @@
   ;; when the child's pid is told (forked: the child is running) and after the run: the child and its run's fold are
   ;; procs of the graph while the run is in flight, and both are gone once it has answered
   (let [[_ r] (in-agent ["(ns app.proc-test (:require [clojure.test :refer [deftest is]])) (deftest a (is (= 1 1)))"
-                         (str "(let [procs #(set (keys (:procs (clojure.datafy/datafy (:flow @seon.agent/state)))))"
+                         (str "(let [procs #(set (keys (:procs (clojure.datafy/datafy @(:graph agent)))))"
                               "      before (procs) during (atom nil)"
                               "      r (seon.agent/run-tests-forked agent 100000000 #{} :main (fn [_] (reset! during (procs))) '#{app.proc-test})]"
                               "  (pr-str {:pass (:pass r) :added (count (remove before @during)) :after (= before (procs))}))")])
@@ -2215,7 +2215,7 @@
                     "      second-call (clojure.core/deref (second two))"
                     "      new (:id (clojure.core/deref (first two)))"
                     "      nb (:branch (get-in (seon.server/agents-answer sys) [:agents new]))"
-                    "      went-on (clojure.core/deref (seon.system/submit! sys new \"(do (def there 3) (:key (clojure.core/deref seon.agent/state)))\"))]"
+                    "      went-on (clojure.core/deref (seon.system/submit! sys new \"(do (def there 3) (:key agent))\"))]"
                     "  {:missing (:seon.error/message missing) :second (:seon.error/message second-call) :was (name a) :new new :old-branch b :new-branch nb"
                     "   :old-kept (= before (codes (seon.db/head conn b))) :at (codes (seon.db/head conn nb))"
                     "   :task (let [on-main (seon.system/await-db sys #(= (seon.db/off-main (seon.db/conn-main conn) nb) (:seon.task/branch (datahike.api/entity % [:seon.task/id task])))) t (datahike.api/entity on-main [:seon.task/id task])] {:outcome (:seon.task/outcome t) :agent-branch (:seon.agent/branch (:seon.task/agent t)) :task-branch (:seon.task/branch t)}) :went-on (:value went-on) :this-boots (let [k (:value went-on) on-main (seon.system/await-db sys #(= new (seon.task/this-boots % (datahike.api/entity % [:seon.agent/key k]))))] (and (:max-tx on-main) (contains? (seon.task/agents on-main) k) (some? (seon.server/agents-answer sys))))})"))
@@ -2498,8 +2498,9 @@
 ;; "if another agent has already run the same exact test we remove those" (owner, 2026-11-07)
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 14 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~5000k, 5000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 5000000 :asks 11}} a-process-test-green-at-its-digest-asks-no-gate
-  ;; docs/merging.md#verdicts-are-a-cache. Another's green at this digest answers; another's red does not (the test stays deferred, named and not
-  ;; run until the one-build runner, docs/plan.md NOW), and a schema the branch registers moves the
+  ;; docs/merging.md#verdicts-are-a-cache. Another's green at this digest answers; another's red does not: an eval's prove (my.agent/prove)
+  ;; names a process test and never runs it (the owner's one prove of a change: process tests run on a candidate only at the judge of a
+  ;; merge, seon.agent/judge! with reach? true), so it stays deferred; and a schema the branch registers moves the
   ;; digest, since a process test takes the schema class and an agent's inputs are its root's boot's (seon.agent/test-plan)
   (let [t 'seon.repl-test/a-process-proof-already-green
         ;; an edge each (seon.program/reach-step): what this judges runs across prove!'s message, which no reference shows, so a fix to it moved no digest here
@@ -2610,7 +2611,7 @@
               (let [answer (a/promise-chan) pid (keyword "seon.test" (str "fold-" n))]
                 (reset! kids [])
                 (flow/update! g #(assoc-in % [:procs pid] {:proc (flow/process fold)
-                                                           :args {:answer answer :plan {} :ticks 0 :budgets nil :shards shards :forked forked :say (fn [_])}}))
+                                                           :args {:graph g :ag {:key "test/a1" :role :test} :answer answer :plan {} :ticks 0 :budgets nil :shards shards :forked forked :say (fn [_])}}))
                 ;; the fold forks in its resume, on its own thread: the run is the test's once every shard's child is told
                 (dotimes [_ (count shards)] (a/<!! forked-c))
                 {:pid pid :answer answer}))
@@ -3012,7 +3013,7 @@
   ;; is a set, and its first was main's at random, whose commits hold root's own evals two at a time (the flake, 2026-11-10)
   (let [[_ counts] (in-agent (fn [{:keys [task ns]}]
                              [(str "(seon.turn/work! agent {:task " (pr-str task) " :max-turns 1})")
-                              (str "(let [db (seon.agent/db) k (:key (clojure.core/deref seon.agent/state))"
+                              (str "(let [db (seon.agent/db) k (:key agent)"
                                    "      n (fn [db] (count (datahike.api/q '[:find ?e :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a] [?e :seon.eval/id]] db k)))"
                                    "      evs (fn [db] (set (datahike.api/q '[:find ?i ?o ?c :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a] [?e :seon.eval/id ?i] [(get-else $ ?e :seon.eval/origin :none) ?o] [(get-else $ ?e :seon.eval/code \"\") ?c]] db k)))"
                                    "      back (fn [db] (when-let [ps (seq (datahike.api/parent-commit-ids db))] (apply max-key n (map #(datahike.api/commit-as-db db %) ps))))"
@@ -3225,7 +3226,7 @@
         [names mine sum status problems]
         (in-agent (fn [names]
                     [(fn [_] names)
-                     "(#'my.agent/own-cites)" "(+ 1 2)"
+                     "(#'my.agent/own-cites agent)" "(+ 1 2)"
                      {:op :eval :agent "root" :code (str "(:seon.agent/missing-cites (get (:agents (c/state sys)) :" (:agent names) "))")}
                      {:op :eval :agent "root" :code problem-code}])
                   {:config {:seon.config.agent/cites [gone held]}})]
@@ -3563,7 +3564,7 @@
                (#'agent/hold-plan "b@dA!turn" "dA" (plan 'a.x-test/one "1a" [:turn]))
                (#'agent/hold-plan "b@dA" "dA" (plan 'a.x-test/one "1a" [:judge]))
                (#'agent/hold-plan "b@dB" "dB" (plan 'a.x-test/one "1b" [:b])))
-        sel #(#'agent/grant-selection (#'agent/held-plans %1) %2 (fn [] :planned-again))]
+        sel #(#'agent/grant-selection (#'agent/held-plans %1) %2 (fn [] :planned-again) nil)]
     (is (= [:turn] (get-in st [:held-plans "b@dA!turn" :selected])) "a turn's plan stays beside a :judge's at the same digest")
     (is (= [:judge] (get-in st [:held-plans "b@dA" :selected])) "and the :judge's beside it")
     (is (= "1b" (get-in st [:held-plans "b@dB" :digests 'a.x-test/one])) "beside the newest, at another digest")
@@ -3588,7 +3589,7 @@
   (let [sel {:plan {:process #{'a.p-test/boots} :reused {'a.x-test/kept {:pass 1 :fail 0 :error 0}}}
              :judge [] :selected [] :run [] :deferred [] :reused {} :reused-reports [] :digests {'a.x-test/dropped "d2"}}
         items {'a.x-test/dropped "d1" 'a.x-test/kept "d3" 'a.p-test/boots "d4"}
-        s (#'agent/granted-selection sel items)
+        s (#'agent/granted-selection sel items nil)
         named (set (map :var (:reused-reports s)))]
     (is (= ['a.x-test/dropped] (:run s)) "a granted test the fresh plan's filter left out runs")
     (is (= #{'a.x-test/dropped 'a.x-test/kept} (set (:selected s))) "every granted test this child can run is selected")
@@ -3751,3 +3752,15 @@
       (is (zero? @asked) "the child parses and validates nothing")
       (is (identical? h @installed) "it holds what its agent derived")
       (finally (reset! held h0)))))
+
+;; task seon.prove/tests-fork-from-the-branchs-warm-agent: a batch the service hands with the one booted candidate runs its process
+;; tests here, on that candidate (the child records it on its world, :seon.test/candidate), never refused to a checkout build. Red first:
+;; granted-selection refused every process item whatever the batch carried. Estimate: two maps built, ~20k ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-process-item-runs-on-the-candidate-its-batch-carries
+  (let [sel {:plan {:process #{'a.p-test/boots}} :judge [] :selected [] :run [] :deferred [] :reused {} :reused-reports [] :digests {}}
+        items {'a.p-test/boots "d4" 'a.x-test/pure "d1"}
+        on (#'agent/granted-selection sel items {:port 4242 :store "/tmp/candidate/store" :main "candidate-x" :branch :candidate-x})
+        off (#'agent/granted-selection sel items nil)]
+    (is (= #{'a.p-test/boots 'a.x-test/pure} (set (:run on))) "with a candidate, the process test runs with the rest")
+    (is (empty? (filter :not-run (:reused-reports on))) "and none is refused")
+    (is (= ['a.x-test/pure] (:run off)) "without one, it is refused as before")))

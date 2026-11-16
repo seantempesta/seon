@@ -673,7 +673,7 @@
       ;; the test service (seon.prove): the request goes to its proc, the caller (a session, or an
       ;; agent's turn through its proc) is answered when the run it joined ends
       :prove (let [[st rid] (pend st p :prove (:agent m))]
-               (step/out! o [:prove :req] (assoc (select-keys m [:branch :t :digest :agent :proofs :names :mode :checkout :tree :verdicts]) :rid rid))
+               (step/out! o [:prove :req] (assoc (select-keys m [:branch :t :digest :agent :proofs :names :mode :checkout :tree :verdicts :process?]) :rid rid))
                st)
       ;; answered when its end is recorded (end-agent: its view entry, :status and :ended-ms), never before: a caller waits
       ;; on that answer, not on an end event it may have missed; one already ended is answered its entry at once

@@ -1389,7 +1389,7 @@
               (spit (str dir "/steps.edn") (sedn/encode {:tree tree :digests {name digest}}))
               (when (false? binary?) (spit (str dir "/steps-binary") ""))
               (spit (str dir "/step-bounds") (str name " " bound "\n")))
-    (:build :seed) nil)
+    (:build :seed :candidate) nil)
   nil)
 
 (defn- clone-program-store!
@@ -1420,7 +1420,7 @@
   (let [t0 (profile/now-ns)
         here (tree-id checkout)
         ;; a green already stored at its digest is the answer: no process started (2.3 s a test's runner, only to reuse it)
-        held (when-not (#{:build :seed} kind) (stored-results {name digest}))]
+        held (when-not (#{:build :seed :candidate} kind) (stored-results {name digest}))]
     (cond
       (not= here tree)
       (error #'seon.fx/run-tree-item :seon.fx/io-error (str "the checkout " checkout " is tree " here ", not the item's " tree ": its files moved since the plan")
@@ -1466,9 +1466,14 @@
                                             ;; shards (bin/system seed): a process item's root clones it, and one seeded at an earlier tree was a
                                             ;; binary built from this tree over a store of that one, every spawn refused (Tests' trial, step 2b)
                                             (when (:binary? req) " && bin/system seed \"$(<target/process-store.path)\""))))
-                :step (let [c (sh "bin/check" "--steps" dir)] (sh "bin/test" "--store-steps" dir) c))
+                :step (let [c (sh "bin/check" "--steps" dir)] (sh "bin/test" "--store-steps" dir) c)
+                ;; the tree's one booted candidate: its build on a clone of the process tests' store (seon.test-store/boot-candidate!,
+                ;; deps'), booted once in root's process and held by the prove proc for every process test of the tree
+                :candidate (let [c ((requiring-resolve 'seon.test-store/boot-candidate!) checkout)]
+                             (spit log (str "candidate " (pr-str (select-keys c [:port :writer-pid :system-pid :dir :runs :store :main])) "\n") :append true)
+                             (if (:port c) {:exit 0 :candidate (select-keys c [:port :writer-pid :system-pid :dir :runs :store :main])} {:exit 1 :out (pr-str (select-keys c [:log :exit]))})))
             ms (profile/ms-since t0)
-            stored (when-not (#{:build :seed} kind) (stored-results {name digest}))
+            stored (when-not (#{:build :seed :candidate} kind) (stored-results {name digest}))
             _ (when pstore (doseq [^java.io.File d (some-> (java.io.File. ^String dir) .listFiles seq)
                                    :when (str/starts-with? (.getName d) "program-store")]
                              (lib/remove-tree! (.getPath d))))
@@ -1478,6 +1483,9 @@
           (= :build kind) (if (zero? (:exit r))
                             {:value {:pass 1 :fail 0 :error 0 :failures [] :ms ms}}
                             (error #'seon.fx/run-tree-item :seon.fx/io-error (str (build-failure (str (:out r) (:err r)) nil) "; its log: " log) {:path checkout}))
+          (= :candidate kind) (if (zero? (:exit r))
+                                {:value {:pass 1 :fail 0 :error 0 :failures [] :ms ms :candidate (:candidate r)}}
+                                (error #'seon.fx/run-tree-item :seon.fx/io-error (str "the candidate of tree " tree " did not boot: " (:out r) "; its log: " log) {:path checkout}))
           (= :seed kind) (if (and (zero? (:exit r)) (or (not (:binary? req)) (.isFile (java.io.File. (str store "/data.mdb")))))
                            {:value {:pass 1 :fail 0 :error 0 :failures [] :ms ms}}
                            (error #'seon.fx/run-tree-item :seon.fx/io-error (str "the seed of " store " failed (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log) {:path checkout}))
@@ -1493,7 +1501,16 @@
   docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :map] :map]}
   [{req :req}]
-  (run-tree-item req))
+  (cond
+    ;; a candidate no item needs any more: stopped, its store and runs removed (seon.test-store/stop-candidate!, deps')
+    (= :stop-candidate (:kind req)) {:value ((requiring-resolve 'seon.test-store/stop-candidate!) (:candidate req))}
+    ;; an agent's branch's candidate (no checkout): the standing binary on a clone of the standing store, the branch its main
+    (and (= :candidate (:kind req)) (:branch req) (not (:checkout req)))
+    (let [t0 (profile/now-ns) c ((requiring-resolve 'seon.test-store/boot-branch-candidate!) (:branch req))]
+      (if (:port c)
+        {:value {:pass 1 :fail 0 :error 0 :failures [] :ms (profile/ms-since t0) :candidate (select-keys c [:port :writer-pid :system-pid :dir :runs :store :main])}}
+        (error #'seon.fx/run-item :seon.fx/io-error (str "the candidate of branch " (:branch req) " did not boot: " (pr-str (select-keys c [:log :exit]))) {:path (str (:dir c))})))
+    :else (run-tree-item req)))
 
 ;; ---- the owner -----------------------------------------------------------------------
 

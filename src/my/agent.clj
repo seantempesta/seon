@@ -334,10 +334,12 @@
   is the run's part of the page. Its results are kept at each test's reach digest (the test service
   records them), so (my.task/status) and the judge read a proof's status at its digest whichever call
   measured it."
-  {:malli/schema [:function [:=> [:cat :seon.agent/start] :map] [:=> [:cat :seon.agent/start [:or :symbol [:set :symbol] [:sequential :symbol]]] :map]]}
+  {:malli/schema [:function [:=> [:cat [:maybe :seon.agent/start]] :map] [:=> [:cat [:maybe :seon.agent/start] [:or :symbol [:set :symbol] [:sequential :symbol]]] :map]]}
   ([ag] (prove ag #{}))
   ([ag given]
-   (let [proofs (if (symbol? given) #{given} (set given))
+   ;; its branch read first: root, which has none (ag nil), is told so typed (seon.agent/db's :seon.agent/no-branch), never a defect
+   (let [_ (agent/db)
+         proofs (if (symbol? given) #{given} (set given))
          test-run (agent/judge! ag proofs false)]
      (if (contract/error? test-run)
        test-run
