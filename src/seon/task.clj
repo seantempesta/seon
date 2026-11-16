@@ -366,8 +366,7 @@
   "What a new boot changes about the agents an earlier boot started: each keeps its link to root
   (:seon.agent/root, so root's page holds every boot's sessions, grouped by :seon.agent/boot,
   root's session's pull, through the user's); one still shown live (:busy, :idle, :spawning: a root that
-  crashed or was stopped wrote no end) is :dead, its running form retracted; and a stall one showed is over, its :seon.process/stall retracted with its process (an
-  open :stalled problem never outlives it)."
+  crashed or was stopped wrote no end) is :dead, its running form retracted."
   {:malli/schema [:=> [:cat :seon.host/db] :seon.db/tx-data]}
   [db] (let [live live-statuses
              ;; every agent still shown live, read by its status (no join through the system entity: docs/users.md#who-started-whom)
