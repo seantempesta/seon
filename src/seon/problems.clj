@@ -631,7 +631,12 @@
 (def ^:private holding-refs
   "What a proc's code refers to that holds work outside its channels, a pend, an ask or a timer: the reads health's :undrained-proc
   takes (docs/health.md#a-proc-that-does-not-drain)."
-  '#{seon.step/pend seon.step/ask seon.step/ask-edge seon.step/put-after! seon.step/arm!})
+  '#{seon.step/pend seon.step/ask-edge seon.step/put-after! seon.step/arm!})
+
+(def ^:private answered-refs
+  "What a proc's code refers to whose holding its answerer ends, not descended by :undrained-proc: an ask (seon.step/ask) is answered
+  by the proc it asked, at that proc's own drain if not before (docs/flow.md#the-five-rules, rule 3)."
+  '#{seon.step/ask})
 
 (def ^:private stateful-refs
   "What a form refers to that holds state or waits outside a Flow proc, by kind: the reads health's :stateful-outside-flow
@@ -691,13 +696,15 @@
                      (do (vswap! holds assoc v false)
                          (let [ve (some->> (pdb/eid db :var/name v) (d/entity db))
                                refs (when (and ve (src? ve)) (:form/refs (:var/form ve)))
-                               r (boolean (or (some holding-refs refs) (some #(and (qualified-symbol? %) (not (holding-refs %)) (reaches? %)) refs)))]
+                               r (boolean (or (some holding-refs refs) (some #(and (qualified-symbol? %) (not (holding-refs %)) (not (answered-refs %)) (reaches? %)) refs)))]
                            (vswap! holds assoc v r)
                            r))))]
     (vec (for [ve (sort-by (comp str :var/name) procs)
                :when (and (step-fn? ve) (src? ve) (not (contains? (:var/meta ve) :seon.flow/edge)))
                :let [v (:var/name ve)]
-               :when (and (reaches? v) (not (contains? (set (:form/keywords (:var/form ve))) :clojure.core.async.flow/drain)))
+               ;; its transition names ::flow/drain, or its describe says why its held work ends by itself (:seon.flow/drain, a reason)
+               :let [kws (set (:form/keywords (:var/form ve)))]
+               :when (and (reaches? v) (not (kws :clojure.core.async.flow/drain)) (not (kws :seon.flow/drain)))
                :let [s (str "undrained-proc " v)]]
            (derived-row ans s (some-> (namespace v) symbol)
                         (str v " holds work outside its channels (a pend, an ask or a timer) and does not end it at ::flow/drain: end it there as at ::flow/stop (seon.step/end-all, timers cancelled)")
