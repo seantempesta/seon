@@ -1144,6 +1144,35 @@
         r (get (proofs/run-tests! ['pt.sk-test/reads-an-entry] {'pt.sk-test/reads-an-entry "d"} (fn [_])) 'pt.sk-test/reads-an-entry)]
     (is (contains? (:schema-reads r) [:ea e :schema/form]) (pr-str (select-keys r [:schema-reads :pass :error])))))
 
+;; seon.agent/a-tests-result-is-read-in-one-seek-at-its-digest: the input of size n, a test holding n results, each at a reach digest
+;; of its own (the results branch held ~18 a test, 41,251 for 2,298 tests), and the one asked for: [db {test digest}], verdicts-at's.
+(defn results-of
+  "[db cand]: test pt.rs-test/adds holding n results at n reach digests on a small world, cand asking for the last one's."
+  {:malli/schema [:=> [:cat pos-int?] [:vector :any]]}
+  [n]
+  (let [w0 (mt/with (mt/world) (mt/code 'pt.rs "(ns pt.rs)\n(defn add [x y] (+ x y))\n"))
+        g (program/reach-graph w0 nil) t 'pt.rs-test/adds
+        basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
+        one (first (proofs/verdict-tx w0 g basis {t {:digest (seon.lib/digest "0") :pass 1 :fail 0 :error 0}} {t [{:var 'pt.rs/add}]} {}))
+        ds (mapv #(seon.lib/digest (str "run " %)) (range n))
+        db (pdb/db-with w0 (vec (for [[i d] (map-indexed vector ds)]
+                                  (assoc one :seon.proof/reach-digest d :seon.proof/reads-digest (seon.lib/digest (str "reads " i))
+                                         :seon.proof/id (proofs/verdict-id t (seon.lib/digest (str "reads " i)) :pass)))))]
+    [db {t (peek ds)}]))
+
+;; Estimate: 4 worlds with one form (~4M each) and their 152 results written (~4M), the four sizes measured (~1M): 25,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 25000000}} a-results-read-is-one-seek-a-candidate
+  ;; a candidate's result at its reach digest is one seek of that digest, whatever else the test holds (red first: verdicts-at sorted
+  ;; every result of the test and read each one's unindexed reach digest, 6.0B of a 2,298-test plan's 8.6B ticks, root result/ac5ab6ca)
+  (cost/proof
+    {:of 'seon.proofs/verdicts-at :input 'seon.proofs-test/results-of
+     :n "results the test holds at other reach digests"
+     :work "one AVET seek of the candidate's reach digest (its one result), a read of that result's test, status and route"
+     :growth :constant
+     ;; in ticks: one index seek (~3.3k, deps M result/c95909e8) and three EAVT reads (~1k each)
+     :fixed {:ticks 8000}
+     :sizes [4 12 36 100]}))
+
 ;; THE FOCUS (E) step 1 (data's condition): a result's identity is its whole content (test, reads digest, status), so two branches'
 ;; results never conflict at a merge: a different status at one reach digest is another entity (flaky is a query), and the lookup at
 ;; a reach digest answers the newest. Red first: the identity was (test, reach digest) with a write-once status, so the second
