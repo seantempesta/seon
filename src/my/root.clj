@@ -620,31 +620,6 @@
                        :error (contract/error :seon.judge/cost-unknown #'my.root/first-moves!
                                               (str "the reply's usage cannot be priced (model " (:model req) "): the pass stops") {:task id :usage usage})}))))))))))
 
-(defn slow-tests-tx
-  "The held tasks the slow tests of slow ({test ms}: seon.fx/slow-tests) ask for, each from its template
-  (seon.template/slow-test), none for a test whose task db holds: tx-data, [] when there is nothing to file.
-  See docs/merging.md#a-slow-test-runs-last."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :qualified-symbol :int] :int] [:sequential :any]]}
-  [db slow bound]
-  (let [decls (vec (for [[t ms] (sort-by key slow)
-                         :let [decl (tpl/slow-test t ms bound)]
-                         :when (not (pdb/eid db :seon.task/id (task/task-id (:seon.task/ns decl) (:seon.task/name decl))))]
-                     decl))]
-    (if (seq decls) (task/create-tx db decls) [])))
-
-(defn file-slow-tests!
-  "Write main's slow tests as held tasks (slow-tests-tx over the test vars of main, by the verdict cache), so a
-  test the cache shows slow is work with its metric known ahead of time; bin/update calls it once root is up.
-  Answers the task ids filed, [] when every slow test has its task. See docs/merging.md#a-slow-test-runs-last."
-  {:malli/schema [:=> [:cat :seon.system/sys] [:vector :string]]}
-  [sys]
-  (let [db @(:conn sys)
-        tests (into {} (for [d (d/datoms db :aevt :var/name) :when (str/ends-with? (or (namespace (:v d)) "") "-test")] [(:v d) nil]))
-        tx (slow-tests-tx db (fx/slow-tests tests) (config/value :seon.config.proofs/slow-test-ms))]
-    (when (seq tx) @(root/transact-main! sys tx))
-    (vec (keep :seon.task/id tx))))
-
-
 (defn held-agent
   "The live agent client attached (seon.server/attach!'s :holder, its :seon.agent/holder) and the task it works, as
   {:agent :task}; nil when it holds none. What a session's edit hook imports onto (bin/seon-import). See

@@ -1085,7 +1085,7 @@
 
 (defn derived?
   "Whether task entity e is made by the system from data it derives again, so no file states it: it has a cause (a stall's
-  :seon.task/cause, a :seon.task/causes tag such as a slow test's measurement) or is a refine (`refine?`). Seeks only. See
+  :seon.task/cause, a :seon.task/causes tag) or is a refine (`refine?`). Seeks only. See
   docs/source.md#a-merged-task-reaches-mains-files."
   {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
   [db e]

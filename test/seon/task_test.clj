@@ -520,9 +520,10 @@
         (is (problems/unsynced? db (e db "demo/old")))
         (is (str/starts-with? (get-in (:req (my.root/sync-req db ["demo/old"] dir)) [:files path])
                               "[{:seon.task/name \"old\" :seon.task/plan \"q\" :seon.task/kind :work}]"))))
-    (testing "a slow test's task is the system's, made again from the verdict cache: never filed"
-      (let [db (d/db-with db (task/create-tx db [(template/slow-test 'demo-test/slow 6000 5000)]))]
-        (is (not (problems/unsynced? db (e db "demo-test/fast-slow"))))))))
+    (testing "a task the system makes from a cause (a stall's) is the system's: never filed"
+      (let [db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo-test :seon.task/name "stalled" :seon.task/plan "p"
+                                                   :seon.task/cause {:stall {:agent :a1 :quiet-ms 60000} :what "a child parked on a pipe" :bug? false}}]))]
+        (is (not (problems/unsynced? db (e db "demo-test/stalled"))))))))
 
 ;; Estimate: 4 task writes on a test db (two load-tx of a two-entry file, a create-tx, a load-tx of an empty one: ~1.5M each)
 ;; + one completes of a message (~50k) = 6000000 ticks
