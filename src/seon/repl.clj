@@ -1418,7 +1418,9 @@
   ([] {:ins {:in "the requests that run at the REPL or write the branch"} :outs {} :workload :io
        :ping-map-fn (fn [st] {:evals (:n @agent/state) :run (some-> (:run-st st) (select-keys [:task :turn])) :queued (count (:queue st))})})
   ([_] (let [port (a/chan 4)] {:run-port port :rid 0 :pending {} :queue clojure.lang.PersistentQueue/EMPTY ::flow/in-ports {:run port}}))
-  ([st _] st)
+  ;; drain: a run ends at once, as root's :stop ends it (its turn re-opens from its basis at the next root), and the requests queued
+  ;; behind it are served (docs/health.md#a-proc-that-does-not-drain)
+  ([st tr] (if (and (= tr ::flow/drain) (:run st)) (drain (drive-run st {:seon.turn/stop true})) st))
   ([st in m]
    (cond
      ;; the answer of the run's last output; one to any other output (a call a stop dropped, a run that ended) is dropped
@@ -1498,7 +1500,9 @@
   verdict cache only, nothing of the branch, and a throw is answered as a step's is (serve-item!). See
   docs/processes.md#the-agent-process, docs/merging.md#the-test-service."
   {:malli/schema :seon.step/step-fn}
-  ([] {:ins {:in "root's :tests requests"} :outs {} :workload :io :ping-map-fn (fn [_] {})})
+  ([] {:ins {:in "root's :tests requests"} :outs {} :workload :io :ping-map-fn (fn [_] {})
+       ;; docs/health.md#a-proc-that-does-not-drain
+       :seon.flow/drain "its waits on root are seon.agent/await-reply's, which the :transport proc answers typed at a drain; its item runs end by their own bounds"})
   ([_] {})
   ([st _] st)
   ([st _ m]
@@ -1535,7 +1539,13 @@
   ([] {:ins {} :outs {:repl "requests that run at the REPL or write the branch" :tests "root's test runs"} :workload :io
        :ping-map-fn (fn [_] {:waits (count (:waits @agent/state))})})
   ([_] {::flow/in-ports {:from (agent/intake)}})
-  ([st _] st)
+  ;; drain: every wait on root (seon.agent/await-reply's :waits) answered typed, root being about to go; the answer ends each
+  ;; wait's bound (await-reply's finally) (docs/health.md#a-proc-that-does-not-drain)
+  ([st tr]
+   (when (= tr ::flow/drain)
+     (doseq [[k p] (:waits @agent/state)]
+       (deliver p {:op :reply :k k :result (contract/error :seon.system/no-agent #'seon.repl/transport-step "root is draining: ask the next root" {})})))
+   st)
   ([st _ m]
    (let [op (:op m)
          p (when (answers op) (get-in @agent/state [:waits (:k m)]))]
@@ -1551,6 +1561,8 @@
        ;; and a run the :repl proc holds ends at once (agent-step), its call in flight dropped
        (= :stop op) (do (flow/resume-proc (:flow @agent/state) :repl) [st {:repl [m]}])
        (= :resume op) (do (flow/resume-proc (:flow @agent/state) :repl) [st nil])
+       ;; root drains this agent: its graph drains, each proc ending what it holds (their ::flow/drain transitions)
+       (= :drain op) (do (flow/drain (:flow @agent/state)) [st nil])
        :else [st {:repl [m]}]))))
 
 (defn defect-answer

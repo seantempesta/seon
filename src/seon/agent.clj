@@ -1527,7 +1527,7 @@
                                              (assoc :todo rest-todo :pid os :exit status :no-progress stalled))))]
     (flow/update! (:flow @state) (fn [cfg] (-> cfg (update :procs dissoc cpid) (update :conns #(filterv (fn [[[p]]] (not= cpid p)) %)))))
     (swap! state #(cond-> % (= os (:test-child %)) (dissoc :test-child)))
-    (if (and (seq rest-todo) (seq died) (not give-up?))
+    (if (and (seq rest-todo) (seq died) (not give-up?) (not (:draining st)))
       (fork-test-child st shard rest-todo)
       (assoc-in st [:shards shard :done] true))))
 
@@ -1579,6 +1579,9 @@
                      st
                      (try (run-answered (reduce-kv (fn [st i sh] (fork-test-child st i (:todo sh))) (assoc st :dealt true) (:shards st)))
                           (catch Throwable e (fold-threw st e))))
+     ;; drain: no child forked from now (no first deal, no refork of a death); those running end by their own bound (arm-wall!)
+     ;; and the stop that follows kills any left (docs/health.md#a-proc-that-does-not-drain)
+     ::flow/drain (assoc st :draining true :dealt true)
      ;; nothing it forked outlives it (a child's exit is still reaped by its watch)
      ::flow/stop (do (doseq [[_ c] (:children st)] (lib/kill! (:os c) (jolt.host/signal-number "KILL")))
                      (a/close! (:ends st))
