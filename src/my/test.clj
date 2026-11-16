@@ -133,17 +133,21 @@
               (with (or db (:db old) (world)) (task (symbol (:ns names)) "t" "Work.")
                     [{:seon.agent/key (:agent names) :seon.agent/task [:seon.task/id (:task names)]}])
               db)]
+     ;; the test's own start value, as the state it replaced held: none for a scratch session, a test agent's with a world, and
+     ;; its forms' own agent on the caller's config and branch
+     (binding [agent/*start* (cond-> {}
+                               db (assoc :mode :test :key "test-agent")
+                               forms? (merge (select-keys agent/*start* [:cfg :branch]) {:key (:agent names) :id (keyword (:agent names))}))]
      (try (reset! agent/state (cond-> {:n 0 :ns (create-ns nsym)}
-                                db (assoc :mode :test :db db :key "test-agent" :seon.repl/as-agent true)
-                                forms? (merge (select-keys old [:cfg :branch :program :index :schema-registry])
-                                              {:key (:agent names) :id (keyword (:agent names))})))
+                                db (assoc :db db :seon.repl/as-agent true)
+                                forms? (merge (select-keys old [:program :index :schema-registry]))))
           (if forms?
             (mapv (fn [f] (if (fn? f)
                             {:value (f {:db (:db @agent/state) :names names})}
                             (let [r (repl/eval-string f {:origin :outside})] (cond-> r (not (contains? r :value)) (assoc :value nil)))))
                   (if (fn? code) (code names) code))
             (repl/eval-string code {}))
-          (finally (reset! agent/state old))))))
+          (finally (reset! agent/state old)))))))
 
 (defn cost
   "The work (thunk) does: {:ticks :bytes :ms :value}, the engine ticks and bytes the test thread

@@ -29,7 +29,7 @@
   "The id of the task this process works: the one root forked it for (seon.agent/init!), or
   nil for an agent forked with none."
   {:malli/schema [:=> [:cat] [:maybe :seon.task/id]]}
-  [] (:task @agent/state))
+  [] (:task agent/*start*))
 
 (defn- begin!
   "This process works task: the task recorded as its agent's on its branch (seon.agent/begin-run!), and the
@@ -58,7 +58,7 @@
   nothing written when it already says so (seon.ctx.status/status reads it)."
   {:malli/schema [:=> [:cat :any] :any]}
   [test-run]
-  (let [k (:key @agent/state)
+  (let [k (:key agent/*start*)
         held (:seon.agent/test-error (d/entity (agent/db) [:seon.agent/key k]))
         err (when (contract/error? test-run) test-run)]
     (cond (and err (not= err held)) (agent/transact! [{:seon.agent/key k :seon.agent/test-error err}])
@@ -109,7 +109,7 @@
   (a turn's end commits the agent's run-ahead writes)."
   {:malli/schema [:=> [:cat :map :seon.agent/outcome [:maybe :string] [:maybe :map]] :seon.turn/end]}
   [{:keys [turn t0]} outcome reason error]
-  (let [db (agent/db) k (:key @agent/state)
+  (let [db (agent/db) k (:key agent/*start*)
         {:keys [tokens model-calls]} (agent-usage db k)
         ;; the run as its branch recorded it, whole across a restart (seon.learn/turns-of), and what its context showed: its task's
         ;; cites and proofs
@@ -163,7 +163,7 @@
   (what): its next request reads it as any message. nil."
   {:malli/schema [:=> [:cat :seon.error/base :string] :nil]}
   [em what]
-  (let [k (:key @agent/state)
+  (let [k (:key agent/*start*)
         body (print/text (vary-meta {:seon-threw what :error em} assoc :seon.print/full true))]
     ;; written after this turn's basis, so the next turn reads it, after everything this turn wrote
     (agent/transact! (agent/own-message-tx (str k "/turn-error/" (random-uuid)) task/system-sender body (System/currentTimeMillis)))
@@ -266,7 +266,7 @@
   reader of what main's program holds runs again only when that moved (docs/render.md#how-the-work-stands)."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
-  (let [db (agent/db) k (:key @agent/state) e (some->> (pdb/eid db :seon.agent/key k) (d/entity db))
+  (let [db (agent/db) k (:key agent/*start*) e (some->> (pdb/eid db :seon.agent/key k) (d/entity db))
         main (:main @agent/state)
         now (into {} (remove (comp nil? val)) {:seon.agent/main-commit (some-> main d/commit-id)
                                                  :seon.agent/main-program (when main (pm/content-commit (some->> (:seon.agent/main-program e) (d/commit-as-db (pdb/store-of db))) main))
@@ -280,7 +280,7 @@
   (seon.ctx.wire/wire-turn makes them again there). A model's turn and an outside agent's reply open alike. Answers [its model call's id, its basis]; its page reaches the model as the turn's page message (seon.ctx.wire/page-diff-msgs), never an eval. See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :seon.task/id :int [:maybe :int] :boolean [:maybe :string]] [:tuple :string :map]]}
   [task n max-turns merge? model-name]
-  (let [k (:key @agent/state) id (lib/call-id k n)]
+  (let [k (:key agent/*start*) id (lib/call-id k n)]
     (deliver! true)
     (agent/transact! (into [{:seon.agent/key k :seon.agent/turn n}
                             {:seon.model-call/id id :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :model}]
@@ -319,10 +319,10 @@
         [id basis] (open-turn! (:seon.task/id t) n max-turns (boolean merge?) model-name)
         ;; the provider as the config stands at the basis (main's as the turn heard it, over the task's own), never one copied at boot
         provider (wire/provider-of (agent/db) basis)
-        {:keys [messages sent]} (request! id (when (> n 1) (lib/call-id (:key @agent/state) (dec n))) n basis true (::sent st))]
+        {:keys [messages sent]} (request! id (when (> n 1) (lib/call-id (:key agent/*start*) (dec n))) n basis true (::sent st))]
     ;; :call and :agent name this model call and its agent, so the reply is read as it streams (docs/flow.md#effects-one-owner-and-its-workers-per-kind)
     {:id id :t1 (profile/now-ns) :sent sent
-     :request {:messages messages :task (:seon.task/id t) :turn turn :provider provider :call id :agent (:key @agent/state)}}))
+     :request {:messages messages :task (:seon.task/id t) :turn turn :provider provider :call id :agent (:key agent/*start*)}}))
 
 (defn- act!
   "One model turn's answer r acted on: the outcome of the call made ready by model-request! (pending: that call, with :task, the
@@ -410,7 +410,7 @@
   ([task take?] (context-block task take? false))
   ([task take? wire?]
    (let [_ (when take? (begin! task))
-         k (:key @agent/state)
+         k (:key agent/*start*)
          turn (inc (agent/turn-now))
          ;; an observer's read records nothing on the branch beyond the read and leaves the print cache
          _ (deliver! take?)
@@ -433,7 +433,7 @@
   "An outside agent's seon_eval on this process, one reply as a model's is: its evals (`seon.model/call-evals`) through the one REPL path in order, every one whatever the one before it did (docs/model.md#one-tool-repl). With turn?, the agent works task with its model outside: the reply is its turn, opened as a model's is (the one `request!`), its message on its model call, and its answer adds :request, what the model's next request would add: a context read taken after its evals (`context-block`, by the same request!), past the read the session saw last. Otherwise it is someone at the REPL of an agent its own model drives: no turn moves. Prints {:responses [...]} as EDN for the server (`seon.server/op-answer`). See docs/users.md#messages."
   {:malli/schema [:=> [:cat [:maybe :seon.task/id] [:maybe :string] :any :boolean] :nil]}
   [task message evals turn?]
-  (let [k (:key @agent/state)
+  (let [k (:key agent/*start*)
         n (when turn? (begin! task) (inc (agent/turn-now)))
         ;; what the session saw last: its newest context read, taken at its attach's seon_context or the reply before
         seen (when turn? (some->> (last-read k) (str "read-") (lib/call-id k)))
@@ -552,7 +552,7 @@
   [{:keys [task merge? max-turns model-name] :as st} t s]
   (let [no-status? (contract/error? s)
         ;; the first red of one of its proofs is when the task was specified: written once, as observed
-        _ (when-not no-status? (some-> (specified-tx (agent/db) task (:key @agent/state) s) agent/transact!))
+        _ (when-not no-status? (some-> (specified-tx (agent/db) task (:key agent/*start*) s) agent/transact!))
         reasons (:reasons s)
         stop (get-in @agent/state [:turn :stop])
         hairy (when (and merge? (not no-status?)) (hairy-of st t s))
@@ -739,7 +739,7 @@
   [::end {} outcome reason error] as hand-back-end says it. See docs/turn.md#the-end."
   {:malli/schema [:=> [:cat :map [:or :map :seon.error/base]] [:tuple [:= ::end] :map :seon.agent/outcome [:maybe :string] [:maybe :map]]]}
   [st s]
-  (when-not (contract/error? s) (some-> (specified-tx (agent/db) (:task st) (:key @agent/state) s) agent/transact!))
+  (when-not (contract/error? s) (some-> (specified-tx (agent/db) (:task st) (:key agent/*start*) s) agent/transact!))
   (let [[outcome reason] (if (contract/error? s) [:error (:seon.error/message s)] (let [[o why] (hand-back-end (:stop st) s)] [o (or why (unjudged-reason s))]))]
     [::end {} outcome reason (when (contract/error? s) s)]))
 
