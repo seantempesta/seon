@@ -121,4 +121,8 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.db-cost-test/reads-digests-costs-its-distinct-keys}
   :seon.task/needs #{}
-  :seon.task/estimate #:seon.db{reads-digests {:n 7253, :order :linear, :ticks 300000000, :bytes 1200000000}}}]
+  :seon.task/estimate #:seon.db{reads-digests {:n 7253, :order :linear, :ticks 300000000, :bytes 1200000000}}} {:seon.task/name "a-page-reads-a-tests-verdict-at-its-current-digest"
+  :seon.task/plan "Owner: tests2. Seen 2026-11-16: seon.proofs/newest-ran-on (the status and an agent's page, docs/render.md#how-the-work-stands) answers the newest verdict written that ran on the branch, never the one at the test's current reach digest. A stand-in run's red, then the file restored, reuses the older green at the restored digest without writing it again, so the page and the status's reds say red while the judge (by digest) says green. Fix at the reader: the verdict at the test's digest (the plan's :digests, one seek a proof, seon.proofs/verdicts-at), else nothing; the newest-written read goes. Proof, red first: a red written at digest b after a green at digest a, the test now at a, reads green. Estimate: one AVET seek a proof, ~3.3k ticks."
+  :seon.task/kind :work
+  :seon.task/estimate #:seon.proofs{newest-ran-on {:n 1 :order :constant :ticks 10000 :bytes 20000}}
+  :seon.task/proofs #{seon.ctx.status-test/a-verdict-is-read-at-the-tests-current-digest}}]

@@ -200,13 +200,16 @@
   calls (the rest are `(dir ns)`), and one test of it to copy: of the tests that call a var or name a key its task cites (cited,
   by each test form's recorded references and text), else of all, of those that state their estimate when any does, the shortest that uses a helper or `my.test`, else the shortest.
   Nil when the branch has no such namespace yet (the agent makes it first). One index read, and each var and each form that
-  defines nothing of the namespace read once. See docs/render.md#how-the-work-stands."
+  defines nothing of the namespace read once, each by a seek. See docs/render.md#how-the-work-stands."
   {:malli/schema [:function [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :map]]
                   [:=> [:cat :seon.host/db :qualified-symbol [:set :any]] [:maybe :map]]]}
   ([db p] (test-shape db p #{}))
   ([db p cited]
   (when-let [n (d/entity db [:ns/name (symbol (namespace p))])]
-    (let [vs (map #(d/entity db %) (d/q '[:find [?e ...] :in $ ?n :where [?e :var/ns ?n]] db (:db/id n)))
+    (let [at (fn [e a] (:v (first (d/datoms db :eavt e a))))
+        ;; the namespace's vars and forms by one AVET seek each, never a datalog query (its engine cost 62 KB and 255 KB on a
+        ;; 256-datom world where the seeks cost 2 KB each, result/c2ef78da)
+        vs (map #(d/entity db (:e %)) (d/datoms db :avet :var/ns (:db/id n)))
           {tests true others false} (group-by #(contains? (set (:var/meta %)) :test) vs)
           names (mapv #(name (:var/name %)) others)
           named (set names)
@@ -227,9 +230,9 @@
           ns-src (get-in n [:ns/form :form/src])
           requires (when-let [i (some-> ns-src (str/index-of "(:require"))] (form-at ns-src i))
           ;; a use-fixtures is a form that defines nothing (a text form): its source is read where it says so
-          fixtures (->> (d/q '[:find ?o ?s :in $ ?n :where [?f :form/ns ?n] [(missing? $ ?f :form/defines)] [?f :form/src ?s] [?f :form/order ?o]]
-                             db (:db/id n))
-                        (filter #(str/starts-with? (str/triml (second %)) "(use-fixtures")) (sort-by first) (mapv second))]
+          fixtures (->> (d/datoms db :avet :form/ns (:db/id n)) (map :e) (remove #(at % :form/defines))
+                        (keep (fn [f] (let [src (at f :form/src)] (when (and src (str/starts-with? (str/triml src) "(use-fixtures")) [(at f :form/order) src]))))
+                        (sort-by first) (mapv second))]
       (cond-> {:ns (symbol (namespace p))}
         requires (assoc :requires requires)
         (seq fixtures) (assoc :fixtures fixtures)
