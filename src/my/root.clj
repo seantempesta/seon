@@ -506,7 +506,7 @@
 (defn build!
   "Build the next generation from main's last merges commit, for what cannot load in place
   (a Jolt, Chez or dependency pin, deps.edn, native code; a merge loads in place:
-  seon.program/load-changes!). Waits for the :build effect (seon.fx/build), records what it
+  seon.program/load-diff!). Waits for the :build effect (seon.fx/build), records what it
   answered on main (:seon.system/generation, and a failure's :effect row naming it:
   seon.error/asked-tx) and answers it: what `bin/system next` starts. nil
   when no merge was committed."

@@ -3,7 +3,7 @@
   store and each test takes a branch of it through one helper (seon.test-store/test-branch!)."
   (:require [seon.task :as task] [seon.vector] [seon.test-store :as ts] [my.test :as mt] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [clojure.java.io] [clojure.walk] [datahike.api :as d] [datahike.writer :as dw] [datahike.writing] [datahike.db.transaction :as dbt]
-            [seon.db :as pdb] [seon.agent] [seon.program] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn] [seon.repl] [seon.print] [datahike.schema]
+            [seon.db :as pdb] [seon.agent] [seon.program] [seon.writer] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn] [seon.repl] [seon.print] [datahike.schema]
             [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost] [seon.lib :as lib] [seon.intr :as intr]
             [datahike.datom :as dd] [datahike.db] [datahike.index.persistent-set :as psi] [seon.merge] [org.replikativ.persistent-sorted-set]
             [jolt.scheme :as scm] [superv.async :as sv] [konserve.metrics :as km] [jolt.ffi :as ffi]))
@@ -1891,9 +1891,14 @@
             br (pdb/connect (assoc cfg :branch b))
             addrs (fn [db] (let [v (volatile! #{})] (org.replikativ.persistent-sorted-set/walk-addresses (:eavt db) (fn [a] (when a (vswap! v conj a)) true)) @v))
             merge! (fn []
+                     ;; the one merge (seon.writer/candidate: main merged into the branch as a value), committed through the branch's
+                     ;; connection as the change from its head to that value, main a parent (as seon.writer's merge-into-main commits)
                      (let [base (d/commit-as-db br (d/merge-base br b :db))
-                           r (seon.merge/delta-three-way base @br @main #{})]
-                       (d/merge-db br #{:db} (vec (seon.merge/merge-tx @br base @main (:apply r) #{})))))
+                           cand (:db (seon.writer/candidate @main base @br {}))
+                           [gone added] (seon.merge/changed-datoms @br cand)
+                           txe (into #{} (map :tx) (concat gone added))]
+                       (d/merge-db br #{:db} (-> [] (into (for [dt gone :when (not (txe (:e dt)))] [:db/retract (:e dt) (:a dt) (:v dt)]))
+                                                 (into (for [dt added :when (not (txe (:e dt)))] [:db/add (:e dt) (:a dt) (:v dt)]))))))
             private (fn [] (let [m (addrs @main) o (addrs @br)] [(count (remove m o)) (count o)]))]
         (try
           ;; main grows by a namespace a round, and the branch takes each by merge; then the branch writes one note
@@ -1911,7 +1916,7 @@
             ;; what a branch's own write adds to its own nodes is the path that write rewrote, and nothing of main's: asserted from the
             ;; write's own nodes, never from where a split falls (a bound of a tenth of the tree went red twice on one config key added
             ;; to main moving a leaf cut, 2026-11-10 and 11-14). How many merged leaves a branch owns depends on insertion order
-            ;; (seon.merge/merge-tx inserts main's datoms in another order than main did): task
+            ;; (the merge inserts main's datoms in another order than main did): task
             ;; seon.db/a-merged-node-is-mains-node-whatever-the-insertion-order; docs/sharing.md#what-a-branchs-nodes-are
             (is (pos? made) "the write made nodes of its own")
             (is (<= own (+ own-before made)) (str "its one write added " (- own own-before) " own nodes, more than the " made " it made"))
