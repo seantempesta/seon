@@ -1,10 +1,8 @@
 #!/bin/zsh
+# DEVIATES: lands from a session's worktree in the shell, with its own land count, races and fast lane (the fast lane's cost line sums the runner's SHARD lines in the shell). Not to be ported: deleted by the E checklist (seon.proofs/a-test-forks-from-the-standing-system-and-a-binary-test-reruns-only-for-its-binary, steps 6 and 7: one land queue as data, every land through :prove and seon_done).
 # bin/land [--check] [--fast NAMESFILE] [-F MSGFILE] — land this worktree's branch on main: the one way any session, Claude's or
 # Seon's, merges (docs/merging.md#a-branch-lands-with-binland). Run in the branch's worktree
 # (bin/worktree NAME), never the main tree, which stays on main and clean.
-# DEVIATES from a thin wrapper over an op (owner's ruling, decisions.md 2db6386065): its checks (Completes, dropped task entries,
-# Deletes, the estimate, health, the laws) and its merge run here in shell, so seon_done has none of them. They become data on the one
-# :merge (task seon.merge/one-merge-system), then this is a thin wrapper over it, then it goes (task seon.merge/a-session-lands-through-seon-done).
 #   0. the branch tip (its HEAD: commit what should land) is checked out beside everything else, a throwaway detached checkout
 #      in the main tree's target/land/ (bin/worktree --at, its products cloned from this worktree's: the same mechanism as the
 #      gate's checkout), and every later step runs there, never in this worktree: what is proved is the tree that lands, and
@@ -194,7 +192,9 @@ RUN=$(sed -nE 's/^(prove|test): run [^,]*, logs in (.*)$/\2/p' "$LOG" | tail -1)
 grep -q "proved green already" "$LOG" && print "proved by an earlier prove of this very tree: merging, nothing run"
 grep -E '^RED |^FAILED ' "$LOG" | cut -c1-200 | head -12
 LINE=$(grep -E ' bin/prove --merge .*: MERGE (OK|FAILED)' "$LOG" | tail -1)
-[[ -n $FAST ]] && LINE="fast lane: $(grep -cvE '^\s*$' "$FAST") tests by name, $(grep -E '^SHARD|^prove: nothing to run' "$LOG" | tail -1)"
+# the run's work beside its seconds (flow's audit 4b): each shard's SHARD line ends with what the tests it ran did themselves
+# (seon.proofs/own-cost, "N ran: T ticks, B bytes"), summed here over the shards
+[[ -n $FAST ]] && LINE="fast lane: $(grep -cvE '^\s*$' "$FAST") tests by name, $(grep -E '^SHARD|^prove: nothing to run' "$LOG" | tail -1 | sed 's/; [0-9]* ran: .*//'); $(sed -nE 's/^SHARD .*; ([0-9]+) ran: ([0-9]+) ticks, ([0-9]+) bytes$/\1 \2 \3/p' "$LOG" | awk '{n += $1; t += $2; b += $3} END {printf "%d ran: %.0f ticks, %.0f bytes", n, t, b}')"
 (( st == 0 )) && [[ $(tail -1 "$LOG") == "MERGE OK" ]] || fail "the proof is red: $LOG"
 [[ $(git rev-parse HEAD) == $PROVED ]] && git merge-base --is-ancestor "$OLD" HEAD || fail "the proved commit is not the commit that would land"
 { if [[ -n $MSG ]]; then cat "$MSG"; else print "Merge $B"; fi; print; print "$LINE"; } > "$LOG.msg"
