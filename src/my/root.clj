@@ -646,18 +646,20 @@
 
 
 (defn held-agent
-  "The live agent client attached (seon.server/attach!'s :holder, its :seon.agent/holder) and the task it works, as
-  {:agent :task}; nil when it holds none. What a session's edit hook imports onto (bin/seon-import). See
-  docs/server.md#working-a-task-from-a-worktree."
-  {:malli/schema [:=> [:cat :seon.system/sys :string] [:maybe [:map [:agent :keyword] [:task :string]]]]}
-  [sys client]
-  (let [db @(:conn sys)]
-    (->> (d/datoms db :aevt :seon.agent/holder)
-         (keep (fn [dt] (when (= client (:v dt))
-                          (let [a (d/entity db (:e dt))
-                                t (or (:seon.agent/task a) (first (:seon.task/_agent a)))]
-                            (when (and (not (:seon.agent/ended-ms a)) (:seon.task/id t))
-                              {:agent (keyword (:seon.agent/key a)) :task (:seon.task/id t) :tx (:tx dt)})))))
-         (sort-by :tx >)
-         first
-         (#(some-> % (dissoc :tx))))))
+  "The live agent of the session whose worktree is on git branch branch, and the task it works, as {:agent :task :holder}: a
+  session's worktree is on jolt/<area> and its session works session/<area> (AGENTS.md section 2), so the branch names the task, and
+  its newest live agent is the one, whoever attached it (the session attaches as its area, its edit hook writes as its checkout: one
+  session, one agent). nil for a branch of no session, or a session with no live agent. What a session's edit hook imports onto
+  (bin/seon-import). See docs/server.md#working-a-task-from-a-worktree."
+  {:malli/schema [:=> [:cat :seon.system/sys :string] [:maybe [:map [:agent :keyword] [:task :string] [:holder {:optional true} [:maybe :string]]]]]}
+  [sys branch]
+  (when-let [area (second (re-matches #"jolt/(.+)" branch))]
+    (let [db @(:conn sys)
+          task (str "session/" area)]
+      (->> (d/q '[:find ?a ?tx :in $ ?id :where [?t :seon.task/id ?id] [?a :seon.agent/task ?t ?tx]] db task)
+           (keep (fn [[a tx]] (let [e (d/entity db a)]
+                                (when-not (:seon.agent/ended-ms e)
+                                  {:agent (keyword (:seon.agent/key e)) :task task :holder (:seon.agent/holder e) :tx tx}))))
+           (sort-by :tx >)
+           first
+           (#(some-> % (dissoc :tx)))))))

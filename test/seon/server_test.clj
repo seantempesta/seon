@@ -375,7 +375,7 @@
   ;; called seon_context had no read, so its first reply was the whole request; and a seon_context read stored no parts, so the reply
   ;; after it was the whole request again: runtime's reply of 93,941 characters, 2026-11-16 [result/dba934d6]. Every read stores what it
   ;; showed, so the reply after a seon_context is what moved since it. Red before: it carried the system prompt whole. A session that has
-  ;; read nothing is answered its run's request, the run's own (seon.ctx-test/a-runs-request-holds-only-its-own-runs-evals-and-messages).
+  ;; read nothing is answered its whole request (seon.ctx/a-runs-request-holds-its-own-run would make it its run's).
   ;; Estimate unchanged: one more round trip (~0.5M)
   (let [[_ first-reply ctx second-reply third-reply] (at/in-agent (fn [{:keys [agent task]}]
                                                          [{:op :attach :task task}
@@ -1146,16 +1146,20 @@
        (is (re-find #"the run broke" (str (:seon.error/message r))))))))
 
 (deftest ^{:seon.test/estimate {:ticks 3000000}} a-checkout-names-the-agent-it-holds
-  ;; docs/server.md#working-a-task-from-a-worktree: a session's edit hook (bin/seon-import) imports onto the agent its checkout
-  ;; attached (seon.server/attach!'s :holder): the live one and its task; an ended one, or another client's, is none
+  ;; docs/server.md#working-a-task-from-a-worktree: a session's edit hook (bin/seon-import) imports onto its session's agent. A
+  ;; worktree's branch is jolt/<area> and its session works session/<area> (AGENTS.md section 2), so the checkout's branch names the
+  ;; agent: the live one working session/<area>, whoever attached it (the session attaches as its area, the hook writes as its checkout:
+  ;; one session, two clients, and root measured that nothing imported, 2026-11-16). An ended agent, or a branch of no session, is none
   (ts/test-branch!
    (fn [_ conn]
-     (let [decl (fn [nm] {:seon.task/ns 'demo :seon.task/name nm :seon.task/plan (str "Make " nm " true.") :seon.task/proofs #{(symbol "demo-test" nm)}})]
-       (d/transact conn (task/create-tx @conn [(decl "old") (decl "a") (decl "b")]))
-       (d/transact conn (ts/work-tx "demo/old" :running {:agent :k0 :holder "checkout-/w"}))
+     (let [decl (fn [nm] {:seon.task/ns 'session :seon.task/name nm :seon.task/plan (str "Work " nm ".") :seon.task/proofs #{(symbol "demo-test" nm)}})]
+       (d/transact conn (task/create-tx @conn [(decl "w") (decl "v")]))
+       (d/transact conn (ts/work-tx "session/w" :running {:agent :k0 :holder "w"}))
        (d/transact conn [{:seon.agent/key "k0" :seon.agent/ended-ms 1}])
-       (d/transact conn (ts/work-tx "demo/a" :running {:agent :k1 :holder "checkout-/w"}))
-       (d/transact conn (ts/work-tx "demo/b" :running {:agent :k2 :holder "mcp-1-2"}))
+       (d/transact conn (ts/work-tx "session/w" :running {:agent :k1 :holder "w"}))
+       (d/transact conn (ts/work-tx "session/v" :running {:agent :k2 :holder "mcp-1-2"}))
        (let [sys {:graph nil :ext (a/chan) :conn conn}]
-         (is (= {:agent :k1 :task "demo/a"} (my.root/held-agent sys "checkout-/w")) "the checkout's live agent, its task")
-         (is (nil? (my.root/held-agent sys "checkout-/elsewhere")) "a checkout that attached none holds none"))))))
+         (is (= {:agent :k1 :task "session/w"} (select-keys (my.root/held-agent sys "jolt/w") [:agent :task])) "the session's live agent, attached by its area")
+         (is (= :k2 (:agent (my.root/held-agent sys "jolt/v"))) "whoever attached it")
+         (is (nil? (my.root/held-agent sys "jolt/nobody")) "a branch whose session attached none holds none")
+         (is (nil? (my.root/held-agent sys "main")) "a branch of no session holds none"))))))
