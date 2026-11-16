@@ -647,9 +647,6 @@
                     [(when k {:seon.task/id id :seon.task/agent k})
                      (when k (cond-> {:db/id k :seon.agent/key k :seon.agent/task [:seon.task/id id]
                                       :seon.agent/branch branch :seon.agent/boot boot :seon.agent/started-ms start-ms}
-                               ;; a task begun is a run begun (its first start, or the agent's key now on another task); a wake or a restart of
-                               ;; its process goes on in the same run (docs/turn.md#the-turn-is-a-number)
-                               (or (nil? (:seon.agent/run-ms ae)) (not= id (get-in ae [:seon.agent/task :seon.task/id]))) (assoc :seon.agent/run-ms start-ms)
                                ;; the agent it is forked from, none when nobody started its task (never an invented one)
                                (and (not (:seon.agent/parent ae)) by) (assoc :seon.agent/parent by)
                                model (assoc :seon.agent/model model)

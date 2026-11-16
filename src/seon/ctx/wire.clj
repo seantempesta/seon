@@ -675,13 +675,7 @@
         ;; system's own work (seon.turn/work!, no intent), stay out (Context and Data model, 2026-11-11)
         ;; read untracked, member by its path: who made an eval and its intent are written with it, once
         plain (ratom/untracked c)
-        ;; the run working now (:seon.agent/run-ms: a task begun or an attach, root's): its request holds the turns and members linked since,
-        ;; each by its link's instant (the pattern's :tx :at); an earlier run's stay the branch's facts, in the record and its page. A member
-        ;; whose link names no instant (a db with no history), or an agent with no run written, is read whole
-        run-ms (:seon.agent/run-ms plain)
-        in-run? (fn [m] (let [i (get-in m [:at :db/txInstant])] (or (nil? run-ms) (nil? i) (<= run-ms (inst-ms i)))))
-        model-reads? (fn [p] (let [m (get-in plain p) by (:seon.eval/by m)]
-                               (and (in-run? m) (or (nil? by) (= (:db/id by) (:db/id plain)) (and (:seon.system/id by) (not (str/blank? (:seon.eval/intent m))))))))
+        model-reads? (fn [p] (let [m (get-in plain p) by (:seon.eval/by m)] (or (nil? by) (= (:db/id by) (:db/id plain)) (and (:seon.system/id by) (not (str/blank? (:seon.eval/intent m)))))))
         ;; the newest call's basis is written after the commit it names (seon.turn/open-turn!), so read at that commit it holds none:
         ;; there the point is db's own (the basis it will name), so a request made again at its basis holds its page message; a pull
         ;; that leaves bases out (a smaller pattern) shows no page
@@ -689,9 +683,7 @@
         ;; its turns: the calls with a number, but an outside agent's context read (origin :outside, read-<k>), which is no turn
         ;; (seon.ctx/turns, placed-messages): numbered by reads, it sat among the turns by its own count, placed a turn's messages
         ;; a second time and moved the page pairs after it at every read
-        cs (map val (sort-by (comp :seon.model-call/n val) (filter (fn [[e x]] (and (:seon.model-call/n x) (not= :outside (:seon.model-call/origin x))
-                                                                                    (in-run? (get-in plain [:seon.model-call/_agent e]))))
-                                                                   (:seon.model-call/_agent c))))
+        cs (map val (sort-by (comp :seon.model-call/n val) (filter (fn [[_ x]] (and (:seon.model-call/n x) (not= :outside (:seon.model-call/origin x)))) (:seon.model-call/_agent c))))
         newest (:seon.model-call/n (last cs))
         ;; a call whose basis the db holds but the pull left out has none here: the pull says what the agent reads. A basis is
         ;; placed as its point alone ({:commit :t}): the opening page placed at here, once its call is written, is the same pair

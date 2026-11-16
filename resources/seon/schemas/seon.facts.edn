@@ -290,9 +290,6 @@
  ;; root's boot it was started in, and when (ms): the agent is live in a root when the boot is that root's and its task is :running
  :seon.agent/boot [:and {:seon.db/index true :seon.db/root-only true :description "The root boot the agent was started in; it is live in a root when the boot is that root's and its task is running."} :string]
  :seon.agent/started-ms [:int {:seon.db/root-only true :description "When the agent was started, in ms."}]
- ;; a run is the agent's work on one task from when it was begun or attached, across its parks, wakes and process restarts: its request holds
- ;; the turns and evals linked since (seon.ctx.wire/turn-entities); written by seon.task/start-tx on a task begun and by every attach (seon.server/attach!)
- :seon.agent/run-ms [:int {:seon.db/root-only true :description "When the agent's run began (a task begun, or an attach), in ms; its request holds what was linked since. See docs/turn.md#the-turn-is-a-number."}]
  :seon.agent/ended-ms [:int {:seon.db/root-only true :description "When the agent ended, in ms."}]
  ;; a test run that failed as a whole (its fork refused, a namespace did not load): the error as data (its type, message and
  ;; data keys), written on the agent's branch by its turn (seon.turn/observe) and retracted when a run answers;
@@ -356,7 +353,6 @@
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
  ;; its joins are the page walk's units, seon.render/units), each member rendered by its own schema's render
  :seon.db/agent-fact [:map {:seon.db/attributes true :seon.ctx/required {:seon.agent/task "the task you work" :seon.message/_to "the messages sent to you" :seon.eval/_agent "your evals" :seon.model-call/_agent "your turns"} :seon.render/keys [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [:seon.agent/key
-                               :seon.agent/run-ms
                                :seon.user/name
                                :seon.render/hiccup
                                :seon.agent/branch
@@ -401,10 +397,10 @@
  ;; a user: an agent with a person's name (docs/users.md#what-each-thing-is), its own schema by extending the agent's, so its
  ;; layout is its own and an entity holding both identities is a user whatever its keys' order (seon.render/entity-schema)
  ;; a started agent: an agent (it extends :seon.db/agent-fact, as a user does) with the boot of the root that started it and
- ;; when, both written by every start (seon.task/start-tx, seon.system's own spawn), and when its run began (a task begun, an attach). Its branch comes only with a task and its
+ ;; when, both written by every start (seon.task/start-tx, seon.system's own spawn). Its branch comes only with a task and its
  ;; turn budget it also writes alone on its own branch (seon.turn), so they stay the agent's, optional
  :seon.db/agent-start-fact [:and {:seon.db/attributes true :description "An agent a root started: the boot of that root, and when."}
-                            :seon.db/agent-fact [:map [:seon.agent/boot :seon.agent/boot] [:seon.agent/started-ms :seon.agent/started-ms] [:seon.agent/run-ms {:optional true} :seon.agent/run-ms]]]
+                            :seon.db/agent-fact [:map [:seon.agent/boot :seon.agent/boot] [:seon.agent/started-ms :seon.agent/started-ms]]]
  ;; the agent whose page the person last opened: home is this page (docs/users.md#whats-on-screen); absent means root
  ;; or a task: an agent focuses the person on work it just launched (my.task/launch! answers the task), its agent made a moment later
  :seon.user/focus [:and {:seon.db/to [:seon.db/agent-fact :seon.task/task-fact]} :seon.db/ref]
