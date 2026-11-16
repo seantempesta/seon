@@ -355,10 +355,11 @@
         refs (for [[nsn src] (d/q '[:find ?nsn ?src :in $ [?f ...] :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn]
                                     [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]] db (vec calling))]
                [nsn (take 2 (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))])]
-    ;; the analyzer does find them: the loader's own two (checkout, secret); the profile is a
-    ;; command-line layer (--profile), not an environment read
+    ;; the analyzer does find them: the loader's own three (checkout, secret, and process: a process's own facts, the variables the
+    ;; shipped file's #env tags read before B1, until flow's start map hands them in as :process); the profile is a command-line
+    ;; layer (--profile), not an environment read
     (is (= #{'seon.config} (set (map first refs))))
-    (is (= '#{(defn checkout) (defn secret)} (set (map second refs))))))
+    (is (= '#{(defn checkout) (defn secret) (defn process)} (set (map second refs))))))
 
 ;; ---- layers: the shipped file, --config (a checkout's local.edn only when named), --set ---------------------------------------
 
