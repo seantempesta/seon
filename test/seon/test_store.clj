@@ -280,10 +280,13 @@
            rc (d/connect (assoc cfg :branch rb))]
        (try (f #(assoc-in % [:config :branch] ab)
                (fn [t status failures]
-                 (d/transact rc [(cond-> {:seon.proof/id (seon.lib/digest (str t " " (count (d/datoms @rc :aevt :seon.proof/test))))
-                                          :seon.proof/test t :seon.proof/status status :seon.proof/route :live :seon.proof/ran-on #{ab}
-                                          :seon.proof/reads-digest (seon.lib/digest (str t " reads"))}
-                                   (seq failures) (assoc :seon.proof/failures (vec failures)))])
+                 ;; a result and its run, a red's failures its run's, as seon.proofs/verdict-tx writes them
+                 (let [id (seon.lib/digest (str t " " (count (d/datoms @rc :aevt :seon.proof/test))))]
+                   (d/transact rc [{:db/id id :seon.proof/id id :seon.proof/test t :seon.proof/status status :seon.proof/route :live
+                                    :seon.proof/ran-on #{ab} :seon.proof/reads-digest (seon.lib/digest (str t " reads"))}
+                                   (cond-> {:seon.proof.run/id (seon.lib/digest (str id " run")) :seon.proof.run/of id
+                                            :seon.proof.run/reach-digest (seon.lib/digest (str id " reach"))}
+                                     (seq failures) (assoc :seon.proof.run/failures (vec failures)))]))
                  nil))
             (finally (d/release rc) (d/delete-branch! conn rb)))))))
 
@@ -768,7 +771,18 @@
             _ (try (d/branch! conn (or from (keyword smain)) (keyword cmain)) (finally (d/release conn)))
             bconn (pdb/connect (assoc cfg :branch (keyword cmain)))
             _ (try (let [running (d/q '[:find [?t ...] :where [?t :seon.task/execution :running]] @bconn)]
-                     (when (seq running) (d/transact bconn {:tx-data (mapv (fn [t] [:db/add t :seon.task/execution :held]) running)})))
+                     (when (seq running) (d/transact bconn {:tx-data (mapv (fn [t] [:db/add t :seon.task/execution :held]) running)}))
+                     ;; a branch's own build (checkout another than this process's): its main was brought to the tree that build is of, so
+                     ;; its source fact names that tree, the one every start's runtime check reads (seon.system's :seon.system/source :tree),
+                     ;; never the tree the clone inherited, which its binary is not (every attach refused, :seon.process/env-mismatch)
+                     (when (and from (not= checkout (seon.config/checkout)))
+                       ;; the tree as the build recorded it (target/seon.tree, what runtime-for reads of the binary), never HEAD's: bin/build
+                       ;; records the tree it built, its pins checked out, which is not the written-out commit's own tree
+                       (let [held (:seon.system/source (d/pull @bconn [:seon.system/source] [:seon.system/id :root]))
+                             built (clojure.string/trim (slurp (str checkout "/target/seon.tree")))
+                             commit (clojure.string/trim (:out (sh/sh "git" "-C" checkout "rev-parse" "HEAD")))]
+                         (d/transact bconn {:tx-data [{:seon.system/id :root
+                                                       :seon.system/source (assoc held :tree built :commit commit :root checkout)}]}))))
                    (finally (pdb/sync! cfg) (d/release bconn)))
             root (start-root! (cond-> {:store store :main cmain :runs (str dir "/runs")
                                        :args (if from

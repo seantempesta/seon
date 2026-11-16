@@ -4,7 +4,7 @@ How a test is written in Seon: on a small world, with what it adds, cheaply, one
 
 ## Testing in the world
 
-A test runs on **the world**, a small db shaped like production, plus what the test adds. Never build a test on the real program, the real wiki or a store of its own: those cost seconds and a store, the world about a millisecond.
+A test runs on **the world**, a small db shaped like production, plus what the test adds. Never build a test on the real program, the real wiki or a store of its own: those cost seconds and a store, the world about a millisecond. The world is on the schema the process holds (```seon.db/held-schema```): built once in the fork server on main's, and once more on a branch's own when the branch added an attribute since, so a branch's tests write what it added (```my.test/world```, `my.test-test/a-branch-that-adds-an-attribute-writes-it-in-its-world`).
 
 ```clojure
 (ns app.x-test

@@ -86,26 +86,46 @@
    (task 'app.calc "total-is-exact" "Make app.calc/total exact for an empty seq (0)." #{'app.calc-test/total-sums})])
 
 (def ^:private ^:seon.test/fixture plain-world
-  "The world, built once a process from base (`world` answers it), a fixture: forced before any test (seon.proofs/warm-fixtures!),
-  never inside the first test's budget (~3.2M ticks). See docs/testing.md#testing-in-the-world."
-  (delay (apply with (pdb/empty-db false) base)))
+  "The world, built once a process from base on the schema the process holds when it is forced ({:schema :db}), a fixture: forced
+  before any test (seon.proofs/warm-fixtures!), never inside the first test's budget (~3.2M ticks). See docs/testing.md#testing-in-the-world."
+  (delay {:schema (pdb/held-schema) :db (apply with (pdb/empty-db false) base)}))
 
 (def ^:private ^:seon.test/fixture history-world
-  "The world on a db that keeps history, built once a process from base (`world` answers it), a fixture as plain-world is. See
-  docs/testing.md#testing-in-the-world."
-  (delay (apply with (pdb/empty-db true) base)))
+  "The world on a db that keeps history, a fixture as plain-world is. See docs/testing.md#testing-in-the-world."
+  (delay {:schema (pdb/held-schema) :db (apply with (pdb/empty-db true) base)}))
+
+(def ^:private own-world
+  "The world on the schema of a branch that added an attribute since the fixture was forced (its agent's held schema), built at its
+  first use, never in the fork server: no fixture. See docs/testing.md#testing-in-the-world."
+  (delay {:schema (pdb/held-schema) :db (apply with (pdb/empty-db false) base)}))
+
+(def ^:private own-history-world
+  "own-world on a db that keeps history. See docs/testing.md#testing-in-the-world."
+  (delay {:schema (pdb/held-schema) :db (apply with (pdb/empty-db true) base)}))
+
+(defn- on-held-schema
+  "The world of the schema this process holds: the first of worlds (delays of {:schema :db}) built on it (one identity check each),
+  else one built now. See docs/testing.md#testing-in-the-world."
+  {:malli/schema [:=> [:cat [:sequential :any] :boolean] :seon.host/db]}
+  [worlds history?]
+  (let [s (pdb/held-schema)]
+    (or (some (fn [w] (let [{:keys [schema db]} @w] (when (identical? schema s) db))) worlds)
+        (apply with (pdb/empty-db history?) base))))
 
 (defn world
   "The base world, a db value: Seon's schema and a small program shaped like production:
   namespaces app.calc (add, inc2, total; a macro twice; add contracted) and app.report (line,
   calling app.calc/total), their tests app.calc-test (add-adds, total-sums), the wiki page
   docs/calc.md citing them, and the task app.calc/total-is-exact. Built once per process, in
-  memory (~3.2M ticks), before any test (a fixture). Add what a test needs with `with`. With {:history? true}, the same world
+  memory (~3.2M ticks), before any test (a fixture), on the schema the process holds; a branch that adds an attribute has a world
+  of its own schema, built once. Add what a test needs with `with`. With {:history? true}, the same world
   on a db that keeps history, for a test that reads d/history or d/as-of.
   Example: (my.test/world {:history? true}) See docs/testing.md#testing-in-the-world."
   {:malli/schema [:function [:=> [:cat] :seon.host/db] [:=> [:cat [:map [:history? {:optional true} :boolean]]] :seon.host/db]]}
   ([] (world {}))
-  ([{:keys [history?]}] (if history? @history-world @plain-world)))
+  ;; the fixture, forced in the fork server before any branch's schema existed, while its schema is the one held; a branch that added
+  ;; an attribute since (seon.db/held-schema, its own) has its own world on that schema, so its tests can write it
+  ([{:keys [history?]}] (if history? (on-held-schema [history-world own-history-world] true) (on-held-schema [plain-world own-world] false))))
 
 (defn eval-in
   "The response of code asked of the REPL in this process, as clojure's REPL answers it, in namespace nsym

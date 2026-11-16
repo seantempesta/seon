@@ -1560,8 +1560,8 @@
                 ;; the tree's one booted candidate: its build on a clone of the process tests' store (seon.test-store/boot-candidate!,
                 ;; deps'), booted once in root's process and held by the prove proc for every process test of the tree
                 :candidate (let [c ((requiring-resolve 'seon.test-store/boot-candidate!) checkout)]
-                             (spit log (str "candidate " (pr-str (select-keys c [:port :writer-pid :system-pid :dir :runs :store :main])) "\n") :append true)
-                             (if (:port c) {:exit 0 :candidate (select-keys c [:port :writer-pid :system-pid :dir :runs :store :main])} {:exit 1 :out (pr-str (select-keys c [:log :exit]))})))
+                             (spit log (str "candidate " (sedn/encode (select-keys c [:port :writer-pid :system-pid :dir :runs :store :main])) "\n") :append true)
+                             (if (:port c) {:exit 0 :candidate (contract/message :seon.prove/held-candidate c)} {:exit 1 :out (str "the candidate did not boot: exit " (:exit c) "\n" (:log c))})))
             ms (profile/ms-since t0)
             stored (when-not (#{:build :seed :candidate} kind) (stored-results {name digest}))
             _ (when pstore (doseq [^java.io.File d (some-> (java.io.File. ^String dir) .listFiles seq)
@@ -1615,9 +1615,9 @@
         {:value {:pass 1 :fail 0 :error 0 :failures [] :ms (profile/ms-since t0)
                  ;; :build, the build it booted when the branch moved a build input (seon.fx/build's answer): what a merge of this branch
                  ;; switches the standing root over to (:seon.task/build, seon.fx/switch-over), never built again
-                 :candidate (cond-> (select-keys c [:port :writer-pid :system-pid :dir :runs :store :main])
-                              dropped (assoc :write-out dropped)
-                              b (assoc :build (select-keys (:value b) [:checkout :binary :commit])))}}
+                 :candidate (contract/message :seon.prove/held-candidate (cond-> c
+                                                                          dropped (assoc :write-out dropped)
+                                                                          b (assoc :build (contract/message :seon.task/build (:value b)))))}}
         :else (error #'seon.fx/run-item :seon.fx/io-error (str "the candidate of branch " (:branch req) " did not boot: its :log and :exit are this error's") (assoc (select-keys c [:log :exit]) :path (str (:dir c))))))
     :else (run-tree-item req)))
 
