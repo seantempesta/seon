@@ -1307,10 +1307,15 @@
         db2 (pdb/speculate-db db1 docs)
         task-texts (into {} (for [[p t] changed :when (and tasks-dir (str/ends-with? p ".edn") (under? p tasks-dir))]
                               [(subs p (inc (count tasks-dir))) (or t "[]")]))
-        tasks (if (or (seq task-texts) (seq completed)) (task/load-tx db2 (tasks-of task-texts) completed) [])]
+        tasks (if (or (seq task-texts) (seq completed)) (task/load-tx db2 (tasks-of task-texts) completed) [])
+        ;; each task file's own text, a fact of the program beside the tasks it declares, so a merge carries the file and the write-back
+        ;; writes it byte for byte (seon.merge's [:tasks path]); a removed file's text goes with it
+        task-files (vec (for [[p t] changed :when (and tasks-dir (str/ends-with? p ".edn") (under? p tasks-dir))]
+                          (if t {:file/path p :file/text t} [:db/retractEntity [:file/path p]])))
+        task-files (filterv #(or (map? %) (pdb/eid db :file/path (second (second %)))) task-files)]
     (if (contract/error? tasks)
       (throw (ex-info (str "the landed task files were refused: " (:seon.error/message tasks)) tasks))
-      (vec (concat code docs tasks))))))
+      (vec (concat code docs tasks task-files))))))
 
 (defn- leave-out
   "tx without the entry named by (a task's id or a section's address, the :by of a :seon.db/no-target refusal): its own maps and
@@ -1361,7 +1366,11 @@
                                (let [{db' :db s :skipped} (transact-leaving-out! conn w)]
                                  ;; a round that wrote nothing but left entries out states nothing more
                                  (if (= (:max-tx db') (:max-tx db)) [db' (into skipped s)] (recur db' (into skipped s)))))))
-            tasks (task/load-tx db (task-files))
+            texts (lib/dir-texts (cfg/value :seon.config.root/tasks-dir) ".edn")
+            tasks (task/load-tx db (tasks-of texts))
+            ;; with each task file's own text, as a catch-up writes it (changed-tx): what a merge carries and the write-back writes
+            tasks (if (contract/error? tasks) tasks
+                      (into (vec tasks) (for [[n t] (sort texts)] {:file/path (str (cfg/value :seon.config.source/tasks-dir) "/" n) :file/text t})))
             {db :db task-skipped :skipped} (if (or (contract/error? tasks) (empty? tasks)) {:db db :skipped []} (transact-leaving-out! conn tasks))
             ;; an entry the wiki's rounds met again is named once
             skipped (into [] (comp (distinct)) (into skipped task-skipped))]
@@ -1404,7 +1413,7 @@
   (landed-tx: code, pages and task files, the source fact moved to the tree now), less those left out and named under :skipped,
   which keep the fact at the tree it held, so the next catch-up reads them again: a file that does not read as its reader reads it
   (seon.fx/unreadable), a task file the changed task files are refused with (seon.task/load-tx), and a file a merged task main
-  holds unsynced also changed (seon.problems/unsynced? of a merged task: the checkout's text would replace the merge's). Answers {:tx :paths
+  holds unsynced also changed (seon.task/unsynced? of a merged task: the checkout's text would replace the merge's). Answers {:tx :paths
   :skipped}, {:paths []} when nothing differs, nil when db holds no tree and no :paths are named, or the read's error. Its caller writes :tx on the branch
   it brings up to date (boot!: main). opts: :tree, the tree to read what differs from (default db's held one; with :fact? false, the
   checkout's merge base with main, seon.fx/base-commit, so a checkout behind main names only its own files, and the answer's :behind
@@ -1432,7 +1441,7 @@
         (let [;; the merged tasks first, by the outcome's index (O(merged)), never every declaration read (648 tasks' texts: 139 ms,
               ;; 192 MB for one merged task [M root result/bcff9cbd])
               unsynced (into {} (for [{:keys [e]} (d/datoms db :avet :seon.task/outcome :merged)
-                                      :when (and (seq (d/datoms db :eavt e :seon.task/declared)) (problems/unsynced? db e))
+                                      :when (and (seq (d/datoms db :eavt e :seon.task/declared)) (task/unsynced? db e))
                                       p (problems/changed-paths db e)]
                                   [p (:v (first (d/datoms db :eavt e :seon.task/id)))]))
               task? #(and (str/ends-with? % ".edn") (str/starts-with? % (str tasks-dir "/")))
@@ -1463,6 +1472,8 @@
               changed (into {} (remove (comp out key)) (:value r))
               modes (into {} (remove (comp out key)) (:modes r))]
           (let [res (cond-> {:paths (vec (keys changed)) :skipped skipped
+                             ;; the task entries a load leaves out, each with why (seon.task/left-out): the rest of their files load
+                             :left-out (if (seq readable) (task/left-out db (tasks-of readable)) {})
                      :tx (if (or (seq out) (not fact?))
                            (changed-tx db changed modes tasks-dir)
                            (landed-tx db changed modes (:tree r) (:commit r)))}
