@@ -1289,8 +1289,6 @@
   (let [[_ _ rows task-rows nothing both opt-t foreign bad-branch bad-commit branch-ok bare-ok commit-ok mix]
         (ts/test-branch!
          (fn [cfg conn]
-          ;; this process's main is the test's own here (seon.agent/main-branch, which my.db/at names a task's branch under)
-          (with-redefs [seon.agent/main-branch (constantly (:branch cfg))]
           (my.test/eval-in
            (fn [{:keys [task]}]
            ["(defn zz-h [] 1)"
@@ -1310,10 +1308,10 @@
             "(:seon.error/type (my.db/at agent {:commit (random-uuid)}))"
             "(let [b (seon.agent/own-branch)] (= (:seon.error/type (my.db/at agent {:branch b})) nil))"
             ;; a branch as a task names it (its root's main left off) reads the same branch as the store's name for it
-            "(let [b (seon.agent/own-branch) m (seon.agent/main-branch) bare (if (= (name m) (namespace b)) (keyword (name b)) b)] [(not= b bare) (= (:max-tx (my.db/at agent {:branch b})) (:max-tx (my.db/at agent {:branch bare})))])"
+            "(let [b (seon.agent/own-branch) m (seon.agent/own-main) bare (if (= (name m) (namespace b)) (keyword (name b)) b)] [(not= b bare) (= (:max-tx (my.db/at agent {:branch b})) (:max-tx (my.db/at agent {:branch bare})))])"
             "(let [b (seon.agent/own-branch) c (datahike.api/commit-id (my.db/at agent {:branch b}))] (= (:max-tx (my.db/at agent {:commit c})) (:max-tx (my.db/at agent {:branch b}))))"
             "(try (my.db/at agent {:commit (random-uuid) :t 1}) :no (catch Exception e :refused))"])
-           'seon.repl-test.scratch {:conn conn}))))]
+           'seon.repl-test.scratch {:conn conn})))]
     (is (= 2 (count (filter :added? (:value rows)))) (str "the var's two definitions: " (pr-str rows)))
     (is (every? string? (map (comp :form/src :v) (filter :added? (:value rows)))) "each pulled to the text it had")
     (is (vector? (:value task-rows)) (pr-str task-rows))

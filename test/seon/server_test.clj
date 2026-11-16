@@ -398,7 +398,7 @@
   ;; value a later read can read back, its t its commit's own. Red before: the read wrote its record, then drew its request on that run-ahead
   ;; value, so its page walk kept the last commit with a t past it, which a later read could only read as an as-of value of a different
   ;; db (a cold walk of the same turn drew another record: a-later-read-draws-no-page-cold, red on the candidate)
-  (let [[_ r] (ts/test-branch! (fn [_ conn] (my.test/eval-in ["(swap! seon.agent/state assoc :inbox [])" (str "(let [t (seon.agent/task-of agent)"
+  (let [[r] (ts/test-branch! (fn [_ conn] (my.test/eval-in [(str "(let [t (seon.agent/task-of agent)"
                                " _ (seon.turn/context-block agent t true) _ (seon.turn/context-block agent t true)"
                                " db (seon.agent/db) st (seon.db/store-of db)"
                                " own? (fn [p] (= (:t p) (:max-tx (datahike.api/commit-as-db st (:commit p)))))"

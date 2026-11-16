@@ -130,17 +130,20 @@
   {:malli/schema [:=> [:cat] [:vector :map]]}
   [] (:inbox @state))
 
+(defn own-main
+  "The main this agent's branch is cut under, read from the branch's name (seon.db/on-main qualifies a branch by its main's): the
+  process's main (main-branch) in production, a test's own for a test's agent on a stored branch (my.test/eval-in). Every read that
+  names a branch of this agent's main resolves it here. See docs/processes.md#the-agent-process."
+  {:malli/schema [:=> [:cat] :keyword]}
+  [] (let [br (get-in (db) [:config :branch])] (if (and (keyword? br) (namespace br)) (pdb/main-of br) (main-branch))))
+
 (defn heard-main
   "Main's head as the store holds it now, held on the state as what this agent last heard of main
   (:main; the record's :main-commit and :main-t, seon.ctx). Every read of main's head is this one. A db with no store (a test's
   world, d/db-with values) has no other branch: it is its own main."
   {:malli/schema [:=> [:cat] :seon.host/db]}
   [] (let [b (db) s (pdb/store-of b)
-           ;; the main its branch is cut under (a branch's name is qualified by its main's, seon.db/on-main): the process's in production,
-           ;; a test's own main for a test's agent on a stored branch (my.test/eval-in)
-           br (get-in b [:config :branch])
-           main (if (and (keyword? br) (namespace br)) (pdb/main-of br) (main-branch))
-           m (if s (d/branch-as-db s main) b)]
+           m (if s (d/branch-as-db s (own-main)) b)]
        (swap! state assoc :main m) m))
 
 (defn task-of
