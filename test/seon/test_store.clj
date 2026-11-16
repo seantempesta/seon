@@ -773,10 +773,13 @@
                      ;; its source fact names that tree, the one every start's runtime check reads (seon.system's :seon.system/source :tree),
                      ;; never the tree the clone inherited, which its binary is not (every attach refused, :seon.process/env-mismatch)
                      (when (and from (not= checkout (seon.config/checkout)))
-                       (let [rev (fn [x] (clojure.string/trim (:out (sh/sh "git" "-C" checkout "rev-parse" x))))
-                             held (:seon.system/source (d/pull @bconn [:seon.system/source] [:seon.system/id :root]))]
+                       ;; the tree as the build recorded it (target/seon.tree, what runtime-for reads of the binary), never HEAD's: bin/build
+                       ;; records the tree it built, its pins checked out, which is not the written-out commit's own tree
+                       (let [held (:seon.system/source (d/pull @bconn [:seon.system/source] [:seon.system/id :root]))
+                             built (clojure.string/trim (slurp (str checkout "/target/seon.tree")))
+                             commit (clojure.string/trim (:out (sh/sh "git" "-C" checkout "rev-parse" "HEAD")))]
                          (d/transact bconn {:tx-data [{:seon.system/id :root
-                                                       :seon.system/source (assoc held :tree (rev "HEAD^{tree}") :commit (rev "HEAD") :root checkout)}]}))))
+                                                       :seon.system/source (assoc held :tree built :commit commit :root checkout)}]}))))
                    (finally (pdb/sync! cfg) (d/release bconn)))
             root (start-root! (cond-> {:store store :main cmain :runs (str dir "/runs")
                                        :args (if from
