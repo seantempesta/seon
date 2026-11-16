@@ -956,6 +956,24 @@
 
 ;; ---- a proc answers every request it took (laws audit #2) ----------------------
 
+;; Estimate: one socket pair and remote end opened (~0.3M ticks), three agent-proc steps as plain calls (~0.1M each): ~0.6M; 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} an-agents-call-is-answered-and-writes-only-its-own-branch
+  ;; one agent kind (task seon.step/roots-procs-are-the-first-forks-graph, B1): an agent asks the writer process as root's REPL does
+  ;; through sys, with one frame, :call, forwarded as a :request the api answers by its tag, as :launch is. Main changes only by a
+  ;; merge (decisions): a :write names no branch, so the agent's own is the only one it can mean (the root agent's is main). Red before:
+  ;; no :call frame
+  (let [[r _] (sock/socketpair)
+        end (remote/open r {:codec {:encode codec/encode :decode codec/decode}})
+        st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
+        [_ outs] (step #'ap/agent-proc st :from {:op :call :k 7 :req {:op :state}})
+        [_ outs2] (step #'ap/agent-proc st :from {:op :call :k 8 :req {:op :write :req {:op :tx :tx-data [{:note/text "x"}]}}})]
+    (is (= [{:op :request :req {:op :state} :route [:a1 :in] :tag 7}] (filterv #(= :request (:op %)) (:to-api outs))) (pr-str outs))
+    (is (= :agent-1 (get-in (first (filterv #(= :request (:op %)) (:to-api outs2))) [:req :req :branch]))
+        (str "a write names no branch and is this agent's own: " (pr-str outs2)))
+    (is (not (seon.contract/valid? :seon.agent/call-req {:op :write :req {:op :tx :branch :db :tx-data []}}))
+        "a write naming a branch fails its schema: never rewritten")
+    (is (seon.contract/valid? :seon.agent/call-req {:op :write :req {:op :tx :tx-data []}}))))
+
 (defn- api-state []
   (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                     :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))}))
