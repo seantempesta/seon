@@ -16,6 +16,34 @@ long e13_nthreads(void) {
   vm_deallocate(mach_task_self(), (vm_address_t)th, n * sizeof(thread_act_t));
   return n;
 }
+// This task's dirty bytes by region share mode, as vmmap's region table sums its dirty column (mach_vm_region_recurse,
+// descending submaps): out[0] SM_PRIVATE, out[1] SM_COW (still shared with a fork's other side), out[2] SM_SHARED and
+// SM_TRUESHARED, out[3] SM_PRIVATE_ALIASED, out[4] SM_ZERO_FILL/SM_EMPTY and others, out[5] pages_shared_now_private (bytes
+// a COW region copied for this task alone), out[6] the regions walked. Read inside the process, since macOS gives no other
+// process's task port. 0, or -1.
+long e13_vm_dirty(long *out) {
+  vm_size_t ps; if (host_page_size(mach_host_self(), &ps) != KERN_SUCCESS) return -1;
+  for (int i = 0; i < 7; i++) out[i] = 0;
+  mach_vm_address_t addr = 0; natural_t depth = 0;
+  for (;;) {
+    mach_vm_size_t size = 0; struct vm_region_submap_info_64 info; mach_msg_type_number_t cnt = VM_REGION_SUBMAP_INFO_COUNT_64;
+    kern_return_t kr = mach_vm_region_recurse(mach_task_self(), &addr, &size, &depth, (vm_region_recurse_info_t)&info, &cnt);
+    if (kr != KERN_SUCCESS) break;
+    if (info.is_submap) { depth++; continue; }
+    long d = (long)info.pages_dirtied * (long)ps;
+    switch (info.share_mode) {
+      case SM_PRIVATE: out[0] += d; break;
+      case SM_COW: out[1] += d; break;
+      case SM_SHARED: case SM_TRUESHARED: out[2] += d; break;
+      case SM_PRIVATE_ALIASED: out[3] += d; break;
+      default: out[4] += d; break;
+    }
+    out[5] += (long)info.pages_shared_now_private * (long)ps;
+    out[6] += 1;
+    addr += size;
+  }
+  return 0;
+}
 // The machine's memory as host_statistics64 counts it, in bytes: free pages, inactive pages (clean
 // or reclaimable without a write) and the compressor's pages. Free plus inactive is what a process
 // can take without the system paging: the drop in it is what ten agents cost, where a sum of their

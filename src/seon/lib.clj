@@ -103,6 +103,38 @@
 
 (defc nthreads "e13_nthreads" [] :long)
 (defc sysmem* "e13_sysmem" [:pointer] :long)
+(defc vm-dirty* "e13_vm_dirty" [:pointer] :long)
+
+(defn vm-dirty
+  "This process's dirty memory in MB by region share mode, as vmmap's region table sums its dirty column (native/probe.c
+  e13_vm_dirty): :private-mb (SM=PRV, this process's own), :cow-mb (SM=COW, still shared with the other side of a fork),
+  :shared-mb, :aliased-mb, :other-mb, :now-private-mb (pages a COW region copied for this process) and :regions."
+  {:malli/schema [:=> [:cat] [:map-of :keyword number?]]}
+  []
+  (let [b (ffi/alloc 56)
+        _ (when (neg? (vm-dirty* b)) (throw (ex-info "mach_vm_region_recurse refused" {})))
+        mb #(/ (ffi/read b :long (* 8 %)) 1048576.0)]
+    {:private-mb (mb 0) :cow-mb (mb 1) :shared-mb (mb 2) :aliased-mb (mb 3) :other-mb (mb 4) :now-private-mb (mb 5)
+     :regions (ffi/read b :long 48)}))
+
+(defn boot-step!
+  "DEBUG, NOT TO LAND (deps' stepped boot, 2026-11-16): with SEON_BOOT_STOP set, print one BOOT-STEP line to stderr (the
+  step, pid, ms since t0, Chez's bytes allocated, heap bytes and collections, OS threads, dirty MB by share mode), then stop
+  this process with SIGSTOP, so it is measured from outside (vmmap, ps -M, sample) and resumed with kill -CONT. Nothing
+  when SEON_BOOT_STOP is unset."
+  {:malli/schema [:=> [:cat :string] :nil]}
+  [step]
+  (when (seq (System/getenv "SEON_BOOT_STOP"))
+    (let [[alloc heap gcs rt] (scm/eval-string "(list (bytes-allocated) (current-memory-bytes) (collections) (real-time))")
+          v (vm-dirty)]
+      (binding [*out* *err*]
+        (println "BOOT-STEP" step "pid" (c-getpid) "real-ms" rt "alloc-mb" (format "%.1f" (/ alloc 1048576.0))
+                 "heap-mb" (format "%.1f" (/ heap 1048576.0)) "gcs" gcs "threads" (nthreads)
+                 "prv-mb" (format "%.1f" (:private-mb v)) "cow-mb" (format "%.1f" (:cow-mb v))
+                 "now-private-mb" (format "%.1f" (:now-private-mb v)))
+        (flush))
+      (c-kill (c-getpid) 17)))
+  nil)
 
 (defn ignore-sigpipe! {:malli/schema [:=> [:cat] :seon.ffi/address]}
   [] (c-signal 13 1))
