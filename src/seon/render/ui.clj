@@ -1337,13 +1337,17 @@
         agent (into {} (for [k [:seon.agent/outcome :seon.agent/ended-turn :seon.agent/turn :seon.agent/max-turns :seon.agent/reason :seon.agent/status]
                              :let [v (ratom/realize (get c k))] :when (some? v)] [k v]))
         stands (standing agent t)
-        verdicts (for [[_ ps] (concat [[nil (:proved task)]] (map (fn [[_ nd]] [nil (:proved nd)]) (:seon.task/needs task))) [_ v] ps] (ratom/realize (:seon.test/status v)))
+        ;; each proof's newest verdict that ran on this branch (seon.proofs/ran-on on the results branch): one seek a proof, no plan
+        b (get-in db [:config :branch])
+        rdb (when b (proofs/results-db db (pdb/main-of b)))
+        verdicts (for [[_ ps] (concat [[nil (:proved task)]] (map (fn [[_ nd]] [nil (:proved nd)]) (:seon.task/needs task))) [p] ps]
+                   (some-> rdb (proofs/ran-on p b) peek :status))
         running (d/q '[:find ?r . :in $ ?a :where [?p :seon.process/agent ?a] [?p :seon.process/running ?r]] db (:db/id c))]
     [:div {:wire/for "page"}
      [:p (str "● " (:text stands) (when (:detail stands) (str " · " (:detail stands))) (when (:reason stands) (str " · " (:reason stands))))]
      (when (:seon.task/id t) [:p "task " (task-title t)])
      (when running [:p "running " [:code running]])
-     (when (seq verdicts) [:p (str (count (filter #{:green} verdicts)) " of " (count verdicts) " proofs green at their last run")])]))
+     (when (seq verdicts) [:p (str (count (filter #{:pass} verdicts)) " of " (count verdicts) " proofs green at their last run")])]))
 
 (defn- recent-errors
   "Agent pull c's newest failures, newest first, at most n: [label error] for each model call holding :seon.model-call/error and each
@@ -1646,7 +1650,7 @@
         [:p {:class "muted"} (case status :busy "working…" (kname status))]))))
 
 (defn story-rows
-  "Each turn's reading of a proof, [n status failures first-failure] in order (status nil: not run yet; :gone: its commit was swept), as the runs of equal readings: {:from :to :status :failures :first}, so a change is a row and a stretch of the same is one. See docs/render.md#the-page."
+  "Each run's verdict of a proof, [n status failures first-failure] in write order, as the runs of equal verdicts: {:from :to :status :failures :first}, so a change is a row and a stretch of the same is one. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat [:sequential [:tuple :int :any :int :any]]] [:vector :map]]}
   [turns]
   (reduce (fn [acc [n status failures fst]]
@@ -1657,27 +1661,29 @@
           [] turns))
 
 (defn proof-story
-  "How each proof of an agent's task went across its turns (a component over ctx and the db), once its work has ended: read from the commit each turn's basis names, where the test's status and failures stood, so it is what the agent read then and nothing is recorded for it. A row for each change. The person's: the model read each as it came. See docs/render.md#the-page. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
+  "How each proof of an agent's task went across its runs (a component over ctx and the db), once its work has ended: each verdict
+  that ran on the agent's branch, in the order written (seon.proofs/ran-on on the results branch), a row for each change. A verdict
+  serves every run whose reads match, so it names no turn. The person's: the model read each as it came. See docs/render.md#the-page.
+  It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db ix :seon.render/index}]
   (let [proofs (ratom/realize (get (:seon.agent/task c) :seon.task/proofs))
         outcome (ratom/realize (:seon.agent/outcome c))
-        turn (or (ratom/realize (:seon.agent/turn c)) 0)]
-    (when (and (seq proofs) outcome (= (ratom/realize (:seon.agent/ended-turn c)) turn))
-      (let [calls (sort-by first (d/q '[:find ?n ?b :in $ ?a :where [?c :seon.model-call/agent ?a] [?c :seon.model-call/n ?n] [?c :seon.model-call/basis ?b]] db (:db/id c)))
-            commits (for [[n b] calls] [n (d/commit-as-db (:store db) (:commit b))])]
+        turn (or (ratom/realize (:seon.agent/turn c)) 0)
+        b (get-in db [:config :branch])]
+    (when (and (seq proofs) outcome b (= (ratom/realize (:seon.agent/ended-turn c)) turn))
+      (let [rdb (proofs/results-db db (pdb/main-of b))]
         [:details {:class "self-stretch"}
          [:summary {:class "muted"} "How the proof went"]
-         (for [p (sort-by str proofs) :let [e (:db/id (d/entity db [:var/name p]))]]
+         (for [p (sort-by str proofs)]
            [:div {:class "mt-1"}
             [:code p]
             [:ul {:class "ml-2"}
-             (for [{:keys [from to status failures first]} (story-rows (vec (for [[n at] commits
-                                                                                   :let [t (when (and at e) (d/entity at e))
-                                                                                         fs (:seon.test/failures t)]]
-                                                                               [n (if at (:seon.test/status t) :gone) (count fs) (some-> (clojure.core/first fs) (select-keys [:message :expected :actual]))])))]
-               (let [line (str (if (= from to) (str "turn " from) (str "turns " from "–" to)) " · "
-                               (case status nil "not run yet" :gone "its commit was swept" (kname status))
+             (for [{:keys [from to status failures first]} (story-rows (vec (map-indexed (fn [i {:keys [status failures]}]
+                                                                                           [(inc i) status (count failures)
+                                                                                            (some-> (clojure.core/first failures) (select-keys [:message :expected :actual]))])
+                                                                                         (some-> rdb (proofs/ran-on p b)))))]
+               (let [line (str (if (= from to) (str "run " from) (str "runs " from "–" to)) " · " (kname status)
                                (when (pos? failures) (str " · " failures (if (= 1 failures) " failure" " failures"))))]
                  [:li
                   (if first

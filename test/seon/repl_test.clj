@@ -163,14 +163,14 @@
                                      (fn [{:keys [root]}] (:form/src (:var/form (d/entity (ts/read-task-branch root task) [:var/name (symbol (str ns ".rc/f"))]))))]))]
     (is (clojure.string/includes? (str (:value branch)) "[] 1") (str "the branch holds what the reply said was done: " (pr-str branch)))))
 
-(deftest an-edit-in-an-agent-is-program-on-its-branch
+(deftest ^{:seon.test/estimate {:ticks 5000000}} an-edit-in-an-agent-is-program-on-its-branch
   ;; the edit's definition is recorded as a typed defn is: the branch's program holds the new source,
   ;; and its inner eval records no eval of its own
-  (let [[_ edit branch] (at/in-agent (fn [{:keys [ns task]}]
+  (let [[_ edit branch] (my.test/eval-in (fn [{:keys [ns task]}]
                                        [(str "(ns " ns ".ed) (defn f \"One.\" {:malli/schema [:=> [:cat] :int]} [] 1)")
                                         (str "(seon.repl/edit! '" ns ".ed/f \"[] 1\" \"[] 2\")")
-                                        (fn [{:keys [root]}]
-                                          (let [b (ts/read-task-branch root task)]
+                                        (fn [{:keys [db]}]
+                                          (let [b db]
                                             [(:form/src (:var/form (d/entity b [:var/name (symbol (str ns ".ed/f"))])))
                                              (count (filter #(clojure.string/includes? % "[] 2)") (d/q '[:find [?c ...] :where [?e :seon.eval/code ?c] [?e :seon.eval/agent ?a] [?a :seon.agent/key _]] b)))]))]))]
     (is (get-in edit [:value :edited]) (pr-str edit))
@@ -230,23 +230,23 @@
         (is (not (.exists (java.io.File. ^String abs))) "nothing reached the disk"))
       (finally (reset! agent/state old)))))
 
-(deftest a-doc-is-edited-as-a-definition-is
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-doc-is-edited-as-a-definition-is
   ;; docs as code (task seon.doc/any-markdown-file-is-docs-it-writes-back): edit! of a doc's address replaces exact
   ;; text once in its block, as of a definition, and loads its page again on the agent's branch, so what its text
-  ;; derives follows it (here its lead) and main keeps its own; text counts no delimiter
-  (let [a "docs/agent.md#ending"
-        lead (fn [db] (str "(:seon.doc/lead (datahike.api/entity " db " [:seon.doc/address " (pr-str a) "]))"))
-        [edit missing branch main]
-        (at/in-agent (fn [{:keys [task]}]
-                       [(str "(seon.repl/edit! " (pr-str a) " \"the task's failure.\" \"the task's failure (as the turn ends.\")")
-                        (str "(seon.repl/edit! " (pr-str a) " \"no such text\" \"x\")")
-                        {:op :eval :agent "root"
-                         :code (lead (str "(:db @(seon.system/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))"))}
-                        {:op :eval :agent "root" :code (lead "@(:conn sys)")}]))]
+  ;; derives follows it (here its lead) and main keeps its own (a db value); text counts no delimiter
+  ;; Estimate: the world and a page (~3.5M), the task and agent (~0.5M), two forms (~1M each): ~6M. No root: my.test/eval-in
+  (let [a "docs/ending.md#ending"
+        main (my.test/with (my.test/world) (my.test/page "docs/ending.md" "# Page\n\n## Ending\n\nA task ends with the task's failure.\n"))
+        lead (fn [db] (:seon.doc/lead (d/entity db [:seon.doc/address a])))
+        [edit missing branch]
+        (my.test/eval-in [(str "(seon.repl/edit! " (pr-str a) " \"the task's failure.\" \"the task's failure (as the turn ends.\")")
+                          (str "(seon.repl/edit! " (pr-str a) " \"no such text\" \"x\")")
+                          (fn [{:keys [db]}] (lead db))]
+                         'user {:db main})]
     (is (= a (get-in edit [:value :edited :doc])) (pr-str edit))
     (is (= :not-found (get-in missing [:ex :seon.repl/refused-because])) (pr-str missing))
     (is (str/ends-with? (str (:value branch)) "the task's failure (as the turn ends.") (str "the branch's doc derives its new lead: " (pr-str branch)))
-    (is (str/ends-with? (str (:value main)) "the task's failure.") (str "main's is its own: " (pr-str main)))))
+    (is (str/ends-with? (str (lead main)) "the task's failure.") (str "main's is its own: " (lead main)))))
 
 (deftest ^{:seon.test/estimate {:ticks 3000000}} an-unmapped-definition-is-no-longer-the-branchs-program
   ;; docs/source.md#an-agent-changes-code-at-its-repl: md-scan #19 unmapped a scratch helper and its branch kept it,
@@ -291,18 +291,18 @@
     (is (nil? (:value var-form)) (str "the computed unmap is recorded: " (pr-str var-form)))
     (is (empty? (:value methods)) (str "and the computed remove-method: " (pr-str methods)))))
 
-(deftest an-eval-that-printed-answers-its-value
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-eval-that-printed-answers-its-value
   ;; since an eval's :out is shown verbatim (md-scan #20), the printed answer is no EDN once it printed, and a reader
   ;; that read the value back from the text got nil (seon.source-test's restart read nil of a turn that printed); the
   ;; agent's reply carries a plain value as data beside the text (seon.repl, seon.server)
-  (let [[r] (at/in-agent ["(do (println \"a ] b\") {:n 42})"])]
+  (let [[r] (my.test/eval-in ["(do (println \"a ] b\") {:n 42})"])]
     (is (= {:n 42} (:value r)) (pr-str r))
     (is (str/includes? (str (:text r)) "a ] b") "and its text still shows what it printed, verbatim")))
 
-(deftest an-ns-form-at-the-repl-adds-to-the-namespace
+(deftest ^{:seon.test/estimate {:ticks 8000000}} an-ns-form-at-the-repl-adds-to-the-namespace
   ;; docs/agent.md#the-repl: Clojure's ns adds to a namespace, so what's recorded does too. Real run 10: `(ns seon.render)`, to switch to it, replaced the file's whole form,
   ;; and a merge landed a tree that didn't compile; deepseek-run6 lost an alias the same way
-  (let [[_ bare fewer more src] (at/in-agent (fn [{:keys [ns]}]
+  (let [[_ bare fewer more src] (my.test/eval-in (fn [{:keys [ns]}]
                                                (let [n (str ns ".adds")]
                                                  [(str "(ns " n " \"The doc.\" (:require [clojure.set :as s] [clojure.string :as str]))")
                                                   (str "(ns " n ")")
@@ -316,10 +316,10 @@
     (is (= "The doc." (nth form 2)) (pr-str form))
     (is (= #{'clojure.set 'clojure.string 'clojure.walk} (seon.program/ns-requires form)) (pr-str form))))
 
-(deftest an-edit-changes-a-namespaces-ns-form
+(deftest ^{:seon.test/estimate {:ticks 8000000}} an-edit-changes-a-namespaces-ns-form
   ;; docs/agent.md#changing-a-definition: real run 11: an agent's proof needed a require, and (edit! 'its-test-ns ...) was a contract error, so it spent turns 15-22 on it, ending with an edit on disk that nothing reads.
   ;; An explicit edit states the whole form, so it can remove a require, which an evaluated ns form can't
-  (let [[_ more fewer src plain] (at/in-agent (fn [{:keys [ns]}]
+  (let [[_ more fewer src plain] (my.test/eval-in (fn [{:keys [ns]}]
                                                 (let [n (str ns ".edited")]
                                                   [(str "(ns " n " (:require [clojure.set :as s]))")
                                                    (str "(seon.repl/edit! '" n " \"[clojure.set :as s]\" \"[clojure.set :as s] [clojure.walk :as w]\")")
@@ -331,21 +331,21 @@
     (is (= #{'clojure.walk} (seon.program/ns-requires (read-string (:value src)))) (pr-str src))
     (is (= :seon.repl/edit-refused (:seon.error/type (:ex plain))) (pr-str plain))))
 
-(deftest an-edit-of-a-namespaces-file-says-how-it-changes
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-edit-of-a-namespaces-file-says-how-it-changes
   ;; docs/agent.md#changing-a-file: real run 11: the path of a test file, relative, said only that no file was there; absolute, it wrote the checkout, which no branch reads.
   ;; A namespace's file is a place on the branch now (seon.repl/an-edit-of-an-in-tree-path-is-held-on-the-branch): its text is read there, so an old
   ;; that is not in it is refused as not in that file, never as no file
-  (let [[said] (at/in-agent (fn [_] ["(seon.repl/edit! \"src/seon/repl.clj\" \"zz-not-there\" \"x\")"]))
+  (let [[said] (my.test/eval-in ["(seon.repl/edit! \"src/seon/repl.clj\" \"zz-not-there\" \"x\")"])
         r (pr-str said)]
     (is (= :seon.repl/edit-refused (:seon.error/type (:ex said))) r)
     (is (clojure.string/includes? r "src/seon/repl.clj") r)
     (is (not (clojure.string/includes? r "no file at")) "the branch holds the file")))
 
-(deftest a-namespace-edit-names-the-var-that-holds-the-text
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-namespace-edit-names-the-var-that-holds-the-text
   ;; docs/agent.md#changing-a-definition: loop PU (2026-11-12) spent e17-34 changing one function's tail: (lines 'the.ns 380 470) was empty
   ;; (a namespace's text was its ns form alone) and (edit! 'the.ns old new) was :not-found, the text being in a var; loop D0 lost t35-44 so
 ;; the calls are made of #'repl/edit! itself, so this test reaches what it tests (code in a string reaches nothing)
-  (let [[_ in-var nowhere ls] (at/in-agent (fn [{:keys [ns]}]
+  (let [[_ in-var nowhere ls] (my.test/eval-in (fn [{:keys [ns]}]
                                              (let [n (str ns ".held")]
                                                [(str "(ns " n ") (defn f [a] (+ a 1)) (defn g [] (* 2 3))")
                                                 (str "(" (symbol #'repl/edit!) " '" n " \"(+ a 1)\" \"(+ a 2)\")")
@@ -365,34 +365,30 @@
       (is (str/includes? m (str "(in-ns '" ns ")")) (str "an insertion: a new definition is evaluated in its namespace: " m)))
     (is (some #(str/includes? % "(+ a 1)") (:value ls)) (str "lines of a namespace are its file, its definitions with its ns form: " (pr-str ls)))))
 
-(deftest a-require-at-the-repl-is-no-program
-  ;; deepseek-run3/4: an eval's (require '[seon.repl-test ...]) in seon.repl was recorded as a text form of that file, so seon.repl required a test
-  ;; namespace and the gate's build failed 6 times; another agent retracted such forms by hand. A REPL's require is its own, and says so; an ns form stays program
-  (let [[_ req held] (at/in-agent (fn [{:keys [ns]}]
-                                    [(str "(ns " ns ".here)")
-                                     "(require '[clojure.set :as s])"
-                                     (str "(mapv :form/src (filter :form/src (map #(datahike.api/entity (seon.agent/db) (:e %)) (datahike.api/datoms (seon.agent/db) :avet :form/ns (seon.db/eid (seon.agent/db) :ns/name '" ns ".here)))))")]))]
-    (is (= [:not-program] (mapv :seon.repl/finding (:warnings req))) (pr-str req))
-    (is (= 1 (count (:value held))) (pr-str held))
-    (is (clojure.string/starts-with? (first (:value held)) "(ns ") "the ns form, and no require")))
-
-;; docs/testing.md#testing-in-the-world: a REPL finding is proved in this process, on a world, by my.test/eval-in as an agent's test fork
+;; docs/testing.md#testing-in-the-world: a REPL finding is proved in this process, on a world, by my.test/eval-in as an agent's test fork on it
 ;; (it records and notes as the agent does, its writes on the world's value): the loop's agents wrote this note's proof as an in-agent
-;; process test, which their fork can't run, and spent about ten turns on it in 2 runs of 3 (2026-11-12)
-(deftest ^{:seon.test/estimate {:ticks 5000000}} a-require-at-the-repl-is-no-program-in-this-process
+;; process test, which their fork can't run, and spent about ten turns on it in 2 runs of 3 (2026-11-12).
+;; deepseek-run3/4: an eval's (require '[seon.repl-test ...]) in seon.repl was recorded as a text form of that file, so seon.repl required a test
+;; namespace and the gate's build failed 6 times; another agent retracted such forms by hand. A REPL's require is its own, and says so; an ns form stays program
+;; Estimate: the world and the namespace (~3.5M), the task and agent (~0.5M), two forms (~1M each): ~6M. No root.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-require-at-the-repl-is-no-program-in-this-process
   (let [db (my.test/with (my.test/world) (my.test/code 'app.rq "(ns app.rq)"))
-        r (my.test/eval-in "(require '[clojure.set :as s])" 'app.rq {:db db})]
-    (is (= [:not-program] (mapv :seon.repl/finding (:warnings r))) (pr-str (dissoc r :text)))))
+        [req held] (my.test/eval-in ["(require '[clojure.set :as s])"
+                                     (fn [{:keys [db]}] (mapv :form/src (filter :form/src (map #(d/entity db (:e %)) (d/datoms db :avet :form/ns (seon.db/eid db :ns/name 'app.rq))))))]
+                                    'app.rq {:db db})]
+    (is (= [:not-program] (mapv :seon.repl/finding (:warnings req))) (pr-str (dissoc req :text)))
+    (is (= 1 (count (:value held))) (pr-str held))
+    (is (str/starts-with? (first (:value held)) "(ns ") "the ns form, and no require")))
 
-(deftest an-agents-namespace-is-recorded-where-its-eval-left-it
+(deftest ^{:seon.test/estimate {:ticks 6000000}} an-agents-namespace-is-recorded-where-its-eval-left-it
   ;; owner, 2026-10-29: "we have to be able to expose this we own all the machinery": the namespace the
   ;; REPL is in lived only in the agent's memory; each eval's record keeps it (seon.ctx/current-ns). The agent
   ;; is the one with a key: main's evals, root's, are on the branch too (any one agent was root's by chance)
-  (let [[_ _ where] (at/in-agent (fn [{:keys [ns task]}]
+  (let [[_ _ where] (my.test/eval-in (fn [{:keys [ns task]}]
                                    [(str "(ns " ns ".here)")
                                     "(+ 1 1)"
-                                    (fn [{:keys [root]}]
-                                      (let [b (ts/read-task-branch root task)
+                                    (fn [{:keys [db]}]
+                                      (let [b db
                                             a (d/q '[:find ?a . :in $ ?id :where [?t :seon.task/id ?id] [?a :seon.agent/task ?t] [_ :seon.eval/agent ?a]] b task)]
                                         (seon.ctx/current-ns (:tree (seon.ctx/build (seon.db/index) b a :b)))))]))]
     (is (str/ends-with? (str (:value where)) ".here") (pr-str where))))
@@ -462,22 +458,19 @@
          (is (= 2 (:value (repl/eval-string "(+ 1 1)" {:intent "Adds, see seon.ref/scan."}))) "an eval with text outside an agent")
          (finally (reset! agent/state old) (remove-ns 'x.repl-shadow)))))
 
-(deftest an-answer-carries-no-turn-count-and-names-a-db-by-its-form
+(deftest ^{:seon.test/estimate {:ticks 10000000}} an-answer-carries-no-turn-count-and-names-a-db-by-its-form
   ;; one agent answers all four claims in order (each on a name of its own): an attach is most of what an agent costs a test
   (let [ed (fn [f a b] (str "(seon.repl/edit! 'x.swap/" f " " (pr-str a) " " (pr-str b) ")"))
-        [_ ab ba ab2 _ _ turned _ _ m7 _ s2]
-        (at/in-agent ["(ns x.swap) (defn f [] 1)" (ed "f" "[] 1" "[] 2") (ed "f" "[] 2" "[] 1") (ed "f" "[] 1" "[] 2")
+        [_ ab ba ab2 _ _ turned]
+        (my.test/eval-in ["(ns x.swap) (defn f [] 1)" (ed "f" "[] 1" "[] 2") (ed "f" "[] 2" "[] 1") (ed "f" "[] 1" "[] 2")
                       "(ns x.swap) (defn g [] 1)"
                       "(seon.agent/transact! [{:seon.agent/key (:key @seon.agent/state) :seon.agent/turn 1 :seon.agent/max-turns 9}])"
-                      (ed "g" "[] 1" "[] 2")
-                      ;; the agent's own data keeps its keys: a timing of its own that changed is a different answer
-                      "(def t (atom 4))" "{:ms (swap! t inc)}" "{:ms (swap! t inc)}"
-                      ;; an answer holding a db is printed as the record keeps it (the one text of an eval), its host object named by the form that reads it
-                      "(select-keys @seon.agent/state [:db])" "(select-keys @seon.agent/state [:db])"])]
+                      (ed "g" "[] 1" "[] 2")])]
     (is (not (str/includes? (:text turned) ":turn")) (str "an agent under a cap is told no count: " (:text turned)))
-    (is (str/includes? (:text s2) "(get (deref seon.agent/state) :db)") (str "the db named by its form: " (:text s2)))))
+    ;; an answer holding a db is printed as the record keeps it, its host object named by the form that reads it (the state's summary)
+    (is (= '(get (deref seon.agent/state) :db) (:read (:db (agent/state-summary {} {:db (my.test/world)})))) "the db named by its form")))
 
-(deftest a-broken-parser-leaves-the-repl-answering
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-broken-parser-leaves-the-repl-answering
   ;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: a DeepSeek run of md-scan gave
   ;; seon.ref/scan's emit step a new arity, and every eval it made after threw "Wrong number of args (6)", a pure
   ;; (count s) included, since seon.repl/eval-string parsed each call's text for its citations (seon.ref/references
@@ -487,11 +480,13 @@
         call (fn [code] (str "(let [r (seon.repl/eval-string " (pr-str code) " {:intent " (pr-str text) "})]"
                             " {:value (when (number? (:value r)) (:value r)) :ex (some-> (:ex r) :seon.error/message str) :record (:record r)})"))
         [_ counted undone works]
-        (at/in-agent [(str "(in-ns 'seon.ref) (def scan-was scan)"
-                           " (clojure.core/defn scan [& _] (throw (ex-info \"Wrong number of args (6) passed to: fn\" {})))")
-                      (call "(count \"abc\")")
-                      (call "(in-ns 'seon.ref) (def scan scan-was)")
-                      "(map? (seon.ref/scan \"# h\\n\"))"])]
+        ;; the root is the test's own to put back (with-redefs of itself): a break the eval made never outlives the test
+        (with-redefs [seon.ref/scan seon.ref/scan]
+          (my.test/eval-in [(str "(in-ns 'seon.ref) (def scan-was scan)"
+                                 " (clojure.core/defn scan [& _] (throw (ex-info \"Wrong number of args (6) passed to: fn\" {})))")
+                            (call "(count \"abc\")")
+                            (call "(in-ns 'seon.ref) (def scan scan-was)")
+                            "(map? (seon.ref/scan \"# h\\n\"))"]))]
     (is (= 3 (get-in counted [:value :value]))
         (str "a broken seon.ref/scan never reaches the answer of an eval that does not call it (seon.repl/eval-string ran it on the text): " (pr-str counted)))
     (is (string? (get-in counted [:value :record])) (str "and the eval is recorded: " (pr-str counted)))
@@ -501,37 +496,36 @@
 ;; docs/source.md#an-agent-changes-code-at-its-repl: Data model's first task as a Seon agent (2026-11-11): a test defined before
 ;; the macro it calls was redefined ran the old expansion, and (prove) ran it stale; a dummy edit to the test fixed it.
 ;; Clojure's eval recompiles nothing that already expanded a macro, so the REPL does it (seon.program/reload-dependents!)
-(deftest a-macros-redefinition-reaches-the-forms-that-expanded-it
-  (let [[_ _ _ r] (at/in-agent (fn [{:keys [ns]}]
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-macros-redefinition-reaches-the-forms-that-expanded-it
+  (let [[_ _ _ r] (my.test/eval-in (fn [{:keys [ns]}]
                                  [(str "(ns " ns ".mac) (defmacro m [] 1)")
                                   (str "(in-ns '" ns ".mac) (defn f [] (m))")
                                   (str "(in-ns '" ns ".mac) (defmacro m [] 2)")
                                   (str "(in-ns '" ns ".mac) (f)")]))]
     (is (= 2 (last (:value r))) (str "f runs the macro's new expansion: " (pr-str (select-keys r [:value :text :ex]))))))
 
-(deftest a-def-beside-calls-stays-a-recorded-eval
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-def-beside-calls-stays-a-recorded-eval
   ;; root's ruling, 2026-10-27: a branch's program held the eval (let [r (my.agent/prove)] (def
   ;; last-prove r) r), so every agent loading the branch ran prove at load and died ("nil where a
   ;; java.util.concurrent.Future is required"). A form is program when its top-level form is a
   ;; definition; a def nested beside calls stays the recorded eval, and its record says so
-  (let [[top nested branch] (at/in-agent (fn [{:keys [ns task agent]}]
+  (let [[top nested branch] (my.test/eval-in (fn [{:keys [ns task agent]}]
                                            [(str "(ns " ns ".core) (def a 1)")
                                             (str "(in-ns '" ns ".core) (let [r (+ 1 1)] (def b r) r)")
                                             ;; an agent commits a request's writes before it replies (seon.repl/agent-step): read once,
                                             ;; here, from the store (b never is there)
-                                            (fn [{:keys [root]}]
-                                              (let [b (ts/read-task-branch root task)]
-                                                (mapv #(some? (d/entity b [:var/name (symbol (str ns ".core/" %))])) ["a" "b"])))]))]
+                                            (fn [{:keys [db]}]
+                                              (mapv #(some? (d/entity db [:var/name (symbol (str ns ".core/" %))])) ["a" "b"]))]))]
     (is (some #(= "a" (name %)) (:recorded top)) (str "a top-level def is program: " (pr-str top)))
     (is (empty? (:recorded nested)) (pr-str nested))
     (is (clojure.string/includes? (str (:text nested)) "not program") "its record says why it stays an eval")
     (is (= [true false] (:value branch)) "the branch's program holds a, not b")))
 
-(deftest a-plain-def-in-a-program-namespace-says-where-it-landed
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-plain-def-in-a-program-namespace-says-where-it-landed
   ;; loop 2 (2026-11-11): an agent's (def conn ...) to look at something became program in the task's namespace, and it spent eight
   ;; turns learning what :recorded meant; Data model's real tasks: a scratch defn and a macro became program unnoticed. A var NEW on the
   ;; branch, whatever form made it, is said where it lands, with the form that takes it back; a var redefined is the change itself
-  (let [[d f g] (at/in-agent (fn [{:keys [ns]}]
+  (let [[d f g] (my.test/eval-in (fn [{:keys [ns]}]
                                [(str "(ns " ns ".core) (def look 1)")
                                 (str "(in-ns '" ns ".core) (defn g \"G.\" {:malli/schema [:=> [:cat :int] :int]} [x] x)")
                                 (str "(in-ns '" ns ".core) (defn g \"G.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")]))
@@ -541,21 +535,20 @@
     (is (= "g" (some-> (found f) :vars first name)) (str "a new defn too: " (pr-str f)))
     (is (nil? (found g)) (str "a var redefined is the change it means: nothing said: " (pr-str g)))))
 
-(deftest a-definition-inside-a-top-level-do-is-program
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-definition-inside-a-top-level-do-is-program
   ;; owner, 2026-10-28: match Clojure, whose compiler evaluates each form of a top-level do as a
   ;; top-level form; an agent's (do (in-ns ..) (defn f ..)) never reached its branch, and its run
   ;; spent 39 turns finding out why (docs/prompt.md)
   (let [[r nested stopped after branch]
-        (at/in-agent (fn [{:keys [ns task agent]}]
+        (my.test/eval-in (fn [{:keys [ns task agent]}]
                        [(str "(do (ns " ns ".core)\n  (def c 1)\n  (inc c))")
                         (str "(in-ns '" ns ".core) (do (do (def d 3)) (* d 2))")
                         (str "(in-ns '" ns ".core) (do (def e 1) (throw (ex-info \"boom\" {})) (def f 2))")
                         (str "[(some? (resolve '" ns ".core/e)) (some? (resolve '" ns ".core/f))]")
                         ;; an agent commits a request's writes before it replies (seon.repl/agent-step): its
                         ;; branch in the store holds them once the reply came, read once, here
-                        (fn [{:keys [root]}]
-                          (let [b (ts/read-task-branch root task)]
-                            (mapv #(some? (d/entity b [:var/name (symbol (str ns ".core/" %))])) ["c" "d"])))]))]
+                        (fn [{:keys [db]}]
+                          (mapv #(some? (d/entity db [:var/name (symbol (str ns ".core/" %))])) ["c" "d"]))]))]
     (is (some #(= "c" (name %)) (:recorded r)) (str "the def inside the do is program: " (pr-str r)))
     (is (= 2 (:value r)) "the do's value is its last form's")
     (is (= 6 (last (:value nested))) "a do inside a top-level do is its forms too (after the in-ns: each top-level form's value)")
@@ -563,26 +556,25 @@
     (is (= [true false] (:value after)) "the forms after the error never ran")
     (is (= [true true] (:value branch)) "the branch's program holds c and d")))
 
-(deftest a-top-level-dos-inner-forms-are-recorded-with-their-own-text
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-top-level-dos-inner-forms-are-recorded-with-their-own-text
   ;; coordinator, 2026-10-29: the inner forms of a written (do ...) come from the form the reader
   ;; returned, each form's exact text from the reader's positions (seon.repl/do-parts), no regex over
   ;; the code. Each definition is program with its own text, comments and spacing as written
   (let [[_ r branch]
-        (at/in-agent (fn [{:keys [ns task agent]}]
+        (my.test/eval-in (fn [{:keys [ns task agent]}]
                        [(str "(ns " ns ".core)")
                         (str "(do ; leads f\n  (seon.contract/defn f {:malli/schema [:=> [:cat :int] :int]} [x]   (inc x))\n"
                              "  ;; leads g-test\n  (clojure.test/deftest g-test (clojure.test/is (= 2 (f 1)))))")
                         ;; an agent commits a request's writes before it replies (seon.repl/agent-step): its
                         ;; branch in the store holds them once the reply came, read once, here
-                        (fn [{:keys [root]}]
-                          (let [b (ts/read-task-branch root task)]
-                            (mapv #(d/q '[:find ?src . :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/src ?src]] b (symbol (str ns ".core/" %))) ["f" "g-test"])))]))]
+                        (fn [{:keys [db]}]
+                          (mapv #(d/q '[:find ?src . :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/src ?src]] db (symbol (str ns ".core/" %))) ["f" "g-test"]))]))]
     (is (= 2 (count (:recorded r))) (str "both inner definitions are program: " (pr-str r)))
     (is (= ["(seon.contract/defn f {:malli/schema [:=> [:cat :int] :int]} [x]   (inc x))"
             "(clojure.test/deftest g-test (clojure.test/is (= 2 (f 1))))"]
            (:value branch)) "each recorded with its own exact text, not the do's")))
 
-(deftest a-loaded-file-defines-what-source-shows-and-the-branch-records
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-loaded-file-defines-what-source-shows-and-the-branch-records
   ;; seon.repl/a-loaded-file-is-recorded-as-evals-are: a top-level (load-file "path") is its file's forms,
   ;; each evaluated as a top-level form of the request (bench run A3: source-fn answered the old text)
   (let [file (java.io.File/createTempFile "loaded" ".clj")
@@ -590,7 +582,7 @@
         body (fn [ns n] (str "(ns " ns ".lf)\n(seon.contract/defn f {:malli/schema [:=> [:cat] :int]} [] " n ")"))]
     (try
       (let [[_ _ _ _ loaded called src then]
-            (at/in-agent (fn [{:keys [ns]}]
+            (my.test/eval-in (fn [{:keys [ns]}]
                            [(str "(ns " ns ".core)")
                             (str "(spit " (pr-str path) " " (pr-str (body ns 1)) ")")
                             (str "(load-file " (pr-str path) ")")
@@ -606,17 +598,17 @@
         (is (some #(str/ends-with? (str %) ".lf/f") (:recorded loaded)) (str "the loaded definition is recorded as program on the branch: " (pr-str (:recorded loaded)))))
       (finally (.delete file)))))
 
-(deftest a-value-that-is-no-data-reaches-root-printed
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-value-that-is-no-data-reaches-root-printed
   ;; (in-ns 'x) answers a Namespace: it is printed for the model, and the agent's reply to root
   ;; carries the text, never the live value (which no wire encodes)
-  (let [[ns-call next-call] (at/in-agent ["(in-ns 'user)" "(+ 1 1)"])]
+  (let [[ns-call next-call] (my.test/eval-in ["(in-ns 'user)" "(+ 1 1)"])]
     (is (str/includes? (str (:text ns-call)) "user") "the value, printed as the record keeps it: the namespace's name")
     (is (= 2 (:value next-call)) "and the agent lives to answer the next")))
 
-(deftest a-redefinition-that-changes-a-docstring-says-so
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-redefinition-that-changes-a-docstring-says-so
   ;; owner, 2026-10-25 (DECISIONS: a change to a schema is an explicit fact the eval shows): the
   ;; eval that changes an existing var's docstring or contract answers what it was and is now
-  (let [[_ again same] (at/in-agent ["(ns app.redef) (seon.contract/defn f \"One.\" {:malli/schema [:=> [:cat] :int]} [] 1)"
+  (let [[_ again same] (my.test/eval-in ["(ns app.redef) (seon.contract/defn f \"One.\" {:malli/schema [:=> [:cat] :int]} [] 1)"
                                       "(seon.contract/defn f \"Two.\" {:malli/schema [:=> [:cat] :int]} [] 1)"
                                       "(seon.contract/defn f \"Two.\" {:malli/schema [:=> [:cat] :int]} [] 2)"])]
     (is (str/includes? (str (:text again)) ":redefined") "a docstring changed: said")

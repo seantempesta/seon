@@ -1,6 +1,6 @@
 ;; Seon's config file: only the values a schema's :default can't state (owner, 2026-11-16: config defaults live in the
 ;; schema). Every other key's shipped value is its schema entry's :default (resources/seon/schemas/seon.config*.edn,
-;; seon.config/defaults, every config's bottom layer), with its unit, provenance and bound in the comment above it. What
+;; filled by malli's default-value-transformer as a config is read), with its unit, provenance and bound in the comment above it. What
 ;; stays here: values read from the process (#env, #seon/checkout, #seon/cores), #profile choices, #ref and #join paths
 ;; and the keys they name (max-agents, runs-dir), and the three keys bin/env and bin/tree read from this file's text
 ;; (jolt-cache-mb, jolt-compiler-options, tree-excludes). Beside each key, its unit, provenance and bound.
