@@ -648,9 +648,8 @@
   #{:done :eval})
 
 (defn- own-agent
-  "The agent req acts on: root for an :eval naming root; for an op of own-ops from a caller with a client (bin/mcp stamps one),
-  the agent that client last attached (my.root/held-agent), so another session's agent is not addressable by it, or the refusal
-  that it attached none; else the agent req names (a caller with no client: bin/ask, a test). See docs/server.md#ops."
+  "The agent req acts on: for :done or :eval from a caller with a client, the agent that client last attached (or the answer
+  that it holds none); else the agent req names. See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.system/sys :map] :any]}
   [sys req]
   (let [named (some-> (:agent req) (#(if (= "root" %) :root (keyword %))))

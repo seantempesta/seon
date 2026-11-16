@@ -249,7 +249,7 @@
     (is (= "Work." (:value plan)) "the sibling task holds the task's plan")
     (is (= [41 true] (:value seen)) "and its agent what the forked one defined, live and on its branch")))
 
-(deftest ^{:seon.test/estimate {:ticks 6000000}} an-op-acts-on-its-callers-own-agent
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 6000000}} an-op-acts-on-its-callers-own-agent
   ;; task seon.server/an-op-acts-on-its-callers-own-agent (docs/server.md#ops): done and eval act on the agent the caller's
   ;; client last attached (my.root/held-agent), so another session's agent is not addressable by them at all; a share hands the
   ;; hold over. Root, 2026-10-27: one session's seon_done named another session's agent and ended its task red. Red before: c2's
@@ -465,8 +465,9 @@
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000}} a-sessions-own-area-client-takes-over-its-hold
   ;; root's ruling 2026-11-15 evening: a session agent attached before bin/mcp call kept a session's SEON_MCP_CLIENT held its hold under
   ;; checkout-<path> for its life (session/context's, repaired by hand with transact-main!, result/dc7c8582). A re-attach of a LIVE
-  ;; session/<area> by the client named <area> takes over the hold (the same session under its own name); any other named client still
-  ;; gets :shared, so no session takes another's agent. Red before: the live branch answered :shared and never moved the hold
+  ;; session/<area> by the client named <area> takes over the hold (the same session under its own name). Root, 2026-11-16 (task
+  ;; seon.server/an-op-acts-on-its-callers-own-agent): any client attaching a live agent takes its hold over, so another client's attach
+  ;; moves it away from the area's. Red before: the live branch answered :shared and never moved the hold
   (let [[one two who three who-after] (at/in-agent (fn [{:keys [ns]}]
                                                      (let [i (str "session/" ns) area (str ns)]
                                                        [{:op :attach :task i :template "user" :client "checkout-old"}
@@ -478,8 +479,8 @@
     (is (some? (:agent one)) (pr-str one))
     (is (= (:agent one) (:agent two)) "the same agent")
     (is (= (name (:agent one)) (:value who)) (str "its own area client now holds it: " (pr-str who)))
-    (is (:shared three) (str "another named client only shares it: " (pr-str three)))
-    (is (= (name (:agent one)) (:value who-after)) "and the hold stays with the area's own client")))
+    (is (:shared three) (str "another named client shares it: " (pr-str three)))
+    (is (nil? (:value who-after)) (str "and takes its hold: the area's client holds it no more " (pr-str who-after)))))
 
 (deftest ^{:seon.test/estimate {:ticks 300000}} an-inbox-line-runs-on-its-connection-and-holds-no-worker
   ;; part 2: seon_inbox waits, so it runs on the connection's fiber (which parks), never one of the 16 :server-op worker threads
