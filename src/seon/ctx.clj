@@ -797,14 +797,27 @@
 
 (defn moved
   "The datoms db moved by from a to b: the last transaction's when b is its db (agent/transact!
-  records it), else what the commits between them changed (a merge, a resume: seon.merge/changed-datoms, Datahike's d/changes,
-  which a merge states against the head it replaces), so a merge's branch facts made again are no move. See docs/merging.md#a-branch-merges-main-in."
+  records it), else what the commits between them changed (a merge, a resume: Datahike's d/changes from the commit a names to b's,
+  which a merge states against the head it replaces), with a's own uncommitted writes (a run-ahead value's, made by d/with) as
+  touched, so the record reads them again from b; a whole diff of the two values (seon.merge/changed-datoms) only where the commits
+  kept no changes. A patch reads each touched entity again from b, so the work is what moved, never the store: a merge of main
+  diffed whole was 551M ticks and 2.4 GB (flow, 2026-11-16). See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :map]] [:sequential :any]]}
   [a b tx]
   (if (identical? b (:db-after tx))
     (:tx-data tx)
-    (let [[gone added] (pm/changed-datoms a b)]
-      (concat (map #(assoc % :added false) gone) added))))
+    (let [from (d/commit-id a) to (d/commit-id b)
+          own (map #(assoc % :added false) (:datahike/uncommitted (meta a)))
+          ch (when (and from to (nil? (:datahike/uncommitted (meta b))))
+               (if (= from to)
+                 []
+                 (try (d/changes b from to)
+                      (catch clojure.lang.ExceptionInfo e
+                        (when-not (#{:datahike/changes-unrecorded :datahike/changes-not-ancestor} (:type (ex-data e))) (throw e))))))]
+      (if ch
+        (concat own ch)
+        (let [[gone added] (pm/changed-datoms a b)]
+          (concat (map #(assoc % :added false) gone) added))))))
 
 (defn advance
   "c0, the record as of db0, as of db1 (the same branch, later): patched by the datoms the two

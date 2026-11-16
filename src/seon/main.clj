@@ -48,17 +48,28 @@
   it bound (what bin/system and seon.test-store/start-root! read), never one picked beforehand; a ROOT STALE BINARY line
   before it, on one line, when the binary is not current for main (seon.system/stale-binary), which bin/system start ends on.
   args: the mode's own, `--started-by ns/test` naming the test that started it (its boot's
-  :seon.system/started-by)."
+  :seon.system/started-by), and `--take-over PORT`: this root is the successor of the root serving PORT on this store (task
+  seon.system/a-successor-takes-over-the-running-root). It asks that root :hand-over before its boot opens the store, and binds the
+  port the old root released; a refusal ends it with ROOT TAKE-OVER REFUSED and exit 1, the old root as it was."
   {:seon.flow/edge "an OS signal's edge: the shutdown hook the platform calls on its own thread, which ends root through its one stop" :malli/schema [:=> [:cat [:sequential :string]] :any]}
   [args]
-  (let [port (get-in (seon.config/process) [:ports :server])
+  (let [arg (fn [k] (some->> args (partition 2 1) (filter #(= k (first %))) last second))
+        ;; a successor: everything above (the binary, its namespaces, its config) is loaded while the old root still serves; the
+        ;; old root drains and releases its store and port before it answers (seon.server's op-answer :hand-over), so the boot
+        ;; below opens a store no other root writes
+        taken (when-let [p (some-> (arg "--take-over") parse-long)]
+                (let [r (seon.server/ask-streamed p {:op :hand-over :tree (:digest (seon.program/binary-program))} (fn [_]))]
+                  (if (:released r)
+                    r
+                    (do (out! "ROOT TAKE-OVER REFUSED " (shown r) ": the root on " p " runs as it was") (lib/c-exit 1)))))
+        port (if taken (:port taken) (get-in (seon.config/process) [:ports :server]))
         _ (when (zero? port)
             (out! "ROOT REFUSED: :seon.config.root/server-port is 0 (no server); bin/worktree --ports writes config/local.edn with this checkout's ports")
             (lib/c-exit 1))
         ;; a scripted provider's script is a test fixture (seon.fixtures, in test/): the
         ;; provider's config says so, and the checkout's source is added before root starts
         _ (when (= :scripted (:kind (seon.config/provider seon.config/config))) (checkout-roots! (checkout)))
-        sys (c/start! {:started-by (some->> args (partition 2 1) (filter #(= "--started-by" (first %))) last second)})]
+        sys (c/start! {:started-by (arg "--started-by")})]
     ;; the first cause stops root, once; a signal's hook waits for that stop, then Jolt exits
     (let [cause (promise) stopped (promise)
           ;; the exit status, delivered once root has stopped and whatever ended it has answered (stdin's EOF at once; a hand-over
