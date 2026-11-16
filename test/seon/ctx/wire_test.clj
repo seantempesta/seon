@@ -2659,7 +2659,7 @@
 
 ;; docs/agent.md#working-for-a-person, task seon.reconcile (plan item 8): an outside agent's end is its hand-back (seon_done), judged by what
 ;; its change adds, so the status it ends from (seon.turn/hand-back-end, clear?) reads the one done rule as the judge does
-;; (seon.reconcile/judgment's outside?: the agent's :seon.agent/model "outside"). Before, the status said :open for a session's task while
+;; (seon.reconcile/judgment's outside?: the session's task declares :seon.task/model "outside"). Before, the status said :open for a session's task while
 ;; the judge found nothing open, so every session's seon_done ended ':gate, its agent ended red saying "open"' [M result/d7770773].
 ;; Estimate: a program db (~2M), one task, two status reads (~1M each): ~4M; 8000000 ticks, 60 MB
 (deftest ^{:seon.test/estimate {:ticks 8000000 :bytes 60000000}} an-outside-agents-end-reads-the-done-rule-the-judge-reads
@@ -2667,20 +2667,6 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "s" :seon.task/kind :user :seon.task/plan "Talk with me."}]))
         reasons #(set (map :reason (:reasons %)))
         inside (status-at db "demo/s" {})
-        outside (status-at (d/db-with db [{:seon.agent/key "a1" :seon.agent/model "outside"}]) "demo/s" {})]
+        outside (status-at (d/db-with db [{:seon.task/id "demo/s" :seon.task/model "outside"}]) "demo/s" {})]
     (is (contains? (reasons inside) :open) "a person's agent driven by its own model parks open between their messages")
     (is (not (contains? (reasons outside) :open)) (str "an outside agent's end is its hand-back, never open: " (pr-str (reasons outside))))))
-
-;; docs/merging.md#a-merge-runs-what-the-change-reaches, plan item 8: a session's hand-back is judged by what its change adds, so the gate runs
-;; the process tests it reaches (seon.task/unjudged): before, a :user task's were all closed, so a session's prove never asked the gate and its
-;; end said "a user task isn't judged by the gate" while the judge gated it (session/context's seon_done, 2026-11-16). A person's agent driven
-;; by its own model still merges nothing. Estimate: a program db (~2M), two unjudged reads (~0.1M): ~2M; 4000000 ticks, 40 MB
-(deftest ^{:seon.test/estimate {:ticks 4000000 :bytes 40000000}} a-sessions-hand-back-asks-the-gate-for-what-it-reaches
-  (let [db (db-with-program)
-        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "s" :seon.task/kind :user :seon.task/plan "Talk with me."}]))
-        on (fn [db model] (d/db-with db [(cond-> {:db/id "a" :seon.agent/key "a1"} model (assoc :seon.agent/model model))
-                                        {:seon.task/id "demo/s" :seon.task/agent "a"}]))
-        why #(:why (task/unjudged % (task/task % "demo/s") ['demo-test/p-test]))
-        kind-why "a user task isn't judged by the gate"]
-    (is (= kind-why (why (on db nil))) "a person's agent driven by its own model merges nothing, so no gate")
-    (is (not= kind-why (why (on db "outside"))) "an outside agent's hand-back is gated as work")))

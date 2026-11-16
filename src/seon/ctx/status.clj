@@ -315,9 +315,10 @@
                                  results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) (set deferred) (constantly false) (constantly false)))
                 (seq (:caused split)) (assoc :caused (set (:caused split)))
                 (some? changed?) (assoc :changed? changed?)
-                ;; an outside agent's end is its hand-back (seon_done), judged by what its change adds: the fact the judge reads
-                ;; (seon.reconcile/judgment's outside?, the agent's model "outside"), so the end and the judge read one done rule
-                (= "outside" (:seon.agent/model ag)) (assoc :hand-back? true)
+                ;; a task an outside agent drives (a session's own, :seon.task/model "outside") ends by its hand-back (seon_done), judged
+                ;; by what its change adds: the fact the judge reads (seon.reconcile/judgment's outside?, through desired-env) and
+                ;; seon.task/unjudged reads, so the end and the judge read one done rule
+                (and tid (= "outside" (:seon.task/model (d/entity db [:seon.task/id tid])))) (assoc :hand-back? true)
                 (seq also-on-main) (assoc :main-red (set also-on-main))
                 ;; a refine's one write: the task it refines names a function it did not (one function, root's judging reads it too)
                 (and base tid) (as-> m (let [n (task/names-new-site? base db tid)] (cond-> m (some? n) (assoc :named-site? n)))))

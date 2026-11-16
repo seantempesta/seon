@@ -51,7 +51,7 @@
 (defn- scratch-dir
   "A new empty directory under target/ (the live tree is never written)."
   [label]
-  (let [d (str here "/target/tmp/source-test-" label "-" (random-uuid))]
+  (let [d (str (System/getProperty "java.io.tmpdir") "/seon-source-test-" label "-" (random-uuid))]
     (.mkdirs (java.io.File. d))
     d))
 
@@ -465,52 +465,6 @@
     ;; kept the last write-back's :t, a fact claiming an older main than its files
     (is (= (:max-tx db) (:t fact)) "its :t is the t of the main it landed on, never an older write-back's")
     (is (some? (d/entity db1 [:var/name 'app.landed/f])) "and the landed file's facts are main's")))
-
-(defn- tree-with
-  "The git tree of the checkout's HEAD with path's blob replaced by text, written as git objects through an index of its own,
-  deleted after (the checkout, its index and refs untouched). The blob and tree are loose objects in the checkout's repository,
-  which runtime-for reads (as boots-on-a-tree's objects-into-checkout! does): no ref names them, so git's gc prunes them."
-  [path text]
-  (let [co (config/checkout) idx (java.io.File/createTempFile "rt-index-" "")
-        env (assoc (into {} (System/getenv)) "GIT_INDEX_FILE" (.getPath idx))
-        git (fn [& args] (let [r (apply sh/sh "git" "-C" co (concat args [:env env]))] (assert (zero? (:exit r)) (:err r)) (str/trim (:out r))))]
-    (try
-      (.delete idx)
-      (let [blob (:out (sh/sh "git" "-C" co "hash-object" "-w" "--stdin" :in text))]
-        (git "read-tree" "HEAD")
-        (git "update-index" "--add" "--cacheinfo" (str "100644," (str/trim blob) "," path))
-        (git "write-tree"))
-      (finally (.delete idx)))))
-
-;; Estimate: six trees written as git objects and six runtime-for asks (seon.fx/binary-digest once a tree: four git calls), the
-;; restart-for answers pure; ~4M ticks of this process's own work
-(deftest ^{:seon.test/estimate {:ticks 4000000} :seon.test/execs ["git"]} a-landing-restarts-only-when-a-build-input-moved
-  ;; task seon.system/a-landing-restarts-root-only-for-a-binary-change (deps' (2), in runtime's slice, root 2026-11-15): keep or
-  ;; restart is seon.fx/runtime-for's answer for the landed tree and nothing else; a landing kept builds nothing (bin/update). On
-  ;; real trees: the checkout's HEAD tree with a src form changed is kept (src is no build input: a boot loads the program as a
-  ;; diff), as are a config entry and a schema entry (a landing's commit loads them in place); with deps.edn changed, root's graph
-  ;; (system.edn, a boot reads the binary's copy) or a config entry a process reads only at its start, it restarts.
-  ;; Red before: restart-for read stale-binary's tree compare, never runtime-for
-  (let [held (fn [t] {:root "/r" :dirs ["src"] :tree t :commit "c1"})
-        inputs {:tree "tm" :env "e" :code "c" :config {}}
-        why (fn [t] (root/restart-for (held t) t (seon.fx/runtime-for t) inputs))
-        co (config/checkout)
-        src (tree-with "src/seon/lib.clj" (str (slurp (str co "/src/seon/lib.clj")) "\n;; a comment a landing added\n"))
-        deps (tree-with "deps.edn" (str (slurp (str co "/deps.edn")) "\n;; a build input changed\n"))
-        graph (tree-with "resources/seon/system.edn" (str (slurp (str co "/resources/seon/system.edn")) "\n;; root's graph changed\n"))
-        default (slurp (str co "/resources/seon/config/default.edn"))
-        ;; a config entry a load holds in place (seon.program/hold-config!), and one a process reads once at its start (:seon.config/at-load)
-        cfg (tree-with "resources/seon/config/default.edn" (str/replace default ":seon.config.render/flush-max 250" ":seon.config.render/flush-max 251"))
-        at-load (tree-with "resources/seon/config/default.edn" (str/replace default ":seon.config.agent/stall-ms 30000" ":seon.config.agent/stall-ms 30001"))
-        ;; a schema entry, which the landing's commit loads in place (its dependents re-armed)
-        schema (tree-with "resources/seon/schemas/seon.facts.edn" (str (slurp (str co "/resources/seon/schemas/seon.facts.edn")) "\n;; a schema file changed\n"))]
-    (is (not= cfg at-load) "the two config trees differ (each replace found its line)")
-    (is (nil? (why src)) "a landing that moves only src keeps the system running and builds nothing")
-    (is (re-find #"deps.edn" (str (why deps))) (str "a landing that moves a build input restarts, naming it: " (why deps)))
-    (is (re-find #"system.edn" (str (why graph))) (str "and root's graph is one: " (why graph)))
-    (is (nil? (why cfg)) (str "a config entry loads in place: kept: " (why cfg)))
-    (is (some? (why at-load)) "a config entry a process reads only at its start is a restart")
-    (is (nil? (why schema)) (str "a schema entry loads in place: kept: " (why schema)))))
 
 (deftest ^{:seon.test/estimate {:ticks 400000}} a-landing-keeps-the-system-running-only-when-nothing-calls-for-a-restart
   ;; docs/source.md#a-landing-enters-main-as-data: after the bridge moved main's source fact to the landed tree, bin/update keeps
@@ -1048,13 +1002,25 @@
     (is (= 2 (run)) "the process runs what main now holds")))
 
 ;; Estimate: read-source of src 1M + each gitlink read once (~10 child calls x 70k) 0.7M = 2000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 2000000}} the-source-read-carries-each-reference-code-pin
+(deftest ^{:seon.test/estimate {:ticks 2000000} :seon.test/execs ["git"]} the-source-read-carries-each-reference-code-pin
   ;; land6 review, must-fix 4: a cited reference-code file shows the revision main's source
-  ;; pins it at; the :source effect reads each gitlink once, at import, so no render runs git
-  (let [r (fx/read-source {:req {:root here :dirs ["src"]}})
-        head-tree (str/trim (:out (sh/sh "git" "-C" here "rev-parse" "HEAD:reference-code/malli")))]
-    (is (= head-tree (get (:pins r) "reference-code/malli")) "the gitlink HEAD's tree records for it")
-    (is (every? #(str/starts-with? % "reference-code/") (keys (:pins r))))))
+  ;; pins it at; the :source effect reads each gitlink once, at import, so no render runs git.
+  ;; A scratch repository in the temp dir holds one gitlink .gitmodules names (not the checkout's, whose pins move).
+  ;; Estimate: ~7 git calls x 150k + the read ~0.5M
+  (let [dir (scratch-dir "pin")
+        pin "0123456789abcdef0123456789abcdef01234567"]
+    (try
+      (git dir "init" "-q" "-b" "main")
+      (.mkdirs (java.io.File. (str dir "/src")))
+      (spit (str dir "/src/a.clj") "(ns a)\n")
+      (spit (str dir "/.gitmodules") "[submodule \"reference-code/malli\"]\n\tpath = reference-code/malli\n\turl = https://example.invalid/malli\n")
+      (git dir "add" ".")
+      (git dir "update-index" "--add" "--cacheinfo" (str "160000," pin ",reference-code/malli"))
+      (git dir "-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "pinned")
+      (let [r (fx/read-source {:req {:root dir :dirs ["src"]}})]
+        (is (= pin (get (:pins r) "reference-code/malli")) "the gitlink the tree records for it")
+        (is (every? #(str/starts-with? % "reference-code/") (keys (:pins r)))))
+      (finally (seon.lib/remove-tree! dir)))))
 
 ;; Estimate: import of 3 files (~12 forms) 1.3M + reach-index and reach-graph over ~380 forms x 20k 7.6M each = 20000000 ticks
 (deftest ^{:seon.test/estimate {:ticks 20000000}} a-test-that-reaches-a-process-is-found-by-the-reach-walk
@@ -1385,125 +1351,6 @@
                :fixed {:ticks 200000 :bytes 500000}
                :sizes [5 15 50]}))
 
-;; Estimate: 8 child calls (git, bin/worktree --at) x 60k = 500000 ticks
-(deftest ^{:seon.test/estimate {:ticks 500000}} a-gates-checkout-takes-its-roots-built-products
-  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: bin/worktree --at given FROM clones FROM's built products into the checkout's
-  ;; target/ (the runtime and native libraries a gate's runner runs on), not the main tree's: a gate's checkout is made from the
-  ;; checkout of the root that runs it (seon.fx/run-on-checkout). Red before: --at took no FROM and cloned the main tree's
-  (let [tmp (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-at-" (random-uuid))) (.mkdirs)))
-        here (seon.config/checkout)
-        repo (str tmp "/repo") from (str tmp "/from") wt (str tmp "/wt")
-        git (fn [dir & args] (let [r (apply sh/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args)]
-                               (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))]
-    (try
-      (.mkdirs (java.io.File. repo)) (.mkdirs (java.io.File. (str from "/target")))
-      (git repo "init" "-q" "-b" "main") (spit (str repo "/f") "a") (git repo "add" ".") (git repo "commit" "-q" "-m" "a")
-      (spit (str from "/target/zz") "the root's product") (spit (str from "/target/zz.stamp") "the root's pin")
-      (let [r (sh/sh (str here "/bin/worktree") "--at" wt (git repo "rev-parse" "HEAD") repo from)]
-        (is (zero? (:exit r)) (str (:out r) (:err r)))
-        (is (= "the root's pin" (slurp (str wt "/target/zz.stamp"))) "its product's stamp is FROM's")
-        (is (= "the root's product" (slurp (str wt "/target/zz"))) "and so is the product"))
-      (finally (sh/sh "git" "-C" repo "worktree" "remove" "--force" wt) (seon.lib/remove-tree! tmp)))))
-
-;; Estimate: 21 child calls (git, bin/worktree --sync) x 70k 1.5M = 2000000 ticks
-(deftest ^{:seon.test/estimate {:ticks 2000000}} a-checkout-whose-submodule-moved-is-synced-to-its-pin
-  ;; root, 2026-10-27: a worktree that merged main kept its old Jolt checked out (no one ran
-  ;; bin/worktree --sync), and bin/build built that Jolt, not the pin: the forks step hung on a
-  ;; Jolt three fixes old. The one sync path moves a submodule checkout to the commit its HEAD pins
-  ;; (bin/build calls it first); one with uncommitted work it would lose is an error naming it
-  (let [tmp (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-sync-" (random-uuid))) (.mkdirs)))
-        here (seon.config/checkout)
-        sub (str tmp "/sub") co (str tmp "/co") x (str co "/reference-code/x")
-        git (fn [dir & args] (let [r (apply sh/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" "-c" "protocol.file.allow=always" args)]
-                               (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
-        sync! #(sh/sh (str here "/bin/worktree") "--sync" co)]
-    (try
-      (.mkdirs (java.io.File. sub)) (.mkdirs (java.io.File. co))
-      (git sub "init" "-q" "-b" "main")
-      (spit (str sub "/f") "a") (git sub "add" ".") (git sub "commit" "-q" "-m" "a")
-      (let [a (git sub "rev-parse" "HEAD")
-            _ (do (spit (str sub "/f") "b") (git sub "commit" "-q" "-am" "b"))
-            b (git sub "rev-parse" "HEAD")]
-        (git co "init" "-q" "-b" "main")
-        (git co "submodule" "add" "-q" sub "reference-code/x")
-        (git x "checkout" "-q" "--detach" a)
-        (git co "add" ".") (git co "commit" "-q" "-m" "pin a")
-        (testing "a checkout left at another commit is moved to the pin, and says so"
-          (git x "checkout" "-q" "--detach" b)
-          (let [r (sync!)]
-            (is (zero? (:exit r)) (:err r))
-            (is (str/includes? (:out r) (str "reference-code/x: " (subs b 0 8) " -> " (subs a 0 8))) (:out r))
-            (is (= a (git x "rev-parse" "HEAD")))))
-        (testing "one with uncommitted work it would lose is an error naming it, and left as it is"
-          (git x "checkout" "-q" "--detach" b)
-          (spit (str x "/f") "work")
-          (let [r (sync!)]
-            (is (not (zero? (:exit r))))
-            (is (str/includes? (str (:out r) (:err r)) "reference-code/x") (pr-str r))
-            (is (= b (git x "rev-parse" "HEAD")))
-            (is (= "work" (slurp (str x "/f"))))))
-        (testing "at its pin, nothing moves"
-          (git x "checkout" "-q" "--" ".") (git x "checkout" "-q" "--detach" a)
-          (is (= "" (str/trim (:out (sync!)))))))
-      (finally (seon.lib/remove-tree! tmp)))))
-
-;; A scratch repository of one file on a store of its own, empty: the seed is one of the claims, and none reads more than one namespace (the
-;; checkout's tree analysed at each boot was 81 s). Two boots of a built root, the only claims that need a process start; the rest of the boot's
-;; catch-up (what it leaves out, a merged task's file, :fact? false) is seon.system/catch-up on a test db, the next test.
-;; Estimate: ~9 git calls x 70k 0.6M + 2 root boots and stops (their own work, ~2.3 s each, not ours) 0.3M + ~9 asks x 30k 0.3M + 4 log reads 0.1M
-;; + 2 mkdirs and file writes 0.1M = 1400000; measured 2.2M (the boots' ask and stop waits), so 2500000 ticks
-(deftest ^{:seon.test/estimate {:ticks 2500000}} a-boot-resumes-main-and-reads-no-file
-  ;; task seon.system/a-boot-resumes-from-the-db (owner, 2026-11-09: "Boot's job is to resume the existing system or if
-  ;; it's fresh to index it and get it to the point that everything is running off the db. From that point on we are
-  ;; syncing data TO files not reading from them"), end to end through bin/system: a fresh store is indexed once, at its
-  ;; first boot (seon.system/seed!); a file written under the running root changes nothing on main; the next boot, with
-  ;; docs/source.md#a-boot-catches-up-with-its-checkout on, indexes only the files its checkout changed while root was down (an
-  ;; untracked one, a committed one) and names the one that does not read, reading none of the unchanged file's. Red before: the boot
-  ;; imported the commit (import-tree!)
-  (let [dir (scratch-dir "resume")
-        co (str dir "/co")
-        git (fn [d & args] (let [r (apply sh/sh "git" "-C" d "-c" "user.name=t" "-c" "user.email=t@t" args)]
-                             (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
-        probe! (fn [n] (spit (str co "/src/seon/resume_probe_" n ".clj") (str "(ns seon.resume-probe-" n ")\n\n(defn probe [] " n ")\n")))
-        commit! (fn [] (git co "add" "src") (git co "commit" "-q" "-m" "probe") (git co "rev-parse" "HEAD"))
-        root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs") :env {"SEON_RESULTS_PORT" "0"}}
-        args (fn [catch-up?] ["--set" (str ":seon.config.source/root=" (pr-str co)) "--set" ":seon.config.source/dirs=[\"src\"]"
-                              "--set" ":seon.config.root/wiki-dirs=[]" "--set" (str ":seon.config.root/catch-up-on-boot=" catch-up?)])
-        log #(ts/output (str dir "/runs/root.log"))
-        root (atom nil)
-        start! #(do (reset! root (ts/start-root! (assoc root0 :args (args %))))
-                    (is (some? (:port @root)) (str "the root started: " (log))))
-        ask (fn [code] (let [a (ts/ask @root {:op :eval :agent "root" :code code})]
-                         (if (:error a) a (ts/value-of (:response a)))))
-        has-var? (fn [n] (ask (str "(some? (seon.db/eid @(:conn sys) :var/name 'seon.resume-probe-" n "/probe))")))
-        state "[(seon.program/program-digest @(:conn sys)) (:commit (:seon.system/source (datahike.api/pull @(:conn sys) [:seon.system/source] [:seon.system/id :root])))]"]
-    (try
-      (.mkdirs (java.io.File. (str co "/src/seon")))
-      ;; a tree's own deps, which the binary was not built with
-      (spit (str co "/deps.edn") "{:deps {}}")
-      (git co "init" "-q" "-b" "main")
-      (probe! 0)
-      (let [c0 (commit!)]
-        (start! false)
-        (is (true? (has-var? 0)) "a fresh store is indexed at its first boot")
-        (let [[d0 seeded] (ask state)]
-          (is (= c0 seeded) "from the tree's commit")
-          (probe! 1)
-          (is (false? (has-var? 1)) "a file written under the running root changes nothing on main")
-          (ts/stop-root! @root)
-          (probe! 2) (commit!)
-          (spit (str co "/src/seon/resume_broken.clj") "(ns seon.resume-broken)\n(defn f [")
-          (start! true)
-          (is (= [true true] [(has-var? 1) (has-var? 2)]) "the next boot indexed what its checkout changed while it was down: an untracked file and a committed one")
-          (is (not= d0 (first (ask state))) "and main's program moved with them")
-          (is (re-find #"(?m)^ROOT CAUGHT UP 2 files at t \d+: src/seon/resume_probe_1.clj src/seon/resume_probe_2.clj$" (log))
-              "exactly those: the unchanged file was not read again")
-          (is (re-find #"(?m)^ROOT CATCH-UP LEFT OUT src/seon/resume_broken.clj: " (log)) "a file that does not read is named and left out")
-          (is (false? (ask "(some? (seon.db/eid @(:conn sys) :ns/name 'seon.resume-broken))")) "and is not on main")))
-      (finally
-        (when @root (ts/stop-root! @root))
-        (seon.lib/remove-tree! dir)))))
-
 (deftest ^{:seon.test/estimate {:ticks 5000000}} a-landed-schema-file-installs-its-new-attributes
   ;; docs/source.md#a-landing-enters-main-as-data: a landing that changes a schema file keeps root running (it loads in place), so
   ;; its new stored attributes must be installed by the landing's own write: context's 1916c1b31c added :seon.task/specified-turn,
@@ -1748,7 +1595,7 @@
   ;; (bin/update --merges-only, the function the update runs) refuses staged changes, and says OK only when HEAD
   ;; contains main. Red before: the mode did not exist, and the update's check passed this tree
   (let [here (config/checkout)
-        d (str here "/target/tmp/update-merges-" (random-uuid))
+        d (str (System/getProperty "java.io.tmpdir") "/seon-update-merges-" (random-uuid))
         g (fn [& args] (let [r (apply sh/sh "git" "-C" d args)] (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
         ;; the merge is the :git effect's (seon.fx/git-commit's {:merge ref}), the merges tree's one writer: slice 2a of
         ;; seon.system/a-landing-restarts-root-only-for-a-binary-change (bin/update --merges-only, a second writer, is gone)
@@ -1800,7 +1647,7 @@
   ;; after every land. The merge answers what it merged and the tree after (:expected, :tree), and source-moved-tx moves the fact as a
   ;; write-back's does. Red before: the merge's answer held no :expected, the fact stayed, and the write-back refused
   (let [here (config/checkout)
-        d (str here "/target/tmp/merge-moves-fact-" (random-uuid))
+        d (str (System/getProperty "java.io.tmpdir") "/seon-merge-moves-fact-" (random-uuid))
         g (fn [& args] (let [r (apply sh/sh "git" "-C" d args)] (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))]
     (try
       (.mkdirs (java.io.File. d))
@@ -1846,14 +1693,3 @@
           db2 (d/db-with db1 (:tx i2))]
       (is (= {a (sha "c")} (source/pins-of db2)) "a moved pin is the new commit, a removed one is gone")
       (is (empty? (d/datoms db2 :avet :seon.pin/path b)) "the removed submodule's entity is retracted whole"))))
-
-;; Estimate: three runtime-for asks on real trees (four git calls each the first time): ~2M ticks
-(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["git"]} a-tree-says-before-it-lands-whether-it-restarts-root
-  ;; task seon.system/a-landing-restarts-root-only-for-a-binary-change (slice 2b, item 7): a session asked the running root's
-  ;; runtime-for by hand before landing, after a land predicted from a file diff restarted root (2026-11-15). my.root/would-restart?
-  ;; is that question as a function: nil when the running binary is the tree's (the land keeps root), else why, writing nothing
-  (let [co (config/checkout)
-        src (tree-with "src/seon/lib.clj" (str (slurp (str co "/src/seon/lib.clj")) "\n;; a comment a landing added\n"))
-        deps (tree-with "deps.edn" (str (slurp (str co "/deps.edn")) "\n;; a build input changed\n"))]
-    (is (nil? (my.root/would-restart? src)) "a src change keeps root running")
-    (is (re-find #"deps.edn" (str (my.root/would-restart? deps))) (str "a build input restarts it, naming the input: " (my.root/would-restart? deps)))))

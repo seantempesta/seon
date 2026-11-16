@@ -894,8 +894,7 @@
 
 (defn unjudged
   "Of tests, the process tests this branch's change reaches, those no gate will run for task t on db, and why:
-  {:tests :why}, or nil when the gate runs them all. A person's task is no merge, unless an outside agent hands it back (a session's
-  seon_done); a design task may leave its proofs red; a root with no checkout has
+  {:tests :why}, or nil when the gate runs them all. A design task may leave its proofs red; a root with no checkout has
   nowhere to run them; a test can't be its own gate (:seon.system/started-by). See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :map] [:sequential :qualified-symbol]] [:maybe :seon.task/unjudged]]}
   [db t tests]
@@ -903,11 +902,9 @@
         all (fn [why] {:tests (vec tests) :why why})]
     (cond
       (empty? tests) nil
-      ;; a person's task is no merge, but an outside agent's hand-back of one (a session's seon_done) is judged by what its change adds,
-      ;; as the judge judges it (seon.reconcile/judgment's outside?, the agent's model "outside"), so the gate runs what it reaches
-      (not (or (#{:work :merge :whole} (:seon.task/kind t))
-               (and (= :user (:seon.task/kind t))
-                    (= "outside" (some-> (d/entity db [:seon.task/id (:seon.task/id t)]) :seon.task/agent :seon.agent/model)))))
+      ;; a task an outside agent drives (a session's own, :seon.task/model "outside") hands back through seon_done, whose end the judge
+      ;; takes as work (seon.reconcile's :hand-back?): its process tests are the gate's as work's are (web, result/cd4ba881)
+      (and (not (#{:work :merge :whole} (:seon.task/kind t))) (not= "outside" (:seon.task/model t)))
       (all (str "a " (some-> (:seon.task/kind t) name) " task isn't judged by the gate"))
       (nil? gate-checkout) (all "this root has no checkout to run them on (:seon.config.source/gate-checkout, or a source root)")
       (some #(= started-by (str %)) tests) {:tests (filterv #(= started-by (str %)) tests) :why "this root was started by it, and a test can't be its own gate"})))
