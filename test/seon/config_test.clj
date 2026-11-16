@@ -564,9 +564,11 @@
 ;; states: a key its schema file adds is read, never refused by this process's older schema (Tests' prove of a branch that
 ;; changed both, through the system, was skipped: 2026-11-12). Red before: text-refusal took no schema changes
 (deftest a-config-file-is-checked-against-the-schema-its-change-states
-  (let [text (slurp (str (config/checkout) "/" config/shipped-file))
+  ;; the file and the config map as this process's branch states them (the binary's forms, the branch's held changes over them),
+  ;; never the disk's file beside the binary's map: an older binary's map requires a key the branch's file no longer states
+  (let [text (config/shipped-text)
         with-key (clojure.string/replace-first text "{" "{:seon.config.zz/new-key 3\n ")
-        form (get config/schema-forms :seon.config/config)
+        form (get (merge config/schema-forms (:changes @@#'seon.config/held)) :seon.config/config)
         changes {:seon.config/config (conj form [:seon.config.zz/new-key {:optional true} :seon.config.zz/new-key])
                  :seon.config.zz/new-key [:int {:description "A key a branch adds."}]}]
     (is (string? (config/text-refusal with-key)) "this process's schema has no such key")
