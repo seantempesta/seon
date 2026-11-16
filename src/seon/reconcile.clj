@@ -66,7 +66,7 @@
   the merge itself, and once it merged main in its own diff can be empty (swarm's merge steps). A refine (named-site? false) is
   refused :no-change-site until the task it refines names a function its plan did not (seon.task/names-new-site?)."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
-  [{:keys [proofs results main-green allowed-red main-red main-unknown uncontracted unmerged caused kind plan plan-before deferred behind changed? named-site?]}]
+  [{:keys [proofs results main-green allowed-red main-red main-unknown uncontracted unmerged caused kind plan plan-before deferred behind changed? named-site? hand-back?]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))
         main-unknown (set main-unknown)
         design? (= :design kind)]
@@ -74,7 +74,11 @@
            ;; judged before it has merged main: its proofs ran on a program main has moved from, so the
            ;; reasons below may be only that (a proof unknown, a regression); the fix comes first
            (when (some-> behind pos?) [{:reason :behind :behind behind}])
-           (if (= :user kind) [{:reason :open}] (when (empty? proofs) [{:reason :no-proofs}]))
+           ;; a person's session parks between their messages, so its own end is open; its hand-back (seon_done) asks to land its
+           ;; change, judged by what the change reaches (the judge's :run), never by proofs a session's task names none of
+           (cond (and (= :user kind) hand-back?) nil
+                 (= :user kind) [{:reason :open}]
+                 (empty? proofs) [{:reason :no-proofs}])
            (when (and design? (or (nil? plan-before) (= plan plan-before))) [{:reason :no-design}])
            (when (and (false? changed?) (not= :merge kind)) [{:reason :no-change}])
            ;; a refine is done by one write, the task it refines naming its change site (seon.task/names-new-site?): its proof is green before it starts
@@ -472,7 +476,9 @@
                                 (seq main-unknown) (assoc :main-unknown (set main-unknown))
                                 (and plan (= :design kind)) (assoc :plan plan)
                                 (some? changed?) (assoc :changed? changed?)
-                                (some? named-site?) (assoc :named-site? named-site?))
+                                (some? named-site?) (assoc :named-site? named-site?)
+                                ;; an outside agent's end is its hand-back (seon_done): a session's change judged as work is
+                                outside (assoc :hand-back? true))
                                ;; behind is the work's own to fix only when no merge task follows it: a merge task
                                ;; merges main into the branch and the gate tests what it writes (seon.template's
                                ;; merge-decl), so a green work task is never judged behind; a merge that main moves under is the merge

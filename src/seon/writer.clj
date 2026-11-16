@@ -100,6 +100,19 @@
     (when (contract/error? base) (throw (ex-info (:seon.error/message base) base)))
     [head (pm/delta-three-way base head @conn data-attrs) base]))
 
+(defn against-main
+  "What branch head's change adds against main, from r, the three-way of base, head and main (branch-merge's): :uncontracted, the
+  functions its changes define without a contract, and :caused, the derived problems they cause. The done rule's measures. See
+  docs/tasks.md#the-done-rule."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/result] [:map [:uncontracted [:vector :qualified-symbol]] [:caused [:vector :string]]]]}
+  [base head main r]
+  ;; what the branch holds because main holds it (a session's import of a worktree that merged main carries main's changes) is main's:
+  ;; only what main's own change since base does not also define or cause counts (plan item 8; root's pilot, 2026-11-16)
+  (let [mains-gaps (set (pm/uncontracted (:theirs r)))
+        mains-caused (problems/caused base main (:theirs r))]
+    {:uncontracted (vec (remove mains-gaps (pm/uncontracted (:ours r))))
+     :caused (vec (remove mains-caused (problems/caused base head (:ours r))))}))
+
 (defn- written
   "What a merge of changes ours writes back, read on db (main with them merged): :files, the source
   files (namespaces' and schema resources') they touch, and :unfiled, the changed forms of
@@ -527,12 +540,13 @@
                                    (refused (str "no branch " (:branch m)) {})))
       ;; one derivation (seon.merge/three-way) for the dashboard, the done rule and merges
       :branch-diff (reply st (if (exists? (:branch m))
-                               (let [[head r base] (branch-merge st (:branch m) (:data-attrs m #{}))]
+                               (let [[head r base] (branch-merge st (:branch m) (:data-attrs m #{}))
+                                     adds (against-main base head @(:conn st) r)]
                                  {:ok true :db head :base base :base-t (:max-tx base)
                                   :ours (vec (sort-by str (keys (:ours r)))) :theirs (count (:theirs r))
                                   :conflicts (count (:conflicts r))
-                                  :unmerged (mapv :key (pm/unmerged head)) :uncontracted (pm/uncontracted (:ours r))
-                                  :caused (vec (problems/caused base head (:ours r)))
+                                  :unmerged (mapv :key (pm/unmerged head))
+                                  :uncontracted (:uncontracted adds) :caused (:caused adds)
                                   :vars (into (sorted-set) (keep (fn [[k s]] (when (= :var k) s))) (keys (:ours r)))})
                                (refused (str "no branch " (:branch m)) {})))
       ;; root's read of a branch (or main): its committed value from the store; :base is the
