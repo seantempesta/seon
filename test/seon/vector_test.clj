@@ -170,7 +170,12 @@
       (let [db2 (with! conn db tx)
             [st _] (vector/vectors-proc st :answers {:tag (:tag w) :r {:ok true :t (:max-tx db2)}})
             [_ o2] (vector/vectors-proc st :main (assoc (note db2) :t (:max-tx db2)))]
-        (is (not-any? #(some :seon.search/hits (get-in % [:req :req :tx-data])) (:to-api o2)) "written once: the next round owes it nothing"))))))
+        (is (not-any? #(some :seon.search/hits (get-in % [:req :req :tx-data])) (:to-api o2)) "written once: the next round owes it nothing"))
+      ;; a proc whose state was made before this code arrived in place: past its first round (:clean), holding no :hits-owed
+      (let [old (-> (vector/vectors-proc {:model "m" :texts 64 :conn conn}) (dissoc :hits-owed) (assoc :clean (note db) :seen (:commit (note db))))
+            [_ o3] (vector/vectors-proc old :main (assoc (note db) :t 10))]
+        (is (some #(some :seon.search/hits (get-in % [:req :req :tx-data])) (:to-api o3))
+            "a proc started before the code arrived owes it at its next round"))))))
 
 (defn- round
   "One whole round of the proc st at db, notice t: the notice (committed on conn), the :embed answered with vectors, the
