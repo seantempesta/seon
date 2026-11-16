@@ -26,6 +26,7 @@
   asks, never by a commit (on a clean store a run per program move started 223 tests at boot)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.proofs :as proofs] [seon.program :as program] [seon.config :as cfg] [seon.fx :as fx]
+            [seon.writer :as writer] [seon.db :as pdb] [datahike.api :as d]
             [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
 (defn run-key
@@ -593,18 +594,32 @@
   "The items of plan r (seon.agent/process-plan's) for a run of an agent's branch, which names no checkout: its process tests, each
   needing the branch's one candidate, [[:candidate commit] commit], the standing binary booted on a clone of the standing store with
   the branch as its main (it loads the branch's forms; no tree, build or seed). A branch that moved a build input (:input-moved?)
-  needs a build of its own, which waits on its files written to a tree (task seon.writer/a-branchs-files-are-written-out-to-a-tree):
-  none, its process tests left named and unrun. See task seon.prove/tests-fork-from-the-branchs-warm-agent."
+  needs a build of its own: its candidate item carries the request that writes the branch's files out as a commit (r's :build
+  :write-out, with-write-out's), and seon.fx/run-item writes it out, builds it and boots that build. See task
+  seon.prove/tests-fork-from-the-branchs-warm-agent."
   {:malli/schema [:=> [:cat :map :map] [:map-of :any :map]]}
   [run r]
-  (if (or (empty? (:process r)) (get-in r [:build :input-moved?]) (not (:branch r)))
+  (if (or (empty? (:process r)) (not (:branch r)) (and (get-in r [:build :input-moved?]) (not (get-in r [:build :write-out]))))
     {}
     (let [c (:commit r)
           ck [[:candidate c] c]
           on {:branch (:branch r)}]
-      (into {ck (assoc on :kind :candidate)}
+      (into {ck (cond-> (assoc on :kind :candidate) (get-in r [:build :input-moved?]) (assoc :write-out (get-in r [:build :write-out])))}
             (for [[t d] (:process r)]
               [[t d] (assoc on :kind :test :process? true :shared? (contains? (:shared r) t) :agent (:agent run) :mode (:mode run) :ms (get-in r [:ms t]) :needs #{ck})])))))
+
+(defn- with-write-out
+  "Plan r of a run of an agent's branch (no checkout) whose change moved a build input and reaches process tests, with the request
+  that writes the branch's files out as a commit to build its candidate from (seon.writer/write-out-req, on main and the branch's
+  head, into the repository main's files were imported from, at the commit they were: root's :seon.system/source) as its :build
+  :write-out; any other r as it is. O(what the branch changed). See task seon.writer/a-branchs-files-are-written-out-to-a-tree."
+  {:malli/schema [:=> [:cat :map :map :map] :map]}
+  [st run r]
+  (if (and (get-in r [:build :input-moved?]) (:branch r) (not (:checkout run)) (seq (:process r)))
+    (let [conn (:conn st) main @conn
+          {:keys [root commit]} (:seon.system/source (d/pull main [:seon.system/source] [:seon.system/id :root]))]
+      (assoc-in r [:build :write-out] (writer/write-out-req main (pdb/head conn (:branch r)) (:branch r) root commit)))
+    r))
 
 (defn- plan-items
   "The items of plan r ({:process {test digest} :steps {step {:digest :binary? :bound}} :build {:tree :needed?}}, seon.agent's
@@ -708,7 +723,7 @@
         (= :spawn step) (plan! (-> st (update-in [:runs key] assoc :runner (:id r) :agent (:id r)) (assoc-in [:runners key] (:id r))) key)
         (= :plan step) (let [st (assoc-in st [:runs key :base] (dissoc r :items :ms :process :steps :build))
                              prio (if (= :turn (:mode run)) :turn :batch)
-                             items (into (plan-items run r) (for [[t d] (:items r)] [[t d] (cond-> {:agent (:agent run) :mode (:mode run) :kind :test} (get-in r [:ms t]) (assoc :ms (get-in r [:ms t]))
+                             items (into (plan-items run (with-write-out st run r)) (for [[t d] (:items r)] [[t d] (cond-> {:agent (:agent run) :mode (:mode run) :kind :test} (get-in r [:ms t]) (assoc :ms (get-in r [:ms t]))
                                                                                      (:checkout run) (assoc :checkout (:checkout run)))]))
                              ;; past a red, a turn waits for its own proofs; any other run (a tree's :judge, main's) is a verdict of the
                              ;; whole and waits for every item, so a session and a landing hear every red, never only the first
