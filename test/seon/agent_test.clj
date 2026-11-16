@@ -3759,7 +3759,7 @@
 (deftest ^{:seon.test/estimate {:ticks 100000}} a-process-item-runs-on-the-candidate-its-batch-carries
   (let [sel {:plan {:process #{'a.p-test/boots}} :judge [] :selected [] :run [] :deferred [] :reused {} :reused-reports [] :digests {}}
         items {'a.p-test/boots "d4" 'a.x-test/pure "d1"}
-        on (#'agent/granted-selection sel items {:port 4242 :branch :candidate-x})
+        on (#'agent/granted-selection sel items {:port 4242 :store "/tmp/candidate/store" :main "candidate-x" :branch :candidate-x})
         off (#'agent/granted-selection sel items nil)]
     (is (= #{'a.p-test/boots 'a.x-test/pure} (set (:run on))) "with a candidate, the process test runs with the rest")
     (is (empty? (filter :not-run (:reused-reports on))) "and none is refused")
