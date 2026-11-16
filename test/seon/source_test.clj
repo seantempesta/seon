@@ -243,11 +243,12 @@
                   (is (seq (:entries whole)) "the import states config entries")
                   (is (= (select-keys whole [:entries :schemas]) (select-keys (read-after config-cut) [:entries :schemas])) "the config check's cut")
                   (is (= (select-keys whole [:forms :ns-files :schema-files]) (select-keys (read-after count-cut) [:forms :ns-files :schema-files])) "the counts' cut")
-                  (is (< (count (pdb/project-tx tx counted)) (count tx)) "and the cut is smaller than the whole")))
+                  (is (<= (count (pdb/project-tx tx counted)) (count tx)) "and the cut is no larger than the whole")))
         db0 (empty-db)
         tx (source/tx-of db0 files false)
         db1 (d/db-with db0 tx)]
     (same? db0 tx)
+    (is (< (count (pdb/project-tx tx counted)) (count tx)) "a whole import's cut is smaller than it (a refresh writes only what moved, so its cut may be all of it)")
     (testing "a refresh that removes a file and changes the config"
       (let [refresh (source/tx-of db1 {"src/seon/edn.clj" nil config/shipped-file (str/replace (files config/shipped-file) #"(?m)^ :seon.config.root/main .*$" "")} true)]
         (is (some #(and (vector? %) (= :db/retractEntity (first %))) refresh) "it retracts")
@@ -497,6 +498,18 @@
     (is (some? (d/entity main-b [:seon.task/id "zz-land/t"])) "the added task file's task is main's")
     (is (= (program/program-digest seeded-b) (program/program-digest main-b))
         "the program main holds is the one a seed of B holds: one program digest")))
+
+;; docs/source.md#a-program-file: a refresh writes only the entries a changed resource moved. An agent's start-up catch-up of a branch
+;; that moved a schema resource measured 203M ticks / 549 MB (cost canary 8a8f351fc6522975, tests2): every entry of a 310-entry resource was
+;; written again, and an unchanged text wrote 315 ops. Red before file-paths-tx left out the entries db holds as stated.
+;; Estimate: an empty db and one import of a 3-entry resource ~1M, two refreshes of it ~0.5M = 2000000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-refresh-writes-only-the-schema-entries-that-moved
+  (let [p "resources/seon/schemas/zz-moved.edn"
+        text "{:zz/a :string\n :zz/b :int\n :zz/c :keyword}\n"
+        db (let [db (ts/test-db)] (d/db-with db (source/import-tx db {p text})))
+        entries (fn [tx] (set (keep :schema/key (filter map? tx))))]
+    (is (empty? (entries (source/refresh-tx db {p text}))) "an unchanged resource writes no entry again")
+    (is (= #{:zz/b} (entries (source/refresh-tx db {p (clojure.string/replace text ":zz/b :int" ":zz/b :double")}))) "an edited one writes the entry it moved alone")))
 
 ;; docs/source.md#commit-the-merges-branch: the merges commit carries each merged task's landing message under its task line
 ;; Estimate: a test db with one task ~0.5M, one message ~10k = 600000

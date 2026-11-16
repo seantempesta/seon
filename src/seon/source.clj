@@ -529,15 +529,23 @@
 
 (defn- file-paths-tx
   "The facts that make the files at paths db's as files ({relative path text}) hold
-  them: each file's facts (file-tx), and every entry or file of them no file makes retracted."
+  them: each file's facts (file-tx) that db does not hold already, and every entry or file of them no file makes retracted. An entry
+  db holds as the text states it is not written again: an edit of one entry of a 310-entry schema resource wrote all 310 (and an
+  unchanged text 315 ops), each built, checked and applied for nothing, on every catch-up that read the file. O(entries of the
+  files): one lookup and one compare an entry."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:set :string]] :seon.db/tx-data]}
   [db files paths]
   (let [ents (concat (for [p paths a [:schema/file :config/file] dt (d/datoms db :avet a p)] (:e dt)) (keep #(pdb/eid db :file/path %) paths))
-        new (vec (for [p (sort paths) :let [t (get files p)] :when t
-                       op (file-tx p t)]
-                   op))
         names [:schema/key :config/key :file/path]
-        mk (set (for [op new k names :let [v (get op k)] :when (some? v)] [k v]))]
+        made (vec (for [p (sort paths) :let [t (get files p)] :when t
+                        op (file-tx p t)]
+                    op))
+        ;; an entity by its identity whose every stated value db already holds
+        held? (fn [op] (when-let [[k v] (some #(when-some [v (get op %)] [% v]) names)]
+                         (when-let [e (pdb/eid db k v)]
+                           (let [x (d/entity db e)] (every? (fn [[a b]] (= b (get x a))) op)))))
+        mk (set (for [op made k names :let [v (get op k)] :when (some? v)] [k v]))
+        new (into [] (remove #(and (map? %) (held? %))) made)]
     (into (vec (for [e (distinct ents) :let [x (d/entity db e)
                                              k (some #(when-some [v (get x %)] [% v]) names)]
                      :when (not (mk k))]
