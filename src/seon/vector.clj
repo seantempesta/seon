@@ -412,7 +412,7 @@
     (vswap! (:facts handle) assoc :exit (:exit f) :exited-ms (System/currentTimeMillis))
     f))
 
-(defn- spawn!
+(defn- start!
   "Start the helper (`seon embed-worker` in this checkout's target/), its model still loading, and hold it in the handle:
   the helper {:process :pid :in :out :new true}, or :seon.vector/model-unopened (the model file missing) or
   :seon.vector/helper-died (it did not start). Its first frame, {:ready ..} once its model is loaded or {:error e}, is read
@@ -423,13 +423,13 @@
   (let [path (cfg/value :seon.config.vector/model)
         bin (first (helper-argv))]
     (if-not (.exists (java.io.File. ^String path))
-      (contract/error :seon.vector/model-unopened #'seon.vector/spawn! (str "no model file at " path " (bin/build embed fetches it)") {:path path})
+      (contract/error :seon.vector/model-unopened #'seon.vector/start! (str "no model file at " path " (bin/build embed fetches it)") {:path path})
       (let [_ (.mkdirs (java.io.File. (str (cfg/checkout) "/target/tmp")))
             p (try (.start (doto (ProcessBuilder. ^java.util.List (helper-argv)) (.directory (java.io.File. (str (cfg/checkout) "/target")))
                              (.redirectError (java.io.File. ^String (:err handle)))))
                    (catch java.io.IOException e e))]
         (if (instance? Throwable p)
-          (contract/error :seon.vector/helper-died #'seon.vector/spawn! (str bin " did not start: " (.getMessage ^Throwable p)) {:exit -1 :stderr ""})
+          (contract/error :seon.vector/helper-died #'seon.vector/start! (str bin " did not start: " (.getMessage ^Throwable p)) {:exit -1 :stderr ""})
           (let [h {:process p :pid (.pid p) :in (.getOutputStream p) :out (.getInputStream p) :new true}]
             (vreset! (:helper handle) h)
             (vreset! (:facts handle) {:pid (:pid h) :started-ms (System/currentTimeMillis)})
@@ -473,7 +473,7 @@
                            (first (reduce (fn [[acc vs ts] n] [(conj acc {:value {:model model :vectors (subvec vs 0 n) :tokens (subvec ts 0 n)} :cost n})
                                                                (subvec vs n) (subvec ts n)])
                                           [[] (:vectors r) (:tokens r)] ns))))
-        h0 (when (seq texts) (or @(:helper handle) (spawn! handle)))]
+        h0 (when (seq texts) (or @(:helper handle) (start! handle)))]
     (cond
       (empty? texts) (outcomes {:vectors [] :tokens []})
       (contract/error? h0) (outcomes h0)
@@ -487,7 +487,7 @@
                                      (let [w (send! @cur req)
                                            w (if (and (= :unsent w) (not (:new @cur)))
                                                (do (finished handle @cur true)
-                                                   (let [h2 (spawn! handle)] (if (contract/error? h2) h2 (do (vreset! cur h2) (send! h2 req)))))
+                                                   (let [h2 (start! handle)] (if (contract/error? h2) h2 (do (vreset! cur h2) (send! h2 req)))))
                                                w)]
                                        (cond (contract/error? w) (do (vreset! over true) w)
                                              (= :unsent w) (do (vreset! over true) (died handle @cur "was gone before the request"))

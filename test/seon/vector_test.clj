@@ -430,7 +430,7 @@
         (is (empty? (:to-api o)) "and the round has nothing to sweep"))))))
 
 ;; ---- the model in its own process (docs/vector.md#the-model) ------------------------------------
-;; These start the built binary's `embed-worker` (seon.vector/spawn! is a :seon.config.source/binary-vars
+;; These start the built binary's `embed-worker` (seon.vector/start! is a :seon.config.source/binary-vars
 ;; var, so bin/test builds target/seon first) and the real model, bin/build embed.
 
 (defn- maps-model?
