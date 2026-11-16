@@ -5,5 +5,6 @@
  {:seon.task/name "a-stub-providers-port-is-the-kernels"
   :seon.task/plan "FOUND (tests2, 2026-11-17): seon.model-test/a-streamed-reply-ends-when-the-server-ends-it went red in jolt/tests2 28915ce5a7's seon_done (a stray: that change reached it through seon.agent, not its code): \"port 39147 is already in use (Address already in use, errno 48)\". The test picks its stub server's port as (+ 20000 (rand-int 20000)) (model_test.clj:56), so a port another process holds fails it, at random. PRIOR WORK: seon.web/web-proc already binds :port 0 and reads the kernel's port back as (:port server) (web.clj:515), the adapter's own answer. THE CHANGE: the stub binds :port 0 and the request's base-url reads (:port server); sweep test/ for other (rand-int ...) ports and fix them the same way. PROOF: the test as it is, green with a listener held on the port it used to pick (red first: bind a socket on the port the old form drew)."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.model-test/a-streamed-reply-ends-when-the-server-ends-it}}
+  :seon.task/proofs #{seon.model-test/a-streamed-reply-ends-when-the-server-ends-it}
+  :seon.task/estimate {seon.model-test/a-streamed-reply-ends-when-the-server-ends-it {:n 1 :order :constant :ticks 2000000 :bytes 4000000}}}
 ]
