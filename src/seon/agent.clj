@@ -2260,13 +2260,15 @@
   its record holds them and its own cite! and uncite! change them, and a merge of main never brings one back."
   {:malli/schema [:=> [:cat :seon.task/id] :any]}
   [task]
-  ;; :seon.agent/task is root's alone, on main (one writer per attribute, docs/users.md): the agent reads it as it hears main, so
-  ;; begun is this process's own state, never a write of root's fact on the branch (two writers disagreed at a whole task's stage move)
-  (let [k (:key @state) e (d/entity (db) [:seon.agent/key k])]
-    (when-not (= task (:begun @state))
-      (let [made? (or (nil? e) (empty? (task/cites-of (db) (:db/id e))))]
+  ;; :seon.agent/task is root's alone, on main (one writer per attribute, docs/users.md), so it is never written here; whether the
+  ;; task is begun is read from what begin-run-tx writes (the task running, the agent's system page), so nothing is written twice
+  (let [k (:key @state) db (db) e (d/entity db [:seon.agent/key k])
+        sys (ref/page-top db doc/system-page)
+        begun? (and e (= :running (:seon.task/execution (d/entity db [:seon.task/id task])))
+                    (or (nil? sys) (some #(= sys (:db/id %)) (:seon.agent/system e))))]
+    (when-not begun?
+      (let [made? (or (nil? e) (empty? (task/cites-of db (:db/id e))))]
         (begin-run-tx! task)
-        (swap! state assoc :begun task)
         (when made? (transact! (task/agent-cites-tx (db) [:seon.agent/key k] k)))))))
 
 (defn begin-run-tx

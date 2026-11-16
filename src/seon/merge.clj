@@ -679,7 +679,7 @@
         name-of (fn [e] (let [n (named branch e)] (if (= n e) (named main e) n)))
         held (into {} (map (juxt :key identity)) (entries branch))
         decided? (fn [k0 i] (when-let [en (held k0)] (and (:resolved? en) (= i (:theirs en)))))
-        judged (for [k (into (sorted-set-by #(compare (pr-str %1) (pr-str %2))) (map k-of) fs)
+        judged (for [k (sort-by (fn [[_ e a]] [e a]) (distinct (map k-of fs)))
                      :let [k0 (k0s k) b (at base k) i (at main k) f (at-branch k)]
                      :when (and (not= b i) (not= b f) (not= i f))]
                  [(decided? k0 i) (cond-> {:key k0 :entity (name-of (second k0))}
