@@ -215,16 +215,15 @@
                                                        ;; process tests run on the tree's one booted candidate, on a branch of this batch's own
                                                        (when-let [cd (get-in st [:candidates (or (:checkout it) (:branch it))])]
                                                          (and (:process? it) (contains? (:needs it) [[:candidate (:tree cd)] (:tree cd)])))
-                                                       (assoc :seon.test/candidate (assoc (select-keys (get-in st [:candidates (or (:checkout it) (:branch it)) :candidate]) [:port :store :main])
-                                                                                          :branch (keyword (str "candidate-batch-" bid)))))}
+                                                       (assoc :seon.test/candidate (contract/message :seon.test/candidate
+                                                                                                    (assoc (get-in st [:candidates (or (:checkout it) (:branch it)) :candidate])
+                                                                                                           :branch (keyword (str "candidate-batch-" bid))))))}
                                                ;; a build, a seed or a check step: run on the run's checkout
-                                               (cond-> {:kind (:kind it) :tree (:tree it) :checkout (:checkout it)
-                                                        :name (if (#{:build :seed} (:kind it)) (:kind it) (first k)) :digest (second k)
-                                                        :binary? (boolean (:binary? it)) :bound (:bound it) :seon.prove/batch (fx/batch-tag bid)}
-                                                 ;; an agent branch's candidate names its branch (it has no checkout), and, when its change moved a
-                                                 ;; build input, the write-out its build is made from (seon.fx/run-item)
-                                                 (:branch it) (assoc :branch (:branch it))
-                                                 (:write-out it) (assoc :write-out (:write-out it))))}
+                                               ;; the item as its effect runs it, made from its schema: a key the item gains (an agent branch's
+                                               ;; :branch, its build's :write-out) reaches seon.fx/run-item with no edit here
+                                               (contract/message :seon.prove/item-request
+                                                                 (assoc it :name (if (#{:build :seed} (:kind it)) (:kind it) (first k)) :digest (second k)
+                                                                        :binary? (boolean (:binary? it)) :seon.prove/batch (fx/batch-tag bid))))}
                                  (= plain c) (assoc :seon.fx/processes 1)))]
           (recur st (conj outs m) (inc sent)))))))
 
@@ -555,7 +554,7 @@
         names (not-empty (:names m))
         mode (or (:mode m) :judge)
         key (run-key branch (:digest m) names mode (boolean (:process? m)))
-        req (-> m (select-keys [:branch :digest :agent :proofs :checkout :tree :process?]) (assoc :key key :t t :names names :mode mode))
+        req (-> (contract/message :seon.prove/request m) (dissoc :verdicts) (assoc :key key :t t :names names :mode mode))
         done (get-in st [:done (slot req)])]
     (cond
       ;; a run of this key in flight: joined

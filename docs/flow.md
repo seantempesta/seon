@@ -153,6 +153,15 @@ Every component of Seon is a step-fn proc declared as data (`resources/seon/syst
 - the work is done when the count of messages reaches zero: each one promised is counted, each one taken is taken off, and zero is quiet ([below](#idioms-for-seon));
 - a proc never binds an out-port to its own in-port's channel: Flow names a channel by one port, so the in-port's close is missed and the proc reads a closed channel forever. A proc that needs a later step of its own asks another proc that answers on its in-port (the writer asks the flusher for its `:commit`).
 
+## Messages are made from their schema
+
+A message one proc or process sends another is made by ```seon.contract/message```: the keys its map schema names, checked there, so the schema is the one list of what crosses, and a key the receiver gains reaches it with no edit at the sender. A hand list of keys at a send dropped each new key in turn: the api's `:process?`, the test batch's candidate, an item's `:write-out` and the effect's request (`:seon.prove/request`, `:seon.test/candidate`, `:seon.prove/held-candidate`, `:seon.prove/item-request`, `:seon.fx/admission`). Health's `:message-lists` law reads a send whose line takes a `select-keys`; the sends that keep one are a reply's chosen part or a message yet to be given its schema:
+- `seon.system/end-agent`, `seon.system/ext-op`: a reply of an agent's `:status` and `:ended-ms`, and of the build's counts.
+- `seon.system/await-message`: an await's own `:ms` and `:due` from its options.
+- `seon.agent-proc/agent-frame`: the status fields a frame carried.
+- `seon.vector/round`: an embedding round's point.
+- `seon.web/http-in`: the render messages `:toggle` and `:at` (web's, to be made from a schema).
+
 ## Idioms for Seon
 
 How Seon meets each need on Flow.

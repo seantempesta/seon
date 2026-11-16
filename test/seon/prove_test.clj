@@ -626,7 +626,8 @@
   (let [[st o ask] (tree-run 4 {:items {} :process {'a.p-test/t "dp"} :build {:tree "T" :needed? true}})
         [b] (fx-asks o)]
     (is (true? (get-in ask [:req :process?])) "a checkout's run asks its agent for its process items")
-    (is (= [{:kind :build :tree "T" :checkout "/ck" :name :build :digest "T" :binary? false :bound nil}] (mapv #(dissoc (get-in % [:req :req]) :seon.prove/batch) (fx-asks o)))
+    ;; the request made from its schema (:seon.prove/item-request): a key the item has none of is left out, never sent as nil
+    (is (= [{:kind :build :tree "T" :checkout "/ck" :name :build :digest "T" :binary? false}] (mapv #(dissoc (get-in % [:req :req]) :seon.prove/batch) (fx-asks o)))
         "the build alone is granted, though three workers are free")
     (let [[st o1] (feed st [(answer-of b {:value {:pass 1 :fail 0 :error 0 :ms 900}})])
           [sd] (fx-asks o1)

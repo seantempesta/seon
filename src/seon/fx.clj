@@ -1503,7 +1503,7 @@
                 ;; deps'), booted once in root's process and held by the prove proc for every process test of the tree
                 :candidate (let [c ((requiring-resolve 'seon.test-store/boot-candidate!) checkout)]
                              (spit log (str "candidate " (pr-str (select-keys c [:port :writer-pid :system-pid :dir :runs :store :main])) "\n") :append true)
-                             (if (:port c) {:exit 0 :candidate (select-keys c [:port :writer-pid :system-pid :dir :runs :store :main])} {:exit 1 :out (pr-str (select-keys c [:log :exit]))})))
+                             (if (:port c) {:exit 0 :candidate (contract/message :seon.prove/held-candidate c)} {:exit 1 :out (pr-str (select-keys c [:log :exit]))})))
             ms (profile/ms-since t0)
             stored (when-not (#{:build :seed :candidate} kind) (stored-results {name digest}))
             _ (when pstore (doseq [^java.io.File d (some-> (java.io.File. ^String dir) .listFiles seq)
@@ -1555,7 +1555,7 @@
         failed (do (some-> dropped (as-> x (drop-write-out {:req x}))) failed)
         (:port c)
         {:value {:pass 1 :fail 0 :error 0 :failures [] :ms (profile/ms-since t0)
-                 :candidate (cond-> (select-keys c [:port :writer-pid :system-pid :dir :runs :store :main]) dropped (assoc :write-out dropped))}}
+                 :candidate (contract/message :seon.prove/held-candidate (cond-> c dropped (assoc :write-out dropped)))}}
         :else (error #'seon.fx/run-item :seon.fx/io-error (str "the candidate of branch " (:branch req) " did not boot: its :log and :exit are this error's") (assoc (select-keys c [:log :exit]) :path (str (:dir c))))))
     :else (run-tree-item req)))
 

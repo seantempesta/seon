@@ -573,6 +573,22 @@
   {:malli/schema [:=> [:cat :any] :boolean]}
   [v] (and (map? v) (keyword? (:seon.error/type v))))
 
+(defn message
+  "Map m as the message the map schema k names: the keys k names (m's others left out, never a list kept where it is sent),
+  checked against k where it is made. A message one proc or process sends another is made by this, so its schema is the one
+  list of what crosses, and a key the schema gains reaches the receiver with no edit at the sender (hand lists dropped :process?,
+  the candidate, an item's :write-out and grant's, 2026-11-17). Throws :seon.contract/invalid-message, its problems, when the
+  message does not hold. Cost: one entries walk of k and one validate. See docs/flow.md#messages-are-made-from-their-schema."
+  {:malli/schema [:=> [:cat :qualified-keyword :map] :map]}
+  [k m]
+  (let [s (held k)
+        v (select-keys m (map first (m/entries (m/deref s))))]
+    (if (m/validate s v)
+      v
+      (let [e (error :seon.contract/invalid-message #'seon.contract/message (str "the message " k " does not hold: " (count (problems s v)) " problems")
+                     {:schema k :seon.error/problems (problems s v)})]
+        (throw (ex-info (:seon.error/message e) e))))))
+
 
 ;; ---- arming ------------------------------------------------------------------------------
 

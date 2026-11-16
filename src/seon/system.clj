@@ -678,7 +678,7 @@
       ;; the test service (seon.prove): the request goes to its proc, the caller (a session, or an
       ;; agent's turn through its proc) is answered when the run it joined ends
       :prove (let [[st rid] (pend st p :prove (:agent m))]
-               (step/out! o [:prove :req] (assoc (select-keys m [:branch :t :digest :agent :proofs :names :mode :checkout :tree :verdicts :process?]) :rid rid))
+               (step/out! o [:prove :req] (assoc (contract/message :seon.prove/request m) :rid rid))
                st)
       ;; answered when its end is recorded (end-agent: its view entry, :status and :ended-ms), never before: a caller waits
       ;; on that answer, not on an end event it may have missed; one already ended is answered its entry at once
@@ -695,7 +695,7 @@
       :fx (let [owner (keyword "fx" (name (:kind m)))]
             (if (contains? (graph/fx-owners (get-in st [:system :procs])) owner)
               (let [[st rid] (pend st p :fx nil)]
-                (step/out! o [owner :ask] (merge {:prio 0} (select-keys m [:prio :seon.fx/class :seon.fx/processes :seon.prove/askers]) {:req (:req m) :dest {:rid rid}}))
+                (step/out! o [owner :ask] (merge {:prio 0} (contract/message :seon.fx/admission m) {:dest {:rid rid}}))
                 ;; the store's sweep: spawns wait for its answer (spawn-agent, deliver-rid)
                 (cond-> st (= :collect (:kind m)) (assoc ::sweep rid)))
               (reply! st o p (contract/error :seon.fx/unknown-kind #'seon.system/ext-op (str "no effect kind " (:kind m))))))

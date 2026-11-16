@@ -165,6 +165,10 @@
    {:law :printer :fact :form/refs :page "docs/render.md" :section "docs/render.md#one-printer" :rule printer-law}
    {:law :clocks :fact :form/src :pre ["leep" "imeout" "deadline" "-MS"] :page "docs/clocks.md" :anchor "time-decides" :tests? true
     :rule (text-law #"(?m)[Ss]leep|[Tt]imeout([^s]|$)|deadline|[A-Z]-MS")}
+   ;; a message sent with a hand list of its keys (docs/flow.md#messages-are-made-from-their-schema): a send whose line takes a select-keys,
+   ;; which drops a key the receiver gains (2026-11-17: :process?, the candidate, an item's :write-out); made by seon.contract/message instead
+   {:law :message-lists :fact :form/src :pre ["select-keys"] :page "docs/flow.md" :anchor "messages-are-made-from-their-schema"
+    :rule (text-law #"[(](step/out!|step/ask|step/ask-edge|reply!)[^\n]*[(]select-keys ")}
    {:law :measures :fact :form/src :pre ["currentTimeMillis" "nanoTime" "now-ns" "now-ms"] :page "docs/clocks.md" :rule (text-law #"currentTimeMillis|nanoTime|now-ns|now-ms")}
    {:law :resolution :fact :form/src :pre ["resolve" "intern" "alter-var-root" "with-redefs"] :page "docs/resolution.md"
     :rule (text-law #"[(](requiring-resolve|ns-resolve|resolve '|intern|alter-var-root|with-redefs)[\s)]")}
