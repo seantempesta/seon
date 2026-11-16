@@ -252,7 +252,9 @@
   program), for a test that only reads or uses d/db-with: no branch is made."
   {:malli/schema [:=> [:cat] :seon.host/db]}
   []
-  (let [c (pdb/connect @store)] (try @c (finally (d/release c)))))
+  ;; with the declarations this process's branch adds (seon.db/missing-declarations), as a value: the seed stays as it was made
+  (let [c (pdb/connect @store) db (try @c (finally (d/release c))) ms (pdb/missing-declarations (:schema db))]
+    (if (seq ms) (pdb/speculate-db db ms) db)))
 
 (defn test-branch!
   "(f cfg conn) on a fresh branch of the test store (its seed: the schema and about 2,000
@@ -262,6 +264,8 @@
   [f]
   (let [b (keyword (str "test-" (random-uuid)))
         [conn _] (pdb/open-main! @store b)
+        ;; the declarations this process's branch adds, on the test's own branch (seon.db/install-missing!: nothing when none)
+        _ (pdb/install-missing! conn)
         seed (pdb/connect @store)]
     (try (f (assoc @store :branch b) conn)
          (finally (d/release conn) (pdb/delete-main! seed b) (d/release seed)))))
