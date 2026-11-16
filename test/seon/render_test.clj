@@ -1063,6 +1063,20 @@
             same (for [[k r] ran :when (and (= :same r) (mine (first k)))] (first k))]
         (is (empty? same) (str a " reran, to the same output: " (vec same)))))))
 
+;; See docs/render.md#reactive-renders. Estimate: as a-commit-of-one-attribute-reruns-only-what-shows-it, one advance by one eval
+;; added (~0.2M): ~1.5M ticks, ~10 MB: 2,000,000.
+(deftest ^{:seon.test/estimate {:ticks 2000000 :bytes 10000000}} a-new-eval-does-not-rerun-the-tasks-problems
+  ;; web, 2026-11-16 (task seon.ratom/web-reads-on-the-core, cause c): own-problems drew the task's open problems (seon.problems/own, a db
+  ;; read of the errors raised in its task, ~1.5 MB a run at a session agent) and the agent's recent failures (recent-errors, every eval's
+  ;; and every call's error path) in one component, so each new eval reran the db read to the same output. The recent failures are their
+  ;; own component, so a new eval reruns only the cheap one. Red before: own-problems ran, :same
+  (let [[_ branch _] (paged-dbs)
+        kw (step-walk branch)
+        a3 (seon.db/eid branch :seon.agent/key "a3")
+        db (d/db-with branch [{:seon.eval/id "e-new" :seon.eval/agent a3 :seon.eval/code "1" :seon.eval/intent "one more"}])
+        ran (:ran (:p (#'p/advance-walk! kw db :task-demo-f identity)))]
+    (is (not (contains? (set (map (comp first key) ran)) 'seon.render.ui/own-problems)) (str "the task's problems did not rerun: " (pr-str ran)))))
+
 ;; See docs/render.md#the-debug-page-is-the-wire-request
 ;; Estimate: paged-dbs' two dbs (~1M), the branch's kept walk built once (~0.3M), and two requests read at the head, one cold (~0.5M)
 ;; and one from the kept walk's answers (~0.05M): ~1.9M; 2,000,000 ticks, worked from the work.
