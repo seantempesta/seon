@@ -958,7 +958,9 @@
     (is (schemas 'reads-schemas) "a test reaching seon.reconcile/index takes the schema class")
     (is (not (schemas 'pure)) "a pure test takes no schema class")
     (is (schemas 'walks-the-keys) "a test walking the registry takes the schema class: every entry is its input")
-    (is (schemas 'reads-entity-index) "a test reading the entity index takes the schema class: the entity schema it chooses at run time is its input")
+    ;; THE FOCUS (C) slice 2: the entries a test consults through the entity index are its recorded reads (seon.db/checked,
+    ;; seon.proofs/test-vars), so a schema edit selects it by readers, never every test reaching the index (1,646 of 2,277)
+    (is (not (schemas 'reads-entity-index)) "a test reading the entity index takes no whole schema class: the entries it consulted are its reads")
     (is (schemas 'walks-by-a-helper) "and so does one walking it by a helper of its namespace")
     ;; docs/source.md#tests-run-by-reach: what a digest takes besides code is its test's static reads, kept with its verdict
     ;; until its run records them (seon.proofs/reads-key's :keys)
