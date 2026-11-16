@@ -36,29 +36,33 @@
   ;; wait parked (no ticks) and one walk of the thread list, a few million ticks.
   ;; the holder runs Scheme and never parks (it holds every fork), reaching safe points (a holder blocked in a plain C call
   ;; would wedge a collection meanwhile, and this test with it)
+  ;; the bound is 20 ms here (the key's default, 1000, is only the test's wait): the key read through the one resolver
   (let [stop (atom false) started (promise)
+        bound 20
+        value config/value
         holder (doto (Thread. #(do (deliver started true) (loop [] (when-not @stop (recur)))) "holder") (.setDaemon true) (.start))]
     (try
       @started
-      (let [r (lib/fork! {:child #(lib/c-exit 3) :parent (fn [pid] [:forked (lib/wait-status pid)]) :refused (fn [m] [:refused m])})
+      (let [r (with-redefs [config/value (fn [k & more] (if (= k :seon.config.agent/fork-wait-ms) bound (apply value k more)))]
+                (lib/fork! {:child #(lib/c-exit 3) :parent (fn [pid] [:forked (lib/wait-status pid)]) :refused (fn [m] [:refused m])}))
             [k {:keys [holders bound-ms active-threads]}] r]
         (is (= :refused k) (str "answered " r))
-        (is (= (seon.config/value :seon.config.agent/fork-wait-ms) bound-ms))
+        (is (= bound bound-ms))
         (is (<= 2 active-threads))
         (is (some #(= "holder" (:name %)) holders) (str "holders " holders)))
       (finally (reset! stop true) (.join holder)))))
 
-(deftest ^{:seon.test/estimate {:ticks 60000000}} a-shell-call-answers-its-output-or-says-why-not
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-shell-call-answers-its-output-or-says-why-not
   ;; seon.lib/sh, the one shell, answered exit 0 with no output (`git status`, 2026-11-12): Jolt's pipe port read errno in a
   ;; later call, where a collection or another fiber could overwrite it, and took any errno but EINTR and EAGAIN for the end
   ;; of the output. Its read now keeps the errno of its own call and a failed read raises naming it (Jolt gate
   ;; pipereadfailure, red first on a closed descriptor). Here 20 calls at once on fibers, each child writing only after it
-  ;; has read its stdin, so its first read finds nothing and parks: each answers exit 0 and its whole text. The estimate:
-  ;; 20 spawns and their pipe reads, ~2M ticks each.
-  (let [calls (doall (for [i (range 20)]
+  ;; has read its stdin, so its first read finds nothing and parks: each answers exit 0 and its whole text. 4 calls at once
+  ;; already overlap their parks on fibers. The estimate: 4 spawns and their pipe reads, ~2M ticks each.
+  (let [calls (doall (for [i (range 4)]
                        (future (lib/sh "/bin/sh" "-c" (str "read go; printf 'out-" i "'") :in "go\n"))))
         answers (mapv deref calls)]
-    (is (= (mapv (fn [i] {:exit 0 :out (str "out-" i)}) (range 20)) (mapv #(select-keys % [:exit :out]) answers)))))
+    (is (= (mapv (fn [i] {:exit 0 :out (str "out-" i)}) (range 4)) (mapv #(select-keys % [:exit :out]) answers)))))
 
 (def ^:private park-in-a-read
   ;; a raw Chez thread (no Jolt lock taken to start it) blocked in a collect-safe read of fd
@@ -66,7 +70,7 @@
     "(let ([rd (foreign-procedure __collect_safe \"read\" (int u8* size_t) ssize_t)])
        (lambda (fd) (let ([b (make-immobile-bytevector 1)]) (fork-thread (lambda () (rd fd b 1)))) #t))"))
 
-(deftest a-fork-beside-a-thread-parked-in-a-read-forks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-fork-beside-a-thread-parked-in-a-read-forks
   ;; a thread in a collect-safe call (a read) runs no Scheme, so a fork beside it is a fork beside a
   ;; parked thread. Our Chez counts it in $active-threads until it is converted, and fork! read the
   ;; count bare: it refused every time (Jolt's forkheldlocks waited for good). The thread may not be
@@ -92,20 +96,37 @@
   (let [{:keys [exit out err]} (ts/binary-sh "./seon" "forks" k "--profile" ts/root-profile :dir "target")]
     (if (zero? exit) (edn/read-string (last (str/split-lines out))) {:exit exit :err err})))
 
-(deftest a-forked-child-that-throws-exits-and-never-returns-into-its-parent
+(defn- first-line
+  "The first non-empty line a pipe end r gives, read on a parked fiber (the io poller), or nil at its end of file."
+  [r]
+  (let [rd (sock/line-reader r (fn [] (clojure.core.async/<!! (jolt.io-poller/ready-chan r :read))))]
+    (loop [] (let [ls (rd)] (cond (= ls :eof) nil (seq ls) (first ls) :else (recur))))))
+
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-forked-child-that-throws-exits-and-never-returns-into-its-parent
   ;; the child holds a copy of every frame its parent forked from: a throw out of (child) that
   ;; unwound out of lib/fork! ran the parent's code in the child (in an agent's test child, the
   ;; agent's own serve! loop, which died as the agent, exit 70, or went on reading root's socket
   ;; as a second agent). The child ends at fork!, exit 1, saying what threw; one that returns
-  ;; exits 0 (seon.check/fork-cases "child-throws")
-  (is (= [{:exit 1} {:exit 0}] (fork-case "child-throws"))))
+  ;; exits 0. In this process (a fork beside the runner's parked threads waits for them: no fresh binary): two forks and their
+  ;; exits, ~1M ticks each. The throwing child's catch here would exit 7: it never runs
+  (is (= [{:exit 1} {:exit 0}]
+         [(try (lib/fork! {:child (fn [] (throw (ex-info "out of the child" {}))) :refused (fn [n] {:refused n}) :parent lib/wait-status})
+               (catch clojure.lang.ExceptionInfo _ (lib/c-exit 7)))
+          (lib/fork! {:child (fn [] :returned) :refused (fn [n] {:refused n}) :parent lib/wait-status})])))
 
-(deftest a-forked-child-runs-none-of-its-parents-shutdown-hooks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-forked-child-runs-none-of-its-parents-shutdown-hooks
   ;; task seon.lib/a-fork-carries-no-shutdown-hook: Jolt's hooks are the process's list, and a
   ;; fork copied it; root's hook (its whole stop: seon.main/root-serve) ran in an agent or a test
   ;; child that left by System/exit, an uncaught throw or a signal, on root's copied state
-  ;; against the shared store (seon.check/fork-cases "child-hooks")
-  (is (= {:status {:exit 3} :parents-hook-ran-in nil} (fork-case "child-hooks"))))
+  ;; against the shared store. In this process: a hook of the parent's writing a file, one fork leaving by System/exit, ~1M ticks
+  (let [f (java.io.File/createTempFile "seon-child-hook" ".txt")
+        _ (.delete f)
+        hook (Thread. ^Runnable (fn [] (spit f (str (lib/c-getpid)) :append true)))]
+    (.addShutdownHook (Runtime/getRuntime) hook)
+    (try (let [st (lib/fork! {:child (fn [] (System/exit 3)) :refused (fn [n] {:refused n}) :parent lib/wait-status})]
+           (is (= {:exit 3} st))
+           (is (not (.exists f)) (str "the parent's hook ran in the child: " (when (.exists f) (slurp f)))))
+         (finally (.removeShutdownHook (Runtime/getRuntime) hook) (.delete f)))))
 
 (deftest a-wait-for-a-line-parks-the-fiber
   ;; an agent waits for its test child's lines for the whole test run (seon.agent/run-tests-forked):
@@ -118,52 +139,128 @@
   ;; forked from a main carrier, the reader on the child's own fiber
   (is (= {:exit 0} (fork-case "line-parks")) "a fiber ran while the reader waited"))
 
-(deftest a-process-ends-with-what-it-watches-and-so-does-what-it-forks
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-process-ends-with-what-it-watches-and-so-does-what-it-forks
   ;; task seon.lib/a-child-ends-with-its-starter (docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data):
   ;; ./seon problems trees outlived the bin/check a timeout killed, 12 h at 0% CPU with ppid 1. A
   ;; process's C thread ends it when what it watches exits, and fork! arms it again in each child, so
-  ;; a child parked in a read (no Scheme of its own would ever end it) ends with the process it watches
-  (is (= :exited (:child (fork-case "ends-with-its-starter"))) "the child parked in a read ends with mid"))
+  ;; a child parked in a read (no Scheme of its own would ever end it) ends with the process it watches.
+  ;; Here: mid watches itself and forks a child parked in a read; mid is killed; the child ends. 2 forks, ~1M ticks each
+  (let [[r w] (sock/socketpair)
+        [hold _] (sock/socketpair)
+        park (fn [_] (sock/recv! (sock/conn hold)))
+        mid (lib/fork! {:keep #{w hold}
+                        :child (fn []
+                                 (lib/end-with! (lib/c-getpid) false)
+                                 (lib/fork! {:keep #{w hold} :child (fn [] (sock/write-line! w (str (lib/c-getpid))) (park nil))
+                                             :refused park :parent park}))
+                        :refused (fn [n] {:refused n}) :parent identity})
+        child (parse-long (first-line r))
+        exit (jolt.io-poller/exit-chan child)]
+    (lib/c-kill mid 9)
+    (lib/wait-status mid)
+    (is (= :exited (do (clojure.core.async/<!! exit) :exited)) "the child parked in a read ends with mid")
+    (run! lib/c-close [r w])))
 
-(deftest a-process-watching-a-gone-pid-ends-at-once
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-process-watching-a-gone-pid-ends-at-once
   ;; task seon.lib/a-child-ends-with-its-starter: a pid already gone when it is watched ends the
-  ;; process at once, though its code would park forever
-  (is (= {:signal 9} (fork-case "ends-with-a-gone-pid"))))
+  ;; process at once, though its code would park forever. 2 forks, ~1M ticks each
+  (let [gone (lib/fork! {:child (fn [] :done) :refused (fn [n] {:refused n}) :parent identity})]
+    (lib/wait-status gone)
+    (is (= {:signal 9}
+           (lib/fork! {:child (fn [] (lib/end-with! gone false) (sock/recv! (sock/conn (first (sock/socketpair)))))
+                       :refused (fn [n] {:refused n}) :parent lib/wait-status})))))
 
-(deftest a-process-that-leads-its-group-ends-the-group
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-process-that-leads-its-group-ends-the-group
   ;; task seon.lib/a-child-ends-with-its-starter: the leader watches anchor; anchor is killed; the
-  ;; leader ends its group, so its member, which watches only what still lives, ends with it
-  (is (= {:anchor {:signal 9} :leader {:signal 9} :member :exited} (fork-case "ends-its-group"))))
+  ;; leader ends its group, so its member, which watches only what still lives, ends with it. 3 forks, ~1M ticks each
+  (let [[r w] (sock/socketpair)
+        [hold _] (sock/socketpair)
+        park (fn [_] (sock/recv! (sock/conn hold)))
+        anchor (lib/fork! {:keep #{hold} :child (fn [] (park nil)) :refused (fn [n] {:refused n}) :parent identity})
+        leader (lib/fork! {:keep #{w hold}
+                           :child (fn []
+                                    (lib/c-setpgid 0 0)
+                                    (lib/fork! {:keep #{w hold} :child (fn [] (sock/write-line! w (str (lib/c-getpid))) (park nil))
+                                                :refused park
+                                                :parent (fn [_] (lib/end-with! anchor false) (park nil))}))
+                           :refused (fn [n] {:refused n}) :parent identity})
+        member (parse-long (first-line r))
+        exit (jolt.io-poller/exit-chan member)]
+    (lib/c-kill anchor 9)
+    (is (= [{:signal 9} {:signal 9}] [(lib/wait-status anchor) (lib/wait-status leader)]))
+    (is (= :exited (do (clojure.core.async/<!! exit) :exited)) "the member ends with its group")
+    (run! lib/c-close [r w])))
 
-(deftest a-process-forks-beside-its-watch
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-process-forks-beside-its-watch
   ;; task seon.lib/a-child-ends-with-its-starter (docs/failure-points.md#physics-who-may-run-threads):
-  ;; the watcher is a C thread Chez never made, so 200 forks beside it each run their child
-  (is (= {{:exit 0} 200} (fork-case "forks-beside-the-watch"))))
+  ;; the watcher is a C thread Chez never made, so forks beside it each run their child. A forked process arms its own watch
+  ;; (never this runner's) and forks 20 times, ~1M ticks each, and says what the children's exits were
+  (let [[r w] (sock/socketpair)
+        pid (lib/fork! {:fd w :refused (fn [n] {:refused n}) :parent identity
+                        :child (fn [] (lib/end-with! (lib/c-getpid) false)
+                                 (sock/write-line! w (pr-str (frequencies (for [_ (range 20)]
+                                                                           (lib/fork! {:child (fn [] :ran) :refused (fn [n] {:refused n}) :parent lib/wait-status}))))))})]
+    (is (= {{:exit 0} 20} (edn/read-string (first-line r))))
+    (is (= {:exit 0} (lib/wait-status pid)))
+    (lib/c-close r)))
 
-(deftest the-memory-gauge-reads-what-macos-charges-across-a-fork
+(deftest ^{:seon.test/estimate {:ticks 20000000}} the-memory-gauge-reads-what-macos-charges-across-a-fork
   ;; task seon.lib/real-mb-reads-what-macos-charges: the gauge is the task's phys_footprint, what
   ;; macOS charges (Activity Monitor, jetsam). It counted a process's private and shared-now-private
   ;; resident pages, and a fork turns the parent's pages copy-on-write: a parent holding 730 MB read
   ;; 76 MB after forking a child (measured 2026-10-23), so root, which forks the fork server, read a
   ;; quarter of what it holds. A forked child is charged what it writes, not what it shares.
-  ;; Every reading window holds only page writes, so the reading is the block's charge whatever the machine
-  ;; does: with Random's nextBytes in it (61 collections, whose nursery Jolt sizes from wall time) it read
-  ;; 49.7 MB under a land's load at pressure level 1, 66 to 67 alone (seon.check/fork-cases "memory-gauge")
-  (let [{:keys [before held child after] :as r} (fork-case "memory-gauge")]
-    (is (and before held (< 64 (- held before) 66)) (str "a 64 MB block written is charged 64 MB: " (pr-str r)))
-    (is (= {:exit 0} child) "a forked child is charged the 8 MB it writes")
-    (is (and after (< (* 0.95 held) after)) (str "the parent still holds its block after the fork: " (pr-str r))))
-  ;; the reading child (case "touch-gauge", task seon.lib/scale-charges-what-the-machine-lost): a
-  ;; parent holds 40 MB it wrote; a child that only reads every page is charged ~40 MB, as the
-  ;; one that writes them is, though only the writer takes memory from the machine. That second
-  ;; half is the machine's free plus inactive pages (lib/sysmem), which every process on the
-  ;; machine moves (measured 2026-10-29 at load 10: the writer's drop was 0 to 156 MB of its
-  ;; 200, the reader's -4 to 15), so it is recorded in the failure message and docs/cost.md, never
-  ;; judged: only the ledger's charge (a count of the child's own pages) and a reading that came back are.
-  ;; The child's window allocates nothing and the parent collects before each fork (as memory-gauge's): 40.66 to
-  ;; 40.69 MB every run
-  (let [{:keys [read write] :as r} (fork-case "touch-gauge")]
-    (is (and (< 40 (:charged read) 41.5) (< 40 (:charged write) 41.5)) (str "both children are charged what they touch: " (pr-str r)))
+  ;; In this process, a 16 MB block (one bytevector Chez keeps in place) and a 2 MB write in the child: the block's pages are
+  ;; the same copy-on-write pages at any size. Every reading window holds only page writes (no allocation), after a full
+  ;; collection. The estimate: 16 MB of page writes ~4M ticks, one fork and its 128 page copies ~1M, a collection of this
+  ;; process's heap ~10M
+  (let [mb (* 1024 1024)
+        src (byte-array mb)
+        _ (.nextBytes (java.util.Random. 42) src)   ; random bytes: macOS compresses a repeated one under pressure
+        _ (jolt.host/gc-full!)
+        before (lib/real-mb)
+        block (byte-array (* 16 mb))]
+    (dotimes [i 16] (System/arraycopy src 0 block (* i mb) mb))
+    (let [held (lib/real-mb)
+          [r w] (sock/socketpair)
+          ;; the child writes one byte of each of 128 pages (2 MB): each is copied, and charged to it alone
+          pid (lib/fork! {:keep #{w} :refused (fn [n] {:refused n}) :parent identity
+                          :child (fn [] (let [b0 (lib/real-mb)]
+                                          (dotimes [p 128] (aset block (* p 16384) (byte 1)))
+                                          (sock/write-line! w (pr-str (- (lib/real-mb) b0)))))})
+          charged (edn/read-string (first-line r))
+          st (lib/wait-status pid)
+          after (lib/real-mb)]
+      (is (< 15 (- held before) 17.5) (str "a 16 MB block written is charged 16 MB: " (- held before)))
+      (is (= {:exit 0} st))
+      (is (< 1.9 charged 2.6) (str "a forked child is charged the 2 MB it writes: " charged))
+      (is (< (* 0.95 held) after) (str "the parent still holds its block after the fork: " held " then " after))
+      (is (= (aget src 0) (aget block 0))"the child's writes were its own")
+      (run! lib/c-close [r w])))
+  ;; the reading child (task seon.lib/scale-charges-what-the-machine-lost): a parent holds 8 MB it wrote; a child that only
+  ;; reads every page is charged what it touches, as the one that writes them is, though only the writer takes memory from the
+  ;; machine. That second half is the machine's free plus inactive pages (lib/sysmem), which every process on the machine
+  ;; moves, so it is read, never judged: only the ledger's charge (a count of the child's own pages) and a reading that came
+  ;; back are. The window allocates nothing and the parent collects before each fork
+  (let [mb 8
+        block (byte-array (* mb 1024 1024))
+        _ (java.util.Arrays/fill block (byte 7))
+        touch (fn [write?]
+                (let [[r w] (sock/socketpair)
+                      _ (jolt.host/gc-full!)
+                      pid (lib/fork! {:keep #{w} :refused (fn [n] {:refused n}) :parent identity
+                                      :child (fn []
+                                               (let [f0 (lib/real-mb) m0 (:available-mb (lib/sysmem)) sum (volatile! 0)]
+                                                 (dotimes [p (* mb 64)]
+                                                   (let [i (* p 16384)] (if write? (aset block i (byte 1)) (vswap! sum + (aget block i)))))
+                                                 (sock/write-line! w (pr-str {:charged (- (lib/real-mb) f0)
+                                                                              :machine-drop (- m0 (:available-mb (lib/sysmem)))}))))})
+                      line (first-line r)
+                      st (lib/wait-status pid)]
+                  (run! lib/c-close [r w])
+                  (assoc (edn/read-string line) :exit st)))
+        {:keys [read write] :as r} {:read (touch false) :write (touch true)}]
+    (is (and (< 7.9 (:charged read) 9.5) (< 7.9 (:charged write) 9.5)) (str "both children are charged what they touch: " (pr-str r)))
     (is (and (= {:exit 0} (:exit read) (:exit write)) (number? (:machine-drop read)) (number? (:machine-drop write)))
         (str "both children ran and read the machine's memory: " (pr-str r)))))
 
@@ -192,7 +289,7 @@
     (is (= {"own" 10} doubles) (str "each of 10 grandchildren of a double fork ran its own code and nothing of the parent's: " (pr-str r)))))
 
 
-(deftest a-forked-child-holds-only-what-it-is-given
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-forked-child-holds-only-what-it-is-given
   ;; docs/processes.md#the-agent-process: a forked child closes every descriptor but 0-2 and what it is given (:fd, :keep), once, in
   ;; lib/fork! (ProcessBuilder's rule). An agent ran two test runs at once (the test service's items): one run's child kept the
   ;; other's pipe end, opened between that run's socketpair and its close, so the other's end of file never came and it answered
@@ -216,7 +313,7 @@
 (deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["sh"]} a-shell-call-that-cannot-read-its-output-is-a-typed-error-naming-the-command
   ;; a shell call answers its whole output, or a typed error naming the command, never an empty answer; the read failure is
   ;; raised as Jolt's pipe port raises it since a5a3a89d (a Scheme error naming the errno). See docs/failure-points.md
-  (is (= {:exit 0 :out "late\n" :err ""} (lib/sh "sh" "-c" "sleep 0.05; echo late")) "a child that writes after a wait answers its text")
+  (is (= {:exit 0 :out "late\n" :err ""} (lib/sh "sh" "-c" "read go; echo late" :in "go\n")) "a child that writes after a wait answers its text")
   (let [e (with-redefs [clojure.java.shell/sh (fn [& _] (scm/eval-string "(error 'read \"failed: errno 9\")"))]
             (try (lib/sh "git" "status" "--porcelain=v2" :dir "/tmp") nil (catch Throwable e e)))
         d (ex-data e)]

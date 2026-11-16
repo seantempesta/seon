@@ -57,4 +57,12 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.problems-test/a-branch-that-adds-state-outside-flow-fails-unless-it-names-its-edge}
   :seon.task/estimate #:seon.problems{stateful-outside-flow {:n 6270, :order :linear, :ticks 60000000, :bytes 300000000}}}
+ {:seon.task/name "a-moved-forms-health-costs-that-form"
+  :seon.task/plan "Owner: web (root's ask, 2026-11-16). FOUND: a move of main that changes one form's text costs health-moved 1.80M ticks / 5.1 MB on main's code (web result/d7e591fc), 18x the ~0.1M bound of docs/cost.md's health row; the laws add 0.34M of it (result/af516f7f). The cost is split-rows' content classes reading the one moved form: each class's candidates and both sides (base and head) of each, the law rules built, stale-sections, uncited-vars and the rest each on the moved var. PRIOR WORK: seon.problems/split-rows, caused-attrs, health-moved (moves with no caused attribute skip split-rows: seon.render.proc/a-moves-health-costs-what-it-moved, done). FIRST: profile split-rows on that move by class (seon.profile/touched after measure!), then cut each class's read to the one form and its var (O(d)), never a class read whole. Bound: ~0.1M ticks for one moved form. PROOF: seon.problems-test/problems-move-at-the-cost-of-what-changed with a moved form's text in its input, its estimate at the bound."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.problems-test/problems-move-at-the-cost-of-what-changed}}
+ {:seon.task/name "the-render-laws-are-health-classes"
+  :seon.task/plan "Owner: web. The render-test rewrites of 2026-11-16 (the 3 s suite: f237fdc687, 7aff37ebaf, 325a24dc81) moved three whole-program checks onto small worlds, so the program itself is no longer checked by them: seon.render-test/a-render-reaches-no-process (no render's reach holds a process var), one-path-to-the-model (the model's request is drawn by one path) and a-site-the-one-printer-section-names-still-prints. Each is a law over the program index, so it belongs with seon.problems/laws as a health class read form by form, a move reading only the forms it moved (as the text laws are: seon.problems-test/bin-laws-text-rules-are-health-classes-read-over-the-forms). PRIOR WORK: seon.problems/laws, unnamed-sites, split-rows; the reach graph (seon.program/reach-graph); :seon.config.source/process-vars. PROOF, red first: a render whose reach holds a process var is a health row; one that does not is none."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.problems-test/a-render-reaching-a-process-is-a-health-row}}
 ]

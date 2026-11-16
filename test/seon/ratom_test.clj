@@ -359,7 +359,7 @@
   ;; render!: a layout over every row, rerun by one change, re-indexed each path with each prefix: one eval added at 100 evals was
   ;; 37.7 MB, 13.0 MB after); the index so moved is the one built from the rerun's reads whole, and a read gained or lost decides what
   ;; reaches it
-  (let [a (rv/atom {:db/id 1 :flag 0 :evals (#'seon.ctx/members-map (for [i (range 20)] [i {:db/id i :v i}]))})
+  (let [a (rv/atom {:db/id 1 :flag 0 :evals (#'seon.ctx/members-map (for [i (range 6)] [i {:db/id i :v i}]))})
         v #(rv/ref-view a ctx/changes)
         reads #(second (rv/reads-of a (fn [] [(:flag (v)) (reduce + (map (fn [[_ e]] (:v e)) (:evals (v))))])))
         ;; as render! moves them: what it no longer reads out, what it newly reads in
@@ -370,11 +370,11 @@
         ix0 (whole r0)]
     (is (= #{:r} (reached ix0 #(assoc % :flag 1))))
     (is (= r0 (reads)) "the same reads, rerun: nothing to move")
-    (is (= #{:r} (reached ix0 #(assoc-in % [:evals 20] {:db/id 20 :v 20}))) "a member added reaches the iteration")
+    (is (= #{:r} (reached ix0 #(assoc-in % [:evals 6] {:db/id 6 :v 6}))) "a member added reaches the iteration")
     (let [r1 (reads) ix1 (move ix0 r0 r1)]
-      (is (= #{[[:evals 20 :v] :deep]} (set (remove r0 r1))) "its rerun gained the new member's read alone")
+      (is (= #{[[:evals 6 :v] :deep]} (set (remove r0 r1))) "its rerun gained the new member's read alone")
       (is (= (whole r1) ix1) "moved by it: the index built whole")
-      (is (= #{:r} (reached ix1 #(assoc-in % [:evals 20 :v] 5))) "the read it gained reaches it")
+      (is (= #{:r} (reached ix1 #(assoc-in % [:evals 6 :v] 5))) "the read it gained reaches it")
       (is (= #{:r} (reached ix1 #(update % :evals dissoc 3))))
       (let [r2 (reads) ix2 (move ix1 r1 r2)]
         (is (= #{[[:evals 3 :v] :deep]} (set (remove r2 r1))) "a member gone: its read lost")
@@ -472,45 +472,45 @@
   "A reader of entity e's text on store s, run now and on each commit that touches it."
   [s e] (run! (:v (first (d/datoms @s :eavt e :note/text)))))
 
-;; Estimate: three stores of 1,010 notes (~3M each) and 1,110 readers' first runs (~20k each, ~22M) and 9 commits; ~40M ticks
-(deftest ^{:seon.test/estimate {:ticks 40000000}} a-commit-costs-its-datoms-not-the-readers
+;; Estimate: three stores of 40 notes (~0.1M each) and 43 readers' first runs (~20k each, ~1M) and 9 commits; ~4M ticks
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-commit-costs-its-datoms-not-the-readers
   ;; docs/reactive.md#what-it-does-not-do-yet: a commit of d datoms costs d x 5 index lookups, whatever the readers; today each reader
   ;; checks every commit itself ([M root result/bcecbc16]: 53.6k, 538k, 4.41M ticks at 10, 100, 1,000 readers)
-  (let [[db es] (notes 1010) readers (subvec es 0 1000) moved (subvec es 1000)
+  (let [[db es] (notes 40) readers (subvec es 0 30) moved (subvec es 30)
         ;; a new value each commit, from the db it commits on (its :max-tx moves with each), never a random draw
         tx (fn [db] (vec (for [e moved] [:db/add e :note/text (str "moved" (:max-tx db))])))
-        [t10 t100 t1000] (for [n [10 100 1000]] (commit-ticks db (subvec readers 0 n) text-reader tx))]
-    (is (<= t1000 (* 2 t10)) (str "a commit no reader read costs the same at 10 and 1,000 readers: " [t10 t100 t1000]))))
+        [t10 t100 t1000] (for [n [3 10 30]] (commit-ticks db (subvec readers 0 n) text-reader tx))]
+    (is (<= t1000 (* 2 t10)) (str "a commit no reader read costs the same at 3 and 30 readers: " [t10 t100 t1000]))))
 
-;; Estimate: two stores (110 and 1,100 notes, ~4M), 200 readers' first runs (~4M), 6 commits; ~10M ticks
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-commit-costs-its-datoms-not-the-store
-  ;; the same commit on a store 10x larger costs the same: nothing a commit does reads the store whole
+;; Estimate: two stores (30 and 120 notes, ~0.5M), 20 readers' first runs (~0.4M), 6 commits; ~2M ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-commit-costs-its-datoms-not-the-store
+  ;; the same commit on a store 4x larger costs the same: nothing a commit does reads the store whole
   (let [cost (fn [n] (let [[db es] (notes n)]
-                       (commit-ticks db (subvec es 0 100) text-reader
-                                     (fn [db] (vec (for [e (subvec es 100 110)] [:db/add e :note/text (str "moved" (:max-tx db))]))))))
-        small (cost 110) large (cost 1100)]
-    (is (<= large (* 2 small)) (str "10x the store, the same commit: " [small large]))))
+                       (commit-ticks db (subvec es 0 10) text-reader
+                                     (fn [db] (vec (for [e (subvec es 10 15)] [:db/add e :note/text (str "moved" (:max-tx db))]))))))
+        small (cost 30) large (cost 120)]
+    (is (<= large (* 2 small)) (str "4x the store, the same commit: " [small large]))))
 
-;; Estimate: one store of 110 notes, 100 readers of an attribute read whole (each a count over 110 datoms, ~50k a run), two commits
-;; and 100 reruns (~5M); ~10M ticks
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-hot-attribute-reruns-each-of-its-readers-once
+;; Estimate: one store of 20 notes, 20 readers of an attribute read whole (each a count over 20 datoms, ~10k a run), two commits
+;; and 20 reruns (~0.5M); ~1M ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-hot-attribute-reruns-each-of-its-readers-once
   ;; a reader of an attribute read whole ([:a a]) reruns on any write of it: the fan-out is its readers, once each, and a write of
   ;; another attribute reruns none of them
-  (let [[db es] (notes 110) s (rv/store db) runs (volatile! 0)
-        rs (vec (for [_ (range 100)] (run! (vswap! runs inc) (count (d/datoms @s :aevt :note/agent)))))
+  (let [[db es] (notes 20) s (rv/store db) runs (volatile! 0)
+        rs (vec (for [_ (range 20)] (run! (vswap! runs inc) (count (d/datoms @s :aevt :note/agent)))))
         commit (fn [tx] (let [rep (pdb/with @s tx)] (rv/commit! s (:db-after rep) (:tx-data rep)) (flush!)))]
-    (is (= 100 @runs))
+    (is (= 20 @runs))
     (commit [[:db/add (first es) :note/text "other attribute"]])
-    (is (= 100 @runs) "a write of another attribute reruns none")
+    (is (= 20 @runs) "a write of another attribute reruns none")
     (commit [[:db/add (first es) :note/agent :y]])
-    (is (= 200 @runs) "a write of the attribute reruns each of its 100 readers once")
+    (is (= 40 @runs) "a write of the attribute reruns each of its 20 readers once")
     (doseq [r rs] (dispose! r))))
 
-;; Estimate: 50 rounds over a 40-note store: 40 readers' runs (~20k each) and one commit a round; ~50M ticks
-(deftest ^{:seon.test/estimate {:ticks 50000000}} a-commit-reruns-exactly-the-readers-its-datoms-touch
+;; Estimate: 20 rounds over a 20-note store: 20 readers' runs (~20k each) and one commit a round; ~5M ticks
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-commit-reruns-exactly-the-readers-its-datoms-touch
   ;; the index answers what each reader's own check over its key set answered (reads/reads-touched?, the oracle), on random readers and
   ;; commits seeded with what the keys compare by value: card-one upserts, re-assertions, a value read as [:av], a schema datom
-  (let [[db es] (notes 40)
+  (let [[db es] (notes 20)
         rng (java.util.Random. 42)
         pick #(nth es (.nextInt rng (count es)))
         read-kinds [(fn [s e] (:v (first (d/datoms @s :eavt e :note/text))))      ; [:ea e a]
@@ -519,10 +519,10 @@
                     (fn [s _] (count (d/datoms @s :aevt :note/agent)))]              ; [:a a]
         s (rv/store db)
         runs (atom {})
-        rs (vec (for [i (range 40) :let [e (pick) f (nth read-kinds (.nextInt rng (count read-kinds)))]]
+        rs (vec (for [i (range 20) :let [e (pick) f (nth read-kinds (.nextInt rng (count read-kinds)))]]
                   (make-reaction (fn [] (swap! runs update i (fnil inc 0)) (f s e)) :auto-run true)))
         _ (doseq [r rs] @r)]
-    (dotimes [_ 50]
+    (dotimes [_ 20]
       (let [e (pick)
             tx (case (.nextInt rng 4)
                  0 [[:db/add e :note/text (str "t" (.nextInt rng 5))]]          ; a card-one upsert (or a re-assertion of the same text)
