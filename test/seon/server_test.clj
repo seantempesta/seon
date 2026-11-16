@@ -295,7 +295,7 @@
 (deftest roots-repl-names-what-has-no-branch
   ;; my.agent/* and my.db/* at root answered seon.agent/db's invalid-output, "Fix seon.agent/db (the producer)", and
   ;; (my.agent/prove) an NPE from datahike.writer/abandon-pending!: root has no branch, and neither said so
-  (let [[db prove] (at/in-agent [{:op :eval :agent "root" :code "(my.db/db)"} {:op :eval :agent "root" :code "(my.agent/prove agent)"}])]
+  (let [[db prove] (at/in-agent [{:op :eval :agent "root" :code "(my.db/db)"} {:op :eval :agent "root" :code "(my.agent/prove nil)"}])]
     (doseq [r [db prove]]
       (is (= :seon.agent/no-branch (:seon.error/type (:ex r))) (pr-str r))
       (is (clojure.string/includes? (:seon.error/fix (:ex r)) "@(:conn sys)") (pr-str r)))))
@@ -407,7 +407,7 @@
                              "            :cold? (let [w (:walk @seon.agent/state)] (not (< (count (:ran w)) (count (:cache w)))))}))]"
                              "  {:reads (vec (repeatedly 9 m))"
                              "   :live=cold (let [pw (seon.repl/page-walk agent) db (seon.agent/db) a (seon.db/eid db :seon.agent/key (:key agent))"
-                             "                    ix (seon.program/index-of-db db) t (:tree (seon.ctx/build ix db a (:seon.agent/branch (datahike.api/entity db a))))"
+                             "                    ix (seon.program/index-of-db db) t (:tree (seon.ctx/build ix db a (get-in db [:config :branch])))"
                              "                    cw (seon.render/walk nil {:db db :tree t :root (seon.render/render-var-of ix (merge {:seon.agent/key (:key agent)} t)) :index ix :changes seon.ctx/changes :model-only true :once true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})"
                              "                    msgs (fn [w] (mapv first (get-in w [:answers :seon.render/openai-compat])))]"
                              "                (or (= (msgs pw) (msgs cw)) (vec (remove (set (msgs cw)) (msgs pw)))))})")]))
