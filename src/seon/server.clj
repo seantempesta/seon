@@ -454,7 +454,8 @@
 
 (defn connection-agent
   "The key of the agent req's client is (my.root/held-agents, the one read of a client's agents): its session's own, of kind :user,
-  else the one it last attached; nil with no client or none held, then the signed-in person. See docs/users.md#messages."
+  else the one it last attached, ended or not (who sent a message outlives the process that held it); nil with no client or none
+  held, then the signed-in person. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.system/sys :map] [:maybe :string]]}
   [sys req]
   (when-let [c (:client req)]
