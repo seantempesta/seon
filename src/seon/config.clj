@@ -437,7 +437,9 @@
   [args es changes]
   (let [dir (checkout)
         layers (layers-over #(read-layer (java.io.StringReader. built-text) % dir) dir args)
-        r0 (layered layers (schema-of changes))
+        ;; the binary's text is checked against the schema it was built with (config-schema), never the branch's: a key the branch's
+        ;; schema deleted is still the binary's, and the branch's entries (of-entries, below) are what is checked against the branch's
+        r0 (layered layers config-schema)
         put! (fn [r] (reset! held r) (alter-var-root #'config (constantly (:config r))) (alter-var-root #'sources (constantly (:sources r))))]
     (alter-var-root #'built-layers (constantly layers))
     ;; the layers' own config first, so the entries below are read under this process's profile, never its parent's

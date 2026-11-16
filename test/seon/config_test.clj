@@ -594,6 +594,24 @@
       (finally (reset! held h) (alter-var-root #'config/config (constantly c)) (alter-var-root #'config/sources (constantly s))
                (alter-var-root #'seon.config/built-layers (constantly layers0))))))
 
+;; docs/config.md#a-process-holds-its-branchs-config: a test child holds its branch's config whatever text the binary was built with.
+;; Red first: hold-args! checked the binary's baked text against the branch's schema before taking the branch's entries, so a
+;; key a land deleted (the binary states it, the branch's :seon.config/config no longer declares it) refused every test child
+;; at its start: every prove on the standing system died after data's f790e57b8f deleted :seon.config.merge/max-behind.
+;; Estimate: four layered resolutions of the shipped file (~3M each) and two compiles of the whole config map with the change (schema-of,
+;; ~20M each: the first estimate counted one at 8M; measured 59M): 60M ticks
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-test-child-holds-a-branch-that-deleted-a-key-the-binary-states
+  (let [held @#'seon.config/held h @held c config/config s config/sources layers0 @#'seon.config/built-layers
+        k :seon.config.root/view-window
+        es (dissoc (into {} (for [{ck :config/key f :config/form} (source/config-tx config/shipped-file config/built-text) :when ck] [ck f])) k)
+        changes {:seon.config/config (into [] (remove #(and (vector? %) (= k (first %)))) (get config/schema-forms :seon.config/config))}]
+    (try
+      (is (contains? config/config k) "the binary states the key")
+      (is (nil? (config/hold-args! ["--profile" "scripted"] es changes)) "the branch's config is held, not refused")
+      (is (not (contains? (:config (config/in-force)) k)) "and the deleted key is gone from it")
+      (finally (reset! held h) (alter-var-root #'config/config (constantly c)) (alter-var-root #'config/sources (constantly s))
+               (alter-var-root #'seon.config/built-layers (constantly layers0))))))
+
 ;; Estimate: three layered resolutions of the shipped file, ~3M ticks each; ~10M ticks
 (deftest ^{:seon.test/estimate {:ticks 10000000}} a-config-with-a-source-root-gates-on-it
   ;; :seon.config.source/gate-checkout absent is the source root as it resolves, whatever layer names the root (the checkout's
