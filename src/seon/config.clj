@@ -103,10 +103,11 @@
   (mr/composite-registry (m/default-schemas) (mr/simple-registry schema-forms)))
 
 (def ^:private with-defaults
-  "Malli's default-value transformer (malli.transform/default-value-transformer): a decode of a config map adds each key it lacks
-  from its entry's :default, required or optional (::mt/add-optional-keys: a schema that marks a key optional, as a branch's older
-  one does, still has its default count), the one way a schema's default reaches a config (resolved). See docs/config.md#the-file."
-  (mt/default-value-transformer {::mt/add-optional-keys true}))
+  "Malli's default-value transformer (malli.transform/default-value-transformer): a decode of a config map, held to config-schema
+  (`as-read`: every top-level key required unless its own schema says optional, whatever the branch's entity map says), adds each
+  required key it lacks from its :default. Optional keys are never filled, so a model's or provider's entry that leaves a key unset
+  still falls through to the next level (resolve-in). See docs/config.md#the-file."
+  (mt/default-value-transformer))
 
 (defn- optional?
   "Whether config key k's own schema in map s says it may be absent (:seon.config/optional: its readers take nil as none)."
