@@ -1580,9 +1580,22 @@
             _ (d/release bc2)
             proved-t2 (:max-tx @conn)
             [st _] (move-f1 st "app.m0/f1-main-m4")
-            [_ outs] (step #'writer/writer-proc st :in {:op :merge :branch b2 :proved-t proved-t2 :dest {:rid 2}})
-            r2 (:r (first (filter #(= {:rid 2} (:dest %)) (:to-api outs))))]
-        (is (= {:reprove true :tests #{'app.m0-test/reads-f1}} (select-keys r2 [:reprove :tests])) (pr-str r2))))))))
+            [st outs] (step #'writer/writer-proc st :in {:op :merge :branch b2 :proved-t proved-t2 :dest {:rid 2}})
+            answered (fn [outs] (:r (first (filter #(= {:rid 2} (:dest %)) (:to-api outs)))))
+            ask (first (filter #(= :request (:op %)) (:to-api outs)))]
+        (is (nil? (answered outs)) "the merge's caller waits for the merge, never told :reprove")
+        (is (= {:op :prove :branch b2 :mode :judge :names ['app.m0-test/reads-f1]} (select-keys (:req ask) [:op :branch :mode :names]))
+            (str "R alone is asked of the test service, through the api: " (pr-str ask)))
+        (is (= [:writer :answers] (:route ask)) "answered on the writer's own in-port")
+        (testing "a red R answers the caller a refusal naming it, and nothing merges"
+          (let [t0 (:max-tx @conn)
+                [_ outs] (step #'writer/writer-proc st :answers {:tag (:tag ask) :r {:red ['app.m0-test/reads-f1] :results {'app.m0-test/reads-f1 :fail}}})]
+            (is (= ['app.m0-test/reads-f1] (:red (answered outs))) (pr-str (answered outs)))
+            (is (= t0 (:max-tx @conn)) "main did not move")))
+        (testing "a green R merges in the step that takes it"
+          (let [[_ outs] (step #'writer/writer-proc st :answers {:tag (:tag ask) :r {:red [] :results {'app.m0-test/reads-f1 :pass}}})]
+            (is (:merged? (answered outs)) (pr-str (answered outs)))
+            (is (some #(= "the branch's own change" (:v %)) (d/datoms @conn :aevt :note/text)) "main holds the branch's change")))))))))
 
 ;; docs/source.md#a-landing-enters-main-as-data, the one load path: the writer process loads main's program by the diff from the db it last
 ;; loaded to each commit that moves the program (seon.program/load-diff!), never from a commit's ops alone, so a change no commit's ops
@@ -1623,8 +1636,11 @@
                                                                :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (- x))"}
                                                               [:db/add g :var/form "f1'"]]})
         main-t (:max-tx @conn)
-        [_ outs] (step #'writer/writer-proc st :in {:op :merge :branch b :proved-t proved-t :dest {:rid 1}})
-        r (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))]
-    (is (:reprove r) (str "main's program moved since the proof: prove again: " (pr-str r)))
+        [st outs] (step #'writer/writer-proc st :in {:op :merge :branch b :proved-t proved-t :dest {:rid 1}})
+        r (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))
+        ask (first (filter #(= :request (:op %)) (:to-api outs)))]
+    (is (nil? r) (str "main's program moved since the proof: the caller waits for the proof, never told :reprove: " (pr-str r)))
+    (is (= {:op :prove :branch b :mode :judge :names nil} (select-keys (:req ask) [:op :branch :mode :names]))
+        "no result of the branch's own: its proof's reads are unknown, so the judge's whole plan is asked")
     (is (= main-t (:max-tx @conn)) "main did not move")
     (is (= "app.m0/f1-main" (:form/id (:var/form (d/entity (pdb/head conn b) [:var/name 'app.m0/f1])))) "the branch holds main's change, ready to prove")))))
