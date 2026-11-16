@@ -168,7 +168,22 @@
   [st m open]
    (case (:op m)
      :exit (let [[st evs] (reaped st (:pid m))] [st {:ev evs}])
-     :tx (if (<= (:t m) (:max-tx (:db st)))
+     ;; the first notice of a server forked bare (holding no db: nothing root built is inherited): main at that commit, its
+     ;; config held and its program loaded (load-all!: the forms the binary lacks), then one collection, so every agent forked
+     ;; after shares what was built here once (task seon.step/roots-procs-are-the-first-forks-graph)
+     :tx (if (nil? (:db st))
+           (let [t0 (profile/now-ns)
+                 store (or (:store st) (pdb/connect (assoc (:cfg st) :branch (pdb/main-branch (:cfg st)))))
+                 db' (d/commit-as-db store (:commit m))
+                 _ (program/hold-config! db')
+                 loaded (program/load-all! db')
+                 _ (System/gc)
+                 st (assoc st :db db' :store store :program-t (:program-t m) :graph-moved true :static-due true :fixtures-due true
+                           :load-errors (seq (:errors loaded)) :standing (group-by :ns (:errors loaded)))]
+             [st {:ev (cond-> [] (seq (:errors loaded)) (conj {:ev :load-errors :t (:t m) :errors (vec (:errors loaded))})
+                        true (conj {:ev :applied :t (:max-tx db') :writer-t (:t m) :apply-ms (profile/ms-since t0)
+                                    :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch 0}))}])
+         (if (<= (:t m) (:max-tx (:db st)))
            [st nil] ; already in the db this server was forked with
            (let [t0 (profile/now-ns)
                  ;; main at t is the commit the writer made, read from the store (lazy over its
@@ -199,7 +214,7 @@
                  errs (seq (concat errs load-errs))]
              [st {:ev (cond-> [] errs (conj {:ev :load-errors :t (:t m) :errors (vec errs)})
                         true (conj {:ev :applied :t (:max-tx db') :writer-t (:t m) :apply-ms (profile/ms-since t0)
-                                    :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}]))
+                                    :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}])))
      ;; draining (server-step's ::flow/drain): no new fork; its socket end is closed and root told, the agent forks at the next root
      :fork (if (:draining st)
              (do (sock/close! (sock/take-fd! (:conn st)))
