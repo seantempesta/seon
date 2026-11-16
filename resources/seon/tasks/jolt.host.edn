@@ -87,4 +87,14 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.lib-test/a-forked-child-never-collects-what-it-inherited}
   :seon.task/needs #{}}
+ {:seon.task/name "a-server-socket-is-made-from-an-inherited-fd"
+  :seon.task/plan "Owner: deps (asked by web, 2026-11-16, for seon.server/one-listener-for-roots-life: the system process binds root's listening socket once, and every root, its first fork included, accepts on that fd). Jolt has no ServerSocket over an fd it inherited (web searched jolt.socket and host-static.ss). Needed: a server socket made from an fd number, whose accept parks the fiber as java.net.ServerSocket's accept does today, through the same poller registration. PRIOR WORK to read first: Jolt's ServerSocket shim and its accept path (host-static.ss), jolt.io-poller's readiness channels, and seon.sock's socketpair fds, which already cross fork as numbers. Proof, red first: a parent binds and listens, forks, and the child accepts a connection on the inherited fd, parked, not polling. Estimate: one fstat and one poller registration per socket made; an accept costs what an accept costs today."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.lib-test/a-forked-child-accepts-on-a-listening-socket-it-inherited}
+  :seon.task/needs #{}}
+ {:seon.task/name "a-process-reads-its-own-private-bytes"
+  :seon.task/plan "Owner: deps (2026-11-16; the gauge the 5 MB row is held to). FOUND (runtime, checked by deps and tests2): phys_footprint, what jolt.host/process-footprint-bytes and seon.lib/real-mb read, also counts dirty pages still shared copy-on-write with the parent: fresh agent pid 63596, 225 MB = 52.1 MB private dirty (vmmap SM=PRV) + 172.9 MB shared (SM=COW); pid 63513, 370 MB dirty heap of which 327 MB SM=COW. NEEDED: jolt.host/process-private-bytes, this process's private dirty bytes: on macOS mach_vm_region_recurse over mach_task_self with VM_REGION_SUBMAP_INFO_64, summing pages_dirtied of regions whose share_mode is SM_PRIVATE and the private part of SM_COW regions (vmmap's SM=PRV); on Linux /proc/self/smaps_rollup's Private_Dirty. Another process's cannot be read without its task port (task_for_pid needs root or a signed debugging entitlement), so each process reports its own, through Flow's ping (each proc's :ping-map-fn answers :private-bytes), never an eval, so no eval's pages are counted. PRIOR WORK: jolt.host/process-footprint-bytes (host/chez/rt.ss, task_info TASK_VM_INFO's phys_footprint), which stays as the platform's charge. ESTIMATE: one walk of the process's regions, ~thousands, a few ms, no allocation per region. Proof, red first: in one process, process-private-bytes equals vmmap's SM=PRV dirty sum within one page size a region, where process-footprint-bytes does not."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.lib-test/a-process-reads-its-own-private-bytes}
+  :seon.task/needs #{}}
 ]

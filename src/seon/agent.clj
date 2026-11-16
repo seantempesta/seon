@@ -16,7 +16,7 @@
   breaks its forks; docs/failure-points.md, \"Physics\". Agent code calls the functions of my.db and my.agent,
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.ref :as ref] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
+  (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.ref :as ref] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.ctx.search :as search] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [seon.render :as render] [seon.template :as template] [seon.graph :as graph] [clojure.repl]
             [malli.registry :as mr] [malli.core] [jolt.analyzer] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.async.remote :as remote] [jolt.async.remote.flow :as rflow] [jolt.fibers] [jolt.io-poller :as poller] [datahike.connector]))
 
@@ -331,6 +331,16 @@
     (swap! state dissoc :refused)
     (assoc (last es) :transactions (reduce + (map :transactions es)) :evals (into [] (comp (mapcat :evals) (distinct)) es))))
 
+(defn call!
+  "Ask the writer process for what root's REPL asks through sys: req, one of its ops (:seon.agent/call-op: a read of its live state,
+  an act, an effect, a wait on main, a write), answered as root's call! answers it. One frame, :call, awaited by its key
+  (await-reply). A :write names no branch (:seon.agent/call-req): it is this agent's own, named by its agent proc; the root agent
+  is main's agent, so its writes are main's. See docs/processes.md#the-socket-and-the-agent-proc."
+  {:malli/schema [:=> [:cat :seon.agent/call-req] :any]}
+  [req]
+  (let [k (:tx-seq (swap! state update :tx-seq inc))]
+    (:result (await-reply k {:op :call :k k :req req}))))
+
 (defn launch!
   "Ask root to make a released task of text, from template (a name in seon.template/templates), which the reconciler gives an agent of its own: root's answer, {:task id} or its refusal. See docs/agent.md#working-for-a-person."
   {:malli/schema [:=> [:cat :string :keyword] :map]}
@@ -388,10 +398,14 @@
   seon.db/index-of), and :index-builds, how many times this agent built one. See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
-  (let [k (program/schema-changes (:db st)) reg (program/schema-registry k)]
+  (let [k (program/schema-changes (:db st))
+        ;; a branch whose schema changes are main's (it changed none beyond main) takes main's as this process holds it, inherited from
+        ;; the system process, never derived again here (seon.db/held-main-of); else its own, derived once: registry, entity index and
+        ;; the Datahike schema its worlds and stores install (seon.db/held-schema)
+        slot (or (when-let [hm (pdb/held-main-of k)] (select-keys hm [:key :registry :index :schema]))
+                 (let [reg (program/schema-registry k)] {:key k :registry reg :index (pdb/index-of {:forms k}) :schema (pdb/schema-of k reg)}))]
     (-> st
-        ;; the branch's Datahike schema with them, derived once here: what its worlds and stores install (seon.db/held-schema)
-        (assoc :schema-registry {:key k :registry reg :index (pdb/index-of {:forms k}) :schema (pdb/schema-of k reg)})
+        (assoc :schema-registry slot)
         (update :index-builds (fnil inc 0)))))
 
 (defn schema-moved
@@ -582,7 +596,9 @@
            (= :seon.vector/encode-failed (:seon.error/type r)) (do (swap! state update :unembeddable (fnil into #{}) (map first ask)) r)
            (contract/error? r) r
            :else (let [{:keys [model vectors]} (:value r)
-                       _ (transact! (vector/tx-data (map first ask) (map peek ask) vectors model))]
+                       ;; a search of this branch's own is searched once, here, with its query's vector (seon.ctx.search/embedded-tx), as
+                       ;; the writer process's vectors proc searches main's: the page draws its hits and never searches (seon.render.ui/searched)
+                       _ (transact! (search/embedded-tx head (map first ask) (map peek ask) vectors model))]
                    (when (= (count ask) (count due)) (swap! state assoc :embedded-from (db)))
                    (count ask))))))))
 

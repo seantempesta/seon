@@ -1121,6 +1121,35 @@
               :where [?m :var/meta :macro] [?m :var/form ?mf] [?mf :form/refs ?r] [?m :var/name ?mn]]
             db (vec file-readers))))
 
+(defn- value-names
+  "The qualified keywords schema form f names as part of a value's shape: names, less those in a schema's properties (a ref's
+  :seon.db/to targets, a render, a description's keys), which no stored value is checked against."
+  {:malli/schema [:=> [:cat :any] [:set :qualified-keyword]]}
+  [f]
+  (letfn [(walk [x] (cond (vector? x) (let [[h p & r] x] (concat (walk h) (if (map? p) [] (walk p)) (mapcat walk r)))
+                          (map? x) (mapcat walk (vals x))
+                          (coll? x) (mapcat walk x)
+                          (qualified-keyword? x) [x]
+                          :else []))]
+    (set (walk f))))
+
+(defn schema-reached
+  "keys and every schema entry that names one, on and on (db's schema forms over the binary's): what a move of keys reaches, found by
+  the entries that name them, never only the keys themselves (C2 narrowed :seon.reconcile/reason, which :seon.task/reasons names through
+  :seon.reconcile/not-done). values? true follows only what a value's shape names (value-names: no property, so no ref's target), what a
+  stored value is checked against (health's refused values); else every name (a contract's reach: schema-dependents, rearm!). The one
+  closure. See docs/source.md#schemas-at-the-repl."
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:set :qualified-keyword]] [:set :qualified-keyword]]
+                  [:=> [:cat :seon.host/db [:set :qualified-keyword] :boolean] [:set :qualified-keyword]]]}
+  ([db keys] (schema-reached db keys false))
+  ([db keys values?]
+   (if (empty? keys)
+     #{}
+     (let [nm (if values? value-names names)
+           naming (reduce (fn [m [k f]] (reduce #(update %1 %2 (fnil conj []) k) m (nm f)))
+                          {} (merge contract/forms (schema-changes db)))]
+       (into (set keys) (closure keys naming))))))
+
 (defn schema-dependents
   "The live forms of db whose form names one of keys (its contract or its code, :form/keywords: one AVET seek a key), or a
   schema that names one, and on (the binary's schema forms with db's changes): the forms to evaluate again against the changed
@@ -1133,9 +1162,7 @@
   [db keys]
   (if (empty? keys)
     []
-    (let [naming (reduce (fn [m [k f]] (reduce #(update %1 %2 (fnil conj []) k) m (names f)))
-                         {} (merge contract/forms (schema-changes db)))
-          reached (into keys (closure keys naming))
+    (let [reached (schema-reached db keys)
           reading (delay (file-reading-macros db))]
       (mapv #(form-row db %)
             (distinct (for [k reached
@@ -1282,6 +1309,21 @@
   {:malli/schema [:=> [:cat :seon.host/registry] :nil]}
   [reg] (mr/set-default-registry! reg) nil)
 
+(declare hold-config!)
+
+(defn hold-main-schema!
+  "Make main's schema this process holds db's, the act of holding main: its registry (hold-registry!), Datahike schema and entity
+  index (seon.db/hold-schema!) and config (hold-config!), each derived once from db's schema entries beyond the binary's; called BEFORE
+  the load of what the commit changed (load-diff!, load-changes!), so the contracts the load re-arms (load!'s schema dependents) compile
+  against them. The system process at each commit notice, root's writer at each commit that moves a schema entry. Nothing when no schema
+  entry moved from what is held. Answers the config's load errors. See docs/source.md#schemas-at-the-repl."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.program/error]]}
+  [db]
+  (let [k (schema-changes db) reg (schema-registry k)]
+    (hold-registry! reg)
+    (pdb/hold-schema! k reg)
+    (hold-config! db)))
+
 (defn schema-declarations
   "The Datahike declarations registry reg derives that db does not hold as declared (a
   registration or merge of a schema carries its attribute, so its facts can be stored)."
@@ -1353,9 +1395,7 @@
   {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-keyword]] [:vector :map]]}
   [db keys]
   ;; the keys reached: keys, and every schema naming one, on and on (schema-dependents' closure)
-  (let [naming (reduce (fn [m [k f]] (reduce #(update %1 %2 (fnil conj []) k) m (names f)))
-                       {} (merge contract/forms (schema-changes db)))
-        reached (into (set keys) (closure keys naming))]
+  (let [reached (schema-reached db keys)]
     (binding [mr/*registry* (schema-registry (schema-changes db))]
       (into (vec (for [n (all-ns) v (vals (ns-interns n))
                  :let [c (contract/contract v)]

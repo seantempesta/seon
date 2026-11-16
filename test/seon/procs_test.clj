@@ -956,11 +956,45 @@
 
 ;; ---- a proc answers every request it took (laws audit #2) ----------------------
 
+;; Estimate: one socket pair and remote end opened (~0.3M ticks), three agent-proc steps as plain calls (~0.1M each): ~0.6M; 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} an-agents-call-is-answered-and-writes-only-its-own-branch
+  ;; one agent kind (task seon.step/roots-procs-are-the-first-forks-graph, B1): an agent asks the writer process as root's REPL does
+  ;; through sys, with one frame, :call, forwarded as a :request the api answers by its tag, as :launch is. Main changes only by a
+  ;; merge (decisions): a :write names no branch, so the agent's own is the only one it can mean (the root agent's is main). Red before:
+  ;; no :call frame
+  (let [[r _] (sock/socketpair)
+        end (remote/open r {:codec {:encode codec/encode :decode codec/decode}})
+        st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
+        [_ outs] (step #'ap/agent-proc st :from {:op :call :k 7 :req {:op :state}})
+        [_ outs2] (step #'ap/agent-proc st :from {:op :call :k 8 :req {:op :write :req {:op :tx :tx-data [{:note/text "x"}]}}})]
+    (is (= [{:op :request :req {:op :state} :route [:a1 :in] :tag 7}] (filterv #(= :request (:op %)) (:to-api outs))) (pr-str outs))
+    (is (= :agent-1 (get-in (first (filterv #(= :request (:op %)) (:to-api outs2))) [:req :req :branch]))
+        (str "a write names no branch and is this agent's own: " (pr-str outs2)))
+    (is (not (seon.contract/valid? :seon.agent/call-req {:op :write :req {:op :tx :branch :db :tx-data []}}))
+        "a write naming a branch fails its schema: never rewritten")
+    (is (seon.contract/valid? :seon.agent/call-req {:op :write :req {:op :tx :tx-data []}}))))
+
 (defn- api-state []
   (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                     :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))}))
 
 (defn- answer "What p was answered, or :unanswered." [p] (if (realized? p) @p :unanswered))
+
+;; Estimate: three api steps as plain calls (~0.1M each) and api-state (~0.2M): ~0.5M ticks; 2,000,000
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-stops-fact-is-written-inside-its-drain
+  ;; the switch-over's L2 (task seon.system/an-update-loses-nothing): the stop fact rides the api's :shutdown and goes to the writer then,
+  ;; flushed, before its in-port closes, so the stop has one wait, its drain, under one bound, and a writer stuck on it is named by that
+  ;; bound's ping (drained-within), never a wait of its own. Red before: stop! wrote the fact first and waited on it unbounded (pid
+  ;; 52331: :fact 30,569 ms on 3.7k ticks, the 6 s bound gone, its drain left 1 ms)
+  (let [p (promise)
+        fact {:boot "b1" :cause :hand-over :at-ms 1 :tree "t1"}
+        [st outs] (step #'root/api-proc (api-state) :ext {:op :shutdown :p p :fact fact})
+        w (first (:to-writer outs))]
+    (is (= [{:seon.system/id :root :seon.system/stopped fact}] (:tx-data w)) (str "the fact goes to the writer at the shutdown: " (pr-str outs)))
+    (is (and (true? (:flush? w)) (= :db (:branch w))) "flushed, on main")
+    (let [[st _] (step #'root/api-proc st :back {:dest (:dest w) :r {:ok true :t 9}})
+          [_ _] (step #'root/api-proc st :from-fs {:op :fs-down :pid 1 :ended :group-ended})]
+      (is (= {:ok true :t 9} (:stop-fact (answer p))) "and the stop's answer carries the writer's answer to it"))))
 
 ;; Estimate, each piece measured in an agent (2026-11-13): the throw, a case miss (Jolt's IllegalArgumentException) ~0.7M; flow-error
 ;; ~0.13M (its trace: Jolt keeps 25 frames, ~0.1M to read at any depth); api-state ~0.2M; one api step ~0.1M; step-out-ok?'s
@@ -1080,6 +1114,24 @@
     (f (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 8) :conn conn
                          :view {:agents {}} :system (doto (promise) (deliver {:procs {} :conns []}))
                          :graph (doto (promise) (deliver (reify clojure.core.async.flow.impl.graph/Update (update-flow [_ _] {}))))})))))
+
+;; Estimate: the world (built once per process, a fixture) with one namespace more, its program loaded once (load-all! of the forms the
+;; binary lacks: the world's ~12 forms, ~2M ticks) and one collection: ~3M ticks; 6,000,000
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-bare-fork-server-takes-main-from-its-first-notice
+  ;; task seon.step/roots-procs-are-the-first-forks-graph, piece A: the fork server is forked bare, holding no db and no program of
+  ;; main's, so nothing root built is inherited by an agent; it takes main from its first commit notice as it takes any merge:
+  ;; that commit read from the store, its config held and its program loaded (load-all!: the forms the binary lacks), then later
+  ;; notices by load-diff!. Red before: the :tx arm compared the notice's t with a held db's, and a server holding none threw
+  (let [w (mt/with (mt/world) (mt/code 'app.bare "(ns app.bare)\n(defn hello [] :taken)"))
+        held (atom nil)
+        st (#'server/server-step {:graph {} :index {} :store :stub})]
+    (with-redefs [d/commit-as-db (fn [_ _] w)
+                  seon.program/hold-config! (fn [db] (reset! held db) [])]
+      (let [[st1 outs] (#'server/server-step st :cmd {:op :tx :t (:max-tx w) :commit (random-uuid) :ns 0 :tx-data [] :program-t (:max-tx w)})]
+        (is (= [:applied] (map :ev (:ev outs))) (pr-str (:ev outs)))
+        (is (identical? w (:db st1)) "it holds main at the notice's commit")
+        (is (identical? w @held) "with that commit's config")
+        (is (= :taken ((resolve 'app.bare/hello))) "and runs main's program, loaded from the first notice")))))
 
 ;; Estimate: the fork server's state on the world (graph and index given) ~10k + a throw with its stack ~0.1M + a :stats step (a count
 ;; of the world's ~2,000 datoms) ~50k + api-state and 3 api steps (a spawn refused, its error printed) ~0.5M ~ 0.7M; plus the world when
@@ -1301,13 +1353,9 @@
   ;; process alive and silent, or dead, with every request it took unanswered); the event names the op
   ;; and carries the typed error, a fork's received socket is closed, and root's proc answers the asker
   (let [step-failed? #(= :seon.fork-server/step-failed (get-in % [:error :seon.error/type]))]
-    (testing "a step with no db to read answers its stats request the error, its state as it was"
-      (let [st {:db nil}
-            [st' outs] (#'server/server-step st :cmd {:op :stats})]
-        (is (identical? st st'))
-        (is (= [:step-failed] (map :ev (:ev outs))))
-        (is (step-failed? (first (:ev outs))))
-        (is (= :stats (:op (first (:ev outs)))))))
+    ;; a step that throws answers its op's error with its state as it was: proved on a :tx naming a commit the server cannot read
+    ;; (a-fork-server-step-that-throws-answers-and-the-server-serves-on); :stats no longer throws on a server holding no db, since it
+    ;; counts no datoms (a scan of the store inside the process a reading measures)
     (testing "a fork that throws before it forks closes the socket that came with it"
       (let [[a b] (sock/socketpair) [fa fpeer] (sock/socketpair)
             conn (sock/conn b)
@@ -1574,6 +1622,21 @@
             [_ outs] (step #'writer/writer-proc st :in {:op :merge :branch b2 :proved-t proved-t2 :dest {:rid 2}})
             r2 (:r (first (filter #(= {:rid 2} (:dest %)) (:to-api outs))))]
         (is (= {:reprove true :tests #{'app.m0-test/reads-f1}} (select-keys r2 [:reprove :tests])) (pr-str r2))))))))
+
+;; docs/source.md#a-landing-enters-main-as-data, the one load path: the writer process loads main's program by the diff from the db it last
+;; loaded to each commit that moves the program (seon.program/load-diff!), never from a commit's ops alone, so a change no commit's ops
+;; showed it (runtime, 2026-11-16: seon.vector/round's new body never loaded in the writer process, result/c5c223ff) is loaded by the next.
+;; Red first: main-commit loaded each commit's ops (load-changes!), and app.wd, written without the writer, was never loaded.
+;; Estimate: 1 test branch ~1M + 2 namespaces recorded ~1M + 1 writer :tx step with one load-diff! of two small namespaces ~3M ~ 5,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 5000000}} the-writer-loads-a-program-change-no-commits-ops-showed
+  (ts/test-branch! (fn [cfg conn] (let [st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 16) :events (a/chan 16)})
+        ;; a change the writer never saw in a commit's ops: written on main without it
+        _ (d/transact conn {:tx-data ((my.test/code 'app.wd "(ns app.wd)\n(defn f {:malli/schema [:=> [:cat] :int]} [] 41)\n") @conn) :tx-meta (pdb/tx-meta (:branch cfg))})
+        ;; then a commit through the writer that moves the program
+        [_ _] (step #'writer/writer-proc st :in {:op :tx :branch :db :flush? true :dest {:rid 1}
+                                                  :tx-data ((my.test/code 'app.wd2 "(ns app.wd2)\n(defn g {:malli/schema [:=> [:cat] :int]} [] 2)\n") @conn)})]
+    (is (some? (resolve 'app.wd2/g)) "the commit's own change is loaded")
+    (is (= 41 (some-> (resolve 'app.wd/f) deref (apply []))) "and the change no commit's ops showed, by the diff from what the process last loaded")))))
 
 ;; docs/merging.md#a-branch-merges-main-in: main's program moving after the branch's proof is never merged unproved and never "behind":
 ;; the one :merge step merges main into the branch and answers :reprove, main unmoved, so the judge proves the branch again on what it
