@@ -1923,7 +1923,7 @@
         built (graph/build decl bindings nil)
         root-procs (:procs built) root-conns (:conns built)
         _ (deliver root-procs-p built)
-        g (flow/create-flow {:procs root-procs :conns root-conns :stop-timeout-ms (cfg/value :seon.config.root/flow-stop-ms)})
+        g (flow/create-flow {:procs root-procs :conns root-conns :stop-timeout-ms (cfg/value :seon.config.root/stop-ms)})
         _ (deliver graph-p g)
         {root-errors :error-chan root-reports :report-chan} (flow/start g)
         ;; Flow's error channel (every proc's, agents included) piped into :back, each defect
@@ -2475,6 +2475,25 @@
   {:malli/schema [:=> [:cat :seon.system/sys :seon.agent/id] :seon.host/promise]}
   [sys agent-id] (request! sys 'kill! agent-id nil))
 
+(defn stop-bound-ms
+  "The whole bound of a root's stop: its two parts, the drain (the stop fact and every proc's drain) and Flow's stop of the graph, each
+  bounded by :seon.config.root/stop-ms. What the root prints on ROOT LISTENING, and bin/system stop kills past. See
+  docs/clocks.md#two-kinds-of-wait."
+  {:malli/schema [:=> [:cat] :int]}
+  [] (* 2 (cfg/value :seon.config.root/stop-ms)))
+
+;; Estimate: one deref; past its bound, one Flow ping for what was held (~0.5M ticks) and the typed error
+(defn- drained-within
+  "The answer p gives within ms, else the typed :seon.system/stop-overran of a stop's :drain, naming what (held) answers was
+  still held then. See docs/clocks.md#two-kinds-of-wait."
+  {:malli/schema [:=> [:cat :seon.host/promise :int ifn?] :any]}
+  [p ms held]
+  (let [r (deref p ms nil)]
+    (if-not (realized? p)
+      (contract/error :seon.system/stop-overran #'seon.system/stop! (str "the stop's drain did not end within " ms " ms; what was held is :held")
+                      {:part :drain :ms ms :held (held)})
+      r)))
+
 (defn stop!
   "Stop root by letting the flow drain: the api closes (later calls answer \"root
   stopped\"); every agent is sent :stop, never interrupted: its run ends at once (seon.repl/agent-step) and it exits after the requests before
@@ -2501,6 +2520,8 @@
   (let [part (fn [nm f] (let [m (profile/measure! f) ph {:ticks (:ticks m) :ms (lib/r2 (/ (:wall-ns m) 1e6))}]
                           (binding [*out* *err*] (println "ROOT STOP PHASE" nm ph) (flush))
                           [(:value m) ph]))
+        ;; the one bound of the drain, the fact included (stop-bound-ms): its deadline taken here
+        drain-ms (cfg/value :seon.config.root/stop-ms) t-drain (profile/now-ns)
         [fact fact-part] (part :fact #(deref (transact-main! sys [{:seon.system/id :root :seon.system/stopped {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)}}]
                                                        {:flush? true})))
         t0 (profile/now-ns)
@@ -2509,10 +2530,11 @@
     (a/close! (:ext sys))
     ;; a wait on main asked after this answers stopped at once (ask-edge's closed case)
     (a/close! (:judge sys))
-    ;; parked on the drain, no bound: each agent interrupted and stopped exits (seon.agent-proc/stop!), the
-    ;; writer flushes, the fork server ends; one that never does is a stall, recorded (task
-    ;; seon.system/a-stop-or-crash-resumes-from-one-resume-point-and-says-what-it-lost)
-    (let [[drained drain-part] (part :drain #(deref p))
+    ;; the drain within what is left of its bound: each agent stopped exits (seon.agent-proc/stop!), the writer flushes, the fork
+    ;; server ends; past the bound the stop answers what was still held (drained-within: the procs mid-step and the api's asks, one
+    ;; ping) and goes on to Flow's stop, which ends every proc within the same bound (task seon.system/an-update-loses-nothing, L2)
+    (let [left (max 1 (- drain-ms (long (/ (- (profile/now-ns) t-drain) 1000000))))
+          [drained drain-part] (part :drain #(drained-within p left (fn [] (let [s (stall-state sys)] {:unanswered (:unanswered s) :pending (get-in s [:root :pending])}))))
           [graph stop-part] (part :flow-stop #(flow/stop (:graph sys)))]
       ;; a wait put on :judge that the stopped reconciler never took is answered here
       (loop [] (when-let [m (a/poll! (:judge sys))] (some-> (:p m) (deliver {:stopped true})) (recur)))

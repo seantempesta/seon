@@ -142,3 +142,14 @@
     (is (= [:clojure.core.async.flow/drain :after :clojure.core.async.flow/stop] @seen)
         "one drain transition for two :drain ops, the message after it taken, then the stop at EOF")))
 
+;; Estimate: one 30 ms deref and one delivered deref, the error's few map ops: ~10k ticks; 100,000
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-stop-past-its-bound-answers-the-part-it-was-in
+  ;; the switch-over's L2 (seon.system/an-update-loses-nothing; docs/clocks.md#two-kinds-of-wait): a stop's drain ends within its one
+  ;; bound (:seon.config.root/stop-ms), past it answering the typed :seon.system/stop-overran with the part and what was still held, so
+  ;; the stop goes on to Flow's and never waits past what bin/system allows. Red before: stop! derefd the api's shutdown with no bound
+  (let [held {:pending {28 [:tx nil]} :unanswered {}}
+        over (#'seon.system/drained-within (promise) 30 (constantly held))
+        done (#'seon.system/drained-within (deliver (promise) {:drained true}) 30 (constantly held))]
+    (is (= [:seon.system/stop-overran :drain 30 held] ((juxt :seon.error/type :part :ms :held) over)) (pr-str over))
+    (is (= {:drained true} done) "an answer within the bound is the answer")))
+

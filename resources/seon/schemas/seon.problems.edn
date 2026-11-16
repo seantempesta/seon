@@ -48,6 +48,8 @@
  :seon.await/shared-root [:and :seon.error/base [:map [:seon.error/type [:= :seon.await/shared-root]] [:seon.error/fix :string]]]
  :seon.system/quiet-before-true [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/quiet-before-true]] [:t :int] [:waits-on :string]]]
  :seon.system/wait-threw [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/wait-threw]] [:t :int]]]
+ ;; a root's stop whose drain did not end within its bound (seon.system/stop!): the part, the bound, and what was still held
+ :seon.system/stop-overran [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/stop-overran]] [:part :keyword] [:ms :int] [:held :map]]]
  ;; a request to an agent after it ended (root stopped it, or it died): not gone, it was
  :seon.system/ended [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/ended]] [:agent :keyword]]]
  :seon.agent/last-op [:map [:kind :keyword] [:form {:optional true} [:maybe :string]] [:since-ms {:optional true} [:maybe :int]]]
