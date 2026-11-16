@@ -256,8 +256,9 @@
              v sites
              ;; the law is Seon's own source's (src, and test for a law that says :tests?): a namespace with no file, and a
              ;; test helper's under test/, are not failure points of the system
-             :when (and (not (named v)) (not (and (= v (:form/id f)) (named nsym)))
-                        (or tests? (contains? @program nsym)) (site-of f nsym))
+             ;; the form's own rule first: the page's names and the program's namespaces are read only when a form is a site
+             :when (and (site-of f nsym) (not (named v)) (not (and (= v (:form/id f)) (named nsym)))
+                        (or tests? (contains? @program nsym)))
              :let [s (str "unnamed-site " (name law) " " v)]]
          (derived-row ans s nsym (if page (str v " has a " (name law) " site that " page " does not name") (str v " " says))
                       {:kind :unnamed-site :law law :site v :page page}
