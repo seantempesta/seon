@@ -219,8 +219,8 @@
  :seon.cause/warm-state [:map {:description "A result depended on state its reads don't name (a cache's warmth, a process's loaded code): what it was and both readings."}
                          [:seon.db/tag [:= :seon.cause/warm-state]] [:seon.cause/held :seon.cause/held] [:seon.cause/expected :seon.cause/expected]]
  ;; a test's result, keyed by what it read: reused on any branch while nothing its reads name moved (docs/merging.md#verdicts-are-a-cache)
- :seon.proof/id [:and {:seon.db/identity true :seon.db/content-id true :description "The result's identity: the content id of its test and its reach digest (seon.proofs/verdict-id), so a lookup computes it and seeks once."} :seon.lib/digest]
- :seon.proof/reach-digest [:and {:description "The test's reach digest when it ran (seon.program/graph-index): what its identity is taken over beside the test."} :seon.lib/digest]
+ :seon.proof/id [:and {:seon.db/identity true :seon.db/content-id true :description "The result's identity: the content id of its test, the digest of what it read and its status (seon.proofs/verdict-id), so two branches' results never conflict at a merge and a second status at one reads digest is another result (flaky is a query)."} :seon.lib/digest]
+ :seon.proof/reach-digest [:and {:seon.db/index true :description "The test's reach digest when it ran (seon.program/graph-index): what a plan finds the result by, one AVET seek (seon.proofs/verdicts-at)."} :seon.lib/digest]
  :seon.proof/test [:qualified-symbol {:seon.db/index true :description "The test the result is of."}]
  :seon.proof/reads-digest [:and {:description "The digest of the content each read key held at the basis, basis excluded (seon.reads/content-digest): equal content gives one result on any branch."} :seon.lib/digest]
  ;; read back by seek: a moved datom's five keys (datahike.reads/datom-keys, each its pr-str) find the results they move, one AVET seek each
