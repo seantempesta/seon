@@ -337,9 +337,6 @@
    :inbox {:inline true
            :doc "Wait for a message to an agent (its key, or its task: a session's agent is the one attached to its task session/<area>): answers at once with the messages main holds that its branch has not taken, else when one is written, else the typed :seon.server/no-message at :seon.config.root/inbox-wait-ms (ask again). It delivers what it answers (the agent's one delivery), so the next call answers only what came after. Run it in the background: its answer is your notification."
            :args {:agent {:type "string" :description "an agent id"} :task {:type "string" :description "ns/name: its agent, instead of agent"}}}
-   :messages {:doc "Look at the messages addressed to an agent (its key, or its task: a session's agent is the one attached to session/<area>), writing nothing: those linked to it after since (main's t; all when none), oldest first, and :t, main's t this read, the since of your next look. A look never changes data or the agent's state."
-              :args {:agent {:type "string" :description "an agent id"} :task {:type "string" :description "ns/name: its agent, instead of agent"}
-                     :since {:type "string" :description "main's t of your last look (its :t); none for all"}}}
    :done {:doc "Hand the task the agent works back to root: the agent writes its end (its proofs run, seon.turn/hand-back!), then root judges it, and merges it when the done rule has no reason. Answers the verdict when main holds it, as one line and a handle (seon.server/verdict-line): the task's outcome (done, merged, or closed with its task held) and reason, each red test with its first failure, and how main differs from the branch; the handle is the form that reads it whole at root. A defect of the reconciler that stops the judge, as that defect. It waits as long as the judge does (the run's proofs, a gate, a merge), so a caller's read timeout must allow minutes."
           :args {:agent {:type "string"} :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}} :required ["agent"]}))
 
@@ -519,33 +516,6 @@
             r))))))
 
 (defmethod op-answer :inbox [sys _ req] (inbox-answer sys req))
-
-;; Estimate: one :avet seek of the agent's message links, a tx filter and an entity read each, O(m) for m messages to it (~10k ticks a
-;; message [M, inbox-messages' seek]); no write
-(defn messages-since
-  "The messages main db holds to agent key k linked after since (a t; nil for all), oldest first, each {:id :from :body :sent-ms :t},
-  :from by name and :t the link's transaction. Reads only. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.host/db :string [:maybe :int]] [:vector :map]]}
-  [db k since]
-  (if-let [e (pdb/eid db :seon.agent/key k)]
-    (->> (d/datoms db :avet :seon.message/to e)
-         (filter #(or (nil? since) (> (:tx %) since)))
-         (map (fn [dt] (let [m (d/entity db (:e dt))]
-                         {:id (:seon.message/id m) :from (task/sender-name (:seon.message/from m)) :body (:seon.message/body m)
-                          :sent-ms (:seon.message/sent-ms m) :t (:tx dt)})))
-         (sort-by (juxt :t :id))
-         vec)
-    []))
-
-(defmethod op-answer :messages [sys _ req]
-  (let [db @(:conn sys)
-        k (or (:agent req) (some->> (:task req) (task/agent-key db)))
-        v (:since req)
-        since (cond (int? v) v (and (string? v) (re-matches #"\d+" v)) (parse-long v))]
-    (cond (not (and k (pdb/eid db :seon.agent/key k)))
-          (refused (str "seon_messages names no agent: give :agent (an agent key) or :task (a task id); asked agent " (:agent req) ", task " (:task req)))
-          (and (some? v) (nil? since)) (refused (str "seon_messages since is main's t, a whole number (the :t of your last look); got " (pr-str v)))
-          :else {:agent k :messages (messages-since db k since) :t (:max-tx db)})))
 
 (defmethod op-answer :message [sys ag req]
   ;; from the agent the connection works through (connection-agent), else the signed-in person
