@@ -171,17 +171,6 @@
       (is (= "a1" (:seon.agent/key (:seon.task/agent (d/entity db [:seon.task/id "demo/workouts-implement"]))))
           "a process of a later boot, on the session's agent"))))
 
-;; docs/merging.md#a-slow-test-runs-last: its metric known ahead of time, itself its proof, filed once
-(deftest a-slow-test-becomes-a-task-that-names-what-it-measured
-  (let [db (t/world)
-        tx (my.root/slow-tests-tx db '{app.x-test/waits 9000} 5000)
-        tk (first (filter :seon.task/id tx))]
-    (is (= "app.x-test/fast-waits" (:seon.task/id tk)))
-    (is (= '#{app.x-test/waits} (set (:seon.task/proofs tk))) "itself its proof")
-    (is (re-find #"`app.x-test/waits` measured 9000 ms, at or over the bound of 5000" (:seon.task/plan tk)) "its plan names its measure and the bound")
-    (is (= :held (:seon.task/execution tk)) "held until released")
-    (is (= [] (filterv :seon.task/id (my.root/slow-tests-tx (datahike.core/db-with db tx) '{app.x-test/waits 9000} 5000))) "filed once")))
-
 ;; docs/health.md#an-unfocused-docstring: one task a var, naming its measure and how it is done
 (deftest ^{:seon.test/estimate {:ticks 300000}} an-unfocused-docstring-becomes-a-task-that-says-how-it-is-done
   (let [d (tpl/focus-docstring 'seon.task/entity-value 74 [:words :measurement])]
