@@ -779,7 +779,7 @@
   (let [root (scratch-dir)
         tree (tiny-tree root identity-files)]
     (try
-      (with-redefs [cfg/checkout (fn [] root) cfg/config (dissoc cfg/config :seon.config.source/root)]
+      (with-redefs [cfg/checkout (fn [] root) cfg/process (let [p cfg/process] (fn [] (assoc (p) :source-root nil)))]
         (let [r (fx/runtime-for tree {:record {:digest "another-build" :inputs (:inputs (seon.program/binary-program))}})
               d (:seon.process/branch-digest r)]
           (is (= :seon.process/env-mismatch (:seon.error/type r)) (str "a running binary of another identity is told: " r))

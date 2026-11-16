@@ -246,7 +246,7 @@
     (is (pos-int? (:port a)) (str "it listens: " (subs (str (:log a)) (max 0 (- (count (str (:log a))) 3000)))))
     (is (= (dissoc a :branch) (dissoc b :branch)) "booted once")
     (is (not= (:branch a) (:branch b)) "a branch each")
-    (is (not= (seon.config/value :seon.config.root/runs-dir) (:runs a)) "never the standing system")
+    (is (not= (:runs (seon.config/process)) (:runs a)) "never the standing system")
     (is (every? pos-int? [(:writer-pid a) (:system-pid a)]) (pr-str a))
     (is (not= (:writer-pid a) (:system-pid a)))
     (is (= (:writer-pid a) (ppid (:system-pid a))) "the system process is the writer's fork")))

@@ -339,18 +339,33 @@
   "Which layer each key of the config as it loaded came from."
   (:sources loaded))
 
+(defn process-of
+  "A process's own facts (:seon.config/process) from what it started with: layers (its command line's, as layers-over reads
+  them: the --config files and --set keys after the shipped file), getenv (the environment variable named, or nil), its checkout dir,
+  and the machine's cores. A fact a later layer states wins over an earlier one, any layer over the environment, and the environment
+  over its default: the store under the runs directory, the runs directory under the checkout, main \"main\", no port (0), no
+  source tree. Pure. The shipped file states none of them: a branch never states a process's own facts (task
+  seon.config/config-is-schema-defaults-and-datoms, B1). See docs/config.md#a-process-holds-its-branchs-config."
+  {:malli/schema [:=> [:cat [:sequential [:tuple :string :map]] ifn? :string :int] :seon.config/process]}
+  [layers getenv dir cores]
+  (let [stated (reduce (fn [m [_ x]] (merge m x)) {} (rest layers))
+        long-env #(some-> (getenv %) parse-long)
+        of (fn [k env default] (if (contains? stated k) (get stated k) (or (getenv env) default)))
+        runs (of :seon.config.root/runs-dir "SEON_RUNS" (str dir "/runs"))]
+    {:ports {:server (get stated :seon.config.root/server-port (or (long-env "SEON_SERVER_PORT") 0))
+             :web (get stated :seon.config.web/port (or (long-env "SEON_WEB_PORT") 0))}
+     :store (of :seon.config.root/store-path "SEON_STORE" (str runs "/store")) :runs runs
+     :main (of :seon.config.root/main "SEON_MAIN" "main") :source-root (of :seon.config.source/root "SEON_SOURCE_ROOT" nil)
+     :checkout dir :cores cores :end-with (get stated :seon.config.root/end-with (or (long-env "SEON_END_WITH") 0))
+     ;; read from the config until B3 moves it: a test's digest takes it (seon.fx/config-input)
+     :embed-model (:seon.config.vector/model config)}))
+
 (defn process
-  "This process's own facts (:seon.config/process): what no branch states and no two processes share. The seam until flow's start
-  map carries them as :process (task seon.step/roots-procs-are-the-first-forks-graph (vii)): today read from the layers this
-  process started with (its environment, --config and --set, as `config` holds them; a test child's are its own, seon.agent/hold-env!),
-  never from its branch's entries. See docs/config.md#a-process-holds-its-branchs-config."
+  "This process's own facts (process-of over the layers it started with, its environment, checkout and cores). The seam until flow's
+  start map carries them as :process (task seon.step/roots-procs-are-the-first-forks-graph (vii)); a test child's layers are its own
+  (seon.agent/hold-env!). See docs/config.md#a-process-holds-its-branchs-config."
   {:malli/schema [:=> [:cat] :seon.config/process]}
-  []
-  (let [c config]
-    {:ports {:server (:seon.config.root/server-port c) :web (:seon.config.web/port c)}
-     :store (:seon.config.root/store-path c) :runs (:seon.config.root/runs-dir c) :main (:seon.config.root/main c)
-     :source-root (:seon.config.source/root c) :checkout (checkout) :cores (:seon.config.machine/cores c)
-     :end-with (:seon.config.root/end-with c) :embed-model (:seon.config.vector/model c)}))
+  [] (process-of built-layers #(System/getenv %) (checkout) (:seon.config.machine/cores config)))
 
 (def ^:private held
   "The config this process reads: :config and :sources, its branch's (hold!) or as it loaded; :schema, the config map compiled as its branch states it; :text, the shipped file as its branch states it; :entries and :changes, what they were built from; :waiting, the keys it does not act on (waiting). See docs/config.md#a-process-holds-its-branchs-config."

@@ -115,6 +115,12 @@
 (def ^:private shipped-entries
   (delay (into {} (for [{k :config/key f :config/form} (source/config-tx config/shipped-file config/built-text) :when k] [k f]))))
 
+;; the keys that are a process's own facts, read through seon.config/process and stated by no shipped file (task
+;; seon.config/config-is-schema-defaults-and-datoms, B1)
+(def ^:private process-keys
+  #{:seon.config.root/runs-dir :seon.config.root/store-path :seon.config.root/main :seon.config.source/root
+    :seon.config.web/port :seon.config.root/server-port :seon.config.root/end-with})
+
 ;; docs/config.md#layers: `#env` appears only where a script sets one
 (deftest entries-are-a-config-over-this-processs-layers
   ;; docs/config.md#a-process-holds-its-branchs-config: what a branch's entries state is what a process reads: tags read as aero reads them, a place stays where the process loaded, and a key needs its schema
@@ -181,7 +187,7 @@
   (doseq [p [:default :scripted :deepseek]]
     (let [c (dissoc (shipped p) :seon.config.source/root)]
       ;; every declared key has a value, from its schema's :default or the file (a branch's own key is declared by its schema: seon.config/of-entries)
-      (is (= [] (remove (set (keys c)) (remove (cond-> #{:seon.config.ai/temperature :seon.config.source/root :seon.config.root/profile :seon.config.proofs/max-cores :seon.config.proofs/max-load} (not= :scripted p) (conj :seon.config.ai/script))
+      (is (= [] (remove (set (keys c)) (remove (cond-> (into #{:seon.config.ai/temperature :seon.config.root/profile :seon.config.proofs/max-cores :seon.config.proofs/max-load} process-keys) (not= :scripted p) (conj :seon.config.ai/script))
                                                (config/keys-declared)))) p)))
   ;; no profile runs on the provider the shipped file states as its default, read through the resolver, never a literal here (owner
   ;; 2026-11-15: tests don't hardcode defaults; the default itself is docs/decisions.md's, DeepSeek)
@@ -204,7 +210,7 @@
         set-by-test (set (map second (re-seq #"(?m)^export (SEON_\w+)=\$\{\1:-" (slurp (str checkout "/bin/test")))))
         read-by (into {} (for [[_ k v] (re-seq #"(?m)^ *:(seon\.config[\w./-]+) [^\n]*#env (SEON_\w+)" (config/shipped-text))] [v (keyword k)]))
         keys-set (keep read-by set-by-test)]
-    (is (= #{:seon.config.web/port :seon.config.root/wiki-baseline :seon.config.vector/texts} (set keys-set)))
+    (is (= #{:seon.config.root/wiki-baseline :seon.config.vector/texts} (set keys-set)))
     (doseq [k keys-set]
       (is (get-in config/schema-forms [k 1 :seon.config/place]) (str k " is set by bin/test, so a root and a test run differ in it: it must be :seon.config/place")))))
 
@@ -431,20 +437,22 @@
   (is (= [{:key :seon.config.web/port :problem :invalid :value "-2"}]
          (:seon.config/problems (refused #(config/layered (config/load-layers (config/checkout) ["--set" ":seon.config.web/port=-2"])))))))
 
-(defn- shipped-default
-  "The value the shipped file states for key k when its #env variables are unset: the last alternative of
-  its `#or`, read from the file's text (edn tagged literals, as env-tags does), since the resolved value
-  is the process's environment's (a root's SEON_SERVER_PORT) when one is set."
-  [k]
-  (let [f (get (edn/read-string {:default tagged-literal} (config/shipped-text)) k)
-        alts (-> f :form :form)]
-    (assert (= 'long (:tag f)))
-    (assert (= 'or (:tag (:form f))))
-    (last alts)))
-
-(deftest no-port-is-listened-on-unless-the-config-says-so
-  (is (= 0 (shipped-default :seon.config.web/port)))
-  (is (= 0 (shipped-default :seon.config.root/server-port))))
+;; docs/config.md#a-process-holds-its-branchs-config: a process's own facts come from what it started with, never a file: a later layer
+;; over an earlier, any layer over the environment, the environment over the default (seon.config/process-of, pure). Red under a
+;; process-of that reads the shipped layer, or the environment over a layer. Estimate: three calls over small maps, ~30k ticks.
+(deftest ^{:seon.test/estimate {:ticks 30000}} a-processs-facts-are-what-it-started-with
+  (let [none (fn [_] nil)
+        shipped ["resources/seon/config/default.edn" {:seon.config.root/store-path "/shipped" :seon.config.web/port 1}]
+        p0 (config/process-of [shipped] none "/co" 4)]
+    (is (= {:ports {:server 0 :web 0} :store "/co/runs/store" :runs "/co/runs" :main "main" :source-root nil :checkout "/co" :cores 4 :end-with 0}
+           (dissoc p0 :embed-model))
+        "nothing stated: no port, the store under the runs directory under the checkout, and the shipped file states none")
+    (let [env {"SEON_RUNS" "/r" "SEON_SERVER_PORT" "7" "SEON_SOURCE_ROOT" "/src"}
+          p1 (config/process-of [shipped] env "/co" 4)
+          p2 (config/process-of [shipped ["--config local.edn" {:seon.config.root/server-port 9 :seon.config.source/root "/merges"}]
+                                 ["--set" {:seon.config.root/server-port 10}]] env "/co" 4)]
+      (is (= ["/r" "/r/store" 7 "/src"] ((juxt :runs :store (comp :server :ports) :source-root) p1)) "the environment over the defaults")
+      (is (= [10 "/merges"] ((juxt (comp :server :ports) :source-root) p2)) "a layer over the environment, --set over --config"))))
 
 (deftest the-loader-reads-the-command-line-as-the-process-has-it
   (binding [*command-line-args* '("ports" "--set" ":seon.config.web/port=7998")]
@@ -622,17 +630,3 @@
     (is (= [{:key :t.cfg/need :problem :missing-key :value "nil"}]
            (:seon.config/problems (refused #(config/layered [] (m/schema [:map [:t.cfg/need :int]])))))
         "required, no default and no layer: refused, named")))
-
-
-;; docs/config.md#a-process-holds-its-branchs-config: a process's own facts are read through one seam (seon.config/process), the shape flow's
-;; start map gives as :process (task seon.step/roots-procs-are-the-first-forks-graph (vii)), each the value its start layers state. Red when
-;; any fact is read from the wrong key; its shape is seon.config/process's contract (:seon.config/process). Estimate: ten gets
-;; and one ten-key map compared, ~50k ticks.
-(deftest ^{:seon.test/estimate {:ticks 50000}} a-processs-facts-are-its-start-layers
-  (let [p (config/process) c config/config]
-    (is (= {:ports {:server (:seon.config.root/server-port c) :web (:seon.config.web/port c)}
-            :store (:seon.config.root/store-path c) :runs (:seon.config.root/runs-dir c) :main (:seon.config.root/main c)
-            :source-root (:seon.config.source/root c) :checkout (config/checkout) :cores (:seon.config.machine/cores c)
-            :end-with (:seon.config.root/end-with c) :embed-model (:seon.config.vector/model c)}
-           p)
-        "each fact the value its start layers state")))
