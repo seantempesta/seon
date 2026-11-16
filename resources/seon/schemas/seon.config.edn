@@ -117,7 +117,6 @@
   [:seon.config.proofs/unmeasured-process-ms {:optional true} :seon.config.proofs/unmeasured-process-ms]
   [:seon.config.proofs/shard-mb {:optional true} :seon.config.proofs/shard-mb]
   [:seon.config.proofs/free-floor-mb {:optional true} :seon.config.proofs/free-floor-mb]
-  [:seon.config.proofs/candidate {:optional true} :seon.config.proofs/candidate]
   [:seon.config.proofs/slow-test-ms {:optional true} :seon.config.proofs/slow-test-ms]
   [:seon.config.proofs/error-frames {:optional true} :seon.config.proofs/error-frames]
   [:seon.config.build/inputs {:optional true} :seon.config.build/inputs]

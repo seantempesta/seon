@@ -1415,14 +1415,8 @@
         (own-store! (:cfg *start*) (:branch *start*))
         ;; its first act on its own env: the branch's environment, whatever the agent it was forked from held (its reads of
         ;; db go through its own env, so after own-store!)
-        ;; a batch on the one booted candidate: its {:port ...} is this test process's :seon.config.proofs/candidate, which
-        ;; shared-root! answers, so no test of it boots a root (task seon.prove/tests-fork-from-the-branchs-warm-agent)
-        (hold-env! (db) {:args (cond-> ["--profile" "scripted"]
-                                 (:candidate plan) (into ["--set" (str ":seon.config.proofs/candidate=" (pr-str (:candidate plan)))]))
-                         :checkout (:checkout plan)
-                         ;; a candidate's batch parses its args (one parse a child, ~8M ticks), so its --set is held: the config derived
-                         ;; once for the branch holds no candidate
-                         :held (when (and (not (:candidate plan)) (= (::test-point plan) (pdb/point (db)))) (::test-held plan))})
+        (hold-env! (db) {:args ["--profile" "scripted"] :checkout (:checkout plan)
+                         :held (when (= (::test-point plan) (pdb/point (db))) (::test-held plan))})
         ;; and as a test process: a private function's contract is checked on each call here, whatever its agent's
         ;; setting (the owner, 2026-11-10: "Private helpers: tests only"; docs/checks.md#contracts-armed-at-definition)
         (contract/check-private! true)
@@ -1436,7 +1430,10 @@
                                        ;; a removed test that no longer loads ends as its own error, sent as a test's end
                                        (doseq [[t msg] unloaded]
                                          (put! {:seon.test/ended (str "#'" t) :reports [{:type :error :var (str "#'" t) :message msg}]}))
-                                       (run-tests-here put! ticks (vec (remove unloaded tests)))) true]
+                                       ;; a batch on a candidate: shared-root! answers it (seon.test-store/*candidate*), so no test boots a root
+                                       (if-let [v (and (:candidate plan) (requiring-resolve 'seon.test-store/*candidate*))]
+                                         (with-bindings {v (:candidate plan)} (run-tests-here put! ticks (vec (remove unloaded tests))))
+                                         (run-tests-here put! ticks (vec (remove unloaded tests))))) true]
                                    (catch Throwable e [{:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]} false]))]
           ;; a run's reports went as its tests ended: its answer is its end and its counts; a run that threw
           ;; streamed none, so its answer keeps the throw's report (scale's agents read :error 2 and nothing else)
@@ -1815,7 +1812,7 @@
   {:malli/schema [:=> [:cat :map [:map-of :qualified-symbol :string] [:maybe :map]] :map]}
   [sel items candidate]
   ;; with the one booted candidate the service handed (candidate, {:port ...}), a process test runs here on it (its shared-root! answers
-  ;; it: :seon.config.proofs/candidate in the child's config), never refused to a checkout (task seon.prove/tests-fork-from-the-branchs-warm-agent)
+  ;; it: seon.test-store/*candidate*), never refused to a checkout (task seon.prove/tests-fork-from-the-branchs-warm-agent)
   (let [process (if candidate #{} (set (:process (:plan sel))))
         ts (vec (sort-by str (keys items)))
         {here false there true} (group-by (comp boolean process) ts)

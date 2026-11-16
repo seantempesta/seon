@@ -668,10 +668,16 @@
 
 (declare default-root-args)
 
+(def ^:dynamic *candidate*
+  "The one booted candidate a process test runs on ({:port ...}, seon.test-store/candidate's answer), bound by the run around a
+  process item the prove service handed it with the candidate's port; nil outside one. shared-root! answers it in place of a root of
+  its own, so a candidate boots once for every process test of a change, never once a test process (task
+  seon.prove/tests-fork-from-the-branchs-warm-agent)."
+  nil)
+
 (defn shared-root!
-  "The root this test process shares among its tests for root arguments args: for the default arguments, the one booted candidate
-  its run was handed (:seon.config.proofs/candidate, set in this test process's config from the batch's request: no root booted),
-  else started at the
+  "The root this test process shares among its tests for root arguments args: the bound candidate (*candidate*) for the default
+  arguments, else started at the
   first call for them (start-shared-root!), then the same one: a root boots once per shard, not
   once per test (the boot was most of an in-agent test; an attach on a running root costs
   milliseconds). A test sharing it works on branches of its main and deletes them when it ends
@@ -682,8 +688,8 @@
   ;; no arguments is the shard's shared root (docs/testing.md#test-types): default-root-args, the one shard-fixture warms, never a
   ;; second root booted inside the first asking test's budget (an-idle-connection-holds-no-os-thread: 1.2M ticks or 10.3M, by
   ;; whether another test had booted the [] root first)
-  (if-let [c (and (empty? args) (seon.config/value :seon.config.proofs/candidate))]
-    c
+  (if (and *candidate* (empty? args))
+    *candidate*
   (let [args (if (empty? args) (default-root-args) args)
         k [(seon.config/checkout) (vec args)]
         ;; a start that is not run unless it is the one put: two callers at once share one root
