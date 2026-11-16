@@ -397,9 +397,11 @@
           (let [errs (:errors @state) n (turn-now ag) moved? (not= n (:sent-turn @state))]
             (when errs (swap! state dissoc :errors))
             (when moved? (swap! state assoc :sent-turn n))
-            (send! (cond-> {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c) :mem-mb (mem-mb)}
-                     errs (assoc :errors (vec (vals errs)))
-                     moved? (assoc :turn n))))))))
+            ;; a test's agent (:role :test) writes its own value only: its commit is the test's, and no root hears it
+            (when-not (= :test (:role ag))
+              (send! (cond-> {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c) :mem-mb (mem-mb)}
+                       errs (assoc :errors (vec (vals errs)))
+                       moved? (assoc :turn n)))))))))
 
 (defn- with-citations
   "tx-data, which writes a task's plan or instructions, with what that text cites derived in it
@@ -468,7 +470,8 @@
   or at a turn's end, never because time passed (owner: the agent-owned run-ahead
   writer). A write of a task's plan or instructions carries what the text cites (`with-citations`).
   Answers {:t :datoms :tempids}. Inside a test (a fork of the agent) it applies to
-  the fork's db only (ag's :role :test). A refused transaction throws its message into the caller's eval."
+  the fork's db only (ag's :role :test), or to the test's own stored branch when it has one (its :conn: my.test/eval-in), whose commit
+  tells no root. A refused transaction throws its message into the caller's eval."
   {:malli/schema [:=> [:cat :seon.agent/start :seon.db/tx-data] :seon.agent/tx-result]}
   [ag tx-data]
   (let [text? #{:seon.task/plan :seon.task/instructions}
@@ -483,7 +486,9 @@
     (when-let [ra (seq (root-only-written (pdb/index) tx-data))]
       (let [e (contract/error :seon.agent/root-only-write #'seon.agent/transact! (str "only root writes " (str/join ", " ra) ", on main") {:attributes (vec ra)})]
         (throw (ex-info (:seon.error/message e) e))))
-    (if (= :test (:role ag))
+    ;; a test's agent with no branch of its own writes its db value only; one given a stored branch (its :conn, my.test/eval-in's) writes
+    ;; it through the one path, as an agent does
+    (if (and (= :test (:role ag)) (nil? (:conn ag)))
       (let [r (pdb/with (db) tx-data schemas) attrs (into #{} (map :a) (:tx-data r))]
         (doc/carry-index! (:db-before r) (:db-after r) (map (juxt :e :a) (:tx-data r)))
         (swap! state #(-> % (assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data])) (schema-moved attrs)))
