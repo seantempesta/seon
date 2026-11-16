@@ -200,12 +200,12 @@
     (clojure.test/is (= [:held nil false] (:value seen)) "and the start it wrote is answered: the u task is held again, with no env and no agent")
     (clojure.test/is (= (:value before) (:value after)) "its entity exactly as before, apart from the refusal (each fact the start wrote inverted)")))
 
-(deftest a-refused-attach-names-its-branchs-unmerged-entries
+;; Estimate: one attach refused at spawn (~0.5M of the test's own), one branch read for its entries (~0.2M), the agent's one write: ~1M
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000}} a-refused-attach-names-its-branchs-unmerged-entries
   ;; task seon.server/a-refused-attach-names-its-branchs-unmerged-entries: pilot 7 (2026-11-16), a resumed branch whose merge of main met a
   ;; conflict kept its pins, and its attach was refused naming only the mismatch. A refused attach names the unmerged entries its branch holds,
   ;; and where their repair is (docs/merging.md#root-repairs-a-failed-merge-from-its-repl). Here t's agent writes one entry on the branch it
   ;; holds, and <ns>/u, which shares that branch, is refused
-  {:seon.test/estimate {:n 1 :order :linear :ticks 3000000 :bytes 15000000}}
   (let [[n refused] (at/in-agent (fn [{:keys [task]}]
                                    [(str "(let [db (seon.agent/db) e (:db/id (datahike.api/entity db [:seon.task/id " (pr-str task) "]))"
                                          " v (:seon.task/plan (datahike.api/entity db e))]"
