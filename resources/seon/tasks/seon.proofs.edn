@@ -117,9 +117,4 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.db-cost-test/reads-digests-costs-its-distinct-keys}
   :seon.task/needs #{}
-  :seon.task/estimate #:seon.db{reads-digests {:n 7253, :order :linear, :ticks 300000000, :bytes 1200000000}}}
- {:seon.task/name "main-is-green-server-test-cost-test-problems-test"
-  :seon.task/plan "Owner: tests2. Red on main at d17211e69f, from the one run of main's in-process tests at a fresh agent through the prove service (tests2, root's written yes, 2026-11-16): 3 red. Any red on main parks every seon_done that reaches it, so each is fixed at its cause or the test rewritten or deleted under the bad-tests rule; done when every proof below is green on main. See docs/testing.md#a-proof-is-focused."
-  :seon.task/kind :work
-  :seon.task/estimate #:seon.proofs{run-tests! {:n 3 :order :linear :ticks 7500000 :bytes 60000000}}
-  :seon.task/proofs #{seon.cost-test/a-scan-inside-the-loop-is-red-under-the-bound seon.problems-test/problems-reads-only-the-problems seon.server-test/a-done-on-a-parked-task-brings-its-agent-back}}]
+  :seon.task/estimate #:seon.db{reads-digests {:n 7253, :order :linear, :ticks 300000000, :bytes 1200000000}}}]
