@@ -1561,3 +1561,26 @@
     (is (clojure.string/includes? (str nt) "[] 2") (str "the namespace's file on the branch: " (pr-str ne)))
     (is (clojure.string/includes? (str nf) "[] 2") "and its definition's form, as an eval of it records it")
     (is (not (.exists (java.io.File. fixture))) "nothing written on disk")))
+
+(defn- start-reader
+  "A step-fn whose step answers the agent's key as the code it runs reads it (seon.agent/*start*), on its :out."
+  {:malli/schema :seon.step/step-fn}
+  ([] {:ins {:in "a message"} :outs {:out "the key the step read"}})
+  ([_] {})
+  ([st _] st)
+  ([st _ _] [st {:out [(:key seon.agent/*start*)]}]))
+
+;; Estimate: one graph of one proc made, started, one message stepped and answered, stopped: ~0.2M ticks; 1,000,000
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-procs-step-reads-the-start-value-its-init-took-from-args
+  ;; docs/flow.md#flow-inside-an-agent: an agent's start value reaches its procs as the flow def's :args, each init keeps it in the proc's
+  ;; state, and each step binds it around the code it runs (seon.repl/with-start), as a REPL binds *ns*; no root value is read. Red under a
+  ;; stand-in (identity for with-start: the start held nowhere but a global the test never set): the step read no key
+  (let [out (clojure.core.async/chan 1)
+        g (clojure.core.async.flow/create-flow
+            {:procs {:p {:proc (clojure.core.async.flow/process (#'seon.repl/with-start #'start-reader)) :args {:seon.repl/start {:key "the-agent"}}}
+                     :sink {:proc (clojure.core.async.flow/process (fn ([] {:ins {:in "the key"} :outs {}}) ([_] {}) ([st _] st) ([st _ m] (clojure.core.async/put! out m) [st nil])))}}
+             :conns [[[:p :out] [:sink :in]]]})]
+    (clojure.core.async.flow/start g) (clojure.core.async.flow/resume g)
+    @(clojure.core.async.flow/inject g [:p :in] [:go])
+    (try (is (= "the-agent" (clojure.core.async/<!! out)) "the step reads the key its proc's init took from :args")
+         (finally (clojure.core.async.flow/stop g)))))

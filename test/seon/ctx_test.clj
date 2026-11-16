@@ -41,7 +41,7 @@
   {:malli/schema [:=> [:cat [:maybe :map]] :nil]}
   [st]
   (when (= ::unset @found) (reset! found [@seon.agent/state seon.agent/*start*]))
-  (seon.agent/hold-start! (merge (or (second @found) {}) (select-keys st start-keys)))
+  (alter-var-root #'seon.agent/*start* (constantly (merge (or (second @found) {}) (select-keys st start-keys))))
   (reset! seon.agent/state (some-> st (#(apply dissoc % start-keys))))
   nil)
 

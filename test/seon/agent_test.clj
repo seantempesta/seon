@@ -2715,6 +2715,19 @@
       (is (= {:seon.bound/ms 50} (get-in r [:result :seon.bound/bound])) "it names the bound it reached")
       (is (nil? (get-in @agent/state [:waits k])) "and holds no wait after"))))
 
+;; Estimate: in-agent's own setup and teardown (~1.5M) + one ask of the test's own at ~0.25M = ~1750000; 2,000,000
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} an-agents-start-value-is-its-procs-args-never-a-root
+  ;; docs/flow.md#flow-inside-an-agent: the agent's start value goes to each proc of its graph as the flow def's :args, its init keeps it,
+  ;; and each step binds it around the code it runs (seon.repl/with-start); the var has no root value, so nothing reads a process global.
+  ;; Red under hold-start! (the root set at the process's start): the root held the agent's key
+  (let [[r] (in-agent (fn [{:keys [task]}] [(str "{:root (.getRawRoot #'seon.agent/*start*) :key (:key seon.agent/*start*) :task (:task seon.agent/*start*)"
+                                                 " :graph? (realized? (:graph seon.agent/*start*)) :task-asked " (pr-str task) "}")]))
+        v (:value r)]
+    (is (nil? (:root v)) (str "the start value has no root: " (pr-str r)))
+    (is (string? (:key v)) (str "an eval reads the agent's key from its proc's binding: " (pr-str r)))
+    (is (= (:task-asked v) (:task v)) "and its task")
+    (is (true? (:graph? v)) "and its own graph, delivered once it exists")))
+
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-task-whose-proofs-pass-is-done-only-when-what-it-reaches-is-green
   ;; the owner's ruling: a turn runs the proofs, the tests the change reaches run once they are green, judged as the
