@@ -403,7 +403,7 @@
     (cond (nil? checkout) (refused (str "seon_import imports onto the agent a checkout holds: its client is checkout-<path> (bin/mcp call), not " (pr-str cl)))
           (nil? rel) (refused (str path " is outside the checkout " checkout ": not imported"))
           :else (let [branch (fx/checkout-branch checkout)]
-                  (if-let [{:keys [agent task]} (some->> branch (root/held-agent sys))]
+                  (if-let [{:keys [agent task]} (some->> branch (root/branch-agent sys))]
                     ;; an eval at the session's agent that is no turn of its: an edit moves the branch, never the agent's turn or its messages
                     (let [form (list 'seon.turn/outside-reply! task "" [{"intent" (str "import " rel ", written by the session")
                                                                          "code" (str "(my.branch/import! " (pr-str checkout) " [" (pr-str rel) "])")}] false)

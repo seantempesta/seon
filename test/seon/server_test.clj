@@ -1166,7 +1166,7 @@
        (d/transact conn (ts/work-tx "session/w" :running {:agent :k1 :holder "w"}))
        (d/transact conn (ts/work-tx "session/v" :running {:agent :k2 :holder "mcp-1-2"}))
        (let [sys {:graph nil :ext (a/chan) :conn conn}]
-         (is (= {:agent :k1 :task "session/w"} (select-keys (my.root/held-agent sys "jolt/w") [:agent :task])) "the session's live agent, attached by its area")
-         (is (= :k2 (:agent (my.root/held-agent sys "jolt/v"))) "whoever attached it")
-         (is (nil? (my.root/held-agent sys "jolt/nobody")) "a branch whose session attached none holds none")
-         (is (nil? (my.root/held-agent sys "main")) "a branch of no session holds none"))))))
+         (is (= {:agent :k1 :task "session/w"} (select-keys (my.root/branch-agent sys "jolt/w") [:agent :task])) "the session's live agent, attached by its area")
+         (is (= :k2 (:agent (my.root/branch-agent sys "jolt/v"))) "whoever attached it")
+         (is (nil? (my.root/branch-agent sys "jolt/nobody")) "a branch whose session attached none holds none")
+         (is (nil? (my.root/branch-agent sys "main")) "a branch of no session holds none"))))))

@@ -1282,7 +1282,7 @@
 
 (defn checkout-branch
   "The branch the checkout at dir is on (jolt/<area> for a session's worktree), or nil on a detached HEAD: what names the session
-  whose agent a worktree's edits are imported onto (my.root/held-agent). See docs/server.md#working-a-task-from-a-worktree."
+  whose agent a worktree's edits are imported onto (my.root/branch-agent). See docs/server.md#working-a-task-from-a-worktree."
   {:malli/schema [:=> [:cat :string] [:maybe :string]]}
   [dir] (git-try dir ["symbolic-ref" "--short" "HEAD"]))
 
