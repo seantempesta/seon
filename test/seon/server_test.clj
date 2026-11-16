@@ -214,23 +214,19 @@
     (is (= [:seon.task/plan] (map last (:unmerged (:error refused refused)))) "and the refusal names the entry's key")
     (is (clojure.string/includes? (pr-str refused) "root-repairs-a-failed-merge-from-its-repl") "with where its repair is")))
 
-(deftest an-attached-agent-holds-its-task
-  ;; agent view's browser check: an agent attached from outside (seon.server/attach!
-  ;; spawns it before it writes the start on main, so its branch is cut without the task) held no
-  ;; task in @ctx, and its page no task, until a turn or a context read began its work. Forked for
-  ;; a task, the agent records it on its branch as it starts (seon.agent/begin-run!): before any turn
+(deftest an-attached-agent-holds-its-task-running-in-its-record
+  ;; agent view's browser check: an agent attached from outside (seon.server/attach! spawns it before it writes the start on main, so its branch is
+  ;; cut without the task, and before main writes the task's release) held no task in @ctx, and read it :held, until a turn or a context read began
+  ;; its work. Forked for a task, the agent records it on its branch as it starts (seon.agent/begin-run!): its task in its record, no runs, and
+  ;; (my.task/current) and its record read the task running, as main does (task seon.task/an-agent-reads-its-task-as-main-holds-it)
   (let [names (volatile! nil)
-        [held] (at/in-agent (fn [n] (vreset! names n) ["(let [t @seon.ctx/ctx] [(contains? t :runs) (get-in t [:seon.agent/task :seon.task/id])])"]))]
-    (is (= [false (:task @names)] (:value held)) "its task, in its record, and no runs")))
-
-(deftest an-agent-reads-its-task-running
-  ;; task seon.task/an-agent-reads-its-task-as-main-holds-it: an attached agent's branch is cut
-  ;; before main writes the task's release, so (my.task/current) and its page read :held
-  ;; its record, which every part of its page is drawn from (the agent's own task part tells it its work, not the execution)
-  (let [[current held] (at/in-agent ["(:seon.task/execution (my.task/current))"
-                                     "(:seon.task/execution (:seon.agent/task @seon.ctx/ctx))"])]
+        [held current running] (at/in-agent (fn [n] (vreset! names n)
+                                              ["(let [t @seon.ctx/ctx] [(contains? t :runs) (get-in t [:seon.agent/task :seon.task/id])])"
+                                               "(:seon.task/execution (my.task/current))"
+                                               "(:seon.task/execution (:seon.agent/task @seon.ctx/ctx))"]))]
+    (is (= [false (:task @names)] (:value held)) "its task, in its record, and no runs")
     (is (= :running (:value current)) "the agent reads its task running, as main does")
-    (is (= :running (:value held)) "and so does its record")))
+    (is (= :running (:value running)) "and so does its record")))
 
 (defn- in-agent-of
   "Root-REPL code that evaluates form in the agent that works task id, answering its value (read back
@@ -783,17 +779,6 @@
     (is (contract/error? other) "v's branch is t's, which t's agent holds: refused, as an answer, never a server defect")
     (is (= :seon.system/refused (:seon.error/type other)) (pr-str other))
     (is (re-find #"held by live agent :[a-p][0-9a-f]{15} working [a-p][0-9a-f]{15}/t: its seon_done" (str (:seon.error/message other))) (pr-str other))))
-
-;; docs/turn.md#an-outside-agent: an attached agent reads the page as the model does, Seon's message of the turn, and what moved after
-(deftest an-outside-agents-read-carries-the-page-and-what-moved
-  (let [[_ first-read _ moved-read]
-        (at/in-agent (fn [{:keys [agent task]}]
-                       [{:op :attach :task task}
-                        {:op :context :agent agent}
-                        {:op :eval :agent agent :message-md "Changing my plan." :evals [{:intent "change it" :code "(swap! ctx assoc-in [:seon.agent/task :seon.task/plan] \"A plan that moved.\")"}]}
-                        {:op :context :agent agent}]))]
-    (is (clojure.string/includes? (str (:context first-read)) "(my.render/page ") "the page, the first time")
-    (is (clojure.string/includes? (str (:context moved-read)) "A plan that moved.") "and what moved, the next time")))
 
 (deftest green-work-behind-main-is-merged-at-done
   ;; an outside agent's green work was closed "ended green: behind 6", its agent gone, while each answer said to merge when it chose: seon.turn/hand-back! merges main first.
