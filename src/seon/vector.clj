@@ -583,14 +583,24 @@
         todo (concat fresh later)
         due (take (:texts st) todo)
         left (into (mapv first (drop (:texts st) todo)) (drop room owed))
+        ;; the searches holding a vector but no hits for their query (seon.ctx.search/hits-owed): read once, the first round this state
+        ;; holds none (a start, after a failure, or a proc whose state was made before this code arrived in place), then owed round by
+        ;; round; seon.ctx.search requires this namespace, so it is resolved here
+        hits-owed (if (and clean (contains? st :hits-owed)) (:hits-owed st) ((requiring-resolve 'seon.ctx.search/hits-owed) db))
         ;; scanned at this commit: what is still due is owed, so the next round starts from here, not from a full scan
-        st (assoc st :seen (:commit m) :clean (select-keys m [:t :commit]) :owed left)]
+        st (assoc st :seen (:commit m) :clean (select-keys m [:t :commit]) :owed left :hits-owed (vec hits-owed))]
     (cond
       (seq due)
       (let [more? (boolean (seq left))
             [st m] (step/ask st [:vectors :answers] [:embedded [(mapv first due) (mapv peek due) (select-keys m [:t :commit])]]
                              {:op :fx :kind :embed :req (cond-> {:texts (mapv second due)} more? (assoc :more true))})]
         [(assoc st :running true :more more?) [m]])
+      ;; nothing to embed: the owed searches' hits from their stored vectors, :texts a round, then the library
+      (and (seq hits-owed) (pos? (:texts st)))
+      (let [es (vec (take (:texts st) hits-owed))
+            tx ((requiring-resolve 'seon.ctx.search/hits-tx) db es (mapv #(vector-of db %) es))
+            [st w] (step/ask (update st :hits-owed #(vec (drop (count es) %))) [:vectors :answers] [:written 0] {:op :write :req {:op :tx :branch :db :tx-data tx}})]
+        [(assoc st :running true) [w]])
       :else (library-round st db))))
 
 (defn vectors-proc
@@ -612,7 +622,7 @@
        :outs {:to-api "its requests to the api: the :embed effect, the write to main"}
        :workload :io
        :ping-map-fn (fn [st] (-> (select-keys st [:running :embedded :written-t]) (assoc :unembeddable (count (:unembeddable st)))))})
-  ([args] {:rid 0 :pending {} :conn (:conn args) :model (:model args) :texts (:texts args) :running false :embedded 0 :written-t -1 :unembeddable #{} :owed [] :clean nil :seen nil})
+  ([args] {:rid 0 :pending {} :conn (:conn args) :model (:model args) :texts (:texts args) :running false :embedded 0 :written-t -1 :unembeddable #{} :owed [] :hits-owed [] :clean nil :seen nil})
   ([st _] st)
   ([st in m]
    (let [[st outs]
