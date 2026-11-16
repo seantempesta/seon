@@ -30,17 +30,15 @@ What each session works on now, kept by root and rewritten in place at every che
 
 | Session | Item | Started | Estimate | Actual / ratio |
 |---|---|---|---|---|
-| tests | the ask bound (time left of the wall) | 07:43 | 30 min | 49 min (ccb70177dc), 1.6 |
-| tests | read keys at datom level ([:ea form :form/id]): the cross-branch reuse miss, measured to `:form/keywords` moving | 08:39 | its estimate owed | |
-| runtime | docs and tasks to the rulings | 08:00 | 20 min | 35 min (5520f4c5ec), 1.8 |
-| runtime | liveness a reaction, one loader, typed child death, no-disk law, the threads red | 08:39 | its estimate owed | |
-| flow | docs and tasks to the rulings | 08:00 | 20 min | 29 min (7ae810088f), 1.5 |
-| flow | `seon_inbox` reads since t, marks nothing; then `stream=true` | 08:39 | one seek a read, O(d) a commit | |
-| data | landing 6 slice 1; why `:form/keywords` is stored; test writes speculative | 08:15 | its estimate owed | |
-| deps | the LMDB sync bound (pin; restart window owed); then Jolt ticks | 07:50 | 90 min | proving at 08:39 |
-| context | docs and tasks | 07:15 | 15 min | 66 min (f185ad1e2e), 4.4 |
-| context | `edit!` places an in-tree path on the branch; the turn-test's scope fix | 08:39 | its estimate owed | |
-| web | the held-guard fix; the render proc's order-dependent red (root-reads-the-health) | 07:42 | 60 min | built at 08:39, 1.6 |
+| tests | step 2, read keys one value a result | 08:20 | 30 min | 30 min (fc23c6ebd7), 1.0 |
+| tests | test-inputs clock reads named | 08:45 | 15 min | 12 min (33b6caf0f0), 0.8 |
+| tests | item 4 (delete file-slow-tests!), step 3, datom-level read keys; 3 Sonnet helpers on source, system and doc tests | 09:06 | its estimate | |
+| runtime | the threads red (landing); then D's delete-only slice and switch-over step 0; ratom tests' rand-int | 08:40 | 60 min | fix built at 09:06 |
+| flow | `seon_inbox` since=t, marks nothing: land, then verify every session and across a restart | 08:40 | one seek a read, O(d) a commit | land queued at 09:06 |
+| data | slice 1 (blocked on `d/changes` past the parent, deps); `:form/keywords` one producer; the ids plan (no counter; tx id as hybrid-clock time) | 08:15 | its estimate | blocked at 09:06 |
+| deps | LMDB sync bound pin (restart window open); `d/changes` past the parent; ids input for data; then Jolt ticks | 07:50 | 90 min | 76 min so far |
+| context | the reply baseline fix, `edit!` in-tree, turn-test scope (landing); then drivers through the whole Seon path | 08:40 | its estimate | landing at 09:06 |
+| web | audit work and held-guard fix, 629 tests | 07:42 | 60 min | landing at 09:06, 1.4 hours (1.4) |
 
 ## The managing session
 
