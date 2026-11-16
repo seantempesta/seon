@@ -247,7 +247,9 @@
 (deftest ^{:seon.test/estimate {:ticks 1000000}} a-measure-that-never-settles-answers-its-least-and-says-so
   ;; a call allocating fewer bytes every time never reaches a steady state: the measure stops at its cap, answers
   ;; the least of its calls and marks it (an error here failed by chance on a large call whose noise lowers the
-  ;; least now and then: seon.cost-test/the-unit-table-is-current, once in three runs)
+  ;; least now and then: seon.cost-test/the-unit-table-is-current, once in three runs). Counted with no read recorder bound: under the test
+  ;; service's, a measure makes one call more, unmeasured, for the recorder (seon.cost-test/a-measure-takes-a-count-of-samples-never-a-time)
+  (binding [datahike.index.interface/*reads* nil]
   (let [calls (atom 0)
         cap 6
         m (seon.cost/measure (fn [] (swap! calls inc) (count (vec (range (- 1000 (* 100 @calls)))))) [] cap)]
@@ -257,7 +259,7 @@
     (is (nil? (:unsettled (meta (seon.cost/measure (fn [] (count (vec (range 100)))) [] (seon.config/value :seon.config.proofs/cost-max-samples))))) "a settled call carries no mark")
     (let [calls (atom 0)]
       (seon.cost/measure (fn [] (swap! calls inc)) [])
-      (is (= 1 @calls) "by default a measure is one call"))))
+      (is (= 1 @calls) "by default a measure is one call")))))
 
 ;; Estimate: 10 measures x ~17 calls (settle) of 1000 elements x ~50 ticks = 50k a call: ~9M ticks.
 (deftest ^{:seon.test/estimate {:ticks 9000000}} a-measure-is-one-number-beside-another-thread

@@ -994,8 +994,13 @@
             f)))
 
 (defn commit-message
-  "The merges commit's message, from the facts of what merged: each member's task."
-  {:malli/schema [:=> [:cat [:sequential [:map [:task :any]]]] :string]}
-  [members]
+  "The merges commit's message, from the facts of what merged, read on db (main with them merged): each member's task, and its
+  landing's own message (:seon.task/landing's :message, a session's commit messages since its last landing: its Deletes:, estimates and accepted
+  risks) under it, so they reach git as a hand merge's do. See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential [:map [:task :any]]]] :string]}
+  [db members]
   (str "Seon merge: " (str/join ", " (map (comp str :task) members)) "\n\n"
-       (str/join "\n" (for [{:keys [task]} members] (str "task " task))) "\n"))
+       (str/join "\n" (for [{:keys [task]} members
+                             :let [landing (some-> (pdb/eid db :seon.task/id (str task)) (->> (d/entity db)) :seon.task/landing :message str/trim not-empty)]]
+                         (str "task " task (when landing (str "\n\n" landing "\n")))))
+       "\n"))

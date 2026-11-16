@@ -1272,7 +1272,7 @@
                      ;; the branch main was imported from (its source fact's :branch, git's main for the standing root), from its :commit
                      (one (request (update-in st [:flights id :writeback] assoc :written (vec (keys files)) :t (:max-tx (:db r))) id :committed
                                    {:op :fx :kind :git :req (merge {:dir (:root (:source st)) :files files :modes (source/modes (:db r) (keys files))
-                                                                    :message (source/commit-message members)}
+                                                                    :message (source/commit-message (:db r) members)}
                                                                    (write-back-target (:seon.system/source (d/pull (:db r) [:seon.system/source] [:seon.system/id :root]))
                                                                                       (:branch (:source st))))}))))
       ;; the sha on each merged task; the merge already runs where main's program runs

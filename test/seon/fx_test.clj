@@ -652,6 +652,27 @@
           (is (= :seon.fx/ref-moved (:seon.error/type r)) (pr-str r))))
       (finally (seon.lib/remove-tree! dir)))))
 
+;; docs/source.md#commit-the-merges-branch: a seon_done's git commit carries the landing's own message, so a branch commit's Deletes: reaches
+;; main: its own commits since the last landing it read, its merges of main left out. Estimate: git is the subject, ~15 spawns at ~100k
+;; ticks = 1.5M ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["git"]} a-landing-message-is-the-branchs-own-commits-since-its-last-landing
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-fx-landing-" (random-uuid))) (.mkdirs)))
+        git (fn [& args] (clojure.string/trim (str (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@localhost" args)))))
+        commit (fn [f m] (spit (str dir "/" f) m) (git "add" "-A") (git "commit" "-q" "-m" m))]
+    (try
+      (git "init" "-q" "-b" "main") (commit "a" "base")
+      (git "checkout" "-q" "-b" "jolt/s") (commit "b" "A fix\n\nDeletes: x, onto y")
+      (git "checkout" "-q" "main") (commit "c" "main moved") (git "checkout" "-q" "jolt/s") (git "merge" "-q" "--no-edit" "main")
+      (let [l (fx/landing-message dir nil)]
+        (is (clojure.string/includes? (:message l) "Deletes: x, onto y") (pr-str l))
+        (is (not (clojure.string/includes? (:message l) "Merge")) "a merge of main is no part of it")
+        (is (not (clojure.string/includes? (:message l) "main moved")) "nor main's own commits")
+        (is (= (git "rev-parse" "HEAD") (:head l)))
+        (is (nil? (fx/landing-message dir (:head l))) "landed: nothing new since")
+        (commit "d" "Next fix")
+        (is (= "Next fix" (:message (fx/landing-message dir (:head l)))) "the next landing carries only its own"))
+      (finally (seon.lib/remove-tree! dir)))))
+
 ;; docs/merging.md#verdicts-are-a-cache: a config value naming a file enters a test's digest as the file's name, never where the
 ;; machine keeps it, so one test has one digest from any checkout (the embed model in the main tree's cache read "<checkout>/..."
 ;; from the main tree and an absolute path from a worktree: 103 of 181 process digests apart on the standing system, 2026-11-12)
