@@ -815,34 +815,39 @@
     (is (< (my.agent/wc rs) (my.agent/wc (with-meta rs nil))) "wc counts the numbered lines, fewer tokens than the maps")
     (is (= "  no number" (:seon.print/code (my.agent/lines-text {} [{:text "  no number"}]))) "a row without :at shows its text alone")))
 
-(deftest a-name-that-is-no-var-says-so
+;; Estimate: a world with one small namespace (~2M) and nine evals at an agent's REPL state in this process, each recorded as an agent's
+;; on the world (~1.8M each: the first estimate, 0.2M an eval, missed the recording), one named-tests read (~0.1M): ~18M; 25,000,000
+;; ticks, 120 MB; measured 18.4M / 88 MB. It forked an agent for these reads (tests' FOCUS step 4: world reads, nothing that needs a process)
+(deftest ^{:seon.test/estimate {:ticks 25000000 :bytes 120000000}} a-name-that-is-no-var-says-so
   ;; the live rounds (the archived paper live-2026-10-25.md (git history)): (my.agent/callers 'seon.proof/status) answered [],
   ;; read as "no callers", and the run asked again until it ended :no-progress. A symbol that names
   ;; no var says so, with the form for the registry key of that name when there is one
-  (let [[_ nothing key-name real callees library _ fresh aliased referred ns-typo unmatched] (at/in-agent #(vector {:op :context :agent (:agent %)}
-                                                         "(my.agent/callers 'seon.task/no-such-thing)"
-                                                         "(my.agent/callers 'seon.task/plan)"
-                                                         "(my.agent/callers 'seon.task/accumulate)"
-                                                         "(my.agent/callees 'seon.task/no-such-thing)"
-                                                         "(my.agent/callers 'clojure.core/map)"
-                                                         "(defn zz-fresh [] 1)"
-                                                         "(my.agent/callers (symbol (str *ns*) \"zz-fresh\"))"
-                                                         "(do (require '[clojure.string :as s-alias]) (my.agent/callers 's-alias/join))"
-                                                         "(my.agent/callers 'map)"
-                                                         "(my.agent/callers 'seon.tsk)"
-                                                         "(:unmatched (my.agent/prove '#{seon.task-test/no-such-test}))"))]
+  (let [db (my.test/with (my.test/world) (my.test/code 'seon.task "(ns seon.task (:require [clojure.string :as str]))\n(defn accumulate [x] (map inc x))\n(defn tasks [] (accumulate [1]))\n(defn joined [xs] (str/join \",\" xs))\n"))
+        ev (fn [code] (my.test/eval-in code 'seon.repl-test.names {:db db}))
+        [nothing key-name real callees library fresh aliased referred ns-typo]
+        (map ev ["(my.agent/callers 'seon.task/no-such-thing)"
+                 "(my.agent/callers 'seon.task/plan)"
+                 "(my.agent/callers 'seon.task/accumulate)"
+                 "(my.agent/callees 'seon.task/no-such-thing)"
+                 "(my.agent/callers 'clojure.core/map)"
+                 "(do (defn zz-fresh [] 1) (my.agent/callers (symbol (str *ns*) \"zz-fresh\")))"
+                 "(do (require '[clojure.string :as s-alias]) (my.agent/callers 's-alias/join))"
+                 "(my.agent/callers 'map)"
+                 "(my.agent/callers 'seon.tsk)"])]
     (is (= :my.agent/no-var (:seon.error/type (:value nothing))) (pr-str nothing))
     (is (= 'seon.task/no-such-thing (:name (:value nothing))) "it names what was asked")
     (is (nil? (:ask (:value nothing))) "and no key of that name: nothing to ask instead")
     (is (= "(my.agent/callers :seon.task/plan)" (:ask (:value key-name))) "a registry key of that name: the form that asks for it")
-    (is (vector? (:value real)) "a var still answers its callers")
+    (is (vector? (:value real)) (str "a var still answers its callers: " (pr-str real)))
     (is (= :my.agent/no-var (:seon.error/type (:value callees))) "callees says the same")
     (is (vector? (:value library)) "a library's var is a var")
     (is (vector? (:value fresh)) (str "a var just defined at the REPL is a var: " (pr-str fresh)))
     (is (seq (:value aliased)) (str "an alias reads as the var it resolves to, whose callers are recorded by its full name: " (pr-str aliased)))
     (is (seq (:value referred)) (str "a referred name is the var, not a namespace: " (pr-str referred)))
     (is (= :my.agent/no-var (:seon.error/type (:value ns-typo))) (str "a bare name that is no namespace says so, nearest namespaces named: " (pr-str ns-typo)))
-    (is (= '[demo-test/t seon.task-test/no-such-test] (:value unmatched)) (str "a prove naming no test says which: " (pr-str unmatched)))))
+    ;; a prove naming no test says which (my.agent/prove's :unmatched): the names seon.agent/named-tests finds no test for
+    (is (empty? (seon.agent/named-tests db #{'seon.task-test/no-such-test})) "a name that is no test names none")
+    (is (seq (seon.agent/named-tests db #{'app.calc-test/total-sums})) "a test the world holds is named")))
 
 (deftest ^{:seon.test/estimate {:ticks 100000000}} grep-refuses-what-it-does-not-take
   ;; docs/vector.md#search: an option grep does not take, ignored, reads as what it asked for, and so does []
