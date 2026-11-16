@@ -2031,8 +2031,12 @@
                              :when (some (fn [[k mm d]] (and (= :method k) (= m mm) (some #(= d (sedn/encode %)) (:ops f)))) (:defines (rows id)))]
                          id))
         edges (fn [f] (if (schema-row? f)
-                        ;; the entries it names, and the vars (its renders) its properties name
-                        (vec (concat (filter rows (:schema f)) (keep var-form (:refs f))))
+                        ;; the entries it names, and the vars (its renders) its properties name; a config entry's symbols are
+                        ;; data its reader takes as names (:seon.config.source/process-vars, process-entry), never called through
+                        ;; it: an edge to them made reach-graph, test-plan and the agent's procs one component with
+                        ;; seon.lib/fork!, so every test that plans was a process test (docs/source.md#tests-run-by-reach)
+                        (vec (concat (filter rows (:schema f))
+                                     (when-not (some-> (:ns f) namespace (str/starts-with? "seon.config")) (keep var-form (:refs f)))))
                         (vec (concat (remove test-ids (keep var-form (named f)))
                                      (when (or (proc (:id f)) (bin (:id f))) (remove #{(:id f)} entry-ids))
                                      ;; a request a test's code builds goes to a root's server (in-agent's ask)
