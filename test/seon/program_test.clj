@@ -1070,7 +1070,7 @@
     (is (seq process) "there are process tests")
     (is (every? reaching process) "every test that starts a process reaches the code the agent it starts runs")
     (is (every? #(get (:defs g) %) (cfg/value :seon.config.source/process-entry)) "and every configured entry var is in the program: a renamed one drops its edge in silence")
-    (is (every? reaching '[seon.server-test/the-context-op-answers-what-a-model-is-sent seon.server-test/done-answers-the-judges-reasons]))
+    (is (every? reaching '[seon.server-test/the-context-op-answers-what-a-model-is-sent seon.server-test/green-work-behind-main-is-merged-at-done]))
     (is (not (reaching 'seon.reader-test/text-without-a-fence-is-a-comment)) "a pure test does not")
     ;; owner, 2026-10-27 ("no tests should include all of src"): the entry was seon.main/-main, a
     ;; root's whole boot (1,512 vars), so a change anywhere in it deferred every process test to the
@@ -1087,7 +1087,7 @@
       (is (empty? (keep #(path g % 'seon.generation/generation) (cons 'seon.turn/work! (get (:methods g) 'seon.server/op-answer))))
           "what a process runs for a test (the turn, each op's answer) does not reach a root's boot")
       (is (and (method :done) (method :eval)) "each op is a method of its own")
-      (is (done 'seon.server-test/done-answers-the-judges-reasons) "a test that sends :done reaches the :done method")
+      (is (done 'seon.server-test/green-work-behind-main-is-merged-at-done) "a test that sends :done reaches the :done method")
       (is (and (process 'seon.server-test/an-agent-reads-its-task-running) (not (done 'seon.server-test/an-agent-reads-its-task-running)))
           "a process test that sends no :done does not")
       (is (< 0 (count done) (count process)) (str (count done) " of " (count process) " process tests send :done"))

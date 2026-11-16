@@ -412,6 +412,12 @@
   {:malli/schema [:=> [:cat [:maybe [:sequential :any]]] [:maybe :any]]}
   [ps] (some->> (seq (filter :seon.process/forked-ms ps)) (apply max-key :seon.process/forked-ms)))
 
+(defn agent-ended?
+  "Did agent entity a's process end after it started: its :seon.agent/ended-ms at or past its :seon.agent/started-ms. A key spawned again
+  keeps its last end, which is no end of the new process (docs/turn.md#parked)."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [a] (boolean (when-let [e (:seon.agent/ended-ms a)] (>= e (:seon.agent/started-ms a 0)))))
+
 (defn agent-key
   "The agent key of task id's session on db, or nil when none of its chain has had an agent: the
   session is id and the tasks on its branch it needs, transitively (a request's stages, a work
