@@ -8,4 +8,8 @@
   :seon.task/proofs #{seon.ctx.search-test/a-ranked-search-of-a-long-plan-answers}
   :seon.task/estimate {seon.doc/tokens {:n 558, :order :linear, :ticks 3000000, :bytes 10000000}}
   :seon.task/needs #{"seon.ctx/moved-reads-the-commits-between-two-points"}}
+ {:seon.task/name "a-swapped-search-test-writes-its-hits"
+  :seon.task/kind :work
+  :seon.task/plan "Found 2026-11-16 (context) once seon.ctx-test's harness held a test agent's start value in seon.agent/*start* (G2), which had hidden it behind an NPE: seon.ctx-test/a-search-is-a-member-a-swap-adds-and-changes is red, pass 9 fail 3 (ctx_test.clj ~1205): its search's part draws no hits. Cause, read: search once (seon.render.ui/searched draws the stored hits fact, seon.ctx.search/embedded-tx, and never searches) while the test writes the query's vector alone (seon.vector/tx-data). PRIOR WORK: seon.ctx.search/embedded-tx, the vectors proc's write. CHANGE: the test writes the query's hits as the vectors proc does (embedded-tx), so its swap of the query moves only the searched part. Bound: the test's own work, one build and two draws of a 20-eval world."
+  :seon.task/proofs #{seon.ctx-test/a-search-is-a-member-a-swap-adds-and-changes}}
 ]
