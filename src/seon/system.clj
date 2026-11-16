@@ -1699,8 +1699,7 @@
   store at path and resumed, caught up with the files of its source tree that changed since main last indexed it (catch-up; none
   read when nothing changed, and nothing for a root given no source tree), or, when nothing was ever indexed into it nor a root
   booted on it, the checkout indexed into it first (seed!); main's config held, its program digested (seon.program/program-digest), the
-  contracts instrumented, the warm paths run and the heap made static, then the fork server forked from it (which preloads
-  main's indexes for its agents: seon.fork-server/main), sharing all of that copy-on-write while this is the one thread
+  contracts instrumented, the warm paths run and the heap made static, then the fork server forked from it (seon.fork-server/main), sharing all of that copy-on-write while this is the one thread
   there is (docs/failure-points.md, physics). Its return starts the process's threads (Jolt's carriers, timer and poller;
   main-carrier-run! returns into an ordinary process), and root's follow. open!'s answer with main's :db as forked, the
   fork server's :pid and :fd, the seed's answer when it seeded, main's :digest and each phase's ms. See
