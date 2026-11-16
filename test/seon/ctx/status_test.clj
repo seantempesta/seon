@@ -1,6 +1,7 @@
 (ns seon.ctx.status-test
   "seon.ctx.status's done-rule input, the judge's own (docs/tasks.md#the-done-rule). Run: bin/test seon.ctx.status-test"
-  (:require [clojure.test :refer [deftest is]] [seon.reconcile :as r]))
+  (:require [clojure.test :refer [deftest is]] [seon.reconcile :as r] [datahike.api :as d] [seon.test-store :as ts] [seon.task :as task]
+            [seon.db :as pdb] [seon.ctx] [seon.ctx.status :as status]))
 
 (deftest ^{:seon.test/estimate {:ticks 200000}} the-status-reads-the-judges-done-input
   ;; the status built the done rule's input by hand when no test outside the proofs was red, beside the judge's
@@ -46,3 +47,38 @@
     (is (= '(do (my.schema/register! :a/b [:int]) (my.schema/register! :a/c [:int])) (:do several)) "several, one do of their forms")
     (is (not (contains? none :do)) "a problem with no form says none")
     (is (not (contains? red :do)) "only an open problem's")))
+
+;; docs/render.md#how-the-work-stands, plan item 8: a red
+;; outside the task's proofs is judged by the tasks claiming it. The turn listed the reconciler's whole index for that (its agent's,
+;; advanced by what differs, else one built cold: 14.8M ticks on a demo branch) where the judge reads the same claims. Now the turn
+;; reads only the tasks claiming a test (one scan of :seon.task/proofs) through the judge's one input producer, so its reasons are the
+;; judge's on the same results, at less than the listing it replaced (red before: the status paid that listing). Estimate: 42 tasks;
+;; the status of a 4-verdict branch ~2M (its diff-free reads: verdicts 4 seeks, claims-of one scan of 42 datoms and 3 entity reads,
+;; done-explain, refused); the judge's index listing for the comparison ~42 x 100k = 4.2M; the world ~3M: 10,000,000
+(deftest ^{:seon.test/estimate {:ticks 10000000 :bytes 60000000}} a-turn-and-the-judge-give-the-same-reasons
+  (let [db0 (ts/test-db)
+        proof (fn [n] (symbol "demo-test" (str n "-test")))
+        ;; demo/f, the agent's task; demo/g merged, so its proof red here is a regression; demo/o1 open, so its proof red here is
+        ;; allowed; 40 more tasks, the listing's n
+        decls (into [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p" :seon.task/proofs #{(proof "f")}}
+                     {:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "p" :seon.task/proofs #{(proof "g")}}]
+                    (for [i (range 1 41)] {:seon.task/ns 'demo :seon.task/name (str "o" i) :seon.task/plan "p" :seon.task/proofs #{(proof (str "o" i))}}))
+        db1 (d/db-with db0 (task/create-tx db0 decls))
+        db (d/db-with db1 [{:seon.task/id "demo/g" :seon.task/outcome :merged}
+                           {:seon.agent/key "a1" :seon.agent/task [:seon.task/id "demo/f"]}
+                           {:var/name (proof "f") :seon.test/status :green}
+                           {:var/name (proof "g") :seon.test/status :red}
+                           {:var/name (proof "o1") :seon.test/status :red}
+                           {:var/name 'user/stray-test :seon.test/status :red}])
+        rec (:tree (seon.ctx/build (pdb/index) db (pdb/eid db :seon.agent/key "a1") :b))
+        t0 (jolt.host/ticks)
+        st (status/status db rec {})
+        turn (- (jolt.host/ticks) t0)
+        results {(proof "f") :pass (proof "g") :fail (proof "o1") :fail 'user/stray-test :fail}
+        t1 (jolt.host/ticks)
+        idx (r/index db)
+        listing (- (jolt.host/ticks) t1)
+        judge (r/done-explain (r/done-input idx "demo/f" results #{} [] nil nil #{}))]
+    (is (= judge (:reasons st)) (str "the judge's reasons, on the same results: " (pr-str judge) " " (pr-str (:reasons st))))
+    (is (= [:regression :stray-red] (mapv :reason (:reasons st))) "a merged task's proof red is a regression, an open task's is allowed, the rest stray")
+    (is (< turn listing) (str "the turn reads the claims, never the listing: " turn " ticks against the listing's " listing))))

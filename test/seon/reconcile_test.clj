@@ -1099,7 +1099,7 @@
 
 ;; Estimate: sizes 5, 15, 50 on the shared disk store (its seed paid by the observed proof): 70 tasks x ~75k create-tx with a 1.4 KB plan = 5M + the listing proof's own work (fixed 0.2M x 3 + 100k x 70 = 7.6M) ~ 12.6M, about 1e7 ~ 10,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 10000000}} an-index-is-listed-at-the-cost-of-its-tasks
-  ;; an agent's first request build lists the index (seon.agent/reconcile-index); every reconciler helper
+  ;; root's reconciler lists the index at its start; every reconciler helper
   ;; takes the index, so its contract checks it shallowly (each entry is checked where it enters)
   (do
     (cost/proof {:of 'seon.reconcile/index :input 'seon.reconcile-test/listed-input

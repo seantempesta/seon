@@ -28,7 +28,6 @@
 ;; :branch-graph (the reach graph of the branch's db, keyed by its point, updated from the base's: branch-graph)
 ;; :branch-changes (what the branch changed since its base, seon.merge/delta-changes, keyed by the two points: branch-changes)
 ;; :main-changes (what main changed since the base, seon.merge/delta-changes, keyed by the two commits: main-changes)
-;; :index (seon.agent/reconcile-index: the reconciler's index and the commit it was observed for (the fork hands the db once), advanced each turn by what differs; at fork, main's from the fork server)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 ;; :tx (the last transaction transact! applied, {:db-after :tx-data}: seon.ctx patches @ctx from it: the db :db is, dropped by commit! when it moves :db)
 ;; :refused (the :seon.agent/commit-refused errors since the agent last answered: commit!, take-refused!)
@@ -854,20 +853,6 @@
             g (if b (program/reach-update (:graph b) db) (program/reach-graph db (:data-refs in)))]
         (swap! state assoc :branch-graph {:point at :graph g :inputs in})
         g))))
-
-(defn reconcile-index
-  "The reconciler's index of db (seon.reconcile/index), advanced from the one this process held for
-  the db it last asked about by what differs, at first from main's as the fork server handed it
-  (seon.fork-server/index-at-fork); listed whole only when it holds none. What seon.ctx.status/status
-  asks for main's claims. It keeps the commit it is of, never the db. See docs/render.md#how-the-work-stands."
-  {:malli/schema [:=> [:cat :seon.host/db] :map]}
-  [db]
-  (let [{from :db c :commit idx :index} (:index @state)
-        ;; the db it is of, made again from its commit: a db held past its moment pins its index (docs/storage.md#a-kept-db-value-is-a-reference)
-        from (or from (some->> c (d/commit-as-db (:store db))))
-        v (if idx (r/index idx from db) (r/index db))]
-    (swap! state assoc :index {:commit (d/commit-id db) :index v})
-    v))
 
 (defn branch-changes
   "What branch db changed since base, its merge base (seon.merge/delta-changes, declared data
@@ -2289,7 +2274,7 @@
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
-  [fd {id :agent branch :branch task :task cfg :cfg resumed :resumed commit :commit t :t graph :graph index :index schema-registry :schema-registry session :key
+  [fd {id :agent branch :branch task :task cfg :cfg resumed :resumed commit :commit t :t graph :graph schema-registry :schema-registry session :key
        marks0 :marks program-errors :program-errors} db0 serve]
   ;; the spawn's phases on the one clock, each with what this thread allocated in it: the fork
   ;; server's marks (marks0), then this process's, sent with its hello (spawn-phases)
@@ -2323,7 +2308,6 @@
         ;; is the parent's, reclaimed when the parent dies). Nothing after this reads the parent's value; what the parent decoded is
         ;; reused through the node cache after-fork! kept (docs/storage.md#an-agents-reads-and-writes)
         db0 (pdb/at-commit store-conn (d/commit-id db0))
-        index (some-> index (assoc :db db0))
         _ (mark! :connected)]
     ;; the config this process was forked holding (root read it; an agent reads no environment), the heap bound as its task
     ;; states it (docs/config.md#the-resolver): a task's own :seon.config.agent/heap-extra-bytes bounds its agent
@@ -2381,9 +2365,6 @@
                    ;; main's reach graph as the fork server keeps it, for db0: test-plan's base
                    ;; graph starts from it (base-graph), never built in this process
                    graph (assoc :base-graph {:point (pdb/point db0) :graph graph})
-                   ;; main's reconciler index as the fork server keeps it, for db0: the first turn
-                   ;; observes the branch from it (seon.agent/reconcile-index), never lists it here
-                   index (assoc :index index)
                    ;; main's schema registry as the fork server read it: the branch's until a write moves a
                    ;; schema entry (schema-moved), so no eval reads the schema entries before then
                    (and schema-registry (not resumed)) (assoc :schema-registry schema-registry)))

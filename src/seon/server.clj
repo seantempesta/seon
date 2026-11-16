@@ -82,8 +82,7 @@
 
 (defn- index-now
   "Main db's reconciler index (seon.reconcile/index), brought from the one this process last made for conn by what
-  changed since (index's incremental arity over the commit it was made on, d/commit-as-db), as the fork server keeps
-  its own (seon.fork-server/index-at-fork): the cost of what main changed, not of every task (a whole index was 37-46
+  changed since (index's incremental arity over the commit it was made on, d/commit-as-db): the cost of what main changed, not of every task (a whole index was 37-46
   ms of each :agents answer on a root of ~800 tasks). See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db] :seon.reconcile/index]}
   [conn db]
