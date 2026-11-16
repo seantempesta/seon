@@ -1186,7 +1186,7 @@
                                   "                              b (:seon.model-call/basis m)]"
                                   "                          [(:seon.model-call/sent-hash m) (seon.lib/digest (seon.edn/encode (:messages (seon.ctx.wire/render (datahike.api/commit-as-db (:store db) (:commit b)) b))))]))]"
                                   "  {:calls [(calls m1) (calls m2) (calls m3)] :prefix [(= m1 (subvec m2 0 (count m1))) (= m2 (subvec m3 0 (count m2)))]"
-                                  "   :by (vec (sort (datahike.api/q '[:find [?c ...] :where [?e :seon.eval/by ?s] [?s :seon.system/id :root] [?e :seon.eval/code ?c]] db)))"
+                                  "   :by (vec (sort (datahike.api/q '[:find [?c ...] :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a] [?e :seon.eval/by ?s] [?s :seon.system/id :root] [?e :seon.eval/code ?c]] db k)))"
                                   "   :pages [(count (pages m1)) (count (pages m2)) (count (pages m3))]"
                                   "   :hashes [(redrawn 1) (redrawn 2)]"
                                   "   :first-page (apply str (pages m1))"
@@ -1336,7 +1336,7 @@
                     [(str "(seon.turn/work! agent {:task " (pr-str task) " :max-turns 1})")
                      (str "(seon.turn/work! agent {:task " (pr-str task) " :max-turns 2})")
                      (str "(let [db (seon.agent/db)] (count (filter (fn [m] (some-> m :tool-calls first :code (as-> c (or (.startsWith c \"(my.render/\") (.startsWith c \"(my.agent/describe \"))))) (:messages (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) " :turn 3 :max-turns 2 :origin :model :agent (:key agent)})))))")
-                     "(count (datahike.api/q '[:find [?m ...] :where [?m :seon.model-call/origin :model]] (seon.agent/db)))"])
+                     "(count (datahike.api/q '[:find [?m ...] :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :model]] (seon.agent/db) (:key agent)))"])
                   {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})]
     (is (= 2 (:value calls)) "the second wake took a turn, so it had the chance to show the page")
     (is (= 2 (:value whole)) "the record and the page whole once, across both wakes: nothing moved, so the second turn adds no page message")))
@@ -2829,7 +2829,7 @@
                                          " (let [b2 (branch-of " (pr-str w) ")]"
                                          "  {:key k :pid1 pid1 :pid2 (get-in (c/state sys) [:agents ag :pid])"
                                          "   :turns [turn1 (:seon.agent/turn (datahike.api/entity b2 [:seon.agent/key k]))]"
-                                         "   :numbers (sort (datahike.api/q '[:find [?n ...] :where [?m :seon.model-call/n ?n] [?m :seon.model-call/origin :model]] b2))})))")}]))
+                                         "   :numbers (sort (datahike.api/q '[:find [?n ...] :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a] [?m :seon.model-call/n ?n] [?m :seon.model-call/origin :model]] b2 k))})))")}]))
                         {:config {:seon.config.ai/script 'seon.fixtures/wait-call}
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})
         {:keys [key pid1 pid2 turns numbers]} (:value r)
@@ -2856,7 +2856,7 @@
                                          " (let [ag (keyword (:seon.agent/key " (agent-code w) "))]"
                                          "   @(seon.system/message! sys ag \"carry on\") " (parked-code w 2)
                                          "   (let [db (:db @(seon.system/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch " (pr-str w) ")}}))]"
-                                         "     {:intent (sort (datahike.api/q '[:find [?p ...] :where [?e :seon.eval/intent ?p] (not-join [?e] [?e :seon.eval/by ?s] [?s :seon.system/id :root])] db))})))")}]))
+                                         "     {:intent (sort (datahike.api/q '[:find [?p ...] :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a] [?e :seon.eval/intent ?p] (not-join [?e] [?e :seon.eval/by ?s] [?s :seon.system/id :root])] db (name ag)))})))")}]))
                         {:config {:seon.config.ai/script 'seon.fixtures/text-reply}
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= ["Saw my own reply."] (:intent (:value r))) (pr-str r))))
@@ -3076,7 +3076,7 @@
                                         ;; an outside eval after the turn takes the number in force
                                         "(+ 1 2)"
                                         (str "(let [db (seon.agent/db) m (datahike.api/pull db '[*] [:seon.model-call/id (seon.lib/call-id (:key agent) 1)])"
-                                             "      evals (vec (datahike.api/q '[:find ?i ?c :where [?mc :seon.model-call/n 1] [?e :seon.eval/call ?mc] [?e :seon.eval/call-id _] [?e :seon.eval/id ?i] [?e :seon.eval/code ?c]] db))"
+                                             "      evals (vec (datahike.api/q '[:find ?i ?c :in $ ?mc :where [?e :seon.eval/call ?mc] [?e :seon.eval/call-id _] [?e :seon.eval/id ?i] [?e :seon.eval/code ?c]] db (:db/id m)))"
                                              "      msgs (fn [db] (vec (datahike.api/q '[:find ?id ?f ?b ?k :in $ ?k :where [?m :seon.message/id ?id] [?m :seon.message/from ?fe] [?fe :seon.agent/key ?f] [?m :seon.message/body ?b] [?m :seon.message/to ?a] [?a :seon.agent/key ?k]] db (:key agent))))]"
                                              "  {:calls (mapv (fn [[i c]] {:eval i :code c}) evals) :reply (:seon.model-call/reply m) :basis-keys (set (keys (:seon.model-call/basis m)))"
                                              "   :agent-key (:key agent) :on-branch (msgs db)"

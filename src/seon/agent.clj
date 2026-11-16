@@ -2088,7 +2088,8 @@
   check's keys left to the shards), :bound seon.proofs/step-bounds' (every step has one), :binary? seon.proofs/step-needs-binary?; a request naming tests or namespaces (names) runs only the
   steps it names among them (bin/prove --root PORT seon.config-test config), as the plain bin/prove NS runs none; :missing, the steps with no digest here (one naming a
   function the program lacks; health, keyed by a base tree no branch holds); :build {:tree :needed?}, needed when a process
-  test or a binary step is among them; :deferred, what it left that is no process item. Or {:unread error}: the cache
+  test or a binary step is among them; :deferred, what it left that is no process item; :shared, the process tests among them
+  that share the candidate's one root (seon.program/tests-reaching seon.test-store/shared-root!). Or {:unread error}: the cache
   could not be read."
   {:malli/schema [:=> [:cat :map [:maybe [:set :symbol]]] :map]}
   [sel names]
@@ -2115,6 +2116,9 @@
                :input-moved? (let [ins (cfg/value :seon.config.build/inputs)
                                    in? (fn [p] (some #(if (str/ends-with? % "/") (str/starts-with? p %) (= p %)) ins))]
                                (boolean (some (fn [[_ id]] (and (string? id) (in? id))) (keys (branch-changes (:base @state) (db))))))}
+       ;; the process tests that share the candidate's one root (they reach seon.test-store/shared-root!: the in-agent tests), which the
+       ;; test service runs :seon.config.proofs/shared-root-batches batches at a time (seon.prove/grant): one reverse walk of the graph
+       :shared (into #{} (filter (set (program/tests-reaching (:graph plan) 'seon.test-store/shared-root!))) (keys process))
        :branch (own-branch) :commit (str (d/commit-id (db)))})))
 
 (defn asked
@@ -2170,7 +2174,8 @@
                                                            ;; each deferred test's digest at the base, from the base's program (nil: new on the
                                                            ;; branch), which the merge check reads main's verdict at; the service's answer carries it
                                                            :deferred-digests (into {} (for [t (:deferred sel)] [t (get (:base-digests (:plan sel)) t)])))
-                               pp (merge (select-keys pp [:process :steps :mg :build :missing :branch :commit]))))}])
+                               ;; the process plan whole (no list of its keys, which dropped each new one), but :deferred, sel's above
+                               pp (merge (dissoc pp :deferred))))}])
            (let [proofs (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
                  r (run-tests-forked ag (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
                                      proofs
