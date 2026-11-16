@@ -14,7 +14,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str] [jolt.ffi :as ffi] [jolt.deps :as deps]
-            [seon.edn :as sedn] [clojure.edn :as edn] [clojure.java.io :as io] [seon.proofs :as proofs] [seon.reader :as reader] [seon.program :as program] [seon.intr :as intr]))
+            [seon.edn :as sedn] [clojure.edn :as edn] [clojure.java.io :as io] [seon.proofs :as proofs] [seon.reader :as reader] [seon.program :as program] [seon.intr :as intr] [seon.db :as pdb]))
 
 (defn- error
   "An effect's declared failure, as the one error map (its variant registered in
@@ -2242,6 +2242,15 @@
                     [(keyword (str "fx." (name kind)) (str i))
                      {:proc (flow/process #'worker-proc) :args {:kind kind :perform perform :open open :close close :ctx ctx :work work :owner owner}}])))))
     {} kinds))
+
+(defn collect-store
+  "The :collect effect: the store's old commit snapshots swept (seon.db/retain! under its :ctx's :conn, root's) when keep commits
+  have landed since the last sweep; asked by the reconciler at quiescence, never at boot, so its minutes of marking hold no boot
+  and no writer step. Answers {:value record} (nil when none is due), or retain!'s typed refusal, its record under :retained.
+  See docs/storage.md#collection."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [keep]} :req {:keys [conn]} :ctx}]
+  (let [r (pdb/retain! conn keep)] (if (contract/error? r) r {:value r})))
 
 (defn stall-evidence
   "A stalled agent's evidence, captured while it is stuck (seon.system's stall task asks it at the

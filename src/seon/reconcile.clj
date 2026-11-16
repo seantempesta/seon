@@ -1365,9 +1365,10 @@
 (defn- quiet
   "Report quiescence positively, once per quiet spell: when no flight is in the air and no
   task is live after a pass that started nothing, write main's :seon.system/quiescent (the
-  t judged, and the root causes), and ask the writer to collect the store (:collect: it sweeps
-  only when a branch is gone, and root refuses it while an agent is live). Their answers are
-  not awaited (no flight), and the commits they make touch only root, which does not end the
+  t judged, and the root causes), ask the writer to collect the store (:collect: it sweeps
+  only when a branch is gone, and root refuses it while an agent is live), and ask the :collect effect to sweep old commit
+  snapshots once keep commits have landed (seon.fx/collect-store: off the writer; its record is written when it answers,
+  take-answer). Their answers are not awaited (no flight), and the commits they make touch only root, which does not end the
   spell. Answers [st outputs]."
   {:malli/schema [:=> [:cat :seon.reconcile/state [:vector :map]] [:tuple :seon.reconcile/state [:vector :map]]]}
   [st outs]
@@ -1375,9 +1376,10 @@
     [st outs]
     (let [fact {:t (:t st) :root-causes (root-causes (:idx st))}
           [st q] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :tx :branch :db :tx-data [{:seon.system/id :root :seon.system/quiescent fact}]}})
-          [st c] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :collect}})]
+          [st c] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :collect}})
+          [st r] (step/ask st [:reconciler :answers] [::retained nil] {:op :fx :kind :collect :req {:keep (cfg/value :seon.config.store/keep-commits)}})]
       ;; :report, the report's request until its answer: a wait is answered once main holds it
-      [(assoc st :quiet true :quiescent fact :report (:tag q)) [q c]])))
+      [(assoc st :quiet true :quiescent fact :report (:tag q)) [q c r]])))
 
 (defn- answer-waits
   "Deliver each held wait on main (seon.system/await-db, through :quiet) whose :after the
@@ -1483,7 +1485,12 @@
   [st m]
   (let [st (cond-> st (= (:tag m) (:report st)) (dissoc :report))
         [st [aid step]] (step/answered st (:tag m))
-        [st outs] (if aid (advance st aid step (:r m)) [st []])
+        ;; the :collect effect's sweep answered (quiet): its record, swept or refused, written on main through the writer
+        retained (when (= ::retained aid) (or (:value (:r m)) (:retained (:r m))))
+        [st outs] (cond retained (let [[st w] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :tx :branch :db :tx-data (pdb/retained-tx retained)}})]
+                                   [st [w]])
+                        (and aid (not= ::retained aid)) (advance st aid step (:r m))
+                        :else [st []])
         ;; a flight that ended may free its run for the next action
         [st more] (if (and aid (not (get-in st [:flights aid])) (:db st)) (pass st) [st []])]
     [st (into outs more)]))

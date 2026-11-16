@@ -1641,6 +1641,15 @@
       (is (= {:t (:max-tx db) :root-causes [{:task "demo/add" :cause "capped" :blocks blocked}]} report))
       (is (some #(= {:op :collect} (get-in % [:req :req])) outs) "and asks the writer to collect the store, once a spell")
       (is (:quiet st)))
+    ;; switch-over step 0 (seon.system/an-update-loses-nothing): old snapshots are swept at quiescence by the :collect effect, off the
+    ;; writer and never at boot, and its record is written through the writer when it answers
+    (let [sweep (some #(when (= :collect (get-in % [:req :kind])) %) outs)
+          rec {:swept 3 :ms 1.0 :generation 42}
+          [_ after] (r/reconciler-proc st :answers {:tag (:tag sweep) :r {:value rec}})]
+      (testing "the quiet spell asks the :collect effect for the sweep, with the keep the config states"
+        (is (= {:op :fx :kind :collect :req {:keep (seon.config/value :seon.config.store/keep-commits)}} (:req sweep))))
+      (testing "its answer's record is written on main through the writer"
+        (is (some #(= (pdb/retained-tx rec) (get-in % [:req :req :tx-data])) (:to-api after)) (pr-str (:to-api after)))))
     (let [[db2 ops2] (commit db [{:seon.system/id :root :seon.system/quiescent report}])
           [st2 outs2] (step st db2 ops2)]
       (testing "the report's own commit (root only) makes no second report; main holds it"
