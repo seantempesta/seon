@@ -1809,7 +1809,7 @@
                :growth :linear
                :per-n {:ticks 250 :bytes 1000}
                :fixed {:ticks 20000 :bytes 60000}
-               :sizes [16 32 64]}))
+               :sizes [50 150 450]}))
 
 ;; Estimate: a world with 40 recorded errors; the live report built once (~40 rows x ~40k = ~2M), then two moves each its index lookup,
 ;; the reruns it touched and the sync (~1M); ~10M ticks
