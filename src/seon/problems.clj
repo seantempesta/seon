@@ -701,7 +701,7 @@
                :let [s (str "undrained-proc " v)]]
            (derived-row ans s (some-> (namespace v) symbol)
                         (str v " holds work outside its channels (a pend, an ask or a timer) and does not end it at ::flow/drain: end it there as at ::flow/stop (seon.step/end-all, timers cancelled)")
-                        {:kind :undrained-proc :var v} {:var v})))))
+                        {:site v :law :undrained-proc :named? false} {:var v})))))
 
 (defn unfocused-docstrings
   "An :unfocused-docstring row for each named Seon var whose docstring is over :seon.config.shrink/docstring-words words or

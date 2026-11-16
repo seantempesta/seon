@@ -1838,10 +1838,10 @@
                4 {:src "(defn v4 [o] (seon.step/put-after! o 1 {}))" :refs #{'seon.step/put-after!}}
                5 {:src "(defn v5 ([st tr] st))" :contract step :refs #{}}}
         head (var-forms (world) 5 (fn [i] (specs (int i))))
-        rows (filterv #(= nsym (namespace (:var %))) (mapv :evidence (problems/undrained-procs head {} nil)))]
-    (is (= [{:kind :undrained-proc :var (v 1)} {:kind :undrained-proc :var (v 2)}] rows)
+        rows (filterv #(= nsym (namespace (:site %))) (mapv :evidence (problems/undrained-procs head {} nil)))]
+    (is (= [{:site (v 1) :law :undrained-proc :named? false} {:site (v 2) :law :undrained-proc :named? false}] rows)
         "a proc holding a pend, or a timer through its helper, that names no drain; not one that drains, nor one that holds nothing")
-    (is (= [{:kind :undrained-proc :var (v 2)}] (mapv :evidence (problems/undrained-procs head {} #{(v 2) (v 3)})))
+    (is (= [{:site (v 2) :law :undrained-proc :named? false}] (mapv :evidence (problems/undrained-procs head {} #{(v 2) (v 3)})))
         "the moved procs alone")))
 
 (deftest ^{:seon.test/estimate {:ticks 4000000}} a-literal-enumeration-is-a-hand-written-list
