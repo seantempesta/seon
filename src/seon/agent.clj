@@ -26,7 +26,8 @@
 ;; :unembeddable (the entities whose text llama.cpp could not encode, as vectors-proc keeps them)
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base's point (seon.db/point: commit and t, never the db), from the fork server's :graph of main: base-graph)
 ;; :branch-graph (the reach graph of the branch's db, keyed by its point, updated from the base's: branch-graph)
-;; :branch-changes (what the branch changed since its base, seon.merge/delta-changes, keyed by the two points: branch-changes)
+;; :branch-changes (what the branch changed since its base, seon.merge/delta-changes, and the content datoms it was read from, :moved, keyed by the two points: branch-changes, branch-moved)
+;; :results-index (the readers index of the results branch, each test under its newest green's read keys, seon.proofs/reads-index, and the commit it is of, advanced by what that branch wrote since: results-index)
 ;; :main-changes (what main changed since the base, seon.merge/delta-changes, keyed by the two commits: main-changes)
 ;; :index (seon.agent/reconcile-index: the reconciler's index and the commit it was observed for (the fork hands the db once), advanced each turn by what differs; at fork, main's from the fork server)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
@@ -436,6 +437,11 @@
     ;; the branch's own schema changes go with the write: the one transaction path checks it (seon.db/with, the writer's 'transact!)
     (let [schemas (let [{:keys [key registry]} (branch-schemas)] (when (seq key) {:forms key :registry registry}))]
     (when-let [e (program/config-refused (db) tx-data)] (throw (ex-info (:seon.error/message e) e)))
+    ;; this process is its branch's one writer: an attribute only root writes, on main ({:seon.db/root-only true}: what root observes
+    ;; of an agent, the system entity, a recorded error) is never written here, so no merge meets it changed on both sides
+    (when-let [ra (seq (distinct (filter (:root-only-attrs (pdb/index)) (mapcat #(cond (map? %) (keys %) (vector? %) [(nth % 2 nil)]) tx-data))))]
+      (let [e (contract/error :seon.agent/root-only-write #'seon.agent/transact! (str "only root writes " (str/join ", " ra) ", on main") {:attributes (vec ra)})]
+        (throw (ex-info (:seon.error/message e) e))))
     (if (= :test (:mode @state))
       (let [r (pdb/with (db) tx-data schemas) attrs (into #{} (map :a) (:tx-data r))]
         (doc/carry-index! (:db-before r) (:db-after r) (map (juxt :e :a) (:tx-data r)))
@@ -576,7 +582,7 @@
 
 (defn merge-main!
   "git merge main into this agent's branch, decided on MAIN's program: root's writer runs the one merge (its :merge-main,
-  seon.merge/merge-main), never this branch's code. The branch becomes main's head plus its own datoms since the base, one commit
+  seon.merge/decide, then seon.writer/replay), never this branch's code. The branch becomes main's head plus its own transactions since the base, replayed, one commit
   only while the branch is still at the head this process committed; a key both changed stops it, and each conflict is an unmerged
   entry on the branch. This process writes nothing of its branch while it waits; the wait ends by the writer's answer, or, if
   its step throws, the typed error root answers the request's :dest with (seon.system/answer-taken), or root's end; then its connection follows the branch's moved head (datahike.connector/follow-head!). None of
@@ -881,9 +887,41 @@
   (let [{w-base :base w-at :point ch :changes} (:branch-changes @state)]
     (cond (nil? base) {}
           (and ch (d/commit-id db) (d/commit-id base) (= [(d/commit-id base) (:max-tx base)] w-base) (= [(d/commit-id db) (:max-tx db)] w-at)) ch
-          :else (let [ch (pm/delta-changes base db #{})]
-                  (swap! state assoc :branch-changes {:base (pdb/point base) :point (pdb/point db) :changes ch})
+          :else (let [moved (pm/content-datoms base db #{})
+                      ch (pm/delta-changes base db #{} moved)]
+                  (swap! state assoc :branch-changes {:base (pdb/point base) :point (pdb/point db) :changes ch :moved moved})
                   ch))))
+
+(defn branch-moved
+  "The datoms of program content (seon.merge/content-datoms, declared data left out) that differ between branch db and base, its
+  merge base: the one diff branch-changes reads its changes from, held with them, so asking both costs one diff. What the test plan
+  matches against the results' recorded reads (seon.db/readers). [] with no base. See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :seon.host/db] :seon.merge/moved]}
+  [base db]
+  (if (nil? base) [] (do (branch-changes base db) (:moved (:branch-changes @state)))))
+
+(defn- results-index
+  "seon.proofs/reads-index of rdb (the results branch's head), held with the commit it is of and advanced from it by what the branch
+  wrote since (a datoms-diff of :seon.proof/reads), never rebuilt per plan; made whole only when none is held (669M ticks at 2,291
+  tests, result/c9e79efa). A value with no commit (a test's world) is indexed whole and not held. See docs/storage.md#what-a-read-scanned."
+  {:seon.flow/edge "held in the agent's state (seon.agent/state, principles §5's named atom) beside :branch-changes, as plan caches are, until the prove proc holds the index for the processes it forks (seon.proofs/a-test-forks-..., DESIGN (C))" :malli/schema [:=> [:cat :seon.host/db] :map]}
+  [rdb]
+  (let [{c :commit held :held} (:results-index @state)
+        now (d/commit-id rdb)]
+    (if (and held now (= c now))
+      (:index held)
+      (let [from (when (and held c now) (d/commit-as-db (:store rdb) c))
+            v (if from (proofs/reads-index from held rdb) (proofs/reads-index rdb))]
+        (when now (swap! state assoc :results-index {:commit now :held v}))
+        (:index v)))))
+
+(defn- read-moved
+  "The tests whose newest green on rdb (the results branch) read a key one of moved's datoms touches (seon.db/readers over
+  results-index, a test its reader): what a change's datoms can have moved, whether or not it moved their reach digest. Cost:
+  ~5 map lookups a datom. See docs/storage.md#what-a-read-scanned."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/moved] [:set :qualified-symbol]]}
+  [rdb moved]
+  (if (empty? moved) #{} (pdb/readers (results-index rdb) moved)))
 
 (defn- branch-inputs
   "Inputs in, a root's boot's, as branch db's tests read them: the schema class moved by the entries db holds beyond the binary's, which a
@@ -1016,15 +1054,18 @@
     ;; once for this plan, one seek a candidate (seon.proofs/verdicts-at), then reuse by what each run read for the rest
     ;; (seon.proofs/reused-by-reads, never a test that reaches a process of its own). No results branch yet: nothing found
     (let [rdb (results-db db)
-          stored (if rdb (proofs/stored-verdicts rdb db cd (proofs/reads-reusable idx)) {})
+          ;; the readers of what the branch changed (its content datoms against base): selected, as a proof is, though their reach
+          ;; digest did not move, and never reused at that digest, only by reads that still hold (docs/storage.md#what-a-read-scanned)
+          moved (if (and rdb base) (into #{} (filter cd) (read-moved rdb (branch-moved base db))) #{})
+          stored (if rdb (proofs/stored-verdicts rdb db (apply dissoc cd moved) (proofs/reads-reusable idx) (select-keys cd moved)) {})
           unread nil
           ;; a green is anyone's. A red is this branch's own (its verdict's basis, seon.proofs/verdicts-at's :writer), so its judge need not run what
           ;; its turn just recorded, never another's: a digest does not see the machine, so another's red, under load, would be told to this agent as its work
           found (when-not unread (into {} (remove (fn [[_ r]] (and (proofs/red? r) (not (:flaky r)) (not= (:branch @state) (get-in r [:writer :branch]))))) stored))]
-      (cond-> (-> (proofs/plan bd cd (if unread {} found) proofs)
+      (cond-> (-> (proofs/plan bd cd (if unread {} found) (into proofs moved))
                   (update :selected into (keys removed))
                   (update :run into (keys removed))
-                  (assoc :digests cd :base-digests bd :graph g :inputs in :removed removed
+                  (assoc :digests cd :base-digests bd :graph g :inputs in :removed removed :read-moved moved
                          :process (into (program/process-tests idx) removed-process)
                          ;; what a green's run records it read beside the functions it called (seon.proofs/reads-key): each test's
                          ;; reads besides code, and the digest of every read, the agent's one reads index a commit
@@ -1033,6 +1074,21 @@
                                             (or (when (= at (first (:reads-index @state))) (second (:reads-index @state)))
                                                 (let [rd (program/reads-index g in {})] (swap! state assoc :reads-index [at rd]) rd))))))
         unread (assoc :unread unread))))))
+
+(defn results-at
+  "Each of tests' stored result on db's results branch at the digest db's plan gives it (test-plan against base, nil for main's
+  own), {test {:digest :pass :fail :error :failures}}: a test with none there is left out. The one public read of a test's result
+  (seon.proofs/verdicts-at at the plan's :digests), for any process: the results branch read from db's store (results-db).
+  See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:set :qualified-symbol]] [:map-of :qualified-symbol :map]]
+                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] [:set :qualified-symbol]] [:map-of :qualified-symbol :map]]]}
+  ([db tests] (results-at db nil tests))
+  ([db base tests]
+   (if-let [rdb (results-db db)]
+     (let [ds (select-keys (:digests (test-plan db base tests)) tests)
+           at (proofs/verdicts-at rdb ds)]
+       (into {} (for [[t d] ds :let [r (at d)] :when r] [t r])))
+     {})))
 
 (defn stored-results
   "The result of each of tests at its reach digest on this branch now, as stored ({test result}, each
@@ -2257,9 +2313,14 @@
   its record holds them and its own cite! and uncite! change them, and a merge of main never brings one back."
   {:malli/schema [:=> [:cat :seon.task/id] :any]}
   [task]
-  (let [k (:key @state) e (d/entity (db) [:seon.agent/key k])]
-    (when-not (= task (:seon.task/id (:seon.agent/task e)))
-      (let [made? (nil? (:seon.agent/task e))]
+  ;; :seon.agent/task is root's alone, on main (one writer per attribute, docs/users.md), so it is never written here; whether the
+  ;; task is begun is read from what begin-run-tx writes (the task running, the agent's system page), so nothing is written twice
+  (let [k (:key @state) held (db) e (d/entity held [:seon.agent/key k])
+        sys (ref/page-top held doc/system-page)
+        begun? (and e (= :running (:seon.task/execution (d/entity held [:seon.task/id task])))
+                    (or (nil? sys) (some #(= sys (:db/id %)) (:seon.agent/system e))))]
+    (when-not begun?
+      (let [made? (or (nil? e) (empty? (task/cites-of held (:db/id e))))]
         (begin-run-tx! task)
         (when made? (transact! (task/agent-cites-tx (db) [:seon.agent/key k] k)))))))
 
@@ -2270,10 +2331,10 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :string] :seon.db/tx-data]}
   [db task k]
   [{:seon.task/id task :seon.task/execution :running}
-   ;; the agent's task, which its record pulls (the agent is the unit, docs/ctx.md#the-pattern)
-   ;; what it reads as its system message: the system prompt's page, its top section and all below (seon.ctx.wire/agent-system-text)
+   ;; what it reads as its system message: the system prompt's page, its top section and all below (seon.ctx.wire/agent-system-text);
+   ;; its task is root's (:seon.agent/task, written on main by seon.task/start-tx), never written here
    (let [sys (ref/page-top db doc/system-page)]
-     (cond-> {:db/id k :seon.agent/key k :seon.agent/task {:seon.task/id task}} sys (assoc :seon.agent/system [sys])))])
+     (cond-> {:db/id k :seon.agent/key k} sys (assoc :seon.agent/system [sys])))])
 
 (defn- begin-run-tx!
   "Task written on this agent's branch (begin-run!'s write): the task as main declares it when the
@@ -2326,6 +2387,9 @@
         ;; reused through the node cache after-fork! kept (docs/storage.md#an-agents-reads-and-writes)
         db0 (pdb/at-commit store-conn (d/commit-id db0))
         index (some-> index (assoc :db db0))
+        ;; malli's default here is the branch over main as forked: a schema read with no options reads this agent's branch, as
+        ;; seon.contract/options does (one read of main's schema entries and their compile, ~1.8M ticks [M root])
+        _ (program/hold-registry! (contract/branch-over (program/schema-registry (program/schema-changes db0))))
         _ (mark! :connected)]
     ;; the config this process was forked holding (root read it; an agent reads no environment), the heap bound as its task
     ;; states it (docs/config.md#the-resolver): a task's own :seon.config.agent/heap-extra-bytes bounds its agent

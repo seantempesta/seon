@@ -162,10 +162,10 @@
 
 (defn- attach!
   "Start an outside agent on task id: its env's model is \"outside\" (the task keeps its own), so the
-  reconciler starts no turn loop for it and does not kill it. The agent is spawned first;
-  only once it exists are its env, the release and its start written, in one transaction,
-  so a refused spawn writes nothing and the reconciler never sees a release with no agent
-  (it would spawn a second agent for it). The session's agent continues (its key) unless fresh?:
+  reconciler starts no turn loop for it and does not kill it. Its env, the release and its start are written
+  on main in one transaction BEFORE the spawn, with the agent's key made here and the agent :spawning, so its branch is cut holding
+  its task (root's alone) and the reconciler, which counts a :spawning agent live, spawns no second one; a refused spawn answers that
+  start (the task refused, its execution as it was, the agent ended). A clone's start follows its spawn (its branch is cut from its source's). The session's agent continues (its key) unless fresh?:
   a reset, the task's branch a new one cut from main and its conversation empty (the agent on the
   old branch is killed here once the task is the new one's: the reconciler compares the task's own agent, so it never
   saw the old one; that branch and its records stay). A task
@@ -204,23 +204,36 @@
             env (cond-> (assoc (r/desired-env t) :model "outside")
                   restart (assoc :branch (:branch restart))
                   client (assoc :holder client))
-            ;; the session's agent continues (docs/turn.md#parked)
-            k (when-not (or fresh? clone-of) (task/agent-key db id))
+            ;; the session's agent continues (docs/turn.md#parked); a new one's key is made here, so its start is main's before its branch is cut
+            k (when-not clone-of (or (when-not fresh? (task/agent-key db id)) (lib/unique-id)))
             opts (cond-> {:branch (:branch env) :task id} k (assoc :key k))
+            replaced (when fresh? (:agent (first (live-run sys db id))))
+            ;; read after the restart's retractions: its outcome swap starts from none
+            start (fn [ag] (vec (concat (task/execution-tx [id] :running) (:tx restart)
+                                        (task/start-tx (cond-> db restart (-> (pdb/with (:tx restart)) :db-after)) id (:boot sys) ag env (System/currentTimeMillis)))))
+            ;; the start (its outside env, so the reconciler starts no loop; :spawning, so it counts the agent live and spawns none of its own) is
+            ;; written on main BEFORE the spawn: the branch is cut holding its agent's task, root's alone (:seon.agent/task, docs/users.md), so the
+            ;; agent never copies it (two writers disagreed at a whole task's stage move). A clone's branch is cut from its source's: it starts after
+            started (when k @(c/transact-main! sys (conj (start (keyword k)) {:seon.agent/key k :seon.agent/status :spawning})))
             r (if clone-of @(c/clone! sys clone-of opts) @(c/call! sys (c/request 'spawn! nil opts nil)))
             ag (:id r)]
         ;; spawn!'s request, its answer a value: a refusal (a branch another agent holds, named with
-        ;; its task) is the attach's answer, never a server defect
+        ;; its task) is the attach's answer, never a server defect; the start written for it is undone exactly (each fact its transaction
+        ;; wrote on the task and the agent inverted, one rule for every attribute: the session's key, a restart's branch, the release), then the
+        ;; refusal written and the agent that never ran ended
         (if-not ag
-          r
-          (let [replaced (when fresh? (:agent (first (live-run sys db id))))]
-            @(c/transact-main! sys (vec (concat (task/execution-tx [id] :running)
-                                                (:tx restart)
-                                                ;; read after the restart's retractions: its outcome swap starts from none
-                                                (task/start-tx (cond-> db restart (-> (pdb/with (:tx restart)) :db-after)) id (:boot sys) ag env
-                                                               (System/currentTimeMillis)))))
-            (when replaced (c/kill! sys replaced))
-            {:agent ag :task id})))))))
+          (do (when (:t started)
+                (let [db @(:conn sys) h (d/history db)
+                      undo (vec (for [e (remove nil? [(pdb/eid db :seon.task/id id) (pdb/eid db :seon.agent/key k)])
+                                      dt (d/datoms h :eavt e) :when (= (:t started) (:tx dt))]
+                                  [(if (:added dt) :db/retract :db/add) (:e dt) (:a dt) (:v dt)]))]
+                  ;; one transaction: the refusal read on the task as the undo leaves it
+                  @(c/transact-main! sys (into undo (conj (task/refused-tx (:db-after (pdb/with db undo)) id r)
+                                                          {:seon.agent/key k :seon.agent/status :ended :seon.agent/ended-ms (System/currentTimeMillis)})))))
+              r)
+          (do (when clone-of @(c/transact-main! sys (start ag)))
+              (when replaced (c/kill! sys replaced))
+              {:agent ag :task id})))))))
 
 (defn- fork!
   "A fork of live agent from: a sibling of its task, <name>-fork-<n> (its plan, proofs and kind, on
@@ -342,7 +355,8 @@
                   :since {:type "string" :description "main's t of your last answer (its :t); 0 for every message; none for only what comes from now"}
                   :stream {:type "boolean" :description "each message a line as it comes (bin/mcp call), until a wait ends with none"}}}
    :done {:doc "Hand the task the agent works back to root: the agent writes its end (its proofs run, seon.turn/hand-back!), then root judges it, and merges it when the done rule has no reason. Answers the verdict when main holds it, as one line and a handle (seon.server/verdict-line): the task's outcome (done, merged, or closed with its task held) and reason, each red test with its first failure, and how main differs from the branch; the handle is the form that reads it whole at root. A defect of the reconciler that stops the judge, as that defect. It waits as long as the judge does (the run's proofs, a gate, a merge), so a caller's read timeout must allow minutes."
-          :args {:agent {:type "string" :description "the agent, for a caller with no client; one with a client (bin/mcp) hands back the agent it last attached"}}}))
+          :args {:agent {:type "string" :description "the agent, for a caller with no client; one with a client (bin/mcp) hands back the agent it last attached"}
+                 :checkout {:type "string" :description "a session's land: its checkout's absolute path, whose changed files are imported onto the agent's branch first (my.branch/import!)"}}}))
 
 (defmulti op-answer
   "A request's answer, by its :op: a function of root's system, the agent the request names
@@ -611,8 +625,16 @@
 
 (defmethod op-answer :done [sys ag req]
   (if-let [{:keys [task env]} (work-of sys ag)]
-    ;; the end first, as a turn loop's end is written, so the judge reads it
-    (let [r @(c/submit! sys ag (sedn/encode (list 'seon.turn/hand-back! task)) {:origin :outside})]
+    ;; a session's land: its checkout's changed files onto its agent's branch first (my.branch/import!, the edit hook's import), one
+    ;; it cannot read refusing the land, since a judgement of part of the files would be wrong; then the end, as a turn loop's end is
+    ;; written, so the judge reads it
+    (let [imported (when-let [co (:checkout req)] @(c/submit! sys ag (sedn/encode (list 'my.branch/import! co nil)) {:origin :outside}))
+          skipped (some-> imported :value :skipped seq)
+          r (cond (contract/error? imported) imported
+                  (:ex imported) (:ex imported)
+                  skipped (refused (str "seon_done: " (count skipped) " file(s) of " (:checkout req) " do not read, so nothing is judged: "
+                                        (str/join "; " (for [{:keys [path why]} skipped] (str path " (" why ")")))))
+                  :else @(c/submit! sys ag (sedn/encode (list 'seon.turn/hand-back! task)) {:origin :outside}))]
       ;; judged only on the end written: an error or no answer is answered as it is,
       ;; and the task stays the agent's to hand back again
       (cond (contract/error? r) r

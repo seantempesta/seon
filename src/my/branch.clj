@@ -14,19 +14,22 @@
 
 (defn import!
   "Bring files a session edited onto this agent's branch, as one write through the agent's writer, the path an eval takes: the
-  files paths name (relative to root, default this agent's checkout), each read as a boot's catch-up reads its checkout's changed
+  files paths name (relative to root, default this agent's checkout; nil: every file the checkout changed against the tree the branch
+  last indexed, a session's land through seon_done), each read as a boot's catch-up reads its checkout's changed
   files (seon.system/catch-up :fact? false :paths: code, pages and task files as program keys, in the shape an eval writes);
   main never moves. Answers {:imported [path] :unchanged [path] :skipped [{:path :why}]}: a file that does not read is skipped
-  with why, never half-written, and one whose facts the branch holds already is unchanged. Cost: n+1 catch-ups for n paths
-  (each alone, then the changed ones together), each refresh-tx's fixed cost (~0.3M ticks) plus its files' forms: fine at a
-  session's few files, ~30M ticks for a hundred. See docs/source.md#a-boot-catches-up-with-its-checkout."
-  {:malli/schema [:function [:=> [:cat [:sequential :string]] :map] [:=> [:cat :string [:sequential :string]] :map]]}
+  with why, never half-written, and one whose facts the branch holds already is unchanged. Cost: n catch-ups for n paths, and one more of
+  the changed ones together when several changed; a session's edit hook imports one file, one catch-up: ~11M ticks warm for a
+  43 KB namespace [M result/a3b7ff3a], its refresh-tx most of it. See docs/source.md#a-boot-catches-up-with-its-checkout."
+  {:malli/schema [:function [:=> [:cat [:maybe [:sequential :string]]] :map] [:=> [:cat :string [:maybe [:sequential :string]]] :map]]}
   ([paths] (import! (cfg/checkout) paths))
   ([root paths]
    ;; catch-up is root's namespace's, which requires this one: resolved at the call (docs/resolution.md, owed)
    (let [catch-up (requiring-resolve 'seon.system/catch-up)
          db (agent/db)
          read (fn [ps] (catch-up db root {:fact? false :paths (vec ps)}))
+         ;; nil: the files the checkout changed (the tree's diff, the read ones and the ones it left out alike), each then read as named
+         paths (if (some? paths) paths (let [c (catch-up db root {:fact? false})] (if (map? c) (into (vec (:paths c)) (map :path) (:skipped c)) [])))
          ;; each file alone says whether it is skipped or already held; the ones that change are read together, so a file's
          ;; dependents across them are read once
          per (into {} (for [p paths] [p (read [p])]))]
@@ -36,7 +39,8 @@
              out (set (map :path skipped))
              unchanged (vec (for [[p r] per :when (and (not (out p)) (empty? (:tx r)))] p))
              todo (vec (for [[p r] per :when (and (not (out p)) (seq (:tx r)))] p))
-             r (when (seq todo) (read todo))]
+             ;; one changed file's own read is the write: read again together only when several may depend on each other
+             r (cond (= 1 (count todo)) (per (first todo)) (seq todo) (read todo))]
          (when (seq (:tx r)) (agent/transact! (:tx r)) (agent/commit!))
          {:imported todo :unchanged unchanged :skipped skipped})))))
 
@@ -60,34 +64,40 @@
   []
   (pm/unmerged (agent/db)))
 
+(defn- settle-fact!
+  "One datum entry en of this branch taken to side (its :base or :theirs, as git checkout --theirs): its value written (seon.merge/side-tx);
+  a ref to an entity this branch lacks (main made it after the base) brings that entity's own facts from main first, so the branch never
+  holds a ref to nothing; a var's form taken is loaded here too, as an eval of it would be. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.merge/entry-value [:enum :theirs :base]] :any]}
+  [{k :key :as en} side]
+  (let [[_ e a] k v (get en side) db (agent/db)]
+    (when (and (int? v) (= :db.type/ref (get-in (:schema db) [a :db/valueType])) (empty? (d/datoms db :eavt v)))
+      (agent/transact! [(assoc (dissoc (d/pull (agent/heard-main) '[*] v) :db/id) :db/id v)]))
+    (agent/transact! (pm/side-tx (agent/db) k v))
+    (when (and (= :var/form a) (int? v))
+      (let [db (agent/db) sym (:var/name (d/entity db e)) src (:form/src (d/entity db v))]
+        (when (and sym src)
+          (let [cur (ns-name *ns*)] (repl/eval-string (str "(in-ns '" (symbol (namespace sym)) ")\n" src "\n(in-ns '" cur ")"))))))))
+
 (defn resolve!
-  "Settle the unmerged entry of var sym, or of program key k (a task's: [:task \"ns/name\"]) (git add). With no side the branch
-  keeps what it holds now; :theirs or :base takes that side: a var's definition loaded (or the var unmapped when that side
-  deleted it) and recorded, a task's content written. Answers the entries still unmerged."
-  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :seon.merge/program-key]] [:vector :seon.merge/entry-value]]
-                  [:=> [:cat [:or :qualified-symbol :seon.merge/program-key] [:enum :ours :theirs :base]] [:vector :seon.merge/entry-value]]]}
-  ([sym] (resolve! sym :ours))
-  ([sym side]
-   (if (vector? sym)
-     (let [k sym entry (first (filter #(= k (:key %)) (pm/entries (agent/db))))]
-       (when (and entry (not= :ours side))
-         (agent/transact! (pm/side-tx (agent/db) k (get entry side))))
-       (agent/transact! (pm/resolve-tx (agent/db) k))
-       (unmerged))
-   (let [k [:var sym]
-         entry (first (filter #(= k (:key %)) (pm/entries (agent/db))))
-         content (get entry side)
-         nsym (symbol (namespace sym))]
-     (when (and entry (not= :ours side))
-       (if-let [src (:src content)]
-         (let [cur (ns-name *ns*)]
-           (repl/eval-string (str "(in-ns '" nsym ")\n" src "\n(in-ns '" cur ")")))
-         ;; main's side removed it: unmapped here, and its definition retracted as an eval's ns-unmap retracts it (seon.repl/removal-tx)
-         (let [db (agent/db) e (pdb/eid db :var/name sym) f (some-> e (#(d/entity db %)) :var/form :db/id)]
-           (ns-unmap (find-ns nsym) (symbol (name sym)))
-           (when f (agent/transact! (repl/removal-tx db [[sym e f]]))))))
-     (agent/transact! (pm/resolve-tx (agent/db) k))
-     (unmerged)))))
+  "Settle the unmerged entries of an entity (git add): a var by its symbol, any entity by its name ([:seon.task/id \"ns/name\"],
+  [:var/name sym]: seon.merge/named, as the merge shows a conflict), or one entry by its key ([:datum e a]). With no side the branch
+  keeps what it holds now; :theirs or :base takes that side
+  (`settle-fact!`: main's value, a missing ref target brought from main, a var's form loaded). Answers the entries still unmerged."
+  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol [:tuple :keyword :any] [:tuple [:= :datum] :int :keyword]]] [:vector :seon.merge/entry-value]]
+                  [:=> [:cat [:or :qualified-symbol [:tuple :keyword :any] [:tuple [:= :datum] :int :keyword]] [:enum :ours :theirs :base]] [:vector :seon.merge/entry-value]]]}
+  ([x] (resolve! x :ours))
+  ([x side]
+   (let [db (agent/db) es (pm/entries db)
+         ;; the entity x names: a var's symbol, an identity pair, or the entity of a datum key
+         e (cond (symbol? x) (pdb/eid db :var/name x)
+                 (and (vector? x) (= :datum (first x))) (second x)
+                 (and (vector? x) (= 2 (count x)) (qualified-keyword? (first x))) (pdb/eid db (first x) (second x)))
+         datum (vec (filter #(and (= :datum (first (:key %))) (not (:resolved? %)) (if (= :datum (first x)) (= x (:key %)) (= e (second (:key %))))) es))]
+     (doseq [en datum]
+       (when (not= :ours side) (settle-fact! en side))
+       (agent/transact! (pm/resolve-tx (agent/db) (:key en))))
+     (unmerged))))
 
 (defn changes
   "git diff main...: what this branch's merge will carry to main, the vars it added, changed
