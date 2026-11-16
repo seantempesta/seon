@@ -1078,6 +1078,47 @@
             (is (some? (#'seon.agent/results-db (d/db conn))) "the results branch, from the planned db's store, with no agent state"))
           (finally (d/delete-branch! conn rb)))))))
 
+;; THE FOCUS (C) (task seon.proofs/a-test-forks-from-the-standing-system-and-a-binary-test-reruns-only-for-its-binary): selection is
+;; the tests whose reach digest moved and the readers of the change's datoms (seon.db/readers over the results' recorded reads), so a
+;; test that read a schema entry is selected when a branch edits that entry, whether or not its digest moved, and run, never reused
+;; at that digest; a test that did not read it is neither. Red first: selection had no readers half (neither test selected).
+;; Estimate: the world and 3 namespaces' facts (~4M), the reach graph of main the test reads its form from (~3M), the test plan's
+;; base and branch graphs and digests (~8M: two graphs), two namespaces loaded (~1M), the branch's content diff (one descent per
+;; content attribute, ~0.2M), readers indexes of 2 tests' newest greens, whole and advanced (~20k), ~5 lookups a moved datom, three
+;; reads-digests of one key (<0.1M): ~16M, 20,000,000 ticks (the first estimate, 10M, left out the test's own graph and the
+;; plan's second graph).
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-schema-entry-edit-reruns-its-readers-only
+  (let [calc "(ns pt.sr)\n(defn add [x y] (+ x y))\n(defn neg [x] (- x))\n"
+        reader-src "(ns pt.sr-test (:require [clojure.test :refer [deftest is]] [pt.sr :as c]))\n(deftest reads-the-entry (is (= 3 (c/add 1 2))))\n"
+        other-src "(ns pt.sr-other-test (:require [clojure.test :refer [deftest is]] [pt.sr :as c]))\n(deftest reads-another (is (= -1 (c/neg 1))))\n"
+        reader 'pt.sr-test/reads-the-entry other 'pt.sr-other-test/reads-another
+        main (-> (mt/with (mt/world) (mt/code 'pt.sr calc) (mt/code 'pt.sr-test reader-src) (mt/code 'pt.sr-other-test other-src))
+                 (d/db-with [{:schema/key :pt.sr/thing :schema/form "[:map [:pt.sr/x :int]]"}]))
+        entry (pdb/eid main :schema/key :pt.sr/thing)
+        neg-form (:e (first (d/datoms main :avet :form/id (first (get-in (program/reach-graph main nil) [:defs 'pt.sr/neg])))))
+        ;; a green each, on the results branch, whose recorded reads are the keys given, digested on main as its run's were
+        green (fn [t ks] {:seon.proof/id (proofs/verdict-id t (seon.lib/digest (str t))) :seon.proof/test t
+                          :seon.proof/reach-digest (seon.lib/digest (str t)) :seon.proof/status :pass :seon.proof/route :live
+                          :seon.proof/basis {:seon.db/branch :db :seon.db/commit (parse-uuid "00000000-0000-0000-0000-000000000001") :seon.db/t 1}
+                          :seon.proof/reads-digest (pdb/reads-digest main (into #{} (map pr-str) ks) nil)
+                          :seon.proof/reads {:seon.reads/branch :db :seon.reads/commit (parse-uuid "00000000-0000-0000-0000-000000000001")
+                                             :seon.reads/keys (set ks)}})
+        rdb (pdb/db-with main [(green reader [[:ea entry :schema/form]]) (green other [[:ea neg-form :form/code]])])
+        branch (d/db-with main [{:schema/key :pt.sr/thing :schema/form "[:map [:pt.sr/x :string]]"}])]
+    (is (and entry neg-form) "the entry and the other test's function are entities of main")
+    (let [one (pdb/db-with main [(green other [[:ea neg-form :form/code]])])]
+      (is (= (proofs/reads-index rdb) (proofs/reads-index one (proofs/reads-index one) rdb))
+          "the index advanced by what the results branch wrote since is the index made whole")
+      (is (= #{reader other} (set (keys (:keys (proofs/reads-index rdb))))) "each test indexed by its newest green"))
+    (try (doseq [t [reader-src other-src]] (binding [*ns* (create-ns 'user)] (load-string t)))
+         (with-redefs [seon.agent/state (atom {}) seon.agent/results-db (fn [_] rdb)]
+           (let [plan (seon.agent/test-plan branch main #{})]
+             (is (= #{reader} (:read-moved plan)) "the edit's datoms reach the result that read the entry, and only it")
+             (is (contains? (set (:selected plan)) reader) "the reader is selected, though its reach digest did not move")
+             (is (contains? (set (:run plan)) reader) "and run: what it read moved, so no verdict of it is reused")
+             (is (not (contains? (set (:selected plan)) other)) "the test that did not read the entry is not selected")))
+         (finally (run! remove-ns '[pt.sr pt.sr-test pt.sr-other-test])))))
+
 ;; THE FOCUS step (1): one public read of a test's result, seon.agent/results-at, for any process: a test's stored result on the
 ;; results branch at the digest the plan gives it, and nothing for a test with none. Red first: no such read existed (a stand-in
 ;; answering {} for every test). Estimate: one small world and a verdict-tx (~5M), two seeks: 6,000,000 ticks.

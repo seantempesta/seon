@@ -26,7 +26,8 @@
 ;; :unembeddable (the entities whose text llama.cpp could not encode, as vectors-proc keeps them)
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base's point (seon.db/point: commit and t, never the db), from the fork server's :graph of main: base-graph)
 ;; :branch-graph (the reach graph of the branch's db, keyed by its point, updated from the base's: branch-graph)
-;; :branch-changes (what the branch changed since its base, seon.merge/delta-changes, keyed by the two points: branch-changes)
+;; :branch-changes (what the branch changed since its base, seon.merge/delta-changes, and the content datoms it was read from, :moved, keyed by the two points: branch-changes, branch-moved)
+;; :results-index (the readers index of the results branch, each test under its newest green's read keys, seon.proofs/reads-index, and the commit it is of, advanced by what that branch wrote since: results-index)
 ;; :main-changes (what main changed since the base, seon.merge/delta-changes, keyed by the two commits: main-changes)
 ;; :index (seon.agent/reconcile-index: the reconciler's index and the commit it was observed for (the fork hands the db once), advanced each turn by what differs; at fork, main's from the fork server)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
@@ -881,9 +882,41 @@
   (let [{w-base :base w-at :point ch :changes} (:branch-changes @state)]
     (cond (nil? base) {}
           (and ch (d/commit-id db) (d/commit-id base) (= [(d/commit-id base) (:max-tx base)] w-base) (= [(d/commit-id db) (:max-tx db)] w-at)) ch
-          :else (let [ch (pm/delta-changes base db #{})]
-                  (swap! state assoc :branch-changes {:base (pdb/point base) :point (pdb/point db) :changes ch})
+          :else (let [moved (pm/content-datoms base db #{})
+                      ch (pm/delta-changes base db #{} moved)]
+                  (swap! state assoc :branch-changes {:base (pdb/point base) :point (pdb/point db) :changes ch :moved moved})
                   ch))))
+
+(defn branch-moved
+  "The datoms of program content (seon.merge/content-datoms, declared data left out) that differ between branch db and base, its
+  merge base: the one diff branch-changes reads its changes from, held with them, so asking both costs one diff. What the test plan
+  matches against the results' recorded reads (seon.db/readers). [] with no base. See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :seon.host/db] :seon.merge/moved]}
+  [base db]
+  (if (nil? base) [] (do (branch-changes base db) (:moved (:branch-changes @state)))))
+
+(defn- results-index
+  "seon.proofs/reads-index of rdb (the results branch's head), held with the commit it is of and advanced from it by what the branch
+  wrote since (a datoms-diff of :seon.proof/reads), never rebuilt per plan; made whole only when none is held (669M ticks at 2,291
+  tests, result/c9e79efa). A value with no commit (a test's world) is indexed whole and not held. See docs/storage.md#what-a-read-scanned."
+  {:malli/schema [:=> [:cat :seon.host/db] :map]}
+  [rdb]
+  (let [{c :commit held :held} (:results-index @state)
+        now (d/commit-id rdb)]
+    (if (and held now (= c now))
+      (:index held)
+      (let [from (when (and held c now) (d/commit-as-db (:store rdb) c))
+            v (if from (proofs/reads-index from held rdb) (proofs/reads-index rdb))]
+        (when now (swap! state assoc :results-index {:commit now :held v}))
+        (:index v)))))
+
+(defn- read-moved
+  "The tests whose newest green on rdb (the results branch) read a key one of moved's datoms touches (seon.db/readers over
+  results-index, a test its reader): what a change's datoms can have moved, whether or not it moved their reach digest. Cost:
+  ~5 map lookups a datom. See docs/storage.md#what-a-read-scanned."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/moved] [:set :qualified-symbol]]}
+  [rdb moved]
+  (if (empty? moved) #{} (pdb/readers (results-index rdb) moved)))
 
 (defn- branch-inputs
   "Inputs in, a root's boot's, as branch db's tests read them: the schema class moved by the entries db holds beyond the binary's, which a
@@ -1016,15 +1049,18 @@
     ;; once for this plan, one seek a candidate (seon.proofs/verdicts-at), then reuse by what each run read for the rest
     ;; (seon.proofs/reused-by-reads, never a test that reaches a process of its own). No results branch yet: nothing found
     (let [rdb (results-db db)
-          stored (if rdb (proofs/stored-verdicts rdb db cd (proofs/reads-reusable idx)) {})
+          ;; the readers of what the branch changed (its content datoms against base): selected, as a proof is, though their reach
+          ;; digest did not move, and never reused at that digest, only by reads that still hold (docs/storage.md#what-a-read-scanned)
+          moved (if (and rdb base) (into #{} (filter cd) (read-moved rdb (branch-moved base db))) #{})
+          stored (if rdb (proofs/stored-verdicts rdb db (apply dissoc cd moved) (proofs/reads-reusable idx) (select-keys cd moved)) {})
           unread nil
           ;; a green is anyone's. A red is this branch's own (its verdict's basis, seon.proofs/verdicts-at's :writer), so its judge need not run what
           ;; its turn just recorded, never another's: a digest does not see the machine, so another's red, under load, would be told to this agent as its work
           found (when-not unread (into {} (remove (fn [[_ r]] (and (proofs/red? r) (not (:flaky r)) (not= (:branch @state) (get-in r [:writer :branch]))))) stored))]
-      (cond-> (-> (proofs/plan bd cd (if unread {} found) proofs)
+      (cond-> (-> (proofs/plan bd cd (if unread {} found) (into proofs moved))
                   (update :selected into (keys removed))
                   (update :run into (keys removed))
-                  (assoc :digests cd :base-digests bd :graph g :inputs in :removed removed
+                  (assoc :digests cd :base-digests bd :graph g :inputs in :removed removed :read-moved moved
                          :process (into (program/process-tests idx) removed-process)
                          ;; what a green's run records it read beside the functions it called (seon.proofs/reads-key): each test's
                          ;; reads besides code, and the digest of every read, the agent's one reads index a commit
