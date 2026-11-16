@@ -1889,25 +1889,29 @@
 ;; Estimate: one world ~4M, two registries compiled ~10M each, a Datahike schema and entity index ~6M each, move-tx re-armed ~1M,
 ;; restored the same ~33M: ~70,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 70000000}} holding-mains-schema-makes-what-derives-from-it-mains
-  (let [w0 (mt/world)
-        outcome (get contract/forms :seon.task/outcome)
-        widened (clojure.walk/postwalk (fn [x] (if (and (vector? x) (= :enum (first x)) (some #{:merged} x)) (conj x :zz-held) x)) outcome)
-        rep (pdb/with w0 [{:schema/key :zz.held/attr :schema/form "[:string {:description \"An attribute main's schema adds.\"}]"}
-                          {:schema/key :seon.task/outcome :schema/form (pr-str widened)}] nil {} true)
-        w1 (:db-after rep)
-        ops (vec (for [dt (:tx-data rep)] [(if (:added dt) :db/add :db/retract) (:e dt) (:a dt) (:v dt)]))
-        restore-ops (vec (for [[op e a v] ops :when (= a :schema/form)] [op e a v]))
-        ;; this plays the system process, which holds no agent's branch: an agent's own slot (its branch over main) is read first, so the
+  (let [;; this plays the system process, which holds no agent's branch: an agent's own slot (its branch over main) is read first, so the
         ;; test child, a fork of an agent, sets it aside while it holds main's and gives it back after
         agent-st (some-> (find-var 'seon.agent/state) deref)
-        held-st (some-> agent-st deref)]
+        held-st (some-> agent-st deref)
+        entry (fn [k form] {:schema/key k :schema/form form})
+        ;; main as it was: a kind with one value, and a contracted function of it (as seon.task/move-tx is of :seon.task/outcome)
+        w0 (mt/with (mt/world)
+                    [(entry :zz.held/kind "[:enum :a]")]
+                    (mt/code 'pt.held "(ns pt.held)\n(defn kind-of {:malli/schema [:=> [:cat :zz.held/kind] :zz.held/kind]} [k] k)\n"))
+        ;; main now: the kind widened, and an entity schema with an attribute it adds (as :seon.proof/ran-on is proof-fact's)
+        rep (pdb/with w0 [(entry :zz.held/kind "[:enum :a :b]")
+                          (entry :zz.held/attr "[:string {:description \"An attribute main's schema adds.\"}]")
+                          (entry :zz.held/fact "[:map {:seon.db/attributes true} [:zz.held/attr :zz.held/attr]]")] nil {} true)
+        w1 (:db-after rep)
+        ops (vec (for [dt (:tx-data rep)] [(if (:added dt) :db/add :db/retract) (:e dt) (:a dt) (:v dt)]))]
     (try
       (some-> agent-st (swap! dissoc :db :schema-registry))
+      (program/hold-main-schema! w0)
+      (program/load-diff! (mt/world) w0)
       (program/hold-main-schema! w1)
       (program/load-changes! w1 ops)
       (is (contains? (:schema (pdb/empty-db true)) :zz.held/attr) "a world holds the attribute main's schema adds")
-      (is (vector? (seon.task/move-tx "demo/held" :ready :zz-held {})) "and a contract reaching a widened entry accepts its new value")
+      (is (= :b ((resolve 'pt.held/kind-of) :b)) "and a contract reaching a widened entry accepts its new value")
       (finally
-        (program/hold-main-schema! w0)
-        (program/load-changes! w0 restore-ops)
+        (program/hold-main-schema! (mt/world))
         (some-> agent-st (reset! held-st))))))
