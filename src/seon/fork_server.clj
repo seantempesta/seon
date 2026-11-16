@@ -78,7 +78,7 @@
   "Server state st with, once per move of main (:warm-t), main's search text index (seon.doc/text-index) and main's
   schema registry (seon.program/schema-changes), which each agent forked holds as its branch's until it writes a schema
   entry (:schema-registry): built once here, inherited by every agent. Nothing per fork: a per-fork build of the agent's
-  record, made only to warm this process's node cache and dropped, is gone (the owner, 2026-11-16: no baggage). Nothing is
+  record, made only to warm this process's node cache and dropped, is gone (the owner: no baggage). Nothing is
   written. See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [st _]
