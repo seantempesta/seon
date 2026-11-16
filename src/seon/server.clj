@@ -152,7 +152,9 @@
     (cond (not tp) (refused (str "no template " template ": the templates are " (str/join ", " (map name (keys tpl/templates)))))
           (not (namespace s)) (refused (str "a task id is ns/name: " id))
           :else (let [tx (tpl/request-tx db (tpl/from tp {:seon.task/ns (symbol (namespace s)) :seon.task/name (name s)
-                                                          :seon.task/plan (str "Made at its first attach from the " template " template.")}))]
+                                                          :seon.task/plan (str "Made at its first attach from the " template " template.")
+                                                          ;; a session drives it: no model ever works it (seon.reconcile/actions starts no outside task)
+                                                          :seon.task/model "outside"}))]
                   (if (contract/error? tx)
                     tx
                     (let [r @(c/transact-main! sys (conj (vec tx) {:seon.task/id id :seon.task/outcome :parked}))]
