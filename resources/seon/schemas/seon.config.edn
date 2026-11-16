@@ -117,7 +117,6 @@
   [:seon.config.proofs/shard-mb {:optional true} :seon.config.proofs/shard-mb]
   [:seon.config.proofs/free-floor-mb {:optional true} :seon.config.proofs/free-floor-mb]
   [:seon.config.proofs/full-run-at {:optional true} :seon.config.proofs/full-run-at]
-  [:seon.config.proofs/prove-main-on-commit {:optional true} :seon.config.proofs/prove-main-on-commit]
   [:seon.config.proofs/stall-factor {:optional true} :seon.config.proofs/stall-factor]
   [:seon.config.proofs/slow-test-ms {:optional true} :seon.config.proofs/slow-test-ms]
   [:seon.config.proofs/error-frames {:optional true} :seon.config.proofs/error-frames]

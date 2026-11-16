@@ -26,16 +26,23 @@
                          session-pattern))
 
 (def ^:private found
-  "The agent state this process held when a test first took it (enter-agent!), ::unset while none has."
+  "The agent state and start value this process held when a test first took them (enter-agent!), [state start], ::unset while
+  none has."
   (atom ::unset))
 
+(def ^:private start-keys
+  "What a process's start value holds (seon.agent/*start*), never its state: what a test's agent state names of them is held there."
+  [:id :key :task :branch :cfg :mode :store-conn :serve :env-mismatch :flow])
+
 (defn- enter-agent!
-  "The agent state st for a test, the state the process held (a test child's own agent: its db, which
-  seon.agent/source-fn and the REPL read; none in bin/test's) kept for end-agent! to put back."
+  "The agent state st for a test, what it names of a start value (start-keys) the test agent's start value (seon.agent/*start*, held before the state
+  so ctx builds for it: docs/processes.md#the-agent-process), the state and start the process held (a test child's own agent: its
+  db, which seon.agent/source-fn and the REPL read; none in bin/test's) kept for end-agent! to put back."
   {:malli/schema [:=> [:cat [:maybe :map]] :nil]}
   [st]
-  (when (= ::unset @found) (reset! found @seon.agent/state))
-  (reset! seon.agent/state st)
+  (when (= ::unset @found) (reset! found [@seon.agent/state seon.agent/*start*]))
+  (seon.agent/hold-start! (merge (or (second @found) {}) (select-keys st start-keys)))
+  (reset! seon.agent/state (some-> st (#(apply dissoc % start-keys))))
   nil)
 
 (defn- end-agent!
@@ -52,7 +59,10 @@
                                         (vals (:errors @seon.agent/state)))
                                   opts)
    (remove-watch seon.agent/state :seon.ctx/ctx)       ; the record the test drew stays @ctx's (the test reads it after), as with an empty state
-   (reset! seon.agent/state (when (not= ::unset @found) @found))
+   (if (= ::unset @found)
+     (reset! seon.agent/state nil)
+     (do (alter-var-root #'seon.agent/*start* (constantly (second @found)))
+         (reset! seon.agent/state (first @found))))
    (add-watch seon.agent/state :seon.ctx/ctx @#'seon.ctx/on-state)
    (reset! found ::unset)
    nil))
@@ -2034,3 +2044,14 @@
     (is (contains? keys [:ea t :seon.task/id]))
     (is (contains? keys [:ea t :seon.task/ns]))
     (is (not (contains? keys [:ea t :seon.task/plan])) "nor an attribute it did not name")))
+
+(deftest ^{:seon.test/estimate {:ticks 2000000 :bytes 10000000}} an-agents-record-is-its-start-values-agent
+  ;; docs/processes.md#the-agent-process: an agent's key and branch are its start value's (seon.agent/*start*), never its state's;
+  ;; the record @ctx holds is built for that agent when its state takes a db (seon.ctx/on-state). Read from the state, as before
+  ;; G2's fix-forward here, every agent's record was built for no entity, its model render answered no message, and each eval was
+  ;; refused :seon.ctx/no-system-message (root's clean start, 2026-11-16)
+  (let [[r] (my.test/eval-in [(fn [{{a :agent} :names}] [a (:seon.agent/key @ctx/ctx) (some? (:db/id @ctx/ctx))])] 'seon.ctx-test.start)
+        [a k held?] (:value r)]
+    (is (string? a) "the test's agent")
+    (is (= a k) "the record is the start value's agent")
+    (is held? "its entity, held on the db")))
