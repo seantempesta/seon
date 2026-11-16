@@ -155,6 +155,8 @@
                              [:main-red {:optional true} [:set :qualified-symbol]]
                              ;; the red tests main was asked of and answered nothing (a process test): held, never a stray red
                              [:main-unknown {:optional true} [:set :qualified-symbol]]
+                             ;; a hand-back (seon_done of an outside agent's task): a :user task's change is judged as work is, with no :open and no :no-proofs
+                             [:hand-back? {:optional true} :boolean]
                              ;; whether the branch changed a program key or carried task content since its merge base (absent: not measured)
                              [:changed? {:optional true} :boolean]
                              ;; a refine's: whether the task it refines names a function its plan did not at the merge base (absent: no refine)
