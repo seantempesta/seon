@@ -2327,8 +2327,8 @@
   "The merge gate's prove: the candidate's own store branch (candidate, the branch its :gate request names) proved by prove! in mode
   (default :judge) on names, the deferred process tests, its process items, seed and build run on checkout at tree (the gate's
   checkout, seon.fx/run-on-checkout). The candidate is proved at its head commit, on a branch of its own made there (gate-<commit>-<id>)
-  with an agent of its own: never on the task's branch, so no attach of the task is refused while the gate runs (root's pilot,
-  2026-11-16: the gate's agent on session/root's branch refused every attach for 13 minutes) and the task's own agent is never
+  with an agent of its own: never on the task's branch, so no attach of the task is refused while the gate runs (root's pilot:
+  the gate's agent on session/root's branch refused every attach for 13 minutes) and the task's own agent is never
   written by the gate. Once the run answers, however it ends, that agent ends and its branch is dropped (the writer's :drop-branch, as
   a tree's is). The run's answer, or its typed error. See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :seon.system/sys [:map [:candidate :keyword] [:checkout :string] [:tree :string]]] :map]}
