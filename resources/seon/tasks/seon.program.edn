@@ -135,6 +135,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.program-test/a-function-called-in-an-eval-string-moves-its-tests-digest}}
  {:seon.task/name "main-is-green-program-test-program-cost-test"
-  :seon.task/plan "Owner: runtime. Red on main at d17211e69f, from the one run of main's in-process tests at a fresh agent through the prove service (tests2, root's written yes, 2026-11-16): 2 red. Any red on main parks every seon_done that reaches it, so each is fixed at its cause or the test rewritten or deleted under the bad-tests rule; done when every proof below is green on main."
+  :seon.task/plan "Owner: runtime. Red on main at d17211e69f, from the one run of main's in-process tests at a fresh agent through the prove service (tests2, root's written yes, 2026-11-16): 2 red. Any red on main parks every seon_done that reaches it, so each is fixed at its cause or the test rewritten or deleted under the bad-tests rule; done when every proof below is green on main. See docs/testing.md#a-proof-is-focused."
   :seon.task/kind :work
+  :seon.task/estimate #:seon.proofs{run-tests! {:n 2 :order :linear :ticks 5000000 :bytes 40000000}}
   :seon.task/proofs #{seon.program-cost-test/a-probed-entity-is-sought-not-scanned seon.program-test/a-types-method-moves-the-digest-on-an-import}}]
