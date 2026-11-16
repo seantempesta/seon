@@ -251,11 +251,12 @@
     (is (not= (:writer-pid a) (:system-pid a)))
     (is (= (:writer-pid a) (ppid (:system-pid a))) "the system process is the writer's fork")))
 
-;; task seon.prove/tests-fork-from-the-branchs-warm-agent: a process test runs on the one booted candidate its run binds, never on a
-;; root of its own: shared-root! answers the bound candidate for the default arguments, and boots nothing. Named arguments are a
-;; test's own root, as before. Red first: shared-root! had no candidate to answer and booted a shard's root.
-;; Estimate: one binding and a map: 10,000 ticks.
-(deftest ^{:seon.test/estimate {:ticks 10000}} a-process-test-shares-the-candidate-its-run-binds
-  (let [c {:port 4242 :booted true :branch :candidate-x}]
-    (binding [seon.test-store/*candidate* c]
-      (is (identical? c (seon.test-store/shared-root! [])) "the bound candidate, no root booted"))))
+;; task seon.prove/tests-fork-from-the-branchs-warm-agent: a process test runs on the one booted candidate its batch carried, never
+;; on a root of its own: shared-root! answers this test process's :seon.config.proofs/candidate (set from the batch's request) for
+;; the default arguments, and boots nothing. Red first: shared-root! read no candidate and booted a shard's root.
+;; Estimate: one config read and a map: 10,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 10000}} a-process-test-shares-the-candidate-its-batch-carried
+  (let [c {:port 4242 :booted true :branch :candidate-x}
+        value seon.config/value]
+    (with-redefs [seon.config/value (fn [k & more] (if (= k :seon.config.proofs/candidate) c (apply value k more)))]
+      (is (identical? c (seon.test-store/shared-root! [])) "the candidate its config holds, no root booted"))))

@@ -3587,7 +3587,7 @@
         "every granted item is run or reported")))
 
 ;; task seon.prove/tests-fork-from-the-branchs-warm-agent: a batch the service hands with the one booted candidate runs its process
-;; tests here, on that candidate (the child binds seon.test-store/*candidate*), never refused to a checkout build. Red first:
+;; tests here, on that candidate (the child holds it as :seon.config.proofs/candidate, which shared-root! answers), never refused to a checkout build. Red first:
 ;; granted-selection refused every process item whatever the batch carried. Estimate: two maps built, ~20k ticks.
 (deftest ^{:seon.test/estimate {:ticks 100000}} a-process-item-runs-on-the-candidate-its-batch-carries
   (let [sel {:plan {:process #{'a.p-test/boots}} :judge [] :selected [] :run [] :deferred [] :reused {} :reused-reports [] :digests {}}
