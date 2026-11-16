@@ -504,14 +504,18 @@
   transaction that wrote its net value, and a retraction (a value base held and from does not) under the one that wrote its key's new
   value, else the last that wrote its entity, else the last of all: a value changed twice nets to a retraction stamped with the first
   change and an addition stamped with the last, and replayed apart the retraction leaves the entity without a value its schema
-  requires, which the write check refuses (context's and web's seon_done). O(facts)."
-  {:malli/schema [:=> [:cat [:sequential :map] ifn?] [:vector [:map [:source :int] [:ops :seon.db/tx-data]]]]}
-  [fs op]
+  requires, which the write check refuses (context's and web's seon_done). An entity new? names (base held nothing of it, the branch
+  made it) has every fact filed under the first transaction that wrote it, so it is made whole: a task created and then edited nets to
+  its plan stamped with the edit, and its creation replayed without the plan its schema requires was refused whole, every key it wrote
+  an unmerged entry (tests2's seon_done: a false conflict on another task's plan, made again at each merge). O(facts)."
+  {:malli/schema [:=> [:cat [:sequential :map] ifn? ifn?] [:vector [:map [:source :int] [:ops :seon.db/tx-data]]]]}
+  [fs op new?]
   (let [adds (filter #(= :add (:side %)) fs)
         key-t (reduce (fn [m {:keys [e a tx]}] (update m [e a] (fnil max tx) tx)) {} adds)
         e-t (reduce (fn [m {:keys [e tx]}] (update m e (fnil max tx) tx)) {} adds)
+        made-t (reduce (fn [m {:keys [e tx]}] (if (new? e) (update m e (fnil min tx) tx) m)) {} adds)
         last-t (reduce max 0 (map :tx fs))
-        t-of (fn [{:keys [e a tx side]}] (if (= :retract side) (or (key-t [e a]) (e-t e) last-t) tx))]
+        t-of (fn [{:keys [e a tx side]}] (or (made-t e) (if (= :retract side) (or (key-t [e a]) (e-t e) last-t) tx)))]
     (->> fs (group-by t-of) (sort-by key) (mapv (fn [[t ds]] {:source t :ops (vec (distinct (map op ds)))})))))
 
 (defn decide
@@ -562,7 +566,9 @@
          ;; a place into-db holds stays into-db's ({:seon.merge/place true}, as decide judges it): from's is not carried
          place (:place-attrs (pdb/index))
          placed? (fn [{:keys [e a]}] (and (place a) (some? (first (d/datoms into-db :eavt e a)))))]
-     {:txs (by-tx (remove #(or (deleted? (:e %)) (placed? %)) fs) op) :remapped remapped :declarations declarations})))
+     ;; an entity base held nothing of is the branch's own, made whole in its first transaction (by-tx)
+     {:txs (by-tx (remove #(or (deleted? (:e %)) (placed? %)) fs) op (memoize #(nil? (first (d/datoms base :eavt %)))))
+      :remapped remapped :declarations declarations})))
 
 (defn change-record
   "What moved from value a to value b at the keys touched ([e a]) and the entities touched whole (each read at every attribute), as
