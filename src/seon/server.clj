@@ -678,7 +678,7 @@
     ;; import would have written main's older versions onto the branch); the agent imports them by name (my.branch/import!)
     (let [co (:checkout req)
           diff (when co (let [b @(c/branch-db sys (:branch env))]
-                          (if (contract/error? b) b (c/catch-up (:db b) co {:fact? false}))))
+                          (if (contract/error? b) b (c/catch-up (:db b) co {:fact? false :tx? false}))))
           paths (when (map? diff) (into (vec (:paths diff)) (map :path) (:skipped diff)))
           imported (cond (nil? co) nil
                          (contract/error? diff) diff

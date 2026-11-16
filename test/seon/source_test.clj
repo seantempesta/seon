@@ -1439,6 +1439,33 @@
           (is (= 1 (:behind c)) "and it says the checkout is one commit behind main")))
       (finally (seon.lib/remove-tree! dir)))))
 
+;; docs/source.md#a-boot-catches-up-with-its-checkout: root reads which files a session's checkout changed and never analyzes them: the branch's
+;; agent imports them (my.branch/import!). Red before (2026-11-17): a catch-up of a session's checkout at root analyzed its forms in root's own
+;; namespaces, and Jolt's analysis of a def interns its var, so root held seon.agent/write-out-of from jolt/flow and seon.contract/explained
+;; from jolt/deps, unbound (result/b417a01a, b18b3340); a defmacro the store held whole was evaluated in root.
+;; Estimate: ~6 git calls x 70k 0.4M + test db 1M + one catch-up reading two small files, no analysis ~0.3M: 2,000,000 ticks.
+(deftest ^{:seon.test/execs ["git"] :seon.test/estimate {:ticks 2000000}} a-sessions-changed-paths-are-read-without-defining-its-code
+  (let [dir (scratch-dir "paths-only")
+        co (str dir "/co")
+        git (fn [& args] (let [r (apply sh/sh "git" "-C" co "-c" "user.name=t" "-c" "user.email=t@t" args)]
+                           (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
+        n (str "seon.paths-only-" (seon.lib/unique-id))
+        f (str co "/src/" (str/replace (str/replace n "." "/") "-" "_") ".clj")]
+    (try
+      (.mkdirs (.getParentFile (java.io.File. f)))
+      (git "init" "-q" "-b" "main")
+      (spit f (str "(ns " n ")\n\n(defn kept [] 0)\n")) (git "add" ".") (git "commit" "-q" "-m" "base")
+      (git "checkout" "-q" "-b" "s")
+      (spit f (str "(ns " n ")\n\n(defn kept [] 0)\n\n(defn added [] 1)\n\n(defmacro added-macro [x] x)\n"))
+      (git "add" ".") (git "commit" "-q" "-m" "the session adds a defn and a defmacro")
+      (let [db (d/db-with (ts/test-db) [{:seon.system/id :root :seon.system/source {:root co :dirs ["src"] :tree (fx/tree-id co) :commit (git "rev-parse" "main") :t 1}}])
+            c (root/catch-up db co {:fact? false :tx? false})]
+        (is (= [(subs f (inc (count co)))] (:paths c)) "the session's changed file is named")
+        (is (not (contains? c :tx)) "and nothing of it is indexed here")
+        (is (nil? (find-var (symbol n "added"))) "its new defn is no var in this process")
+        (is (nil? (find-var (symbol n "added-macro"))) "nor its new defmacro"))
+      (finally (seon.lib/remove-tree! dir)))))
+
 ;; docs/source.md#a-boot-catches-up-with-its-checkout: what the boot's catch-up indexes (seon.system/catch-up, the call boot! makes), on a test db
 ;; and a scratch repository, in this process: an untracked new file reaches main; a file that does not read is named and left out, keeping the source
 ;; fact where it was; with nothing changed it indexes nothing; a checkout that is gone writes nothing; a session's files move no source fact; a file a

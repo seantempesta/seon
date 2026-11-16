@@ -317,26 +317,64 @@
 
 ;; ---- invalid: malli's report -> the error map, thrown ---------------------------------
 
+;; malli's explainers add each error by conj on the accumulator they are handed: this one ends the explain at its cap, carrying the
+;; errors so far out (explained catches them), so explaining a failure walks the value only to its first reasons. The throw is how it
+;; ends: malli's explain has no early stop of its own, and only this accumulator's conj is ours to change. See docs/errors.md#errors.
+(deftype Capped [errors cap]
+  clojure.lang.IPersistentCollection
+  (cons [_ e] (let [es (conj errors e)]
+                (if (>= (count es) cap) (throw (ex-info "capped" {::capped es})) (Capped. es cap))))
+  (count [_] (count errors))
+  (empty [_] (Capped. [] cap))
+  (equiv [_ o] (= errors o))
+  clojure.lang.Seqable
+  (seq [_] (seq errors)))
+
+(clojure.core/defn explained
+  "Why v does not satisfy schema s: malli's first errors, at most :seon.config.render/problems of them, its explain ended at that
+  many ({:errors :more?}, :more? when it ended there), so a failure costs its shown reasons, never a walk of the whole value (a db
+  handed to a map-of contract made ~1M errors, 5.8B ticks and 21 GB, result/c2970fc5). See docs/errors.md#errors."
+  {:malli/schema [:=> [:cat :seon.host/schema :any] [:map [:errors [:vector :map]] [:more? :boolean]]]}
+  [s v]
+  (let [cap (config/value :seon.config.render/problems)
+        explain (fn [s v] (try {:errors (vec (:errors ((m/explainer s) v [] (Capped. [] cap)))) :more? false}
+                               (catch clojure.lang.ExceptionInfo e
+                                 (if-let [es (::capped (ex-data e))] {:errors es :more? true} (throw e)))))
+        cs (when (and (= :cat (m/type s)) (sequential? v)) (m/children s))
+        ;; a contract's arguments (:cat): malli's :cat explains its children into an accumulator of its own, which the cap never
+        ;; reaches, so the first argument its own schema refuses is explained alone, its paths under its place
+        i (when (and cs (= (count cs) (count v)) (every? m/schema? cs))
+            (first (keep-indexed (fn [i [c x]] (when-not (m/validate c x) i)) (map vector cs v))))]
+    (if i
+      (update (explain (nth cs i) (nth v i)) :errors
+              (fn [es] (mapv #(-> % (update :path (fn [p] (into [i] p))) (update :in (fn [p] (into [i] p)))) es)))
+      (explain s v))))
+
 (clojure.core/defn problems
   "Why v does not satisfy schema s, as an error's problems (:seon.error/problems): each refused
-  part's path and its value as it prints."
-  {:malli/schema [:=> [:cat :seon.host/schema :any] [:vector :seon.error/problem]]} [s v]
-  (vec (for [{:keys [path in schema value]} (:errors (m/explain s v))]
+  part's path and its value as it prints, of its first reasons (explained), or of ex, explained already."
+  {:malli/schema [:function [:=> [:cat :seon.host/schema :any] [:vector :seon.error/problem]]
+                  [:=> [:cat :map] [:vector :seon.error/problem]]]}
+  ([s v] (problems (explained s v)))
+  ([ex]
+  (vec (for [{:keys [path in schema value]} (:errors ex)]
          {:path path :in in :expected (m/form schema)
           ;; the value as it prints, marked code (print/code): it reads as written, a symbol or
           ;; keyword as itself, never a string literal of its text (live runs, 2026-10-26:
           ;; `:value "seon.print.select"` for a symbol, and the agent sent the same call again)
-          :value (print/code (print/text value (:part print/budgets)))})))
+          :value (print/code (print/text value (:part print/budgets)))}))))
 
 (clojure.core/defn- first-problem
   "The first reason v does not satisfy s, in one line for an error's message: where (its :in path),
   what it got, and what was expected (its schema's form), each printed at the printer's :part budget, malli's kind for a
   missing or refused key; then the map or vector that holds it (the value at its path's parent: what a
   REPL would print, which the failed check keeps from its caller); and how many reasons more (\"its value does not satisfy its contract\"
-  alone sends an agent digging through ex-data for the one nil key). See docs/errors.md#errors."
-  {:malli/schema [:=> [:cat :seon.host/schema :any] :string]}
-  [s v]
-  (let [[{:keys [in schema value type]} :as es] (:errors (m/explain s v))]
+  alone sends an agent digging through ex-data for the one nil key). ex is v explained against s (explained), read once by the error's
+  message and its problems. See docs/errors.md#errors."
+  {:malli/schema [:function [:=> [:cat :seon.host/schema :any] :string] [:=> [:cat :seon.host/schema :any :map] :string]]}
+  ([s v] (first-problem s v (explained s v)))
+  ([s v ex]
+  (let [[{:keys [in schema value type]} :as es] (:errors ex)]
     (if-not schema
       ""
       ;; the value and the form it was held to, each by the one printer at a shown-inside budget (its cut says what it left)
@@ -351,7 +389,9 @@
              (let [holder (if (seq in) (get-in v (vec (butlast in))) v)]
                (when (and (coll? holder) (not (identical? holder value)))
                  (str ", in " (print/text holder (:part print/budgets)))))
-             (when (next es) (str " (and " (dec (count es)) " more in :seon.error/problems)")))))))
+             (cond (:more? ex) (str " (and " (dec (count es)) " more in :seon.error/problems, and others past them: the explain ends at"
+                                    " :seon.config.render/problems reasons)")
+                   (next es) (str " (and " (dec (count es)) " more in :seon.error/problems)"))))))))
 
 (clojure.core/defn- calls
   "The calls fn-sym's var declares (its :arglists), each as a form to copy, joined by \" or \":
@@ -369,19 +409,20 @@
   [fn-sym kind data]
   (let [arm (case kind :malli.core/invalid-input :input :malli.core/invalid-output :output
                   :malli.core/invalid-arity :arity :malli.core/invalid-guard :guard :schema)
+        ;; explained once, for the message and the problems both
+        ex (case arm :input (explained (:input data) (:args data)) :output (explained (:output data) (:value data)) nil)
         e (cond-> {:seon.error/type (if (= arm :arity) :seon.instrument/arity-error :seon.instrument/contract-error)
                    :seon.error/operation fn-sym
                    :seon.error/member kind
                    :seon.error/message (str fn-sym " " (name kind)
-                                            (case arm :input (str ": its arguments do not satisfy its contract" (first-problem (:input data) (:args data)))
-                                                  :output (str ": its value does not satisfy its contract" (first-problem (:output data) (:value data)))
+                                            (case arm :input (str ": its arguments do not satisfy its contract" (first-problem (:input data) (:args data) ex))
+                                                  :output (str ": its value does not satisfy its contract" (first-problem (:output data) (:value data) ex))
                                                   :arity (str ": called with " (:arity data) " arguments" (some->> (calls fn-sym) (str "; it is called as ")))
                                                   ""))
                    :seon.error/fix (case arm
                                      :output (str "Fix " fn-sym " (the producer), or its contract.")
                                      (str "Call " fn-sym " with arguments its contract declares."))}
-            (= arm :input) (assoc :seon.error/problems (problems (:input data) (:args data)))
-            (= arm :output) (assoc :seon.error/problems (problems (:output data) (:value data)))
+            ex (assoc :seon.error/problems (problems ex))
             (= arm :arity) (assoc :seon.error/expected (m/form (:schema data)))
             (= arm :schema) (assoc :seon.error/message (str fn-sym ": its contract could not be checked: "
                                                             (ex-message (:exception data)))))]

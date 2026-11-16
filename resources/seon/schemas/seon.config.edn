@@ -181,6 +181,7 @@
   [:seon.config.render/display-namespaces {:optional true} :seon.config.render/display-namespaces]
   [:seon.config.render/agent-tree-depth {:optional true} :seon.config.render/agent-tree-depth]
   [:seon.config.render/part-budget {:optional true} :seon.config.render/part-budget]
+  [:seon.config.render/problems {:optional true} :seon.config.render/problems]
   [:seon.config.render/recent-errors {:optional true} :seon.config.render/recent-errors]
   [:seon.config.render/form-budget {:optional true} :seon.config.render/form-budget]
   [:seon.config.render/context-budget {:optional true} :seon.config.render/context-budget]

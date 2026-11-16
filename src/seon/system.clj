@@ -1436,12 +1436,15 @@
   it brings up to date (boot!: main). opts: :tree, the tree to read what differs from (default db's held one; with :fact? false, the
   checkout's merge base with main, seon.fx/base-commit, so a checkout behind main names only its own files, and the answer's :behind
   says how far behind it is), :fact? false,
-  which moves no source fact (changed-tx alone): a session's files written as a branch of the store, never main; and :paths,
-  the files to read in place of the tree's diff (seon.fx/files-at: a session's import, my.branch/import!)."
+  which moves no source fact (changed-tx alone): a session's files written as a branch of the store, never main; :paths,
+  the files to read in place of the tree's diff (seon.fx/files-at: a session's import, my.branch/import!); and :tx? false, which
+  answers the files alone and indexes none of them: root reads a session's checkout so, since indexing analyzes each form in this
+  process's own namespaces (Jolt's analysis of a def interns its var), and a branch's code is its agent's to index (my.branch/import!)."
   {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:maybe :map]]
-                  [:=> [:cat :seon.host/db :string [:map [:tree {:optional true} :string] [:fact? {:optional true} :boolean] [:paths {:optional true} [:sequential :string]]]] [:maybe :map]]]}
+                  [:=> [:cat :seon.host/db :string [:map [:tree {:optional true} :string] [:fact? {:optional true} :boolean] [:paths {:optional true} [:sequential :string]]
+                                                        [:tx? {:optional true} :boolean]]] [:maybe :map]]]}
   ([db root] (catch-up db root {}))
-  ([db root {:keys [fact?] :or {fact? true} :as opts}]
+  ([db root {:keys [fact? tx?] :or {fact? true tx? true} :as opts}]
   ;; :paths names the files to read (a session's import, my.branch/import!), which needs no held tree; else the tree's diff names
   ;; them, from the tree db last indexed, and a db that holds none has nothing to diff from
   ;; a session's files (fact? false) are read against the checkout's merge base with main: none for a directory git does not track
@@ -1493,19 +1496,19 @@
               modes (into {} (remove (comp out key)) (:modes r))]
           (let [res (cond-> {:paths (vec (keys changed)) :skipped skipped
                              ;; the task entries a load leaves out, each with why (seon.task/left-out): the rest of their files load
-                             :left-out (if (seq readable) (task/left-out db (tasks-of readable)) {})
-                     :tx (cond
+                             :left-out (if (seq readable) (task/left-out db (tasks-of readable)) {})}
+                      tx? (assoc :tx (cond
                            ;; a session's files: what it changed since its base, never their whole text over main's newer forms (session-tx)
                            (and (not fact?) base) (session-tx db (into {} (for [p (keys changed)] [p (fx/tree-file root base p)])) changed modes tasks-dir)
                            (or (seq out) (not fact?)) (changed-tx db changed modes tasks-dir)
-                           :else (landed-tx db changed modes (:tree r) (:commit r)))}
+                           :else (landed-tx db changed modes (:tree r) (:commit r))))
                       ;; how far the checkout is behind main: the tree diff's alone (a :paths import names its files, from any directory)
                       (not (or fact? (:paths opts))) (assoc :behind (fx/behind root)))]
             ;; what the catch-up allocated to build :tx (0.1-4.6 GB a call at the writer process) is freed here, once, while its
             ;; caller holds only the answer: left to the collector's schedule it piled up to 12 GB of garbage awaiting a full
             ;; collection (context's census); one collection measured 215 ms and freed 527 MB at the writer process [result/a4b9e8a8].
             ;; A forked process collects only what it allocated itself (Jolt's collection ceiling), so an agent's import pays its own
-            (System/gc)
+            (when tx? (System/gc))
             res))))))))
 
 (defn- kept-index!
@@ -2332,8 +2335,10 @@
 
 (defn prove-tree!
   "Prove the files of checkout (a worktree of this root's repository) at tree, its tree id (seon.fx/tree-id, what bin/build records):
-  their branch (tree-branch), made once from main with the checkout's catch-up written on it (catch-up :fact? false, as the writer's
-  one :branch-for-tree op), its live agent or one forked onto it, and prove! of names in mode (default :judge). The run's answer,
+  their branch (tree-branch), made once from main (the writer's one :branch-for-tree op), its live agent or one forked onto it, the
+  checkout's changed files imported by that agent (my.branch/import!, as seon_done's land imports them: root reads only which files
+  changed, catch-up :tx? false, and analyzes none, since an analysis here interns the branch's names in root), and prove! of names in
+  mode (default :judge). The run's answer,
   or a typed error: no tree on main to diff from, the catch-up's read failing, or a file it left out (:seon.system/catch-up-skipped,
   each named: a judgement of part of the files would be wrong). Once no run of it is in flight here, its agent ends and the branch
   is dropped (tree-leave!); a run that comes meanwhile waits for the drop and makes the branch again.
@@ -2342,7 +2347,7 @@
   [sys {:keys [checkout tree names mode]}]
   (let [b (tree-branch tree)
         refusal (tree-refusal (program/binary-program) tree)
-        c (when-not refusal (catch-up @(:conn sys) checkout {:fact? false}))]
+        c (when-not refusal (catch-up @(:conn sys) checkout {:fact? false :tx? false}))]
     (cond
       refusal refusal
       (nil? c) (refused 'seon.system/prove-tree! "main holds no tree of its checkout to diff a session's files from" {:checkout checkout})
@@ -2358,15 +2363,24 @@
         ;; the run's count is given back however it ends (a throw included): a tree's branch is always dropped by its last run
         (let [ag-of (volatile! nil)]
          (try
-        (let [w @(write! sys {:op :branch-for-tree :branch b :tx (:tx c)})
+        (let [w @(write! sys {:op :branch-for-tree :branch b})
               full (pdb/on-main (pdb/conn-main (:conn sys)) b)
               live (fn [] (some (fn [[aid a]] (when (and (= full (:branch a)) (not (task/gone-statuses (:status a)))) aid)) (:agents (state sys))))
               ;; the spawn's answer: the new agent, or, for an asker who came second, the refusal naming the live holder
               s (when-not (or (contract/error? w) (live)) @(request! sys 'spawn! nil {:branch b}))
               ag (when-not (contract/error? w) (or (live) (:id s) (:agent s)))
-              _ (vreset! ag-of ag)]
+              _ (vreset! ag-of ag)
+              ;; the agent indexes the checkout's files on its own branch; a second run of the tree finds them imported and imports nothing
+              imp (when (and ag (seq (:paths c))) @(submit! sys ag (sedn/encode (list 'my.branch/import! 'agent checkout (:paths c))) {:origin :outside}))
+              load-errors (some-> imp :value :load-errors seq)
+              unread (some-> imp :value :skipped seq)]
           (cond (contract/error? w) w
                 (nil? ag) s
+                (contract/error? imp) imp
+                (:ex imp) (:ex imp)
+                unread (contract/error :seon.system/catch-up-skipped #'prove-tree!
+                                       (str "the checkout's files could not all be read, so none is proved: " (pr-str (vec unread))) {:skipped (vec unread)})
+                load-errors (refused 'seon.system/prove-tree! (str "the checkout's code does not load, so none is proved: " (pr-str (vec load-errors))) {:load-errors (vec load-errors)})
                 :else @(prove! sys {:branch full} (set (map symbol names)) (or mode :judge) {:checkout checkout :tree tree})))
          (finally (tree-leave! sys b @ag-of))))))))
 
