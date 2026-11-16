@@ -1489,7 +1489,8 @@
                      :tx (if (or (seq out) (not fact?))
                            (changed-tx db changed modes tasks-dir)
                            (landed-tx db changed modes (:tree r) (:commit r)))}
-                      (not fact?) (assoc :behind (fx/behind root)))]
+                      ;; how far the checkout is behind main: the tree diff's alone (a :paths import names its files, from any directory)
+                      (not (or fact? (:paths opts))) (assoc :behind (fx/behind root)))]
             ;; what the catch-up allocated to build :tx (0.1-4.6 GB a call at the writer process) is freed here, once, while its
             ;; caller holds only the answer: left to the collector's schedule it piled up to 12 GB of garbage awaiting a full
             ;; collection (context's census); one collection measured 215 ms and freed 527 MB at the writer process [result/a4b9e8a8].

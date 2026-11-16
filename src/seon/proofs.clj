@@ -673,6 +673,23 @@
                    :when (seq c)]
                [t c]))))
 
+(defn ranking
+  "Every test by its own cost, from costs ({test {:ms :ticks :process?}}, each test's recorded median: seon.proofs/spent-ms, or bin/test's
+  history until it is deleted) and bound (:seon.config.proofs/slow-test-ms): {:fast {:count :ms} :slow {ns {:count :ms}} :process {ns {:count
+  :ms}} :unmeasured n :slowest [[test ms] ...]}. The fast set is what a merge runs; each slow namespace's count is its owner's to bring
+  under the bound or delete. See docs/cost.md#the-test-systems-lower-bound."
+  {:malli/schema [:=> [:cat [:map-of :qualified-symbol :map] pos-int?] :map]}
+  [costs bound]
+  (let [cls (fn [{:keys [ms process?]}] (cond process? :process (nil? ms) :unmeasured (< ms bound) :fast :else :slow))
+        by (group-by (comp cls val) costs)
+        sum (fn [xs] (reduce + 0 (keep (comp :ms val) xs)))
+        per-ns (fn [xs] (into (sorted-map) (for [[n v] (group-by (comp namespace key) xs)] [n {:count (count v) :ms (sum v)}])))]
+    {:fast {:count (count (:fast by)) :ms (sum (:fast by))}
+     :slow (per-ns (:slow by))
+     :process (per-ns (:process by))
+     :unmeasured (count (:unmeasured by))
+     :slowest (vec (take 10 (sort-by (comp - second) (for [[t c] (:slow by)] [t (:ms c)]))))}))
+
 (defn spent-ms
   "{test [ms ...]} of tests, ascending: the wall ms its newest green results in db spent (:seon.bound/spent, verdict-tx's); a test
   with none is left out. One AVET seek a test. See docs/merging.md#a-slow-test-runs-last."
