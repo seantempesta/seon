@@ -1424,20 +1424,6 @@
     (is (pos? (:value marked)) (pr-str marked))
     (is (true? (:value vars)))))
 
-;; See docs/agent.md#changing-a-file
-;; Estimate: in-agent's own setup and teardown (~1.5M) + 2 asks at ~0.25M: 3000000
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 2}} an-edit-of-a-file-in-the-programs-tree-is-refused
-  ;; the program's tree changes only through a branch, its merge's checks and the merge (the owner, 2026-11-15); a driver's edit! of a path
-  ;; wrote the standing checkout's file on disk (2026-11-15). A scratch file in the tree's test/ dir stands in (removed after), so a run
-  ;; without the refusal changes nothing but it
-  (let [f (java.io.File. (str (seon.config/checkout) "/test/seon/ctx_edit_probe_" (random-uuid) ".txt"))]
-    (spit f "before")
-    (try
-      (let [[r] (in-agent [(str "(seon.repl/edit! " (pr-str (.getPath f)) " \"before\" \"after\")")])]
-        (is (= :in-the-tree (:seon.repl/refused-because (:ex r))) (str "refused, saying the place to use: " (pr-str (select-keys r [:value :ex]))))
-        (is (clojure.string/includes? (str (:seon.error/message (:ex r))) "my.schema/register!") "it names the branch's way for each kind")
-        (is (= "before" (slurp f)) "and nothing was written"))
-      (finally (.delete f)))))
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} edit-says-what-it-did
   (let [[_ many same fine] (in-agent (fn [{:keys [ns]}]

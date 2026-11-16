@@ -1538,3 +1538,25 @@
     (is (= st st') "and left the proc's state as it was")
     (repl/agent-step st :run {:seon.turn/answer {:value :current} :seon.repl/out 2})
     (is (= [{:seon.turn/answer {:value :current}}] @stepped) "the current output's answer steps the run, its number taken off")))
+
+;; docs/agent.md#changing-a-file, task seon.repl/an-edit-of-an-in-tree-path-is-held-on-the-branch (rails, never guards: the owner,
+;; 2026-11-16): an edit of a path in the program's tree changes the branch like any other entry, so it reaches main only through the
+;; merge; nothing on disk moves. A fixture (a kind the allow-list names) and a namespace's file, edited by path at an agent's REPL on a
+;; world. Estimate: two edits, a fixture by seon.source/edit-tx (~65k ticks) and a two-form namespace by seon.source/refresh-tx (~1M),
+;; the world (~2M) and two reads back (~0.2M): ~3.3M; 5000000 ticks, 50 MB
+(deftest ^{:seon.test/estimate {:ticks 5000000 :bytes 50000000}} an-edit-of-an-in-tree-path-is-held-on-the-branch
+  (let [fixture (str (cfg/checkout) "/test/seon/probe_" (random-uuid) ".edn")
+        rel (subs fixture (inc (count (cfg/checkout))))
+        db (my.test/with (my.test/world) (fn [db] (seon.source/edit-tx db rel "{:a 1}")) (my.test/code 'app.probe "(ns app.probe)\n(defn f [] 1)\n"))
+        r (my.test/eval-in (str "[(seon.repl/edit! " (pr-str fixture) " \":a 1\" \":a 2\")"
+                                " (get (seon.source/files (seon.agent/db) [" (pr-str rel) "]) " (pr-str rel) ")"
+                                " (seon.repl/edit! \"src/app/probe.clj\" \"[] 1\" \"[] 2\")"
+                                " (get (seon.source/files (seon.agent/db) [\"src/app/probe.clj\"]) \"src/app/probe.clj\")"
+                                " (:form/src (:var/form (datahike.api/entity (seon.agent/db) [:var/name 'app.probe/f])))]")
+                           'seon.repl-test.probe {:db db})
+        [fe ft ne nt nf] (:value r)]
+    (is (nil? (:ex r)) (str "both edits answer: " (pr-str (:ex r))))
+    (is (= "{:a 2}" ft) (str "the fixture's text on the branch: " (pr-str fe)))
+    (is (clojure.string/includes? (str nt) "[] 2") (str "the namespace's file on the branch: " (pr-str ne)))
+    (is (clojure.string/includes? (str nf) "[] 2") "and its definition's form, as an eval of it records it")
+    (is (not (.exists (java.io.File. fixture))) "nothing written on disk")))
