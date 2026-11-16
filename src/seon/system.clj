@@ -1682,7 +1682,7 @@
             config-errors (program/hold-config! @conn)
             ;; and main's program where the binary holds another: what main dropped unmapped, the forms the binary lacks
             ;; loaded, never a test namespace's (docs/source.md#a-boot-runs-mains-program)
-            program-load (program/load-all! @conn)
+            program-load (program/load-all! @conn {:tests? false})
             digest (program/program-digest @conn)
             digest-ms (profile/ms-since t2)
             contracts (contract/instrument! contract/boot-nss)

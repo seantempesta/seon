@@ -455,10 +455,10 @@
     (is (contains? (@rs red) :fail) "and a red one beside it reports red")))
 
 ;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} root-and-its-agents-hold-mains-tests-from-the-binary
-  ;; docs/source.md#the-binary-holds-the-tests-compiled: the binary holds test/ compiled, once, in the image
-  ;; every process shares, so root holds main's tests and the agent forked from it does too, with no load at runtime
-  ;; (and a test child it forks runs them: an-agent-holds-mains-tests above)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} root-holds-no-test-code-and-its-agents-hold-mains-tests
+  ;; task seon.system/root-holds-no-test-code: root imports test/ as facts (reach digests) and evaluates
+  ;; none of it; the fork server loads the tests once, so the agent forked from it holds them
+  ;; compiled (and a test child it forks runs them: an-agent-holds-mains-tests above)
   (let [;; the code this proves, named so its reach digest moves with it: root's boot and writer, the fork server's load
         _ [#'seon.system/boot! #'seon.writer/main-commit #'seon.fork-server/main]
         t "(some-> (resolve 'seon.reader-test/text-without-a-fence-is-a-comment) bound?)"
@@ -467,7 +467,7 @@
                                                 {:op :eval :agent "root" :code "(boolean (seon.db/eid @(:conn sys) :var/name 'seon.reader-test/text-without-a-fence-is-a-comment))"}]
                                                {})]
     (is (true? (:value agent-held)) "the agent holds main's test compiled")
-    (is (true? (:value root-held)) "and root, from the same image")
+    (is (false? (:value root-held)) "root does not")
     (is (true? (:value facts)) "though main's program holds it as facts")))
 
 (defn- statuses
