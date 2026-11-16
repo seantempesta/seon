@@ -37,4 +37,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{jolt.async-test/a-remote-procs-ping-shows-its-childs-last-pushed-view jolt.async-test/a-closed-link-answers-every-pending-ask jolt.async-test/a-full-error-chan-counts-its-drops}
   :seon.task/estimate #:jolt.async.remote.flow{proc {:n 1, :order :constant, :ticks 1000, :bytes 2000}}}
-]
+ {:seon.task/name "a-proc-announces-its-transitions-and-its-parked-writes"
+  :seon.task/plan "Owner: deps (asked by flow, 2026-11-16, for seon.web/the-system-seen-from-flow: every process seen, pushed as it moves, never sampled). In reference-code/jolt/stdlib/clojure/core/async/flow/impl.clj: (1) a proc's status transition (transit, :604/:621: paused, running, draining, exit) puts one {::flow/pid ::flow/from ::flow/to} on the graph's report chan, as ::flow/undeliverable is (:217), with put! (never blocking; the sliding report buffer's drops counted in ping as ::flow/report-dropped); (2) a step's output that parks on a full in-chan (send-outputs' alts!!, :518) reports {::flow/pid ::flow/blocked-writing coord} once when it parks and {::flow/pid ::flow/unblocked coord} when it leaves, so the fast path pays nothing. Cost: one put! per transition and per park, none per ordinary step. Upstream Flow announces neither: these are Jolt's additions. PRIOR WORK to search first: the report chan's existing uses in impl.clj and Seon's flow-report (seon.system)."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}]

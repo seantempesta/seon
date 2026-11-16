@@ -101,24 +101,29 @@
 ;; Estimate: two pings' rows made from small maps and one tile drawn, ~0.3M ticks
 (deftest ^{:seon.test/estimate {:ticks 1000000}} roots-process-shows-each-proc-as-flow-sees-it
   ;; the owner's visibility order, task seon.web/the-system-seen-from-flow (first cut, root 2026-11-16): root's process tile shows each proc
-  ;; of the writer process's graph as one flow/ping answers it (status, count, its site, what waits in its in-ports), pinged while a system
-  ;; view is watched; nothing is pinged while none is. A stepping proc says what it steps on (its in-port and message); no clock is read. Red
-  ;; before: no :procs, and the tile drew none
+  ;; of the writer process's graph as one flow/ping answers it (status, count, its site, what waits in its in-ports), a snapshot taken when a
+  ;; system view is opened, never a ping a pass (flow's review), and nothing pinged while none is watched; the rows read no clock (a stepping
+  ;; site keeps its :since-ns). Red before: no :procs, and the tile drew none
   (let [F (fn [k] (keyword "clojure.core.async.flow" (name k)))
         ping {:api {(F :pid) :api (F :status) :running (F :count) 210 (F :site) {:reading #{:main :back}}
                     (F :in-fill) {:main {:count 0 :capacity 1024 :parked-puts 0} :back {:count 3 :capacity 64 :parked-puts 1}}}
-              :writer {(F :pid) :writer (F :status) :running (F :count) 9 (F :site) {:stepping :in :msg {:op :tx} :since-ns 0}}
+              :writer {(F :pid) :writer (F :status) :running (F :count) 9 (F :site) {:stepping :in :msg {:op :tx} :since-ns 42}}
               :cron {(F :pid) :cron (F :status) :paused (F :count) 0 (F :site) {:reading #{:in}}}}
+        pings (atom 0)
         st {:view {} :system-p (doto (promise) (deliver {:procs {:api {} :writer {} :cron {}}})) :graph-p (doto (promise) (deliver ::graph))
             :watch #{:root}}
-        v (with-redefs [clojure.core.async.flow/ping (fn [g] (is (= ::graph g)) ping)] (p/process-value st))
+        snap (fn [st] (with-redefs [clojure.core.async.flow/ping (fn [g] (is (= ::graph g)) (swap! pings inc) ping)] (#'p/procs-snapshot st)))
+        st1 (snap st)
+        v (p/process-value st1)
         rows (:procs v)]
     (is (= [:cron :api :writer] (mapv :pid rows)) "one row a proc, one not running first")
     (is (= {:back {:count 3 :capacity 64 :parked-puts 1}} (:fill (second rows))) "only an in-port holding something")
-    (is (= {:stepping :in :msg {:op :tx} :since-ns 0} (:site (nth rows 2))) "a stepping proc's site: what it steps on")
+    (is (= 42 (get-in (nth rows 2) [:site :since-ns])) "a stepping site keeps its :since-ns: no clock read")
     (is (not (contains? (nth rows 2) :stepping-ms)) "no clock read: no age")
-    (is (nil? (:procs (with-redefs [clojure.core.async.flow/ping (fn [_] (throw (ex-info "pinged" {})))] (p/process-value (assoc st :watch #{})))))
-        "no system view watched: nothing pinged")
+    (snap st1)
+    (is (= 1 @pings) "the same view still watched on the next pass: no second ping")
+    (is (nil? (:procs (p/process-value (snap (assoc st1 :watch #{}))))) "no system view watched: no rows")
+    (is (= 1 @pings) "and nothing pinged")
     (let [html (h/html (ui/process-tile {:seon.ctx/ctx {:process v}}))]
       (is (str/includes? html "cron") "each proc drawn")
       (is (str/includes? html "paused") "its status")
