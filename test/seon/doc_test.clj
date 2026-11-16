@@ -124,18 +124,14 @@
   ;; the ids are the runs' real names (docs/decisions.md, docs/plan.md): md-scan, scope-<N>, bench-<md-scan|tools|scope-N|b..>,
   ;; a known bench's name before " #N" or " bench", and a session's id after "session"; a hyphenated word alone (step-fn #2, read-only bench, bench-top) is not one
   (let [id #"(?:^|[^A-Za-z0-9_-])(md-scan\b|bench-(?:md-scan|tools|scope-[0-9]+|b[0-9]*)\b|scope-[0-9]+\b|(?:md-scan|fence|scope) (?:#[0-9]+|bench\b)|session,? \(?[0-9a-f]{10}\b)"
-        root (config/checkout)
-        pages (for [^java.io.File f (.listFiles (java.io.File. (str root "/docs")))
-                    :when (and (str/ends-with? (.getName f) ".md") (not (#{"decisions.md" "plan.md"} (.getName f))))]
-                f)
-        srcs (for [^java.io.File f (file-seq (java.io.File. (str root "/src")))
-                   :when (re-find #"\.cljc?$" (.getName f))]
-               f)
-        hits (for [^java.io.File f (sort-by #(.getPath ^java.io.File %) (concat pages srcs))
-                   :let [ids (distinct (map second (re-seq id (slurp f))))]
+        ;; the pages and src as the branch holds them (my.test/stored-files), never the checkout's disk
+        files (merge (into {} (remove #(#{"docs/decisions.md" "docs/plan.md"} (key %))) (my.test/stored-files "docs/" ".md"))
+                     (my.test/stored-files "src/" ".clj") (my.test/stored-files "src/" ".cljc"))
+        hits (for [[p text] (sort files)
+                   :let [ids (distinct (map second (re-seq id text)))]
                    :when (seq ids)]
-               [(subs (.getPath f) (inc (count root))) (vec ids)])]
-    (is (< 50 (count srcs)) "src is read")
+               [p (vec ids)])]
+    (is (< 50 (count (filter #(clojure.string/starts-with? (key %) "src/") files))) "src is read")
     (is (empty? hits) "no page outside decisions.md and plan.md, and no src file, names a bench or a numbered run: each is [path ids]")))
 
 ;; Kept (tests' review, 2026-11-16): the wiki-reading test other tests name (seon.program-test's reach of a wiki edit, docs/references.md,
@@ -164,7 +160,7 @@
 (deftest ^{:seon.test/estimate {:ticks 4000000}} a-loaded-page-draws-back-as-its-file
   (let [db0 (empty-db)
         files {"docs/grammar.md" grammar-page
-               "docs/prompt.md" (slurp (str (config/checkout) "/docs/prompt.md"))}
+               "docs/prompt.md" (my.test/stored-text "docs/prompt.md")}
         db (d/db-with db0 (doc/load-tx db0 "docs" files))]
     (is (< 15 (count (d/datoms db :aevt :seon.doc/address))) "the pages are read")
     ;; a page that does not draw back names where it first differs: the file's text there and the drawn
