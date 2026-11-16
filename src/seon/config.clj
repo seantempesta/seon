@@ -3,7 +3,7 @@
   limit, bound and default of the platform is a key of the `:seon.config/config` map
   (resources/seon/schemas/seon.config*.edn): its entry states its default as `:default`, with
   its unit, provenance and what happens at the bound (`defaults`, every config's bottom layer;
-  owner, 2026-11-16). The aero file resources/seon/config/default.edn states only what a schema
+  owner). The aero file resources/seon/config/default.edn states only what a schema
   can't: values read from the process (`#env`, `#seon/checkout`, `#seon/cores`), `#profile`
   values, `#ref`/`#join` paths, and the keys bin/env and bin/tree read from it by text. This
   namespace is its loader and the only place the process environment is read:
@@ -112,7 +112,7 @@
 
 (defn- required
   "The compiled config map s as a config is read: every key but those it `may-be-absent` required (a missing one refuses it, at
-  boot). Open at its top, as every entity schema is (owner, 2026-11-16: no closed map): a key no schema declares is carried and
+  boot). Open at its top, as every entity schema is (owner: no closed map): a key no schema declares is carried and
   read by nothing. The schema itself keeps its keys optional, since a task holds single keys as its overrides. See
   docs/config.md#a-process-holds-its-branchs-config."
   {:malli/schema [:=> [:cat :any] :any]}
@@ -276,7 +276,7 @@
   (into {} (remove (comp nil? val)) (aero/read-config p {:profile prof ::checkout dir})))
 
 (defn defaults
-  "{k value} of each key whose entry in config map schema states :default in its properties (the owner, 2026-11-16: config
+  "{k value} of each key whose entry in config map schema states :default in its properties (the owner: config
   defaults live in the schema): the bottom layer of every config (layered), so a key no layer states resolves to its schema's
   default. Derived from the schema in force, a branch's own when it changed an entry. See docs/config.md#layers."
   {:malli/schema [:=> [:cat :any] [:map-of :qualified-keyword :any]]}
@@ -463,7 +463,7 @@
   (let [dir (checkout)
         layers (layers-over #(read-layer (java.io.StringReader. built-text) % dir) dir args)
         ;; the binary's shipped text is held to the binary's schema, the branch's entries to the branch's (of-entries, below): a key
-        ;; the branch deleted, which the binary still ships, never meets the branch's schema (every test child died so, 2026-11-16)
+        ;; the branch deleted, which the binary still ships, never meets the branch's schema (every test child died so)
         r0 (layered layers config-schema)
         put! (fn [r] (reset! held r) (alter-var-root #'config (constantly (:config r))) (alter-var-root #'sources (constantly (:sources r))))]
     (alter-var-root #'built-layers (constantly layers))
