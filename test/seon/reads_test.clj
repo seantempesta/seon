@@ -101,11 +101,14 @@
 ;; docs/storage.md#the-write-checks-every-entity-it-touches: a write given a branch's schema changes takes the entity index its
 ;; holder keeps (seon.agent/branch-schemas' slot, built once a schema move), never builds one: one prove built it 51 times, 139M
 ;; ticks / ~1 GB (result/ba7c27c8). Red first: write-index called index-of on every write whatever came with the forms.
-;; Estimate: two writes of one entity on the test db (~0.2M each) and one index built outside the measure: 3,000,000 ticks.
-(deftest ^{:seon.test/estimate {:ticks 3000000}} a-write-takes-its-holders-entity-index-never-builds-one
+;; Estimate: two writes of one entity on the test db (~0.04M each) and one index build (index-of: ~2.8M, the registry's forms merged and
+;; derived once) plus the profile's own overhead (measured 4.1M); the holder's index is the process's own (pdb/index), no second
+;; build: 4,200,000 ticks.
+(deftest ^{:seon.test/estimate {:ticks 4200000}} a-write-takes-its-holders-entity-index-never-builds-one
   (let [forms {:seon.proof/proof-fact (get seon.contract/forms :seon.proof/proof-fact)}
-        ix (pdb/index-of {:forms forms})
-        builds (fn [schemas] (seon.profile/measure! #(pdb/with (ts/test-db) [{:note/text "x" :note/agent :t}] schemas))
+        ix (pdb/index)
+        db (ts/test-db)
+        builds (fn [schemas] (seon.profile/measure! #(pdb/with db [{:note/text "x" :note/agent :t}] schemas))
                  (or (some #(when (= 'seon.db/index-of (:var %)) (:calls %)) (seon.profile/touched)) 0))]
     (is (= 0 (builds {:forms forms :index ix})) "given its holder's index, the write builds none")
     (is (= 1 (builds {:forms forms})) "given the forms alone, it builds the one it needs")))

@@ -11,7 +11,6 @@
             [seon.merge :as pm]
             [seon.program :as program] [clojure.string :as str] [seon.doc] [seon.config] [seon.source] [seon.profile :as profile] [seon.task]
             [seon.edn :as sedn] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg]
-            [my.schema :as schema]
             [seon.source :as source] [seon.writer]
             [clojure.string :as str] [clojure.edn :as edn]))
 
@@ -35,7 +34,11 @@
 ;; program runs, the fork server included, which opens no store)
 ;; the world, on a db that keeps history (docs/testing.md#testing-in-the-world): cases need f, g, h beside a small program;
 ;; the store-shaped test db cost 441 M ticks for the case table, the world 77 M
-(defn- base [] (with (mt/world {:history? true}) (var-tx "f" "x") (var-tx "g" "x") (var-tx "h" "x")))
+(def ^:private ^:seon.test/fixture base-world
+  "The cases' world, built once a process (a fixture, forced before any test, never inside the first test's budget)."
+  (delay (with (mt/world {:history? true}) (var-tx "f" "x") (var-tx "g" "x") (var-tx "h" "x"))))
+
+(defn- base [] @base-world)
 
 (defn- unmap [nm]
   (fn [db] (let [e (:db/id (d/entity db [:var/name (symbol "app" nm)]))]
@@ -51,35 +54,33 @@
 (defn- vk [nm] [:var (symbol "app" nm)])
 (defn- defs-of "The definition keys among ks (a form's own key follows its definition)." [ks] (filterv #(not= :form (first %)) ks))
 
-(deftest three-way-cases
+;; Estimate: the world (a fixture) + 6 small dbs ~1.5M + 3 candidates (decide, carry and replay of 1 to 3 definitions, ~0.5M each) ~1.5M
+;; + 5 decides ~0.5M + one delta-changes ~1.6M = 5.5M, 7000000 for the db builds counted loosely. Each class of the table is one merge with the three kinds of change at once.
+(deftest ^{:seon.test/estimate {:ticks 7000000}} three-way-cases
   ;; the case table, on the one merge (seon.writer/candidate): the merged program is the side that changed, or both's when alike
-  (testing "o = t: nothing to do (identical change, both deleted)"
-    (are [o t] (let [r (one-merge o t)] (and (nil? (:conflicts r)) (= (pm/program t #{}) (pm/program (:db r) #{}))))
-      (with (base) (var-tx "f" "(inc x)")) (with (base) (var-tx "f" "(inc x)"))
-      (with (base) (unmap "f")) (with (base) (unmap "f"))
-      (with (base) (var-tx "n" "1")) (with (base) (var-tx "n" "1"))))
-  (testing "o = b: theirs applies (add, modify, delete)"
-    (are [t] (let [r (one-merge (base) t)] (and (nil? (:conflicts r)) (= (pm/program t #{}) (pm/program (:db r) #{}))))
-      (with (base) (var-tx "n" "1"))
-      (with (base) (var-tx "f" "(dec x)"))
-      (with (base) (unmap "g"))))
-  (testing "t = b: ours kept, and it is an ours-change"
-    (let [o (with (base) (var-tx "f" "(dec x)")) r (one-merge o (base))]
-      (is (nil? (:conflicts r))) (is (= (pm/program o #{}) (pm/program (:db r) #{})))
-      (is (= [(vk "f")] (defs-of (keys (pm/delta-changes (base) o #{})))))))
-  (testing "a conflict holds the sides that have the key, and an absent side is one that never had it or deleted it"
-    (are [o t ss] (= [ss] (map sides (form-conflicts o t)))
-      (with (base) (var-tx "f" "(inc x)")) (with (base) (var-tx "f" "(dec x)")) #{:base :ours :theirs}
-      (with (base) (var-tx "n" "1")) (with (base) (var-tx "n" "2")) #{:ours :theirs}
-      (with (base) (unmap "f")) (with (base) (var-tx "f" "(dec x)")) #{:base :theirs}
-      (with (base) (var-tx "f" "(inc x)")) (with (base) (unmap "f")) #{:base :ours})
-    (let [o (with (base) (var-tx "f" "(inc x)")) t (with (base) (var-tx "f" "(dec x)"))
-          c (first (form-conflicts o t))]
-      (is (= (form-key o "f") (:key c)))
-      (is (nil? (:db (one-merge o t))) "a conflict merges nothing")
-      (is (= (fid "f" "x") (:form/id (d/entity (base) (:base c)))))
-      (is (= (fid "f" "(inc x)") (:form/id (d/entity o (:ours c)))))
-      (is (= (fid "f" "(dec x)") (:form/id (d/entity t (:theirs c))))))))
+  (let [b (base)
+        all-three (with b (var-tx "n" "1") (var-tx "f" "(dec x)") (unmap "g")) ; an add, a modify and a delete
+        f-inc (with b (var-tx "f" "(inc x)")) f-dec (with b (var-tx "f" "(dec x)"))
+        n1 (with b (var-tx "n" "1")) n2 (with b (var-tx "n" "2")) f-gone (with b (unmap "f"))
+        alike (fn [o t] (let [r (one-merge o t)] (and (nil? (:conflicts r)) (= (pm/program t #{}) (pm/program (:db r) #{})))))]
+    (testing "o = t: nothing to do (an identical change)" (is (alike all-three all-three)))
+    (testing "o = b: theirs applies (an add, a modify and a delete)" (is (alike b all-three)))
+    (testing "t = b: ours kept, and it is an ours-change"
+      (let [r (one-merge f-dec b)]
+        (is (nil? (:conflicts r))) (is (= (pm/program f-dec #{}) (pm/program (:db r) #{})))
+        (is (= [(vk "f")] (defs-of (keys (pm/delta-changes b f-dec #{})))))))
+    (testing "a conflict holds the sides that have the key, and an absent side is one that never had it or deleted it"
+      (are [o t ss] (= [ss] (map sides (form-conflicts o t)))
+        f-inc f-dec #{:base :ours :theirs}
+        n1 n2 #{:ours :theirs}
+        f-gone f-dec #{:base :theirs}
+        f-inc f-gone #{:base :ours})
+      (let [c (first (form-conflicts f-inc f-dec))]
+        (is (= (form-key f-inc "f") (:key c)))
+        (is (nil? (:db (one-merge f-inc f-dec))) "a conflict merges nothing")
+        (is (= (fid "f" "x") (:form/id (d/entity b (:base c)))))
+        (is (= (fid "f" "(inc x)") (:form/id (d/entity f-inc (:ours c)))))
+        (is (= (fid "f" "(dec x)") (:form/id (d/entity f-dec (:theirs c)))))))))
 
 (deftest uncontracted-is-what-the-branch-changed
   ;; one question for the writer's merge gate and root's judge: which functions the branch's
@@ -251,17 +252,15 @@
 
 (deftest a-conflict-value-reads-a-pulled-entry
   ;; its input is a merge entry's members
-  ;; (mg/check generated nil and 0 from its `:any` input, which state no conflict)
   ;; a conflict as seon.merge/decide answers it, its :entity (a name to show) left out, as the writer leaves it out of an entry
   (let [c (dissoc (first (form-conflicts (with (base) (var-tx "f" "(inc x)")) (with (base) (var-tx "f" "(dec x)")))) :entity)
         db (d/db-with (base) [(pm/conflict-tx c)])
         e (d/q '[:find ?e . :where [?e :seon.merge/key]] db)]
     (is (= c (pm/conflict-value (pm/conflict-tx c))) "the inverse of conflict-tx")
-    (is (= c (pm/conflict-value (d/pull db '[*] e))) "a pulled entry")
-    (let [seed (proofs/test-seed)]
-      (is (nil? (mg/check (m/deref (contract/schema (contract/contract #'pm/conflict-value))) pm/conflict-value
-                          {:registry contract/registry ::mg/=>seed seed}))
-          (str "mg/check: every input its contract generates states a conflict; seed " seed)))))
+    (is (= c (pm/conflict-value (d/pull db '[*] e))) "a pulled entry")))
+;; the generative check of conflict-value's contract (every input it generates states a conflict) is the per-function key
+;; mg/seon.merge/conflict-value (docs/checks.md#the-generative-check-is-per-function), run for every contracted function: not run again
+;; here (100 cases, ~15M ticks)
 
 (deftest behind-means-main-program-moved
   (let [observed (with (base) [{:seon.agent/key "root" :seon.process/pid 9} {:note/text "run facts" :note/agent :t}])]
@@ -294,8 +293,14 @@
 (def ^:private facts-path "resources/seon/schemas/seon.facts.edn")
 
 (defn- registered
-  "db after registering form v as schema k on it, as my.schema/register! does."
-  [db k v] (d/db-with db (:tx (schema/registration db k v (= "user" (namespace k))))))
+  "db after registering form v as schema k on it, as my.schema/register! writes it (the entry, in the shipped resource unless k is a
+  scratch `user` key, and the declaration of a bare key: seon.program/own-declaration), without its judging of the whole population,
+  which my.schema's own tests prove: a merge reads the entry, not the registration."
+  [db k v]
+  (let [entry (cond-> {:schema/key k :schema/form (binding [*print-namespace-maps* false] (sedn/encode v))}
+                (not= "user" (namespace k)) (assoc :schema/file facts-path))
+        with-entry (d/db-with db [entry])]
+    (d/db-with with-entry (program/own-declaration db k (program/schema-registry (program/schema-changes with-entry))))))
 
 (deftest a-merged-schema-entry-declares-its-own-attribute
   ;; docs/storage.md#the-write-checks-every-datom: a key registered bare (an agent's own datum, no entity map lists it) is an attribute on the
@@ -416,19 +421,24 @@
 
 ;; the-delta-three-way-reads-data-and-schema-entries-as-the-program-does: its three-way equivalence went with seon.merge/three-way and
 ;; delta-three-way; what remains of its claim, a branch's own change read where the dbs differ, is the test below
-(deftest delta-changes-reads-data-and-schema-entries-as-the-program-does
-  ;; declared data (card one and many) and schema entries, besides forms and definitions:
-  ;; delta-changes, read only where the dbs differ, answers what changes over the whole programs does, on either side
-  (let [b (with (empty-db) (var-tx "f" "x") (var-tx "g" "x") (var-tx "h" "x")) ; the test db holds the task :app.m0/tidy and its refs
-        task (d/q '[:find ?e . :where [?e :task/name :app.m0/tidy]] b)
-        ref (:db/id (first (:task/refs (d/entity b task))))
-        o (with b [{:note/text "ours" :note/agent :t} [:db/add task :task/status :done]]
-                [{:schema/key :x/y :schema/form "[:int]" :schema/file "x.edn"}])
-        t (with b [[:db/retract task :task/refs ref] [:db/add task :task/plan "theirs"]] (var-tx "g" "(dec x)"))]
-    (doseq [da [#{} :all #{:task/status :task/refs}] side [o t]]
+;; Estimate: the world (a fixture) + 2 task creates ~1M + one db-with of the change ~0.5M + the whole program of base and of the changed
+;; db at :all and at two attributes (4 reads of a small world, ~0.5M each) + 2 delta-changes ~1M = 8000000 ticks (measured 7M). Was 76M on the
+;; store-shaped test db, whose every schema entry is a program key; the world holds a small program.
+(deftest ^{:seon.test/estimate {:ticks 8000000}} delta-changes-reads-data-and-schema-entries-as-the-program-does
+  ;; declared data (card one and many) and schema entries, besides forms and definitions, changed on one db at once:
+  ;; delta-changes, read only where the dbs differ, answers what changes over the whole programs does
+  (let [b (mt/with (base) (mt/task 'demo "n" "N.") (mt/task 'demo "m" "M." #{} #{"demo/n"}))
+        task (d/entity b [:seon.task/id "demo/m"])
+        need (:db/id (first (:seon.task/needs task)))
+        side (-> b
+                 (d/db-with [{:note/text "ours" :note/agent :t} [:db/add (:db/id task) :seon.task/plan "ours"] [:db/retract (:db/id task) :seon.task/needs need]
+                             {:schema/key :x/y :schema/form "[:int]" :schema/file "x.edn"}])
+                 (with (var-tx "g" "(dec x)")))]
+    (doseq [da [:all #{:seon.task/plan :seon.task/needs}]]
       (let [full (pm/changes (pm/program b da) (pm/program side da))]
         (is (= full (pm/delta-changes b side da)) (pr-str da))
-        (is (seq full))))))
+        (is (seq full))))
+    (is (contains? (pm/delta-changes b side #{:seon.task/needs}) [:datum (:db/id task) :seon.task/needs need]) "a removed ref of a card-many attribute is a change at its value's key")))
 
 (deftest divergence-names-each-change-a-merge-carries
   ;; owner D4 (2026-10-22): the agent sees, every turn, every change its branch's merge will
@@ -495,25 +505,18 @@
   ;; target lacks was carried with its :form/ns ref but not the namespace entity it names, so the form read
   ;; :ns nil there and the target's program differed from the branch's at that key for ever (the writer's
   ;; behind check never settled). The one merge (seon.writer/candidate) carries the namespace entity too.
-  (ts/test-branch!
-   (fn [cfg conn]
-     (let [b (keyword (str (name (:branch cfg)) "-ns"))
-           _ (d/transact conn ((var-tx "f" "x") @conn))
-           _ (d/branch! conn (:branch cfg) b)
-           bc (pdb/connect (assoc cfg :branch b))
-           newns (fn [db] (program/record-tx db {:id "app.z/(defn z [x] x)" :src "(defn z [x] x)" :ns 'app.z :ns-form? false
-                                                  :defs [{:var 'app.z/z :meta #{:arglists} :contract "[:=> [:cat :int] :int]"}]
-                                                  :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}}))]
-       (try
-         (d/transact bc (newns @bc))
-         (let [base (pdb/branch-base conn (:branch cfg) b) head @bc main @conn
-               ks (keys (pm/delta-changes base head #{}))
-               after (:db (seon.writer/candidate main base head {}))]
-           (is (some #(= :form (first %)) ks) "the form is a key to carry")
-           (is (= (pm/program-of head ks #{}) (pm/program-of after ks #{})) "main reads the branch's program at those keys, :ns included")
-           (is (= 'app.z (:ns (val (first (filter #(= :form (first (key %))) (pm/program-of after ks #{})))))) "the form's namespace")
-           (is (= {} (pm/delta-changes head after #{})) "and nothing differs between the two programs any more"))
-         (finally (d/release bc) (d/delete-branch! conn b)))))))
+  ;; In process: main is the base (a db value), the branch the base plus a form of a namespace the base lacks.
+  (let [main (base)
+        newns (fn [db] (program/record-tx db {:id "app.z/(defn z [x] x)" :src "(defn z [x] x)" :ns 'app.z :ns-form? false
+                                               :defs [{:var 'app.z/z :meta #{:arglists} :contract "[:=> [:cat :int] :int]"}]
+                                               :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}}))
+        head (with main newns)
+        ks (keys (pm/delta-changes main head #{}))
+        after (:db (seon.writer/candidate main main head {}))]
+    (is (some #(= :form (first %)) ks) "the form is a key to carry")
+    (is (= (pm/program-of head ks #{}) (pm/program-of after ks #{})) "main reads the branch's program at those keys, :ns included")
+    (is (= 'app.z (:ns (val (first (filter #(= :form (first (key %))) (pm/program-of after ks #{})))))) "the form's namespace")
+    (is (= {} (pm/delta-changes head after #{})) "and nothing differs between the two programs any more")))
 
 ;; docs/merging.md: an agent's first prove asks for its merge candidate before it has changed anything
 (deftest a-branch-with-nothing-of-its-own-merges-nothing
