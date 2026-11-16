@@ -937,29 +937,27 @@
 
 (declare place)
 
-(def ^:private path-note
-  "What the answer to an edit of a plain path adds, by the file's kind: how a file the program holds in parts changes on a branch. See docs/agent.md#changing-a-file."
-  {:schema " To change a schema entry on this branch: (my.schema/register! k form)."})
+(defn- in-tree?
+  "Whether rel, a path as file-name names it, is in the program's tree: what the system imports from (its source dirs, its task
+  files, its wiki dirs, \".\" its own .md files) or a file of a kind the allow-list names. See docs/agent.md#changing-a-file."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [rel]
+  (let [wiki (cfg/value :seon.config.root/wiki-dirs)]
+    (boolean (and (not (clojure.string/starts-with? rel "/"))
+                  (or (some? (cfg/file-kind rel))
+                      (some #(clojure.string/starts-with? rel (str % "/"))
+                            (concat (cfg/value :seon.config.source/dirs) [(cfg/value :seon.config.source/tasks-dir)] (remove #{"."} wiki)))
+                      (and (some #{"."} wiki) (not (clojure.string/includes? rel "/")) (clojure.string/ends-with? rel ".md")))))))
 
 (defn place-kind
-  "Which kind of place at names: a symbol a :var, a string holding a page's anchor (x.md#heading) a :doc, a file this branch holds whose kind has a place of its own that kind, any other string a :path. See docs/agent.md#changing-a-file."
+  "Which kind of place at names: a symbol a :var, a string holding a page's anchor (x.md#heading) a :doc, a path in the program's tree
+  a :tree (the branch holds it), any other string a :path (the disk). See docs/agent.md#changing-a-file."
   {:malli/schema [:=> [:cat [:or :symbol :string]] :keyword]}
   [at]
   (cond (symbol? at) (if (namespace at) :var :ns)
         (clojure.string/includes? at ".md#") :doc
-        :else (let [n (file-name at) k (cfg/file-kind n)]
-                (if (and (get-method place k) (some-> (:db @agent/state) (pdb/eid :file/path n))) k :path))))
-
-(defn- namespace-file-note
-  "What a file at path says when it's a namespace of the program: its text moves by its forms, through the branch, and how. Otherwise empty. See docs/agent.md#changing-a-file."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [at]
-  (let [n (file-name at)
-        db (:db @agent/state)
-        ns-sym (when db (some #(when (= n (:v %)) (:ns/name (d/entity db (:e %)))) (d/datoms db :aevt :ns/file)))]
-    (if ns-sym
-      (str " That's namespace " ns-sym "'s file, and its forms move by your branch: (seon.repl/edit! '" ns-sym " old new) changes its ns form, (seon.repl/edit! '" ns-sym "/a-var old new) a definition.")
-      "")))
+        (in-tree? (file-name at)) :tree
+        :else :path))
 
 (defmulti place
   "The one edge of a text's place, by place-kind: (place at) reads it, as :seon.text/place or the refusal saying why none, and (place p new) writes new over p, answering
@@ -1016,44 +1014,20 @@
      (do (agent/transact! (doc/edit-tx (agent/db) at new)) {:edited {:doc at}}))))
 
 (defmethod place :path
-  ;; any other path: the disk, through the one write of a file (seon.fx/write-file, which keeps its mode); no branch holds it, and the answer says so
+  ;; a path outside the program's tree: the disk, through the one write of a file (seon.fx/write-file, which keeps its mode); no branch holds it, and the answer says so
   ([at] (let [f (java.io.File. ^String at) abs (.getCanonicalPath f)]
           (if (.isFile f)
             {:seon.text/at at :seon.text/text (slurp abs)}
-            (edit-refused at :no-source (str "no file at " abs ": write it whole first." (namespace-file-note at)) nil))))
+            (edit-refused at :no-source (str "no file at " abs ": write it whole first.") nil))))
   ([{at :seon.text/at src :seon.text/text} new]
-   (let [abs (.getCanonicalPath (java.io.File. ^String at))
-         root (str (.getCanonicalPath (java.io.File. ^String (cfg/checkout))) "/")
-         rel (when (clojure.string/starts-with? abs root) (subs abs (count root)))
-         ;; the program's tree: what the system imports from (its source dirs, its task files, its wiki dirs: "." its own .md files)
-         wiki (cfg/value :seon.config.root/wiki-dirs)
-         in-tree? (and rel (or (some #(clojure.string/starts-with? rel (str % "/"))
-                                     (concat (cfg/value :seon.config.source/dirs) [(cfg/value :seon.config.source/tasks-dir)] (remove #{"."} wiki)))
-                                (and (some #{"."} wiki) (not (clojure.string/includes? rel "/")) (clojure.string/ends-with? rel ".md"))))]
-   (cond
-     (= new src) {:unchanged at}
-     ;; the program's tree changes only through a branch, its merge's checks and the merge (the owner, 2026-11-15): a file under the
-     ;; checkout written on disk is the standing checkout changed under every session, and no merge carries it (a driver did, 2026-11-15)
-     in-tree?
-     (edit-refused at :in-the-tree
-                   (str abs " is in the program's tree, which changes only through your branch: a definition by evaluating it, or "
-                        "(seon.repl/edit! 'ns/f old new); a wiki section by (seon.repl/edit! \"docs/x.md#anchor\" old new); a schema entry by "
-                        "(my.schema/register! k form); a config key by edit! on resources/seon/config/default.edn; a bin/ script by edit! on its "
-                        "name. Nothing was written.")
-                   nil)
-     :else
-     (let [w (fx/write-file {:req {:path abs :text new}})]
-       (if (contract/error? w)
-         w
-         {:edited {:path abs}
-          :seon.text/said (str "Wrote to disk at " abs ": no branch holds this, and no merge carries it."
-                               (path-note (cfg/file-kind (file-name at)))
-                               (namespace-file-note at))}))))))
-
-(defn- held-file
-  "A file this branch holds as a kind on the allow-list: its text as the branch states it. See docs/agent.md#changing-a-file."
-  {:malli/schema [:=> [:cat :string] :seon.text/place]}
-  [at] (let [n (file-name at)] {:seon.text/at n :seon.text/text (get (source/files (agent/db) [n]) n)}))
+   (let [abs (.getCanonicalPath (java.io.File. ^String at))]
+     (if (= new src)
+       {:unchanged at}
+       (let [w (fx/write-file {:req {:path abs :text new}})]
+         (if (contract/error? w)
+           w
+           {:edited {:path abs}
+            :seon.text/said (str "Wrote to disk at " abs ": it is outside the program's tree, so no branch holds it and no merge carries it.")}))))))
 
 (defn- held-file-write
   "new over p, a file this branch holds: checked as its reader reads it (seon.fx/unreadable), transacted on the branch, and the answer saying what it did, under kind. See docs/agent.md#changing-a-file."
@@ -1068,15 +1042,32 @@
                                     (when-let [w (not-empty (cfg/waiting))]
                                       (str " This process does not act on " (vec (sort (keys w))) " until a rebuild: (seon.config/waiting) says each.")))})))
 
-(defmethod place :script
-  ;; a script this branch holds: its text is the file's fact
-  ([at] (held-file at))
-  ([p new] (held-file-write p new :script)))
-
-(defmethod place :config
-  ;; the config file this branch holds: its entries are its facts, and a comment or layout the new text adds to a key stays on this branch's base only (docs/agent.md#changing-a-file)
-  ([at] (held-file at))
-  ([p new] (held-file-write p new :config)))
+(defmethod place :tree
+  ;; a path in the program's tree: the branch holds it, so an edit writes the branch, never the disk (rails, never guards: the owner,
+  ;; 2026-11-16). Each kind on its one writer: a kind the allow-list names (a script, the config, a schema file, a fixture) by
+  ;; seon.source/edit-tx, a namespace's file by seon.source/refresh-tx (its forms recorded as an eval of them is), a wiki page by
+  ;; seon.doc/load-tx. A config entry's comment or layout the new text adds stays on this branch's base only (docs/agent.md#changing-a-file)
+  ([at] (let [n (file-name at) db (agent/db)
+              text (or (get (source/files db [n]) n) (when (clojure.string/ends-with? n ".md") (doc/page-text db n)))]
+          (if text
+            {:seon.text/at n :seon.text/text text}
+            (edit-refused at :no-source
+                          (if (clojure.string/ends-with? n ".edn")
+                            "this branch holds no text for this file: a task entry changes by (my.task/update! k f args)"
+                            "this branch holds no file at this path: a new namespace is an (ns ...) evaluated at the REPL, a new definition is evaluated in its namespace")
+                          nil))))
+  ([{n :seon.text/at src :seon.text/text :as p} new]
+   (cond
+     (cfg/file-kind n) (held-file-write p new (cfg/file-kind n))
+     (= new src) {:unchanged n}
+     (fx/unreadable n new) (edit-refused n :unreadable (str "the new text does not read, so nothing changed: " (fx/unreadable n new)) nil)
+     :else (let [db (agent/db)
+                 tx (if (clojure.string/ends-with? n ".md")
+                      (doc/load-tx db (cfg/value :seon.config.root/wiki-dirs) {n new})
+                      (source/refresh-tx db {n new}))]
+             (agent/transact! tx)
+             {:edited {:tree n}
+              :seon.text/said (str "Changed " n " on this branch: a merge carries it, and the write-back after it writes the file. Nothing on disk moved.")}))))
 
 (defn- ns-not-found
   "What an edit of namespace nsym adds when old is not in its ns form, its place: :seon.repl/held-by, the vars whose recorded source holds

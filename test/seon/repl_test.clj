@@ -326,11 +326,14 @@
     (is (= :seon.repl/edit-refused (:seon.error/type (:ex plain))) (pr-str plain))))
 
 (deftest an-edit-of-a-namespaces-file-says-how-it-changes
-  ;; docs/agent.md#changing-a-file: real run 11: the path of a test file, relative, said only that no file was there; absolute, it wrote the checkout, which no branch reads. Either way the answer names the route
+  ;; docs/agent.md#changing-a-file: real run 11: the path of a test file, relative, said only that no file was there; absolute, it wrote the checkout, which no branch reads.
+  ;; A namespace's file is a place on the branch now (seon.repl/an-edit-of-an-in-tree-path-is-held-on-the-branch): its text is read there, so an old
+  ;; that is not in it is refused as not in that file, never as no file
   (let [[said] (at/in-agent (fn [_] ["(seon.repl/edit! \"src/seon/repl.clj\" \"zz-not-there\" \"x\")"]))
         r (pr-str said)]
-    (is (clojure.string/includes? r "seon.repl") r)
-    (is (clojure.string/includes? r "(seon.repl/edit! 'seon.repl") r)))
+    (is (= :seon.repl/edit-refused (:seon.error/type (:ex said))) r)
+    (is (clojure.string/includes? r "src/seon/repl.clj") r)
+    (is (not (clojure.string/includes? r "no file at")) "the branch holds the file")))
 
 (deftest a-namespace-edit-names-the-var-that-holds-the-text
   ;; docs/agent.md#changing-a-definition: loop PU (2026-11-12) spent e17-34 changing one function's tail: (lines 'the.ns 380 470) was empty
@@ -762,11 +765,7 @@
         sent (fn [text] (apply str text (for [[_ a] (re-seq #"```docs/agent\.md#([a-z0-9-]+)```" text)] (str "\n" (section a)))))
         ;; the help page alone, its sections as the one parse reads them (its links reach pages this world does not hold, which a
         ;; load refuses): the forms it tells an agent to run (the agent under test reads the rest)
-        help-forms (runnable (doc/page-text (seon.db/db-with (my.test/world)
-                                                              (vec (for [sec (doc/page-sections wire/help-page page)]
-                                                                     (cond-> (select-keys sec [:seon.doc/address :seon.doc/heading :seon.doc/level :seon.doc/position :seon.doc/lead :seon.doc/text])
-                                                                       (:seon.ref/parent sec) (assoc :seon.doc/parent [:seon.doc/address (:seon.ref/parent sec)])))))
-                                             wire/help-page))
+        help-forms (runnable (doc/page-text (my.test/with (my.test/world) (my.test/page-alone wire/help-page page)) wire/help-page))
         template-forms (into [] (comp (mapcat (comp runnable sent val)) (distinct)) (sort-by key template/instructions))
         ends #{"(my.turn/wait)"}
         end? #(or (ends %) (str/starts-with? % "(my.task/fail!"))
@@ -910,11 +909,13 @@
     ;; so with the parser broken the answer cannot say the task names it
     (is (not (str/includes? msg "your task cites it")) (str "and claims nothing the stored cites do not hold: " msg))))
 
-(deftest help-answers-a-section
+;; Estimate: the test db (~1M), one page loaded by its sections (~3M for agent.md), a few section reads (~1M): ~5M; 10,000,000 ticks.
+;; It loaded the whole wiki to read one page (~180M ticks, tests' FOCUS step 4 ranking, 2026-11-16)
+(deftest ^{:seon.test/estimate {:ticks 10000000 :bytes 100000000}} help-answers-a-section
   ;; the help page is read from the wiki's sections main holds (root's boot loads them), at
-  ;; the commit a turn read, through seon.doc's one reader
+  ;; the commit a turn read, through seon.doc's one reader: the help page alone, as my.test/page loads one
   (let [db0 (ts/test-db)
-        db (d/db-with db0 (doc/load-tx db0 "docs" (doc/pages (cfg/checkout) "docs")))
+        db (my.test/with db0 (my.test/page-alone wire/help-page (slurp (str (cfg/checkout) "/" wire/help-page))))
         toc (doc/page db wire/help-page)]
     (is (= ["docs/agent.md#the-agent" 1] ((juxt :seon.ref/address :seon.ref/level) (first toc))) "the page's sections, the first its title")
     (is (every? :seon.ref/lead toc) "each section leads with a sentence that stands alone")
@@ -1232,31 +1233,28 @@
     (is (var? (:value @(resolve (:handle (ev "#'clojure.core/inc"))))) "the live value is at the handle")))
 
 ;; jolt.analyzer/a-missing-var-through-an-alias-says-no-such-var-in-any-namespace; docs/testing.md
-(deftest a-missing-var-through-an-alias-is-no-such-var-in-a-test
+;; Estimate: one forked agent (in-agent's setup ~1.5M) and 8 asks (~0.25M each), the two proves' runs in its test child (~2M): ~5.5M;
+;; 8,000,000 ticks. It folds a-proof-through-eval-is-told-and-has-no-result in (tests' FOCUS step 4: two agents became one)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 8000000 :asks 8}} a-missing-var-through-an-alias-is-no-such-var-in-a-test
   ;; as an agent writes a proof first: the proof names a function that is not there, then the function is defined
-  ;; and the proof, not evaluated again, runs at a new digest and finds it
-  (let [[_ _ _ red _ green]
+  ;; and the proof, not evaluated again, runs at a new digest and finds it. And a task merged having defined its proof and
+  ;; function through eval: they ran here, and neither was on its branch, so a proof made by eval is told and has no result
+  (let [[_ _ _ red _ green _ defined proved]
         (at/in-agent
          (fn [{:keys [ns]}]
-           (let [impl (str ns ".late") tst (str ns ".late-test") t (str "'#{" tst "/proof}")]
+           (let [impl (str ns ".late") tst (str ns ".late-test") t (str "'#{" tst "/proof}") n (str ns ".viaeval")]
              [(str "(ns " impl ")")
               (str "(ns " tst " (:require [clojure.test :refer [deftest is]] [" impl " :as late]))")
               "(deftest proof (is (= 2 (late/g 1))))"
               (str "(select-keys (my.agent/prove " t ") [:ran :reused :reports])")
               (str "(do (in-ns '" impl ") (defn g [x] (inc x)))")
-              (str "(select-keys (my.agent/prove " t ") [:ran :reused :pass :fail :error])")])))]
-    (is (= 1 (:ran (:value red))) (pr-str red))
-    (is (some #(str/includes? (str %) "No such var: late/g") (:reports (:value red))) (pr-str red))
-    (is (= {:ran 1 :reused 0 :pass 1 :fail 0 :error 0} (select-keys (:value green) [:ran :reused :pass :fail :error])) (pr-str green))))
-;; a task merged having defined its proof and function through eval: they ran here, and neither was on its branch
-(deftest a-proof-through-eval-is-told-and-has-no-result
-  (let [[_ defined proved]
-        (at/in-agent
-         (fn [{:keys [ns]}]
-           (let [n (str ns ".viaeval")]
-             [(str "(ns " n " (:require [clojure.test]))")
+              (str "(select-keys (my.agent/prove " t ") [:ran :reused :pass :fail :error])")
+              (str "(ns " n " (:require [clojure.test]))")
               (str "(do (in-ns '" n ") (eval '(clojure.test/deftest p (clojure.test/is true))))")
               (str "(:results (my.agent/prove '#{" n "/p}))")])))]
+    (is (= 1 (:ran (:value red))) (pr-str red))
+    (is (some #(str/includes? (str %) "No such var: late/g") (:reports (:value red))) (pr-str red))
+    (is (= {:ran 1 :reused 0 :pass 1 :fail 0 :error 0} (select-keys (:value green) [:ran :reused :pass :fail :error])) (pr-str green))
     (is (str/includes? (str (:text defined)) "will not merge") (pr-str defined))
     (is (empty? (:value proved)) (str "no form on the branch, so it does not run: " (pr-str proved)))))
 (deftest every-eval-carries-its-cost-whatever-asked-it-and-whether-it-threw
@@ -1538,3 +1536,25 @@
     (is (= st st') "and left the proc's state as it was")
     (repl/agent-step st :run {:seon.turn/answer {:value :current} :seon.repl/out 2})
     (is (= [{:seon.turn/answer {:value :current}}] @stepped) "the current output's answer steps the run, its number taken off")))
+
+;; docs/agent.md#changing-a-file, task seon.repl/an-edit-of-an-in-tree-path-is-held-on-the-branch (rails, never guards: the owner,
+;; 2026-11-16): an edit of a path in the program's tree changes the branch like any other entry, so it reaches main only through the
+;; merge; nothing on disk moves. A fixture (a kind the allow-list names) and a namespace's file, edited by path at an agent's REPL on a
+;; world. Estimate: two edits, a fixture by seon.source/edit-tx (~65k ticks) and a two-form namespace by seon.source/refresh-tx (~1M),
+;; the world (~2M) and two reads back (~0.2M): ~3.3M; 5000000 ticks, 50 MB
+(deftest ^{:seon.test/estimate {:ticks 5000000 :bytes 50000000}} an-edit-of-an-in-tree-path-is-held-on-the-branch
+  (let [fixture (str (cfg/checkout) "/test/seon/probe_" (random-uuid) ".edn")
+        rel (subs fixture (inc (count (cfg/checkout))))
+        db (my.test/with (my.test/world) (fn [db] (seon.source/edit-tx db rel "{:a 1}")) (my.test/code 'app.probe "(ns app.probe)\n(defn f [] 1)\n"))
+        r (my.test/eval-in (str "[(seon.repl/edit! " (pr-str fixture) " \":a 1\" \":a 2\")"
+                                " (get (seon.source/files (seon.agent/db) [" (pr-str rel) "]) " (pr-str rel) ")"
+                                " (seon.repl/edit! \"src/app/probe.clj\" \"[] 1\" \"[] 2\")"
+                                " (get (seon.source/files (seon.agent/db) [\"src/app/probe.clj\"]) \"src/app/probe.clj\")"
+                                " (:form/src (:var/form (datahike.api/entity (seon.agent/db) [:var/name 'app.probe/f])))]")
+                           'seon.repl-test.probe {:db db})
+        [fe ft ne nt nf] (:value r)]
+    (is (nil? (:ex r)) (str "both edits answer: " (pr-str (:ex r))))
+    (is (= "{:a 2}" ft) (str "the fixture's text on the branch: " (pr-str fe)))
+    (is (clojure.string/includes? (str nt) "[] 2") (str "the namespace's file on the branch: " (pr-str ne)))
+    (is (clojure.string/includes? (str nf) "[] 2") "and its definition's form, as an eval of it records it")
+    (is (not (.exists (java.io.File. fixture))) "nothing written on disk")))

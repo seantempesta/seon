@@ -404,10 +404,14 @@
         rel (when (and checkout (str/starts-with? path (str checkout "/"))) (subs path (inc (count checkout))))]
     (cond (nil? checkout) (refused (str "seon_import imports onto the agent a checkout holds: its client is checkout-<path> (bin/mcp call), not " (pr-str cl)))
           (nil? rel) (refused (str path " is outside the checkout " checkout ": not imported"))
-          :else (if-let [{:keys [agent task]} (root/held-agent sys cl)]
-                  (agent-reply sys agent {:task task :client cl :message-md ""
-                                          :evals [{:intent (str "import " rel ", written by the session") :code (str "(my.branch/import! " (pr-str checkout) " [" (pr-str rel) "])")}]})
-                  (refused (str checkout " holds no Seon agent (bin/mcp call attach task=NS/NAME): " rel " not imported"))))))
+          :else (let [branch (fx/checkout-branch checkout)]
+                  (if-let [{:keys [agent task]} (some->> branch (root/branch-agent sys))]
+                    ;; an eval at the session's agent that is no turn of its: an edit moves the branch, never the agent's turn or its messages
+                    (let [form (list 'seon.turn/outside-reply! task "" [{"intent" (str "import " rel ", written by the session")
+                                                                         "code" (str "(my.branch/import! " (pr-str checkout) " [" (pr-str rel) "])")}] false)
+                          r @(c/submit! sys agent (sedn/encode form) {:origin :context})]
+                      (cond (contract/error? r) r (:ex r) (:ex r) :else (sedn/decode (:seon.print/code (:out r)))))
+                    (refused (str checkout " is on " (or branch "no branch") ", whose session has no live agent (SEON_MCP_CLIENT=<area> bin/mcp call attach task=session/<area> template=user): " rel " not imported")))))))
 
 ;; the block's text as the model reads it: printed to the agent's output, not as a
 ;; value (a value comes back as a string literal, escaped, under the reply's budget);
