@@ -329,10 +329,12 @@
   "Branch b merged into main in ONE writer step (plan item 10): main merged into b first (merge-main-into: the candidate, built on
   main's head; a conflict or a refused fact answers its entries and nothing moves), b's candidate refused as merge-refused and
   dangling-refused judge it, else main takes the candidate's change in one commit with b's head a parent (d/merge-db), so b's merge
-  base is its head. Main can't move inside the step, so a merge is never behind. Answers [st {:merged? :tx ...}] or a refusal. See
-  docs/merging.md#a-branch-merges-main-in."
-  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/branch] [:tuple :seon.writer/state :map]]}
-  [st o b]
+  base is its head. Main can't move inside the step, so a merge is never behind. proved-t is main's t the branch's proof ran on: when
+  main's program moved since (:program-t, program-at), b still takes main and the answer is {:reprove true}, nothing of main moved, so
+  the judge proves b again, reusing every result whose reads did not move: each pass costs what moved, with no count. Answers
+  [st {:merged? :tx ...}], {:merged? false :reprove true}, or a refusal. See docs/merging.md#a-branch-merges-main-in."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/branch :int] [:tuple :seon.writer/state :map]]}
+  [st o b proved-t]
   (let [conn (:conn st)
         r (if (pdb/branch? conn b) (merge-main-into conn (:cfg st) b) (refused (str "no branch " b) {}))]
     (if (or (contract/error? r) (not (:ok r)))
@@ -348,6 +350,8 @@
                     (into (for [dt added :when (not (txe (:e dt)))] [:db/add (:e dt) (:a dt) (:v dt)])))]
         (cond
           why-not [st why-not]
+          ;; main's program moved since the proof: b holds main now; its proof runs again on it
+          (> (:program-t st 0) proved-t) [st {:merged? false :reprove true :tx (:max-tx main)}]
           (empty? ops) [st {:merged? true :tx (:max-tx main) :datoms 0}]
           :else
           (let [rep (d/merge-db conn #{(d/commit-id head)} (into ops (mark-tx main)) (pdb/tx-meta (pdb/conn-main conn)))
@@ -504,7 +508,7 @@
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
                         (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st)}))
       :octopus-merge (let [[st r] (octopus-merge st o (vec (:branches m)) (:data-attrs m :all))] (reply st r))
-      :merge (let [[st r] (merge-into-main st o (:branch m))] (reply st r))
+      :merge (let [[st r] (merge-into-main st o (:branch m) (:proved-t m))] (reply st r))
       ;; main merged into branch b on main's program (merge-main-into); its agent waits meanwhile
       :merge-main (reply st (if-not (exists? (:branch m))
                               (refused (str "no branch " (:branch m)) {})

@@ -1482,12 +1482,43 @@
                                     [:db/add v :var/form "f2'"]]
                           :tx-meta (pdb/tx-meta b)})
         _ (d/release bc)
-        ;; main moves after the branch was cut, at a key the branch never touched
+        ;; the branch was proved here; main then moves, by a record the branch never touched (no program move)
+        proved-t (:max-tx @conn)
         _ (d/transact conn {:tx-data [{:seon.agent/key "m1-other" :seon.agent/model "main-moved"}] :tx-meta (pdb/tx-meta (:branch cfg))})
-        [_ outs] (step #'writer/writer-proc st :in {:op :merge :branch b :dest {:rid 1}})
+        [_ outs] (step #'writer/writer-proc st :in {:op :merge :branch b :proved-t proved-t :dest {:rid 1}})
         r (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))
         main @conn]
     (is (:merged? r) (str "the branch merges though main moved: " (pr-str r)))
     (is (= "app.m0/f2-merged" (:form/id (:var/form (d/entity main [:var/name 'app.m0/f2])))) "main holds the branch's change")
     (is (= "main-moved" (:seon.agent/model (d/entity main [:seon.agent/key "m1-other"]))) "and its own")
     (is (= (d/commit-id (pdb/head conn b)) (d/commit-id (pdb/branch-base conn (:branch cfg) b))) "and the branch is merged: its head is its merge base with main")))))
+
+;; docs/merging.md#a-branch-merges-main-in: main's program moving after the branch's proof is never merged unproved and never "behind":
+;; the one :merge step merges main into the branch and answers :reprove, main unmoved, so the judge proves the branch again on what it
+;; now holds. Red before: the octopus merge answered :seon.merge/behind, the task was told to merge main, up to max-behind.
+;; Estimate: as a-branch-merges-into-a-moved-main-in-one-writer-step, ~5M; 6,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-merge-after-mains-program-moved-reproves-and-never-lands-unproved
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        b (pdb/on-main (:branch cfg) :m2)
+        _ (d/branch! conn (:branch cfg) b)
+        bc (pdb/connect (assoc cfg :branch b))
+        [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f2] [?v :var/form ?f] [?f :form/ns ?n]] @bc)
+        _ (d/transact bc {:tx-data [{:db/id "f2'" :form/id "app.m0/f2-m2" :form/ns nsx :form/order 100 :form/defines [v]
+                                     :form/src "(defn f2 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 400))"}
+                                    [:db/add v :var/form "f2'"]]
+                          :tx-meta (pdb/tx-meta b)})
+        _ (d/release bc)
+        proved-t (:max-tx @conn)
+        ;; main's program moves after the proof, through the writer (so its :program-t sees it): another var redefined
+        [w g nsg] (d/q '[:find [?v ?v ?n] :where [?v :var/name app.m0/f1] [?v :var/form ?f] [?f :form/ns ?n]] @conn)
+        [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :flush? true :dest {:rid 0}
+                                                    :tx-data [{:db/id "f1'" :form/id "app.m0/f1-main" :form/ns nsg :form/order 101 :form/defines [g]
+                                                               :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (- x))"}
+                                                              [:db/add g :var/form "f1'"]]})
+        main-t (:max-tx @conn)
+        [_ outs] (step #'writer/writer-proc st :in {:op :merge :branch b :proved-t proved-t :dest {:rid 1}})
+        r (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))]
+    (is (:reprove r) (str "main's program moved since the proof: prove again: " (pr-str r)))
+    (is (= main-t (:max-tx @conn)) "main did not move")
+    (is (= "app.m0/f1-main" (:form/id (:var/form (d/entity (pdb/head conn b) [:var/name 'app.m0/f1])))) "the branch holds main's change, ready to prove")))))
