@@ -81,7 +81,7 @@
  ;; a message to an agent as its reader takes it (seon.task/undelivered, my.agent/messages)
  :seon.task/message [:map [:id :string] [:from :map] [:body :string] [:sent-ms :int]]
  :seon.task/env [:map {:closed true} [:branch :keyword] [:model [:maybe :string]] [:max-turns pos-int?]
-                 ;; an outside run's: the client that attached it (seon.server/held)
+                 ;; an outside run's: the client that last attached it (seon.server/own-agent)
                  [:holder {:optional true} :string]]
  :seon.proof/results [:map-of :qualified-symbol :seon.proof/status]
  ;; an agent as the reconciler's index holds it: what root decides on of its process and environment (the entity's attributes,
