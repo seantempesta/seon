@@ -13,7 +13,7 @@
   printf '{:op :agents}\\n' | nc -w 5 127.0.0.1 PORT
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.system :as c] [my.root :as root] [seon.fx :as fx] [seon.config :as cfg] [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
+  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.system :as c] [my.root :as root] [seon.fx :as fx] [seon.config :as cfg] [seon.task :as task] [seon.template :as tpl] [seon.proofs :as proofs] [seon.merge :as pm] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
             [seon.lib :as lib] [seon.edn :as sedn] [seon.db :as pdb] [seon.repl :as repl] [seon.intr :as intr] [seon.print :as print] [seon.ctx.wire :as wire] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str] [clojure.walk] [clojure.core.async :as a] [jolt.fibers :as fibers]))
 
 (defn- refused
@@ -96,12 +96,13 @@
     idx))
 
 (defn agents-answer
-  "Live agents (id, branch, status, task) and what is live on main (live-tasks), over main's index kept by change (index-now)."
+  "Live agents (id, branch, status, task, and the pid of its process, as root's view holds it) and what is live on main (live-tasks),
+  over main's index kept by change (index-now)."
   {:malli/schema [:=> [:cat :seon.system/sys] :map]}
   [sys]
   (assoc (let [db @(:conn sys)] (live-tasks db (index-now (:conn sys) db)))
          :agents (into (sorted-map) (for [[id a] (:agents (c/state sys)) :when (not (seon.task/gone-statuses (:status a)))]
-                                      [id (select-keys a [:branch :status :task])]))))
+                                      [id (select-keys a [:branch :status :task :pid])]))))
 
 (def ^:dynamic *sys*
   "This root while its REPL evaluates a form: the `sys` each form reads (root-eval)."
@@ -216,7 +217,12 @@
             ;; agent never copies it (two writers disagreed at a whole task's stage move). A clone's branch is cut from its source's: it starts after
             started (when k @(c/transact-main! sys (conj (start (keyword k)) {:seon.agent/key k :seon.agent/status :spawning})))
             r (if clone-of @(c/clone! sys clone-of opts) @(c/call! sys (c/request 'spawn! nil opts nil)))
-            ag (:id r)]
+            ag (:id r)
+            ;; a refusal names the unmerged entries its branch holds (seon.merge/unmerged, one read of the branch): a resumed branch whose
+            ;; merge of main met a conflict keeps its pins, so its agent cannot start until they are settled (pilot 7, 2026-11-16)
+            r (if ag r (let [um (some-> (:db @(c/branch-db sys (:branch env))) pm/unmerged)]
+                         (cond-> r (seq um) (assoc :unmerged (mapv :key um)
+                                                   :repair "docs/merging.md#root-repairs-a-failed-merge-from-its-repl: settle each entry at root, then attach again"))))]
         ;; spawn!'s request, its answer a value: a refusal (a branch another agent holds, named with
         ;; its task) is the attach's answer, never a server defect; the start written for it is undone exactly (each fact its transaction
         ;; wrote on the task and the agent inverted, one rule for every attribute: the session's key, a restart's branch, the release), then the
@@ -259,11 +265,13 @@
         a))))
 
 (defn- work-of
-  "The task the live agent ag works, from main: {:task :env :key}, or nil."
+  "The task the live agent ag works, from main: {:task :env :key}, or nil. A session's task parked between requests is still its
+  agent's (a hand-back that ended :parked is handed back again), as live-run reads it."
   {:malli/schema [:=> [:cat :seon.system/sys :keyword] [:maybe :map]]}
   [sys ag]
-  (some (fn [a] (when (= ag (:agent a)) (select-keys a [:task :env :key])))
-        (task/running @(:conn sys))))
+  (let [db @(:conn sys)]
+    (some (fn [a] (when (= ag (:agent a)) (select-keys a [:task :env :key])))
+          (concat (task/running db) (task/running db :parked)))))
 
 (defn verdict
   "Task's judgement as main db holds it: its outcome (:done or :merged: the done rule
@@ -321,6 +329,10 @@
                  :input {:type "string" :description "root only: what the forms read as *in* (stdin), empty when none is sent"}
                  :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}}
           :required ["agent"]}
+   :hand-over {:inline true
+               :doc "A candidate root, built and green on this store, asks this root to hand over (task seon.system/an-update-loses-nothing): this root stops through its one end, cause :hand-over (its stop fact names tree and results), closes its listening port and answers {:released true :port p}, then exits; the candidate binds p. Answered typed :seon.system/restarting when this root is already stopping."
+               :args {:tree {:type "string" :description "the candidate's tree"} :results {:type "object" :description "where its results are: {:branch :commit :t}"}}
+               :required ["tree"]}
    :interrupt {:inline true
                :doc "Stop every op you asked that still runs or waits (your seon_eval at root included, which has no work bound): a queued one is answered stopped, a running one interrupted and answered :seon.server/interrupted. Answered at once, never behind the ops it stops. An MCP client's notifications/cancelled stops the one request it names the same way."
                :args {}}
@@ -453,14 +465,26 @@
       (refused (if ag (str ag " works no task: attach one first") (str "no task " (:task req) ", and no agent named"))))))
 
 (defn connection-agent
-  "The key of the agent req's client is (my.root/held-agents, the one read of a client's agents): its session's own, of kind :user,
-  else the one it last attached, ended or not (who sent a message outlives the process that held it); nil with no client or none
-  held, then the signed-in person. See docs/users.md#messages."
+  "The key of the agent req's client is: a client named <area> is the session session/<area>, so its agent is that task's
+  (seon.task/agent-key), whatever client holds its process now (the edit hook's checkout takes a hold over); a client of no session,
+  the one it last attached, ended or not (my.root/held-agents: who sent a message outlives the process that held it); nil with no
+  client or none held, then the signed-in person. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.system/sys :map] [:maybe :string]]}
   [sys req]
   (when-let [c (:client req)]
-    (let [held (root/held-agents sys c)]
-      (some-> (or (first (filter #(= :user (:kind %)) held)) (first held)) :agent name))))
+    (let [db @(:conn sys)
+          session (str "session/" c)]
+      (or (when (task/task db session) (task/agent-key db session))
+          (let [held (root/held-agents sys c)]
+            (some-> (or (first (filter #(= :user (:kind %)) held)) (first held)) :agent name))))))
+
+(defn- task-agent-keys
+  "The keys of every agent that has worked task id on db, its current one (seon.task/agent-key) among them: an inbox of a task reads
+  them all, so an agent ended, OOM-killed or replaced (attach fresh=true) keeps its messages. O(the task's agents)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:set :string]]}
+  [db id]
+  (cond-> (into #{} (map first) (d/q '[:find ?k :in $ ?id :where [?t :seon.task/id ?id] [?a :seon.agent/task ?t] [?a :seon.agent/key ?k]] db id))
+    (task/agent-key db id) (conj (task/agent-key db id))))
 
 ;; Estimate: one :avet seek of the agent's message links, a tx filter and an entity read each, O(m) for m messages to it (~10k ticks a
 ;; message [M]); no write. A wait parks the connection's fiber (no worker, no thread) on await-message, its bound held by the api
@@ -485,7 +509,9 @@
   {:malli/schema [:=> [:cat :seon.system/sys :map] :map]}
   [sys req]
   (let [db @(:conn sys)
+        ;; by task: the messages to every agent the task has had; the wait is on its current agent, which a send by task reaches
         k (or (:agent req) (some->> (:task req) (task/agent-key db)))
+        ks (if (:agent req) #{k} (some->> (:task req) (task-agent-keys db)))
         v (:since req)
         since (cond (nil? v) (:max-tx db) (int? v) v (and (string? v) (re-matches #"\d+" v)) (parse-long v))]
     (cond
@@ -496,7 +522,7 @@
       (let [ms (cfg/value :seon.config.root/inbox-wait-ms)
             opts {:k (keyword "seon.server" (str "inbox-" (lib/unique-id))) :ms ms
                   :due (contract/error :seon.server/no-message #'seon.server/inbox-answer (str "no message to " k " in " ms " ms: ask again, since=" since) {:agent k :waited-ms ms :t since})}
-            answer (fn [db] (when-let [ms (not-empty (inbox-messages db k since))] {:agent k :messages ms :t (:max-tx db)}))]
+            answer (fn [db] (when-let [ms (not-empty (vec (sort-by (juxt :t :id) (mapcat #(inbox-messages db % since) ks))))] {:agent k :messages ms :t (:max-tx db)}))]
         (or (answer db)
             ;; the wait starts at the t this read: a message linked after it wakes it
             (loop [t0 (:max-tx db)]
@@ -610,6 +636,21 @@
       (catch java.net.ConnectException _ (unanswered :refused))
       (catch java.io.IOException _ (unanswered :reset)))))
 
+;; Estimate: O(1) beside the stop it runs (its parts on ROOT STOP PHASE), one socket close and one line written
+(defmethod op-answer :hand-over [sys _ req]
+  ;; on its connection's fiber (inline), never a graph proc, which would wait on its own stop; the answer is written here, before
+  ;; the process may exit, so the candidate reads it with the port already free
+  (let [{:keys [end exit server]} sys]
+    (cond
+      (not (and end exit server)) (refused "this root takes no hand-over: it was not started by seon.main (no one end to stop it through)")
+      (not (end :hand-over (select-keys req [:tree :results])))
+      (contract/error :seon.system/restarting #'seon.server/op-answer "this root is already stopping: ask the next root" {})
+      :else (let [port (.getLocalPort ^java.net.ServerSocket server)]
+              (.close ^java.net.ServerSocket server)
+              (if *emit* (*emit* {:released true :port port}) nil)
+              (deliver exit 0)
+              (when-not *emit* {:released true :port port})))))
+
 (defmethod op-answer :prove [sys ag req]
   (let [run (fn [] (c/prove-tree! sys (cond-> (select-keys req [:checkout :tree :names]) (:mode req) (assoc :mode (keyword (name (:mode req)))))))
         ;; a checkout's files, on their tree's branch (seon.system/prove-tree!), its verdicts streamed when asked; else an agent's branch, or main
@@ -640,17 +681,12 @@
                          (empty? paths) {:value {:imported [] :unchanged [] :skipped []}}
                          :else @(c/submit! sys ag (sedn/encode (list 'my.branch/import! co paths)) {:origin :outside}))
           skipped (some-> imported :value :skipped seq)
-          ;; the process then runs what its branch now holds (seon.agent/take-branch-program!, an outside agent's load-diff!), so the
-          ;; judge judges the imported code, never the program the process started with
-          loaded (when (and imported (not (contract/error? imported)) (not (:ex imported)) (not skipped) (seq (get-in imported [:value :imported])))
-                   @(c/submit! sys ag (sedn/encode '(seon.agent/take-branch-program!)) {:origin :outside}))
-          load-errors (some-> loaded :value seq)
+          ;; import! loads what it wrote (load-diff!), so the judge judges the imported code; its :load-errors are the one answer
+          load-errors (some-> imported :value :load-errors seq)
           r (cond (contract/error? imported) imported
                   (:ex imported) (:ex imported)
                   skipped (refused (str "seon_done: " (count skipped) " file(s) of " (:checkout req) " do not read, so nothing is judged: "
                                         (str/join "; " (for [{:keys [path why]} skipped] (str path " (" why ")")))))
-                  (contract/error? loaded) loaded
-                  (:ex loaded) (:ex loaded)
                   load-errors (refused (str "seon_done: the imported code does not load, so nothing is judged: " (pr-str (vec (take 5 load-errors)))))
                   :else @(c/submit! sys ag (sedn/encode (list 'seon.turn/hand-back! task)) {:origin :outside}))]
       ;; judged only on the end written: an error or no answer is answered as it is,
@@ -667,9 +703,9 @@
                               (:stopped j) (refused (str "root stopped while judging " task))
                               ;; a reconciler step threw while judging: its flight never ends, the defect is the answer
                               (:defect j) {:task task :defect (select-keys (:defect j) [:seon.error/type :seon.error/message])}
-                              ;; :behind, the one :merge's :reprove (main's program moved since its proof, its branch now holding main): handed
+                              ;; :reprove, the one :merge's answer (main's program moved since its proof, its branch now holding main): handed
                               ;; back again, which proves again on the branch, as a model agent's turn loop does when it is told so
-                              (= :behind (outcome db)) (op-answer sys ag req)
+                              (= :reprove (outcome db)) (op-answer sys ag req)
                               ;; a defect and a judge that left the task :running are the judge's own answers (j), never re-read here
                               :else (let [files (fx/uncommitted (str (cfg/checkout)))]
                                         (cond-> (verdict-line db task (:main r))
@@ -870,11 +906,14 @@
   {:malli/schema [:=> [:cat :seon.system/sys nat-int?] :any]}
   [sys port]
   (let [ss (java.net.ServerSocket. port 50 (java.net.InetAddress/getByName "127.0.0.1"))
+        ;; its connections' system holds the socket, which a hand-over closes (op-answer :hand-over)
+        sys (assoc sys :server ss)
         tokens (a/chan (cfg/value :seon.config.root/server-connections))]
     (a/io-thread
       (loop []
         (a/>!! tokens true)
-        (let [s (.accept ss)]
+        ;; a socket a hand-over closed ends the loop: its accept answers that the socket is closed
+        (when-let [s (try (.accept ss) (catch java.net.SocketException _ (when-not (.isClosed ss) (throw _))))]
           (a/io-thread (try (serve-connection! sys s) (finally (a/poll! tokens))))
           (recur))))
     ss))

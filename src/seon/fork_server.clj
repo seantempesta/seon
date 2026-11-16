@@ -13,7 +13,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program] [seon.db :as pdb]
             [seon.step :as step] [seon.sock :as sock] [seon.config :as cfg] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.ffi :as ffi]
-            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx] [seon.graph :as graph] [seon.reconcile :as r] [seon.agent :as agent] [jolt.io-poller :as poller] [seon.task :as task] [seon.ctx :as ctx] [seon.doc :as doc] [datahike.db.interface :as dbi]))
+            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx] [seon.graph :as graph] [seon.reconcile :as r] [seon.agent :as agent] [seon.proofs :as proofs] [jolt.io-poller :as poller] [seon.task :as task] [seon.ctx :as ctx] [seon.doc :as doc] [datahike.db.interface :as dbi]))
 
 (defn- reaped
   "Child pid, whose exit arrived (jolt.io-poller/exit-chan): waited for exactly, so the wait is the
@@ -155,6 +155,8 @@
   (let [tests-errs (when (:tests-due st) (:errors (program/load-all! (:db st))))
         errs (seq (concat (:load-errors st) tests-errs))
         st (-> st (stood tests-errs #{}) (dissoc :tests-due :preload-t :load-errors) graph-at-fork index-at-fork (warm-start {}))]
+    ;; the test fixtures made here once a program, before the heap is made static, so every agent inherits them made
+    (when (:static-due st) (proofs/warm-fixtures!))
     (when (static-due? st) (lib/static!))
     [(dissoc st :static-due) errs]))
 
@@ -224,6 +226,10 @@
                  ;; where it left 333). Not every fork: what a fork replaced (main's db, the graph, the
                  ;; index) stays in static for this server's life (docs/machine.md#what-a-process-owns-in-memory)
                  t1 (profile/now-ns)
+                 ;; the ^:seon.test/fixture delays (the worlds, the test store) made here once a program, before the freeze, so
+                 ;; every agent forked inherits them made, shared: each agent made them at its first prove (195M ticks, 1.1 GB,
+                 ;; tests2 result/ba7c27c8). A program commit (:static-due) may redefine one, so they are forced again then
+                 _ (when (:static-due st) (proofs/warm-fixtures!))
                  due? (static-due? st)
                  _ (when due? (lib/static!))
                  st (dissoc st :static-due)
@@ -350,11 +356,9 @@
   (pdb/after-fork! cfg)
   (let [conn (sock/conn fd)
         store (pdb/connect (assoc cfg :branch (pdb/main-branch cfg)))
-        ;; db0 at its commit, read through this process's own store; the boot server reads all
-        ;; of it once, so agents forked from here inherit it decoded (root does not hold it:
-        ;; docs/machine.md#what-a-process-owns-in-memory)
+        ;; db0 at its commit, read through this process's own store; nothing of it is read ahead: an agent reads what it
+        ;; needs through the node cache it inherits (docs/machine.md#what-a-process-owns-in-memory)
         db0 (d/commit-as-db store (d/commit-id db0))
-        _ (when boot? (pdb/preload! db0))
         ;; main's tests compiled now, at the boot server's start, while root writes its boot fact and imports
         ;; its source (about 1.3 s of a fresh root's first spawn, measured 2026-11-08): a commit the import
         ;; writes after this loads as changes (:tx), as a merge's does
@@ -443,7 +447,7 @@
   (drop-standby (:standby st)) (drop-standby (:standby-pending st))
   (some-> fd (lib/c-shutdown 1)) ; SHUT_WR; a lost server's socket is closed already
   ;; root's boot server leads its own group (main's setpgid): the group ended at once, so a stop never waits for the server
-  ;; to read its EOF, which a server still warming (preload!, its tests' load: ~35 s) did not do until it was done (every
+  ;; to read its EOF, which a server still warming (its tests' load: ~35 s) did not do until it was done (every
   ;; stop of a root under ~35 s old took 26-32 s). It writes nothing to the store, and at a stop its agents have ended.
   ;; A promoted server leads no group: kill answers false, and it exits on the EOF as before
   (let [ended (if (and pid (lib/kill! (- pid) 9)) :group-ended :eof)]

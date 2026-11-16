@@ -237,7 +237,7 @@
  :seon.proof/proof-fact [:map {:seon.db/attributes true}
                          [:seon.proof/id :seon.proof/id] [:seon.proof/test :seon.proof/test] [:seon.proof/reads-digest :seon.proof/reads-digest]
                          [:seon.proof/reach-digest {:optional true} :seon.proof/reach-digest]
-                         [:seon.proof/reads :seon.proof/reads] [:seon.proof/read-keys {:optional true} :seon.proof/read-keys] [:seon.proof/status :seon.proof/status] [:seon.proof/route :seon.proof/route]
+                         [:seon.proof/reads {:optional true} :seon.proof/reads] [:seon.proof/read-keys {:optional true} :seon.proof/read-keys] [:seon.proof/status :seon.proof/status] [:seon.proof/route :seon.proof/route]
                          [:seon.proof/basis :seon.proof/basis]
                          [:seon.proof/unreusable {:optional true} :seon.proof/unreusable]
                          [:seon.proof/agent {:optional true} :seon.proof/agent] [:seon.proof/program {:optional true} :seon.proof/program]
@@ -575,24 +575,24 @@
  ;; (seon.task/finished); judged: judged, root has the next step to take (the merge's turn or its gate); failed: its agent died
  ;; or was lost, a death (seon.problems/report). :running, an agent works it; :parked, its agent waits for a message and its
  ;; process stays; :told, root told it a verdict and it waits for the next wake; :cap, it spent its agent's turns and waits for them to be
- ;; raised (:seon.agent/max-turns) and the task released again; :done, accepted on its branch; :ready, a merge ready for the octopus
- ;; merge; :gate, a merge whose process tests are to run first; :merged, in main; :behind, a merge main moved under; :dead, its
+ ;; raised (:seon.agent/max-turns) and the task released again; :done, accepted on its branch; :ready, a merge ready for the writer's
+ ;; :merge; :gate, a merge whose process tests are to run first; :merged, in main; :reprove, main's program moved since its proof and its branch holds main now, to prove again; :dead, its
  ;; agent died; :lost, its process was gone; :killed, stopped for a cancel, a hold or a changed environment; :refused, root refused
  ;; the spawn; :closed, judged when its task was no longer running, or held for root
  :seon.task/outcome [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ready :gate} :seon.status/failed #{:dead :lost} :seon.status/ended #{:done :merged :dead :lost :closed :cap} :description "How the task's work stands or ended."
                      ;; how it reads to a person (seon.render.ui/standing): :parked and :told are woken by a message (seon.reconcile/park-outcomes);
                      ;; :cap is not: it waits for its agent's turns to be raised and the task released
                      :seon.status/title {:running "working" :parked "parked" :told "told" :cap "stopped at its cap" :done "done" :merged "merged" :ready "ready to merge"
-                                         :gate "at the merge gate" :behind "behind main" :dead "died" :lost "stopped by a restart" :killed "killed" :refused "refused" :closed "closed"}
-                     :seon.status/tone {:running :live :parked :ask :told :ask :cap :stopped :done :done :merged :done :ready :quiet :gate :quiet :behind :stopped
+                                         :gate "at the merge gate" :reprove "proving again on main" :dead "died" :lost "stopped by a restart" :killed "killed" :refused "refused" :closed "closed"}
+                     :seon.status/tone {:running :live :parked :ask :told :ask :cap :stopped :done :done :merged :done :ready :quiet :gate :quiet :reprove :quiet
                                         :dead :failed :lost :quiet :killed :failed :refused :failed :closed :quiet}}
-                     [:enum :running :parked :told :cap :done :ready :gate :merged :behind :dead :lost :killed :refused :closed]]
+                     [:enum :running :parked :told :cap :done :ready :gate :merged :reprove :dead :lost :killed :refused :closed]]
  ;; why it stands so: the agent's own words, or root's (the death, a refused start)
  ;; the branch of the agent that launched this task (my.task/launch!), told how it ends (seon.reconcile/tell-tx)
  ;; who started it, a user or an agent: its agent, when it starts, names that one its :seon.agent/parent (seon.task/start-tx; docs/users.md#what-each-thing-is)
  :seon.task/started-by [:and {:seon.db/to [:seon.db/agent-fact] :description "Who started the task, a user or an agent. See docs/users.md#what-each-thing-is."} :seon.db/ref]
  :seon.task/reason [:string {:description "Why the task stands as its outcome says: the agent's own words, or root's."}]
- :seon.task/reasons [:vector {:seon.db/root-only true :description "What the done rule said was not done when the task was last judged, each reason a map with what it is about (a proof's name, a problem's key, how far behind main). The same reasons twice in a row hold the task; they are retracted when a person continues it. See docs/tasks.md#the-done-rule."}
+ :seon.task/reasons [:vector {:seon.db/root-only true :description "What the done rule said was not done when the task was last judged, each reason a map with what it is about (a proof's name, a problem's key). The same reasons twice in a row hold the task; they are retracted when a person continues it. See docs/tasks.md#the-done-rule."}
                      :seon.reconcile/not-done]
  ;; the merges-branch commit holding the source files a merge rewrote (seon.source, the
  ;; :git effect), or why the commit was refused; recorded by its asker, the reconciler
@@ -608,8 +608,8 @@
                         [:main-red [:set :qualified-symbol]] [:asked [:map-of :qualified-symbol [:enum :pass :fail :error :unknown]]] [:error {:optional true} :keyword]]
  :seon.task/gate-unread [:vector {:description "The changed namespaces that the gate could not read from the branch, each with why."} [:map [:ns :symbol] [:reason :string]]]
  ;; measured at its end from the branch (seon.merge/three-way's :ours): the printed program keys it changed since its merge base
- ;; (each seon.edn/encode of a :seon.merge/program-key, so generated ones are too); the octopus merge admits on them
- :seon.task/changed [:set {:description "The printed program keys that the task changed since its merge base, which the octopus merge admits on."} [:string {:gen/elements ["[:var app/a]" "[:var app.b/c]" "[:form \"app/1-2\"]" "[:ns app]"]}]]
+ ;; (each seon.edn/encode of a :seon.merge/program-key, so generated ones are too); merge tasks are admitted together on them
+ :seon.task/changed [:set {:description "The printed program keys that the task changed since its merge base, which merge tasks are admitted together on."} [:string {:gen/elements ["[:var app/a]" "[:var app.b/c]" "[:form \"app/1-2\"]" "[:ns app]"]}]]
  ;; its merge entries (:seon.merge/conflict) and the keys still unmerged on the branch
  :seon.task/conflicts [:vector {:description "The task's merge entries that conflict."} :seon.merge/conflict]
  :seon.task/unmerged [:set {:description "The keys still unmerged on the task's branch."} :string]
@@ -671,7 +671,9 @@
  ;; how a root ended: its boot, why (:stop! a caller's stop, :stdin-eof its owner closed its
  ;; stdin (bin/system stop), :signal SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks), :unclean
  ;; no stop fact at all: SIGKILL or a crash, found by the next boot) and when
- :seon.system/end [:map [:boot :string] [:cause :keyword] [:at-ms :int]]
+ :seon.system/end [:map [:boot :string] [:cause :keyword] [:at-ms :int]
+                  ;; a hand-over's: the candidate's tree and where its results are (task seon.system/an-update-loses-nothing)
+                  [:tree {:optional true} :string] [:results {:optional true} :map]]
  ;; written by seon.system/stop! before anything stops, durable
  ;; the outcome of root's last read of the task files (my.root/load-tasks!): how many files read, or
  ;; the refused read's message. A refused read's error names it as its subject

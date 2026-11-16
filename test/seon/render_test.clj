@@ -141,28 +141,28 @@
       (is (= {:defects 0} (get h :api)))
       (is (= 3 (count h))))))
 
-(def ^:private behind
-  ;; as seon.writer/merge-reason makes it
-  (seon.contract/error :seon.merge/behind 'seon.writer/merge-refused
-                       "main changed 3 key(s) since the branch's merge base: merge main into the branch first"
-                       {:tx 812 :behind 3
-                        :seon.error/fix "A merge task merges main into the branch (my.branch/merge-main!), resolves any conflict, and its proofs run on the combined program."}))
+(def ^:private refusal
+  ;; as seon.writer/merge-refused makes one, with a fix
+  (seon.contract/error :seon.merge/unmerged 'seon.writer/merge-refused
+                       "the branch has 3 unmerged entr(ies)"
+                       {:tx 812 :unmerged [[:var 'app/f] [:var 'app/g] [:var 'app/h]]
+                        :seon.error/fix "Settle each entry on the branch (my.branch/resolve!) and merge again."}))
 
 (deftest an-error-reads-its-message-fix-and-variant
   (testing "an error map's schema is its variant: the base's render, whatever the variant"
-    (is (= :seon.merge/behind (r/schema-of (seon.db/index) behind nil)))
+    (is (= :seon.merge/unmerged (r/schema-of (seon.db/index) refusal nil)))
     (is (= :seon.error/base (r/schema-of (seon.db/index) {:seon.error/type :no.such/variant :seon.error/operation 'a/b :seon.error/message "m"} nil))))
-  (let [text (seon.print/text behind)]
+  (let [text (seon.print/text refusal)]
     (testing "as a REPL answers it, by the one printer: its message, fix, variant and its own keys"
-      (is (str/includes? text "main changed 3 key(s)"))
-      (is (str/includes? text "A merge task merges main into the branch (my.branch/merge-main!)"))
-      (is (str/includes? text ":seon.merge/behind"))
-      (is (str/includes? text ":behind 3"))))
+      (is (str/includes? text "the branch has 3 unmerged entr(ies)"))
+      (is (str/includes? text "Settle each entry on the branch (my.branch/resolve!)"))
+      (is (str/includes? text ":seon.merge/unmerged"))
+      (is (str/includes? text "app/h"))))
   (testing "the page shows the same facts"
-    (let [html (h/html (r/hiccup {:seon.render/index (seon.db/index)} behind))]
-      (is (str/includes? html "main changed 3 key(s)"))
-      (is (str/includes? html "fix: A merge task merges main"))
-      (is (str/includes? html "seon.merge/behind in seon.writer/merge-refused"))))
+    (let [html (h/html (r/hiccup {:seon.render/index (seon.db/index)} refusal))]
+      (is (str/includes? html "the branch has 3 unmerged entr(ies)"))
+      (is (str/includes? html "fix: Settle each entry on the branch"))
+      (is (str/includes? html "seon.merge/unmerged in seon.writer/merge-refused"))))
   ;; an outside eval on root returned select-keys of its recorded errors, no operation among them,
   ;; and root's page threw on error-box's contract (2026-10-28)
   (let [picked {:seon.error/type :seon.agent/load-failed :seon.error/message "the branch program did not load"
@@ -191,7 +191,7 @@
 (deftest the-problem-report-reads-by-class
   ;; the whole report on root's page: by class, each row by its render
   (let [rep (with-meta {:t 90 :classes {:failed {:n 1 :rows [(row {:task "calc/add" :reason "not total" :open? true})]}
-                                        :merge {:n 1 :rows [(row {:task "calc/sub" :error behind :open? false})]}
+                                        :merge {:n 1 :rows [(row {:task "calc/sub" :error refusal :open? false})]}
                                         :red {:n 0 :rows []}}}
               {:seon.render/schema :seon.problems/report})
         html (h/html (r/hiccup {:seon.render/index (seon.db/index)} rep))]
@@ -3398,8 +3398,8 @@
       (is (not-any? #(str/includes? (text (st :idle :cap)) %) ["waiting" "idle"]))
       (is (= :stopped (:tone (st :idle :cap)))))
     (testing "a task's end"
-      (is (= ["done" "ready to merge" "at the merge gate" "merged" "behind main"]
-             (mapv #(text (st :ended %)) [:done :ready :gate :merged :behind])))
+      (is (= ["done" "ready to merge" "at the merge gate" "merged" "proving again on main"]
+             (mapv #(text (st :ended %)) [:done :ready :gate :merged :reprove])))
       (is (= ["died" "stopped by a restart" "killed" "refused" "closed"] (mapv #(text (st :dead %)) [:dead :lost :killed :refused :closed])))
       (is (= :quiet (:tone (st :dead :lost))) "a restart is no failure of its work")
       (is (= :done (:tone (st :ended :merged))))

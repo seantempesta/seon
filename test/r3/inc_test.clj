@@ -6,6 +6,7 @@
 
 (defn- rand-step
   "One random write a root or observer makes on main (tx-data), drawn with rng."
+  {:malli/schema [:=> [:cat :seon.host/db :any :int] [:maybe [:sequential :any]]]}
   [db ^java.util.Random rng k]
   (let [;; the ids alone, from their indexes: the step draws one task, never a read of every one of them
         ts (vec (sort (map :v (d/datoms db :aevt :seon.task/id))))
@@ -16,7 +17,7 @@
     (case (.nextInt rng 9)
       0 (when t (task/execution-tx [t] (pick [:running :held :cancelled :running])))
       1 (when t (task/start-tx db t (pick ["r3-boot" "old-boot"]) (pick [:ax :ay]) (env t) (inc k)))
-      2 (when t [{:seon.task/id t :seon.task/outcome (pick [:ready :gate :done :merged :parked :cap :told :closed :lost :dead :killed :behind :running])
+      2 (when t [{:seon.task/id t :seon.task/outcome (pick [:ready :gate :done :merged :parked :cap :told :closed :lost :dead :killed :reprove :running])
                   :seon.task/merged-t (+ 900 (.nextInt rng 300))}])
       3 (let [nm (str "n" k) needs (set (remove nil? [t (pick ts)]))]
           (into (task/create-tx db [(cond-> {:seon.task/ns 'r3 :seon.task/name nm :seon.task/plan "p"
@@ -46,17 +47,16 @@
 (defn- agrees
   "After commit rep (a transact's report), the incremental reconciler (idx observed) against the oracle's full one:
   [ok idx' full incr]."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :map] [:tuple :any :seon.reconcile/index [:vector :map] [:vector :map]]]}
   [idx rep]
   (let [idx' (r/observe idx (:db-after rep) (pdb/report->tx rep))
         full (oracle/reconcile-view (oracle/view (:db-after rep)))
         incr (r/actions idx')
-        merges (filterv #(= :merge (:op %)) full)
-        octopus (first (filter #(= :octopus-merge (:op %)) incr))
+        merge? #(= :merge (:op %))
         live-merge? (some (:live idx') (:merging idx'))
-        ok (and (= (remove #(= :merge (:op %)) full) (remove #(= :octopus-merge (:op %)) incr))
-                (if octopus
-                  (= (mapv #(select-keys % [:task]) merges) (:members octopus))
-                  (or (empty? merges) live-merge?)))]
+        ;; each ready task merges alone through the writer's one :merge, while no merge task works
+        ok (and (= (remove merge? full) (remove merge? incr))
+                (= (if live-merge? #{} (set (filter merge? full))) (set (filter merge? incr))))]
     [ok idx' full incr]))
 
 (def ^:private commits
@@ -67,9 +67,10 @@
 (defn- equals-full
   "A random history from seed, `commits` long, in a world of n work tasks (r3.fx/world, a value in memory): after each, the
   incremental reconciler's actions against the oracle's."
+  {:malli/schema [:=> [:cat :int :int] :any]}
   [n seed]
   (let [rng (java.util.Random. seed)
-        ;; one merge at a time: the octopus merge degenerates to M1's merge queue, the oracle's rule
+        ;; one merge at a time: M1's merge queue, the oracle's rule
         db0 (d/db-with (fx/world n 6) (vec (seon.test-store/root-tx {:seon.config.merge/max-running 1})))]
     (loop [k 0 db db0 idx (r/index db0) bad 0]
       (if (= k commits)

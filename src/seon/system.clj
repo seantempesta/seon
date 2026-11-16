@@ -19,7 +19,7 @@
   drains and flushes last, the fork server is reaped, then flow/stop.
 
   Agents transact facts on their own branch; root reacts: the writer applies them, and
-  only a merge task's octopus merge (the reconciler's, seon.writer) advances main."
+  only a ready task's merge (the reconciler's, through seon.writer's one :merge) advances main."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.ctx.wire :as wire] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
@@ -748,7 +748,7 @@
                (step/out! o :to-writer (assoc (dissoc req :agent) :dest dest))
                (update st :writes (fnil conj #{}) rid)))
       ;; the merge gate's run, whoever asks (the reconciler's :gate, an agent's seon.agent/judge!): branch's candidate
-      ;; (the writer's: the files the octopus merge would write), then the :tests effect over them on the gate checkout
+      ;; (the writer's: the files the merge would write), then the :tests effect over them on the gate checkout
       :gate (let [checkout (:gate-checkout (task/root @(:conn st)))]
               (if-not (and checkout (:branch (:source st)))
                 (reply! st o p (contract/error :seon.system/no-gate-checkout #'seon.system/ext-op "this root has no checkout to run process tests on (:seon.config.source/gate-checkout, or a source root)"))
@@ -1518,8 +1518,10 @@
         (contract/error? r) r
         (empty? (:value r)) {:paths []}
         :else
-        (let [unsynced (into {} (for [{:keys [e]} (d/datoms db :aevt :seon.task/declared)
-                                      :when (and (= :merged (:v (first (d/datoms db :eavt e :seon.task/outcome)))) (problems/unsynced? db e))
+        (let [;; the merged tasks first, by the outcome's index (O(merged)), never every declaration read (648 tasks' texts: 139 ms,
+              ;; 192 MB for one merged task [M root result/bcff9cbd])
+              unsynced (into {} (for [{:keys [e]} (d/datoms db :avet :seon.task/outcome :merged)
+                                      :when (and (seq (d/datoms db :eavt e :seon.task/declared)) (problems/unsynced? db e))
                                       p (problems/changed-paths db e)]
                                   [p (:v (first (d/datoms db :eavt e :seon.task/id)))]))
               task? #(and (str/ends-with? % ".edn") (str/starts-with? % (str tasks-dir "/")))
@@ -1697,8 +1699,7 @@
   store at path and resumed, caught up with the files of its source tree that changed since main last indexed it (catch-up; none
   read when nothing changed, and nothing for a root given no source tree), or, when nothing was ever indexed into it nor a root
   booted on it, the checkout indexed into it first (seed!); main's config held, its program digested (seon.program/program-digest), the
-  contracts instrumented, the warm paths run and the heap made static, then the fork server forked from it (which preloads
-  main's indexes for its agents: seon.fork-server/main), sharing all of that copy-on-write while this is the one thread
+  contracts instrumented, the warm paths run and the heap made static, then the fork server forked from it (seon.fork-server/main), sharing all of that copy-on-write while this is the one thread
   there is (docs/failure-points.md, physics). Its return starts the process's threads (Jolt's carriers, timer and poller;
   main-carrier-run! returns into an ordinary process), and root's follow. open!'s answer with main's :db as forked, the
   fork server's :pid and :fd, the seed's answer when it seeded, main's :digest and each phase's ms. See
@@ -2026,7 +2027,7 @@
   merge-main! message! release! opened! focus!) on agent id with args, as the api request it is: one table for these fns
   and the dashboard's calls (seon.web). a: the agent's entry in root's view, which
   merge-main! reads; an op the agent cannot take answers its error. A branch reaches main
-  only through a merge task (seon.reconcile's octopus merge)."
+  only through a ready task's merge (seon.reconcile, seon.writer's :merge)."
   {:malli/schema [:=> [:cat :symbol [:maybe :seon.agent/id] [:maybe :map] [:maybe :map]] :map]}
   [op id args a]
   (let [live? (boolean (and a (not (task/gone-statuses (:status a)))))
@@ -2321,17 +2322,20 @@
 (defn prove-candidate!
   "The merge gate's prove: the candidate's own store branch (candidate, the branch its :gate request names) proved by prove! in mode
   (default :judge) on names, the deferred process tests, its process items, seed and build run on checkout at tree (the gate's
-  checkout, seon.fx/run-on-checkout). The branch's live agent answers the plan, or one spawned onto it: no tree branch, no catch-up of
-  files that came from the store. An agent spawned for it ends once the run answers, however it ends, so the branch is free for the
-  task's next attach (an agent left live on the branch refuses every seon_attach of
-  its task). The run's answer, or its typed error. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  checkout, seon.fx/run-on-checkout). The candidate is proved at its head commit, on a branch of its own made there (gate-<commit>-<id>)
+  with an agent of its own: never on the task's branch, so no attach of the task is refused while the gate runs (root's pilot,
+  2026-11-16: the gate's agent on session/root's branch refused every attach for 13 minutes) and the task's own agent is never
+  written by the gate. Once the run answers, however it ends, that agent ends and its branch is dropped (the writer's :drop-branch, as
+  a tree's is). The run's answer, or its typed error. See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :seon.system/sys [:map [:candidate :keyword] [:checkout :string] [:tree :string]]] :map]}
   [sys {:keys [candidate checkout tree names mode]}]
-  (let [b (pdb/on-main (pdb/conn-main (:conn sys)) candidate)
-        live (some (fn [[aid a]] (when (and (= b (:branch a)) (not (task/gone-statuses (:status a)))) aid)) (:agents (state sys)))
-        ag (or live (spawn! sys {:branch b}))]
-    (try @(prove! sys {:branch b} (set (map symbol names)) (or mode :judge) {:checkout checkout :tree tree})
-         (finally (when-not live (kill! sys ag))))))
+  (let [main (pdb/conn-main (:conn sys))
+        c (d/commit-id (pdb/head (:conn sys) (pdb/on-main main candidate)))
+        g (keyword (str "gate-" c "-" (lib/unique-id)))
+        ag (spawn! sys {:branch g :commit c})]
+    (try @(prove! sys {:branch (pdb/on-main main g)} (set (map symbol names)) (or mode :judge) {:checkout checkout :tree tree})
+         (finally (kill! sys ag)
+                  @(write! sys {:op :drop-branch :branch g})))))
 
 (defn prove-tree!
   "Prove the files of checkout (a worktree of this root's repository) at tree, its tree id (seon.fx/tree-id, what bin/build records):
@@ -2512,14 +2516,16 @@
   took; the fork server is killed and reaped; then flow/stop (every proc exited) and the
   reader. Every wait ends on its answer, none on a clock. Nothing accepted is lost.
   First the end is a fact on main, durable (:seon.system/stopped {:boot :cause :at-ms}; cause
-  :stop! unless the caller names it: :stdin-eof, :signal), so every clean end says why; a
+  :stop! unless the caller names it: :stdin-eof, :signal, :hand-over with more's :tree and :results), so every clean end says why; a
   refused stop fact still stops root, and the answer carries it (:stop-fact-refused).
   Answers {:stopped true :cause :drained .. :graph true|{::flow/running #{pids}} :ms :peak-processes :phases}, :peak-processes the
   most processes the root held at once (itself, its boot fork server, its live agents), :phases each part's {:ticks :ms} (:fact, :drain,
   :flow-stop): a part whose wall is far above its ticks waits."
-  {:malli/schema [:function [:=> [:cat :seon.system/sys] :map] [:=> [:cat :seon.system/sys :keyword] :map]]}
+  {:malli/schema [:function [:=> [:cat :seon.system/sys] :map] [:=> [:cat :seon.system/sys :keyword] :map]
+                  [:=> [:cat :seon.system/sys :keyword [:maybe [:map [:tree {:optional true} :string] [:results {:optional true} :map]]]] :map]]}
   ([sys] (stop! sys :stop!))
-  ([sys cause]
+  ([sys cause] (stop! sys cause nil))
+  ([sys cause more]
   ;; its fibers as the stop begins, on root's stderr (its log): a proc mid-step holds the stop until the step ends (Flow takes a stop
   ;; between steps), and a fiber running then prints its frames at its next safe point, inside the stop's own bound, so an overrun's
   ;; evidence names the step that held it (docs/machine.md#reading-a-hang); ~91k ticks, 14 KB [M root result/b52f87ea]
@@ -2533,7 +2539,7 @@
                           [(:value m) ph]))
         ;; the one bound of the drain, the fact included (stop-bound-ms): its deadline taken here
         drain-ms (cfg/value :seon.config.root/stop-ms) t-drain (profile/now-ns)
-        [fact fact-part] (part :fact #(deref (transact-main! sys [{:seon.system/id :root :seon.system/stopped {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)}}]
+        [fact fact-part] (part :fact #(deref (transact-main! sys [{:seon.system/id :root :seon.system/stopped (merge more {:boot (:boot sys) :cause cause :at-ms (System/currentTimeMillis)})}]
                                                        {:flush? true})))
         t0 (profile/now-ns)
         ;; every proc drains first, then the api is asked to shut down; an api already closed (a root whose api ended on its own)

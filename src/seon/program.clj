@@ -804,6 +804,21 @@
           (into {:e e :id nil :src nil :ns nil :order nil :defines #{} :declares #{}} (map #(vector % #{})) (vals form-set-keys))
           (d/datoms db :eavt e)))
 
+(defn order-row
+  "Form entity e with only what load-order and a file's text read (seon.source/file-text): its id, order, namespace, lead, text,
+  :source, definitions, declared vars and references, one seek an attribute; never its code or its other sets, which a file's text
+  never reads and form-row decodes whole (file-text of 24 namespaces: 699 -> 234 ms, 588 -> 158 MB, the same text [M root
+  result/a8d84566]). See docs/source.md#a-boot-catches-up-with-its-checkout."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
+  [db e]
+  (let [v1 (fn [a] (:v (first (d/datoms db :eavt e a))))
+        vs (fn [a] (map :v (d/datoms db :eavt e a)))]
+    {:e e :id (v1 :form/id) :order (v1 :form/order) :lead (v1 :form/lead) :src (v1 :form/src) :source (some? (v1 :form/source))
+     :ns (some-> (v1 :form/ns) (#(:v (first (d/datoms db :eavt % :ns/name)))))
+     :defines (into #{} (map #(definition-key db %)) (vs :form/defines))
+     :declares (into #{} (keep #(:v (first (d/datoms db :eavt % :var/name)))) (vs :form/declares))
+     :refs (set (vs :form/refs))}))
+
 (defn- live-ids
   "{form id -> entity} of db's live forms (live?), from four index scans and no entity read:
   a form that defines nothing, or one a definition points to. So two values' difference is

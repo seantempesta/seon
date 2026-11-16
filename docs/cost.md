@@ -16,6 +16,24 @@ The constants a lower bound is worked from (AGENTS.md §3a), measured on 2026-11
 - A process's first read of its binary's build record (```seon.program/binary-program```, 643 KB of EDN decoded once, about 12 ticks a byte) costs 7.9M ticks and 24 MB (measured 2026-11-16, result/bb8b9fd8): the first test in a child to start the prove proc pays it, so a test's estimate counts it when it can be first.
 - A cold test plan's reuse by reads over main's 2,258 tests costs 5.2B ticks and 25 GB (2026-11-16): 4.3B of it finding each test's newest green and reading its ~410 read-key datoms, against a bound of one seek and one value a candidate (```seon.proofs/reused-by-reads```; the read keys as one value a verdict is the fix).
 
+## The test system's lower bound
+
+The tests area owns these bounds: it shares them, justifies each row from first principles and measurement, and changes a row only with that justification. Every plan, test and merge message on the test path is held to them: a design costing more than its row is accepted only with a written justification in its plan and merge message of why the cheaper design cannot work, which tests reviews; a number past 10x of its row with none stops the work and its cause is found first (owner, 2026-11-16; `AGENTS.md` §3a). Any agent may propose a better design or a cheaper bound for any row: it brings the measurements, and the row moves. Worked from measurements on the standing store, 2026-11-16 (tests2, result/a38054f7, result/ca9ba5f4; deps; root result/da6a0d63).
+
+| Step | Lower bound | Measured 2026-11-16 |
+|---|---|---|
+| The judge's plan, s tests selected, d datoms changed | lookups s x ~40k ticks cold (s=400: ~16M, ~0.1 s); readers of the change d x ~15k ticks; the program graph's update O(d) | 2.7B ticks, 12.8 GB, 32 s; after (A) 1.37B, 6.5 GB; agents die at their 2.5 GB heap |
+| Running the tests that must rerun | ~65 ms a fork per worker, ~21 ms a test, divided by `:seon.config.proofs/max-workers`: s=400 ~0.5 s, all ~2,350 ~3 s | ~2.3 s a test (276 s for 120 in a `bin/test` shard), ~100x |
+| The merge, one writer step | d datoms plus ~10 a result: s=400 ~4,000 datoms, ~20M ticks, ~0.1 s | not reached while the plan fails |
+| Re-proving what main moved meanwhile | the same plan over main's d: under 1 s | as the plan |
+| A catch-up of d changed files into a store | O(d files): one read and index of each changed file, ~11M ticks for a 43 KB namespace | 9 files: 410M ticks, 1.36 GB (root, 2026-11-16) |
+| A fresh agent's live heap | ~50 MB shared with the fork server, copy-on-write, plus <=10 MB private: the program's code ~45 MB (code 19.3, procedures 16.9, rp-info 5.7, reloc 2.5 MB, result/c4cae858), the program data it reads (a few MB), one db value (its roots, KB) and the nodes it reads (a few MB); flat across merges (the owner: 250-300 MB is too high; deps) | 2.48 GB live, 2.31 GB of it static (1.76 GB of that reachable from no var); `clojure.test`'s registry +206 MB, the whole-db preload 257 MB, the graph 70 MB |
+| A fork of the fork server | ~5-10 ms (page tables for ~250 MB resident) | ten times that at 2.5 GB resident, every spawn and every test child |
+| A test child | ~20 ms (its own store connection ~5 ms, its parent's config handed over ~1 ms) plus ~21 ms a test | ~175 ms re-reading and re-checking config; was 0.9-1.2 s collecting its agent's 400 MB before 3e430b3a18 |
+| A merge in the fork server | O(d) applied and loaded, then one full collection of ~250 MB live, ~100-200 ms, after which every replaced version is gone | a freeze into static at every program move, so the server grows with each merge |
+
+So a typical change goes through `seon_done` in 2-3 s, a schema-wide change (~1,600 tests) in 3-5 s, and the whole suite with nothing reused in ~3 s of test work. A build-input change adds one build and one boot of the candidate binary (10.7 s today, target 2 s).
+
 ## What is measured
 
 A proof measures the function under test on the thread that calls it, and nothing else in the process:
@@ -101,7 +119,7 @@ A public function's contract is checked on every call, a private one's in a test
 
 ## What a test run measures
 
-Every test run measures each contracted function from the counters every call passes through: ```seon.profile/counted``` counts each call and its engine ticks and thread bytes, in all and its own, with no clock read and nothing allocated. Each test opens its own epoch (```seon.proofs/run-tests!```, through ```seon.profile/measure!```), and its ```seon.profile/touched``` goes on its result as `:fns` and into its cached verdict ([merging](merging.md#verdicts-are-a-cache)). Each test's ended value carries `:heap`, the live heap its child holds after a collection (```seon.agent/take-value```), recorded, never judged. Counting adds about 4 ticks a call (`seon.profile-test/counting-a-call-allocates-nothing-and-costs-a-few-ticks`, `seon.profile-test/a-functions-own-work-is-its-work-less-its-callees`). Self is approximate where a call throws or parks on a fiber. These measures are the data for a function's cost bound.
+Every test run measures each contracted function from the counters every call passes through: ```seon.profile/counted``` counts each call and its engine ticks and thread bytes, in all and its own, with no clock read and nothing allocated. Each test opens its own epoch (```seon.proofs/run-tests!```, through ```seon.profile/measure!```), and its ```seon.profile/touched``` goes on its result as `:fns` and into its cached verdict ([merging](merging.md#verdicts-are-a-cache)). Each test's ended value carries `:heap`, the heap in use its child holds after it, garbage included (```seon.agent/take-value```), recorded, never judged; no collection is forced for it, since one cost a test ~250 ms. Counting adds about 4 ticks a call (`seon.profile-test/counting-a-call-allocates-nothing-and-costs-a-few-ticks`, `seon.profile-test/a-functions-own-work-is-its-work-less-its-callees`). Self is approximate where a call throws or parks on a fiber. These measures are the data for a function's cost bound.
 
 ## A diff per attribute costs a descent each
 
