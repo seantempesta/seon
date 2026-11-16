@@ -4,7 +4,7 @@
   proto.control's writer (session F2; writer design A, the session design papers in git history)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
-            [seon.program :as program] [seon.merge :as pm] [seon.problems :as problems] [seon.source :as source] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg] [seon.task :as task]
+            [seon.program :as program] [seon.merge :as pm] [seon.problems :as problems] [seon.source :as source] [seon.doc :as doc] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg] [seon.task :as task]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
 (defn- main-commit
@@ -87,6 +87,21 @@
   (docs/merging.md#a-merge-runs-what-the-change-reaches)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/changes] [:map [:files [:vector :string]] [:unfiled :map]]]}
   [db ours] {:files (source/changed-files db ours) :unfiled (source/unfiled-forms db ours)})
+
+(defn write-out-req
+  "The :git write-out request (seon.fx/write-out) for branch b, read on main and head (b's committed head): the files b's change touches,
+  drawn as head holds them (changed-files of its delta-changes against main, seon.doc/files, with their modes), and its pins that differ
+  from main's as links, on base (main's :seon.system/source :commit), at dir, named seon/candidate/<b>. O(what b changed): the text
+  of its changed files and its pins. See task seon.writer/a-branchs-files-are-written-out-to-a-tree."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.db/branch :string :string] :map]}
+  [main head b dir base]
+  (let [ours (pm/delta-changes main head :all)
+        paths (source/changed-files head ours)
+        mains (source/pins-of main)]
+    {:dir dir :branch (str "seon/candidate/" (name b)) :base base
+     :files (doc/files head paths) :modes (source/modes head paths)
+     :links (into (sorted-map) (remove (fn [[p c]] (= c (mains p)))) (source/pins-of head))
+     :message (str "Seon candidate: " (name b) "\n")}))
 
 (defn- refused
   "The writer refusing a request, as the one error map (:seon.writer/refused); members

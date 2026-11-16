@@ -673,6 +673,30 @@
         (is (= "Next fix" (:message (fx/landing-message dir (:head l)))) "the next landing carries only its own"))
       (finally (seon.lib/remove-tree! dir)))))
 
+;; task seon.writer/a-branchs-files-are-written-out-to-a-tree: a branch's files are written out as a commit on the base main was imported
+;; from, its pins as gitlinks, the ref moved from whatever it held, so seon.fx/build of it makes the tree a candidate builds from. Estimate:
+;; git is the subject, ~12 spawns at ~100k ticks = 1.2M
+(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["git"]} a-branchs-files-are-written-out-as-a-commit
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-fx-writeout-" (random-uuid))) (.mkdirs)))
+        git (fn [& args] (clojure.string/trim (str (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@localhost" args)))))
+        pin "1111111111111111111111111111111111111111"]
+    (try
+      (git "init" "-q" "-b" "main") (spit (str dir "/a.edn") "{:a 1}\n") (spit (str dir "/b.txt") "b\n") (git "add" "-A") (git "commit" "-q" "-m" "base")
+      (let [base (git "rev-parse" "HEAD")
+            out (fn [files] (fx/write-out {:req {:dir dir :branch "seon/candidate/x" :base base :files files :modes {} :links {"reference-code/lib" pin} :message "m"}}))
+            r (out {"a.edn" "{:a 2}\n"})
+            sha (get-in r [:value :sha])]
+        (is (= "{:a 2}" (git "show" (str sha ":a.edn"))) (pr-str r))
+        (is (= "b" (git "show" (str sha ":b.txt"))) "every other file as base holds it")
+        (is (re-find (re-pattern (str "^160000 commit " pin "\t")) (git "ls-tree" sha "reference-code/lib")) "a pin as its gitlink")
+        (is (= base (git "rev-parse" (str sha "^"))) "on the base main was imported from")
+        (is (= base (git "rev-parse" "HEAD")) "no tree moved")
+        (let [r2 (out {"b.txt" "c\n"}) sha2 (get-in r2 [:value :sha])]
+          (is (= sha2 (git "rev-parse" "refs/heads/seon/candidate/x")) "written out again, the ref moves to it")
+          (is (= base (git "rev-parse" (str sha2 "^"))) "from the base again, never on the last write-out")
+          (is (= "{:a 1}" (git "show" (str sha2 ":a.edn"))) "so it holds the branch's files now alone")))
+      (finally (seon.lib/remove-tree! dir)))))
+
 ;; docs/merging.md#verdicts-are-a-cache: a config value naming a file enters a test's digest as the file's name, never where the
 ;; machine keeps it, so one test has one digest from any checkout (the embed model in the main tree's cache read "<checkout>/..."
 ;; from the main tree and an absolute path from a worktree: 103 of 181 process digests apart on the standing system, 2026-11-12)
