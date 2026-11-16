@@ -1518,8 +1518,10 @@
         (contract/error? r) r
         (empty? (:value r)) {:paths []}
         :else
-        (let [unsynced (into {} (for [{:keys [e]} (d/datoms db :aevt :seon.task/declared)
-                                      :when (and (= :merged (:v (first (d/datoms db :eavt e :seon.task/outcome)))) (problems/unsynced? db e))
+        (let [;; the merged tasks first, by the outcome's index (O(merged)), never every declaration read (648 tasks' texts: 139 ms,
+              ;; 192 MB for one merged task [M root result/bcff9cbd])
+              unsynced (into {} (for [{:keys [e]} (d/datoms db :avet :seon.task/outcome :merged)
+                                      :when (and (seq (d/datoms db :eavt e :seon.task/declared)) (problems/unsynced? db e))
                                       p (problems/changed-paths db e)]
                                   [p (:v (first (d/datoms db :eavt e :seon.task/id)))]))
               task? #(and (str/ends-with? % ".edn") (str/starts-with? % (str tasks-dir "/")))
