@@ -610,13 +610,16 @@
 (defn- facts
   "The facts from changed since base (`changed-datoms`), each {:e :a :v :tx :side}: :retract for one gone, :add for one added, the
   side taken from which list it is in, never a datom's own flag (a diff's gone datoms are stored datoms, :added true). A
-  transaction's own facts and Datahike's own attributes are left out; every other fact merges whole (owner: no list of what merges). See docs/merging.md#a-branch-merges-main-in."
+  transaction's own facts, Datahike's own attributes and derived values ({:seon.db/derived true}, derived again where they land) are
+  left out; every other fact merges whole (owner: no list of what merges). See docs/merging.md#a-branch-merges-main-in."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :map]]}
   [base from]
   (let [[gone added] (changed-datoms base from)
         txe (into #{} (map :tx) (concat gone added))
-        ;; every fact merges whole, no list of what crosses (owner): a transaction's own facts and Datahike's own are no facts of the merge
-        fact? (fn [{:keys [e a]}] (and (not (txe e)) (keyword? a) (not= "db" (namespace a))))
+        ;; every fact merges whole, no list of what crosses (owner): a transaction's own facts and Datahike's own are no facts of the merge,
+        ;; nor a derived value ({:seon.db/derived true}: a cache each side computes, derived again where it lands; the entity index's set)
+        derived (:derived-attrs (pdb/index))
+        fact? (fn [{:keys [e a]}] (and (not (txe e)) (keyword? a) (not= "db" (namespace a)) (not (derived a))))
         as (fn [side] (fn [dt] {:e (:e dt) :a (:a dt) :v (:v dt) :tx (:tx dt) :side side}))
         held? (fn [db {:keys [e a v]}] (some? (first (d/datoms db :eavt e a v))))]
     ;; a fact is [e a v]: one both hold, asserted in different transactions (a diff compares whole datoms), is neither side's change
@@ -697,7 +700,10 @@
                  [(decided? k0 i) (cond-> {:key k0 :entity (name-of (second k0))}
                                     (some? b) (assoc :base b) (some? f) (assoc :ours f) (some? i) (assoc :theirs i))])
         conflicts (vec (keep (fn [[d c]] (when-not d c)) judged))
-        settled (into #{} (keep (fn [[d c]] (when d (:key c)))) judged)]
+        ;; the entries decided, and any left at a derived attribute's key (no conflict can be: a cache each side computes)
+        derived (:derived-attrs (pdb/index))
+        settled (into (into #{} (keep (fn [[d c]] (when d (:key c)))) judged)
+                      (comp (map :key) (filter #(and (= :datum (first %)) (derived (nth % 2 nil))))) (vals held))]
     (if (seq conflicts)
       {:conflicts conflicts}
       {:settled settled
