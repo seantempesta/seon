@@ -1502,8 +1502,8 @@
                 ;; the tree's one booted candidate: its build on a clone of the process tests' store (seon.test-store/boot-candidate!,
                 ;; deps'), booted once in root's process and held by the prove proc for every process test of the tree
                 :candidate (let [c ((requiring-resolve 'seon.test-store/boot-candidate!) checkout)]
-                             (spit log (str "candidate " (pr-str (select-keys c [:port :writer-pid :system-pid :dir :runs :store :main])) "\n") :append true)
-                             (if (:port c) {:exit 0 :candidate (contract/message :seon.prove/held-candidate c)} {:exit 1 :out (pr-str (select-keys c [:log :exit]))})))
+                             (spit log (str "candidate " (sedn/encode (select-keys c [:port :writer-pid :system-pid :dir :runs :store :main])) "\n") :append true)
+                             (if (:port c) {:exit 0 :candidate (contract/message :seon.prove/held-candidate c)} {:exit 1 :out (str "the candidate did not boot: exit " (:exit c) "\n" (:log c))})))
             ms (profile/ms-since t0)
             stored (when-not (#{:build :seed :candidate} kind) (stored-results {name digest}))
             _ (when pstore (doseq [^java.io.File d (some-> (java.io.File. ^String dir) .listFiles seq)
