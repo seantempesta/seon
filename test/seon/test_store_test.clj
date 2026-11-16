@@ -235,18 +235,21 @@
 
 
 ;; Estimate: the candidate's one boot (~10.7 s of wall, docs/cost.md#the-test-systems-lower-bound) is its own processes' work; this
-;; process's ticks are the process store's open and release (~10M), four shells (bin/system status and start, cp, ps: ~1M each), one
-;; root ask (~1M): ~16M ticks; the second call one deref
+;; process's ticks are the process store's open and release (~10M), five shells (bin/system status, start and stop, cp, ps: ~1M
+;; each), one root ask (~1M): ~16M ticks
 (deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 16000000}} the-candidate-is-one-build-booted-once
-  ;; seon.test-store/candidate: the process tests' one booted build, on a store of its own (never runs/store), its writer process and
-  ;; system process (the fork server) live and distinct, the system process the writer's fork (today's process model:
-  ;; seon.main/the-binary-main-is-the-system-process inverts it, and this test with it); a second call is the same root, a branch each
-  (let [a (ts/candidate) b (ts/candidate)
+  ;; seon.test-store/boot-candidate!: the process tests' one booted build, a value the runner passes, on a store of its own (never
+  ;; runs/store), its writer process and system process (the fork server) live and distinct, the system process the writer's fork
+  ;; (today's process model: seon.main/the-binary-main-is-the-system-process inverts it, and this test with it); each test a branch
+  (let [c (ts/boot-candidate! (seon.config/checkout))
         ppid (fn [pid] (some-> (:out (sh/sh "ps" "-o" "ppid=" "-p" (str pid))) clojure.string/trim parse-long))]
-    (is (pos-int? (:port a)) (str "it listens: " (subs (str (:log a)) (max 0 (- (count (str (:log a))) 3000)))))
-    (is (= (dissoc a :branch) (dissoc b :branch)) "booted once")
-    (is (not= (:branch a) (:branch b)) "a branch each")
-    (is (not= (seon.config/value :seon.config.root/runs-dir) (:runs a)) "never the standing system")
-    (is (every? pos-int? [(:writer-pid a) (:system-pid a)]) (pr-str a))
-    (is (not= (:writer-pid a) (:system-pid a)))
-    (is (= (:writer-pid a) (ppid (:system-pid a))) "the system process is the writer's fork")))
+    (try
+      (let [a (ts/on-candidate c) b (ts/on-candidate c)]
+        (is (pos-int? (:port a)) (str "it listens: " (subs (str (:log a)) (max 0 (- (count (str (:log a))) 3000)))))
+        (is (= (dissoc a :branch) (dissoc b :branch)) "one system")
+        (is (not= (:branch a) (:branch b)) "a branch each")
+        (is (not= (seon.config/value :seon.config.root/runs-dir) (:runs a)) "never the standing system")
+        (is (every? pos-int? [(:writer-pid a) (:system-pid a)]) (pr-str a))
+        (is (not= (:writer-pid a) (:system-pid a)))
+        (is (= (:writer-pid a) (ppid (:system-pid a))) "the system process is the writer's fork"))
+      (finally (ts/stop-candidate! c)))))
