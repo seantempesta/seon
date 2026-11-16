@@ -160,6 +160,15 @@
                     (let [r @(c/transact-main! sys (conj (vec tx) {:seon.task/id id :seon.task/outcome :parked}))]
                       (when (contract/error? r) r)))))))
 
+(defn- run-begun
+  "answer, an attach's, once agent's run start (:seon.agent/run-ms, written on main: root's alone) is on its branch too, where its request
+  is drawn: the agent merges main (seon.system/merge-main!, the one merge), as a model agent's turn does when main moved. A merge that
+  fails is the answer's :merge-main, its error as data. See docs/turn.md#the-turn-is-a-number."
+  {:malli/schema [:=> [:cat :seon.system/sys :seon.agent/id :map] :map]}
+  [sys agent answer]
+  (let [r @(c/merge-main! sys agent)]
+    (cond-> answer (contract/error? r) (assoc :merge-main r))))
+
 (defn- attach!
   "Start an outside agent on task id: its env's model is \"outside\" (the task keeps its own), so the
   reconciler starts no turn loop for it and does not kill it. Its env, the release and its start are written
@@ -195,10 +204,12 @@
       ;; its agent is live: it is the one to work it (a second spawn on its branch is refused)
       live (do
              ;; the client attaching it takes its hold over (root, 2026-11-16): its done and eval act on the agent it last attached (own-agent),
-             ;; and the client that held it before acts on it no more
-             (when (and client (not= client (get-in live [:env :holder])))
-               @(c/transact-main! sys [[:db/add [:seon.agent/key (:key live)] :seon.agent/holder client]]))
-             {:agent (:agent live) :task id :shared true})
+             ;; and the client that held it before acts on it no more. An attach begins a run (root, 2026-11-16: a session's re-attach is a
+             ;; new run), so its request holds only what is linked from now (seon.ctx.wire/turn-entities)
+             @(c/transact-main! sys (cond-> [[:db/add [:seon.agent/key (:key live)] :seon.agent/run-ms (System/currentTimeMillis)]]
+                                      (and client (not= client (get-in live [:env :holder])))
+                                      (conj [:db/add [:seon.agent/key (:key live)] :seon.agent/holder client])))
+             (run-begun sys (:agent live) {:agent (:agent live) :task id :shared true}))
       :else
       (let [restart (when fresh? (task/restart-tx db id))
             env (cond-> (assoc (r/desired-env t) :model "outside")
@@ -214,7 +225,8 @@
             ;; the start (its outside env, so the reconciler starts no loop; :spawning, so it counts the agent live and spawns none of its own) is
             ;; written on main BEFORE the spawn: the branch is cut holding its agent's task, root's alone (:seon.agent/task, docs/users.md), so the
             ;; agent never copies it (two writers disagreed at a whole task's stage move). A clone's branch is cut from its source's: it starts after
-            started (when k @(c/transact-main! sys (conj (start (keyword k)) {:seon.agent/key k :seon.agent/status :spawning})))
+            ;; an attach begins a run (start-tx writes one only for a task begun): its request holds what is linked from now
+            started (when k @(c/transact-main! sys (conj (start (keyword k)) {:seon.agent/key k :seon.agent/status :spawning :seon.agent/run-ms (System/currentTimeMillis)})))
             r (if clone-of @(c/clone! sys clone-of opts) @(c/call! sys (c/request 'spawn! nil opts nil)))
             ag (:id r)]
         ;; spawn!'s request, its answer a value: a refusal (a branch another agent holds, named with
@@ -233,7 +245,7 @@
               r)
           (do (when clone-of @(c/transact-main! sys (start ag)))
               (when replaced (c/kill! sys replaced))
-              {:agent ag :task id})))))))
+              (cond->> {:agent ag :task id} (not clone-of) (run-begun sys ag)))))))))
 
 (defn- fork!
   "A fork of live agent from: a sibling of its task, <name>-fork-<n> (its plan, proofs and kind, on

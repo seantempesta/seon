@@ -2017,3 +2017,52 @@
         (is (= ["A." "B." "D."] @told) "watches are told each patch, in order, and nothing for a refused write"))
       (finally (remove-watch ctx/ctx ::told) (end-agent!)))))
 
+;; docs/ctx.md#the-pattern, task seon.ctx/a-runs-request-holds-its-own-run: an agent's history is its branch's facts, and its request shows
+;; the run working now (the owner, 2026-11-16, via root): a restart begins from its plan, so a new run is not sent an earlier run's turns
+;; and evals. A run's start is the fact root writes when a task is begun or attached (:seon.agent/run-ms); each turn and eval is linked by a
+;; transaction whose instant the record reads (the pattern's :tx :at). runtime's re-attached agent was sent 37 of 43 evals and 37 of 56
+;; messages from earlier runs, 93,941 characters [result/b7323904]. Red before: the earlier run's turn and eval were sent.
+;; Estimate: a history world (~2M), three transactions (~0.3M), one build of the record (~1M) and the request's entities (~0.5M): ~4M;
+;; 6000000 ticks, 60 MB
+(deftest ^{:seon.test/estimate {:ticks 6000000 :bytes 60000000}} a-runs-request-holds-only-its-own-runs-evals-and-messages
+  (let [at (fn [db s tx] (:db-after (d/with db {:tx-data tx :tx-meta {:db/txInstant s}})))
+        ev (fn [n i] {:seon.eval/id (str "run-e" i) :seon.eval/agent [:seon.agent/key k] :seon.eval/by {:seon.agent/key k}
+                      :seon.eval/code (str "(+ " i " 1)") :seon.eval/response (response i) :seon.eval/call-id (str "c" i)
+                      :seon.eval/call (seon.task/call-ref k n)})
+        db0 (at (seon.db/db-with (my.test/world {:history? true}) [])
+                #inst "2030-01-01T00:00:00Z" [{:seon.agent/key k :seon.agent/task {:seon.task/id "lab/run"}}
+                                        {:seon.task/id "lab/run" :seon.task/ns 'app.x :seon.task/name "run" :seon.task/plan "Make app.x/f0 pass."
+                                         :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-run}])
+        ;; the earlier run: its turn 1 and its eval
+        db1 (at db0 #inst "2030-01-01T00:01:00Z" [(assoc (seon.task/call-ref k 1) :seon.model-call/reply "the earlier run's reply") (ev 1 1)])
+        ;; an attach begins a new run
+        db2 (at db1 #inst "2030-01-02T00:00:00Z" [{:seon.agent/key k :seon.agent/run-ms (inst-ms #inst "2030-01-02T00:00:00Z")}])
+        ;; this run: its turn 2 and its eval
+        db3 (at db2 #inst "2030-01-02T00:01:00Z" [(assoc (seon.task/call-ref k 2) :seon.model-call/reply "this run's reply") (ev 2 2)])
+        rec (:tree (ctx/build (seon.db/index) db3 (aid db3) :b))
+        msgs (seon.ctx.wire/agent-msgs {:seon.db/db db3 :seon.render/index (seon.db/index)} rec)
+        evals (set (keep #(when (map? %) (:seon.eval/id %)) msgs))
+        replies (set (keep #(when (map? %) (:seon.model-call/reply %)) msgs))]
+    (is (contains? evals "run-e2") (str "this run's eval is sent: " (pr-str evals)))
+    (is (not (contains? evals "run-e1")) "an earlier run's eval is not")
+    (is (contains? replies "this run's reply") (pr-str replies))
+    (is (not (contains? replies "the earlier run's reply")) "nor its turn")
+    (is (= #{"run-e1" "run-e2"} (set (map (comp :seon.eval/id val) (:seon.eval/_agent rec)))) "both stay the branch's facts, in the record")))
+
+;; docs/turn.md#the-turn-is-a-number, task seon.ctx/a-runs-request-holds-its-own-run: a run is the agent's work on one task, so a wake or a
+;; restart of its process (seon.task/start-tx again on the same task) keeps the run it began, and the agent's key begun on another task begins
+;; one. The reverted first build bounded the request by :seon.agent/started-ms, which every wake rewrites, so a woken agent lost its own run.
+;; Estimate: a world (~2M) and three start-tx withs (~0.3M): ~3M; 6000000 ticks, 60 MB
+(deftest ^{:seon.test/estimate {:ticks 6000000 :bytes 60000000}} a-wake-keeps-its-run-and-a-task-begun-begins-one
+  (let [task (fn [id] {:seon.task/id id :seon.task/ns 'app.x :seon.task/name (subs id 4) :seon.task/plan "Make app.x/f0 pass."
+                       :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :held :seon.task/branch (keyword "main" (str "lab-" (subs id 4)))})
+        db0 (seon.db/db-with (my.test/world) [(task "lab/one") (task "lab/two")])
+        start (fn [db id ms] (:db-after (d/with db (seon.task/start-tx db id "boot" :run-a1 {:branch :main/lab-one :max-turns 10 :model "outside"} ms))))
+        run (fn [db] (:seon.agent/run-ms (d/entity db [:seon.agent/key "run-a1"])))
+        begun (start db0 "lab/one" 1000)
+        woken (start begun "lab/one" 2000)
+        other (start woken "lab/two" 3000)]
+    (is (= 1000 (run begun)) "a task begun begins the run")
+    (is (= 1000 (run woken)) "a wake on the same task keeps it")
+    (is (= 2000 (:seon.agent/started-ms (d/entity woken [:seon.agent/key "run-a1"]))) "while the process's start moves")
+    (is (= 3000 (run other)) "the key begun on another task begins a new run")))
