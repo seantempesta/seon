@@ -450,6 +450,25 @@
     {:outcome :parked :reasons (:reasons j)}
     j))
 
+(defn rule-input
+  "The done rule's whole input: base (done-input's, or input's where no index is read) with the facts every reader of a branch's end
+  holds: what the change caused, main's own reds, what main left unanswered, a design's plan now, whether the branch changed and named
+  its site, and whether its end is a hand-back (a task an outside agent drives: a session's own). The one builder, for the writer process's judgment
+  and the agent's own status alike, so the two never read a branch's end two ways. See docs/tasks.md#the-done-rule."
+  {:malli/schema [:=> [:cat :map [:map [:caused {:optional true} [:maybe [:or [:set :any] [:sequential :any]]]]
+                                  [:main-red {:optional true} [:maybe [:or [:set :any] [:sequential :any]]]]
+                                  [:main-unknown {:optional true} [:maybe [:or [:set :any] [:sequential :any]]]] [:plan {:optional true} [:maybe :seon.task/plan]]
+                                  [:kind {:optional true} [:maybe :keyword]] [:changed? {:optional true} [:maybe :boolean]]
+                                  [:named-site? {:optional true} [:maybe :boolean]] [:hand-back? {:optional true} [:maybe :boolean]]]]
+                  :seon.reconcile/done-input]}
+  [base {:keys [caused main-red main-unknown plan kind changed? named-site? hand-back?]}]
+  (cond-> (assoc base :caused (set caused) :main-red (set main-red))
+    (seq main-unknown) (assoc :main-unknown (set main-unknown))
+    (and plan (= :design kind)) (assoc :plan plan)
+    (some? changed?) (assoc :changed? changed?)
+    (some? named-site?) (assoc :named-site? named-site?)
+    hand-back? (assoc :hand-back? true)))
+
 (defn judgment
   "How task id's agent's end stands, decided once, where its facts are in hand (judge-tx; the gate's answer, gated),
   from the index and facts, a map of: :end (the agent's own end, {:outcome :reason}, or nil: it wrote none, :no-end), :died
@@ -468,17 +487,13 @@
       (not= :running execution) {:outcome :closed :reasons []}
       died (parked-if-person kind {:outcome :dead :reasons [] :hold (str "its agent died" (some->> (:seon.error/message died) (str ": ")))})
       :else
-      (let [rs (done-explain (cond-> (cond-> (assoc (done-input idx id results uncontracted unmerged basis plan-before (set deferred))
-                                              :caused (set caused) :main-red (set main-red))
-                                (seq main-unknown) (assoc :main-unknown (set main-unknown))
-                                (and plan (= :design kind)) (assoc :plan plan)
-                                (some? changed?) (assoc :changed? changed?)
-                                (some? named-site?) (assoc :named-site? named-site?)
-                                ;; an outside agent's end is its hand-back (seon_done): a session's change judged as work is
-                                outside (assoc :hand-back? true))
-                               ;; behind main is no reason (plan item 10): a green task is ready, and the writer's one :merge merges main
-                               ;; into its branch in its own step, re-proving when main's program moved since the proof (:reprove)
-                               ))
+      (let [rs (done-explain (rule-input (done-input idx id results uncontracted unmerged basis plan-before (set deferred))
+                                         ;; behind main is no reason (plan item 10): a green task is ready, and the writer's one :merge merges main
+                                         ;; into its branch in its own step, re-proving when main's program moved since the proof (:reprove)
+                                         {:caused caused :main-red main-red :main-unknown main-unknown :plan plan :kind kind
+                                          :changed? changed? :named-site? named-site?
+                                          ;; an outside agent's end is its hand-back (seon_done): a session's change judged as work is
+                                          :hand-back? (boolean outside)}))
             ended (str "ended" (some->> oc name (str " ")) (some->> (:reason end) (str " (") (#(str % ")"))) ": " (explain-text rs))]
         (parked-if-person kind (cond
           ;; the process tests the branch's change reaches run before its merge, on a checkout (:gate, seon.fx/run-tests),

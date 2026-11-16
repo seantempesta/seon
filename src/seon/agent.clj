@@ -582,7 +582,9 @@
            (= :seon.vector/encode-failed (:seon.error/type r)) (do (swap! state update :unembeddable (fnil into #{}) (map first ask)) r)
            (contract/error? r) r
            :else (let [{:keys [model vectors]} (:value r)
-                       _ (transact! (vector/tx-data (map first ask) (map peek ask) vectors model))]
+                       ;; a search of this branch's own is searched once, here, with its query's vector (seon.ctx.search/embedded-tx), as
+                       ;; the writer process's vectors proc searches main's: the page draws its hits and never searches (seon.render.ui/searched)
+                       _ (transact! ((requiring-resolve 'seon.ctx.search/embedded-tx) head (map first ask) (map peek ask) vectors model))]
                    (when (= (count ask) (count due)) (swap! state assoc :embedded-from (db)))
                    (count ask))))))))
 
